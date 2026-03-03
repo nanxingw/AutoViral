@@ -1,0 +1,50 @@
+{
+  "name": "skill-evolver",
+  "version": "0.1.0",
+  "description": "Create and evolve Claude Code skills automatically",
+  "type": "module",
+  "bin": {
+    "skill-evolver": "./dist/index.js"
+  },
+  "files": [
+    "dist/",
+    "skills/",
+    "web/dist/"
+  ],
+  "scripts": {
+    "build": "npm run build:backend && npm run build:frontend",
+    "build:backend": "tsc",
+    "build:frontend": "vite build",
+    "dev": "tsc --watch",
+    "dev:frontend": "vite dev",
+    "postinstall": "node dist/postinstall.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.0",
+    "commander": "^12.0.0",
+    "hono": "^4.0.0",
+    "js-yaml": "^4.1.0",
+    "node-cron": "^3.0.0",
+    "ws": "^8.0.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5.0.0",
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.0.0",
+    "@types/node-cron": "^3.0.11",
+    "@types/ws": "^8.5.0",
+    "svelte": "^5.0.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.0.0",
+    "vitest": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nanxingw/skill-evolver.git"
+  }
+}
