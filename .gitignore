@@ -1,6 +1,9 @@
 node_modules/
 dist/
+web/dist/
 .env
 .env.local
 *.log
 .DS_Store
+.claude
+CLAUDE.md
