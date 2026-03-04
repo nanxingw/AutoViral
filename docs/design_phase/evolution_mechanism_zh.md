@@ -228,26 +228,29 @@ Claude 注意到：用户再次请求暗色模式，这次是设置页面。
 ```
 ~/.claude/skills/
 ├── user-context/
-│   ├── SKILL.md
-│   ├── context/                # 已确认知识
+│   ├── SKILL.md                  # 路由器：丰富描述 + 数据概览 + 场景路由
+│   ├── reference/
+│   │   ├── runtime_guide.md      # 给日常 Claude Code 会话用：如何读取和应用用户数据
+│   │   └── evolution_guide.md    # 给后台演化用：添加信号、毕业、清理过期等完整操作手册
+│   ├── context/                  # 已确认知识
 │   │   ├── preference.yaml
 │   │   ├── objective.yaml
 │   │   └── cognition.yaml
-│   ├── tmp/                    # 积累中的观察
-│   │   ├── preference_tmp.yaml
-│   │   ├── objective_tmp.yaml
-│   │   └── cognition_tmp.yaml
-│   └── scripts/
+│   └── tmp/                      # 积累中的观察
+│       ├── preference_tmp.yaml
+│       ├── objective_tmp.yaml
+│       └── cognition_tmp.yaml
 │
 ├── skill-evolver/
-│   ├── SKILL.md
+│   ├── SKILL.md                  # 路由器：丰富描述 + 数据概览 + 场景路由
 │   ├── reference/
-│   │   └── permitted_skills.md
+│   │   ├── permitted_skills.md   # 演化器有权修改的技能列表
+│   │   ├── runtime_guide.md      # 给日常会话用：如何查阅已知失败/成功经验
+│   │   └── evolution_guide.md    # 给后台演化用：完整操作手册
 │   ├── tmp/
 │   │   ├── success_experience.yaml
 │   │   ├── failure_experience.yaml
 │   │   └── useful_tips.yaml
-│   └── scripts/
 │
 ├── <演化创建的技能-1>/
 │   └── SKILL.md
@@ -256,11 +259,20 @@ Claude 注意到：用户再次请求暗色模式，这次是设置页面。
 └── ...
 
 ~/.skill-evolver/
-└── reports/                   # 完成报告
+└── reports/                     # 完成报告
     ├── 2026-03-03_14-30_report.md
     ├── 2026-03-03_15-30_report.md
-    └── ...                    # 最多 50 份，最旧自动删除
+    └── ...                      # 最多 50 份，最旧自动删除
 ```
+
+### SKILL.md 作为路由器
+
+每个元技能的 SKILL.md 采用**路由器模式**：包含对技能功能和数据的丰富描述，然后根据上下文将 Claude 路由到合适的参考指南：
+
+- **日常 Claude Code 会话**（用户正在交互工作）-> `reference/runtime_guide.md` — 如何读取已存储数据并应用于个性化响应
+- **后台演化周期**（定时或手动触发）-> `reference/evolution_guide.md` — 扫描日志、添加信号、毕业条目、创建技能等的完整操作手册
+
+这种双用途设计意味着同一个 skill 同时服务于运行时个性化和后台演化，同时保持 SKILL.md 本身精简可扫描。
 
 ---
 
@@ -276,8 +288,13 @@ Claude 注意到：用户再次请求暗色模式，这次是设置页面。
 
 5. **极简**：每条 YAML 记录只有 4-5 个字段。不臃肿。
 
+6. **双用途技能**：每个元技能同时服务于运行时（在工作中个性化 Claude 的响应）和演化（后台数据积累与毕业）。SKILL.md 作为精简路由器，根据上下文将 Claude 引导到正确的参考指南。
+
+7. **指南职责分离**：`runtime_guide.md` 是只读的轻量指南（仅应用已存储的知识），而 `evolution_guide.md` 包含完整的读写操作手册。这防止了日常会话意外触发演化操作。
+
 ---
 
-*文档版本：2.0*
+*文档版本：2.1*
 *创建日期：2026-03-03*
+*更新日期：2026-03-04*
 *状态：设计阶段*

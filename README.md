@@ -57,7 +57,7 @@ Then it acts: creating new skills, updating existing ones, pruning outdated ones
 
 ## Two Meta-Skills
 
-skill-evolver installs two core skills into `~/.claude/skills/` that power the evolution:
+skill-evolver installs two core skills into `~/.claude/skills/` that power the system. Each skill serves a **dual purpose**: providing context during normal Claude Code sessions (runtime) and guiding the background evolution process.
 
 ### user-context
 
@@ -67,6 +67,8 @@ Tracks **who the user is** across three pillars:
 - **Objective** — current tasks, project goals, career direction
 - **Cognition** — personality traits, decision-making patterns, communication style
 
+**At runtime**, Claude reads confirmed context to personalize responses. **During evolution**, the background agent reviews session logs, accumulates observations in `tmp/`, and graduates strong signals to confirmed context.
+
 ### skill-evolver
 
 Tracks **what works technically** across three categories:
@@ -75,7 +77,7 @@ Tracks **what works technically** across three categories:
 - **Failure experience** — approaches that failed or caused problems
 - **Useful tips** — non-obvious shortcuts and workarounds
 
-When accumulated experience is strong enough, it automatically creates standalone Claude Code skills.
+**At runtime**, Claude reads accumulated experience to avoid known pitfalls and apply proven approaches. **During evolution**, the background agent extracts new signals from logs and, when experience is strong enough, creates standalone Claude Code skills.
 
 ## Getting Started
 
@@ -173,31 +175,38 @@ This prevents premature conclusions. A single session preference won't become a 
 
 ## File Structure
 
+Each skill uses a **router pattern**: `SKILL.md` provides a rich description and metadata frontmatter, while detailed operation manuals live in `reference/` guides — `runtime_guide.md` for normal session use and `evolution_guide.md` for the background evolution process.
+
 ```
 ~/.claude/skills/
   user-context/
-    context/          # Graduated knowledge (confirmed)
+    SKILL.md                    # Router: rich description + metadata
+    reference/
+      runtime_guide.md          # How to use context during normal work
+      evolution_guide.md        # Full evolution operation manual
+    context/                    # Graduated knowledge (confirmed)
       preference.yaml
       objective.yaml
       cognition.yaml
-    tmp/              # Accumulating observations
+    tmp/                        # Accumulating observations
       preference_tmp.yaml
       objective_tmp.yaml
       cognition_tmp.yaml
-    SKILL.md
 
   skill-evolver/
+    SKILL.md                    # Router: rich description + metadata
     reference/
-      permitted_skills.md   # Skills this agent can modify
-    tmp/              # Accumulating experience
+      permitted_skills.md       # Skills this agent can modify
+      runtime_guide.md          # How to use experience during normal work
+      evolution_guide.md        # Full evolution operation manual
+    tmp/                        # Accumulating experience
       success_experience.yaml
       failure_experience.yaml
       useful_tips.yaml
-    SKILL.md
 
 ~/.skill-evolver/
-  config.yaml         # Configuration
-  reports/            # Evolution cycle reports
+  config.yaml                   # Configuration
+  reports/                      # Evolution cycle reports
 ```
 
 ## License

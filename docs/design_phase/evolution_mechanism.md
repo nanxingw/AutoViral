@@ -228,39 +228,51 @@ User says: "Actually, use the system default now"
 ```
 ~/.claude/skills/
 ├── user-context/
-│   ├── SKILL.md
-│   ├── context/                # Confirmed knowledge
+│   ├── SKILL.md                  # Router: rich description + data overview + scenario routing
+│   ├── reference/
+│   │   ├── runtime_guide.md      # For normal Claude Code sessions: how to READ and APPLY user data
+│   │   └── evolution_guide.md    # For background evolution: ADD SIGNAL, GRADUATE, CLEAN STALE, etc.
+│   ├── context/                  # Confirmed knowledge
 │   │   ├── preference.yaml
 │   │   ├── objective.yaml
 │   │   └── cognition.yaml
-│   ├── tmp/                    # Accumulating observations
-│   │   ├── preference_tmp.yaml
-│   │   ├── objective_tmp.yaml
-│   │   └── cognition_tmp.yaml
-│   └── scripts/
+│   └── tmp/                      # Accumulating observations
+│       ├── preference_tmp.yaml
+│       ├── objective_tmp.yaml
+│       └── cognition_tmp.yaml
 │
 ├── skill-evolver/
-│   ├── SKILL.md
+│   ├── SKILL.md                  # Router: rich description + data overview + scenario routing
 │   ├── reference/
-│   │   └── permitted_skills.md
+│   │   ├── permitted_skills.md   # Skills the evolver has permission to modify
+│   │   ├── runtime_guide.md      # For normal sessions: how to check known failures/successes
+│   │   └── evolution_guide.md    # For background evolution: full operation manual
 │   ├── tmp/
 │   │   ├── success_experience.yaml
 │   │   ├── failure_experience.yaml
 │   │   └── useful_tips.yaml
-│   └── scripts/
 │
-├── <evolved-skill-1>/         # Skills created by the evolver
+├── <evolved-skill-1>/           # Skills created by the evolver
 │   └── SKILL.md
 ├── <evolved-skill-2>/
 │   └── SKILL.md
 └── ...
 
 ~/.skill-evolver/
-└── reports/                   # Completion reports
+└── reports/                     # Completion reports
     ├── 2026-03-03_14-30_report.md
     ├── 2026-03-03_15-30_report.md
-    └── ...                    # Max 50, oldest auto-deleted
+    └── ...                      # Max 50, oldest auto-deleted
 ```
+
+### SKILL.md as Router
+
+Each meta-skill's SKILL.md follows a **router pattern**: it contains a rich description of what the skill does and what data it holds, then routes Claude to the appropriate reference guide based on context:
+
+- **Normal Claude Code session** (user is working interactively) -> `reference/runtime_guide.md` — instructions on how to READ stored data and APPLY it to personalize responses
+- **Background evolution cycle** (scheduled or manual trigger) -> `reference/evolution_guide.md` — full operational manual for scanning logs, adding signals, graduating entries, creating skills, etc.
+
+This dual-purpose design means the same skill serves both runtime personalization and background evolution, while keeping SKILL.md itself concise and scannable.
 
 ---
 
@@ -276,8 +288,13 @@ User says: "Actually, use the system default now"
 
 5. **Minimal**: each YAML record has 4-5 fields. No bloat.
 
+6. **Dual-purpose skills**: each meta-skill serves both runtime (personalize Claude's responses during work) and evolution (background data accumulation and graduation). SKILL.md acts as a concise router that directs Claude to the right reference guide based on context.
+
+7. **Separation of concerns in guides**: `runtime_guide.md` is read-only and lightweight (just apply stored knowledge), while `evolution_guide.md` contains the full read-write operational manual. This prevents normal sessions from accidentally triggering evolution operations.
+
 ---
 
-*Document version: 2.0*
+*Document version: 2.1*
 *Created: 2026-03-03*
+*Updated: 2026-03-04*
 *Status: Design Phase*

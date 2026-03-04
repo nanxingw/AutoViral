@@ -100,17 +100,23 @@ Both meta-skills are installed to `~/.claude/skills/`. Skills created by the evo
 **Directory structure**:
 ```
 ~/.claude/skills/user-context/
-├── SKILL.md                   # Instructions: how to CRUD on tmp and context
+├── SKILL.md                   # Router: rich description + data overview + scenario routing
+├── reference/
+│   ├── runtime_guide.md       # For normal sessions: how to READ and APPLY user profile data
+│   └── evolution_guide.md     # For background evolution: ADD SIGNAL, GRADUATE, CLEAN STALE, etc.
 ├── context/                   # Graduated user context (confirmed data)
 │   ├── preference.yaml        # User preferences
 │   ├── objective.yaml         # User goals (small to large)
 │   └── cognition.yaml         # User cognition (personality, MBTI, thinking patterns)
-├── tmp/                       # Accumulating observations (pre-graduation)
-│   ├── preference_tmp.yaml
-│   ├── objective_tmp.yaml
-│   └── cognition_tmp.yaml
-└── scripts/
+└── tmp/                       # Accumulating observations (pre-graduation)
+    ├── preference_tmp.yaml
+    ├── objective_tmp.yaml
+    └── cognition_tmp.yaml
 ```
+
+**SKILL.md as Router**: The SKILL.md file is a concise entry point that contains a rich description of the skill's purpose and data, then routes Claude to the appropriate guide:
+- **During normal work** -> `reference/runtime_guide.md` (read-only: apply stored user knowledge to personalize responses)
+- **During evolution cycles** -> `reference/evolution_guide.md` (read-write: scan logs, add signals, graduate entries, handle contradictions)
 
 **YAML field design (minimal)**:
 
@@ -144,15 +150,20 @@ entries:
 **Directory structure**:
 ```
 ~/.claude/skills/skill-evolver/
-├── SKILL.md                   # Instructions: how to accumulate experience, when to create/evolve skills
+├── SKILL.md                   # Router: rich description + data overview + scenario routing
 ├── reference/
-│   └── permitted_skills.md    # List of skills this evolver has permission to modify (self-created only)
+│   ├── permitted_skills.md    # List of skills this evolver has permission to modify (self-created only)
+│   ├── runtime_guide.md       # For normal sessions: check known failures/successes before trying approaches
+│   └── evolution_guide.md     # For background evolution: full operation manual
 ├── tmp/                       # Accumulating intermediate experience
 │   ├── success_experience.yaml
 │   ├── failure_experience.yaml
 │   └── useful_tips.yaml
-└── scripts/
 ```
+
+**SKILL.md as Router**: Same pattern as user-context. The SKILL.md describes what experience data is available, then routes:
+- **During normal work** -> `reference/runtime_guide.md` (check for known failures before trying risky approaches, apply proven patterns)
+- **During evolution cycles** -> `reference/evolution_guide.md` (scan logs, add signals, create/update skills when ready)
 
 **Skill creation flow**:
 1. Claude finds recurring experience in tmp with broad applicability
@@ -282,12 +293,18 @@ skill-evolver/
 ├── dist/                     # Compiled code
 ├── skills/                   # Meta-skill templates (copied on install)
 │   ├── user-context/
-│   │   ├── SKILL.md
+│   │   ├── SKILL.md                          # Router
+│   │   ├── reference/
+│   │   │   ├── runtime_guide.md
+│   │   │   └── evolution_guide.md
 │   │   ├── context/{preference,objective,cognition}.yaml
 │   │   └── tmp/{preference_tmp,objective_tmp,cognition_tmp}.yaml
 │   └── skill-evolver/
-│       ├── SKILL.md
-│       ├── reference/permitted_skills.md
+│       ├── SKILL.md                          # Router
+│       ├── reference/
+│       │   ├── permitted_skills.md
+│       │   ├── runtime_guide.md
+│       │   └── evolution_guide.md
 │       └── tmp/{success_experience,failure_experience,useful_tips}.yaml
 └── docs/
 ```
@@ -386,6 +403,7 @@ skill-evolver config set interval 2h
 
 ---
 
-*Document version: 2.0*
+*Document version: 2.1*
 *Created: 2026-03-03*
+*Updated: 2026-03-04*
 *Status: Design Phase*
