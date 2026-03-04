@@ -1,13 +1,15 @@
 import { Command } from "commander";
-import { loadConfig, saveConfig, type Config } from "./config.js";
+import { loadConfig, saveConfig, type Config, getConfigDir } from "./config.js";
 import { orchestrator } from "./orchestrator.js";
 import { startScheduler, stopScheduler } from "./scheduler.js";
-import { readFile, writeFile, unlink } from "node:fs/promises";
+import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { exec } from "node:child_process";
+import { exec, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 
 const PID_FILE = join(homedir(), ".skill-evolver", "daemon.pid");
+const LOG_FILE = join(homedir(), ".skill-evolver", "daemon.log");
 
 async function readPid(): Promise<number | null> {
   try {
@@ -38,10 +40,34 @@ export function runCLI(): void {
   program
     .command("start")
     .description("Start the skill-evolver daemon")
-    .action(async () => {
+    .option("--foreground", "Run in foreground (don't daemonize)")
+    .action(async (opts: { foreground?: boolean }) => {
       const existingPid = await readPid();
       if (existingPid && isProcessRunning(existingPid)) {
         console.log(`Daemon already running (PID ${existingPid})`);
+        return;
+      }
+
+      // If not --foreground and not already a spawned daemon, fork to background
+      if (!opts.foreground && !process.env.__SKILL_EVOLVER_DAEMON) {
+        await mkdir(getConfigDir(), { recursive: true });
+        const fs = await import("node:fs");
+        const logFd = fs.openSync(LOG_FILE, "a");
+        const entryScript = process.argv[1];
+        const child = spawn(process.execPath, [entryScript, "start", "--foreground"], {
+          detached: true,
+          stdio: ["ignore", logFd, logFd],
+          env: { ...process.env, __SKILL_EVOLVER_DAEMON: "1" },
+        });
+        child.unref();
+        fs.closeSync(logFd);
+        // Wait briefly for PID file to be written
+        await new Promise(r => setTimeout(r, 1500));
+        const pid = await readPid();
+        const config = await loadConfig();
+        console.log(`skill-evolver daemon started (PID ${pid ?? child.pid})`);
+        console.log(`Dashboard: http://localhost:${config.port}`);
+        console.log(`Logs: ${LOG_FILE}`);
         return;
       }
 
