@@ -4,7 +4,7 @@
   "description": "Create and evolve Claude Code skills automatically",
   "type": "module",
   "bin": {
-    "skill-evolver": "./dist/index.js"
+    "skill-evolver": "dist/index.js"
   },
   "files": [
     "dist/",
@@ -43,6 +43,6 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/nanxingw/skill-evolver.git"
+    "url": "git+https://github.com/nanxingw/skill-evolver.git"
   }
 }
