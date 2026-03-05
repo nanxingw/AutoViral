@@ -1,6 +1,17 @@
 # skill-evolver
 
-**Create and evolve Claude Code skills and your own context automatically.**
+[![npm version](https://img.shields.io/npm/v/skill-evolver.svg)](https://www.npmjs.com/package/skill-evolver)
+[![Node.js](https://img.shields.io/node/v/skill-evolver.svg)](https://nodejs.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+**Two commands. Your Claude Code starts evolving.**
+
+```bash
+npm install -g skill-evolver
+skill-evolver start
+```
+
+That's it. skill-evolver runs in the background, reviewing your past sessions, extracting what worked and what didn't, and turning insights into reusable skills — automatically.
 
 ## The Problem
 
@@ -221,6 +232,13 @@ Each skill uses a **router pattern**: `SKILL.md` provides a rich description and
   config.yaml                   # Configuration
   reports/                      # Evolution cycle reports
 ```
+
+## Roadmap
+
+- [ ] **Multi-CLI support** — extend beyond Claude Code to support Codex, Gemini CLI, and other AI coding agents
+- [ ] **Richer information sources** — ingest browser history, Git commit logs, and IDE activity as additional evolution signals
+- [ ] **Cross-machine sync** — optional cloud sync for user context and evolved skills across devices
+- [ ] **Skill marketplace** — share and discover community-created skills evolved by other users
 
 ## License
 
