@@ -10,18 +10,14 @@
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
 </p>
 
-<p align="center">Two commands. Your Claude Code starts evolving.</p>
+**Two commands. Your Claude Code starts evolving.**
 
 ```bash
 npm install -g skill-evolver
 skill-evolver start
 ```
 
-<p align="center">
-  That's it. skill-evolver runs in the background, reviewing your past sessions,<br>
-  extracting what worked and what didn't, and turning insights into<br>
-  reusable skills and persistent memory — automatically.
-</p>
+That's it. skill-evolver runs in the background, reviewing your past sessions, extracting what worked and what didn't, and turning insights into reusable skills and persistent memory — automatically.
 
 ## The Problem
 
