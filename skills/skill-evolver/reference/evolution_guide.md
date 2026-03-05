@@ -158,13 +158,18 @@ An experience is ready to become a skill when ALL of the following are true:
 
 1. **Choose a name**: Short, descriptive, kebab-case. Examples: `typescript-strict-mode`, `git-commit-hygiene`, `react-testing-patterns`.
 
-2. **Write the SKILL.md**: Create `~/.claude/skills/<skill-name>/SKILL.md` with proper frontmatter and clear instructions.
+2. **Read the skill-creator reference**: Before writing, read `~/.claude/skills/skill-creator/SKILL.md` (the "Skill Writing Guide" section) for best practices on structure, description writing, and progressive disclosure. Key takeaways:
+   - **Description is the primary trigger**: The `description` field in frontmatter determines when Claude activates the skill. Make it specific and slightly "pushy" — include both what the skill does AND specific contexts for when to use it.
+   - **Progressive disclosure**: Keep SKILL.md under 500 lines. For complex skills, use `references/` for detailed docs and reference them from SKILL.md.
+   - **Use imperative form** in instructions. Explain *why* things matter, not just what to do.
+
+3. **Write the SKILL.md**: Create `~/.claude/skills/<skill-name>/SKILL.md` with proper frontmatter and clear instructions.
 
    The SKILL.md must have:
    ```yaml
    ---
    name: <skill-name>
-   description: "<one-line description>"
+   description: "<trigger-optimized description — include what it does AND when to use it>"
    allowed-tools:
      - Read
      - Write
@@ -182,9 +187,9 @@ An experience is ready to become a skill when ALL of the following are true:
    - Examples if helpful
    - Keep it concise — skills should be focused and actionable
 
-3. **Register the skill**: Add the skill name to `~/.claude/skills/skill-evolver/reference/permitted_skills.md` under the "Registered Skills" section.
+4. **Register the skill**: Add the skill name to `~/.claude/skills/skill-evolver/reference/permitted_skills.md` under the "Registered Skills" section.
 
-4. **Remove graduated experience**: Optionally, remove or mark the source tmp entries that were used to create the skill, to avoid re-processing them. If the experience might still accumulate more signals relevant to future skill updates, you may keep it.
+5. **Remove graduated experience**: Optionally, remove or mark the source tmp entries that were used to create the skill, to avoid re-processing them. If the experience might still accumulate more signals relevant to future skill updates, you may keep it.
 
 ### Skill quality checklist
 
@@ -194,6 +199,7 @@ Before writing a skill, verify:
 - [ ] The skill would actually change Claude's behavior in a useful way.
 - [ ] The skill does not duplicate or contradict existing skills.
 - [ ] The frontmatter is valid YAML with required fields.
+- [ ] The `description` is trigger-optimized — it includes specific contexts and keywords that would cause Claude to activate this skill when relevant (see skill-creator guidance).
 
 ---
 

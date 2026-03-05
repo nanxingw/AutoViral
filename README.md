@@ -90,6 +90,7 @@ npm install -g skill-evolver
 This will:
 - Install the `skill-evolver` CLI
 - Automatically copy the two meta-skills (user-context, skill-evolver) to `~/.claude/skills/`
+- Install [skill-creator](https://github.com/anthropics/claude-plugins-official) from the official Anthropic plugin repository (requires git)
 
 ### Prerequisites
 
@@ -192,6 +193,12 @@ Each skill uses a **router pattern**: `SKILL.md` provides a rich description and
       preference_tmp.yaml
       objective_tmp.yaml
       cognition_tmp.yaml
+    scripts/                    # Session history search tools
+      list-sessions.mjs         # Find sessions by date/project
+      session-digest.mjs        # Extract conversation text only
+      search-messages.mjs       # Regex keyword search across sessions
+      extract-tool-flow.mjs     # Tool usage sequence with error detection
+      session-stats.mjs         # Quick session statistics
 
   skill-evolver/
     SKILL.md                    # Router: rich description + metadata
@@ -203,6 +210,12 @@ Each skill uses a **router pattern**: `SKILL.md` provides a rich description and
       success_experience.yaml
       failure_experience.yaml
       useful_tips.yaml
+
+  skill-creator/                # From official Anthropic plugin repo
+    SKILL.md                    # Skill creation & iteration guide
+    references/                 # Schemas and best practices
+    scripts/                    # Eval and benchmarking tools
+    agents/                     # Subagent definitions
 
 ~/.skill-evolver/
   config.yaml                   # Configuration
