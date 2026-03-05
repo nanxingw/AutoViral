@@ -1,17 +1,27 @@
-# skill-evolver
+<h1 align="center">skill-evolver</h1>
 
-[![npm version](https://img.shields.io/npm/v/skill-evolver.svg)](https://www.npmjs.com/package/skill-evolver)
-[![Node.js](https://img.shields.io/node/v/skill-evolver.svg)](https://nodejs.org)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+<p align="center">
+  <strong>Self-evolution & long-term memory for Claude Code.</strong>
+</p>
 
-**Two commands. Your Claude Code starts evolving.**
+<p align="center">
+  <a href="https://www.npmjs.com/package/skill-evolver"><img src="https://img.shields.io/npm/v/skill-evolver.svg" alt="npm version"></a>
+  <a href="https://nodejs.org"><img src="https://img.shields.io/node/v/skill-evolver.svg" alt="Node.js"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+</p>
+
+<p align="center">Two commands. Your Claude Code starts evolving.</p>
 
 ```bash
 npm install -g skill-evolver
 skill-evolver start
 ```
 
-That's it. skill-evolver runs in the background, reviewing your past sessions, extracting what worked and what didn't, and turning insights into reusable skills — automatically.
+<p align="center">
+  That's it. skill-evolver runs in the background, reviewing your past sessions,<br>
+  extracting what worked and what didn't, and turning insights into<br>
+  reusable skills and persistent memory — automatically.
+</p>
 
 ## The Problem
 
