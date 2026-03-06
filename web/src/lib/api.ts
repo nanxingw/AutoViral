@@ -65,25 +65,25 @@ export async function updateConfig(config: Record<string, unknown>) {
 // Task types
 // ---------------------------------------------------------------------------
 
+export interface TaskSchedule {
+  type: "cron" | "one-shot";
+  cron?: string;
+  at?: string;
+}
+
 export interface Task {
   id: string;
   name: string;
-  description: string;
-  type: "recurring" | "one-shot";
-  schedule?: string;
-  scheduled_at?: string;
+  description?: string;
   prompt: string;
-  model?: string;
-  source: "user" | "agent";
+  schedule?: TaskSchedule;
   status: string;
-  approved: boolean;
-  created_at: string;
-  last_run: string | null;
-  next_run: string | null;
-  run_count: number;
-  max_runs: number | null;
-  tags: string[];
-  memory_ref?: string;
+  approved?: boolean;
+  model?: string;
+  tags?: string[];
+  runCount: number;
+  lastRun?: string;
+  createdAt: string;
 }
 
 export interface Idea {

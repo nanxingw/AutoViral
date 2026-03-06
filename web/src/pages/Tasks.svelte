@@ -34,7 +34,7 @@
   // Create form state
   let formName: string = $state("");
   let formDesc: string = $state("");
-  let formType: "recurring" | "one-shot" = $state("recurring");
+  let formType: "cron" | "one-shot" = $state("cron");
   let formSchedule: string = $state("0 8 * * *");
   let formScheduledAt: string = $state("");
   let formPrompt: string = $state("");
@@ -45,7 +45,7 @@
 
   // ── Derived ────────────────────────────────────────────────────────────────
 
-  const filters = ["all", "active", "pending", "completed", "paused", "failed"] as const;
+  const filters = ["all", "active", "pending", "completed", "paused", "expired"] as const;
 
   let filteredTasks = $derived(
     activeFilter === "all"
@@ -145,7 +145,7 @@
     e.stopPropagation();
     const newStatus = task.status === "paused" ? "active" : "paused";
     try {
-      const updated = await updateTask(task.id, { status: newStatus });
+      const updated = await updateTask(task.id, { status: newStatus } as Partial<Task>);
       tasks = tasks.map((t) => (t.id === task.id ? updated : t));
     } catch { /* ignore */ }
   }
@@ -170,7 +170,7 @@
   function openCreateModal() {
     formName = "";
     formDesc = "";
-    formType = "recurring";
+    formType = "cron";
     formSchedule = "0 8 * * *";
     formScheduledAt = "";
     formPrompt = "";
@@ -195,14 +195,12 @@
       const payload: Record<string, unknown> = {
         name: formName.trim(),
         description: formDesc.trim(),
-        type: formType,
         prompt: formPrompt.trim(),
-        source: "user",
         status: "active",
         approved: true,
         tags: formTags.split(",").map((t) => t.trim()).filter(Boolean),
       };
-      if (formType === "recurring") {
+      if (formType === "cron") {
         payload.schedule = formSchedule.trim();
       } else {
         payload.scheduled_at = formScheduledAt ? new Date(formScheduledAt).toISOString() : undefined;
@@ -210,7 +208,7 @@
       if (formModel) {
         payload.model = formModel;
       }
-      const created = await createTask(payload);
+      const created = await createTask(payload as Partial<Task>);
       tasks = [...tasks, created];
       showModal = false;
     } catch (err) {
@@ -228,23 +226,29 @@
       case "running": return "var(--status-running)";
       case "paused": return "var(--status-paused)";
       case "pending": return "var(--status-pending)";
-      case "failed": return "var(--status-failed)";
+      case "expired": return "var(--status-failed)";
       case "completed": return "var(--status-completed)";
       default: return "var(--text-dim)";
     }
   }
 
   function scheduleLabel(task: Task): string {
-    if (task.type === "recurring" && task.schedule) {
-      return task.schedule;
+    if (task.schedule?.type === "cron" && task.schedule.cron) {
+      return task.schedule.cron;
     }
-    if (task.type === "one-shot" && task.scheduled_at) {
-      return new Date(task.scheduled_at).toLocaleString();
+    if (task.schedule?.type === "one-shot" && task.schedule.at) {
+      return new Date(task.schedule.at).toLocaleString();
     }
     return "--";
   }
 
-  function formatTime(iso: string | null): string {
+  function scheduleTypeBadge(task: Task): string {
+    if (task.schedule?.type === "cron") return "recurring";
+    if (task.schedule?.type === "one-shot") return "one-shot";
+    return "manual";
+  }
+
+  function formatTime(iso: string | undefined | null): string {
     if (!iso) return "--";
     return new Date(iso).toLocaleString();
   }
@@ -345,24 +349,18 @@
               <div class="card-info">
                 <div class="card-title-row">
                   <span class="card-name">{task.name}</span>
-                  <span class="badge type-badge">{task.type}</span>
-                  {#if task.source === "agent"}
-                    <span class="badge agent-badge">agent</span>
-                  {/if}
+                  <span class="badge type-badge">{scheduleTypeBadge(task)}</span>
                 </div>
                 <div class="card-meta">
                   <span class="meta-item">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                     {scheduleLabel(task)}
                   </span>
-                  {#if task.last_run}
-                    <span class="meta-item">Last: {formatTime(task.last_run)}</span>
+                  {#if task.lastRun}
+                    <span class="meta-item">Last: {formatTime(task.lastRun)}</span>
                   {/if}
-                  {#if task.next_run}
-                    <span class="meta-item">Next: {formatTime(task.next_run)}</span>
-                  {/if}
-                  {#if task.run_count > 0}
-                    <span class="meta-item">Runs: {task.run_count}</span>
+                  {#if task.runCount > 0}
+                    <span class="meta-item">Runs: {task.runCount}</span>
                   {/if}
                 </div>
               </div>
@@ -380,7 +378,7 @@
                 >
                   {running ? "Running..." : "Run Now"}
                 </button>
-                {#if task.type === "recurring"}
+                {#if task.schedule?.type === "cron"}
                   <button class="action-btn ghost" onclick={(e) => handlePauseResume(e, task)}>
                     {task.status === "paused" ? "Resume" : "Pause"}
                   </button>
@@ -414,12 +412,18 @@
                 <pre class="prompt-box">{task.prompt}</pre>
               </div>
 
-              {#if task.memory_ref}
-                <div class="detail-section">
-                  <h4>Memory Reference</h4>
-                  <span class="meta-mono">{task.memory_ref}</span>
+              <div class="detail-section detail-row">
+                <div class="detail-pair">
+                  <h4>Created</h4>
+                  <span class="meta-mono">{formatTime(task.createdAt)}</span>
                 </div>
-              {/if}
+                {#if task.model}
+                  <div class="detail-pair">
+                    <h4>Model</h4>
+                    <span class="meta-mono">{task.model}</span>
+                  </div>
+                {/if}
+              </div>
 
               {#if loadingDetail}
                 <p class="muted">Loading details...</p>
@@ -528,7 +532,7 @@
           <div class="radio-group">
             <span class="radio-label">Type</span>
             <label class="radio-option">
-              <input type="radio" bind:group={formType} value="recurring" />
+              <input type="radio" bind:group={formType} value="cron" />
               <span>Recurring</span>
             </label>
             <label class="radio-option">
@@ -537,7 +541,7 @@
             </label>
           </div>
 
-          {#if formType === "recurring"}
+          {#if formType === "cron"}
             <label>
               <span>Schedule (cron)</span>
               <input type="text" bind:value={formSchedule} placeholder="0 8 * * *" class="mono-input" />
@@ -792,11 +796,6 @@
     color: var(--text-muted);
   }
 
-  .agent-badge {
-    background: rgba(59, 130, 246, 0.15);
-    color: #60a5fa;
-  }
-
   .card-meta {
     display: flex;
     align-items: center;
@@ -943,6 +942,24 @@
     font-size: 0.88rem;
     color: var(--text-secondary);
     line-height: 1.5;
+  }
+
+  .detail-row {
+    flex-direction: row;
+    gap: 2rem;
+  }
+
+  .detail-pair {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .detail-pair h4 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    letter-spacing: 0.03em;
   }
 
   .section-header {
