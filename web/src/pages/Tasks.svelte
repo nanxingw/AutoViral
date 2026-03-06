@@ -15,6 +15,7 @@
   let tasks: Task[] = $state([]);
   let ideas: Idea[] = $state([]);
   let loading: boolean = $state(true);
+  let loadError: string = $state("");
   let activeFilter: string = $state("all");
   let expandedId: string | null = $state(null);
   let showModal: boolean = $state(false);
@@ -57,9 +58,11 @@
 
   async function loadTasks() {
     try {
+      loadError = "";
       tasks = await fetchTasks();
-    } catch {
+    } catch (err) {
       tasks = [];
+      loadError = err instanceof Error ? err.message : "Failed to load tasks";
     }
   }
 
@@ -312,6 +315,12 @@
   <!-- Task list -->
   {#if loading}
     <p class="muted">Loading tasks...</p>
+  {:else if loadError}
+    <div class="empty-state">
+      <p class="empty-title" style="color: var(--error)">Failed to load tasks</p>
+      <p class="empty-desc">{loadError}</p>
+      <button class="action-btn ghost" onclick={loadTasks} style="margin-top: 0.5rem">Retry</button>
+    </div>
   {:else if filteredTasks.length === 0}
     <div class="empty-state">
       <div class="empty-icon">

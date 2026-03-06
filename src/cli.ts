@@ -431,5 +431,5 @@ export function runCLI(): void {
       console.log(`Task ${id} rejected.`);
     });
 
-  program.parse();
+  program.parseAsync();
 }
