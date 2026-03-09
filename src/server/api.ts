@@ -10,7 +10,7 @@ import { loadConfig, saveConfig, type Config } from "../config.js";
 import {
   listTasks, getTask, createTask as storeCreateTask, updateTask as storeUpdateTask,
   deleteTask as storeDeleteTask, listRuns, readRun, listArtifacts, readArtifact,
-  getArtifactsDir, addRejected, listIdeas,
+  getArtifactsDir, addRejected, listIdeas, listSkillNeeds,
 } from "../task-store.js";
 import { buildTaskPrompt } from "../prompt.js";
 
@@ -392,6 +392,16 @@ apiRoutes.post("/api/tasks/:id/artifacts/open", async (c) => {
     return c.json({ opened: true });
   } catch {
     return c.json({ error: "Failed to open artifacts" }, 500);
+  }
+});
+
+// GET /api/skill-needs
+apiRoutes.get("/api/skill-needs", async (c) => {
+  try {
+    const needs = await listSkillNeeds();
+    return c.json({ needs });
+  } catch {
+    return c.json({ needs: [] });
   }
 });
 

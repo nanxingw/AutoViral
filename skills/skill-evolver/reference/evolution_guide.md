@@ -82,6 +82,27 @@ Use scripts. Look for:
 - Things the user repeatedly explains to Claude
 - Difficulties or friction points
 
+**Source E — Task execution patterns** (`~/.skill-evolver/tasks/`)
+Read `tasks.yaml` for the task inventory. Browse recent task reports in `~/.skill-evolver/tasks/*/reports/`. Look for:
+- Tasks that failed repeatedly → a skill could prevent the failure pattern
+- Tasks where the agent improvised → codify that knowledge as a skill
+- Tasks sharing similar patterns → a common skill helps all of them
+- Tasks with `tags: ["skill-building"]` that completed → verify the skill was created
+
+**Source F — Skill-need signals (PRIORITY)** (`tmp/skill_needs.yaml`)
+These are high-priority needs emitted by post-task reviews. Format:
+```yaml
+entries:
+  - need: "Description of skill needed"
+    source_task: "task-id"
+    task_name: "human readable"
+    evidence: "why needed"
+    priority: "high" | "medium"
+    date: "ISO date"
+    addressed: false
+```
+Address unaddressed needs FIRST. After creating/finding a skill for a need, set `addressed: true`.
+
 You must identify **at least 3 needs** per cycle and list them in your report.
 
 ### Step 2: Match Against Existing Skills
@@ -110,19 +131,42 @@ If you find a suitable external skill:
 - Adapt to the user's specific needs
 - Register in `permitted_skills.md`
 
-### Step 4: Create or Evolve Skills
+### Step 4: Create or Evolve Skills (using skill-creator)
+
+You MUST use skill-creator methodology. Read `~/.claude/skills/skill-creator/SKILL.md` first — it defines the standard process for skill creation, evaluation, and description optimization.
 
 **Creating a new skill:**
-1. Read `~/.claude/skills/skill-creator/SKILL.md` for best practices
-2. Design a precise `description` — this determines when the skill triggers
-3. Write `~/.claude/skills/<skill-name>/SKILL.md` with proper frontmatter
-4. Keep it under 500 lines; use `references/` for detailed docs
-5. Register in `~/.claude/skills/skill-evolver/reference/permitted_skills.md`
+1. Read `~/.claude/skills/skill-creator/SKILL.md` thoroughly
+2. **Design the skill** following skill-creator's anatomy:
+   - Write a precise `description` in YAML frontmatter — make it "pushy" (include specific contexts and keywords)
+   - Use imperative form in instructions; explain the **why** behind each rule
+   - Keep SKILL.md under 500 lines; use `references/` for detailed docs
+   - Follow progressive disclosure: metadata → body → bundled resources
+3. **Write basic evals** at `~/.claude/skills/<skill-name>/evals/evals.json`:
+   ```json
+   {
+     "skill_name": "<skill-name>",
+     "evals": [
+       { "id": 1, "prompt": "Realistic user prompt", "expected_output": "Expected result" }
+     ]
+   }
+   ```
+4. Register in `~/.claude/skills/skill-evolver/reference/permitted_skills.md`
 
 **Evolving an existing skill:**
 1. Only modify skills listed in `permitted_skills.md`
-2. Use Edit for targeted changes — don't rewrite entire files
-3. Base changes on accumulated experience evidence
+2. Read the skill's existing SKILL.md and any evals
+3. Use Edit for targeted changes — don't rewrite entire files
+4. Base changes on accumulated experience evidence
+5. Update `evals/evals.json` if it exists, adding scenarios for the new behavior
+
+**Skill quality checklist** (from skill-creator):
+- [ ] Clear, actionable instructions using imperative form
+- [ ] Explains the **why** behind instructions, not just rigid rules
+- [ ] Description is trigger-optimized (pushy, includes keywords and contexts)
+- [ ] Under 500 lines for SKILL.md; references/ for detailed content
+- [ ] Scoped to one coherent topic, no duplication with existing skills
+- [ ] Valid YAML frontmatter with name and description
 
 ### Step 5: Experience Maintenance
 
@@ -165,8 +209,11 @@ Your report MUST include these sections:
 ## Skills Created or Evolved
 (If none, explain why for EACH unmet need)
 
+## Task-Derived Needs
+(Skill needs from task execution patterns. Skill-need signals addressed.)
+
 ## Experience Updates
-(Signal counts by category, stale entries cleaned)
+(Signal counts by category, stale entries cleaned, skill_needs addressed)
 
 ## Notes
 (Observations for next cycle)

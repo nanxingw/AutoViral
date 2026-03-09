@@ -70,14 +70,26 @@ Use scripts to scan recent sessions:
 - What information does the user repeatedly query? (→ scheduled report)
 - What errors keep recurring? (→ preventive check task)
 
-### Phase 4: Task Lifecycle Management
+### Phase 4: Skill Awareness (co-evolution)
+
+Understand what skills are available so you can leverage them and identify gaps:
+
+1. **List available skills**: `ls ~/.claude/skills/`
+2. **Check evolved skills**: Read `~/.claude/skills/skill-evolver/reference/permitted_skills.md`
+3. **For each task you plan to create**, consider:
+   - Which existing skills could help this task execute better? → set `relatedSkills` field
+   - Does this task need a skill that doesn't exist yet? → create a **skill-building task**
+4. **Detect skill gaps**: If an objective requires capabilities no existing skill provides, create a skill-building task to fill that gap
+
+### Phase 5: Task Lifecycle Management
 
 Read existing tasks from `~/.skill-evolver/tasks/tasks.yaml`:
 - Check artifact quality (browse `~/.skill-evolver/tasks/<id>/artifacts/`)
 - Is the schedule still appropriate?
 - Should any task be adjusted, paused, or removed?
+- For skill-building tasks: has the target skill been created? If yes → mark `status: completed`
 
-### Phase 5: Decision and Creation
+### Phase 6: Decision and Creation
 
 **Task safety tiers** (prefer safer categories):
 1. **Information gathering** — Always safe: news, trends, summaries, monitoring
@@ -115,6 +127,47 @@ tasks:
 ```
 
 4. **Remove the idea** from `buffer/ideas.yaml` if you created a task from it.
+
+### Skill-building tasks
+
+A special task type whose purpose is to create or improve a Claude Code skill, following skill-creator methodology:
+
+```yaml
+- id: "t_YYYYMMDD_HHmm_xxx"
+  name: "Create <skill-name> skill"
+  description: "Create a skill for <what it does>"
+  prompt: |
+    You are a skill builder. Create (or improve) a Claude Code skill using skill-creator methodology.
+    TARGET SKILL: <skill-name>
+    GOAL: <what the skill should do>
+    EVIDENCE: <why this skill is needed>
+    INSTRUCTIONS:
+    1. Read ~/.claude/skills/skill-creator/SKILL.md THOROUGHLY — it defines the standard
+       process for skill creation including eval, benchmark, and description optimization
+    2. Check if ~/.claude/skills/<skill-name>/ already exists
+       - If exists: Read SKILL.md, identify improvements, make targeted edits
+       - If new: Create directory, write SKILL.md with trigger-optimized description
+    3. Write basic evals to ~/.claude/skills/<skill-name>/evals/evals.json
+    4. Register in ~/.claude/skills/skill-evolver/reference/permitted_skills.md
+    5. Write a report: what was created/changed, eval design rationale, description design
+  schedule:
+    type: one-shot
+    at: "<ISO datetime>"
+  status: active
+  approved: true
+  source: agent
+  model: sonnet
+  tags: ["skill-building"]
+  skillTarget: "<skill-name>"
+  runCount: 0
+  createdAt: "<ISO datetime>"
+```
+
+**When to create skill-building tasks:**
+- An objective needs capabilities no existing skill provides
+- Multiple tasks share patterns that should be codified
+- Task failures reveal a knowledge gap a skill could fill
+- User repeatedly needs guidance in a specific domain
 
 ### Key field notes
 
@@ -178,11 +231,15 @@ Your report MUST include these sections:
 ## Session Patterns
 (Recurring manual actions or queries found?)
 
+## Skill Awareness
+(Available skills. Skill gaps identified. Skill-building tasks proposed?)
+
 ## Existing Tasks Review
-(Status of each existing task)
+(Status of each existing task. Skill-building tasks: target skill created?)
 
 ## Tasks Created
 (List each with name, schedule, rationale. If zero, explain why for EACH objective.)
+(For skill-building tasks: include skillTarget and evidence.)
 
 ## Tasks Modified / Ideas Buffer Updates
 
@@ -198,3 +255,6 @@ Your report MUST include these sections:
 - **Prompts must be self-contained.** The executing Claude has no evolution context.
 - **Do not execute tasks.** You only create, edit, and review definitions.
 - **Write tasks to `~/.skill-evolver/tasks/tasks.yaml`**, not to skill-planner directory.
+- **Set `relatedSkills`** when a task can benefit from existing skills.
+- **Use `tags: ["skill-building"]` and `skillTarget`** for tasks that create/improve skills.
+- **Do not modify skill files.** Only the Skill Agent or skill-building tasks can create/modify skills.

@@ -87,14 +87,16 @@ assert.ok(!contextPrompt.includes("Create or Evolve"), "Context agent should not
 assert.ok(!contextPrompt.includes("tasks.yaml"), "Context agent should not touch tasks");
 console.log("  ✓ Context agent has no skill/task write instructions");
 
-// Skill agent should NOT mention task creation
-assert.ok(!skillPrompt.includes("tasks.yaml"), "Skill agent should not touch tasks.yaml");
-console.log("  ✓ Skill agent has no task write instructions");
+// Skill agent has READ-ONLY access to tasks (co-evolution), but no WRITE access
+assert.ok(skillPrompt.includes("tasks.yaml") && skillPrompt.includes("read only"), "Skill agent should have read-only task access");
+assert.ok(skillPrompt.includes("another agent handles this — read only"), "Skill agent tasks.yaml should be explicitly read-only");
+console.log("  ✓ Skill agent has read-only task access (co-evolution)");
 
-// Task agent should NOT mention skill creation
-assert.ok(!taskPrompt.includes("permitted_skills"), "Task agent should not touch skills");
-assert.ok(!taskPrompt.includes("Create or Evolve"), "Task agent should not create skills");
-console.log("  ✓ Task agent has no skill write instructions");
+// Task agent has READ access to skills (co-evolution), but cannot create/modify them directly
+assert.ok(taskPrompt.includes("permitted_skills"), "Task agent should read skill inventory");
+assert.ok(taskPrompt.includes("do not modify any skill files"), "Task agent should not modify skills directly");
+assert.ok(!taskPrompt.includes("Create or Evolve"), "Task agent should not create skills directly");
+console.log("  ✓ Task agent has read-only skill access (co-evolution)");
 
 // ── Test 4: Executor exports ────────────────────────────────────────────────
 

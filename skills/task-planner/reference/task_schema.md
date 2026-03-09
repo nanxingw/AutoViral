@@ -69,7 +69,9 @@ schedule:
 | `description` | string | - | Detailed description of what the task does. |
 | `model` | string | Config default | Claude model: `"opus"`, `"sonnet"`, `"haiku"`. |
 | `source` | string | `"user"` | Who created: `"user"` or `"agent"`. |
-| `tags` | string[] | `[]` | Categorization tags. |
+| `tags` | string[] | `[]` | Categorization tags. Use `["skill-building"]` for skill creation tasks. |
+| `relatedSkills` | string[] | `[]` | Skills this task should leverage. Task executor reads their SKILL.md for guidance. |
+| `skillTarget` | string | - | For skill-building tasks: the skill to create or update. |
 | `lastRun` | string | - | ISO datetime of most recent execution. |
 | `max_runs` | integer or null | `null` | Max executions. `null` = unlimited. |
 
@@ -133,3 +135,51 @@ entries:
 ```
 
 The evolution agent must check this file before proposing new tasks.
+
+---
+
+## Skill-Building Tasks
+
+Tasks with `tags: ["skill-building"]` are special — their purpose is to create or improve a Claude Code skill.
+
+```yaml
+- id: "t_20260309_1400_abc"
+  name: "Create git-workflow skill"
+  description: "Create a skill for standardized git workflow patterns"
+  prompt: |
+    You are a skill builder. Create a Claude Code skill for git-workflow.
+    Read ~/.claude/skills/skill-creator/SKILL.md for best practices.
+    ...
+  schedule:
+    type: one-shot
+    at: "2026-03-09T14:00:00Z"
+  status: active
+  approved: true
+  source: agent
+  model: sonnet
+  tags: ["skill-building"]
+  skillTarget: "git-workflow"
+  runCount: 0
+  createdAt: "2026-03-09T13:00:00Z"
+```
+
+**Lifecycle**: After execution, the post-task review verifies whether `~/.claude/skills/<skillTarget>/SKILL.md` was created and registered in `permitted_skills.md`. If successful, the task is marked `completed`.
+
+---
+
+## skill_needs.yaml
+
+Located at `~/.claude/skills/skill-evolver/tmp/skill_needs.yaml`. Bridges task execution insights to skill creation.
+
+```yaml
+entries:
+  - need: "Python async error handling patterns"
+    source_task: "t_20260309_1200_a3f"
+    task_name: "Debug async pipeline"
+    evidence: "Task failed 3 times on same async pattern"
+    priority: "high"
+    date: "2026-03-09"
+    addressed: false
+```
+
+Written by post-task reviews when tasks struggle. Read by the Skill Agent as priority needs.

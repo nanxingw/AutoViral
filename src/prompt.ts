@@ -157,7 +157,7 @@ ${CRITICAL_PATH}
 ## Your Data Paths
 
 **Write access:**
-- \`~/.claude/skills/skill-evolver/tmp/\` (success_experience.yaml, failure_experience.yaml, useful_tips.yaml)
+- \`~/.claude/skills/skill-evolver/tmp/\` (success_experience.yaml, failure_experience.yaml, useful_tips.yaml, skill_needs.yaml)
 - \`~/.claude/skills/skill-evolver/reference/permitted_skills.md\`
 - \`~/.claude/skills/<new-skill-name>/\` (creating new skills)
 - \`~/.claude/skills/<permitted-skill>/\` (evolving registered skills)
@@ -165,11 +165,13 @@ ${CRITICAL_PATH}
 **Read access:**
 - \`~/.claude/skills/user-context/context/\` and \`tmp/\` (user profile — read only)
 - \`~/.claude/skills/skill-evolver/tmp/\` (experience base)
+- \`~/.skill-evolver/tasks/tasks.yaml\` (task inventory — read only)
+- \`~/.skill-evolver/tasks/*/reports/\` (task execution reports — read only)
 - Session logs at \`~/.claude/projects/\`
 
 **Do NOT touch:**
 - \`~/.claude/skills/user-context/\` (another agent handles this)
-- \`~/.skill-evolver/tasks/\` (another agent handles this)
+- \`~/.skill-evolver/tasks/tasks.yaml\` (another agent handles this — read only!)
 - \`~/.claude/skills/skill-evolver/SKILL.md\` (your own instructions)`;
 
   const task = `
@@ -201,6 +203,16 @@ Use scripts to scan recent sessions. Look for:
 - Things the user repeatedly explains to Claude (should be in a skill)
 - Difficulties or friction points (skill can provide pre-built solutions)
 
+**Source E — Task execution patterns (IMPORTANT — co-evolution)**
+Read \`~/.skill-evolver/tasks/tasks.yaml\` for the task inventory, then browse recent task reports in \`~/.skill-evolver/tasks/*/reports/\`. Look for:
+- Tasks that failed repeatedly → a skill could prevent the failure pattern
+- Tasks where the agent had to improvise or figure things out → codify that knowledge as a skill
+- Tasks that always need certain boilerplate or setup → extract as a utility skill
+- Multiple tasks sharing similar patterns → a common skill would help all of them
+
+**Source F — Skill-need signals (PRIORITY)**
+Read \`~/.claude/skills/skill-evolver/tmp/skill_needs.yaml\`. These are high-priority needs emitted by post-task reviews when tasks struggle or fail. Address these FIRST before other needs. After addressing a need, set its \`addressed\` field to \`true\`.
+
 **Output**: List of identified needs (at least 3) in your report.
 
 ### Step 2: Match Against Existing Skills
@@ -228,18 +240,41 @@ If you find a suitable external skill:
 
 If nothing suitable found → proceed to Step 4.
 
-### Step 4: Create or Evolve Skills
+### Step 4: Create or Evolve Skills (using skill-creator)
+
+You MUST use skill-creator methodology when creating or evolving skills. Read \`~/.claude/skills/skill-creator/SKILL.md\` first.
 
 **Creating a new skill:**
-- Read \`~/.claude/skills/skill-creator/SKILL.md\` for best practices
-- Design a precise \`description\` (this determines when the skill triggers)
-- Keep SKILL.md under 500 lines, use \`references/\` for detailed docs
-- Register the skill name in \`~/.claude/skills/skill-evolver/reference/permitted_skills.md\`
+1. Read \`~/.claude/skills/skill-creator/SKILL.md\` thoroughly for best practices
+2. **Design the skill** following skill-creator's anatomy:
+   - Write a precise \`description\` in the YAML frontmatter — this is the PRIMARY trigger mechanism. Make it "pushy" (include specific contexts and keywords that should trigger it)
+   - Keep SKILL.md under 500 lines; use \`references/\` for detailed docs
+   - Follow progressive disclosure: metadata → SKILL.md body → bundled resources
+3. **Write basic evals** — create \`~/.claude/skills/<skill-name>/evals/evals.json\` with 2-3 realistic test prompts:
+   \`\`\`json
+   {
+     "skill_name": "<skill-name>",
+     "evals": [
+       { "id": 1, "prompt": "Realistic user prompt that should trigger this skill", "expected_output": "What the skill should produce" }
+     ]
+   }
+   \`\`\`
+4. **Register** the skill name in \`~/.claude/skills/skill-evolver/reference/permitted_skills.md\`
 
 **Evolving an existing skill:**
-- Only modify skills listed in \`permitted_skills.md\`
-- Use Edit for targeted changes, don't rewrite entire files
-- Base changes on accumulated experience evidence
+1. Only modify skills listed in \`permitted_skills.md\`
+2. Read the skill's existing SKILL.md and any evals
+3. Use Edit for targeted changes — don't rewrite entire files unless necessary
+4. Base changes on accumulated experience evidence
+5. If the skill has \`evals/evals.json\`, consider updating the evals to cover new scenarios
+
+**Skill quality checklist** (from skill-creator):
+- [ ] Clear, actionable instructions using imperative form
+- [ ] Explains the **why** behind instructions, not just rigid rules
+- [ ] Description is trigger-optimized (pushy, includes keywords and contexts)
+- [ ] Under 500 lines for SKILL.md; references/ for detailed content
+- [ ] Scoped to one coherent topic, no duplication with existing skills
+- [ ] Valid YAML frontmatter with name and description
 
 ### Step 5: Experience Maintenance
 
@@ -262,7 +297,7 @@ Write your report to:
 (List at least 3 identified user needs with evidence source)
 
 1. Need: ...
-   Source: objective/preference/experience/session
+   Source: objective/preference/experience/session/task-execution/skill-need-signal
    Evidence: ...
 
 ## Existing Skill Coverage
@@ -274,10 +309,14 @@ Write your report to:
 ## Skills Created or Evolved
 (List any new skills created or existing skills modified. If none, explain why for EACH unmet need.)
 
+## Task-Derived Needs
+(What skill needs were identified from task execution patterns? Any skill_needs.yaml signals addressed?)
+
 ## Experience Updates
 - success_experience: N signals added
 - failure_experience: N signals added
 - useful_tips: N signals added
+- skill_needs addressed: N
 - Stale entries cleaned: N
 
 ## Notes
@@ -307,12 +346,15 @@ ${CRITICAL_PATH}
 **Read access:**
 - \`~/.claude/skills/user-context/context/\` and \`tmp/\` (user profile)
 - \`~/.claude/skills/skill-evolver/tmp/\` (technical experience)
+- \`~/.claude/skills/\` (skill inventory — list all available skills)
+- \`~/.claude/skills/skill-evolver/reference/permitted_skills.md\` (evolved skills list)
 - Session logs at \`~/.claude/projects/\`
 - \`~/.claude/skills/task-planner/reference/\` (task schema and guides)
 
 **Do NOT touch:**
 - \`~/.claude/skills/user-context/\` data files (another agent handles this)
-- \`~/.claude/skills/skill-evolver/tmp/\` (another agent handles this)`;
+- \`~/.claude/skills/skill-evolver/tmp/\` (another agent handles this)
+- \`~/.claude/skills/*/SKILL.md\` (do not modify any skill files)`;
 
   const task = `
 ${SCRIPTS_REFERENCE}
@@ -353,16 +395,28 @@ Use scripts to scan recent sessions:
 - What information does the user repeatedly query? (→ scheduled report)
 - What errors keep recurring? (→ preventive check)
 
-### Phase 4: Task Lifecycle Management
+### Phase 4: Skill Awareness (IMPORTANT — co-evolution)
+
+Understand what skills are available so you can leverage them and identify gaps:
+
+1. **List available skills**: \`ls ~/.claude/skills/\`
+2. **Check evolved skills**: Read \`~/.claude/skills/skill-evolver/reference/permitted_skills.md\`
+3. **For each task you plan to create**, consider:
+   - Which existing skills could help this task execute better? → set \`relatedSkills\` field
+   - Does this task need a skill that doesn't exist yet? → create a **skill-building task**
+4. **Detect skill gaps**: If an objective requires capabilities no existing skill provides, create a skill-building task to fill that gap
+
+### Phase 5: Task Lifecycle Management
 
 Read existing tasks from \`~/.skill-evolver/tasks/tasks.yaml\`:
 - Check artifact quality (browse \`~/.skill-evolver/tasks/<id>/artifacts/\`)
 - Is the schedule still appropriate?
 - Should any task be adjusted, paused, or removed?
+- For skill-building tasks: has the target skill been created? If yes → mark completed
 
-### Phase 5: Decision and Creation
+### Phase 6: Decision and Creation
 
-Combine analysis from Phases 1-4. Create tasks following the schema in \`~/.claude/skills/task-planner/reference/task_schema.md\`.
+Combine analysis from Phases 1-5. Create tasks following the schema in \`~/.claude/skills/task-planner/reference/task_schema.md\`.
 
 **Task safety tiers** (prefer safer categories first):
 1. **Information gathering** — Always safe: news, trends, summaries, monitoring
@@ -374,7 +428,7 @@ Combine analysis from Phases 1-4. Create tasks following the schema in \`~/.clau
 
 **Check \`~/.claude/skills/task-planner/tasks/_rejected.yaml\`** before creating — do not re-propose rejected tasks.
 
-**Task creation format** (append to tasks array in tasks.yaml):
+**Standard task format** (append to tasks array in tasks.yaml):
 \`\`\`yaml
 - id: "t_YYYYMMDD_HHmm_xxx"    # date + 3-char random hex
   name: "Short descriptive name"
@@ -388,11 +442,57 @@ Combine analysis from Phases 1-4. Create tasks following the schema in \`~/.clau
   source: agent
   model: sonnet              # Prefer sonnet unless deep reasoning needed
   tags: ["tag1", "tag2"]
+  relatedSkills: ["skill-name"]   # optional: skills this task should leverage
   runCount: 0
   createdAt: "<ISO datetime>"
 \`\`\`
 
-### Phase 6: Write Report
+**Skill-building task format** (special task type for creating/improving skills):
+\`\`\`yaml
+- id: "t_YYYYMMDD_HHmm_xxx"
+  name: "Create <skill-name> skill"
+  description: "Create a skill for <what it does> based on <evidence>"
+  prompt: |
+    You are a skill builder. Your task is to create (or improve) a Claude Code skill
+    using the skill-creator methodology.
+
+    TARGET SKILL: <skill-name>
+    GOAL: <what the skill should do>
+    EVIDENCE: <why this skill is needed — specific patterns, failures, or user needs>
+
+    INSTRUCTIONS:
+    1. Read ~/.claude/skills/skill-creator/SKILL.md THOROUGHLY — it defines the
+       standard process for skill creation including eval, benchmark, and description optimization.
+    2. Check if ~/.claude/skills/<skill-name>/ already exists
+       - If exists: Read current SKILL.md, identify improvements, make targeted edits
+       - If new: Create the skill directory and write SKILL.md following skill-creator's anatomy:
+         - YAML frontmatter with name and trigger-optimized description (make it "pushy")
+         - Instructions using imperative form, explaining WHY not just WHAT
+         - Under 500 lines; use references/ for detailed docs
+    3. Write basic evals to ~/.claude/skills/<skill-name>/evals/evals.json with 2-3
+       realistic test prompts and expected outputs
+    4. Register the skill in ~/.claude/skills/skill-evolver/reference/permitted_skills.md
+    5. Write a report summarizing: what was created/changed, eval results if any, description design rationale
+  schedule:
+    type: one-shot
+    at: "<ISO datetime — schedule within next few hours>"
+  status: ${autoApprove ? "active" : "pending"}
+  approved: ${autoApprove ? "true" : "false"}
+  source: agent
+  model: sonnet
+  tags: ["skill-building"]
+  skillTarget: "<skill-name>"     # REQUIRED for skill-building tasks
+  runCount: 0
+  createdAt: "<ISO datetime>"
+\`\`\`
+
+**When to create a skill-building task:**
+- An objective needs capabilities no existing skill provides
+- Multiple tasks share patterns that should be codified
+- Task failures reveal a knowledge gap that a skill could fill
+- User repeatedly needs guidance in a specific domain
+
+### Phase 7: Write Report
 
 Write your report to:
 \`${reportPath}\`
@@ -411,11 +511,15 @@ Write your report to:
 ## Session Patterns
 (What recurring manual actions or queries did you find?)
 
+## Skill Awareness
+(Available skills inventory. Skill gaps identified. Any skill-building tasks proposed?)
+
 ## Existing Tasks Review
-(Status of each existing task — healthy/needs-adjustment/stale?)
+(Status of each existing task — healthy/needs-adjustment/stale? Skill-building tasks: target skill created?)
 
 ## Tasks Created
 (List each new task with name, schedule, and rationale. If zero, explain why EACH objective doesn't warrant a task.)
+(For skill-building tasks, include skillTarget and evidence.)
 
 ## Tasks Modified
 (Any changes to existing tasks)
@@ -442,13 +546,25 @@ CRITICAL SAFETY RULES:
 - All persistent artifacts should be written to the artifacts directory below.
 - Write your task report to the specified report path when done.`;
 
+  // Include related skills context if available
+  let skillsSection = "";
+  if (task.relatedSkills && task.relatedSkills.length > 0) {
+    skillsSection = `\n## Related Skills
+
+The following skills are relevant to this task. Read their SKILL.md files for guidance before starting:
+${task.relatedSkills.map(s => `- \`~/.claude/skills/${s}/SKILL.md\``).join("\n")}
+
+These skills contain best practices and patterns that will help you execute this task more effectively.\n`;
+  }
+
   const taskSection = `
 ## Task Details
 
 - **Name**: ${task.name}
 - **Description**: ${task.description ?? "(no description)"}
 - **Task ID**: ${task.id}
-
+${task.skillTarget ? `- **Skill Target**: ${task.skillTarget} (this is a skill-building task)\n` : ""}
+${skillsSection}
 ## Prompt
 
 ${task.prompt}
@@ -509,13 +625,33 @@ ${taskReport}
    - Add failure experiences to \`~/.claude/skills/skill-evolver/tmp/failure_experience.yaml\` if something went wrong.
    - Add useful tips to \`~/.claude/skills/skill-evolver/tmp/useful_tips.yaml\` for any non-obvious learnings.
 
-3. **Check if follow-up needed** — Determine if the task result warrants any follow-up actions (e.g., a new task, an update to user-context, a skill modification).
+3. **Emit skill-need signals (IMPORTANT — task-skill co-evolution)** — If the task struggled, failed, or had to improvise in a domain where a skill could help:
+   - Write a skill-need signal to \`~/.claude/skills/skill-evolver/tmp/skill_needs.yaml\`
+   - Format:
+   \`\`\`yaml
+   entries:
+     - need: "Description of what skill is needed"
+       source_task: "${task.id}"
+       task_name: "${task.name}"
+       evidence: "Why this skill is needed — what went wrong or was difficult"
+       priority: "high"    # high if task failed, medium if task struggled
+       date: "<today ISO>"
+       addressed: false
+   \`\`\`
+   - This signal will be picked up by the Skill Agent in the next evolution cycle as a priority need.
 
-4. **Update idea buffer** — If the task outcome suggests new ideas for tasks or skills, add them to the idea buffer.
+4. **Skill-building task verification** — If this task has \`tags: ["skill-building"]\` or \`skillTarget\`:
+   - Check if the target skill was actually created at \`~/.claude/skills/<skillTarget>/SKILL.md\`
+   - If created: verify it's registered in \`~/.claude/skills/skill-evolver/reference/permitted_skills.md\`
+   - If NOT created: note the failure and emit a skill-need signal so the Skill Agent can handle it
 
-5. **Write review report** — Write a brief markdown report to:
+5. **Check if follow-up needed** — Determine if the task result warrants any follow-up actions (e.g., a new task, an update to user-context, a skill modification).
+
+6. **Update idea buffer** — If the task outcome suggests new ideas for tasks or skills, add them to the idea buffer.
+
+7. **Write review report** — Write a brief markdown report to:
    \`${reportPath}\`
-   Include: quality assessment, lessons extracted, and any follow-up recommendations.`;
+   Include: quality assessment, lessons extracted, skill-need signals emitted, and any follow-up recommendations.`;
 
   return identity + rSection + taskSection;
 }

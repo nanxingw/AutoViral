@@ -32,6 +32,8 @@ export interface Task {
   runCount: number;
   lastRun?: string;    // ISO date string
   createdAt: string;   // ISO date string
+  relatedSkills?: string[];  // skills this task should leverage
+  skillTarget?: string;      // for skill-building tasks: the skill to create/update
 }
 
 // ── Storage ──────────────────────────────────────────────────────────────────
@@ -195,4 +197,45 @@ export async function addRejected(entry: Record<string, unknown>): Promise<void>
   entries.push({ ...entry, date: entry.date ?? new Date().toISOString() });
   const raw = yaml.dump({ entries }, { lineWidth: -1 });
   await writeFile(REJECTED_FILE, raw, "utf-8");
+}
+
+// ── Skill Needs (task→skill bridge) ──────────────────────────────────────────
+
+export interface SkillNeed {
+  need: string;
+  source_task?: string;
+  task_name?: string;
+  evidence: string;
+  priority: "high" | "medium";
+  date: string;
+  addressed?: boolean;
+}
+
+const SKILL_NEEDS_FILE = join(homedir(), ".claude", "skills", "skill-evolver", "tmp", "skill_needs.yaml");
+
+export async function listSkillNeeds(): Promise<SkillNeed[]> {
+  try {
+    const raw = await readFile(SKILL_NEEDS_FILE, "utf-8");
+    const parsed = yaml.load(raw) as { entries?: SkillNeed[] } | null;
+    return parsed?.entries ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function addSkillNeed(need: SkillNeed): Promise<void> {
+  const dir = join(homedir(), ".claude", "skills", "skill-evolver", "tmp");
+  await mkdir(dir, { recursive: true });
+  const entries = await listSkillNeeds();
+  // Deduplicate by need text
+  const existing = entries.find(e => e.need === need.need);
+  if (existing) {
+    existing.evidence += `\n${need.evidence}`;
+    existing.priority = need.priority === "high" ? "high" : existing.priority;
+    existing.date = need.date;
+  } else {
+    entries.push(need);
+  }
+  const raw = yaml.dump({ entries }, { lineWidth: -1 });
+  await writeFile(SKILL_NEEDS_FILE, raw, "utf-8");
 }
