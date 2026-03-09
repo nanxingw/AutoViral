@@ -27,13 +27,19 @@ function currentTs(): string {
 }
 
 // GET /api/status
-apiRoutes.get("/api/status", (c) => {
+apiRoutes.get("/api/status", async (c) => {
   const nextRun = getNextRun();
+  const config = await loadConfig();
+  const activeAgents = Array.from(executor.running.values())
+    .filter(j => j.type === "evo-context" || j.type === "evo-skill" || j.type === "evo-task" || j.type === "evolution")
+    .map(j => ({ id: j.id, type: j.type }));
   return c.json({
     state: executor.state,
     lastRun: executor.lastRun?.toISOString() ?? null,
     nextRun: nextRun?.toISOString() ?? null,
     isSchedulerActive: isSchedulerRunning(),
+    evolutionMode: config.evolutionMode,
+    activeAgents,
   });
 });
 

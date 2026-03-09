@@ -1,13 +1,20 @@
 import { spawn } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { homedir } from "node:os";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { loadConfig } from "./config.js";
-import { readRecentReports, cleanupReports } from "./reports.js";
-import { buildPrompt } from "./prompt.js";
+import { readRecentReports, cleanupReports, getReportsDir } from "./reports.js";
+import {
+  buildPrompt,
+  buildContextAgentPrompt,
+  buildSkillAgentPrompt,
+  buildTaskAgentPrompt,
+} from "./prompt.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type JobType = "evolution" | "post-task" | "task";
+export type JobType = "evolution" | "post-task" | "task" | "evo-context" | "evo-skill" | "evo-task";
 
 export interface ExecutionJob {
   id: string;
@@ -24,6 +31,13 @@ export interface ExecutionResult {
   output: string;
   jobId: string;
   jobType: JobType;
+}
+
+export interface MultiAgentResult {
+  context: ExecutionResult | null;
+  skill: ExecutionResult | null;
+  task: ExecutionResult | null;
+  totalDuration: number;
 }
 
 // Backward-compatible aliases
@@ -50,6 +64,13 @@ class Executor extends EventEmitter {
     return this.running.size === 0;
   }
 
+  /** Check if any evolution-related job is running */
+  get hasEvolutionRunning(): boolean {
+    return Array.from(this.running.values()).some(
+      j => j.type === "evolution" || j.type === "evo-context" || j.type === "evo-skill" || j.type === "evo-task",
+    );
+  }
+
   async run(job: ExecutionJob): Promise<ExecutionResult> {
     this.running.set(job.id, job);
     this.emit("job_start", { jobId: job.id, jobType: job.type, taskId: job.taskId, taskName: job.taskName });
@@ -57,6 +78,15 @@ class Executor extends EventEmitter {
     // Backward compat: emit cycle_start for evolution jobs
     if (job.type === "evolution") {
       this.emit("cycle_start");
+    }
+    // Multi-agent: emit cycle_start on first evo-* job
+    if (job.type === "evo-context" || job.type === "evo-skill" || job.type === "evo-task") {
+      const evoJobs = Array.from(this.running.values()).filter(
+        j => j.type === "evo-context" || j.type === "evo-skill" || j.type === "evo-task",
+      );
+      if (evoJobs.length === 1) {
+        this.emit("cycle_start");
+      }
     }
 
     const startTime = Date.now();
@@ -202,6 +232,20 @@ let evolutionCounter = 0;
 
 export async function runEvolutionCycle(): Promise<ExecutionResult> {
   const config = await loadConfig();
+
+  if (config.evolutionMode === "multi") {
+    const multiResult = await runMultiAgentEvolution();
+    // Return a synthetic ExecutionResult for backward compat
+    return {
+      success: (multiResult.context?.success ?? true) && (multiResult.skill?.success ?? true) && (multiResult.task?.success ?? true),
+      duration: multiResult.totalDuration,
+      output: `Multi-agent cycle completed. Context: ${multiResult.context?.success ?? "skipped"}, Skill: ${multiResult.skill?.success ?? "skipped"}, Task: ${multiResult.task?.success ?? "skipped"}`,
+      jobId: `evolution-multi-${++evolutionCounter}-${Date.now()}`,
+      jobType: "evolution",
+    };
+  }
+
+  // Single-agent mode (backward compat)
   const recentReports = await readRecentReports(config.reportsToFeed);
   const prompt = buildPrompt(recentReports, { taskAutoApprove: config.taskAutoApprove });
 
@@ -215,4 +259,154 @@ export async function runEvolutionCycle(): Promise<ExecutionResult> {
   const result = await executor.run(job);
   await cleanupReports(config.maxReports);
   return result;
+}
+
+// ── Multi-agent evolution ────────────────────────────────────────────────────
+
+function currentTimestamp(): string {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const MM = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  const hh = String(now.getHours()).padStart(2, "0");
+  const mm = String(now.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${MM}-${dd}_${hh}-${mm}`;
+}
+
+export async function runMultiAgentEvolution(): Promise<MultiAgentResult> {
+  const config = await loadConfig();
+  const recentReports = await readRecentReports(config.reportsToFeed);
+  const ts = currentTimestamp();
+  const reportsDir = getReportsDir();
+
+  const contextReportPath = join(reportsDir, `${ts}_context_report.md`);
+  const skillReportPath = join(reportsDir, `${ts}_skill_report.md`);
+  const taskReportPath = join(reportsDir, `${ts}_task_report.md`);
+  const mergedReportPath = join(reportsDir, `${ts}_report.md`);
+
+  const contextPrompt = buildContextAgentPrompt(recentReports, contextReportPath);
+  const skillPrompt = buildSkillAgentPrompt(recentReports, skillReportPath);
+  const taskPrompt = buildTaskAgentPrompt(recentReports, taskReportPath, {
+    taskAutoApprove: config.taskAutoApprove,
+  });
+
+  const startTime = Date.now();
+  const counter = ++evolutionCounter;
+
+  // Run three agents in parallel
+  const [contextSettled, skillSettled, taskSettled] = await Promise.allSettled([
+    executor.run({
+      id: `evo-context-${counter}-${Date.now()}`,
+      type: "evo-context",
+      prompt: contextPrompt,
+      model: config.model,
+    }),
+    executor.run({
+      id: `evo-skill-${counter}-${Date.now()}`,
+      type: "evo-skill",
+      prompt: skillPrompt,
+      model: config.model,
+    }),
+    executor.run({
+      id: `evo-task-${counter}-${Date.now()}`,
+      type: "evo-task",
+      prompt: taskPrompt,
+      model: config.model,
+    }),
+  ]);
+
+  const contextResult = contextSettled.status === "fulfilled" ? contextSettled.value : null;
+  const skillResult = skillSettled.status === "fulfilled" ? skillSettled.value : null;
+  const taskResult = taskSettled.status === "fulfilled" ? taskSettled.value : null;
+
+  const totalDuration = Date.now() - startTime;
+
+  // Merge sub-reports into a combined report
+  await mergeReports(mergedReportPath, {
+    contextPath: contextReportPath,
+    skillPath: skillReportPath,
+    taskPath: taskReportPath,
+    contextResult,
+    skillResult,
+    taskResult,
+    totalDuration,
+  });
+
+  // Emit cycle_end with synthetic result
+  const syntheticResult: ExecutionResult = {
+    success: (contextResult?.success ?? false) || (skillResult?.success ?? false) || (taskResult?.success ?? false),
+    duration: totalDuration,
+    output: "Multi-agent evolution cycle completed",
+    jobId: `evolution-multi-${counter}`,
+    jobType: "evolution",
+  };
+  executor.lastRun = new Date();
+  executor.lastResult = syntheticResult;
+  executor.emit("cycle_end", syntheticResult);
+
+  await cleanupReports(config.maxReports);
+
+  return { context: contextResult, skill: skillResult, task: taskResult, totalDuration };
+}
+
+async function mergeReports(
+  outputPath: string,
+  opts: {
+    contextPath: string;
+    skillPath: string;
+    taskPath: string;
+    contextResult: ExecutionResult | null;
+    skillResult: ExecutionResult | null;
+    taskResult: ExecutionResult | null;
+    totalDuration: number;
+  },
+): Promise<void> {
+  const { writeFile } = await import("node:fs/promises");
+  const { ensureDir } = await import("./config.js");
+  const { dirname } = await import("node:path");
+
+  await ensureDir(dirname(outputPath));
+
+  let contextReport = "";
+  let skillReport = "";
+  let taskReport = "";
+
+  try { contextReport = await readFile(opts.contextPath, "utf-8"); } catch { /* agent may not have written it */ }
+  try { skillReport = await readFile(opts.skillPath, "utf-8"); } catch { /* agent may not have written it */ }
+  try { taskReport = await readFile(opts.taskPath, "utf-8"); } catch { /* agent may not have written it */ }
+
+  const statusLine = (result: ExecutionResult | null, name: string): string => {
+    if (!result) return `${name}: FAILED`;
+    return `${name}: ${result.success ? "OK" : "FAILED"} (${Math.round(result.duration / 1000)}s)`;
+  };
+
+  const merged = `# Evolution Report (Multi-Agent) — ${new Date().toISOString()}
+
+## Summary
+
+- ${statusLine(opts.contextResult, "Context Agent")}
+- ${statusLine(opts.skillResult, "Skill Agent")}
+- ${statusLine(opts.taskResult, "Task Agent")}
+- Total duration: ${Math.round(opts.totalDuration / 1000)}s
+
+---
+
+## Context Agent
+
+${contextReport || "_Agent did not produce a report._"}
+
+---
+
+## Skill Agent
+
+${skillReport || "_Agent did not produce a report._"}
+
+---
+
+## Task Agent
+
+${taskReport || "_Agent did not produce a report._"}
+`;
+
+  await writeFile(outputPath, merged, "utf-8");
 }

@@ -155,14 +155,48 @@ export function runCLI(): void {
   program
     .command("evolve")
     .description("Run a single evolution cycle")
-    .action(async () => {
-      console.log("Starting evolution cycle...");
-      executor.on("cycle_progress", (text: string) => {
-        process.stdout.write(text);
+    .option("--single", "Force single-agent mode")
+    .action(async (opts: { single?: boolean }) => {
+      const config = await loadConfig();
+      const mode = opts.single ? "single" : config.evolutionMode;
+      console.log(`Starting evolution cycle (${mode} mode)...`);
+
+      // Show progress from all job types
+      executor.on("job_progress", (data: { jobType?: string; text?: string }) => {
+        if (data.text) {
+          const prefix = data.jobType && data.jobType.startsWith("evo-")
+            ? `[${data.jobType.replace("evo-", "")}] `
+            : "";
+          process.stdout.write(prefix + data.text);
+        }
       });
+
+      // Backward compat for single mode
+      executor.on("cycle_progress", (text: string) => {
+        if (mode === "single") {
+          process.stdout.write(text);
+        }
+      });
+
       try {
-        const result = await runEvolutionCycle();
-        console.log(`\n\nEvolution cycle completed in ${Math.round(result.duration / 1000)}s`);
+        if (opts.single) {
+          // Temporarily override config for this run
+          const origMode = config.evolutionMode;
+          config.evolutionMode = "single";
+          const { saveConfig } = await import("./config.js");
+          await saveConfig(config);
+          try {
+            const result = await runEvolutionCycle();
+            console.log(`\n\nEvolution cycle completed in ${Math.round(result.duration / 1000)}s`);
+          } finally {
+            config.evolutionMode = origMode;
+            const { saveConfig: sc } = await import("./config.js");
+            await sc(config);
+          }
+        } else {
+          const result = await runEvolutionCycle();
+          console.log(`\n\nEvolution cycle completed in ${Math.round(result.duration / 1000)}s`);
+        }
       } catch (err) {
         console.error("Evolution cycle failed:", err instanceof Error ? err.message : err);
         process.exit(1);

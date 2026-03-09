@@ -1,6 +1,6 @@
 ---
 name: skill-evolver
-description: "Technical experience knowledge base. Contains accumulated success patterns, failure patterns, and useful tips from past Claude Code sessions. Read tmp/ files to avoid known pitfalls and apply proven approaches. Use this skill whenever you are about to try an approach that might have known issues, or when looking for best practices the user has benefited from before."
+description: "Technical experience knowledge base. Contains accumulated success patterns, failure patterns, and useful tips from past Claude Code sessions. Read tmp/ files to avoid known pitfalls and apply proven approaches. Use this skill whenever you are about to try an approach that might have known issues, or when looking for best practices the user has benefited from before. During evolution cycles, this skill drives need-driven skill creation — discovering user needs and finding or creating skills to address them."
 allowed-tools:
   - Read
   - Write

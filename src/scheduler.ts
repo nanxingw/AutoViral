@@ -52,9 +52,8 @@ function scheduleEvolutionTimer(): void {
     evolutionTimer = null;
     nextRunTime = null;
 
-    // If an evolution job is already running, retry in 60s
-    const hasEvolution = Array.from(executor.running.values()).some(j => j.type === "evolution");
-    if (hasEvolution) {
+    // If any evolution job is already running (single or multi-agent), retry in 60s
+    if (executor.hasEvolutionRunning) {
       evolutionTimer = setTimeout(() => scheduleEvolutionTimer(), 60_000);
       return;
     }

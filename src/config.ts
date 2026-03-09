@@ -14,6 +14,7 @@ export interface Config {
   taskMaxConcurrent: number;
   taskMaxRunsPerTask: number;
   postTaskDebounce: number;
+  evolutionMode: "single" | "multi";
 }
 
 const CONFIG_DIR = join(homedir(), ".skill-evolver");
@@ -31,6 +32,7 @@ export function getDefaultConfig(): Config {
     taskMaxConcurrent: 3,
     taskMaxRunsPerTask: 20,
     postTaskDebounce: 300,
+    evolutionMode: "multi",
   };
 }
 
