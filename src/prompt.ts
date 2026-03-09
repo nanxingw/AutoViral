@@ -12,7 +12,7 @@ function currentTimestamp(): string {
   return `${yyyy}-${MM}-${dd}_${hh}-${mm}`;
 }
 
-export function buildPrompt(recentReports: string[]): string {
+export function buildPrompt(recentReports: string[], opts?: { taskAutoApprove?: boolean }): string {
   const reportPath = join(getReportsDir(), `${currentTimestamp()}_report.md`);
 
   const identity = `You are running as a background evolution engine for skill-evolver.
@@ -44,11 +44,12 @@ CRITICAL PATH CONSTRAINT: You must ONLY read and write skill files under ~/.clau
    \`${reportPath}\`
    Include: sessions analyzed, signals extracted, any graduations or skill changes made, and notes for next cycle.
 
-5. **Task Planning** — Read the task-planner skill.
-   - Read buffer/ideas.yaml, existing tasks, _rejected.yaml
+5. **Task Planning** — Read the task-planner skill at \`~/.claude/skills/task-planner/\`.
+   - Read buffer/ideas.yaml, existing tasks at \`~/.skill-evolver/tasks/tasks.yaml\`, and _rejected.yaml
    - Freely add/remove ideas, create tasks if appropriate
    - One-shot tasks should be scheduled before next cycle
-   - Record decisions in the evolution report`;
+   - Record decisions in the evolution report
+   - **Task auto-approve is ${opts?.taskAutoApprove !== false ? "ON" : "OFF"}**. ${opts?.taskAutoApprove !== false ? "Set agent-created tasks to `status: active` and `approved: true` — they will run immediately on schedule." : "Set agent-created tasks to `status: pending` and `approved: false` — user must approve via dashboard."}`;
 
   return identity + reportsSection + task;
 }

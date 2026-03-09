@@ -203,7 +203,7 @@ let evolutionCounter = 0;
 export async function runEvolutionCycle(): Promise<ExecutionResult> {
   const config = await loadConfig();
   const recentReports = await readRecentReports(config.reportsToFeed);
-  const prompt = buildPrompt(recentReports);
+  const prompt = buildPrompt(recentReports, { taskAutoApprove: config.taskAutoApprove });
 
   const job: ExecutionJob = {
     id: `evolution-${++evolutionCounter}-${Date.now()}`,

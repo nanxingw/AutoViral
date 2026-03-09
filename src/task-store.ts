@@ -171,14 +171,14 @@ export async function readArtifact(taskId: string, filename: string): Promise<st
 
 // ── Ideas / Rejected ─────────────────────────────────────────────────────────
 
-const IDEAS_FILE = join(TASKS_DIR, "ideas.yaml");
-const REJECTED_FILE = join(TASKS_DIR, "_rejected.yaml");
+const IDEAS_FILE = join(homedir(), ".claude", "skills", "task-planner", "buffer", "ideas.yaml");
+const REJECTED_FILE = join(homedir(), ".claude", "skills", "task-planner", "tasks", "_rejected.yaml");
 
 export async function listIdeas(): Promise<unknown[]> {
   try {
     const raw = await readFile(IDEAS_FILE, "utf-8");
-    const parsed = yaml.load(raw) as { ideas?: unknown[] } | null;
-    return parsed?.ideas ?? [];
+    const parsed = yaml.load(raw) as { entries?: unknown[]; ideas?: unknown[] } | null;
+    return parsed?.entries ?? parsed?.ideas ?? [];
   } catch {
     return [];
   }

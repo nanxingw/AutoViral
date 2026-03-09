@@ -1,34 +1,34 @@
 # Task Schema Reference
 
-This document defines the YAML format for task files stored in `~/.claude/skills/task-planner/tasks/`.
+This document defines the YAML format for tasks stored in `~/.skill-evolver/tasks/tasks.yaml`.
 
 ---
 
-## Task File Format
+## Storage Format
 
-Each task is a single YAML file named `<id>.yaml`.
+All tasks are stored in a single YAML file as an array:
 
 ```yaml
-id: "t_20260306_1530_abc"
-name: "Daily lint check"
-description: "Run ESLint on the main project every morning before the user starts work"
-type: "recurring"
-schedule: "0 8 * * *"
-prompt: |
-  Run ESLint on the project at ~/projects/main-app.
-  Report any new warnings or errors since the last run.
-  If clean, just confirm "No lint issues found."
-model: "sonnet"
-source: "user"
-status: "active"
-approved: true
-created_at: "2026-03-06T15:30:00+08:00"
-last_run: null
-next_run: "2026-03-07T08:00:00+08:00"
-run_count: 0
-max_runs: null
-tags: ["linting", "code-quality"]
-memory_ref: null
+tasks:
+  - id: "t_20260306_1530_abc"
+    name: "Daily lint check"
+    description: "Run ESLint on the main project every morning"
+    prompt: |
+      Run ESLint on the project at ~/projects/main-app.
+      Report any new warnings or errors since the last run.
+    schedule:
+      type: cron
+      cron: "0 8 * * *"
+    status: active
+    approved: true
+    source: user
+    model: sonnet
+    tags: ["linting", "code-quality"]
+    runCount: 0
+    createdAt: "2026-03-06T15:30:00.000Z"
+  - id: "t_20260307_0900_def"
+    name: "Check eval results"
+    # ... next task ...
 ```
 
 ---
@@ -39,29 +39,39 @@ memory_ref: null
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `id` | string | Unique identifier. Format: `t_YYYYMMDD_HHmm_<3-char-random>`. Generated at creation time. |
+| `id` | string | Unique identifier. Format: `t_YYYYMMDD_HHmm_<3-char-hex>`. |
 | `name` | string | Short human-readable name. Keep under 60 characters. |
-| `description` | string | Detailed description of what the task does and why. |
-| `type` | enum | `"recurring"` (cron-based) or `"one-shot"` (runs once). |
-| `schedule` | string | **Recurring only.** Cron expression (5 fields: minute hour day-of-month month day-of-week). |
-| `scheduled_at` | string | **One-shot only.** ISO 8601 datetime for when to execute. |
-| `prompt` | string | The full prompt given to Claude when the task fires. Must be self-contained — the executing Claude has no other context. |
-| `source` | enum | `"user"` (created by user during a session) or `"agent"` (suggested by the evolution agent). |
-| `status` | enum | `"active"`, `"paused"`, `"pending"` (awaiting approval), `"inactive"`, `"completed"` (one-shot that has run). |
-| `approved` | boolean | Whether the user has approved this task. User-created tasks are `true` by default. Agent-suggested tasks start as `false`. |
-| `created_at` | string | ISO 8601 datetime of task creation. |
+| `prompt` | string | Full prompt given to Claude when the task fires. Must be self-contained. |
+| `schedule` | object | Schedule configuration (see below). |
+| `status` | enum | `"active"`, `"paused"`, `"pending"`, `"completed"`, `"expired"`, `"running"` |
+| `approved` | boolean | Whether user approved. User-created: `true`. Agent-suggested: `false`. |
+| `runCount` | integer | Total executions. Start at `0`. |
+| `createdAt` | string | ISO 8601 datetime of creation. |
+
+### Schedule object
+
+```yaml
+# For recurring tasks:
+schedule:
+  type: cron
+  cron: "0 8 * * *"    # 5-field cron expression
+
+# For one-shot tasks:
+schedule:
+  type: one-shot
+  at: "2026-03-07T10:00:00Z"   # ISO datetime
+```
 
 ### Optional fields
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `model` | string | Config default | Claude model to use for execution (`"opus"`, `"sonnet"`, `"haiku"`). |
-| `last_run` | string or null | `null` | ISO 8601 datetime of the most recent execution. Updated by the daemon. |
-| `next_run` | string or null | Computed | ISO 8601 datetime of the next scheduled execution. Computed from schedule/scheduled_at. |
-| `run_count` | integer | `0` | Total number of times this task has executed. |
-| `max_runs` | integer or null | `null` | Maximum executions. `null` = unlimited. `1` = effectively one-shot. After reaching max, status becomes `"completed"`. |
-| `tags` | string[] | `[]` | Categorization tags for filtering and display. |
-| `memory_ref` | string or null | `null` | For agent-suggested tasks: brief explanation of the reasoning and evidence behind the suggestion. |
+| `description` | string | - | Detailed description of what the task does. |
+| `model` | string | Config default | Claude model: `"opus"`, `"sonnet"`, `"haiku"`. |
+| `source` | string | `"user"` | Who created: `"user"` or `"agent"`. |
+| `tags` | string[] | `[]` | Categorization tags. |
+| `lastRun` | string | - | ISO datetime of most recent execution. |
+| `max_runs` | integer or null | `null` | Max executions. `null` = unlimited. |
 
 ---
 
@@ -69,16 +79,17 @@ memory_ref: null
 
 ```
 pending ──(user approves)──> active ──(runs)──> active (recurring)
-                                                  └──> completed (one-shot or max_runs reached)
+                                                  └──> completed (one-shot or max_runs)
 active ──(user pauses)──> paused ──(user resumes)──> active
-active ──(deactivated)──> inactive
+active ──(deactivated)──> expired
 ```
 
 - `pending`: Agent-suggested, awaiting user approval. Will not execute.
 - `active`: Approved and scheduled. Will execute on schedule.
 - `paused`: Temporarily stopped. Retains schedule but will not execute.
-- `inactive`: Permanently stopped. Kept for history.
+- `running`: Currently being executed by the daemon.
 - `completed`: One-shot that has run, or recurring that hit `max_runs`.
+- `expired`: Deactivated or rejected.
 
 ---
 
@@ -86,61 +97,32 @@ active ──(deactivated)──> inactive
 
 Standard 5-field cron: `minute hour day-of-month month day-of-week`
 
-| Field | Allowed values |
-|-------|---------------|
-| minute | 0-59 |
-| hour | 0-23 |
-| day-of-month | 1-31 |
-| month | 1-12 |
-| day-of-week | 0-7 (0 and 7 are Sunday) |
-
-Special characters: `*` (any), `,` (list), `-` (range), `/` (step).
-
-### Common examples
-
 | Expression | Meaning |
 |-----------|---------|
 | `0 * * * *` | Every hour on the hour |
 | `0 9 * * *` | Daily at 9:00 AM |
 | `0 9 * * 1-5` | Weekdays at 9:00 AM |
 | `*/30 * * * *` | Every 30 minutes |
-| `0 9,18 * * *` | Twice daily at 9:00 AM and 6:00 PM |
 | `0 0 * * 0` | Weekly on Sunday at midnight |
-| `0 12 1 * *` | Monthly on the 1st at noon |
-| `0 */6 * * *` | Every 6 hours |
 
 ---
 
-## Artifacts and Run History
+## Artifacts and Reports
 
-When a task executes, the daemon stores output artifacts at:
+When a task executes, the daemon stores outputs at:
 
 ```
-~/.skill-evolver/task-artifacts/<task-id>/
-  run_<YYYY-MM-DD_HH-mm>/
-    output.md        # Claude's full output from the execution
-    metadata.yaml    # Run metadata
-```
-
-### metadata.yaml format
-
-```yaml
-task_id: "t_20260306_1530_abc"
-run_at: "2026-03-07T09:00:12+08:00"
-completed_at: "2026-03-07T09:02:45+08:00"
-duration_seconds: 153
-model: "sonnet"
-exit_code: 0
-prompt_tokens: 1240
-output_tokens: 856
-error: null
+~/.skill-evolver/tasks/<task-id>/
+  artifacts/           # Persistent artifacts shared across runs
+  reports/             # Per-run reports
+    YYYY-MM-DD_HH-mm_report.md
 ```
 
 ---
 
 ## _rejected.yaml Format
 
-Tracks declined task proposals to prevent re-suggestion.
+Located at `~/.claude/skills/task-planner/tasks/_rejected.yaml`.
 
 ```yaml
 entries:
@@ -148,10 +130,6 @@ entries:
     reason: "User prefers manual formatting control"
     rejected_at: "2026-03-06"
     original_source: "agent"
-  - name: "Weekly backup reminder"
-    reason: "User already has Time Machine configured"
-    rejected_at: "2026-03-05"
-    original_source: "agent"
 ```
 
-The evolution agent must check this file before proposing new tasks to avoid duplicating rejected ideas.
+The evolution agent must check this file before proposing new tasks.
