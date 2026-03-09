@@ -144,7 +144,16 @@ apiRoutes.get("/api/skills", async (c) => {
     const skillNames = raw
       .split("\n")
       .filter((line) => /^[-*]\s+\S/.test(line))
-      .map((line) => line.replace(/^[-*]\s*/, "").trim())
+      .map((line) => {
+        const stripped = line.replace(/^[-*]\s*/, "").trim();
+        // Handle formats: "**name** — desc", "**name**", "name — desc", "name"
+        const boldMatch = stripped.match(/^\*\*([^*]+)\*\*/);
+        if (boldMatch) return boldMatch[1].trim();
+        // Plain name before any separator
+        const dashMatch = stripped.match(/^([^—–\-]+)/);
+        if (dashMatch) return dashMatch[1].trim();
+        return stripped;
+      })
       .filter((name) => name.length > 0 && !name.startsWith("("));
 
     const skills = await Promise.all(

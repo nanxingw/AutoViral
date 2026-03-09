@@ -17,6 +17,8 @@ const TARGET_SKILLS = join(homedir(), ".claude", "skills");
 
 // Files that should NEVER be overwritten (user's accumulated data)
 const NEVER_OVERWRITE_EXTENSIONS = [".yaml"];
+// Files that should not be overwritten if they already exist (runtime-modified files)
+const NEVER_OVERWRITE_FILES = ["permitted_skills.md"];
 
 const SKILL_CREATOR_REPO = "https://github.com/anthropics/claude-plugins-official.git";
 const SKILL_CREATOR_PATH = "plugins/skill-creator/skills/skill-creator";
@@ -42,13 +44,12 @@ async function copyDir(src: string, dest: string): Promise<void> {
       await copyDir(srcPath, destPath);
     } else {
       const isYaml = NEVER_OVERWRITE_EXTENSIONS.some((ext) => entry.name.endsWith(ext));
+      const isProtected = NEVER_OVERWRITE_FILES.includes(entry.name);
 
-      if (isYaml && await exists(destPath)) {
-        // Never overwrite user's YAML data files
+      if ((isYaml || isProtected) && await exists(destPath)) {
+        // Never overwrite user's YAML data or runtime-modified files
         continue;
       }
-
-      // SKILL.md, permitted_skills.md, and other instruction files: always overwrite
       const content = await readFile(srcPath);
       await writeFile(destPath, content);
     }
