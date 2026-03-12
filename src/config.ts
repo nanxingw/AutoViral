@@ -15,6 +15,12 @@ export interface Config {
   taskMaxRunsPerTask: number;
   postTaskDebounce: number;
   evolutionMode: "single" | "multi";
+  // Task scheduling constraints
+  taskMaxActive: number;           // max tasks in active+running+pending states
+  taskTimeoutMinutes: number;      // default per-task timeout
+  taskMaxRetries: number;          // max consecutive failures before auto-pause
+  taskCompletedRetention: number;  // max completed/expired tasks to keep
+  taskOneShotExpiryHours: number;  // expiry window for missed one-shot tasks
 }
 
 const CONFIG_DIR = join(homedir(), ".skill-evolver");
@@ -33,6 +39,11 @@ export function getDefaultConfig(): Config {
     taskMaxRunsPerTask: 20,
     postTaskDebounce: 300,
     evolutionMode: "multi",
+    taskMaxActive: 10,
+    taskTimeoutMinutes: 10,
+    taskMaxRetries: 3,
+    taskCompletedRetention: 20,
+    taskOneShotExpiryHours: 2,
   };
 }
 

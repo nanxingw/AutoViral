@@ -23,6 +23,7 @@ export interface ExecutionJob {
   model: string;
   taskId?: string;
   taskName?: string;
+  timeoutMinutes?: number;
 }
 
 export interface ExecutionResult {
@@ -48,6 +49,8 @@ export type CycleResult = ExecutionResult;
 
 class Executor extends EventEmitter {
   running: Map<string, ExecutionJob> = new Map();
+  /** Track child processes for timeout/kill support. */
+  processes: Map<string, { proc: ReturnType<typeof spawn>; startedAt: number }> = new Map();
   lastRun: Date | null = null;
   lastResult: ExecutionResult | null = null;
 
@@ -69,6 +72,25 @@ class Executor extends EventEmitter {
     return Array.from(this.running.values()).some(
       j => j.type === "evolution" || j.type === "evo-context" || j.type === "evo-skill" || j.type === "evo-task",
     );
+  }
+
+  /** Kill a running job by sending SIGTERM, then SIGKILL after 5s. */
+  killJob(jobId: string): boolean {
+    const entry = this.processes.get(jobId);
+    if (!entry) return false;
+    const { proc } = entry;
+    try {
+      proc.kill("SIGTERM");
+      setTimeout(() => {
+        try { proc.kill("SIGKILL"); } catch { /* already dead */ }
+      }, 5000);
+    } catch { /* already dead */ }
+    return true;
+  }
+
+  /** Get start time of a running job (for timeout checks). */
+  getJobStartTime(jobId: string): number | undefined {
+    return this.processes.get(jobId)?.startedAt;
   }
 
   async run(job: ExecutionJob): Promise<ExecutionResult> {
@@ -110,6 +132,9 @@ class Executor extends EventEmitter {
             return env;
           })(),
         });
+
+        // Track process for timeout/kill support
+        this.processes.set(job.id, { proc: claude, startedAt: Date.now() });
 
         claude.on("error", (err) => {
           if ((err as NodeJS.ErrnoException).code === "ENOENT") {
@@ -192,6 +217,7 @@ class Executor extends EventEmitter {
       });
 
       this.running.delete(job.id);
+      this.processes.delete(job.id);
       this.lastRun = new Date();
       this.lastResult = result;
 
@@ -210,6 +236,7 @@ class Executor extends EventEmitter {
       };
 
       this.running.delete(job.id);
+      this.processes.delete(job.id);
       this.lastRun = new Date();
       this.lastResult = result;
 

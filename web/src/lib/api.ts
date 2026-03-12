@@ -54,6 +54,43 @@ export async function openSkillDir(name: string): Promise<void> {
   await request<{ opened: boolean }>(`/api/skills/${encodeURIComponent(name)}/open`, { method: "POST" });
 }
 
+// ---------------------------------------------------------------------------
+// Dashboard aggregate
+// ---------------------------------------------------------------------------
+
+export interface DashboardReport {
+  filename: string;
+  date: string;
+  summary: string;
+  agentType: string;
+}
+
+export interface DashboardTask {
+  id: string;
+  name: string;
+  status: string;
+  schedule?: TaskSchedule;
+  lastRun?: string;
+  runCount: number;
+  tags?: string[];
+}
+
+export interface DashboardData {
+  state: string;
+  lastRun: string | null;
+  nextRun: string | null;
+  evolutionMode: string;
+  activeAgents: { id: string; type: string }[];
+  recentReports: DashboardReport[];
+  scheduledTasks: DashboardTask[];
+  skillCount: number;
+  totalReports: number;
+}
+
+export async function fetchDashboard(): Promise<DashboardData> {
+  return request<DashboardData>("/api/dashboard");
+}
+
 export async function fetchConfig() {
   return request<{
     interval: string;
@@ -96,6 +133,12 @@ export interface Task {
   runCount: number;
   lastRun?: string;
   createdAt: string;
+  // Scheduling constraints
+  priority?: "high" | "normal" | "low";
+  failCount?: number;
+  nextRetryAfter?: string;
+  completedAt?: string;
+  timeoutMinutes?: number;
 }
 
 export interface Idea {
@@ -144,6 +187,10 @@ export async function approveTask(id: string): Promise<Task> {
 
 export async function rejectTask(id: string): Promise<void> {
   await request<void>(`/api/tasks/${encodeURIComponent(id)}/reject`, { method: "POST" });
+}
+
+export async function retryTask(id: string): Promise<Task> {
+  return request<Task>(`/api/tasks/${encodeURIComponent(id)}/retry`, { method: "POST" });
 }
 
 export async function triggerTask(id: string): Promise<void> {

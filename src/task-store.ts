@@ -14,6 +14,8 @@ export interface TaskSchedule {
   at?: string;         // ISO date string (for type=one-shot)
 }
 
+export type TaskPriority = "high" | "normal" | "low";
+
 export interface Task {
   id: string;
   name: string;
@@ -34,6 +36,12 @@ export interface Task {
   createdAt: string;   // ISO date string
   relatedSkills?: string[];  // skills this task should leverage
   skillTarget?: string;      // for skill-building tasks: the skill to create/update
+  // Scheduling constraints
+  priority?: TaskPriority;     // default: "normal"
+  failCount?: number;          // consecutive failures (reset on success)
+  nextRetryAfter?: string;     // ISO date: don't retry before this time
+  completedAt?: string;        // when task finished (for cleanup)
+  timeoutMinutes?: number;     // per-task timeout override
 }
 
 // ── Storage ──────────────────────────────────────────────────────────────────
@@ -51,13 +59,45 @@ async function ensureTasksDir(): Promise<void> {
 
 async function readTasksFile(): Promise<TasksFile> {
   await ensureTasksDir();
+  let raw: string;
   try {
-    const raw = await readFile(TASKS_FILE, "utf-8");
-    const parsed = yaml.load(raw) as TasksFile | null;
-    return parsed ?? { tasks: [] };
+    raw = await readFile(TASKS_FILE, "utf-8");
   } catch {
+    // File doesn't exist yet — that's fine
     return { tasks: [] };
   }
+  try {
+    const parsed = yaml.load(raw) as TasksFile | null;
+    return parsed ?? { tasks: [] };
+  } catch (err) {
+    // YAML is corrupted — log loudly so it doesn't silently vanish
+    console.error(`[task-store] Failed to parse ${TASKS_FILE}: ${err}`);
+    console.error("[task-store] Attempting auto-repair...");
+    const repaired = repairYaml(raw);
+    try {
+      const parsed = yaml.load(repaired) as TasksFile | null;
+      await writeFile(TASKS_FILE, repaired, "utf-8");
+      console.error("[task-store] Auto-repair succeeded, file rewritten.");
+      return parsed ?? { tasks: [] };
+    } catch (err2) {
+      console.error(`[task-store] Auto-repair failed: ${err2}`);
+      return { tasks: [] };
+    }
+  }
+}
+
+/** Remove duplicate consecutive YAML keys (the most common corruption pattern). */
+function repairYaml(raw: string): string {
+  const lines = raw.split("\n");
+  const result: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const stripped = lines[i].trimEnd();
+    if (i > 0 && stripped === lines[i - 1].trimEnd() && stripped.includes(":")) {
+      continue; // skip duplicate key line
+    }
+    result.push(lines[i]);
+  }
+  return result.join("\n");
 }
 
 async function writeTasksFile(data: TasksFile): Promise<void> {
@@ -114,6 +154,61 @@ export async function deleteTask(id: string): Promise<boolean> {
   if (data.tasks.length === before) return false;
   await writeTasksFile(data);
   return true;
+}
+
+// ── Scheduling helpers ───────────────────────────────────────────────────────
+
+const PRIORITY_ORDER: Record<string, number> = { high: 0, normal: 1, low: 2 };
+
+/** Count tasks in schedulable states (active + running + pending). */
+export async function countActiveTasks(): Promise<number> {
+  const data = await readTasksFile();
+  return data.tasks.filter(
+    t => t.status === "active" || t.status === "running" || t.status === "pending",
+  ).length;
+}
+
+/** Sort tasks by priority, then by longest wait (fairness), then by creation date. */
+export function sortByPriority(tasks: Task[]): Task[] {
+  return [...tasks].sort((a, b) => {
+    const pa = PRIORITY_ORDER[a.priority ?? "normal"] ?? 1;
+    const pb = PRIORITY_ORDER[b.priority ?? "normal"] ?? 1;
+    if (pa !== pb) return pa - pb;
+    // Fairness: longest time since last run first
+    const aLast = a.lastRun ? new Date(a.lastRun).getTime() : 0;
+    const bLast = b.lastRun ? new Date(b.lastRun).getTime() : 0;
+    if (aLast !== bLast) return aLast - bLast;
+    // Tie-breaker: older tasks first
+    return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+  });
+}
+
+/** Archive old completed/expired tasks, keeping at most `maxRetain`. */
+export async function archiveCompletedTasks(maxRetain: number): Promise<void> {
+  const data = await readTasksFile();
+  const terminal = data.tasks.filter(t => t.status === "completed" || t.status === "expired");
+  if (terminal.length <= maxRetain) return;
+
+  // Sort by completedAt/lastRun descending — keep newest
+  terminal.sort((a, b) => {
+    const aTime = new Date(a.completedAt ?? a.lastRun ?? a.createdAt).getTime();
+    const bTime = new Date(b.completedAt ?? b.lastRun ?? b.createdAt).getTime();
+    return bTime - aTime;
+  });
+
+  const toRemove = new Set(terminal.slice(maxRetain).map(t => t.id));
+  if (toRemove.size === 0) return;
+
+  data.tasks = data.tasks.filter(t => !toRemove.has(t.id));
+  await writeTasksFile(data);
+  console.log(`[task-store] Archived ${toRemove.size} old completed tasks.`);
+}
+
+/** Retry backoff delays in ms: 5min, 15min, 30min */
+const RETRY_DELAYS = [5 * 60_000, 15 * 60_000, 30 * 60_000];
+
+export function getRetryDelay(failCount: number): number {
+  return RETRY_DELAYS[Math.min(failCount, RETRY_DELAYS.length) - 1] ?? RETRY_DELAYS[RETRY_DELAYS.length - 1];
 }
 
 // ── Run history ──────────────────────────────────────────────────────────────
