@@ -1,34 +1,51 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import Dashboard from "./pages/Dashboard.svelte";
-  import Tasks from "./pages/Tasks.svelte";
-  import Reports from "./pages/Reports.svelte";
-  import DataBrowser from "./pages/DataBrowser.svelte";
-  import Settings from "./pages/Settings.svelte";
+  import FeatureDetail from "./pages/FeatureDetail.svelte";
+  import { t, getLanguage, setLanguage, subscribe } from "./lib/i18n";
 
-  const tabs = [
-    { id: "Dashboard", icon: "gauge", label: "Dashboard" },
-    { id: "Tasks", icon: "tasks", label: "Tasks" },
-    { id: "Reports", icon: "reports", label: "Reports" },
-    { id: "Data Browser", icon: "data", label: "Data" },
-    { id: "Settings", icon: "settings", label: "Settings" },
-  ] as const;
-  type Tab = (typeof tabs)[number]["id"];
-
-  let activeTab: Tab = $state("Dashboard");
   let theme: "light" | "dark" = $state("dark");
+  let lang = $state(getLanguage());
 
-  let CurrentPage = $derived(
-    activeTab === "Dashboard"
-      ? Dashboard
-      : activeTab === "Tasks"
-        ? Tasks
-        : activeTab === "Reports"
-          ? Reports
-          : activeTab === "Data Browser"
-            ? DataBrowser
-            : Settings
-  );
+  interface FeatureDef {
+    id: string;
+    icon: string;
+    color: string;
+  }
+
+  const features: FeatureDef[] = [
+    {
+      id: "viral",
+      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
+      color: "linear-gradient(135deg, #f59e0b, #ef4444)",
+    },
+    {
+      id: "hotspot",
+      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>`,
+      color: "linear-gradient(135deg, #ef4444, #ec4899)",
+    },
+    {
+      id: "timing",
+      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
+      color: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
+    },
+    {
+      id: "pitfall",
+      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
+      color: "linear-gradient(135deg, #f59e0b, #d97706)",
+    },
+    {
+      id: "copywriting",
+      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`,
+      color: "linear-gradient(135deg, #10b981, #059669)",
+    },
+    {
+      id: "competitor",
+      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>`,
+      color: "linear-gradient(135deg, #8b5cf6, #6366f1)",
+    },
+  ];
+
+  let activeFeature: FeatureDef | null = $state(null);
 
   function toggleTheme() {
     theme = theme === "dark" ? "light" : "dark";
@@ -36,56 +53,94 @@
     localStorage.setItem("se-theme", theme);
   }
 
+  function toggleLanguage() {
+    const next = lang === "en" ? "zh" : "en";
+    setLanguage(next);
+  }
+
   onMount(() => {
     const current = document.documentElement.getAttribute("data-theme") as "light" | "dark" | null;
     theme = current ?? "dark";
+    const unsub = subscribe(() => { lang = getLanguage(); });
+    return () => unsub();
   });
 </script>
 
-<div class="shell">
+<div class="shell" data-lang={lang}>
   <header>
     <div class="brand">
       <div class="logo">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
         </svg>
       </div>
-      <h1>AutoCode</h1>
+      <h1>CreatorPilot</h1>
     </div>
-    <nav>
-      {#each tabs as tab}
-        <button
-          class:active={activeTab === tab.id}
-          onclick={() => (activeTab = tab.id)}
-        >
-          <svg class="nav-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            {#if tab.icon === "gauge"}
-              <path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><path d="M12 6v6l4 2"/>
-            {:else if tab.icon === "tasks"}
-              <rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 12l2 2 4-4"/>
-            {:else if tab.icon === "reports"}
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
-            {:else if tab.icon === "data"}
-              <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-            {:else if tab.icon === "settings"}
-              <circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
-            {/if}
-          </svg>
-          <span>{tab.label}</span>
+    <div class="header-actions">
+      <div class="lang-switcher">
+        <span class="lang-label" class:active={lang === "en"}>EN</span>
+        <button class="lang-toggle" class:zh={lang === "zh"} onclick={toggleLanguage} title="Switch language">
+          <span class="lang-thumb"></span>
         </button>
-      {/each}
-    </nav>
-    <button class="theme-toggle" onclick={toggleTheme} title="Toggle theme">
-      {#if theme === "dark"}
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-      {:else}
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-      {/if}
-    </button>
+        <span class="lang-label" class:active={lang === "zh"}>中文</span>
+      </div>
+      <button class="theme-toggle" onclick={toggleTheme} title="Toggle theme">
+        {#if theme === "dark"}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+        {:else}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        {/if}
+      </button>
+    </div>
   </header>
 
   <main>
-    <CurrentPage />
+    {#if activeFeature}
+      <FeatureDetail feature={activeFeature} onBack={() => activeFeature = null} />
+    {:else}
+      <!-- Hero Section -->
+      <div class="hero">
+        <h2 class="hero-title">{t("heroTitle")}</h2>
+        <p class="hero-desc">{t("heroDesc")}</p>
+      </div>
+
+      <!-- Feature Grid -->
+      <div class="feature-grid">
+        {#each features as feature}
+          <button class="feature-card" onclick={() => activeFeature = feature}>
+            <div class="card-icon" style="background: {feature.color}">
+              {@html feature.icon}
+            </div>
+            <div class="card-content">
+              <h3>{t(`feature_${feature.id}_name`)}</h3>
+              <p>{t(`feature_${feature.id}_desc`)}</p>
+            </div>
+            <div class="card-arrow">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="9 18 15 12 9 6"/>
+              </svg>
+            </div>
+          </button>
+        {/each}
+      </div>
+
+      <!-- Workflow hint -->
+      <div class="workflow-hint">
+        <div class="workflow-steps">
+          <span class="wf-step">{t("wf_research")}</span>
+          <span class="wf-arrow">→</span>
+          <span class="wf-step">{t("wf_topic")}</span>
+          <span class="wf-arrow">→</span>
+          <span class="wf-step">{t("wf_script")}</span>
+          <span class="wf-arrow">→</span>
+          <span class="wf-step">{t("wf_produce")}</span>
+          <span class="wf-arrow">→</span>
+          <span class="wf-step">{t("wf_publish")}</span>
+          <span class="wf-arrow">→</span>
+          <span class="wf-step">{t("wf_analyze")}</span>
+        </div>
+      </div>
+    {/if}
   </main>
 </div>
 
@@ -203,7 +258,7 @@
   }
 
   .shell {
-    max-width: 1120px;
+    max-width: 960px;
     margin: 0 auto;
     padding: 0 1.5rem 2rem;
   }
@@ -211,6 +266,7 @@
   header {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     gap: 1.5rem;
     padding: 1rem 0;
     margin-bottom: 1.5rem;
@@ -231,7 +287,7 @@
   .logo {
     width: 32px;
     height: 32px;
-    background: linear-gradient(135deg, #d4845a, #c06830);
+    background: linear-gradient(135deg, #ef4444, #f59e0b);
     border-radius: 8px;
     display: flex;
     align-items: center;
@@ -248,53 +304,69 @@
     letter-spacing: -0.02em;
   }
 
-  nav {
-    display: flex;
-    gap: 0.125rem;
-    flex: 1;
-  }
-
-  nav button {
+  .header-actions {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    padding: 0.5rem 0.875rem;
-    cursor: pointer;
-    border-radius: 8px;
-    font-size: 0.84rem;
-    font-weight: 450;
-    transition: all 0.2s ease;
-    white-space: nowrap;
-  }
-
-  nav button:hover {
-    background: var(--nav-hover);
-    color: var(--text-secondary);
-  }
-
-  nav button.active {
-    background: var(--nav-active-bg);
-    color: var(--accent);
-    font-weight: 550;
-  }
-
-  .nav-icon {
-    opacity: 0.6;
+    gap: 0.5rem;
     flex-shrink: 0;
   }
 
-  nav button.active .nav-icon {
-    opacity: 1;
+  .lang-switcher {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+  }
+
+  .lang-label {
+    font-size: 0.72rem;
+    font-weight: 550;
+    color: var(--text-dim);
+    transition: color 0.2s ease;
+    user-select: none;
+  }
+
+  .lang-label.active {
+    color: var(--text);
+  }
+
+  .lang-toggle {
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+    background: var(--text-dim);
+    border: none;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.2s ease;
+    padding: 0;
+    flex-shrink: 0;
+  }
+
+  .lang-toggle.zh {
+    background: var(--accent);
+  }
+
+  .lang-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+
+  .lang-toggle.zh .lang-thumb {
+    transform: translateX(16px);
   }
 
   .theme-toggle {
     background: none;
     border: 1px solid var(--border);
     color: var(--text-muted);
-    padding: 0.45rem;
+    padding: 0.4rem;
     border-radius: 8px;
     cursor: pointer;
     display: flex;
@@ -310,15 +382,152 @@
     background: var(--bg-hover);
   }
 
+  /* ── Hero ───────────────────────────────────────────────────────────────── */
+  .hero {
+    text-align: center;
+    padding: 2rem 0 1.5rem;
+  }
+
+  .hero-title {
+    font-size: 1.6rem;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    background: linear-gradient(135deg, var(--text), var(--accent));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .hero-desc {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    margin-top: 0.5rem;
+    max-width: 500px;
+    margin-left: auto;
+    margin-right: auto;
+    line-height: 1.6;
+  }
+
+  /* ── Feature Grid ──────────────────────────────────────────────────────── */
+  .feature-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.875rem;
+    margin-top: 0.5rem;
+  }
+
+  @media (max-width: 640px) {
+    .feature-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+
+  .feature-card {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.125rem 1.25rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    text-align: left;
+    box-shadow: var(--shadow-sm);
+    color: var(--text);
+    font-family: inherit;
+    font-size: inherit;
+  }
+
+  .feature-card:hover {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-md), var(--glow);
+    transform: translateY(-2px);
+  }
+
+  .feature-card:active {
+    transform: translateY(0);
+  }
+
+  .card-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    flex-shrink: 0;
+    box-shadow: var(--shadow-sm);
+  }
+
+  .card-content {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .card-content h3 {
+    font-size: 0.92rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-bottom: 0.2rem;
+  }
+
+  .card-content p {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .card-arrow {
+    color: var(--text-dim);
+    flex-shrink: 0;
+    transition: all 0.2s ease;
+  }
+
+  .feature-card:hover .card-arrow {
+    color: var(--accent);
+    transform: translateX(2px);
+  }
+
+  /* ── Workflow Hint ──────────────────────────────────────────────────────── */
+  .workflow-hint {
+    margin-top: 2rem;
+    padding: 1rem 0;
+    text-align: center;
+  }
+
+  .workflow-steps {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+  }
+
+  .wf-step {
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: var(--bg-surface);
+    padding: 0.3rem 0.65rem;
+    border-radius: 6px;
+    border: 1px solid var(--border-subtle);
+    white-space: nowrap;
+  }
+
+  .wf-arrow {
+    color: var(--text-dim);
+    font-size: 0.72rem;
+  }
+
   @media (max-width: 768px) {
-    nav button span {
+    .lang-label {
       display: none;
-    }
-    nav button {
-      padding: 0.5rem;
-    }
-    nav {
-      gap: 0.25rem;
     }
   }
 </style>

@@ -8,6 +8,9 @@
     type DashboardTask,
   } from "../lib/api";
   import { createWsConnection } from "../lib/ws";
+  import { t, getLanguage, subscribe } from "../lib/i18n";
+
+  let lang = $state(getLanguage());
 
   // ── State ──────────────────────────────────────────────────────────────────
   let data: DashboardData | null = $state(null);
@@ -80,6 +83,7 @@
   }
 
   onMount(() => {
+    const unsub = subscribe(() => { lang = getLanguage(); });
     loadDashboard();
     const ws = createWsConnection((event, payload) => {
       if (event === "cycle_start") {
@@ -114,7 +118,7 @@
         loadDashboard();
       }
     });
-    return () => ws.close();
+    return () => { ws.close(); unsub(); };
   });
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -176,16 +180,22 @@
   }
 </script>
 
-<div class="dashboard">
+<div class="dashboard" data-lang={lang}>
+  <!-- ══ Page Header ═══════════════════════════════════════════════════════ -->
+  <div class="page-header">
+    <h2>{t("analytics")}</h2>
+    <p class="page-desc">{t("analyticsDesc")}</p>
+  </div>
+
   <!-- ══ Status Bar ══════════════════════════════════════════════════════════ -->
   <div class="status-bar" class:running={state === "running"}>
     <div class="status-left">
       <span class="dot" class:pulse={state === "running"} style="--dot-color: {state === 'running' ? 'var(--state-running)' : 'var(--state-idle)'}"></span>
       <div class="status-text">
-        <span class="status-label">{state === "running" ? "Evolution in progress" : "System idle"}</span>
+        <span class="status-label">{state === "running" ? t("evolutionInProgress") : t("idle")}</span>
         <span class="status-sub">
           {#if data}
-            Last run {relativeTime(data.lastRun)} · Next {data.nextRun ? relativeTime(data.nextRun) : "not scheduled"}
+            {t("lastRun")} {relativeTime(data.lastRun)} · {t("nextRun")} {data.nextRun ? relativeTime(data.nextRun) : "--"}
           {:else}
             Loading...
           {/if}
@@ -195,10 +205,10 @@
     <button class="trigger-btn" onclick={handleTrigger} disabled={state === "running" || triggering}>
       {#if state === "running"}
         <svg class="spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
-        Running
+        {t("running")}
       {:else}
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        Evolve Now
+        {t("startEvolution")}
       {/if}
     </button>
   </div>
@@ -382,6 +392,18 @@
     display: flex;
     flex-direction: column;
     gap: 1.25rem;
+  }
+
+  .page-header h2 {
+    font-size: 1.15rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  .page-desc {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-top: 0.2rem;
   }
 
   /* ── Agent Colors ───────────────────────────────────────────────────────── */

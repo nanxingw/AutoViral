@@ -1,28 +1,37 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { fetchContext } from "../lib/api";
+  import { t, getLanguage, subscribe } from "../lib/i18n";
 
-  const categories = [
+  let lang = $state(getLanguage());
+
+  onMount(() => {
+    const unsub = subscribe(() => { lang = getLanguage(); });
+    return () => unsub();
+  });
+
+  let categories = $derived([
     {
-      label: "Who You Are",
+      label: t("userProfile"),
       icon: "user",
       hasConfirmed: true,
       pillars: [
-        { key: "preference", label: "Preferences", desc: "Tools, code style, communication habits", icon: "sliders" },
-        { key: "objective", label: "Objectives", desc: "Projects, goals, career direction", icon: "target" },
-        { key: "cognition", label: "Cognition", desc: "Thinking patterns, decision style", icon: "brain" },
+        { key: "preference", label: t("preference"), desc: "Tools, code style, communication habits", icon: "sliders" },
+        { key: "objective", label: t("objective"), desc: "Projects, goals, career direction", icon: "target" },
+        { key: "cognition", label: t("cognition"), desc: "Thinking patterns, decision style", icon: "brain" },
       ],
     },
     {
-      label: "What You've Learned",
+      label: t("aiWorklog"),
       icon: "code",
       hasConfirmed: false,
       pillars: [
-        { key: "success_experience", label: "Successes", desc: "Proven approaches that work", icon: "check" },
-        { key: "failure_experience", label: "Failures", desc: "Pitfalls to avoid", icon: "x" },
-        { key: "useful_tips", label: "Tips", desc: "Practical insights", icon: "lightbulb" },
+        { key: "success_experience", label: t("successExperience"), desc: "Proven approaches that work", icon: "check" },
+        { key: "failure_experience", label: t("failureExperience"), desc: "Pitfalls to avoid", icon: "x" },
+        { key: "useful_tips", label: t("usefulTips"), desc: "Practical insights", icon: "lightbulb" },
       ],
     },
-  ];
+  ]);
 
   let activeCategory: number = $state(0);
   let activePillar: string = $state("preference");
@@ -67,8 +76,8 @@
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2z"/><path d="M12 8a3 3 0 1 0 3 3 3 3 0 0 0-3-3z"/><path d="M6.17 18.35A4 4 0 0 1 10 16h4a4 4 0 0 1 3.83 2.35"/></svg>
       </div>
       <div>
-        <h2>Your Knowledge Base</h2>
-        <p class="page-desc">Everything AutoCode has learned about you and your experience.</p>
+        <h2>{t("knowledge")}</h2>
+        <p class="page-desc">{t("knowledgeDesc")}</p>
       </div>
     </div>
   </div>
@@ -150,7 +159,7 @@
         <section class="data-section">
           <div class="section-head">
             <span class="head-dot confirmed"></span>
-            <span>Confirmed Knowledge</span>
+            <span>{t("confirmed")}</span>
             <span class="head-count">{contextEntries.length}</span>
           </div>
           <ul class="entries">
@@ -173,7 +182,7 @@
       <section class="data-section">
         <div class="section-head">
           <span class="head-dot accumulating"></span>
-          <span>{showConfirmed ? "Accumulating Signals" : "Observed Patterns"}</span>
+          <span>{t("confirming")}</span>
           <span class="head-count">{tmpEntries.length}</span>
         </div>
         {#if tmpEntries.length === 0}

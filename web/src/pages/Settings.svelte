@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { fetchConfig, updateConfig } from "../lib/api";
+  import { t, getLanguage, subscribe } from "../lib/i18n";
+
+  let lang = $state(getLanguage());
 
   let interval: string = $state("1h");
   let model: string = $state("sonnet");
@@ -18,6 +21,7 @@
   let messageType: "success" | "error" = $state("success");
 
   onMount(async () => {
+    const unsub = subscribe(() => { lang = getLanguage(); });
     try {
       const c = await fetchConfig();
       interval = c.interval;
@@ -32,6 +36,7 @@
     } catch {
       // use defaults
     }
+    return () => unsub();
   });
 
   async function handleSave() {
@@ -43,11 +48,11 @@
         taskMaxActive, taskMaxConcurrent, taskTimeoutMinutes,
         taskMaxRetries, taskMaxRunsPerTask,
       });
-      message = "Settings saved successfully.";
+      message = t("settingsSaved");
       messageType = "success";
       setTimeout(() => { message = ""; }, 3000);
     } catch {
-      message = "Failed to save settings.";
+      message = t("settingsSaveFailed");
       messageType = "error";
     } finally {
       saving = false;
@@ -55,11 +60,11 @@
   }
 </script>
 
-<div class="settings">
+<div class="settings" data-lang={lang}>
   <div class="page-header">
     <div>
-      <h2>Settings</h2>
-      <p class="page-desc">Configure evolution intervals, model, and system behavior.</p>
+      <h2>{t("settings")}</h2>
+      <p class="page-desc">{t("settingsDesc")}</p>
     </div>
   </div>
 
@@ -68,38 +73,38 @@
     <div class="settings-card">
       <div class="card-header">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20z"/><path d="M12 6v6l4 2"/></svg>
-        <h3>Evolution</h3>
+        <h3>{t("evolutionSettings")}</h3>
       </div>
 
       <div class="field-group">
         <label>
-          <span class="field-label">Interval</span>
-          <span class="field-hint">How often to run evolution cycles</span>
+          <span class="field-label">{t("interval")}</span>
+          <span class="field-hint">{t("intervalHint")}</span>
           <select bind:value={interval}>
-            <option value="15m">Every 15 minutes</option>
-            <option value="30m">Every 30 minutes</option>
-            <option value="1h">Every 1 hour</option>
-            <option value="2h">Every 2 hours</option>
-            <option value="4h">Every 4 hours</option>
-            <option value="8h">Every 8 hours</option>
+            <option value="15m">{t("minutes15")}</option>
+            <option value="30m">{t("minutes30")}</option>
+            <option value="1h">{t("hour1")}</option>
+            <option value="2h">{t("hours2")}</option>
+            <option value="4h">{t("hours4")}</option>
+            <option value="8h">{t("hours8")}</option>
           </select>
         </label>
 
         <label>
-          <span class="field-label">Model</span>
-          <span class="field-hint">Claude model for evolution agents</span>
+          <span class="field-label">{t("model")}</span>
+          <span class="field-hint">{t("modelHint")}</span>
           <select bind:value={model}>
-            <option value="haiku">Claude Haiku (fast, light)</option>
-            <option value="sonnet">Claude Sonnet (balanced)</option>
-            <option value="opus">Claude Opus (most capable)</option>
+            <option value="haiku">{t("claudeHaikuFast")}</option>
+            <option value="sonnet">{t("claudeSonnetBalanced")}</option>
+            <option value="opus">{t("claudeOpusCapable")}</option>
           </select>
         </label>
       </div>
 
       <div class="toggle-field">
         <div class="toggle-info">
-          <span class="field-label">Auto Run</span>
-          <span class="field-hint">Automatically run evolution cycles on the interval</span>
+          <span class="field-label">{t("autoRun")}</span>
+          <span class="field-hint">{t("enableAutoRun")}</span>
         </div>
         <button
           class="toggle-switch"
@@ -117,37 +122,37 @@
     <div class="settings-card">
       <div class="card-header">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        <h3>Task Scheduling</h3>
+        <h3>{t("taskSettings")}</h3>
       </div>
 
       <div class="field-group">
         <label>
-          <span class="field-label">Max Active Tasks</span>
-          <span class="field-hint">Maximum tasks in active/running/pending states</span>
+          <span class="field-label">{t("maxActiveTasks")}</span>
+          <span class="field-hint">{t("maxActiveTasksHint")}</span>
           <input type="number" bind:value={taskMaxActive} min="1" max="50" />
         </label>
 
         <label>
-          <span class="field-label">Max Concurrent</span>
-          <span class="field-hint">Tasks running simultaneously</span>
+          <span class="field-label">{t("taskMaxConcurrent")}</span>
+          <span class="field-hint">{t("maxConcurrentHint")}</span>
           <input type="number" bind:value={taskMaxConcurrent} min="1" max="10" />
         </label>
 
         <label>
-          <span class="field-label">Timeout (minutes)</span>
-          <span class="field-hint">Auto-kill tasks exceeding this duration</span>
+          <span class="field-label">{t("timeoutMinutes")}</span>
+          <span class="field-hint">{t("timeoutHint")}</span>
           <input type="number" bind:value={taskTimeoutMinutes} min="1" max="60" />
         </label>
 
         <label>
-          <span class="field-label">Max Retries</span>
-          <span class="field-hint">Auto-pause after this many consecutive failures</span>
+          <span class="field-label">{t("maxRetries")}</span>
+          <span class="field-hint">{t("maxRetriesHint")}</span>
           <input type="number" bind:value={taskMaxRetries} min="0" max="10" />
         </label>
 
         <label>
-          <span class="field-label">Max Runs Per Task</span>
-          <span class="field-hint">Pause recurring tasks after this many total runs</span>
+          <span class="field-label">{t("taskMaxRunsPerTask")}</span>
+          <span class="field-hint">{t("maxRunsPerTaskHint")}</span>
           <input type="number" bind:value={taskMaxRunsPerTask} min="1" max="1000" />
         </label>
       </div>
@@ -157,13 +162,13 @@
     <div class="settings-card">
       <div class="card-header">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/><line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/></svg>
-        <h3>Server</h3>
+        <h3>{t("serverSettings")}</h3>
       </div>
 
       <div class="field-group">
         <label>
-          <span class="field-label">Port</span>
-          <span class="field-hint">Web dashboard port number</span>
+          <span class="field-label">{t("port")}</span>
+          <span class="field-hint">{t("portHint")}</span>
           <input type="number" bind:value={port} />
         </label>
       </div>
@@ -175,9 +180,9 @@
     <button class="save-btn" onclick={handleSave} disabled={saving}>
       {#if saving}
         <svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
-        Saving...
+        {t("saving")}
       {:else}
-        Save Changes
+        {t("saveChanges")}
       {/if}
     </button>
     {#if message}

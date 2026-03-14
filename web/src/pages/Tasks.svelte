@@ -10,6 +10,9 @@
   } from "../lib/api";
   import { createWsConnection } from "../lib/ws";
   import { marked } from "marked";
+  import { t, getLanguage, subscribe } from "../lib/i18n";
+
+  let lang = $state(getLanguage());
 
   // ── State ──────────────────────────────────────────────────────────────────
 
@@ -97,7 +100,7 @@
       tasks = await fetchTasks();
     } catch (err) {
       tasks = [];
-      loadError = err instanceof Error ? err.message : "Failed to load tasks";
+      loadError = err instanceof Error ? err.message : t("failedToLoad");
     }
   }
 
@@ -149,7 +152,7 @@
     try {
       runContent = await fetchTaskRun(taskId, filename);
     } catch {
-      runContent = "Failed to load run report.";
+      runContent = t("failedToSave");
     } finally {
       loadingRun = false;
     }
@@ -166,7 +169,7 @@
     try {
       artifactContent = await fetchTaskArtifact(taskId, filename);
     } catch {
-      artifactContent = "Failed to load artifact.";
+      artifactContent = t("failedToSave");
     } finally {
       loadingArtifact = false;
     }
@@ -260,7 +263,7 @@
   async function handleSaveSettings() {
     if (!selectedId) return;
     if (!editName.trim() || !editPrompt.trim()) {
-      editError = "Name and prompt are required.";
+      editError = t("namePromptRequired");
       return;
     }
     editSaving = true;
@@ -281,10 +284,10 @@
       }
       const updated = await updateTask(selectedId, payload as Partial<Task>);
       tasks = tasks.map((t) => (t.id === selectedId ? updated : t));
-      editSuccess = "Saved successfully.";
+      editSuccess = t("savedSuccessfully");
       setTimeout(() => { editSuccess = ""; }, 2000);
     } catch (err) {
-      editError = err instanceof Error ? err.message : "Failed to save.";
+      editError = err instanceof Error ? err.message : t("failedToSave");
     } finally {
       editSaving = false;
     }
@@ -311,7 +314,7 @@
 
   async function handleCreate() {
     if (!formName.trim() || !formPrompt.trim()) {
-      formError = "Name and prompt are required.";
+      formError = t("namePromptRequired");
       return;
     }
     formSaving = true;
@@ -341,7 +344,7 @@
       populateEditForm(created);
       await loadDetail(created.id);
     } catch (err) {
-      formError = err instanceof Error ? err.message : "Failed to create task.";
+      formError = err instanceof Error ? err.message : t("createTask");
     } finally {
       formSaving = false;
     }
@@ -423,6 +426,7 @@
   // ── Lifecycle ──────────────────────────────────────────────────────────────
 
   onMount(() => {
+    const unsub = subscribe(() => { lang = getLanguage(); });
     Promise.all([loadTasks(), loadIdeas()]).finally(() => {
       loading = false;
     });
@@ -442,18 +446,18 @@
       }
     });
 
-    return () => ws.close();
+    return () => { ws.close(); unsub(); };
   });
 </script>
 
-<div class="tasks-page">
+<div class="tasks-page" data-lang={lang}>
   <!-- ─── LEFT PANEL: Task List ─────────────────────────────────────────── -->
   <aside class="list-panel">
     <div class="list-header">
-      <h2>Tasks</h2>
+      <h2>{t("tasks")}</h2>
       <button class="new-btn" onclick={openCreateModal}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-        New
+        {t("newTask")}
       </button>
     </div>
 
@@ -490,7 +494,7 @@
       {:else if loadError}
         <div class="list-empty">
           <p class="empty-error">{loadError}</p>
-          <button class="action-btn ghost" onclick={loadTasks}>Retry</button>
+          <button class="action-btn ghost" onclick={loadTasks}>{t("retry")}</button>
         </div>
       {:else if filteredTasks.length === 0}
         <div class="list-empty">
@@ -499,9 +503,9 @@
           </svg>
           <p>
             {#if activeFilter === "all"}
-              No tasks yet. Create one to get started.
+              {t("noTasksYet")}
             {:else}
-              No {activeFilter} tasks.
+              {t("noFilteredTasks").replace("{0}", activeFilter)}
             {/if}
           </p>
         </div>
@@ -538,14 +542,14 @@
     <div class="idea-section">
       <button class="idea-toggle" onclick={() => (showIdeas = !showIdeas)}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 1 4 12.7V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.3A7 7 0 0 1 12 2z"/></svg>
-        Ideas
+        {t("ideas")}
         <span class="idea-count">{ideas.length}</span>
         <svg class="idea-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="transform: rotate({showIdeas ? '180deg' : '0deg'})"><polyline points="6 9 12 15 18 9"/></svg>
       </button>
       {#if showIdeas}
         <div class="idea-list">
           {#if ideas.length === 0}
-            <p class="idea-empty">No ideas yet. The Task Agent will suggest ideas based on your workflow.</p>
+            <p class="idea-empty">{t("noIdeasHint")}</p>
           {:else}
             {#each ideas as idea}
               <div class="idea-card">
@@ -570,8 +574,8 @@
           <rect x="3" y="3" width="18" height="18" rx="2"/>
           <path d="M9 12l2 2 4-4"/>
         </svg>
-        <p class="empty-title">Select a task</p>
-        <p class="empty-hint">Choose a task from the list to view runs, artifacts, and settings.</p>
+        <p class="empty-title">{t("selectATask")}</p>
+        <p class="empty-hint">{t("selectTaskHint")}</p>
       </div>
     {:else}
       {@const running = isRunning(selectedTask.id)}
@@ -593,8 +597,8 @@
           </div>
           <div class="ws-header-actions">
             {#if selectedTask.status === "pending" && !selectedTask.approved}
-              <button class="action-btn approve" onclick={(e) => handleApprove(e, selectedTask.id)}>Approve</button>
-              <button class="action-btn reject" onclick={(e) => handleReject(e, selectedTask.id)}>Reject</button>
+              <button class="action-btn approve" onclick={(e) => handleApprove(e, selectedTask.id)}>{t("approve")}</button>
+              <button class="action-btn reject" onclick={(e) => handleReject(e, selectedTask.id)}>{t("reject")}</button>
             {:else}
               <button
                 class="action-btn ghost"
@@ -603,20 +607,20 @@
               >
                 {#if running}
                   <svg class="spin" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
-                  Running...
+                  {t("runningDots")}
                 {:else}
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                  Run Now
+                  {t("runNow")}
                 {/if}
               </button>
               {#if selectedTask.schedule?.type === "cron"}
                 <button class="action-btn ghost" onclick={() => handlePauseResume(selectedTask)}>
                   {#if selectedTask.status === "paused"}
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-                    Resume
+                    {t("resume")}
                   {:else}
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>
-                    Pause
+                    {t("pause")}
                   {/if}
                 </button>
               {/if}
@@ -625,7 +629,7 @@
                 class:danger={confirmDeleteId !== selectedTask.id}
                 class:confirm-del={confirmDeleteId === selectedTask.id}
                 onclick={(e) => handleDeleteClick(e, selectedTask.id)}
-              >{confirmDeleteId === selectedTask.id ? "Confirm?" : "Delete"}</button>
+              >{confirmDeleteId === selectedTask.id ? t("confirmQuestion") : t("delete")}</button>
             {/if}
           </div>
         </div>
@@ -639,7 +643,7 @@
           <span class="ws-meta-badge">{scheduleTypeBadge(selectedTask)}</span>
           <span class="ws-meta-badge status" style="--badge-color: {statusColor(selectedTask.status)}">{selectedTask.status}</span>
           {#if selectedTask.runCount > 0}
-            <span class="ws-meta-item">{selectedTask.runCount} runs</span>
+            <span class="ws-meta-item">{selectedTask.runCount} {t("runs")}</span>
           {/if}
           {#if selectedTask.lastRun}
             <span class="ws-meta-item">Last: {formatTime(selectedTask.lastRun)}</span>
@@ -656,21 +660,21 @@
       <div class="ws-tabs">
         <button class="ws-tab" class:active={activeTab === "runs"} onclick={() => (activeTab = "runs")}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-          Runs
+          {t("runs")}
           {#if detailRuns.length > 0}
             <span class="tab-count">{detailRuns.length}</span>
           {/if}
         </button>
         <button class="ws-tab" class:active={activeTab === "artifacts"} onclick={() => (activeTab = "artifacts")}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          Artifacts
+          {t("artifacts")}
           {#if detailArtifacts.length > 0}
             <span class="tab-count">{detailArtifacts.length}</span>
           {/if}
         </button>
         <button class="ws-tab" class:active={activeTab === "settings"} onclick={() => (activeTab = "settings")}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-          Settings
+          {t("settings")}
         </button>
       </div>
 
@@ -690,7 +694,7 @@
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.2">
                 <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
               </svg>
-              <p>No runs recorded yet.</p>
+              <p>{t("noRunsYet")}</p>
             </div>
           {:else}
             <div class="runs-container">
@@ -743,7 +747,7 @@
               <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.2">
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
               </svg>
-              <p>No artifacts produced yet.</p>
+              <p>{t("noArtifactsYet")}</p>
             </div>
           {:else if selectedArtifact}
             <!-- Artifact preview mode -->
@@ -751,16 +755,16 @@
               <div class="artifact-preview-header">
                 <button class="action-btn ghost small" onclick={() => { selectedArtifact = null; artifactContent = ""; }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
-                  Back
+                  {t("back")}
                 </button>
                 <span class="artifact-preview-name">{selectedArtifact}</span>
                 <button class="action-btn ghost small" onclick={() => handleOpenArtifacts(selectedTask.id)}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                  Finder
+                  {t("finder")}
                 </button>
               </div>
               {#if loadingArtifact}
-                <div class="tab-empty"><p>Loading...</p></div>
+                <div class="tab-empty"><p>{t("loading")}</p></div>
               {:else if isMarkdown(selectedArtifact)}
                 <div class="markdown-body artifact-md">{@html renderMarkdown(artifactContent)}</div>
               {:else}
@@ -770,10 +774,10 @@
           {:else}
             <div class="artifacts-panel">
               <div class="artifacts-header">
-                <span class="artifacts-count">{detailArtifacts.length} file{detailArtifacts.length > 1 ? 's' : ''}</span>
+                <span class="artifacts-count">{detailArtifacts.length} {t("file")}</span>
                 <button class="action-btn ghost small" onclick={() => handleOpenArtifacts(selectedTask.id)}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-                  Open in Finder
+                  {t("openInFinder")}
                 </button>
               </div>
               <ul class="artifact-list">
@@ -804,17 +808,17 @@
           <!-- ─── Settings tab ──────────────────────────────────────────── -->
           <div class="settings-form">
             <label class="form-field">
-              <span class="field-label">Name</span>
-              <input type="text" bind:value={editName} placeholder="Task name" />
+              <span class="field-label">{t("taskName")}</span>
+              <input type="text" bind:value={editName} placeholder={t("taskName")} />
             </label>
 
             <label class="form-field">
-              <span class="field-label">Description</span>
-              <input type="text" bind:value={editDesc} placeholder="Brief description (optional)" />
+              <span class="field-label">{t("description")}</span>
+              <input type="text" bind:value={editDesc} placeholder={t("taskDescription")} />
             </label>
 
             <div class="form-field">
-              <span class="field-label">Schedule Type</span>
+              <span class="field-label">{t("scheduleType")}</span>
               <div class="type-options">
                 <button
                   class="type-option"
@@ -822,7 +826,7 @@
                   onclick={() => editType = "cron"}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 2.1l4 4-4 4"/><path d="M3 12.2v-2a4 4 0 0 1 4-4h12.8"/><path d="M7 21.9l-4-4 4-4"/><path d="M21 11.8v2a4 4 0 0 1-4 4H4.2"/></svg>
-                  Recurring
+                  {t("recurring")}
                 </button>
                 <button
                   class="type-option"
@@ -830,33 +834,33 @@
                   onclick={() => editType = "one-shot"}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                  One-shot
+                  {t("oneshot")}
                 </button>
               </div>
             </div>
 
             {#if editType === "cron"}
               <label class="form-field">
-                <span class="field-label">Schedule (cron)</span>
+                <span class="field-label">{t("scheduleCron")}</span>
                 <input type="text" bind:value={editSchedule} placeholder="0 8 * * *" class="mono-input" />
                 <span class="field-hint">{describeCron(editSchedule)}</span>
               </label>
             {:else}
               <label class="form-field">
-                <span class="field-label">Scheduled At</span>
+                <span class="field-label">{t("scheduledAt")}</span>
                 <input type="datetime-local" bind:value={editScheduledAt} />
               </label>
             {/if}
 
             <label class="form-field">
-              <span class="field-label">Prompt</span>
-              <textarea bind:value={editPrompt} rows="6" placeholder="What should Claude do?"></textarea>
+              <span class="field-label">{t("prompt")}</span>
+              <textarea bind:value={editPrompt} rows="6" placeholder={t("whatShouldClaudeDo")}></textarea>
             </label>
 
             <label class="form-field">
-              <span class="field-label">Model</span>
+              <span class="field-label">{t("model")}</span>
               <select bind:value={editModel}>
-                <option value="">Default (from config)</option>
+                <option value="">{t("defaultFromConfig")}</option>
                 <option value="sonnet">Sonnet</option>
                 <option value="opus">Opus</option>
                 <option value="haiku">Haiku</option>
@@ -864,8 +868,8 @@
             </label>
 
             <label class="form-field">
-              <span class="field-label">Tags</span>
-              <input type="text" bind:value={editTags} placeholder="Comma-separated, e.g. review, daily" />
+              <span class="field-label">{t("tags")}</span>
+              <input type="text" bind:value={editTags} placeholder={t("tagsPlaceholder")} />
             </label>
 
             {#if editError}
@@ -876,16 +880,16 @@
             {/if}
 
             <div class="settings-actions">
-              <button class="action-btn ghost" onclick={() => populateEditForm(selectedTask)}>Reset</button>
+              <button class="action-btn ghost" onclick={() => populateEditForm(selectedTask)}>{t("reset")}</button>
               <button class="action-btn primary" onclick={handleSaveSettings} disabled={editSaving}>
-                {editSaving ? "Saving..." : "Save Changes"}
+                {editSaving ? t("saving") : t("saveChanges")}
               </button>
             </div>
 
             <!-- Info row -->
             <div class="settings-info">
               <div class="info-pair">
-                <span class="info-label">Created</span>
+                <span class="info-label">{t("created")}</span>
                 <span class="info-value">{formatTime(selectedTask.createdAt)}</span>
               </div>
               <div class="info-pair">
@@ -894,7 +898,7 @@
               </div>
               {#if selectedTask.model}
                 <div class="info-pair">
-                  <span class="info-label">Current Model</span>
+                  <span class="info-label">{t("currentModel")}</span>
                   <span class="info-value">{selectedTask.model}</span>
                 </div>
               {/if}
@@ -910,7 +914,7 @@
     <div class="modal-overlay" role="button" tabindex="-1" aria-label="Close modal" onclick={closeModal} onkeydown={(e) => { if (e.key === 'Escape') closeModal(); }}>
       <div class="modal" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()}>
         <div class="modal-header">
-          <h3>New Task</h3>
+          <h3>{t("newTask")}</h3>
           <button class="modal-close" aria-label="Close" onclick={closeModal}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
           </button>
@@ -918,17 +922,17 @@
 
         <div class="modal-body">
           <label class="form-field">
-            <span class="field-label">Name</span>
-            <input type="text" bind:value={formName} placeholder="e.g. Daily code review" />
+            <span class="field-label">{t("taskName")}</span>
+            <input type="text" bind:value={formName} placeholder={t("taskName")} />
           </label>
 
           <label class="form-field">
-            <span class="field-label">Description</span>
-            <input type="text" bind:value={formDesc} placeholder="Brief description (optional)" />
+            <span class="field-label">{t("description")}</span>
+            <input type="text" bind:value={formDesc} placeholder={t("taskDescription")} />
           </label>
 
           <div class="form-field">
-            <span class="field-label">Type</span>
+            <span class="field-label">{t("scheduleType")}</span>
             <div class="type-options">
               <button
                 class="type-option"
@@ -936,7 +940,7 @@
                 onclick={() => formType = "cron"}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 2.1l4 4-4 4"/><path d="M3 12.2v-2a4 4 0 0 1 4-4h12.8"/><path d="M7 21.9l-4-4 4-4"/><path d="M21 11.8v2a4 4 0 0 1-4 4H4.2"/></svg>
-                Recurring
+                {t("recurring")}
               </button>
               <button
                 class="type-option"
@@ -944,33 +948,33 @@
                 onclick={() => formType = "one-shot"}
               >
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-                One-shot
+                {t("oneshot")}
               </button>
             </div>
           </div>
 
           {#if formType === "cron"}
             <label class="form-field">
-              <span class="field-label">Schedule (cron)</span>
+              <span class="field-label">{t("scheduleCron")}</span>
               <input type="text" bind:value={formSchedule} placeholder="0 8 * * *" class="mono-input" />
               <span class="field-hint">{describeCron(formSchedule)}</span>
             </label>
           {:else}
             <label class="form-field">
-              <span class="field-label">Scheduled At</span>
+              <span class="field-label">{t("scheduledAt")}</span>
               <input type="datetime-local" bind:value={formScheduledAt} />
             </label>
           {/if}
 
           <label class="form-field">
-            <span class="field-label">Prompt</span>
-            <textarea bind:value={formPrompt} rows="5" placeholder="What should Claude do?"></textarea>
+            <span class="field-label">{t("prompt")}</span>
+            <textarea bind:value={formPrompt} rows="5" placeholder={t("whatShouldClaudeDo")}></textarea>
           </label>
 
           <label class="form-field">
-            <span class="field-label">Model</span>
+            <span class="field-label">{t("model")}</span>
             <select bind:value={formModel}>
-              <option value="">Default (from config)</option>
+              <option value="">{t("defaultFromConfig")}</option>
               <option value="sonnet">Sonnet</option>
               <option value="opus">Opus</option>
               <option value="haiku">Haiku</option>
@@ -978,8 +982,8 @@
           </label>
 
           <label class="form-field">
-            <span class="field-label">Tags</span>
-            <input type="text" bind:value={formTags} placeholder="Comma-separated, e.g. review, daily" />
+            <span class="field-label">{t("tags")}</span>
+            <input type="text" bind:value={formTags} placeholder={t("tagsPlaceholder")} />
           </label>
 
           {#if formError}
@@ -988,9 +992,9 @@
         </div>
 
         <div class="modal-footer">
-          <button class="action-btn ghost" onclick={closeModal}>Cancel</button>
+          <button class="action-btn ghost" onclick={closeModal}>{t("cancel")}</button>
           <button class="action-btn primary" onclick={handleCreate} disabled={formSaving}>
-            {formSaving ? "Creating..." : "Create Task"}
+            {formSaving ? t("creatingDots") : t("createTask")}
           </button>
         </div>
       </div>
