@@ -1,120 +1,245 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { fetchConfig, updateConfig, triggerEvolution, fetchReports, fetchReport } from "../lib/api";
-  import { marked } from "marked";
+  import { onMount, tick } from "svelte";
+  import { triggerEvolution } from "../lib/api";
   import { t, getLanguage, subscribe } from "../lib/i18n";
 
-  interface FeatureDef {
-    id: string;
-    icon: string;
+  let { workId, onBack }: { workId: string; onBack: () => void } = $props();
+
+  let lang = $state(getLanguage());
+  let isNewWork = $derived(workId === "new");
+
+  // Pipeline steps
+  interface PipelineStep {
+    id: number;
+    nameKey: string;
+    descKey: string;
     color: string;
   }
 
-  let { feature, onBack }: { feature: FeatureDef; onBack: () => void } = $props();
+  const steps: PipelineStep[] = [
+    { id: 1, nameKey: "step1_name", descKey: "step1_desc", color: "linear-gradient(135deg, #f59e0b, #ef4444)" },
+    { id: 2, nameKey: "step2_name", descKey: "step2_desc", color: "linear-gradient(135deg, #ef4444, #ec4899)" },
+    { id: 3, nameKey: "step3_name", descKey: "step3_desc", color: "linear-gradient(135deg, #8b5cf6, #6366f1)" },
+    { id: 4, nameKey: "step4_name", descKey: "step4_desc", color: "linear-gradient(135deg, #10b981, #059669)" },
+    { id: 5, nameKey: "step5_name", descKey: "step5_desc", color: "linear-gradient(135deg, #f59e0b, #d97706)" },
+    { id: 6, nameKey: "step6_name", descKey: "step6_desc", color: "linear-gradient(135deg, #3b82f6, #8b5cf6)" },
+  ];
 
-  let lang = $state(getLanguage());
+  // Pipeline state
+  type StepStatus = "pending" | "running" | "complete" | "paused";
+  let stepStatuses: StepStatus[] = $state(steps.map(() => "pending"));
+  let isRunning = $state(false);
+  let isPaused = $state(false);
+  let currentStep = $state(-1);
+  let shouldStop = false;
+  let allDone = $derived(stepStatuses.every(s => s === "complete"));
+  let hasEverCompleted = $state(false);
 
-  // Config state
-  let interval: string = $state("1h");
-  let model: string = $state("sonnet");
-  let autoRun: boolean = $state(false);
+  // Custom direction per step
+  let stepDirections: string[] = $state(steps.map(() => ""));
+  let showDirectionPanel: number | null = $state(null);
 
-  let saving: boolean = $state(false);
-  let message: string = $state("");
-  let messageType: "success" | "error" = $state("success");
+  // Track if user has made changes since last completion (for regen button)
+  let hasChanges = $state(false);
+  let canRegen = $derived(hasChanges && allDone && !isRunning);
+  let saveMessage = $state("");
 
-  // Research state
-  let researching: boolean = $state(false);
-  let researchMessage: string = $state("");
+  function markChanged() {
+    hasChanges = true;
+  }
 
-  // Reports state
-  let reports: { filename: string; date: string }[] = $state([]);
-  let loadingReports: boolean = $state(true);
-  let selectedReport: string | null = $state(null);
-  let reportContent: string = $state("");
-  let loadingContent: boolean = $state(false);
+  function handleSaveDirections() {
+    // Persist to localStorage
+    const data = { directions: stepDirections, competitorUrls };
+    localStorage.setItem(`cp-work-${workId}`, JSON.stringify(data));
+    saveMessage = t("directionsSaved");
+    setTimeout(() => { saveMessage = ""; }, 2000);
+  }
 
-  let renderedMarkdown: string = $derived.by(() => {
-    if (!reportContent) return "";
-    return marked(reportContent) as string;
-  });
-
-  async function handleSave() {
-    saving = true;
-    message = "";
+  function loadSavedDirections() {
     try {
-      await updateConfig({ interval, model, autoRun });
-      message = t("settingsSaved");
-      messageType = "success";
-      setTimeout(() => { message = ""; }, 3000);
-    } catch {
-      message = t("settingsSaveFailed");
-      messageType = "error";
-    } finally {
-      saving = false;
+      const raw = localStorage.getItem(`cp-work-${workId}`);
+      if (raw) {
+        const data = JSON.parse(raw);
+        if (data.directions) stepDirections = data.directions;
+        if (data.competitorUrls) competitorUrls = data.competitorUrls;
+      }
+    } catch {}
+  }
+
+  // Competitor URLs for step 3
+  let competitorUrls: string[] = $state([]);
+  let newUrl = $state("");
+  let showCompetitorPanel = $state(false);
+
+  // Strategy results - active report preview
+  let activeReportKey: string | null = $state(null);
+
+  // Existing work: expand/collapse steps
+  let stepsExpanded = $state(false);
+
+  // Mock deliverable data
+  interface Deliverable {
+    key: string;
+    labelKey: string;
+    content: string;
+    reportContent: string;
+  }
+
+  const mockDeliverables: Deliverable[] = [
+    {
+      key: "title",
+      labelKey: "resultTitle",
+      content: "\"3 Things Your Competitors Don't Want You to Know About Short Video Growth\"",
+      reportContent: "## Title Generation Report\n\nAnalyzed **47 competitor videos** across 3 platforms.\n\n### Key Findings\n- Numbered titles (\"3 things\", \"5 tips\") have **2.3x higher CTR**\n- Curiosity-gap titles outperform direct titles by 45%\n- Competitor mention increases engagement by 30%\n\n### Recommended Variants\n1. \"3 Things Your Competitors Don't Want You to Know\" *(top pick)*\n2. \"Why Your Competitor Gets 10x More Views\"\n3. \"The Growth Secret Nobody Talks About\"\n\n### Data Sources\n- Analyzed top 50 viral videos in your niche\n- Cross-referenced with your past 20 posts' performance\n- Applied A/B title patterns from 1,200+ tested headlines",
+    },
+    {
+      key: "copy",
+      labelKey: "resultCopy",
+      content: "Opening hook: \"You've been posting every day but your competitor barely posts and gets 10x your views...\" → Pain point → 3-part framework → CTA with urgency",
+      reportContent: "## Copy & Script Report\n\n### Hook Analysis\nYour best-performing hooks use the **contrast pattern** — comparing effort vs. results.\n\n### Script Structure\n1. **Hook** (0-3s): Contrast statement\n2. **Problem** (3-10s): Why effort ≠ results\n3. **Framework** (10-45s): 3-part solution\n4. **CTA** (45-60s): Urgency + value promise\n\n### Word Choice Insights\n- \"Secret\" → +18% retention\n- \"Nobody\" → +22% engagement\n- \"Actually\" → builds trust\n\n### Estimated Performance\n- Predicted watch-through rate: 42% (your avg: 28%)\n- Predicted engagement rate: 8.5% (your avg: 4.2%)",
+    },
+    {
+      key: "style",
+      labelKey: "resultStyle",
+      content: "Conversational + data-backed tone. Fast cuts every 3s. Text overlays on key stats. Your signature warm color grading. Background music: upbeat lo-fi.",
+      reportContent: "## Style Strategy Report\n\n### Your Signature Style DNA\nBased on analysis of your top 10 performing posts:\n- **Tone**: Conversational, slightly provocative\n- **Pacing**: Fast cuts every 2.8s average\n- **Visual**: Warm color grading (your signature look)\n\n### Competitor Style Gap\n| Element | You | Top Competitor | Opportunity |\n|---------|-----|---------------|-------------|\n| Cut pace | 2.8s | 2.1s | Speed up slightly |\n| Text overlays | Rare | Every key point | Add more |\n| Data visuals | None | Frequent | Big opportunity |\n\n### Recommendations\n1. Add text overlays on statistics\n2. Keep your warm color grading (distinctive)\n3. Increase cut frequency to ~2.3s\n4. Add subtle background music (lo-fi beat)",
+    },
+    {
+      key: "publishTime",
+      labelKey: "resultPublishTime",
+      content: "Best window: Tuesday 7:30 PM — 8:30 PM. Secondary: Thursday 12:00 PM. Avoid weekends for this topic category.",
+      reportContent: "## Publish Time Report\n\n### Optimal Windows\n\n**Primary**: Tuesday 19:30 - 20:30\n- Your audience online peak: 87% active\n- Competition posting density: Low\n- Historical best performance day\n\n**Secondary**: Thursday 12:00 - 13:00\n- Lunch-break browsing spike\n- 72% audience active\n\n### Avoid\n- Weekends: Your niche audience engagement drops 40%\n- Monday mornings: High competition, low attention\n\n### Data Basis\n- Analyzed your last 30 posts' time-performance correlation\n- Cross-referenced with platform-wide engagement heatmaps\n- Factored in competitor posting schedules to find low-competition slots",
+    },
+    {
+      key: "memory",
+      labelKey: "resultMemory",
+      content: "Applied: You prefer direct communication style (learned from 12 sessions). Your audience responds best to data-driven content (3 past successes). Avoided: tutorial format (low engagement in your history).",
+      reportContent: "## Memory Insights Report\n\n### Applied User Preferences\nThese insights were accumulated from observing your behavior across **12 sessions** over **3 weeks**:\n\n1. **Communication Style**: Direct and slightly provocative\n   - *Source*: Confirmed across 5 sessions, 2+ weeks\n   - *Application*: Hook uses confrontational tone\n\n2. **Content Preference**: Data-driven arguments\n   - *Source*: 3 successful posts featured statistics\n   - *Application*: Script includes specific numbers and %\n\n3. **Avoided Patterns**: Tutorial/how-to format\n   - *Source*: Your last 2 tutorials underperformed by 60%\n   - *Application*: Used story-driven structure instead\n\n### Confidence Level\n- High confidence (graduated knowledge): Communication style, data preference\n- Medium confidence (accumulating): Audience demographic assumptions\n- Excluded (stale): Old posting frequency preferences (60+ days old)",
+    },
+  ];
+
+  // Reference to results section for scroll
+  let resultsEl: HTMLElement | undefined = $state(undefined);
+
+  function initExistingWork() {
+    stepStatuses = steps.map(() => "complete");
+    currentStep = steps.length;
+    hasEverCompleted = true;
+    hasChanges = false;
+  }
+
+  // Pipeline controls
+  function addCompetitorUrl() {
+    const url = newUrl.trim();
+    if (url && competitorUrls.length < 10 && !competitorUrls.includes(url)) {
+      competitorUrls = [...competitorUrls, url];
+      newUrl = "";
+      markChanged();
     }
   }
 
-  async function handleStartResearch() {
-    researching = true;
-    researchMessage = "";
-    try {
-      await triggerEvolution();
-      researchMessage = t("researchStarted");
-      setTimeout(() => { researchMessage = ""; }, 5000);
-    } catch {
-      researchMessage = t("researchFailed");
-    } finally {
-      researching = false;
+  function removeCompetitorUrl(index: number) {
+    competitorUrls = competitorUrls.filter((_, i) => i !== index);
+    markChanged();
+  }
+
+  function handleUrlKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addCompetitorUrl();
     }
   }
 
-  async function selectReport(filename: string) {
-    if (selectedReport === filename) {
-      selectedReport = null;
-      reportContent = "";
-      return;
+  async function runPipeline() {
+    isRunning = true;
+    isPaused = false;
+    shouldStop = false;
+    hasChanges = false;
+    const startFrom = currentStep >= 0 && stepStatuses[currentStep] !== "complete" ? currentStep : 0;
+    if (startFrom === 0) {
+      stepStatuses = steps.map(() => "pending");
+      currentStep = -1;
+      activeReportKey = null;
     }
-    selectedReport = filename;
-    loadingContent = true;
-    reportContent = "";
-    try {
-      const r = await fetchReport(filename);
-      reportContent = r.content;
-    } catch {
-      reportContent = "Failed to load report.";
-    } finally {
-      loadingContent = false;
+
+    for (let i = startFrom; i < steps.length; i++) {
+      if (shouldStop) {
+        stepStatuses[i] = "paused";
+        stepStatuses = [...stepStatuses];
+        currentStep = i;
+        isRunning = false;
+        isPaused = true;
+        return;
+      }
+      currentStep = i;
+      stepStatuses[i] = "running";
+      stepStatuses = [...stepStatuses];
+
+      try { if (i === 0) await triggerEvolution(); } catch {}
+
+      await new Promise<void>((resolve) => {
+        const duration = 2000 + Math.random() * 2000;
+        const check = setInterval(() => { if (shouldStop) { clearInterval(check); resolve(); } }, 100);
+        setTimeout(() => { clearInterval(check); resolve(); }, duration);
+      });
+
+      if (shouldStop) {
+        stepStatuses[i] = "paused";
+        stepStatuses = [...stepStatuses];
+        currentStep = i;
+        isRunning = false;
+        isPaused = true;
+        return;
+      }
+      stepStatuses[i] = "complete";
+      stepStatuses = [...stepStatuses];
+    }
+    isRunning = false;
+    currentStep = steps.length;
+    hasEverCompleted = true;
+    hasChanges = false;
+
+    // Auto-scroll to results
+    await tick();
+    setTimeout(() => {
+      resultsEl?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 200);
+  }
+
+  function handleStart() {
+    if (isPaused) {
+      isPaused = false;
+      shouldStop = false;
+      runPipeline();
+    } else if (hasEverCompleted && canRegen) {
+      runPipeline();
+    } else if (!hasEverCompleted) {
+      runPipeline();
     }
   }
 
-  function formatTime(iso: string): string {
-    return new Date(iso).toLocaleString(undefined, {
-      month: "short", day: "numeric",
-      hour: "2-digit", minute: "2-digit",
-    });
+  function handlePause() {
+    shouldStop = true;
   }
 
-  onMount(async () => {
+  function getStatusKey(status: StepStatus): string {
+    if (status === "complete") return "stepComplete";
+    if (status === "running") return "stepRunning";
+    if (status === "paused") return "stepPaused";
+    return "stepPending";
+  }
+
+  onMount(() => {
     const unsub = subscribe(() => { lang = getLanguage(); });
-    const [, rawReports] = await Promise.all([
-      fetchConfig().then((c) => {
-        interval = c.interval;
-        model = c.model;
-        autoRun = c.autoRun;
-      }).catch(() => {}),
-      fetchReports().catch(() => [] as { filename: string; date: string }[]),
-    ]);
-    reports = (rawReports ?? [])
-      .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
-      .slice(0, 20);
-    loadingReports = false;
+    loadSavedDirections();
+    if (!isNewWork) initExistingWork();
     return () => unsub();
   });
 </script>
 
-<div class="feature-detail" data-lang={lang}>
-  <!-- Back + Title -->
+<div class="pipeline-view" data-lang={lang}>
+  <!-- Back button -->
   <div class="detail-header">
     <button class="back-btn" onclick={onBack}>
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -124,586 +249,490 @@
     </button>
   </div>
 
-  <div class="feature-title-row">
-    <div class="feature-icon-lg" style="background: {feature.color}">
-      {@html feature.icon}
-    </div>
-    <div class="feature-title-info">
-      <h2>{t(`feature_${feature.id}_name`)}</h2>
-      <p class="feature-subtitle">{t(`feature_${feature.id}_desc`)}</p>
-    </div>
-  </div>
-
-  <!-- Research Config -->
-  <div class="config-section">
-    <div class="section-header">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-      <h3>{t("researchConfig")}</h3>
-    </div>
-
-    <div class="config-cards">
-      <div class="config-card">
-        <label>
-          <span class="field-label">{t("researchInterval")}</span>
-          <span class="field-hint">{t("researchIntervalHint")}</span>
-          <select bind:value={interval}>
-            <option value="15m">{t("minutes15")}</option>
-            <option value="30m">{t("minutes30")}</option>
-            <option value="1h">{t("hour1")}</option>
-            <option value="2h">{t("hours2")}</option>
-            <option value="4h">{t("hours4")}</option>
-            <option value="8h">{t("hours8")}</option>
-          </select>
-        </label>
-
-        <label>
-          <span class="field-label">{t("aiModel")}</span>
-          <span class="field-hint">{t("aiModelHint")}</span>
-          <select bind:value={model}>
-            <option value="haiku">{t("claudeHaikuFast")}</option>
-            <option value="sonnet">{t("claudeSonnetBalanced")}</option>
-            <option value="opus">{t("claudeOpusCapable")}</option>
-          </select>
-        </label>
+  {#if isNewWork}
+    <!-- ═══════════ NEW WORK MODE ═══════════ -->
+    <div class="pipeline-header">
+      <div class="pipeline-title-area">
+        <h2>{t("createNewWork")}</h2>
+        <p class="pipeline-desc">{t("createNewWorkDesc")}</p>
       </div>
-
-      <div class="config-card">
-        <div class="toggle-field">
-          <div class="toggle-info">
-            <span class="field-label">{t("autoResearch")}</span>
-            <span class="field-hint">{t("autoResearchHint")}</span>
-          </div>
-          <button
-            class="toggle-switch"
-            class:on={autoRun}
-            onclick={() => autoRun = !autoRun}
-            role="switch"
-            aria-checked={autoRun}
-          >
-            <span class="toggle-thumb"></span>
+      <div class="pipeline-actions">
+        {#if saveMessage}
+          <span class="save-msg">{saveMessage}</span>
+        {/if}
+        {#if hasChanges && hasEverCompleted && !isRunning}
+          <button class="save-text-btn" onclick={handleSaveDirections}>{t("saveDirections")}</button>
+        {/if}
+        {#if isRunning}
+          <button class="pause-btn" onclick={handlePause}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
+            </svg>
+            {t("pauseWork")}
           </button>
+        {:else if hasEverCompleted}
+          <button class="start-btn" class:disabled-regen={!canRegen} onclick={handleStart} disabled={!canRegen} title={canRegen ? "" : t("regenNoChange")}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+            </svg>
+            {t("regenerate")}
+          </button>
+        {:else}
+          <button class="start-btn" onclick={handleStart}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <polygon points="5 3 19 12 5 21 5 3"/>
+            </svg>
+            {#if isPaused}{t("resumeWork")}{:else}{t("startWork")}{/if}
+          </button>
+        {/if}
+      </div>
+    </div>
+
+    <!-- Full Steps List -->
+    <div class="steps-list">
+      {#each steps as step, i}
+        {@const status = stepStatuses[i]}
+        <div class="step-card" class:running={status === "running"} class:complete={status === "complete"}>
+          <div class="step-left">
+            <div class="step-number" class:active={status === "running"} class:done={status === "complete"}>
+              {#if status === "complete"}
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              {:else if status === "running"}
+                <svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+              {:else}
+                <span>{step.id}</span>
+              {/if}
+            </div>
+            {#if i < steps.length - 1}
+              <div class="step-connector" class:filled={status === "complete"}></div>
+            {/if}
+          </div>
+          <div class="step-body">
+            <div class="step-main">
+              <div class="step-info">
+                <h4>{t(step.nameKey)}</h4>
+                <p>{t(step.descKey)}</p>
+              </div>
+              <div class="step-status-area">
+                {#if step.id === 3}
+                  <button class="competitor-btn" onclick={() => showCompetitorPanel = !showCompetitorPanel}>{t("addCompetitors")}</button>
+                  {#if competitorUrls.length === 0 && !showCompetitorPanel}
+                    <span class="ai-tag">{t("aiAutoAnalysis")}</span>
+                  {/if}
+                {/if}
+                <button class="direction-btn" onclick={() => showDirectionPanel = showDirectionPanel === i ? null : i} title={t("customDirection")}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                  {t("customDirection")}
+                </button>
+                <span class="step-badge" class:badge-running={status === "running"} class:badge-complete={status === "complete"} class:badge-paused={status === "paused"}>
+                  {t(getStatusKey(status))}
+                </span>
+              </div>
+            </div>
+            <!-- Custom direction panel -->
+            {#if showDirectionPanel === i}
+              <div class="direction-panel">
+                <textarea
+                  class="direction-input"
+                  bind:value={stepDirections[i]}
+                  oninput={markChanged}
+                  placeholder={t("customDirectionPlaceholder")}
+                  rows="2"
+                ></textarea>
+              </div>
+            {/if}
+            {#if step.id === 3 && showCompetitorPanel}
+              <div class="competitor-panel">
+                <div class="url-input-row">
+                  <input type="url" class="url-input" bind:value={newUrl} onkeydown={handleUrlKeydown} placeholder={t("competitorUrlPlaceholder")} disabled={competitorUrls.length >= 10} />
+                  <button class="url-add-btn" onclick={addCompetitorUrl} disabled={!newUrl.trim() || competitorUrls.length >= 10}>{t("addUrl")}</button>
+                </div>
+                <span class="url-hint">{t("maxUrls")}</span>
+                {#if competitorUrls.length > 0}
+                  <ul class="url-list">
+                    {#each competitorUrls as url, idx}
+                      <li class="url-item">
+                        <span class="url-text">{url}</span>
+                        <button class="url-remove" onclick={() => removeCompetitorUrl(idx)} title={t("removeUrl")}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                        </button>
+                      </li>
+                    {/each}
+                  </ul>
+                {/if}
+              </div>
+            {/if}
+            {#if status === "running"}
+              <div class="step-output">
+                <div class="typing-indicator"><span></span><span></span><span></span></div>
+              </div>
+            {/if}
+          </div>
         </div>
-      </div>
+      {/each}
     </div>
 
-    <!-- Actions -->
-    <div class="actions-row">
-      <button class="save-btn" onclick={handleSave} disabled={saving}>
-        {#if saving}
-          <svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
-          {t("saving")}
-        {:else}
-          {t("saveChanges")}
-        {/if}
-      </button>
-
-      <button class="research-btn" onclick={handleStartResearch} disabled={researching} style="background: {feature.color}">
-        {#if researching}
-          <svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
-          {t("researchingDots")}
-        {:else}
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-          </svg>
-          {t("startResearch")}
-        {/if}
-      </button>
-
-      {#if message}
-        <span class="action-message" class:error={messageType === "error"} class:success={messageType === "success"}>
-          {message}
-        </span>
-      {/if}
-      {#if researchMessage}
-        <span class="action-message success">{researchMessage}</span>
-      {/if}
-    </div>
-  </div>
-
-  <!-- Research Reports -->
-  <div class="reports-section">
-    <div class="section-header">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
-      </svg>
-      <h3>{t("researchReports")}</h3>
-      <span class="report-count">{reports.length}</span>
-    </div>
-
-    {#if loadingReports}
-      <div class="reports-list">
-        {#each Array(3) as _}
-          <div class="report-item skeleton">
-            <div class="skeleton-bar w60"></div>
-            <div class="skeleton-bar w40"></div>
+  {:else}
+    <!-- ═══════════ EXISTING WORK MODE ═══════════ -->
+    <!-- Compact Progress Bar with expand/collapse -->
+    <div class="progress-bar-row" class:expanded={stepsExpanded}>
+      <div class="progress-top">
+        <div class="progress-bar-wrap">
+          <div class="progress-bar">
+            {#each steps as step, i}
+              {@const status = stepStatuses[i]}
+              <div class="progress-segment" class:seg-complete={status === "complete"} class:seg-running={status === "running"}>
+                <div class="seg-fill green"></div>
+              </div>
+              {#if i < steps.length - 1}
+                <div class="seg-gap"></div>
+              {/if}
+            {/each}
           </div>
-        {/each}
-      </div>
-    {:else if reports.length === 0}
-      <div class="empty-reports">
-        <p>{t("noResearchReports")}</p>
-      </div>
-    {:else}
-      <div class="reports-list">
-        {#each reports as report}
-          <button
-            class="report-item"
-            class:active={selectedReport === report.filename}
-            onclick={() => selectReport(report.filename)}
-          >
-            <span class="report-time">{formatTime(report.date)}</span>
-            <span class="report-name">{report.filename}</span>
-          </button>
-        {/each}
-      </div>
-
-      {#if selectedReport}
-        <div class="report-viewer">
-          {#if loadingContent}
-            <div class="report-loading">
-              {#each Array(5) as _}
-                <div class="skeleton-bar" style="width: {60 + Math.random() * 35}%; margin-bottom: 0.6rem"></div>
-              {/each}
-            </div>
-          {:else}
-            <div class="markdown-body">
-              {@html renderedMarkdown}
-            </div>
+          <div class="progress-labels">
+            {#each steps as step, i}
+              <span class="progress-label" class:label-done={stepStatuses[i] === "complete"} class:label-active={stepStatuses[i] === "running"}>{t(step.nameKey)}</span>
+            {/each}
+          </div>
+        </div>
+        <div class="progress-actions">
+          {#if saveMessage}
+            <span class="save-msg">{saveMessage}</span>
           {/if}
+          {#if hasChanges && !isRunning}
+            <button class="save-text-btn" onclick={handleSaveDirections}>{t("saveDirections")}</button>
+          {/if}
+          <button class="expand-btn" onclick={() => stepsExpanded = !stepsExpanded}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class:rotated={stepsExpanded}>
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+            {stepsExpanded ? t("collapseSteps") : t("expandSteps")}
+          </button>
+          <button class="regen-btn" class:disabled-regen={!canRegen} onclick={handleStart} disabled={!canRegen || isRunning} title={canRegen ? "" : t("regenNoChange")}>
+            {#if isRunning}
+              <svg class="spin" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+              {t("regenerating")}
+            {:else}
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/>
+              </svg>
+              {t("regenerate")}
+            {/if}
+          </button>
+        </div>
+      </div>
+
+      <!-- Expanded steps (same as new work) -->
+      {#if stepsExpanded}
+        <div class="expanded-steps">
+          {#each steps as step, i}
+            {@const status = stepStatuses[i]}
+            <div class="step-card" class:running={status === "running"} class:complete={status === "complete"}>
+              <div class="step-left">
+                <div class="step-number" class:active={status === "running"} class:done={status === "complete"}>
+                  {#if status === "complete"}
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                  {:else if status === "running"}
+                    <svg class="spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+                  {:else}
+                    <span>{step.id}</span>
+                  {/if}
+                </div>
+                {#if i < steps.length - 1}
+                  <div class="step-connector" class:filled={status === "complete"}></div>
+                {/if}
+              </div>
+              <div class="step-body">
+                <div class="step-main">
+                  <div class="step-info">
+                    <h4>{t(step.nameKey)}</h4>
+                    <p>{t(step.descKey)}</p>
+                  </div>
+                  <div class="step-status-area">
+                    {#if step.id === 3}
+                      <button class="competitor-btn" onclick={() => showCompetitorPanel = !showCompetitorPanel}>{t("addCompetitors")}</button>
+                      {#if competitorUrls.length === 0 && !showCompetitorPanel}
+                        <span class="ai-tag">{t("aiAutoAnalysis")}</span>
+                      {/if}
+                    {/if}
+                    <button class="direction-btn" onclick={() => showDirectionPanel = showDirectionPanel === i ? null : i} title={t("customDirection")}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                      {t("customDirection")}
+                    </button>
+                    <span class="step-badge badge-complete">{t("stepComplete")}</span>
+                  </div>
+                </div>
+                {#if showDirectionPanel === i}
+                  <div class="direction-panel">
+                    <textarea class="direction-input" bind:value={stepDirections[i]} oninput={markChanged} placeholder={t("customDirectionPlaceholder")} rows="2"></textarea>
+                  </div>
+                {/if}
+                {#if step.id === 3 && showCompetitorPanel}
+                  <div class="competitor-panel">
+                    <div class="url-input-row">
+                      <input type="url" class="url-input" bind:value={newUrl} onkeydown={handleUrlKeydown} placeholder={t("competitorUrlPlaceholder")} disabled={competitorUrls.length >= 10} />
+                      <button class="url-add-btn" onclick={addCompetitorUrl} disabled={!newUrl.trim() || competitorUrls.length >= 10}>{t("addUrl")}</button>
+                    </div>
+                    <span class="url-hint">{t("maxUrls")}</span>
+                    {#if competitorUrls.length > 0}
+                      <ul class="url-list">
+                        {#each competitorUrls as url, idx}
+                          <li class="url-item">
+                            <span class="url-text">{url}</span>
+                            <button class="url-remove" onclick={() => removeCompetitorUrl(idx)} title={t("removeUrl")}>
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                            </button>
+                          </li>
+                        {/each}
+                      </ul>
+                    {/if}
+                  </div>
+                {/if}
+                {#if status === "running"}
+                  <div class="step-output">
+                    <div class="typing-indicator"><span></span><span></span><span></span></div>
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/each}
         </div>
       {/if}
-    {/if}
-  </div>
+    </div>
+  {/if}
+
+  <!-- ═══════════ STRATEGY RESULTS ═══════════ -->
+  {#if allDone}
+    <div class="results-section" bind:this={resultsEl}>
+      <h3 class="results-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>
+        </svg>
+        {t("strategyResults")}
+      </h3>
+      <div class="results-layout">
+        <div class="results-left">
+          {#each mockDeliverables as item}
+            <div class="deliverable-card" class:active-card={activeReportKey === item.key}>
+              <div class="deliverable-header">
+                <span class="deliverable-label">{t(item.labelKey)}</span>
+                {#if item.key === "memory"}
+                  <span class="memory-hint">{t("resultMemoryHint")}</span>
+                {/if}
+              </div>
+              <p class="deliverable-content">{item.content}</p>
+              <button class="view-report-btn" onclick={() => activeReportKey = activeReportKey === item.key ? null : item.key}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                </svg>
+                {activeReportKey === item.key ? t("closeReport") : t("viewReport")}
+              </button>
+            </div>
+          {/each}
+        </div>
+        <div class="results-right">
+          <div class="report-preview-header">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+            </svg>
+            <span>{t("reportPreview")}</span>
+          </div>
+          <div class="report-preview-body">
+            {#if activeReportKey}
+              {@const report = mockDeliverables.find(d => d.key === activeReportKey)}
+              {#if report}
+                <div class="markdown-body">
+                  {@html report.reportContent
+                    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+                    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+                    .replace(/^\| (.+)$/gm, (m) => `<code>${m}</code>`)
+                    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                    .replace(/^- (.+)$/gm, '<li>$1</li>')
+                    .replace(/^(\d+)\. (.+)$/gm, '<li><strong>$1.</strong> $2</li>')
+                    .replace(/\n\n/g, '<br><br>')
+                    .replace(/\n/g, '<br>')
+                  }
+                </div>
+              {/if}
+            {:else}
+              <div class="report-placeholder">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <p>{t("selectReportHint")}</p>
+              </div>
+            {/if}
+          </div>
+        </div>
+      </div>
+    </div>
+  {/if}
 </div>
 
 <style>
-  .feature-detail {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
-  }
+  .pipeline-view { display: flex; flex-direction: column; gap: 1.25rem; }
 
-  /* Back button */
-  .back-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 0.85rem;
-    font-weight: 500;
-    padding: 0.4rem 0;
-    transition: color 0.2s ease;
-  }
+  .back-btn { display: flex; align-items: center; gap: 0.4rem; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.85rem; font-weight: 500; padding: 0.4rem 0; transition: color 0.2s ease; }
+  .back-btn:hover { color: var(--accent); }
 
-  .back-btn:hover {
-    color: var(--accent);
-  }
+  /* ── Pipeline header ─────────────────────────────────────────────── */
+  .pipeline-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+  .pipeline-title-area h2 { font-size: 1.3rem; font-weight: 700; letter-spacing: -0.02em; }
+  .pipeline-desc { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.3rem; line-height: 1.5; }
+  .pipeline-actions { flex-shrink: 0; }
 
-  /* Feature title */
-  .feature-title-row {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
-  }
+  .save-text-btn { background: none; border: none; color: var(--accent); font-size: 0.82rem; font-weight: 600; cursor: pointer; padding: 0.4rem 0; transition: opacity 0.15s; white-space: nowrap; }
+  .save-text-btn:hover { opacity: 0.8; }
+  .save-msg { font-size: 0.78rem; color: var(--success); font-weight: 550; animation: fadeIn 0.2s ease; white-space: nowrap; }
 
-  .feature-icon-lg {
-    width: 52px;
-    height: 52px;
-    border-radius: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #fff;
-    flex-shrink: 0;
-    box-shadow: var(--shadow-md);
-  }
+  .start-btn { display: flex; align-items: center; gap: 0.45rem; background: var(--accent); color: var(--accent-text); border: none; padding: 0.65rem 1.5rem; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 0.88rem; transition: all 0.2s ease; box-shadow: var(--shadow-sm); white-space: nowrap; }
+  .start-btn:hover:not(:disabled) { background: var(--accent-hover); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  .start-btn.disabled-regen { opacity: 0.45; cursor: not-allowed; }
+  .start-btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-  .feature-title-info h2 {
-    font-size: 1.3rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-  }
+  .pause-btn { display: flex; align-items: center; gap: 0.45rem; background: var(--bg-surface); color: var(--text); border: 1px solid var(--border); padding: 0.65rem 1.5rem; border-radius: 10px; font-weight: 600; cursor: pointer; font-size: 0.88rem; transition: all 0.2s ease; white-space: nowrap; }
+  .pause-btn:hover { background: var(--bg-hover); border-color: var(--text-dim); }
 
-  .feature-subtitle {
-    font-size: 0.85rem;
-    color: var(--text-muted);
-    margin-top: 0.2rem;
-    line-height: 1.5;
-  }
+  /* ── Steps list ──────────────────────────────────────────────────── */
+  .steps-list, .expanded-steps { display: flex; flex-direction: column; }
+  .expanded-steps { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); animation: slideDown 0.25s ease; }
 
-  /* Section header */
-  .section-header {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    margin-bottom: 0.75rem;
-  }
+  .step-card { display: flex; gap: 1rem; transition: all 0.2s ease; }
+  .step-left { display: flex; flex-direction: column; align-items: center; flex-shrink: 0; width: 36px; }
 
-  .section-header svg {
-    color: var(--accent);
-  }
+  .step-number { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--bg-surface); border: 2px solid var(--border); color: var(--text-dim); font-size: 0.82rem; font-weight: 600; flex-shrink: 0; transition: all 0.3s ease; }
+  .step-number.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .step-number.done { background: var(--success); border-color: var(--success); color: #fff; }
 
-  .section-header h3 {
-    font-size: 0.95rem;
-    font-weight: 600;
-  }
+  .step-connector { width: 2px; flex: 1; min-height: 12px; background: var(--border); transition: background 0.3s ease; }
+  .step-connector.filled { background: var(--success); }
 
-  /* Config section */
-  .config-section {
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-  }
+  .step-body { flex: 1; min-width: 0; padding-bottom: 1.25rem; }
 
-  .config-cards {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1rem;
-  }
+  .step-main { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.125rem; box-shadow: var(--shadow-sm); transition: all 0.2s ease; }
+  .step-card.running .step-main { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-sm); }
+  .step-card.complete .step-main { border-color: var(--success); opacity: 0.85; }
 
-  @media (max-width: 640px) {
-    .config-cards {
-      grid-template-columns: 1fr;
-    }
-  }
+  .step-info { flex: 1; min-width: 0; }
+  .step-info h4 { font-size: 0.92rem; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 0.2rem; }
+  .step-info p { font-size: 0.78rem; color: var(--text-muted); line-height: 1.45; }
 
-  .config-card {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.25rem;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    box-shadow: var(--shadow-sm);
-  }
+  .step-status-area { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
 
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-  }
+  .step-badge { font-size: 0.68rem; font-weight: 600; padding: 0.2rem 0.6rem; border-radius: 9999px; background: var(--bg-surface); color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; }
+  .step-badge.badge-running { background: var(--accent-soft); color: var(--accent); animation: pulse-badge 1.5s ease-in-out infinite; }
+  .step-badge.badge-complete { background: var(--success-soft); color: var(--success); }
+  .step-badge.badge-paused { background: var(--state-running); color: #fff; }
 
-  .field-label {
-    font-size: 0.82rem;
-    font-weight: 550;
-    color: var(--text-secondary);
-  }
+  @keyframes pulse-badge { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 
-  .field-hint {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-  }
+  /* ── Custom direction ────────────────────────────────────────────── */
+  .direction-btn { display: flex; align-items: center; gap: 0.3rem; font-size: 0.72rem; font-weight: 550; color: var(--text-muted); background: none; border: 1px solid var(--border); padding: 0.2rem 0.55rem; border-radius: 6px; cursor: pointer; transition: all 0.15s ease; white-space: nowrap; }
+  .direction-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
 
-  select {
-    background: var(--bg-surface);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 0.55rem 0.75rem;
-    font-size: 0.88rem;
-    font-family: inherit;
-    transition: border-color 0.2s ease;
-    margin-top: 0.15rem;
-  }
+  .direction-panel { margin-top: 0.5rem; animation: slideDown 0.2s ease; }
+  .direction-input { width: 100%; background: var(--bg-inset); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem 0.75rem; font-size: 0.82rem; font-family: inherit; resize: vertical; min-height: 48px; transition: border-color 0.2s; line-height: 1.5; }
+  .direction-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .direction-input::placeholder { color: var(--text-dim); }
 
-  select:focus {
-    outline: none;
-    border-color: var(--accent);
-    box-shadow: 0 0 0 3px var(--accent-soft);
-  }
+  /* ── Competitor ──────────────────────────────────────────────────── */
+  .competitor-btn { font-size: 0.75rem; font-weight: 550; color: var(--accent); background: none; border: 1px solid var(--accent); padding: 0.2rem 0.6rem; border-radius: 6px; cursor: pointer; transition: all 0.15s ease; white-space: nowrap; }
+  .competitor-btn:hover { background: var(--accent-soft); }
 
-  /* Toggle */
-  .toggle-field {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-  }
+  .ai-tag { font-size: 0.68rem; font-weight: 500; color: var(--info); background: var(--info-soft); padding: 0.2rem 0.55rem; border-radius: 9999px; white-space: nowrap; }
 
-  .toggle-info {
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-  }
+  .competitor-panel { margin-top: 0.75rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 10px; padding: 0.875rem; display: flex; flex-direction: column; gap: 0.5rem; animation: slideDown 0.2s ease; }
+  .url-input-row { display: flex; gap: 0.5rem; }
+  .url-input { flex: 1; background: var(--bg-inset); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 0.5rem 0.75rem; font-size: 0.82rem; font-family: inherit; transition: border-color 0.2s; }
+  .url-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+  .url-input::placeholder { color: var(--text-dim); }
+  .url-input:disabled { opacity: 0.5; }
+  .url-add-btn { background: var(--accent); color: var(--accent-text); border: none; padding: 0.5rem 1rem; border-radius: 8px; font-weight: 600; font-size: 0.82rem; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+  .url-add-btn:hover:not(:disabled) { background: var(--accent-hover); }
+  .url-add-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .url-hint { font-size: 0.7rem; color: var(--text-dim); }
+  .url-list { list-style: none; display: flex; flex-direction: column; gap: 0.3rem; }
+  .url-item { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; background: var(--bg-inset); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 0.4rem 0.6rem; }
+  .url-text { font-size: 0.78rem; color: var(--text-secondary); font-family: "SF Mono", "Fira Code", monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0; }
+  .url-remove { background: none; border: none; color: var(--text-dim); cursor: pointer; padding: 0.15rem; border-radius: 4px; display: flex; align-items: center; justify-content: center; transition: all 0.15s; flex-shrink: 0; }
+  .url-remove:hover { color: var(--error); background: var(--error-soft); }
 
-  .toggle-switch {
-    width: 44px;
-    height: 24px;
-    border-radius: 12px;
-    background: var(--text-dim);
-    border: none;
-    cursor: pointer;
-    position: relative;
-    transition: background 0.2s ease;
-    flex-shrink: 0;
-    padding: 0;
-  }
+  .step-output { margin-top: 0.5rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; padding: 0.65rem 0.875rem; animation: fadeIn 0.2s ease; }
+  .typing-indicator { display: flex; gap: 4px; padding: 0.15rem 0; }
+  .typing-indicator span { width: 5px; height: 5px; border-radius: 50%; background: var(--text-dim); animation: typing 1.4s ease-in-out infinite; }
+  .typing-indicator span:nth-child(2) { animation-delay: 0.2s; }
+  .typing-indicator span:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes typing { 0%, 60%, 100% { opacity: 0.3; transform: translateY(0); } 30% { opacity: 1; transform: translateY(-3px); } }
 
-  .toggle-switch.on {
-    background: var(--accent);
-  }
+  /* ── Progress Bar (existing work) ──────────────────────────────── */
+  .progress-bar-row { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px; padding: 1rem 1.25rem; box-shadow: var(--shadow-sm); }
+  .progress-top { display: flex; align-items: center; gap: 1rem; }
 
-  .toggle-thumb {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 20px;
-    height: 20px;
-    border-radius: 50%;
-    background: #fff;
-    transition: transform 0.2s ease;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
-  }
+  .progress-bar-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+  .progress-bar { display: flex; align-items: center; gap: 0; height: 8px; width: 100%; }
+  .progress-segment { flex: 1; height: 8px; border-radius: 4px; background: var(--bg-surface); overflow: hidden; position: relative; }
+  .seg-fill { position: absolute; inset: 0; border-radius: 4px; opacity: 0; transition: opacity 0.3s ease; }
+  .seg-fill.green { background: var(--success); }
+  .progress-segment.seg-complete .seg-fill { opacity: 1; }
+  .progress-segment.seg-running .seg-fill { opacity: 1; animation: progress-pulse 1.5s ease-in-out infinite; }
+  @keyframes progress-pulse { 0%, 100% { opacity: 0.6; } 50% { opacity: 1; } }
+  .seg-gap { width: 4px; flex-shrink: 0; }
 
-  .toggle-switch.on .toggle-thumb {
-    transform: translateX(20px);
-  }
+  .progress-labels { display: flex; gap: 0; }
+  .progress-label { flex: 1; font-size: 0.62rem; color: var(--text-dim); text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: color 0.2s; }
+  .progress-label.label-done { color: var(--success); }
+  .progress-label.label-active { color: var(--accent); font-weight: 600; }
 
-  /* Actions row */
-  .actions-row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    flex-wrap: wrap;
-  }
+  .progress-actions { display: flex; align-items: center; gap: 0.5rem; flex-shrink: 0; }
 
-  .save-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    background: var(--bg-surface);
-    color: var(--text);
-    border: 1px solid var(--border);
-    padding: 0.6rem 1.25rem;
-    border-radius: 10px;
-    font-weight: 550;
-    cursor: pointer;
-    font-size: 0.85rem;
-    transition: all 0.2s ease;
-  }
+  .expand-btn { display: flex; align-items: center; gap: 0.3rem; background: none; border: 1px solid var(--border); color: var(--text-muted); padding: 0.4rem 0.75rem; border-radius: 8px; font-size: 0.78rem; font-weight: 550; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+  .expand-btn:hover { color: var(--text); border-color: var(--text-dim); background: var(--bg-hover); }
+  .expand-btn svg { transition: transform 0.2s; }
+  .expand-btn svg.rotated { transform: rotate(180deg); }
 
-  .save-btn:hover:not(:disabled) {
-    background: var(--bg-hover);
-    border-color: var(--text-dim);
-  }
+  .regen-btn { display: flex; align-items: center; gap: 0.4rem; background: var(--accent); color: var(--accent-text); border: none; padding: 0.5rem 1.1rem; border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 0.82rem; transition: all 0.2s ease; box-shadow: var(--shadow-sm); white-space: nowrap; }
+  .regen-btn:hover:not(:disabled) { background: var(--accent-hover); box-shadow: var(--shadow-md); transform: translateY(-1px); }
+  .regen-btn:disabled, .regen-btn.disabled-regen { opacity: 0.45; cursor: not-allowed; }
 
-  .save-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
+  /* ── Strategy Results ──────────────────────────────────────────── */
+  .results-section { margin-top: 0.25rem; animation: fadeIn 0.3s ease; min-height: 100vh; }
+  .results-title { display: flex; align-items: center; gap: 0.5rem; font-size: 1rem; font-weight: 650; margin-bottom: 1rem; letter-spacing: -0.01em; }
+  .results-title svg { color: var(--success); }
 
-  .research-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    color: #fff;
-    border: none;
-    padding: 0.6rem 1.5rem;
-    border-radius: 10px;
-    font-weight: 600;
-    cursor: pointer;
-    font-size: 0.88rem;
-    transition: all 0.2s ease;
-    box-shadow: var(--shadow-sm);
-  }
+  .results-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; min-height: calc(100vh - 6rem); }
+  @media (max-width: 768px) { .results-layout { grid-template-columns: 1fr; } }
 
-  .research-btn:hover:not(:disabled) {
-    box-shadow: var(--shadow-md);
-    transform: translateY(-1px);
-    filter: brightness(1.1);
-  }
+  .results-left { display: flex; flex-direction: column; gap: 0.625rem; max-height: calc(100vh - 6rem); overflow-y: auto; padding-right: 0.25rem; }
 
-  .research-btn:active:not(:disabled) {
-    transform: translateY(0);
-  }
+  .deliverable-card { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; padding: 0.875rem 1rem; display: flex; flex-direction: column; gap: 0.4rem; box-shadow: var(--shadow-sm); transition: border-color 0.2s; }
+  .deliverable-card.active-card { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent-soft); }
+  .deliverable-header { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+  .deliverable-label { font-size: 0.78rem; font-weight: 650; color: var(--accent); text-transform: uppercase; letter-spacing: 0.04em; }
+  .memory-hint { font-size: 0.68rem; color: var(--text-dim); font-style: italic; }
+  .deliverable-content { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.55; }
+  .view-report-btn { display: flex; align-items: center; gap: 0.35rem; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 0.75rem; font-weight: 550; padding: 0.3rem 0; transition: color 0.15s; align-self: flex-start; margin-top: 0.1rem; }
+  .view-report-btn:hover { color: var(--accent); }
 
-  .research-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
+  .results-right { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow-sm); display: flex; flex-direction: column; max-height: calc(100vh - 6rem); }
+  .report-preview-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); font-size: 0.82rem; font-weight: 600; color: var(--text-muted); }
+  .report-preview-header svg { color: var(--accent); }
+  .report-preview-body { flex: 1; overflow-y: auto; padding: 1rem 1.125rem; }
 
-  .action-message {
-    font-size: 0.82rem;
-    font-weight: 500;
-    animation: fadeIn 0.2s ease;
-  }
+  .report-placeholder { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.75rem; padding: 3rem 1rem; text-align: center; color: var(--text-dim); }
+  .report-placeholder p { font-size: 0.82rem; max-width: 240px; line-height: 1.5; }
 
-  .action-message.success { color: var(--success); }
-  .action-message.error { color: var(--error); }
+  .markdown-body { font-size: 0.82rem; line-height: 1.7; color: var(--text-secondary); word-break: break-word; }
+  :global(.report-preview-body .markdown-body h2) { font-size: 1rem; font-weight: 650; color: var(--text); margin: 0.8rem 0 0.4rem; }
+  :global(.report-preview-body .markdown-body h3) { font-size: 0.88rem; font-weight: 600; color: var(--text); margin: 0.6rem 0 0.3rem; }
+  :global(.report-preview-body .markdown-body strong) { font-weight: 650; color: var(--text); }
+  :global(.report-preview-body .markdown-body em) { color: var(--text-muted); }
+  :global(.report-preview-body .markdown-body li) { margin-bottom: 0.25rem; padding-left: 0.25rem; }
+  :global(.report-preview-body .markdown-body code) { font-family: "SF Mono", "Fira Code", monospace; font-size: 0.78rem; background: var(--bg-inset); padding: 0.15em 0.4em; border-radius: 4px; color: var(--text-muted); display: block; margin: 0.3rem 0; overflow-x: auto; }
 
-  /* Reports */
-  .reports-section {
-    border-top: 1px solid var(--border);
-    padding-top: 1rem;
-  }
-
-  .report-count {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    background: var(--bg-surface);
-    padding: 0.15rem 0.5rem;
-    border-radius: 9999px;
-    border: 1px solid var(--border);
-  }
-
-  .reports-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.25rem;
-    max-height: 300px;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg-elevated);
-  }
-
-  .report-item {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 0.6rem 1rem;
-    border: none;
-    background: transparent;
-    color: var(--text);
-    cursor: pointer;
-    text-align: left;
-    font-size: 0.82rem;
-    transition: background 0.12s ease;
-    border-left: 3px solid transparent;
-    width: 100%;
-  }
-
-  .report-item:hover {
-    background: var(--bg-hover);
-  }
-
-  .report-item.active {
-    background: var(--accent-soft);
-    border-left-color: var(--accent);
-  }
-
-  .report-item.skeleton {
-    cursor: default;
-    padding: 0.75rem 1rem;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.4rem;
-  }
-
-  .report-time {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-    font-weight: 500;
-    white-space: nowrap;
-  }
-
-  .report-name {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .empty-reports {
-    padding: 2rem;
-    text-align: center;
-    color: var(--text-dim);
-    font-size: 0.85rem;
-  }
-
-  .report-viewer {
-    margin-top: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    background: var(--bg-surface);
-    padding: 1.25rem;
-    max-height: 500px;
-    overflow-y: auto;
-  }
-
-  .report-loading {
-    padding: 0.5rem;
-  }
-
-  /* Skeleton */
-  .skeleton-bar {
-    height: 12px;
-    border-radius: 4px;
-    background: var(--bg-hover);
-    animation: shimmer 1.5s ease-in-out infinite;
-  }
-
-  .w40 { width: 40%; }
-  .w60 { width: 60%; }
-
-  .spin {
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-
-  @keyframes shimmer {
-    0%, 100% { opacity: 0.4; }
-    50% { opacity: 0.7; }
-  }
-
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* Markdown (compact version) */
-  .markdown-body {
-    font-size: 0.88rem;
-    line-height: 1.7;
-    color: var(--text);
-    word-break: break-word;
-  }
-
-  :global(.report-viewer .markdown-body h1) { font-size: 1.2rem; font-weight: 700; margin: 1rem 0 0.5rem; }
-  :global(.report-viewer .markdown-body h2) { font-size: 1.05rem; font-weight: 650; margin: 0.8rem 0 0.4rem; }
-  :global(.report-viewer .markdown-body h3) { font-size: 0.95rem; font-weight: 600; margin: 0.6rem 0 0.3rem; }
-  :global(.report-viewer .markdown-body p) { margin: 0 0 0.6rem; }
-  :global(.report-viewer .markdown-body ul),
-  :global(.report-viewer .markdown-body ol) { margin: 0 0 0.6rem; padding-left: 1.5rem; }
-  :global(.report-viewer .markdown-body li) { margin-bottom: 0.2rem; }
-  :global(.report-viewer .markdown-body code) {
-    font-family: "SF Mono", "Fira Code", monospace;
-    font-size: 0.82em;
-    background: var(--bg-inset);
-    padding: 0.15em 0.4em;
-    border-radius: 4px;
-    color: var(--accent);
-  }
-  :global(.report-viewer .markdown-body pre) {
-    background: var(--bg-inset);
-    border: 1px solid var(--border-subtle);
-    border-radius: 8px;
-    padding: 0.75rem 1rem;
-    overflow-x: auto;
-    margin: 0 0 0.6rem;
-    font-size: 0.8rem;
-  }
-  :global(.report-viewer .markdown-body pre code) {
-    background: none; padding: 0; color: var(--text-secondary);
-  }
-  :global(.report-viewer .markdown-body blockquote) {
-    margin: 0 0 0.6rem;
-    padding: 0.5rem 1rem;
-    border-left: 3px solid var(--accent);
-    background: var(--bg-inset);
-    border-radius: 0 6px 6px 0;
-    color: var(--text-secondary);
-  }
-  :global(.report-viewer .markdown-body a) { color: var(--accent); text-decoration: none; }
-  :global(.report-viewer .markdown-body a:hover) { text-decoration: underline; }
-  :global(.report-viewer .markdown-body strong) { font-weight: 650; }
+  /* ── Animations ─────────────────────────────────────────────────── */
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes fadeIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes slideDown { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
 </style>

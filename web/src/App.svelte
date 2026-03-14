@@ -1,51 +1,88 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import FeatureDetail from "./pages/FeatureDetail.svelte";
+  import Explore from "./pages/Explore.svelte";
+  import Analytics from "./pages/Analytics.svelte";
+  import { fetchConfig, updateConfig, triggerEvolution } from "./lib/api";
   import { t, getLanguage, setLanguage, subscribe } from "./lib/i18n";
 
   let theme: "light" | "dark" = $state("dark");
   let lang = $state(getLanguage());
 
-  interface FeatureDef {
-    id: string;
-    icon: string;
-    color: string;
+  // Config state
+  let interval: string = $state("1h");
+  let model: string = $state("sonnet");
+  let autoRun: boolean = $state(false);
+  let saving: boolean = $state(false);
+  let message: string = $state("");
+  let messageType: "success" | "error" = $state("success");
+  let researching: boolean = $state(false);
+  let researchMessage: string = $state("");
+
+  // Tab state
+  type Tab = "works" | "explore" | "analytics";
+  let activeTab: Tab = $state("works");
+
+  // View state: null = gallery, "new" = new work pipeline, string = existing work
+  let activeView: string | null = $state(null);
+
+  // Flag to scroll to insights on analytics page
+  let scrollToInsightsFlag = $state(false);
+
+  function goToInsights() {
+    scrollToInsightsFlag = true;
+    activeTab = "analytics";
+    activeView = null;
+    // Reset flag after navigation
+    setTimeout(() => { scrollToInsightsFlag = false; }, 500);
   }
 
-  const features: FeatureDef[] = [
-    {
-      id: "viral",
-      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>`,
-      color: "linear-gradient(135deg, #f59e0b, #ef4444)",
-    },
-    {
-      id: "hotspot",
-      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>`,
-      color: "linear-gradient(135deg, #ef4444, #ec4899)",
-    },
-    {
-      id: "timing",
-      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>`,
-      color: "linear-gradient(135deg, #3b82f6, #8b5cf6)",
-    },
-    {
-      id: "pitfall",
-      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>`,
-      color: "linear-gradient(135deg, #f59e0b, #d97706)",
-    },
-    {
-      id: "copywriting",
-      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>`,
-      color: "linear-gradient(135deg, #10b981, #059669)",
-    },
-    {
-      id: "competitor",
-      icon: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>`,
-      color: "linear-gradient(135deg, #8b5cf6, #6366f1)",
-    },
+  // Mock works data
+  interface Work {
+    id: string;
+    title: string;
+    cover: string; // gradient color as cover
+    date: string;
+    status: "complete" | "draft";
+  }
+
+  const mockWorks: Work[] = [
+    { id: "w1", title: "3 Tips to 10x Your Reach", cover: "https://i.ytimg.com/vi/lHGgMOT1gGM/hq720.jpg", date: "Mar 12", status: "complete" },
+    { id: "w2", title: "Why Nobody Watches Your Videos", cover: "https://i.ytimg.com/vi/QfFOm4rMER0/hq720.jpg", date: "Mar 10", status: "complete" },
+    { id: "w3", title: "Hook Formula That Works", cover: "https://i.ytimg.com/vi/krsBRQlAFbY/hq720.jpg", date: "Mar 8", status: "complete" },
+    { id: "w4", title: "Competitor Blind Spots", cover: "https://i.ytimg.com/vi/JpLFn2_2V8M/hq720.jpg", date: "Mar 5", status: "draft" },
+    { id: "w5", title: "Weekend Posting Strategy", cover: "https://i.ytimg.com/vi/OM3Z_Cc7wJY/hq720.jpg", date: "Mar 3", status: "complete" },
   ];
 
-  let activeFeature: FeatureDef | null = $state(null);
+  async function handleSave() {
+    saving = true;
+    message = "";
+    try {
+      await updateConfig({ interval, model, autoRun });
+      message = t("settingsSaved");
+      messageType = "success";
+      setTimeout(() => { message = ""; }, 3000);
+    } catch {
+      message = t("settingsSaveFailed");
+      messageType = "error";
+    } finally {
+      saving = false;
+    }
+  }
+
+  async function handleStartResearch() {
+    researching = true;
+    researchMessage = "";
+    try {
+      await triggerEvolution();
+      researchMessage = t("researchStarted");
+      setTimeout(() => { researchMessage = ""; }, 5000);
+    } catch {
+      researchMessage = t("researchFailed");
+    } finally {
+      researching = false;
+    }
+  }
 
   function toggleTheme() {
     theme = theme === "dark" ? "light" : "dark";
@@ -58,10 +95,16 @@
     setLanguage(next);
   }
 
-  onMount(() => {
+  onMount(async () => {
     const current = document.documentElement.getAttribute("data-theme") as "light" | "dark" | null;
     theme = current ?? "dark";
     const unsub = subscribe(() => { lang = getLanguage(); });
+    try {
+      const c = await fetchConfig();
+      interval = c.interval;
+      model = c.model;
+      autoRun = c.autoRun;
+    } catch {}
     return () => unsub();
   });
 </script>
@@ -76,6 +119,20 @@
       </div>
       <h1>CreatorPilot</h1>
     </div>
+    <nav class="tab-bar">
+      <button class="tab-btn" class:active={activeTab === "works"} onclick={() => { activeTab = "works"; activeView = null; }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+        {t("tabWorks")}
+      </button>
+      <button class="tab-btn" class:active={activeTab === "explore"} onclick={() => { activeTab = "explore"; activeView = null; }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
+        {t("tabExplore")}
+      </button>
+      <button class="tab-btn" class:active={activeTab === "analytics"} onclick={() => { activeTab = "analytics"; activeView = null; }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        {t("tabAnalytics")}
+      </button>
+    </nav>
     <div class="header-actions">
       <div class="lang-switcher">
         <span class="lang-label" class:active={lang === "en"}>EN</span>
@@ -95,49 +152,114 @@
   </header>
 
   <main>
-    {#if activeFeature}
-      <FeatureDetail feature={activeFeature} onBack={() => activeFeature = null} />
+    {#if activeTab === "explore"}
+      <Explore />
+    {:else if activeTab === "analytics"}
+      <Analytics scrollToInsights={scrollToInsightsFlag} />
+    {:else if activeView !== null}
+      <FeatureDetail workId={activeView} onBack={() => activeView = null} />
     {:else}
-      <!-- Hero Section -->
-      <div class="hero">
-        <h2 class="hero-title">{t("heroTitle")}</h2>
-        <p class="hero-desc">{t("heroDesc")}</p>
+      <!-- Greeting Section -->
+      <div class="greeting">
+        <p class="greeting-line1">{t("greetingLine1")}</p>
+        <p class="greeting-line2">{t("greetingLine2a").replace("{count}", "47")}<span class="greeting-link" role="button" tabindex="0" onclick={goToInsights} onkeydown={(e) => e.key === "Enter" && goToInsights()}>{t("greetingLine2b").replace("{insights}", "3")}</span>{t("greetingLine2c")}</p>
       </div>
 
-      <!-- Feature Grid -->
-      <div class="feature-grid">
-        {#each features as feature}
-          <button class="feature-card" onclick={() => activeFeature = feature}>
-            <div class="card-icon" style="background: {feature.color}">
-              {@html feature.icon}
-            </div>
-            <div class="card-content">
-              <h3>{t(`feature_${feature.id}_name`)}</h3>
-              <p>{t(`feature_${feature.id}_desc`)}</p>
-            </div>
-            <div class="card-arrow">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <polyline points="9 18 15 12 9 6"/>
+      <!-- Research Config Area -->
+      <div class="config-area">
+        <div class="config-area-header">
+          <div class="config-area-title">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            <h3>{t("researchConfig")}</h3>
+          </div>
+          <div class="config-area-actions">
+            {#if message}
+              <span class="action-msg" class:error={messageType === "error"} class:success={messageType === "success"}>{message}</span>
+            {/if}
+            {#if researchMessage}
+              <span class="action-msg success">{researchMessage}</span>
+            {/if}
+            <button class="save-btn" onclick={handleSave} disabled={saving}>
+              {#if saving}
+                <svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+                {t("saving")}
+              {:else}
+                {t("saveChanges")}
+              {/if}
+            </button>
+            <button class="research-btn" onclick={handleStartResearch} disabled={researching}>
+              {#if researching}
+                <svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+                {t("researchingDots")}
+              {:else}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                {t("startResearch")}
+              {/if}
+            </button>
+          </div>
+        </div>
+
+        <div class="config-fields-inline">
+          <label class="config-field-inline">
+            <span class="field-label">{t("researchInterval")}</span>
+            <select bind:value={interval}>
+              <option value="15m">{t("minutes15")}</option>
+              <option value="30m">{t("minutes30")}</option>
+              <option value="1h">{t("hour1")}</option>
+              <option value="2h">{t("hours2")}</option>
+              <option value="4h">{t("hours4")}</option>
+              <option value="8h">{t("hours8")}</option>
+            </select>
+          </label>
+          <label class="config-field-inline">
+            <span class="field-label">{t("aiModel")}</span>
+            <select bind:value={model}>
+              <option value="haiku">{t("claudeHaikuFast")}</option>
+              <option value="sonnet">{t("claudeSonnetBalanced")}</option>
+              <option value="opus">{t("claudeOpusCapable")}</option>
+            </select>
+          </label>
+          <div class="config-toggle-inline">
+            <span class="field-label">{t("autoResearch")}</span>
+            <button class="toggle-switch" class:on={autoRun} onclick={() => autoRun = !autoRun} role="switch" aria-checked={autoRun}>
+              <span class="toggle-thumb"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Works Gallery -->
+      <div class="gallery-section">
+        <h3 class="gallery-title">{t("myWorks")}</h3>
+        <div class="gallery-grid">
+          <!-- New Work Card -->
+          <button class="gallery-card new-card" onclick={() => activeView = "new"}>
+            <div class="new-card-inner">
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
               </svg>
+              <span>{t("newWork")}</span>
             </div>
           </button>
-        {/each}
-      </div>
 
-      <!-- Workflow hint -->
-      <div class="workflow-hint">
-        <div class="workflow-steps">
-          <span class="wf-step">{t("wf_research")}</span>
-          <span class="wf-arrow">→</span>
-          <span class="wf-step">{t("wf_topic")}</span>
-          <span class="wf-arrow">→</span>
-          <span class="wf-step">{t("wf_script")}</span>
-          <span class="wf-arrow">→</span>
-          <span class="wf-step">{t("wf_produce")}</span>
-          <span class="wf-arrow">→</span>
-          <span class="wf-step">{t("wf_publish")}</span>
-          <span class="wf-arrow">→</span>
-          <span class="wf-step">{t("wf_analyze")}</span>
+          <!-- Existing Works -->
+          {#each mockWorks as work}
+            <button class="gallery-card" onclick={() => activeView = work.id}>
+              <div class="card-cover">
+                <img src={work.cover} alt={work.title} loading="lazy" />
+                {#if work.status === "draft"}
+                  <span class="draft-badge">Draft</span>
+                {/if}
+              </div>
+              <div class="card-info">
+                <span class="card-title">{work.title}</span>
+                <span class="card-date">{work.date}</span>
+              </div>
+            </button>
+          {/each}
         </div>
       </div>
     {/if}
@@ -304,6 +426,54 @@
     letter-spacing: -0.02em;
   }
 
+  /* ── Tab Bar ────────────────────────────────────────────────────────── */
+  .tab-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+    background: var(--bg-surface);
+    border-radius: 10px;
+    padding: 0.2rem;
+  }
+
+  .tab-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    padding: 0.4rem 0.85rem;
+    border-radius: 8px;
+    font-size: 0.82rem;
+    font-weight: 550;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+    font-family: inherit;
+  }
+
+  .tab-btn:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+  }
+
+  .tab-btn.active {
+    color: var(--accent);
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .tab-btn svg {
+    flex-shrink: 0;
+  }
+
+  @media (max-width: 640px) {
+    .tab-btn span { display: none; }
+    .tab-bar { gap: 0.15rem; padding: 0.15rem; }
+    .tab-btn { padding: 0.4rem 0.6rem; }
+  }
+
   .header-actions {
     display: flex;
     align-items: center;
@@ -382,147 +552,359 @@
     background: var(--bg-hover);
   }
 
-  /* ── Hero ───────────────────────────────────────────────────────────────── */
-  .hero {
-    text-align: center;
-    padding: 2rem 0 1.5rem;
+  /* ── Greeting ──────────────────────────────────────────────────────────── */
+  .greeting {
+    padding: 1.5rem 0 0.75rem;
   }
 
-  .hero-title {
-    font-size: 1.6rem;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    background: linear-gradient(135deg, var(--text), var(--accent));
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-  }
-
-  .hero-desc {
-    font-size: 0.9rem;
+  .greeting-line1 {
+    font-size: 0.88rem;
     color: var(--text-muted);
-    margin-top: 0.5rem;
-    max-width: 500px;
-    margin-left: auto;
-    margin-right: auto;
-    line-height: 1.6;
+    margin-bottom: 0.35rem;
   }
 
-  /* ── Feature Grid ──────────────────────────────────────────────────────── */
-  .feature-grid {
+  .greeting-line2 {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1.45;
+    color: var(--text);
+  }
+
+  .greeting-link {
+    color: var(--text);
+    cursor: pointer;
+    transition: color 0.15s ease;
+    text-decoration: none;
+  }
+
+  .greeting-link:hover {
+    color: var(--accent);
+  }
+
+  /* ── Config Area ─────────────────────────────────────────────────────── */
+  .config-area {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 1.25rem;
+    box-shadow: var(--shadow-sm);
+    margin-bottom: 1.5rem;
+  }
+
+  .config-area-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .config-area-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .config-area-title svg {
+    color: var(--accent);
+  }
+
+  .config-area-title h3 {
+    font-size: 0.95rem;
+    font-weight: 600;
+  }
+
+  .config-area-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+
+  .action-msg {
+    font-size: 0.78rem;
+    font-weight: 500;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .action-msg.success { color: var(--success); }
+  .action-msg.error { color: var(--error); }
+
+  .save-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--bg-surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 0.45rem 1rem;
+    border-radius: 8px;
+    font-weight: 550;
+    cursor: pointer;
+    font-size: 0.82rem;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+
+  .save-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+    border-color: var(--text-dim);
+  }
+
+  .save-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .research-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: var(--accent);
+    color: var(--accent-text);
+    border: none;
+    padding: 0.45rem 1rem;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.82rem;
+    transition: all 0.2s ease;
+    box-shadow: var(--shadow-sm);
+    white-space: nowrap;
+  }
+
+  .research-btn:hover:not(:disabled) {
+    background: var(--accent-hover);
+    box-shadow: var(--shadow-md);
+    transform: translateY(-1px);
+  }
+
+  .research-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .config-fields-inline {
+    display: flex;
+    align-items: flex-end;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+
+  .config-field-inline {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+    min-width: 140px;
+  }
+
+  .config-toggle-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding-bottom: 0.15rem;
+    flex-shrink: 0;
+  }
+
+  .field-label {
+    font-size: 0.8rem;
+    font-weight: 550;
+    color: var(--text-secondary);
+    white-space: nowrap;
+  }
+
+  select {
+    background: var(--bg-surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.85rem;
+    font-family: inherit;
+    transition: border-color 0.2s ease;
+  }
+
+  select:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  .toggle-switch {
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    background: var(--text-dim);
+    border: none;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.2s ease;
+    flex-shrink: 0;
+    padding: 0;
+  }
+
+  .toggle-switch.on {
+    background: var(--accent);
+  }
+
+  .toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.2s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  }
+
+  .toggle-switch.on .toggle-thumb {
+    transform: translateX(18px);
+  }
+
+  .spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── Gallery ──────────────────────────────────────────────────────────── */
+  .gallery-section {
+    margin-top: 0.5rem;
+  }
+
+  .gallery-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 1rem;
+    letter-spacing: -0.01em;
+  }
+
+  .gallery-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.875rem;
-    margin-top: 0.5rem;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
   }
 
-  @media (max-width: 640px) {
-    .feature-grid {
+  @media (max-width: 768px) {
+    .gallery-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+  }
+
+  @media (max-width: 480px) {
+    .gallery-grid {
       grid-template-columns: 1fr;
     }
   }
 
-  .feature-card {
-    display: flex;
-    align-items: center;
-    gap: 1rem;
+  .gallery-card {
     background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 1.125rem 1.25rem;
+    border-radius: 12px;
+    overflow: hidden;
     cursor: pointer;
     transition: all 0.2s ease;
     text-align: left;
-    box-shadow: var(--shadow-sm);
     color: var(--text);
     font-family: inherit;
-    font-size: inherit;
+    padding: 0;
+    box-shadow: var(--shadow-sm);
   }
 
-  .feature-card:hover {
+  .gallery-card:hover {
     border-color: var(--accent);
     box-shadow: var(--shadow-md), var(--glow);
-    transform: translateY(-2px);
+    transform: translateY(-3px);
   }
 
-  .feature-card:active {
+  .gallery-card:active {
     transform: translateY(0);
   }
 
-  .card-icon {
-    width: 44px;
-    height: 44px;
-    border-radius: 12px;
+  /* New work card */
+  .new-card {
+    border-style: dashed;
+    border-width: 2px;
+    background: transparent;
+  }
+
+  .new-card-inner {
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 0.6rem;
+    padding: 3rem 1rem;
+    color: var(--text-dim);
+    transition: color 0.2s ease;
+  }
+
+  .new-card:hover .new-card-inner {
+    color: var(--accent);
+  }
+
+  .new-card-inner span {
+    font-size: 0.85rem;
+    font-weight: 550;
+  }
+
+  /* Existing work card */
+  .card-cover {
+    aspect-ratio: 16 / 10;
+    position: relative;
+    overflow: hidden;
+    background: var(--bg-surface);
+  }
+
+  .card-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .draft-badge {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 9999px;
+    background: rgba(0,0,0,0.5);
     color: #fff;
-    flex-shrink: 0;
-    box-shadow: var(--shadow-sm);
+    backdrop-filter: blur(4px);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
   }
 
-  .card-content {
-    flex: 1;
-    min-width: 0;
+  .card-info {
+    padding: 0.75rem 0.875rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
   }
 
-  .card-content h3 {
-    font-size: 0.92rem;
+  .card-title {
+    font-size: 0.85rem;
     font-weight: 600;
     letter-spacing: -0.01em;
-    margin-bottom: 0.2rem;
-  }
-
-  .card-content p {
-    font-size: 0.78rem;
-    color: var(--text-muted);
-    line-height: 1.45;
     display: -webkit-box;
     -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
 
-  .card-arrow {
-    color: var(--text-dim);
-    flex-shrink: 0;
-    transition: all 0.2s ease;
-  }
-
-  .feature-card:hover .card-arrow {
-    color: var(--accent);
-    transform: translateX(2px);
-  }
-
-  /* ── Workflow Hint ──────────────────────────────────────────────────────── */
-  .workflow-hint {
-    margin-top: 2rem;
-    padding: 1rem 0;
-    text-align: center;
-  }
-
-  .workflow-steps {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.4rem;
-    flex-wrap: wrap;
-  }
-
-  .wf-step {
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: var(--text-muted);
-    background: var(--bg-surface);
-    padding: 0.3rem 0.65rem;
-    border-radius: 6px;
-    border: 1px solid var(--border-subtle);
-    white-space: nowrap;
-  }
-
-  .wf-arrow {
-    color: var(--text-dim);
+  .card-date {
     font-size: 0.72rem;
+    color: var(--text-dim);
   }
 
   @media (max-width: 768px) {
