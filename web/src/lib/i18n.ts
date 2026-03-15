@@ -95,7 +95,7 @@ const translations: Record<Language, Record<string, string>> = {
     lastResearchTime: "Last Research",
 
     // Strategy Results
-    strategyResults: "Strategy Results",
+    strategyResults: "Viral Formula",
     resultTitle: "Content Title",
     resultCopy: "Copy & Script",
     resultStyle: "Style Strategy",
@@ -197,7 +197,7 @@ const translations: Record<Language, Record<string, string>> = {
     stepPaused: "已暂停",
 
     // 6 pipeline steps
-    step1_name: "爆款生成器",
+    step1_name: "爆款选题生成器",
     step1_desc: "分析爆款视频提取成功 DNA — 钩子、节奏、格式",
     step2_name: "热点个性化改编",
     step2_desc: "将热点改编成符合个人风格的内容",
@@ -211,7 +211,7 @@ const translations: Record<Language, Record<string, string>> = {
     step6_desc: "基于数据预测最佳发布窗口",
 
     // Competitor URLs
-    addCompetitors: "自填竞品",
+    addCompetitors: "自定义竞品",
     competitorUrlPlaceholder: "粘贴竞争对手主页 URL...",
     aiAutoAnalysis: "AI 自动分析",
     maxUrls: "最多 10 个",
@@ -235,7 +235,7 @@ const translations: Record<Language, Record<string, string>> = {
     lastResearchTime: "上次调研",
 
     // Strategy Results
-    strategyResults: "策略成果",
+    strategyResults: "爆款公式",
     resultTitle: "内容标题",
     resultCopy: "文案大纲",
     resultStyle: "风格策略",
@@ -255,10 +255,10 @@ const translations: Record<Language, Record<string, string>> = {
     tabAnalytics: "分析",
 
     // Explore page
-    ytTrending: "YouTube 热门视频",
-    ttTrending: "TikTok 热门视频",
-    ytTags: "YouTube 热门话题",
-    ttTags: "TikTok 热门话题",
+    ytTrending: "抖音热门视频",
+    ttTrending: "小红书热门视频",
+    ytTags: "抖音热门话题",
+    ttTags: "小红书热门话题",
     views: "播放",
     likes: "点赞",
     comments: "评论",

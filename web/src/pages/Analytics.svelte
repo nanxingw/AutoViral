@@ -5,13 +5,13 @@
   let { scrollToInsights = false }: { scrollToInsights?: boolean } = $props();
 
   let lang = $state(getLanguage());
+  function tt(key: string): string { void lang; return t(key); }
   let insightsEl: HTMLElement | undefined = $state(undefined);
 
   // Mock user profile
   const profile = {
-    avatar: "https://api.dicebear.com/7.x/adventurer/svg?seed=CreatorPilot",
+    avatar: "https://api.dicebear.com/7.x/adventurer/svg?seed=AutoViral",
     username: "@alex_creates",
-    ytFollowers: "128K",
     ttFollowers: "342K",
     todayLikes: "2,847",
     todayComments: "436",
@@ -77,10 +77,6 @@
       <div class="profile-identity">
         <span class="username">{profile.username}</span>
         <div class="platform-followers">
-          <span class="pf-badge yt">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M22.54 6.42a2.78 2.78 0 0 0-1.94-2C18.88 4 12 4 12 4s-6.88 0-8.6.46a2.78 2.78 0 0 0-1.94 2A29 29 0 0 0 1 11.75a29 29 0 0 0 .46 5.33A2.78 2.78 0 0 0 3.4 19.1c1.72.46 8.6.46 8.6.46s6.88 0 8.6-.46a2.78 2.78 0 0 0 1.94-2 29 29 0 0 0 .46-5.25 29 29 0 0 0-.46-5.43z"/><polygon points="9.75 15.02 15.5 11.75 9.75 8.48 9.75 15.02" fill="#fff" stroke="none"/></svg>
-            {profile.ytFollowers}
-          </span>
           <span class="pf-badge tt">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2"><path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"/></svg>
             {profile.ttFollowers}
@@ -90,12 +86,12 @@
       <div class="profile-stats">
         <div class="stat-item">
           <span class="stat-num">{profile.todayLikes}</span>
-          <span class="stat-label">{t("todayLikes")}</span>
+          <span class="stat-label">{tt("todayLikes")}</span>
         </div>
         <div class="stat-divider"></div>
         <div class="stat-item">
           <span class="stat-num">{profile.todayComments}</span>
-          <span class="stat-label">{t("todayComments")}</span>
+          <span class="stat-label">{tt("todayComments")}</span>
         </div>
       </div>
     </div>
@@ -103,7 +99,7 @@
 
   <!-- Style Keywords -->
   <div class="style-section">
-    <h3 class="sec-title">{t("styleKeywords")}</h3>
+    <h3 class="sec-title">{tt("styleKeywords")}</h3>
     <div class="keyword-chips">
       {#each styleKeywords as kw}
         <span class="keyword-chip">{lang === "zh" ? kw.textZh : kw.text}</span>
@@ -113,11 +109,11 @@
 
   <!-- Fan Demographics -->
   <div class="demo-section">
-    <h3 class="sec-title">{t("fanDemographics")}</h3>
+    <h3 class="sec-title">{tt("fanDemographics")}</h3>
     <div class="demo-grid">
       <!-- Age Distribution -->
       <div class="demo-card">
-        <h4>{t("ageDistribution")}</h4>
+        <h4>{tt("ageDistribution")}</h4>
         <div class="bar-chart">
           {#each ageData as age}
             <div class="bar-row">
@@ -133,7 +129,7 @@
 
       <!-- Gender Split -->
       <div class="demo-card">
-        <h4>{t("genderSplit")}</h4>
+        <h4>{tt("genderSplit")}</h4>
         <div class="gender-visual">
           <div class="gender-bar">
             <div class="gender-male" style="width: {genderData.male}%"></div>
@@ -142,11 +138,11 @@
           <div class="gender-legend">
             <span class="gender-item male-item">
               <span class="gender-dot male-dot"></span>
-              {t("male")} {genderData.male}%
+              {tt("male")} {genderData.male}%
             </span>
             <span class="gender-item female-item">
               <span class="gender-dot female-dot"></span>
-              {t("female")} {genderData.female}%
+              {tt("female")} {genderData.female}%
             </span>
           </div>
         </div>
@@ -154,7 +150,7 @@
 
       <!-- Top Regions -->
       <div class="demo-card">
-        <h4>{t("topRegions")}</h4>
+        <h4>{tt("topRegions")}</h4>
         <div class="bar-chart">
           {#each topRegions as region}
             <div class="bar-row">
@@ -172,30 +168,30 @@
 
   <!-- Research Stats -->
   <div class="research-stats-section">
-    <h3 class="sec-title">{t("researchStats")}</h3>
+    <h3 class="sec-title">{tt("researchStats")}</h3>
     <div class="stats-grid">
       <div class="rs-card">
         <span class="rs-num">1,247</span>
-        <span class="rs-label">{t("totalResearched")}</span>
+        <span class="rs-label">{tt("totalResearched")}</span>
       </div>
       <div class="rs-card">
         <span class="rs-num">86</span>
-        <span class="rs-label">{t("insightsGenerated")}</span>
+        <span class="rs-label">{tt("insightsGenerated")}</span>
       </div>
       <div class="rs-card">
         <span class="rs-num">23</span>
-        <span class="rs-label">{t("worksCreated")}</span>
+        <span class="rs-label">{tt("worksCreated")}</span>
       </div>
       <div class="rs-card">
-        <span class="rs-num">2h ago</span>
-        <span class="rs-label">{t("lastResearchTime")}</span>
+        <span class="rs-num">{lang === "zh" ? "2小时前" : "2h ago"}</span>
+        <span class="rs-label">{tt("lastResearchTime")}</span>
       </div>
     </div>
   </div>
 
   <!-- Latest Insights -->
   <div class="insights-section" bind:this={insightsEl}>
-    <h3 class="sec-title">{t("latestInsights")}</h3>
+    <h3 class="sec-title">{tt("latestInsights")}</h3>
     <div class="insights-list">
       {#each insights as insight}
         <div class="insight-row">
@@ -214,38 +210,42 @@
   .analytics {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
+    gap: 1.5rem;
   }
 
   .sec-title {
-    font-size: 0.9rem;
-    font-weight: 650;
-    margin-bottom: 0.75rem;
-    letter-spacing: -0.01em;
+    font-size: 0.92rem;
+    font-weight: 700;
+    margin-bottom: 0.875rem;
+    letter-spacing: -0.015em;
+    color: var(--text);
   }
 
   /* ── Profile Card ──────────────────────────────────────────────────── */
   .profile-card {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 1.25rem;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius);
+    padding: 1.5rem;
     box-shadow: var(--shadow-sm);
+    backdrop-filter: var(--card-blur);
+    -webkit-backdrop-filter: var(--card-blur);
   }
 
   .profile-top {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 1.25rem;
   }
 
   .avatar {
-    width: 56px;
-    height: 56px;
+    width: 60px;
+    height: 60px;
     border-radius: 50%;
     background: var(--bg-surface);
     flex-shrink: 0;
-    border: 2px solid var(--border);
+    border: 2.5px solid var(--border);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
   }
 
   .profile-identity {
@@ -253,13 +253,13 @@
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 0.35rem;
+    gap: 0.4rem;
   }
 
   .username {
-    font-size: 1.1rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-size: 1.2rem;
+    font-weight: 750;
+    letter-spacing: -0.025em;
   }
 
   .platform-followers {
@@ -272,20 +272,24 @@
     align-items: center;
     gap: 0.3rem;
     font-size: 0.75rem;
-    font-weight: 600;
-    padding: 0.2rem 0.6rem;
+    font-weight: 650;
+    padding: 0.25rem 0.7rem;
     border-radius: 9999px;
     color: #fff;
+    transition: transform var(--transition-fast);
   }
 
-  .pf-badge.yt { background: #cc0000; }
-  .pf-badge.tt { background: #25f4ee; color: #000; }
-  .pf-badge.tt svg { stroke: #000; }
+  .pf-badge:hover {
+    transform: scale(1.03);
+  }
+
+  .pf-badge.tt { background: linear-gradient(135deg, #25f4ee, #fe2c55); color: #fff; }
+  .pf-badge.tt svg { stroke: #fff; }
 
   .profile-stats {
     display: flex;
     align-items: center;
-    gap: 1rem;
+    gap: 1.25rem;
     flex-shrink: 0;
   }
 
@@ -293,36 +297,39 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.1rem;
+    gap: 0.15rem;
   }
 
   .stat-num {
-    font-size: 1.15rem;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-size: 1.25rem;
+    font-weight: 750;
+    letter-spacing: -0.03em;
     font-variant-numeric: tabular-nums;
   }
 
   .stat-label {
-    font-size: 0.68rem;
+    font-size: 0.65rem;
     color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.05em;
+    font-weight: 550;
   }
 
   .stat-divider {
     width: 1px;
-    height: 32px;
+    height: 36px;
     background: var(--border);
   }
 
   /* ── Style Keywords ────────────────────────────────────────────────── */
   .style-section {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1rem 1.125rem;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius);
+    padding: 1.25rem 1.375rem;
     box-shadow: var(--shadow-sm);
+    backdrop-filter: var(--card-blur);
+    -webkit-backdrop-filter: var(--card-blur);
   }
 
   .keyword-chips {
@@ -334,25 +341,32 @@
   .keyword-chip {
     font-size: 0.82rem;
     font-weight: 550;
-    padding: 0.4rem 0.9rem;
+    padding: 0.45rem 1rem;
     border-radius: 9999px;
     background: var(--accent-soft);
     color: var(--accent);
     border: 1px solid transparent;
-    transition: all 0.15s;
+    transition: all var(--transition-fast);
+    cursor: default;
+  }
+
+  .keyword-chip:hover {
+    background: var(--accent);
+    color: var(--accent-text);
   }
 
   .keyword-chip:first-child {
-    background: var(--accent);
+    background: var(--accent-gradient);
     color: var(--accent-text);
     font-weight: 650;
+    box-shadow: 0 4px 14px rgba(134, 120, 191, 0.25);
   }
 
   /* ── Demographics ──────────────────────────────────────────────────── */
   .demo-grid {
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
-    gap: 0.75rem;
+    gap: 0.875rem;
   }
 
   @media (max-width: 768px) {
@@ -360,33 +374,35 @@
   }
 
   .demo-card {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1rem;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius);
+    padding: 1.125rem;
     box-shadow: var(--shadow-sm);
+    backdrop-filter: var(--card-blur);
+    -webkit-backdrop-filter: var(--card-blur);
   }
 
   .demo-card h4 {
-    font-size: 0.78rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    margin-bottom: 0.75rem;
+    font-size: 0.72rem;
+    font-weight: 650;
+    color: var(--text-dim);
+    margin-bottom: 0.875rem;
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.06em;
   }
 
   /* Bar chart */
   .bar-chart {
     display: flex;
     flex-direction: column;
-    gap: 0.45rem;
+    gap: 0.55rem;
   }
 
   .bar-row {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.6rem;
   }
 
   .bar-label {
@@ -404,7 +420,7 @@
 
   .bar-track {
     flex: 1;
-    height: 8px;
+    height: 7px;
     background: var(--bg-surface);
     border-radius: 4px;
     overflow: hidden;
@@ -414,7 +430,7 @@
     height: 100%;
     background: var(--info);
     border-radius: 4px;
-    transition: width 0.5s ease;
+    transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
   .bar-fill.accent {
@@ -424,7 +440,7 @@
   .bar-pct {
     width: 32px;
     font-size: 0.72rem;
-    font-weight: 600;
+    font-weight: 650;
     color: var(--text-secondary);
     text-align: right;
     font-variant-numeric: tabular-nums;
@@ -434,30 +450,31 @@
   .gender-visual {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    gap: 0.875rem;
   }
 
   .gender-bar {
     display: flex;
-    height: 12px;
-    border-radius: 6px;
+    height: 10px;
+    border-radius: 5px;
     overflow: hidden;
+    gap: 2px;
   }
 
-  .gender-male { background: #60a5fa; }
-  .gender-female { background: #f472b6; }
+  .gender-male { background: #60a5fa; border-radius: 5px 0 0 5px; }
+  .gender-female { background: #f472b6; border-radius: 0 5px 5px 0; }
 
   .gender-legend {
     display: flex;
-    gap: 1rem;
+    gap: 1.25rem;
   }
 
   .gender-item {
     display: flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: 0.4rem;
     font-size: 0.78rem;
-    font-weight: 550;
+    font-weight: 600;
     color: var(--text-secondary);
   }
 
@@ -472,17 +489,19 @@
 
   /* ── Research Stats ─────────────────────────────────────────────────── */
   .research-stats-section {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1rem 1.125rem;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius);
+    padding: 1.25rem 1.375rem;
     box-shadow: var(--shadow-sm);
+    backdrop-filter: var(--card-blur);
+    -webkit-backdrop-filter: var(--card-blur);
   }
 
   .stats-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
-    gap: 0.75rem;
+    gap: 0.875rem;
   }
 
   @media (max-width: 640px) {
@@ -490,39 +509,47 @@
   }
 
   .rs-card {
-    background: var(--bg-surface);
+    background: var(--bg-inset);
     border: 1px solid var(--border-subtle);
-    border-radius: 10px;
-    padding: 0.875rem 1rem;
+    border-radius: 12px;
+    padding: 1rem;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.2rem;
+    gap: 0.3rem;
     text-align: center;
+    transition: border-color var(--transition-fast);
+  }
+
+  .rs-card:hover {
+    border-color: var(--border);
   }
 
   .rs-num {
-    font-size: 1.35rem;
-    font-weight: 700;
+    font-size: 1.5rem;
+    font-weight: 750;
     color: var(--accent);
-    letter-spacing: -0.02em;
+    letter-spacing: -0.03em;
     font-variant-numeric: tabular-nums;
   }
 
   .rs-label {
-    font-size: 0.7rem;
+    font-size: 0.65rem;
     color: var(--text-dim);
     text-transform: uppercase;
-    letter-spacing: 0.03em;
+    letter-spacing: 0.05em;
+    font-weight: 550;
   }
 
   /* ── Insights ──────────────────────────────────────────────────────── */
   .insights-section {
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1rem 1.125rem;
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius);
+    padding: 1.25rem 1.375rem;
     box-shadow: var(--shadow-sm);
+    backdrop-filter: var(--card-blur);
+    -webkit-backdrop-filter: var(--card-blur);
   }
 
   .insights-list {
@@ -534,40 +561,42 @@
   .insight-row {
     display: flex;
     align-items: flex-start;
-    gap: 0.75rem;
-    padding: 0.65rem 0.4rem;
-    border-radius: 8px;
-    transition: background 0.15s;
+    gap: 0.875rem;
+    padding: 0.75rem 0.5rem;
+    border-radius: 10px;
+    transition: background var(--transition-fast);
     cursor: pointer;
   }
 
   .insight-row:hover { background: var(--bg-hover); }
 
   .insight-dot {
-    width: 8px;
-    height: 8px;
+    width: 7px;
+    height: 7px;
     border-radius: 50%;
     background: var(--accent);
     flex-shrink: 0;
-    margin-top: 0.35rem;
+    margin-top: 0.4rem;
+    box-shadow: 0 0 8px rgba(134, 120, 191, 0.35);
   }
 
   .insight-body {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 0.15rem;
+    gap: 0.2rem;
   }
 
   .insight-title {
     font-size: 0.85rem;
     font-weight: 550;
     color: var(--text);
-    line-height: 1.45;
+    line-height: 1.5;
   }
 
   .insight-date {
     font-size: 0.7rem;
     color: var(--text-dim);
+    font-weight: 500;
   }
 </style>
