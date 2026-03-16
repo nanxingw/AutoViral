@@ -3,6 +3,7 @@ import { readFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
+import { DataCollector, type PublishEngineLike } from "../data-collector.js";
 import { executor, runEvolutionCycle } from "../executor.js";
 import { isSchedulerRunning, getNextRun, reschedule } from "../scheduler.js";
 import { listReports, readReport } from "../reports.js";
@@ -18,6 +19,7 @@ import {
   updateWork as storeUpdateWork, deleteWork as storeDeleteWork,
   listAssets, getAssetPath,
 } from "../work-store.js";
+import { MemoryClient } from "../memory.js";
 
 export const apiRoutes = new Hono();
 
@@ -691,5 +693,158 @@ apiRoutes.get("/api/works/:id/assets/:filename", async (c) => {
     });
   } catch {
     return c.json({ error: "Asset not found" }, 404);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Data Collector — lazy singleton and API routes
+// ---------------------------------------------------------------------------
+
+let _collector: DataCollector | null = null;
+
+/** Get or create the DataCollector singleton. Starts with null engine. */
+export function getCollector(): DataCollector {
+  if (!_collector) {
+    _collector = new DataCollector(null);
+  }
+  return _collector;
+}
+
+/** Set the publish engine on the collector once it's ready. */
+export function setCollectorEngine(engine: PublishEngineLike): void {
+  getCollector().setPublishEngine(engine);
+}
+
+// GET /api/trends/:platform — return latest trend data
+apiRoutes.get("/api/trends/:platform", async (c) => {
+  const platform = c.req.param("platform");
+  try {
+    const collector = getCollector();
+    const trends = await collector.getLatestTrends(platform);
+    if (!trends) return c.json({ error: "No trend data available" }, 404);
+    return c.json(trends);
+  } catch {
+    return c.json({ error: "Failed to load trends" }, 500);
+  }
+});
+
+// GET /api/analytics — aggregate metrics from all published works
+apiRoutes.get("/api/analytics", async (c) => {
+  try {
+    const summaries = await listWorks();
+    let totalWorks = 0;
+    let totalViews = 0;
+    let totalLikes = 0;
+    let totalComments = 0;
+
+    for (const summary of summaries) {
+      if (summary.status !== "published") continue;
+      totalWorks++;
+
+      const work = await getWork(summary.id);
+      if (!work) continue;
+
+      for (const entry of work.platforms) {
+        if (!entry.metrics || entry.metrics.length === 0) continue;
+        // Use the latest snapshot for each platform
+        const latest = entry.metrics[entry.metrics.length - 1];
+        totalViews += latest.views ?? 0;
+        totalLikes += latest.likes ?? 0;
+        totalComments += latest.comments ?? 0;
+      }
+    }
+
+    return c.json({ totalWorks, totalViews, totalLikes, totalComments });
+  } catch {
+    return c.json({ totalWorks: 0, totalViews: 0, totalLikes: 0, totalComments: 0 });
+  }
+});
+
+// GET /api/analytics/work/:id — per-work growth curves (metricsHistory)
+apiRoutes.get("/api/analytics/work/:id", async (c) => {
+  const id = c.req.param("id");
+  try {
+    const work = await getWork(id);
+    if (!work) return c.json({ error: "Work not found" }, 404);
+
+    const metricsHistory: Record<string, Array<{
+      views?: number; likes?: number; comments?: number; shares?: number; collectedAt: string;
+    }>> = {};
+
+    for (const entry of work.platforms) {
+      metricsHistory[entry.platform] = entry.metrics ?? [];
+    }
+
+    return c.json({ id: work.id, title: work.title, metricsHistory });
+  } catch {
+    return c.json({ error: "Work not found" }, 404);
+  }
+});
+
+// POST /api/collector/trigger — manually trigger collection
+apiRoutes.post("/api/collector/trigger", async (c) => {
+  try {
+    const body = await c.req.json<{ type?: "metrics" | "trends"; platforms?: string[] }>().catch(() => ({}));
+    const collector = getCollector();
+    const type = (body as any).type ?? "metrics";
+
+    if (type === "trends") {
+      const platforms = (body as any).platforms ?? ["youtube", "tiktok"];
+      const result = await collector.collectTrends(platforms);
+      return c.json({ triggered: true, type: "trends", ...result });
+    }
+
+    const result = await collector.collectPostMetrics();
+    return c.json({ triggered: true, type: "metrics", ...result });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "Collection failed" }, 500);
+  }
+});
+
+// GET /api/collector/status — placeholder returning enabled status
+apiRoutes.get("/api/collector/status", async (c) => {
+  try {
+    const config = await loadConfig();
+    const collector = getCollector();
+    return c.json({
+      enabled: true,
+      metricsEnabled: config.collector?.metricsEnabled ?? true,
+      trendEnabled: config.collector?.trendEnabled ?? true,
+      trendInterval: config.collector?.trendInterval ?? "6h",
+      circuitBreaker: collector.getCircuitBreakerStatus(),
+    });
+  } catch {
+    return c.json({ enabled: false });
+  }
+});
+
+// GET /api/competitors — list tracked competitors
+apiRoutes.get("/api/competitors", async (c) => {
+  try {
+    const config = await loadConfig();
+    return c.json({ competitors: config.collector?.competitors ?? [] });
+  } catch {
+    return c.json({ competitors: [] });
+  }
+});
+
+// POST /api/competitors — add or update tracked competitors
+apiRoutes.post("/api/competitors", async (c) => {
+  try {
+    const body = await c.req.json<{
+      competitors: Array<{ platform: string; profileUrl: string; name: string }>;
+    }>();
+    if (!body.competitors || !Array.isArray(body.competitors)) {
+      return c.json({ error: "competitors array is required" }, 400);
+    }
+    const config = await loadConfig();
+    if (!config.collector) {
+      config.collector = { competitors: [] };
+    }
+    config.collector.competitors = body.competitors;
+    await saveConfig(config);
+    return c.json({ competitors: config.collector.competitors });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "Failed to update competitors" }, 400);
   }
 });
