@@ -3,6 +3,21 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
 
+export interface CollectorConfig {
+  trendInterval?: string;
+  metricsEnabled?: boolean;
+  trendEnabled?: boolean;
+  competitors?: Array<{ platform: string; profileUrl: string; name: string }>;
+}
+
+export interface MemoryConfig {
+  apiKey?: string;
+  userId?: string;
+  weeklyReview?: boolean;
+  reviewDay?: string;
+  reviewTime?: string;
+}
+
 export interface Config {
   interval: string;
   model: string;
@@ -21,6 +36,9 @@ export interface Config {
   taskMaxRetries: number;          // max consecutive failures before auto-pause
   taskCompletedRetention: number;  // max completed/expired tasks to keep
   taskOneShotExpiryHours: number;  // expiry window for missed one-shot tasks
+  // AutoViral extensions
+  collector?: CollectorConfig;
+  memory?: MemoryConfig;
 }
 
 const CONFIG_DIR = join(homedir(), ".skill-evolver");
@@ -44,6 +62,8 @@ export function getDefaultConfig(): Config {
     taskMaxRetries: 3,
     taskCompletedRetention: 20,
     taskOneShotExpiryHours: 2,
+    collector: { trendInterval: "6h", metricsEnabled: true, trendEnabled: true, competitors: [] },
+    memory: { apiKey: "", userId: "autoviral-user", weeklyReview: true, reviewDay: "sunday", reviewTime: "09:00" },
   };
 }
 
