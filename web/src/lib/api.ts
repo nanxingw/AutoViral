@@ -233,3 +233,84 @@ export async function fetchIdeas(): Promise<Idea[]> {
   const data = await request<{ ideas: Idea[] }>("/api/ideas");
   return data.ideas;
 }
+
+// ---------------------------------------------------------------------------
+// Work types
+// ---------------------------------------------------------------------------
+
+export type WorkType = "short-video" | "image-text" | "long-video" | "livestream";
+export type WorkStatus = "draft" | "creating" | "ready" | "publishing" | "published" | "failed";
+
+export interface WorkSummary {
+  id: string;
+  title: string;
+  type: WorkType;
+  status: WorkStatus;
+  updatedAt: string;
+}
+
+export interface PipelineStep {
+  name: string;
+  status: "pending" | "active" | "done" | "skipped";
+  startedAt?: string;
+  completedAt?: string;
+  note?: string;
+}
+
+export interface PlatformEntry {
+  platform: string;
+  publishedUrl?: string;
+  publishedAt?: string;
+}
+
+export interface Work {
+  id: string;
+  title: string;
+  type: WorkType;
+  status: WorkStatus;
+  platforms: PlatformEntry[];
+  pipeline: Record<string, PipelineStep>;
+  cliSessionId?: string;
+  coverImage?: string;
+  topicHint?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// ---------------------------------------------------------------------------
+// Work API
+// ---------------------------------------------------------------------------
+
+export async function fetchWorks(): Promise<WorkSummary[]> {
+  const data = await request<{ works: WorkSummary[] }>("/api/works");
+  return data.works;
+}
+
+export async function fetchWork(id: string): Promise<Work> {
+  return request<Work>(`/api/works/${encodeURIComponent(id)}`);
+}
+
+export async function createWorkApi(input: {
+  title: string;
+  type: WorkType;
+  platforms: string[];
+  topicHint?: string;
+}): Promise<Work> {
+  return request<Work>("/api/works", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateWorkApi(id: string, updates: Partial<Work>): Promise<Work> {
+  return request<Work>(`/api/works/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(updates),
+  });
+}
+
+export async function deleteWorkApi(id: string): Promise<void> {
+  await request<{ deleted: boolean }>(`/api/works/${encodeURIComponent(id)}`, { method: "DELETE" });
+}
