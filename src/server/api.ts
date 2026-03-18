@@ -8,7 +8,7 @@ import { loadConfig, saveConfig, type Config } from "../config.js";
 import {
   listWorks, getWork, createWork as storeCreateWork,
   updateWork as storeUpdateWork, deleteWork as storeDeleteWork,
-  listAssets, getAssetPath,
+  listAssets, getAssetPath, saveStepHistory, loadStepHistory,
 } from "../work-store.js";
 import { MemoryClient } from "../memory.js";
 import type { WsBridge } from "../ws-bridge.js";
@@ -312,10 +312,9 @@ async function researchTrends(platforms: string[]): Promise<{ collected: string[
       `你必须输出有效的 JSON，这是硬性要求，不允许输出其他格式。`,
       ``,
       `输出格式（只输出这个 JSON，不要其他任何文字）：`,
-      `{"videos":[{"title":"内容标题","thumb":"","views":"1.2万","likes":"3200","comments":"156"}],"tags":[{"tag":"#话题","posts":"50万","trend":"up"}]}`,
+      `{"topics":[{"title":"话题标题","heat":4,"competition":"中","description":"简短描述和建议方向"}]}`,
       ``,
-      `videos 至少8条，tags 至少10个。trend 为 up/down/stable。`,
-      `views/likes/comments/posts 用中文简写（万/亿）。`,
+      `topics 至少8个。heat 为 1-5 的整数。competition 为 "低"/"中"/"高"。`,
     ].join("\n");
 
     try {
@@ -329,12 +328,12 @@ async function researchTrends(platforms: string[]): Promise<{ collected: string[
       }
 
       const data = JSON.parse(stripped.slice(firstBrace, lastBrace + 1));
-      if (!data.videos || !data.tags) {
+      if (!data.topics || !Array.isArray(data.topics)) {
         errors.push(platform);
         continue;
       }
 
-      const trendsDir = join(homedir(), ".skill-evolver", "trends", platform);
+      const trendsDir = join(homedir(), ".autoviral", "trends", platform);
       await mkdir(trendsDir, { recursive: true });
       const dateStr = new Date().toISOString().slice(0, 10);
       await writeFile(
@@ -356,7 +355,7 @@ async function researchTrends(platforms: string[]): Promise<{ collected: string[
 apiRoutes.get("/api/trends/:platform", async (c) => {
   const platform = c.req.param("platform");
   try {
-    const trendsDir = join(homedir(), ".skill-evolver", "trends", platform);
+    const trendsDir = join(homedir(), ".autoviral", "trends", platform);
     const files = await readdir(trendsDir);
     const yamlFiles = files.filter(f => f.endsWith(".yaml")).sort().reverse();
     if (yamlFiles.length === 0) return c.json({ error: "No trend data available" }, 404);
@@ -378,6 +377,52 @@ apiRoutes.post("/api/trends/refresh", async (c) => {
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : "Collection failed" }, 500);
   }
+});
+
+// POST /api/trends/refresh-stream — streaming trend research via WsBridge
+apiRoutes.post("/api/trends/refresh-stream", async (c) => {
+  if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
+
+  try {
+    const body = await c.req.json<{ platform?: string }>().catch(() => ({}));
+    const platform = (body as any).platform ?? "douyin";
+    const platformLabel = platform === "xiaohongshu" ? "小红书" : platform === "douyin" ? "抖音" : platform;
+
+    const sessionKey = `trends_${platform}_${Date.now()}`;
+
+    const prompt = [
+      `你是一个社交媒体趋势研究员。请搜索 ${platformLabel} 平台当前最热门的内容趋势和话题。`,
+      ``,
+      `使用 WebSearch 搜索以下内容：`,
+      `- "${platformLabel} 热门话题 2026"`,
+      `- "${platformLabel} 爆款内容 趋势"`,
+      `- "${platformLabel} 热搜榜"`,
+      ``,
+      `然后根据搜索结果，整理成以下 JSON 格式。`,
+      `即使搜索结果不完整，也要根据已有信息尽力填充，估算数据也可以。`,
+      `你必须输出有效的 JSON，这是硬性要求，不允许输出其他格式。`,
+      ``,
+      `输出格式（只输出这个 JSON，不要其他任何文字）：`,
+      `{"topics":[{"title":"话题标题","heat":4,"competition":"中","description":"简短描述和建议方向"}]}`,
+      ``,
+      `topics 至少8个。heat 为 1-5 的整数。competition 为 "低"/"中"/"高"。`,
+    ].join("\n");
+
+    await wsBridge.createTrendSession(sessionKey, prompt);
+
+    return c.json({ sessionKey, platform });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "Failed to start research" }, 500);
+  }
+});
+
+// POST /api/trends/cancel/:sessionKey — cancel trend research
+apiRoutes.post("/api/trends/cancel/:sessionKey", async (c) => {
+  if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
+
+  const sessionKey = c.req.param("sessionKey");
+  const killed = wsBridge.killTrendSession(sessionKey);
+  return c.json({ cancelled: killed });
 });
 
 // ---------------------------------------------------------------------------
@@ -434,7 +479,7 @@ apiRoutes.post("/api/works/:id/chat", async (c) => {
       return c.json({ sent: true, sessionCreated: true, workId: id });
     }
 
-    const sent = wsBridge.sendMessage(id, body.text);
+    const sent = await wsBridge.sendMessage(id, body.text);
     if (!sent) return c.json({ error: "Failed to send message" }, 500);
     return c.json({ sent: true, workId: id });
   } catch (err) {
@@ -455,6 +500,16 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
     const pipelineStep = work.pipeline[step];
     if (!pipelineStep) return c.json({ error: `Unknown pipeline step: ${step}` }, 404);
 
+    // Check prerequisites: all preceding steps must be done/skipped
+    const stepKeys = Object.keys(work.pipeline);
+    const stepIdx = stepKeys.indexOf(step);
+    for (let i = 0; i < stepIdx; i++) {
+      const prev = work.pipeline[stepKeys[i]];
+      if (prev.status !== "done" && prev.status !== "skipped") {
+        return c.json({ error: `Previous step "${prev.name}" is not completed` }, 400);
+      }
+    }
+
     const prompt = [
       `You are working on a content piece: "${work.title}" (type: ${work.type}).`,
       `Platforms: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}.`,
@@ -471,10 +526,58 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
       return c.json({ triggered: true, sessionCreated: true, workId: id, step });
     }
 
-    wsBridge.sendMessage(id, prompt);
+    await wsBridge.sendMessage(id, prompt);
     return c.json({ triggered: true, workId: id, step });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : "Step trigger error" }, 500);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Step History API (persistent execution logs per pipeline step)
+// ---------------------------------------------------------------------------
+
+// GET /api/works/:id/steps/:step/history
+apiRoutes.get("/api/works/:id/steps/:step/history", async (c) => {
+  const id = c.req.param("id");
+  const step = c.req.param("step");
+  const history = await loadStepHistory(id, step);
+  if (!history) return c.json({ error: "No history for this step" }, 404);
+  return c.json(history);
+});
+
+// POST /api/works/:id/steps/:step/history
+apiRoutes.post("/api/works/:id/steps/:step/history", async (c) => {
+  const id = c.req.param("id");
+  const step = c.req.param("step");
+  const body = await c.req.json();
+  await saveStepHistory(id, step, body);
+  return c.json({ saved: true });
+});
+
+// GET /api/works/:id/chat — load full conversation
+apiRoutes.get("/api/works/:id/chat", async (c) => {
+  const id = c.req.param("id");
+  try {
+    const { loadWorkChat } = await import("../work-store.js");
+    const chat = await loadWorkChat(id);
+    if (!chat) return c.json({ error: "No chat history" }, 404);
+    return c.json(chat);
+  } catch {
+    return c.json({ error: "No chat history" }, 404);
+  }
+});
+
+// PUT /api/works/:id/chat — save full conversation
+apiRoutes.put("/api/works/:id/chat", async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json();
+  try {
+    const { saveWorkChat } = await import("../work-store.js");
+    await saveWorkChat(id, body);
+    return c.json({ saved: true });
+  } catch {
+    return c.json({ error: "Save failed" }, 500);
   }
 });
 
