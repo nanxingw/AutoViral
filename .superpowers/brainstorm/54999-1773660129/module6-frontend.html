@@ -1,0 +1,212 @@
+<h2>Module 6: Frontend — Creation Studio & Interaction Design</h2>
+<p class="subtitle">Redesign FeatureDetail into a real creation workspace with chat panel. Major changes to web/src/</p>
+
+<div class="mockup">
+  <div class="mockup-header">Navigation Restructure</div>
+  <div class="mockup-body" style="padding: 20px;">
+    <div style="font-size: 12px; margin-bottom: 16px;">
+      <div style="font-weight: bold; color: #f59e0b; margin-bottom: 8px;">Tab Bar Change: 3 tabs → 5 tabs</div>
+      <div style="display: flex; gap: 0; background: rgba(255,255,255,0.05); border-radius: 8px; overflow: hidden; font-size: 11px;">
+        <div style="padding: 10px 20px; background: rgba(134,120,191,0.2); border-right: 1px solid rgba(255,255,255,0.05);">
+          <div style="font-weight: bold;">Works</div>
+          <div style="color: #888; font-size: 10px;">Gallery + New</div>
+        </div>
+        <div style="padding: 10px 20px; background: rgba(52,211,153,0.25); border: 1px solid rgba(52,211,153,0.4); border-right: 1px solid rgba(255,255,255,0.05);">
+          <div style="font-weight: bold; color: #34d399;">Studio ★</div>
+          <div style="color: #888; font-size: 10px;">Creation workspace</div>
+        </div>
+        <div style="padding: 10px 20px; background: rgba(134,120,191,0.2); border-right: 1px solid rgba(255,255,255,0.05);">
+          <div style="font-weight: bold;">Explore</div>
+          <div style="color: #888; font-size: 10px;">Real trends</div>
+        </div>
+        <div style="padding: 10px 20px; background: rgba(134,120,191,0.2); border-right: 1px solid rgba(255,255,255,0.05);">
+          <div style="font-weight: bold;">Analytics</div>
+          <div style="color: #888; font-size: 10px;">Real metrics</div>
+        </div>
+        <div style="padding: 10px 20px; background: rgba(99,179,237,0.2); border: 1px solid rgba(99,179,237,0.3);">
+          <div style="font-weight: bold; color: #63b3ed;">Memory ★</div>
+          <div style="color: #888; font-size: 10px;">AI learned</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Studio Layout -->
+<div class="mockup" style="margin-top: 16px;">
+  <div class="mockup-header">Creation Studio — Layout Wireframe</div>
+  <div class="mockup-body" style="padding: 0; min-height: 400px;">
+    <div style="display: grid; grid-template-columns: 280px 1fr 320px; height: 400px; font-size: 11px;">
+
+      <!-- Left: Pipeline Steps -->
+      <div style="background: rgba(134,120,191,0.08); border-right: 1px solid rgba(255,255,255,0.08); padding: 16px; overflow-y: auto;">
+        <div style="font-weight: bold; color: #8678bf; margin-bottom: 12px; font-size: 12px;">Pipeline Steps</div>
+
+        <div style="background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.3); border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #34d399;">✓ 1. 爆款选题</span>
+            <span style="color: #888; font-size: 10px;">done</span>
+          </div>
+          <div style="color: #888; font-size: 10px; margin-top: 4px;">AI工具效率提升 → 打工人AI神器</div>
+        </div>
+
+        <div style="background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.3); border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #34d399;">✓ 2. 趋势混搭</span>
+            <span style="color: #888; font-size: 10px;">done</span>
+          </div>
+          <div style="color: #888; font-size: 10px; margin-top: 4px;">结合 #效率提升 挑战</div>
+        </div>
+
+        <div style="background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3); border-radius: 8px; padding: 10px; margin-bottom: 8px;">
+          <div style="display: flex; justify-content: space-between;">
+            <span style="color: #f59e0b;">● 3. 差异化分析</span>
+            <span style="color: #f59e0b; font-size: 10px;">running</span>
+          </div>
+          <div style="color: #888; font-size: 10px; margin-top: 4px;">
+            <div style="background: rgba(245,158,11,0.2); height: 3px; border-radius: 2px; margin-top: 4px;">
+              <div style="background: #f59e0b; height: 3px; border-radius: 2px; width: 60%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px; margin-bottom: 8px; opacity: 0.5;">
+          <span style="color: #888;">4. 脚本分镜</span>
+        </div>
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px; margin-bottom: 8px; opacity: 0.5;">
+          <span style="color: #888;">5. 视频制作指导</span>
+        </div>
+        <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 10px; opacity: 0.5;">
+          <span style="color: #888;">6. 发布 + 复盘</span>
+        </div>
+
+        <!-- Content Type Indicator -->
+        <div style="margin-top: 16px; padding: 10px; background: rgba(255,255,255,0.03); border-radius: 8px;">
+          <div style="color: #888; font-size: 10px;">CONTENT TYPE</div>
+          <div style="font-weight: bold; margin-top: 2px;">🎬 短视频</div>
+          <div style="color: #888; font-size: 10px; margin-top: 4px;">Platforms: 抖音, 小红书</div>
+        </div>
+      </div>
+
+      <!-- Center: Main Content Area -->
+      <div style="padding: 16px; overflow-y: auto;">
+        <div style="font-weight: bold; font-size: 14px; margin-bottom: 4px;">Step 3: 差异化分析</div>
+        <div style="color: #888; font-size: 11px; margin-bottom: 16px;">Agent is analyzing competitors and finding your unique angle...</div>
+
+        <!-- Agent Output (streaming) -->
+        <div style="background: rgba(52,211,153,0.08); border-radius: 8px; padding: 14px; margin-bottom: 12px; line-height: 1.8;">
+          <div style="color: #34d399; font-size: 10px; margin-bottom: 6px;">🤖 Agent</div>
+          <div style="font-size: 12px;">
+            我分析了你提供的3个竞品视频，发现以下差异化机会：<br><br>
+            <strong>1. 内容角度差异</strong><br>
+            竞品多走"功能展示"路线，你可以走<span style="color: #f59e0b;">"效率对比"</span>路线 — 直接演示使用前后的时间差距...<br><br>
+            <strong>2. 叙事结构差异</strong><br>
+            竞品用传统"介绍→演示→总结"，你可以用<span style="color: #f59e0b;">"痛点→解决→惊喜"</span>结构...
+            <span style="color: #888; animation: blink 1s infinite;">▊</span>
+          </div>
+        </div>
+
+        <!-- Previous step result (collapsed) -->
+        <div style="background: rgba(255,255,255,0.03); border-radius: 8px; padding: 10px; margin-bottom: 8px; cursor: pointer;">
+          <div style="display: flex; justify-content: space-between; color: #888;">
+            <span>▶ Step 2 Result: 趋势混搭方案</span>
+            <span style="font-size: 10px;">click to expand</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Chat Panel -->
+      <div style="background: rgba(99,179,237,0.05); border-left: 1px solid rgba(255,255,255,0.08); display: flex; flex-direction: column;">
+        <div style="padding: 12px; border-bottom: 1px solid rgba(255,255,255,0.08); font-weight: bold; color: #63b3ed; font-size: 12px;">
+          Chat with Agent
+        </div>
+
+        <!-- Chat messages -->
+        <div style="flex: 1; overflow-y: auto; padding: 12px;">
+          <div style="background: rgba(134,120,191,0.15); border-radius: 8px 8px 8px 2px; padding: 8px 10px; margin-bottom: 8px; font-size: 11px;">
+            <div style="color: #8678bf; font-size: 10px; margin-bottom: 2px;">You</div>
+            这个选题会不会太普通？AI工具的视频很多了
+          </div>
+          <div style="background: rgba(52,211,153,0.1); border-radius: 8px 8px 2px 8px; padding: 8px 10px; margin-bottom: 8px; font-size: 11px;">
+            <div style="color: #34d399; font-size: 10px; margin-bottom: 2px;">Agent</div>
+            确实竞争激烈，但根据你的记忆数据，你之前"工具对比"类视频表现优于"工具推荐"类2.1倍。建议保持对比角度，但换一个更具体的场景——比如"自由职业者一天"...
+          </div>
+          <div style="background: rgba(134,120,191,0.15); border-radius: 8px 8px 8px 2px; padding: 8px 10px; margin-bottom: 8px; font-size: 11px;">
+            <div style="color: #8678bf; font-size: 10px; margin-bottom: 2px;">You</div>
+            好主意，用这个方向重新生成
+          </div>
+          <div style="background: rgba(52,211,153,0.1); border-radius: 8px 8px 2px 8px; padding: 8px 10px; font-size: 11px;">
+            <div style="color: #34d399; font-size: 10px; margin-bottom: 2px;">Agent</div>
+            已重新生成。新标题："自由职业者的一天：3个AI工具让我每天多出2小时"。这个角度更有代入感...
+          </div>
+        </div>
+
+        <!-- Input -->
+        <div style="padding: 12px; border-top: 1px solid rgba(255,255,255,0.08);">
+          <div style="display: flex; gap: 8px;">
+            <div style="flex: 1; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 8px 10px; font-size: 11px; color: #888;">
+              Type your feedback or instructions...
+            </div>
+            <div style="background: #8678bf; padding: 8px 12px; border-radius: 8px; color: white; font-size: 11px; display: flex; align-items: center;">
+              Send
+            </div>
+          </div>
+          <div style="display: flex; gap: 6px; margin-top: 8px;">
+            <span style="background: rgba(255,255,255,0.06); padding: 3px 8px; border-radius: 4px; font-size: 10px; color: #888; cursor: pointer;">🔄 Regenerate</span>
+            <span style="background: rgba(255,255,255,0.06); padding: 3px 8px; border-radius: 4px; font-size: 10px; color: #888; cursor: pointer;">⏭ Next Step</span>
+            <span style="background: rgba(255,255,255,0.06); padding: 3px 8px; border-radius: 4px; font-size: 10px; color: #888; cursor: pointer;">⏮ Redo Step</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- New Work Flow -->
+<div class="section" style="margin-top: 20px;">
+  <h3>New Work Creation Flow</h3>
+  <div style="background: rgba(255,255,255,0.05); padding: 14px; border-radius: 8px; font-size: 12px; line-height: 2;">
+    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 11px;">
+      <span style="background: rgba(134,120,191,0.3); padding: 4px 10px; border-radius: 12px;">Click "+"</span>
+      <span style="color: #555;">→</span>
+      <span style="background: rgba(134,120,191,0.2); padding: 4px 10px; border-radius: 12px;">Choose type<br><span style="font-size:9px;">短视频/图文/长视频/直播</span></span>
+      <span style="color: #555;">→</span>
+      <span style="background: rgba(134,120,191,0.2); padding: 4px 10px; border-radius: 12px;">Select platforms<br><span style="font-size:9px;">小红书/抖音 (multi)</span></span>
+      <span style="color: #555;">→</span>
+      <span style="background: rgba(245,158,11,0.2); padding: 4px 10px; border-radius: 12px;">Optional: topic hint<br><span style="font-size:9px;">or leave blank for AI</span></span>
+      <span style="color: #555;">→</span>
+      <span style="background: rgba(52,211,153,0.3); padding: 4px 10px; border-radius: 12px;">Enter Studio<br><span style="font-size:9px;">CLI session spawned</span></span>
+    </div>
+  </div>
+</div>
+
+<!-- Page Changes Summary -->
+<div class="section" style="margin-top: 20px;">
+  <h3>All Frontend Changes</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 12px;">
+    <div style="background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #34d399; margin-bottom: 6px;">New Pages</div>
+      <div style="font-size: 11px; line-height: 2;">
+        <div><span style="color:#34d399;">+</span> <code>Studio.svelte</code> — Creation workspace (replaces FeatureDetail)</div>
+        <div><span style="color:#34d399;">+</span> <code>Memory.svelte</code> — Memory dashboard tab</div>
+        <div><span style="color:#34d399;">+</span> <code>NewWorkModal.svelte</code> — Type + platform picker</div>
+        <div><span style="color:#34d399;">+</span> <code>ChatPanel.svelte</code> — Reusable chat component</div>
+        <div><span style="color:#34d399;">+</span> <code>PipelineSteps.svelte</code> — Left sidebar step list</div>
+        <div><span style="color:#34d399;">+</span> <code>PublishModal.svelte</code> — Platform select + confirm</div>
+        <div><span style="color:#34d399;">+</span> <code>LoginModal.svelte</code> — Platform QR login prompt</div>
+      </div>
+    </div>
+    <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #f59e0b; margin-bottom: 6px;">Modified Pages</div>
+      <div style="font-size: 11px; line-height: 2;">
+        <div><span style="color:#f59e0b;">~</span> <code>App.svelte</code> — 5 tabs, route to Studio</div>
+        <div><span style="color:#f59e0b;">~</span> <code>Explore.svelte</code> — real data from /api/trends</div>
+        <div><span style="color:#f59e0b;">~</span> <code>Analytics.svelte</code> — real data from /api/analytics</div>
+        <div><span style="color:#f59e0b;">~</span> <code>lib/api.ts</code> — add work/publish/memory/trend APIs</div>
+        <div><span style="color:#f59e0b;">~</span> <code>lib/ws.ts</code> — add per-work WS connection</div>
+        <div><span style="color:#f59e0b;">~</span> <code>lib/i18n.ts</code> — new strings for all new UI</div>
+        <div><span style="color:#fb7185;">-</span> <code>FeatureDetail.svelte</code> — replaced by Studio</div>
+      </div>
+    </div>
+  </div>
+</div>

@@ -57,9 +57,15 @@
   async function handleCollectNow() {
     collecting = true;
     try {
-      await fetch("/api/collector/trigger", { method: "POST" });
-      // Re-fetch after a short delay to let collection start
-      setTimeout(() => fetchTrends(), 2000);
+      const res = await fetch("/api/collector/trigger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "research", platforms: ["xiaohongshu", "douyin"] }),
+      });
+      const data = await res.json();
+      if (data.collected?.length > 0) {
+        await fetchTrends();
+      }
     } catch (_) {
       // ignore
     } finally {

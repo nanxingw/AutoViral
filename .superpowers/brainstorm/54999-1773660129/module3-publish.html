@@ -1,0 +1,178 @@
+<h2>Module 3: Publish Engine — Playwright Browser Automation</h2>
+<p class="subtitle">Automated publishing to Xiaohongshu & Douyin via browser control. New file: src/publish-engine.ts</p>
+
+<div class="mockup">
+  <div class="mockup-header">Publishing Flow</div>
+  <div class="mockup-body" style="font-family: monospace; font-size: 12px; line-height: 1.8; padding: 20px;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <!-- Left: Flow -->
+      <div>
+        <div style="font-weight: bold; color: #fb7185; margin-bottom: 8px;">Publish Lifecycle</div>
+        <div style="background: rgba(251,113,133,0.1); padding: 14px; border-radius: 8px; line-height: 2.2;">
+          <div><span style="color:#8678bf;">①</span> User clicks "Publish" on ready work</div>
+          <div>&nbsp;&nbsp;→ selects platforms: [xiaohongshu, douyin]</div>
+          <div>&nbsp;&nbsp;→ optional: schedule time or publish now</div>
+          <div><span style="color:#8678bf;">②</span> Backend checks login state</div>
+          <div>&nbsp;&nbsp;→ load saved cookies from <code>~/.skill-evolver/auth/</code></div>
+          <div>&nbsp;&nbsp;→ if expired → prompt user to re-login</div>
+          <div><span style="color:#8678bf;">③</span> Launch Playwright browser (per platform)</div>
+          <div>&nbsp;&nbsp;→ <code>chromium.launchPersistentContext(userDataDir)</code></div>
+          <div>&nbsp;&nbsp;→ persistent context = cookies survive restarts</div>
+          <div><span style="color:#8678bf;">④</span> Platform adapter executes publish</div>
+          <div>&nbsp;&nbsp;→ navigate to publish page</div>
+          <div>&nbsp;&nbsp;→ fill title, content, upload media</div>
+          <div>&nbsp;&nbsp;→ add tags/topics</div>
+          <div>&nbsp;&nbsp;→ click publish</div>
+          <div><span style="color:#8678bf;">⑤</span> Verify & capture proof</div>
+          <div>&nbsp;&nbsp;→ wait for success confirmation</div>
+          <div>&nbsp;&nbsp;→ screenshot → save to work assets</div>
+          <div>&nbsp;&nbsp;→ extract post URL</div>
+          <div><span style="color:#8678bf;">⑥</span> Update work store + EverMemOS</div>
+          <div>&nbsp;&nbsp;→ status → published, save postUrl</div>
+          <div>&nbsp;&nbsp;→ write memory: content + platform + time</div>
+        </div>
+      </div>
+
+      <!-- Right: Login & Adapters -->
+      <div>
+        <div style="font-weight: bold; color: #f59e0b; margin-bottom: 8px;">Login Management</div>
+        <div style="background: rgba(245,158,11,0.1); padding: 14px; border-radius: 8px; line-height: 2; margin-bottom: 16px;">
+          <div style="font-size: 11px;">
+            <div style="color: #f59e0b; font-weight: bold;">Strategy: Persistent Browser Context</div>
+            <div style="margin-top: 4px;"><span style="color:#34d399;">✓</span> Use <code>launchPersistentContext()</code> with userDataDir</div>
+            <div><span style="color:#34d399;">✓</span> Cookies + localStorage persist across launches</div>
+            <div><span style="color:#34d399;">✓</span> User logs in once via visible browser window</div>
+            <div><span style="color:#34d399;">✓</span> Subsequent publishes reuse session automatically</div>
+            <div style="margin-top: 8px; color: #f59e0b; font-weight: bold;">First-time Login Flow:</div>
+            <div>1. Open visible browser: <code>headless: false</code></div>
+            <div>2. Navigate to login page</div>
+            <div>3. User scans QR code / enters credentials</div>
+            <div>4. Detect login success (URL change or cookie)</div>
+            <div>5. Save context → future launches headless</div>
+          </div>
+        </div>
+
+        <div style="font-weight: bold; color: #34d399; margin-bottom: 8px;">Platform Adapters</div>
+        <div style="background: rgba(52,211,153,0.1); padding: 14px; border-radius: 8px; font-size: 11px; line-height: 1.8;">
+<span style="color:#888;">// src/platforms/base.ts</span>
+interface PlatformAdapter {
+  name: string
+  loginUrl: string
+  publishUrl: string
+  <span style="color:#34d399;">checkLogin(page): Promise&lt;boolean&gt;</span>
+  <span style="color:#34d399;">login(page): Promise&lt;void&gt;</span>
+  <span style="color:#34d399;">publish(page, content): Promise&lt;PublishResult&gt;</span>
+  <span style="color:#34d399;">scrapeMetrics(page, postUrl): Promise&lt;Metrics&gt;</span>
+}
+
+<span style="color:#888;">// src/platforms/xiaohongshu.ts</span>
+class XiaohongshuAdapter implements PlatformAdapter {
+  loginUrl = "https://creator.xiaohongshu.com"
+  publishUrl = "https://creator.xiaohongshu.com/publish/publish"
+  <span style="color:#888;">// QR code login → detect cookie</span>
+  <span style="color:#888;">// Upload cover + content + tags</span>
+}
+
+<span style="color:#888;">// src/platforms/douyin.ts</span>
+class DouyinAdapter implements PlatformAdapter {
+  loginUrl = "https://creator.douyin.com"
+  publishUrl = "https://creator.douyin.com/creator-micro/content/upload"
+  <span style="color:#888;">// QR code login → detect cookie</span>
+  <span style="color:#888;">// Upload video + title + tags + cover</span>
+}</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Content Formatting -->
+<div class="section" style="margin-top: 20px;">
+  <h3>Content Formatting per Platform</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 12px;">
+    <div style="background: rgba(251,113,133,0.1); border: 1px solid rgba(251,113,133,0.2); border-radius: 8px; padding: 14px;">
+      <div style="font-weight: bold; color: #fb7185; margin-bottom: 8px;">小红书 Xiaohongshu</div>
+      <table style="width: 100%; font-size: 11px; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 4px; color: #888;">短视频</td>
+          <td style="padding: 4px;">视频 + 标题 + 正文 + 话题标签 + 封面</td>
+        </tr>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 4px; color: #888;">图文</td>
+          <td style="padding: 4px;">多图(最多18张) + 标题 + 正文 + 话题标签</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px; color: #888;">限制</td>
+          <td style="padding: 4px;">标题≤20字, 正文≤1000字, 话题≤10个</td>
+        </tr>
+      </table>
+    </div>
+    <div style="background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.2); border-radius: 8px; padding: 14px;">
+      <div style="font-weight: bold; color: #34d399; margin-bottom: 8px;">抖音 Douyin</div>
+      <table style="width: 100%; font-size: 11px; border-collapse: collapse;">
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 4px; color: #888;">短视频</td>
+          <td style="padding: 4px;">视频 + 标题描述 + 话题 + 封面 + 定位</td>
+        </tr>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 4px; color: #888;">图文</td>
+          <td style="padding: 4px;">多图 + 文字描述 + 音乐(可选)</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px; color: #888;">限制</td>
+          <td style="padding: 4px;">描述≤4000字, 视频≤15min, 话题≤5个</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- File Layout -->
+<div class="section" style="margin-top: 20px;">
+  <h3>File Structure</h3>
+  <div style="background: rgba(255,255,255,0.05); padding: 14px; border-radius: 8px; font-family: monospace; font-size: 11px; line-height: 2;">
+<span style="color:#f59e0b;">src/</span>
+├── publish-engine.ts         <span style="color:#888;"># orchestrator: login check → format → publish → verify</span>
+├── platforms/
+│   ├── base.ts               <span style="color:#888;"># PlatformAdapter interface</span>
+│   ├── xiaohongshu.ts        <span style="color:#888;"># 小红书 creator platform automation</span>
+│   └── douyin.ts             <span style="color:#888;"># 抖音 creator platform automation</span>
+
+<span style="color:#f59e0b;">~/.skill-evolver/</span>
+├── auth/
+│   ├── xiaohongshu/          <span style="color:#888;"># persistent browser context (cookies + storage)</span>
+│   └── douyin/               <span style="color:#888;"># persistent browser context</span>
+
+<span style="color:#f59e0b;">API routes (added to api.ts):</span>
+POST /api/works/:id/publish           <span style="color:#888;"># {platforms: ["xiaohongshu","douyin"], scheduleAt?: ISO}</span>
+POST /api/platforms/:name/login       <span style="color:#888;"># open visible browser for QR login</span>
+GET  /api/platforms/:name/status      <span style="color:#888;"># check if logged in (cookie valid)</span>
+GET  /api/platforms                    <span style="color:#888;"># list all platforms + login status</span>
+  </div>
+</div>
+
+<!-- Error Handling -->
+<div class="section" style="margin-top: 20px;">
+  <h3>Error Handling & Safety</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 12px;">
+    <div style="background: rgba(251,113,133,0.1); padding: 12px; border-radius: 8px; line-height: 1.8;">
+      <div style="font-weight: bold; color: #fb7185; margin-bottom: 4px;">Failure Scenarios</div>
+      <div style="font-size: 11px;">
+        <div>• Login expired → prompt user, don't auto-retry</div>
+        <div>• Upload timeout → retry once, then mark failed</div>
+        <div>• Platform UI changed → adapter throws, work stays "ready"</div>
+        <div>• Network error → retry with backoff (max 3)</div>
+        <div>• Content rejected by platform → capture error screenshot</div>
+      </div>
+    </div>
+    <div style="background: rgba(52,211,153,0.1); padding: 12px; border-radius: 8px; line-height: 1.8;">
+      <div style="font-weight: bold; color: #34d399; margin-bottom: 4px;">Safety Measures</div>
+      <div style="font-size: 11px;">
+        <div>• Visible browser for first login (no credential storage)</div>
+        <div>• Screenshot every publish for audit trail</div>
+        <div>• User must confirm before publishing (no auto-publish without consent)</div>
+        <div>• Rate limiting: max 5 publishes per platform per day</div>
+        <div>• Dry-run mode: fill form but don't click submit</div>
+      </div>
+    </div>
+  </div>
+</div>

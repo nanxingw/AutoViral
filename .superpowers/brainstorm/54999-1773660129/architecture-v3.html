@@ -1,0 +1,193 @@
+<h2>Final Architecture: AutoViral Full Product</h2>
+<p class="subtitle">Pneuma-skills CLI control + EverMemOS memory integration</p>
+
+<div class="mockup">
+  <div class="mockup-header">Complete System Architecture</div>
+  <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 1.8; padding: 20px;">
+
+    <!-- Top: User Interface Layer -->
+    <div style="text-align: center; margin-bottom: 20px;">
+      <span style="background: linear-gradient(135deg, #8678bf, #34d399); -webkit-background-clip: text; color: transparent; font-size: 18px; font-weight: bold;">AutoViral — Closed-Loop Content Platform</span>
+    </div>
+
+    <!-- Row 1: Frontend -->
+    <div style="background: rgba(134,120,191,0.12); border: 1px solid rgba(134,120,191,0.25); border-radius: 12px; padding: 16px; margin-bottom: 12px;">
+      <div style="color: #8678bf; font-weight: bold; margin-bottom: 10px;">Frontend — Svelte 5 (port 3271)</div>
+      <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; font-size: 11px;">
+        <div style="background: rgba(134,120,191,0.15); padding: 8px; border-radius: 6px; text-align: center;">
+          <div style="font-weight: bold;">Works</div>
+          <div style="color: #888;">内容管理<br>Gallery</div>
+        </div>
+        <div style="background: rgba(52,211,153,0.15); padding: 8px; border-radius: 6px; text-align: center; border: 1px solid rgba(52,211,153,0.3);">
+          <div style="font-weight: bold; color: #34d399;">Creation Studio</div>
+          <div style="color: #888;">6步流水线<br>+ Chat Panel</div>
+        </div>
+        <div style="background: rgba(134,120,191,0.15); padding: 8px; border-radius: 6px; text-align: center;">
+          <div style="font-weight: bold;">Explore</div>
+          <div style="color: #888;">真实趋势<br>Real Data</div>
+        </div>
+        <div style="background: rgba(134,120,191,0.15); padding: 8px; border-radius: 6px; text-align: center;">
+          <div style="font-weight: bold;">Analytics</div>
+          <div style="color: #888;">真实数据<br>Real Metrics</div>
+        </div>
+        <div style="background: rgba(52,211,153,0.15); padding: 8px; border-radius: 6px; text-align: center; border: 1px solid rgba(52,211,153,0.3);">
+          <div style="font-weight: bold; color: #34d399;">Memory</div>
+          <div style="color: #888;">记忆看板<br>风格画像</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 2: Backend Services -->
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+      <!-- WsBridge -->
+      <div style="background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.25); border-radius: 12px; padding: 16px;">
+        <div style="color: #34d399; font-weight: bold; margin-bottom: 8px;">WsBridge — Agent Session Manager</div>
+        <div style="font-size: 11px; line-height: 1.8;">
+          <div><span style="color: #f59e0b;">pneuma pattern:</span> --sdk-url WebSocket</div>
+          <div>Per-work persistent CLI session</div>
+          <div>Multi-turn dialogue (user ⇄ Agent)</div>
+          <div>--resume across restarts</div>
+          <div>Tool approval flow (bypassPermissions)</div>
+          <div style="color: #34d399; margin-top: 4px;">Stream events → Frontend WebSocket</div>
+        </div>
+      </div>
+      <!-- Publish Engine -->
+      <div style="background: rgba(251,113,133,0.12); border: 1px solid rgba(251,113,133,0.25); border-radius: 12px; padding: 16px;">
+        <div style="color: #fb7185; font-weight: bold; margin-bottom: 8px;">Publish Engine — Playwright Automation</div>
+        <div style="font-size: 11px; line-height: 1.8;">
+          <div>Platform adapters: 小红书 / 抖音</div>
+          <div>Cookie-based login persistence</div>
+          <div>Content format per platform</div>
+          <div>Scheduled publishing (optimal time)</div>
+          <div>Screenshot proof of publish</div>
+          <div style="color: #fb7185; margin-top: 4px;">Publish result → Memory + Analytics</div>
+        </div>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+      <!-- Data Collector -->
+      <div style="background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.25); border-radius: 12px; padding: 16px;">
+        <div style="color: #f59e0b; font-weight: bold; margin-bottom: 8px;">Data Collector — Playwright Scraper</div>
+        <div style="font-size: 11px; line-height: 1.8;">
+          <div>Cron-scheduled metric collection</div>
+          <div>Track: views / likes / comments / shares</div>
+          <div>Trend data (YouTube/TikTok/小红书/抖音)</div>
+          <div>Competitor content monitoring</div>
+          <div style="color: #f59e0b; margin-top: 4px;">Metrics → Analytics + Memory</div>
+        </div>
+      </div>
+      <!-- EverMemOS -->
+      <div style="background: rgba(99,179,237,0.12); border: 1px solid rgba(99,179,237,0.25); border-radius: 12px; padding: 16px;">
+        <div style="color: #63b3ed; font-weight: bold; margin-bottom: 8px;">EverMemOS — Long-term Memory</div>
+        <div style="font-size: 11px; line-height: 1.8;">
+          <div><span style="color: #f59e0b;">via evermem-async API client</span></div>
+          <div>创作记忆: topic/style/what worked</div>
+          <div>数据记忆: metrics per content piece</div>
+          <div>平台规则: learned posting patterns</div>
+          <div>竞品洞察: competitor strategies</div>
+          <div style="color: #63b3ed; margin-top: 4px;">hybrid search → inject into CLI prompt</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 3: Data Flow -->
+    <div style="background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; padding: 16px;">
+      <div style="font-weight: bold; margin-bottom: 12px; color: #f59e0b;">Closed Loop: Create → Publish → Measure → Learn → Create Better</div>
+      <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px;">
+        <span style="background: #8678bf; color: white; padding: 4px 10px; border-radius: 16px;">1. Create</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(52,211,153,0.2); padding: 4px 10px; border-radius: 16px; border: 1px solid rgba(52,211,153,0.4);">WsBridge + Claude CLI</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(134,120,191,0.2); padding: 4px 10px; border-radius: 16px;">User reviews & refines</span>
+        <span style="color: #555;">→</span>
+        <span style="background: #fb7185; color: white; padding: 4px 10px; border-radius: 16px;">2. Publish</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(251,113,133,0.2); padding: 4px 10px; border-radius: 16px; border: 1px solid rgba(251,113,133,0.4);">Playwright → 小红书/抖音</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 11px; margin-top: 8px;">
+        <span style="background: #f59e0b; color: white; padding: 4px 10px; border-radius: 16px;">3. Measure</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(245,158,11,0.2); padding: 4px 10px; border-radius: 16px; border: 1px solid rgba(245,158,11,0.4);">Scrape metrics (cron)</span>
+        <span style="color: #555;">→</span>
+        <span style="background: #63b3ed; color: white; padding: 4px 10px; border-radius: 16px;">4. Learn</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(99,179,237,0.2); padding: 4px 10px; border-radius: 16px; border: 1px solid rgba(99,179,237,0.4);">EverMemOS stores insights</span>
+        <span style="color: #555;">→</span>
+        <span style="background: #8678bf; color: white; padding: 4px 10px; border-radius: 16px;">5. Create Better</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(134,120,191,0.2); padding: 4px 10px; border-radius: 16px;">memory-injected prompt</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Memory Integration Detail -->
+<div class="section" style="margin-top: 24px;">
+  <h3>EverMemOS Integration Points</h3>
+  <div style="font-size: 13px; line-height: 1.8;">
+    <table style="width: 100%; border-collapse: collapse;">
+      <thead>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.1);">
+          <th style="text-align: left; padding: 8px; color: #63b3ed;">Trigger</th>
+          <th style="text-align: left; padding: 8px; color: #63b3ed;">Action</th>
+          <th style="text-align: left; padding: 8px; color: #63b3ed;">Memory Type</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 8px;">New Work created</td>
+          <td style="padding: 8px;">Search past creations + style profile → inject into CLI prompt</td>
+          <td style="padding: 8px; color: #34d399;">READ: profile + episodic</td>
+        </tr>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 8px;">Pipeline step completed</td>
+          <td style="padding: 8px;">Store step result + user feedback as episodic memory</td>
+          <td style="padding: 8px; color: #fb7185;">WRITE: episodic_memory</td>
+        </tr>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 8px;">Content published</td>
+          <td style="padding: 8px;">Store publish metadata (platform, time, content hash)</td>
+          <td style="padding: 8px; color: #fb7185;">WRITE: episodic_memory</td>
+        </tr>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 8px;">Metrics collected (cron)</td>
+          <td style="padding: 8px;">Store performance data, update associated creation memory</td>
+          <td style="padding: 8px; color: #fb7185;">WRITE: episodic_memory</td>
+        </tr>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 8px;">Weekly review (cron)</td>
+          <td style="padding: 8px;">Agent analyzes all metrics → generates style/rule insights</td>
+          <td style="padding: 8px; color: #f59e0b;">WRITE: profile</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px;">Explore page loaded</td>
+          <td style="padding: 8px;">Search competitor memories → show alongside live trends</td>
+          <td style="padding: 8px; color: #34d399;">READ: episodic</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Tech Stack -->
+<div class="section" style="margin-top: 24px;">
+  <h3>New Dependencies</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; font-size: 12px;">
+    <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px;">
+      <div style="font-weight: bold; margin-bottom: 6px;">WsBridge (new module)</div>
+      <div style="color: #888;">Based on pneuma-skills ws-bridge.ts</div>
+      <div style="color: #888;">WebSocket server for CLI sessions</div>
+    </div>
+    <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px;">
+      <div style="font-weight: bold; margin-bottom: 6px;">Playwright</div>
+      <div style="color: #888;">Browser automation</div>
+      <div style="color: #888;">Publishing + scraping</div>
+    </div>
+    <div style="background: rgba(255,255,255,0.05); padding: 12px; border-radius: 8px;">
+      <div style="font-weight: bold; margin-bottom: 6px;">evermemos.js (import)</div>
+      <div style="color: #888;">From evermem-async project</div>
+      <div style="color: #888;">Memory read/write API client</div>
+    </div>
+  </div>
+</div>

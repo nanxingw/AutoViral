@@ -1,0 +1,185 @@
+<h2>Module 2: Work Store — Content Persistence</h2>
+<p class="subtitle">Replace mock gallery data with real YAML-based work storage. New file: src/work-store.ts</p>
+
+<div class="mockup">
+  <div class="mockup-header">Work Data Model</div>
+  <div class="mockup-body" style="font-family: monospace; font-size: 12px; line-height: 1.8; padding: 20px;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <!-- Left: YAML Schema -->
+      <div>
+        <div style="font-weight: bold; color: #34d399; margin-bottom: 8px;">Work Schema (YAML)</div>
+        <div style="background: rgba(0,0,0,0.3); padding: 14px; border-radius: 8px; font-size: 11px; line-height: 1.9; white-space: pre;">id: work_a1b2c3
+title: "3天涨粉1万的秘密"
+type: short-video          <span style="color:#888;"># short-video | image-text | long-video | livestream</span>
+status: published          <span style="color:#888;"># draft | creating | ready | publishing | published | failed</span>
+contentType: short-video
+platforms:
+  - name: xiaohongshu
+    publishedAt: "2026-03-15T10:30:00Z"
+    postUrl: "https://..."
+    metrics:
+      views: 12400
+      likes: 892
+      comments: 156
+      shares: 43
+      lastUpdated: "2026-03-16T08:00:00Z"
+  - name: douyin
+    publishedAt: "2026-03-15T11:00:00Z"
+    postUrl: "https://..."
+    metrics:
+      views: 45200
+      likes: 3201
+      comments: 487
+
+pipeline:
+  step1_topic:
+    status: completed
+    result: "短视频选题：3天涨粉秘密..."
+    completedAt: "2026-03-14T09:00:00Z"
+  step2_remix:
+    status: completed
+    result: "结合热门挑战 #转型..."
+    completedAt: "2026-03-14T09:15:00Z"
+  step3_differentiation:
+    status: completed
+    result: "竞品分析：对比3个头部..."
+    competitorUrls:
+      - "https://..."
+    completedAt: "2026-03-14T09:30:00Z"
+  step4_script:
+    status: completed
+    result: "开头hook: 你知道..."
+    completedAt: "2026-03-14T10:00:00Z"
+  step5_production:
+    status: completed
+    result: "视频素材路径..."
+    completedAt: "2026-03-14T14:00:00Z"
+  step6_publish:
+    status: completed
+    publishResults:
+      - platform: xiaohongshu
+        success: true
+        screenshotPath: "..."
+
+cliSessionId: "sess_xyz789"   <span style="color:#888;"># for --resume</span>
+coverImage: "/works/a1b2c3/cover.jpg"
+createdAt: "2026-03-14T08:30:00Z"
+updatedAt: "2026-03-16T08:00:00Z"</div>
+      </div>
+
+      <!-- Right: Storage Layout + API -->
+      <div>
+        <div style="font-weight: bold; color: #f59e0b; margin-bottom: 8px;">File System Layout</div>
+        <div style="background: rgba(245,158,11,0.1); padding: 14px; border-radius: 8px; font-size: 11px; line-height: 2;">
+<span style="color:#f59e0b;">~/.skill-evolver/</span>
+├── works/
+│   ├── <span style="color:#34d399;">works.yaml</span>         <span style="color:#888;"># index: all works metadata</span>
+│   ├── work_a1b2c3/
+│   │   ├── <span style="color:#34d399;">work.yaml</span>      <span style="color:#888;"># full work data (schema above)</span>
+│   │   ├── <span style="color:#34d399;">assets/</span>        <span style="color:#888;"># generated images, videos, scripts</span>
+│   │   │   ├── cover.jpg
+│   │   │   ├── script.md
+│   │   │   └── video.mp4
+│   │   └── <span style="color:#34d399;">chat-log.jsonl</span> <span style="color:#888;"># conversation history backup</span>
+│   └── work_d4e5f6/
+│       ├── work.yaml
+│       ├── assets/
+│       └── chat-log.jsonl
+├── config.yaml              <span style="color:#888;"># existing</span>
+├── tasks/                   <span style="color:#888;"># existing</span>
+└── reports/                 <span style="color:#888;"># existing</span></div>
+
+        <div style="font-weight: bold; color: #8678bf; margin: 16px 0 8px;">REST API (new routes in api.ts)</div>
+        <div style="background: rgba(134,120,191,0.1); padding: 14px; border-radius: 8px; font-size: 11px; line-height: 2;">
+<span style="color:#34d399;">GET</span>    /api/works              <span style="color:#888;"># list all works</span>
+<span style="color:#34d399;">POST</span>   /api/works              <span style="color:#888;"># create new work {title, type}</span>
+<span style="color:#34d399;">GET</span>    /api/works/:id          <span style="color:#888;"># get full work data</span>
+<span style="color:#34d399;">PUT</span>    /api/works/:id          <span style="color:#888;"># update work fields</span>
+<span style="color:#fb7185;">DELETE</span> /api/works/:id          <span style="color:#888;"># delete work + assets</span>
+<span style="color:#34d399;">GET</span>    /api/works/:id/assets   <span style="color:#888;"># list assets</span>
+<span style="color:#34d399;">GET</span>    /api/works/:id/assets/:f <span style="color:#888;"># serve asset file</span>
+<span style="color:#f59e0b;">POST</span>   /api/works/:id/chat     <span style="color:#888;"># send message to CLI session</span>
+<span style="color:#f59e0b;">POST</span>   /api/works/:id/step/:n  <span style="color:#888;"># trigger pipeline step N</span>
+<span style="color:#f59e0b;">POST</span>   /api/works/:id/publish  <span style="color:#888;"># trigger publish to platforms</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Content Types -->
+<div class="section" style="margin-top: 20px;">
+  <h3>Content Type Pipelines</h3>
+  <p class="subtitle">Each content type has a different pipeline, but shares the same Work schema</p>
+  <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; font-size: 11px;">
+    <div style="background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #34d399; margin-bottom: 6px;">short-video</div>
+      <div style="line-height: 1.8;">
+        1. 爆款选题<br>
+        2. 趋势混搭<br>
+        3. 差异化分析<br>
+        4. 脚本分镜<br>
+        5. 视频制作指导<br>
+        6. 发布 + 复盘
+      </div>
+      <div style="color: #888; margin-top: 6px;">Platforms: 抖音, 小红书</div>
+    </div>
+    <div style="background: rgba(134,120,191,0.1); border: 1px solid rgba(134,120,191,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #8678bf; margin-bottom: 6px;">image-text</div>
+      <div style="line-height: 1.8;">
+        1. 选题策划<br>
+        2. 文案撰写<br>
+        3. 图片规划<br>
+        4. 排版设计指导<br>
+        5. 封面优化<br>
+        6. 发布 + 复盘
+      </div>
+      <div style="color: #888; margin-top: 6px;">Platforms: 小红书</div>
+    </div>
+    <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #f59e0b; margin-bottom: 6px;">long-video</div>
+      <div style="line-height: 1.8;">
+        1. 主题研究<br>
+        2. 大纲编排<br>
+        3. 详细脚本<br>
+        4. 分镜头脚本<br>
+        5. 后期指导<br>
+        6. 发布 + 复盘
+      </div>
+      <div style="color: #888; margin-top: 6px;">Platforms: YouTube, B站</div>
+    </div>
+    <div style="background: rgba(251,113,133,0.1); border: 1px solid rgba(251,113,133,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #fb7185; margin-bottom: 6px;">livestream</div>
+      <div style="line-height: 1.8;">
+        1. 直播主题<br>
+        2. 流程编排<br>
+        3. 话术脚本<br>
+        4. 互动设计<br>
+        5. 预热文案<br>
+        6. 预约 + 复盘
+      </div>
+      <div style="color: #888; margin-top: 6px;">Platforms: 抖音, 小红书</div>
+    </div>
+  </div>
+</div>
+
+<!-- Work Status Flow -->
+<div class="section" style="margin-top: 20px;">
+  <h3>Work Status State Machine</h3>
+  <div style="background: rgba(255,255,255,0.05); padding: 16px; border-radius: 8px; font-family: monospace; font-size: 12px; text-align: center; line-height: 2.5;">
+    <span style="background: rgba(134,120,191,0.3); padding: 4px 12px; border-radius: 12px;">draft</span>
+    <span style="color: #555;"> → </span>
+    <span style="background: rgba(52,211,153,0.3); padding: 4px 12px; border-radius: 12px;">creating</span>
+    <span style="color: #555;"> → </span>
+    <span style="background: rgba(245,158,11,0.3); padding: 4px 12px; border-radius: 12px;">ready</span>
+    <span style="color: #555;"> → </span>
+    <span style="background: rgba(251,113,133,0.3); padding: 4px 12px; border-radius: 12px;">publishing</span>
+    <span style="color: #555;"> → </span>
+    <span style="background: rgba(52,211,153,0.5); padding: 4px 12px; border-radius: 12px;">published</span>
+    <br>
+    <span style="color: #888; font-size: 11px;">
+      draft: 刚创建 &nbsp;|&nbsp; creating: Agent 正在生成 &nbsp;|&nbsp; ready: 所有步骤完成,待发布 &nbsp;|&nbsp; publishing: Playwright 发布中 &nbsp;|&nbsp; published: 已上线
+    </span>
+    <br>
+    <span style="color: #fb7185; font-size: 11px;">Any state can → failed (with error message)</span>
+  </div>
+</div>

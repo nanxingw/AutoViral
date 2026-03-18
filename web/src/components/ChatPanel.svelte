@@ -24,6 +24,7 @@
 
   let input = $state("");
   let scrollContainer: HTMLDivElement | undefined = $state();
+  let textareaEl: HTMLTextAreaElement | undefined = $state();
 
   onMount(() => {
     const unsub = subscribe(() => { lang = getLanguage(); });
@@ -50,8 +51,9 @@
   function sendMessage() {
     const text = input.trim();
     if (!text || disabled) return;
-    onSend(text);
     input = "";
+    if (textareaEl) textareaEl.value = "";
+    onSend(text);
   }
 </script>
 
@@ -72,6 +74,7 @@
   <div class="chat-input-area">
     <textarea
       class="chat-input"
+      bind:this={textareaEl}
       bind:value={input}
       onkeydown={handleKeydown}
       {placeholder}

@@ -9,12 +9,14 @@
     platforms = [],
     currentStep = "",
     onStepClick,
+    onNextStep,
   }: {
     pipeline: Record<string, PipelineStep>;
     contentType: string;
     platforms: string[];
     currentStep: string;
     onStepClick: (stepKey: string) => void;
+    onNextStep?: (stepKey: string) => void;
   } = $props();
 
   let lang = $state(getLanguage());
@@ -25,55 +27,8 @@
     return unsub;
   });
 
-  const stepLabels: Record<string, Record<string, string>> = {
-    "short-video": {
-      topic: "爆款选题",
-      remix: "热点改编",
-      differentiation: "差异化洞察",
-      script: "脚本分镜",
-      production: "视频制作",
-      publish: "发布复盘",
-    },
-    "image-text": {
-      topic: "选题策划",
-      remix: "热点改编",
-      differentiation: "差异化洞察",
-      script: "文案撰写",
-      production: "图片制作",
-      publish: "发布复盘",
-    },
-    "long-video": {
-      topic: "深度选题",
-      remix: "热点改编",
-      differentiation: "差异化洞察",
-      script: "脚本大纲",
-      production: "视频剪辑",
-      publish: "发布复盘",
-    },
-    livestream: {
-      topic: "直播策划",
-      remix: "热点融入",
-      differentiation: "差异化洞察",
-      script: "话术准备",
-      production: "场景布置",
-      publish: "复盘总结",
-    },
-  };
-
-  const defaultLabels: Record<string, string> = {
-    topic: "选题",
-    remix: "改编",
-    differentiation: "洞察",
-    script: "脚本",
-    production: "制作",
-    publish: "发布",
-  };
-
-  const stepOrder = ["topic", "remix", "differentiation", "script", "production", "publish"];
-
-  function getLabel(key: string): string {
-    return stepLabels[contentType]?.[key] ?? defaultLabels[key] ?? key;
-  }
+  // Use actual pipeline keys from data
+  let stepKeys = $derived(Object.keys(pipeline));
 
   function statusIcon(status: string): string {
     if (status === "done") return "✓";
@@ -89,6 +44,18 @@
     if (status === "skipped") return "step-failed" + active;
     return "step-pending" + active;
   }
+
+  // Find the next pending step after the current one
+  let nextPendingStep = $derived.by(() => {
+    const idx = stepKeys.indexOf(currentStep);
+    if (idx < 0) return null;
+    const currentStatus = pipeline[currentStep]?.status;
+    // Only show next if current step conversation is done (step still pending but turn_complete happened)
+    for (let i = idx + 1; i < stepKeys.length; i++) {
+      if (pipeline[stepKeys[i]]?.status === "pending") return stepKeys[i];
+    }
+    return null;
+  });
 
   const typeLabels: Record<string, string> = {
     "short-video": "🎬 短视频",
@@ -109,7 +76,7 @@
   </div>
 
   <div class="steps-list">
-    {#each stepOrder as key, i}
+    {#each stepKeys as key, i}
       {@const step = pipeline[key]}
       {@const status = step?.status ?? "pending"}
       <button
@@ -118,7 +85,7 @@
       >
         <span class="step-num">{i + 1}</span>
         <span class="step-icon">{statusIcon(status)}</span>
-        <span class="step-label">{getLabel(key)}</span>
+        <span class="step-label">{step?.name ?? key}</span>
         <span class="step-status-text">
           {#if status === "done"}
             {tt("stepCompletedLabel")}
@@ -133,6 +100,14 @@
       </button>
     {/each}
   </div>
+
+  {#if nextPendingStep && onNextStep}
+    <div class="next-step-bar">
+      <button class="next-step-btn" onclick={() => onNextStep!(nextPendingStep!)}>
+        {pipeline[nextPendingStep]?.name ?? nextPendingStep} →
+      </button>
+    </div>
+  {/if}
 
   <div class="pipeline-footer">
     <div class="footer-item">
@@ -153,7 +128,6 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    border-right: 1px solid var(--border);
     background: var(--bg-elevated);
   }
 
@@ -196,10 +170,7 @@
     text-align: left;
     width: 100%;
   }
-
-  .step-item:hover {
-    background: var(--bg-hover);
-  }
+  .step-item:hover { background: var(--bg-hover); }
 
   .step-num {
     font-size: 0.68rem;
@@ -209,56 +180,50 @@
     text-align: center;
     flex-shrink: 0;
   }
+  .step-icon { font-size: 0.75rem; flex-shrink: 0; width: 1rem; text-align: center; }
+  .step-label { flex: 1; font-weight: 550; }
+  .step-status-text { font-size: 0.68rem; font-weight: 500; flex-shrink: 0; }
 
-  .step-icon {
-    font-size: 0.75rem;
-    flex-shrink: 0;
-    width: 1rem;
-    text-align: center;
-  }
-
-  .step-label {
-    flex: 1;
-    font-weight: 550;
-  }
-
-  .step-status-text {
-    font-size: 0.68rem;
-    font-weight: 500;
-    flex-shrink: 0;
-  }
-
-  /* Status colors */
-  .step-done {
-    border-color: rgba(52, 211, 153, 0.3);
-  }
+  .step-done { border-color: rgba(52, 211, 153, 0.3); }
   .step-done .step-icon { color: var(--success); }
   .step-done .step-status-text { color: var(--success); }
 
-  .step-running {
-    border-color: rgba(245, 158, 11, 0.3);
-  }
+  .step-running { border-color: rgba(245, 158, 11, 0.3); }
   .step-running .step-icon { color: var(--state-running); }
   .step-running .step-status-text { color: var(--state-running); }
 
-  .step-failed {
-    border-color: rgba(251, 113, 133, 0.3);
-  }
+  .step-failed { border-color: rgba(251, 113, 133, 0.3); }
   .step-failed .step-icon { color: var(--error); }
   .step-failed .step-status-text { color: var(--error); }
 
-  .step-pending {
-    opacity: 0.5;
-  }
+  .step-pending { opacity: 0.5; }
   .step-pending .step-icon { color: var(--text-dim); }
   .step-pending .step-status-text { color: var(--text-dim); }
 
-  /* Active step highlight */
   .step-active {
     border-color: var(--accent) !important;
     background: var(--accent-soft);
     opacity: 1;
   }
+
+  .next-step-bar {
+    padding: 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .next-step-btn {
+    width: 100%;
+    background: var(--accent-gradient);
+    color: var(--accent-text);
+    border: none;
+    border-radius: 10px;
+    padding: 0.55rem 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .next-step-btn:hover { filter: brightness(1.1); }
 
   .pipeline-footer {
     padding: 0.75rem 1rem;
@@ -267,21 +232,7 @@
     flex-direction: column;
     gap: 0.4rem;
   }
-
-  .footer-item {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 0.72rem;
-  }
-
-  .footer-label {
-    color: var(--text-dim);
-    font-weight: 500;
-  }
-
-  .footer-value {
-    color: var(--text-secondary);
-    font-weight: 600;
-  }
+  .footer-item { display: flex; justify-content: space-between; align-items: center; font-size: 0.72rem; }
+  .footer-label { color: var(--text-dim); font-weight: 500; }
+  .footer-value { color: var(--text-secondary); font-weight: 600; }
 </style>

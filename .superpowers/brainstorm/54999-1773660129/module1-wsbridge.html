@@ -1,0 +1,118 @@
+<h2>Module 1: WsBridge — Agent Session Manager</h2>
+<p class="subtitle">Core engine replacing the current executor. Based on pneuma-skills pattern.</p>
+
+<div class="mockup">
+  <div class="mockup-header">WsBridge Lifecycle</div>
+  <div class="mockup-body" style="font-family: monospace; font-size: 12px; line-height: 2; padding: 20px;">
+    <div style="display: flex; gap: 20px;">
+      <!-- Left: Lifecycle -->
+      <div style="flex: 1;">
+        <div style="font-weight: bold; color: #34d399; margin-bottom: 8px;">Session Lifecycle</div>
+        <div style="background: rgba(52,211,153,0.1); padding: 12px; border-radius: 8px; line-height: 2.2;">
+          <div><span style="color:#8678bf;">①</span> User creates new Work</div>
+          <div>&nbsp;&nbsp;→ <code>wsBridge.createSession(workId)</code></div>
+          <div>&nbsp;&nbsp;→ spawn <code>claude --sdk-url ws://localhost:3271/ws/cli/{workId}</code></div>
+          <div>&nbsp;&nbsp;→ CLI connects back as WebSocket client</div>
+          <div><span style="color:#8678bf;">②</span> CLI sends <code>system.init</code></div>
+          <div>&nbsp;&nbsp;→ save <code>cliSessionId</code> for resume</div>
+          <div>&nbsp;&nbsp;→ session ready for messages</div>
+          <div><span style="color:#8678bf;">③</span> Backend sends initial prompt</div>
+          <div>&nbsp;&nbsp;→ NDJSON: <code>{"type":"user","message":{...}}</code></div>
+          <div>&nbsp;&nbsp;→ includes memory context from EverMemOS</div>
+          <div><span style="color:#8678bf;">④</span> Agent streams response</div>
+          <div>&nbsp;&nbsp;→ <code>stream_event</code> tokens → frontend WebSocket</div>
+          <div>&nbsp;&nbsp;→ <code>result</code> = turn complete</div>
+          <div><span style="color:#8678bf;">⑤</span> User sends feedback/refinement</div>
+          <div>&nbsp;&nbsp;→ same WebSocket, next turn</div>
+          <div>&nbsp;&nbsp;→ Agent has full conversation context</div>
+          <div><span style="color:#8678bf;">⑥</span> User closes or server restarts</div>
+          <div>&nbsp;&nbsp;→ persist <code>cliSessionId</code> to work store</div>
+          <div>&nbsp;&nbsp;→ next open: <code>claude --resume {cliSessionId}</code></div>
+        </div>
+      </div>
+      <!-- Right: Data Flow -->
+      <div style="flex: 1;">
+        <div style="font-weight: bold; color: #f59e0b; margin-bottom: 8px;">Message Flow</div>
+        <div style="background: rgba(245,158,11,0.1); padding: 12px; border-radius: 8px; font-size: 11px; line-height: 2;">
+          <div style="color: #888; margin-bottom: 4px;">Browser → Backend → CLI</div>
+          <div style="background: rgba(255,255,255,0.05); padding: 6px 8px; border-radius: 4px; margin: 4px 0;">
+            <span style="color:#8678bf;">Browser WS:</span> {"action":"send","text":"改一下标题"}
+          </div>
+          <div style="text-align: center; color: #555;">↓ Backend translates</div>
+          <div style="background: rgba(255,255,255,0.05); padding: 6px 8px; border-radius: 4px; margin: 4px 0;">
+            <span style="color:#34d399;">CLI WS:</span> {"type":"user","message":{"role":"user","content":"改一下标题"}}
+          </div>
+          <div style="color: #888; margin: 8px 0 4px;">CLI → Backend → Browser</div>
+          <div style="background: rgba(255,255,255,0.05); padding: 6px 8px; border-radius: 4px; margin: 4px 0;">
+            <span style="color:#34d399;">CLI WS:</span> {"type":"assistant","message":{"content":[{"type":"text","text":"..."}]}}
+          </div>
+          <div style="text-align: center; color: #555;">↓ Backend forwards</div>
+          <div style="background: rgba(255,255,255,0.05); padding: 6px 8px; border-radius: 4px; margin: 4px 0;">
+            <span style="color:#8678bf;">Browser WS:</span> {"event":"agent_message","data":{"text":"..."}}
+          </div>
+        </div>
+
+        <div style="font-weight: bold; color: #fb7185; margin: 16px 0 8px;">Key Difference from Current Executor</div>
+        <div style="background: rgba(251,113,133,0.1); padding: 12px; border-radius: 8px; font-size: 11px; line-height: 1.8;">
+          <div><span style="color:#fb7185;">Current:</span> spawn → single prompt → parse stdout → done</div>
+          <div><span style="color:#34d399;">New:</span> spawn → persistent WS → multi-turn → resume</div>
+          <div style="margin-top: 8px; color: #888;">The CLI process stays alive for the entire work session. User can send unlimited messages. Full Claude Code capabilities (tool use, file ops, MCP) available throughout.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- API Surface -->
+<div class="section" style="margin-top: 20px;">
+  <h3>WsBridge API (new module: src/ws-bridge.ts)</h3>
+  <div style="font-size: 12px;">
+    <table style="width: 100%; border-collapse: collapse;">
+      <thead>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.15);">
+          <th style="text-align: left; padding: 8px;">Method</th>
+          <th style="text-align: left; padding: 8px;">Purpose</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 8px; color: #34d399;"><code>createSession(workId, initialPrompt)</code></td>
+          <td style="padding: 8px;">Spawn CLI, return session object. Injects EverMemOS memory into prompt.</td>
+        </tr>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 8px; color: #34d399;"><code>resumeSession(workId)</code></td>
+          <td style="padding: 8px;">Respawn CLI with --resume using stored cliSessionId.</td>
+        </tr>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 8px; color: #34d399;"><code>sendMessage(workId, text)</code></td>
+          <td style="padding: 8px;">Send user message to active CLI session via WebSocket.</td>
+        </tr>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 8px; color: #34d399;"><code>killSession(workId)</code></td>
+          <td style="padding: 8px;">Gracefully terminate CLI process, persist sessionId.</td>
+        </tr>
+        <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+          <td style="padding: 8px; color: #34d399;"><code>getSession(workId)</code></td>
+          <td style="padding: 8px;">Return session state: idle/busy, message history, cliSessionId.</td>
+        </tr>
+        <tr>
+          <td style="padding: 8px; color: #34d399;"><code>onEvent(workId, handler)</code></td>
+          <td style="padding: 8px;">Subscribe to CLI events (stream tokens, tool use, result).</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Coexistence -->
+<div class="section" style="margin-top: 20px;">
+  <h3>Coexistence with Existing Executor</h3>
+  <div style="font-size: 13px; padding: 12px; background: rgba(245,158,11,0.1); border-radius: 8px; line-height: 1.8;">
+    <p>The existing <code>executor.ts</code> continues to handle evolution cycles (evo-context, evo-skill, evo-task) via stdout parsing. WsBridge is <strong>only</strong> for content creation sessions where multi-turn dialogue is needed. They share the same Hono server and WebSocket upgrade path.</p>
+    <div style="margin-top: 8px;">
+      <span style="color: #f59e0b;">Route:</span> <code>/ws/cli/:workId</code> → WsBridge (CLI connects here)<br>
+      <span style="color: #f59e0b;">Route:</span> <code>/ws/browser/:workId</code> → WsBridge (frontend connects here)<br>
+      <span style="color: #f59e0b;">Route:</span> <code>/ws</code> → existing executor broadcast (unchanged)
+    </div>
+  </div>
+</div>

@@ -1,0 +1,203 @@
+<h2>Module 5: EverMemOS Integration — Memory System</h2>
+<p class="subtitle">Long-term learning via evermem-async API client. New file: src/memory.ts</p>
+
+<div class="mockup">
+  <div class="mockup-header">Memory Architecture</div>
+  <div class="mockup-body" style="font-family: monospace; font-size: 12px; line-height: 1.8; padding: 20px;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <!-- Left: Memory Types -->
+      <div>
+        <div style="font-weight: bold; color: #63b3ed; margin-bottom: 8px;">Memory Categories for AutoViral</div>
+
+        <div style="background: rgba(99,179,237,0.12); border: 1px solid rgba(99,179,237,0.2); border-radius: 8px; padding: 12px; margin-bottom: 10px;">
+          <div style="color: #63b3ed; font-weight: bold;">1. Creation Memory (episodic)</div>
+          <div style="font-size: 11px; line-height: 1.8; margin-top: 4px;">
+            <div>What: 每次创作的选题、风格、用户反馈</div>
+            <div>When: 每步完成 + work 完成时写入</div>
+            <div>Format: <code>group_id: "autoviral_work_{workId}"</code></div>
+            <div>Example: "为用户创作了关于AI工具的短视频，选题角度是'3个改变工作效率的AI工具'，用户要求更接地气的标题，修改为'打工人必备的3个AI神器'"</div>
+          </div>
+        </div>
+
+        <div style="background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.2); border-radius: 8px; padding: 12px; margin-bottom: 10px;">
+          <div style="color: #34d399; font-weight: bold;">2. Performance Memory (episodic)</div>
+          <div style="font-size: 11px; line-height: 1.8; margin-top: 4px;">
+            <div>What: 发布后的数据表现和归因分析</div>
+            <div>When: 指标采集后写入（关键节点：24h、72h、7d）</div>
+            <div>Format: <code>group_id: "autoviral_metrics_{workId}"</code></div>
+            <div>Example: "短视频'打工人必备的3个AI神器'在抖音24h数据：播放4.5万，点赞3200，完播率42%。表现高于该账号均值2.3倍，hook在前1.5秒的策略有效。"</div>
+          </div>
+        </div>
+
+        <div style="background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; padding: 12px; margin-bottom: 10px;">
+          <div style="color: #f59e0b; font-weight: bold;">3. Platform Rules (profile)</div>
+          <div style="font-size: 11px; line-height: 1.8; margin-top: 4px;">
+            <div>What: 从成功/失败中学到的平台规则</div>
+            <div>When: 周度复盘 Agent 分析后写入</div>
+            <div>Format: <code>category: "platform_rules"</code></div>
+            <div>Example: "小红书图文笔记封面带人脸的点击率高30%；标题使用'数字+痛点'格式表现最好；下午6-8点发布获得最多初始流量"</div>
+          </div>
+        </div>
+
+        <div style="background: rgba(134,120,191,0.12); border: 1px solid rgba(134,120,191,0.2); border-radius: 8px; padding: 12px; margin-bottom: 10px;">
+          <div style="color: #8678bf; font-weight: bold;">4. Style Profile (profile)</div>
+          <div style="font-size: 11px; line-height: 1.8; margin-top: 4px;">
+            <div>What: 用户的内容风格画像，持续演进</div>
+            <div>When: 每5个 work 后 Agent 重新评估</div>
+            <div>Format: <code>category: "style_profile"</code></div>
+            <div>Example: "用户偏好：节奏快、信息密度高、实用导向；常用剪辑风格：卡点、弹幕字幕、数据可视化；语气：轻松幽默但不油腻"</div>
+          </div>
+        </div>
+
+        <div style="background: rgba(251,113,133,0.12); border: 1px solid rgba(251,113,133,0.2); border-radius: 8px; padding: 12px;">
+          <div style="color: #fb7185; font-weight: bold;">5. Competitor Insights (episodic)</div>
+          <div style="font-size: 11px; line-height: 1.8; margin-top: 4px;">
+            <div>What: 竞品内容策略和表现分析</div>
+            <div>When: 竞品数据采集后写入</div>
+            <div>Format: <code>group_id: "autoviral_competitor_{name}"</code></div>
+            <div>Example: "竞品@科技范儿本周发3条：AI工具测评、效率app推荐、新品开箱。AI测评类播放最高(12万)，开箱类表现一般(2万)。其hook策略：先展示效果再讲方法。"</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Integration Flow -->
+      <div>
+        <div style="font-weight: bold; color: #f59e0b; margin-bottom: 8px;">Read/Write Flow</div>
+        <div style="background: rgba(245,158,11,0.1); padding: 14px; border-radius: 8px; font-size: 11px; line-height: 2; margin-bottom: 16px;">
+          <div style="color: #34d399; font-weight: bold;">READ — Before Creation</div>
+          <div style="margin: 4px 0;">
+            <div>1. <code>searchMemories({query: workTopic, method: "hybrid", top_k: 10})</code></div>
+            <div>&nbsp;&nbsp;&nbsp;→ find related past creations + their performance</div>
+            <div>2. <code>searchMemories({query: "style_profile", memory_types: ["profile"]})</code></div>
+            <div>&nbsp;&nbsp;&nbsp;→ get latest style preferences</div>
+            <div>3. <code>searchMemories({query: "platform_rules " + platform})</code></div>
+            <div>&nbsp;&nbsp;&nbsp;→ get learned platform rules</div>
+            <div>4. Compose into <span style="color:#8678bf;">memory context block</span></div>
+            <div>5. Inject into CLI session initial prompt</div>
+          </div>
+
+          <div style="color: #fb7185; font-weight: bold; margin-top: 12px;">WRITE — After Key Events</div>
+          <div style="margin: 4px 0;">
+            <div>1. Pipeline step completed → <code>addMemory(creation)</code></div>
+            <div>2. Work published → <code>addMemory(publish event)</code></div>
+            <div>3. Metrics at 24h/72h/7d → <code>addMemory(performance)</code></div>
+            <div>4. Weekly review → <code>addMemory(rules + style)</code></div>
+            <div>5. Competitor scraped → <code>addMemory(competitor insight)</code></div>
+          </div>
+        </div>
+
+        <div style="font-weight: bold; color: #34d399; margin-bottom: 8px;">Memory Context Injection</div>
+        <div style="background: rgba(52,211,153,0.1); padding: 14px; border-radius: 8px; font-size: 11px; line-height: 1.8;">
+<span style="color:#888;">// Injected into CLI prompt at session start:</span>
+
+## 你的创作记忆
+
+### 风格画像
+{style_profile from EverMemOS}
+
+### 平台规则 ({platform})
+{platform_rules from EverMemOS}
+
+### 相关历史创作
+{top 3 related past works + their metrics}
+
+### 竞品动态
+{latest competitor insights}
+
+<span style="color:#888;">// This gives the Agent full context about:</span>
+<span style="color:#888;">// - How user likes to create</span>
+<span style="color:#888;">// - What works on this platform</span>
+<span style="color:#888;">// - Past wins and losses</span>
+<span style="color:#888;">// - What competitors are doing</span></div>
+
+        <div style="font-weight: bold; color: #fb7185; margin: 16px 0 8px;">Weekly Review Agent</div>
+        <div style="background: rgba(251,113,133,0.1); padding: 14px; border-radius: 8px; font-size: 11px; line-height: 1.8;">
+          <div>Cron: weekly (Sunday, configurable)</div>
+          <div>Uses existing executor (evo-skill pattern)</div>
+          <div style="margin-top: 6px;">
+            <div>1. Search all creation + performance memories from past 7 days</div>
+            <div>2. Agent analyzes: what content performed best/worst?</div>
+            <div>3. Agent generates updated profile memories:</div>
+            <div>&nbsp;&nbsp;• Style profile refresh</div>
+            <div>&nbsp;&nbsp;• Platform rules update</div>
+            <div>&nbsp;&nbsp;• Suggested topics for next week</div>
+            <div>4. Write to EverMemOS as profile type</div>
+            <div>5. Generate report → shown on Analytics page</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- API Client -->
+<div class="section" style="margin-top: 20px;">
+  <h3>src/memory.ts — API Client Wrapper</h3>
+  <div style="background: rgba(255,255,255,0.05); padding: 14px; border-radius: 8px; font-family: monospace; font-size: 11px; line-height: 1.8;">
+<span style="color:#888;">// Reuses evermemos.js API client pattern from evermem-async</span>
+<span style="color:#888;">// Config: apiKey from ~/.skill-evolver/config.yaml (new field)</span>
+
+interface MemoryClient {
+  <span style="color:#34d399;">search(query, options?)</span>: Promise&lt;SearchResult&gt;
+  <span style="color:#888;">  // options: { method, top_k, memory_types, group_ids }</span>
+
+  <span style="color:#fb7185;">addMemory(memory)</span>: Promise&lt;void&gt;
+  <span style="color:#888;">  // memory: { content, group_id, group_name, role, sender_name }</span>
+
+  <span style="color:#8678bf;">buildContext(workTopic, platform)</span>: Promise&lt;string&gt;
+  <span style="color:#888;">  // convenience: runs 4 searches, formats as markdown block</span>
+  <span style="color:#888;">  // used by WsBridge when creating new session</span>
+}
+
+<span style="color:#888;">// Config additions to config.yaml:</span>
+memory:
+  apiKey: "sk_..."             <span style="color:#888;"># EverMemOS API key (same as evermem)</span>
+  userId: "autoviral-user"     <span style="color:#888;"># memory namespace</span>
+  weeklyReview: true           <span style="color:#888;"># enable weekly agent review</span>
+  reviewDay: "sunday"          <span style="color:#888;"># which day</span>
+  reviewTime: "09:00"          <span style="color:#888;"># what time</span>
+  </div>
+</div>
+
+<!-- Memory Dashboard Page -->
+<div class="section" style="margin-top: 20px;">
+  <h3>Frontend: Memory Dashboard (new tab)</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; font-size: 12px;">
+    <div style="background: rgba(99,179,237,0.1); border: 1px solid rgba(99,179,237,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #63b3ed; margin-bottom: 4px;">Style Profile Card</div>
+      <div style="font-size: 11px; line-height: 1.8;">
+        Current style tags (from profile memory)<br>
+        Evolution timeline (how style has changed)<br>
+        Confidence scores per trait
+      </div>
+    </div>
+    <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #f59e0b; margin-bottom: 4px;">Learned Rules</div>
+      <div style="font-size: 11px; line-height: 1.8;">
+        Platform rules per platform<br>
+        Best posting times<br>
+        Content format insights
+      </div>
+    </div>
+    <div style="background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #34d399; margin-bottom: 4px;">Memory Search</div>
+      <div style="font-size: 11px; line-height: 1.8;">
+        Free-text search all memories<br>
+        Filter by type / platform<br>
+        View creation → performance links
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- New API routes -->
+<div class="section" style="margin-top: 20px;">
+  <h3>New API Routes</h3>
+  <div style="background: rgba(255,255,255,0.05); padding: 14px; border-radius: 8px; font-family: monospace; font-size: 11px; line-height: 2;">
+<span style="color:#34d399;">GET</span>  /api/memory/search?q=...&method=hybrid   <span style="color:#888;"># search memories</span>
+<span style="color:#34d399;">GET</span>  /api/memory/profile                       <span style="color:#888;"># latest style profile + platform rules</span>
+<span style="color:#34d399;">GET</span>  /api/memory/context/:workId               <span style="color:#888;"># get memory context for a work (for debugging)</span>
+<span style="color:#f59e0b;">POST</span> /api/memory/review/trigger                <span style="color:#888;"># manually trigger weekly review</span>
+<span style="color:#34d399;">GET</span>  /api/memory/review/latest                 <span style="color:#888;"># latest review report</span>
+  </div>
+</div>

@@ -314,3 +314,36 @@ export async function updateWorkApi(id: string, updates: Partial<Work>): Promise
 export async function deleteWorkApi(id: string): Promise<void> {
   await request<{ deleted: boolean }>(`/api/works/${encodeURIComponent(id)}`, { method: "DELETE" });
 }
+
+export async function startWorkSession(id: string): Promise<{ status: string; workId: string; step?: string }> {
+  return request(`/api/works/${encodeURIComponent(id)}/session`, { method: "POST" });
+}
+
+// ---------------------------------------------------------------------------
+// Platform connection
+// ---------------------------------------------------------------------------
+
+export interface PlatformInfo {
+  name: string;
+  label: string;
+  creatorUrl: string;
+  loggedIn: boolean;
+  connecting: boolean;
+}
+
+export async function fetchPlatforms(): Promise<PlatformInfo[]> {
+  const data = await request<{ platforms: PlatformInfo[] }>("/api/platforms");
+  return data.platforms;
+}
+
+export async function checkPlatformStatus(name: string): Promise<{ loggedIn: boolean; connecting: boolean }> {
+  return request(`/api/platforms/${encodeURIComponent(name)}/status`);
+}
+
+export async function connectPlatform(name: string): Promise<{ pending: boolean; message: string }> {
+  return request(`/api/platforms/${encodeURIComponent(name)}/login`, { method: "POST" });
+}
+
+export async function disconnectPlatform(name: string): Promise<void> {
+  await request(`/api/platforms/${encodeURIComponent(name)}/logout`, { method: "POST" });
+}

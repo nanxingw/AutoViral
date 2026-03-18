@@ -1,0 +1,88 @@
+<h2>Architecture Approaches</h2>
+<p class="subtitle">How should we build the full content creation + publishing platform?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)" style="border-left: 3px solid #34d399;">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Extend Existing Executor (Recommended)</h3>
+      <p><strong>Core idea:</strong> Reuse the current Claude CLI executor pattern. Each pipeline step = a job that spawns <code>claude</code> CLI with a specialized prompt.</p>
+      <div style="margin: 12px 0; padding: 12px; background: rgba(255,255,255,0.05); border-radius: 8px; font-family: monospace; font-size: 13px; line-height: 1.8;">
+        <div style="color: #8678bf;">User clicks "Start Creation"</div>
+        <div>&nbsp;&nbsp;Step 1: <span style="color:#34d399;">executor.run()</span> → Claude CLI → topic generation</div>
+        <div>&nbsp;&nbsp;Step 2: <span style="color:#34d399;">executor.run()</span> → Claude CLI → trend remix</div>
+        <div>&nbsp;&nbsp;... (each step streams progress via WebSocket)</div>
+        <div>&nbsp;&nbsp;Step 6: <span style="color:#fb7185;">playwright.run()</span> → browser automation → publish</div>
+        <div style="color: #8678bf;">Post-publish: <span style="color:#34d399;">executor.run()</span> → scrape metrics → update memory</div>
+      </div>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Reuses proven executor + WebSocket infrastructure</li>
+          <li>Minimal new code — extend, don't rebuild</li>
+          <li>Claude CLI handles auth, streaming, tool use natively</li>
+          <li>Each step is an independent job (resilient to failures)</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Multi-turn dialogue needs session state management</li>
+          <li>CLI spawning has overhead (~2s per launch)</li>
+          <li>No built-in conversation memory between steps</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Claude API Direct Integration</h3>
+      <p><strong>Core idea:</strong> Replace CLI executor with direct Claude API calls via <code>@anthropic-ai/sdk</code>. Enables native multi-turn conversations within each step.</p>
+      <div style="margin: 12px 0; padding: 12px; background: rgba(255,255,255,0.05); border-radius: 8px; font-family: monospace; font-size: 13px; line-height: 1.8;">
+        <div style="color: #8678bf;">User clicks "Start Creation"</div>
+        <div>&nbsp;&nbsp;Session: <span style="color:#34d399;">anthropic.messages.create()</span> with full conversation history</div>
+        <div>&nbsp;&nbsp;User feedback → <span style="color:#34d399;">append to messages[]</span> → regenerate</div>
+        <div>&nbsp;&nbsp;... (true multi-turn dialogue per step)</div>
+        <div>&nbsp;&nbsp;Publish: <span style="color:#fb7185;">playwright.run()</span></div>
+      </div>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Native multi-turn conversation (no session hacks)</li>
+          <li>Lower latency (no CLI spawn overhead)</li>
+          <li>Full API control (tool use, vision, etc.)</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Requires API key management (not using Claude Code auth)</li>
+          <li>Must rebuild streaming, tool use, error handling from scratch</li>
+          <li>Loses Claude Code's built-in MCP/skill capabilities</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Hybrid: CLI + Conversation Layer</h3>
+      <p><strong>Core idea:</strong> Use CLI executor for one-shot generation, add a lightweight API conversation layer for interactive revision. Best of both worlds.</p>
+      <div style="margin: 12px 0; padding: 12px; background: rgba(255,255,255,0.05); border-radius: 8px; font-family: monospace; font-size: 13px; line-height: 1.8;">
+        <div style="color: #8678bf;">Step auto-generation:</div>
+        <div>&nbsp;&nbsp;<span style="color:#34d399;">executor.run()</span> → Claude CLI → initial result</div>
+        <div style="color: #8678bf;">User wants to refine:</div>
+        <div>&nbsp;&nbsp;<span style="color:#f59e0b;">conversation.send()</span> → Claude API → revised result</div>
+        <div style="color: #8678bf;">User satisfied → next step:</div>
+        <div>&nbsp;&nbsp;<span style="color:#34d399;">executor.run()</span> → Claude CLI (with previous context)</div>
+      </div>
+      <div class="pros-cons" style="margin-top: 8px;">
+        <div class="pros"><h4>Pros</h4><ul>
+          <li>Best of both: CLI tools for generation, API for dialogue</li>
+          <li>Multi-turn revision is natural</li>
+          <li>Can progressively migrate from CLI to API</li>
+        </ul></div>
+        <div class="cons"><h4>Cons</h4><ul>
+          <li>Two integration points to maintain (CLI + API)</li>
+          <li>Context sync between CLI and API conversations</li>
+          <li>More complex architecture</li>
+        </ul></div>
+      </div>
+    </div>
+  </div>
+</div>

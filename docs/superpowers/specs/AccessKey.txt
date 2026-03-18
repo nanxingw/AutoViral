@@ -1,0 +1,2 @@
+AccessKeyId: ***REMOVED***
+SecretAccessKey: T0dSalpHSmxOall6WXpjd05ETmxPV0l3TnprMk1HWXpORE5tTlRKa1pHVQ==

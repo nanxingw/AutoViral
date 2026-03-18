@@ -1,26 +1,16 @@
 import { Hono } from "hono";
-import { readFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
-import { DataCollector, type PublishEngineLike } from "../data-collector.js";
-import { executor, runEvolutionCycle } from "../executor.js";
-import { isSchedulerRunning, getNextRun, reschedule } from "../scheduler.js";
-import { listReports, readReport } from "../reports.js";
 import { loadConfig, saveConfig, type Config } from "../config.js";
-import {
-  listTasks, getTask, createTask as storeCreateTask, updateTask as storeUpdateTask,
-  deleteTask as storeDeleteTask, listRuns, readRun, listArtifacts, readArtifact,
-  getArtifactsDir, addRejected, listIdeas, listSkillNeeds, countActiveTasks,
-} from "../task-store.js";
-import { buildTaskPrompt } from "../prompt.js";
 import {
   listWorks, getWork, createWork as storeCreateWork,
   updateWork as storeUpdateWork, deleteWork as storeDeleteWork,
   listAssets, getAssetPath,
 } from "../work-store.js";
 import { MemoryClient } from "../memory.js";
-import { getPublishEngine } from "../publish-engine.js";
 import type { WsBridge } from "../ws-bridge.js";
 
 export const apiRoutes = new Hono();
@@ -32,196 +22,14 @@ export function setWsBridge(bridge: WsBridge): void {
   wsBridge = bridge;
 }
 
-// ── Helper: compute a report path for a task run ────────────────────────────
-function taskReportDir(taskId: string): string {
-  return join(homedir(), ".skill-evolver", "tasks", taskId, "reports");
-}
-
-function currentTs(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}-${String(now.getMinutes()).padStart(2, "0")}`;
-}
-
 // GET /api/status
 apiRoutes.get("/api/status", async (c) => {
-  const nextRun = getNextRun();
   const config = await loadConfig();
-  const activeAgents = Array.from(executor.running.values())
-    .filter(j => j.type === "evo-context" || j.type === "evo-skill" || j.type === "evo-task" || j.type === "evolution")
-    .map(j => ({ id: j.id, type: j.type }));
   return c.json({
-    state: executor.state,
-    lastRun: executor.lastRun?.toISOString() ?? null,
-    nextRun: nextRun?.toISOString() ?? null,
-    isSchedulerActive: isSchedulerRunning(),
-    evolutionMode: config.evolutionMode,
-    activeAgents,
+    state: "idle",
+    model: config.model,
+    port: config.port,
   });
-});
-
-// POST /api/trigger
-apiRoutes.post("/api/trigger", (c) => {
-  runEvolutionCycle().catch(() => {
-    // errors emitted via executor events
-  }).finally(() => {
-    reschedule();
-  });
-  return c.json({ triggered: true });
-});
-
-// GET /api/reports
-apiRoutes.get("/api/reports", async (c) => {
-  try {
-    const reports = await listReports();
-    return c.json({
-      reports: reports.map((r) => ({
-        filename: r.filename,
-        date: r.date.toISOString(),
-      })),
-    });
-  } catch {
-    return c.json({ reports: [] });
-  }
-});
-
-// GET /api/reports/:filename
-apiRoutes.get("/api/reports/:filename", async (c) => {
-  const filename = c.req.param("filename");
-  try {
-    const content = await readReport(filename);
-    return c.json({ filename, content });
-  } catch {
-    return c.json({ error: "Report not found" }, 404);
-  }
-});
-
-// GET /api/context/:pillar
-apiRoutes.get("/api/context/:pillar", async (c) => {
-  const pillar = c.req.param("pillar");
-  const home = homedir();
-  const userContextBase = join(home, ".claude", "skills", "user-context");
-  const skillEvolverBase = join(home, ".claude", "skills", "skill-evolver");
-
-  const pillarMap: Record<string, { context?: string; tmp?: string }> = {
-    preference: {
-      context: join(userContextBase, "context", "preference.yaml"),
-      tmp: join(userContextBase, "tmp", "preference_tmp.yaml"),
-    },
-    objective: {
-      context: join(userContextBase, "context", "objective.yaml"),
-      tmp: join(userContextBase, "tmp", "objective_tmp.yaml"),
-    },
-    cognition: {
-      context: join(userContextBase, "context", "cognition.yaml"),
-      tmp: join(userContextBase, "tmp", "cognition_tmp.yaml"),
-    },
-    success_experience: {
-      tmp: join(skillEvolverBase, "tmp", "success_experience.yaml"),
-    },
-    failure_experience: {
-      tmp: join(skillEvolverBase, "tmp", "failure_experience.yaml"),
-    },
-    useful_tips: {
-      tmp: join(skillEvolverBase, "tmp", "useful_tips.yaml"),
-    },
-  };
-
-  const paths = pillarMap[pillar];
-  if (!paths) {
-    return c.json({ error: "Unknown pillar" }, 404);
-  }
-
-  async function loadYaml(filePath: string): Promise<unknown[]> {
-    try {
-      const raw = await readFile(filePath, "utf-8");
-      const parsed = yaml.load(raw) as { entries?: unknown[] } | null;
-      return parsed?.entries ?? [];
-    } catch {
-      return [];
-    }
-  }
-
-  const context = paths.context ? await loadYaml(paths.context) : [];
-  const tmp = paths.tmp ? await loadYaml(paths.tmp) : [];
-
-  return c.json({ context, tmp });
-});
-
-// GET /api/skills
-apiRoutes.get("/api/skills", async (c) => {
-  const home = homedir();
-  const permittedPath = join(
-    home, ".claude", "skills", "skill-evolver", "reference", "permitted_skills.md",
-  );
-  const skillsBase = join(home, ".claude", "skills");
-
-  try {
-    const raw = await readFile(permittedPath, "utf-8");
-    const skillNames = raw
-      .split("\n")
-      .filter((line) => /^[-*]\s+\S/.test(line))
-      .map((line) => {
-        const stripped = line.replace(/^[-*]\s*/, "").trim();
-        // Handle formats: "**name** — desc", "**name**", "name — desc", "name"
-        const boldMatch = stripped.match(/^\*\*([^*]+)\*\*/);
-        if (boldMatch) return boldMatch[1].trim();
-        // Plain name before any separator
-        const dashMatch = stripped.match(/^([^—–\-]+)/);
-        if (dashMatch) return dashMatch[1].trim();
-        return stripped;
-      })
-      .filter((name) => name.length > 0 && !name.startsWith("("));
-
-    const skills = await Promise.all(
-      skillNames.map(async (name) => {
-        const skillMdPath = join(skillsBase, name, "SKILL.md");
-        let exists = false;
-        let description = "";
-        let summary = "";
-        try {
-          const content = await readFile(skillMdPath, "utf-8");
-          exists = true;
-          // Extract description from YAML frontmatter
-          const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
-          if (fmMatch) {
-            const descMatch = fmMatch[1].match(/description:\s*(.+)/);
-            if (descMatch) description = descMatch[1].trim().replace(/^["']|["']$/g, "");
-          }
-          // Extract first meaningful paragraph as summary (skip frontmatter and headings)
-          const body = fmMatch ? content.slice(fmMatch[0].length).trim() : content.trim();
-          const lines = body.split("\n");
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (trimmed && !trimmed.startsWith("#") && !trimmed.startsWith("---") && !trimmed.startsWith("```")) {
-              summary = trimmed.length > 150 ? trimmed.slice(0, 150) + "..." : trimmed;
-              break;
-            }
-          }
-        } catch {
-          exists = false;
-        }
-        const path = join(skillsBase, name);
-        return { name, exists, description, summary, path };
-      }),
-    );
-
-    return c.json({ skills });
-  } catch {
-    return c.json({ skills: [] });
-  }
-});
-
-// POST /api/skills/:name/open — open skill directory in Finder
-apiRoutes.post("/api/skills/:name/open", async (c) => {
-  const name = c.req.param("name");
-  const dir = join(homedir(), ".claude", "skills", name);
-  try {
-    const { spawn } = await import("node:child_process");
-    spawn("open", [dir], { detached: true, stdio: "ignore" }).unref();
-    return c.json({ opened: true });
-  } catch {
-    return c.json({ error: "Failed to open directory" }, 500);
-  }
 });
 
 // GET /api/config
@@ -237,363 +45,6 @@ apiRoutes.put("/api/config", async (c) => {
   const updated: Config = { ...current, ...body };
   await saveConfig(updated);
   return c.json(updated);
-});
-
-// ---------------------------------------------------------------------------
-// Task API
-// ---------------------------------------------------------------------------
-
-// GET /api/tasks
-apiRoutes.get("/api/tasks", async (c) => {
-  const status = c.req.query("status");
-  try {
-    let tasks = await listTasks();
-    if (status) {
-      tasks = tasks.filter((t) => t.status === status);
-    }
-    return c.json({ tasks });
-  } catch {
-    return c.json({ tasks: [] });
-  }
-});
-
-// GET /api/tasks/:id
-apiRoutes.get("/api/tasks/:id", async (c) => {
-  const id = c.req.param("id");
-  try {
-    const task = await getTask(id);
-    if (!task) return c.json({ error: "Task not found" }, 404);
-    return c.json(task);
-  } catch {
-    return c.json({ error: "Task not found" }, 404);
-  }
-});
-
-// POST /api/tasks
-apiRoutes.post("/api/tasks", async (c) => {
-  try {
-    // Enforce active task limit
-    const config = await loadConfig();
-    const activeCount = await countActiveTasks();
-    if (activeCount >= config.taskMaxActive) {
-      return c.json({
-        error: `Active task limit reached (${activeCount}/${config.taskMaxActive}). Complete, pause, or delete existing tasks first.`,
-      }, 409);
-    }
-
-    const body = await c.req.json();
-    // Generate ID and fill defaults
-    const now = new Date();
-    const tsId = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, "0")}${String(now.getDate()).padStart(2, "0")}_${String(now.getHours()).padStart(2, "0")}${String(now.getMinutes()).padStart(2, "0")}`;
-    const hex = Math.random().toString(16).slice(2, 5);
-    const id = body.id || `t_${tsId}_${hex}`;
-
-    // Build schedule object from frontend fields
-    let schedule = body.schedule;
-    if (typeof schedule === "string") {
-      schedule = { type: "cron" as const, cron: schedule };
-    }
-    if (!schedule && body.scheduled_at) {
-      schedule = { type: "one-shot" as const, at: body.scheduled_at };
-    }
-
-    const priority = body.priority;
-    if (priority && !["high", "normal", "low"].includes(priority)) {
-      return c.json({ error: "Invalid priority. Must be high, normal, or low." }, 400);
-    }
-
-    const task = {
-      id,
-      name: body.name || "Untitled",
-      description: body.description,
-      prompt: body.prompt || "",
-      schedule,
-      status: body.status || "active",
-      approved: body.approved ?? true,
-      model: body.model,
-      tags: body.tags || [],
-      priority: priority || "normal",
-      failCount: 0,
-      runCount: 0,
-      createdAt: now.toISOString(),
-    };
-
-    await storeCreateTask(task);
-    return c.json(task, 201);
-  } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : "Failed to create task" }, 400);
-  }
-});
-
-// PUT /api/tasks/:id
-apiRoutes.put("/api/tasks/:id", async (c) => {
-  const id = c.req.param("id");
-  try {
-    const body = await c.req.json();
-    const task = await storeUpdateTask(id, body);
-    if (!task) return c.json({ error: "Task not found" }, 404);
-    return c.json(task);
-  } catch {
-    return c.json({ error: "Task not found" }, 404);
-  }
-});
-
-// DELETE /api/tasks/:id
-apiRoutes.delete("/api/tasks/:id", async (c) => {
-  const id = c.req.param("id");
-  try {
-    await storeDeleteTask(id);
-    return c.json({ deleted: true });
-  } catch {
-    return c.json({ error: "Task not found" }, 404);
-  }
-});
-
-// POST /api/tasks/:id/approve
-apiRoutes.post("/api/tasks/:id/approve", async (c) => {
-  const id = c.req.param("id");
-  try {
-    const task = await storeUpdateTask(id, { status: "active", approved: true });
-    if (!task) return c.json({ error: "Task not found" }, 404);
-    return c.json(task);
-  } catch {
-    return c.json({ error: "Task not found" }, 404);
-  }
-});
-
-// POST /api/tasks/:id/reject
-apiRoutes.post("/api/tasks/:id/reject", async (c) => {
-  const id = c.req.param("id");
-  try {
-    const task = await getTask(id);
-    if (!task) return c.json({ error: "Task not found" }, 404);
-    await addRejected({
-      idea: task.name,
-      reason: "Rejected by user via dashboard",
-      date: new Date().toISOString(),
-    });
-    await storeUpdateTask(id, { status: "expired" });
-    return c.json({ rejected: true });
-  } catch {
-    return c.json({ error: "Task not found" }, 404);
-  }
-});
-
-// POST /api/tasks/:id/retry — reset fail count and reactivate
-apiRoutes.post("/api/tasks/:id/retry", async (c) => {
-  const id = c.req.param("id");
-  try {
-    const task = await getTask(id);
-    if (!task) return c.json({ error: "Task not found" }, 404);
-    const updated = await storeUpdateTask(id, {
-      status: "active",
-      failCount: 0,
-      nextRetryAfter: undefined,
-    });
-    return c.json(updated);
-  } catch {
-    return c.json({ error: "Failed to retry task" }, 500);
-  }
-});
-
-// POST /api/tasks/:id/trigger
-apiRoutes.post("/api/tasks/:id/trigger", async (c) => {
-  const id = c.req.param("id");
-  try {
-    const task = await getTask(id);
-    if (!task) return c.json({ error: "Task not found" }, 404);
-    const config = await loadConfig();
-    const artifactsDir = getArtifactsDir(id);
-    await mkdir(artifactsDir, { recursive: true });
-    const reportsDir = taskReportDir(id);
-    await mkdir(reportsDir, { recursive: true });
-    const reportPath = join(reportsDir, `${currentTs()}_report.md`);
-    const prompt = buildTaskPrompt(task, artifactsDir, reportPath);
-    const job = {
-      id: `task-${id}-${Date.now()}`,
-      type: "task" as const,
-      prompt,
-      model: task.model || config.model,
-      taskId: id,
-      taskName: task.name,
-    };
-    executor.run(job).catch(() => { /* errors emitted via events */ });
-    return c.json({ triggered: true });
-  } catch {
-    return c.json({ error: "Task not found" }, 404);
-  }
-});
-
-// GET /api/tasks/:id/runs
-apiRoutes.get("/api/tasks/:id/runs", async (c) => {
-  const id = c.req.param("id");
-  try {
-    const runs = await listRuns(id);
-    return c.json({
-      runs: runs.map((r) => ({
-        filename: r.filename,
-        date: r.date.toISOString(),
-      })),
-    });
-  } catch {
-    return c.json({ runs: [] });
-  }
-});
-
-// GET /api/tasks/:id/runs/:filename
-apiRoutes.get("/api/tasks/:id/runs/:filename", async (c) => {
-  const id = c.req.param("id");
-  const filename = c.req.param("filename");
-  try {
-    const content = await readRun(id, filename);
-    return c.json({ filename, content });
-  } catch {
-    return c.json({ error: "Run not found" }, 404);
-  }
-});
-
-// GET /api/tasks/:id/artifacts
-apiRoutes.get("/api/tasks/:id/artifacts", async (c) => {
-  const id = c.req.param("id");
-  try {
-    const artifacts = await listArtifacts(id);
-    return c.json({ artifacts });
-  } catch {
-    return c.json({ artifacts: [] });
-  }
-});
-
-// GET /api/tasks/:id/artifacts/:filename — read individual artifact content
-apiRoutes.get("/api/tasks/:id/artifacts/:filename", async (c) => {
-  const id = c.req.param("id");
-  const filename = c.req.param("filename");
-  try {
-    const content = await readArtifact(id, filename);
-    return c.json({ filename, content });
-  } catch {
-    return c.json({ error: "Artifact not found" }, 404);
-  }
-});
-
-// POST /api/tasks/:id/artifacts/open
-apiRoutes.post("/api/tasks/:id/artifacts/open", async (c) => {
-  const id = c.req.param("id");
-  try {
-    const dir = getArtifactsDir(id);
-    const { exec: execCb } = await import("node:child_process");
-    execCb(`open "${dir}"`);
-    return c.json({ opened: true });
-  } catch {
-    return c.json({ error: "Failed to open artifacts" }, 500);
-  }
-});
-
-// GET /api/skill-needs
-apiRoutes.get("/api/skill-needs", async (c) => {
-  try {
-    const needs = await listSkillNeeds();
-    return c.json({ needs });
-  } catch {
-    return c.json({ needs: [] });
-  }
-});
-
-// GET /api/dashboard — aggregated dashboard data
-apiRoutes.get("/api/dashboard", async (c) => {
-  try {
-    const config = await loadConfig();
-    const nextRun = getNextRun();
-
-    // Active agents
-    const activeAgents = Array.from(executor.running.values())
-      .filter(j => j.type === "evo-context" || j.type === "evo-skill" || j.type === "evo-task" || j.type === "evolution")
-      .map(j => ({ id: j.id, type: j.type }));
-
-    // Recent reports (last 5) with summary
-    let recentReports: { filename: string; date: string; summary: string; agentType: string }[] = [];
-    try {
-      const allReports = await listReports();
-      allReports.sort((a, b) => b.date.getTime() - a.date.getTime());
-      const top5 = allReports.slice(0, 5);
-      recentReports = await Promise.all(top5.map(async (r) => {
-        let summary = "";
-        let agentType = "evolution";
-        if (r.filename.includes("_context_")) agentType = "context";
-        else if (r.filename.includes("_skill_")) agentType = "skill";
-        else if (r.filename.includes("_task_")) agentType = "task";
-        try {
-          const content = await readReport(r.filename);
-          // Extract first meaningful line as summary
-          const lines = content.split("\n").filter(l => l.trim() && !l.startsWith("#") && !l.startsWith("---"));
-          summary = (lines[0] ?? "").trim().slice(0, 120);
-        } catch { /* ignore */ }
-        return { filename: r.filename, date: r.date.toISOString(), summary, agentType };
-      }));
-    } catch { /* ignore */ }
-
-    // Active tasks with schedules
-    let scheduledTasks: { id: string; name: string; status: string; schedule?: TaskScheduleDTO; lastRun?: string; runCount: number; tags?: string[] }[] = [];
-    try {
-      const tasks = await listTasks();
-      scheduledTasks = tasks
-        .filter(t => t.status === "active" || t.status === "pending")
-        .slice(0, 8)
-        .map(t => ({
-          id: t.id,
-          name: t.name,
-          status: t.status,
-          schedule: t.schedule as TaskScheduleDTO | undefined,
-          lastRun: t.lastRun,
-          runCount: t.runCount ?? 0,
-          tags: t.tags,
-        }));
-    } catch { /* ignore */ }
-
-    // Skills count
-    let skillCount = 0;
-    try {
-      const permPath = join(homedir(), ".claude", "skills", "skill-evolver", "reference", "permitted_skills.md");
-      const raw = await readFile(permPath, "utf-8");
-      skillCount = raw.split("\n").filter(l => /^[-*]\s+\S/.test(l)).length;
-    } catch { /* ignore */ }
-
-    // Total reports count
-    let totalReports = 0;
-    try {
-      const allR = await listReports();
-      totalReports = allR.length;
-    } catch { /* ignore */ }
-
-    return c.json({
-      state: executor.state,
-      lastRun: executor.lastRun?.toISOString() ?? null,
-      nextRun: nextRun?.toISOString() ?? null,
-      evolutionMode: config.evolutionMode,
-      activeAgents,
-      recentReports,
-      scheduledTasks,
-      skillCount,
-      totalReports,
-    });
-  } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : "Dashboard error" }, 500);
-  }
-});
-
-interface TaskScheduleDTO {
-  type: "cron" | "one-shot";
-  cron?: string;
-  at?: string;
-}
-
-// GET /api/ideas
-apiRoutes.get("/api/ideas", async (c) => {
-  try {
-    const ideas = await listIdeas();
-    return c.json({ ideas });
-  } catch {
-    return c.json({ ideas: [] });
-  }
 });
 
 // ---------------------------------------------------------------------------
@@ -624,7 +75,7 @@ apiRoutes.post("/api/works", async (c) => {
     }
     const work = await storeCreateWork({
       title: body.title,
-      type: body.type as "short-video" | "image-text" | "long-video" | "livestream",
+      type: body.type as "short-video" | "image-text",
       platforms: body.platforms,
       topicHint: body.topicHint,
     });
@@ -705,63 +156,14 @@ apiRoutes.get("/api/works/:id/assets/:filename", async (c) => {
   }
 });
 
-// ---------------------------------------------------------------------------
-// Data Collector — lazy singleton and API routes
-// ---------------------------------------------------------------------------
-
-let _collector: DataCollector | null = null;
-
-/** Get or create the DataCollector singleton. Starts with null engine. */
-export function getCollector(): DataCollector {
-  if (!_collector) {
-    _collector = new DataCollector(null);
-  }
-  return _collector;
-}
-
-/** Set the publish engine on the collector once it's ready. */
-export function setCollectorEngine(engine: PublishEngineLike): void {
-  getCollector().setPublishEngine(engine);
-}
-
-// GET /api/trends/:platform — return latest trend data
-apiRoutes.get("/api/trends/:platform", async (c) => {
-  const platform = c.req.param("platform");
-  try {
-    const collector = getCollector();
-    const trends = await collector.getLatestTrends(platform);
-    if (!trends) return c.json({ error: "No trend data available" }, 404);
-    return c.json(trends);
-  } catch {
-    return c.json({ error: "Failed to load trends" }, 500);
-  }
-});
-
-// GET /api/analytics — aggregate metrics from all published works
+// GET /api/analytics — aggregate metrics from all works
 apiRoutes.get("/api/analytics", async (c) => {
   try {
     const summaries = await listWorks();
-    let totalWorks = 0;
+    let totalWorks = summaries.length;
     let totalViews = 0;
     let totalLikes = 0;
     let totalComments = 0;
-
-    for (const summary of summaries) {
-      if (summary.status !== "published") continue;
-      totalWorks++;
-
-      const work = await getWork(summary.id);
-      if (!work) continue;
-
-      for (const entry of work.platforms) {
-        if (!entry.metrics || entry.metrics.length === 0) continue;
-        // Use the latest snapshot for each platform
-        const latest = entry.metrics[entry.metrics.length - 1];
-        totalViews += latest.views ?? 0;
-        totalLikes += latest.likes ?? 0;
-        totalComments += latest.comments ?? 0;
-      }
-    }
 
     return c.json({ totalWorks, totalViews, totalLikes, totalComments });
   } catch {
@@ -769,100 +171,290 @@ apiRoutes.get("/api/analytics", async (c) => {
   }
 });
 
-// GET /api/analytics/work/:id — per-work growth curves (metricsHistory)
-apiRoutes.get("/api/analytics/work/:id", async (c) => {
-  const id = c.req.param("id");
-  try {
-    const work = await getWork(id);
-    if (!work) return c.json({ error: "Work not found" }, 404);
+// ---------------------------------------------------------------------------
+// Trend Research via Claude CLI
+// ---------------------------------------------------------------------------
 
-    const metricsHistory: Record<string, Array<{
-      views?: number; likes?: number; comments?: number; shares?: number; collectedAt: string;
-    }>> = {};
+/** Run claude CLI with a prompt and return the text result. */
+function runCliBrief(prompt: string, useChrome = false, timeoutMs = 60000): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const args = [
+      "-p", prompt,
+      "--output-format", "json",
+      "--dangerously-skip-permissions",
+      "--model", "haiku",
+    ];
+    if (useChrome) args.push("--chrome");
 
-    for (const entry of work.platforms) {
-      metricsHistory[entry.platform] = entry.metrics ?? [];
+    const proc = spawn("claude", args, {
+      cwd: homedir(),
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli" },
+    });
+
+    let stdout = "";
+    proc.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
+    proc.on("exit", (code) => {
+      if (code !== 0 && !stdout) {
+        reject(new Error(`CLI exited with code ${code}`));
+        return;
+      }
+      try {
+        const envelope = JSON.parse(stdout);
+        resolve(envelope.result ?? "");
+      } catch {
+        resolve(stdout);
+      }
+    });
+    proc.on("error", reject);
+    setTimeout(() => { try { proc.kill(); } catch {} reject(new Error("Timeout")); }, timeoutMs);
+  });
+}
+
+async function researchTrends(platforms: string[]): Promise<{ collected: string[]; errors: string[] }> {
+  const collected: string[] = [];
+  const errors: string[] = [];
+
+  for (const platform of platforms) {
+    const platformLabel = platform === "xiaohongshu" ? "小红书" : platform === "douyin" ? "抖音" : platform;
+
+    const prompt = [
+      `你是一个社交媒体趋势研究员。请搜索 ${platformLabel} 平台当前最热门的内容趋势和话题。`,
+      ``,
+      `使用 WebSearch 搜索以下内容：`,
+      `- "${platformLabel} 热门话题 2026"`,
+      `- "${platformLabel} 爆款内容 趋势"`,
+      `- "${platformLabel} 热搜榜"`,
+      ``,
+      `然后根据搜索结果，整理成以下 JSON 格式。`,
+      `即使搜索结果不完整，也要根据已有信息尽力填充，估算数据也可以。`,
+      `你必须输出有效的 JSON，这是硬性要求，不允许输出其他格式。`,
+      ``,
+      `输出格式（只输出这个 JSON，不要其他任何文字）：`,
+      `{"videos":[{"title":"内容标题","thumb":"","views":"1.2万","likes":"3200","comments":"156"}],"tags":[{"tag":"#话题","posts":"50万","trend":"up"}]}`,
+      ``,
+      `videos 至少8条，tags 至少10个。trend 为 up/down/stable。`,
+      `views/likes/comments/posts 用中文简写（万/亿）。`,
+    ].join("\n");
+
+    try {
+      const result = await runCliBrief(prompt);
+      const stripped = result.replace(/```json?\s*/gi, "").replace(/```/g, "").trim();
+      const firstBrace = stripped.indexOf("{");
+      const lastBrace = stripped.lastIndexOf("}");
+      if (firstBrace < 0 || lastBrace <= firstBrace) {
+        errors.push(platform);
+        continue;
+      }
+
+      const data = JSON.parse(stripped.slice(firstBrace, lastBrace + 1));
+      if (!data.videos || !data.tags) {
+        errors.push(platform);
+        continue;
+      }
+
+      const trendsDir = join(homedir(), ".skill-evolver", "trends", platform);
+      await mkdir(trendsDir, { recursive: true });
+      const dateStr = new Date().toISOString().slice(0, 10);
+      await writeFile(
+        join(trendsDir, `${dateStr}.yaml`),
+        yaml.dump(data, { lineWidth: -1 }),
+        "utf-8"
+      );
+
+      collected.push(platform);
+    } catch {
+      errors.push(platform);
     }
+  }
 
-    return c.json({ id: work.id, title: work.title, metricsHistory });
+  return { collected, errors };
+}
+
+// GET /api/trends/:platform — return latest trend data
+apiRoutes.get("/api/trends/:platform", async (c) => {
+  const platform = c.req.param("platform");
+  try {
+    const trendsDir = join(homedir(), ".skill-evolver", "trends", platform);
+    const { readdir } = await import("node:fs/promises");
+    const files = await readdir(trendsDir);
+    const yamlFiles = files.filter(f => f.endsWith(".yaml")).sort().reverse();
+    if (yamlFiles.length === 0) return c.json({ error: "No trend data available" }, 404);
+    const raw = await readFile(join(trendsDir, yamlFiles[0]), "utf-8");
+    const data = yaml.load(raw);
+    return c.json(data);
   } catch {
-    return c.json({ error: "Work not found" }, 404);
+    return c.json({ error: "No trend data available" }, 404);
   }
 });
 
-// POST /api/collector/trigger — manually trigger collection
+// POST /api/collector/trigger — trigger research collection
 apiRoutes.post("/api/collector/trigger", async (c) => {
   try {
-    const body = await c.req.json<{ type?: "metrics" | "trends"; platforms?: string[] }>().catch(() => ({}));
-    const collector = getCollector();
-    const type = (body as any).type ?? "metrics";
-
-    if (type === "trends") {
-      const platforms = (body as any).platforms ?? ["youtube", "tiktok"];
-      const result = await collector.collectTrends(platforms);
-      return c.json({ triggered: true, type: "trends", ...result });
-    }
-
-    const result = await collector.collectPostMetrics();
-    return c.json({ triggered: true, type: "metrics", ...result });
+    const body = await c.req.json<{ platforms?: string[] }>().catch(() => ({}));
+    const platforms = (body as any).platforms ?? ["xiaohongshu", "douyin"];
+    const result = await researchTrends(platforms);
+    return c.json({ triggered: true, type: "research", ...result });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : "Collection failed" }, 500);
   }
 });
 
-// GET /api/collector/status — placeholder returning enabled status
+// GET /api/collector/status
 apiRoutes.get("/api/collector/status", async (c) => {
-  try {
-    const config = await loadConfig();
-    const collector = getCollector();
-    return c.json({
-      enabled: true,
-      metricsEnabled: config.collector?.metricsEnabled ?? true,
-      trendEnabled: config.collector?.trendEnabled ?? true,
-      trendInterval: config.collector?.trendInterval ?? "6h",
-      circuitBreaker: collector.getCircuitBreakerStatus(),
-    });
-  } catch {
-    return c.json({ enabled: false });
-  }
+  const config = await loadConfig();
+  const research = (config as any).research ?? { enabled: true, schedule: "0 9,21 * * *", platforms: ["douyin", "xiaohongshu"] };
+  return c.json({
+    enabled: research.enabled,
+    schedule: research.schedule,
+    platforms: research.platforms,
+  });
 });
 
-// GET /api/competitors — list tracked competitors
-apiRoutes.get("/api/competitors", async (c) => {
-  try {
-    const config = await loadConfig();
-    return c.json({ competitors: config.collector?.competitors ?? [] });
-  } catch {
-    return c.json({ competitors: [] });
+// ---------------------------------------------------------------------------
+// Platform connection via Claude CLI --chrome
+// ---------------------------------------------------------------------------
+
+const PLATFORM_CONFIG: Record<string, { label: string; creatorUrl: string; checkPrompt: string; loginPrompt: string }> = {
+  douyin: {
+    label: "抖音",
+    creatorUrl: "https://creator.douyin.com/",
+    checkPrompt: '使用Chrome打开 https://creator.douyin.com/ ，等待3秒页面加载完成。然后检查页面上是否有"创作者登录"按钮或登录相关元素。如果看到了登录按钮或登录页面，回复 "NOT_LOGGED_IN"。如果看到了创作者后台/仪表盘内容（如数据概览、作品管理等），回复 "LOGGED_IN"。只回复这两个词之一，不要其他内容。',
+    loginPrompt: '使用Chrome打开 https://creator.douyin.com/ ，点击"创作者登录"按钮。等待登录弹窗出现，让用户扫码登录。等待最多120秒直到登录成功（页面跳转到创作者后台）。如果登录成功回复 "LOGIN_SUCCESS"，如果超时回复 "LOGIN_TIMEOUT"。',
+  },
+  xiaohongshu: {
+    label: "小红书",
+    creatorUrl: "https://creator.xiaohongshu.com/",
+    checkPrompt: '使用Chrome打开 https://creator.xiaohongshu.com/ ，等待3秒页面加载完成。检查当前URL是否包含"/login"或页面上是否有登录表单。如果看到了登录页面，回复 "NOT_LOGGED_IN"。如果看到了创作者后台内容，回复 "LOGGED_IN"。只回复这两个词之一，不要其他内容。',
+    loginPrompt: '使用Chrome打开 https://creator.xiaohongshu.com/login ，页面右上角有一个二维码图标，点击切换到二维码登录模式。让用户用小红书App扫码。等待最多120秒直到登录成功。如果登录成功回复 "LOGIN_SUCCESS"，如果超时回复 "LOGIN_TIMEOUT"。',
+  },
+};
+
+const checkProcesses: Map<string, Promise<boolean>> = new Map();
+const checkCache: Map<string, { result: boolean; timestamp: number }> = new Map();
+const CHECK_CACHE_TTL = 30_000;
+const loginProcesses: Map<string, Promise<boolean>> = new Map();
+
+async function checkPlatformLogin(platform: string): Promise<boolean> {
+  const config = PLATFORM_CONFIG[platform];
+  if (!config) return false;
+
+  const cached = checkCache.get(platform);
+  if (cached && Date.now() - cached.timestamp < CHECK_CACHE_TTL) {
+    return cached.result;
   }
+
+  const existing = checkProcesses.get(platform);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    try {
+      const result = await runCliBrief(config.checkPrompt, true);
+      const loggedIn = result.includes("LOGGED_IN") && !result.includes("NOT_LOGGED_IN");
+      checkCache.set(platform, { result: loggedIn, timestamp: Date.now() });
+      return loggedIn;
+    } catch {
+      return false;
+    } finally {
+      checkProcesses.delete(platform);
+    }
+  })();
+
+  checkProcesses.set(platform, promise);
+  return promise;
+}
+
+function triggerPlatformLogin(platform: string): void {
+  const config = PLATFORM_CONFIG[platform];
+  if (!config) return;
+  const promise = runCliBrief(config.loginPrompt, true, 150000)
+    .then(result => result.includes("LOGIN_SUCCESS"))
+    .catch(() => false)
+    .finally(() => loginProcesses.delete(platform));
+  loginProcesses.set(platform, promise);
+}
+
+// GET /api/platforms
+apiRoutes.get("/api/platforms", async (c) => {
+  const platforms = Object.entries(PLATFORM_CONFIG).map(([name, config]) => ({
+    name,
+    label: config.label,
+    creatorUrl: config.creatorUrl,
+    loggedIn: false,
+    checking: false,
+    connecting: loginProcesses.has(name),
+  }));
+  return c.json({ platforms });
 });
 
-// POST /api/competitors — add or update tracked competitors
-apiRoutes.post("/api/competitors", async (c) => {
-  try {
-    const body = await c.req.json<{
-      competitors: Array<{ platform: string; profileUrl: string; name: string }>;
-    }>();
-    if (!body.competitors || !Array.isArray(body.competitors)) {
-      return c.json({ error: "competitors array is required" }, 400);
-    }
-    const config = await loadConfig();
-    if (!config.collector) {
-      config.collector = { competitors: [] };
-    }
-    config.collector.competitors = body.competitors;
-    await saveConfig(config);
-    return c.json({ competitors: config.collector.competitors });
-  } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : "Failed to update competitors" }, 400);
+// GET /api/platforms/:name/status
+apiRoutes.get("/api/platforms/:name/status", async (c) => {
+  const name = c.req.param("name");
+  if (!PLATFORM_CONFIG[name]) {
+    return c.json({ error: `Unknown platform: ${name}` }, 404);
   }
+  const loggedIn = await checkPlatformLogin(name);
+  return c.json({ platform: name, loggedIn, connecting: loginProcesses.has(name) });
+});
+
+// POST /api/platforms/:name/login
+apiRoutes.post("/api/platforms/:name/login", async (c) => {
+  const name = c.req.param("name");
+  if (!PLATFORM_CONFIG[name]) {
+    return c.json({ error: `Unknown platform: ${name}` }, 404);
+  }
+  if (loginProcesses.has(name)) {
+    return c.json({ pending: true, message: "Login already in progress" });
+  }
+  triggerPlatformLogin(name);
+  return c.json({ pending: true, message: `Chrome opened for ${PLATFORM_CONFIG[name].label} login` });
+});
+
+// POST /api/platforms/:name/logout
+apiRoutes.post("/api/platforms/:name/logout", async (c) => {
+  const name = c.req.param("name");
+  return c.json({ success: true, message: `${name} disconnected` });
 });
 
 // ---------------------------------------------------------------------------
 // Work Chat API (WsBridge)
 // ---------------------------------------------------------------------------
 
-// POST /api/works/:id/chat — send a message to the CLI session for a work
+// POST /api/works/:id/session
+apiRoutes.post("/api/works/:id/session", async (c) => {
+  const id = c.req.param("id");
+  if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
+
+  try {
+    const session = wsBridge.getSession(id);
+    if (session?.cliProcess) {
+      return c.json({ status: "already_running", workId: id });
+    }
+
+    const work = await getWork(id);
+    if (!work) return c.json({ error: "Work not found" }, 404);
+
+    const steps = Object.entries(work.pipeline);
+    const pendingStep = steps.find(([, s]) => s.status === "pending" || s.status === "active");
+    const stepName = pendingStep ? pendingStep[1].name : steps[0]?.[1]?.name ?? "创作";
+
+    const prompt = [
+      `你是一个内容创作助手。你正在帮助用户创作: "${work.title}" (类型: ${work.type})。`,
+      `目标平台: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}。`,
+      work.topicHint ? `选题方向: ${work.topicHint}` : "",
+      ``,
+      `当前步骤: "${stepName}"。请开始这个步骤的创作工作。`,
+    ].filter(Boolean).join("\n");
+
+    const config = await loadConfig();
+    wsBridge.createSession(id, prompt, config.model);
+    return c.json({ status: "started", workId: id, step: stepName });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "Session start error" }, 500);
+  }
+});
+
+// POST /api/works/:id/chat
 apiRoutes.post("/api/works/:id/chat", async (c) => {
   const id = c.req.param("id");
   if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
@@ -871,10 +463,8 @@ apiRoutes.post("/api/works/:id/chat", async (c) => {
     const body = await c.req.json<{ text: string }>();
     if (!body.text) return c.json({ error: "text is required" }, 400);
 
-    // Ensure session exists
     let session = wsBridge.getSession(id);
     if (!session) {
-      // Auto-create a session with the message as the initial prompt
       const config = await loadConfig();
       session = wsBridge.createSession(id, body.text, config.model);
       return c.json({ sent: true, sessionCreated: true, workId: id });
@@ -888,7 +478,7 @@ apiRoutes.post("/api/works/:id/chat", async (c) => {
   }
 });
 
-// POST /api/works/:id/step/:step — trigger a specific pipeline step via prompt
+// POST /api/works/:id/step/:step
 apiRoutes.post("/api/works/:id/step/:step", async (c) => {
   const id = c.req.param("id");
   const step = c.req.param("step");
@@ -901,10 +491,9 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
     const pipelineStep = work.pipeline[step];
     if (!pipelineStep) return c.json({ error: `Unknown pipeline step: ${step}` }, 404);
 
-    // Build a step-specific prompt
     const prompt = [
       `You are working on a content piece: "${work.title}" (type: ${work.type}).`,
-      `Platforms: ${work.platforms.map(p => p.platform).join(", ")}.`,
+      `Platforms: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}.`,
       work.topicHint ? `Topic hint: ${work.topicHint}` : "",
       ``,
       `Execute the "${pipelineStep.name}" step of the pipeline.`,
@@ -929,7 +518,6 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
 // Memory API (EverMemOS integration)
 // ---------------------------------------------------------------------------
 
-// Lazily-initialized MemoryClient (singleton)
 let _memoryClient: MemoryClient | null | undefined;
 async function getMemoryClient(): Promise<MemoryClient | null> {
   if (_memoryClient === undefined) {
@@ -950,7 +538,7 @@ apiRoutes.get("/api/memory/search", async (c) => {
   return c.json(result);
 });
 
-// GET /api/memory/profile — style profiles + platform rules
+// GET /api/memory/profile
 apiRoutes.get("/api/memory/profile", async (c) => {
   const client = await getMemoryClient();
   if (!client) return c.json({ error: "Memory not configured (missing apiKey)" }, 503);
@@ -965,7 +553,7 @@ apiRoutes.get("/api/memory/profile", async (c) => {
   });
 });
 
-// GET /api/memory/context/:workId — memory context for a work (debug)
+// GET /api/memory/context/:workId
 apiRoutes.get("/api/memory/context/:workId", async (c) => {
   const client = await getMemoryClient();
   if (!client) return c.json({ error: "Memory not configured (missing apiKey)" }, 503);
@@ -973,178 +561,8 @@ apiRoutes.get("/api/memory/context/:workId", async (c) => {
   const work = await getWork(workId);
   if (!work) return c.json({ error: "Work not found" }, 404);
   const topic = work.topicHint ?? work.title;
-  const platform = work.platforms?.[0]?.platform ?? "通用";
+  const firstPlatform = work.platforms?.[0];
+  const platform = typeof firstPlatform === "string" ? firstPlatform : (firstPlatform as any)?.platform ?? "通用";
   const context = await client.buildContext(topic, platform);
   return c.json({ workId, topic, platform, context });
-});
-
-// ---------------------------------------------------------------------------
-// Publish Engine API
-// ---------------------------------------------------------------------------
-
-// GET /api/platforms — list platforms with available + loggedIn status
-apiRoutes.get("/api/platforms", async (c) => {
-  try {
-    const engine = getPublishEngine();
-    const available = engine.isAvailable();
-    const platforms = engine.listPlatforms();
-
-    const result = await Promise.all(
-      platforms.map(async (name) => {
-        let loggedIn = false;
-        if (available) {
-          try {
-            loggedIn = await engine.checkLoginStatus(name);
-          } catch { /* ignore */ }
-        }
-        const adapter = engine.getAdapter(name);
-        return {
-          name,
-          available,
-          loggedIn,
-          loginUrl: adapter?.loginUrl ?? "",
-          publishUrl: adapter?.publishUrl ?? "",
-        };
-      }),
-    );
-
-    return c.json({ platforms: result });
-  } catch {
-    return c.json({ platforms: [] });
-  }
-});
-
-// POST /api/platforms/:name/login — open visible browser for QR login
-apiRoutes.post("/api/platforms/:name/login", async (c) => {
-  const name = c.req.param("name");
-  try {
-    const engine = getPublishEngine();
-    if (!engine.isAvailable()) {
-      // Try to initialize
-      await engine.init();
-      if (!engine.isAvailable()) {
-        return c.json({ error: "Playwright is not installed. Run: npx playwright install chromium" }, 503);
-      }
-    }
-
-    const adapter = engine.getAdapter(name);
-    if (!adapter) {
-      return c.json({ error: `Unknown platform: ${name}` }, 404);
-    }
-
-    // Open login in background (non-blocking for the API response)
-    // The browser will stay open for the user to scan QR code
-    const loginPromise = engine.openLogin(name);
-
-    // Return immediately — user interacts with the browser window
-    // We give a short grace period then respond
-    const success = await Promise.race([
-      loginPromise,
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 3_000)),
-    ]);
-
-    if (success === true) {
-      return c.json({ success: true, message: "Login successful" });
-    } else if (success === false) {
-      return c.json({ success: false, error: "Login failed or timed out" });
-    } else {
-      // Still waiting — browser is open for QR scan
-      return c.json({
-        success: false,
-        pending: true,
-        message: "Browser opened for login. Please scan the QR code.",
-      });
-    }
-  } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : "Login failed" }, 500);
-  }
-});
-
-// GET /api/platforms/:name/status — check login status
-apiRoutes.get("/api/platforms/:name/status", async (c) => {
-  const name = c.req.param("name");
-  try {
-    const engine = getPublishEngine();
-    const adapter = engine.getAdapter(name);
-    if (!adapter) {
-      return c.json({ error: `Unknown platform: ${name}` }, 404);
-    }
-
-    if (!engine.isAvailable()) {
-      return c.json({ platform: name, available: false, loggedIn: false });
-    }
-
-    const loggedIn = await engine.checkLoginStatus(name);
-    return c.json({ platform: name, available: true, loggedIn });
-  } catch {
-    return c.json({ platform: name, available: false, loggedIn: false });
-  }
-});
-
-// POST /api/works/:id/publish — trigger publish with {platforms:[]}
-apiRoutes.post("/api/works/:id/publish", async (c) => {
-  const id = c.req.param("id");
-  try {
-    const work = await getWork(id);
-    if (!work) return c.json({ error: "Work not found" }, 404);
-
-    const body = await c.req.json<{ platforms?: string[] }>();
-    const targetPlatforms = body.platforms ?? work.platforms.map((p: any) => p.platform);
-
-    if (!targetPlatforms || targetPlatforms.length === 0) {
-      return c.json({ error: "No platforms specified" }, 400);
-    }
-
-    const engine = getPublishEngine();
-    if (!engine.isAvailable()) {
-      await engine.init();
-      if (!engine.isAvailable()) {
-        return c.json({ error: "Playwright is not installed" }, 503);
-      }
-    }
-
-    // Build publish content from work data
-    // Work may have extended fields stored in YAML beyond the TS interface
-    const workAny = work as any;
-    const content = {
-      title: work.title,
-      body: workAny.body ?? workAny.description ?? work.topicHint ?? "",
-      tags: workAny.tags ?? [],
-      mediaFiles: workAny.mediaFiles ?? [],
-      coverImage: work.coverImage,
-    };
-
-    // Update work status
-    await storeUpdateWork(id, { status: "publishing" });
-
-    const results: Record<string, any> = {};
-    let anySuccess = false;
-
-    for (const platform of targetPlatforms) {
-      const result = await engine.publish(platform, content);
-      results[platform] = result;
-      if (result.success) anySuccess = true;
-
-      // Update platform-specific status on the work
-      try {
-        const freshWork = await getWork(id);
-        if (freshWork) {
-          const platEntry = freshWork.platforms.find((p: any) => p.platform === platform);
-          if (platEntry) {
-            platEntry.publishedUrl = result.postUrl;
-            platEntry.publishedAt = new Date().toISOString();
-            (platEntry as any).status = result.success ? "published" : "failed";
-          }
-          await storeUpdateWork(id, { platforms: freshWork.platforms });
-        }
-      } catch { /* ignore partial update failure */ }
-    }
-
-    // Update overall work status
-    await storeUpdateWork(id, { status: anySuccess ? "published" : "failed" });
-
-    return c.json({ results });
-  } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : "Publish failed" }, 500);
-  }
 });

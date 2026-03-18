@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount, tick } from "svelte";
   import { t, getLanguage, subscribe } from "../lib/i18n";
+  import { fetchPlatforms, checkPlatformStatus, connectPlatform, disconnectPlatform, type PlatformInfo } from "../lib/api";
 
   let { scrollToInsights = false }: { scrollToInsights?: boolean } = $props();
 
@@ -17,6 +18,75 @@
   let styleProfile: string[] = $state([]);
   let insights: { content: string; summary?: string; memory_type?: string; relevance?: number }[] = $state([]);
   let loading = $state(true);
+
+  // ── Platform connection state ──
+  interface PlatformState { name: string; label: string; status: "checking" | "connected" | "disconnected" | "connecting"; }
+  let platforms: PlatformState[] = $state([
+    { name: "douyin", label: "抖音", status: "checking" },
+    { name: "xiaohongshu", label: "小红书", status: "checking" },
+  ]);
+
+  const platformIcons: Record<string, string> = { douyin: "🎵", xiaohongshu: "📕" };
+
+  async function loadPlatformStatus() {
+    for (const p of platforms) {
+      p.status = "checking";
+    }
+    platforms = [...platforms];
+
+    for (const p of platforms) {
+      try {
+        const res = await checkPlatformStatus(p.name);
+        p.status = res.loggedIn ? "connected" : (res.connecting ? "connecting" : "disconnected");
+      } catch {
+        p.status = "disconnected";
+      }
+    }
+    platforms = [...platforms];
+  }
+
+  async function handleConnect(name: string) {
+    const p = platforms.find(x => x.name === name);
+    if (!p) return;
+    p.status = "connecting";
+    platforms = [...platforms];
+
+    try {
+      await connectPlatform(name);
+      // Poll status — but much less aggressively (every 15s, max 8 tries = 2min)
+      let attempts = 0;
+      const poll = setInterval(async () => {
+        attempts++;
+        try {
+          const res = await checkPlatformStatus(name);
+          if (res.loggedIn) {
+            p.status = "connected";
+            platforms = [...platforms];
+            clearInterval(poll);
+            return;
+          }
+        } catch { /* keep polling */ }
+        if (attempts >= 8) {
+          p.status = "disconnected";
+          platforms = [...platforms];
+          clearInterval(poll);
+        }
+      }, 15000);
+    } catch {
+      p.status = "disconnected";
+      platforms = [...platforms];
+    }
+  }
+
+  async function handleDisconnect(name: string) {
+    const p = platforms.find(x => x.name === name);
+    if (!p) return;
+    try {
+      await disconnectPlatform(name);
+    } catch { /* ignore */ }
+    p.status = "disconnected";
+    platforms = [...platforms];
+  }
 
   // ── Fetch analytics + profile + insights ──
   async function fetchData() {
@@ -60,6 +130,7 @@
 
   onMount(async () => {
     fetchData();
+    loadPlatformStatus();
     const unsub = subscribe(() => { lang = getLanguage(); });
     if (scrollToInsights) {
       await tick();
@@ -72,6 +143,50 @@
 </script>
 
 <div class="analytics" data-lang={lang}>
+  <!-- Platform Connections -->
+  <div class="platform-section">
+    <h3 class="sec-title">{lang === "zh" ? "社媒连接" : "Connected Accounts"}</h3>
+    <div class="platform-grid">
+      {#each platforms as p}
+        <div class="platform-card" class:card-connected={p.status === "connected"} class:card-connecting={p.status === "connecting"} class:card-checking={p.status === "checking"}>
+          <div class="platform-header">
+            <span class="platform-icon">{platformIcons[p.name] ?? "📱"}</span>
+            <span class="platform-name">{p.label}</span>
+            <span class="platform-dot" class:dot-green={p.status === "connected"} class:dot-orange={p.status === "checking" || p.status === "connecting"} class:dot-gray={p.status === "disconnected"}></span>
+          </div>
+          <div class="platform-status-text">
+            {#if p.status === "checking"}
+              {lang === "zh" ? "检测中..." : "Checking..."}
+            {:else if p.status === "connected"}
+              {lang === "zh" ? "已连接" : "Connected"}
+            {:else if p.status === "connecting"}
+              {lang === "zh" ? "扫码中..." : "Waiting for scan..."}
+            {:else}
+              {lang === "zh" ? "未连接" : "Not connected"}
+            {/if}
+          </div>
+          <div class="platform-actions">
+            {#if p.status === "connected"}
+              <button class="p-btn p-btn-disconnect" onclick={() => handleDisconnect(p.name)}>
+                {lang === "zh" ? "断开" : "Disconnect"}
+              </button>
+            {:else if p.status === "connecting"}
+              <button class="p-btn p-btn-waiting" disabled>
+                {lang === "zh" ? "等待扫码..." : "Waiting..."}
+              </button>
+            {:else if p.status === "checking"}
+              <button class="p-btn" disabled>...</button>
+            {:else}
+              <button class="p-btn p-btn-connect" onclick={() => handleConnect(p.name)}>
+                {lang === "zh" ? "连接" : "Connect"}
+              </button>
+            {/if}
+          </div>
+        </div>
+      {/each}
+    </div>
+  </div>
+
   <!-- Research Stats -->
   <div class="research-stats-section">
     <h3 class="sec-title">{tt("researchStats")}</h3>
@@ -151,6 +266,57 @@
     flex-direction: column;
     gap: 1.5rem;
   }
+
+  /* Platform connection cards */
+  .platform-section { margin-bottom: 0.25rem; }
+  .platform-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; margin-top: 0.5rem; }
+  .platform-card {
+    border: 1.5px solid var(--border);
+    border-radius: var(--card-radius, 14px);
+    padding: 1rem 1.1rem;
+    background: var(--card-bg);
+    backdrop-filter: var(--card-blur);
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .platform-card:hover { border-color: var(--text-dim); }
+  .card-connected { border-color: rgba(52, 211, 153, 0.4); }
+  .card-connecting { border-color: rgba(134, 120, 191, 0.4); }
+  .card-checking { border-color: rgba(245, 158, 11, 0.3); }
+
+  .platform-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .platform-icon { font-size: 1.3rem; }
+  .platform-name { font-size: 0.92rem; font-weight: 650; flex: 1; }
+  .platform-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .dot-green { background: var(--success); box-shadow: 0 0 6px rgba(52, 211, 153, 0.5); }
+  .dot-orange { background: var(--state-running); animation: pulse-dot 1.5s ease-in-out infinite; }
+  .dot-gray { background: var(--text-dim); opacity: 0.5; }
+  @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+  .platform-status-text { font-size: 0.76rem; color: var(--text-muted); margin-bottom: 0.65rem; }
+  .card-connected .platform-status-text { color: var(--success); }
+  .card-connecting .platform-status-text { color: var(--accent); }
+
+  .platform-actions { display: flex; gap: 0.4rem; }
+  .p-btn {
+    flex: 1;
+    padding: 0.4rem 0.65rem;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .p-btn:hover:not(:disabled) { border-color: var(--text-dim); background: var(--bg-hover); }
+  .p-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .p-btn-connect { background: var(--accent-gradient); color: var(--accent-text); border-color: transparent; }
+  .p-btn-connect:hover { filter: brightness(1.1); }
+  .p-btn-disconnect { color: var(--error); border-color: rgba(251, 113, 133, 0.3); }
+  .p-btn-disconnect:hover:not(:disabled) { background: rgba(251, 113, 133, 0.08); }
+  .p-btn-waiting { color: var(--accent); border-color: rgba(134, 120, 191, 0.3); animation: pulse-dot 2s ease-in-out infinite; }
 
   .sec-title {
     font-size: 0.92rem;

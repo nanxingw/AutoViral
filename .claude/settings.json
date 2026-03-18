@@ -7,5 +7,9 @@
         "allow": [],
         "defaultMode": "bypassPermissions"
     },
+    "enabledPlugins": {
+        "context7@claude-plugins-official": true,
+        "superpowers@superpowers-marketplace": true
+      },
     "effortLevel": "medium"
 }

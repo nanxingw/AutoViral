@@ -1,0 +1,191 @@
+<h2>Module 4: Data Collector — Metric Scraping Engine</h2>
+<p class="subtitle">Playwright-based periodic data collection. Replaces all mock data with real metrics. New file: src/data-collector.ts</p>
+
+<div class="mockup">
+  <div class="mockup-header">Collection Architecture</div>
+  <div class="mockup-body" style="font-family: monospace; font-size: 12px; line-height: 1.8; padding: 20px;">
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+      <!-- Left: Two types of collection -->
+      <div>
+        <div style="font-weight: bold; color: #f59e0b; margin-bottom: 8px;">Two Collection Modes</div>
+
+        <div style="background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.25); border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+          <div style="color: #34d399; font-weight: bold; margin-bottom: 6px;">A. Post Metrics — Track Your Content</div>
+          <div style="font-size: 11px; line-height: 2;">
+            <div><span style="color:#888;">Trigger:</span> Cron (every 4h for first 48h, then daily for 7d, then weekly)</div>
+            <div><span style="color:#888;">Target:</span> Each published work's postUrl on each platform</div>
+            <div><span style="color:#888;">Collects:</span></div>
+            <div>&nbsp;&nbsp;• views / plays</div>
+            <div>&nbsp;&nbsp;• likes / favorites</div>
+            <div>&nbsp;&nbsp;• comments count</div>
+            <div>&nbsp;&nbsp;• shares / reposts</div>
+            <div>&nbsp;&nbsp;• follower delta (if available)</div>
+            <div><span style="color:#888;">Stores:</span> work.yaml → platforms[].metrics + metrics history</div>
+            <div><span style="color:#888;">Memory:</span> → EverMemOS episodic (performance record)</div>
+          </div>
+        </div>
+
+        <div style="background: rgba(245,158,11,0.12); border: 1px solid rgba(245,158,11,0.25); border-radius: 8px; padding: 12px;">
+          <div style="color: #f59e0b; font-weight: bold; margin-bottom: 6px;">B. Trend Data — Discover What's Hot</div>
+          <div style="font-size: 11px; line-height: 2;">
+            <div><span style="color:#888;">Trigger:</span> Cron (every 6h, configurable)</div>
+            <div><span style="color:#888;">Target:</span> Platform trending/explore pages</div>
+            <div><span style="color:#888;">Collects:</span></div>
+            <div>&nbsp;&nbsp;• Trending videos (title, views, likes, creator)</div>
+            <div>&nbsp;&nbsp;• Hot topics / hashtags (post count, trend direction)</div>
+            <div>&nbsp;&nbsp;• Competitor content updates (if configured)</div>
+            <div><span style="color:#888;">Stores:</span> ~/.skill-evolver/trends/{platform}/{date}.yaml</div>
+            <div><span style="color:#888;">Memory:</span> → EverMemOS episodic (trend snapshot)</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Scheduling & Storage -->
+      <div>
+        <div style="font-weight: bold; color: #8678bf; margin-bottom: 8px;">Smart Scheduling</div>
+        <div style="background: rgba(134,120,191,0.1); padding: 14px; border-radius: 8px; font-size: 11px; line-height: 2; margin-bottom: 16px;">
+          <div style="color: #8678bf; font-weight: bold;">Post Metrics — Decay Schedule</div>
+          <div style="margin: 8px 0;">
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <span style="background: rgba(52,211,153,0.3); padding: 2px 8px; border-radius: 4px;">0-48h</span>
+              <span>every 4 hours</span>
+              <span style="color: #888;">(12 collections)</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px;">
+              <span style="background: rgba(245,158,11,0.3); padding: 2px 8px; border-radius: 4px;">2-7 days</span>
+              <span>once daily</span>
+              <span style="color: #888;">(5 collections)</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px;">
+              <span style="background: rgba(134,120,191,0.3); padding: 2px 8px; border-radius: 4px;">7-30 days</span>
+              <span>weekly</span>
+              <span style="color: #888;">(~3 collections)</span>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px;">
+              <span style="background: rgba(251,113,133,0.2); padding: 2px 8px; border-radius: 4px;">30d+</span>
+              <span>stop (content lifecycle over)</span>
+            </div>
+          </div>
+          <div style="color: #888; margin-top: 4px;">Total ~20 scrapes per work per platform. Minimizes requests.</div>
+
+          <div style="color: #8678bf; font-weight: bold; margin-top: 12px;">Trend Data — Fixed Interval</div>
+          <div style="margin-top: 4px;">
+            Default: every 6h (configurable in config.yaml)<br>
+            <span style="color: #888;">4 collections/day × 2 platforms = 8 scrapes/day</span>
+          </div>
+        </div>
+
+        <div style="font-weight: bold; color: #fb7185; margin-bottom: 8px;">Metrics History</div>
+        <div style="background: rgba(251,113,133,0.1); padding: 14px; border-radius: 8px; font-size: 11px; line-height: 1.8;">
+<span style="color:#888;"># In work.yaml → platforms[].metricsHistory</span>
+metricsHistory:
+  - timestamp: "2026-03-15T14:00:00Z"
+    views: 120
+    likes: 15
+    comments: 3
+  - timestamp: "2026-03-15T18:00:00Z"
+    views: 890
+    likes: 87
+    comments: 23
+  - timestamp: "2026-03-15T22:00:00Z"
+    views: 3400
+    likes: 312
+    comments: 67
+<span style="color:#888;"># → enables growth curves on Analytics page</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Scraper Details -->
+<div class="section" style="margin-top: 20px;">
+  <h3>Platform Scrapers (reuse PlatformAdapter)</h3>
+  <div style="font-size: 12px;">
+    <div style="background: rgba(255,255,255,0.05); padding: 14px; border-radius: 8px; font-family: monospace; font-size: 11px; line-height: 1.8;">
+<span style="color:#888;">// PlatformAdapter interface (from Module 3) already includes:</span>
+<span style="color:#34d399;">scrapeMetrics(page, postUrl): Promise&lt;Metrics&gt;</span>
+<span style="color:#888;">// → same login context, same browser profile</span>
+
+<span style="color:#888;">// New methods added to PlatformAdapter:</span>
+<span style="color:#34d399;">scrapeTrending(page): Promise&lt;TrendData&gt;</span>
+<span style="color:#888;">// → navigate to explore/trending, extract top videos + tags</span>
+
+<span style="color:#34d399;">scrapeCompetitor(page, profileUrl): Promise&lt;CompetitorData&gt;</span>
+<span style="color:#888;">// → visit creator profile, extract recent posts + metrics</span>
+
+<span style="color:#888;">// TrendData shape:</span>
+{
+  platform: "xiaohongshu"
+  collectedAt: "2026-03-16T08:00:00Z"
+  videos: [
+    { title, url, views, likes, comments, creator, thumbnail }
+  ]
+  tags: [
+    { name, postCount, trend: "up" | "down" | "stable" }
+  ]
+}
+    </div>
+  </div>
+</div>
+
+<!-- Integration with existing pages -->
+<div class="section" style="margin-top: 20px;">
+  <h3>Frontend Integration — Mock → Real</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; font-size: 12px;">
+    <div style="background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #34d399; margin-bottom: 4px;">Explore Page</div>
+      <div style="font-size: 11px; line-height: 1.8;">
+        <div><span style="color:#fb7185;">Before:</span> hardcoded 10+10 videos</div>
+        <div><span style="color:#34d399;">After:</span> GET /api/trends/:platform</div>
+        <div>Real trending data from latest scrape</div>
+        <div>Auto-refresh when new data arrives (WS)</div>
+      </div>
+    </div>
+    <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #f59e0b; margin-bottom: 4px;">Analytics Page</div>
+      <div style="font-size: 11px; line-height: 1.8;">
+        <div><span style="color:#fb7185;">Before:</span> fake demographics</div>
+        <div><span style="color:#34d399;">After:</span> GET /api/analytics</div>
+        <div>Aggregated from real work metrics</div>
+        <div>Growth curves from metricsHistory</div>
+      </div>
+    </div>
+    <div style="background: rgba(134,120,191,0.1); border: 1px solid rgba(134,120,191,0.2); border-radius: 8px; padding: 12px;">
+      <div style="font-weight: bold; color: #8678bf; margin-bottom: 4px;">Works Gallery</div>
+      <div style="font-size: 11px; line-height: 1.8;">
+        <div><span style="color:#fb7185;">Before:</span> 5 mock works</div>
+        <div><span style="color:#34d399;">After:</span> GET /api/works</div>
+        <div>Real works with real metrics</div>
+        <div>Live badge updates via WS</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- New API routes -->
+<div class="section" style="margin-top: 20px;">
+  <h3>New API Routes</h3>
+  <div style="background: rgba(255,255,255,0.05); padding: 14px; border-radius: 8px; font-family: monospace; font-size: 11px; line-height: 2;">
+<span style="color:#34d399;">GET</span>  /api/trends/:platform            <span style="color:#888;"># latest trend snapshot (xiaohongshu | douyin)</span>
+<span style="color:#34d399;">GET</span>  /api/trends/:platform/history     <span style="color:#888;"># trend snapshots over time</span>
+<span style="color:#34d399;">GET</span>  /api/analytics                    <span style="color:#888;"># aggregated: total views/likes, avg growth, top works</span>
+<span style="color:#34d399;">GET</span>  /api/analytics/work/:id           <span style="color:#888;"># per-work growth curves</span>
+<span style="color:#f59e0b;">POST</span> /api/collector/trigger             <span style="color:#888;"># manually trigger a collection run</span>
+<span style="color:#34d399;">GET</span>  /api/collector/status              <span style="color:#888;"># next scheduled run, last run stats</span>
+<span style="color:#34d399;">GET</span>  /api/competitors                   <span style="color:#888;"># list tracked competitor profiles</span>
+<span style="color:#f59e0b;">POST</span> /api/competitors                   <span style="color:#888;"># add competitor to track {platform, profileUrl}</span>
+  </div>
+</div>
+
+<!-- Config additions -->
+<div class="section" style="margin-top: 20px;">
+  <h3>Config Additions (config.yaml)</h3>
+  <div style="background: rgba(255,255,255,0.05); padding: 14px; border-radius: 8px; font-family: monospace; font-size: 11px; line-height: 1.8;">
+<span style="color:#888;"># New fields in ~/.skill-evolver/config.yaml</span>
+collector:
+  trendInterval: "6h"          <span style="color:#888;"># how often to scrape trending pages</span>
+  metricsEnabled: true         <span style="color:#888;"># auto-collect post metrics</span>
+  trendEnabled: true           <span style="color:#888;"># auto-collect trend data</span>
+  competitors: []              <span style="color:#888;"># [{platform, profileUrl, name}]</span>
+  </div>
+</div>

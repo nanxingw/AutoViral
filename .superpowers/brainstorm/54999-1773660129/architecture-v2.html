@@ -1,0 +1,132 @@
+<h2>Revised Architecture: Claude CLI WebSocket (pneuma-skills pattern)</h2>
+<p class="subtitle">Based on your discovery — persistent multi-turn conversations via Claude CLI's <code>--sdk-url</code></p>
+
+<div class="section">
+  <h3>Core Innovation</h3>
+  <p>Instead of spawning a new CLI process per step (current approach), we maintain a <strong>persistent Claude CLI session per work</strong>. The Agent remembers everything about this content piece across all 6 steps + user dialogue.</p>
+</div>
+
+<div class="mockup">
+  <div class="mockup-header">System Architecture: Content Creation Closed Loop</div>
+  <div class="mockup-body" style="font-family: monospace; font-size: 13px; line-height: 2; padding: 20px;">
+    <div style="text-align: center; margin-bottom: 16px;">
+      <span style="background: linear-gradient(135deg, #8678bf, #34d399); -webkit-background-clip: text; color: transparent; font-size: 18px; font-weight: bold;">AutoViral Full Architecture</span>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+      <!-- Frontend -->
+      <div style="background: rgba(134,120,191,0.15); border: 1px solid rgba(134,120,191,0.3); border-radius: 12px; padding: 16px;">
+        <div style="color: #8678bf; font-weight: bold; margin-bottom: 8px;">Frontend (Svelte)</div>
+        <div style="font-size: 12px; line-height: 1.8;">
+          <div>Works / Explore / Analytics</div>
+          <div style="color: #34d399;">+ Creation Studio (new)</div>
+          <div style="color: #34d399;">+ Chat Panel (new)</div>
+          <div style="color: #34d399;">+ Publish Manager (new)</div>
+          <div style="color: #34d399;">+ Memory Dashboard (new)</div>
+        </div>
+      </div>
+      <!-- Backend -->
+      <div style="background: rgba(52,211,153,0.15); border: 1px solid rgba(52,211,153,0.3); border-radius: 12px; padding: 16px;">
+        <div style="color: #34d399; font-weight: bold; margin-bottom: 8px;">Backend (Hono)</div>
+        <div style="font-size: 12px; line-height: 1.8;">
+          <div>API + WebSocket Server</div>
+          <div style="color: #f59e0b;">~ Executor → WsBridge (upgrade)</div>
+          <div style="color: #34d399;">+ Work Store (new)</div>
+          <div style="color: #34d399;">+ Memory Store (new)</div>
+          <div style="color: #34d399;">+ Publish Engine (new)</div>
+        </div>
+      </div>
+      <!-- External -->
+      <div style="background: rgba(251,113,133,0.15); border: 1px solid rgba(251,113,133,0.3); border-radius: 12px; padding: 16px;">
+        <div style="color: #fb7185; font-weight: bold; margin-bottom: 8px;">External</div>
+        <div style="font-size: 12px; line-height: 1.8;">
+          <div>Claude CLI (via --sdk-url)</div>
+          <div>Playwright Browsers</div>
+          <div style="color: #34d399;">+ Xiaohongshu (scrape)</div>
+          <div style="color: #34d399;">+ Douyin (scrape)</div>
+          <div style="color: #34d399;">+ Metric Collector (new)</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Data Flow -->
+    <div style="background: rgba(255,255,255,0.05); border-radius: 12px; padding: 16px; margin-bottom: 16px;">
+      <div style="font-weight: bold; margin-bottom: 12px; color: #f59e0b;">Content Creation Flow (per Work)</div>
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 12px;">
+        <span style="background: #8678bf; color: white; padding: 4px 8px; border-radius: 6px;">User: New Work</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(52,211,153,0.2); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(52,211,153,0.4);">Spawn CLI Session</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(52,211,153,0.2); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(52,211,153,0.4);">Step 1: Topic</span>
+        <span style="color: #555;">⇄</span>
+        <span style="background: rgba(134,120,191,0.2); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(134,120,191,0.4);">User Chat</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(52,211,153,0.2); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(52,211,153,0.4);">Step 2: Remix</span>
+        <span style="color: #555;">⇄ ...</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(251,113,133,0.2); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(251,113,133,0.4);">Publish</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(245,158,11,0.2); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(245,158,11,0.4);">Collect Metrics</span>
+        <span style="color: #555;">→</span>
+        <span style="background: rgba(134,120,191,0.2); padding: 4px 8px; border-radius: 6px; border: 1px solid rgba(134,120,191,0.4);">Update Memory</span>
+      </div>
+    </div>
+
+    <!-- Key Upgrade -->
+    <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 12px; padding: 16px;">
+      <div style="font-weight: bold; margin-bottom: 8px; color: #f59e0b;">Key Upgrade: Executor → WsBridge</div>
+      <div style="font-size: 12px; line-height: 1.8;">
+        <div><span style="color: #fb7185;">Before:</span> executor.run() → spawn CLI → parse stdout → one-shot result</div>
+        <div><span style="color: #34d399;">After:</span> wsBridge.createSession() → spawn CLI with --sdk-url → persistent WebSocket → multi-turn dialogue</div>
+        <div style="margin-top: 8px;"><span style="color: #8678bf;">Resume:</span> CLI session persisted → --resume on restart → full context restored</div>
+        <div><span style="color: #8678bf;">Memory:</span> Each work's conversation history = creation context for next work</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 24px;">
+  <h3>Sub-Systems Breakdown</h3>
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 13px;">
+    <div style="background: rgba(52,211,153,0.1); border: 1px solid rgba(52,211,153,0.2); border-radius: 8px; padding: 12px;">
+      <strong style="color: #34d399;">1. Content Engine</strong>
+      <ul style="margin: 8px 0 0; padding-left: 16px; line-height: 1.8;">
+        <li>WsBridge (persistent CLI sessions)</li>
+        <li>Work Store (YAML, per-work state)</li>
+        <li>Pipeline orchestration (6 steps + custom)</li>
+        <li>Chat interface (user ⇄ Agent dialogue)</li>
+        <li>Multi-format (video script, image-text, livestream)</li>
+      </ul>
+    </div>
+    <div style="background: rgba(251,113,133,0.1); border: 1px solid rgba(251,113,133,0.2); border-radius: 8px; padding: 12px;">
+      <strong style="color: #fb7185;">2. Publish Engine</strong>
+      <ul style="margin: 8px 0 0; padding-left: 16px; line-height: 1.8;">
+        <li>Playwright browser automation</li>
+        <li>Platform adapters (Xiaohongshu, Douyin)</li>
+        <li>Login state management (cookies)</li>
+        <li>Content formatting per platform</li>
+        <li>Scheduling (publish at optimal time)</li>
+      </ul>
+    </div>
+    <div style="background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.2); border-radius: 8px; padding: 12px;">
+      <strong style="color: #f59e0b;">3. Data Collector</strong>
+      <ul style="margin: 8px 0 0; padding-left: 16px; line-height: 1.8;">
+        <li>Playwright periodic scraping</li>
+        <li>Metrics: views, likes, comments, shares</li>
+        <li>Trend data (real, not mock)</li>
+        <li>Competitor content tracking</li>
+        <li>Cron-scheduled collection jobs</li>
+      </ul>
+    </div>
+    <div style="background: rgba(134,120,191,0.1); border: 1px solid rgba(134,120,191,0.2); border-radius: 8px; padding: 12px;">
+      <strong style="color: #8678bf;">4. Memory System</strong>
+      <ul style="margin: 8px 0 0; padding-left: 16px; line-height: 1.8;">
+        <li>Creation history (what worked, what didn't)</li>
+        <li>Style profile (evolving, data-driven)</li>
+        <li>Platform rules (learned from successes/failures)</li>
+        <li>Competitor insights (accumulated)</li>
+        <li>Injected into CLI session as system context</li>
+      </ul>
+    </div>
+  </div>
+</div>
