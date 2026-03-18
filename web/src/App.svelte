@@ -1,60 +1,43 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import FeatureDetail from "./pages/FeatureDetail.svelte";
   import Explore from "./pages/Explore.svelte";
   import Analytics from "./pages/Analytics.svelte";
   import Studio from "./pages/Studio.svelte";
-  import Memory from "./pages/Memory.svelte";
+  import Works from "./pages/Works.svelte";
   import NewWorkModal from "./components/NewWorkModal.svelte";
-  import { fetchConfig, updateConfig, triggerEvolution, fetchWorks, createWorkApi, type WorkSummary } from "./lib/api";
+  import { fetchConfig, updateConfig, fetchWorks, createWorkApi, type WorkSummary } from "./lib/api";
   import { t, getLanguage, setLanguage, subscribe } from "./lib/i18n";
 
   let theme: "light" | "dark" = $state("dark");
   let lang = $state(getLanguage());
   function tt(key: string): string { void lang; return t(key); }
 
+  // App state
+  type Tab = "explore" | "works" | "analytics";
+  let activeTab: Tab = $state("works");
+  let showStudio = $state(false);
+  let currentWorkId: string | null = $state(null);
+  let showSettings = $state(false);
+  let showNewWorkModal = $state(false);
+
   // Config state
   let interval: string = $state("1h");
   let model: string = $state("sonnet");
   let autoRun: boolean = $state(false);
   let saving: boolean = $state(false);
-  let message: string = $state("");
-  let messageType: "success" | "error" = $state("success");
-  let researching: boolean = $state(false);
-  let researchMessage: string = $state("");
+  let settingsMessage: string = $state("");
 
-  // Tab state
-  type Tab = "works" | "explore" | "analytics" | "memory";
-  let activeTab: Tab = $state("works");
+  // Sidebar hover
+  let sidebarExpanded = $state(false);
 
-  // View state: null = gallery, "new" = new work pipeline, string = existing work
-  let activeView: string | null = $state(null);
-
-  // Studio & Modal state
-  let currentWorkId: string | null = $state(null);
-  let showNewWorkModal = $state(false);
-  let showStudio = $state(false);
-
-  // Works from API
-  let works: WorkSummary[] = $state([]);
-
-  // Flag to scroll to insights on analytics page
-  let scrollToInsightsFlag = $state(false);
-
-  function goToInsights() {
-    scrollToInsightsFlag = true;
-    activeTab = "analytics";
-    activeView = null;
-    // Reset flag after navigation
-    setTimeout(() => { scrollToInsightsFlag = false; }, 500);
+  function openStudio(workId: string) {
+    currentWorkId = workId;
+    showStudio = true;
   }
 
-  async function loadWorks() {
-    try {
-      works = await fetchWorks();
-    } catch {
-      // fallback to empty
-    }
+  function closeStudio() {
+    showStudio = false;
+    currentWorkId = null;
   }
 
   async function handleCreateWork(data: { title: string; type: string; platforms: string[]; topicHint: string }) {
@@ -68,67 +51,22 @@
       });
       currentWorkId = newWork.id;
       showStudio = true;
-      await loadWorks();
     } catch {
       // creation failed
     }
   }
 
-  function openStudio(workId: string) {
-    currentWorkId = workId;
-    showStudio = true;
-  }
-
-  function closeStudio() {
-    showStudio = false;
-    currentWorkId = null;
-    loadWorks();
-  }
-
-  function workStatusLabel(status: string): string {
-    const map: Record<string, string> = {
-      draft: "workDraft",
-      creating: "workCreating",
-      ready: "workReady",
-      publishing: "workPublishing",
-      published: "workPublished",
-      failed: "workFailed",
-    };
-    return tt(map[status] ?? "workDraft");
-  }
-
-  function workStatusClass(status: string): string {
-    if (status === "published") return "published";
-    return "draft";
-  }
-
-  async function handleSave() {
+  async function handleSaveSettings() {
     saving = true;
-    message = "";
+    settingsMessage = "";
     try {
       await updateConfig({ interval, model, autoRun });
-      message = t("settingsSaved");
-      messageType = "success";
-      setTimeout(() => { message = ""; }, 3000);
+      settingsMessage = tt("settingsSaved");
+      setTimeout(() => { settingsMessage = ""; }, 3000);
     } catch {
-      message = t("settingsSaveFailed");
-      messageType = "error";
+      settingsMessage = tt("settingsSaveFailed");
     } finally {
       saving = false;
-    }
-  }
-
-  async function handleStartResearch() {
-    researching = true;
-    researchMessage = "";
-    try {
-      await triggerEvolution();
-      researchMessage = t("researchStarted");
-      setTimeout(() => { researchMessage = ""; }, 5000);
-    } catch {
-      researchMessage = t("researchFailed");
-    } finally {
-      researching = false;
     }
   }
 
@@ -153,186 +91,178 @@
       model = c.model;
       autoRun = c.autoRun;
     } catch {}
-    await loadWorks();
     return () => {
       unsub();
     };
   });
+
+  const navItems = [
+    { tab: "explore" as Tab, icon: "search", labelKey: "explore" },
+    { tab: "works" as Tab, icon: "works", labelKey: "works" },
+    { tab: "analytics" as Tab, icon: "analytics", labelKey: "analytics" },
+  ];
 </script>
 
 <div class="shell" data-lang={lang}>
-  <header>
-    <div class="brand">
-      <div class="logo">
-        <svg width="22" height="22" viewBox="0 0 32 32" fill="none">
-          <path d="M8 6L20 16L8 26V6Z" fill="url(#logo-grad)" opacity="0.9"/>
+  <!-- Sidebar -->
+  <nav
+    class="sidebar"
+    class:expanded={sidebarExpanded}
+    onmouseenter={() => sidebarExpanded = true}
+    onmouseleave={() => sidebarExpanded = false}
+  >
+    <div class="sidebar-logo">
+      <div class="logo-icon">
+        <svg width="20" height="20" viewBox="0 0 32 32" fill="none">
+          <path d="M8 6L20 16L8 26V6Z" fill="url(#sidebar-grad)" opacity="0.9"/>
           <path d="M16 6L28 16L16 26V6Z" fill="#fff" opacity="0.45"/>
-          <defs><linearGradient id="logo-grad" x1="8" y1="6" x2="20" y2="26"><stop stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0.6"/></linearGradient></defs>
+          <defs><linearGradient id="sidebar-grad" x1="8" y1="6" x2="20" y2="26"><stop stop-color="#fff"/><stop offset="1" stop-color="#fff" stop-opacity="0.6"/></linearGradient></defs>
         </svg>
       </div>
-      <h1>AutoViral</h1>
+      {#if sidebarExpanded}
+        <span class="logo-text">AutoViral</span>
+      {/if}
     </div>
-    <nav class="tab-bar">
-      <button class="tab-btn" class:active={activeTab === "works"} onclick={() => { activeTab = "works"; activeView = null; }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-        {tt("tabWorks")}
-      </button>
-      <button class="tab-btn" class:active={activeTab === "explore"} onclick={() => { activeTab = "explore"; activeView = null; }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76"/></svg>
-        {tt("tabExplore")}
-      </button>
-      <button class="tab-btn" class:active={activeTab === "analytics"} onclick={() => { activeTab = "analytics"; activeView = null; }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        {tt("tabAnalytics")}
-      </button>
-      <button class="tab-btn" class:active={activeTab === "memory"} onclick={() => { activeTab = "memory"; activeView = null; }}>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z"/><line x1="10" y1="22" x2="14" y2="22"/></svg>
-        {tt("tabMemory")}
-      </button>
-    </nav>
-    <div class="header-actions">
-      <div class="lang-switcher">
-        <span class="lang-label" class:active={lang === "en"}>EN</span>
-        <button class="lang-toggle" class:zh={lang === "zh"} onclick={toggleLanguage} title="Switch language">
-          <span class="lang-thumb"></span>
+
+    <div class="nav-items">
+      {#each navItems as item}
+        <button
+          class="nav-item"
+          class:active={activeTab === item.tab && !showStudio}
+          onclick={() => { activeTab = item.tab; showStudio = false; currentWorkId = null; }}
+        >
+          <span class="nav-icon">
+            {#if item.icon === "search"}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            {:else if item.icon === "works"}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            {:else if item.icon === "analytics"}
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+            {/if}
+          </span>
+          {#if sidebarExpanded}
+            <span class="nav-label">{tt(item.labelKey)}</span>
+          {/if}
         </button>
-        <span class="lang-label" class:active={lang === "zh"}>中文</span>
-      </div>
-      <button class="theme-toggle" onclick={toggleTheme} title="Toggle theme">
-        {#if theme === "dark"}
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-        {:else}
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+      {/each}
+    </div>
+
+    <div class="nav-bottom">
+      <button
+        class="nav-item"
+        class:active={showSettings}
+        onclick={() => { showSettings = !showSettings; }}
+      >
+        <span class="nav-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        </span>
+        {#if sidebarExpanded}
+          <span class="nav-label">{tt("settings")}</span>
         {/if}
       </button>
     </div>
-  </header>
+  </nav>
 
-  <main>
+  <!-- Main Content -->
+  <main class="main-content">
     {#if showStudio && currentWorkId}
       <Studio workId={currentWorkId} onBack={closeStudio} />
     {:else if activeTab === "explore"}
       <Explore />
     {:else if activeTab === "analytics"}
-      <Analytics scrollToInsights={scrollToInsightsFlag} />
-    {:else if activeTab === "memory"}
-      <Memory />
-    {:else if activeView !== null}
-      {@const w = works.find(w => w.id === activeView)}
-      <FeatureDetail workId={activeView} workStatus={w?.status ?? "draft"} onBack={() => activeView = null} />
+      <Analytics />
     {:else}
-      <!-- Greeting Section -->
-      <div class="greeting">
-        <p class="greeting-line1">{tt("greetingLine1")}</p>
-        <p class="greeting-line2">{tt("greetingLine2a").replace("{count}", "47")}<span class="greeting-link" role="button" tabindex="0" onclick={goToInsights} onkeydown={(e) => e.key === "Enter" && goToInsights()}>{tt("greetingLine2b").replace("{insights}", "3")}</span>{tt("greetingLine2c")}</p>
-      </div>
-
-      <!-- Research Config Area -->
-      <div class="config-area">
-        <div class="config-area-header">
-          <div class="config-area-title">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
-            <h3>{tt("researchConfig")}</h3>
-          </div>
-          <div class="config-area-actions">
-            {#if message}
-              <span class="action-msg" class:error={messageType === "error"} class:success={messageType === "success"}>{message}</span>
-            {/if}
-            {#if researchMessage}
-              <span class="action-msg success">{researchMessage}</span>
-            {/if}
-            <button class="save-btn" onclick={handleSave} disabled={saving}>
-              {#if saving}
-                <svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
-                {tt("saving")}
-              {:else}
-                {tt("saveChanges")}
-              {/if}
-            </button>
-            <button class="research-btn" onclick={handleStartResearch} disabled={researching}>
-              {#if researching}
-                <svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
-                {tt("researchingDots")}
-              {:else}
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <polygon points="5 3 19 12 5 21 5 3"/>
-                </svg>
-                {tt("startResearch")}
-              {/if}
-            </button>
-          </div>
-        </div>
-
-        <div class="config-fields-inline">
-          <label class="config-field-inline">
-            <span class="field-label">{tt("researchInterval")}</span>
-            <select bind:value={interval}>
-              <option value="15m">{tt("minutes15")}</option>
-              <option value="30m">{tt("minutes30")}</option>
-              <option value="1h">{tt("hour1")}</option>
-              <option value="2h">{tt("hours2")}</option>
-              <option value="4h">{tt("hours4")}</option>
-              <option value="8h">{tt("hours8")}</option>
-            </select>
-          </label>
-          <label class="config-field-inline">
-            <span class="field-label">{tt("aiModel")}</span>
-            <select bind:value={model}>
-              <option value="haiku">{tt("claudeHaikuFast")}</option>
-              <option value="sonnet">{tt("claudeSonnetBalanced")}</option>
-              <option value="opus">{tt("claudeOpusCapable")}</option>
-            </select>
-          </label>
-          <div class="config-toggle-inline">
-            <span class="field-label">{tt("autoResearch")}</span>
-            <button class="toggle-switch" class:on={autoRun} onclick={() => autoRun = !autoRun} role="switch" aria-checked={autoRun}>
-              <span class="toggle-thumb"></span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Works Gallery -->
-      <div class="gallery-section">
-        <h3 class="gallery-title">{tt("myWorks")}</h3>
-        <div class="gallery-grid">
-          <!-- New Work Card -->
-          <button class="gallery-card new-card" onclick={() => showNewWorkModal = true}>
-            <div class="new-card-inner">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="12" y1="5" x2="12" y2="19"/>
-                <line x1="5" y1="12" x2="19" y2="12"/>
-              </svg>
-              <span>{tt("newWork")}</span>
-            </div>
-          </button>
-
-          {#if works.length === 0}
-            <div class="no-works-hint">
-              <p>{tt("noWorks")}</p>
-            </div>
-          {:else}
-            {#each works as w}
-              <button class="gallery-card" onclick={() => openStudio(w.id)}>
-                <div class="card-cover">
-                  <div class="card-cover-placeholder">
-                    <span class="cover-type-icon">
-                      {#if w.type === "short-video"}🎬{:else if w.type === "image-text"}📷{:else if w.type === "long-video"}🎥{:else}📡{/if}
-                    </span>
-                  </div>
-                  <span class="status-badge {workStatusClass(w.status)}">{workStatusLabel(w.status)}</span>
-                </div>
-                <div class="card-info">
-                  <span class="card-title">{w.title}</span>
-                  <span class="card-date">{new Date(w.updatedAt).toLocaleDateString()}</span>
-                </div>
-              </button>
-            {/each}
-          {/if}
-        </div>
-      </div>
+      <Works
+        onOpenStudio={openStudio}
+        onCreateNew={() => showNewWorkModal = true}
+      />
     {/if}
   </main>
+
+  <!-- Settings Slide-out -->
+  {#if showSettings}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="settings-overlay" onclick={() => showSettings = false}></div>
+    <aside class="settings-panel">
+      <div class="settings-header">
+        <h2>{tt("settingsTitle")}</h2>
+        <button class="close-settings" onclick={() => showSettings = false}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <div class="settings-body">
+        <!-- Language -->
+        <div class="setting-group">
+          <label class="setting-label">{tt("languageSetting")}</label>
+          <div class="lang-switcher">
+            <span class="lang-opt" class:active={lang === "en"}>EN</span>
+            <button class="lang-toggle" class:zh={lang === "zh"} onclick={toggleLanguage}>
+              <span class="lang-thumb"></span>
+            </button>
+            <span class="lang-opt" class:active={lang === "zh"}>中文</span>
+          </div>
+        </div>
+
+        <!-- Theme -->
+        <div class="setting-group">
+          <label class="setting-label">{tt("themeSetting")}</label>
+          <button class="theme-btn" onclick={toggleTheme}>
+            {#if theme === "dark"}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+              {tt("darkTheme")}
+            {:else}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+              {tt("lightTheme")}
+            {/if}
+          </button>
+        </div>
+
+        <!-- Research Config -->
+        <div class="setting-group">
+          <label class="setting-label">{tt("researchConfig")}</label>
+          <div class="config-fields">
+            <div class="config-field">
+              <span class="field-label">{tt("researchInterval")}</span>
+              <select bind:value={interval}>
+                <option value="15m">{tt("minutes15")}</option>
+                <option value="30m">{tt("minutes30")}</option>
+                <option value="1h">{tt("hour1")}</option>
+                <option value="2h">{tt("hours2")}</option>
+                <option value="4h">{tt("hours4")}</option>
+                <option value="8h">{tt("hours8")}</option>
+              </select>
+            </div>
+            <div class="config-field">
+              <span class="field-label">{tt("aiModel")}</span>
+              <select bind:value={model}>
+                <option value="haiku">{tt("claudeHaikuFast")}</option>
+                <option value="sonnet">{tt("claudeSonnetBalanced")}</option>
+                <option value="opus">{tt("claudeOpusCapable")}</option>
+              </select>
+            </div>
+            <div class="config-field toggle-field">
+              <span class="field-label">{tt("autoResearch")}</span>
+              <button class="toggle-switch" class:on={autoRun} onclick={() => autoRun = !autoRun} role="switch" aria-checked={autoRun}>
+                <span class="toggle-thumb"></span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {#if settingsMessage}
+          <p class="settings-msg">{settingsMessage}</p>
+        {/if}
+
+        <button class="save-settings-btn" onclick={handleSaveSettings} disabled={saving}>
+          {#if saving}
+            <svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
+          {/if}
+          {saving ? tt("saving") : tt("saveChanges")}
+        </button>
+      </div>
+    </aside>
+  {/if}
 
   <NewWorkModal
     open={showNewWorkModal}
@@ -382,6 +312,7 @@
     --card-blur: blur(20px);
     --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --sidebar-bg: rgba(12, 13, 20, 0.85);
   }
 
   :global([data-theme="light"]) {
@@ -423,6 +354,7 @@
     --card-blur: blur(20px);
     --transition-fast: 0.15s cubic-bezier(0.4, 0, 0.2, 1);
     --transition-normal: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --sidebar-bg: rgba(255, 255, 255, 0.85);
   }
 
   :global(*, *::before, *::after) {
@@ -443,166 +375,256 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
-  :global(::selection) {
-    background: var(--selection);
-  }
-
-  :global(::-webkit-scrollbar) {
-    width: 5px;
-  }
-
-  :global(::-webkit-scrollbar-track) {
-    background: transparent;
-  }
-
-  :global(::-webkit-scrollbar-thumb) {
-    background: var(--scrollbar);
-    border-radius: 3px;
-  }
-
-  :global(::-webkit-scrollbar-thumb:hover) {
-    background: var(--text-dim);
-  }
-
-  :global(:focus-visible) {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-  }
+  :global(::selection) { background: var(--selection); }
+  :global(::-webkit-scrollbar) { width: 5px; }
+  :global(::-webkit-scrollbar-track) { background: transparent; }
+  :global(::-webkit-scrollbar-thumb) { background: var(--scrollbar); border-radius: 3px; }
+  :global(::-webkit-scrollbar-thumb:hover) { background: var(--text-dim); }
+  :global(:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .shell {
-    max-width: 1120px;
-    margin: 0 auto;
-    padding: 0 2.5rem 4rem;
+    display: flex;
+    height: 100vh;
+    overflow: hidden;
   }
 
-  header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1.5rem;
-    padding: 1.25rem 0;
-    margin-bottom: 2.5rem;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    background: color-mix(in srgb, var(--bg) 85%, transparent);
-    backdrop-filter: blur(16px) saturate(180%);
-    -webkit-backdrop-filter: blur(16px) saturate(180%);
-  }
-
-  .brand {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
+  /* ── Sidebar ──────────────────────────────────────────────────── */
+  .sidebar {
+    width: 60px;
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--sidebar-bg);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border-right: 1px solid var(--border);
+    padding: 0.75rem 0;
+    transition: width var(--transition-normal);
+    overflow: hidden;
+    z-index: 200;
   }
 
-  .logo {
+  .sidebar.expanded {
+    width: 200px;
+  }
+
+  .sidebar-logo {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.5rem 0.85rem 1.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+
+  .logo-icon {
     width: 36px;
     height: 36px;
+    min-width: 36px;
     background: var(--accent-gradient);
     border-radius: 11px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #fff;
     box-shadow: 0 4px 12px rgba(134, 120, 191, 0.25);
   }
 
-  h1 {
-    font-size: 1.25rem;
+  .logo-text {
+    font-size: 1.1rem;
     font-weight: 750;
-    color: var(--text);
-    white-space: nowrap;
     letter-spacing: -0.04em;
+    color: var(--text);
+    animation: fadeInLabel 0.2s ease;
   }
 
-  /* ── Tab Bar ────────────────────────────────────────────────────────── */
-  .tab-bar {
+  .nav-items {
+    flex: 1;
     display: flex;
-    align-items: center;
-    gap: 0.2rem;
-    background: var(--bg-surface);
-    border-radius: 14px;
-    padding: 0.3rem;
-    border: 1px solid var(--border);
-    backdrop-filter: var(--card-blur);
-    -webkit-backdrop-filter: var(--card-blur);
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0 0.5rem;
   }
 
-  .tab-btn {
+  .nav-bottom {
+    padding: 0 0.5rem;
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+    margin-top: 0.5rem;
+  }
+
+  .nav-item {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
-    background: none;
+    gap: 0.75rem;
+    padding: 0.6rem 0.7rem;
+    border-radius: 12px;
     border: none;
+    background: none;
     color: var(--text-muted);
-    padding: 0.55rem 1.1rem;
-    border-radius: 11px;
-    font-size: 0.82rem;
+    font-family: inherit;
+    font-size: 0.85rem;
     font-weight: 550;
     cursor: pointer;
     transition: all var(--transition-fast);
     white-space: nowrap;
-    font-family: inherit;
+    overflow: hidden;
+    width: 100%;
+    text-align: left;
   }
 
-  .tab-btn:hover {
+  .nav-item:hover {
+    background: var(--bg-hover);
     color: var(--text);
+  }
+
+  .nav-item.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .nav-item.active .nav-icon {
+    color: var(--accent);
+  }
+
+  .nav-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    min-width: 24px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+
+  .nav-label {
+    animation: fadeInLabel 0.2s ease;
+  }
+
+  @keyframes fadeInLabel {
+    from { opacity: 0; transform: translateX(-4px); }
+    to { opacity: 1; transform: translateX(0); }
+  }
+
+  /* ── Main Content ─────────────────────────────────────────── */
+  .main-content {
+    flex: 1;
+    min-width: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 1.5rem 2.5rem 4rem;
+  }
+
+  /* ── Settings Panel ───────────────────────────────────────── */
+  .settings-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.4);
+    z-index: 500;
+    animation: fadeIn 0.2s ease;
+  }
+
+  .settings-panel {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: min(400px, 90vw);
+    background: var(--sidebar-bg);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    border-left: 1px solid var(--border);
+    z-index: 600;
+    display: flex;
+    flex-direction: column;
+    animation: slideIn 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: var(--shadow-lg);
+  }
+
+  @keyframes slideIn {
+    from { transform: translateX(100%); }
+    to { transform: translateX(0); }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  .settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1.25rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .settings-header h2 {
+    font-size: 1.1rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+  }
+
+  .close-settings {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    padding: 0.35rem;
+    cursor: pointer;
+    display: flex;
+    transition: all 0.15s ease;
+  }
+
+  .close-settings:hover {
+    color: var(--text);
+    border-color: var(--text-dim);
     background: var(--bg-hover);
   }
 
-  .tab-btn.active {
-    color: var(--accent);
-    background: var(--card-bg);
-    box-shadow: var(--shadow-sm);
-    backdrop-filter: var(--card-blur);
-  }
-
-  .tab-btn svg {
-    flex-shrink: 0;
-    opacity: 0.5;
-  }
-
-  .tab-btn.active svg {
-    opacity: 1;
-  }
-
-  @media (max-width: 640px) {
-    .tab-btn span { display: none; }
-    .tab-bar { gap: 0.1rem; padding: 0.2rem; }
-    .tab-btn { padding: 0.5rem 0.7rem; }
-  }
-
-  .header-actions {
+  .settings-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.5rem;
     display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-shrink: 0;
+    flex-direction: column;
+    gap: 1.75rem;
   }
 
+  .setting-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .setting-label {
+    font-size: 0.78rem;
+    font-weight: 650;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  /* Lang switcher */
   .lang-switcher {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.5rem;
   }
 
-  .lang-label {
-    font-size: 0.72rem;
+  .lang-opt {
+    font-size: 0.8rem;
     font-weight: 550;
     color: var(--text-dim);
     transition: color 0.2s ease;
     user-select: none;
   }
 
-  .lang-label.active {
-    color: var(--text);
-  }
+  .lang-opt.active { color: var(--text); }
 
   .lang-toggle {
-    width: 36px;
-    height: 20px;
-    border-radius: 10px;
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
     background: var(--text-dim);
     border: none;
     cursor: pointer;
@@ -612,218 +634,69 @@
     flex-shrink: 0;
   }
 
-  .lang-toggle.zh {
-    background: var(--accent-gradient);
-  }
+  .lang-toggle.zh { background: var(--accent-gradient); }
 
   .lang-thumb {
     position: absolute;
     top: 2px;
     left: 2px;
-    width: 16px;
-    height: 16px;
+    width: 18px;
+    height: 18px;
     border-radius: 50%;
     background: #fff;
     transition: transform 0.2s ease;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
   }
 
-  .lang-toggle.zh .lang-thumb {
-    transform: translateX(16px);
-  }
+  .lang-toggle.zh .lang-thumb { transform: translateX(18px); }
 
-  .theme-toggle {
-    background: none;
-    border: 1px solid var(--border);
-    color: var(--text-muted);
-    padding: 0.4rem;
-    border-radius: 8px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-  }
-
-  .theme-toggle:hover {
-    color: var(--text);
-    border-color: var(--text-dim);
-    background: var(--bg-hover);
-  }
-
-  /* ── Greeting ──────────────────────────────────────────────────────────── */
-  .greeting {
-    padding: 2rem 0 1.25rem;
-  }
-
-  .greeting-line1 {
-    font-size: 0.82rem;
-    color: var(--text-dim);
-    margin-bottom: 0.6rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    font-weight: 550;
-  }
-
-  .greeting-line2 {
-    font-size: 1.5rem;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    line-height: 1.5;
-    color: var(--text);
-  }
-
-  .greeting-link {
-    color: var(--accent);
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    text-decoration: none;
-    border-bottom: 1.5px solid rgba(134, 120, 191, 0.3);
-  }
-
-  .greeting-link:hover {
-    border-bottom-color: var(--accent);
-  }
-
-  /* ── Config Area ─────────────────────────────────────────────────────── */
-  .config-area {
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: var(--card-radius);
-    padding: 1.5rem;
-    box-shadow: var(--shadow-sm);
-    margin-bottom: 2.5rem;
-    backdrop-filter: var(--card-blur);
-    -webkit-backdrop-filter: var(--card-blur);
-  }
-
-  .config-area-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1rem;
-    flex-wrap: wrap;
-  }
-
-  .config-area-title {
+  /* Theme button */
+  .theme-btn {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-  }
-
-  .config-area-title svg {
-    color: var(--accent);
-  }
-
-  .config-area-title h3 {
-    font-size: 0.95rem;
-    font-weight: 600;
-  }
-
-  .config-area-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-    flex-wrap: wrap;
-  }
-
-  .action-msg {
-    font-size: 0.78rem;
-    font-weight: 500;
-    animation: fadeIn 0.2s ease;
-  }
-
-  .action-msg.success { color: var(--success); }
-  .action-msg.error { color: var(--error); }
-
-  .save-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.35rem;
     background: var(--bg-surface);
-    color: var(--text);
     border: 1px solid var(--border);
-    padding: 0.45rem 1rem;
-    border-radius: 8px;
+    border-radius: 10px;
+    padding: 0.55rem 1rem;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85rem;
     font-weight: 550;
     cursor: pointer;
-    font-size: 0.82rem;
-    transition: all 0.2s ease;
-    white-space: nowrap;
+    transition: all 0.15s ease;
+    width: fit-content;
   }
 
-  .save-btn:hover:not(:disabled) {
-    background: var(--bg-hover);
+  .theme-btn:hover {
     border-color: var(--text-dim);
+    background: var(--bg-hover);
   }
 
-  .save-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .research-btn {
+  /* Config fields in settings */
+  .config-fields {
     display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    background: var(--accent-gradient);
-    color: var(--accent-text);
-    border: none;
-    padding: 0.55rem 1.25rem;
-    border-radius: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    font-size: 0.82rem;
-    transition: all var(--transition-fast);
-    box-shadow: 0 4px 14px rgba(134, 120, 191, 0.25);
-    white-space: nowrap;
+    flex-direction: column;
+    gap: 0.75rem;
   }
 
-  .research-btn:hover:not(:disabled) {
-    box-shadow: 0 6px 22px rgba(134, 120, 191, 0.35);
-    transform: translateY(-1px);
-    filter: brightness(1.1);
-  }
-
-  .research-btn:active:not(:disabled) {
-    transform: translateY(0);
-  }
-
-  .research-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .config-fields-inline {
-    display: flex;
-    align-items: flex-end;
-    gap: 1rem;
-    flex-wrap: wrap;
-  }
-
-  .config-field-inline {
+  .config-field {
     display: flex;
     flex-direction: column;
     gap: 0.25rem;
-    flex: 1;
-    min-width: 140px;
   }
 
-  .config-toggle-inline {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    padding-bottom: 0.15rem;
-    flex-shrink: 0;
-  }
-
-  .field-label {
-    font-size: 0.8rem;
+  .config-field .field-label {
+    font-size: 0.78rem;
     font-weight: 550;
-    color: var(--text-secondary);
-    white-space: nowrap;
+    color: var(--text-muted);
+  }
+
+  .toggle-field {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.3rem 0;
   }
 
   select {
@@ -863,9 +736,7 @@
     padding: 0;
   }
 
-  .toggle-switch.on {
-    background: var(--accent-gradient);
-  }
+  .toggle-switch.on { background: var(--accent-gradient); }
 
   .toggle-thumb {
     position: absolute;
@@ -876,285 +747,64 @@
     border-radius: 50%;
     background: #fff;
     transition: transform 0.2s ease;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
   }
 
-  .toggle-switch.on .toggle-thumb {
-    transform: translateX(18px);
+  .toggle-switch.on .toggle-thumb { transform: translateX(18px); }
+
+  .settings-msg {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--success);
+    animation: fadeIn 0.2s ease;
   }
+
+  .save-settings-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    background: var(--accent-gradient);
+    color: var(--accent-text);
+    border: none;
+    border-radius: 12px;
+    padding: 0.65rem 1.5rem;
+    font-size: 0.85rem;
+    font-weight: 650;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    box-shadow: 0 4px 14px rgba(134, 120, 191, 0.25);
+    width: 100%;
+  }
+
+  .save-settings-btn:hover:not(:disabled) {
+    box-shadow: 0 6px 22px rgba(134, 120, 191, 0.35);
+    transform: translateY(-1px);
+    filter: brightness(1.1);
+  }
+
+  .save-settings-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
   .spin { animation: spin 1s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  @keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-4px); }
-    to { opacity: 1; transform: translateY(0); }
-  }
-
-  /* ── Gallery ──────────────────────────────────────────────────────────── */
-  .gallery-section {
-    margin-top: 0.75rem;
-  }
-
-  .gallery-title {
-    font-size: 1rem;
-    font-weight: 650;
-    margin-bottom: 1.25rem;
-    letter-spacing: -0.015em;
-    color: var(--text);
-  }
-
-  .gallery-grid {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 1.125rem;
-  }
-
+  /* ── Responsive ───────────────────────────────────────────── */
   @media (max-width: 768px) {
-    .gallery-grid {
-      grid-template-columns: repeat(2, 1fr);
+    .sidebar {
+      width: 0;
+      border-right: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      bottom: 0;
     }
-  }
-
-  @media (max-width: 480px) {
-    .gallery-grid {
-      grid-template-columns: 1fr;
+    .sidebar.expanded {
+      width: 200px;
+      box-shadow: var(--shadow-lg);
     }
-  }
-
-  .gallery-card {
-    background: var(--card-bg);
-    border: 1px solid var(--card-border);
-    border-radius: var(--card-radius);
-    overflow: hidden;
-    cursor: pointer;
-    transition: all var(--transition-normal);
-    text-align: left;
-    color: var(--text);
-    font-family: inherit;
-    padding: 0;
-    box-shadow: var(--shadow-sm);
-    backdrop-filter: var(--card-blur);
-    -webkit-backdrop-filter: var(--card-blur);
-  }
-
-  .gallery-card:hover {
-    border-color: rgba(134, 120, 191, 0.3);
-    box-shadow: var(--shadow-md), var(--glow);
-    transform: translateY(-6px) scale(1.01);
-  }
-
-  .gallery-card:active {
-    transform: translateY(-2px) scale(1.005);
-    transition-duration: 0.1s;
-  }
-
-  /* New work card */
-  .new-card {
-    border-style: dashed;
-    border-width: 1.5px;
-    border-color: var(--text-dim);
-    background: transparent;
-    backdrop-filter: none;
-  }
-
-  .new-card:hover {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    border-style: solid;
-  }
-
-  .new-card-inner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-    padding: 3.5rem 1rem;
-    color: var(--text-dim);
-    transition: color var(--transition-fast);
-  }
-
-  .new-card:hover .new-card-inner {
-    color: var(--accent);
-  }
-
-  .new-card-inner span {
-    font-size: 0.85rem;
-    font-weight: 600;
-  }
-
-  /* Existing work card */
-  .card-cover {
-    aspect-ratio: 16 / 10;
-    position: relative;
-    overflow: hidden;
-    background: var(--bg-surface);
-  }
-
-  .card-cover img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-    display: block;
-    transition: transform var(--transition-normal);
-  }
-
-  .gallery-card:hover .card-cover img {
-    transform: scale(1.03);
-  }
-
-  .status-badge {
-    position: absolute;
-    top: 0.6rem;
-    right: 0.6rem;
-    font-size: 0.62rem;
-    font-weight: 700;
-    padding: 0.2rem 0.6rem;
-    border-radius: 9999px;
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-    letter-spacing: 0.04em;
-  }
-
-  .status-badge.published {
-    background: rgba(52, 211, 153, 0.2);
-    color: #34d399;
-  }
-
-  .status-badge.draft {
-    background: rgba(0,0,0,0.55);
-    color: #fff;
-  }
-
-  .card-info {
-    padding: 0.875rem 1rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-  }
-
-  .card-title {
-    font-size: 0.88rem;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    line-height: 1.4;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .card-date {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    font-weight: 500;
-  }
-
-  /* ── Live dot & card metrics ──────────────────────────── */
-  .live-dot-sm {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: #34d399;
-    flex-shrink: 0;
-    animation: live-blink 1.5s ease-in-out infinite;
-  }
-
-  @keyframes live-blink {
-    0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.5); }
-    50% { opacity: 0.35; box-shadow: 0 0 8px 3px rgba(52, 211, 153, 0.25); }
-  }
-
-  .card-metrics {
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    margin-top: 0.15rem;
-  }
-
-  .card-metric {
-    display: flex;
-    align-items: center;
-    gap: 0.25rem;
-    font-size: 0.7rem;
-    color: var(--text-muted);
-    font-weight: 550;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .card-metric svg {
-    color: var(--text-dim);
-    flex-shrink: 0;
-  }
-
-  .card-metric.follower-metric {
-    color: var(--success);
-  }
-
-  .card-metric.follower-metric svg {
-    color: var(--success);
-  }
-
-  /* ── Memory placeholder ───────────────────────────────────────────── */
-  .memory-placeholder {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-    padding: 4rem 1rem;
-    color: var(--text-dim);
-    text-align: center;
-  }
-
-  .memory-placeholder .placeholder-icon {
-    opacity: 0.4;
-  }
-
-  .memory-placeholder h3 {
-    font-size: 1.1rem;
-    font-weight: 650;
-    color: var(--text-muted);
-  }
-
-  .memory-placeholder p {
-    font-size: 0.85rem;
-    color: var(--text-dim);
-  }
-
-  /* ── No works hint ──────────────────────────────────────────────── */
-  .no-works-hint {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    grid-column: 1 / -1;
-    padding: 2rem;
-    color: var(--text-dim);
-    font-size: 0.88rem;
-  }
-
-  /* ── Card cover placeholder ────────────────────────────────────── */
-  .card-cover-placeholder {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg-surface);
-  }
-
-  .cover-type-icon {
-    font-size: 2.5rem;
-    opacity: 0.6;
-  }
-
-  @media (max-width: 768px) {
-    .lang-label {
-      display: none;
-    }
-    .shell {
-      padding: 0 1.25rem 2rem;
+    .main-content {
+      padding: 1rem 1rem 3rem;
     }
   }
 </style>
