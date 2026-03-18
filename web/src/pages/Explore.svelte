@@ -1,6 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import MarkdownBlock from "../components/MarkdownBlock.svelte";
+  import { createTrendWs } from "../lib/ws";
+  import ResearchProgress from "../components/ResearchProgress.svelte";
 
   type Platform = "douyin" | "xiaohongshu";
 
@@ -13,15 +15,24 @@
 
   let activePlatform: Platform = $state("douyin");
   let loading = $state(false);
-  let refreshing = $state(false);
   let directions: TrendDirection[] = $state([]);
   let rawContent: string = $state("");
   let isStructured = $state(true);
+  let researchActive = $state(false);
+  let researchWs: { close: () => void } | null = null;
+  let sessionKey = $state("");
+
+  interface ProgressLine {
+    type: "search" | "result" | "analyzing" | "done" | "error";
+    text: string;
+  }
+  let progressLines: ProgressLine[] = $state([]);
+  let researchPhase: "idle" | "searching" | "analyzing" | "done" | "error" = $state("idle");
 
   function parseTrends(data: any): void {
     // Structured data with topics/directions array
     if (data && typeof data === "object") {
-      const arr = data.topics ?? data.directions ?? data.trends ?? data.items;
+      const arr = data.topics ?? data.directions ?? data.trends ?? data.items ?? data.videos;
       if (Array.isArray(arr) && arr.length > 0) {
         directions = arr.map((item: any) => ({
           title: item.title ?? item.name ?? item.direction ?? "未知方向",
@@ -81,19 +92,103 @@
   }
 
   async function handleRefresh() {
-    refreshing = true;
+    if (researchActive) return;
+
+    progressLines = [];
+    researchPhase = "searching";
+    researchActive = true;
+
     try {
-      await fetch("/api/trends/refresh", {
+      const res = await fetch("/api/trends/refresh-stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ platform: activePlatform }),
       });
-      await loadTrends();
+
+      if (!res.ok) {
+        researchPhase = "error";
+        progressLines = [{ type: "error", text: "无法启动趋势调研" }];
+        researchActive = false;
+        return;
+      }
+
+      const { sessionKey: key } = await res.json();
+      sessionKey = key;
+
+      researchWs = createTrendWs(key, (event, data) => {
+        switch (event) {
+          case "search_query":
+            progressLines = [...progressLines, {
+              type: "search",
+              text: `搜索 "${data.query}"`,
+            }];
+            break;
+          case "search_result": {
+            const updated = [...progressLines];
+            for (let i = updated.length - 1; i >= 0; i--) {
+              if (updated[i].type === "search") {
+                updated[i] = { type: "result", text: updated[i].text + "  " + (data.summary || "完成") };
+                break;
+              }
+            }
+            progressLines = updated;
+            break;
+          }
+          case "analyzing":
+            researchPhase = "analyzing";
+            progressLines = [...progressLines, {
+              type: "analyzing",
+              text: "正在分析整理...",
+            }];
+            break;
+          case "research_done":
+            researchPhase = "done";
+            progressLines = [...progressLines, {
+              type: "done",
+              text: "调研完成",
+            }];
+            setTimeout(() => {
+              researchActive = false;
+              researchPhase = "idle";
+              progressLines = [];
+              loadTrends();
+            }, 800);
+            break;
+          case "research_error":
+            researchPhase = "error";
+            progressLines = [...progressLines, {
+              type: "error",
+              text: data.message || "调研失败",
+            }];
+            researchActive = false;
+            break;
+          case "session_closed":
+            researchWs = null;
+            break;
+        }
+      });
     } catch {
-      // ignore
-    } finally {
-      refreshing = false;
+      researchPhase = "error";
+      progressLines = [{ type: "error", text: "网络错误，请重试" }];
+      researchActive = false;
     }
+  }
+
+  async function handleCancel() {
+    if (researchPhase === "error") {
+      handleRefresh();
+      return;
+    }
+    if (sessionKey) {
+      await fetch(`/api/trends/cancel/${encodeURIComponent(sessionKey)}`, {
+        method: "POST",
+      }).catch(() => {});
+    }
+    researchWs?.close();
+    researchWs = null;
+    researchActive = false;
+    researchPhase = "idle";
+    progressLines = [];
   }
 
   function switchPlatform(p: Platform) {
@@ -129,6 +224,7 @@
         class="pill-tab"
         class:active={activePlatform === "douyin"}
         onclick={() => switchPlatform("douyin")}
+        disabled={researchActive}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"/></svg>
         抖音
@@ -137,16 +233,24 @@
         class="pill-tab"
         class:active={activePlatform === "xiaohongshu"}
         onclick={() => switchPlatform("xiaohongshu")}
+        disabled={researchActive}
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 12h8M12 8v8"/></svg>
         小红书
       </button>
     </div>
-    <button class="refresh-btn" onclick={handleRefresh} disabled={refreshing || loading}>
-      <svg class="refresh-icon" class:spinning={refreshing} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
-      {refreshing ? "刷新中..." : "刷新趋势"}
+    <button class="refresh-btn" onclick={researchActive ? handleCancel : handleRefresh} disabled={loading}>
+      <svg class="refresh-icon" class:spinning={researchActive} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      {researchActive ? "取消" : "刷新趋势"}
     </button>
   </div>
+
+  <ResearchProgress
+    active={researchActive}
+    lines={progressLines}
+    phase={researchPhase}
+    onCancel={handleCancel}
+  />
 
   <!-- Content -->
   {#if loading}
@@ -159,8 +263,8 @@
       <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
       <p class="empty-title">暂无趋势数据</p>
       <p class="empty-desc">点击刷新获取最新趋势</p>
-      <button class="action-btn" onclick={handleRefresh} disabled={refreshing}>
-        {refreshing ? "获取中..." : "刷新趋势"}
+      <button class="action-btn" onclick={handleRefresh} disabled={researchActive}>
+        {researchActive ? "获取中..." : "刷新趋势"}
       </button>
     </div>
   {:else if isStructured}
@@ -252,6 +356,12 @@
 
   .pill-tab.active svg {
     opacity: 1;
+  }
+
+  .pill-tab:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
   }
 
   .refresh-btn {
