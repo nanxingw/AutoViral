@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { spawn } from "node:child_process";
-import { join } from "node:path";
+import { join, extname } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
 import { loadConfig, saveConfig, type Config } from "../config.js";
@@ -12,8 +12,25 @@ import {
 } from "../work-store.js";
 import { MemoryClient } from "../memory.js";
 import type { WsBridge } from "../ws-bridge.js";
+import { getProvider, getDefaultProvider, listProviders } from "../providers/registry.js";
+import { listSharedAssets, getSharedAssetPath, CATEGORIES } from "../shared-assets.js";
 
 export const apiRoutes = new Hono();
+
+// ── MIME type helper ────────────────────────────────────────────────────────
+
+const MIME_TYPES: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+  ".mp4": "video/mp4", ".webm": "video/webm",
+  ".mp3": "audio/mpeg", ".wav": "audio/wav",
+  ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown",
+};
+
+function getMimeType(filePath: string): string {
+  const ext = extname(filePath).toLowerCase();
+  return MIME_TYPES[ext] ?? "application/octet-stream";
+}
 
 // ── WsBridge accessor (set by server/index.ts after construction) ─────────
 let wsBridge: WsBridge | null = null;
@@ -21,6 +38,8 @@ let wsBridge: WsBridge | null = null;
 export function setWsBridge(bridge: WsBridge): void {
   wsBridge = bridge;
 }
+
+// ── Status & Config ─────────────────────────────────────────────────────────
 
 // GET /api/status
 apiRoutes.get("/api/status", async (c) => {
@@ -133,23 +152,20 @@ apiRoutes.get("/api/works/:id/assets", async (c) => {
   }
 });
 
-// GET /api/works/:id/assets/:filename — serve asset file
-apiRoutes.get("/api/works/:id/assets/:filename", async (c) => {
+// GET /api/works/:id/assets/* — serve asset files (supports nested paths like images/scene-01.png)
+apiRoutes.get("/api/works/:id/assets/*", async (c) => {
   const id = c.req.param("id");
-  const filename = c.req.param("filename");
+  // Extract the nested path after /assets/
+  const url = new URL(c.req.url);
+  const prefix = `/api/works/${id}/assets/`;
+  const nestedPath = url.pathname.slice(prefix.length);
+  if (!nestedPath) return c.json({ error: "Asset path required" }, 400);
+
   try {
-    const filePath = getAssetPath(id, filename);
+    const filePath = getAssetPath(id, `assets/${nestedPath}`);
     const content = await readFile(filePath);
-    // Determine content type from extension
-    const ext = filename.split(".").pop()?.toLowerCase() ?? "";
-    const mimeMap: Record<string, string> = {
-      png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",
-      webp: "image/webp", svg: "image/svg+xml", mp4: "video/mp4", webm: "video/webm",
-      pdf: "application/pdf", txt: "text/plain", md: "text/markdown",
-    };
-    const contentType = mimeMap[ext] ?? "application/octet-stream";
     return new Response(content, {
-      headers: { "Content-Type": contentType },
+      headers: { "Content-Type": getMimeType(filePath) },
     });
   } catch {
     return c.json({ error: "Asset not found" }, 404);
@@ -160,10 +176,10 @@ apiRoutes.get("/api/works/:id/assets/:filename", async (c) => {
 apiRoutes.get("/api/analytics", async (c) => {
   try {
     const summaries = await listWorks();
-    let totalWorks = summaries.length;
-    let totalViews = 0;
-    let totalLikes = 0;
-    let totalComments = 0;
+    const totalWorks = summaries.length;
+    const totalViews = 0;
+    const totalLikes = 0;
+    const totalComments = 0;
 
     return c.json({ totalWorks, totalViews, totalLikes, totalComments });
   } catch {
@@ -172,11 +188,76 @@ apiRoutes.get("/api/analytics", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
+// Generate API (Provider-based image/video generation)
+// ---------------------------------------------------------------------------
+
+// POST /api/generate/image
+apiRoutes.post("/api/generate/image", async (c) => {
+  const body = await c.req.json();
+  const { workId, prompt, width, height, filename, provider: providerName, referenceImage } = body;
+  if (!workId || !prompt || !filename) {
+    return c.json({ success: false, error: "Missing required fields", code: "INVALID_PARAMS" }, 400);
+  }
+  const provider = providerName ? getProvider(providerName) : getDefaultProvider("image");
+  if (!provider) {
+    return c.json({ success: false, error: "No image provider available", code: "INVALID_PARAMS" }, 400);
+  }
+  try {
+    const result = await provider.generateImage({ prompt, width, height, workId, filename, referenceImage });
+    return c.json(result);
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+  }
+});
+
+// POST /api/generate/video
+apiRoutes.post("/api/generate/video", async (c) => {
+  const body = await c.req.json();
+  const { workId, prompt, firstFrame, lastFrame, resolution, filename, provider: providerName } = body;
+  if (!workId || !prompt || !filename) {
+    return c.json({ success: false, error: "Missing required fields", code: "INVALID_PARAMS" }, 400);
+  }
+  const provider = providerName ? getProvider(providerName) : getDefaultProvider("video");
+  if (!provider) {
+    return c.json({ success: false, error: "No video provider available", code: "INVALID_PARAMS" }, 400);
+  }
+  try {
+    const result = await provider.generateVideo({ prompt, firstFrame, lastFrame, resolution, workId, filename });
+    return c.json(result);
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+  }
+});
+
+// GET /api/generate/providers
+apiRoutes.get("/api/generate/providers", (c) => c.json(listProviders()));
+
+// ---------------------------------------------------------------------------
+// Shared Assets
+// ---------------------------------------------------------------------------
+
+// GET /api/shared-assets
+apiRoutes.get("/api/shared-assets", async (c) => c.json(await listSharedAssets()));
+
+// GET /api/shared-assets/:category/:file — serve file with correct MIME type
+apiRoutes.get("/api/shared-assets/:category/:file", async (c) => {
+  const filePath = getSharedAssetPath(c.req.param("category"), c.req.param("file"));
+  try {
+    const data = await readFile(filePath);
+    return new Response(data, {
+      headers: { "Content-Type": getMimeType(filePath) },
+    });
+  } catch {
+    return c.json({ error: "File not found" }, 404);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // Trend Research via Claude CLI
 // ---------------------------------------------------------------------------
 
 /** Run claude CLI with a prompt and return the text result. */
-function runCliBrief(prompt: string, useChrome = false, timeoutMs = 60000): Promise<string> {
+function runCliBrief(prompt: string, timeoutMs = 60000): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = [
       "-p", prompt,
@@ -184,7 +265,6 @@ function runCliBrief(prompt: string, useChrome = false, timeoutMs = 60000): Prom
       "--dangerously-skip-permissions",
       "--model", "haiku",
     ];
-    if (useChrome) args.push("--chrome");
 
     const proc = spawn("claude", args, {
       cwd: homedir(),
@@ -276,7 +356,6 @@ apiRoutes.get("/api/trends/:platform", async (c) => {
   const platform = c.req.param("platform");
   try {
     const trendsDir = join(homedir(), ".skill-evolver", "trends", platform);
-    const { readdir } = await import("node:fs/promises");
     const files = await readdir(trendsDir);
     const yamlFiles = files.filter(f => f.endsWith(".yaml")).sort().reverse();
     if (yamlFiles.length === 0) return c.json({ error: "No trend data available" }, 404);
@@ -288,8 +367,8 @@ apiRoutes.get("/api/trends/:platform", async (c) => {
   }
 });
 
-// POST /api/collector/trigger — trigger research collection
-apiRoutes.post("/api/collector/trigger", async (c) => {
+// POST /api/trends/refresh — trigger research collection
+apiRoutes.post("/api/trends/refresh", async (c) => {
   try {
     const body = await c.req.json<{ platforms?: string[] }>().catch(() => ({}));
     const platforms = (body as any).platforms ?? ["xiaohongshu", "douyin"];
@@ -298,121 +377,6 @@ apiRoutes.post("/api/collector/trigger", async (c) => {
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : "Collection failed" }, 500);
   }
-});
-
-// GET /api/collector/status
-apiRoutes.get("/api/collector/status", async (c) => {
-  const config = await loadConfig();
-  return c.json({
-    enabled: config.research.enabled,
-    schedule: config.research.schedule,
-    platforms: config.research.platforms,
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Platform connection via Claude CLI --chrome
-// ---------------------------------------------------------------------------
-
-const PLATFORM_CONFIG: Record<string, { label: string; creatorUrl: string; checkPrompt: string; loginPrompt: string }> = {
-  douyin: {
-    label: "抖音",
-    creatorUrl: "https://creator.douyin.com/",
-    checkPrompt: '使用Chrome打开 https://creator.douyin.com/ ，等待3秒页面加载完成。然后检查页面上是否有"创作者登录"按钮或登录相关元素。如果看到了登录按钮或登录页面，回复 "NOT_LOGGED_IN"。如果看到了创作者后台/仪表盘内容（如数据概览、作品管理等），回复 "LOGGED_IN"。只回复这两个词之一，不要其他内容。',
-    loginPrompt: '使用Chrome打开 https://creator.douyin.com/ ，点击"创作者登录"按钮。等待登录弹窗出现，让用户扫码登录。等待最多120秒直到登录成功（页面跳转到创作者后台）。如果登录成功回复 "LOGIN_SUCCESS"，如果超时回复 "LOGIN_TIMEOUT"。',
-  },
-  xiaohongshu: {
-    label: "小红书",
-    creatorUrl: "https://creator.xiaohongshu.com/",
-    checkPrompt: '使用Chrome打开 https://creator.xiaohongshu.com/ ，等待3秒页面加载完成。检查当前URL是否包含"/login"或页面上是否有登录表单。如果看到了登录页面，回复 "NOT_LOGGED_IN"。如果看到了创作者后台内容，回复 "LOGGED_IN"。只回复这两个词之一，不要其他内容。',
-    loginPrompt: '使用Chrome打开 https://creator.xiaohongshu.com/login ，页面右上角有一个二维码图标，点击切换到二维码登录模式。让用户用小红书App扫码。等待最多120秒直到登录成功。如果登录成功回复 "LOGIN_SUCCESS"，如果超时回复 "LOGIN_TIMEOUT"。',
-  },
-};
-
-const checkProcesses: Map<string, Promise<boolean>> = new Map();
-const checkCache: Map<string, { result: boolean; timestamp: number }> = new Map();
-const CHECK_CACHE_TTL = 30_000;
-const loginProcesses: Map<string, Promise<boolean>> = new Map();
-
-async function checkPlatformLogin(platform: string): Promise<boolean> {
-  const config = PLATFORM_CONFIG[platform];
-  if (!config) return false;
-
-  const cached = checkCache.get(platform);
-  if (cached && Date.now() - cached.timestamp < CHECK_CACHE_TTL) {
-    return cached.result;
-  }
-
-  const existing = checkProcesses.get(platform);
-  if (existing) return existing;
-
-  const promise = (async () => {
-    try {
-      const result = await runCliBrief(config.checkPrompt, true);
-      const loggedIn = result.includes("LOGGED_IN") && !result.includes("NOT_LOGGED_IN");
-      checkCache.set(platform, { result: loggedIn, timestamp: Date.now() });
-      return loggedIn;
-    } catch {
-      return false;
-    } finally {
-      checkProcesses.delete(platform);
-    }
-  })();
-
-  checkProcesses.set(platform, promise);
-  return promise;
-}
-
-function triggerPlatformLogin(platform: string): void {
-  const config = PLATFORM_CONFIG[platform];
-  if (!config) return;
-  const promise = runCliBrief(config.loginPrompt, true, 150000)
-    .then(result => result.includes("LOGIN_SUCCESS"))
-    .catch(() => false)
-    .finally(() => loginProcesses.delete(platform));
-  loginProcesses.set(platform, promise);
-}
-
-// GET /api/platforms
-apiRoutes.get("/api/platforms", async (c) => {
-  const platforms = Object.entries(PLATFORM_CONFIG).map(([name, config]) => ({
-    name,
-    label: config.label,
-    creatorUrl: config.creatorUrl,
-    loggedIn: false,
-    checking: false,
-    connecting: loginProcesses.has(name),
-  }));
-  return c.json({ platforms });
-});
-
-// GET /api/platforms/:name/status
-apiRoutes.get("/api/platforms/:name/status", async (c) => {
-  const name = c.req.param("name");
-  if (!PLATFORM_CONFIG[name]) {
-    return c.json({ error: `Unknown platform: ${name}` }, 404);
-  }
-  const loggedIn = await checkPlatformLogin(name);
-  return c.json({ platform: name, loggedIn, connecting: loginProcesses.has(name) });
-});
-
-// POST /api/platforms/:name/login
-apiRoutes.post("/api/platforms/:name/login", async (c) => {
-  const name = c.req.param("name");
-  if (!PLATFORM_CONFIG[name]) {
-    return c.json({ error: `Unknown platform: ${name}` }, 404);
-  }
-  if (loginProcesses.has(name)) {
-    return c.json({ pending: true, message: "Login already in progress" });
-  }
-  triggerPlatformLogin(name);
-  return c.json({ pending: true, message: `Chrome opened for ${PLATFORM_CONFIG[name].label} login` });
-});
-
-// POST /api/platforms/:name/logout
-apiRoutes.post("/api/platforms/:name/logout", async (c) => {
-  const name = c.req.param("name");
-  return c.json({ success: true, message: `${name} disconnected` });
 });
 
 // ---------------------------------------------------------------------------
