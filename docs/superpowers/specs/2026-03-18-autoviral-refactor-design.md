@@ -123,6 +123,8 @@ research → plan → assets → assembly
 - 每生成一个素材前，先描述计划，等用户确认
 - 素材生成后展示预览链接，等用户反馈
 - 只支持抖音和小红书平台
+- 当收到阶段切换指令（如"进入规划阶段"），立即确认切换并开始新阶段的工作
+- 不要在未经用户确认的情况下自动跳转到下一阶段
 ```
 
 步骤切换由前端触发：用户在PipelineSteps中点击下一步 → 前端发消息告诉agent进入新阶段。
@@ -190,8 +192,9 @@ Skill(curl) → POST /api/jimeng/image {prompt, width, height}
 **文生图 req_key:** `jimeng_t2i_v31`
 - prompt (必填), width/height (可选, 默认1088x1088, 范围576-1728)
 
-**视频生成 req_key:** V3.0 Pro对应的req_key
+**视频生成 req_key:** `jimeng_vgfm_t2v_l20` (V3.0 Pro文生视频), `jimeng_vgfm_i2v_l20` (V3.0 Pro图生视频)
 - prompt (必填), image_url (图生视频时必填), resolution (可选: 16:9, 9:16, 1:1等)
+- 输出：1080P视频，支持宽高比 16:9, 4:3, 1:1, 3:4, 9:16, 21:9
 
 ## 6. Claude Code Skills
 
@@ -406,7 +409,80 @@ WebSocket:
 |-----|------|
 | `/ws/browser/:workId` | Studio页agent通信 |
 
-## 10. 技术决策
+## 10. 迁移与清理
+
+### 数据迁移
+
+- 现有 `WorkType` 包含 `long-video` 和 `livestream`，重构后只保留 `short-video` 和 `image-text`。已有的 long-video/livestream 类型作品标记为 `failed` 状态，不做自动迁移。
+- 现有 `platforms` 字段从 `PlatformEntry[]`（含 publishedUrl、metrics 等）简化为 `string[]`。重构时只保留 `.platform` 值，丢弃发布和指标数据。
+- 现有 `WorkStatus` 去掉 `publishing` 和 `published`（用户自行发布，系统不追踪发布状态）。
+
+### Pipeline步骤映射
+
+新的 `defaultPipeline` 按类型：
+
+| Key | short-video显示名 | image-text显示名 |
+|-----|-------------------|------------------|
+| research | 话题调研 | 话题调研 |
+| plan | 分镜规划 | 内容规划 |
+| assets | 素材生成 | 图片生成 |
+| assembly | 视频合成 | 图文排版 |
+
+### 代码清理
+
+- 删除所有 Section 3 中列出的模块文件
+- `api.ts` 中所有未在 Section 9 路由表中列出的路由全部删除
+- `package.json` 中移除 `playwright` optional dependency
+- 前端移除 `publishing`/`published` 状态相关的UI代码
+
+## 11. 定时调研机制
+
+删除 `scheduler.ts`（面向evolution cycle的复杂调度器），用轻量的 `node-cron` 替代：
+
+- 新建 `src/research-scheduler.ts`，使用 `node-cron` 库
+- 读取 `config.yaml` 的 `research.schedule` 字段（cron表达式）
+- 到点时通过 WsBridge 启动一个临时 Claude CLI session 执行调研（使用 trend-research skill）
+- 调研结果保存到 `~/.skill-evolver/trends/{platform}/{date}.yaml`
+- 用户手动刷新走 `POST /api/trends/refresh` 路由，复用相同逻辑
+
+## 12. 错误处理
+
+### 即梦API错误响应格式
+
+```typescript
+interface JimengResult {
+  success: boolean
+  assetPath?: string           // 成功时：本地文件路径
+  previewUrl?: string          // 成功时：可访问的URL
+  error?: string               // 失败时：错误描述
+  code?: "TIMEOUT" | "API_ERROR" | "DOWNLOAD_FAILED" | "INVALID_PARAMS"
+}
+```
+
+- 轮询超时（5分钟）：返回 `code: "TIMEOUT"`，skill向用户说明并建议重试
+- API报错：返回 `code: "API_ERROR"` + 火山引擎原始错误信息
+- 下载失败：返回 `code: "DOWNLOAD_FAILED"`，skill建议重试
+- 不做自动重试，由skill决定是否重新生成
+
+### 资产文件服务
+
+`GET /api/works/:id/assets/:file` 根据文件扩展名设置 Content-Type：
+- `.png` → `image/png`, `.jpg/.jpeg` → `image/jpeg`
+- `.mp4` → `video/mp4`, `.webm` → `video/webm`
+- 其他 → `application/octet-stream`
+
+## 13. 安全考量
+
+WsBridge使用 `--dangerously-skip-permissions` 启动Claude CLI，agent拥有完整的bash和文件系统访问权。这是产品运行在本地环境的必要条件。
+
+**风险缓解：**
+- 服务只监听 localhost（不暴露到公网）
+- 即梦API密钥存储在server端config中，不传递给CLI环境变量
+- Agent通过curl调用本地HTTP API而非直接持有密钥
+- System prompt明确限制agent的行为范围
+- WebSearch结果可能包含非预期内容，但agent主要用于调研而非执行外部指令
+
+## 14. 技术决策
 
 1. **Server侧即梦代理** — 密钥安全（不暴露给CLI），异步封装为同步（skill调用更简单）
 2. **单Agent per Work** — 通过 `--resume` 保持跨步骤上下文连贯
