@@ -5,8 +5,12 @@ import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Server } from "node:http";
+import { loadConfig } from "../config.js";
+import { initProviders } from "../providers/registry.js";
+import { ensureSharedDirs } from "../shared-assets.js";
 import { apiRoutes, setWsBridge } from "./api.js";
 import { WsBridge } from "../ws-bridge.js";
+import { startResearchScheduler } from "../research-scheduler.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -14,13 +18,26 @@ const __dirname = dirname(__filename);
 // Resolve web/dist relative to the package root (two levels up from dist/server/)
 const WEB_DIST = join(__dirname, "..", "..", "web", "dist");
 
-export function startServer(port: number): { server: Server } {
+export async function startServer(port: number): Promise<{ server: Server }> {
+  // 1. Load config
+  const config = await loadConfig();
+
+  // 2. Initialize providers
+  initProviders(config);
+
+  // 3. Ensure shared asset directories
+  await ensureSharedDirs();
+
+  // 4. Create WsBridge
+  const wsBridge = new WsBridge(port);
+  setWsBridge(wsBridge);
+
   const app = new Hono();
 
-  // Mount API routes
+  // 5. Mount API routes
   app.route("/", apiRoutes);
 
-  // Serve static files from web/dist
+  // 8. Serve static frontend files from web/dist/
   app.use("/*", serveStatic({ root: WEB_DIST }));
 
   // SPA fallback: serve index.html for any non-API GET request that didn't match a static file
@@ -34,16 +51,13 @@ export function startServer(port: number): { server: Server } {
     }
   });
 
+  // 6. Start HTTP server + WebSocket upgrade handler
   const nodeServer = serve({
     fetch: app.fetch,
     port,
   });
 
   const httpServer = nodeServer as unknown as Server;
-
-  // Create WsBridge for CLI <-> browser sessions
-  const wsBridge = new WsBridge(port);
-  setWsBridge(wsBridge);
 
   // Route HTTP upgrade events
   httpServer.on("upgrade", (req, socket, head) => {
@@ -57,6 +71,9 @@ export function startServer(port: number): { server: Server } {
     // Unknown upgrade — destroy socket
     socket.destroy();
   });
+
+  // 7. Start research scheduler
+  await startResearchScheduler();
 
   return { server: httpServer };
 }

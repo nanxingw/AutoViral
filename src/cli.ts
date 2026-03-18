@@ -4,7 +4,7 @@ import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { exec, spawn } from "node:child_process";
-import { fileURLToPath } from "node:url";
+import { stopResearchScheduler } from "./research-scheduler.js";
 
 const PID_FILE = join(homedir(), ".skill-evolver", "daemon.pid");
 const LOG_FILE = join(homedir(), ".skill-evolver", "daemon.log");
@@ -76,20 +76,22 @@ export function runCLI(): void {
       console.log(`Starting AutoViral server (PID ${process.pid})`);
       console.log(`Model: ${config.model}`);
 
-      // Start web server
+      // Start web server (initializes providers, shared dirs, research scheduler, etc.)
       const { startServer } = await import("./server/index.js");
-      startServer(config.port);
+      await startServer(config.port);
       console.log(`Dashboard: http://localhost:${config.port}`);
 
       // Keep process alive
       process.on("SIGTERM", async () => {
         console.log("\nShutting down...");
+        stopResearchScheduler();
         try { await unlink(PID_FILE); } catch { /* ignore */ }
         process.exit(0);
       });
 
       process.on("SIGINT", async () => {
         console.log("\nShutting down...");
+        stopResearchScheduler();
         try { await unlink(PID_FILE); } catch { /* ignore */ }
         process.exit(0);
       });
