@@ -2,68 +2,31 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
+import dotenv from "dotenv";
 
-export interface CollectorConfig {
-  trendInterval?: string;
-  metricsEnabled?: boolean;
-  trendEnabled?: boolean;
-  competitors?: Array<{ platform: string; profileUrl: string; name: string }>;
-}
-
-export interface MemoryConfig {
-  apiKey?: string;
-  userId?: string;
-  weeklyReview?: boolean;
-  reviewDay?: string;
-  reviewTime?: string;
-}
+dotenv.config();
 
 export interface Config {
-  interval: string;
-  model: string;
-  autoRun: boolean;
   port: number;
-  maxReports: number;
-  reportsToFeed: number;
-  taskAutoApprove: boolean;
-  taskMaxConcurrent: number;
-  taskMaxRunsPerTask: number;
-  postTaskDebounce: number;
-  evolutionMode: "single" | "multi";
-  // Task scheduling constraints
-  taskMaxActive: number;           // max tasks in active+running+pending states
-  taskTimeoutMinutes: number;      // default per-task timeout
-  taskMaxRetries: number;          // max consecutive failures before auto-pause
-  taskCompletedRetention: number;  // max completed/expired tasks to keep
-  taskOneShotExpiryHours: number;  // expiry window for missed one-shot tasks
-  // AutoViral extensions
-  collector?: CollectorConfig;
-  memory?: MemoryConfig;
+  model: string;
+  jimeng: { accessKey: string; secretKey: string };
+  openrouter?: { apiKey: string };
+  research: { enabled: boolean; schedule: string; platforms: string[] };
+  memory?: { apiKey: string; userId: string };
 }
 
 const CONFIG_DIR = join(homedir(), ".skill-evolver");
 const CONFIG_PATH = join(CONFIG_DIR, "config.yaml");
 
+/** Base data directory for works, trends, etc. */
+export const dataDir = CONFIG_DIR;
+
 export function getDefaultConfig(): Config {
   return {
-    interval: "1h",
-    model: "opus",
-    autoRun: true,
     port: 3271,
-    maxReports: 50,
-    reportsToFeed: 5,
-    taskAutoApprove: true,
-    taskMaxConcurrent: 3,
-    taskMaxRunsPerTask: 20,
-    postTaskDebounce: 300,
-    evolutionMode: "multi",
-    taskMaxActive: 10,
-    taskTimeoutMinutes: 10,
-    taskMaxRetries: 3,
-    taskCompletedRetention: 20,
-    taskOneShotExpiryHours: 2,
-    collector: { trendInterval: "6h", metricsEnabled: true, trendEnabled: true, competitors: [] },
-    memory: { apiKey: "", userId: "autoviral-user", weeklyReview: true, reviewDay: "sunday", reviewTime: "09:00" },
+    model: "opus",
+    jimeng: { accessKey: "", secretKey: "" },
+    research: { enabled: true, schedule: "0 9,21 * * *", platforms: ["douyin", "xiaohongshu"] },
   };
 }
 
@@ -76,7 +39,17 @@ export async function loadConfig(): Promise<Config> {
   try {
     const raw = await readFile(CONFIG_PATH, "utf-8");
     const parsed = yaml.load(raw) as Partial<Config> | null;
-    return { ...getDefaultConfig(), ...parsed };
+    const config: Config = { ...getDefaultConfig(), ...parsed };
+
+    // .env overrides
+    if (process.env.OPENROUTER_API_KEY) {
+      config.openrouter = { apiKey: process.env.OPENROUTER_API_KEY };
+    }
+    if (process.env.EVERMEMOS_API_KEY && config.memory) {
+      config.memory.apiKey = process.env.EVERMEMOS_API_KEY;
+    }
+
+    return config;
   } catch {
     const config = getDefaultConfig();
     await saveConfig(config);

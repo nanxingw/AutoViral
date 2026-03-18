@@ -303,11 +303,10 @@ apiRoutes.post("/api/collector/trigger", async (c) => {
 // GET /api/collector/status
 apiRoutes.get("/api/collector/status", async (c) => {
   const config = await loadConfig();
-  const research = (config as any).research ?? { enabled: true, schedule: "0 9,21 * * *", platforms: ["douyin", "xiaohongshu"] };
   return c.json({
-    enabled: research.enabled,
-    schedule: research.schedule,
-    platforms: research.platforms,
+    enabled: config.research.enabled,
+    schedule: config.research.schedule,
+    platforms: config.research.platforms,
   });
 });
 
