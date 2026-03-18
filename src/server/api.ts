@@ -410,7 +410,7 @@ apiRoutes.post("/api/works/:id/session", async (c) => {
     ].filter(Boolean).join("\n");
 
     const config = await loadConfig();
-    wsBridge.createSession(id, prompt, config.model);
+    await wsBridge.createSession(id, prompt, config.model);
     return c.json({ status: "started", workId: id, step: stepName });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : "Session start error" }, 500);
@@ -429,7 +429,7 @@ apiRoutes.post("/api/works/:id/chat", async (c) => {
     let session = wsBridge.getSession(id);
     if (!session) {
       const config = await loadConfig();
-      session = wsBridge.createSession(id, body.text, config.model);
+      session = await wsBridge.createSession(id, body.text, config.model);
       return c.json({ sent: true, sessionCreated: true, workId: id });
     }
 
@@ -466,7 +466,7 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
     const config = await loadConfig();
     let session = wsBridge.getSession(id);
     if (!session) {
-      session = wsBridge.createSession(id, prompt, config.model);
+      session = await wsBridge.createSession(id, prompt, config.model);
       return c.json({ triggered: true, sessionCreated: true, workId: id, step });
     }
 

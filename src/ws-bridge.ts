@@ -11,9 +11,14 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { homedir } from "node:os";
+import { join } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
+import { loadConfig, dataDir } from "./config.js";
+import { getWork, type Work, type PipelineStep } from "./work-store.js";
+import { listSharedAssets } from "./shared-assets.js";
+import { MemoryClient } from "./memory.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -90,10 +95,88 @@ export class WsBridge {
   }
 
   /**
-   * Start a new CLI session. Spawns `claude -p <prompt> --output-format stream-json --verbose`.
-   * stdin is closed immediately — the initial prompt goes via -p.
+   * Build a system prompt with full context for a given work.
    */
-  createSession(workId: string, initialPrompt: string, model?: string): WsSession {
+  private async buildSystemPrompt(work: Work): Promise<string> {
+    const config = await loadConfig();
+    const port = config.port;
+
+    // Determine current step (first non-done step)
+    const steps = Object.entries(work.pipeline);
+    const currentEntry = steps.find(([, s]) => s.status !== "done" && s.status !== "skipped");
+    const currentStep = currentEntry ? currentEntry[1].name : steps[0]?.[1]?.name ?? "创作";
+
+    // Workspace path
+    const workspacePath = join(dataDir, "works", work.id);
+
+    // Shared assets summary
+    let sharedAssetsInfo = "";
+    try {
+      const assets = await listSharedAssets();
+      const parts: string[] = [];
+      for (const [category, files] of Object.entries(assets)) {
+        if (files.length > 0) {
+          parts.push(`- ${category}: ${files.join(", ")}`);
+        } else {
+          parts.push(`- ${category}: (空)`);
+        }
+      }
+      sharedAssetsInfo = parts.length > 0 ? parts.join("\n") : "暂无公共素材";
+    } catch {
+      sharedAssetsInfo = "暂无公共素材";
+    }
+
+    // Memory context
+    let memoryContext = "";
+    try {
+      const client = await MemoryClient.fromConfig();
+      if (client) {
+        const topic = work.topicHint ?? work.title;
+        const platform = work.platforms[0] ?? "通用";
+        memoryContext = await client.buildContext(topic, platform);
+      }
+    } catch {
+      memoryContext = "";
+    }
+
+    const platforms = work.platforms.join(", ");
+
+    return `你是AutoViral创作助手，正在帮用户创建一个${work.type}作品。
+目标平台：${platforms}
+当前阶段：${currentStep}
+
+## 你的能力
+- 调研：使用WebSearch工具搜索平台热门趋势，支持用户指定方向深入挖掘
+- 生图：调用 curl http://localhost:${port}/api/generate/image 生成图片
+- 生视频：调用 curl http://localhost:${port}/api/generate/video 生成视频
+- 合成：使用ffmpeg命令剪辑视频（拼接片段+字幕+配乐+转场）
+- 公共素材：通过 curl http://localhost:${port}/api/shared-assets 查看可用的公共素材（人物、配乐等）
+
+## 当前项目workspace
+${workspacePath}
+
+## 公共素材库
+${sharedAssetsInfo}
+
+## 记忆上下文（如有）
+${memoryContext}
+
+## 规则
+- 调研阶段：如果用户指定了方向，围绕该方向深入调研；否则广泛调研热门趋势
+- 每生成一个素材前，先描述计划，等用户确认
+- 素材生成后展示预览链接，等用户反馈
+- 短视频制作：先生成首帧图片→用首帧图生成视频片段→ffmpeg剪辑合成
+- 可随时引用公共素材库中的人物、配乐等素材
+- 只支持抖音和小红书平台
+- 当收到阶段切换指令（如"进入规划阶段"），立即确认切换并开始新阶段的工作
+- 不要在未经用户确认的情况下自动跳转到下一阶段`;
+  }
+
+  /**
+   * Start a new CLI session. Loads work context, builds system prompt,
+   * then spawns `claude -p <prompt> --output-format stream-json --verbose`.
+   */
+  async createSession(workId: string, initialPrompt: string, model?: string): Promise<WsSession> {
     const existing = this.sessions.get(workId);
     if (existing?.cliProcess) {
       try { existing.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
@@ -108,7 +191,20 @@ export class WsBridge {
     };
     this.sessions.set(workId, session);
 
-    this.spawnCli(session, initialPrompt);
+    // Build system prompt from work context
+    let systemPrompt = initialPrompt;
+    try {
+      const work = await getWork(workId);
+      if (work) {
+        const contextPrompt = await this.buildSystemPrompt(work);
+        // Prepend system context, then append the user's initial message
+        systemPrompt = contextPrompt + "\n\n---\n\n用户消息：" + initialPrompt;
+      }
+    } catch {
+      // Fall back to plain initialPrompt
+    }
+
+    this.spawnCli(session, systemPrompt);
     return session;
   }
 
