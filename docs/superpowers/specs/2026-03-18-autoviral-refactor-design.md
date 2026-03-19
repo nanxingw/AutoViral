@@ -237,7 +237,7 @@ GET  /api/generate/providers           → 列出可用的provider及状态
 - 输出：1080P视频，支持宽高比 16:9, 4:3, 1:1, 3:4, 9:16, 21:9
 
 **认证密钥（已配置）：**
-- AccessKeyId: `***REMOVED***`
+- AccessKeyId: `REDACTED`
 - SecretAccessKey: 存储在 config.yaml 中
 
 ### Provider: NanoBanana 2 Pro (`src/providers/nanobanana.ts`)
@@ -433,7 +433,7 @@ port: 3271
 model: opus
 
 jimeng:
-  accessKey: "***REMOVED***"
+  accessKey: "REDACTED"
   secretKey: "T0dSalpHSmxOall6..."    # 从config读取
 
 research:
