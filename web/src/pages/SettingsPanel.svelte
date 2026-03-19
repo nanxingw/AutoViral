@@ -13,6 +13,8 @@
   let researchEnabled = $state(false);
   let researchCron = $state("0 9 * * *");
   let model = $state("sonnet");
+  let douyinUrl = $state("")
+  let memorySyncEnabled = $state(false)
 
   // Show/hide password toggles
   let showAccessKey = $state(false);
@@ -37,6 +39,8 @@
         researchEnabled = data.researchEnabled ?? data.autoRun ?? false;
         researchCron = data.researchCron ?? data.interval ?? "0 9 * * *";
         model = data.model ?? "sonnet";
+        douyinUrl = data.douyinUrl ?? ""
+        memorySyncEnabled = data.memorySyncEnabled ?? false
       }
     } catch {
       // silently fail
@@ -58,6 +62,8 @@
           researchEnabled,
           researchCron,
           model,
+          douyinUrl,
+          memorySyncEnabled,
         }),
       });
     } catch {
@@ -205,6 +211,47 @@
                   {/each}
                 </select>
               </label>
+            </div>
+          </section>
+
+          <!-- Creator Data Collection -->
+          <section class="config-section">
+            <h3 class="section-label">创作者数据</h3>
+            <div class="field-group">
+              <label class="field-label">
+                抖音主页 URL
+                <input
+                  type="text"
+                  class="field-input"
+                  bind:value={douyinUrl}
+                  placeholder="https://v.douyin.com/xxx"
+                />
+              </label>
+              <p class="field-hint">输入你的抖音主页链接，系统将每小时自动采集作品数据</p>
+            </div>
+          </section>
+
+          <!-- Memory Sync -->
+          <section class="config-section">
+            <h3 class="section-label">AI 记忆</h3>
+            <div class="field-group">
+              <div class="toggle-row">
+                <div class="toggle-info">
+                  <span class="toggle-label">记忆同步</span>
+                  <p class="field-hint">开启后，每次创作完成时自动将对话同步到 EverMemOS，让 AI 记住你的创作历史</p>
+                </div>
+                <button
+                  class="toggle-switch"
+                  class:on={memorySyncEnabled}
+                  onclick={() => memorySyncEnabled = !memorySyncEnabled}
+                  role="switch"
+                  aria-checked={memorySyncEnabled}
+                  aria-label="记忆同步"
+                >
+                  <span class="toggle-thumb"></span>
+                </button>
+              </div>
+              <p class="field-hint field-hint--muted">需要配置 EVERMEMOS_API_KEY 环境变量</p>
             </div>
           </section>
         </div>
@@ -504,5 +551,25 @@
   .save-btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+  }
+
+  .field-hint {
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    margin: 0;
+    line-height: 1.5;
+    opacity: 0.75;
+  }
+
+  .field-hint--muted {
+    opacity: 0.5;
+  }
+
+  .toggle-info {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    flex: 1;
+    min-width: 0;
   }
 </style>

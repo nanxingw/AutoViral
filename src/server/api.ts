@@ -82,16 +82,57 @@ apiRoutes.get("/api/status", async (c) => {
 // GET /api/config
 apiRoutes.get("/api/config", async (c) => {
   const config = await loadConfig();
-  return c.json(config);
+  return c.json({
+    ...config,
+    jimengAccessKey: config.jimeng?.accessKey ?? "",
+    jimengSecretKey: config.jimeng?.secretKey ?? "",
+    openrouterKey: config.openrouter?.apiKey ?? "",
+    researchEnabled: config.research?.enabled ?? false,
+    researchCron: config.research?.schedule ?? "0 9 * * *",
+    douyinUrl: config.analytics?.douyinUrl ?? "",
+    memorySyncEnabled: config.memory?.syncEnabled ?? false,
+  });
 });
 
 // PUT /api/config
 apiRoutes.put("/api/config", async (c) => {
-  const body = await c.req.json<Partial<Config>>();
-  const current = await loadConfig();
-  const updated: Config = { ...current, ...body };
-  await saveConfig(updated);
-  return c.json(updated);
+  const body = await c.req.json<Record<string, unknown>>();
+  const config = await loadConfig();
+
+  // Map flat frontend fields to nested config structure
+  if (body.jimengAccessKey !== undefined) {
+    if (!config.jimeng) config.jimeng = { accessKey: "", secretKey: "" };
+    config.jimeng.accessKey = body.jimengAccessKey as string;
+  }
+  if (body.jimengSecretKey !== undefined) {
+    if (!config.jimeng) config.jimeng = { accessKey: "", secretKey: "" };
+    config.jimeng.secretKey = body.jimengSecretKey as string;
+  }
+  if (body.openrouterKey !== undefined) {
+    config.openrouter = { apiKey: body.openrouterKey as string };
+  }
+  if (body.researchEnabled !== undefined) {
+    if (!config.research) config.research = { enabled: false, schedule: "0 9 * * *", platforms: ["douyin", "xiaohongshu"] };
+    config.research.enabled = body.researchEnabled as boolean;
+  }
+  if (body.researchCron !== undefined) {
+    if (!config.research) config.research = { enabled: false, schedule: "0 9 * * *", platforms: ["douyin", "xiaohongshu"] };
+    config.research.schedule = body.researchCron as string;
+  }
+  if (body.model !== undefined) {
+    config.model = body.model as string;
+  }
+  if (body.douyinUrl !== undefined) {
+    if (!config.analytics) config.analytics = { douyinUrl: "", collectInterval: 60, enabled: true };
+    config.analytics.douyinUrl = body.douyinUrl as string;
+  }
+  if (body.memorySyncEnabled !== undefined) {
+    if (!config.memory) config.memory = { apiKey: "", userId: "autoviral-user", syncEnabled: false };
+    config.memory.syncEnabled = body.memorySyncEnabled as boolean;
+  }
+
+  await saveConfig(config);
+  return c.json(config);
 });
 
 // ---------------------------------------------------------------------------
