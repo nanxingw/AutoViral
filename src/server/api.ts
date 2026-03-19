@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { join, extname } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
@@ -16,6 +17,31 @@ import { getProvider, getDefaultProvider, listProviders } from "../providers/reg
 import { listSharedAssets, getSharedAssetPath, CATEGORIES } from "../shared-assets.js";
 
 export const apiRoutes = new Hono();
+
+// ── Python script runner for real-time trend data ────────────────────────────
+
+const execFileAsync = promisify(execFile);
+
+async function runTrendScript(platform: string): Promise<string> {
+  const scriptsDir = join(process.cwd(), 'skills', 'trend-research', 'scripts');
+
+  try {
+    if (platform === 'douyin') {
+      const { stdout } = await execFileAsync('python3', [
+        join(scriptsDir, 'douyin_hot_search.py'), '--top', '30'
+      ], { timeout: 30000 });
+      return stdout;
+    }
+    // Other platforms via newsnow
+    const { stdout } = await execFileAsync('python3', [
+      join(scriptsDir, 'newsnow_trends.py'), platform, '--top', '20'
+    ], { timeout: 30000 });
+    return stdout;
+  } catch (err) {
+    console.error(`[trends] Script error for ${platform}:`, err);
+    return '';
+  }
+}
 
 // ── MIME type helper ────────────────────────────────────────────────────────
 
@@ -315,25 +341,52 @@ async function researchTrends(platforms: string[]): Promise<{ collected: string[
   const collected: string[] = [];
   const errors: string[] = [];
 
+  // Load user interests once for all platforms
+  const config = await loadConfig();
+  const interests = config.interests ?? [];
+  const interestClause = interests.length > 0
+    ? `\n用户特别关注以下领域：${interests.join("、")}。请优先覆盖这些领域的趋势，同时也包含其他热门方向。\n`
+    : '';
+
   for (const platform of platforms) {
     const platformLabel = platform === "xiaohongshu" ? "小红书" : platform === "douyin" ? "抖音" : platform;
 
+    // Run script for real-time data
+    const scriptData = await runTrendScript(platform);
+    const dataClause = scriptData
+      ? `\n以下是通过 API 获取的 ${platformLabel} 实时热搜数据，请以此为基础进行分析：\n\`\`\`json\n${scriptData.slice(0, 4000)}\n\`\`\`\n`
+      : `\n无法通过 API 获取实时数据，请使用 WebSearch 搜索最新热搜信息。\n`;
+
     const prompt = [
-      `你是一个社交媒体趋势研究员。请搜索 ${platformLabel} 平台当前最热门的内容趋势和话题。`,
+      `你是一个专业的社交媒体趋势研究员。请分析 ${platformLabel} 平台当前最热门的内容趋势。`,
+      dataClause,
+      interestClause,
+      `如果上面的 API 数据不够充分，请使用 WebSearch 补充搜索：`,
+      `- "${platformLabel} 爆款内容 趋势 2026"`,
+      `- "${platformLabel} 热门话题 最新"`,
       ``,
-      `使用 WebSearch 搜索以下内容：`,
-      `- "${platformLabel} 热门话题 2026"`,
-      `- "${platformLabel} 爆款内容 趋势"`,
-      `- "${platformLabel} 热搜榜"`,
+      `根据所有信息，输出以下 JSON 格式（只输出 JSON，不要其他文字）：`,
+      `{"topics":[{`,
+      `  "title":"话题标题",`,
+      `  "heat":4,`,
+      `  "competition":"中",`,
+      `  "opportunity":"金矿",`,
+      `  "description":"趋势描述和为什么值得做",`,
+      `  "tags":["推荐标签1","推荐标签2","推荐标签3"],`,
+      `  "contentAngles":["切入角度1","切入角度2"],`,
+      `  "exampleHook":"爆款开头示例，如：你绝对想不到...",`,
+      `  "category":"所属领域"`,
+      `}]}`,
       ``,
-      `然后根据搜索结果，整理成以下 JSON 格式。`,
-      `即使搜索结果不完整，也要根据已有信息尽力填充，估算数据也可以。`,
-      `你必须输出有效的 JSON，这是硬性要求，不允许输出其他格式。`,
-      ``,
-      `输出格式（只输出这个 JSON，不要其他任何文字）：`,
-      `{"topics":[{"title":"话题标题","heat":4,"competition":"中","description":"简短描述和建议方向"}]}`,
-      ``,
-      `topics 至少8个。heat 为 1-5 的整数。competition 为 "低"/"中"/"高"。`,
+      `要求：`,
+      `- topics 至少 10 个`,
+      `- heat 为 1-5 整数`,
+      `- competition 为 "低"/"中"/"高"`,
+      `- opportunity 为 "金矿"(高热低竞)/"蓝海"(低热低竞)/"红海"(高热高竞)`,
+      `- tags 3-5 个平台推荐标签`,
+      `- contentAngles 2-3 个具体的内容切入角度`,
+      `- exampleHook 一句话的爆款开头示例`,
+      `- category 为话题所属领域（如 美食/科技/穿搭/生活/情感/职场/健身/旅行/宠物/教育）`,
     ].join("\n");
 
     try {
@@ -409,26 +462,53 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
 
     const sessionKey = `trends_${platform}_${Date.now()}`;
 
+    // 1. Get user interests
+    const config = await loadConfig();
+    const interests = config.interests ?? [];
+    const interestClause = interests.length > 0
+      ? `\n用户特别关注以下领域：${interests.join("、")}。请优先覆盖这些领域的趋势，同时也包含其他热门方向。\n`
+      : '';
+
+    // 2. Run script for real-time data
+    const scriptData = await runTrendScript(platform);
+    const dataClause = scriptData
+      ? `\n以下是通过 API 获取的 ${platformLabel} 实时热搜数据，请以此为基础进行分析：\n\`\`\`json\n${scriptData.slice(0, 4000)}\n\`\`\`\n`
+      : `\n无法通过 API 获取实时数据，请使用 WebSearch 搜索最新热搜信息。\n`;
+
+    // 3. Build enhanced prompt
     const prompt = [
-      `你是一个社交媒体趋势研究员。请搜索 ${platformLabel} 平台当前最热门的内容趋势和话题。`,
+      `你是一个专业的社交媒体趋势研究员。请分析 ${platformLabel} 平台当前最热门的内容趋势。`,
+      dataClause,
+      interestClause,
+      `如果上面的 API 数据不够充分，请使用 WebSearch 补充搜索：`,
+      `- "${platformLabel} 爆款内容 趋势 2026"`,
+      `- "${platformLabel} 热门话题 最新"`,
       ``,
-      `使用 WebSearch 搜索以下内容：`,
-      `- "${platformLabel} 热门话题 2026"`,
-      `- "${platformLabel} 爆款内容 趋势"`,
-      `- "${platformLabel} 热搜榜"`,
+      `根据所有信息，输出以下 JSON 格式（只输出 JSON，不要其他文字）：`,
+      `{"topics":[{`,
+      `  "title":"话题标题",`,
+      `  "heat":4,`,
+      `  "competition":"中",`,
+      `  "opportunity":"金矿",`,
+      `  "description":"趋势描述和为什么值得做",`,
+      `  "tags":["推荐标签1","推荐标签2","推荐标签3"],`,
+      `  "contentAngles":["切入角度1","切入角度2"],`,
+      `  "exampleHook":"爆款开头示例，如：你绝对想不到...",`,
+      `  "category":"所属领域"`,
+      `}]}`,
       ``,
-      `然后根据搜索结果，整理成以下 JSON 格式。`,
-      `即使搜索结果不完整，也要根据已有信息尽力填充，估算数据也可以。`,
-      `你必须输出有效的 JSON，这是硬性要求，不允许输出其他格式。`,
-      ``,
-      `输出格式（只输出这个 JSON，不要其他任何文字）：`,
-      `{"topics":[{"title":"话题标题","heat":4,"competition":"中","description":"简短描述和建议方向"}]}`,
-      ``,
-      `topics 至少8个。heat 为 1-5 的整数。competition 为 "低"/"中"/"高"。`,
+      `要求：`,
+      `- topics 至少 10 个`,
+      `- heat 为 1-5 整数`,
+      `- competition 为 "低"/"中"/"高"`,
+      `- opportunity 为 "金矿"(高热低竞)/"蓝海"(低热低竞)/"红海"(高热高竞)`,
+      `- tags 3-5 个平台推荐标签`,
+      `- contentAngles 2-3 个具体的内容切入角度`,
+      `- exampleHook 一句话的爆款开头示例`,
+      `- category 为话题所属领域（如 美食/科技/穿搭/生活/情感/职场/健身/旅行/宠物/教育）`,
     ].join("\n");
 
     await wsBridge.createTrendSession(sessionKey, prompt);
-
     return c.json({ sessionKey, platform });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : "Failed to start research" }, 500);
