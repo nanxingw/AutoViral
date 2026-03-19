@@ -6,6 +6,7 @@
   import PipelineSteps from "../components/PipelineSteps.svelte";
   import MarkdownBlock from "../components/MarkdownBlock.svelte";
   import AssetPanel from "../components/AssetPanel.svelte";
+  import CanvasWorkspace from "../components/CanvasWorkspace.svelte";
 
   interface AskQuestion {
     question: string;
@@ -61,6 +62,10 @@
   // Asset panel refresh
   let assetRefresh = $state(0);
 
+  // Studio layout mode: "chat" (3-column with chat) or "canvas" (2-column with canvas workspace)
+  type StudioMode = "chat" | "canvas";
+  let studioMode: StudioMode = $state("chat");
+
   function resetInactivityTimer() {
     if (inactivityTimer) clearTimeout(inactivityTimer);
     inactivityTimer = setTimeout(() => {
@@ -77,6 +82,18 @@
     if (s === "failed") return "badge-error";
     if (s === "creating") return "badge-running";
     return "badge-default";
+  }
+
+  function handleCanvasSend(text: string) {
+    if (!text || streaming || !wsConn) return;
+    streamBlocks = [...streamBlocks, { type: "user", text }];
+    wsConn.send(text);
+    streaming = true;
+    showNextStep = false;
+    if (studioMode === "canvas") {
+      // Stay in canvas mode but ensure live view
+      viewMode = "live";
+    }
   }
 
   function handleSend() {
@@ -495,6 +512,14 @@
       {/if}
     </div>
     <div class="header-controls">
+      <div class="view-toggle">
+        <button class="toggle-btn" class:active={studioMode === "chat"} onclick={() => studioMode = "chat"} title="对话模式">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        </button>
+        <button class="toggle-btn" class:active={studioMode === "canvas"} onclick={() => studioMode = "canvas"} title="画布模式">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        </button>
+      </div>
       {#if allStepsDone}
         <span class="session-indicator ready">{lang === "zh" ? "已完成" : "Completed"}</span>
       {:else if sessionReady}
@@ -759,10 +784,16 @@
       {/if}
     </div>
 
-    <!-- Right: Assets (~320px) -->
-    <div class="panel-right">
-      <AssetPanel {workId} visible={true} refreshTrigger={assetRefresh} />
-    </div>
+    <!-- Right: Assets (320px in chat mode) or Canvas (expanded) -->
+    {#if studioMode === "canvas"}
+      <div class="panel-canvas">
+        <CanvasWorkspace {workId} visible={true} refreshTrigger={assetRefresh} onSendMessage={handleCanvasSend} />
+      </div>
+    {:else}
+      <div class="panel-right">
+        <AssetPanel {workId} visible={true} refreshTrigger={assetRefresh} />
+      </div>
+    {/if}
   </div>
 </div>
 
@@ -880,6 +911,40 @@
     flex-shrink: 0;
     overflow: hidden;
   }
+
+  .panel-canvas {
+    flex: 1.5;
+    min-width: 0;
+    overflow: hidden;
+    border-left: 1px solid var(--border);
+  }
+
+  /* View toggle */
+  .view-toggle {
+    display: flex;
+    gap: 0.15rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 0.15rem;
+  }
+
+  .toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 28px;
+    border-radius: 6px;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .toggle-btn:hover { color: var(--text-secondary); background: rgba(255, 255, 255, 0.04); }
+  .toggle-btn.active { background: var(--accent-gradient); color: var(--accent-text); }
 
   /* Stream area */
   .stream-area {
