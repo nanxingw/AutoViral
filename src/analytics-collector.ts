@@ -50,7 +50,7 @@ async function collectData(douyinUrl: string): Promise<CreatorData | null> {
   try {
     await mkdir(ANALYTICS_DIR, { recursive: true })
     const { stdout } = await execFileAsync("python3", [
-      scriptPath, "--url", douyinUrl, "--format", "json"
+      scriptPath, "--platform", "douyin", "--url", douyinUrl
     ], { timeout: 120000 })
 
     const data = JSON.parse(stdout.trim()) as CreatorData
