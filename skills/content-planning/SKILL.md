@@ -3,207 +3,164 @@ name: content-planning
 description: Create detailed content plans and storyboards for Douyin (抖音) and Xiaohongshu (小红书) content. Use this skill whenever the user wants to plan content, create a storyboard, write a shot list, design image-text layouts, plan a content piece, or when the pipeline step is "plan". Handles both short-video storyboards with shot-by-shot breakdowns and image-text content structures with per-image descriptions.
 ---
 
-# Content Planning Skill
+# 内容策划技能
 
-You are an expert content planner and storyboard artist for Chinese social media platforms. Your job is to create detailed, production-ready content plans that can be directly executed by the asset generation step.
+你是一位专业的中国社交媒体内容策划师和分镜师。你的任务是创建详细的、可直接投入制作的内容方案，使素材生成环节能够直接执行。
 
-## Determine Content Type
+## 确定内容类型
 
-Check the work's `type` field:
-- **short-video** → Create a storyboard with shot-by-shot breakdown
-- **image-text** → Create an image structure with per-image descriptions
+检查作品的 `type` 字段：
+- **short-video** → 创建逐镜头分镜脚本
+- **image-text** → 创建逐图描述的图片结构
 
-Always fetch the work context first:
+首先获取作品上下文：
 ```bash
 curl http://localhost:3271/api/works/{workId}
 curl http://localhost:3271/api/shared-assets
 curl http://localhost:3271/api/memory/profile
 ```
 
+## 平台参考资料
+
+根据目标发布平台，阅读对应的参考文件以获取平台特定的策略和规格：
+- **抖音（Douyin）：** 阅读 `references/douyin.md`，了解视频规格、内容策略和平台最佳实践
+- **小红书（XHS）：** 阅读 `references/xiaohongshu.md`，了解图片规格、内容策略和 SEO 导向的方法
+- **双平台发布：** 阅读两个参考文件，并根据各平台特点调整方案
+
 ---
 
-## Short Video Composition Principles
+## 短视频构图原则
 
-### Visual Composition Rules
+### 视觉构图规则
 
-**三分法 (Rule of Thirds):**
-- Place subjects at intersection points of the 3×3 grid
-- For talking-head videos: eyes at top-third line
-- For product shots: product at a power point (intersection)
+**三分法（Rule of Thirds）：**
+- 将主体放置在 3×3 网格的交叉点上
+- 口播视频：眼睛位于上三分线
+- 产品展示：产品放在视觉焦点（交叉点）上
 
-**引导线 (Leading Lines):**
-- Use architectural lines, roads, table edges to guide the eye to the subject
-- Diagonal lines create dynamic energy; horizontal lines create calm
-- In vertical (9:16) format, vertical leading lines are especially powerful
+**引导线（Leading Lines）：**
+- 利用建筑线条、道路、桌沿等引导观众视线聚焦主体
+- 斜线营造动态感；水平线营造平静感
+- 在竖屏（9:16）画面中，纵向引导线效果尤为突出
 
-**框架构图 (Framing):**
-- Use doorways, windows, phone screens, or natural frames to draw attention
-- Creates depth and focuses the viewer on the subject
+**框架构图（Framing）：**
+- 利用门框、窗户、手机屏幕或自然框架来聚焦注意力
+- 营造纵深感，让观众的目光集中在主体上
 
-**留白 (Negative Space):**
-- Leave space for text overlays (especially important for Douyin — text is often placed in the top or bottom third)
-- XHS cover images need clean areas for title text
+**留白（Negative Space）：**
+- 为文字叠加预留空间（在文字密集型平台上尤为重要）
+- 封面图需要留出干净的区域放置标题文字
 
-**竖屏构图特点 (Vertical Frame Composition):**
-- 9:16 is a tall, narrow frame — use it vertically
-- Stack elements top-to-bottom instead of left-to-right
-- Close-ups and medium shots work better than wide shots in vertical
-- Subject should fill 60-80% of the frame for impact
+**竖屏构图特点：**
+- 9:16 是窄长画幅——善用纵向空间
+- 元素从上到下排列，而非从左到右
+- 竖屏更适合特写和中景，而非远景
+- 主体应占画面 60-80% 以获得视觉冲击力
 
-### Camera Language (镜头语言)
+### 镜头语言
 
-Use Chinese cinematography terminology in storyboards:
+在分镜脚本中使用中文影视术语：
 
-| 术语 | English | Use Case | Emotional Effect |
-|------|---------|----------|-----------------|
-| 推 (Push/Zoom in) | Push in / Dolly in | Emphasize detail, create tension | Focus, importance, intimacy |
-| 拉 (Pull/Zoom out) | Pull out / Dolly out | Reveal context, show scale | Revelation, loneliness, grandeur |
-| 摇 (Pan) | Pan left/right | Survey a scene, follow action | Exploration, continuity |
-| 移 (Dolly/Track) | Dolly / Tracking shot | Follow subject movement | Journey, energy, fluidity |
-| 跟 (Follow) | Follow shot | Stay with moving subject | Engagement, immersion |
-| 俯拍 (Bird's eye) | Top-down / Overhead | Show layout, food flat-lay | Overview, order, aesthetic |
-| 仰拍 (Low angle) | Low angle | Make subject look powerful/tall | Authority, grandeur, drama |
-| 特写 (Close-up) | Close-up / ECU | Show detail, emotion | Intimacy, emphasis, tension |
-| 全景 (Wide/Establishing) | Wide / Establishing | Set the scene, show environment | Context, atmosphere, scale |
-| 中景 (Medium shot) | Medium shot | Standard conversation, action | Neutral, balanced, informative |
-| 固定 (Static) | Locked-off / Static | Stable, professional feel | Calm, confidence, clarity |
-| 手持 (Handheld) | Handheld | Raw, authentic vlog feel | Energy, authenticity, urgency |
+| 术语 | English | 使用场景 | 情绪效果 |
+|------|---------|----------|----------|
+| 推（Push/Zoom in） | Push in / Dolly in | 强调细节，制造紧张感 | 聚焦、重要性、亲密感 |
+| 拉（Pull/Zoom out） | Pull out / Dolly out | 揭示环境，展现规模 | 揭示感、孤独感、壮阔感 |
+| 摇（Pan） | Pan left/right | 扫视场景，跟随动作 | 探索感、连续性 |
+| 移（Dolly/Track） | Dolly / Tracking shot | 跟随主体移动 | 旅途感、活力、流动性 |
+| 跟（Follow） | Follow shot | 紧跟移动中的主体 | 参与感、沉浸感 |
+| 俯拍（Bird's eye） | Top-down / Overhead | 展示布局、美食俯拍 | 全局感、秩序感、美感 |
+| 仰拍（Low angle） | Low angle | 让主体显得高大有力 | 权威感、壮阔感、戏剧性 |
+| 特写（Close-up） | Close-up / ECU | 展示细节、情绪 | 亲密感、强调、紧张感 |
+| 全景（Wide/Establishing） | Wide / Establishing | 交代场景、展示环境 | 交代背景、氛围感、空间感 |
+| 中景（Medium shot） | Medium shot | 标准对话、动作场景 | 中性、均衡、信息传递 |
+| 固定（Static） | Locked-off / Static | 稳定、专业感 | 沉稳、自信、清晰 |
+| 手持（Handheld） | Handheld | 真实、vlog 质感 | 活力、真实感、紧迫感 |
 
-### Narrative Pacing for Short-Form Video
+### 短视频叙事节奏
 
-**The Hook-Value-CTA Framework:**
+**钩子-价值-行动号召框架（Hook-Value-CTA）：**
 
-**Hook (0-3 seconds) — 最关键:**
-Every short video lives or dies by its first 3 seconds. The hook determines whether the viewer swipes.
+**钩子（0-3 秒）— 最关键：**
+每条短视频的生死取决于前 3 秒。钩子决定了观众是否会继续看还是划走。
 
-Hook types:
-- **视觉钩子 (Visual hook):** A striking image — before/after, unusual scene, beautiful composition
-- **文字钩子 (Text hook):** On-screen text that poses a question or makes a bold claim
-- **声音钩子 (Audio hook):** Surprising sound, trending BGM opening, or attention-grabbing voice
-- **悬念钩子 (Suspense hook):** Show the end result first, then "让我告诉你怎么做的"
-- **痛点钩子 (Pain point hook):** Identify a problem the viewer has — "你是不是也..."
+钩子类型：
+- **视觉钩子：** 一个抓眼球的画面——对比图、奇特场景、精美构图
+- **文字钩子：** 画面文字抛出一个问题或大胆的观点
+- **声音钩子：** 出人意料的声效、热门 BGM 开头、引人注意的旁白
+- **悬念钩子：** 先展示最终成果，然后"让我告诉你怎么做的"
+- **痛点钩子：** 戳中观众的痛点——"你是不是也..."
 
-**Value Delivery (3-45 seconds):**
-- Rhythm changes every 5-7 seconds to maintain attention
-- Each scene should deliver a micro-value or advance the narrative
-- Use visual variety: alternate between close-ups and medium shots
-- Text overlays reinforce key points (many viewers watch without sound)
+**价值传递（3-45 秒）：**
+- 每 5-7 秒变换一次节奏以维持注意力
+- 每个场景都应传递一个小价值点或推进叙事
+- 运用视觉变化：在特写和中景之间交替
+- 用文字叠加强调重点（很多观众是静音观看的）
 
-**CTA (Last 3-5 seconds):**
-- 关注型: "关注我，下期教你..." (Follow for more)
-- 互动型: "你觉得哪个更好？评论区告诉我" (Comment engagement)
-- 收藏型: "先收藏，用到的时候找得到" (Save for later)
-- 转发型: "转给你需要的朋友" (Share with friends)
+**行动号召 CTA（最后 3-5 秒）：**
+- 关注型: "关注我，下期教你..."
+- 互动型: "你觉得哪个更好？评论区告诉我"
+- 收藏型: "先收藏，用到的时候找得到"
+- 转发型: "转给你需要的朋友"
 
-### Pacing Rhythm Templates
+### 节奏模板
 
-**教程型 (Tutorial, 30-60s):**
+> **注意：** 平台特定的节奏模板在参考文件中。以下为通用框架。
+
+**教程型（Tutorial，30-60s）：**
 ```
 [Hook: 成品展示 3s] → [问题引出 3s] → [步骤1 5-8s] → [步骤2 5-8s] → [步骤3 5-8s] → [成品特写 3s] → [CTA 3s]
 ```
 
-**故事型 (Story, 30-60s):**
+**故事型（Story，30-60s）：**
 ```
 [Hook: 冲突/悬念 3s] → [背景交代 5s] → [发展 10-15s] → [高潮/反转 5-8s] → [结局 3-5s] → [CTA 3s]
 ```
 
-**种草型 (Product showcase/XHS, 15-30s):**
+**种草型（Product showcase，15-30s）：**
 ```
 [Hook: 痛点 3s] → [产品介绍 5s] → [使用展示 5-8s] → [效果对比 5s] → [总结推荐 3s] → [CTA 3s]
 ```
 
-**Vlog型 (Vlog/日常, 45-90s):**
+**Vlog型（Vlog/日常，45-90s）：**
 ```
 [Hook: 今日亮点 3s] → [场景1 10-15s] → [过渡 2s] → [场景2 10-15s] → [场景3 10-15s] → [总结感悟 5s] → [CTA 3s]
 ```
 
 ---
 
-## Platform-Specific Content Strategy
+## 色彩心理与氛围
 
-### Douyin Content Strategy
+| 色调 | 中文 | 氛围 | 适用场景 |
+|------|------|------|----------|
+| 暖橙/暖黄 | 暖色调 | 温馨、有食欲、亲和 | 美食、生活方式、家居 |
+| 冷蓝/青 | 冷色调 | 专业、沉稳、可信 | 科技、教育、商务 |
+| 粉色/桃色 | 粉色调 | 柔和、女性化、浪漫 | 美妆、时尚、情感 |
+| 大地色系 | 大地色 | 自然、有机、扎实 | 旅行、健康、环保 |
+| 高对比黑白 | 黑白高对比 | 戏剧性、艺术感、大胆 | 时尚、艺术、有力量的故事 |
+| 马卡龙色 | 马卡龙色 | 青春、清新、活泼 | 年轻人内容、可爱产品 |
+| 胶片/复古 | 胶片/复古 | 怀旧、文艺、潮流 | 文化内容、生活方式 |
+| 莫兰迪色 | 莫兰迪色 | 优雅、柔和、高级感 | 小红书美学、高端产品 |
 
-**What performs well:**
-- Hook-driven content — first frame must stop the scroll
-- Trending audio (热门BGM) — reusing trending sounds gets algorithmic boost
-- 话题挑战 (Hashtag challenges) — participating in trending challenges
-- 合拍/对口型 (Duets/Lip-sync) — engagement with existing viral content
-- Emotional storytelling with a twist ending
-- Practical tutorials with clear, fast pacing
-
-**Video specs:**
-- Resolution: 1080×1920 (9:16) or 1088×1920
-- Duration: 7-60 seconds optimal (algorithm favors content that people finish watching)
-- Frame rate: 30fps standard, 60fps for high-motion
-- Codec: H.264 / H.265
-- Max file size: 4GB
-- Max duration: 15 minutes (but under 60s recommended)
-
-**Text overlay best practices:**
-- Large, bold text (48-72px equivalent)
-- Centered or top-third placement
-- High contrast (white text with black shadow)
-- Key phrases only — not full sentences
-- Animated text appearance adds engagement
-
-### XHS Content Strategy
-
-**What performs well:**
-- Aesthetic-first — beautiful cover images drive clicks
-- Educational value — "干货" (useful knowledge) gets saved
-- Authentic voice — personal experience > generic advice
-- List format — "10个..." "5种..." structured content
-- Step-by-step tutorials with clear photos
-- Detailed reviews with pros and cons
-
-**Image specs:**
-- Cover image: 1080×1440 (3:4) recommended, or 1080×1920 (9:16)
-- Interior images: consistent ratio throughout the post
-- Minimum 3 images, recommended 6-9 images per post
-- Image quality: clear, well-lit, aesthetically pleasing
-
-**XHS image content principles:**
-- First image IS the cover — it determines click-through rate
-- Cover should have: clear subject + readable title text + aesthetic background
-- Use consistent color tone across all images
-- Text on images should be readable on mobile (minimum 24px equivalent)
-- Include a "拍摄信息" or "详细信息" image for credibility
+**一致性原则：** 每条内容选定一套色彩方案，并在所有镜头/图片中保持统一。这能创造视觉连贯性和品牌辨识度。
 
 ---
 
-## Color Psychology and Mood
+## 视觉一致性的提示词写作
 
-| Color Tone | 中文 | Mood | Best For |
-|-----------|------|------|----------|
-| Warm orange/yellow | 暖色调 | Cozy, appetizing, friendly | Food, lifestyle, home |
-| Cool blue/teal | 冷色调 | Professional, calm, trustworthy | Tech, education, business |
-| Pink/peach | 粉色调 | Soft, feminine, romantic | Beauty, fashion, relationship |
-| Earth tones | 大地色 | Natural, organic, grounded | Travel, wellness, eco |
-| High contrast B&W | 黑白高对比 | Dramatic, artistic, bold | Fashion, art, powerful stories |
-| Pastel | 马卡龙色 | Youthful, fresh, playful | Youth content, cute products |
-| Vintage/film | 胶片/复古 | Nostalgic, artistic, trendy | Cultural content, lifestyle |
-| Morandi colors | 莫兰迪色 | Elegant, muted, sophisticated | XHS aesthetic, premium products |
+在编写场景描述时（这些描述将直接用作图片/视频生成的提示词），请遵循以下规则以确保一致性：
 
-**Consistency rule:** Choose ONE color palette per content piece and maintain it across all shots/images. This creates visual cohesion and brand recognition.
-
----
-
-## Prompt Writing for Visual Consistency
-
-When writing scene descriptions (which will be used directly as image/video generation prompts), follow these rules for consistency:
-
-### Character Consistency
-If a character appears in multiple shots, create a **Character Reference Block** at the top of the plan:
+### 角色一致性
+如果某个角色出现在多个镜头中，在方案顶部创建一个**角色参考块**：
 
 ```
 【角色定义】
 角色A: young Chinese woman, age 25, long black hair, wearing white linen shirt and light blue jeans, natural makeup, warm smile
 ```
 
-Then in each shot description, reference the full character description rather than shorthand. This ensures the generation model produces consistent characters.
+然后在每个镜头描述中引用完整的角色描述，而不是使用简称。这能确保生成模型产出一致的角色形象。
 
-### Style Consistency Keywords
-Define a **Style Block** that gets appended to every generation prompt:
+### 风格一致性关键词
+定义一个**风格块**，附加到每个生成提示词后面：
 
 ```
 【风格定义】
@@ -211,159 +168,142 @@ Style: soft natural lighting, warm color grading, shallow depth of field, lifest
 Negative: blurry, distorted, oversaturated, artificial, stock photo feel
 ```
 
-### Scene Description Formula
+### 场景描述公式
 
-Each scene description should follow this structure:
+每个场景描述应遵循以下结构：
 ```
-[Subject/Character description], [Action/Pose], [Environment/Background], [Lighting], [Camera angle], [Style keywords]
+[主体/角色描述], [动作/姿势], [环境/背景], [光线], [镜头角度], [风格关键词]
 ```
 
-Example:
+示例：
 ```
 Young Chinese woman with long black hair in white linen shirt, smiling while arranging flowers on a wooden kitchen table, bright modern kitchen with large windows, warm morning sunlight streaming in, medium shot at eye level, soft natural lighting, lifestyle photography, warm color grading
 ```
 
 ---
 
-## Output Format: Short Video (短视频)
+## 输出格式：短视频
+
+> **注意：** 从对应的参考文件（`references/douyin.md`、`references/xiaohongshu.md`）中填写平台特定的发布信息。
 
 ```markdown
 # 内容策划: [Title]
 
 ## 基本信息
 - **主题:** [Theme]
-- **标题:** [Catchy title for the platform]
+- **标题:** [适合平台的吸引人标题]
 - **内容类型:** 短视频
-- **目标平台:** [Douyin / XHS / Both]
+- **目标平台:** [抖音 / 小红书 / 双平台]
 - **预计时长:** [Duration]
-- **目标受众:** [Target audience description]
-- **内容定位:** [Educational / Entertaining / Emotional / etc.]
+- **目标受众:** [目标受众描述]
+- **内容定位:** [教程 / 娱乐 / 情感 / 等]
 
-## 角色定义 (Character Consistency)
-> 角色A: [Detailed character description for generation consistency]
-> 角色B (if any): [Description]
+## 角色定义（角色一致性）
+> 角色A: [用于生成一致性的详细角色描述]
+> 角色B（如有）: [描述]
 
-## 风格定义 (Style Guide)
-- **色调:** [Color tone]
-- **光线:** [Lighting style]
-- **质感:** [Texture/feel]
-- **整体氛围:** [Overall mood]
-- **风格关键词 (append to all prompts):** [style keywords]
+## 风格定义（Style Guide）
+- **色调:** [色调]
+- **光线:** [光线风格]
+- **质感:** [质感/感觉]
+- **整体氛围:** [整体情绪]
+- **风格关键词（附加到所有提示词）:** [风格关键词]
 
-## 分镜脚本 (Storyboard)
+## 分镜脚本（Storyboard）
 
-| 镜号 | 场景描述 | 首帧描述 (Image Prompt) | 时长 | 旁白/字幕 | 镜头运动 | 末帧描述 (optional) |
-|------|---------|----------------------|------|----------|---------|-------------------|
-| 01   | [Scene description in Chinese] | [Detailed English prompt for image generation, including character ref, environment, lighting, camera angle, style keywords] | 3s | [Voiceover or on-screen text] | [Camera movement: 固定/推/拉/摇/etc.] | [If needed for smooth transition] |
+| 镜号 | 场景描述 | 首帧描述 (Image Prompt) | 时长 | 旁白/字幕 | 镜头运动 | 末帧描述（可选） |
+|------|---------|----------------------|------|----------|---------|-----------------|
+| 01   | [中文场景描述] | [详细英文提示词，包含角色参考、环境、光线、镜头角度、风格关键词] | 3s | [旁白或画面文字] | [镜头运动：固定/推/拉/摇/等] | [如需平滑过渡] |
 | 02   | ... | ... | ... | ... | ... | ... |
 
 ## 音乐/配乐建议
-- **风格:** [Music style description]
-- **节奏:** [BPM range, tempo]
-- **情绪:** [Mood]
-- **参考:** [Reference song or shared asset name]
-- **共享素材检查:** Check `curl http://localhost:3271/api/shared-assets` for available music
+- **风格:** [音乐风格描述]
+- **节奏:** [BPM 范围、速度]
+- **情绪:** [情绪]
+- **参考:** [参考歌曲或共享素材名称]
+- **共享素材检查:** 通过 `curl http://localhost:3271/api/shared-assets` 查看可用音乐
 
 ## 发布信息
-
-### Douyin
-- **标题:** [Platform-optimized title]
-- **标签:** #tag1 #tag2 #tag3 #tag4 #tag5
-- **文案:** [Post caption]
-- **发布时间建议:** [Recommended posting time]
-
-### XHS (if applicable)
-- **标题:** [SEO-optimized title with keywords and emoji]
-- **正文:** [Post body text]
-- **标签:** #tag1 #tag2 ... #tag10
-- **话题:** #topic1 #topic2
+[从对应的参考文件中填写平台特定的发布信息]
 ```
 
-## Output Format: Image-Text (图文)
+## 输出格式：图文
+
+> **注意：** 从对应的参考文件（`references/douyin.md`、`references/xiaohongshu.md`）中填写平台特定的发布信息。
 
 ```markdown
 # 内容策划: [Title]
 
 ## 基本信息
 - **主题:** [Theme]
-- **标题:** [Catchy, SEO-friendly title]
+- **标题:** [吸引人且 SEO 友好的标题]
 - **内容类型:** 图文
-- **目标平台:** [XHS / Douyin / Both]
-- **图片数量:** [Number of images]
-- **目标受众:** [Target audience]
-- **内容定位:** [Educational / Review / Tutorial / Lifestyle / etc.]
+- **目标平台:** [小红书 / 抖音 / 双平台]
+- **图片数量:** [图片数量]
+- **目标受众:** [目标受众]
+- **内容定位:** [教程 / 评测 / 教学 / 生活方式 / 等]
 
-## 风格指南 (Style Guide)
-- **色调:** [Color tone — reference the Color Psychology table]
-- **字体风格建议:** [Font style for text overlays]
-- **排版风格:** [Layout style — clean/collage/magazine/etc.]
-- **风格关键词 (append to all prompts):** [style keywords for consistency]
+## 风格指南（Style Guide）
+- **色调:** [色调——参考色彩心理表]
+- **字体风格建议:** [文字叠加的字体风格]
+- **排版风格:** [排版风格——简洁/拼贴/杂志风/等]
+- **风格关键词（附加到所有提示词）:** [确保一致性的风格关键词]
 
-## 图片结构 (Image Structure)
+## 图片结构（Image Structure）
 
-### 封面图 (Cover Image)
-- **内容描述 (Generation Prompt):** [Detailed English prompt — this is the most important image, must be eye-catching]
-- **文字叠加:** [Title text to overlay on cover]
-- **尺寸:** [3:4 for XHS / 9:16 for Douyin]
+### 封面图（Cover Image）
+- **内容描述 (Generation Prompt):** [详细英文提示词——这是最重要的图片，必须抓眼球]
+- **文字叠加:** [覆盖在封面上的标题文字]
+- **尺寸:** [小红书 3:4 / 抖音 9:16——参见平台参考文件获取精确规格]
 
 ### 图片 1
-- **内容描述 (Generation Prompt):** [Detailed English prompt]
-- **配文:** [Caption text for this image, in Chinese]
-- **文字叠加 (if any):** [Text to place on the image]
+- **内容描述 (Generation Prompt):** [详细英文提示词]
+- **配文:** [这张图片的中文配文]
+- **文字叠加（如有）:** [放在图片上的文字]
 
 ### 图片 2
-- **内容描述 (Generation Prompt):** [Detailed prompt]
-- **配文:** [Caption]
+- **内容描述 (Generation Prompt):** [详细提示词]
+- **配文:** [配文]
 
 ### 图片 3-N
-[Continue for all images]
+[所有图片依此继续]
 
 ## 发布信息
-
-### XHS
-- **标题:** [Title with keywords, emoji, max 20 characters recommended]
-- **正文:**
-  [Full post body text — structured, with line breaks, emoji, and relevant keywords naturally embedded. Should be 300-800 characters for optimal performance.]
-- **标签:** #tag1 #tag2 ... #tag10
-- **话题:** #topic1 #topic2 #topic3
-
-### Douyin (if applicable)
-- **标题:** [Short, punchy title]
-- **文案:** [Short caption]
-- **标签:** #tag1 #tag2 #tag3 #tag4 #tag5
+[从对应的参考文件中填写平台特定的发布信息]
 ```
 
 ---
 
-## Planning Process
+## 策划流程
 
-1. **Fetch context:** Read the work details, research report (if research step is done), shared assets, and user memory profile.
-2. **Confirm direction:** Briefly summarize the planned content direction and ask the user to confirm before creating the full plan.
-3. **Create the plan:** Produce the complete plan in the format above.
-4. **Review with user:** Present the plan and ask for feedback. Iterate until confirmed.
-5. **Save the plan:** Update the work pipeline status.
+1. **获取上下文：** 读取作品详情、调研报告（如已完成调研步骤）、共享素材和用户记忆档案。
+2. **阅读平台参考资料：** 根据目标平台，从 `references/` 目录中阅读对应的参考文件。
+3. **确认方向：** 简要总结计划的内容方向，请用户确认后再创建完整方案。
+4. **创建方案：** 按照上述格式输出完整方案，融入参考文件中的平台特定细节。
+5. **与用户对审：** 展示方案并征求反馈。反复修改直到用户确认。
+6. **保存方案：** 更新作品的流水线状态。
 
 ```bash
-# Fetch work
+# 获取作品信息
 curl http://localhost:3271/api/works/{workId}
 
-# Check for shared assets (character references, music, etc.)
+# 检查共享素材（角色参考、音乐等）
 curl http://localhost:3271/api/shared-assets
 
-# Check user style preferences
+# 检查用户风格偏好
 curl http://localhost:3271/api/memory/profile
 
-# After plan is confirmed, update pipeline status
+# 方案确认后，更新流水线状态
 curl -X PUT http://localhost:3271/api/works/{workId} \
   -H "Content-Type: application/json" \
   -d '{"pipeline": {"plan": {"status": "done"}}}'
 ```
 
-## Key Constraints
+## 关键约束
 
-1. **Scene descriptions MUST be precise enough to serve as direct API prompts** for image generation. Include specific visual details — do not write vague descriptions like "美丽的场景."
-2. **All shots in a storyboard MUST share the same style keywords** to ensure visual consistency when generated.
-3. **Character descriptions MUST be repeated fully** in each shot where they appear — do not use shorthand references that a generation model cannot resolve.
-4. **Durations must be realistic** — 3-5 seconds per shot for short content, up to 10 seconds for complex scenes.
-5. **Total duration should match the pacing template** chosen for the content type.
-6. **The cover image / first frame is the most important visual** — spend the most effort on its prompt description.
+1. **场景描述必须足够精确，能直接作为图片生成的 API 提示词。** 包含具体的视觉细节——不要写"美丽的场景"这样含糊的描述。
+2. **分镜中的所有镜头必须共享相同的风格关键词**，以确保生成结果的视觉一致性。
+3. **角色描述必须在每个出现的镜头中完整重复**——不要使用生成模型无法解析的简写引用。
+4. **时长必须合理**——短内容每个镜头 3-5 秒，复杂场景最多 10 秒。
+5. **总时长应与所选内容类型的节奏模板匹配。**
+6. **封面图/首帧是最重要的视觉元素**——在它的提示词描述上花最多心思。
