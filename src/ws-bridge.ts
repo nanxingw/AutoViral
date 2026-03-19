@@ -10,7 +10,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
@@ -372,31 +372,44 @@ ${memoryContext}
   }
 
   /**
-   * Parse the agent's text output for JSON trend data and save to YAML cache.
+   * After trend session completes, read the agent-written data.json and
+   * copy it to the dated YAML cache so GET /api/trends/:platform picks it up.
+   * Also read report.md and broadcast it to the frontend.
    */
-  private async saveTrendData(sessionKey: string, text: string): Promise<void> {
-    if (!text) return;
+  private async finalizeTrendData(sessionKey: string): Promise<void> {
     const platform = sessionKey.split("_")[1] ?? "unknown";
+    const trendsDir = join(homedir(), ".autoviral", "trends", platform);
+    const dataFile = join(trendsDir, "data.json");
+    const reportFile = join(trendsDir, "report.md");
+
     try {
-      // Strip markdown code fences if present
-      const stripped = text.replace(/```json?\s*/gi, "").replace(/```/g, "").trim();
-      const firstBrace = stripped.indexOf("{");
-      const lastBrace = stripped.lastIndexOf("}");
-      if (firstBrace < 0 || lastBrace <= firstBrace) return;
-
-      const data = JSON.parse(stripped.slice(firstBrace, lastBrace + 1));
-      if (!data.topics || !Array.isArray(data.topics)) return;
-
-      const trendsDir = join(homedir(), ".autoviral", "trends", platform);
-      await mkdir(trendsDir, { recursive: true });
-      const dateStr = new Date().toISOString().slice(0, 10);
-      await writeFile(
-        join(trendsDir, `${dateStr}.yaml`),
-        yaml.dump(data, { lineWidth: -1 }),
-        "utf-8"
-      );
+      // Read the JSON data the agent wrote
+      const raw = await readFile(dataFile, "utf-8");
+      const data = JSON.parse(raw);
+      if (data.topics && Array.isArray(data.topics)) {
+        // Save as dated YAML for the trends API
+        const dateStr = new Date().toISOString().slice(0, 10);
+        await writeFile(
+          join(trendsDir, `${dateStr}.yaml`),
+          yaml.dump(data, { lineWidth: -1 }),
+          "utf-8"
+        );
+      }
     } catch {
-      // Parsing failed — agent may not have output valid JSON
+      // Agent may not have written valid data.json — fall back to stdout parsing
+    }
+
+    // Read report and broadcast to frontend
+    try {
+      const report = await readFile(reportFile, "utf-8");
+      if (report.trim()) {
+        this.broadcastToBrowsers(sessionKey, {
+          event: "research_report",
+          data: { report },
+        });
+      }
+    } catch {
+      // No report file — that's fine
     }
   }
 
@@ -620,18 +633,22 @@ ${memoryContext}
         const lastAssistant = session.messageHistory.filter(m => m.role === "assistant").pop();
         const resultForReport = lastAssistant?.text ?? turnText ?? "";
 
-        // Save trend data to YAML cache before broadcasting done
-        if (code === 0 && resultForReport) {
-          this.saveTrendData(session.workId, resultForReport).catch(() => {});
+        if (code === 0) {
+          // Read agent-written files and broadcast report before done event
+          this.finalizeTrendData(session.workId).catch(() => {}).finally(() => {
+            this.broadcastToBrowsers(session.workId, {
+              event: "research_done",
+              data: { platform: session.workId.split("_")[1] ?? "unknown" },
+            });
+            this.cleanupTrendSession(session.workId);
+          });
+        } else {
+          this.broadcastToBrowsers(session.workId, {
+            event: "research_error",
+            data: { message: `CLI exited with code ${code}` },
+          });
+          this.cleanupTrendSession(session.workId);
         }
-
-        this.broadcastToBrowsers(session.workId, {
-          event: code === 0 ? "research_done" : "research_error",
-          data: code === 0
-            ? { platform: session.workId.split("_")[1] ?? "unknown", result: resultForReport }
-            : { message: `CLI exited with code ${code}` },
-        });
-        this.cleanupTrendSession(session.workId);
       } else {
         this.broadcastToBrowsers(session.workId, {
           event: "cli_exited",

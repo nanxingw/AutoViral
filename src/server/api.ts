@@ -423,11 +423,19 @@ async function researchTrends(platforms: string[]): Promise<{ collected: string[
   return { collected, errors };
 }
 
-// GET /api/trends/:platform — return latest trend data
+// GET /api/trends/:platform — return latest trend data (prefer data.json, fall back to YAML)
 apiRoutes.get("/api/trends/:platform", async (c) => {
   const platform = c.req.param("platform");
+  const trendsDir = join(homedir(), ".autoviral", "trends", platform);
+
+  // Try data.json first (written by agent)
   try {
-    const trendsDir = join(homedir(), ".autoviral", "trends", platform);
+    const raw = await readFile(join(trendsDir, "data.json"), "utf-8");
+    return c.json(JSON.parse(raw));
+  } catch { /* fall through */ }
+
+  // Fall back to dated YAML files
+  try {
     const files = await readdir(trendsDir);
     const yamlFiles = files.filter(f => f.endsWith(".yaml")).sort().reverse();
     if (yamlFiles.length === 0) return c.json({ error: "No trend data available" }, 404);
@@ -436,6 +444,18 @@ apiRoutes.get("/api/trends/:platform", async (c) => {
     return c.json(data);
   } catch {
     return c.json({ error: "No trend data available" }, 404);
+  }
+});
+
+// GET /api/trends/:platform/report — return the markdown research report
+apiRoutes.get("/api/trends/:platform/report", async (c) => {
+  const platform = c.req.param("platform");
+  try {
+    const reportPath = join(homedir(), ".autoviral", "trends", platform, "report.md");
+    const report = await readFile(reportPath, "utf-8");
+    return c.text(report);
+  } catch {
+    return c.text("", 404);
   }
 });
 
@@ -475,7 +495,11 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       ? `\n以下是通过 API 获取的 ${platformLabel} 实时热搜数据，请以此为基础进行分析：\n\`\`\`json\n${scriptData.slice(0, 4000)}\n\`\`\`\n`
       : `\n无法通过 API 获取实时数据，请使用 WebSearch 搜索最新热搜信息。\n`;
 
-    // 3. Build enhanced prompt
+    // 3. Build enhanced prompt — agent writes files to trends output dir
+    const outputDir = join(homedir(), ".autoviral", "trends", platform);
+    const dataFile = join(outputDir, "data.json");
+    const reportFile = join(outputDir, "report.md");
+
     const prompt = [
       `你是一个专业的社交媒体趋势研究员。请分析 ${platformLabel} 平台当前最热门的内容趋势。`,
       dataClause,
@@ -484,7 +508,10 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       `- "${platformLabel} 爆款内容 趋势 2026"`,
       `- "${platformLabel} 热门话题 最新"`,
       ``,
-      `根据所有信息，输出以下 JSON 格式（只输出 JSON，不要其他文字）：`,
+      `完成分析后，请将结果写入以下两个文件：`,
+      ``,
+      `**文件 1: ${dataFile}**`,
+      `写入 JSON 格式的结构化趋势数据：`,
       `{"topics":[{`,
       `  "title":"话题标题",`,
       `  "heat":4,`,
@@ -493,19 +520,26 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       `  "description":"趋势描述和为什么值得做",`,
       `  "tags":["推荐标签1","推荐标签2","推荐标签3"],`,
       `  "contentAngles":["切入角度1","切入角度2"],`,
-      `  "exampleHook":"爆款开头示例，如：你绝对想不到...",`,
+      `  "exampleHook":"爆款开头示例",`,
       `  "category":"所属领域"`,
       `}]}`,
-      ``,
-      `要求：`,
       `- topics 至少 10 个`,
-      `- heat 为 1-5 整数`,
-      `- competition 为 "低"/"中"/"高"`,
+      `- heat 为 1-5 整数，competition 为 "低"/"中"/"高"`,
       `- opportunity 为 "金矿"(高热低竞)/"蓝海"(低热低竞)/"红海"(高热高竞)`,
       `- tags 3-5 个平台推荐标签`,
       `- contentAngles 2-3 个具体的内容切入角度`,
       `- exampleHook 一句话的爆款开头示例`,
-      `- category 为话题所属领域（如 美食/科技/穿搭/生活/情感/职场/健身/旅行/宠物/教育）`,
+      `- category 为所属领域（美食/科技/穿搭/生活/情感/职场/健身/旅行/宠物/教育）`,
+      ``,
+      `**文件 2: ${reportFile}**`,
+      `写入一份中文的 Markdown 格式趋势研究报告，包含：`,
+      `- 标题：# ${platformLabel} 趋势研究报告`,
+      `- 研究日期`,
+      `- 整体趋势概述（当前平台的核心热点方向，2-3段）`,
+      `- 各话题的详细分析（按热度排序，每个话题包含：为什么火、竞争情况、适合什么类型的创作者、具体的内容建议）`,
+      `- 行动建议（给小创作者的 3-5 条可执行建议）`,
+      ``,
+      `先写 data.json，再写 report.md。两个文件都必须写入。`,
     ].join("\n");
 
     await wsBridge.createTrendSession(sessionKey, prompt);

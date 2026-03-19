@@ -179,32 +179,36 @@
               }];
             }
             break;
-          case "turn_complete":
-            // Capture the full result as report
-            if (data.result) {
-              reportText = data.result;
+          case "research_report":
+            // Agent wrote report.md, backend read and forwarded it
+            if (data.report) {
+              reportText = data.report;
             }
+            break;
+          case "turn_complete":
             break;
           case "research_done":
             researchPhase = "done";
-            // Capture report from research_done or fall back to streamed text
-            if (data.result && !reportText) {
-              reportText = data.result;
-            }
-            if (!reportText && streamText) {
-              reportText = streamText;
-            }
             progressLines = [...progressLines, {
               type: "done",
               text: "调研完成",
             }];
-            setTimeout(() => {
+            setTimeout(async () => {
               researchActive = false;
               researchPhase = "idle";
               progressLines = [];
               streamText = "";
-              // NOTE: reportText is intentionally NOT cleared — it persists for "查看报告"
               loadTrends();
+              // Load report if not already received via WebSocket
+              if (!reportText) {
+                try {
+                  const res = await fetch(`/api/trends/${activePlatform}/report`);
+                  if (res.ok) {
+                    const text = await res.text();
+                    if (text.trim()) reportText = text;
+                  }
+                } catch {}
+              }
             }, 1200);
             break;
           case "research_error":
@@ -250,6 +254,7 @@
     activePlatform = p;
     reportText = "";
     loadTrends();
+    loadReport();
   }
 
   function heatDots(level: number): string {
@@ -281,9 +286,20 @@
   let hasData = $derived(directions.length > 0 || rawContent.length > 0);
   let platformLabel = $derived(activePlatform === "douyin" ? "抖音" : "小红书");
 
+  async function loadReport() {
+    try {
+      const res = await fetch(`/api/trends/${activePlatform}/report`);
+      if (res.ok) {
+        const text = await res.text();
+        if (text.trim()) reportText = text;
+      }
+    } catch {}
+  }
+
   onMount(() => {
     loadTrends();
     loadInterests();
+    loadReport();
   });
 </script>
 
