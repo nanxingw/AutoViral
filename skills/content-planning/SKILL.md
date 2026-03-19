@@ -20,6 +20,16 @@ curl http://localhost:3271/api/shared-assets
 curl http://localhost:3271/api/memory/profile
 ```
 
+## 可用数据源
+
+在规划内容时，你可以参考用户的真实账号数据和历史经验：
+
+- **创作者数据**：`curl http://localhost:3271/api/analytics/creator` 了解粉丝量级和内容表现，据此调整内容难度和定位
+- **历史记忆**：`curl "http://localhost:3271/api/memory/search?q=相关主题&method=hybrid&topK=5"` 查看过去类似主题的创作经验
+- **用户画像**：`curl http://localhost:3271/api/memory/profile` 了解用户的创作风格偏好
+
+这些数据源是可选的。请求失败时直接跳过，不影响规划流程。
+
 ## 平台参考资料
 
 根据目标发布平台，阅读对应的参考文件以获取平台特定的策略和规格：

@@ -18,6 +18,18 @@ description: Research trending topics and content strategies for Douyin (抖音)
 
 ---
 
+## 可用数据源
+
+在调研过程中，你可以访问以下数据来了解用户的账号情况和历史经验：
+
+- **创作者数据**：`curl http://localhost:3271/api/analytics/creator` 获取粉丝数、互动率、最近作品表现，据此推荐适合用户量级的内容策略
+- **历史记忆**：`curl "http://localhost:3271/api/memory/search?q=关键词&method=hybrid&topK=5"` 搜索历史创作经验，避免重复选题
+- **用户画像**：`curl http://localhost:3271/api/memory/profile` 获取创作风格档案
+
+这些数据源是可选的。如果请求失败（返回空或 404），说明用户未配置相应服务，直接跳过即可。
+
+---
+
 ## Explore 集成
 
 本 skill 的脚本工具同时为 Explore 页面提供数据支撑。Explore 页面会：
