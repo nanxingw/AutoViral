@@ -10,9 +10,11 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { mkdir, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
+import yaml from "js-yaml";
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { loadConfig, dataDir } from "./config.js";
@@ -369,6 +371,35 @@ ${memoryContext}
     return this.sessions;
   }
 
+  /**
+   * Parse the agent's text output for JSON trend data and save to YAML cache.
+   */
+  private async saveTrendData(sessionKey: string, text: string): Promise<void> {
+    if (!text) return;
+    const platform = sessionKey.split("_")[1] ?? "unknown";
+    try {
+      // Strip markdown code fences if present
+      const stripped = text.replace(/```json?\s*/gi, "").replace(/```/g, "").trim();
+      const firstBrace = stripped.indexOf("{");
+      const lastBrace = stripped.lastIndexOf("}");
+      if (firstBrace < 0 || lastBrace <= firstBrace) return;
+
+      const data = JSON.parse(stripped.slice(firstBrace, lastBrace + 1));
+      if (!data.topics || !Array.isArray(data.topics)) return;
+
+      const trendsDir = join(homedir(), ".autoviral", "trends", platform);
+      await mkdir(trendsDir, { recursive: true });
+      const dateStr = new Date().toISOString().slice(0, 10);
+      await writeFile(
+        join(trendsDir, `${dateStr}.yaml`),
+        yaml.dump(data, { lineWidth: -1 }),
+        "utf-8"
+      );
+    } catch {
+      // Parsing failed — agent may not have output valid JSON
+    }
+  }
+
   private cleanupTrendSession(sessionKey: string): void {
     this.broadcastToBrowsers(sessionKey, {
       event: "session_closed",
@@ -588,6 +619,12 @@ ${memoryContext}
         // Include the accumulated turn text so frontend can show the full report
         const lastAssistant = session.messageHistory.filter(m => m.role === "assistant").pop();
         const resultForReport = lastAssistant?.text ?? turnText ?? "";
+
+        // Save trend data to YAML cache before broadcasting done
+        if (code === 0 && resultForReport) {
+          this.saveTrendData(session.workId, resultForReport).catch(() => {});
+        }
+
         this.broadcastToBrowsers(session.workId, {
           event: code === 0 ? "research_done" : "research_error",
           data: code === 0
