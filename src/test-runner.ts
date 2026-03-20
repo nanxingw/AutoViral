@@ -261,7 +261,22 @@ async function waitForStepCompletion(
         lastAssistantText += (data.text ?? "");
       }
 
-      if (event === "turn_complete" || event === "cli_exited") {
+      // turn_complete: just check if step is done (agent may still be working on tool calls)
+      if (event === "turn_complete") {
+        getWork(workId).then(w => {
+          if (!w || settled) return;
+          if (w.pipeline[stepKey]?.status === "done") {
+            settled = true;
+            clearTimeout(timer);
+            cleanup();
+            resolve({ status: "completed", messageCount, toolCalls });
+          }
+        }).catch(() => {});
+      }
+
+      // cli_exited: CLI process has exited — agent is truly done with this turn
+      // If step is not done, agent is waiting for user input → simulate reply
+      if (event === "cli_exited") {
         turnCount++;
 
         getWork(workId).then(async w => {
@@ -277,8 +292,7 @@ async function waitForStepCompletion(
             return;
           }
 
-          // Step NOT done + turn complete → agent is waiting for user input
-          // Simulate a user response using AI
+          // Safety limit
           if (turnCount >= MAX_TURNS) {
             settled = true;
             clearTimeout(timer);
@@ -287,6 +301,7 @@ async function waitForStepCompletion(
             return;
           }
 
+          // Agent exited but step not done → simulate user reply
           log("info", "server", "test_simulating_user", workId, {
             stepKey, turnCount, agentTextLen: lastAssistantText.length,
           });
@@ -299,14 +314,12 @@ async function waitForStepCompletion(
               stepKey, reply: userReply.slice(0, 100),
             });
 
-            // Send the simulated user reply
             await wsBridge.sendMessage(workId, userReply);
           } catch (err) {
-            // If AI reply generation fails, send a generic "继续" to unblock
             log("warn", "server", "test_user_reply_failed", workId, {
               error: err instanceof Error ? err.message : String(err),
             });
-            await wsBridge.sendMessage(workId, "好的，请继续执行，不需要等我确认。").catch(() => {});
+            await wsBridge.sendMessage(workId, "好的，请继续").catch(() => {});
           }
         }).catch(() => {});
       }
