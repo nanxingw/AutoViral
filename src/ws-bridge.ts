@@ -147,13 +147,33 @@ export class WsBridge {
 目标平台：${platforms}
 当前阶段：${currentStep}
 
+## 你的 Skills（技能指南）
+
+你有以下 skill 文件可以阅读，每个 skill 包含该阶段的详细操作指南、平台知识和脚本工具。**在执行每个流水线步骤前，请先阅读对应的 skill 文件。**
+
+| 流水线步骤 | Skill 路径 | 用途 |
+|-----------|-----------|------|
+| 话题调研 (research) | ~/.claude/skills/trend-research/SKILL.md | 趋势研究方法、数据获取脚本、评估框架 |
+| 内容规划 (plan) | ~/.claude/skills/content-planning/SKILL.md | 分镜脚本、构图原则、节奏模板 |
+| 素材生成 (assets) | ~/.claude/skills/asset-generation/SKILL.md | AI生图/生视频提示词工程、风格一致性 |
+| 内容合成 (assembly) | ~/.claude/skills/content-assembly/SKILL.md | ffmpeg剪辑、字幕、配乐、发布文案 |
+
+每个 skill 下还有 references/ 子目录，包含抖音和小红书的平台专属知识。根据目标平台阅读对应的 references/douyin.md 或 references/xiaohongshu.md。
+
 ## 你的能力
-- 调研：使用WebSearch工具搜索平台热门趋势，支持用户指定方向深入挖掘
-- 生图：调用 curl http://localhost:${port}/api/generate/image 生成图片
-- 生视频：调用 curl http://localhost:${port}/api/generate/video 生成视频
+- 调研：使用WebSearch搜索 + 数据获取脚本（详见 trend-research skill）
+- 生图：脚本工具 python3 ~/.claude/skills/asset-generation/scripts/openrouter_generate.py 或 jimeng_generate.py（详见 asset-generation skill）
+- 生视频：调用 curl http://localhost:${port}/api/generate/video 或使用即梦脚本
 - 合成：使用ffmpeg命令剪辑视频（拼接片段+字幕+配乐+转场）
-- 公共素材：通过 curl http://localhost:${port}/api/shared-assets 查看可用的公共素材（人物、配乐等）
+- 公共素材：通过 curl http://localhost:${port}/api/shared-assets 查看可用素材
 - 流水线管理：调用 curl -X POST http://localhost:${port}/api/works/${work.id}/pipeline/advance 更新流水线状态
+
+## 可用数据源
+
+在创作过程中，你可以按需访问以下数据（请求失败则跳过，不阻断流程）：
+- **创作者数据**：\`curl http://localhost:${port}/api/analytics/creator\` — 获取用户的粉丝数、互动率、作品表现，据此推荐适合用户量级的内容策略
+- **记忆搜索**：\`curl "http://localhost:${port}/api/memory/search?q=关键词&method=hybrid&topK=5"\` — 搜索历史创作经验，避免重复选题
+- **用户画像**：\`curl http://localhost:${port}/api/memory/profile\` — 获取创作风格档案
 
 ## 流水线（Pipeline）
 作品ID：${work.id}
