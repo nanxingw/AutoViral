@@ -317,7 +317,7 @@
     if (work.pipeline[currentStep].status !== "active") return;
 
     const stepName = work.pipeline[currentStep].name ?? currentStep;
-    saveCurrentStepHistory(currentStep, stepName);
+    saveStepSnapshot(currentStep, stepName);
 
     work.pipeline[currentStep].status = "done";
     work.pipeline[currentStep].completedAt = new Date().toISOString();
