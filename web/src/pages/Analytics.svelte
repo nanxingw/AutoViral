@@ -198,11 +198,27 @@
     </div>
     <h2 class="empty-title">连接你的抖音账号</h2>
     <p class="empty-sub">输入账号主页链接，开始采集创作者数据，解锁完整数据看板</p>
+
+    <div class="how-to-get">
+      <span class="how-label">如何获取链接？</span>
+      <div class="how-steps">
+        <span class="step">打开手机抖音</span>
+        <span class="step-arrow">→</span>
+        <span class="step">点击右上角 ≡</span>
+        <span class="step-arrow">→</span>
+        <span class="step">我的二维码</span>
+        <span class="step-arrow">→</span>
+        <span class="step">右上角分享</span>
+        <span class="step-arrow">→</span>
+        <span class="step highlight">复制链接</span>
+      </div>
+    </div>
+
     <div class="url-form">
       <input
         class="url-input"
         type="text"
-        placeholder="https://www.douyin.com/user/..."
+        placeholder="粘贴你的抖音主页链接，如 https://v.douyin.com/xxx/"
         bind:value={douyinUrlInput}
         onkeydown={(e) => { if (e.key === "Enter") saveDouyinUrl(); }}
       />
@@ -262,10 +278,11 @@
 
     {#if showUrlEdit}
       <div class="url-edit-bar">
+        <span class="url-edit-hint">手机抖音 → ≡ → 我的二维码 → 分享 → 复制链接</span>
         <input
           class="url-edit-input"
           type="text"
-          placeholder="输入新的抖音主页链接..."
+          placeholder="粘贴抖音主页链接..."
           bind:value={editUrlValue}
           onkeydown={(e) => { if (e.key === "Enter" && editUrlValue.trim()) { douyinUrlInput = editUrlValue; saveDouyinUrl(); showUrlEdit = false; } if (e.key === "Escape") showUrlEdit = false; }}
         />
@@ -504,6 +521,65 @@
     margin: 0;
   }
 
+  .how-to-get {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.25rem;
+    padding: 0.65rem 1.25rem;
+    background: rgba(134, 120, 191, 0.06);
+    border: 1px solid rgba(134, 120, 191, 0.12);
+    border-radius: 10px;
+    max-width: 520px;
+  }
+
+  .how-label {
+    font-size: 0.72rem;
+    font-weight: 650;
+    color: var(--accent);
+    letter-spacing: 0.02em;
+  }
+
+  .how-steps {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .step {
+    font-size: 0.78rem;
+    font-weight: 550;
+    color: var(--text-secondary);
+    padding: 0.2rem 0.5rem;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 5px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .step.highlight {
+    background: rgba(134, 120, 191, 0.12);
+    border-color: rgba(134, 120, 191, 0.2);
+    color: var(--accent);
+    font-weight: 650;
+  }
+
+  .step-arrow {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    opacity: 0.5;
+  }
+
+  .url-edit-hint {
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    font-weight: 550;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
   .empty-sub {
     font-size: 0.88rem;
     color: var(--text-muted);
@@ -609,13 +685,15 @@
 
   .url-edit-bar {
     display: flex;
+    align-items: center;
     gap: 0.5rem;
-    padding: 0.75rem 1rem;
+    padding: 0.6rem 1rem;
     background: rgba(134, 120, 191, 0.06);
     border: 1px solid rgba(134, 120, 191, 0.15);
     border-radius: 10px;
     margin-bottom: 0.5rem;
     animation: fadeIn 0.2s ease;
+    flex-wrap: wrap;
   }
 
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
