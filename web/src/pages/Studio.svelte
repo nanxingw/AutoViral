@@ -457,8 +457,15 @@
           streaming = false;
           activeToolName = "";
           showNextStep = true;
-          if (data.result && !streamBlocks.some(b => b.type === "text")) {
-            appendToLastBlock("text", data.result);
+          // If the result contains text that wasn't already streamed via assistant_text,
+          // check if the last block captured it. If not, append it.
+          if (data.result) {
+            const lastText = streamBlocks.filter(b => b.type === "text").pop();
+            const resultTrimmed = data.result.trim();
+            // Only append if result text wasn't already shown (avoid duplicating streamed content)
+            if (!lastText || !resultTrimmed.startsWith(lastText.text.trim().slice(0, 50))) {
+              appendToLastBlock("text", data.result);
+            }
           }
           assetRefresh++;
           // Auto-save current step's blocks (persists across refresh/restart)

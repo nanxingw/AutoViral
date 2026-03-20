@@ -603,6 +603,7 @@ ${memoryContext}
             const resultText = typeof msg.result === "string" && msg.result
               ? msg.result
               : turnText;
+            console.log(`[ws-bridge] turn_complete for ${session.workId}: result=${typeof msg.result === "string" ? msg.result.slice(0, 80) + "..." : "none"}, turnText=${turnText.slice(0, 80)}...`);
             if (resultText) {
               session.messageHistory.push({
                 role: "assistant",
