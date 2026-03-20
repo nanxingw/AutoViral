@@ -59,6 +59,8 @@
   let saveMsg = $state("");
   let sortCol = $state<keyof WorkItem>("play_count");
   let sortAsc = $state(false);
+  let showUrlEdit = $state(false);
+  let editUrlValue = $state("");
 
   // ── Derived ────────────────────────────────────────────────────────────────
   let sortedWorks = $derived(
@@ -252,8 +254,29 @@
         <button class="refresh-btn" onclick={loadAnalytics} title="刷新数据">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
         </button>
+        <button class="change-acct-btn" onclick={() => { showUrlEdit = !showUrlEdit; editUrlValue = ""; }} title="更换账号">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        </button>
       </div>
     </div>
+
+    {#if showUrlEdit}
+      <div class="url-edit-bar">
+        <input
+          class="url-edit-input"
+          type="text"
+          placeholder="输入新的抖音主页链接..."
+          bind:value={editUrlValue}
+          onkeydown={(e) => { if (e.key === "Enter" && editUrlValue.trim()) { douyinUrlInput = editUrlValue; saveDouyinUrl(); showUrlEdit = false; } if (e.key === "Escape") showUrlEdit = false; }}
+        />
+        <button class="url-edit-save" disabled={!editUrlValue.trim()} onclick={() => { douyinUrlInput = editUrlValue; saveDouyinUrl(); showUrlEdit = false; }}>
+          保存
+        </button>
+        <button class="url-edit-cancel" onclick={() => showUrlEdit = false}>
+          取消
+        </button>
+      </div>
+    {/if}
 
     <!-- 2. Key Metrics Row -->
     <div class="metrics-row">
@@ -564,6 +587,89 @@
   }
 
   /* ── Account Header Bar ─────────────────────────────────────────────────── */
+  /* Change account button & URL edit bar */
+  .change-acct-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .change-acct-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .url-edit-bar {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.75rem 1rem;
+    background: rgba(134, 120, 191, 0.06);
+    border: 1px solid rgba(134, 120, 191, 0.15);
+    border-radius: 10px;
+    margin-bottom: 0.5rem;
+    animation: fadeIn 0.2s ease;
+  }
+
+  @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+  .url-edit-input {
+    flex: 1;
+    padding: 0.4rem 0.75rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-surface);
+    color: var(--text);
+    font-size: 0.82rem;
+    font-family: inherit;
+    outline: none;
+  }
+
+  .url-edit-input:focus {
+    border-color: var(--accent);
+  }
+
+  .url-edit-save {
+    padding: 0.4rem 0.85rem;
+    border-radius: 6px;
+    border: none;
+    background: var(--accent-gradient);
+    color: var(--accent-text);
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .url-edit-save:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .url-edit-cancel {
+    padding: 0.4rem 0.7rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: none;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  .url-edit-cancel:hover {
+    border-color: var(--text-muted);
+    color: var(--text);
+  }
+
   /* Platform tabs */
   .platform-tabs {
     display: flex;
