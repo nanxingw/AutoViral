@@ -170,35 +170,6 @@
     scrollToBottom();
   }
 
-  // --- Conversation persistence (work-level, not step-level) ---
-
-  /** Save ALL streamBlocks to a single chat.json per work. */
-  async function saveChat() {
-    if (streamBlocks.length === 0) return;
-    try {
-      await fetch(`/api/works/${encodeURIComponent(workId)}/chat`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ blocks: streamBlocks }),
-      });
-    } catch { /* best effort */ }
-  }
-
-  /** Load full conversation from chat.json on page open. */
-  async function loadChat(): Promise<boolean> {
-    try {
-      const res = await fetch(`/api/works/${encodeURIComponent(workId)}/chat`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data.blocks?.length) {
-          streamBlocks = data.blocks;
-          return true;
-        }
-      }
-    } catch { /* ignore */ }
-    return false;
-  }
-
   onMount(async () => {
     const unsub = subscribe(() => { lang = getLanguage(); });
 
@@ -214,8 +185,6 @@
         }
       }
 
-      // Always load full chat history from disk (survives refresh + server restart)
-      await loadChat();
     } catch { /* fetch failed */ }
 
     wsConn = createWorkWs(workId, (event, data) => {
@@ -241,6 +210,19 @@
         case "session_state":
           // WebSocket connected — always allow sending (sendMessage will spawn CLI if needed)
           sessionReady = true;
+          break;
+
+        case "message_history":
+          // Server replayed full chat history — replace streamBlocks
+          if (data.blocks && Array.isArray(data.blocks)) {
+            streamBlocks = data.blocks.map((b: any) => ({
+              type: b.type ?? "text",
+              text: b.text ?? "",
+              toolName: b.toolName,
+              collapsed: b.collapsed ?? (b.type === "thinking" || b.type === "tool_result"),
+            }));
+            scrollToBottom();
+          }
           break;
 
         case "assistant_thinking":
@@ -295,8 +277,6 @@
             }
           }
           assetRefresh++;
-          // Auto-save current step's blocks (persists across refresh/restart)
-          saveChat();
           scrollToBottom();
           break;
 
@@ -305,7 +285,6 @@
           streaming = false;
           showNextStep = true;
           assetRefresh++;
-          saveChat();
           break;
       }
     });
@@ -319,19 +298,7 @@
       } catch { /* failed */ }
     }
 
-    // Save on page unload (navigate away, close tab, refresh)
-    function onBeforeUnload() { saveChat(); }
-    window.addEventListener("beforeunload", onBeforeUnload);
-
-    // Periodic auto-save every 10s while active
-    const autoSaveInterval = setInterval(() => {
-      if (streamBlocks.length > 0 && currentStep) saveChat();
-    }, 10000);
-
     return () => {
-      saveChat(); // Save when component unmounts
-      clearInterval(autoSaveInterval);
-      window.removeEventListener("beforeunload", onBeforeUnload);
       unsub();
       wsConn?.close();
       if (inactivityTimer) clearTimeout(inactivityTimer);

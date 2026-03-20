@@ -19,16 +19,18 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { logBridge, logBridgeDebug } from "./logger.js";
 import { loadConfig, dataDir } from "./config.js";
-import { getWork, updateWork, saveStepHistory, loadStepHistory, type Work, type PipelineStep } from "./work-store.js";
+import { getWork, updateWork, saveStepHistory, loadStepHistory, saveWorkChat, loadWorkChat, type Work, type PipelineStep } from "./work-store.js";
 import { listSharedAssets } from "./shared-assets.js";
 import { MemoryClient } from "./memory.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export interface HistoryEntry {
-  role: "user" | "assistant";
+export interface ChatBlock {
+  type: "user" | "text" | "thinking" | "tool_use" | "tool_result" | "step_divider";
   text: string;
-  timestamp: string;
+  toolName?: string;
+  collapsed?: boolean;
+  timestamp?: string;
 }
 
 export interface WsSession {
@@ -37,7 +39,7 @@ export interface WsSession {
   browserSockets: Set<WebSocket>;
   cliProcess?: ChildProcess;
   idle: boolean;
-  messageHistory: HistoryEntry[];
+  messageHistory: ChatBlock[];
   model?: string;
 }
 
@@ -227,6 +229,14 @@ ${memoryContext}
     };
     this.sessions.set(workId, session);
 
+    // Load persisted chat history (survives server restart)
+    try {
+      const existing = await loadWorkChat(session.workId);
+      if ((existing as any)?.blocks && Array.isArray((existing as any).blocks)) {
+        session.messageHistory = (existing as any).blocks;
+      }
+    } catch { /* ignore */ }
+
     // Load persisted cliSessionId from work.yaml (survives server restart)
     let savedSessionId: string | undefined;
     try {
@@ -310,7 +320,7 @@ ${memoryContext}
     if (!session) return false;
 
     session.messageHistory.push({
-      role: "user",
+      type: "user",
       text,
       timestamp: new Date().toISOString(),
     });
@@ -582,16 +592,25 @@ ${memoryContext}
                   lastEventWasToolResult = false;
                 }
                 turnText += block.text as string;
+                if (!session.workId.startsWith("trends_")) {
+                  session.messageHistory.push({ type: "text", text: block.text as string, timestamp: new Date().toISOString() });
+                }
                 this.broadcastToBrowsers(session.workId, {
                   event: "assistant_text",
                   data: { workId: session.workId, text: block.text },
                 });
               } else if (block.type === "thinking" && block.thinking) {
+                if (!session.workId.startsWith("trends_")) {
+                  session.messageHistory.push({ type: "thinking", text: block.thinking as string, collapsed: true });
+                }
                 this.broadcastToBrowsers(session.workId, {
                   event: "assistant_thinking",
                   data: { workId: session.workId, text: block.thinking },
                 });
               } else if (block.type === "tool_use") {
+                if (!session.workId.startsWith("trends_")) {
+                  session.messageHistory.push({ type: "tool_use", text: JSON.stringify(block.input), toolName: block.name as string });
+                }
                 this.broadcastToBrowsers(session.workId, {
                   event: "tool_use",
                   data: { workId: session.workId, name: block.name, input: block.input },
@@ -611,6 +630,9 @@ ${memoryContext}
                   const resultContent = typeof block.content === "string"
                     ? block.content
                     : JSON.stringify(block.content);
+                  if (!session.workId.startsWith("trends_")) {
+                    session.messageHistory.push({ type: "tool_result", text: resultContent, collapsed: true });
+                  }
                   this.broadcastToBrowsers(session.workId, {
                     event: "tool_result",
                     data: { workId: session.workId, content: resultContent },
@@ -633,13 +655,6 @@ ${memoryContext}
               turnTextLen: turnText.length,
               resultPreview: (resultText || "").slice(0, 150),
             });
-            if (resultText) {
-              session.messageHistory.push({
-                role: "assistant",
-                text: resultText,
-                timestamp: new Date().toISOString(),
-              });
-            }
             // Update cliSessionId from result if present
             if (msg.session_id) {
               session.cliSessionId = msg.session_id;
@@ -654,6 +669,10 @@ ${memoryContext}
                 historyLength: session.messageHistory.length,
               },
             });
+            // Persist chat to disk (survives server restart)
+            if (!session.workId.startsWith("trends_")) {
+              saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
+            }
             // Auto-save step history from backend (doesn't rely on frontend)
             // Only save the NEW messages from this turn (not entire history)
             if (!session.workId.startsWith("trends_") && resultText) {
@@ -663,7 +682,7 @@ ${memoryContext}
                 if (activeStep) {
                   const [stepKey, stepInfo] = activeStep;
                   // Build blocks from this turn only: the last user message + resultText
-                  const lastUserMsg = [...session.messageHistory].reverse().find(m => m.role === "user");
+                  const lastUserMsg = [...session.messageHistory].reverse().find(m => m.type === "user");
                   const blocks: Array<{type: string; text: string}> = [];
                   if (lastUserMsg) blocks.push({ type: "user", text: lastUserMsg.text });
                   blocks.push({ type: "text", text: resultText });
@@ -717,10 +736,6 @@ ${memoryContext}
       session.cliProcess = undefined;
       session.idle = true;
       if (session.workId.startsWith("trends_")) {
-        // Include the accumulated turn text so frontend can show the full report
-        const lastAssistant = session.messageHistory.filter(m => m.role === "assistant").pop();
-        const resultForReport = lastAssistant?.text ?? turnText ?? "";
-
         if (code === 0) {
           // Read agent-written files and broadcast report before done event
           this.finalizeTrendData(session.workId).catch(() => {}).finally(() => {
@@ -742,6 +757,8 @@ ${memoryContext}
           event: "cli_exited",
           data: { workId: session.workId, code, signal },
         });
+        // Persist chat to disk on CLI exit
+        saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
       }
     });
 
@@ -766,10 +783,18 @@ ${memoryContext}
         connected: !!session.cliProcess,
         idle: session.idle,
         cliSessionId: session.cliSessionId,
-        history: session.messageHistory,
       },
       timestamp: new Date().toISOString(),
     }));
+
+    // Replay chat history so browser can reconstruct conversation
+    if (session.messageHistory.length > 0) {
+      ws.send(JSON.stringify({
+        event: "message_history",
+        data: { blocks: session.messageHistory },
+        timestamp: new Date().toISOString(),
+      }));
+    }
 
     ws.on("message", async (raw) => {
       try {
