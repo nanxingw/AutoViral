@@ -412,8 +412,8 @@
           break;
 
         case "session_state":
-          if (data.connected) sessionReady = true;
-          // Chat is loaded in onMount via loadChat() — don't overwrite with WsBridge summaries
+          // WebSocket connected — always allow sending (sendMessage will spawn CLI if needed)
+          sessionReady = true;
           break;
 
         case "assistant_thinking":
