@@ -8,14 +8,12 @@
     visible = false,
     refreshTrigger = 0,
     showOutput = false,
-    onEditAsset,
     topicHint = "",
   }: {
     workId: string;
     visible: boolean;
     refreshTrigger: number;
     showOutput?: boolean;
-    onEditAsset?: (assetName: string, assetUrl: string) => void;
     topicHint?: string;
   } = $props();
 
@@ -167,32 +165,16 @@
     return "other";
   }
 
-  // Output tab: final video OR images (output/ dir first, then assets/images/ for image-text content)
+  // Only the final video goes in output tab; everything else is assets
   let finalVideo = $derived(files.find(f => isFinalVideo(f.path)));
-  let outputDirImages = $derived(files.filter(f => f.group === "output" && isImage(f.name)));
-  let galleryImages = $derived(files.filter(f => f.group === "images" && isImage(f.name)));
-  // Use output/ images if available, otherwise fall back to assets/images/ for image-text works
-  let outputImages = $derived(outputDirImages.length > 0 ? outputDirImages : (finalVideo ? [] : galleryImages));
   // Look for copytext: first in output/ dir, then any .md/.txt with "copy"/"caption"/"文案" in name, then any .md in output group
   let outputCopytextFile = $derived(
     files.find(f => f.group === "output" && (isMarkdown(f.name) || isText(f.name))) ??
     files.find(f => (isMarkdown(f.name) || isText(f.name)) && /copy|caption|文案|publish/i.test(f.name)) ??
     files.find(f => isMarkdown(f.name) && f.group === "other")
   );
-  let hasOutput = $derived(!!finalVideo || outputImages.length > 0);
-  let outputImageSet = $derived(new Set(outputImages));
-  let assetFiles = $derived(files.filter(f => f !== finalVideo && f !== outputCopytextFile && !outputImageSet.has(f)));
-  let outputFiles = $derived(finalVideo ? [finalVideo] : outputImages);
-  let carouselIdx = $state(0);
-  // Reset carousel only when the image count actually changes
-  let prevImageCount = 0;
-  $effect(() => {
-    const len = outputImages.length;
-    if (len !== prevImageCount) {
-      prevImageCount = len;
-      if (carouselIdx >= len) carouselIdx = Math.max(0, len - 1);
-    }
-  });
+  let assetFiles = $derived(files.filter(f => f !== finalVideo && f !== outputCopytextFile));
+  let outputFiles = $derived(finalVideo ? [finalVideo] : []);
 
   let framesFiles = $derived(assetFiles.filter(f => f.group === "frames"));
   let clipsFiles = $derived(assetFiles.filter(f => f.group === "clips"));
@@ -228,15 +210,6 @@
     } catch {
       mdPreview = { name: file.name, content: "(Failed to load)" };
     }
-  }
-
-  function handleEditAsset(file: AssetFile) {
-    onEditAsset?.(file.name, file.url);
-  }
-
-  function handleDownloadAll() {
-    // Open the download endpoint
-    window.open(`/api/works/${encodeURIComponent(workId)}/assets/download`, "_blank");
   }
 
   async function loadCopytext() {
@@ -311,13 +284,10 @@
             <div class="image-grid">
               {#each framesFiles as file}
                 {#if isImage(file.name)}
-                  <div class="asset-card">
-                    <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
-                      <img src={file.url} alt={file.name} loading="lazy" />
-                      <span class="thumb-name">{file.name}</span>
-                    </button>
-                    {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
-                  </div>
+                  <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
+                    <img src={file.url} alt={file.name} loading="lazy" />
+                    <span class="thumb-name">{file.name}</span>
+                  </button>
                 {:else}
                   <a class="file-item-sm" href={file.url} download={file.name}>
                     <span>{file.name}</span>
@@ -336,10 +306,7 @@
                   <div class="video-wrapper">
                     <video controls preload="metadata" src={file.url}></video>
                   </div>
-                  <div class="asset-row">
-                    <span class="file-name">{file.name}</span>
-                    {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
-                  </div>
+                  <span class="file-name">{file.name}</span>
                 </div>
               {:else}
                 <a class="file-item-sm" href={file.url} download={file.name}>
@@ -355,13 +322,10 @@
             <div class="image-grid">
               {#each imagesFiles as file}
                 {#if isImage(file.name)}
-                  <div class="asset-card">
-                    <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
-                      <img src={file.url} alt={file.name} loading="lazy" />
-                      <span class="thumb-name">{file.name}</span>
-                    </button>
-                    {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
-                  </div>
+                  <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
+                    <img src={file.url} alt={file.name} loading="lazy" />
+                    <span class="thumb-name">{file.name}</span>
+                  </button>
                 {:else}
                   <a class="file-item-sm" href={file.url} download={file.name}>
                     <span>{file.name}</span>
@@ -407,8 +371,8 @@
         {/if}
 
       {:else}
-        <!-- Output section: final video or images + copytext -->
-        {#if !hasOutput}
+        <!-- Output section: final video + copytext -->
+        {#if !finalVideo}
           <div class="empty-state">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
               <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
@@ -419,31 +383,9 @@
           </div>
         {:else}
           <div class="output-showcase">
-            {#if finalVideo}
-              <div class="video-wrapper">
-                <video controls preload="metadata" src={finalVideo.url}></video>
-              </div>
-            {/if}
-            {#if outputImages.length > 0}
-              <div class="carousel">
-                <div class="carousel-viewport">
-                  <button class="carousel-img" onclick={() => { lightboxSrc = outputImages[carouselIdx].url; }}>
-                    <img src={outputImages[carouselIdx].url} alt={outputImages[carouselIdx].name} />
-                  </button>
-                </div>
-                {#if outputImages.length > 1}
-                  <div class="carousel-controls">
-                    <button class="carousel-arrow" disabled={carouselIdx <= 0} onclick={() => carouselIdx--}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-                    </button>
-                    <span class="carousel-counter">{carouselIdx + 1} / {outputImages.length}</span>
-                    <button class="carousel-arrow" disabled={carouselIdx >= outputImages.length - 1} onclick={() => carouselIdx++}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                    </button>
-                  </div>
-                {/if}
-              </div>
-            {/if}
+            <div class="video-wrapper">
+              <video controls preload="metadata" src={finalVideo.url}></video>
+            </div>
             {#if outputCopytext}
               {@const allPlatforms = parseCopytextMulti(outputCopytext)}
               {@const currentCopy = allPlatforms.find(p => p.platform === copyPlatform) ?? allPlatforms[0]}
@@ -513,7 +455,7 @@
             fetch(`/api/works/${encodeURIComponent(workId)}/assets/upload`, { method: "POST", body: formData }).then(() => loadAssets()).catch(() => {});
           }} />
         </label>
-        <button class="footer-btn secondary" onclick={handleDownloadAll}>
+        <button class="footer-btn secondary" onclick={() => window.open(`/api/works/${encodeURIComponent(workId)}/assets/download`, "_blank")}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           {tt("downloadAll")}
         </button>
@@ -786,43 +728,6 @@
   .file-item:hover { border-color: var(--accent); }
   .dl-icon { color: var(--accent); display: flex; }
 
-  /* Asset card with edit button */
-  .asset-card {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .asset-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.3rem;
-  }
-
-  .edit-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.15rem;
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.15rem 0.35rem;
-    font-size: 0.6rem;
-    font-family: inherit;
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: all 0.12s;
-    white-space: nowrap;
-    margin-top: 0.15rem;
-    align-self: stretch;
-  }
-
-  .edit-btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: var(--accent-soft);
-  }
-
   /* Footer */
   .panel-footer {
     padding: 0.6rem 0.75rem;
@@ -938,70 +843,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
-  }
-
-  .carousel {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-  .carousel-viewport {
-    /* Fixed iPhone 14 ratio, full width matching copytext card below */
-    width: 100%;
-    height: 480px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
-    background: #000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .carousel-img {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 100%;
-    padding: 0;
-    border: none;
-    background: none;
-    cursor: pointer;
-  }
-  .carousel-img img {
-    max-width: 100%;
-    max-height: 100%;
-    object-fit: contain;
-    display: block;
-  }
-  .carousel-controls {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
-  }
-  .carousel-arrow {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-muted);
-    width: 28px;
-    height: 28px;
-    cursor: pointer;
-    transition: all 0.12s;
-    padding: 0;
-  }
-  .carousel-arrow:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
-  .carousel-arrow:disabled { opacity: 0.25; cursor: not-allowed; }
-  .carousel-counter {
-    font-size: 0.72rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    min-width: 3em;
-    text-align: center;
   }
 
   /* Platform filter */

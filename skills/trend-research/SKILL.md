@@ -237,17 +237,6 @@ curl http://localhost:3271/api/trends/xiaohongshu
 6. **考虑用户背景。** 查看共享资产和记忆模块，了解用户过往的内容风格、优势和偏好：`curl http://localhost:3271/api/memory/profile` 和 `curl http://localhost:3271/api/shared-assets`。
 7. **保持时效性。** 搜索查询中始终包含当前年月，确保获取最新数据。
 
-## 垂类专项指南
-
-执行前检查 `genres/` 目录。如果当前作品的内容类型（如搞笑、美食、教育等）有对应的 `genres/<type>.md` 文件，**必须读取并遵循其中的专项规则**——它们覆盖本文件中的通用指导。
-
-## 扩展能力模块
-
-检查 `modules/` 目录，根据当前任务需要加载相关能力模块。例如：
-- 需要采集达人数据时 → 读取 `modules/creator-analytics.md`
-
----
-
 ## 服务端集成
 
 为特定作品做研究时，获取上下文信息：
@@ -281,6 +270,4 @@ curl -X POST http://localhost:3271/api/works/{workId} \
 
 ## 扩展能力模块
 
-检查 `modules/` 目录，根据当前任务需要加载相关能力模块。例如：
-- 需要采集达人数据时 → 读取 `modules/creator-analytics.md`
-- 需要分析竞品视频时 → 读取 `modules/video-understanding.md`，使用 `scripts/video-understanding/analyze_video.py` 抽帧分析
+检查 `modules/` 目录，根据当前任务需要加载相关能力模块。

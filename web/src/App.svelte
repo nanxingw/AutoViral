@@ -28,7 +28,6 @@
   let settingsMessage: string = $state("");
 
   function openStudio(workId: string) {
-    initialPrompt = "";
     currentWorkId = workId;
     showStudio = true;
   }
@@ -48,32 +47,6 @@
     return lang === "zh" ? "未命名作品" : "Untitled";
   }
 
-  let initialPrompt = $state("");
-
-  function buildInitialPrompt(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; topicHint: string }): string {
-    const categoryMap: Record<string, string> = {
-      anxiety: "危机感/焦虑",
-      conflict: "观点分歧/愤怒",
-      comedy: "搞笑抽象",
-      envy: "向往拥有/羡慕",
-    };
-    const typeMap: Record<string, string> = {
-      "short-video": "短视频",
-      "image-text": "图文",
-    };
-    const parts: string[] = [];
-    parts.push(`开始创作。`);
-    parts.push(`内容形式：${typeMap[data.type] ?? data.type}`);
-    parts.push(`情绪品类：${categoryMap[data.contentCategory] ?? data.contentCategory}`);
-    if (data.title) parts.push(`标题：${data.title}`);
-    if (data.topicHint) parts.push(`创作方向：${data.topicHint}`);
-    if (data.videoSource === "search" && data.videoSearchQuery) parts.push(`视频素材搜索：${data.videoSearchQuery}`);
-    else if (data.videoSource === "ai-generate") parts.push(`视频素材：AI 生成`);
-    else if (data.videoSource === "upload") parts.push(`视频素材：用户上传`);
-    parts.push(`请从话题调研开始执行流水线。`);
-    return parts.join("\n");
-  }
-
   async function handleCreateWork(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; topicHint: string }) {
     showNewWorkModal = false;
     prefillTitle = "";
@@ -82,13 +55,12 @@
       const newWork = await createWorkApi({
         title: deriveTitle(data),
         type: data.type as any,
-        contentCategory: (data.contentCategory || "anxiety") as ContentCategory,
+        contentCategory: (data.contentCategory || "info") as ContentCategory,
         videoSource: data.videoSource || undefined,
         videoSearchQuery: data.videoSearchQuery || undefined,
         platforms: ["douyin", "xiaohongshu"],
         topicHint: data.topicHint || undefined,
       });
-      initialPrompt = buildInitialPrompt(data);
       currentWorkId = newWork.id;
       showStudio = true;
     } catch {
@@ -184,7 +156,7 @@
 
   <main class="main" class:main-studio={showStudio && currentWorkId}>
     {#if showStudio && currentWorkId}
-      <Studio workId={currentWorkId} onBack={closeStudio} {initialPrompt} />
+      <Studio workId={currentWorkId} onBack={closeStudio} />
     {:else if activeTab === "explore"}
       <Explore />
     {:else if activeTab === "analytics"}

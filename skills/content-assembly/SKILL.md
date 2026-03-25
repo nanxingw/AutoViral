@@ -13,8 +13,8 @@ description: Assemble generated assets into final publishable content using ffmp
 
 | 情绪 | 剪辑/文案要求 |
 |------|-------------|
-| **焦虑** | 图文：严格按策划选定的路线（1/2/3）执行模板；视频：节奏递增、信息密度高、文案直接抛出威胁 |
-| **愤怒** | 图文：严格按策划选定的路线（1/2/3）执行模板；视频：对比剪辑放大不合理、文案抛出开放问题引发评论 |
+| **焦虑** | 节奏递增、信息密度高、文案直接抛出威胁 |
+| **愤怒** | 对比剪辑放大不合理、文案抛出开放问题引发评论 |
 | **搞笑/抽象** | 节奏精确服务笑点（详见 `genres/comedy.md`）、**文案只写一句话，禁止剧透笑点** |
 | **羡慕** | 慢节奏沉浸、文案轻描淡写展示结果 |
 
@@ -95,19 +95,6 @@ curl http://localhost:3271/api/shared-assets
 
 等待用户确认后再继续执行。
 
-### 音频丢失防护（极重要）
-
-**每一步 ffmpeg 处理后，都必须验证输出文件包含音频流：**
-```bash
-ffprobe -v error -show_entries stream=codec_type -of csv=p=0 output.mp4 | grep audio
-```
-如果没有 `audio` 行，说明音频丢失了。常见原因：
-- 使用 `-map 0:v` 时忘记同时 `-map 0:a`（或用 `-map 0` 映射所有流）
-- 使用 `-vf` 视频滤镜时没有用 `-c:a copy` 保留音频
-- 多步骤处理时中间文件丢了音频（letterbox、字幕叠加等步骤特别容易出问题）
-
-**安全做法：** 在 pad/crop/overlay 等纯视频操作中始终加 `-c:a copy` 或 `-map 0:a`。
-
 ### 阶段二：执行组装
 
 #### 第1步：统一所有片段格式（横屏→竖屏智能裁切）
@@ -170,8 +157,6 @@ ffmpeg -i clip-01.mp4 -vf "scale=1080:1920:force_original_aspect_ratio=decrease,
 - 帧率：`-r 30`
 - 编码：`-c:v libx264 -preset medium -crf 23`
 - 音频：`-c:a aac -ar 44100`
-
-> **可选：视频增强处理** — 如果AI生成的素材存在帧率低、分辨率不足或画面微抖等问题，参考 `modules/video-enhancement.md` 进行增强处理。推荐处理链：RIFE帧插值 → Real-ESRGAN超分 → vid.stab稳定。
 
 #### 第1.5步：剪除静音/停顿片段（有人声的素材必做）
 
@@ -389,8 +374,6 @@ ASSEOF
 ffmpeg -i concat.mp4 -vf "ass=subs.ass" -c:v libx264 -crf 23 -c:a copy -y subtitled.mp4
 ```
 
-> **进阶字幕样式** — 需要花字、动画字幕或自动语音转字幕等高级功能，参考 `modules/subtitle-aesthetics.md`。
-
 #### 第4步：添加背景音乐
 
 **音乐获取规则：指定知名歌曲时**
@@ -433,20 +416,6 @@ ffmpeg -i subtitled.mp4 -i music.mp3 \
 - 淡入时长：1-2 秒
 - 淡出时长：结尾 2-3 秒
 
-#### 第4.5步：调色（可选但推荐）
-
-为成品视频添加统一的调色风格，大幅提升观感：
-
-```bash
-# 应用LUT调色
-ffmpeg -i final-no-grade.mp4 -vf "lut3d=cinematic.cube" -c:a copy -y final.mp4
-
-# 或使用基础参数调色（暖调示例）
-ffmpeg -i final-no-grade.mp4 -vf "eq=brightness=0.03:contrast=1.1:saturation=1.15:gamma=1.02" -c:a copy -y final.mp4
-```
-
-> 详细调色指南和内容类型专属参数，参考 `modules/color-grading.md`。
-
 #### 第5步：最终输出
 
 按照对应平台参考文档中的编码设置进行最终编码，然后：
@@ -467,14 +436,14 @@ cp final.mp4 output/final.mp4
 ## 图文排版方案
 
 ### 图片顺序
-1. cover.png — 封面文字卡片（已在素材生成阶段完成，纯色背景+大字）
+1. cover.png — 封面图 (3:4)
 2. image-01.png — [描述]
 3. image-02.png — [描述]
 4. image-03.png — [描述]
 
 ### 封面处理
-- 封面是文字卡片，通常不需要额外处理
-- 如需微调：可调整色调使其与内容图片色系统一
+- 添加标题文字叠加
+- 色调统一调整
 
 ### 输出
 - 所有图片复制到 output/ 目录
@@ -485,11 +454,14 @@ cp final.mp4 output/final.mp4
 
 ### 阶段二：执行
 
-#### 封面图
+#### 可选：为图片添加文字叠加
 
-封面图是素材生成阶段已完成的文字卡片（纯色背景 + 大字），直接复制到 output/ 即可，无需再叠加文字。
-
-#### 可选：为内容图片添加文字叠加
+```bash
+# 在封面图上添加标题文字
+ffmpeg -i cover.png \
+  -vf "drawtext=text='10个提升生活品质的好物':fontsize=72:fontcolor=white:borderw=4:bordercolor=black@0.6:x=(w-text_w)/2:y=h*0.75:fontfile=/System/Library/Fonts/PingFang.ttc" \
+  -y output/cover.png
+```
 
 #### 可选：创建拼图
 
@@ -646,129 +618,7 @@ ffmpeg -i audio1.mp3 -i audio2.mp3 \
 
 ---
 
-## 垂类专项指南
-
-执行前检查 `genres/` 目录。如果当前作品的内容类型（如搞笑、美食、教育等）有对应的 `genres/<type>.md` 文件，**必须读取并遵循其中的专项规则**——特别是剪辑节奏、BGM 策略和音效使用方面，垂类文件的规则优先级高于本文件的通用规则。
-
-## 扩展能力模块
-
-本 skill 自带以下模块和脚本，**必须优先使用这些工具，不要自己写内联代码替代**：
-
-### 可用模块
-
-| 模块 | 文档路径 | 用途 |
-|------|---------|------|
-| 热门音乐搜索 | `modules/music-search.md` | 从 YouTube/B站搜索下载 BGM，按情绪/BPM 匹配 |
-| 卡点剪辑 | `modules/beat-sync.md` | 节拍检测 + 视频与音乐节拍对齐 |
-| 调色指南 | `modules/color-grading.md` | LUT调色、内容类型调色参数、AI调色工具 |
-| 字幕美学 | `modules/subtitle-aesthetics.md` | 字幕规范、花字样式、ASS高级样式、自动字幕流水线 |
-| 专业字幕 | `modules/pro-captions.md` | 逐词高亮 karaoke 字幕、自动语音识别、5种预设样式 |
-| 视频增强 | `modules/video-enhancement.md` | 帧插值(RIFE)、超分(Real-ESRGAN)、视频稳定(vid.stab) |
-
-### 可用脚本
-
-| 脚本 | 路径 | 用途 | 用法示例 |
-|------|------|------|---------|
-| 节拍检测 | `scripts/beat-sync/detect_beats.py` | 分析音乐节拍、BPM、强拍 | `python3 skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json` |
-| 一键卡点 | `scripts/beat-sync/beat_sync_edit.py` | 自动按节拍切割视频+混入BGM | `python3 skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic` |
-| 专业字幕 | `scripts/caption_generate.py` | 逐词高亮 karaoke ASS 字幕生成 | `python3 skills/content-assembly/scripts/caption_generate.py --input video.mp4 --output subs.ass --style douyin-highlight` |
-
-**⚠️ 重要：当需要节拍分析或卡点剪辑时，必须调用上述脚本，禁止自己写 librosa/numpy 内联代码。**
-
-### 使用流程
-
-1. 需要 BGM → 先读 `modules/music-search.md`，用 yt-dlp 搜索下载
-2. 需要分析节拍 → 运行 `detect_beats.py` 获取 beats.json
-3. 需要卡点剪辑 → 运行 `beat_sync_edit.py` 一键完成
-4. 需要手动精调 → 参考 `modules/beat-sync.md` 中的手动流程
-
----
-
-## 专业字幕生成（caption_generate.py）
-
-逐词高亮（karaoke）字幕生成脚本，支持自动语音识别和外部时间戳两种模式，内置 5 种平台预设样式。
-
-> **完整方法论** — 详见 `modules/pro-captions.md`，包含何时加字幕的判断、样式选择决策树、与 beat-sync 配合等。
-
-### 参数列表
-
-| 参数 | 类型 | 说明 | 默认值 |
-|------|------|------|--------|
-| `--input` | str | 视频/音频路径（auto 模式，与 `--timestamps` 互斥） | — |
-| `--timestamps` | str | 时间戳 JSON 路径（手动模式，与 `--input` 互斥） | — |
-| `--output` | str（必填） | 输出 ASS 文件路径 | — |
-| `--style` | str | 预设样式：`douyin-highlight`/`douyin-bold`/`xhs-soft`/`funny`/`minimal` | `douyin-highlight` |
-| `--language` | str | 语言代码（auto 模式） | `zh` |
-| `--model` | str | Whisper 模型（auto 模式） | `medium` |
-| `--font` | str | 覆盖预设字体 ID | 由样式决定 |
-| `--font-size` | int | 覆盖预设字号 | 由样式决定 |
-| `--highlight-color` | str | 高亮颜色 hex，如 `#FFFF00` | 由样式决定 |
-| `--base-color` | str | 基础颜色 hex，如 `#FFFFFF` | 由样式决定 |
-| `--stroke-width` | int | 描边宽度 | 由样式决定 |
-| `--position` | str | `center`/`top`/`bottom` | 由样式决定 |
-| `--max-words` | int | 每行最大词数 | `8` |
-| `--lead-time` | int | 字幕提前出现毫秒数 | `80` |
-
-### 使用示例
-
-```bash
-# Auto 模式：自动识别视频中的语音
-python3 skills/content-assembly/scripts/caption_generate.py \
-  --input video.mp4 --output subtitles.ass \
-  --style douyin-highlight --language zh
-
-# Timestamps 模式：从 JSON 文件读取词级时间戳
-python3 skills/content-assembly/scripts/caption_generate.py \
-  --timestamps captions.json --output subtitles.ass \
-  --style xhs-soft
-
-# 自定义颜色
-python3 skills/content-assembly/scripts/caption_generate.py \
-  --input video.mp4 --output subtitles.ass \
-  --style douyin-highlight --highlight-color "#FF6699" --font-size 56
-
-# 烧录到视频
-ffmpeg -i video.mp4 -vf "ass=subtitles.ass" -c:v libx264 -crf 18 -c:a copy output.mp4
-```
-
-### 输出格式（stdout JSON）
-
-```json
-{
-  "success": true,
-  "output": "/abs/path/subtitles.ass",
-  "segments": 12,
-  "words": 87,
-  "duration_sec": 45.2,
-  "style": "douyin-highlight",
-  "mode": "auto",
-  "model": "medium"
-}
-```
-
-### 依赖
-
-- **auto 模式**：`pip install stable-ts`（含 Whisper + torch）
-- **timestamps 模式**：无额外依赖
-- **烧录**：系统 ffmpeg
-- **字体**：通过 `font_manager.py` 自动下载
-
----
-
 ## 错误处理
-
-### 音频丢失防护（极重要）
-
-**每一步 ffmpeg 处理后，都必须验证输出文件包含音频流：**
-```bash
-ffprobe -v error -show_entries stream=codec_type -of csv=p=0 output.mp4 | grep audio
-```
-如果没有 `audio` 行，说明音频丢失了。常见原因：
-- 使用 `-map 0:v` 时忘记同时 `-map 0:a`（或用 `-map 0` 映射所有流）
-- 使用 `-vf` 视频滤镜时没有用 `-c:a copy` 保留音频
-- 多步骤处理时中间文件丢了音频（letterbox、字幕叠加等步骤特别容易出问题）
-
-**安全做法：** 在 pad/crop/overlay 等纯视频操作中始终加 `-c:a copy` 或 `-map 0:a`。
 
 ### 常见 ffmpeg 错误
 
@@ -824,32 +674,9 @@ curl -X PUT http://localhost:3271/api/works/{workId} \
 
 ## 垂类专项指南
 
-执行前检查 `genres/` 目录。如果当前作品的内容类型（如搞笑、美食、教育等）有对应的 `genres/<type>.md` 文件，**必须读取并遵循其中的专项规则**——特别是剪辑节奏、BGM 策略和音效使用方面，垂类文件的规则优先级高于本文件的通用规则。
+执行前检查 `genres/` 目录。如果当前作品的内容类型有对应的 `genres/<type>.md` 文件，
+**必须读取并遵循其中的专项规则**——它们覆盖本文件中的通用指导。
 
 ## 扩展能力模块
 
-本 skill 自带以下模块和脚本，**必须优先使用这些工具，不要自己写内联代码替代**：
-
-### 可用模块
-
-| 模块 | 文档路径 | 用途 |
-|------|---------|------|
-| 热门音乐搜索 | `modules/music-search.md` | 从 YouTube/B站搜索下载 BGM，按情绪/BPM 匹配 |
-| 卡点剪辑 | `modules/beat-sync.md` | 节拍检测 + 视频与音乐节拍对齐 |
-
-### 可用脚本
-
-| 脚本 | 路径 | 用途 | 用法示例 |
-|------|------|------|---------|
-| 节拍检测 | `scripts/beat-sync/detect_beats.py` | 分析音乐节拍、BPM、强拍 | `python3 skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json` |
-| 一键卡点 | `scripts/beat-sync/beat_sync_edit.py` | 自动按节拍切割视频+混入BGM | `python3 skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic` |
-| 专业字幕 | `scripts/caption_generate.py` | 逐词高亮 karaoke ASS 字幕生成 | `python3 skills/content-assembly/scripts/caption_generate.py --input video.mp4 --output subs.ass --style douyin-highlight` |
-
-**重要：当需要节拍分析或卡点剪辑时，必须调用上述脚本，禁止自己写 librosa/numpy 内联代码。**
-
-### 使用流程
-
-1. 需要 BGM → 先读 `modules/music-search.md`，用 yt-dlp 搜索下载
-2. 需要分析节拍 → 运行 `detect_beats.py` 获取 beats.json
-3. 需要卡点剪辑 → 运行 `beat_sync_edit.py` 一键完成
-4. 需要手动精调 → 参考 `modules/beat-sync.md` 中的手动流程
+检查 `modules/` 目录，根据当前任务需要加载相关能力模块。

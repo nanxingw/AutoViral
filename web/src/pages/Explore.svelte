@@ -23,8 +23,8 @@
     category?: string;
   }
 
-  type ContentCategory = "anxiety" | "conflict" | "comedy" | "envy";
-  let activeCategory: ContentCategory = $state("anxiety");
+  type ContentCategory = "info" | "beauty" | "comedy";
+  let activeCategory: ContentCategory = $state("info");
 
   let interests: string[] = $state([]);
   let activePlatform: Platform = $state("douyin");
@@ -354,79 +354,26 @@
 <div class="explore">
   <!-- Category tabs -->
   <div class="category-tabs">
-    <button class="cat-tab" class:active={activeCategory === "anxiety"} onclick={() => activeCategory = "anxiety"}>
-      <span class="cat-tab-name">{tt("categoryAnxiety")}</span>
-      <span class="cat-tab-desc">{tt("categoryAnxietyDesc")}</span>
+    <button class="cat-tab" class:active={activeCategory === "info"} onclick={() => activeCategory = "info"}>
+      <span class="cat-tab-name">{tt("categoryInfo")}</span>
+      <span class="cat-tab-desc">{tt("categoryInfoDesc")}</span>
     </button>
-    <button class="cat-tab" class:active={activeCategory === "conflict"} onclick={() => activeCategory = "conflict"}>
-      <span class="cat-tab-name">{tt("categoryConflict")}</span>
-      <span class="cat-tab-desc">{tt("categoryConflictDesc")}</span>
+    <button class="cat-tab" class:active={activeCategory === "beauty"} onclick={() => activeCategory = "beauty"}>
+      <span class="cat-tab-name">{tt("categoryBeauty")}</span>
+      <span class="cat-tab-desc">{tt("categoryBeautyDesc")}</span>
     </button>
     <button class="cat-tab" class:active={activeCategory === "comedy"} onclick={() => activeCategory = "comedy"}>
       <span class="cat-tab-name">{tt("categoryComedy")}</span>
       <span class="cat-tab-desc">{tt("categoryComedyDesc")}</span>
     </button>
-    <button class="cat-tab" class:active={activeCategory === "envy"} onclick={() => activeCategory = "envy"}>
-      <span class="cat-tab-name">{tt("categoryEnvy")}</span>
-      <span class="cat-tab-desc">{tt("categoryEnvyDesc")}</span>
-    </button>
   </div>
 
   <!-- Showcase examples -->
   <div class="showcase-grid">
-    {#if activeCategory === "conflict"}
-      <div class="phone-showcase">
-        <div class="phone-frame">
-          <div class="phone-notch"></div>
-          <div class="phone-screen">
-            <!-- XHS post mockup -->
-            <div class="xhs-post">
-              <div class="xhs-cover">
-                <img src="/api/works/w_20260325_1753_75d/assets/images/cover_v2.png" alt="封面" />
-              </div>
-              <div class="xhs-body">
-                <h3 class="xhs-title">一个能引发所有人讨论的价值观冲突很严重的话题</h3>
-                <div class="xhs-author">
-                  <div class="xhs-avatar"></div>
-                  <span class="xhs-name">AutoViral 创作</span>
-                </div>
-                <p class="xhs-text">我今年28，单身，没房，没车。不是我不努力，是这个社会疯了。凭什么结婚就必须买房？凭什么我爸妈辛苦了大半辈子，老了还要掏空自己来成全我的"面子"？</p>
-                <div class="xhs-tags">
-                  <span class="xhs-tag">#结婚必须买房吗</span>
-                  <span class="xhs-tag">#买房焦虑</span>
-                  <span class="xhs-tag">#年轻人不买房</span>
-                  <span class="xhs-tag">#婚姻观</span>
-                </div>
-                <div class="xhs-actions">
-                  <span class="xhs-action">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-                    2.4w
-                  </span>
-                  <span class="xhs-action">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 4H5a2 2 0 0 0-2 2v14l3.5-2 3.5 2 3.5-2 3.5 2V6a2 2 0 0 0-2-2z"/></svg>
-                    8.1k
-                  </span>
-                  <span class="xhs-action">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                    3.6k
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-          <div class="phone-home-bar"></div>
-        </div>
-        <div class="showcase-caption">
-          <span class="caption-tag">{tt("categoryConflict")}</span>
-          <span class="caption-route">{lang === "zh" ? "路线1 · 观点输出型" : "Route 1 · Opinion"}</span>
-        </div>
-      </div>
-    {:else}
-      <div class="showcase-empty">
-        <p class="showcase-empty-text">{lang === "zh" ? "优秀案例即将上线" : "Showcase examples coming soon"}</p>
-        <p class="showcase-empty-sub">{lang === "zh" ? "这里将展示由 AutoViral 生成的优秀作品" : "Featured works created with AutoViral will appear here"}</p>
-      </div>
-    {/if}
+    <div class="showcase-empty">
+      <p class="showcase-empty-text">{lang === "zh" ? "优秀案例即将上线" : "Showcase examples coming soon"}</p>
+      <p class="showcase-empty-sub">{lang === "zh" ? "这里将展示由 AutoViral 生成的优秀作品" : "Featured works created with AutoViral will appear here"}</p>
+    </div>
   </div>
 </div>
 
@@ -565,175 +512,6 @@
     font-size: 0.75rem;
     color: var(--text-dim);
     margin: 0;
-  }
-
-  /* Phone showcase */
-  .phone-showcase {
-    grid-column: 1 / -1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 2rem 0;
-  }
-
-  .phone-frame {
-    width: 280px;
-    background: #000;
-    border-radius: 32px;
-    padding: 8px;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(255,255,255,0.05);
-    position: relative;
-  }
-
-  .phone-notch {
-    width: 80px;
-    height: 22px;
-    background: #000;
-    border-radius: 0 0 14px 14px;
-    margin: 0 auto;
-    position: relative;
-    z-index: 2;
-    margin-top: -1px;
-  }
-
-  .phone-screen {
-    background: #fff;
-    border-radius: 24px;
-    overflow: hidden;
-    margin-top: -12px;
-    max-height: 520px;
-    overflow-y: auto;
-  }
-
-  .phone-screen::-webkit-scrollbar { display: none; }
-
-  .phone-home-bar {
-    width: 100px;
-    height: 4px;
-    background: rgba(255,255,255,0.3);
-    border-radius: 2px;
-    margin: 6px auto 2px;
-  }
-
-  /* XHS post mockup */
-  .xhs-post {
-    font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
-    color: #333;
-  }
-
-  .xhs-cover {
-    width: 100%;
-    aspect-ratio: 3/4;
-    overflow: hidden;
-    background: #f5e6e0;
-  }
-
-  .xhs-cover img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .xhs-body {
-    padding: 10px 12px 14px;
-  }
-
-  .xhs-title {
-    font-size: 14px;
-    font-weight: 700;
-    color: #222;
-    margin: 0 0 8px;
-    line-height: 1.35;
-  }
-
-  .xhs-author {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 8px;
-  }
-
-  .xhs-avatar {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #FE2C55, #FF6B6B);
-    flex-shrink: 0;
-  }
-
-  .xhs-name {
-    font-size: 11px;
-    color: #999;
-    font-weight: 500;
-  }
-
-  .xhs-text {
-    font-size: 12.5px;
-    color: #444;
-    line-height: 1.65;
-    margin: 0 0 8px;
-    display: -webkit-box;
-    -webkit-line-clamp: 4;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-  }
-
-  .xhs-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-bottom: 10px;
-  }
-
-  .xhs-tag {
-    font-size: 11px;
-    color: #FE2C55;
-    font-weight: 500;
-  }
-
-  .xhs-actions {
-    display: flex;
-    justify-content: space-around;
-    padding-top: 8px;
-    border-top: 1px solid #f0f0f0;
-  }
-
-  .xhs-action {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    color: #999;
-    font-weight: 500;
-  }
-
-  .xhs-action svg {
-    width: 14px;
-    height: 14px;
-    stroke: #999;
-  }
-
-  .showcase-caption {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .caption-tag {
-    font-size: 0.72rem;
-    font-weight: 650;
-    color: var(--spark-red, #FE2C55);
-    padding: 0.15rem 0.5rem;
-    border: 1px solid rgba(254, 44, 85, 0.2);
-    border-radius: 4px;
-    background: rgba(254, 44, 85, 0.04);
-  }
-
-  .caption-route {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    font-weight: 500;
   }
 
   .ranking-grid {
