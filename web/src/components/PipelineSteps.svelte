@@ -11,6 +11,7 @@
     topicHint = "",
     workTitle = "",
     onNextStep,
+    onSelectStep,
     canAdvance = false,
   }: {
     pipeline: Record<string, PipelineStep>;
@@ -20,6 +21,7 @@
     topicHint?: string;
     workTitle?: string;
     onNextStep?: (stepKey: string) => void;
+    onSelectStep?: (stepKey: string) => void;
     canAdvance?: boolean;
   } = $props();
 
@@ -41,6 +43,7 @@
     const active = key === currentStep ? " step-current" : "";
     if (status === "done") return "step-done" + active;
     if (status === "active") return "step-running" + active;
+    if (status === "aborted") return "step-aborted" + active;
     if (status === "skipped") return "step-failed" + active;
     return "step-pending" + active;
   }
@@ -90,7 +93,12 @@
           {#if i > 0}
             <div class="connector" class:connector-done={pipeline[stepKeys[i - 1]]?.status === "done"}></div>
           {/if}
-          <div class="step-item {statusClass(status, key)}">
+          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+          <div
+            class="step-item {statusClass(status, key)}"
+            class:step-clickable={status === "done" || status === "aborted" || key === currentStep}
+            onclick={() => { if ((status === "done" || status === "aborted" || key === currentStep) && onSelectStep) onSelectStep(key); }}
+          >
             <span class="step-indicator" class:pulse={status === "active"}>
               {#if isDone(status)}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
@@ -111,6 +119,8 @@
                   {#if elapsed(step)}
                     <span class="step-time">{elapsed(step)}</span>
                   {/if}
+                {:else if status === "aborted"}
+                  {tt("abortTask")}
                 {:else if status === "skipped"}
                   {tt("stepFailedLabel")}
                 {:else}
@@ -118,6 +128,11 @@
                 {/if}
               </span>
             </div>
+            {#if status === "done"}
+              <span class="step-redo-hint">{tt("redoStep")}</span>
+            {:else if status === "aborted"}
+              <span class="step-redo-hint">{tt("resumeTask")}</span>
+            {/if}
           </div>
         </div>
       {/each}
@@ -323,6 +338,15 @@
     50% { box-shadow: 0 0 0 5px rgba(254, 44, 85, 0); }
   }
 
+  /* Aborted */
+  .step-aborted .step-indicator {
+    border-color: var(--spark-red, #FE2C55);
+    color: var(--spark-red, #FE2C55);
+    background: none;
+    opacity: 0.6;
+  }
+  .step-aborted .step-status-text { color: var(--spark-red, #FE2C55); opacity: 0.6; }
+
   /* Failed */
   .step-failed .step-indicator {
     border-color: var(--text-dim);
@@ -330,6 +354,20 @@
     background: none;
   }
   .step-failed .step-status-text { color: var(--text-dim); }
+
+  /* Clickable steps */
+  .step-clickable { cursor: pointer; }
+  .step-clickable:hover { background: var(--bg-hover); }
+
+  .step-redo-hint {
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--text-dim);
+    opacity: 0;
+    transition: opacity 0.12s;
+    flex-shrink: 0;
+  }
+  .step-clickable:hover .step-redo-hint { opacity: 1; }
 
   /* Pending */
   .step-pending { opacity: 0.4; }

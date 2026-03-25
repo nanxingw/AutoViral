@@ -368,69 +368,11 @@
     </button>
   </div>
 
-  <div class="ranking-grid">
-    <div class="ranking-list">
-      <h3 class="ranking-head">{tt("douyinTab")} · {lang === "zh" ? "热搜榜" : "Hot Search"}</h3>
-      <ol class="ranking-ol">
-        {#each (directions.length > 0 ? directions : []).slice(0, 10) as dir, i}
-          <li class="ranking-item">
-            <span class="ranking-rank" class:top3={i < 3}>{i + 1}</span>
-            <span class="ranking-name">{dir.title}</span>
-            <span class="ranking-heat">{heatDots(dir.heat)}</span>
-          </li>
-        {:else}
-          <li class="ranking-empty">{lang === "zh" ? "暂无数据" : "No data"}</li>
-        {/each}
-      </ol>
-    </div>
-
-    <div class="ranking-list">
-      <h3 class="ranking-head">{tt("douyinTab")} · {lang === "zh" ? "涨粉榜" : "Follower Growth"}</h3>
-      <ol class="ranking-ol">
-        {#each (directions.length > 0 ? directions : []).slice(0, 10) as dir, i}
-          <li class="ranking-item">
-            <span class="ranking-rank" class:top3={i < 3}>{i + 1}</span>
-            <span class="ranking-name">{dir.title}</span>
-            {#if dir.category}
-              <span class="ranking-tag">{dir.category}</span>
-            {/if}
-          </li>
-        {:else}
-          <li class="ranking-empty">{lang === "zh" ? "暂无数据" : "No data"}</li>
-        {/each}
-      </ol>
-    </div>
-
-    <div class="ranking-list">
-      <h3 class="ranking-head">{tt("xiaohongshuTab")} · {lang === "zh" ? "热搜榜" : "Hot Search"}</h3>
-      <ol class="ranking-ol">
-        {#each (directions.length > 0 ? directions : []).slice(0, 10) as dir, i}
-          <li class="ranking-item">
-            <span class="ranking-rank" class:top3={i < 3}>{i + 1}</span>
-            <span class="ranking-name">{dir.title}</span>
-            <span class="ranking-heat">{heatDots(dir.heat)}</span>
-          </li>
-        {:else}
-          <li class="ranking-empty">{lang === "zh" ? "暂无数据" : "No data"}</li>
-        {/each}
-      </ol>
-    </div>
-
-    <div class="ranking-list">
-      <h3 class="ranking-head">{tt("xiaohongshuTab")} · {lang === "zh" ? "种草榜" : "Trending Products"}</h3>
-      <ol class="ranking-ol">
-        {#each (directions.length > 0 ? directions : []).slice(0, 10) as dir, i}
-          <li class="ranking-item">
-            <span class="ranking-rank" class:top3={i < 3}>{i + 1}</span>
-            <span class="ranking-name">{dir.title}</span>
-            {#if dir.category}
-              <span class="ranking-tag">{dir.category}</span>
-            {/if}
-          </li>
-        {:else}
-          <li class="ranking-empty">{lang === "zh" ? "暂无数据" : "No data"}</li>
-        {/each}
-      </ol>
+  <!-- Showcase examples -->
+  <div class="showcase-grid">
+    <div class="showcase-empty">
+      <p class="showcase-empty-text">{lang === "zh" ? "优秀案例即将上线" : "Showcase examples coming soon"}</p>
+      <p class="showcase-empty-sub">{lang === "zh" ? "这里将展示由 AutoViral 生成的优秀作品" : "Featured works created with AutoViral will appear here"}</p>
     </div>
   </div>
 </div>
@@ -494,17 +436,17 @@
   /* Category tabs */
   .category-tabs {
     display: flex;
-    gap: 0.5rem;
+    justify-content: center;
+    gap: 0.4rem;
     margin-bottom: 1.25rem;
   }
 
   .cat-tab {
-    flex: 1;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.15rem;
-    padding: 0.7rem 0.5rem;
+    gap: 0.1rem;
+    padding: 0.5rem 1rem;
     border: 1.5px solid var(--border);
     border-radius: 6px;
     background: none;
@@ -538,6 +480,38 @@
 
   .cat-tab.active .cat-tab-desc {
     color: var(--text-muted);
+  }
+
+  /* Showcase */
+  .showcase-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 1rem;
+  }
+
+  .showcase-empty {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 4rem 1rem;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+  }
+
+  .showcase-empty-text {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin: 0;
+  }
+
+  .showcase-empty-sub {
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    margin: 0;
   }
 
   .ranking-grid {

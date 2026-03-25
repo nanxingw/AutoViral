@@ -807,14 +807,21 @@ ${memoryContext}
 
     ws.on("close", () => {
       session.browserSockets.delete(ws);
-      if (session.workId.startsWith("trends_") && session.browserSockets.size === 0) {
+      if (session.browserSockets.size === 0 && session.cliProcess) {
+        // Kill CLI process when all browsers disconnect (leaving the page = abort)
+        const delay = session.workId.startsWith("trends_") ? 3000 : 1000;
         setTimeout(() => {
           if (session.browserSockets.size === 0 && session.cliProcess) {
             try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
             session.cliProcess = undefined;
-            this.cleanupTrendSession(session.workId);
+            if (session.workId.startsWith("trends_")) {
+              this.cleanupTrendSession(session.workId);
+            } else {
+              session.idle = true;
+              this.broadcastToBrowsers(session.workId, { event: "cli_exited", data: { workId: session.workId } });
+            }
           }
-        }, 3000);
+        }, delay);
       }
     });
     ws.on("error", () => session.browserSockets.delete(ws));

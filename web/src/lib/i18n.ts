@@ -3,7 +3,7 @@ type Language = "en" | "zh";
 const translations: Record<Language, Record<string, string>> = {
   en: {
     // Navigation
-    explore: "Explore",
+    explore: "Inspiration",
     works: "Works",
     analytics: "Analytics",
     settings: "Settings",
@@ -86,7 +86,7 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Studio
     studio: "Studio",
-    chatPlaceholder: "Type a message...",
+    chatPlaceholder: "How would you like to modify the plan?",
     emptyChat: "Start a conversation",
     sessionConnecting: "Connecting...",
     sessionReady: "Ready",
@@ -128,7 +128,7 @@ const translations: Record<Language, Record<string, string>> = {
     cancelResearch: "Cancel",
     loadingTrends: "Loading trends...",
     emptyTrendsTitle: "No trends yet",
-    emptyTrendsDesc: "Click Research above to discover trending topics",
+    emptyTrendsDesc: "Click \"New Ideas\" and wait a moment",
     viralHook: "Hook",
     createFromTrend: "Create from this",
 
@@ -191,7 +191,7 @@ const translations: Record<Language, Record<string, string>> = {
   },
   zh: {
     // Navigation
-    explore: "探索",
+    explore: "灵感",
     works: "作品",
     analytics: "数据",
     settings: "设置",
@@ -274,7 +274,7 @@ const translations: Record<Language, Record<string, string>> = {
 
     // Studio
     studio: "工作台",
-    chatPlaceholder: "输入消息...",
+    chatPlaceholder: "你想如何修改方案？",
     emptyChat: "开始对话",
     sessionConnecting: "连接中...",
     sessionReady: "就绪",
@@ -316,7 +316,7 @@ const translations: Record<Language, Record<string, string>> = {
     cancelResearch: "取消调研",
     loadingTrends: "加载趋势数据中...",
     emptyTrendsTitle: "暂无趋势数据",
-    emptyTrendsDesc: "点击上方「开始调研」发现热门话题",
+    emptyTrendsDesc: "点击「想新思路」后等待片刻",
     viralHook: "爆款钩子",
     createFromTrend: "以此创建",
 

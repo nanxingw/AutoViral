@@ -110,6 +110,11 @@
     activeToolName = "";
     showNextStep = false;
     aborted = true;
+    // Update pipeline step status to aborted
+    if (work && currentStep && work.pipeline[currentStep]) {
+      work.pipeline[currentStep].status = "aborted";
+      work = { ...work };
+    }
     streamBlocks = [...streamBlocks, { type: "step_divider", text: tt("abortedMessage") }];
     scrollToBottom();
   }
@@ -155,10 +160,20 @@
       last.text += text;
       streamBlocks = [...streamBlocks];
     } else {
-      const collapsed = type === "thinking" || type === "tool_result";
+      const collapsed = type === "thinking" || type === "tool_use" || type === "tool_result";
       streamBlocks = [...streamBlocks, { type, text, toolName, collapsed }];
     }
     scrollToBottom();
+  }
+
+  function getThinkingGroup(startIdx: number, blocks: StreamBlock[]): { indices: number[] } {
+    const thinkTypes = ["thinking", "tool_use", "tool_result"];
+    const indices: number[] = [];
+    for (let j = startIdx; j < blocks.length; j++) {
+      if (thinkTypes.includes(blocks[j].type)) indices.push(j);
+      else break;
+    }
+    return { indices };
   }
 
   function toggleBlock(idx: number, blocks: StreamBlock[]) {
@@ -202,6 +217,8 @@
       const activeKey = Object.keys(data.pipeline).find((k: string) => data.pipeline[k].status === "active");
       if (activeKey) {
         currentStep = activeKey;
+        streaming = true;
+        resetInactivityTimer();
         const stepName = data.pipeline[activeKey]?.name ?? activeKey;
         streamBlocks = [...streamBlocks, { type: "step_divider", text: stepName }];
       }
@@ -221,7 +238,7 @@
             type: b.type ?? "text",
             text: b.text ?? "",
             toolName: b.toolName,
-            collapsed: b.collapsed ?? (b.type === "thinking" || b.type === "tool_result"),
+            collapsed: b.collapsed ?? (b.type === "thinking" || b.type === "tool_use" || b.type === "tool_result"),
           }));
           scrollToBottom();
         }
@@ -299,16 +316,19 @@
 
     wsConn = createWorkWs(workId, wsHandler);
 
-    // Auto-trigger if a step is already "active" (e.g. video-search created as active)
-    if (work?.pipeline && currentStep && work.pipeline[currentStep]?.status === "active") {
-      // Small delay to let WS connect first
-      setTimeout(() => triggerStep(currentStep), 500);
-    }
+    // Don't auto-start any task when opening a draft — user decides when to start
 
     return () => {
       unsub();
-      wsConn?.close();
       if (inactivityTimer) clearTimeout(inactivityTimer);
+      // Leaving Studio = abort any running task on the server
+      if (streaming) {
+        fetch(`/api/works/${encodeURIComponent(workId)}/abort`, { method: "POST" }).catch(() => {});
+      }
+      wsConn?.close();
+      wsConn = null;
+      streaming = false;
+      activeToolName = "";
     };
   });
 </script>
@@ -316,7 +336,11 @@
 <div class="studio-layout">
   <div class="studio-header">
     <div class="header-left-group">
-      <button class="back-btn" onclick={onBack}>
+      <button class="back-btn" onclick={() => {
+        // Leaving aborts any running task
+        if (streaming) handleAbort();
+        onBack();
+      }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
         {tt("backToHome")}
       </button>
@@ -345,17 +369,6 @@
       {/if}
     </div>
     <div class="header-controls">
-      {#if aborted}
-        <button class="resume-btn" onclick={handleResume}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          {tt("resumeTask")}
-        </button>
-      {:else}
-        <button class="abort-btn" onclick={handleAbort}>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></svg>
-          {tt("abortTask")}
-        </button>
-      {/if}
     </div>
   </div>
 
@@ -370,6 +383,7 @@
         workTitle={work?.title ?? ""}
         topicHint={work?.topicHint ?? ""}
         onNextStep={triggerStep}
+        onSelectStep={(key) => { if (!streaming) triggerStep(key); }}
         canAdvance={showNextStep && !streaming}
       />
     </div>
@@ -389,35 +403,29 @@
               <div class="block-label">You</div>
               <div class="block-content user-content">{block.text}</div>
             </div>
-          {:else if block.type === "thinking"}
-            <button class="stream-block thinking-toggle" onclick={() => toggleBlock(i, streamBlocks)}>
-              <span class="toggle-icon">{block.collapsed ? "\u25B8" : "\u25BE"}</span>
-              <span class="t-label">Thinking</span>
-              {#if block.collapsed}
-                <span class="toggle-hint">{block.text.slice(0, 50)}...</span>
+          {:else if block.type === "thinking" || block.type === "tool_use" || block.type === "tool_result"}
+            <!-- Only show toggle if previous block is not also a thinking-type -->
+            {#if i === 0 || !["thinking", "tool_use", "tool_result"].includes(streamBlocks[i - 1]?.type)}
+              {@const group = getThinkingGroup(i, streamBlocks)}
+              <button class="stream-block thinking-toggle" onclick={() => { for (const idx of group.indices) toggleBlock(idx, streamBlocks); }}>
+                <span class="toggle-icon">{block.collapsed ? "\u25B8" : "\u25BE"}</span>
+                <span class="t-label thinking-label">{lang === "zh" ? "思考中..." : "Thinking..."}</span>
+              </button>
+              {#if !block.collapsed}
+                <div class="thinking-content">
+                  {#each group.indices as gi}
+                    {@const gb = streamBlocks[gi]}
+                    {#if gb.type === "tool_use"}
+                      <div class="inner-tool-label">{gb.toolName ?? "Tool"}</div>
+                      <pre class="inner-tool-pre">{gb.text}</pre>
+                    {:else if gb.type === "tool_result"}
+                      <pre class="inner-tool-pre">{gb.text}</pre>
+                    {:else}
+                      <MarkdownBlock text={gb.text} />
+                    {/if}
+                  {/each}
+                </div>
               {/if}
-            </button>
-            {#if !block.collapsed}
-              <div class="thinking-content"><MarkdownBlock text={block.text} /></div>
-            {/if}
-          {:else if block.type === "tool_use"}
-            <div class="stream-block tool-block">
-              <div class="block-label tool-label">
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
-                {block.toolName ?? "Tool"}
-              </div>
-              <pre class="block-content tool-content">{block.text}</pre>
-            </div>
-          {:else if block.type === "tool_result"}
-            <button class="stream-block result-toggle" onclick={() => toggleBlock(i, streamBlocks)}>
-              <span class="toggle-icon">{block.collapsed ? "\u25B8" : "\u25BE"}</span>
-              <span class="t-label result-label">Result</span>
-              {#if block.collapsed}
-                <span class="toggle-hint">{block.text.slice(0, 60)}...</span>
-              {/if}
-            </button>
-            {#if !block.collapsed}
-              <pre class="result-content">{block.text}</pre>
             {/if}
           {:else if block.type === "ask_question" && block.questions}
             <div class="stream-block ask-block">
@@ -447,23 +455,16 @@
           {/if}
         {/each}
 
-        {#if streaming}
-          <div class="streaming-indicator" class:tool-active={!!activeToolName}>
-            {#if activeToolName}
-              <div class="tool-spinner"></div>
-              <span class="streaming-label">{toolDisplayName(activeToolName)}</span>
-            {:else}
-              <span class="dot"></span><span class="dot"></span><span class="dot"></span>
-            {/if}
+        {#if streaming && activeToolName}
+          <div class="streaming-indicator tool-active">
+            <div class="tool-spinner"></div>
+            <span class="streaming-label">{toolDisplayName(activeToolName)}</span>
           </div>
         {/if}
 
         {#if streamBlocks.length === 0 && !streaming}
           <div class="empty-state">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-            </svg>
-            <p>{tt("chatWithAgent")}</p>
+            <p>{lang === "zh" ? "你想如何修改方案？" : "How would you like to modify the plan?"}</p>
           </div>
         {/if}
       </div>
@@ -476,19 +477,29 @@
             bind:value={inputText}
             onkeydown={handleKeydown}
             placeholder={tt("chatPlaceholder")}
-            disabled={!sessionReady || streaming}
+            disabled={!sessionReady || (streaming && !aborted)}
             rows="1"
           ></textarea>
-          <button class="send-btn" onclick={handleSend} disabled={!sessionReady || streaming || !inputText.trim()}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          </button>
+          {#if streaming && !aborted}
+            <button class="send-btn abort-mode" onclick={handleAbort}>
+              <svg width="16" height="16" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor"/></svg>
+            </button>
+          {:else if aborted}
+            <button class="send-btn resume-mode" onclick={handleResume}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            </button>
+          {:else}
+            <button class="send-btn" onclick={handleSend} disabled={!sessionReady || !inputText.trim()}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+            </button>
+          {/if}
         </div>
       </div>
     </div>
 
     <!-- Right: Assets -->
     <div class="panel-right">
-      <AssetPanel {workId} visible={true} refreshTrigger={assetRefresh} showOutput={showOutputTab} />
+      <AssetPanel {workId} visible={true} refreshTrigger={assetRefresh} showOutput={showOutputTab} topicHint={work?.topicHint ?? ""} />
     </div>
   </div>
 </div>
@@ -572,47 +583,6 @@
     flex-shrink: 0;
   }
 
-  .abort-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.35rem 0.75rem;
-    border: none;
-    border-radius: 4px;
-    background: var(--spark-red, #FE2C55);
-    color: #fff;
-    font-family: var(--font-body, inherit);
-    font-size: var(--size-xs, 0.7rem);
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.12s;
-    white-space: nowrap;
-  }
-
-  .abort-btn:hover {
-    opacity: 0.85;
-  }
-
-  .resume-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.35rem 0.75rem;
-    border: none;
-    border-radius: 4px;
-    background: var(--text);
-    color: var(--bg);
-    font-family: var(--font-body, inherit);
-    font-size: var(--size-xs, 0.7rem);
-    font-weight: 600;
-    cursor: pointer;
-    transition: opacity 0.12s;
-    white-space: nowrap;
-  }
-
-  .resume-btn:hover {
-    opacity: 0.85;
-  }
 
   .studio-title:hover {
     border-color: var(--text-dim);
@@ -720,22 +690,43 @@
     text-align: left;
   }
   .thinking-toggle:hover { background: rgba(148, 163, 184, 0.08); }
-  .result-toggle:hover { background: rgba(52, 211, 153, 0.05); }
+  .result-toggle:hover { background: rgba(254, 44, 85, 0.04); }
 
   .toggle-icon { font-size: 0.7rem; width: 0.8rem; flex-shrink: 0; }
   .t-label { font-weight: 650; text-transform: uppercase; letter-spacing: 0.04em; flex-shrink: 0; }
-  .result-label { color: var(--success); }
+  .thinking-label { color: var(--spark-red, #FE2C55); text-transform: none; letter-spacing: 0; opacity: 0.7; }
+  .result-label { color: var(--spark-red, #FE2C55); opacity: 0.7; }
   .toggle-hint { color: var(--text-dim); font-size: 0.7rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.6; }
 
   .thinking-content {
-    background: rgba(148, 163, 184, 0.05);
-    border-left: 2px solid rgba(148, 163, 184, 0.2);
-    padding: 0.35rem 0.65rem;
+    background: rgba(254, 44, 85, 0.03);
+    border-left: 2px solid rgba(254, 44, 85, 0.15);
+    padding: 0.5rem 0.75rem;
     border-radius: 0 6px 6px 0;
     font-size: 0.76rem;
-    color: var(--text-muted);
-    max-height: 200px;
+    color: var(--text-secondary);
     overflow-y: auto;
+    min-height: 30vh;
+  }
+
+  .inner-tool-label {
+    font-size: 0.68rem;
+    font-weight: 650;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 0.2rem;
+    margin-top: 0.4rem;
+  }
+
+  .inner-tool-pre {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 0.72rem;
+    color: var(--text);
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    padding: 0.25rem 0;
   }
 
   .tool-label { color: var(--state-running); }
@@ -755,8 +746,8 @@
   }
 
   .result-content {
-    background: rgba(52, 211, 153, 0.04);
-    border-left: 2px solid rgba(52, 211, 153, 0.2);
+    background: rgba(254, 44, 85, 0.03);
+    border-left: 2px solid rgba(254, 44, 85, 0.15);
     padding: 0.5rem 0.65rem;
     border-radius: 0 6px 6px 0;
     font-family: "SF Mono", "Fira Code", monospace;
@@ -770,11 +761,9 @@
     word-break: break-word;
   }
 
-  .text-label { color: var(--success); }
+  .text-label { color: var(--spark-red, #FE2C55); }
   .text-content {
-    padding: 0.55rem 0.85rem;
-    background: rgba(52, 211, 153, 0.05);
-    border-radius: 14px 14px 14px 4px;
+    padding: 0.55rem 0;
   }
 
   .streaming-indicator { display: flex; align-items: center; gap: 0.3rem; padding: 0.5rem 0.85rem; }
@@ -825,7 +814,7 @@
 
   .input-wrapper {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     gap: 0;
     background: var(--bg-inset);
     border: 1px solid var(--border);
@@ -866,6 +855,18 @@
   }
   .send-btn:hover:not(:disabled) { color: var(--text); }
   .send-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+
+  .send-btn.abort-mode {
+    color: var(--spark-red, #FE2C55);
+    opacity: 1;
+  }
+  .send-btn.abort-mode:hover { opacity: 0.7; }
+
+  .send-btn.resume-mode {
+    color: var(--text);
+    opacity: 1;
+  }
+  .send-btn.resume-mode:hover { opacity: 0.7; }
 
   /* AskUserQuestion options */
   .ask-block { max-width: 90%; }

@@ -42,28 +42,18 @@
     return `<pre class="md-code-block"><code class="hljs ${language ? `language-${language}` : ""}">${highlighted}</code></pre>`;
   };
 
-  // Custom renderer: turn video asset links into inline <video> players
+  // Hide video links entirely (videos are shown in the Assets panel instead)
   renderer.link = ({ href, title, text: linkText }: { href: string; title?: string | null; text: string }) => {
-    if (href && /\.(mp4|webm|mov)(\?|$)/i.test(href)) {
-      return `<div class="md-video-wrapper"><video controls preload="metadata" src="${href}" title="${title ?? linkText}"></video><span class="md-video-label">${linkText}</span></div>`;
-    }
+    if (href && /\.(mp4|webm|mov)(\?|$)/i.test(href)) return "";
     return `<a href="${href}"${title ? ` title="${title}"` : ""}>${linkText}</a>`;
-  };
-
-  // Also detect bare image/video URLs in images
-  renderer.image = ({ href, title, text: altText }: { href: string; title?: string | null; text: string }) => {
-    if (href && /\.(mp4|webm|mov)(\?|$)/i.test(href)) {
-      return `<div class="md-video-wrapper"><video controls preload="metadata" src="${href}" title="${title ?? altText}"></video><span class="md-video-label">${altText}</span></div>`;
-    }
-    return `<img src="${href}" alt="${altText}"${title ? ` title="${title}"` : ""} />`;
   };
 
   let html = $derived(() => {
     try {
       const raw = marked.parse(text) as string;
       return DOMPurify.sanitize(raw, {
-        ADD_TAGS: ["pre", "code", "video", "source", "img", "div", "span"],
-        ADD_ATTR: ["class", "controls", "preload", "src", "type", "alt", "title", "autoplay", "muted", "loop", "playsinline"],
+        ADD_TAGS: ["pre", "code", "img", "div", "span"],
+        ADD_ATTR: ["class", "src", "type", "alt", "title"],
         ALLOW_UNKNOWN_PROTOCOLS: true,
       });
     } catch {
@@ -98,13 +88,15 @@
   .md-rendered :global(em) { font-style: italic; }
 
   /* Links */
-  .md-rendered :global(a) { color: var(--accent); text-decoration: none; }
-  .md-rendered :global(a:hover) { text-decoration: underline; }
+  .md-rendered :global(a) { color: #4b9bff; text-decoration: none; }
+  .md-rendered :global(a:hover) { text-decoration: underline; opacity: 0.85; }
+  :global([data-theme="light"]) .md-rendered :global(a) { color: #2563eb; }
+  :global([data-theme="light"]) .md-rendered :global(a:hover) { color: #1d4ed8; }
 
   /* Lists */
   .md-rendered :global(ul), .md-rendered :global(ol) { padding-left: 1.4rem; margin: 0.3rem 0; }
   .md-rendered :global(li) { margin: 0.15rem 0; }
-  .md-rendered :global(li::marker) { color: var(--text-dim); }
+  .md-rendered :global(li::marker) { color: var(--text-muted); }
 
   /* Tables */
   .md-rendered :global(table) {
@@ -114,34 +106,35 @@
     font-size: 0.8rem;
   }
   .md-rendered :global(th) {
-    background: rgba(0, 0, 0, 0.1);
+    background: var(--bg-hover);
     font-weight: 650;
     text-align: left;
     padding: 0.45rem 0.65rem;
     border-bottom: 2px solid var(--border);
-    color: var(--text-secondary);
+    color: var(--text);
   }
   .md-rendered :global(td) {
     padding: 0.4rem 0.65rem;
     border-bottom: 1px solid var(--border);
+    color: var(--text-secondary);
   }
   .md-rendered :global(tr:nth-child(even) td) {
-    background: rgba(148, 163, 184, 0.04);
+    background: var(--bg-surface);
   }
 
   /* Code inline */
   .md-rendered :global(code) {
     font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
     font-size: 0.78rem;
-    background: rgba(148, 163, 184, 0.1);
+    background: var(--bg-hover);
     padding: 0.1rem 0.35rem;
     border-radius: 4px;
-    color: var(--text-secondary);
+    color: var(--text);
   }
 
   /* Code blocks */
   .md-rendered :global(pre.md-code-block) {
-    background: rgba(15, 15, 25, 0.5);
+    background: var(--bg-inset);
     border: 1px solid var(--border);
     border-radius: 8px;
     padding: 0.65rem 0.85rem;
@@ -153,6 +146,7 @@
     padding: 0;
     font-size: 0.76rem;
     line-height: 1.55;
+    color: var(--text-secondary);
   }
 
   /* Blockquote */
@@ -160,34 +154,9 @@
     border-left: 3px solid var(--accent);
     padding: 0.3rem 0.75rem;
     margin: 0.4rem 0;
-    color: var(--text-muted);
-    background: rgba(0, 0, 0, 0.04);
-    border-radius: 0 6px 6px 0;
-  }
-
-  /* Inline video player */
-  .md-rendered :global(.md-video-wrapper) {
-    margin: 0.5rem 0;
-    border-radius: 12px;
-    overflow: hidden;
-    border: 1px solid var(--border);
-    background: rgba(0, 0, 0, 0.3);
-  }
-
-  .md-rendered :global(.md-video-wrapper video) {
-    width: 100%;
-    max-height: 360px;
-    display: block;
-    object-fit: contain;
-    background: #000;
-  }
-
-  .md-rendered :global(.md-video-label) {
-    display: block;
-    padding: 0.4rem 0.65rem;
-    font-size: 0.76rem;
     color: var(--text-secondary);
-    font-weight: 550;
+    background: var(--bg-hover);
+    border-radius: 0 6px 6px 0;
   }
 
   /* Inline images */
@@ -204,17 +173,31 @@
     margin: 0.6rem 0;
   }
 
-  /* highlight.js token colors (Glass Noir theme) */
-  .md-rendered :global(.hljs-keyword) { color: #c792ea; }
-  .md-rendered :global(.hljs-string) { color: #c3e88d; }
-  .md-rendered :global(.hljs-number) { color: #f78c6c; }
-  .md-rendered :global(.hljs-comment) { color: #676e95; font-style: italic; }
-  .md-rendered :global(.hljs-function) { color: #82aaff; }
-  .md-rendered :global(.hljs-title) { color: #82aaff; }
-  .md-rendered :global(.hljs-built_in) { color: #ffcb6b; }
-  .md-rendered :global(.hljs-attr) { color: #ffcb6b; }
-  .md-rendered :global(.hljs-variable) { color: #f07178; }
-  .md-rendered :global(.hljs-type) { color: #c792ea; }
-  .md-rendered :global(.hljs-meta) { color: #89ddff; }
-  .md-rendered :global(.hljs-selector-tag) { color: #ff5370; }
+  /* highlight.js token colors — dark theme */
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-keyword) { color: #c792ea; }
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-string) { color: #c3e88d; }
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-number) { color: #f78c6c; }
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-comment) { color: #8b92b3; font-style: italic; }
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-function),
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-title) { color: #82aaff; }
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-built_in),
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-attr) { color: #ffcb6b; }
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-variable) { color: #f07178; }
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-type) { color: #c792ea; }
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-meta) { color: #89ddff; }
+  :global([data-theme="dark"]) .md-rendered :global(.hljs-selector-tag) { color: #ff5370; }
+
+  /* highlight.js token colors — light theme */
+  :global([data-theme="light"]) .md-rendered :global(.hljs-keyword) { color: #7c3aed; }
+  :global([data-theme="light"]) .md-rendered :global(.hljs-string) { color: #16803c; }
+  :global([data-theme="light"]) .md-rendered :global(.hljs-number) { color: #c2410c; }
+  :global([data-theme="light"]) .md-rendered :global(.hljs-comment) { color: #6b7280; font-style: italic; }
+  :global([data-theme="light"]) .md-rendered :global(.hljs-function),
+  :global([data-theme="light"]) .md-rendered :global(.hljs-title) { color: #2563eb; }
+  :global([data-theme="light"]) .md-rendered :global(.hljs-built_in),
+  :global([data-theme="light"]) .md-rendered :global(.hljs-attr) { color: #b45309; }
+  :global([data-theme="light"]) .md-rendered :global(.hljs-variable) { color: #dc2626; }
+  :global([data-theme="light"]) .md-rendered :global(.hljs-type) { color: #7c3aed; }
+  :global([data-theme="light"]) .md-rendered :global(.hljs-meta) { color: #0891b2; }
+  :global([data-theme="light"]) .md-rendered :global(.hljs-selector-tag) { color: #dc2626; }
 </style>

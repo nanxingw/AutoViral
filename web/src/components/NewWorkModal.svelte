@@ -6,10 +6,14 @@
     open = false,
     onClose,
     onCreate,
+    prefillTitle = "",
+    prefillTopicHint = "",
   }: {
     open: boolean;
     onClose: () => void;
     onCreate: (data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; topicHint: string }) => void;
+    prefillTitle?: string;
+    prefillTopicHint?: string;
   } = $props();
 
   let lang = $state(getLanguage());
@@ -21,6 +25,14 @@
   let videoSource = $state("search");
   let videoSearchQuery = $state("");
   let topicHint = $state("");
+  let validationError = $state("");
+
+  // Apply prefill when modal opens
+  $effect(() => {
+    if (open && prefillTitle) title = prefillTitle;
+    if (open && prefillTopicHint) topicHint = prefillTopicHint;
+    if (open) validationError = "";
+  });
 
   onMount(() => {
     const unsub = subscribe(() => { lang = getLanguage(); });
@@ -28,6 +40,11 @@
   });
 
   function handleCreate() {
+    if (!title.trim() && !topicHint.trim()) {
+      validationError = lang === "zh" ? "请至少填写标题或创作方向" : "Please fill in a title or topic direction";
+      return;
+    }
+    validationError = "";
     onCreate({
       title,
       type: selectedType,
@@ -203,6 +220,9 @@
 
       <!-- Actions -->
       <div class="modal-actions">
+        {#if validationError}
+          <p class="validation-error">{validationError}</p>
+        {/if}
         <button class="btn-create" onclick={handleCreate}>{tt("create")}</button>
       </div>
     </div>
@@ -317,7 +337,7 @@
 
   .type-card.selected {
     border-color: var(--spark-red, #FE2C55);
-    background: rgba(254, 44, 85, 0.06);
+    background: rgba(254, 44, 85, 0.03);
     color: var(--text);
   }
 
@@ -364,7 +384,7 @@
 
   .source-chip.selected {
     border-color: var(--spark-red, #FE2C55);
-    background: rgba(254, 44, 85, 0.08);
+    background: rgba(254, 44, 85, 0.04);
     color: var(--spark-red, #FE2C55);
   }
 
@@ -410,7 +430,7 @@
 
   .category-card.selected {
     border-color: var(--spark-red, #FE2C55);
-    background: rgba(254, 44, 85, 0.06);
+    background: rgba(254, 44, 85, 0.03);
     color: var(--text);
   }
 
@@ -479,6 +499,13 @@
 
   .modal-actions {
     margin-top: 1.25rem;
+  }
+
+  .validation-error {
+    font-size: 0.75rem;
+    color: var(--spark-red, #FE2C55);
+    margin-bottom: 0.5rem;
+    text-align: center;
   }
 
   .btn-create {

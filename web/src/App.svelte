@@ -37,11 +37,23 @@
     currentWorkId = null;
   }
 
+  function deriveTitle(data: { title: string; topicHint: string }): string {
+    if (data.title) return data.title;
+    if (data.topicHint) {
+      // Use first line, truncated
+      const first = data.topicHint.split("\n")[0].replace(/^[#\-*·•\s]+/, "").trim();
+      return first.length > 30 ? first.slice(0, 30) + "…" : first;
+    }
+    return lang === "zh" ? "未命名作品" : "Untitled";
+  }
+
   async function handleCreateWork(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; topicHint: string }) {
     showNewWorkModal = false;
+    prefillTitle = "";
+    prefillTopicHint = "";
     try {
       const newWork = await createWorkApi({
-        title: data.title || "Untitled",
+        title: deriveTitle(data),
         type: data.type as any,
         contentCategory: (data.contentCategory || "info") as ContentCategory,
         videoSource: data.videoSource || undefined,
@@ -56,21 +68,13 @@
     }
   }
 
-  async function handleCreateFromTrend(title: string, topicHint: string) {
-    try {
-      const newWork = await createWorkApi({
-        title,
-        type: "short-video",
-        contentCategory: "info" as ContentCategory,
-        videoSource: "search",
-        platforms: ["douyin", "xiaohongshu"],
-        topicHint,
-      });
-      currentWorkId = newWork.id;
-      showStudio = true;
-    } catch {
-      // creation failed
-    }
+  let prefillTitle = $state("");
+  let prefillTopicHint = $state("");
+
+  function handleCreateFromTrend(title: string, topicHint: string) {
+    prefillTitle = title;
+    prefillTopicHint = topicHint;
+    showNewWorkModal = true;
   }
 
   async function handleSaveSettings() {
@@ -250,8 +254,10 @@
 
   <NewWorkModal
     open={showNewWorkModal}
-    onClose={() => showNewWorkModal = false}
+    onClose={() => { showNewWorkModal = false; prefillTitle = ""; prefillTopicHint = ""; }}
     onCreate={handleCreateWork}
+    {prefillTitle}
+    {prefillTopicHint}
   />
 </div>
 
@@ -280,7 +286,7 @@
     --text: #f5f2ed;
     --text-secondary: #c4bfb8;
     --text-muted: #8a847e;
-    --text-dim: #504b46;
+    --text-dim: #78726c;
 
     /* Accents — from the logo */
     --accent: #f0ece6;
@@ -339,7 +345,7 @@
     --text: #1a1714;
     --text-secondary: #57534e;
     --text-muted: #8c8580;
-    --text-dim: #bdb7b0;
+    --text-dim: #9e9890;
     --accent: #1a1714;
     --accent-soft: rgba(26, 23, 20, 0.05);
     --accent-hover: #33302c;

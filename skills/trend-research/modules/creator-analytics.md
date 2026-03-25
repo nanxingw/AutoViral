@@ -1,11 +1,6 @@
 ---
 name: creator-analytics
-description: "Collect social media creator analytics data (profile stats + per-post engagement metrics). Use this skill whenever the user wants to: collect creator data, get creator stats, fetch profile analytics, check account metrics, analyze a social media account, get follower/fan count, check video play counts, see engagement data. Platforms: Douyin (抖音), with Xiaohongshu (小红书) planned. Data types: follower count, following count, total likes, video count, play count (播放量), likes (点赞), comments (评论), shares (分享/转发), collects/favorites (收藏), engagement rate. Triggers on: creator analytics, creator data, douyin analytics, 抖音数据, 达人数据, 账号分析, 作品数据, 播放量, 粉丝数, social media analytics, account stats, content performance."
-allowed-tools:
-  - Bash
-  - Read
-  - Write
-  - Edit
+description: "Collect social media creator analytics data (profile stats + per-post engagement metrics). Platforms: Douyin (抖音), with Xiaohongshu (小红书) planned."
 ---
 
 # Creator Analytics
@@ -34,22 +29,22 @@ Ask the user for their profile URL. Accepted formats:
 
 ### 2. Remind user to close Chrome
 
-**IMPORTANT**: `browser_cookie3` needs exclusive access to Chrome's cookie database. The user must fully close Chrome before running the collector. If Chrome is open, cookie extraction will fail or return stale data.
+**IMPORTANT**: `browser_cookie3` needs exclusive access to Chrome's cookie database. The user must fully close Chrome before running the collector.
 
 ### 3. Run the collector
 
 ```bash
 # First time — provide URL (auto-saved for future use):
-python3 ~/.claude/skills/creator-analytics/scripts/collect.py \
+python3 skills/trend-research/scripts/creator-analytics/collect.py \
   --platform douyin \
   --url "<PROFILE_URL>"
 
 # After first time — just run without --url:
-python3 ~/.claude/skills/creator-analytics/scripts/collect.py \
+python3 skills/trend-research/scripts/creator-analytics/collect.py \
   --platform douyin
 
 # Check saved accounts:
-python3 ~/.claude/skills/creator-analytics/scripts/collect.py \
+python3 skills/trend-research/scripts/creator-analytics/collect.py \
   --platform douyin --list-accounts
 ```
 
@@ -82,9 +77,6 @@ The script outputs JSON to **stdout**. Errors go to **stderr** with exit code 1.
   "account": {
     "sec_user_id": "MS4wLjAB...",
     "nickname": "创作者昵称",
-    "signature": "个人简介",
-    "uid": "...",
-    "unique_id": "...",
     "follower_count": 125000,
     "following_count": 320,
     "total_favorited": 5600000,
@@ -95,7 +87,6 @@ The script outputs JSON to **stdout**. Errors go to **stderr** with exit code 1.
       "aweme_id": "7341...",
       "desc": "视频描述",
       "create_time": "2026-03-15 14:30:00",
-      "aweme_type": 0,
       "play_count": 89200,
       "digg_count": 45200,
       "comment_count": 1230,
@@ -117,12 +108,6 @@ The script outputs JSON to **stdout**. Errors go to **stderr** with exit code 1.
 
 ### Error Handling
 
-Errors are JSON on stderr:
-
-```json
-{"error": "NOT_LOGGED_IN", "message": "No valid session found...", "platform": "douyin"}
-```
-
 | Code | Cause | Fix |
 |------|-------|-----|
 | `DEPENDENCY_ERROR` | f2 or browser_cookie3 not installed | `pip3 install f2 browser_cookie3` |
@@ -131,7 +116,6 @@ Errors are JSON on stderr:
 | `NOT_LOGGED_IN` | No session cookie | Log in to douyin.com in browser, close it, retry |
 | `INVALID_URL` | URL not recognized | Use valid Douyin profile URL |
 | `API_ERROR` | API request failed | Cookie expired — re-login and retry |
-| `PLATFORM_NOT_SUPPORTED` | Platform not implemented | Currently only `douyin` |
 
 ## Supported Platforms
 
@@ -143,11 +127,9 @@ Errors are JSON on stderr:
 ## Architecture
 
 ```
-scripts/
+scripts/creator-analytics/
 ├── collect.py              # CLI entry point
 └── platforms/
     ├── __init__.py          # BaseCollector abstract class
     └── douyin.py            # Douyin collector (f2 + browser_cookie3)
 ```
-
-To add a new platform: create `platforms/<name>.py` implementing `BaseCollector`, add it to `collect.py`'s platform dispatch.
