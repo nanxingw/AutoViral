@@ -77,7 +77,6 @@ The script outputs JSON to **stdout**. Errors go to **stderr** with exit code 1.
   "account": {
     "sec_user_id": "MS4wLjAB...",
     "nickname": "创作者昵称",
-    "signature": "个人简介",
     "follower_count": 125000,
     "following_count": 320,
     "total_favorited": 5600000,
@@ -134,5 +133,3 @@ scripts/creator-analytics/
     ├── __init__.py          # BaseCollector abstract class
     └── douyin.py            # Douyin collector (f2 + browser_cookie3)
 ```
-
-To add a new platform: create `platforms/<name>.py` implementing `BaseCollector`, and register it in `collect.py`.
