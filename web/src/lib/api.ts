@@ -161,8 +161,41 @@ export async function fetchProviders() {
 // Shared assets & Trends
 // ---------------------------------------------------------------------------
 
-export async function fetchSharedAssets() {
-  return get<any>("/api/shared-assets");
+export interface AssetFile {
+  name: string;
+  size: number;
+  mtime: string;
+  category: string;
+}
+
+export interface UploadResult {
+  uploaded: (AssetFile & { url: string })[];
+}
+
+export async function fetchSharedAssets(): Promise<Record<string, AssetFile[]>> {
+  return get<Record<string, AssetFile[]>>("/api/shared-assets");
+}
+
+export async function uploadAsset(category: string, files: FileList | File[]): Promise<UploadResult> {
+  const form = new FormData();
+  for (const f of files) form.append("file", f);
+  const res = await fetch(`/api/shared-assets/${encodeURIComponent(category)}`, { method: "POST", body: form });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function deleteAsset(category: string, filename: string): Promise<void> {
+  const res = await fetch(`/api/shared-assets/${encodeURIComponent(category)}/${encodeURIComponent(filename)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await res.text());
+}
+
+export async function moveAsset(from: string, to: string, file: string): Promise<void> {
+  const res = await fetch("/api/shared-assets/move", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ from, to, file }),
+  });
+  if (!res.ok) throw new Error(await res.text());
 }
 
 export async function fetchTrends(platform: string) {
