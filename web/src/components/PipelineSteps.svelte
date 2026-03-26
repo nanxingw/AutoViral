@@ -41,6 +41,8 @@
     const active = key === currentStep ? " step-current" : "";
     if (status === "done") return "step-done" + active;
     if (status === "active") return "step-running" + active;
+    if (status === "evaluating") return "step-evaluating" + active;
+    if (status === "eval_blocked") return "step-blocked" + active;
     if (status === "skipped") return "step-failed" + active;
     return "step-pending" + active;
   }
@@ -91,7 +93,7 @@
             <div class="connector" class:connector-done={pipeline[stepKeys[i - 1]]?.status === "done"}></div>
           {/if}
           <div class="step-item {statusClass(status, key)}">
-            <span class="step-indicator" class:pulse={status === "active"}>
+            <span class="step-indicator" class:pulse={status === "active" || status === "evaluating"}>
               {#if isDone(status)}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
               {:else}
@@ -106,6 +108,13 @@
                   {#if elapsed(step)}
                     <span class="step-time">{elapsed(step)}</span>
                   {/if}
+                {:else if status === "evaluating"}
+                  评审中...
+                  {#if elapsed(step)}
+                    <span class="step-time">{elapsed(step)}</span>
+                  {/if}
+                {:else if status === "eval_blocked"}
+                  评审受阻
                 {:else if status === "active"}
                   {tt("stepRunningLabel")}
                   {#if elapsed(step)}
@@ -322,6 +331,22 @@
     0%, 100% { box-shadow: 0 0 0 0 rgba(254, 44, 85, 0.25); }
     50% { box-shadow: 0 0 0 5px rgba(254, 44, 85, 0); }
   }
+
+  /* Evaluating */
+  .step-evaluating .step-indicator {
+    border-color: var(--amber, #f59e0b);
+    color: var(--amber, #f59e0b);
+    background: none;
+  }
+  .step-evaluating .step-status-text { color: var(--amber, #f59e0b); }
+
+  /* Eval blocked */
+  .step-blocked .step-indicator {
+    border-color: #ef4444;
+    color: #ef4444;
+    background: none;
+  }
+  .step-blocked .step-status-text { color: #ef4444; }
 
   /* Failed */
   .step-failed .step-indicator {

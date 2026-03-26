@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { t, getLanguage, subscribe } from "../lib/i18n";
-  import { fetchWork, startWorkSession, type Work, fetchSharedAssets, uploadAsset, type AssetFile } from "../lib/api";
+  import { fetchWork, startWorkSession, type Work, fetchSharedAssets, uploadAsset, type AssetFile, toggleEvalMode, forcePassEval, retryWithGuidance } from "../lib/api";
   import { createWorkWs } from "../lib/ws";
   import PipelineSteps from "../components/PipelineSteps.svelte";
   import MarkdownBlock from "../components/MarkdownBlock.svelte";
@@ -14,11 +14,13 @@
   }
 
   interface StreamBlock {
-    type: "thinking" | "tool_use" | "tool_result" | "text" | "user" | "step_divider" | "ask_question";
+    type: "thinking" | "tool_use" | "tool_result" | "text" | "user" | "step_divider" | "ask_question" | "eval_divider";
     text: string;
     toolName?: string;
     collapsed?: boolean;
     questions?: AskQuestion[];
+    source?: "creator" | "evaluator";
+    evalData?: { type: string; step?: string; attempt?: number; verdict?: string; scores?: Record<string, number>; issues?: any[] };
   }
 
   let { workId, onBack }: { workId: string; onBack: () => void } = $props();
@@ -39,6 +41,11 @@
   let showNextStep = $state(false);
   let aborted = $state(false);
   let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+
+  // --- Evaluation state ---
+  let evaluationMode = $state(false);
+  let evalBlocked = $state<{ step: string; attempt: number } | null>(null);
+  let guidanceText = $state("");
 
   // --- Attachment system ---
   let panelExpanded = $state(false);
@@ -141,11 +148,41 @@
     }
   });
 
+  // Sync evaluationMode from work data
+  $effect(() => {
+    if (work) {
+      evaluationMode = (work as any).evaluationMode ?? false;
+    }
+  });
+
   function resetInactivityTimer() {
     if (inactivityTimer) clearTimeout(inactivityTimer);
     inactivityTimer = setTimeout(() => {
       if (streaming) { streaming = false; showNextStep = true; }
     }, 60000);
+  }
+
+  // --- Evaluation handlers ---
+  async function handleToggleEval() {
+    if (!work) return;
+    const result = await toggleEvalMode(workId);
+    evaluationMode = result.evaluationMode;
+  }
+
+  async function handleForcePass() {
+    if (!work || !evalBlocked) return;
+    const stepKeys = Object.keys(work.pipeline);
+    const idx = stepKeys.indexOf(evalBlocked.step);
+    const nextStep = idx < stepKeys.length - 1 ? stepKeys[idx + 1] : undefined;
+    await forcePassEval(workId, evalBlocked.step, nextStep);
+    evalBlocked = null;
+  }
+
+  async function handleRetryWithGuidance() {
+    if (!work || !evalBlocked || !guidanceText.trim()) return;
+    await retryWithGuidance(workId, evalBlocked.step, guidanceText);
+    evalBlocked = null;
+    guidanceText = "";
   }
 
   function handleCanvasSend(text: string) {
@@ -314,7 +351,8 @@
       case "assistant_thinking":
         streaming = true;
         resetInactivityTimer();
-        appendToLastBlock("thinking", data.text ?? "");
+        streamBlocks = [...streamBlocks, { type: "thinking", text: data.text ?? "", collapsed: true, source: data.source ?? undefined }];
+        scrollToBottom();
         break;
       case "tool_use":
         streaming = true;
@@ -324,20 +362,45 @@
           streamBlocks = [...streamBlocks, { type: "ask_question", text: "", questions: data.input.questions }];
           scrollToBottom();
         } else {
-          appendToLastBlock("tool_use", JSON.stringify(data.input, null, 2) ?? "", data.name);
+          streamBlocks = [...streamBlocks, { type: "tool_use", text: JSON.stringify(data.input, null, 2) ?? "", toolName: data.name, source: data.source ?? undefined }];
+          scrollToBottom();
         }
         break;
       case "tool_result":
         streaming = true;
         activeToolName = "";
         resetInactivityTimer();
-        appendToLastBlock("tool_result", data.content ?? "");
+        streamBlocks = [...streamBlocks, { type: "tool_result", text: data.content ?? "", collapsed: true, source: data.source ?? undefined }];
+        scrollToBottom();
         break;
-      case "assistant_text":
+      case "assistant_text": {
         streaming = true;
         activeToolName = "";
         resetInactivityTimer();
-        appendToLastBlock("text", data.text ?? "");
+        const source = data.source as "creator" | "evaluator" | undefined;
+        const last = streamBlocks[streamBlocks.length - 1];
+        if (last?.type === "text" && last.source === (source ?? undefined)) {
+          last.text += data.text ?? "";
+          streamBlocks = [...streamBlocks];
+        } else {
+          streamBlocks = [...streamBlocks, { type: "text", text: data.text ?? "", source: source ?? undefined }];
+        }
+        scrollToBottom();
+        break;
+      }
+      case "eval_divider":
+        streamBlocks = [...streamBlocks, {
+          type: "eval_divider",
+          text: data.type === "start"
+            ? `评审开始 (第${data.attempt}轮)`
+            : data.verdict === "pass" ? "评审通过" : "评审未通过",
+          source: "evaluator",
+          evalData: data,
+        }];
+        scrollToBottom();
+        break;
+      case "eval_blocked":
+        evalBlocked = { step: data.step, attempt: data.attempt };
         break;
       case "turn_complete":
         if (inactivityTimer) clearTimeout(inactivityTimer);
@@ -430,6 +493,13 @@
       {/if}
     </div>
     <div class="header-controls">
+      <div class="eval-toggle" title={evaluationMode ? "关闭质量评审" : "开启质量评审"}>
+        <label class="toggle-switch">
+          <input type="checkbox" checked={evaluationMode} onchange={handleToggleEval} />
+          <span class="toggle-slider"></span>
+        </label>
+        <span class="toggle-label">质量评审</span>
+      </div>
       {#if aborted}
         <button class="resume-btn" onclick={handleResume}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
@@ -463,7 +533,22 @@
     <div class="panel-main">
       <div class="stream-area" bind:this={scrollEl}>
         {#each streamBlocks as block, i}
-          {#if block.type === "step_divider"}
+          {#if block.type === "eval_divider"}
+            <div class="eval-divider" class:eval-pass={block.evalData?.verdict === "pass"} class:eval-fail={block.evalData?.verdict === "fail"}>
+              <span class="eval-divider-line"></span>
+              <span class="eval-divider-label">
+                {#if block.evalData?.verdict === "pass"}
+                  <span class="eval-icon">✓</span>
+                {:else if block.evalData?.verdict === "fail"}
+                  <span class="eval-icon">✗</span>
+                {:else}
+                  <span class="eval-icon">◎</span>
+                {/if}
+                {block.text}
+              </span>
+              <span class="eval-divider-line"></span>
+            </div>
+          {:else if block.type === "step_divider"}
             <div class="step-divider">
               <span class="divider-line"></span>
               <span class="divider-label">{block.text}</span>
@@ -475,9 +560,9 @@
               <div class="block-content user-content">{block.text}</div>
             </div>
           {:else if block.type === "thinking"}
-            <button class="stream-block thinking-toggle" onclick={() => toggleBlock(i, streamBlocks)}>
+            <button class="stream-block thinking-toggle" class:msg-evaluator={block.source === "evaluator"} onclick={() => toggleBlock(i, streamBlocks)}>
               <span class="toggle-icon">{block.collapsed ? "\u25B8" : "\u25BE"}</span>
-              <span class="t-label">Thinking</span>
+              <span class="t-label">{block.source === "evaluator" ? "评审 Thinking" : "Thinking"}</span>
               {#if block.collapsed}
                 <span class="toggle-hint">{block.text.slice(0, 50)}...</span>
               {/if}
@@ -486,17 +571,18 @@
               <div class="thinking-content"><MarkdownBlock text={block.text} /></div>
             {/if}
           {:else if block.type === "tool_use"}
-            <div class="stream-block tool-block">
+            <div class="stream-block tool-block" class:msg-evaluator={block.source === "evaluator"}>
               <div class="block-label tool-label">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                {#if block.source === "evaluator"}<span class="eval-badge">评审</span>{/if}
                 {block.toolName ?? "Tool"}
               </div>
               <pre class="block-content tool-content">{block.text}</pre>
             </div>
           {:else if block.type === "tool_result"}
-            <button class="stream-block result-toggle" onclick={() => toggleBlock(i, streamBlocks)}>
+            <button class="stream-block result-toggle" class:msg-evaluator={block.source === "evaluator"} onclick={() => toggleBlock(i, streamBlocks)}>
               <span class="toggle-icon">{block.collapsed ? "\u25B8" : "\u25BE"}</span>
-              <span class="t-label result-label">Result</span>
+              <span class="t-label result-label">{block.source === "evaluator" ? "评审 Result" : "Result"}</span>
               {#if block.collapsed}
                 <span class="toggle-hint">{block.text.slice(0, 60)}...</span>
               {/if}
@@ -523,8 +609,14 @@
               {/each}
             </div>
           {:else}
-            <div class="stream-block text-block">
-              <div class="block-label text-label">Agent</div>
+            <div class="stream-block text-block" class:msg-evaluator={block.source === "evaluator"}>
+              <div class="block-label text-label">
+                {#if block.source === "evaluator"}
+                  <span class="eval-badge">评审</span>
+                {:else}
+                  Agent
+                {/if}
+              </div>
               <div class="block-content text-content">
                 <MarkdownBlock text={block.text} />
               </div>
@@ -552,6 +644,30 @@
           </div>
         {/if}
       </div>
+
+      {#if evalBlocked}
+        <div class="eval-blocked-panel">
+          <div class="eval-blocked-header">
+            <span class="eval-blocked-icon">⚠️</span>
+            <span>评审已达最大迭代次数 ({evalBlocked.attempt}/3)</span>
+          </div>
+          <div class="eval-blocked-actions">
+            <button class="eval-btn eval-btn-pass" onclick={handleForcePass}>强制通过</button>
+            <div class="eval-guidance-row">
+              <input
+                type="text"
+                class="eval-guidance-input"
+                placeholder="给出修改方向..."
+                bind:value={guidanceText}
+                onkeydown={(e) => { if (e.key === "Enter" && guidanceText.trim()) handleRetryWithGuidance(); }}
+              />
+              <button class="eval-btn eval-btn-retry" onclick={handleRetryWithGuidance} disabled={!guidanceText.trim()}>
+                重新尝试
+              </button>
+            </div>
+          </div>
+        </div>
+      {/if}
 
       <div class="input-area" style="position: relative;">
       {#if attachments.length > 0}
@@ -1168,4 +1284,193 @@
     .panel-left { display: none; }
     .studio-body { border-radius: 12px; }
   }
+
+  /* ── Evaluator styling ── */
+  .msg-evaluator {
+    border-left: 3px solid var(--amber, #f59e0b);
+    background: color-mix(in srgb, var(--amber, #f59e0b) 5%, transparent);
+    border-radius: 8px;
+    margin: 4px 0;
+    padding-left: 12px;
+  }
+
+  .eval-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    background: color-mix(in srgb, var(--amber, #f59e0b) 15%, transparent);
+    color: var(--amber, #f59e0b);
+    letter-spacing: 0.5px;
+  }
+
+  /* Eval divider */
+  .eval-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0;
+    padding: 0 8px;
+  }
+
+  .eval-divider-line {
+    flex: 1;
+    height: 1px;
+    background: color-mix(in srgb, var(--amber, #f59e0b) 30%, transparent);
+  }
+
+  .eval-divider-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--amber, #f59e0b);
+    white-space: nowrap;
+  }
+
+  .eval-divider.eval-pass .eval-divider-line { background: color-mix(in srgb, #22c55e 30%, transparent); }
+  .eval-divider.eval-pass .eval-divider-label { color: #22c55e; }
+  .eval-divider.eval-fail .eval-divider-line { background: color-mix(in srgb, #ef4444 30%, transparent); }
+  .eval-divider.eval-fail .eval-divider-label { color: #ef4444; }
+
+  .eval-icon { font-size: 14px; font-weight: 700; }
+
+  /* Eval toggle */
+  .eval-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: 16px;
+    padding: 4px 12px;
+    border-radius: 8px;
+    background: var(--bg-secondary, #1a1a2e);
+  }
+
+  .toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+  }
+
+  .toggle-switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+
+  .toggle-slider {
+    position: absolute;
+    inset: 0;
+    background: var(--bg-tertiary, #2a2a4a);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+
+  .toggle-slider::before {
+    content: "";
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 2px;
+    bottom: 2px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+  }
+
+  .toggle-switch input:checked + .toggle-slider {
+    background: var(--amber, #f59e0b);
+  }
+
+  .toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(16px);
+  }
+
+  .toggle-label {
+    font-size: 12px;
+    color: var(--text-secondary, #8888aa);
+    font-weight: 500;
+  }
+
+  /* Eval blocked panel */
+  .eval-blocked-panel {
+    margin: 8px 16px;
+    padding: 16px;
+    border-radius: 12px;
+    background: color-mix(in srgb, #ef4444 8%, var(--bg-secondary, #1a1a2e));
+    border: 1px solid color-mix(in srgb, #ef4444 25%, transparent);
+    animation: slideUp 0.3s ease-out;
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .eval-blocked-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary, #eee);
+    margin-bottom: 12px;
+  }
+
+  .eval-blocked-icon { font-size: 18px; }
+
+  .eval-blocked-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .eval-btn {
+    padding: 8px 16px;
+    border-radius: 8px;
+    border: none;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+
+  .eval-btn-pass {
+    background: color-mix(in srgb, var(--amber, #f59e0b) 20%, transparent);
+    color: var(--amber, #f59e0b);
+    width: fit-content;
+  }
+
+  .eval-btn-pass:hover { background: color-mix(in srgb, var(--amber, #f59e0b) 30%, transparent); }
+
+  .eval-guidance-row {
+    display: flex;
+    gap: 8px;
+  }
+
+  .eval-guidance-input {
+    flex: 1;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border, #333);
+    background: var(--bg-primary, #0f0f23);
+    color: var(--text-primary, #eee);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+
+  .eval-guidance-input:focus {
+    border-color: var(--accent, #6366f1);
+  }
+
+  .eval-btn-retry {
+    background: var(--accent, #6366f1);
+    color: white;
+    white-space: nowrap;
+  }
+
+  .eval-btn-retry:hover { opacity: 0.9; }
+  .eval-btn-retry:disabled { opacity: 0.4; cursor: not-allowed; }
 </style>

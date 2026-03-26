@@ -75,7 +75,7 @@ export interface WorkSummary {
 
 export interface PipelineStep {
   name: string;
-  status: "pending" | "active" | "done" | "skipped";
+  status: "pending" | "active" | "done" | "skipped" | "evaluating" | "eval_blocked";
   startedAt?: string;
   completedAt?: string;
   note?: string;
