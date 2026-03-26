@@ -49,7 +49,7 @@
     const isVid = ["mp4","mov","webm"].includes(ext);
     const type = isImg ? "图片" : isVid ? "视频" : "文件";
     inputText = `请修改这个${type}素材「${assetName}」（${assetUrl}）：\n`;
-    inputEl?.focus();
+    requestAnimationFrame(() => { autoResizeInput(); inputEl?.focus(); });
   }
 
   interface ChatAttachment {
@@ -162,7 +162,7 @@
     if (streaming) return;
     const fullText = text + formatAttachments();
     inputText = "";
-    if (inputEl) inputEl.value = "";
+    if (inputEl) { inputEl.value = ""; inputEl.style.height = "auto"; }
     attachments = [];
     showAssetPicker = false;
     streamBlocks = [...streamBlocks, { type: "user", text: fullText }];
@@ -174,6 +174,12 @@
 
   function handleKeydown(e: KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); handleSend(); }
+  }
+
+  function autoResizeInput() {
+    if (!inputEl) return;
+    inputEl.style.height = "auto";
+    inputEl.style.height = Math.min(inputEl.scrollHeight, 150) + "px";
   }
 
   function handleOptionClick(label: string) {
@@ -601,6 +607,7 @@
             bind:this={inputEl}
             bind:value={inputText}
             onkeydown={handleKeydown}
+            oninput={autoResizeInput}
             placeholder={tt("chatPlaceholder")}
             disabled={!sessionReady || streaming}
             rows="1"
@@ -1016,6 +1023,8 @@
     font-family: inherit;
     resize: none;
     line-height: 1.5;
+    max-height: 150px;
+    overflow-y: auto;
   }
   .msg-input:focus { outline: none; }
   .msg-input:disabled { opacity: 0.5; cursor: not-allowed; }
