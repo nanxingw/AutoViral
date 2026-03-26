@@ -434,6 +434,20 @@ apiRoutes.get("/api/shared-assets/:category/:file", async (c) => {
   }
 });
 
+apiRoutes.post("/api/shared-assets/move", async (c) => {
+  try {
+    const { from, to, file } = await c.req.json<{ from: string; to: string; file: string }>();
+    if (!from || !to || !file) return c.json({ error: "from, to, and file are required" }, 400);
+    await moveSharedAsset(from, to, file);
+    return c.json({ moved: true, from, to, file });
+  } catch (e: any) {
+    if (e.code === "ENOENT") return c.json({ error: "File not found" }, 404);
+    if (e.message?.includes("Invalid")) return c.json({ error: e.message }, 400);
+    if (e.message?.includes("already exists")) return c.json({ error: e.message }, 409);
+    return c.json({ error: e.message ?? "Move failed" }, 500);
+  }
+});
+
 apiRoutes.post("/api/shared-assets/:category", async (c) => {
   const category = c.req.param("category");
   try {
@@ -469,20 +483,6 @@ apiRoutes.delete("/api/shared-assets/:category/:file", async (c) => {
     if (e.code === "ENOENT") return c.json({ error: "File not found" }, 404);
     if (e.message?.includes("Invalid")) return c.json({ error: e.message }, 400);
     return c.json({ error: "Delete failed" }, 500);
-  }
-});
-
-apiRoutes.post("/api/shared-assets/move", async (c) => {
-  try {
-    const { from, to, file } = await c.req.json<{ from: string; to: string; file: string }>();
-    if (!from || !to || !file) return c.json({ error: "from, to, and file are required" }, 400);
-    await moveSharedAsset(from, to, file);
-    return c.json({ moved: true, from, to, file });
-  } catch (e: any) {
-    if (e.code === "ENOENT") return c.json({ error: "File not found" }, 404);
-    if (e.message?.includes("Invalid")) return c.json({ error: e.message }, 400);
-    if (e.message?.includes("already exists")) return c.json({ error: e.message }, 409);
-    return c.json({ error: e.message ?? "Move failed" }, 500);
   }
 });
 
