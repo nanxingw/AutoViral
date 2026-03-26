@@ -6,7 +6,7 @@
 
 ## 核心原则
 
-1. **Skill 与 Pipeline 一一对应**：只有 4 个 skill，分别对应产品的 4 个流水线步骤
+1. **4+1 Skill 模型**：4 个创作 skill 与 pipeline 一一对应，加 1 个跨阶段评审 skill
 2. **SKILL.md 只包含通用方法论**：不在 SKILL.md 中写垂类专项内容
 3. **垂类知识通过 genres/ 按需加载**：每种内容类型一个文件
 4. **新能力通过 modules/ 插入**：不膨胀主文件
@@ -37,7 +37,9 @@ skills/
 
 ---
 
-## 四个 Skill
+## 4+1 个 Skill
+
+### 4 个创作 Skill（与 Pipeline 一一对应）
 
 | Skill 目录 | Pipeline 步骤 | 职责 |
 |------------|--------------|------|
@@ -46,7 +48,15 @@ skills/
 | `asset-generation` | Assets（素材） | 图片/视频生成、提示词工程 |
 | `content-assembly` | Assembly（合成） | 剪辑、字幕、配乐、最终输出 |
 
-**不允许在 `skills/` 下新建第 5 个顶层目录。** 所有新能力都必须归入这 4 个 skill 之一。
+### 1 个跨阶段评审 Skill
+
+| Skill 目录 | 类型 | 职责 |
+|------------|------|------|
+| `content-evaluator` | 跨阶段质量门禁 | 对各阶段产出进行结构化评审，输出评分与改进建议 |
+
+`content-evaluator` 不对应任何 pipeline 步骤，而是作为 quality gate 横跨所有阶段，可在任意步骤的产出上运行。
+
+**不允许在 `skills/` 下新建第 6 个顶层目录。** 除上述 4+1 个 skill 外，所有新能力都必须归入已有 skill 之一。
 
 ---
 
@@ -175,5 +185,8 @@ skills/
     SKILL.md
     references/douyin.md, xiaohongshu.md
     genres/comedy.md
+    modules/
+  content-evaluator/              # 跨阶段评审 skill
+    SKILL.md
     modules/
 ```
