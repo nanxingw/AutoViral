@@ -1161,6 +1161,12 @@ async function runEvaluation(workId: string, completedStep: string, nextStep?: s
 
       // Persist chat
       saveWorkChat(workId, { blocks: session.messageHistory }).catch(() => {});
+
+      // Auto-resume creator agent to continue with next step
+      if (nextStep) {
+        const continuePrompt = `评审已通过，pipeline 已自动推进到「${freshWork?.pipeline[nextStep]?.name ?? nextStep}」阶段。请继续执行该阶段的工作。`;
+        await wsBridge.sendMessage(workId, continuePrompt);
+      }
     } else {
       // FAIL — send feedback to creator agent
       session.messageHistory.push({
