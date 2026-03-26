@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { join, extname } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
-import { loadConfig, saveConfig, type Config } from "../config.js";
+import { loadConfig, saveConfig } from "../config.js";
 import {
   listWorks, getWork, createWork as storeCreateWork,
   updateWork as storeUpdateWork, deleteWork as storeDeleteWork,
@@ -14,7 +14,7 @@ import {
 import { MemoryClient } from "../memory.js";
 import type { WsBridge } from "../ws-bridge.js";
 import { getProvider, getDefaultProvider, listProviders } from "../providers/registry.js";
-import { listSharedAssets, getSharedAssetPath, CATEGORIES } from "../shared-assets.js";
+import { listSharedAssetsWithMeta, getSharedAssetPath, validateCategory, sanitizeFilename, saveSharedAsset, deleteSharedAsset, moveSharedAsset } from "../shared-assets.js";
 import { getLatestCreatorData, getCreatorHistory } from "../analytics-collector.js";
 import { syncStepConversation } from "../memory-sync.js";
 import { log, readLogs } from "../logger.js";
@@ -255,9 +255,40 @@ apiRoutes.get("/api/works/:id/assets/*", async (c) => {
   try {
     // nestedPath maps directly to workspace subdirectory (e.g. "images/xxx.png", "output/xxx.png")
     const filePath = getAssetPath(id, nestedPath);
+    const { stat } = await import("node:fs/promises");
+    const fileStat = await stat(filePath);
+    const fileSize = fileStat.size;
+    const mimeType = getMimeType(filePath);
+    const rangeHeader = c.req.header("range");
+
+    // Support HTTP Range requests (required for browser video/audio playback)
+    if (rangeHeader && (mimeType.startsWith("video/") || mimeType.startsWith("audio/"))) {
+      const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
+      if (match) {
+        const start = parseInt(match[1], 10);
+        const end = match[2] ? parseInt(match[2], 10) : fileSize - 1;
+        const chunkSize = end - start + 1;
+        const fullContent = await readFile(filePath);
+        const slice = fullContent.subarray(start, end + 1);
+        return new Response(slice, {
+          status: 206,
+          headers: {
+            "Content-Type": mimeType,
+            "Content-Range": `bytes ${start}-${end}/${fileSize}`,
+            "Content-Length": String(chunkSize),
+            "Accept-Ranges": "bytes",
+          },
+        });
+      }
+    }
+
     const content = await readFile(filePath);
     return new Response(content, {
-      headers: { "Content-Type": getMimeType(filePath) },
+      headers: {
+        "Content-Type": mimeType,
+        "Content-Length": String(fileSize),
+        "Accept-Ranges": "bytes",
+      },
     });
   } catch {
     return c.json({ error: "Asset not found" }, 404);
@@ -374,19 +405,84 @@ apiRoutes.get("/api/generate/providers", (c) => c.json(listProviders()));
 // Shared Assets
 // ---------------------------------------------------------------------------
 
-// GET /api/shared-assets
-apiRoutes.get("/api/shared-assets", async (c) => c.json(await listSharedAssets()));
+apiRoutes.get("/api/shared-assets", async (c) => {
+  const assets = await listSharedAssetsWithMeta();
+  return c.json(assets);
+});
 
-// GET /api/shared-assets/:category/:file — serve file with correct MIME type
 apiRoutes.get("/api/shared-assets/:category/:file", async (c) => {
-  const filePath = getSharedAssetPath(c.req.param("category"), c.req.param("file"));
+  const category = c.req.param("category");
+  const file = c.req.param("file");
   try {
+    validateCategory(category);
+    const filePath = getSharedAssetPath(category, file);
     const data = await readFile(filePath);
+    const mime = getMimeType(filePath);
+    const isMedia = mime.startsWith("image/") || mime.startsWith("audio/") || mime.startsWith("video/");
     return new Response(data, {
-      headers: { "Content-Type": getMimeType(filePath) },
+      headers: {
+        "Content-Type": mime,
+        "Content-Length": String(data.length),
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": isMedia ? "inline" : `attachment; filename="${encodeURIComponent(sanitizeFilename(file))}"`,
+      },
     });
+  } catch (e: any) {
+    if (e.code === "ENOENT") return c.json({ error: "File not found" }, 404);
+    if (e.message?.includes("Invalid")) return c.json({ error: e.message }, 400);
+    return c.json({ error: "Failed to read file" }, 500);
+  }
+});
+
+apiRoutes.post("/api/shared-assets/:category", async (c) => {
+  const category = c.req.param("category");
+  try {
+    validateCategory(category);
   } catch {
-    return c.json({ error: "File not found" }, 404);
+    return c.json({ error: `Invalid category: ${category}` }, 400);
+  }
+  try {
+    const body = await c.req.parseBody({ all: true });
+    const files = Array.isArray(body["file"]) ? body["file"] : body["file"] ? [body["file"]] : [];
+    const uploaded = [];
+    for (const f of files) {
+      if (!(f instanceof File)) continue;
+      if (f.size > 100 * 1024 * 1024) return c.json({ error: `File ${f.name} exceeds 100MB limit` }, 400);
+      const buf = Buffer.from(await f.arrayBuffer());
+      const asset = await saveSharedAsset(category, f.name, buf);
+      uploaded.push({ ...asset, url: `/api/shared-assets/${category}/${encodeURIComponent(asset.name)}` });
+    }
+    if (uploaded.length === 0) return c.json({ error: "No files provided" }, 400);
+    return c.json({ uploaded });
+  } catch (e: any) {
+    return c.json({ error: e.message ?? "Upload failed" }, 500);
+  }
+});
+
+apiRoutes.delete("/api/shared-assets/:category/:file", async (c) => {
+  const category = c.req.param("category");
+  const file = c.req.param("file");
+  try {
+    await deleteSharedAsset(category, file);
+    return c.json({ deleted: true });
+  } catch (e: any) {
+    if (e.code === "ENOENT") return c.json({ error: "File not found" }, 404);
+    if (e.message?.includes("Invalid")) return c.json({ error: e.message }, 400);
+    return c.json({ error: "Delete failed" }, 500);
+  }
+});
+
+apiRoutes.post("/api/shared-assets/move", async (c) => {
+  try {
+    const { from, to, file } = await c.req.json<{ from: string; to: string; file: string }>();
+    if (!from || !to || !file) return c.json({ error: "from, to, and file are required" }, 400);
+    await moveSharedAsset(from, to, file);
+    return c.json({ moved: true, from, to, file });
+  } catch (e: any) {
+    if (e.code === "ENOENT") return c.json({ error: "File not found" }, 404);
+    if (e.message?.includes("Invalid")) return c.json({ error: e.message }, 400);
+    if (e.message?.includes("already exists")) return c.json({ error: e.message }, 409);
+    return c.json({ error: e.message ?? "Move failed" }, 500);
   }
 });
 
@@ -806,6 +902,25 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
         `Execute the "${pipelineStep.name}" step of the pipeline.`,
         `Produce output appropriate for this step. Be thorough and creative.`,
       );
+      if (step === "assets" && work.type === "short-video") {
+        promptParts.push(
+          ``,
+          `## Asset Acquisition Strategy`,
+          `For this step, you should acquire video materials by **downloading real clips from the internet** using yt-dlp.`,
+          `Do NOT use AI generation APIs unless the user explicitly requests it.`,
+          ``,
+          `### Workflow:`,
+          `1. Read the storyboard/plan from the previous step to understand what clips are needed`,
+          `2. For each shot, construct search keywords based on the scene description`,
+          `3. Search YouTube/Bilibili: \`yt-dlp "ytsearch5:keywords" --get-title --get-url --get-duration\``,
+          `4. Download best quality: \`yt-dlp -f "bestvideo[height<=1080]+bestaudio/best" --merge-output-format mp4 -o "clips/clip-NN.mp4" "URL"\``,
+          `5. Trim to needed segment: \`ffmpeg -i clip.mp4 -ss START -to END -c copy -y trimmed.mp4\``,
+          `6. Verify audio exists: \`ffprobe -v error -show_entries stream=codec_type -of csv=p=0 clip.mp4 | grep audio\``,
+          ``,
+          `Read the SKILL.md section "素材获取方式：全网搜索下载" for full details.`,
+          `Save all clips to the work assets directory under clips/.`,
+        );
+      }
       if (step === "assembly" && work.type === "short-video") {
         promptParts.push(
           ``,
@@ -867,6 +982,12 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
             `- Add sound effects precisely (急刹车 at reversals, 静音0.3-0.5s before twists)`,
             `- For abstract: consider using silence instead of sound effects to maintain the "dead serious" tone`,
             `- Volume: dialogue 100%, BGM 15-25% during speech, 40-60% during visual-only`,
+            ``,
+            `### Available Scripts (MUST USE, do NOT write inline code):`,
+            `- **BGM search**: Read \`modules/music-search.md\` for yt-dlp search/download workflow`,
+            `- **Beat detection**: \`python3 ~/.claude/skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json\``,
+            `- **Beat-sync editing**: \`python3 ~/.claude/skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic\``,
+            `- Read \`modules/beat-sync.md\` for detailed usage of 3 styles (fast/smooth/dramatic)`,
           ].join("\n"),
         };
         if (comedyByStep[step]) {

@@ -119,12 +119,17 @@ export class WsBridge {
     let sharedAssetsInfo = "";
     try {
       const assets = await listSharedAssets();
+      const categoryLabels: Record<string, string> = {
+        characters: "人物", scenes: "场景", music: "音乐",
+        templates: "模板", branding: "品牌", general: "通用",
+      };
       const parts: string[] = [];
       for (const [category, files] of Object.entries(assets)) {
+        const label = categoryLabels[category] ?? category;
         if (files.length > 0) {
-          parts.push(`- ${category}: ${files.join(", ")}`);
+          parts.push(`- ${label}(${category}): ${files.join(", ")}`);
         } else {
-          parts.push(`- ${category}: (空)`);
+          parts.push(`- ${label}(${category}): (空)`);
         }
       }
       sharedAssetsInfo = parts.length > 0 ? parts.join("\n") : "暂无公共素材";
@@ -775,9 +780,29 @@ ${memoryContext}
 
   // ── Browser WebSocket handler ────────────────────────────────────────────
 
-  private handleBrowserConnection(workId: string, ws: WebSocket): void {
+  private async handleBrowserConnection(workId: string, ws: WebSocket): Promise<void> {
     const session = this.ensureSession(workId);
     session.browserSockets.add(ws);
+
+    // Load persisted chat history from disk if session has no in-memory history
+    if (session.messageHistory.length === 0) {
+      try {
+        const persisted = await loadWorkChat(workId);
+        if ((persisted as any)?.blocks && Array.isArray((persisted as any).blocks)) {
+          session.messageHistory = (persisted as any).blocks;
+        }
+      } catch { /* no persisted chat */ }
+    }
+
+    // Load persisted cliSessionId from work.yaml if not already set
+    if (!session.cliSessionId) {
+      try {
+        const work = await getWork(workId);
+        if (work?.cliSessionId) {
+          session.cliSessionId = work.cliSessionId;
+        }
+      } catch { /* ignore */ }
+    }
 
     ws.send(JSON.stringify({
       event: "session_state",
