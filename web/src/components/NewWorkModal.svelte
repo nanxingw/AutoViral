@@ -25,13 +25,11 @@
   let videoSource = $state("search");
   let videoSearchQuery = $state("");
   let topicHint = $state("");
-  let validationError = $state("");
 
   // Apply prefill when modal opens
   $effect(() => {
     if (open && prefillTitle) title = prefillTitle;
     if (open && prefillTopicHint) topicHint = prefillTopicHint;
-    if (open) validationError = "";
   });
 
   // Apply prefill when modal opens
@@ -46,11 +44,6 @@
   });
 
   function handleCreate() {
-    if (!title.trim() && !topicHint.trim()) {
-      validationError = lang === "zh" ? "请至少填写标题或创作方向" : "Please fill in a title or topic direction";
-      return;
-    }
-    validationError = "";
     onCreate({
       title,
       type: selectedType,
@@ -237,9 +230,6 @@
 
       <!-- Actions -->
       <div class="modal-actions">
-        {#if validationError}
-          <p class="validation-error">{validationError}</p>
-        {/if}
         <button class="btn-create" onclick={handleCreate}>{tt("create")}</button>
       </div>
     </div>
@@ -516,13 +506,6 @@
 
   .modal-actions {
     margin-top: 1.25rem;
-  }
-
-  .validation-error {
-    font-size: 0.75rem;
-    color: var(--spark-red, #FE2C55);
-    margin-bottom: 0.5rem;
-    text-align: center;
   }
 
   .btn-create {

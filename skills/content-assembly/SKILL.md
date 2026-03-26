@@ -13,8 +13,8 @@ description: Assemble generated assets into final publishable content using ffmp
 
 | 情绪 | 剪辑/文案要求 |
 |------|-------------|
-| **焦虑** | 节奏递增、信息密度高、文案直接抛出威胁 |
-| **愤怒** | 对比剪辑放大不合理、文案抛出开放问题引发评论 |
+| **焦虑** | 图文：严格按策划选定的路线（1/2/3）执行模板；视频：节奏递增、信息密度高、文案直接抛出威胁 |
+| **愤怒** | 图文：严格按策划选定的路线（1/2/3）执行模板；视频：对比剪辑放大不合理、文案抛出开放问题引发评论 |
 | **搞笑/抽象** | 节奏精确服务笑点（详见 `genres/comedy.md`）、**文案只写一句话，禁止剧透笑点** |
 | **羡慕** | 慢节奏沉浸、文案轻描淡写展示结果 |
 
@@ -94,6 +94,19 @@ curl http://localhost:3271/api/shared-assets
 ```
 
 等待用户确认后再继续执行。
+
+### 音频丢失防护（极重要）
+
+**每一步 ffmpeg 处理后，都必须验证输出文件包含音频流：**
+```bash
+ffprobe -v error -show_entries stream=codec_type -of csv=p=0 output.mp4 | grep audio
+```
+如果没有 `audio` 行，说明音频丢失了。常见原因：
+- 使用 `-map 0:v` 时忘记同时 `-map 0:a`（或用 `-map 0` 映射所有流）
+- 使用 `-vf` 视频滤镜时没有用 `-c:a copy` 保留音频
+- 多步骤处理时中间文件丢了音频（letterbox、字幕叠加等步骤特别容易出问题）
+
+**安全做法：** 在 pad/crop/overlay 等纯视频操作中始终加 `-c:a copy` 或 `-map 0:a`。
 
 ### 阶段二：执行组装
 
@@ -436,14 +449,14 @@ cp final.mp4 output/final.mp4
 ## 图文排版方案
 
 ### 图片顺序
-1. cover.png — 封面图 (3:4)
+1. cover.png — 封面文字卡片（已在素材生成阶段完成，纯色背景+大字）
 2. image-01.png — [描述]
 3. image-02.png — [描述]
 4. image-03.png — [描述]
 
 ### 封面处理
-- 添加标题文字叠加
-- 色调统一调整
+- 封面是文字卡片，通常不需要额外处理
+- 如需微调：可调整色调使其与内容图片色系统一
 
 ### 输出
 - 所有图片复制到 output/ 目录
@@ -454,14 +467,11 @@ cp final.mp4 output/final.mp4
 
 ### 阶段二：执行
 
-#### 可选：为图片添加文字叠加
+#### 封面图
 
-```bash
-# 在封面图上添加标题文字
-ffmpeg -i cover.png \
-  -vf "drawtext=text='10个提升生活品质的好物':fontsize=72:fontcolor=white:borderw=4:bordercolor=black@0.6:x=(w-text_w)/2:y=h*0.75:fontfile=/System/Library/Fonts/PingFang.ttc" \
-  -y output/cover.png
-```
+封面图是素材生成阶段已完成的文字卡片（纯色背景 + 大字），直接复制到 output/ 即可，无需再叠加文字。
+
+#### 可选：为内容图片添加文字叠加
 
 #### 可选：创建拼图
 
@@ -674,9 +684,31 @@ curl -X PUT http://localhost:3271/api/works/{workId} \
 
 ## 垂类专项指南
 
-执行前检查 `genres/` 目录。如果当前作品的内容类型有对应的 `genres/<type>.md` 文件，
-**必须读取并遵循其中的专项规则**——它们覆盖本文件中的通用指导。
+执行前检查 `genres/` 目录。如果当前作品的内容类型（如搞笑、美食、教育等）有对应的 `genres/<type>.md` 文件，**必须读取并遵循其中的专项规则**——特别是剪辑节奏、BGM 策略和音效使用方面，垂类文件的规则优先级高于本文件的通用规则。
 
 ## 扩展能力模块
 
-检查 `modules/` 目录，根据当前任务需要加载相关能力模块。
+本 skill 自带以下模块和脚本，**必须优先使用这些工具，不要自己写内联代码替代**：
+
+### 可用模块
+
+| 模块 | 文档路径 | 用途 |
+|------|---------|------|
+| 热门音乐搜索 | `modules/music-search.md` | 从 YouTube/B站搜索下载 BGM，按情绪/BPM 匹配 |
+| 卡点剪辑 | `modules/beat-sync.md` | 节拍检测 + 视频与音乐节拍对齐 |
+
+### 可用脚本
+
+| 脚本 | 路径 | 用途 | 用法示例 |
+|------|------|------|---------|
+| 节拍检测 | `scripts/beat-sync/detect_beats.py` | 分析音乐节拍、BPM、强拍 | `python3 skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json` |
+| 一键卡点 | `scripts/beat-sync/beat_sync_edit.py` | 自动按节拍切割视频+混入BGM | `python3 skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic` |
+
+**重要：当需要节拍分析或卡点剪辑时，必须调用上述脚本，禁止自己写 librosa/numpy 内联代码。**
+
+### 使用流程
+
+1. 需要 BGM → 先读 `modules/music-search.md`，用 yt-dlp 搜索下载
+2. 需要分析节拍 → 运行 `detect_beats.py` 获取 beats.json
+3. 需要卡点剪辑 → 运行 `beat_sync_edit.py` 一键完成
+4. 需要手动精调 → 参考 `modules/beat-sync.md` 中的手动流程

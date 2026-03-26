@@ -270,4 +270,6 @@ curl -X POST http://localhost:3271/api/works/{workId} \
 
 ## 扩展能力模块
 
-检查 `modules/` 目录，根据当前任务需要加载相关能力模块。
+检查 `modules/` 目录，根据当前任务需要加载相关能力模块。例如：
+- 需要采集达人数据时 → 读取 `modules/creator-analytics.md`
+- 需要分析竞品视频时 → 读取 `modules/video-understanding.md`，使用 `scripts/video-understanding/analyze_video.py` 抽帧分析
