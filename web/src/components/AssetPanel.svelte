@@ -8,11 +8,13 @@
     visible = false,
     refreshTrigger = 0,
     showOutput = false,
+    onEditAsset,
   }: {
     workId: string;
     visible: boolean;
     refreshTrigger: number;
     showOutput?: boolean;
+    onEditAsset?: (assetName: string, assetUrl: string) => void;
   } = $props();
 
   // When showOutput changes to true, switch to output tab
@@ -97,6 +99,10 @@
     }
   }
 
+  function handleEditAsset(file: AssetFile) {
+    onEditAsset?.(file.name, file.url);
+  }
+
   function handleDownloadAll() {
     // Open the download endpoint
     window.open(`/api/works/${encodeURIComponent(workId)}/assets/download`, "_blank");
@@ -159,10 +165,13 @@
             <div class="image-grid">
               {#each framesFiles as file}
                 {#if isImage(file.name)}
-                  <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
-                    <img src={file.url} alt={file.name} loading="lazy" />
-                    <span class="thumb-name">{file.name}</span>
-                  </button>
+                  <div class="asset-card">
+                    <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
+                      <img src={file.url} alt={file.name} loading="lazy" />
+                      <span class="thumb-name">{file.name}</span>
+                    </button>
+                    {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
+                  </div>
                 {:else}
                   <a class="file-item-sm" href={file.url} download={file.name}>
                     <span>{file.name}</span>
@@ -181,7 +190,10 @@
                   <div class="video-wrapper">
                     <video controls preload="metadata" src={file.url}></video>
                   </div>
-                  <span class="file-name">{file.name}</span>
+                  <div class="asset-row">
+                    <span class="file-name">{file.name}</span>
+                    {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
+                  </div>
                 </div>
               {:else}
                 <a class="file-item-sm" href={file.url} download={file.name}>
@@ -197,10 +209,13 @@
             <div class="image-grid">
               {#each imagesFiles as file}
                 {#if isImage(file.name)}
-                  <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
-                    <img src={file.url} alt={file.name} loading="lazy" />
-                    <span class="thumb-name">{file.name}</span>
-                  </button>
+                  <div class="asset-card">
+                    <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
+                      <img src={file.url} alt={file.name} loading="lazy" />
+                      <span class="thumb-name">{file.name}</span>
+                    </button>
+                    {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
+                  </div>
                 {:else}
                   <a class="file-item-sm" href={file.url} download={file.name}>
                     <span>{file.name}</span>
@@ -273,16 +288,22 @@
         {:else}
           {#each outputFiles as file}
             {#if isImage(file.name)}
-              <button class="thumb-single" onclick={() => { lightboxSrc = file.url; }}>
-                <img src={file.url} alt={file.name} loading="lazy" />
-                <span class="thumb-name">{file.name}</span>
-              </button>
+              <div class="asset-card">
+                <button class="thumb-single" onclick={() => { lightboxSrc = file.url; }}>
+                  <img src={file.url} alt={file.name} loading="lazy" />
+                  <span class="thumb-name">{file.name}</span>
+                </button>
+                {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
+              </div>
             {:else if isVideo(file.name)}
               <div class="video-item">
                 <div class="video-wrapper">
                   <video controls preload="metadata" src={file.url}></video>
                 </div>
-                <span class="file-name">{file.name}</span>
+                <div class="asset-row">
+                  <span class="file-name">{file.name}</span>
+                  {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
+                </div>
               </div>
             {:else if isMarkdown(file.name) || isText(file.name)}
               <button class="md-item" onclick={() => openMdPreview(file)}>
@@ -577,6 +598,43 @@
   }
   .file-item:hover { border-color: var(--accent); }
   .dl-icon { color: var(--accent); display: flex; }
+
+  /* Asset card with edit button */
+  .asset-card {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .asset-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.3rem;
+  }
+
+  .edit-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.15rem;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.15rem 0.35rem;
+    font-size: 0.6rem;
+    font-family: inherit;
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.12s;
+    white-space: nowrap;
+    margin-top: 0.15rem;
+    align-self: stretch;
+  }
+
+  .edit-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
 
   /* Footer */
   .panel-footer {

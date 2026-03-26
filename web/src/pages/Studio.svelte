@@ -41,6 +41,17 @@
   let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 
   // --- Attachment system ---
+  let panelExpanded = $state(false);
+
+  function handleEditAsset(assetName: string, assetUrl: string) {
+    const ext = assetName.split(".").pop()?.toLowerCase() ?? "";
+    const isImg = ["png","jpg","jpeg","gif","webp","svg"].includes(ext);
+    const isVid = ["mp4","mov","webm"].includes(ext);
+    const type = isImg ? "图片" : isVid ? "视频" : "文件";
+    inputText = `请修改这个${type}素材「${assetName}」（${assetUrl}）：\n`;
+    inputEl?.focus();
+  }
+
   interface ChatAttachment {
     name: string;
     url: string;
@@ -603,8 +614,15 @@
     </div>
 
     <!-- Right: Assets -->
-    <div class="panel-right">
-      <AssetPanel {workId} visible={true} refreshTrigger={assetRefresh} showOutput={showOutputTab} />
+    <div class="panel-right" class:panel-expanded={panelExpanded}>
+      <button class="panel-expand-toggle" onclick={() => panelExpanded = !panelExpanded} title={panelExpanded ? "收起面板" : "展开面板"}>
+        {#if panelExpanded}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>
+        {:else}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg>
+        {/if}
+      </button>
+      <AssetPanel {workId} visible={true} refreshTrigger={assetRefresh} showOutput={showOutputTab} onEditAsset={handleEditAsset} />
     </div>
   </div>
 </div>
@@ -766,6 +784,41 @@
     width: 320px;
     flex-shrink: 0;
     overflow: hidden;
+    position: relative;
+    transition: width 0.25s ease;
+  }
+
+  .panel-right.panel-expanded {
+    width: 520px;
+  }
+
+  .panel-expand-toggle {
+    position: absolute;
+    left: -16px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 10;
+    width: 16px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-right: none;
+    border-radius: 6px 0 0 6px;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.15s;
+    padding: 0;
+    opacity: 0.6;
+  }
+
+  .panel-expand-toggle:hover {
+    color: var(--text);
+    background: var(--accent-soft, rgba(254, 44, 85, 0.08));
+    border-color: var(--accent, #FE2C55);
+    opacity: 1;
   }
 
   /* Stream area */
@@ -1100,6 +1153,7 @@
   /* Responsive */
   @media (max-width: 1024px) {
     .panel-right { display: none; }
+    .panel-expand-toggle { display: none; }
   }
   @media (max-width: 768px) {
     .panel-left { display: none; }
