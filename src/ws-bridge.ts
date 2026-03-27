@@ -509,7 +509,7 @@ ${memoryContext}
     }
 
     const proc = spawn("claude", args, {
-      cwd: homedir(),
+      cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,

@@ -115,6 +115,16 @@
     return p;
   }
 
+  function categoryLabel(cat: string): string {
+    const map: Record<string, string> = {
+      anxiety: tt("categoryAnxiety"),
+      conflict: tt("categoryConflict"),
+      comedy: tt("categoryComedy"),
+      envy: tt("categoryEnvy"),
+    };
+    return map[cat] ?? cat;
+  }
+
   const gradients = [
     "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
     "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
@@ -488,6 +498,15 @@
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
               </button>
             </div>
+            <div class="card-tags">
+              <span class="card-tag">{typeLabel(w.type)}</span>
+              {#if w.contentCategory}
+                <span class="card-tag">{categoryLabel(w.contentCategory)}</span>
+              {/if}
+              {#each w.platforms as p}
+                <span class="card-tag">{platformLabel(p)}</span>
+              {/each}
+            </div>
             {#if isPublished(w.status)}
               {@const stats = getWorkStats(w.id)}
               <div class="card-stats">
@@ -504,10 +523,6 @@
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="8.5" cy="7" r="4"/><line x1="20" y1="8" x2="20" y2="14"/><line x1="23" y1="11" x2="17" y2="11"/></svg>
                   +{formatNum(stats.newFollowers)}
                 </span>
-              </div>
-            {:else}
-              <div class="card-meta">
-                <span class="type-badge">{typeLabel(w.type)}</span>
               </div>
             {/if}
             <span class="card-date">{new Date(w.updatedAt).toLocaleDateString()}</span>
@@ -986,6 +1001,23 @@
 
   .delete-btn:hover {
     color: var(--error);
+  }
+
+  .card-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+    margin-top: 0.15rem;
+  }
+
+  .card-tag {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: var(--bg-elevated);
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    line-height: 1.4;
   }
 
   .card-meta {

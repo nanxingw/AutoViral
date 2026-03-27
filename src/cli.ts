@@ -53,7 +53,13 @@ export function runCLI(): void {
         const fs = await import("node:fs");
         const logFd = fs.openSync(LOG_FILE, "a");
         const entryScript = process.argv[1];
-        const child = spawn(process.execPath, [entryScript, "start", "--foreground"], {
+        // If running under tsx (or ts file), use npx tsx to fork; otherwise use node directly
+        const isTsEntry = entryScript.endsWith(".ts");
+        const forkCmd = isTsEntry ? "npx" : process.execPath;
+        const forkArgs = isTsEntry
+          ? ["tsx", entryScript, "start", "--foreground"]
+          : [entryScript, "start", "--foreground"];
+        const child = spawn(forkCmd, forkArgs, {
           detached: true,
           stdio: ["ignore", logFd, logFd],
           env: { ...process.env, __AUTOVIRAL_DAEMON: "1" },

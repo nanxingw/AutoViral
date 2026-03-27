@@ -21,17 +21,15 @@
 
   let title = $state("");
   let selectedType = $state("short-video");
-  let selectedCategory = $state("info");
+  let selectedCategory = $state("anxiety");
   let videoSource = $state("search");
   let videoSearchQuery = $state("");
   let topicHint = $state("");
-  let validationError = $state("");
 
   // Apply prefill when modal opens
   $effect(() => {
     if (open && prefillTitle) title = prefillTitle;
     if (open && prefillTopicHint) topicHint = prefillTopicHint;
-    if (open) validationError = "";
   });
 
   onMount(() => {
@@ -40,11 +38,6 @@
   });
 
   function handleCreate() {
-    if (!title.trim() && !topicHint.trim()) {
-      validationError = lang === "zh" ? "请至少填写标题或创作方向" : "Please fill in a title or topic direction";
-      return;
-    }
-    validationError = "";
     onCreate({
       title,
       type: selectedType,
@@ -55,7 +48,7 @@
     });
     title = "";
     selectedType = "short-video";
-    selectedCategory = "info";
+    selectedCategory = "anxiety";
     videoSource = "search";
     videoSearchQuery = "";
     topicHint = "";
@@ -162,25 +155,25 @@
         <div class="category-grid">
           <button
             class="category-card"
-            class:selected={selectedCategory === "info"}
-            onclick={() => selectedCategory = "info"}
+            class:selected={selectedCategory === "anxiety"}
+            onclick={() => selectedCategory = "anxiety"}
           >
             <span class="category-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
             </span>
-            <span class="category-name">{tt("categoryInfo")}</span>
-            <span class="category-desc">{tt("categoryInfoDesc")}</span>
+            <span class="category-name">{tt("categoryAnxiety")}</span>
+            <span class="category-desc">{tt("categoryAnxietyDesc")}</span>
           </button>
           <button
             class="category-card"
-            class:selected={selectedCategory === "beauty"}
-            onclick={() => selectedCategory = "beauty"}
+            class:selected={selectedCategory === "conflict"}
+            onclick={() => selectedCategory = "conflict"}
           >
             <span class="category-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             </span>
-            <span class="category-name">{tt("categoryBeauty")}</span>
-            <span class="category-desc">{tt("categoryBeautyDesc")}</span>
+            <span class="category-name">{tt("categoryConflict")}</span>
+            <span class="category-desc">{tt("categoryConflictDesc")}</span>
           </button>
           <button
             class="category-card"
@@ -192,6 +185,17 @@
             </span>
             <span class="category-name">{tt("categoryComedy")}</span>
             <span class="category-desc">{tt("categoryComedyDesc")}</span>
+          </button>
+          <button
+            class="category-card"
+            class:selected={selectedCategory === "envy"}
+            onclick={() => selectedCategory = "envy"}
+          >
+            <span class="category-icon">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            </span>
+            <span class="category-name">{tt("categoryEnvy")}</span>
+            <span class="category-desc">{tt("categoryEnvyDesc")}</span>
           </button>
         </div>
       </div>
@@ -220,9 +224,6 @@
 
       <!-- Actions -->
       <div class="modal-actions">
-        {#if validationError}
-          <p class="validation-error">{validationError}</p>
-        {/if}
         <button class="btn-create" onclick={handleCreate}>{tt("create")}</button>
       </div>
     </div>
@@ -403,7 +404,7 @@
   /* Category cards */
   .category-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
+    grid-template-columns: 1fr 1fr;
     gap: 0.5rem;
   }
 
@@ -499,13 +500,6 @@
 
   .modal-actions {
     margin-top: 1.25rem;
-  }
-
-  .validation-error {
-    font-size: 0.75rem;
-    color: var(--spark-red, #FE2C55);
-    margin-bottom: 0.5rem;
-    text-align: center;
   }
 
   .btn-create {

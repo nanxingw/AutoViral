@@ -253,9 +253,34 @@ curl -X POST http://localhost:3271/api/generate/video \
 
 ## 工作流程：图文
 
-### 分步流程
+### 封面图（文字卡片）
 
-针对内容方案中的每张图片：
+封面图**不需要 AI 生图**，而是用 ffmpeg 生成纯色背景 + 大号白色粗体文字的卡片。
+这是小红书/抖音图文的主流封面风格。
+
+**1. 从内容方案中提取封面信息：**
+- 封面文案（1-3 行短句）
+- 背景色（莫兰迪色系或深色系）
+- 装饰元素（如引号 "）
+
+**2. 用 ffmpeg 生成文字卡片封面：**
+```bash
+# 生成纯色背景文字卡片封面
+ffmpeg -f lavfi -i "color=c=0x8B7D6B:s=1080x1440:d=1" \
+  -vf "drawtext=text='封面文案第一行':fontsize=96:fontcolor=white:fontfile=/System/Library/Fonts/PingFang.ttc:x=80:y=h*0.38,\
+drawtext=text='第二行文字':fontsize=96:fontcolor=white:fontfile=/System/Library/Fonts/PingFang.ttc:x=80:y=h*0.38+120,\
+drawtext=text='第三行文字':fontsize=96:fontcolor=white:fontfile=/System/Library/Fonts/PingFang.ttc:x=80:y=h*0.38+240,\
+drawtext=text='❝':fontsize=72:fontcolor=white@0.4:fontfile=/System/Library/Fonts/PingFang.ttc:x=80:y=h*0.22" \
+  -frames:v 1 -y {workDir}/assets/images/cover.png
+```
+
+> 颜色参考：莫兰迪棕 `0x8B7D6B`、雾蓝 `0x6B7D8B`、暖灰 `0x7D7B78`、深墨绿 `0x2F4F4F`、烟粉 `0x8B6B7D`
+
+**3. 不需要用户确认**——封面是文字卡片，生成成本为零。
+
+### 内容图片
+
+针对方案中的每张内容图片（非封面）：
 
 **1. 通知用户即将生成的内容：**
 ```
@@ -287,7 +312,7 @@ curl -X POST http://localhost:3271/api/generate/image \
 ```
 ## 生成进度
 
-- [x] 封面图: ✓
+- [x] 封面图(文字卡片): ✓
 - [x] 图片 01: ✓
 - [ ] 图片 02: ⏳
 - [ ] 图片 03: —
@@ -615,11 +640,74 @@ Agent: [调用 API]
       clip-02.mp4
       ...
     images/          (用于图文内容)
-      cover.png
+      cover.png      (文字卡片，ffmpeg 生成，非 AI 生图)
       image-01.png
       image-02.png
       ...
 ```
+
+## 素材获取方式：全网搜索下载
+
+当不使用 AI 生成，而是从互联网下载真实素材时，使用以下工作流：
+
+### 视频素材下载（yt-dlp）
+
+```bash
+# 1. 根据分镜脚本的场景描述，构造搜索关键词
+# 关键词要具体：主体 + 动作 + 风格
+# 例如："epic water drinking slow motion cinematic"
+
+# 2. 搜索并预览（不下载）
+yt-dlp "ytsearch5:epic water drinking slow motion" --get-title --get-url --get-duration
+
+# 3. 下载最佳质量视频（必须带音频）
+yt-dlp -f "bestvideo[height<=1080]+bestaudio/best" --merge-output-format mp4 \
+  -o "clips/clip-01.mp4" "VIDEO_URL"
+
+# 4. 裁切需要的片段
+ffmpeg -i clips/clip-01.mp4 -ss 5 -to 10 -c copy -y clips/clip-01-trimmed.mp4
+```
+
+### 搜索关键词构造规则
+
+根据分镜脚本中每个镜头的描述，按五维约束框架构造关键词：
+
+| 分镜描述 | 搜索关键词 |
+|---------|-----------|
+| 主角认真地拿起水杯 | `person picking up glass water serious cinematic` |
+| 慢镜头倒水特写 | `pouring water slow motion close up cinematic` |
+| 史诗级仰拍喝水 | `drinking water low angle epic cinematic` |
+| 满足地放下杯子 | `person putting down glass satisfied reaction` |
+
+### 下载后必做检查
+
+```bash
+# 验证视频有音频轨
+ffprobe -v error -show_entries stream=codec_type -of csv=p=0 clip-01.mp4 | grep audio
+
+# 检查分辨率
+ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 clip-01.mp4
+```
+
+### 素材管理
+
+- 所有下载的素材保存到作品的 `assets/clips/` 目录
+- 使用 API 上传：`curl -X POST http://localhost:3271/api/works/{workId}/assets -F "file=@clip-01.mp4" -F "path=clips/clip-01.mp4"`
+- 或直接保存到作品目录（通过 API 获取路径）
+
+### 进度跟踪
+
+```
+## 素材下载进度
+
+- [x] 镜头 01: 搜索 ✓ | 下载 ✓ | 裁切 ✓
+- [ ] 镜头 02: 搜索 ⏳ | 下载 — | 裁切 —
+- [ ] 镜头 03: 搜索 — | 下载 — | 裁切 —
+
+已完成: 1/3 镜头
+```
+
+---
 
 ## 完成
 

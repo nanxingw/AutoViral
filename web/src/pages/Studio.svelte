@@ -23,7 +23,7 @@
     evalData?: { type: string; step?: string; attempt?: number; verdict?: string; scores?: Record<string, number>; issues?: any[] };
   }
 
-  let { workId, onBack }: { workId: string; onBack: () => void } = $props();
+  let { workId, onBack, initialPrompt = "" }: { workId: string; onBack: () => void; initialPrompt?: string } = $props();
 
   let lang = $state(getLanguage());
   function tt(key: string): string { void lang; return t(key); }
@@ -40,6 +40,68 @@
   let wsConn: { send: (text: string) => void; close: () => void } | null = null;
   let showNextStep = $state(false);
   let aborted = $state(false);
+  let showTypeDropdown = $state(false);
+  let showCategoryDropdown = $state(false);
+
+  const pipelineTemplates: Record<string, Record<string, string>> = {
+    "short-video": { research: "话题调研", plan: "分镜规划", assembly: "视频合成" },
+    "image-text": { research: "话题调研", plan: "内容规划", assets: "图片生成", assembly: "图文排版" },
+  };
+
+  async function switchType(newType: string) {
+    if (!work || work.type === newType) return;
+    // Abort any running task
+    if (streaming) handleAbort();
+    // Rebuild pipeline: keep research status, reset everything else
+    const researchStatus = work.pipeline["research"]?.status ?? "pending";
+    const newPipeline: Record<string, any> = {};
+    for (const [key, name] of Object.entries(pipelineTemplates[newType] ?? {})) {
+      newPipeline[key] = { name, status: key === "research" ? researchStatus : "pending" };
+    }
+    work.type = newType as any;
+    work.pipeline = newPipeline;
+    work = { ...work };
+    await fetch(`/api/works/${encodeURIComponent(workId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: newType, pipeline: newPipeline }),
+    }).catch(() => {});
+    // Auto-start from plan if research is done
+    if (researchStatus === "done") {
+      // Reconnect WS if needed
+      if (!wsConn) wsConn = createWorkWs(workId, wsHandler);
+      setTimeout(() => triggerStep("plan"), 300);
+    }
+  }
+
+  async function switchCategory(newCat: string) {
+    if (!work || work.contentCategory === newCat) return;
+    // Abort any running task
+    if (streaming) handleAbort();
+    // Reset pipeline from plan onwards
+    const keys = Object.keys(work.pipeline);
+    for (const key of keys) {
+      if (key !== "research") {
+        work.pipeline[key].status = "pending";
+      }
+    }
+    work.contentCategory = newCat as any;
+    work = { ...work };
+    const pipelineUpdate: Record<string, any> = {};
+    for (const key of keys) {
+      if (key !== "research") pipelineUpdate[key] = { status: "pending" };
+    }
+    await fetch(`/api/works/${encodeURIComponent(workId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contentCategory: newCat, pipeline: pipelineUpdate }),
+    }).catch(() => {});
+    // Auto-start from plan if research is done
+    if (work.pipeline["research"]?.status === "done") {
+      if (!wsConn) wsConn = createWorkWs(workId, wsHandler);
+      setTimeout(() => triggerStep("plan"), 300);
+    }
+  }
   let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 
   // --- Evaluation state ---
@@ -135,14 +197,15 @@
   let showOutputTab = $state(false);
 
   // Auto-advance to next step when current step completes
+  // Auto-advance: immediately start next step when current one completes
   $effect(() => {
-    if (showNextStep && !streaming && work?.pipeline) {
+    if (showNextStep && !streaming && !aborted && work?.pipeline) {
       const keys = Object.keys(work.pipeline);
       const currentIdx = keys.indexOf(currentStep);
       if (currentIdx >= 0 && currentIdx < keys.length - 1) {
         const nextKey = keys[currentIdx + 1];
         if (work.pipeline[nextKey]?.status === "pending") {
-          setTimeout(() => triggerStep(nextKey), 800);
+          triggerStep(nextKey);
         }
       }
     }
@@ -226,16 +289,23 @@
   }
 
   function handleAbort() {
+    // Kill server-side CLI process
+    fetch(`/api/works/${encodeURIComponent(workId)}/abort`, { method: "POST" }).catch(() => {});
     wsConn?.close();
     wsConn = null;
     streaming = false;
     activeToolName = "";
     showNextStep = false;
     aborted = true;
-    // Update pipeline step status to aborted
+    // Update pipeline step status to aborted (client + server)
     if (work && currentStep && work.pipeline[currentStep]) {
       work.pipeline[currentStep].status = "aborted";
       work = { ...work };
+      fetch(`/api/works/${encodeURIComponent(workId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pipeline: { [currentStep]: { status: "aborted" } } }),
+      }).catch(() => {});
     }
     streamBlocks = [...streamBlocks, { type: "step_divider", text: tt("abortedMessage") }];
     scrollToBottom();
@@ -464,7 +534,20 @@
 
     wsConn = createWorkWs(workId, wsHandler);
 
-    // Don't auto-start any task when opening a draft — user decides when to start
+    // If we have an initial prompt (from new work creation), send it to start the pipeline
+    if (initialPrompt && work?.pipeline) {
+      const firstKey = Object.keys(work.pipeline)[0];
+      if (firstKey) {
+        currentStep = firstKey;
+        streamBlocks = [
+          { type: "user", text: initialPrompt },
+          { type: "step_divider", text: work.pipeline[firstKey]?.name ?? firstKey },
+        ];
+        streaming = true;
+        // Send via HTTP step trigger (creates CLI session + sends prompt)
+        fetch(`/api/works/${encodeURIComponent(workId)}/step/${encodeURIComponent(firstKey)}`, { method: "POST" }).catch(() => {});
+      }
+    }
 
     return () => {
       unsub();
@@ -481,12 +564,16 @@
   });
 </script>
 
+<svelte:window on:pointerdown={() => { showTypeDropdown = false; showCategoryDropdown = false; }} />
 <div class="studio-layout">
   <div class="studio-header">
     <div class="header-left-group">
       <button class="back-btn" onclick={() => {
-        // Leaving aborts any running task
-        if (streaming) handleAbort();
+        if (streaming) {
+          const msg = lang === "zh" ? "正在生成中，退出将中止当前任务。确认退出？" : "Content is being generated. Leaving will abort the task. Continue?";
+          if (!confirm(msg)) return;
+          handleAbort();
+        }
         onBack();
       }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
@@ -510,9 +597,39 @@
         onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLElement).blur(); } }}
       >{work?.title ?? tt("studio")}</h2>
       {#if work}
-        <span class="header-tag">{work.type === "short-video" ? tt("shortVideo") : tt("imageText")}</span>
+        <div class="tag-dropdown-wrap">
+          <button class="header-tag clickable" onclick={() => showTypeDropdown = !showTypeDropdown}>
+            {work.type === "short-video" ? tt("shortVideo") : tt("imageText")}
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+          </button>
+          {#if showTypeDropdown}
+            <div class="tag-dropdown">
+              {#each [["short-video", tt("shortVideo")], ["image-text", tt("imageText")]] as [val, label]}
+                <button class="tag-option" class:active={work.type === val} onclick={() => {
+                  switchType(val);
+                  showTypeDropdown = false;
+                }}>{label}</button>
+              {/each}
+            </div>
+          {/if}
+        </div>
         {#if work.contentCategory}
-          <span class="header-tag">{work.contentCategory === "comedy" ? tt("categoryComedy") : work.contentCategory === "beauty" ? tt("categoryBeauty") : tt("categoryInfo")}</span>
+          <div class="tag-dropdown-wrap">
+            <button class="header-tag clickable" onclick={() => showCategoryDropdown = !showCategoryDropdown}>
+              {work.contentCategory === "anxiety" ? tt("categoryAnxiety") : work.contentCategory === "conflict" ? tt("categoryConflict") : work.contentCategory === "comedy" ? tt("categoryComedy") : work.contentCategory === "envy" ? tt("categoryEnvy") : work.contentCategory}
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
+            </button>
+            {#if showCategoryDropdown}
+              <div class="tag-dropdown">
+                {#each [["anxiety", tt("categoryAnxiety")], ["conflict", tt("categoryConflict")], ["comedy", tt("categoryComedy")], ["envy", tt("categoryEnvy")]] as [val, label]}
+                  <button class="tag-option" class:active={work.contentCategory === val} onclick={() => {
+                    switchCategory(val);
+                    showCategoryDropdown = false;
+                  }}>{label}</button>
+                {/each}
+              </div>
+            {/if}
+          </div>
         {/if}
       {/if}
     </div>
@@ -645,13 +762,13 @@
             <div class="tool-spinner"></div>
             <span class="streaming-label">{toolDisplayName(activeToolName)}</span>
           </div>
-        {/if}
-
-        {#if streamBlocks.length === 0 && !streaming}
-          <div class="empty-state">
-            <p>{lang === "zh" ? "你想如何修改方案？" : "How would you like to modify the plan?"}</p>
+        {:else if streaming && !activeToolName}
+          <div class="streaming-indicator thinking-active">
+            <div class="thinking-spinner"></div>
+            <span class="streaming-label">{lang === "zh" ? "思考中..." : "Thinking..."}</span>
           </div>
         {/if}
+
       </div>
 
       {#if evalBlocked}
@@ -840,6 +957,57 @@
     white-space: nowrap;
     flex-shrink: 0;
   }
+
+  .header-tag.clickable {
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 0.2rem;
+    background: none;
+    font-family: inherit;
+    transition: all 0.12s;
+  }
+  .header-tag.clickable:hover {
+    border-color: var(--text-muted);
+    color: var(--text);
+  }
+
+  .tag-dropdown-wrap {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .tag-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.15));
+    z-index: 100;
+    min-width: 100px;
+    padding: 0.2rem;
+    animation: modalIn 0.1s ease;
+  }
+
+  .tag-option {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.72rem;
+    font-weight: 500;
+    padding: 0.35rem 0.6rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.1s;
+  }
+  .tag-option:hover { background: rgba(148,163,184,0.08); color: var(--text); }
+  .tag-option.active { color: var(--spark-red, #FE2C55); font-weight: 650; }
 
   .header-controls {
     display: flex;
@@ -1074,6 +1242,26 @@
     background: rgba(245, 158, 11, 0.06);
     border-radius: 10px;
     border: 1px solid rgba(245, 158, 11, 0.12);
+  }
+  .streaming-indicator.thinking-active {
+    gap: 0.5rem;
+    padding: 0.6rem 0.85rem;
+    background: rgba(254, 44, 85, 0.04);
+    border-radius: 10px;
+    border: 1px solid rgba(254, 44, 85, 0.08);
+  }
+  .streaming-indicator.thinking-active .streaming-label {
+    color: var(--spark-red, #FE2C55);
+    opacity: 0.7;
+  }
+  .thinking-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(254, 44, 85, 0.15);
+    border-top-color: var(--spark-red, #FE2C55);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
   }
   .tool-spinner {
     width: 14px;

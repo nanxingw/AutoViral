@@ -167,16 +167,32 @@
     return "other";
   }
 
-  // Only the final video goes in output tab; everything else is assets
+  // Output tab: final video OR images (output/ dir first, then assets/images/ for image-text content)
   let finalVideo = $derived(files.find(f => isFinalVideo(f.path)));
+  let outputDirImages = $derived(files.filter(f => f.group === "output" && isImage(f.name)));
+  let galleryImages = $derived(files.filter(f => f.group === "images" && isImage(f.name)));
+  // Use output/ images if available, otherwise fall back to assets/images/ for image-text works
+  let outputImages = $derived(outputDirImages.length > 0 ? outputDirImages : (finalVideo ? [] : galleryImages));
   // Look for copytext: first in output/ dir, then any .md/.txt with "copy"/"caption"/"文案" in name, then any .md in output group
   let outputCopytextFile = $derived(
     files.find(f => f.group === "output" && (isMarkdown(f.name) || isText(f.name))) ??
     files.find(f => (isMarkdown(f.name) || isText(f.name)) && /copy|caption|文案|publish/i.test(f.name)) ??
     files.find(f => isMarkdown(f.name) && f.group === "other")
   );
-  let assetFiles = $derived(files.filter(f => f !== finalVideo && f !== outputCopytextFile));
-  let outputFiles = $derived(finalVideo ? [finalVideo] : []);
+  let hasOutput = $derived(!!finalVideo || outputImages.length > 0);
+  let outputImageSet = $derived(new Set(outputImages));
+  let assetFiles = $derived(files.filter(f => f !== finalVideo && f !== outputCopytextFile && !outputImageSet.has(f)));
+  let outputFiles = $derived(finalVideo ? [finalVideo] : outputImages);
+  let carouselIdx = $state(0);
+  // Reset carousel only when the image count actually changes
+  let prevImageCount = 0;
+  $effect(() => {
+    const len = outputImages.length;
+    if (len !== prevImageCount) {
+      prevImageCount = len;
+      if (carouselIdx >= len) carouselIdx = Math.max(0, len - 1);
+    }
+  });
 
   let framesFiles = $derived(assetFiles.filter(f => f.group === "frames"));
   let clipsFiles = $derived(assetFiles.filter(f => f.group === "clips"));
@@ -391,8 +407,8 @@
         {/if}
 
       {:else}
-        <!-- Output section: final video + copytext -->
-        {#if !finalVideo}
+        <!-- Output section: final video or images + copytext -->
+        {#if !hasOutput}
           <div class="empty-state">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
               <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
@@ -403,9 +419,31 @@
           </div>
         {:else}
           <div class="output-showcase">
-            <div class="video-wrapper">
-              <video controls preload="metadata" src={finalVideo.url}></video>
-            </div>
+            {#if finalVideo}
+              <div class="video-wrapper">
+                <video controls preload="metadata" src={finalVideo.url}></video>
+              </div>
+            {/if}
+            {#if outputImages.length > 0}
+              <div class="carousel">
+                <div class="carousel-viewport">
+                  <button class="carousel-img" onclick={() => { lightboxSrc = outputImages[carouselIdx].url; }}>
+                    <img src={outputImages[carouselIdx].url} alt={outputImages[carouselIdx].name} />
+                  </button>
+                </div>
+                {#if outputImages.length > 1}
+                  <div class="carousel-controls">
+                    <button class="carousel-arrow" disabled={carouselIdx <= 0} onclick={() => carouselIdx--}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
+                    </button>
+                    <span class="carousel-counter">{carouselIdx + 1} / {outputImages.length}</span>
+                    <button class="carousel-arrow" disabled={carouselIdx >= outputImages.length - 1} onclick={() => carouselIdx++}>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+                    </button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
             {#if outputCopytext}
               {@const allPlatforms = parseCopytextMulti(outputCopytext)}
               {@const currentCopy = allPlatforms.find(p => p.platform === copyPlatform) ?? allPlatforms[0]}
@@ -900,6 +938,70 @@
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
+  }
+
+  .carousel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .carousel-viewport {
+    /* Fixed iPhone 14 ratio, full width matching copytext card below */
+    width: 100%;
+    height: 480px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .carousel-img {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+  }
+  .carousel-img img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: block;
+  }
+  .carousel-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+  }
+  .carousel-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    width: 28px;
+    height: 28px;
+    cursor: pointer;
+    transition: all 0.12s;
+    padding: 0;
+  }
+  .carousel-arrow:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
+  .carousel-arrow:disabled { opacity: 0.25; cursor: not-allowed; }
+  .carousel-counter {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 3em;
+    text-align: center;
   }
 
   /* Platform filter */

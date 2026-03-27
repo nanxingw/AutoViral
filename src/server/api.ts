@@ -943,6 +943,94 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
         `- Video files MUST have audio. Always use yt-dlp with audio merging, never plain curl/wget.`,
         `- Files must be actually downloaded and saved as assets so the inline player can play them.`,
       );
+    } else if (step === "research" && work.contentCategory && work.contentCategory !== "comedy") {
+      const emotionEffect: Record<string, string> = {
+        anxiety: "看完之后感到焦虑、危机感、害怕自己落后或错过",
+        conflict: "看完之后感到愤怒、不公、想站队、想在评论区吵架",
+        envy: "看完之后感到羡慕、向往、想收藏、想拥有同样的生活",
+      };
+      const routeTemplates: Record<string, string> = {
+        anxiety: [
+          `路线1 观点输出型：文字卡片封面（≤20字，一句极端观点）+ 文案（第一人称+身边案例+绝对表态）`,
+          `路线2 对话截图型：微信对话截图封面 + 一句话文案`,
+          `路线3 清单盘点型：极端判断句封面 + 清单图 + 文案`,
+        ].join("\n"),
+        conflict: [
+          `路线1 观点输出型：文字卡片封面（≤20字，一句极端观点）+ 文案（第一人称+身边案例+绝对表态）`,
+          `路线2 对话截图型：微信对话截图封面 + 一句话文案`,
+          `路线3 清单盘点型：极端判断句封面 + 清单图 + 文案`,
+        ].join("\n"),
+        envy: [
+          `路线1 反差跃迁型：before/after 两张搜图 + 文案强调路径短`,
+          `路线2 关系羡慕型：1-5张甜蜜瞬间搜图（风格统一）+ 一句话文案`,
+          `路线3 隐性阶层信号型：1-5张日常搜图（细节暗示阶层）+ 轻描淡写文案`,
+        ].join("\n"),
+      };
+      const cat = work.contentCategory as string;
+      // Load user interests and competitors for topic relevance
+      const config = await loadConfig();
+      const userInterests = (config.interests ?? []) as string[];
+      const douyinUrl = (config as any).douyinUrl ?? "";
+      const interestClause = userInterests.length > 0
+        ? `\n## 选题领域\n\n用户关注的领域：${userInterests.join("、")}。选题必须与这些领域相关——"我"的身份、经历、处境要自然地属于这些领域。\n`
+        : "";
+      const competitorClause = douyinUrl
+        ? `\n用户的竞品账号：${douyinUrl}。选题风格和受众定位可以参考这个账号的方向。\n`
+        : "";
+      promptParts.push([
+        `Execute the "${pipelineStep.name}" step.`,
+        ``,
+        `## 你要产出什么`,
+        ``,
+        `3 个完整的图文选题，每个可以直接复制粘贴去小红书/抖音发布。`,
+        interestClause,
+        competitorClause,
+        `## 内容视角：永远是"我"的故事`,
+        ``,
+        `这不是新闻报道。所有内容都是发布者以**第一人称**在聊自己的主观感受、自己的经历、自己的处境。`,
+        ``,
+        `正确示例：`,
+        `- "我今年28，单身，没房没车。我妈说我是废物。"（第一人称，聊自己）`,
+        `- "我老公今天突然送了我一束花，没有任何原因。"（第一人称，聊自己的关系）`,
+        `- "周三下午，一个人坐在阳台上喝咖啡。"（第一人称，聊自己的日常）`,
+        ``,
+        `错误示例（绝对禁止）：`,
+        `- "某地房价暴跌30%，购房者损失惨重"（这是新闻报道，不是个人帖子）`,
+        `- "年轻人就业压力增大，专家建议..."（这是客观分析，不是个人感受）`,
+        `- "据统计，2026年考研人数再创新高"（这是数据引用，不是个人故事）`,
+        ``,
+        `热点话题只用来选标签、蹭流量，内容本身必须是"我"的故事。`,
+        ``,
+        `## 第一步：搜索当前热门标签`,
+        ``,
+        `用 WebSearch 搜索"今日热搜""微博热搜""抖音热点"，找到当前有热度的话题。`,
+        `这些话题只用来选标签（蹭流量），不是用来写内容的。`,
+        ``,
+        `## 第二步：围绕热门话题，构造"我"的故事`,
+        ``,
+        `每个选题的核心是一个虚构但真实感极强的第一人称故事/感受，读完后让观众${emotionEffect[cat] ?? "产生强烈情绪"}。`,
+        ``,
+        `构造方法：`,
+        `1. 给"我"一个身份（年龄、职业、城市、处境）`,
+        `2. 讲"我"的一段具体经历或此刻的感受`,
+        `3. 让读者代入"我"的处境后，自然地${emotionEffect[cat] ?? "产生情绪"}`,
+        ``,
+        `## 3 条路线模板（3 个选题各用一条）`,
+        ``,
+        routeTemplates[cat] ?? "",
+        ``,
+        `## 输出格式：3 个完整选题`,
+        ``,
+        `每个选题包含：`,
+        `1. **蹭的热门话题**：用来选标签的热点`,
+        `2. **路线**：用的哪条路线`,
+        `3. **封面**：文字卡片写出完整文字（≤20字）；搜图类给出关键词`,
+        `4. **标题**：可以直接用的发布标题`,
+        `5. **完整文案**：以"我"的第一人称写的完整成品文案，读起来像一个真人在倾诉自己的经历/感受`,
+        `6. **标签**：5-6 个（从热搜中选）`,
+        ``,
+        `请用户从 3 个中选一个。`,
+      ].join("\n"));
     } else {
       promptParts.push(
         `Execute the "${pipelineStep.name}" step of the pipeline.`,
@@ -1017,56 +1105,121 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
           `Tailor the tone to the content category and platform style.`,
         );
       }
-      if (work.contentCategory === "comedy") {
+      // Inject emotion-driven directives based on content category
+      const emotionMap: Record<string, string> = {
+        anxiety: "焦虑 (anxiety/crisis). Read modules/emotional-hooks.md and apply the 焦虑 emotion rules. For image-text, use one of the 3 mandatory routes (观点输出/对话截图/清单盘点).",
+        conflict: "愤怒 (conflict/debate). Read modules/emotional-hooks.md and apply the 愤怒 emotion rules. For image-text, use one of the 3 mandatory routes (观点输出/对话截图/清单盘点).",
+        comedy: "搞笑/抽象 (comedy/abstract). Read genres/comedy.md and apply its rules to this step.",
+        envy: "羡慕 (aspiration/envy). Read modules/emotional-hooks.md and apply the 羡慕 emotion rules. For image-text, use one of the 3 mandatory routes (反差跃迁/关系羡慕/隐性阶层信号).",
+      };
+      const emotionDirective = emotionMap[work.contentCategory as string];
+      if (emotionDirective) {
         promptParts.push(
           ``,
-          `## IMPORTANT: This is comedy/abstract content (搞笑/抽象类).`,
-          `You MUST read the genres/comedy.md file in the current step's skill directory and apply its rules.`,
+          `## IMPORTANT: Target emotion for this content is ${emotionDirective}`,
         );
-        const comedyByStep: Record<string, string> = {
-          research: [
-            `For the research step, focus on:`,
-            `- Finding trending comedy/abstract topics, memes, and formats on the target platform`,
-            `- Analyzing what reversal types (经典反转/递进荒诞/错位/重复打破/平行对比/紧张崩塌/微观共鸣) are currently performing well`,
-            `- For abstract content: which "mismatch dimensions" (感官错配/过度认真/过度随意/语境位移/形式解构/真实解构/平行宇宙) are trending`,
-            `- Identifying comedy hooks and BGM trends`,
+        // Additional comedy-specific directives
+        if (work.contentCategory === "comedy") {
+          promptParts.push(
+            `## IMPORTANT: This is comedy/abstract content (搞笑/抽象类).`,
+            `You MUST read the genres/comedy.md file in the current step's skill directory and apply its rules.`,
+          );
+          const comedyByStep: Record<string, string> = {
+            research: [
+              `For the research step, focus on:`,
+              `- Finding trending comedy/abstract topics, memes, and formats on the target platform`,
+              `- Analyzing what reversal types (经典反转/递进荒诞/错位/重复打破/平行对比/紧张崩塌/微观共鸣) are currently performing well`,
+              `- For abstract content: which "mismatch dimensions" (感官错配/过度认真/过度随意/语境位移/形式解构/真实解构/平行宇宙) are trending`,
+              `- Identifying comedy hooks and BGM trends`,
+            ].join("\n"),
+            plan: [
+              `For the planning step, the script/storyboard MUST follow the comedy genre rules (see genres/comedy.md):`,
+              `- Choose a specific structure from the 7 comedy types or 7 abstract types in the skill`,
+              `- Design the Hook (first 3 seconds) using the Hook types table`,
+              `- Write dialogue following the comedy dialogue rules (短句为王, 口语化, 留白)`,
+              `- Plan BGM strategy (情绪铺垫反转 / 卡点强化 / 反差配乐 / 梗音乐)`,
+              `- Plan sound effects at key moments (反转点必须有声音标记)`,
+              `- For abstract content: define the two "mismatch dimensions" and ensure purity of each extreme`,
+              `- Run the 爆款自检清单 before finalizing`,
+            ].join("\n"),
+            assembly: [
+              `For the assembly step, you handle BOTH asset generation AND editing/compositing.`,
+              ``,
+              `### Editing & Compositing:`,
+              `- Editing rhythm: normal during setup, sudden change at reversal point`,
+              `- BGM must have a sound marker at the reversal point (静音/音效/换曲)`,
+              `- Jump cuts for comedy, longer takes for abstract`,
+              `- Add sound effects precisely (急刹车 at reversals, 静音0.3-0.5s before twists)`,
+              `- For abstract: consider using silence instead of sound effects to maintain the "dead serious" tone`,
+              `- Volume: dialogue 100%, BGM 15-25% during speech, 40-60% during visual-only`,
+              ``,
+              `### Available Scripts (MUST USE, do NOT write inline code):`,
+              `- **BGM search**: Read \`modules/music-search.md\` for yt-dlp search/download workflow`,
+              `- **Beat detection**: \`python3 ~/.claude/skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json\``,
+              `- **Beat-sync editing**: \`python3 ~/.claude/skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic\``,
+              `- Read \`modules/beat-sync.md\` for detailed usage of 3 styles (fast/smooth/dramatic)`,
+            ].join("\n"),
+          };
+          const comedyDirective = comedyByStep[step];
+          if (comedyDirective) promptParts.push(comedyDirective);
+        }
+      }
+
+      // For image-text assets step: enforce correct asset acquisition method per category
+      if (step === "assets" && work.type === "image-text") {
+        const assetMethod: Record<string, string> = {
+          envy: [
+            ``,
+            `## 严禁 AI 生图！严禁 ffmpeg 生成文字卡片！所有图片（包括封面）必须从网上搜索下载真实照片`,
+            ``,
+            `"向往拥有/羡慕"类图文的**所有图片（封面图 + 内容图）**都必须是从网上搜索下载的真实照片。`,
+            `- ❌ 禁止使用 AI 生成图片`,
+            `- ❌ 禁止使用 ffmpeg 生成文字卡片作为封面`,
+            `- ✅ 封面图也必须是真实照片——看似普通，但细节透露"中产以上层级"的照片`,
+            ``,
+            `### 封面图要求`,
+            `通过细节（不是直接展示奢侈品）传达阶层信号：`,
+            `- 地点：某个特定区域/场所（独立咖啡馆、大落地窗客厅、安静的街区）`,
+            `- 时间：工作日白天在做某件悠闲的事（暗示不用上班）`,
+            `- 行为：不赶时间、从容不迫的状态`,
+            `照片风格：像 iPhone 随手拍的，自然光线，构图不能太精心，不能有摆拍痕迹。`,
+            ``,
+            `### 图2-5 要求`,
+            `每张图内容不同，但**风格、清晰度、色调、画风必须完全一致**，像同一部手机同一天拍的。`,
+            ``,
+            `### 执行步骤`,
+            `1. 从内容规划方案中提取每张图的搜图关键词（关键词要具体到场景细节）`,
+            `2. 所有搜图关键词加上统一的风格限定词（如"自然光 手机拍摄 日常 真实"）`,
+            `3. 用 WebSearch 搜索对应的图片`,
+            `4. 用 curl 下载找到的图片，保存到作品的 assets/images/ 目录`,
+            `5. 下载后用 ffmpeg 统一调色（亮度/对比度/色温），消除不同来源的色差`,
+            `6. 如果某张图风格偏离太大，弃用重搜，不要强行调色凑数`,
+            ``,
+            `参考 modules/emotional-hooks.md 中羡慕类的素材生成指令获取详细规则。`,
           ].join("\n"),
-          plan: [
-            `For the planning step, the script/storyboard MUST follow the comedy genre rules (see genres/comedy.md):`,
-            `- Choose a specific structure from the 7 comedy types or 7 abstract types in the skill`,
-            `- Design the Hook (first 3 seconds) using the Hook types table`,
-            `- Write dialogue following the comedy dialogue rules (短句为王, 口语化, 留白)`,
-            `- Plan BGM strategy (情绪铺垫反转 / 卡点强化 / 反差配乐 / 梗音乐)`,
-            `- Plan sound effects at key moments (反转点必须有声音标记)`,
-            `- For abstract content: define the two "mismatch dimensions" and ensure purity of each extreme`,
-            `- Run the 爆款自检清单 before finalizing`,
+          anxiety: [
+            ``,
+            `## 图片生成方式`,
+            ``,
+            `"危机感/焦虑"类图文：只有封面是文字卡片（用 ffmpeg 生成）。`,
+            `**除封面外的其他图片禁止写文字观点！** 文字观点全部在文案正文里体现。`,
+            `其余配图用与话题相关的真实照片（全网搜索下载）。`,
+            `如果方案使用的是路线2（对话截图型），对话截图仅限封面，其余图用真实照片。`,
+            `参考 modules/emotional-hooks.md 中焦虑类的素材生成指令。`,
           ].join("\n"),
-          assembly: [
-            `For the assembly step, you handle BOTH asset generation AND editing/compositing.`,
+          conflict: [
             ``,
-            `### Asset Generation (visual production):`,
-            `- Shot types must serve the comedy (特写 for reaction moments, 大远景 for absurd reveals)`,
-            `- Color grading must match the comedy sub-type (日常搞笑=natural, 模仿正式=cinematic, 抽象=oversaturated or intentionally low quality)`,
-            `- For abstract: visual purity is critical — each extreme must be "authentic"`,
+            `## 图片生成方式`,
             ``,
-            `### Editing & Compositing:`,
-            `- Editing rhythm: normal during setup, sudden change at reversal point`,
-            `- BGM must have a sound marker at the reversal point (静音/音效/换曲)`,
-            `- Jump cuts for comedy, longer takes for abstract`,
-            `- Add sound effects precisely (急刹车 at reversals, 静音0.3-0.5s before twists)`,
-            `- For abstract: consider using silence instead of sound effects to maintain the "dead serious" tone`,
-            `- Volume: dialogue 100%, BGM 15-25% during speech, 40-60% during visual-only`,
-            ``,
-            `### Available Scripts (MUST USE, do NOT write inline code):`,
-            `- **BGM search**: Read \`modules/music-search.md\` for yt-dlp search/download workflow`,
-            `- **Beat detection**: \`python3 ~/.claude/skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json\``,
-            `- **Beat-sync editing**: \`python3 ~/.claude/skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic\``,
-            `- Read \`modules/beat-sync.md\` for detailed usage of 3 styles (fast/smooth/dramatic)`,
+            `"观点分歧/愤怒"类图文：只有封面是文字卡片（用 ffmpeg 生成）。`,
+            `**除封面外的其他图片禁止写文字观点！** 文字观点全部在文案正文里体现。`,
+            `其余配图用与话题相关的真实照片（全网搜索下载）。`,
+            `如果方案使用的是路线2（对话截图型），对话截图仅限封面，其余图用真实照片。`,
+            `参考 modules/emotional-hooks.md 中焦虑类的素材生成指令。`,
           ].join("\n"),
         };
-        if (comedyByStep[step]) {
-          promptParts.push(comedyByStep[step]);
-        }
+        const method = assetMethod[work.contentCategory as string];
+        if (method) promptParts.push(method);
       }
     }
 
