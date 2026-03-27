@@ -1,74 +1,74 @@
-# 达人数据采集模块
-
-当需要采集达人/创作者的账号数据和作品数据时，加载此模块。适用于竞品分析、账号诊断、内容复盘等场景。
-
+---
+name: creator-analytics
+description: "Collect social media creator analytics data (profile stats + per-post engagement metrics). Platforms: Douyin (抖音), with Xiaohongshu (小红书) planned."
 ---
 
-## 前置条件
+# Creator Analytics
+
+Collects creator profile and per-post engagement data from social media platforms. Currently supports **Douyin (抖音)**. Outputs structured JSON.
+
+## Prerequisites
 
 ```bash
 python3 -c "import f2, browser_cookie3; print('OK')"
 ```
 
-如缺少依赖：`pip3 install f2 browser_cookie3`
+If missing: `pip3 install f2 browser_cookie3`
 
----
+## Workflow
 
-## 使用流程
+### 1. Get the creator's profile URL (first time only)
 
-### 1. 获取创作者主页 URL（首次使用）
+The URL is **only needed on first use** — it gets saved to `~/.config/creator-analytics/accounts.json` automatically. On subsequent runs, just omit `--url`.
 
-URL **只需首次提供**——会自动保存到 `~/.config/creator-analytics/accounts.json`。后续运行可省略 `--url`。
+Ask the user for their profile URL. Accepted formats:
 
-接受的格式：
-- **完整 URL**: `https://www.douyin.com/user/MS4wLjABAAAA...`
-- **分享链接**: `https://v.douyin.com/i2wyU53P/`
-- 用户可在抖音 APP → 个人主页 → 分享 → 复制链接获取
+- **Full URL**: `https://www.douyin.com/user/MS4wLjABAAAA...`
+- **Share link**: `https://v.douyin.com/i2wyU53P/`
+- User can get this by opening Douyin APP → Profile → Share → Copy Link
 
-### 2. 提醒用户关闭 Chrome
+### 2. Remind user to close Chrome
 
-**重要**：`browser_cookie3` 需要独占访问 Chrome 的 cookie 数据库。用户必须完全关闭 Chrome 后再运行采集脚本。
+**IMPORTANT**: `browser_cookie3` needs exclusive access to Chrome's cookie database. The user must fully close Chrome before running the collector.
 
-### 3. 运行采集脚本
+### 3. Run the collector
 
 ```bash
-# 首次——提供 URL（自动保存）：
+# First time — provide URL (auto-saved for future use):
 python3 skills/trend-research/scripts/creator-analytics/collect.py \
   --platform douyin \
   --url "<PROFILE_URL>"
 
-# 后续——不需要 URL：
+# After first time — just run without --url:
 python3 skills/trend-research/scripts/creator-analytics/collect.py \
   --platform douyin
 
-# 查看已保存的账号：
+# Check saved accounts:
 python3 skills/trend-research/scripts/creator-analytics/collect.py \
   --platform douyin --list-accounts
 ```
 
-**参数：**
+**Options:**
 
-| Flag | 必填 | 默认值 | 说明 |
-|------|------|--------|------|
-| `--platform` | 是 | — | 目标平台：`douyin` |
-| `--url` | 否 | 已保存 | 创作者主页 URL |
-| `--browser` | 否 | `chrome` | Cookie 来源浏览器 |
-| `--max-posts` | 否 | 全部 | 限制采集的作品数量 |
-| `--list-accounts` | 否 | — | 显示已保存账号并退出 |
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `--platform` | Yes | — | Target platform: `douyin` |
+| `--url` | No | saved | Creator profile URL (saved after first use) |
+| `--browser` | No | `chrome` | Browser for cookies: `chrome`, `firefox`, `edge` |
+| `--max-posts` | No | all | Limit number of posts to fetch |
+| `--list-accounts` | No | — | Show saved accounts and exit |
 
-### 4. 解析输出
+### 4. Parse output and present results
 
-脚本将 JSON 输出到 **stdout**，错误输出到 **stderr**（exit code 1）。
+The script outputs JSON to **stdout**. Errors go to **stderr** with exit code 1.
 
-**结果展示方式：**
-1. **账号概览** — 昵称、粉丝数、获赞总数、作品数
-2. **互动摘要** — 平均播放、点赞、评论、转发、收藏；互动率
-3. **TOP 作品** — 按播放量或点赞排序，展示前 5 条
-4. **趋势** — 如数据跨多月，标注增长趋势
+**Present results as:**
+1. **Account overview** — nickname, followers, total likes, video count
+2. **Engagement summary** — avg plays, likes, comments, shares, collects per post; engagement rate
+3. **Top posts** — sort by play_count or digg_count, show top 5
+4. **Trends** — if data spans multiple months, note growth patterns
 
----
-
-## 输出 Schema
+### Output Schema
 
 ```json
 {
@@ -107,36 +107,32 @@ python3 skills/trend-research/scripts/creator-analytics/collect.py \
 }
 ```
 
----
+### Error Handling
 
-## 错误处理
+| Code | Cause | Fix |
+|------|-------|-----|
+| `DEPENDENCY_ERROR` | f2 or browser_cookie3 not installed | `pip3 install f2 browser_cookie3` |
+| `BROWSER_NOT_FOUND` | Unsupported browser | Use `--browser chrome` |
+| `COOKIE_NOT_FOUND` | Can't read cookie DB | Close browser completely, retry |
+| `NOT_LOGGED_IN` | No session cookie | Log in to douyin.com in browser, close it, retry |
+| `INVALID_URL` | URL not recognized | Use valid Douyin profile URL |
+| `API_ERROR` | API request failed | Cookie expired — re-login and retry |
 
-| 错误码 | 原因 | 解决方法 |
-|--------|------|---------|
-| `DEPENDENCY_ERROR` | f2 或 browser_cookie3 未安装 | `pip3 install f2 browser_cookie3` |
-| `BROWSER_NOT_FOUND` | 不支持的浏览器 | 使用 `--browser chrome` |
-| `COOKIE_NOT_FOUND` | 无法读取 cookie 数据库 | 完全关闭浏览器后重试 |
-| `NOT_LOGGED_IN` | 无有效会话 | 在浏览器中登录 douyin.com，关闭浏览器后重试 |
-| `INVALID_URL` | URL 格式不对 | 使用有效的抖音个人主页 URL |
-| `API_ERROR` | API 请求失败 | Cookie 过期——重新登录后重试 |
+## Supported Platforms
 
----
+| Platform | Status | Flag |
+|----------|--------|------|
+| Douyin (抖音) | Supported | `--platform douyin` |
+| Xiaohongshu (小红书) | Planned | `--platform xiaohongshu` |
 
-## 支持平台
-
-| 平台 | 状态 | Flag |
-|------|------|------|
-| 抖音 | 已支持 | `--platform douyin` |
-| 小红书 | 规划中 | `--platform xiaohongshu` |
-
-## 架构
+## Architecture
 
 ```
 scripts/creator-analytics/
-├── collect.py              # CLI 入口
+├── collect.py              # CLI entry point
 └── platforms/
-    ├── __init__.py          # BaseCollector 抽象基类
-    └── douyin.py            # 抖音采集器（f2 + browser_cookie3）
+    ├── __init__.py          # BaseCollector abstract class
+    └── douyin.py            # Douyin collector (f2 + browser_cookie3)
 ```
 
-新增平台：创建 `platforms/<name>.py` 实现 `BaseCollector`，并在 `collect.py` 中注册。
+To add a new platform: create `platforms/<name>.py` implementing `BaseCollector`, and register it in `collect.py`.

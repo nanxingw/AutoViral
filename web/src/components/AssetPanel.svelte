@@ -9,12 +9,14 @@
     refreshTrigger = 0,
     showOutput = false,
     onEditAsset,
+    topicHint = "",
   }: {
     workId: string;
     visible: boolean;
     refreshTrigger: number;
     showOutput?: boolean;
     onEditAsset?: (assetName: string, assetUrl: string) => void;
+    topicHint?: string;
   } = $props();
 
   // When showOutput changes to true, switch to output tab
@@ -37,8 +39,113 @@
   let loading = $state(false);
   let lightboxSrc = $state("");
   let mdPreview: { name: string; content: string } | null = $state(null);
-  let activeSection: "assets" | "output" = $state("assets");
+  let activeSection: "assets" | "output" = $state("output");
   let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let outputCopytext = $state("");
+
+  interface PlatformCopy {
+    platform: string; // "douyin" | "xiaohongshu"
+    title: string;
+    body: string;
+    tags: string[];
+    topics: string[];
+    publishTips: string[];
+  }
+
+  let copyPlatform: "douyin" | "xiaohongshu" = $state("douyin");
+
+  function parseCopytextMulti(raw: string): PlatformCopy[] {
+    const results: PlatformCopy[] = [];
+    // Split by top-level headings that mention platform names
+    const platformBlocks = raw.split(/^#\s+.*/m).filter(Boolean);
+    const platformHeaders = raw.match(/^#\s+.*/gm) ?? [];
+
+    // If no platform headers found, treat entire text as single block
+    if (platformHeaders.length === 0) {
+      results.push(parseSingleBlock(raw, "douyin"));
+      return results;
+    }
+
+    for (let i = 0; i < platformHeaders.length; i++) {
+      const header = platformHeaders[i].toLowerCase();
+      let platform: "douyin" | "xiaohongshu" = "douyin";
+      if (/小红书|xiaohongshu|xhs/i.test(header)) platform = "xiaohongshu";
+      else if (/抖音|douyin|tiktok/i.test(header)) platform = "douyin";
+      const block = platformBlocks[i] ?? "";
+      results.push(parseSingleBlock(block, platform));
+    }
+    return results;
+  }
+
+  function parseSingleBlock(block: string, platform: "douyin" | "xiaohongshu"): PlatformCopy {
+    const lines = block.split("\n");
+    let currentSection = "";
+    let title = "";
+    let bodyLines: string[] = [];
+    let tags: string[] = [];
+    let topics: string[] = [];
+    let publishTips: string[] = [];
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line) continue;
+
+      // Detect section headers (## 标题, ## 文案, ## 正文, ## 标签, ## 话题, ## 发布建议)
+      const sectionMatch = line.match(/^#{2,3}\s+(.+)/);
+      if (sectionMatch) {
+        const name = sectionMatch[1].trim().toLowerCase();
+        if (/标题|title/.test(name)) currentSection = "title";
+        else if (/文案|正文|body|caption|copy/.test(name)) currentSection = "body";
+        else if (/标签|tag|hashtag/.test(name)) currentSection = "tags";
+        else if (/话题|topic/.test(name)) currentSection = "topics";
+        else if (/发布|建议|publish|tip/.test(name)) currentSection = "tips";
+        else currentSection = "body"; // unknown sections go to body
+        continue;
+      }
+      // Skip markdown artifacts
+      if (line === "---" || line === "***") continue;
+
+      const cleaned = line.replace(/\*\*(.+?)\*\*/g, "$1").replace(/^[-*]\s+/, "");
+
+      switch (currentSection) {
+        case "title":
+          if (!title) title = cleaned;
+          break;
+        case "tags": {
+          const found = cleaned.match(/#[\w\u4e00-\u9fff\u00c0-\u024f]+/g);
+          if (found) tags.push(...found);
+          else if (cleaned) tags.push(cleaned.startsWith("#") ? cleaned : "#" + cleaned);
+          break;
+        }
+        case "topics": {
+          const found = cleaned.match(/#[\w\u4e00-\u9fff\u00c0-\u024f]+/g);
+          if (found) topics.push(...found);
+          else if (cleaned) topics.push(cleaned.startsWith("#") ? cleaned : "#" + cleaned);
+          break;
+        }
+        case "tips":
+          publishTips.push(cleaned);
+          break;
+        default:
+          bodyLines.push(cleaned);
+      }
+    }
+
+    // Fallback: if no title found, use first short line of body
+    if (!title && bodyLines.length) {
+      const first = bodyLines[0];
+      if (first.length < 60) { title = first; bodyLines.shift(); }
+    }
+
+    return {
+      platform,
+      title,
+      body: bodyLines.join("\n"),
+      tags: [...new Set(tags)],
+      topics: [...new Set(topics)],
+      publishTips,
+    };
+  }
 
   function isImage(name: string) { return /\.(png|jpe?g|webp|gif|svg)$/i.test(name); }
   function isVideo(name: string) { return /\.(mp4|mov|webm|avi)$/i.test(name); }
@@ -60,8 +167,16 @@
     return "other";
   }
 
-  let assetFiles = $derived(files.filter(f => f.group !== "output"));
-  let outputFiles = $derived(files.filter(f => f.group === "output"));
+  // Only the final video goes in output tab; everything else is assets
+  let finalVideo = $derived(files.find(f => isFinalVideo(f.path)));
+  // Look for copytext: first in output/ dir, then any .md/.txt with "copy"/"caption"/"文案" in name, then any .md in output group
+  let outputCopytextFile = $derived(
+    files.find(f => f.group === "output" && (isMarkdown(f.name) || isText(f.name))) ??
+    files.find(f => (isMarkdown(f.name) || isText(f.name)) && /copy|caption|文案|publish/i.test(f.name)) ??
+    files.find(f => isMarkdown(f.name) && f.group === "other")
+  );
+  let assetFiles = $derived(files.filter(f => f !== finalVideo && f !== outputCopytextFile));
+  let outputFiles = $derived(finalVideo ? [finalVideo] : []);
 
   let framesFiles = $derived(assetFiles.filter(f => f.group === "frames"));
   let clipsFiles = $derived(assetFiles.filter(f => f.group === "clips"));
@@ -107,6 +222,21 @@
     // Open the download endpoint
     window.open(`/api/works/${encodeURIComponent(workId)}/assets/download`, "_blank");
   }
+
+  async function loadCopytext() {
+    if (!outputCopytextFile) { outputCopytext = ""; return; }
+    try {
+      const res = await fetch(outputCopytextFile.url);
+      outputCopytext = await res.text();
+    } catch { outputCopytext = ""; }
+  }
+
+  // Load copytext whenever the file appears
+  $effect(() => {
+    if (outputCopytextFile) loadCopytext();
+    else outputCopytext = "";
+  });
+
 
   onMount(() => {
     const unsub = subscribe(() => { lang = getLanguage(); });
@@ -260,8 +390,80 @@
           {/if}
         {/if}
 
-        <!-- Upload button at bottom of assets tab -->
-        <label class="upload-btn-bottom">
+      {:else}
+        <!-- Output section: final video + copytext -->
+        {#if !finalVideo}
+          <div class="empty-state">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
+              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+              <line x1="8" y1="21" x2="16" y2="21"/>
+              <line x1="12" y1="17" x2="12" y2="21"/>
+            </svg>
+            <span>{tt("noAssetsYet")}</span>
+          </div>
+        {:else}
+          <div class="output-showcase">
+            <div class="video-wrapper">
+              <video controls preload="metadata" src={finalVideo.url}></video>
+            </div>
+            {#if outputCopytext}
+              {@const allPlatforms = parseCopytextMulti(outputCopytext)}
+              {@const currentCopy = allPlatforms.find(p => p.platform === copyPlatform) ?? allPlatforms[0]}
+              {#if allPlatforms.length > 1}
+                <div class="platform-filter">
+                  <button class="pf-btn" class:active={copyPlatform === "douyin"} onclick={() => copyPlatform = "douyin"}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12.53 1.02c1.15-.04 2.29.02 3.43.14.17 1.38.76 2.71 1.74 3.66 1 .98 2.37 1.52 3.76 1.65v3.53c-1.3-.04-2.6-.35-3.76-.92-.5-.24-.97-.53-1.4-.87-.01 2.84.01 5.68-.02 8.51-.08 1.34-.53 2.67-1.31 3.76a7.24 7.24 0 01-5.6 3.15c-1.6.13-3.24-.3-4.56-1.2A7.18 7.18 0 012 17.02c0-.3.03-.6.07-.9.24-1.7 1.15-3.27 2.48-4.33a6.82 6.82 0 014.83-1.56c.01 1.3-.01 2.6-.02 3.9-.92-.28-1.97-.13-2.77.42a3.2 3.2 0 00-1.4 2.17c-.07.58.03 1.2.34 1.72.52 1 1.64 1.7 2.83 1.73 1.15.06 2.3-.5 2.97-1.42.22-.32.4-.68.46-1.06.12-.87.1-1.75.1-2.63V1.02h2.64z"/></svg>
+                    {tt("douyin")}
+                  </button>
+                  <button class="pf-btn" class:active={copyPlatform === "xiaohongshu"} onclick={() => copyPlatform = "xiaohongshu"}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2 2h8.5v8.5H2V2zm11.5 0H22v8.5h-8.5V2zM2 13.5h8.5V22H2v-8.5zm11.5 0H22V22h-8.5v-8.5z"/></svg>
+                    {tt("xiaohongshu")}
+                  </button>
+                </div>
+              {/if}
+              {#if currentCopy}
+                <div class="copytext-card">
+                  {#if currentCopy.title}
+                    <h3 class="ct-title">{currentCopy.title}</h3>
+                  {/if}
+                  {#if currentCopy.body}
+                    <p class="ct-body">{currentCopy.body}</p>
+                  {/if}
+                  {#if currentCopy.tags.length || currentCopy.topics.length}
+                    <div class="ct-tags">
+                      {#each currentCopy.topics as topic}
+                        <span class="ct-tag ct-topic">{topic}</span>
+                      {/each}
+                      {#each currentCopy.tags as tag}
+                        <span class="ct-tag">{tag}</span>
+                      {/each}
+                    </div>
+                  {/if}
+                  {#if currentCopy.publishTips.length}
+                    <div class="ct-tips">
+                      {#each currentCopy.publishTips as tip}
+                        <p class="ct-tip">{tip}</p>
+                      {/each}
+                    </div>
+                  {/if}
+                </div>
+              {:else}
+                <div class="copytext-card"><p class="ct-body">{outputCopytext}</p></div>
+              {/if}
+            {:else if topicHint}
+              <div class="copytext-card">
+                <p class="ct-body">{topicHint}</p>
+              </div>
+            {/if}
+          </div>
+        {/if}
+      {/if}
+    </div>
+
+    <!-- Footer: upload + download -->
+    {#if activeSection === "assets"}
+      <div class="panel-footer">
+        <label class="footer-btn secondary">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           {tt("uploadAsset")}
           <input type="file" class="sr-only" onchange={(e) => {
@@ -273,62 +475,7 @@
             fetch(`/api/works/${encodeURIComponent(workId)}/assets/upload`, { method: "POST", body: formData }).then(() => loadAssets()).catch(() => {});
           }} />
         </label>
-
-      {:else}
-        <!-- Output section -->
-        {#if outputFiles.length === 0}
-          <div class="empty-state">
-            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
-              <line x1="8" y1="21" x2="16" y2="21"/>
-              <line x1="12" y1="17" x2="12" y2="21"/>
-            </svg>
-            <span>{tt("noAssetsYet")}</span>
-          </div>
-        {:else}
-          {#each outputFiles as file}
-            {#if isImage(file.name)}
-              <div class="asset-card">
-                <button class="thumb-single" onclick={() => { lightboxSrc = file.url; }}>
-                  <img src={file.url} alt={file.name} loading="lazy" />
-                  <span class="thumb-name">{file.name}</span>
-                </button>
-                {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
-              </div>
-            {:else if isVideo(file.name)}
-              <div class="video-item">
-                <div class="video-wrapper">
-                  <video controls preload="metadata" src={file.url}></video>
-                </div>
-                <div class="asset-row">
-                  <span class="file-name">{file.name}</span>
-                  {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
-                </div>
-              </div>
-            {:else if isMarkdown(file.name) || isText(file.name)}
-              <button class="md-item" onclick={() => openMdPreview(file)}>
-                <span class="md-icon">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
-                </span>
-                <span class="file-name">{file.name}</span>
-              </button>
-            {:else}
-              <a class="file-item" href={file.url} download={file.name}>
-                <span class="file-name">{file.name}</span>
-                <span class="dl-icon">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                </span>
-              </a>
-            {/if}
-          {/each}
-        {/if}
-      {/if}
-    </div>
-
-    <!-- Download all button -->
-    {#if files.length > 0}
-      <div class="panel-footer">
-        <button class="download-all-btn" onclick={handleDownloadAll}>
+        <button class="footer-btn secondary" onclick={handleDownloadAll}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           {tt("downloadAll")}
         </button>
@@ -365,6 +512,7 @@
       </div>
     </div>
   {/if}
+
 {/if}
 
 <style>
@@ -537,7 +685,8 @@
     border: 1px solid var(--border);
   }
 
-  .video-item video {
+  .video-item video,
+  .output-showcase video {
     width: 100%;
     display: block;
   }
@@ -640,30 +789,275 @@
   .panel-footer {
     padding: 0.6rem 0.75rem;
     border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    flex-shrink: 0;
   }
 
-  .download-all-btn {
+
+  /* Unified footer buttons */
+  .footer-btn {
     width: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
     gap: 0.4rem;
-    background: var(--bg-surface);
+    border-radius: 4px;
+    padding: 0.45rem 0.75rem;
+    font-family: inherit;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.12s;
+  }
+
+  .footer-btn.secondary {
+    background: none;
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 0.5rem 0.75rem;
+    color: var(--text-muted);
+  }
+  .footer-btn.secondary:hover { border-color: var(--text-dim); color: var(--text); }
+
+  .footer-btn.primary {
+    background: var(--text);
+    color: var(--bg);
+    border: none;
+  }
+  .footer-btn.primary:hover { opacity: 0.85; }
+
+  /* Link modal */
+  .link-modal {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    width: min(90vw, 380px);
+    cursor: default;
+    box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.3));
+  }
+
+  .link-modal-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.15rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .link-modal-head h3 {
+    font-family: var(--font-display, inherit);
+    font-size: 0.92rem;
+    font-weight: 650;
+  }
+
+  .link-modal-body {
+    padding: 1rem 1.15rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .link-desc {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .link-input {
+    width: 100%;
+    padding: 0.5rem 0.7rem;
+    background: var(--bg-inset);
     color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .link-input:focus { border-color: var(--text-muted); }
+  .link-input::placeholder { color: var(--text-dim); }
+
+  .link-confirm {
+    width: 100%;
+    padding: 0.5rem;
+    background: var(--text);
+    color: var(--bg);
+    border: none;
+    border-radius: 4px;
     font-family: inherit;
     font-size: 0.8rem;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: opacity 0.12s;
+  }
+  .link-confirm:hover { opacity: 0.85; }
+  .link-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Output showcase */
+  .output-showcase {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
   }
 
-  .download-all-btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: var(--accent-soft);
+  /* Platform filter */
+  .platform-filter {
+    display: flex;
+    gap: 0.35rem;
+    margin-bottom: 0.5rem;
+  }
+
+  .pf-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.35rem 0.7rem;
+    border: 1.5px solid var(--border);
+    border-radius: 9999px;
+    background: none;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s;
+  }
+  .pf-btn:hover { border-color: var(--text-dim); color: var(--text); }
+  .pf-btn.active {
+    border-color: var(--text);
+    background: var(--text);
+    color: var(--bg);
+  }
+
+  /* Copytext card — native app feel */
+  .copytext-card {
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+
+  .ct-title {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.45;
+    margin: 0;
+  }
+
+  .ct-body {
+    font-size: 0.8rem;
+    color: var(--text);
+    line-height: 1.75;
+    white-space: pre-line;
+    margin: 0;
+  }
+
+  .ct-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.15rem;
+    margin-top: 0.1rem;
+  }
+
+  .ct-tag {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: #4b9bff;
+    background: none;
+    padding: 0;
+  }
+  :global([data-theme="light"]) .ct-tag { color: #2563eb; }
+
+  .ct-topic {
+    font-weight: 600;
+  }
+
+  .ct-tips {
+    border-top: 1px solid var(--border);
+    padding-top: 0.5rem;
+    margin-top: 0.15rem;
+  }
+
+  .ct-tip {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    line-height: 1.55;
+    margin: 0.1rem 0;
+  }
+
+  /* Publish button & dropdown */
+  .publish-wrap {
+    position: relative;
+  }
+
+  .publish-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    background: var(--text);
+    color: var(--bg);
+    border: none;
+    border-radius: 4px;
+    padding: 0.55rem 0.75rem;
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.12s;
+  }
+
+  .publish-btn:hover { opacity: 0.85; }
+
+  .publish-dropdown {
+    position: absolute;
+    bottom: calc(100% + 0.35rem);
+    left: 0;
+    right: 0;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.3));
+    z-index: 10;
+    animation: dropIn 0.1s ease;
+  }
+
+  @keyframes dropIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .publish-option {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.6rem 0.85rem;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background 0.1s;
+    text-align: left;
+  }
+
+  .publish-option:hover {
+    background: var(--bg-hover, rgba(255,255,255,0.04));
+  }
+
+  .publish-option + .publish-option {
+    border-top: 1px solid var(--border);
   }
 
   /* Lightbox */
@@ -759,29 +1153,6 @@
     padding: 1rem;
   }
 
-  .upload-btn-bottom {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.35rem;
-    width: 100%;
-    padding: 0.55rem;
-    margin-top: 0.75rem;
-    border: 1px dashed var(--border);
-    border-radius: 4px;
-    background: none;
-    color: var(--text-muted);
-    font-family: var(--font-body, inherit);
-    font-size: var(--size-sm, 0.8rem);
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.12s;
-  }
-
-  .upload-btn-bottom:hover {
-    border-color: var(--text-dim);
-    color: var(--text-secondary);
-  }
 
   .sr-only {
     position: absolute;

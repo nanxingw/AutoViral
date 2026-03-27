@@ -148,12 +148,27 @@ apiRoutes.put("/api/config", async (c) => {
 apiRoutes.get("/api/works", async (c) => {
   try {
     const works = await listWorks();
-    // Attach coverImage: first image asset found for each work
+    // Attach coverImage: prefer final video (for keyframe), then output image, then first asset image
     const enriched = await Promise.all(works.map(async (w) => {
       try {
         const assets = await listAssets(w.id);
+        // 1. Final video — browser will show keyframe as poster
+        const finalVideo = assets.find((a: string) =>
+          /\.(mp4|mov|webm)$/i.test(a) && /final/i.test(a)
+        );
+        if (finalVideo) {
+          return { ...w, coverImage: `/api/works/${w.id}/assets/${finalVideo.split("/").map(encodeURIComponent).join("/")}`, coverIsVideo: true };
+        }
+        // 2. Output image (thumbnail/cover)
+        const outputImage = assets.find((a: string) =>
+          /\.(png|jpe?g|webp|gif)$/i.test(a) && a.startsWith("output/")
+        );
+        if (outputImage) {
+          return { ...w, coverImage: `/api/works/${w.id}/assets/${outputImage.split("/").map(encodeURIComponent).join("/")}` };
+        }
+        // 3. Any asset image
         const firstImage = assets.find((a: string) =>
-          /\.(png|jpe?g|webp|gif)$/i.test(a) && !a.includes("output/")
+          /\.(png|jpe?g|webp|gif)$/i.test(a)
         );
         if (firstImage) {
           return { ...w, coverImage: `/api/works/${w.id}/assets/${firstImage.split("/").map(encodeURIComponent).join("/")}` };
@@ -685,17 +700,22 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
   if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
 
   try {
-    const body = await c.req.json<{ platform?: string }>().catch(() => ({}));
+    const body = await c.req.json<{ platform?: string; interests?: string[]; competitors?: string[] }>().catch(() => ({}));
     const platform = (body as any).platform ?? "douyin";
     const platformLabel = platform === "xiaohongshu" ? "小红书" : platform === "douyin" ? "抖音" : platform;
 
     const sessionKey = `trends_${platform}_${Date.now()}`;
 
-    // 1. Get user interests
+    // 1. Get user interests and competitors
     const config = await loadConfig();
-    const interests = config.interests ?? [];
+    const reqInterests = (body as any).interests ?? config.interests ?? [];
+    const interests = reqInterests as string[];
+    const competitors = ((body as any).competitors ?? []) as string[];
     const interestClause = interests.length > 0
       ? `\n用户特别关注以下领域：${interests.join("、")}。请优先覆盖这些领域的趋势，同时也包含其他热门方向。\n`
+      : '';
+    const competitorClause = competitors.length > 0
+      ? `\n用户关注的竞品账号：${competitors.join("、")}。请参考这些账号的内容方向和爆款模式。\n`
       : '';
 
     // 2. Run script for real-time data
@@ -713,6 +733,18 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       `你是一个专业的社交媒体趋势研究员。请分析 ${platformLabel} 平台当前最热门的内容趋势。`,
       dataClause,
       interestClause,
+      competitorClause,
+      ``,
+      `## 核心创作方向（强制执行）`,
+      ``,
+      `每个推荐的话题/方向必须能触发以下四种情绪中的至少一种，否则不予推荐：`,
+      `1. **焦虑**（落后焦虑/错过焦虑/被替代焦虑/身份下坠焦虑）— 让观众觉得"我是不是落后了"`,
+      `2. **愤怒**（不公/冒犯/双标/欺骗/价值观冲突）— 让观众觉得"这不对/凭什么"`,
+      `3. **搞笑/抽象**（反转/共鸣/错位）— 让观众笑出来想转发`,
+      `4. **羡慕**（想成为/想拥有）— 让观众觉得"我也想要这样的生活"`,
+      ``,
+      `每个话题必须在 JSON 中标注 "emotionType"（焦虑/愤怒/搞笑/羡慕）和 "emotionSubtype"（具体子类型）。`,
+      ``,
       `如果上面的 API 数据不够充分，请使用 WebSearch 补充搜索：`,
       `- "${platformLabel} 爆款内容 趋势 2026"`,
       `- "${platformLabel} 热门话题 最新"`,
@@ -726,6 +758,8 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       `  "heat":4,`,
       `  "competition":"中",`,
       `  "opportunity":"金矿",`,
+      `  "emotionType":"焦虑",`,
+      `  "emotionSubtype":"被替代焦虑",`,
       `  "description":"趋势描述和为什么值得做",`,
       `  "tags":["推荐标签1","推荐标签2","推荐标签3"],`,
       `  "contentAngles":["切入角度1","切入角度2"],`,
@@ -735,6 +769,8 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       `- topics 至少 10 个`,
       `- heat 为 1-5 整数，competition 为 "低"/"中"/"高"`,
       `- opportunity 为 "金矿"(高热低竞)/"蓝海"(低热低竞)/"红海"(高热高竞)`,
+      `- emotionType 必填，为 "焦虑"/"愤怒"/"搞笑"/"羡慕" 之一`,
+      `- emotionSubtype 必填，为该情绪的具体子类型`,
       `- tags 3-5 个平台推荐标签`,
       `- contentAngles 2-3 个具体的内容切入角度`,
       `- exampleHook 一句话的爆款开头示例`,
@@ -770,6 +806,14 @@ apiRoutes.post("/api/trends/cancel/:sessionKey", async (c) => {
 // ---------------------------------------------------------------------------
 // Work Chat API (WsBridge)
 // ---------------------------------------------------------------------------
+
+// POST /api/works/:id/abort — abort running task for a work
+apiRoutes.post("/api/works/:id/abort", async (c) => {
+  const id = c.req.param("id");
+  if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
+  const killed = wsBridge.killSession(id);
+  return c.json({ aborted: killed });
+});
 
 // POST /api/works/:id/session
 apiRoutes.post("/api/works/:id/session", async (c) => {
@@ -943,6 +987,34 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
           `- If black bars exist, they must be EQUAL top and bottom`,
           `- Subject is not cropped unless Strategy A was deliberately chosen`,
           `\`ffmpeg -i final.mp4 -ss 3 -frames:v 1 -y /tmp/verify.png\``,
+          ``,
+          `## REQUIRED: Generate Publishing Copytext & Tags`,
+          `After producing the final video, you MUST also generate a publishing copytext file.`,
+          `Write it to \`output/copytext.md\` in the work directory.`,
+          ``,
+          `The copytext MUST follow viral/爆款 principles:`,
+          `- **Hook line (first sentence)**: Must grab attention in under 2 seconds of reading. Use curiosity gaps, bold claims, or relatable pain points.`,
+          `- **Body (2-3 sentences max)**: Expand on the hook, add value or intrigue. Keep it conversational and platform-native.`,
+          `- **Call to action**: Encourage engagement (关注/收藏/转发/评论). Be natural, not pushy.`,
+          `- **Tags/Hashtags**: Include 5-10 relevant hashtags. Mix:`,
+          `  - 2-3 high-traffic trending tags (热门标签)`,
+          `  - 2-3 niche/topic-specific tags`,
+          `  - 1-2 branded or unique tags`,
+          `  - Format: #tag1 #tag2 #tag3 (each prefixed with #)`,
+          ``,
+          `Example format of copytext.md:`,
+          `\`\`\``,
+          `这个方法我后悔没早点知道...`,
+          ``,
+          `很多人不知道，其实只要掌握这个技巧就能轻松搞定。今天一次性讲清楚，看完直接上手！`,
+          ``,
+          `觉得有用就收藏起来，别划走了 👆`,
+          ``,
+          `#知识分享 #干货 #涨知识 #教程 #生活技巧`,
+          `\`\`\``,
+          ``,
+          `The copytext language should match the target platform (Chinese for 抖音/小红书).`,
+          `Tailor the tone to the content category and platform style.`,
         );
       }
       if (work.contentCategory === "comedy") {

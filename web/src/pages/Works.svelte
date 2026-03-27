@@ -152,6 +152,8 @@
     opportunity?: string;
     competition?: string;
     category?: string;
+    emotionType?: string;
+    emotionSubtype?: string;
   }
 
   let douyinDirections: TrendDirection[] = $state([]);
@@ -186,6 +188,9 @@
     showResearchModal = false;
     researchLoading = true;
     researchSeconds = 30;
+    // Clear old directions immediately so user sees fresh results
+    if (inspirationPlatform === "douyin") douyinDirections = [];
+    else xhsDirections = [];
     // Save config
     try {
       await fetch("/api/config", {
@@ -202,12 +207,12 @@
         researchTimer = null;
       }
     }, 1000);
-    // Start research
+    // Start research — pass interests and competitors
     try {
       await fetch("/api/trends/refresh-stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ platform: inspirationPlatform }),
+        body: JSON.stringify({ platform: inspirationPlatform, interests, competitors: [] }),
       });
       // Wait then reload
       setTimeout(async () => {
@@ -261,6 +266,8 @@
               opportunity: item.opportunity ?? "",
               competition: item.competition ?? "",
               category: item.category ?? "",
+              emotionType: item.emotionType ?? "",
+              emotionSubtype: item.emotionSubtype ?? "",
             }));
             if (platform === "douyin") douyinDirections = mapped;
             else xhsDirections = mapped;
@@ -291,6 +298,7 @@
 
   function dispatchCreate(dir: TrendDirection) {
     const hint = [
+      dir.emotionType ? `目标情绪: ${dir.emotionType}${dir.emotionSubtype ? `（${dir.emotionSubtype}）` : ""}` : "",
       dir.description,
       dir.contentAngles?.length ? `切入角度: ${dir.contentAngles.join("; ")}` : "",
       dir.exampleHook ? `爆款钩子: ${dir.exampleHook}` : "",
@@ -357,6 +365,9 @@
         {#each inspirationDirections.slice(0, 10) as dir}
           <button class="inspiration-card" onclick={() => selectedTrend = dir}>
             <div class="insp-card-top">
+              {#if dir.emotionType}
+                <span class="insp-emotion">{dir.emotionType}</span>
+              {/if}
               {#if dir.category}
                 <span class="insp-category">{dir.category}</span>
               {/if}
@@ -1078,6 +1089,15 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.3rem;
+  }
+
+  .insp-emotion {
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--spark-red, #FE2C55);
+    background: rgba(254, 44, 85, 0.08);
+    padding: 0.1rem 0.4rem;
+    border-radius: 9999px;
   }
 
   .insp-category {
