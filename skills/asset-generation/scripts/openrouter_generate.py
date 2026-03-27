@@ -411,7 +411,8 @@ def main():
     parser.add_argument(
         "--image-size", "--size",
         choices=sorted(VALID_IMAGE_SIZES),
-        help="分辨率等级: 0.5K / 1K / 2K / 4K",
+        default="4K",
+        help="分辨率等级: 0.5K / 1K / 2K / 4K (默认: 4K)",
     )
     parser.add_argument(
         "--seed", type=int,
