@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { join, extname } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
-import { loadConfig, saveConfig } from "../config.js";
+import { loadConfig, saveConfig, dataDir } from "../config.js";
 import {
   listWorks, getWork, createWork as storeCreateWork,
   updateWork as storeUpdateWork, deleteWork as storeDeleteWork,
@@ -1323,8 +1323,9 @@ async function runEvaluation(workId: string, completedStep: string, nextStep?: s
     ? prevResults.map(r => `第${r.attempt}轮评审: ${r.verdict}\n问题: ${r.issues.map(i => i.description).join("; ")}\n建议: ${r.suggestions.join("; ")}`).join("\n\n")
     : "";
 
-  // Build evaluator prompt
-  const evalPrompt = buildEvalPrompt(work, completedStep, attempt, historyText, prevResultsText);
+  // Build evaluator prompt with work directory path
+  const workDir = join(dataDir, "works", workId);
+  const evalPrompt = buildEvalPrompt(work, completedStep, attempt, historyText, prevResultsText, workDir);
 
   // Broadcast eval_divider start
   session.messageHistory.push({
@@ -1338,10 +1339,10 @@ async function runEvaluation(workId: string, completedStep: string, nextStep?: s
     data: { type: "start", step: completedStep, attempt },
   });
 
-  // Spawn evaluator (resume if same step has prior session)
-  const resumeId = work.evalSessionIds?.[completedStep];
+  // Always spawn a fresh evaluator session (no --resume) so it reads the latest files
+  // from disk without relying on cached file content from prior eval rounds.
   try {
-    const evalResult = await wsBridge.spawnEvaluator(session, evalPrompt, resumeId);
+    const evalResult = await wsBridge.spawnEvaluator(session, evalPrompt);
     evalResult.step = completedStep;
     evalResult.attempt = attempt;
     evalResult.timestamp = new Date().toISOString();
@@ -1473,7 +1474,7 @@ ${suggestionList}
 请修复以上问题，修复完成后再次调用 pipeline/advance 提交评审。`;
 }
 
-function buildEvalPrompt(work: Work, step: string, attempt: number, historyText: string, prevResultsText: string): string {
+function buildEvalPrompt(work: Work, step: string, attempt: number, historyText: string, prevResultsText: string, workDir: string): string {
   const stepName = work.pipeline[step]?.name ?? step;
   const platforms = work.platforms?.join(", ") ?? "未指定";
 
@@ -1490,6 +1491,7 @@ function buildEvalPrompt(work: Work, step: string, attempt: number, historyText:
 - 平台: ${platforms}
 - 当前阶段: ${stepName}
 - 评审轮次: 第${attempt}轮
+- **作品目录: ${workDir}**
 
 ## 评审标准
 请阅读 skills/content-evaluator/criteria/${step}.md 获取该阶段的详细评审标准。如果文件不存在，请使用通用的内容质量标准进行评审。
@@ -1498,13 +1500,23 @@ function buildEvalPrompt(work: Work, step: string, attempt: number, historyText:
 ${historyText.slice(0, 6000) || "(无文本产出记录)"}
 
 ## 评审指令
-1. 检查作品目录下的实际文件
+
+**重要：你必须从磁盘重新读取文件的最新内容。不要依赖之前会话中缓存的文件内容。创作者可能已经修改了文件。**
+
+1. 使用 Read 工具从 ${workDir} 目录读取实际文件（必须重新读取，不要使用缓存）
 2. 对于图片文件：使用 Read 工具查看图片，评估视觉质量
 3. 对于视频文件：使用 ffprobe 检查技术参数（分辨率、时长、编码、音频轨）
 4. 根据评审标准逐项评分
 5. 输出结构化评审结果
 
-${prevResultsText ? `## 历史评审记录\n${prevResultsText}\n\n请特别关注之前指出的问题是否已修复。不要重复提出已修复的问题。` : ""}
+常用文件路径：
+- 调研报告: ${workDir}/research/report.md
+- 内容方案: ${workDir}/plan/plan.md
+- 图片素材: ${workDir}/assets/images/
+- 视频素材: ${workDir}/assets/clips/
+- 最终输出: ${workDir}/output/
+
+${prevResultsText ? `## 历史评审记录\n${prevResultsText}\n\n请特别关注之前指出的问题是否已修复。**必须重新读取文件确认修复，不要依赖之前的缓存内容。**` : ""}
 
 ## 输出格式（必须严格遵循）
 
