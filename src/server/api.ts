@@ -380,7 +380,8 @@ apiRoutes.get("/api/analytics/creator/history", async (c) => {
 // POST /api/generate/image
 apiRoutes.post("/api/generate/image", async (c) => {
   const body = await c.req.json();
-  const { workId, prompt, width, height, filename, provider: providerName, referenceImage } = body;
+  const { workId, prompt, width, height, filename, provider: providerName, referenceImage,
+    aspectRatio, imageSize, seed, temperature, model } = body;
   if (!workId || !prompt || !filename) {
     return c.json({ success: false, error: "Missing required fields", code: "INVALID_PARAMS" }, 400);
   }
@@ -389,7 +390,10 @@ apiRoutes.post("/api/generate/image", async (c) => {
     return c.json({ success: false, error: "No image provider available", code: "INVALID_PARAMS" }, 400);
   }
   try {
-    const result = await provider.generateImage({ prompt, width, height, workId, filename, referenceImage });
+    const result = await provider.generateImage({
+      prompt, width, height, workId, filename, referenceImage,
+      aspectRatio, imageSize, seed, temperature, model,
+    });
     return c.json(result);
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);

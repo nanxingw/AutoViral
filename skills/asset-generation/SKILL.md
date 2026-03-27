@@ -126,10 +126,91 @@ python3 skills/asset-generation/scripts/check_providers.py
 python3 skills/asset-generation/scripts/check_providers.py --format table
 ```
 
-#### 2. `jimeng_generate.py` — 即梦 AI（主力，图片+视频）
+#### 2. `openrouter_generate.py` — OpenRouter/Gemini（**主力图片生成**）
+
+需要 `OPENROUTER_API_KEY`。默认模型 `google/gemini-3.1-flash-image-preview`，是目前最强的图片生成模型。
+
+**完整参数列表：**
+
+| 参数 | 说明 | 示例值 |
+|------|------|--------|
+| `--prompt` | 图片描述/指令（必填） | `"一只橘猫在窗台上"` |
+| `--output` | 输出文件路径（必填） | `output.png` |
+| `--aspect-ratio` / `--ar` | 宽高比 | `3:4`, `9:16`, `16:9` |
+| `--image-size` / `--size` | 分辨率等级 | `0.5K`, `1K`, `2K`, `4K` |
+| `--seed` | 随机种子（相同 seed + prompt → 相似结果） | `42` |
+| `--ref-image` | 参考图路径/URL（可多次指定） | `ref.png` |
+| `--temperature` | 生成温度 (0.0-2.0) | `0.8` |
+| `--model` | 切换模型 | `google/gemini-2.5-flash-image` |
+
+**宽高比选项（`--aspect-ratio`）：**
+
+| 比例 | 像素 (1K) | 适用场景 |
+|------|-----------|---------|
+| `1:1` | 1024×1024 | 头像、正方形贴图 |
+| `3:4` | 864×1184 | **小红书图文（推荐）** |
+| `4:3` | 1184×864 | 横版展示图 |
+| `4:5` | 896×1152 | Instagram 风格 |
+| `9:16` | 768×1344 | **抖音/短视频封面** |
+| `16:9` | 1344×768 | 横屏视频封面 |
+| `2:3` | 832×1248 | 海报竖版 |
+| `3:2` | 1248×832 | 摄影横版 |
+| `21:9` | 1536×672 | 超宽屏 banner |
+| `1:4` | — | 超长竖图（仅 Gemini 3.1） |
+| `4:1` | — | 超长横图（仅 Gemini 3.1） |
+
+**分辨率等级（`--image-size`）：**
+
+| 等级 | 说明 | 成本 | 推荐用途 |
+|------|------|------|---------|
+| `0.5K` | 低分辨率（仅 Gemini 3.1） | 最低 | 快速预览、草图 |
+| `1K` | 标准分辨率（默认） | 标准 | 一般用途 |
+| `2K` | 高分辨率 | 较高 | **正式发布内容（推荐）** |
+| `4K` | 超高分辨率 | 最高 | 需要极致细节的内容 |
+
+**使用示例：**
+
+```bash
+# 小红书图文：3:4 竖图，2K 高清
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "一位穿着米色针织衫的年轻女性，温柔微笑，自然光线，iPhone 随手拍风格" \
+  --aspect-ratio 3:4 --image-size 2K --output images/image-01.png
+
+# 抖音短视频首帧：9:16 全屏，2K
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "..." --ar 9:16 --size 2K --output frames/frame-01.png
+
+# 保持风格一致（同 seed）
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "同一女性在咖啡厅..." --seed 42 --ar 3:4 --size 2K --output images/image-02.png
+
+# 图片编辑（参考图 + 指令）
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "保持人物不变，把背景换成海边日落" \
+  --ref-image images/image-01.png --ar 3:4 --size 2K --output images/image-01-v2.png
+
+# 多张参考图（风格融合）
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "用第一张图的风格画第二张图中的场景" \
+  --ref-image style-ref.png --ref-image scene-ref.png --output result.png
+
+# 快速预览（0.5K 低分辨率，省成本）
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "..." --size 0.5K --output preview.png
+
+# 4K 超清（最高画质）
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "..." --ar 3:4 --size 4K --output hd.png
+```
+
+**可用模型：**
+- `google/gemini-3.1-flash-image-preview`（**默认，推荐**）— 最强画质，支持扩展比例和 0.5K
+- `google/gemini-2.5-flash-image` — 性价比高，适合大批量生成
+
+#### 3. `jimeng_generate.py` — 即梦 AI（**视频生成 + 备用图片**）
 需要 `JIMENG_ACCESS_KEY` + `JIMENG_SECRET_KEY`。
 ```bash
-# 文生图
+# 文生图（备用，优先用 OpenRouter）
 python3 skills/asset-generation/scripts/jimeng_generate.py image \
   --prompt "描述" --width 1088 --height 1920 --output output.png
 
@@ -146,14 +227,11 @@ python3 skills/asset-generation/scripts/jimeng_generate.py video \
   --prompt "动作描述" --first-frame frame.png --output clip.mp4
 ```
 
-#### 3. `openrouter_generate.py` — OpenRouter/Gemini（备用，仅图片）
-需要 `OPENROUTER_API_KEY`。
-```bash
-python3 skills/asset-generation/scripts/openrouter_generate.py \
-  --prompt "描述" --output output.png
-```
-
-**选择策略**: 先运行 `check_providers.py` 确认可用服务，优先使用即梦（支持图片+视频），OpenRouter 作为图片生成的备用方案。
+**选择策略：**
+1. **图片生成** → 优先 `openrouter_generate.py`（Gemini 3.1 Flash，画质最好，参数最丰富）
+2. **视频生成** → 使用 `jimeng_generate.py`（即梦是唯一支持视频的服务）
+3. **图片备用** → OpenRouter 不可用时，用 `jimeng_generate.py image`
+4. 先运行 `check_providers.py` 确认可用服务
 
 ---
 
@@ -184,15 +262,18 @@ python3 skills/asset-generation/scripts/openrouter_generate.py \
 
 **3. 生成首帧图片：**
 ```bash
-curl -X POST http://localhost:3271/api/generate/image \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workId": "{workId}",
-    "prompt": "{优化后的提示词}",
-    "width": 1088,
-    "height": 1920,
-    "filename": "frames/frame-{NN}.png"
-  }'
+# 推荐：使用 OpenRouter (Gemini 3.1) 生成高清首帧
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "{优化后的提示词}" \
+  --ar 9:16 --size 2K \
+  --output {workDir}/assets/frames/frame-{NN}.png
+
+# 如需保持角色一致性，加 --seed 和 --ref-image
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "{提示词}" \
+  --ar 9:16 --size 2K --seed 42 \
+  --ref-image {workDir}/assets/frames/frame-01.png \
+  --output {workDir}/assets/frames/frame-{NN}.png
 ```
 
 **4. 报告结果并展示预览：**
@@ -294,15 +375,17 @@ drawtext=text='❝':fontsize=72:fontcolor=white@0.4:fontfile=/System/Library/Fon
 
 **3. 生成：**
 ```bash
-curl -X POST http://localhost:3271/api/generate/image \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workId": "{workId}",
-    "prompt": "{优化后的提示词}",
-    "width": 1080,
-    "height": 1440,
-    "filename": "images/image-{NN}.png"
-  }'
+# 推荐：OpenRouter (Gemini 3.1) 3:4 竖图，2K 高清
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "{优化后的提示词}" \
+  --ar 3:4 --size 2K \
+  --output {workDir}/assets/images/image-{NN}.png
+
+# 保持风格一致性：加 --seed（所有图用同一 seed）
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "{提示词}" \
+  --ar 3:4 --size 2K --seed {统一的seed值} \
+  --output {workDir}/assets/images/image-{NN}.png
 ```
 
 **4. 报告并继续。**
@@ -416,19 +499,54 @@ travel photography, landscape, wanderlust, vivid colors, cinematic, adventure ph
 
 ### 分辨率与宽高比
 
-具体分辨率规格请参考各平台参考文件。通用规则：
+具体分辨率规格请参考各平台参考文件。
 
-**API 的 width/height 必须是 64 的倍数。** 常用安全值：
-- 9:16 → 1088×1920
-- 3:4 → 1088×1440 或 1080×1440
-- 1:1 → 1088×1088
-- 16:9 → 1920×1088
+**OpenRouter（主力）使用 `--aspect-ratio` + `--image-size` 控制：**
+- 宽高比：`--ar 3:4`（小红书）、`--ar 9:16`（抖音）、`--ar 1:1`（头像）
+- 分辨率：`--size 2K`（推荐正式发布）、`--size 4K`（极致画质）、`--size 0.5K`（快速预览）
+
+**即梦 AI（备用图片/视频）仍然用像素值：**
+- 9:16 → `--width 1088 --height 1920`
+- 3:4 → `--width 1080 --height 1440`
+- 1:1 → `--width 1088 --height 1088`
+- width/height 必须是 64 的倍数，范围 576-1728
 
 ---
 
 ## 风格一致性技巧
 
-### 技巧一：风格后缀
+### 技巧一：Seed 锁定（最有效）
+
+**使用 `--seed` 参数让同一组图片保持一致的风格和色调。** 同一个 seed + 相似的 prompt = 风格高度一致。
+
+```bash
+# 第一张图：记住 seed 值
+python3 openrouter_generate.py --prompt "女性在咖啡厅..." --seed 42 --ar 3:4 --size 2K --output img-01.png
+
+# 后续图片：使用相同 seed
+python3 openrouter_generate.py --prompt "同一女性在公园..." --seed 42 --ar 3:4 --size 2K --output img-02.png
+python3 openrouter_generate.py --prompt "同一女性在书店..." --seed 42 --ar 3:4 --size 2K --output img-03.png
+```
+
+### 技巧二：参考图（图生图模式）
+
+使用 `--ref-image` 传入已有图片作为风格参考，让生成结果保持一致：
+
+```bash
+# 用第一张图作为参考，生成后续图片
+python3 openrouter_generate.py \
+  --prompt "保持相同的人物和风格，场景换成公园" \
+  --ref-image img-01.png --seed 42 --ar 3:4 --size 2K \
+  --output img-02.png
+
+# 多张参考图（风格 + 内容分离）
+python3 openrouter_generate.py \
+  --prompt "用第一张图的风格和人物，画第二张图中的场景" \
+  --ref-image style-ref.png --ref-image scene-ref.png \
+  --output result.png
+```
+
+### 技巧三：风格后缀
 
 从方案的风格模块中提取风格后缀，并附加到每一条提示词后面：
 
@@ -436,34 +554,28 @@ travel photography, landscape, wanderlust, vivid colors, cinematic, adventure ph
 [具体场景提示词], [风格后缀: soft natural lighting, warm color grading, lifestyle photography, Morandi color palette, shot on iPhone 15 Pro]
 ```
 
-### 技巧二：角色描述复用
+### 技巧四：角色描述复用
 
 将方案中角色参考模块的角色描述原样复制到每个该角色出现的镜头中。不要改写或缩写——生成模型在不同调用之间没有记忆。
 
 错误做法：`the woman from shot 1, same outfit`
 正确做法：`young Chinese woman, age 25, shoulder-length black hair with subtle waves, wearing cream-colored knit sweater and high-waisted brown trousers, gentle smile`
 
-### 技巧三：色板锚定
+### 技巧五：色板锚定
 
 在每条提示词中都包含明确的色彩参考：
 ```
 color palette: warm cream (#F5E6CC), soft terracotta (#C4785B), sage green (#9CAF88), natural wood brown (#8B6914)
 ```
 
-### 技巧四：参考图
+### 一致性组合策略（推荐）
 
-如果共享素材中有定义风格的参考图，可以用它来引导生成：
+**同时使用 seed + ref-image + 风格后缀 + 角色描述复用**，效果最好：
 ```bash
-curl -X POST http://localhost:3271/api/generate/image \
-  -H "Content-Type: application/json" \
-  -d '{
-    "workId": "{workId}",
-    "prompt": "{prompt}",
-    "width": 1088,
-    "height": 1920,
-    "filename": "frames/frame-02.png",
-    "referenceImage": "http://localhost:3271/api/shared-assets/references/style-ref.png"
-  }'
+python3 openrouter_generate.py \
+  --prompt "young Chinese woman, age 25, shoulder-length black hair, cream sweater, [具体场景], soft natural lighting, warm color grading, Morandi palette" \
+  --ref-image img-01.png --seed 42 --ar 3:4 --size 2K \
+  --output img-03.png
 ```
 
 ---
@@ -562,6 +674,13 @@ ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p
 
 检查 `modules/` 目录，根据当前任务需要加载相关能力模块。
 
+### 可用模块
+
+| 模块 | 文档路径 | 用途 |
+|------|---------|------|
+| Prompt 进阶 | `modules/prompt-mastery.md` | 模型差异化策略、负向提示词库、高级质量关键词、风格一致性进阶 |
+| 质量门控 | `modules/quality-gate.md` | 生成后自检清单、常见问题修复、美学评分工具 |
+
 ---
 
 ## 错误处理与重试
@@ -584,6 +703,8 @@ ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p
    - 更换光线或构图关键词
    - 增加或删除风格关键词
 4. 用户确认后使用更新的提示词重新生成
+
+> **提示**：加载 `modules/quality-gate.md` 获取完整的质量自检清单、常见 AI 生成问题的修复策略，以及美学评分工具参考。系统性地诊断和修复生成质量问题，而不是盲目重试。
 
 ---
 

@@ -51,7 +51,26 @@ def check_providers(env_vars: dict[str, str]) -> dict:
     """检查各个 provider 的配置状态"""
     providers = []
 
-    # 即梦 (Jimeng / VolcEngine)
+    # OpenRouter (Gemini) — 主力图片生成
+    openrouter_key = env_vars.get("OPENROUTER_API_KEY", "")
+    openrouter_ready = bool(openrouter_key)
+    providers.append({
+        "name": "openrouter",
+        "display_name": "OpenRouter (Gemini 3.1 Flash)",
+        "available": openrouter_ready,
+        "supports_image": True,
+        "supports_video": False,
+        "missing_keys": ["OPENROUTER_API_KEY"] if not openrouter_key else [],
+        "script": "openrouter_generate.py",
+        "note": "主力图片生成，支持 4K/宽高比/seed/图生图，模型: gemini-3.1-flash-image-preview",
+        "models": [
+            "google/gemini-3.1-flash-image-preview (推荐，最强画质)",
+            "google/gemini-2.5-flash-image (备用，性价比高)",
+        ],
+        "features": ["aspect_ratio", "image_size (0.5K-4K)", "seed", "ref-image", "temperature"],
+    })
+
+    # 即梦 (Jimeng / VolcEngine) — 视频生成 + 备用图片
     jimeng_ak = env_vars.get("JIMENG_ACCESS_KEY", "")
     jimeng_sk = env_vars.get("JIMENG_SECRET_KEY", "")
     jimeng_ready = bool(jimeng_ak and jimeng_sk)
@@ -68,21 +87,7 @@ def check_providers(env_vars: dict[str, str]) -> dict:
             ] if not v
         ],
         "script": "jimeng_generate.py",
-        "note": "主力生成服务，支持文生图/文生视频/图生视频",
-    })
-
-    # OpenRouter (Gemini)
-    openrouter_key = env_vars.get("OPENROUTER_API_KEY", "")
-    openrouter_ready = bool(openrouter_key)
-    providers.append({
-        "name": "openrouter",
-        "display_name": "OpenRouter (Gemini)",
-        "available": openrouter_ready,
-        "supports_image": True,
-        "supports_video": False,
-        "missing_keys": ["OPENROUTER_API_KEY"] if not openrouter_key else [],
-        "script": "openrouter_generate.py",
-        "note": "备用图片生成，使用 Gemini 模型，不支持视频",
+        "note": "视频生成主力 + 备用图片，支持文生图/文生视频/图生视频",
     })
 
     # 汇总可用能力

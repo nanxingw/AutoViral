@@ -5,6 +5,12 @@ export interface ImageOpts {
   referenceImage?: string
   workId: string
   filename: string
+  // OpenRouter image_config
+  aspectRatio?: string
+  imageSize?: string
+  seed?: number
+  temperature?: number
+  model?: string
 }
 
 export interface VideoOpts {

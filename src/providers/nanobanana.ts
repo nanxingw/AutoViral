@@ -4,7 +4,7 @@ import { dataDir } from '../config.js'
 import type { GenerateProvider, ImageOpts, VideoOpts, GenerateResult } from './base.js'
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const MODEL = 'google/gemini-3-pro-image-preview'
+const DEFAULT_MODEL = 'google/gemini-3.1-flash-image-preview'
 
 export class NanoBananaProvider implements GenerateProvider {
   readonly name = 'nanobanana'
@@ -18,9 +18,40 @@ export class NanoBananaProvider implements GenerateProvider {
   }
 
   async generateImage(opts: ImageOpts): Promise<GenerateResult> {
-    const { prompt, workId, filename } = opts
+    const { prompt, workId, filename, referenceImage, aspectRatio, imageSize, seed, temperature, model } = opts
 
     try {
+      // Build message content
+      const contentParts: any[] = []
+
+      // Add reference image if provided
+      if (referenceImage) {
+        if (referenceImage.startsWith('data:')) {
+          contentParts.push({ type: 'image_url', image_url: { url: referenceImage } })
+        } else if (referenceImage.startsWith('http')) {
+          contentParts.push({ type: 'image_url', image_url: { url: referenceImage } })
+        }
+      }
+
+      contentParts.push({ type: 'text', text: prompt })
+
+      // Build request payload
+      const payload: any = {
+        model: model || DEFAULT_MODEL,
+        modalities: ['text', 'image'],
+        messages: [{ role: 'user', content: contentParts }],
+      }
+
+      // image_config for aspect ratio and resolution
+      const imageConfig: any = {}
+      if (aspectRatio) imageConfig.aspect_ratio = aspectRatio
+      if (imageSize) imageConfig.image_size = imageSize
+      if (Object.keys(imageConfig).length > 0) payload.image_config = imageConfig
+
+      // Optional parameters
+      if (seed !== undefined) payload.seed = seed
+      if (temperature !== undefined) payload.temperature = temperature
+
       const res = await fetch(OPENROUTER_URL, {
         method: 'POST',
         headers: {
@@ -28,16 +59,7 @@ export class NanoBananaProvider implements GenerateProvider {
           'Content-Type': 'application/json',
           'HTTP-Referer': 'http://localhost:3271',
         },
-        body: JSON.stringify({
-          model: MODEL,
-          modalities: ['text', 'image'],
-          messages: [
-            {
-              role: 'user',
-              content: [{ type: 'text', text: prompt }],
-            },
-          ],
-        }),
+        body: JSON.stringify(payload),
       })
 
       if (!res.ok) {
@@ -46,69 +68,12 @@ export class NanoBananaProvider implements GenerateProvider {
       }
 
       const data = await res.json() as any
-      const message = data.choices?.[0]?.message
-      const content = message?.content
-      const images = message?.images
 
-      // Extract base64 image data from response
-      // OpenRouter may return images in message.images[] or message.content
-      let base64Data: string | null = null
-      let mimeType = 'image/png'
-
-      // Check message.images array first (OpenRouter Gemini image generation format)
-      if (Array.isArray(images)) {
-        for (const img of images) {
-          const url = img?.image_url?.url ?? img?.url
-          if (url) {
-            const match = url.match(/data:(image\/[^;]+);base64,(.+)/)
-            if (match) {
-              mimeType = match[1]
-              base64Data = match[2]
-              break
-            }
-          }
-          if (img?.source?.data) {
-            base64Data = img.source.data
-            mimeType = img.source.media_type ?? 'image/png'
-            break
-          }
-        }
+      if (data.error) {
+        return { success: false, error: `OpenRouter error: ${data.error.message || JSON.stringify(data.error)}`, code: 'API_ERROR' }
       }
 
-      // Fall back to content field
-      if (!base64Data && typeof content === 'string') {
-        const match = content.match(/data:(image\/[^;]+);base64,([A-Za-z0-9+/=]+)/)
-        if (match) {
-          mimeType = match[1]
-          base64Data = match[2]
-        }
-      }
-
-      if (!base64Data && Array.isArray(content)) {
-        for (const part of content) {
-          if (part.type === 'image_url' && part.image_url?.url) {
-            const match = part.image_url.url.match(/data:(image\/[^;]+);base64,(.+)/)
-            if (match) {
-              mimeType = match[1]
-              base64Data = match[2]
-              break
-            }
-          }
-          if (part.type === 'image' && part.source?.data) {
-            base64Data = part.source.data
-            mimeType = part.source.media_type ?? 'image/png'
-            break
-          }
-          if (part.type === 'text' && typeof part.text === 'string') {
-            const textMatch = part.text.match(/data:(image\/[^;]+);base64,([A-Za-z0-9+/=]+)/)
-            if (textMatch) {
-              mimeType = textMatch[1]
-              base64Data = textMatch[2]
-              break
-            }
-          }
-        }
-      }
+      const base64Data = this.extractBase64(data)
 
       if (!base64Data) {
         return { success: false, error: 'No image data found in response', code: 'API_ERROR' }
@@ -128,6 +93,47 @@ export class NanoBananaProvider implements GenerateProvider {
     } catch (err: any) {
       return { success: false, error: err.message, code: 'API_ERROR' }
     }
+  }
+
+  private extractBase64(data: any): string | null {
+    const message = data.choices?.[0]?.message
+    const content = message?.content
+    const images = message?.images
+
+    // Check message.images array first
+    if (Array.isArray(images)) {
+      for (const img of images) {
+        const url = img?.image_url?.url ?? img?.url
+        if (url) {
+          const match = url.match(/data:image\/[^;]+;base64,(.+)/)
+          if (match) return match[1]
+        }
+        if (img?.source?.data) return img.source.data
+      }
+    }
+
+    // Fall back to content string
+    if (typeof content === 'string') {
+      const match = content.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/)
+      if (match) return match[1]
+    }
+
+    // Fall back to content array
+    if (Array.isArray(content)) {
+      for (const part of content) {
+        if (part.type === 'image_url' && part.image_url?.url) {
+          const match = part.image_url.url.match(/data:image\/[^;]+;base64,(.+)/)
+          if (match) return match[1]
+        }
+        if (part.type === 'image' && part.source?.data) return part.source.data
+        if (part.type === 'text' && typeof part.text === 'string') {
+          const m = part.text.match(/data:image\/[^;]+;base64,([A-Za-z0-9+/=]+)/)
+          if (m) return m[1]
+        }
+      }
+    }
+
+    return null
   }
 
   async generateVideo(_opts: VideoOpts): Promise<GenerateResult> {
