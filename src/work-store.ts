@@ -13,13 +13,13 @@ export type WorkStatus = "draft" | "creating" | "ready" | "failed";
 
 export interface PipelineStep {
   name: string;
-  status: "pending" | "active" | "evaluating" | "done" | "skipped" | "eval_blocked";
+  status: "pending" | "active" | "done" | "skipped";
   startedAt?: string;
   completedAt?: string;
   note?: string;
 }
 
-export type ContentCategory = "info" | "beauty" | "comedy";
+export type ContentCategory = "info" | "beauty" | "comedy" | "anxiety" | "conflict" | "envy";
 export type VideoSource = "upload" | "search" | "ai-generate";
 
 export interface Work {
@@ -35,9 +35,7 @@ export interface Work {
   cliSessionId?: string;
   coverImage?: string;
   topicHint?: string;
-  evaluationMode?: boolean;
-  evalSessionIds?: Record<string, string>;
-  evalAttempts?: Record<string, number>;
+  titleLocked?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -106,7 +104,43 @@ function outputDir(id: string): string {
 async function readWorkFile(id: string): Promise<Work | undefined> {
   try {
     const raw = await readFile(workFilePath(id), "utf-8");
-    return yaml.load(raw) as Work;
+    const work = yaml.load(raw) as Work;
+    // Repair pipeline: ensure all expected steps exist (fixes previously corrupted data)
+    if (work && work.pipeline && work.type) {
+      const template = defaultPipeline(work.type, work.videoSource);
+      let repaired = false;
+      for (const [key, step] of Object.entries(template)) {
+        if (!work.pipeline[key]) {
+          // Missing step — add it as done if later steps exist and are done, otherwise pending
+          const templateKeys = Object.keys(template);
+          const missingIdx = templateKeys.indexOf(key);
+          const laterSteps = templateKeys.slice(missingIdx + 1);
+          const hasLaterDone = laterSteps.some(k => work.pipeline[k]?.status === "done");
+          work.pipeline[key] = { ...step, status: hasLaterDone ? "done" : "pending" };
+          repaired = true;
+        } else if (!work.pipeline[key].name && step.name) {
+          // Existing step missing name — restore from template
+          work.pipeline[key].name = step.name;
+          repaired = true;
+        }
+      }
+      if (repaired) {
+        // Reorder pipeline to match template order
+        const templateKeys = Object.keys(template);
+        const ordered: Record<string, PipelineStep> = {};
+        for (const key of templateKeys) {
+          if (work.pipeline[key]) ordered[key] = work.pipeline[key];
+        }
+        // Keep any extra steps not in template
+        for (const [key, step] of Object.entries(work.pipeline)) {
+          if (!ordered[key]) ordered[key] = step;
+        }
+        work.pipeline = ordered;
+        // Persist the repair
+        writeWorkFile(work).catch(() => {});
+      }
+    }
+    return work;
   } catch {
     return undefined;
   }
@@ -135,7 +169,7 @@ function defaultPipeline(type: WorkType, videoSource?: VideoSource): Record<stri
   }
 
   const names: Record<string, Record<string, string>> = {
-    "short-video": { research: "话题调研", plan: "分镜规划", assets: "素材准备", assembly: "视频合成" },
+    "short-video": { research: "话题调研", plan: "分镜规划", assembly: "视频合成" },
     "image-text": { research: "话题调研", plan: "内容规划", assets: "图片生成", assembly: "图文排版" },
   };
   for (const [key, name] of Object.entries(names[type])) {
@@ -213,7 +247,18 @@ export async function updateWork(id: string, updates: Partial<Work>): Promise<Wo
   const work = await readWorkFile(id);
   if (!work) return undefined;
 
-  const updated: Work = { ...work, ...updates, id, updatedAt: new Date().toISOString() };
+  // Deep-merge pipeline: update individual steps instead of replacing the whole object
+  let mergedPipeline = work.pipeline;
+  if (updates.pipeline) {
+    mergedPipeline = { ...work.pipeline };
+    for (const [key, stepUpdate] of Object.entries(updates.pipeline)) {
+      mergedPipeline[key] = mergedPipeline[key]
+        ? { ...mergedPipeline[key], ...stepUpdate }
+        : stepUpdate;
+    }
+  }
+
+  const updated: Work = { ...work, ...updates, pipeline: mergedPipeline, id, updatedAt: new Date().toISOString() };
   await writeWorkFile(updated);
 
   // Sync index
@@ -309,43 +354,4 @@ export async function loadWorkChat(id: string): Promise<unknown | null> {
   } catch {
     return null;
   }
-}
-
-// ── Evaluation results ──────────────────────────────────────────────────────
-
-export interface EvalResult {
-  step: string;
-  attempt: number;
-  verdict: "pass" | "fail";
-  scores: Record<string, number>;
-  issues: Array<{ severity: "critical" | "major" | "minor"; description: string; file?: string }>;
-  suggestions: string[];
-  timestamp: string;
-}
-
-export async function saveEvalResult(id: string, step: string, attempt: number, result: EvalResult): Promise<void> {
-  const dir = workDir(id);
-  await mkdir(dir, { recursive: true });
-  const filePath = join(dir, `eval-${step}-${attempt}.json`);
-  await writeFile(filePath, JSON.stringify(result, null, 2), "utf-8");
-}
-
-export async function loadEvalResult(id: string, step: string, attempt: number): Promise<EvalResult | null> {
-  try {
-    const filePath = join(workDir(id), `eval-${step}-${attempt}.json`);
-    const raw = await readFile(filePath, "utf-8");
-    return JSON.parse(raw) as EvalResult;
-  } catch {
-    return null;
-  }
-}
-
-export async function loadAllEvalResults(id: string, step: string): Promise<EvalResult[]> {
-  const results: EvalResult[] = [];
-  for (let i = 1; i <= 10; i++) {
-    const r = await loadEvalResult(id, step, i);
-    if (r) results.push(r);
-    else break;
-  }
-  return results;
 }

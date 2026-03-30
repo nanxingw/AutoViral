@@ -198,6 +198,8 @@ export class WsBridge {
 **重要：你必须主动管理流水线状态。** 每次回答用户之前，根据对话上下文判断当前阶段是否已经完成、是否需要推进到下一步。
 - 当你判断当前阶段的工作已经完成（例如调研报告已输出、规划方案已确认），**立即调用** pipeline/advance API 更新状态：
   curl -X POST http://localhost:${port}/api/works/${work.id}/pipeline/advance -H "Content-Type: application/json" -d '{"completedStep":"当前步骤key","nextStep":"下一步骤key"}'
+- 当你为作品确定了标题（例如在规划阶段生成了发布标题），在调用 pipeline/advance 时加上 title 字段来更新作品标题：
+  curl -X POST http://localhost:${port}/api/works/${work.id}/pipeline/advance -H "Content-Type: application/json" -d '{"completedStep":"plan","nextStep":"assembly","title":"你生成的标题"}'
 - 当用户明确要求进入下一阶段时，同样调用此API。
 - 不要等用户来点按钮，你自己判断并更新。
 - 不要在工作未完成时提前推进。
@@ -694,6 +696,28 @@ ${memoryContext}
             // Persist chat to disk (survives server restart)
             if (!session.workId.startsWith("trends_")) {
               saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
+            }
+            // Auto-extract title from plan step output (only once — skip if already locked)
+            if (!session.workId.startsWith("trends_") && resultText) {
+              getWork(session.workId).then(w => {
+                if (!w || w.titleLocked) return;
+                const activeStep = Object.entries(w.pipeline).find(([, s]) => s.status === "active");
+                if (activeStep && activeStep[0] === "plan") {
+                  // Look for title patterns like **标题**：xxx or **标题**: xxx
+                  const titleMatch = resultText.match(/\*{0,2}标题\*{0,2}\s*[：:]\s*(.+)/);
+                  if (titleMatch) {
+                    const newTitle = titleMatch[1].replace(/\*+/g, "").trim();
+                    if (newTitle && newTitle !== w.title) {
+                      updateWork(session.workId, { title: newTitle, titleLocked: true }).then(() => {
+                        this.broadcastToBrowsers(session.workId, {
+                          event: "title_updated",
+                          data: { workId: session.workId, title: newTitle },
+                        });
+                      }).catch(() => {});
+                    }
+                  }
+                }
+              }).catch(() => {});
             }
             // Auto-save step history from backend (doesn't rely on frontend)
             // Only save the NEW messages from this turn (not entire history)

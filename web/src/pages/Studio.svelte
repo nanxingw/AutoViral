@@ -38,68 +38,6 @@
   let wsConn: { send: (text: string) => void; close: () => void } | null = null;
   let showNextStep = $state(false);
   let aborted = $state(false);
-  let showTypeDropdown = $state(false);
-  let showCategoryDropdown = $state(false);
-
-  const pipelineTemplates: Record<string, Record<string, string>> = {
-    "short-video": { research: "话题调研", plan: "分镜规划", assembly: "视频合成" },
-    "image-text": { research: "话题调研", plan: "内容规划", assets: "图片生成", assembly: "图文排版" },
-  };
-
-  async function switchType(newType: string) {
-    if (!work || work.type === newType) return;
-    // Abort any running task
-    if (streaming) handleAbort();
-    // Rebuild pipeline: keep research status, reset everything else
-    const researchStatus = work.pipeline["research"]?.status ?? "pending";
-    const newPipeline: Record<string, any> = {};
-    for (const [key, name] of Object.entries(pipelineTemplates[newType] ?? {})) {
-      newPipeline[key] = { name, status: key === "research" ? researchStatus : "pending" };
-    }
-    work.type = newType as any;
-    work.pipeline = newPipeline;
-    work = { ...work };
-    await fetch(`/api/works/${encodeURIComponent(workId)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: newType, pipeline: newPipeline }),
-    }).catch(() => {});
-    // Auto-start from plan if research is done
-    if (researchStatus === "done") {
-      // Reconnect WS if needed
-      if (!wsConn) wsConn = createWorkWs(workId, wsHandler);
-      setTimeout(() => triggerStep("plan"), 300);
-    }
-  }
-
-  async function switchCategory(newCat: string) {
-    if (!work || work.contentCategory === newCat) return;
-    // Abort any running task
-    if (streaming) handleAbort();
-    // Reset pipeline from plan onwards
-    const keys = Object.keys(work.pipeline);
-    for (const key of keys) {
-      if (key !== "research") {
-        work.pipeline[key].status = "pending";
-      }
-    }
-    work.contentCategory = newCat as any;
-    work = { ...work };
-    const pipelineUpdate: Record<string, any> = {};
-    for (const key of keys) {
-      if (key !== "research") pipelineUpdate[key] = { status: "pending" };
-    }
-    await fetch(`/api/works/${encodeURIComponent(workId)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contentCategory: newCat, pipeline: pipelineUpdate }),
-    }).catch(() => {});
-    // Auto-start from plan if research is done
-    if (work.pipeline["research"]?.status === "done") {
-      if (!wsConn) wsConn = createWorkWs(workId, wsHandler);
-      setTimeout(() => triggerStep("plan"), 300);
-    }
-  }
   let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Derived: check if all steps done or any pending
@@ -134,6 +72,20 @@
     inactivityTimer = setTimeout(() => {
       if (streaming) { streaming = false; showNextStep = true; }
     }, 60000);
+  }
+
+  function handleOutputTitle(title: string) {
+    if (!work || !title || title === work.title) return;
+    // Only auto-set title once; skip if already locked
+    if (work.titleLocked) return;
+    work.title = title;
+    work.titleLocked = true;
+    work = { ...work };
+    fetch(`/api/works/${encodeURIComponent(workId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, titleLocked: true }),
+    }).catch(() => {});
   }
 
   function handleCanvasSend(text: string) {
@@ -281,8 +233,15 @@
   }
 
   function wsHandler(event: string, data: any) {
+    if (event === "title_updated" && data.title && work) {
+      work.title = data.title;
+      work.titleLocked = true;
+      work = { ...work };
+      return;
+    }
     if (event === "pipeline_updated" && data.pipeline && work) {
       work.pipeline = data.pipeline;
+      if (data.title) { work.title = data.title; work.titleLocked = true; }
       work = { ...work };
       const activeKey = Object.keys(data.pipeline).find((k: string) => data.pipeline[k].status === "active");
       if (activeKey) {
@@ -416,7 +375,6 @@
   });
 </script>
 
-<svelte:window on:pointerdown={() => { showTypeDropdown = false; showCategoryDropdown = false; }} />
 <div class="studio-layout">
   <div class="studio-header">
     <div class="header-left-group">
@@ -449,39 +407,9 @@
         onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLElement).blur(); } }}
       >{work?.title ?? tt("studio")}</h2>
       {#if work}
-        <div class="tag-dropdown-wrap">
-          <button class="header-tag clickable" onclick={() => showTypeDropdown = !showTypeDropdown}>
-            {work.type === "short-video" ? tt("shortVideo") : tt("imageText")}
-            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-          </button>
-          {#if showTypeDropdown}
-            <div class="tag-dropdown">
-              {#each [["short-video", tt("shortVideo")], ["image-text", tt("imageText")]] as [val, label]}
-                <button class="tag-option" class:active={work.type === val} onclick={() => {
-                  switchType(val);
-                  showTypeDropdown = false;
-                }}>{label}</button>
-              {/each}
-            </div>
-          {/if}
-        </div>
+        <span class="header-tag">{work.type === "short-video" ? tt("shortVideo") : tt("imageText")}</span>
         {#if work.contentCategory}
-          <div class="tag-dropdown-wrap">
-            <button class="header-tag clickable" onclick={() => showCategoryDropdown = !showCategoryDropdown}>
-              {work.contentCategory === "anxiety" ? tt("categoryAnxiety") : work.contentCategory === "conflict" ? tt("categoryConflict") : work.contentCategory === "comedy" ? tt("categoryComedy") : work.contentCategory === "envy" ? tt("categoryEnvy") : work.contentCategory}
-              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
-            </button>
-            {#if showCategoryDropdown}
-              <div class="tag-dropdown">
-                {#each [["anxiety", tt("categoryAnxiety")], ["conflict", tt("categoryConflict")], ["comedy", tt("categoryComedy")], ["envy", tt("categoryEnvy")]] as [val, label]}
-                  <button class="tag-option" class:active={work.contentCategory === val} onclick={() => {
-                    switchCategory(val);
-                    showCategoryDropdown = false;
-                  }}>{label}</button>
-                {/each}
-              </div>
-            {/if}
-          </div>
+          <span class="header-tag">{work.contentCategory === "anxiety" ? tt("categoryAnxiety") : work.contentCategory === "conflict" ? tt("categoryConflict") : work.contentCategory === "comedy" ? tt("categoryComedy") : work.contentCategory === "envy" ? tt("categoryEnvy") : work.contentCategory}</span>
         {/if}
       {/if}
     </div>
@@ -616,7 +544,7 @@
 
     <!-- Right: Assets -->
     <div class="panel-right">
-      <AssetPanel {workId} visible={true} refreshTrigger={assetRefresh} showOutput={showOutputTab} topicHint={work?.topicHint ?? ""} />
+      <AssetPanel {workId} visible={true} refreshTrigger={assetRefresh} showOutput={showOutputTab} topicHint={work?.topicHint ?? ""} chatBlocks={streamBlocks} onTitleFound={handleOutputTitle} />
     </div>
   </div>
 </div>
@@ -692,57 +620,6 @@
     white-space: nowrap;
     flex-shrink: 0;
   }
-
-  .header-tag.clickable {
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    gap: 0.2rem;
-    background: none;
-    font-family: inherit;
-    transition: all 0.12s;
-  }
-  .header-tag.clickable:hover {
-    border-color: var(--text-muted);
-    color: var(--text);
-  }
-
-  .tag-dropdown-wrap {
-    position: relative;
-    flex-shrink: 0;
-  }
-
-  .tag-dropdown {
-    position: absolute;
-    top: calc(100% + 4px);
-    left: 0;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.15));
-    z-index: 100;
-    min-width: 100px;
-    padding: 0.2rem;
-    animation: modalIn 0.1s ease;
-  }
-
-  .tag-option {
-    display: block;
-    width: 100%;
-    text-align: left;
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    font-family: inherit;
-    font-size: 0.72rem;
-    font-weight: 500;
-    padding: 0.35rem 0.6rem;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.1s;
-  }
-  .tag-option:hover { background: rgba(148,163,184,0.08); color: var(--text); }
-  .tag-option.active { color: var(--spark-red, #FE2C55); font-weight: 650; }
 
   .header-controls {
     display: flex;
