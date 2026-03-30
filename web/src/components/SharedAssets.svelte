@@ -1,5 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { t } from "../lib/i18n";
+
+  function tt(key: string): string { return t(key); }
 
   let { compact = false }: { compact?: boolean } = $props();
 
@@ -19,10 +22,10 @@
   let previewSrc = $state("");
   let playingAudio: HTMLAudioElement | null = $state(null);
 
-  const categories: { key: Category; label: string; icon: string }[] = [
-    { key: "characters", label: "人物", icon: "user" },
-    { key: "music", label: "配乐", icon: "music" },
-    { key: "templates", label: "模板", icon: "layout" },
+  const categoryKeys: { key: Category; labelKey: string; icon: string }[] = [
+    { key: "characters", labelKey: "sharedCatCharacters", icon: "user" },
+    { key: "music", labelKey: "sharedCatMusic", icon: "music" },
+    { key: "templates", labelKey: "sharedCatTemplates", icon: "layout" },
   ];
 
   function isImage(name: string): boolean {
@@ -136,7 +139,7 @@
 <div class="shared-assets" class:compact>
   <!-- Category tabs -->
   <div class="asset-tabs">
-    {#each categories as cat}
+    {#each categoryKeys as cat}
       <button
         class="asset-tab"
         class:active={activeCategory === cat.key}
@@ -149,13 +152,13 @@
         {:else}
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
         {/if}
-        {cat.label}
+        {tt(cat.labelKey)}
       </button>
     {/each}
 
     <label class="upload-btn" class:uploading>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-      {uploading ? "上传中..." : "上传"}
+      {uploading ? tt("uploading") : tt("uploadBtn")}
       <input type="file" class="file-input" onchange={handleUpload} disabled={uploading} />
     </label>
   </div>
@@ -167,7 +170,7 @@
     </div>
   {:else if files.length === 0}
     <div class="asset-empty">
-      <p>暂无{categories.find(c => c.key === activeCategory)?.label ?? ""}素材</p>
+      <p>{tt("noAssetsInCategory").replace("{category}", categoryKeys.find(c => c.key === activeCategory)?.labelKey ? tt(categoryKeys.find(c => c.key === activeCategory)!.labelKey) : "")}</p>
     </div>
   {:else}
     <div class="asset-grid">
@@ -179,7 +182,7 @@
               <img src={file.url} alt={file.name} loading="lazy" />
             </div>
           {:else if isAudio(file.name)}
-            <button class="audio-play-btn" onclick={() => toggleAudio(file)} aria-label="播放">
+            <button class="audio-play-btn" onclick={() => toggleAudio(file)} aria-label={tt("playAudio")}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                 {#if playingAudio?.src?.includes(encodeURI(file.name))}
                   <rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>
@@ -199,7 +202,7 @@
               <span class="asset-size">{formatSize(file.size)}</span>
             {/if}
           </div>
-          <button class="delete-btn" onclick={() => handleDelete(file.name)} aria-label="删除" title="删除">
+          <button class="delete-btn" onclick={() => handleDelete(file.name)} aria-label={tt("deleteAsset")} title={tt("deleteAsset")}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
           </button>
         </div>

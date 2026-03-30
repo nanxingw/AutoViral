@@ -307,10 +307,10 @@
 
   function dispatchCreate(dir: TrendDirection) {
     const hint = [
-      dir.emotionType ? `目标情绪: ${dir.emotionType}${dir.emotionSubtype ? `（${dir.emotionSubtype}）` : ""}` : "",
+      dir.emotionType ? `${tt("labelTargetEmotion")}: ${dir.emotionType}${dir.emotionSubtype ? `（${dir.emotionSubtype}）` : ""}` : "",
       dir.description,
-      dir.contentAngles?.length ? `切入角度: ${dir.contentAngles.join("; ")}` : "",
-      dir.exampleHook ? `爆款钩子: ${dir.exampleHook}` : "",
+      dir.contentAngles?.length ? `${tt("labelContentAngle")}: ${dir.contentAngles.join("; ")}` : "",
+      dir.exampleHook ? `${tt("labelViralHookColon")}: ${dir.exampleHook}` : "",
       dir.tags?.length ? dir.tags.map(t => "#" + t).join(" ") : "",
     ].filter(Boolean).join("\n");
     onCreateFromTrend(dir.title, hint);

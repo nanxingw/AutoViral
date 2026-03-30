@@ -1,7 +1,11 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { t, getLanguage, subscribe } from "../lib/i18n";
 
   let { show = false, onclose }: { show: boolean; onclose?: () => void } = $props();
+
+  let lang = $state(getLanguage());
+  function tt(key: string): string { void lang; return t(key); }
 
   let loading = $state(false);
   let saving = $state(false);
@@ -85,6 +89,11 @@
     }
   }
 
+  onMount(() => {
+    const unsub = subscribe(() => { lang = getLanguage(); });
+    return unsub;
+  });
+
   $effect(() => {
     if (show) {
       loadConfig();
@@ -99,8 +108,8 @@
   <div class="settings-overlay" onclick={handleOverlayClick}>
     <div class="settings-panel" class:visible={show}>
       <div class="panel-header">
-        <h2 class="panel-title">设置</h2>
-        <button class="close-btn" onclick={() => onclose?.()} aria-label="关闭">
+        <h2 class="panel-title">{tt('settingsTitle')}</h2>
+        <button class="close-btn" onclick={() => onclose?.()} aria-label={tt('settingsClose')}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -108,13 +117,13 @@
       {#if loading}
         <div class="panel-loading">
           <div class="loader-sm"></div>
-          <span>加载配置...</span>
+          <span>{tt('settingsLoadingConfig')}</span>
         </div>
       {:else}
         <div class="panel-body">
           <!-- Jimeng API -->
           <section class="config-section">
-            <h3 class="section-label">即梦 API</h3>
+            <h3 class="section-label">{tt('jimengApi')}</h3>
             <div class="field-group">
               <label class="field-label">
                 AccessKey
@@ -123,10 +132,10 @@
                     type={showAccessKey ? "text" : "password"}
                     class="field-input"
                     bind:value={jimengAccessKey}
-                    placeholder="输入 AccessKey"
+                    placeholder={tt('enterAccessKey')}
                   />
-                  <button class="toggle-vis" onclick={() => showAccessKey = !showAccessKey} aria-label="切换可见">
-                    {showAccessKey ? "隐藏" : "显示"}
+                  <button class="toggle-vis" onclick={() => showAccessKey = !showAccessKey} aria-label={tt('toggleVisibility')}>
+                    {showAccessKey ? tt('toggleHide') : tt('toggleShow')}
                   </button>
                 </div>
               </label>
@@ -137,10 +146,10 @@
                     type={showSecretKey ? "text" : "password"}
                     class="field-input"
                     bind:value={jimengSecretKey}
-                    placeholder="输入 SecretKey"
+                    placeholder={tt('enterSecretKey')}
                   />
-                  <button class="toggle-vis" onclick={() => showSecretKey = !showSecretKey} aria-label="切换可见">
-                    {showSecretKey ? "隐藏" : "显示"}
+                  <button class="toggle-vis" onclick={() => showSecretKey = !showSecretKey} aria-label={tt('toggleVisibility')}>
+                    {showSecretKey ? tt('toggleHide') : tt('toggleShow')}
                   </button>
                 </div>
               </label>
@@ -158,10 +167,10 @@
                     type={showOpenRouter ? "text" : "password"}
                     class="field-input"
                     bind:value={openrouterKey}
-                    placeholder="输入 API Key"
+                    placeholder={tt('enterApiKey')}
                   />
-                  <button class="toggle-vis" onclick={() => showOpenRouter = !showOpenRouter} aria-label="切换可见">
-                    {showOpenRouter ? "隐藏" : "显示"}
+                  <button class="toggle-vis" onclick={() => showOpenRouter = !showOpenRouter} aria-label={tt('toggleVisibility')}>
+                    {showOpenRouter ? tt('toggleHide') : tt('toggleShow')}
                   </button>
                 </div>
               </label>
@@ -170,24 +179,24 @@
 
           <!-- Research Settings -->
           <section class="config-section">
-            <h3 class="section-label">调研设置</h3>
+            <h3 class="section-label">{tt('researchSettings')}</h3>
             <div class="field-group">
               <div class="toggle-row">
-                <span class="toggle-label">启用自动调研</span>
+                <span class="toggle-label">{tt('enableAutoResearch')}</span>
                 <button
                   class="toggle-switch"
                   class:on={researchEnabled}
                   onclick={() => researchEnabled = !researchEnabled}
                   role="switch"
                   aria-checked={researchEnabled}
-                  aria-label="启用自动调研"
+                  aria-label={tt('enableAutoResearch')}
                 >
                   <span class="toggle-thumb"></span>
                 </button>
               </div>
               {#if researchEnabled}
                 <label class="field-label">
-                  Cron 表达式
+                  {tt('cronExpression')}
                   <input
                     type="text"
                     class="field-input"
@@ -201,10 +210,10 @@
 
           <!-- Model Selection -->
           <section class="config-section">
-            <h3 class="section-label">模型选择</h3>
+            <h3 class="section-label">{tt('modelSelection')}</h3>
             <div class="field-group">
               <label class="field-label">
-                默认模型
+                {tt('defaultModel')}
                 <select class="field-select" bind:value={model}>
                   {#each modelOptions as opt}
                     <option value={opt.value}>{opt.label}</option>
@@ -216,10 +225,10 @@
 
           <!-- Creator Data Collection -->
           <section class="config-section">
-            <h3 class="section-label">创作者数据</h3>
+            <h3 class="section-label">{tt('creatorDataLabel')}</h3>
             <div class="field-group">
               <label class="field-label">
-                抖音主页 URL
+                {tt('douyinHomeUrl')}
                 <input
                   type="text"
                   class="field-input"
@@ -227,18 +236,18 @@
                   placeholder="https://v.douyin.com/xxx"
                 />
               </label>
-              <p class="field-hint">输入你的抖音主页链接，系统将每小时自动采集作品数据</p>
+              <p class="field-hint">{tt('douyinUrlHint')}</p>
             </div>
           </section>
 
           <!-- Memory Sync -->
           <section class="config-section">
-            <h3 class="section-label">AI 记忆</h3>
+            <h3 class="section-label">{tt('aiMemory')}</h3>
             <div class="field-group">
               <div class="toggle-row">
                 <div class="toggle-info">
-                  <span class="toggle-label">记忆同步</span>
-                  <p class="field-hint">开启后，每次创作完成时自动将对话同步到 EverMemOS，让 AI 记住你的创作历史</p>
+                  <span class="toggle-label">{tt('memorySync')}</span>
+                  <p class="field-hint">{tt('memorySyncDesc')}</p>
                 </div>
                 <button
                   class="toggle-switch"
@@ -246,19 +255,19 @@
                   onclick={() => memorySyncEnabled = !memorySyncEnabled}
                   role="switch"
                   aria-checked={memorySyncEnabled}
-                  aria-label="记忆同步"
+                  aria-label={tt('memorySync')}
                 >
                   <span class="toggle-thumb"></span>
                 </button>
               </div>
-              <p class="field-hint field-hint--muted">需要配置 EVERMEMOS_API_KEY 环境变量</p>
+              <p class="field-hint field-hint--muted">{tt('memorySyncEnvHint')}</p>
             </div>
           </section>
         </div>
 
         <div class="panel-footer">
           <button class="save-btn" onclick={saveConfig} disabled={saving}>
-            {saving ? "保存中..." : "保存设置"}
+            {saving ? tt('savingSettings') : tt('saveSettings')}
           </button>
         </div>
       {/if}

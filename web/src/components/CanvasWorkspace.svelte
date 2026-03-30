@@ -1,6 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { t } from "../lib/i18n";
   import MarkdownBlock from "./MarkdownBlock.svelte";
+
+  function tt(key: string): string { return t(key); }
 
   let {
     workId,
@@ -178,7 +181,7 @@
 
   function handleSendAiInstruction() {
     if (!selectedFile || !aiInstruction.trim()) return;
-    const msg = `请修改 ${selectedFile.name}: ${aiInstruction.trim()}`;
+    const msg = `${tt("modifyFilePrefix")} ${selectedFile.name}: ${aiInstruction.trim()}`;
     onSendMessage?.(msg);
     aiInstruction = "";
   }
@@ -237,7 +240,7 @@
               class:active={activeCategory === cat}
               onclick={() => { activeCategory = cat; selectedFile = null; }}
             >
-              {cat === "all" ? "全部" : cat === "frames" ? "帧" : cat === "clips" ? "片段" : cat === "images" ? "图片" : "输出"}
+              {cat === "all" ? tt("catAll") : cat === "frames" ? tt("catFrames") : cat === "clips" ? tt("catClips") : cat === "images" ? tt("catImages") : tt("catOutput")}
               <span class="cat-count">
                 {cat === "all" ? files.length : cat === "frames" ? framesFiles.length : cat === "clips" ? clipsFiles.length : cat === "images" ? imagesFiles.length : outputFiles.length}
               </span>
@@ -248,17 +251,17 @@
         <!-- Shared assets button -->
         <button class="toolbar-btn" class:active={showSharedPanel} onclick={() => { showSharedPanel = !showSharedPanel; }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          共享素材库
+          {tt("sharedAssetLib")}
         </button>
 
         <!-- Upload -->
         <label class="toolbar-btn upload-label" class:uploading>
           {#if uploading}
             <div class="mini-spinner"></div>
-            上传中…
+            {tt("uploading")}
           {:else}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            上传素材
+            {tt("uploadAssets")}
           {/if}
           <input type="file" class="file-input" onchange={handleUpload} disabled={uploading} />
         </label>
@@ -272,7 +275,7 @@
       {#if showSharedPanel}
         <div class="shared-panel">
           <div class="shared-panel-header">
-            <span class="shared-panel-title">共享素材库</span>
+            <span class="shared-panel-title">{tt("sharedAssetLib")}</span>
             <button class="icon-btn" onclick={() => { showSharedPanel = false; }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
@@ -285,7 +288,7 @@
                 class:active={sharedCategory === cat}
                 onclick={() => { sharedCategory = cat; }}
               >
-                {cat === "characters" ? "人物" : cat === "music" ? "配乐" : "模板"}
+                {cat === "characters" ? tt("sharedCatCharacters") : cat === "music" ? tt("sharedCatMusic") : tt("sharedCatTemplates")}
               </button>
             {/each}
           </div>
@@ -294,7 +297,7 @@
             {#if sharedLoading}
               <div class="loading-center"><div class="mini-spinner"></div></div>
             {:else if sharedFiles.length === 0}
-              <div class="empty-small">暂无素材</div>
+              <div class="empty-small">{tt("noSharedAssets")}</div>
             {:else}
               <div class="shared-grid">
                 {#each sharedFiles as sf}
@@ -326,7 +329,7 @@
         {#if loading && files.length === 0}
           <div class="canvas-empty">
             <div class="mini-spinner large"></div>
-            <span>加载素材中…</span>
+            <span>{tt("loadingAssets")}</span>
           </div>
         {:else if filteredFiles().length === 0}
           <div class="canvas-empty">
@@ -335,11 +338,11 @@
               <circle cx="8.5" cy="8.5" r="1.5"/>
               <polyline points="21 15 16 10 5 21"/>
             </svg>
-            <span class="empty-title">素材将在生成后出现在这里</span>
-            <span class="empty-sub">开始创作，AI 会将生成的帧、片段和图片显示在此画布中</span>
+            <span class="empty-title">{tt("assetsAppearHere")}</span>
+            <span class="empty-sub">{tt("assetsAppearHereSub")}</span>
             <label class="empty-upload-btn">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              手动上传素材
+              {tt("manualUpload")}
               <input type="file" class="file-input" onchange={handleUpload} disabled={uploading} />
             </label>
           </div>
@@ -383,7 +386,7 @@
                 <div class="card-label">
                   <span class="card-name" title={file.name}>{file.name}</span>
                   {#if file.group === "output"}
-                    <span class="output-badge">输出</span>
+                    <span class="output-badge">{tt("outputBadge")}</span>
                   {/if}
                 </div>
               </button>
@@ -424,22 +427,22 @@
                   else if (isMarkdown(selectedFile!.name)) openMdPreview(selectedFile!);
                 }}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                  查看大图
+                  {tt("viewLarge")}
                 </button>
                 <button class="action-btn" onclick={() => handleDownloadFile(selectedFile!)}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                  下载
+                  {tt("downloadFile")}
                 </button>
                 <button class="action-btn danger" onclick={() => { selectedFile = null; }}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                  取消选择
+                  {tt("deselect")}
                 </button>
               </div>
 
               <div class="ai-instruction-row">
                 <textarea
                   class="ai-input"
-                  placeholder="让 AI 修改此素材，例如：把背景换成海边日落..."
+                  placeholder={tt("aiModifyPlaceholder")}
                   rows={2}
                   bind:value={aiInstruction}
                   onkeydown={(e) => {
@@ -452,7 +455,7 @@
                   onclick={handleSendAiInstruction}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                  发送给 AI
+                  {tt("sendToAi")}
                 </button>
               </div>
             </div>
@@ -466,7 +469,7 @@
       <div class="output-footer">
         <span class="output-label">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          输出文件
+          {tt("outputFiles")}
         </span>
         <div class="output-file-list">
           {#each outputFiles as file}
@@ -488,7 +491,7 @@
         </div>
         <button class="output-dl-btn" onclick={handleDownloadAll}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          全部下载
+          {tt("downloadAllBtn")}
         </button>
       </div>
     {/if}
