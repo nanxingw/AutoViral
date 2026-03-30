@@ -19,7 +19,7 @@ export interface PipelineStep {
   note?: string;
 }
 
-export type ContentCategory = "info" | "beauty" | "comedy";
+export type ContentCategory = "info" | "beauty" | "comedy" | "anxiety" | "conflict" | "envy";
 export type VideoSource = "upload" | "search" | "ai-generate";
 
 export interface Work {
@@ -35,6 +35,7 @@ export interface Work {
   cliSessionId?: string;
   coverImage?: string;
   topicHint?: string;
+  titleLocked?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -103,7 +104,43 @@ function outputDir(id: string): string {
 async function readWorkFile(id: string): Promise<Work | undefined> {
   try {
     const raw = await readFile(workFilePath(id), "utf-8");
-    return yaml.load(raw) as Work;
+    const work = yaml.load(raw) as Work;
+    // Repair pipeline: ensure all expected steps exist (fixes previously corrupted data)
+    if (work && work.pipeline && work.type) {
+      const template = defaultPipeline(work.type, work.videoSource);
+      let repaired = false;
+      for (const [key, step] of Object.entries(template)) {
+        if (!work.pipeline[key]) {
+          // Missing step — add it as done if later steps exist and are done, otherwise pending
+          const templateKeys = Object.keys(template);
+          const missingIdx = templateKeys.indexOf(key);
+          const laterSteps = templateKeys.slice(missingIdx + 1);
+          const hasLaterDone = laterSteps.some(k => work.pipeline[k]?.status === "done");
+          work.pipeline[key] = { ...step, status: hasLaterDone ? "done" : "pending" };
+          repaired = true;
+        } else if (!work.pipeline[key].name && step.name) {
+          // Existing step missing name — restore from template
+          work.pipeline[key].name = step.name;
+          repaired = true;
+        }
+      }
+      if (repaired) {
+        // Reorder pipeline to match template order
+        const templateKeys = Object.keys(template);
+        const ordered: Record<string, PipelineStep> = {};
+        for (const key of templateKeys) {
+          if (work.pipeline[key]) ordered[key] = work.pipeline[key];
+        }
+        // Keep any extra steps not in template
+        for (const [key, step] of Object.entries(work.pipeline)) {
+          if (!ordered[key]) ordered[key] = step;
+        }
+        work.pipeline = ordered;
+        // Persist the repair
+        writeWorkFile(work).catch(() => {});
+      }
+    }
+    return work;
   } catch {
     return undefined;
   }
@@ -210,7 +247,18 @@ export async function updateWork(id: string, updates: Partial<Work>): Promise<Wo
   const work = await readWorkFile(id);
   if (!work) return undefined;
 
-  const updated: Work = { ...work, ...updates, id, updatedAt: new Date().toISOString() };
+  // Deep-merge pipeline: update individual steps instead of replacing the whole object
+  let mergedPipeline = work.pipeline;
+  if (updates.pipeline) {
+    mergedPipeline = { ...work.pipeline };
+    for (const [key, stepUpdate] of Object.entries(updates.pipeline)) {
+      mergedPipeline[key] = mergedPipeline[key]
+        ? { ...mergedPipeline[key], ...stepUpdate }
+        : stepUpdate;
+    }
+  }
+
+  const updated: Work = { ...work, ...updates, pipeline: mergedPipeline, id, updatedAt: new Date().toISOString() };
   await writeWorkFile(updated);
 
   // Sync index

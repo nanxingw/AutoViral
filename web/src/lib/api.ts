@@ -92,6 +92,7 @@ export interface Work {
   cliSessionId?: string;
   coverImage?: string;
   topicHint?: string;
+  titleLocked?: boolean;
   createdAt: string;
   updatedAt: string;
 }
