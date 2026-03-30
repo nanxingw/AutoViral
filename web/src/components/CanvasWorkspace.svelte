@@ -1,20 +1,20 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { t } from "../lib/i18n";
   import MarkdownBlock from "./MarkdownBlock.svelte";
-  import { fetchSharedAssets, uploadAsset, type AssetFile as SharedAssetFile } from "$lib/api";
+
+  function tt(key: string): string { return t(key); }
 
   let {
     workId,
     visible = true,
     refreshTrigger = 0,
     onSendMessage,
-    onAttach,
   }: {
     workId: string;
     visible: boolean;
     refreshTrigger: number;
     onSendMessage?: (text: string) => void;
-    onAttach?: (att: { name: string; url: string; category: string; size: number }) => void;
   } = $props();
 
   interface AssetFile {
@@ -44,16 +44,10 @@
   let pollTimer: ReturnType<typeof setInterval> | null = null;
 
   // Shared assets state
-  const sharedCategories = [
-    { key: "characters", label: "人物" }, { key: "scenes", label: "场景" },
-    { key: "music", label: "音乐" }, { key: "templates", label: "模板" },
-    { key: "branding", label: "品牌" }, { key: "general", label: "通用" },
-  ] as const;
-  let allSharedAssets: Record<string, SharedAssetFile[]> = $state({});
-  let sharedCategory = $state("characters");
+  type SharedCategory = "characters" | "music" | "templates";
+  let sharedCategory: SharedCategory = $state("characters");
+  let sharedFiles: { name: string; url: string; size?: number }[] = $state([]);
   let sharedLoading = $state(false);
-  let sharedUploadInput: HTMLInputElement | undefined = $state(undefined);
-  let sharedUploading = $state(false);
 
   function isImage(name: string) { return /\.(png|jpe?g|webp|gif|svg)$/i.test(name); }
   function isVideo(name: string) { return /\.(mp4|mov|webm|avi)$/i.test(name); }
@@ -113,37 +107,21 @@
     }
   }
 
-  let sharedFiles = $derived(allSharedAssets[sharedCategory] ?? []);
-  let totalSharedCount = $derived(Object.values(allSharedAssets).flat().length);
-
   async function loadSharedAssets() {
     sharedLoading = true;
     try {
-      allSharedAssets = await fetchSharedAssets();
-    } catch { /* ignore */ }
-    sharedLoading = false;
-  }
-
-  function assetUrl(asset: SharedAssetFile) {
-    return `/api/shared-assets/${encodeURIComponent(asset.category)}/${encodeURIComponent(asset.name)}`;
-  }
-
-  function handleAssetClick(asset: SharedAssetFile) {
-    const url = assetUrl(asset);
-    onAttach?.({ name: asset.name, url, category: asset.category, size: asset.size });
-  }
-
-  async function handleSharedUpload(e: Event) {
-    const input = e.target as HTMLInputElement;
-    const fileList = input.files;
-    if (!fileList || fileList.length === 0) return;
-    sharedUploading = true;
-    try {
-      await uploadAsset(sharedCategory, fileList);
-      await loadSharedAssets();
-    } catch { /* ignore */ }
-    sharedUploading = false;
-    input.value = "";
+      const res = await fetch(`/api/shared-assets?category=${sharedCategory}`);
+      if (res.ok) {
+        const data = await res.json();
+        sharedFiles = data.files ?? data.assets ?? data.items ?? [];
+      } else {
+        sharedFiles = [];
+      }
+    } catch {
+      sharedFiles = [];
+    } finally {
+      sharedLoading = false;
+    }
   }
 
   async function handleUpload(e: Event) {
@@ -203,7 +181,7 @@
 
   function handleSendAiInstruction() {
     if (!selectedFile || !aiInstruction.trim()) return;
-    const msg = `请修改 ${selectedFile.name}: ${aiInstruction.trim()}`;
+    const msg = `${tt("modifyFilePrefix")} ${selectedFile.name}: ${aiInstruction.trim()}`;
     onSendMessage?.(msg);
     aiInstruction = "";
   }
@@ -241,7 +219,12 @@
     }
   });
 
-  // sharedCategory change is handled by the $derived — no refetch needed
+  $effect(() => {
+    void sharedCategory;
+    if (showSharedPanel) {
+      loadSharedAssets();
+    }
+  });
 </script>
 
 {#if visible}
@@ -257,7 +240,7 @@
               class:active={activeCategory === cat}
               onclick={() => { activeCategory = cat; selectedFile = null; }}
             >
-              {cat === "all" ? "全部" : cat === "frames" ? "帧" : cat === "clips" ? "片段" : cat === "images" ? "图片" : "输出"}
+              {cat === "all" ? tt("catAll") : cat === "frames" ? tt("catFrames") : cat === "clips" ? tt("catClips") : cat === "images" ? tt("catImages") : tt("catOutput")}
               <span class="cat-count">
                 {cat === "all" ? files.length : cat === "frames" ? framesFiles.length : cat === "clips" ? clipsFiles.length : cat === "images" ? imagesFiles.length : outputFiles.length}
               </span>
@@ -268,17 +251,17 @@
         <!-- Shared assets button -->
         <button class="toolbar-btn" class:active={showSharedPanel} onclick={() => { showSharedPanel = !showSharedPanel; }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-          素材 ({totalSharedCount})
+          {tt("sharedAssetLib")}
         </button>
 
         <!-- Upload -->
         <label class="toolbar-btn upload-label" class:uploading>
           {#if uploading}
             <div class="mini-spinner"></div>
-            上传中…
+            {tt("uploading")}
           {:else}
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-            上传素材
+            {tt("uploadAssets")}
           {/if}
           <input type="file" class="file-input" onchange={handleUpload} disabled={uploading} />
         </label>
@@ -292,20 +275,20 @@
       {#if showSharedPanel}
         <div class="shared-panel">
           <div class="shared-panel-header">
-            <span class="shared-panel-title">共享素材库</span>
+            <span class="shared-panel-title">{tt("sharedAssetLib")}</span>
             <button class="icon-btn" onclick={() => { showSharedPanel = false; }}>
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
           </div>
 
           <div class="shared-cat-tabs">
-            {#each sharedCategories as cat}
+            {#each (["characters", "music", "templates"] as const) as cat}
               <button
                 class="shared-cat-tab"
-                class:active={sharedCategory === cat.key}
-                onclick={() => { sharedCategory = cat.key; }}
+                class:active={sharedCategory === cat}
+                onclick={() => { sharedCategory = cat; }}
               >
-                {cat.label}
+                {cat === "characters" ? tt("sharedCatCharacters") : cat === "music" ? tt("sharedCatMusic") : tt("sharedCatTemplates")}
               </button>
             {/each}
           </div>
@@ -314,15 +297,14 @@
             {#if sharedLoading}
               <div class="loading-center"><div class="mini-spinner"></div></div>
             {:else if sharedFiles.length === 0}
-              <div class="empty-small">暂无素材</div>
+              <div class="empty-small">{tt("noSharedAssets")}</div>
             {:else}
               <div class="shared-grid">
                 {#each sharedFiles as sf}
-                  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-                  <div class="shared-item" onclick={() => handleAssetClick(sf)} role="button" tabindex="0" onkeydown={(e) => { if (e.key === 'Enter') handleAssetClick(sf); }}>
+                  <div class="shared-item">
                     {#if isImage(sf.name)}
                       <div class="shared-thumb">
-                        <img src={assetUrl(sf)} alt={sf.name} loading="lazy" />
+                        <img src={sf.url} alt={sf.name} loading="lazy" />
                       </div>
                     {:else if isAudio(sf.name)}
                       <div class="shared-audio-icon">
@@ -339,18 +321,6 @@
               </div>
             {/if}
           </div>
-
-          <!-- Upload button at bottom of shared panel -->
-          <div class="shared-panel-footer">
-            <button class="shared-upload-btn" disabled={sharedUploading} onclick={() => sharedUploadInput?.click()}>
-              {#if sharedUploading}
-                <div class="mini-spinner"></div> 上传中…
-              {:else}
-                + 上传
-              {/if}
-            </button>
-            <input type="file" class="file-input" multiple bind:this={sharedUploadInput} onchange={handleSharedUpload} />
-          </div>
         </div>
       {/if}
 
@@ -359,7 +329,7 @@
         {#if loading && files.length === 0}
           <div class="canvas-empty">
             <div class="mini-spinner large"></div>
-            <span>加载素材中…</span>
+            <span>{tt("loadingAssets")}</span>
           </div>
         {:else if filteredFiles().length === 0}
           <div class="canvas-empty">
@@ -368,11 +338,11 @@
               <circle cx="8.5" cy="8.5" r="1.5"/>
               <polyline points="21 15 16 10 5 21"/>
             </svg>
-            <span class="empty-title">素材将在生成后出现在这里</span>
-            <span class="empty-sub">开始创作，AI 会将生成的帧、片段和图片显示在此画布中</span>
+            <span class="empty-title">{tt("assetsAppearHere")}</span>
+            <span class="empty-sub">{tt("assetsAppearHereSub")}</span>
             <label class="empty-upload-btn">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-              手动上传素材
+              {tt("manualUpload")}
               <input type="file" class="file-input" onchange={handleUpload} disabled={uploading} />
             </label>
           </div>
@@ -416,7 +386,7 @@
                 <div class="card-label">
                   <span class="card-name" title={file.name}>{file.name}</span>
                   {#if file.group === "output"}
-                    <span class="output-badge">输出</span>
+                    <span class="output-badge">{tt("outputBadge")}</span>
                   {/if}
                 </div>
               </button>
@@ -457,22 +427,22 @@
                   else if (isMarkdown(selectedFile!.name)) openMdPreview(selectedFile!);
                 }}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                  查看大图
+                  {tt("viewLarge")}
                 </button>
                 <button class="action-btn" onclick={() => handleDownloadFile(selectedFile!)}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                  下载
+                  {tt("downloadFile")}
                 </button>
                 <button class="action-btn danger" onclick={() => { selectedFile = null; }}>
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                  取消选择
+                  {tt("deselect")}
                 </button>
               </div>
 
               <div class="ai-instruction-row">
                 <textarea
                   class="ai-input"
-                  placeholder="让 AI 修改此素材，例如：把背景换成海边日落..."
+                  placeholder={tt("aiModifyPlaceholder")}
                   rows={2}
                   bind:value={aiInstruction}
                   onkeydown={(e) => {
@@ -485,7 +455,7 @@
                   onclick={handleSendAiInstruction}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-                  发送给 AI
+                  {tt("sendToAi")}
                 </button>
               </div>
             </div>
@@ -499,7 +469,7 @@
       <div class="output-footer">
         <span class="output-label">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          输出文件
+          {tt("outputFiles")}
         </span>
         <div class="output-file-list">
           {#each outputFiles as file}
@@ -521,7 +491,7 @@
         </div>
         <button class="output-dl-btn" onclick={handleDownloadAll}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-          全部下载
+          {tt("downloadAllBtn")}
         </button>
       </div>
     {/if}
@@ -777,7 +747,6 @@
 
   .shared-cat-tabs {
     display: flex;
-    flex-wrap: wrap;
     padding: 0.4rem 0.5rem;
     gap: 0.2rem;
   }
@@ -864,41 +833,6 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-  }
-
-  .shared-panel-footer {
-    padding: 0.5rem;
-    border-top: 1px solid var(--border, rgba(255,255,255,0.06));
-    flex-shrink: 0;
-  }
-
-  .shared-upload-btn {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.35rem;
-    padding: 0.4rem 0;
-    border-radius: 7px;
-    border: 1px dashed var(--border, rgba(255,255,255,0.15));
-    background: none;
-    color: var(--text-dim, rgba(255,255,255,0.5));
-    font-size: 0.72rem;
-    font-weight: 600;
-    font-family: inherit;
-    cursor: pointer;
-    transition: all 0.15s ease;
-  }
-
-  .shared-upload-btn:hover {
-    color: var(--accent, #e8e8e8);
-    border-color: var(--accent, #e8e8e8);
-    background: rgba(134,120,191,0.08);
-  }
-
-  .shared-upload-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 
   /* ── Asset canvas ────────────────────────────────────────────────────── */

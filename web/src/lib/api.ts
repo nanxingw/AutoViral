@@ -93,6 +93,7 @@ export interface Work {
   coverImage?: string;
   topicHint?: string;
   titleLocked?: boolean;
+  language?: "en" | "zh";
   createdAt: string;
   updatedAt: string;
 }
@@ -118,6 +119,7 @@ export async function createWorkApi(input: {
   videoSearchQuery?: string;
   platforms?: string[];
   topicHint?: string;
+  language?: "en" | "zh";
 }): Promise<Work> {
   return request<Work>("/api/works", {
     method: "POST",

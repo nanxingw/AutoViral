@@ -1,5 +1,9 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { t, getLanguage, subscribe } from "../lib/i18n";
+
+  let lang = $state(getLanguage());
+  function tt(key: string): string { void lang; return t(key); }
 
   // ── Types ──────────────────────────────────────────────────────────────────
   interface AccountInfo {
@@ -57,6 +61,7 @@
   let douyinUrlInput = $state("");
   let savingUrl = $state(false);
   let saveMsg = $state("");
+  let saveMsgIsError = $state(false);
   let sortCol = $state<keyof WorkItem>("play_count");
   let sortAsc = $state(false);
   let showUrlEdit = $state(false);
@@ -80,8 +85,8 @@
 
   // ── Utilities ──────────────────────────────────────────────────────────────
   function fmtNum(n: number): string {
-    if (n >= 100_000_000) return (n / 100_000_000).toFixed(1) + "亿";
-    if (n >= 10_000) return (n / 10_000).toFixed(1) + "万";
+    if (n >= 100_000_000) return (n / 100_000_000).toFixed(1) + tt('numHundredMillion');
+    if (n >= 10_000) return (n / 10_000).toFixed(1) + tt('numTenThousand');
     return n.toLocaleString();
   }
 
@@ -100,11 +105,11 @@
   function timeAgo(iso: string): string {
     const diff = Date.now() - new Date(iso).getTime();
     const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "刚刚";
-    if (mins < 60) return `${mins} 分钟前`;
+    if (mins < 1) return tt('timeJustNow');
+    if (mins < 60) return tt('timeMinutesAgo').replace('{n}', String(mins));
     const hrs = Math.floor(mins / 60);
-    if (hrs < 24) return `${hrs} 小时前`;
-    return `${Math.floor(hrs / 24)} 天前`;
+    if (hrs < 24) return tt('timeHoursAgo').replace('{n}', String(hrs));
+    return tt('timeDaysAgo').replace('{n}', String(Math.floor(hrs / 24)));
   }
 
   function engagementColor(rate: number): string {
@@ -162,17 +167,21 @@
         body: JSON.stringify({ douyinUrl: douyinUrlInput.trim() }),
       });
       if (!res.ok) throw new Error();
-      saveMsg = "已保存，正在采集数据…";
+      saveMsg = tt('savedCollecting');
+      saveMsgIsError = false;
       await loadAnalytics();
     } catch {
-      saveMsg = "保存失败，请重试";
+      saveMsg = tt('saveFailedRetry');
+      saveMsgIsError = true;
     } finally {
       savingUrl = false;
     }
   }
 
   onMount(() => {
+    const unsub = subscribe(() => { lang = getLanguage(); });
     loadAnalytics();
+    return unsub;
   });
 </script>
 
@@ -181,7 +190,7 @@
 {#if loading}
   <div class="center-state">
     <div class="spinner"></div>
-    <span class="hint-text">加载中…</span>
+    <span class="hint-text">{tt('loadingEllipsis')}</span>
   </div>
 
 {:else if !configured || !creatorData}
@@ -191,33 +200,33 @@
 
     <!-- Platform tabs -->
     <div class="platform-switch">
-      <button class="ps-tab" class:active={analyticsPlatform === "douyin"} onclick={() => analyticsPlatform = "douyin"}>抖音</button>
-      <button class="ps-tab" class:active={analyticsPlatform === "xiaohongshu"} onclick={() => analyticsPlatform = "xiaohongshu"}>小红书</button>
+      <button class="ps-tab" class:active={analyticsPlatform === "douyin"} onclick={() => analyticsPlatform = "douyin"}>{tt('douyinTabLabel')}</button>
+      <button class="ps-tab" class:active={analyticsPlatform === "xiaohongshu"} onclick={() => analyticsPlatform = "xiaohongshu"}>{tt('xiaohongshuTabLabel')}</button>
     </div>
 
     <h2 class="empty-title">
-      {analyticsPlatform === "douyin" ? "连接你的抖音账号" : "连接你的小红书账号"}
+      {analyticsPlatform === "douyin" ? tt('connectDouyin') : tt('connectXiaohongshu')}
     </h2>
     <p class="empty-sub">
-      输入账号主页链接，开始采集创作者数据，解锁完整数据看板
+      {tt('emptySubDesc')}
     </p>
 
     <div class="how-to-get">
-      <span class="how-label">如何获取链接？</span>
+      <span class="how-label">{tt('howToGetLink')}</span>
       {#if analyticsPlatform === "douyin"}
         <ol class="how-steps-list">
-          <li>打开手机抖音</li>
-          <li>点击右上角 <strong>≡</strong></li>
-          <li>选择 <strong>我的二维码</strong></li>
-          <li>右上角 <strong>分享</strong></li>
-          <li><strong>复制链接</strong></li>
+          <li>{tt('openDouyinApp')}</li>
+          <li>{tt('tapTopRightMenu')} <strong>≡</strong></li>
+          <li>{tt('selectMyQrCode')} <strong>{tt('myQrCodeLabel')}</strong></li>
+          <li>{tt('tapShare')} <strong>{tt('shareLabel')}</strong></li>
+          <li><strong>{tt('copyLink')}</strong></li>
         </ol>
       {:else}
         <ol class="how-steps-list">
-          <li>打开小红书 App</li>
-          <li>进入 <strong>「我」</strong> 页面</li>
-          <li>点击右上角 <strong>···</strong></li>
-          <li><strong>复制链接</strong></li>
+          <li>{tt('openXiaohongshuApp')}</li>
+          <li>{tt('goToMePage')} <strong>{tt('mePageLabel')}</strong> {tt('pageSuffix')}</li>
+          <li>{tt('tapTopRightDots')} <strong>{tt('dotsLabel')}</strong></li>
+          <li><strong>{tt('copyLink')}</strong></li>
         </ol>
       {/if}
     </div>
@@ -227,8 +236,8 @@
         class="url-input"
         type="text"
         placeholder={analyticsPlatform === "douyin"
-          ? "粘贴你的抖音主页链接，如 https://v.douyin.com/xxx/"
-          : "粘贴你的小红书主页链接，如 https://www.xiaohongshu.com/user/xxx"}
+          ? tt('pasteDouyinUrl')
+          : tt('pasteXiaohongshuUrl')}
         bind:value={douyinUrlInput}
         onkeydown={(e) => { if (e.key === "Enter") saveDouyinUrl(); }}
       />
@@ -236,11 +245,11 @@
         {#if savingUrl}
           <span class="btn-spinner"></span>
         {/if}
-        开始采集
+        {tt('startCollecting')}
       </button>
     </div>
     {#if saveMsg}
-      <p class="save-msg" class:err={saveMsg.includes("失败")}>{saveMsg}</p>
+      <p class="save-msg" class:err={saveMsgIsError}>{saveMsg}</p>
     {/if}
   </div>
 
@@ -252,12 +261,12 @@
     <div class="platform-tabs">
       <button class="ptab active">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5"/></svg>
-        抖音
+        {tt('platformDouyin')}
       </button>
-      <button class="ptab disabled" disabled title="即将支持">
+      <button class="ptab disabled" disabled title={tt('comingSoon')}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="M8 12h8M12 8v8"/></svg>
-        小红书
-        <span class="coming-soon">即将支持</span>
+        {tt('platformXiaohongshu')}
+        <span class="coming-soon">{tt('comingSoon')}</span>
       </button>
     </div>
 
@@ -271,16 +280,16 @@
           <span class="acct-name">{creatorData.account.nickname}</span>
           <span class="platform-badge">
             <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z"/></svg>
-            抖音
+            {tt('platformDouyin')}
           </span>
         </div>
       </div>
       <div class="acct-right">
-        <span class="acct-collected">上次采集: {timeAgo(creatorData.collected_at)}</span>
-        <button class="refresh-btn" onclick={loadAnalytics} title="刷新数据">
+        <span class="acct-collected">{tt('lastCollected')} {timeAgo(creatorData.collected_at)}</span>
+        <button class="refresh-btn" onclick={loadAnalytics} title={tt('refreshData')}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 2v6h-6"/><path d="M3 12a9 9 0 0 1 15-6.7L21 8"/><path d="M3 22v-6h6"/><path d="M21 12a9 9 0 0 1-15 6.7L3 16"/></svg>
         </button>
-        <button class="change-acct-btn" onclick={() => { showUrlEdit = !showUrlEdit; editUrlValue = ""; }} title="更换账号">
+        <button class="change-acct-btn" onclick={() => { showUrlEdit = !showUrlEdit; editUrlValue = ""; }} title={tt('changeAccount')}>
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         </button>
       </div>
@@ -288,19 +297,19 @@
 
     {#if showUrlEdit}
       <div class="url-edit-bar">
-        <span class="url-edit-hint">手机抖音 → ≡ → 我的二维码 → 分享 → 复制链接</span>
+        <span class="url-edit-hint">{tt('urlEditHint')}</span>
         <input
           class="url-edit-input"
           type="text"
-          placeholder="粘贴抖音主页链接..."
+          placeholder={tt('pasteDouyinLink')}
           bind:value={editUrlValue}
           onkeydown={(e) => { if (e.key === "Enter" && editUrlValue.trim()) { douyinUrlInput = editUrlValue; saveDouyinUrl(); showUrlEdit = false; } if (e.key === "Escape") showUrlEdit = false; }}
         />
         <button class="url-edit-save" disabled={!editUrlValue.trim()} onclick={() => { douyinUrlInput = editUrlValue; saveDouyinUrl(); showUrlEdit = false; }}>
-          保存
+          {tt('urlSave')}
         </button>
         <button class="url-edit-cancel" onclick={() => showUrlEdit = false}>
-          取消
+          {tt('urlCancel')}
         </button>
       </div>
     {/if}
@@ -315,7 +324,7 @@
         </div>
         <div class="metric-body">
           <span class="metric-val">{fmtNum(creatorData.account.follower_count)}</span>
-          <span class="metric-label">粉丝</span>
+          <span class="metric-label">{tt('metricFollowers')}</span>
         </div>
         {#if delta.followers !== undefined}
           <span class="delta {deltaClass(delta.followers)}">{deltaLabel(delta.followers)}</span>
@@ -329,7 +338,7 @@
         </div>
         <div class="metric-body">
           <span class="metric-val">{fmtNum(creatorData.account.total_favorited)}</span>
-          <span class="metric-label">获赞</span>
+          <span class="metric-label">{tt('metricLikes')}</span>
         </div>
         {#if delta.favorited !== undefined}
           <span class="delta {deltaClass(delta.favorited)}">{deltaLabel(delta.favorited)}</span>
@@ -343,7 +352,7 @@
         </div>
         <div class="metric-body">
           <span class="metric-val">{fmtNum(creatorData.summary.avg_play)}</span>
-          <span class="metric-label">平均播放</span>
+          <span class="metric-label">{tt('metricAvgPlay')}</span>
         </div>
       </div>
 
@@ -356,13 +365,13 @@
           <span class="metric-val" style="color: {engagementColor(creatorData.summary.engagement_rate)}">
             {fmtPct(creatorData.summary.engagement_rate)}
           </span>
-          <span class="metric-label">互动率</span>
+          <span class="metric-label">{tt('metricEngagement')}</span>
         </div>
         <span
           class="engage-badge"
           style="background: {engagementColor(creatorData.summary.engagement_rate)}20; color: {engagementColor(creatorData.summary.engagement_rate)}"
         >
-          {#if creatorData.summary.engagement_rate >= 0.05}优秀{:else if creatorData.summary.engagement_rate >= 0.02}正常{:else}偏低{/if}
+          {#if creatorData.summary.engagement_rate >= 0.05}{tt('engagementExcellent')}{:else if creatorData.summary.engagement_rate >= 0.02}{tt('engagementNormal')}{:else}{tt('engagementLow')}{/if}
         </span>
       </div>
 
@@ -372,66 +381,66 @@
     <div class="strip-row">
       <div class="strip-item">
         <span class="strip-val">{creatorData.account.aweme_count}</span>
-        <span class="strip-lbl">发布作品</span>
+        <span class="strip-lbl">{tt('publishedWorks')}</span>
       </div>
       <div class="strip-sep"></div>
       <div class="strip-item">
         <span class="strip-val">{creatorData.summary.total_works_collected}</span>
-        <span class="strip-lbl">已采集</span>
+        <span class="strip-lbl">{tt('collectedWorks')}</span>
       </div>
       <div class="strip-sep"></div>
       <div class="strip-item">
         <span class="strip-val">{fmtNum(creatorData.summary.avg_digg)}</span>
-        <span class="strip-lbl">均点赞</span>
+        <span class="strip-lbl">{tt('avgLikes')}</span>
       </div>
       <div class="strip-sep"></div>
       <div class="strip-item">
         <span class="strip-val">{fmtNum(creatorData.summary.avg_comment)}</span>
-        <span class="strip-lbl">均评论</span>
+        <span class="strip-lbl">{tt('avgComments')}</span>
       </div>
       <div class="strip-sep"></div>
       <div class="strip-item">
         <span class="strip-val">{fmtNum(creatorData.summary.avg_share)}</span>
-        <span class="strip-lbl">均分享</span>
+        <span class="strip-lbl">{tt('avgShares')}</span>
       </div>
       <div class="strip-sep"></div>
       <div class="strip-item">
         <span class="strip-val">{fmtNum(creatorData.summary.avg_collect)}</span>
-        <span class="strip-lbl">均收藏</span>
+        <span class="strip-lbl">{tt('avgCollects')}</span>
       </div>
     </div>
 
     <!-- 3. Works Performance Table -->
     <div class="table-card">
       <div class="table-header">
-        <h3 class="table-title">作品表现</h3>
-        <span class="table-sub">Top 3 已标注爆款</span>
+        <h3 class="table-title">{tt('worksPerformance')}</h3>
+        <span class="table-sub">{tt('top3Viral')}</span>
       </div>
 
       {#if sortedWorks.length === 0}
-        <p class="empty-msg">暂无作品数据</p>
+        <p class="empty-msg">{tt('noWorksData')}</p>
       {:else}
         <div class="table-wrap">
           <table class="works-table">
             <thead>
               <tr>
-                <th class="col-title">标题</th>
+                <th class="col-title">{tt('colTitle')}</th>
                 <th class="col-date sortable" onclick={() => toggleSort("create_time")}>
-                  日期 {sortCol === "create_time" ? (sortAsc ? "↑" : "↓") : ""}
+                  {tt('colDate')} {sortCol === "create_time" ? (sortAsc ? "↑" : "↓") : ""}
                 </th>
                 <th class="col-num sortable" onclick={() => toggleSort("play_count")}>
-                  播放 {sortCol === "play_count" ? (sortAsc ? "↑" : "↓") : ""}
+                  {tt('colPlays')} {sortCol === "play_count" ? (sortAsc ? "↑" : "↓") : ""}
                 </th>
                 <th class="col-num sortable" onclick={() => toggleSort("digg_count")}>
-                  点赞 {sortCol === "digg_count" ? (sortAsc ? "↑" : "↓") : ""}
+                  {tt('colLikes')} {sortCol === "digg_count" ? (sortAsc ? "↑" : "↓") : ""}
                 </th>
                 <th class="col-num sortable" onclick={() => toggleSort("comment_count")}>
-                  评论 {sortCol === "comment_count" ? (sortAsc ? "↑" : "↓") : ""}
+                  {tt('colComments')} {sortCol === "comment_count" ? (sortAsc ? "↑" : "↓") : ""}
                 </th>
                 <th class="col-num sortable" onclick={() => toggleSort("share_count")}>
-                  分享 {sortCol === "share_count" ? (sortAsc ? "↑" : "↓") : ""}
+                  {tt('colShares')} {sortCol === "share_count" ? (sortAsc ? "↑" : "↓") : ""}
                 </th>
-                <th class="col-bar">热度</th>
+                <th class="col-bar">{tt('colHeat')}</th>
               </tr>
             </thead>
             <tbody>
@@ -439,9 +448,9 @@
                 <tr class="work-row" class:top3={i < 3}>
                   <td class="col-title">
                     {#if i < 3}
-                      <span class="hot-badge">爆</span>
+                      <span class="hot-badge">{tt('viralBadge')}</span>
                     {/if}
-                    <span class="work-desc" title={work.desc}>{work.desc || "（无标题）"}</span>
+                    <span class="work-desc" title={work.desc}>{work.desc || tt('noTitle')}</span>
                   </td>
                   <td class="col-date muted">{fmtDate(work.create_time)}</td>
                   <td class="col-num">{fmtNum(work.play_count)}</td>

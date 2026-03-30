@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "voice": {
+      "name": "Voice",
+      "zip_url": "https://lightmake.site/api/v1/download?slug=voice",
+      "source": "skillhub",
+      "version": "1.0.1"
+    }
+  }
+}

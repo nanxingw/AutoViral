@@ -54,6 +54,7 @@
     id: string;
     title: string;
     coverImage: string;
+    images: string[];
     body: string;
     tags: string[];
     category: ContentCategory;
@@ -62,6 +63,7 @@
   let showcaseWorks: ShowcaseWork[] = $state([]);
   let selectedWork: ShowcaseWork | null = $state(null);
   let showcasePlatform: "all" | "douyin" | "xiaohongshu" = $state("all");
+  let modalImageIdx = $state(0);
 
   let filteredShowcase = $derived(
     showcaseWorks.filter(w =>
@@ -102,9 +104,27 @@
   }
 
   // Hardcoded showcase entries — add works here to feature them
-  const SHOWCASE_ENTRIES: { id: string; category: ContentCategory }[] = [
+  interface ShowcaseEntry {
+    id: string;
+    category: ContentCategory;
+    en?: { title: string; body: string; tags: string[]; imageDir?: string };
+  }
+  const SHOWCASE_ENTRIES: ShowcaseEntry[] = [
     { id: "w_20260325_1753_75d", category: "conflict" },
-    { id: "w_20260329_1710_ecf", category: "envy" },
+    { id: "w_20260329_1710_ecf", category: "envy", en: {
+      title: "Just a normal Wednesday at Harvard.",
+      body: [
+        "8:00 Woke up to my roommate's Breville coffee machine. Grabbed a cup.",
+        "9:30 Went to my econ discussion section. 12 students. The professor remembers everyone's name and what they said last week.",
+        "12:00 Lunch at Annenberg Hall — the dining hall that looks like Hogwarts. The girl across from me is from Kenya, her dad works at the UN. We talked about summer plans. She's interning in Switzerland.",
+        "14:00 Returned books at Widener Library, ended up staying for two hours. Sunlight streaming through the stained glass windows. The air smells like old books.",
+        "17:00 Walked along the Charles River with a friend. Spring has finally arrived in Boston. Someone was rowing on the river.",
+        "19:00 Back at the dorm, opened my MacBook to start next week's essay. Snacks from my parents on the desk, and a bunch of tulips I picked up at the flower shop last week.",
+        "That's it. Just an ordinary day.",
+      ].join("\n"),
+      tags: ["#Harvard", "#StudyAbroad", "#BostonLife", "#CollegeLife", "#SpringVibes"],
+      imageDir: "output_en",
+    }},
   ];
 
   function extractCopytextFromChat(blocks: { type: string; text: string }[]): { title: string; body: string; tags: string[] } | null {
@@ -113,11 +133,9 @@
       const b = blocks[i];
       if (b.type !== "text") continue;
       const text = b.text;
-      // Strategy: look for "发布文案" or "标题" + "正文" pattern
-      const titleMatch = text.match(/\*{0,2}标题\*{0,2}\s*[：:]\s*(.+)/);
+      // Strategy: look for "标题" + "正文" pattern
       const bodyMatch = text.match(/\*{0,2}正文\*{0,2}\s*[：:]\s*/);
-      if (titleMatch && bodyMatch) {
-        const title = titleMatch[1].replace(/\*+/g, "").trim();
+      if (bodyMatch) {
         // Extract body: everything between 正文 and 标签/tags section
         const bodyStart = text.indexOf(bodyMatch[0]) + bodyMatch[0].length;
         let bodyEnd = text.length;
@@ -130,6 +148,13 @@
           const tagsSection = text.slice(tagsIdx);
           const found = tagsSection.match(/#[\w\u4e00-\u9fff]+/g);
           if (found) tags = [...new Set(found)];
+        }
+        // Title = first short line of body (matches 成品tab behavior)
+        let title = "";
+        const bodyLines = body.split("\n").filter(l => l.trim());
+        if (bodyLines.length > 1 && bodyLines[0].length < 60) {
+          title = bodyLines.shift()!;
+          body = bodyLines.join("\n");
         }
         if (body) return { title, body, tags };
       }
@@ -151,8 +176,13 @@
           const found = line.match(/#[\w\u4e00-\u9fff]+/g);
           if (found && !line.startsWith(">")) tags.push(...found);
         }
-        const body = bodyLines.join("\n").trim();
-        if (body) return { title: "", body, tags: [...new Set(tags)] };
+        const cleanLines = bodyLines.filter(l => l.trim());
+        let title = "";
+        if (cleanLines.length > 1 && cleanLines[0].length < 60) {
+          title = cleanLines.shift()!;
+        }
+        const body = cleanLines.join("\n").trim();
+        if (body) return { title, body, tags: [...new Set(tags)] };
       }
     }
     return null;
@@ -170,14 +200,28 @@
         let body = "";
         let tags: string[] = [];
         let coverImage = "";
+        let images: string[] = [];
+        let assets: string[] = [];
 
         const assetsRes = await fetch(`/api/works/${entry.id}/assets`);
         if (assetsRes.ok) {
           const assetsData = await assetsRes.json();
-          const assets: string[] = assetsData.assets ?? assetsData;
-          // Cover: check both output/ and assets/ dirs
-          const cover = assets.find((f: string) => /cover/i.test(f) && /\.(png|jpe?g|webp)$/i.test(f))
-            ?? assets.find((f: string) => f.startsWith("output/") && /p1/i.test(f) && /\.(png|jpe?g|webp)$/i.test(f));
+          assets = assetsData.assets ?? assetsData;
+
+          // Collect all output images (sorted by name for correct order)
+          const outputImgs = assets
+            .filter((f: string) => f.startsWith("output/") && /\.(png|jpe?g|webp)$/i.test(f))
+            .sort();
+          // Fallback to assets/images/ if no output images
+          const imgPool = outputImgs.length > 0
+            ? outputImgs
+            : assets.filter((f: string) => f.startsWith("assets/images/") && /\.(png|jpe?g|webp)$/i.test(f)).sort();
+          images = imgPool.map((f: string) => `/api/works/${entry.id}/assets/${f}`);
+
+          // Cover: prefer output dir cover, then any cover, then first output image
+          const cover = outputImgs.find((f: string) => /cover|p1/i.test(f))
+            ?? assets.find((f: string) => /cover/i.test(f) && /\.(png|jpe?g|webp)$/i.test(f))
+            ?? (outputImgs.length > 0 ? outputImgs[0] : null);
           if (cover) coverImage = `/api/works/${entry.id}/assets/${cover}`;
 
           const copytextFile = assets.find((f: string) =>
@@ -212,10 +256,30 @@
           } catch {}
         }
 
+        // Apply English overrides when language is English
+        if (lang === "en" && entry.en) {
+          title = entry.en.title;
+          body = entry.en.body;
+          tags = entry.en.tags;
+          // Switch to English images if available
+          if (entry.en.imageDir) {
+            const enDir = entry.en.imageDir;
+            const enImgs = assets
+              .filter((f: string) => f.startsWith(enDir + "/") && /\.(png|jpe?g|webp)$/i.test(f))
+              .sort();
+            if (enImgs.length > 0) {
+              images = enImgs.map((f: string) => `/api/works/${entry.id}/assets/${f}`);
+              const enCover = enImgs.find((f: string) => /cover|p1/i.test(f)) ?? enImgs[0];
+              coverImage = `/api/works/${entry.id}/assets/${enCover}`;
+            }
+          }
+        }
+
         results.push({
           id: entry.id,
           title,
           coverImage,
+          images,
           body,
           tags,
           category: entry.category,
@@ -284,7 +348,7 @@
       const arr = data.topics ?? data.directions ?? data.trends ?? data.items ?? data.videos;
       if (Array.isArray(arr) && arr.length > 0) {
         directions = arr.map((item: any) => ({
-          title: item.title ?? item.name ?? item.direction ?? "未知方向",
+          title: item.title ?? item.name ?? item.direction ?? tt("unknownDirection"),
           heat: Math.min(5, Math.max(1, Number(item.heat ?? item.hotness ?? item.score ?? 3))),
           competition: item.competition ?? item.competitionLevel ?? "中",
           opportunity: item.opportunity ?? "",
@@ -358,7 +422,7 @@
 
       if (!res.ok) {
         researchPhase = "error";
-        progressLines = [{ type: "error", text: "无法启动趋势调研" }];
+        progressLines = [{ type: "error", text: tt("cannotStartResearch") }];
         researchActive = false;
         return;
       }
@@ -371,14 +435,14 @@
           case "search_query":
             progressLines = [...progressLines, {
               type: "search",
-              text: `搜索 "${data.query}"`,
+              text: `${tt("searchLabel")} "${data.query}"`,
             }];
             break;
           case "search_result": {
             const updated = [...progressLines];
             for (let i = updated.length - 1; i >= 0; i--) {
               if (updated[i].type === "search") {
-                updated[i] = { type: "result", text: updated[i].text + "  " + (data.summary || "完成") };
+                updated[i] = { type: "result", text: updated[i].text + "  " + (data.summary || tt("done")) };
                 break;
               }
             }
@@ -397,7 +461,7 @@
             if (!progressLines.some(l => l.type === "analyzing")) {
               progressLines = [...progressLines, {
                 type: "analyzing",
-                text: "AI 正在分析整理...",
+                text: tt("aiAnalyzing"),
               }];
             }
             break;
@@ -437,7 +501,7 @@
             researchPhase = "error";
             progressLines = [...progressLines, {
               type: "error",
-              text: data.message || "调研失败",
+              text: data.message || tt("researchError"),
             }];
             researchActive = false;
             break;
@@ -448,7 +512,7 @@
       });
     } catch {
       researchPhase = "error";
-      progressLines = [{ type: "error", text: "网络错误，请重试" }];
+      progressLines = [{ type: "error", text: tt("networkError") }];
       researchActive = false;
     }
   }
@@ -487,8 +551,8 @@
     const hint = [
       dir.title,
       dir.description,
-      dir.contentAngles?.length ? `切入角度: ${dir.contentAngles.join("; ")}` : "",
-      dir.tags?.length ? `推荐标签: ${dir.tags.map(t => "#" + t).join(" ")}` : "",
+      dir.contentAngles?.length ? `${tt("angleLabel")} ${dir.contentAngles.join("; ")}` : "",
+      dir.tags?.length ? `${tt("tagsLabel")} ${dir.tags.map(t => "#" + t).join(" ")}` : "",
     ].filter(Boolean).join("\n");
 
     const event = new CustomEvent("createWork", {
@@ -499,14 +563,14 @@
   }
 
   function opportunityColor(opp: string): string {
-    if (opp === "金矿") return "opp-gold";
-    if (opp === "蓝海") return "opp-blue";
-    if (opp === "红海") return "opp-red";
+    if (opp === "金矿" || opp === "Gold Mine") return "opp-gold";
+    if (opp === "蓝海" || opp === "Blue Ocean") return "opp-blue";
+    if (opp === "红海" || opp === "Red Ocean") return "opp-red";
     return "";
   }
 
   let hasData = $derived(directions.length > 0 || rawContent.length > 0);
-  let platformLabel = $derived(activePlatform === "douyin" ? "抖音" : "小红书");
+  let platformLabel = $derived(activePlatform === "douyin" ? tt("platformDouyin") : tt("platformXiaohongshu"));
 
   async function loadReport() {
     try {
@@ -518,13 +582,18 @@
     } catch {}
   }
 
+  // Reload showcase when language changes
+  $effect(() => {
+    void lang;
+    loadShowcaseWork();
+  });
+
   onMount(() => {
     const unsub = subscribe(() => { lang = getLanguage(); });
     loadTrends();
     loadInterests();
     loadReport();
     loadAutoResearch();
-    loadShowcaseWork();
     return unsub;
   });
 </script>
@@ -556,7 +625,7 @@
     </div>
     <div class="platform-tabs">
       <button class="plat-tab" class:active={showcasePlatform === "all"} onclick={() => showcasePlatform = "all"}>
-        {lang === "zh" ? "全部" : "All"}
+        {tt("filterAllPlatforms")}
       </button>
       <button class="plat-tab" class:active={showcasePlatform === "douyin"} onclick={() => showcasePlatform = "douyin"}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12.53 1.02c1.15-.04 2.29.02 3.43.14.17 1.38.76 2.71 1.74 3.66 1 .98 2.37 1.52 3.76 1.65v3.53c-1.3-.04-2.6-.35-3.76-.92-.5-.24-.97-.53-1.4-.87-.01 2.84.01 5.68-.02 8.51-.08 1.34-.53 2.67-1.31 3.76a7.24 7.24 0 01-5.6 3.15c-1.6.13-3.24-.3-4.56-1.2A7.18 7.18 0 012 17.02c0-.3.03-.6.07-.9.24-1.7 1.15-3.27 2.48-4.33a6.82 6.82 0 014.83-1.56c.01 1.3-.01 2.6-.02 3.9-.92-.28-1.97-.13-2.77.42a3.2 3.2 0 00-1.4 2.17c-.07.58.03 1.2.34 1.72.52 1 1.64 1.7 2.83 1.73 1.15.06 2.3-.5 2.97-1.42.22-.32.4-.68.46-1.06.12-.87.1-1.75.1-2.63V1.02h2.64z"/></svg>
@@ -574,14 +643,20 @@
     {#if filteredShowcase.length > 0}
       {#each filteredShowcase as work}
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="work-card" onclick={() => selectedWork = work}>
-          {#if work.coverImage}
+        <div class="work-card" onclick={() => { modalImageIdx = 0; selectedWork = work; }}>
+          {#if work.coverImage || work.images.length > 0}
             <div class="work-cover">
-              <img src={work.coverImage} alt={work.title} />
+              <img src={work.coverImage || work.images[0]} alt={work.title} />
+              {#if work.images.length > 1}
+                <span class="work-cover-count">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="2" width="15" height="15" rx="2"/><path d="M7 22h13a2 2 0 0 0 2-2V7"/></svg>
+                  {work.images.length}
+                </span>
+              {/if}
               <div class="work-platform-tags">
                 {#each work.platforms as p}
                   <span class="work-platform-tag" class:douyin={p === "douyin"} class:xhs={p === "xiaohongshu"}>
-                    {p === "douyin" ? "抖音" : "小红书"}
+                    {p === "douyin" ? tt("platformDouyin") : tt("platformXiaohongshu")}
                   </span>
                 {/each}
               </div>
@@ -604,8 +679,8 @@
       {/each}
     {:else}
       <div class="showcase-empty">
-        <p class="showcase-empty-text">{lang === "zh" ? "暂无作品" : "No works yet"}</p>
-        <p class="showcase-empty-sub">{lang === "zh" ? "完成创作后，作品将展示在这里" : "Completed works will appear here"}</p>
+        <p class="showcase-empty-text">{tt("noWorksYet")}</p>
+        <p class="showcase-empty-sub">{tt("noWorksYetDesc")}</p>
       </div>
     {/if}
   </div>
@@ -623,7 +698,26 @@
         <div class="phone-notch"></div>
         <div class="phone-screen">
           <div class="xhs-post">
-            {#if selectedWork.coverImage}
+            {#if selectedWork.images.length > 0}
+              <div class="xhs-cover">
+                <img src={selectedWork.images[modalImageIdx]} alt={selectedWork.title} />
+                {#if selectedWork.images.length > 1}
+                  <!-- Left/right tap zones -->
+                  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                  <div class="cover-tap-left" onclick={(e) => { e.stopPropagation(); if (modalImageIdx > 0) modalImageIdx--; }}></div>
+                  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                  <div class="cover-tap-right" onclick={(e) => { e.stopPropagation(); if (modalImageIdx < selectedWork!.images.length - 1) modalImageIdx++; }}></div>
+                  <!-- Dot indicators -->
+                  <div class="cover-dots">
+                    {#each selectedWork.images as _, i}
+                      <span class="cover-dot" class:active={i === modalImageIdx}></span>
+                    {/each}
+                  </div>
+                  <!-- Counter badge -->
+                  <span class="cover-counter">{modalImageIdx + 1}/{selectedWork.images.length}</span>
+                {/if}
+              </div>
+            {:else if selectedWork.coverImage}
               <div class="xhs-cover">
                 <img src={selectedWork.coverImage} alt={selectedWork.title} />
               </div>
@@ -632,11 +726,11 @@
               <h3 class="xhs-title">{selectedWork.title}</h3>
               <div class="xhs-author">
                 <div class="xhs-avatar"></div>
-                <span class="xhs-name">AutoViral 创作</span>
+                <span class="xhs-name">{tt("autoviralCreation")}</span>
                 <div class="xhs-platform-badges">
                   {#each selectedWork.platforms as p}
                     <span class="work-platform-tag" class:douyin={p === "douyin"} class:xhs={p === "xiaohongshu"}>
-                      {p === "douyin" ? "抖音" : "小红书"}
+                      {p === "douyin" ? tt("platformDouyin") : tt("platformXiaohongshu")}
                     </span>
                   {/each}
                 </div>
@@ -680,7 +774,7 @@
     <div class="config-modal">
       <h3 class="config-title">{tt("autoResearchLabel")}</h3>
       <p class="config-desc">
-        {autoResearchOn ? (lang === "zh" ? "自动调研已开启，关闭后将停止自动调研。" : "Auto research is on. Turn off to stop.") : (lang === "zh" ? "开启后，AI 会按设定频率自动调研热门趋势。" : "AI will automatically research trends at the set interval.")}
+        {autoResearchOn ? tt("autoResearchOnDesc") : tt("autoResearchOffDesc")}
       </p>
 
       <div class="config-field">
@@ -707,7 +801,7 @@
       <div class="config-actions">
         <button class="config-cancel" onclick={closeConfigModal}>{tt("cancel")}</button>
         <button class="config-confirm" onclick={saveConfig}>
-          {autoResearchOn ? (lang === "zh" ? "关闭" : "Turn Off") : (lang === "zh" ? "开启" : "Turn On")}
+          {autoResearchOn ? tt("turnOff") : tt("turnOn")}
         </button>
       </div>
     </div>
@@ -894,6 +988,21 @@
     object-fit: cover;
   }
 
+  .work-cover-count {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(0,0,0,0.5);
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+
   .work-platform-tags {
     position: absolute;
     top: 8px;
@@ -1024,12 +1133,62 @@
     aspect-ratio: 3/4;
     overflow: hidden;
     background: #f5e6e0;
+    position: relative;
   }
 
   .xhs-cover img {
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  /* Tap zones for prev/next — invisible, cover left/right halves */
+  .cover-tap-left, .cover-tap-right {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 40%;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .cover-tap-left { left: 0; }
+  .cover-tap-right { right: 0; }
+
+  /* Dot indicators — centered at bottom like XHS/Instagram */
+  .cover-dots {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 5px;
+    z-index: 3;
+  }
+  .cover-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.45);
+    transition: all 0.2s;
+  }
+  .cover-dot.active {
+    background: #fff;
+    transform: scale(1.2);
+  }
+
+  /* Counter badge — top right like XHS */
+  .cover-counter {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0,0,0,0.45);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    z-index: 3;
+    letter-spacing: 0.5px;
   }
 
   .xhs-body {

@@ -1,6 +1,15 @@
 <script lang="ts">
-  import { t } from "../lib/i18n";
+  import { onMount } from "svelte";
+  import { t, getLanguage, subscribe } from "../lib/i18n";
   import MarkdownBlock from "./MarkdownBlock.svelte";
+
+  let lang = $state(getLanguage());
+  function tt(key: string): string { void lang; return t(key); }
+
+  onMount(() => {
+    const unsub = subscribe(() => { lang = getLanguage(); });
+    return unsub;
+  });
 
   interface ProgressLine {
     type: "search" | "result" | "analyzing" | "done" | "error" | "text";
@@ -48,22 +57,22 @@
           <div class="header-left">
             {#if phase === "error"}
               <span class="status-dot dot-error"></span>
-              <span class="header-text">调研失败</span>
+              <span class="header-text">{tt("researchFailed")}</span>
             {:else if phase === "done"}
               <span class="status-dot dot-done"></span>
-              <span class="header-text">{t("researchDone")}</span>
+              <span class="header-text">{tt("researchDone")}</span>
             {:else if phase === "analyzing"}
               <span class="status-dot dot-pulse"></span>
-              <span class="header-text">AI 正在分析趋势...</span>
+              <span class="header-text">{tt("analyzingTrends")}</span>
             {:else}
               <span class="status-dot dot-pulse"></span>
-              <span class="header-text">正在收集热搜数据...</span>
+              <span class="header-text">{tt("collectingData")}</span>
             {/if}
           </div>
           {#if phase === "error"}
-            <button class="action-pill" onclick={onCancel}>重试</button>
+            <button class="action-pill" onclick={onCancel}>{tt("retry")}</button>
           {:else if active}
-            <button class="action-pill cancel" onclick={onCancel}>取消</button>
+            <button class="action-pill cancel" onclick={onCancel}>{tt("cancel")}</button>
           {/if}
         </div>
 
@@ -84,7 +93,7 @@
           <div class="stream-area">
             <div class="stream-label">
               <span class="status-dot dot-pulse small"></span>
-              AI 分析输出
+              {tt("aiAnalysisOutput")}
             </div>
             <div class="stream-content">
               <pre class="stream-text">{streamText}</pre>
@@ -109,7 +118,7 @@
       <div class="report-section">
         <button class="report-toggle" onclick={() => showReport = !showReport}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-          {showReport ? "收起研究报告" : "查看完整研究报告"}
+          {showReport ? tt("collapseReport") : tt("viewFullReport")}
           <svg class="chevron" class:open={showReport} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
         </button>
         {#if showReport}
