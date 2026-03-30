@@ -50,9 +50,9 @@
 
   let initialPrompt = $state("");
 
-  function buildInitialPrompt(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; topicHint: string }): string {
+  function buildInitialPrompt(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; imageSource: string; imageSearchQuery: string; topicHint: string }): string {
     const categoryMap: Record<string, string> = {
-      anxiety: "危机感/焦虑",
+      anxiety: "深度共鸣",
       conflict: "观点分歧/愤怒",
       comedy: "搞笑抽象",
       envy: "向往拥有/羡慕",
@@ -70,11 +70,15 @@
     if (data.videoSource === "search" && data.videoSearchQuery) parts.push(`视频素材搜索：${data.videoSearchQuery}`);
     else if (data.videoSource === "ai-generate") parts.push(`视频素材：AI 生成`);
     else if (data.videoSource === "upload") parts.push(`视频素材：用户上传`);
+    if (data.imageSource === "search" && data.imageSearchQuery) parts.push(`图片素材搜索：${data.imageSearchQuery}`);
+    else if (data.imageSource === "search") parts.push(`图片素材：全网搜索下载`);
+    else if (data.imageSource === "ai-generate") parts.push(`图片素材：AI 生成`);
+    else if (data.imageSource === "upload") parts.push(`图片素材：用户上传`);
     parts.push(`请从话题调研开始执行流水线。`);
     return parts.join("\n");
   }
 
-  async function handleCreateWork(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; topicHint: string }) {
+  async function handleCreateWork(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; imageSource: string; imageSearchQuery: string; topicHint: string }) {
     showNewWorkModal = false;
     prefillTitle = "";
     prefillTopicHint = "";

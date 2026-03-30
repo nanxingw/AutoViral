@@ -9,12 +9,16 @@
     refreshTrigger = 0,
     showOutput = false,
     topicHint = "",
+    chatBlocks = [],
+    onTitleFound,
   }: {
     workId: string;
     visible: boolean;
     refreshTrigger: number;
     showOutput?: boolean;
     topicHint?: string;
+    chatBlocks?: Array<{ type: string; text: string }>;
+    onTitleFound?: (title: string) => void;
   } = $props();
 
   // When showOutput changes to true, switch to output tab
@@ -96,7 +100,7 @@
         else if (/文案|正文|body|caption|copy/.test(name)) currentSection = "body";
         else if (/标签|tag|hashtag/.test(name)) currentSection = "tags";
         else if (/话题|topic/.test(name)) currentSection = "topics";
-        else if (/发布|建议|publish|tip/.test(name)) currentSection = "tips";
+        else if (/发布建议|publish.?tip|注意事项/.test(name)) currentSection = "tips";
         else currentSection = "body"; // unknown sections go to body
         continue;
       }
@@ -228,19 +232,138 @@
     }
   }
 
+  async function loadChatFallback() {
+    try {
+      const res = await fetch(`/api/works/${workId}/chat`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const blocks = (data?.blocks ?? []) as Array<{ type: string; text: string }>;
+      const extracted = extractCopytextFromChat(blocks);
+      if (extracted) {
+        outputCopytext = extracted;
+        if (onTitleFound) {
+          const platforms = parseCopytextMulti(extracted);
+          const title = platforms[0]?.title;
+          if (title) onTitleFound(title);
+        }
+      }
+    } catch {}
+  }
+
   async function loadCopytext() {
     if (!outputCopytextFile) { outputCopytext = ""; return; }
     try {
       const res = await fetch(outputCopytextFile.url);
       outputCopytext = await res.text();
+      // Extract title from copytext and notify parent to update work title
+      if (outputCopytext && onTitleFound) {
+        const platforms = parseCopytextMulti(outputCopytext);
+        const title = platforms[0]?.title;
+        if (title) onTitleFound(title);
+      }
     } catch { outputCopytext = ""; }
   }
 
-  // Load copytext whenever the file appears
+  // Load copytext whenever the file appears; fall back to chat extraction
   $effect(() => {
-    if (outputCopytextFile) loadCopytext();
-    else outputCopytext = "";
+    if (outputCopytextFile) {
+      loadCopytext();
+    } else {
+      // Fallback: extract copytext from chat blocks (agent may have written it inline)
+      let extracted = extractCopytextFromChat(chatBlocks);
+      // If current session blocks don't have it, try loading persisted chat history
+      if (!extracted) {
+        loadChatFallback();
+      } else {
+        outputCopytext = extracted;
+        if (onTitleFound) {
+          const platforms = parseCopytextMulti(extracted);
+          const title = platforms[0]?.title;
+          if (title) onTitleFound(title);
+        }
+      }
+    }
   });
+
+  function extractCopytextFromChat(blocks: Array<{ type: string; text: string }>): string {
+    if (!blocks.length) return "";
+    const allText = blocks.filter(b => b.type === "text" && b.text.length > 80).map(b => b.text);
+
+    // Strategy 1: Find "发布文案" or "配套发布文案" section with quoted (>) or plain text
+    for (const text of [...allText].reverse()) {
+      const match = text.match(/(?:配套)?发布文案[：:\s]*\n([\s\S]+?)(?:\n\n(?:标签|最佳|互动|预期|---)|$)/);
+      if (match) {
+        const body = match[1].replace(/^>\s?/gm, "").trim();
+        if (body.length > 50) return buildCopytext(text, body);
+      }
+    }
+
+    // Strategy 2: Find "完整文案" section (research step output)
+    for (const text of [...allText].reverse()) {
+      const match = text.match(/完整文案[：:\s]*\n([\s\S]+?)(?:\n\n\*{0,2}标签|$)/);
+      if (match) {
+        const body = match[1].replace(/^>\s?/gm, "").trim();
+        if (body.length > 80) return buildCopytext(text, body);
+      }
+    }
+
+    // Strategy 3: Find substantial quoted text blocks (> lines) = inline copytext
+    for (const text of [...allText].reverse()) {
+      const quotedLines = text.split("\n").filter(l => /^>\s/.test(l));
+      if (quotedLines.length >= 5) {
+        const body = quotedLines.map(l => l.replace(/^>\s?/, "")).join("\n").trim();
+        if (body.length > 100) return buildCopytext(text, body);
+      }
+    }
+
+    return "";
+  }
+
+  function buildCopytext(fullBlock: string, body: string): string {
+    // Extract tags: multiple formats
+    let tags = "";
+    // Format: **标签**：`#tag1` `#tag2` or 标签：#tag1 #tag2
+    const inlineTagMatch = fullBlock.match(/\*{0,2}标签\*{0,2}[：:]\s*(.+)/g);
+    if (inlineTagMatch) {
+      tags = inlineTagMatch
+        .map(l => l.replace(/\*{0,2}标签\*{0,2}[：:]\s*/, "").replace(/`/g, ""))
+        .join("\n");
+    }
+    // Format: ### 标签 (section header) followed by tag lines
+    if (!tags) {
+      const sectionMatch = fullBlock.match(/#{1,3}\s*标签\s*\n([\s\S]+?)(?:\n\n|$)/);
+      if (sectionMatch) {
+        tags = sectionMatch[1].trim();
+      }
+    }
+    // Format: 话题标签 section
+    if (!tags) {
+      const topicMatch = fullBlock.match(/#{1,3}\s*话题标签?\s*\n([\s\S]+?)(?:\n\n|$)/);
+      if (topicMatch) {
+        tags = topicMatch[1].trim();
+      }
+    }
+    // Last resort: collect all lines that are mostly hashtags
+    if (!tags) {
+      const tagLines = fullBlock.split("\n").filter(l => {
+        const ht = l.match(/#[\w\u4e00-\u9fff]+/g);
+        return ht && ht.length >= 2 && l.trim().length < 120;
+      });
+      if (tagLines.length) tags = tagLines.join("\n");
+    }
+
+    // Extract title
+    const titleMatch = fullBlock.match(/\*{0,2}标题\*{0,2}[：:]\s*(.+)/);
+    let title = titleMatch ? titleMatch[1].replace(/\*+|`/g, "").trim() : "";
+    const lines = body.split("\n").filter(l => l.trim());
+    if (!title && lines[0] && lines[0].length < 50) title = lines.shift()!;
+
+    const parts = [];
+    if (title) parts.push(`## 标题\n${title}`);
+    parts.push(`## 正文\n${lines.join("\n")}`);
+    if (tags) parts.push(`## 标签\n${tags.replace(/`/g, "")}`);
+    return parts.join("\n\n");
+  }
 
 
   onMount(() => {

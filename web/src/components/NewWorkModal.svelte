@@ -11,7 +11,7 @@
   }: {
     open: boolean;
     onClose: () => void;
-    onCreate: (data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; topicHint: string }) => void;
+    onCreate: (data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; imageSource: string; imageSearchQuery: string; topicHint: string }) => void;
     prefillTitle?: string;
     prefillTopicHint?: string;
   } = $props();
@@ -24,6 +24,8 @@
   let selectedCategory = $state("anxiety");
   let videoSource = $state("search");
   let videoSearchQuery = $state("");
+  let imageSource = $state("search");
+  let imageSearchQuery = $state("");
   let topicHint = $state("");
 
   // Apply prefill when modal opens
@@ -50,6 +52,8 @@
       contentCategory: selectedCategory,
       videoSource: selectedType === "short-video" ? videoSource : "",
       videoSearchQuery: videoSource === "search" ? videoSearchQuery : "",
+      imageSource: selectedType === "image-text" ? imageSource : "",
+      imageSearchQuery: selectedType === "image-text" && imageSource === "search" ? imageSearchQuery : "",
       topicHint,
     });
     title = "";
@@ -57,6 +61,8 @@
     selectedCategory = "anxiety";
     videoSource = "search";
     videoSearchQuery = "";
+    imageSource = "search";
+    imageSearchQuery = "";
     topicHint = "";
   }
 
@@ -155,6 +161,56 @@
         </div>
       {/if}
 
+      <!-- Image Source: only visible when image-text is selected -->
+      {#if selectedType === "image-text"}
+        <div class="form-section">
+          <span class="form-label">{tt("imageSource")}</span>
+          <div class="source-row">
+            <button
+              class="source-chip"
+              class:selected={imageSource === "upload"}
+              onclick={() => imageSource = "upload"}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              {tt("imageSourceUpload")}
+            </button>
+            <button
+              class="source-chip"
+              class:selected={imageSource === "search"}
+              onclick={() => imageSource = "search"}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              {tt("imageSourceSearch")}
+            </button>
+            <button
+              class="source-chip"
+              class:selected={imageSource === "ai-generate"}
+              onclick={() => imageSource = "ai-generate"}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+              {tt("imageSourceAI")}
+            </button>
+          </div>
+          <span class="source-hint">
+            {#if imageSource === "search"}
+              {tt("imageSourceSearchHint")}
+            {:else if imageSource === "ai-generate"}
+              {tt("imageSourceAIHint")}
+            {:else}
+              {tt("imageSourceUploadHint")}
+            {/if}
+          </span>
+          {#if imageSource === "search"}
+            <input
+              type="text"
+              class="form-input source-search-input"
+              bind:value={imageSearchQuery}
+              placeholder={tt("imageSearchPlaceholder")}
+            />
+          {/if}
+        </div>
+      {/if}
+
       <!-- Content Category -->
       <div class="form-section">
         <span class="form-label">{tt("contentCategory")}</span>
@@ -165,7 +221,7 @@
             onclick={() => selectedCategory = "anxiety"}
           >
             <span class="category-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
             </span>
             <span class="category-name">{tt("categoryAnxiety")}</span>
             <span class="category-desc">{tt("categoryAnxietyDesc")}</span>
@@ -176,7 +232,7 @@
             onclick={() => selectedCategory = "conflict"}
           >
             <span class="category-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
             </span>
             <span class="category-name">{tt("categoryConflict")}</span>
             <span class="category-desc">{tt("categoryConflictDesc")}</span>
@@ -187,7 +243,7 @@
             onclick={() => selectedCategory = "comedy"}
           >
             <span class="category-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-3 7a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm6 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm-7.5 5a.5.5 0 0 1 .42-.23h8.16a.5.5 0 0 1 .42.77A5.5 5.5 0 0 1 12 17a5.5 5.5 0 0 1-4.5-2.46.5.5 0 0 1 0-.54z"/></svg>
             </span>
             <span class="category-name">{tt("categoryComedy")}</span>
             <span class="category-desc">{tt("categoryComedyDesc")}</span>
@@ -198,7 +254,7 @@
             onclick={() => selectedCategory = "envy"}
           >
             <span class="category-icon">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
             </span>
             <span class="category-name">{tt("categoryEnvy")}</span>
             <span class="category-desc">{tt("categoryEnvyDesc")}</span>
