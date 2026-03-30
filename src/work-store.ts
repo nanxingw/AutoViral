@@ -36,6 +36,7 @@ export interface Work {
   coverImage?: string;
   topicHint?: string;
   titleLocked?: boolean;
+  language?: "en" | "zh";
   createdAt: string;
   updatedAt: string;
 }
@@ -206,6 +207,7 @@ export async function createWork(input: {
   videoSearchQuery?: string;
   platforms: string[];
   topicHint?: string;
+  language?: "en" | "zh";
 }): Promise<Work> {
   const now = new Date().toISOString();
   const id = generateId();
@@ -220,6 +222,7 @@ export async function createWork(input: {
     platforms: input.platforms,
     pipeline: defaultPipeline(input.type, input.videoSource as VideoSource | undefined),
     topicHint: input.topicHint,
+    language: input.language,
     createdAt: now,
     updatedAt: now,
   };
@@ -316,6 +319,7 @@ export async function listAssets(id: string): Promise<string[]> {
 
   await walk(join(baseDir, "assets"));
   await walk(join(baseDir, "output"));
+  await walk(join(baseDir, "output_en"));
 
   return results;
 }

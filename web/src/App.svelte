@@ -51,16 +51,28 @@
   let initialPrompt = $state("");
 
   function buildInitialPrompt(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; imageSource: string; imageSearchQuery: string; topicHint: string }): string {
-    const categoryMap: Record<string, string> = {
-      anxiety: "深度共鸣",
-      conflict: "观点分歧/愤怒",
-      comedy: "搞笑抽象",
-      envy: "向往拥有/羡慕",
-    };
-    const typeMap: Record<string, string> = {
-      "short-video": "短视频",
-      "image-text": "图文",
-    };
+    const isEn = lang === "en";
+    if (isEn) {
+      const categoryMap: Record<string, string> = { anxiety: "Resonance", conflict: "Debate/Anger", comedy: "Comedy/Absurd", envy: "Aspiration/Envy" };
+      const typeMap: Record<string, string> = { "short-video": "Short Video", "image-text": "Image & Text" };
+      const parts: string[] = [];
+      parts.push(`Start creating.`);
+      parts.push(`Format: ${typeMap[data.type] ?? data.type}`);
+      parts.push(`Emotion category: ${categoryMap[data.contentCategory] ?? data.contentCategory}`);
+      if (data.title) parts.push(`Title: ${data.title}`);
+      if (data.topicHint) parts.push(`Direction: ${data.topicHint}`);
+      if (data.videoSource === "search" && data.videoSearchQuery) parts.push(`Video search: ${data.videoSearchQuery}`);
+      else if (data.videoSource === "ai-generate") parts.push(`Video source: AI generated`);
+      else if (data.videoSource === "upload") parts.push(`Video source: User upload`);
+      if (data.imageSource === "search" && data.imageSearchQuery) parts.push(`Image search: ${data.imageSearchQuery}`);
+      else if (data.imageSource === "search") parts.push(`Image source: Web search`);
+      else if (data.imageSource === "ai-generate") parts.push(`Image source: AI generated`);
+      else if (data.imageSource === "upload") parts.push(`Image source: User upload`);
+      parts.push(`Please start from the research step of the pipeline. Respond in English.`);
+      return parts.join("\n");
+    }
+    const categoryMap: Record<string, string> = { anxiety: "深度共鸣", conflict: "观点分歧/争议感", comedy: "搞笑抽象", envy: "向往拥有/羡慕" };
+    const typeMap: Record<string, string> = { "short-video": "短视频", "image-text": "图文" };
     const parts: string[] = [];
     parts.push(`开始创作。`);
     parts.push(`内容形式：${typeMap[data.type] ?? data.type}`);
@@ -91,6 +103,7 @@
         videoSearchQuery: data.videoSearchQuery || undefined,
         platforms: ["douyin", "xiaohongshu"],
         topicHint: data.topicHint || undefined,
+        language: lang as "en" | "zh",
       });
       initialPrompt = buildInitialPrompt(data);
       currentWorkId = newWork.id;
@@ -222,7 +235,7 @@
             <button class="switch" class:on={lang === "zh"} onclick={toggleLanguage}>
               <span class="switch-thumb"></span>
             </button>
-            <span class="lang-opt" class:active={lang === "zh"}>中文</span>
+            <span class="lang-opt" class:active={lang === "zh"}>{tt("langZh")}</span>
           </div>
         </div>
 

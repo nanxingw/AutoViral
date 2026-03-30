@@ -380,7 +380,7 @@
     <div class="header-left-group">
       <button class="back-btn" onclick={() => {
         if (streaming) {
-          const msg = lang === "zh" ? "正在生成中，退出将中止当前任务。确认退出？" : "Content is being generated. Leaving will abort the task. Continue?";
+          const msg = tt("confirmLeaveWhileGenerating");
           if (!confirm(msg)) return;
           handleAbort();
         }

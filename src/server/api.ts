@@ -191,6 +191,7 @@ apiRoutes.post("/api/works", async (c) => {
       videoSearchQuery?: string;
       platforms: string[];
       topicHint?: string;
+      language?: "en" | "zh";
     }>();
     if (!body.title || !body.type || !body.platforms) {
       return c.json({ error: "title, type, and platforms are required" }, 400);
@@ -203,6 +204,7 @@ apiRoutes.post("/api/works", async (c) => {
       videoSearchQuery: body.videoSearchQuery,
       platforms: body.platforms,
       topicHint: body.topicHint,
+      language: body.language,
     });
     return c.json(work, 201);
   } catch (err) {
@@ -640,12 +642,12 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       `## 核心创作方向（强制执行）`,
       ``,
       `每个推荐的话题/方向必须能触发以下四种情绪中的至少一种，否则不予推荐：`,
-      `1. **焦虑**（落后焦虑/错过焦虑/被替代焦虑/身份下坠焦虑）— 让观众觉得"我是不是落后了"`,
-      `2. **愤怒**（不公/冒犯/双标/欺骗/价值观冲突）— 让观众觉得"这不对/凭什么"`,
+      `1. **共鸣**（身份认同/处境代入/被戳中的感觉）— 让观众觉得"这说的不就是我吗"`,
+      `2. **争议感**（不公/双标/价值观碰撞/辩论欲）— 让观众觉得"这不对/凭什么"，想站队`,
       `3. **搞笑/抽象**（反转/共鸣/错位）— 让观众笑出来想转发`,
       `4. **羡慕**（想成为/想拥有）— 让观众觉得"我也想要这样的生活"`,
       ``,
-      `每个话题必须在 JSON 中标注 "emotionType"（焦虑/愤怒/搞笑/羡慕）和 "emotionSubtype"（具体子类型）。`,
+      `每个话题必须在 JSON 中标注 "emotionType"（共鸣/争议/搞笑/羡慕）和 "emotionSubtype"（具体子类型）。`,
       ``,
       `如果上面的 API 数据不够充分，请使用 WebSearch 补充搜索：`,
       `- "${platformLabel} 爆款内容 趋势 2026"`,
@@ -660,8 +662,8 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       `  "heat":4,`,
       `  "competition":"中",`,
       `  "opportunity":"金矿",`,
-      `  "emotionType":"焦虑",`,
-      `  "emotionSubtype":"被替代焦虑",`,
+      `  "emotionType":"共鸣",`,
+      `  "emotionSubtype":"处境代入",`,
       `  "description":"趋势描述和为什么值得做",`,
       `  "tags":["推荐标签1","推荐标签2","推荐标签3"],`,
       `  "contentAngles":["切入角度1","切入角度2"],`,
@@ -671,7 +673,7 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       `- topics 至少 10 个`,
       `- heat 为 1-5 整数，competition 为 "低"/"中"/"高"`,
       `- opportunity 为 "金矿"(高热低竞)/"蓝海"(低热低竞)/"红海"(高热高竞)`,
-      `- emotionType 必填，为 "焦虑"/"愤怒"/"搞笑"/"羡慕" 之一`,
+      `- emotionType 必填，为 "共鸣"/"争议"/"搞笑"/"羡慕" 之一`,
       `- emotionSubtype 必填，为该情绪的具体子类型`,
       `- tags 3-5 个平台推荐标签`,
       `- contentAngles 2-3 个具体的内容切入角度`,
@@ -735,7 +737,18 @@ apiRoutes.post("/api/works/:id/session", async (c) => {
     const pendingStep = steps.find(([, s]) => s.status === "pending" || s.status === "active");
     const stepName = pendingStep ? pendingStep[1].name : steps[0]?.[1]?.name ?? "创作";
 
-    const prompt = [
+    const isEn = work.language === "en";
+    const prompt = isEn ? [
+      `You are a content creation assistant. You are helping the user create: "${work.title}" (type: ${work.type}).`,
+      `Target platforms: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}.`,
+      work.topicHint ? `Topic direction: ${work.topicHint}` : "",
+      ``,
+      `Current step: "${stepName}".`,
+      `First confirm with the user: briefly explain what you'll do in this step, ask if they have specific directions or requirements, then wait for confirmation before starting.`,
+      `Do not start executing immediately — communicate with the user first.`,
+      ``,
+      `IMPORTANT: All your responses, generated content, titles, copytext, and tags must be in English.`,
+    ].filter(Boolean).join("\n") : [
       `你是一个内容创作助手。你正在帮助用户创作: "${work.title}" (类型: ${work.type})。`,
       `目标平台: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}。`,
       work.topicHint ? `选题方向: ${work.topicHint}` : "",
@@ -800,12 +813,19 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
       }
     }
 
+    const isEn = work.language === "en";
     const promptParts = [
       `You are working on a content piece: "${work.title}" (type: ${work.type}).`,
       work.contentCategory ? `Content category: ${work.contentCategory}.` : "",
       `Platforms: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}.`,
       work.topicHint ? `Topic hint: ${work.topicHint}` : "",
       ``,
+      ...(isEn ? [
+        `## LANGUAGE REQUIREMENT`,
+        `ALL your responses, generated content, titles, copytext, tags, and text overlays on images must be in **English**.`,
+        `Do NOT output Chinese text. The user interface is in English and all deliverables must be English.`,
+        ``,
+      ] : []),
     ];
 
     if (step === "material-search" && work.videoSearchQuery) {
@@ -848,7 +868,7 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
     } else if (step === "research" && work.contentCategory && work.contentCategory !== "comedy") {
       const emotionEffect: Record<string, string> = {
         anxiety: "看完之后感到被戳中、共鸣强烈、忍不住分享给朋友",
-        conflict: "看完之后感到愤怒、不公、想站队、想在评论区吵架",
+        conflict: "看完之后产生强烈的争议感、正义感、想站队、想在评论区辩论",
         envy: "看完之后强烈羡慕、想拥有同样的生活——展示的必须是极少数人才能享有的精致/富裕/甜蜜生活，而非普通人日常",
       };
       const cat = work.contentCategory as string;
@@ -991,8 +1011,44 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
         `Produce output appropriate for this step. Be thorough and creative.`,
       );
       if (step === "assembly" && work.type === "short-video") {
+        // Narration voice generation with edge-tts
+        const voiceConfig = isEn
+          ? { voice: "en-US-AndrewNeural", label: "male English voice (en-US-AndrewNeural)", lang: "English" }
+          : { voice: "zh-CN-YunxiNeural", label: "男声中文旁白 (zh-CN-YunxiNeural)", lang: "中文" };
         promptParts.push(
           ``,
+          `## REQUIRED: Generate Narration Audio`,
+          ``,
+          `Before assembling the final video, you MUST generate a narration voiceover audio file.`,
+          ``,
+          `**Voice selection:** You will use a **${voiceConfig.label}** for this narration.`,
+          `Before starting, tell the user in the chat: "${isEn
+            ? `I'll generate the narration using a ${voiceConfig.label}. Let me know if you'd prefer a different voice (e.g. female, different accent) before I proceed.`
+            : `我将使用${voiceConfig.label}来生成旁白。如果你希望换一种声音（比如女声、不同口音等），请在我开始前告诉我。`}"`,
+          ``,
+          `**How to generate:**`,
+          `Use the \`edge-tts\` command to convert the narration script to audio:`,
+          `\`\`\`bash`,
+          `edge-tts --text "YOUR NARRATION TEXT HERE" --voice ${voiceConfig.voice} --write-media <work_dir>/assets/clips/narration.mp3`,
+          `\`\`\``,
+          ``,
+          `**Voice options (if user requests a change):**`,
+          isEn ? [
+            `- Male English: en-US-AndrewNeural, en-US-GuyNeural, en-GB-RyanNeural`,
+            `- Female English: en-US-JennyNeural, en-US-AriaNeural, en-GB-SoniaNeural`,
+          ].join("\n") : [
+            `- 男声中文: zh-CN-YunxiNeural, zh-CN-YunyangNeural`,
+            `- 女声中文: zh-CN-XiaoxiaoNeural, zh-CN-XiaohanNeural`,
+          ].join("\n"),
+          ``,
+          `**Steps:**`,
+          `1. Write the narration script based on the content plan`,
+          `2. Tell the user the voice you'll use and ask for confirmation`,
+          `3. After confirmation (or immediately if user says to proceed), run edge-tts to generate the audio file`,
+          `4. Merge the narration audio with the video clips using ffmpeg`,
+          ``,
+        );
+        promptParts.push(
           `## CRITICAL: Horizontal-to-Vertical Video Conversion`,
           `The final output MUST be 9:16 vertical (1080x1920). If any source clip is horizontal (wider than tall):`,
           ``,
@@ -1042,8 +1098,8 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
       }
       // Inject emotion-driven directives based on content category
       const emotionMap: Record<string, string> = {
-        anxiety: "焦虑 (anxiety/crisis). Read modules/emotional-hooks.md and apply the 焦虑 emotion rules. For image-text, use one of the 3 mandatory routes (观点输出/对话截图/清单盘点).",
-        conflict: "愤怒 (conflict/debate). Read modules/emotional-hooks.md and apply the 愤怒 emotion rules. For image-text, use one of the 3 mandatory routes (观点输出/对话截图/清单盘点).",
+        anxiety: "深度共鸣 (resonance). Read modules/emotional-hooks.md and apply the 共鸣 emotion rules. For image-text, use one of the 3 mandatory routes (观点输出/对话截图/清单盘点).",
+        conflict: "观点分歧/争议感 (debate/controversy). Read modules/emotional-hooks.md and apply the 争议 emotion rules. For image-text, use one of the 3 mandatory routes (观点输出/对话截图/清单盘点).",
         comedy: "搞笑/抽象 (comedy/abstract). Read genres/comedy.md and apply its rules to this step.",
         envy: "羡慕 (aspiration/envy). Read modules/emotional-hooks.md and apply the 羡慕 emotion rules. For image-text, use one of the 3 mandatory routes (反差跃迁/关系羡慕/隐性阶层信号).",
       };
@@ -1087,7 +1143,7 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
           `- "存款为0的我，刚查出甲状腺结节"（经济+健康）`,
           ``,
           `坏的标题示例（禁止）：`,
-          `- "当代年轻人的焦虑有多严重？"（新闻腔，不是第一人称）`,
+          `- "当代年轻人的压力有多大？"（新闻腔，不是第一人称）`,
           `- "生活好难啊"（太笼统，没有具体信息）`,
           `- "来聊聊你们的压力源"（互动征集，不是个人故事）`,
         ].join("\n"),
@@ -1101,7 +1157,7 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
           `- "相亲对象AA制，我直接走了"（事件+态度，引发站队）`,
           `- "我劝你别考公"（逆主流观点，引发反驳欲）`,
           `- "婆婆住进来第3天，我搬走了"（关系冲突+行动）`,
-          `- "同事天天迟到，领导只骂我"（不公平处境，引发共鸣愤怒）`,
+          `- "同事天天迟到，领导只骂我"（不公平处境，引发正义感和辩论欲）`,
           ``,
           `坏的标题示例（禁止）：`,
           `- "你们觉得AA制合理吗？"（提问式，不是个人故事）`,
@@ -1202,17 +1258,17 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
             `**除封面外的其他图片禁止写文字观点！** 文字观点全部在文案正文里体现。`,
             `其余配图用与话题相关的真实照片（全网搜索下载）。`,
             `如果方案使用的是路线2（对话截图型），对话截图仅限封面，其余图用真实照片。`,
-            `参考 modules/emotional-hooks.md 中焦虑类的素材生成指令。`,
+            `参考 modules/emotional-hooks.md 中共鸣类的素材生成指令。`,
           ].join("\n"),
           conflict: [
             ``,
             `## 图片生成方式`,
             ``,
-            `"观点分歧/愤怒"类图文：只有封面是文字卡片（用 ffmpeg 生成）。`,
+            `"观点分歧/争议感"类图文：只有封面是文字卡片（用 ffmpeg 生成）。`,
             `**除封面外的其他图片禁止写文字观点！** 文字观点全部在文案正文里体现。`,
             `其余配图用与话题相关的真实照片（全网搜索下载）。`,
             `如果方案使用的是路线2（对话截图型），对话截图仅限封面，其余图用真实照片。`,
-            `参考 modules/emotional-hooks.md 中焦虑类的素材生成指令。`,
+            `参考 modules/emotional-hooks.md 中共鸣类的素材生成指令。`,
           ].join("\n"),
         };
         const method = assetMethod[work.contentCategory as string];
