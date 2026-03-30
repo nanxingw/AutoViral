@@ -513,69 +513,127 @@ travel photography, landscape, wanderlust, vivid colors, cinematic, adventure ph
 
 ---
 
-## 风格一致性技巧
+## 人物一致性与场景一致性（核心能力，必读）
 
-### 技巧一：Seed 锁定（最有效）
+**你拥有强大的图生图和风格控制能力。** 生成多张图片时，你**必须**主动使用以下工具组合确保人物外观、风格、色调在所有图片中保持一致。不要只靠 prompt 文字描述来维持一致性——那是不够的。
 
-**使用 `--seed` 参数让同一组图片保持一致的风格和色调。** 同一个 seed + 相似的 prompt = 风格高度一致。
+### 你的一致性工具箱
+
+| 工具 | 参数 | 作用 | 何时用 |
+|------|------|------|--------|
+| **参考图** | `--ref-image` | 传入已有图片，模型会参考其视觉特征（人脸、体型、服装、色调）生成新图 | **生成第2张及之后的每一张图时必须使用** |
+| **Seed 锁定** | `--seed` | 固定随机种子，相同 seed → 相似的风格/色调/构图倾向 | **整组图片使用同一个 seed** |
+| **角色描述复用** | prompt 内 | 每张图 prompt 中原样复制完整的角色外观描述（不缩写、不改写） | **每张有人物的图都必须包含** |
+| **风格后缀** | prompt 内 | 统一的风格/光线/色调关键词附加在每个 prompt 末尾 | **每张图都必须附加** |
+| **色板锚定** | prompt 内 | 明确的色彩 hex 值写入 prompt | 有特定色调要求时 |
+
+### 强制执行规则
+
+**生成包含同一人物的多张图片时（如小红书图文、短视频分镜），必须遵守：**
+
+1. **第1张图（锚定图）**：正常生成，确定 seed 值（可自选一个数字如 42、100 等）
+2. **第2张及之后**：**必须同时使用** `--ref-image 第1张图路径` + `--seed 同一值` + prompt 中包含 "same person/woman/man as reference image" + 完整角色外观描述
+3. **如果生成结果人物不一致**：用第1张图作为 `--ref-image`，在 prompt 中明确写 "keep exactly the same face, hairstyle, and outfit as the reference image"，重新生成
+4. **绝不省略 `--ref-image`**：仅靠 prompt 描述同一人物，模型每次都会生成不同的脸，这是 AI 生图的根本限制
+
+### 标准生成流程（图文类）
 
 ```bash
-# 第一张图：记住 seed 值
-python3 openrouter_generate.py --prompt "女性在咖啡厅..." --seed 42 --ar 3:4 --size 2K --output img-01.png
+# ── 第1张图（锚定图）──
+# 这张图将作为后续所有图的人物/风格参考基准
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "young Chinese woman, age 24, long black hair with soft waves, wearing white linen shirt, natural makeup, gentle smile, sitting by window in bright cafe, soft natural light, iPhone candid style, Morandi warm tones" \
+  --seed 42 --ar 3:4 --size 4K \
+  --output {workDir}/assets/images/image-01.png
 
-# 后续图片：使用相同 seed
-python3 openrouter_generate.py --prompt "同一女性在公园..." --seed 42 --ar 3:4 --size 2K --output img-02.png
-python3 openrouter_generate.py --prompt "同一女性在书店..." --seed 42 --ar 3:4 --size 2K --output img-03.png
+# ── 第2张图（必须传参考图！）──
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "same woman as reference image: young Chinese woman, age 24, long black hair with soft waves, wearing white linen shirt, natural makeup. Walking in a sunlit garden path, looking over her shoulder with a smile, soft natural light, iPhone candid style, Morandi warm tones" \
+  --ref-image {workDir}/assets/images/image-01.png \
+  --seed 42 --ar 3:4 --size 4K \
+  --output {workDir}/assets/images/image-02.png
+
+# ── 第3-N张图（同样传参考图，保持 seed）──
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "same woman as reference image: young Chinese woman, age 24, long black hair with soft waves, wearing white linen shirt, natural makeup. Reading a book on a cozy sofa, warm indoor lighting, iPhone candid style, Morandi warm tones" \
+  --ref-image {workDir}/assets/images/image-01.png \
+  --seed 42 --ar 3:4 --size 4K \
+  --output {workDir}/assets/images/image-03.png
 ```
 
-### 技巧二：参考图（图生图模式）
-
-使用 `--ref-image` 传入已有图片作为风格参考，让生成结果保持一致：
+### 标准生成流程（短视频首帧）
 
 ```bash
-# 用第一张图作为参考，生成后续图片
-python3 openrouter_generate.py \
-  --prompt "保持相同的人物和风格，场景换成公园" \
-  --ref-image img-01.png --seed 42 --ar 3:4 --size 2K \
-  --output img-02.png
+# 第1镜首帧（锚定）
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "{完整角色描述}, {场景}, {光线风格}" \
+  --seed 42 --ar 9:16 --size 4K \
+  --output {workDir}/assets/frames/frame-01.png
 
-# 多张参考图（风格 + 内容分离）
-python3 openrouter_generate.py \
-  --prompt "用第一张图的风格和人物，画第二张图中的场景" \
-  --ref-image style-ref.png --ref-image scene-ref.png \
-  --output result.png
+# 第2-N镜首帧：必须传入第1镜作为参考
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "same person as reference image: {完整角色描述}, {新场景}, {光线风格}" \
+  --ref-image {workDir}/assets/frames/frame-01.png \
+  --seed 42 --ar 9:16 --size 4K \
+  --output {workDir}/assets/frames/frame-02.png
 ```
 
-### 技巧三：风格后缀
+### 多参考图的高级用法
+
+OpenRouter 支持同时传入**多张**参考图（`--ref-image` 可重复使用），适合：
+
+```bash
+# 人物图 + 场景风格图 分离控制
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "place the person from the first reference image into the scene style of the second reference image" \
+  --ref-image person-ref.png --ref-image scene-ref.png \
+  --seed 42 --ar 3:4 --size 4K --output result.png
+
+# 用户上传的共享素材 + 前序生成图 双重参考
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "{描述}" \
+  --ref-image {workDir}/assets/images/image-01.png \
+  --ref-image /path/to/shared-assets/references/style-ref.png \
+  --seed 42 --ar 3:4 --size 4K --output result.png
+```
+
+### 即梦 AI 的参考图用法（备用）
+
+即梦支持**单张**参考图：
+```bash
+python3 skills/asset-generation/scripts/jimeng_generate.py image \
+  --prompt "类似参考图风格的新场景描述" \
+  --ref-image image-01.png \
+  --width 1080 --height 1440 --output result.png
+```
+
+### 一致性自检清单
+
+生成完一组图片后，逐项检查：
+- [ ] 所有图片中的人物面部特征是否一致（脸型、五官）
+- [ ] 发型、发色是否一致
+- [ ] 服装是否一致（除非方案要求换装）
+- [ ] 整体色调、光线风格是否一致
+- [ ] 图片风格是否一致（不能一张像摄影一张像插画）
+
+**如果任何一项不通过，用 `--ref-image` 传入锚定图重新生成该张图片。**
+
+---
+
+## 补充技巧
+
+### 风格后缀
 
 从方案的风格模块中提取风格后缀，并附加到每一条提示词后面：
-
 ```
 [具体场景提示词], [风格后缀: soft natural lighting, warm color grading, lifestyle photography, Morandi color palette, shot on iPhone 15 Pro]
 ```
 
-### 技巧四：角色描述复用
-
-将方案中角色参考模块的角色描述原样复制到每个该角色出现的镜头中。不要改写或缩写——生成模型在不同调用之间没有记忆。
-
-错误做法：`the woman from shot 1, same outfit`
-正确做法：`young Chinese woman, age 25, shoulder-length black hair with subtle waves, wearing cream-colored knit sweater and high-waisted brown trousers, gentle smile`
-
-### 技巧五：色板锚定
+### 色板锚定
 
 在每条提示词中都包含明确的色彩参考：
 ```
 color palette: warm cream (#F5E6CC), soft terracotta (#C4785B), sage green (#9CAF88), natural wood brown (#8B6914)
-```
-
-### 一致性组合策略（推荐）
-
-**同时使用 seed + ref-image + 风格后缀 + 角色描述复用**，效果最好：
-```bash
-python3 openrouter_generate.py \
-  --prompt "young Chinese woman, age 25, shoulder-length black hair, cream sweater, [具体场景], soft natural lighting, warm color grading, Morandi palette" \
-  --ref-image img-01.png --seed 42 --ar 3:4 --size 2K \
-  --output img-03.png
 ```
 
 ---
