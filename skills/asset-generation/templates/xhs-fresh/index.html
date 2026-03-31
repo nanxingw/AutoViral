@@ -1,0 +1,37 @@
+<!-- xhs-fresh 小清新：柔和渐变背景、圆角卡片、大量留白 -->
+<div class="poster" style="--accent: {{ accent_color | default('#E8A87C') }}">
+  <div class="card">
+    <div class="accent-bar"></div>
+    <div class="card-inner">
+      {% if title %}
+      <h1 class="title">{{ title }}</h1>
+      {% endif %}
+
+      {% if subtitle %}
+      <p class="subtitle">{{ subtitle }}</p>
+      {% endif %}
+
+      {% if body %}
+      <div class="body">
+        {% for line in body.split('\n') %}
+          {% if line.strip() %}
+          <p class="body-line">{{ line.strip() }}</p>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if tags %}
+      <div class="tags">
+        {% for tag in tags %}
+        <span class="tag">#{{ tag }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if footer %}
+      <p class="footer">{{ footer }}</p>
+      {% endif %}
+    </div>
+  </div>
+</div>

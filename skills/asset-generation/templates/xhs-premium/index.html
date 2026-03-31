@@ -1,0 +1,45 @@
+<!-- xhs-premium 高级感：深色调、不对称布局、quiet luxury -->
+<div class="poster" style="--accent: {{ accent_color | default('#C9A96E') }}">
+  <div class="content">
+    <div class="top-section">
+      {% if title %}
+      <h1 class="title">{{ title }}</h1>
+      {% endif %}
+
+      {% if subtitle %}
+      <p class="subtitle">{{ subtitle }}</p>
+      {% endif %}
+    </div>
+
+    <div class="divider">
+      <span class="divider-line"></span>
+    </div>
+
+    <div class="bottom-section">
+      {% if body %}
+      <div class="body">
+        {% for line in body.split('\n') %}
+          {% if line.strip() %}
+          <p class="body-line">{{ line.strip() }}</p>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if tags %}
+      <div class="tags">
+        {% for tag in tags %}
+        <span class="tag">{{ tag }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if footer %}
+      <p class="footer">{{ footer }}</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="corner-accent top-left"></div>
+  <div class="corner-accent bottom-right"></div>
+</div>

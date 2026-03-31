@@ -1,0 +1,31 @@
+<!-- xhs-photo-title 美图叠字：全幅背景图 + 渐变遮罩 + 大标题 -->
+<div class="poster"
+     {% if bg_image %}style="background-image: url('{{ bg_image }}');"{% endif %}>
+  <div class="overlay"></div>
+
+  <div class="content">
+    <div class="spacer"></div>
+
+    <div class="text-block">
+      {% if title %}
+      <h1 class="title">{{ title }}</h1>
+      {% endif %}
+
+      {% if subtitle %}
+      <p class="subtitle">{{ subtitle }}</p>
+      {% endif %}
+    </div>
+
+    {% if tags %}
+    <div class="tags">
+      {% for tag in tags %}
+      <span class="tag">#{{ tag }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if footer %}
+    <p class="footer">{{ footer }}</p>
+    {% endif %}
+  </div>
+</div>

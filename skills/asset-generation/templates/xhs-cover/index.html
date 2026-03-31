@@ -1,0 +1,28 @@
+<!-- xhs-cover 封面标题：居中大字 + 副标题 + 渐变底色 -->
+<div class="poster" style="--accent: {{ accent_color | default('#4A90D9') }}">
+  <div class="bg-pattern"></div>
+
+  <div class="content">
+    {% if title %}
+    <h1 class="title">{{ title }}</h1>
+    {% endif %}
+
+    <div class="divider-line"></div>
+
+    {% if subtitle %}
+    <p class="subtitle">{{ subtitle }}</p>
+    {% endif %}
+
+    {% if tags %}
+    <div class="tags">
+      {% for tag in tags %}
+      <span class="tag">#{{ tag }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if footer %}
+    <p class="footer">{{ footer }}</p>
+    {% endif %}
+  </div>
+</div>

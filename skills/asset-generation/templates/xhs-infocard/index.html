@@ -1,0 +1,43 @@
+<!-- xhs-infocard 信息卡片：编号列表、网格布局、专业清晰 -->
+<div class="poster" style="--accent: {{ accent_color | default('#4A90D9') }}">
+  <div class="header">
+    {% if title %}
+    <h1 class="title">{{ title }}</h1>
+    {% endif %}
+
+    {% if subtitle %}
+    <p class="subtitle">{{ subtitle }}</p>
+    {% endif %}
+
+    <div class="header-line"></div>
+  </div>
+
+  {% if body %}
+  <div class="items">
+    {% for item in body.split('\n') %}
+      {% if item.strip() %}
+      <div class="item">
+        <div class="item-number">
+          <span>{{ loop.index }}</span>
+        </div>
+        <div class="item-text">{{ item.strip() }}</div>
+      </div>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <div class="bottom">
+    {% if tags %}
+    <div class="tags">
+      {% for tag in tags %}
+      <span class="tag">#{{ tag }}</span>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if footer %}
+    <p class="footer">{{ footer }}</p>
+    {% endif %}
+  </div>
+</div>
