@@ -662,6 +662,7 @@ ffmpeg -i audio1.mp3 -i audio2.mp3 \
 | 卡点剪辑 | `modules/beat-sync.md` | 节拍检测 + 视频与音乐节拍对齐 |
 | 调色指南 | `modules/color-grading.md` | LUT调色、内容类型调色参数、AI调色工具 |
 | 字幕美学 | `modules/subtitle-aesthetics.md` | 字幕规范、花字样式、ASS高级样式、自动字幕流水线 |
+| 专业字幕 | `modules/pro-captions.md` | 逐词高亮 karaoke 字幕、自动语音识别、5种预设样式 |
 | 视频增强 | `modules/video-enhancement.md` | 帧插值(RIFE)、超分(Real-ESRGAN)、视频稳定(vid.stab) |
 
 ### 可用脚本
@@ -670,6 +671,7 @@ ffmpeg -i audio1.mp3 -i audio2.mp3 \
 |------|------|------|---------|
 | 节拍检测 | `scripts/beat-sync/detect_beats.py` | 分析音乐节拍、BPM、强拍 | `python3 skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json` |
 | 一键卡点 | `scripts/beat-sync/beat_sync_edit.py` | 自动按节拍切割视频+混入BGM | `python3 skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic` |
+| 专业字幕 | `scripts/caption_generate.py` | 逐词高亮 karaoke ASS 字幕生成 | `python3 skills/content-assembly/scripts/caption_generate.py --input video.mp4 --output subs.ass --style douyin-highlight` |
 
 **⚠️ 重要：当需要节拍分析或卡点剪辑时，必须调用上述脚本，禁止自己写 librosa/numpy 内联代码。**
 
@@ -679,6 +681,77 @@ ffmpeg -i audio1.mp3 -i audio2.mp3 \
 2. 需要分析节拍 → 运行 `detect_beats.py` 获取 beats.json
 3. 需要卡点剪辑 → 运行 `beat_sync_edit.py` 一键完成
 4. 需要手动精调 → 参考 `modules/beat-sync.md` 中的手动流程
+
+---
+
+## 专业字幕生成（caption_generate.py）
+
+逐词高亮（karaoke）字幕生成脚本，支持自动语音识别和外部时间戳两种模式，内置 5 种平台预设样式。
+
+> **完整方法论** — 详见 `modules/pro-captions.md`，包含何时加字幕的判断、样式选择决策树、与 beat-sync 配合等。
+
+### 参数列表
+
+| 参数 | 类型 | 说明 | 默认值 |
+|------|------|------|--------|
+| `--input` | str | 视频/音频路径（auto 模式，与 `--timestamps` 互斥） | — |
+| `--timestamps` | str | 时间戳 JSON 路径（手动模式，与 `--input` 互斥） | — |
+| `--output` | str（必填） | 输出 ASS 文件路径 | — |
+| `--style` | str | 预设样式：`douyin-highlight`/`douyin-bold`/`xhs-soft`/`funny`/`minimal` | `douyin-highlight` |
+| `--language` | str | 语言代码（auto 模式） | `zh` |
+| `--model` | str | Whisper 模型（auto 模式） | `medium` |
+| `--font` | str | 覆盖预设字体 ID | 由样式决定 |
+| `--font-size` | int | 覆盖预设字号 | 由样式决定 |
+| `--highlight-color` | str | 高亮颜色 hex，如 `#FFFF00` | 由样式决定 |
+| `--base-color` | str | 基础颜色 hex，如 `#FFFFFF` | 由样式决定 |
+| `--stroke-width` | int | 描边宽度 | 由样式决定 |
+| `--position` | str | `center`/`top`/`bottom` | 由样式决定 |
+| `--max-words` | int | 每行最大词数 | `8` |
+| `--lead-time` | int | 字幕提前出现毫秒数 | `80` |
+
+### 使用示例
+
+```bash
+# Auto 模式：自动识别视频中的语音
+python3 skills/content-assembly/scripts/caption_generate.py \
+  --input video.mp4 --output subtitles.ass \
+  --style douyin-highlight --language zh
+
+# Timestamps 模式：从 JSON 文件读取词级时间戳
+python3 skills/content-assembly/scripts/caption_generate.py \
+  --timestamps captions.json --output subtitles.ass \
+  --style xhs-soft
+
+# 自定义颜色
+python3 skills/content-assembly/scripts/caption_generate.py \
+  --input video.mp4 --output subtitles.ass \
+  --style douyin-highlight --highlight-color "#FF6699" --font-size 56
+
+# 烧录到视频
+ffmpeg -i video.mp4 -vf "ass=subtitles.ass" -c:v libx264 -crf 18 -c:a copy output.mp4
+```
+
+### 输出格式（stdout JSON）
+
+```json
+{
+  "success": true,
+  "output": "/abs/path/subtitles.ass",
+  "segments": 12,
+  "words": 87,
+  "duration_sec": 45.2,
+  "style": "douyin-highlight",
+  "mode": "auto",
+  "model": "medium"
+}
+```
+
+### 依赖
+
+- **auto 模式**：`pip install stable-ts`（含 Whisper + torch）
+- **timestamps 模式**：无额外依赖
+- **烧录**：系统 ffmpeg
+- **字体**：通过 `font_manager.py` 自动下载
 
 ---
 
@@ -770,6 +843,7 @@ curl -X PUT http://localhost:3271/api/works/{workId} \
 |------|------|------|---------|
 | 节拍检测 | `scripts/beat-sync/detect_beats.py` | 分析音乐节拍、BPM、强拍 | `python3 skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json` |
 | 一键卡点 | `scripts/beat-sync/beat_sync_edit.py` | 自动按节拍切割视频+混入BGM | `python3 skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic` |
+| 专业字幕 | `scripts/caption_generate.py` | 逐词高亮 karaoke ASS 字幕生成 | `python3 skills/content-assembly/scripts/caption_generate.py --input video.mp4 --output subs.ass --style douyin-highlight` |
 
 **重要：当需要节拍分析或卡点剪辑时，必须调用上述脚本，禁止自己写 librosa/numpy 内联代码。**
 

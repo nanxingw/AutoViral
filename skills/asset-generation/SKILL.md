@@ -268,8 +268,97 @@ python3 skills/asset-generation/scripts/music_generate.py \
 1. **图片生成** → 优先 `openrouter_generate.py`（Gemini 3.1 Flash，画质最好，参数最丰富）
 2. **视频生成** → 使用 `jimeng_generate.py`（即梦是唯一支持视频的服务）
 3. **音乐生成** → 使用 `music_generate.py`（Lyria Pro，~2分钟完整曲目）
-4. **图片备用** → OpenRouter 不可用时，用 `jimeng_generate.py image`
-4. 先运行 `check_providers.py` 确认可用服务
+4. **图文排版** → 使用 `poster_render.py`（HTML/CSS 模板渲染，文字清晰可控）
+5. **图片备用** → OpenRouter 不可用时，用 `jimeng_generate.py image`
+6. 先运行 `check_providers.py` 确认可用服务
+
+#### 5. `font_manager.py` — 字体管理器（共享组件）
+
+统一管理字体下载，供 `poster_render.py` 和 `caption_generate.py` 共同使用。字体存储在 `~/.autoviral/fonts/`，首次使用时自动从 GitHub 下载。
+
+```bash
+# 列出所有可用字体及下载状态
+python3 skills/asset-generation/scripts/font_manager.py --list
+
+# 获取指定字体路径（自动下载）
+python3 skills/asset-generation/scripts/font_manager.py --font source-han-sans --weight bold
+```
+
+**可用字体：**
+
+| ID | 名称 | 可用字重 |
+|----|------|---------|
+| `source-han-sans` | 思源黑体 | Regular, Bold, Light, Heavy |
+| `source-han-serif` | 思源宋体 | Regular, Bold, Light |
+| `lxgw-wenkai` | 霞鹜文楷 | Regular, Bold, Light |
+| `smiley-sans` | 得意黑 | Regular |
+| `montserrat` | Montserrat | Regular, Bold |
+| `inter` | Inter | Regular, Bold |
+
+#### 6. `poster_render.py` — HTML/CSS 图文排版渲染
+
+使用 Jinja2 模板 + Playwright 浏览器截图，生成专业级图文排版。适用于小红书图文、知识卡片、轮播图等需要精确文字排版的场景。
+
+> **完整方法论** — 详见 `modules/poster-design.md`，包含模板选择决策、数据构造规范、字体搭配、颜色策略等。
+
+**参数：**
+
+| 参数 | 类型 | 说明 | 默认值 |
+|------|------|------|--------|
+| `--template` | str（必填） | 内置模板 ID 或自定义 HTML 路径 | — |
+| `--data` | str（必填） | JSON 文件路径或 inline JSON 字符串 | — |
+| `--output` | str（必填） | 输出图片路径 | — |
+| `--bg-image` | str | 背景图路径（xhs-photo-title 等模板用） | — |
+| `--width` | int | 输出宽度 px | `1080` |
+| `--height` | int | 输出高度 px | `1440` |
+| `--scale` | float | 渲染倍率（2 = Retina） | `2` |
+| `--format` | str | 输出格式 `png`/`jpeg` | `png` |
+
+**内置模板（`templates/` 目录）：**
+
+| 模板 ID | 风格 | 适用内容 | 字体 |
+|---------|------|---------|------|
+| `xhs-fresh` | 小清新：柔和渐变、圆角卡片、留白 | 生活/美妆/穿搭 | 霞鹜文楷 + Inter |
+| `xhs-premium` | 高级感：深色调、不对称布局、细线条 | 时尚/旅行/品牌 | 思源宋体 + Montserrat |
+| `xhs-infocard` | 信息卡片：编号列表、网格布局 | 知识/清单/教程 | 思源黑体 |
+| `xhs-photo-title` | 美图叠字：背景图 + 遮罩 + 大标题 | AI 图 + 文字 | 思源黑体 Bold + Montserrat |
+| `xhs-cover` | 封面标题：居中大字 + 渐变底色 | 轮播首图/封面 | 思源黑体 Bold |
+
+**使用示例：**
+
+```bash
+# 纯模板生成（知识卡片）
+python3 skills/asset-generation/scripts/poster_render.py \
+  --template xhs-infocard \
+  --data '{"title":"5个高效学习法","body":"1. 番茄钟\n2. 费曼技巧\n3. 间隔重复","tags":["学习","效率"],"accent_color":"#4A90D9"}' \
+  --output assets/posters/page-1.png
+
+# AI 图 + 文字叠加（穿搭封面）
+python3 skills/asset-generation/scripts/poster_render.py \
+  --template xhs-photo-title \
+  --bg-image ai_generated_outfit.png \
+  --data '{"title":"早春穿搭灵感","subtitle":"温柔又高级","tags":["穿搭","春季"]}' \
+  --output assets/posters/cover.png
+
+# 轮播封面
+python3 skills/asset-generation/scripts/poster_render.py \
+  --template xhs-cover \
+  --data '{"title":"5个改变人生的习惯","subtitle":"坚持一个月你会感谢自己","accent_color":"#4A90D9"}' \
+  --output assets/posters/cover.png
+
+# 从 JSON 文件读取数据
+python3 skills/asset-generation/scripts/poster_render.py \
+  --template xhs-fresh \
+  --data poster-data.json \
+  --output assets/posters/page-1.png
+```
+
+**输出格式（stdout JSON）：**
+```json
+{"success": true, "output": "/abs/path/poster.png", "template": "xhs-fresh", "width": 1080, "height": 1440, "size_kb": 342.5}
+```
+
+**依赖：** `pip install playwright jinja2 && playwright install chromium`
 
 ---
 
@@ -812,6 +901,7 @@ ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p
 | Prompt 进阶 | `modules/prompt-mastery.md` | 模型差异化策略、负向提示词库、高级质量关键词、风格一致性进阶 |
 | 质量门控 | `modules/quality-gate.md` | 生成后自检清单、常见问题修复、美学评分工具 |
 | 音乐生成 | `modules/music-generation.md` | Lyria BGM 生成方法论、情绪-风格映射、prompt 工程、平台适配 |
+| 图文排版 | `modules/poster-design.md` | HTML/CSS 模板排版方法论、模板选择、数据构造、字体配色、轮播一致性 |
 
 ---
 
@@ -900,6 +990,11 @@ Agent: [调用 API]
     music/           (BGM/配乐)
       bgm.mp3        (主 BGM，Lyria 生成)
       bgm-alt.mp3    (备选 BGM)
+    posters/         (图文排版，poster_render.py 生成)
+      cover.png      (封面)
+      page-1.png     (内页1)
+      page-2.png     (内页2)
+      ...
 ```
 
 ## 素材获取方式：全网搜索下载
