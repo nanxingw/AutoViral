@@ -300,10 +300,11 @@
     if (work && currentStep && work.pipeline[currentStep]) {
       work.pipeline[currentStep].status = "active";
       work = { ...work };
+      // Send the FULL pipeline object to avoid overwriting other steps
       fetch(`/api/works/${encodeURIComponent(workId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pipeline: { [currentStep]: { status: "active" } } }),
+        body: JSON.stringify({ pipeline: work.pipeline }),
       }).catch(() => {});
     }
     streamBlocks = [...streamBlocks, { type: "step_divider", text: tt("abortedMessage") }];
