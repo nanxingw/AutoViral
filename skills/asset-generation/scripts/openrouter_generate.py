@@ -91,21 +91,44 @@ MODEL_FEATURES = {
 
 
 def load_env() -> dict[str, str]:
-    current = Path(__file__).resolve().parent
-    for _ in range(10):
-        candidate = current / ".env"
-        if candidate.exists():
-            env_vars = {}
-            with open(candidate) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    if "=" in line:
-                        key, _, value = line.partition("=")
-                        env_vars[key.strip()] = value.strip()
-            return env_vars
-        current = current.parent
+    """从 .env 文件加载环境变量。
+    查找顺序：
+    1. AUTOVIRAL_PROJECT_DIR 环境变量指定的项目目录
+    2. ~/.autoviral/.env
+    3. 从脚本所在目录向上查找
+    4. 从 cwd 向上查找
+    """
+    search_roots = []
+
+    # 优先：项目目录（服务端通过环境变量传递）
+    if project_dir := os.environ.get("AUTOVIRAL_PROJECT_DIR"):
+        search_roots.append(Path(project_dir))
+
+    # 其次：~/.autoviral/ 数据目录
+    search_roots.append(Path.home() / ".autoviral")
+
+    # 再次：脚本所在目录向上
+    search_roots.append(Path(__file__).resolve().parent)
+
+    # 最后：cwd 向上
+    search_roots.append(Path.cwd())
+
+    for root in search_roots:
+        current = root
+        for _ in range(10):
+            candidate = current / ".env"
+            if candidate.exists():
+                env_vars = {}
+                with open(candidate) as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line or line.startswith("#"):
+                            continue
+                        if "=" in line:
+                            key, _, value = line.partition("=")
+                            env_vars[key.strip()] = value.strip()
+                return env_vars
+            current = current.parent
     return {}
 
 

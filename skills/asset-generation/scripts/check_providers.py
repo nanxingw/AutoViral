@@ -14,21 +14,28 @@ import os
 import sys
 from pathlib import Path
 
-# 查找 .env 文件：从脚本位置向上找项目根目录
+# 查找 .env 文件
+# 查找顺序：AUTOVIRAL_PROJECT_DIR → ~/.autoviral/ → 脚本目录向上 → cwd 向上
 def find_env_file() -> Path | None:
-    # 优先使用环境变量指定的路径
     if env_path := os.environ.get("AUTOVIRAL_ENV"):
         p = Path(env_path)
         if p.exists():
             return p
 
-    # 从脚本所在目录向上找
-    current = Path(__file__).resolve().parent
-    for _ in range(10):
-        candidate = current / ".env"
-        if candidate.exists():
-            return candidate
-        current = current.parent
+    search_roots = []
+    if project_dir := os.environ.get("AUTOVIRAL_PROJECT_DIR"):
+        search_roots.append(Path(project_dir))
+    search_roots.append(Path.home() / ".autoviral")
+    search_roots.append(Path(__file__).resolve().parent)
+    search_roots.append(Path.cwd())
+
+    for root in search_roots:
+        current = root
+        for _ in range(10):
+            candidate = current / ".env"
+            if candidate.exists():
+                return candidate
+            current = current.parent
 
     return None
 

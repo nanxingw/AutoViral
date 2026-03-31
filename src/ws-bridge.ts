@@ -514,6 +514,7 @@ ${memoryContext}
       env: {
         ...process.env,
         CLAUDE_CODE_ENTRYPOINT: "cli",
+        AUTOVIRAL_PROJECT_DIR: process.cwd(),
       },
     });
 
