@@ -227,10 +227,48 @@ python3 skills/asset-generation/scripts/jimeng_generate.py video \
   --prompt "动作描述" --first-frame frame.png --output clip.mp4
 ```
 
+#### 4. `music_generate.py` — Lyria 音乐生成（**BGM/配乐**）
+
+需要 `OPENROUTER_API_KEY`。模型 `google/lyria-3-pro-preview`，生成 ~2 分钟完整音乐。
+
+**参数：**
+
+| 参数 | 说明 | 示例值 |
+|------|------|--------|
+| `--prompt` | 音乐描述（必填） | `"soft acoustic guitar, lo-fi, 85 BPM"` |
+| `--output` | 输出文件路径（必填） | `bgm.mp3` |
+| `--ref-image` | 参考图（可多次，图生音乐） | `cover.png` |
+| `--vocal` | 启用人声（默认纯器乐） | — |
+| `--seed` | 随机种子 | `42` |
+| `--temperature` | 创意度 (0.0-2.0) | `0.8` |
+
+**使用示例：**
+
+```bash
+# 纯器乐 BGM（默认，最常用）
+python3 skills/asset-generation/scripts/music_generate.py \
+  --prompt "soft acoustic guitar, warm and cozy, lo-fi vibes, 85 BPM, gentle percussion" \
+  --output {workDir}/assets/music/bgm.mp3
+
+# 图生音乐：用封面图/关键帧引导音乐风格
+python3 skills/asset-generation/scripts/music_generate.py \
+  --prompt "background music matching this image mood" \
+  --ref-image {workDir}/assets/images/cover.png \
+  --output {workDir}/assets/music/bgm.mp3
+
+# 带人声的完整歌曲
+python3 skills/asset-generation/scripts/music_generate.py \
+  --prompt "catchy pop song about spring fashion, female vocal, bright and cheerful, 110 BPM" \
+  --vocal --output {workDir}/assets/music/bgm-vocal.mp3
+```
+
+> 详细的 prompt 工程技巧和情绪-风格映射请阅读 `modules/music-generation.md`
+
 **选择策略：**
 1. **图片生成** → 优先 `openrouter_generate.py`（Gemini 3.1 Flash，画质最好，参数最丰富）
 2. **视频生成** → 使用 `jimeng_generate.py`（即梦是唯一支持视频的服务）
-3. **图片备用** → OpenRouter 不可用时，用 `jimeng_generate.py image`
+3. **音乐生成** → 使用 `music_generate.py`（Lyria Pro，~2分钟完整曲目）
+4. **图片备用** → OpenRouter 不可用时，用 `jimeng_generate.py image`
 4. 先运行 `check_providers.py` 确认可用服务
 
 ---
@@ -773,6 +811,7 @@ ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p
 |------|---------|------|
 | Prompt 进阶 | `modules/prompt-mastery.md` | 模型差异化策略、负向提示词库、高级质量关键词、风格一致性进阶 |
 | 质量门控 | `modules/quality-gate.md` | 生成后自检清单、常见问题修复、美学评分工具 |
+| 音乐生成 | `modules/music-generation.md` | Lyria BGM 生成方法论、情绪-风格映射、prompt 工程、平台适配 |
 
 ---
 
@@ -858,6 +897,9 @@ Agent: [调用 API]
       image-01.png
       image-02.png
       ...
+    music/           (BGM/配乐)
+      bgm.mp3        (主 BGM，Lyria 生成)
+      bgm-alt.mp3    (备选 BGM)
 ```
 
 ## 素材获取方式：全网搜索下载

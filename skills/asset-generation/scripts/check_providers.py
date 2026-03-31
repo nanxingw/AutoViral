@@ -97,17 +97,35 @@ def check_providers(env_vars: dict[str, str]) -> dict:
         "note": "视频生成主力 + 备用图片，支持文生图/文生视频/图生视频",
     })
 
+    # Google Lyria 3 Pro — 音乐生成（复用 OpenRouter key）
+    providers.append({
+        "name": "lyria",
+        "display_name": "Google Lyria 3 Pro (Music)",
+        "available": openrouter_ready,
+        "supports_image": False,
+        "supports_video": False,
+        "supports_music": True,
+        "missing_keys": ["OPENROUTER_API_KEY"] if not openrouter_key else [],
+        "script": "music_generate.py",
+        "note": "AI 音乐生成，支持文生音乐/图生音乐，~2分钟完整曲目",
+    })
+
     # 汇总可用能力
-    can_image = any(p["available"] and p["supports_image"] for p in providers)
-    can_video = any(p["available"] and p["supports_video"] for p in providers)
+    can_image = any(p["available"] and p.get("supports_image") for p in providers)
+    can_video = any(p["available"] and p.get("supports_video") for p in providers)
+    can_music = any(p["available"] and p.get("supports_music") for p in providers)
 
     # 推荐选择
     recommended_image = next(
-        (p["script"] for p in providers if p["available"] and p["supports_image"]),
+        (p["script"] for p in providers if p["available"] and p.get("supports_image")),
         None,
     )
     recommended_video = next(
-        (p["script"] for p in providers if p["available"] and p["supports_video"]),
+        (p["script"] for p in providers if p["available"] and p.get("supports_video")),
+        None,
+    )
+    recommended_music = next(
+        (p["script"] for p in providers if p["available"] and p.get("supports_music")),
         None,
     )
 
@@ -116,10 +134,12 @@ def check_providers(env_vars: dict[str, str]) -> dict:
         "capabilities": {
             "image_generation": can_image,
             "video_generation": can_video,
+            "music_generation": can_music,
         },
         "recommended": {
             "image": recommended_image,
             "video": recommended_video,
+            "music": recommended_music,
         },
     }
 
@@ -128,14 +148,15 @@ def print_table(result: dict):
     print(f"\n{'='*65}")
     print("  生成服务提供商配置检查")
     print(f"{'='*65}")
-    print(f"{'提供商':<25} {'图片':>6} {'视频':>6} {'状态':>8}")
-    print(f"{'-'*25} {'-'*6} {'-'*6} {'-'*8}")
+    print(f"{'提供商':<25} {'图片':>6} {'视频':>6} {'音乐':>6} {'状态':>8}")
+    print(f"{'-'*25} {'-'*6} {'-'*6} {'-'*6} {'-'*8}")
 
     for p in result["providers"]:
-        img = "✓" if p["supports_image"] else "✗"
-        vid = "✓" if p["supports_video"] else "✗"
+        img = "✓" if p.get("supports_image") else "✗"
+        vid = "✓" if p.get("supports_video") else "✗"
+        mus = "✓" if p.get("supports_music") else "✗"
         status = "可用" if p["available"] else "未配置"
-        print(f"{p['display_name']:<25} {img:>6} {vid:>6} {status:>8}")
+        print(f"{p['display_name']:<25} {img:>6} {vid:>6} {mus:>6} {status:>8}")
         if not p["available"] and p["missing_keys"]:
             print(f"  缺少: {', '.join(p['missing_keys'])}")
 
@@ -143,11 +164,14 @@ def print_table(result: dict):
     rec = result["recommended"]
     img_rec = rec["image"]
     vid_rec = rec["video"]
+    mus_rec = rec.get("music")
     print(f"\n{'─'*65}")
     img_suffix = f"  → 使用 {img_rec}" if img_rec else ""
     vid_suffix = f"  → 使用 {vid_rec}" if vid_rec else ""
+    mus_suffix = f"  → 使用 {mus_rec}" if mus_rec else ""
     print(f"  图片生成: {'✓ 可用' if caps['image_generation'] else '✗ 不可用'}{img_suffix}")
     print(f"  视频生成: {'✓ 可用' if caps['video_generation'] else '✗ 不可用'}{vid_suffix}")
+    print(f"  音乐生成: {'✓ 可用' if caps.get('music_generation') else '✗ 不可用'}{mus_suffix}")
     print(f"{'='*65}\n")
 
 
