@@ -39,7 +39,7 @@
   let scrollEl: HTMLDivElement | undefined = $state();
   let wsConn: { send: (text: string) => void; close: () => void } | null = null;
   let showNextStep = $state(false);
-  let aborted = $state(false);
+  // aborted state removed — after stop, user just sends a new message
   let showTypeDropdown = $state(false);
   let showCategoryDropdown = $state(false);
 
@@ -199,7 +199,7 @@
   // Auto-advance to next step when current step completes
   // Auto-advance: immediately start next step when current one completes
   $effect(() => {
-    if (showNextStep && !streaming && !aborted && work?.pipeline) {
+    if (showNextStep && !streaming && work?.pipeline) {
       const keys = Object.keys(work.pipeline);
       const currentIdx = keys.indexOf(currentStep);
       if (currentIdx >= 0 && currentIdx < keys.length - 1) {
@@ -289,41 +289,29 @@
   }
 
   function handleAbort() {
-    // Kill server-side CLI process
+    // Kill server-side CLI process (both creator and evaluator)
     fetch(`/api/works/${encodeURIComponent(workId)}/abort`, { method: "POST" }).catch(() => {});
     wsConn?.close();
     wsConn = null;
     streaming = false;
     activeToolName = "";
     showNextStep = false;
-    aborted = true;
-    // Update pipeline step status to aborted (client + server)
+    // Set pipeline step back to active so user can send messages
     if (work && currentStep && work.pipeline[currentStep]) {
-      work.pipeline[currentStep].status = "aborted";
+      work.pipeline[currentStep].status = "active";
       work = { ...work };
       fetch(`/api/works/${encodeURIComponent(workId)}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pipeline: { [currentStep]: { status: "aborted" } } }),
+        body: JSON.stringify({ pipeline: { [currentStep]: { status: "active" } } }),
       }).catch(() => {});
     }
     streamBlocks = [...streamBlocks, { type: "step_divider", text: tt("abortedMessage") }];
     scrollToBottom();
-  }
-
-  function handleResume() {
-    if (!work || streaming) return;
-    aborted = false;
-    // Reconnect WS and re-trigger current step
-    wsConn = createWorkWs(workId, wsHandler);
-    setTimeout(() => {
-      if (currentStep && work?.pipeline[currentStep]) {
-        const status = work.pipeline[currentStep].status;
-        if (status === "active" || status === "pending") {
-          triggerStep(currentStep);
-        }
-      }
-    }, 300);
+    // Reconnect WS so user can send new messages immediately
+    if (!wsConn) {
+      wsConn = createWorkWs(workId, wsHandler);
+    }
   }
 
   function toolDisplayName(name: string): string {
@@ -494,7 +482,6 @@
         streaming = false;
         activeToolName = "";
         showNextStep = true;
-        aborted = false;
         if (data.result) {
           const lastText = streamBlocks.filter(b => b.type === "text").pop();
           const resultTrimmed = data.result.trim();
@@ -851,16 +838,12 @@
             onkeydown={handleKeydown}
             oninput={autoResizeInput}
             placeholder={tt("chatPlaceholder")}
-            disabled={!sessionReady || (streaming && !aborted)}
+            disabled={!sessionReady || streaming}
             rows="1"
           ></textarea>
-          {#if streaming && !aborted}
+          {#if streaming}
             <button class="send-btn abort-mode" onclick={handleAbort}>
               <svg width="16" height="16" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor"/></svg>
-            </button>
-          {:else if aborted}
-            <button class="send-btn resume-mode" onclick={handleResume}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             </button>
           {:else}
             <button class="send-btn" onclick={handleSend} disabled={!sessionReady || (!inputText.trim() && attachments.length === 0)}>
@@ -1352,12 +1335,6 @@
     opacity: 1;
   }
   .send-btn.abort-mode:hover { opacity: 0.7; }
-
-  .send-btn.resume-mode {
-    color: var(--text);
-    opacity: 1;
-  }
-  .send-btn.resume-mode:hover { opacity: 0.7; }
 
   /* AskUserQuestion options */
   .ask-block { max-width: 90%; }

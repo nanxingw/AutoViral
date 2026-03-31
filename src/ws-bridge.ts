@@ -41,6 +41,7 @@ export interface WsSession {
   evalStep?: string;
   browserSockets: Set<WebSocket>;
   cliProcess?: ChildProcess;
+  evalProcess?: ChildProcess;
   idle: boolean;
   messageHistory: ChatBlock[];
   model?: string;
@@ -382,11 +383,20 @@ ${memoryContext}
     const session = this.sessions.get(workId);
     if (!session) return false;
 
+    // Kill creator CLI process
     if (session.cliProcess) {
       try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
       const proc = session.cliProcess;
       setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* dead */ } }, 5000);
       session.cliProcess = undefined;
+    }
+
+    // Kill evaluator process if running
+    if (session.evalProcess) {
+      try { session.evalProcess.kill("SIGTERM"); } catch { /* dead */ }
+      const evalProc = session.evalProcess;
+      setTimeout(() => { try { evalProc.kill("SIGKILL"); } catch { /* dead */ } }, 5000);
+      session.evalProcess = undefined;
     }
 
     session.idle = true;
@@ -810,8 +820,11 @@ ${memoryContext}
       const proc = spawn("claude", args, {
         cwd: homedir(),
         stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli" },
+        env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli", AUTOVIRAL_PROJECT_DIR: process.cwd() },
       });
+
+      // Store on session so killSession() can kill it
+      session.evalProcess = proc;
 
       let turnText = "";
       let buffer = "";
@@ -949,6 +962,7 @@ ${memoryContext}
       });
 
       proc.on("exit", (code) => {
+        session.evalProcess = undefined;
         if (!resolved) {
           resolved = true;
           if (code !== 0) {
