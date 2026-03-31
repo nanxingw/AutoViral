@@ -8,9 +8,10 @@ web/dist/
 .claude
 CLAUDE.md
 logs/
-
+docs/experience/
 # Sensitive keys
 docs/superpowers/specs/AccessKey.txt
+docs/superpowers/
 .env
 ..bfg-report/
 .superpowers/

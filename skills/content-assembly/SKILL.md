@@ -171,6 +171,8 @@ ffmpeg -i clip-01.mp4 -vf "scale=1080:1920:force_original_aspect_ratio=decrease,
 - 编码：`-c:v libx264 -preset medium -crf 23`
 - 音频：`-c:a aac -ar 44100`
 
+> **可选：视频增强处理** — 如果AI生成的素材存在帧率低、分辨率不足或画面微抖等问题，参考 `modules/video-enhancement.md` 进行增强处理。推荐处理链：RIFE帧插值 → Real-ESRGAN超分 → vid.stab稳定。
+
 #### 第1.5步：剪除静音/停顿片段（有人声的素材必做）
 
 当视频中有人物说话时，**必须剪掉所有无声停顿片段**，只保留人物在说话的部分。这能大幅提升节奏感和完播率。
@@ -387,6 +389,8 @@ ASSEOF
 ffmpeg -i concat.mp4 -vf "ass=subs.ass" -c:v libx264 -crf 23 -c:a copy -y subtitled.mp4
 ```
 
+> **进阶字幕样式** — 需要花字、动画字幕或自动语音转字幕等高级功能，参考 `modules/subtitle-aesthetics.md`。
+
 #### 第4步：添加背景音乐
 
 **音乐获取规则：指定知名歌曲时**
@@ -428,6 +432,20 @@ ffmpeg -i subtitled.mp4 -i music.mp3 \
 - 音乐为主音频：`volume=0.7` 到 `volume=1.0`
 - 淡入时长：1-2 秒
 - 淡出时长：结尾 2-3 秒
+
+#### 第4.5步：调色（可选但推荐）
+
+为成品视频添加统一的调色风格，大幅提升观感：
+
+```bash
+# 应用LUT调色
+ffmpeg -i final-no-grade.mp4 -vf "lut3d=cinematic.cube" -c:a copy -y final.mp4
+
+# 或使用基础参数调色（暖调示例）
+ffmpeg -i final-no-grade.mp4 -vf "eq=brightness=0.03:contrast=1.1:saturation=1.15:gamma=1.02" -c:a copy -y final.mp4
+```
+
+> 详细调色指南和内容类型专属参数，参考 `modules/color-grading.md`。
 
 #### 第5步：最终输出
 
@@ -642,6 +660,9 @@ ffmpeg -i audio1.mp3 -i audio2.mp3 \
 |------|---------|------|
 | 热门音乐搜索 | `modules/music-search.md` | 从 YouTube/B站搜索下载 BGM，按情绪/BPM 匹配 |
 | 卡点剪辑 | `modules/beat-sync.md` | 节拍检测 + 视频与音乐节拍对齐 |
+| 调色指南 | `modules/color-grading.md` | LUT调色、内容类型调色参数、AI调色工具 |
+| 字幕美学 | `modules/subtitle-aesthetics.md` | 字幕规范、花字样式、ASS高级样式、自动字幕流水线 |
+| 视频增强 | `modules/video-enhancement.md` | 帧插值(RIFE)、超分(Real-ESRGAN)、视频稳定(vid.stab) |
 
 ### 可用脚本
 
