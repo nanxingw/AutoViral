@@ -4,6 +4,9 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import type { Server } from "node:http";
 import { loadConfig } from "../config.js";
 import { initProviders } from "../providers/registry.js";
@@ -28,6 +31,18 @@ export async function startServer(port: number): Promise<{ server: Server }> {
 
   // 3. Ensure shared asset directories
   await ensureSharedDirs();
+
+  // 3.5. Sync skills to ~/.claude/skills/ (agent reads from there)
+  const projectSkills = join(process.cwd(), "skills");
+  const installedSkills = join(homedir(), ".claude", "skills");
+  if (existsSync(projectSkills)) {
+    try {
+      execSync(`rsync -a --delete "${projectSkills}/" "${installedSkills}/"`, { stdio: "ignore" });
+      console.log("Skills synced to ~/.claude/skills/");
+    } catch {
+      console.warn("Warning: failed to sync skills to ~/.claude/skills/");
+    }
+  }
 
   // 4. Create WsBridge
   const wsBridge = new WsBridge(port);
