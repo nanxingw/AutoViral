@@ -55,6 +55,7 @@
     title: string;
     coverImage: string;
     images: string[];
+    videoUrl: string;
     body: string;
     tags: string[];
     category: ContentCategory;
@@ -64,6 +65,7 @@
   let selectedWork: ShowcaseWork | null = $state(null);
   let showcasePlatform: "all" | "douyin" | "xiaohongshu" = $state("all");
   let modalImageIdx = $state(0);
+  let dyPaused = $state(true);
 
   let filteredShowcase = $derived(
     showcaseWorks.filter(w =>
@@ -110,6 +112,7 @@
     en?: { title: string; body: string; tags: string[]; imageDir?: string };
   }
   const SHOWCASE_ENTRIES: ShowcaseEntry[] = [
+    { id: "w_20260401_1537_1cf", category: "envy" },
     { id: "w_20260325_1753_75d", category: "conflict" },
     { id: "w_20260329_1710_ecf", category: "envy" },
   ];
@@ -188,12 +191,18 @@
         let tags: string[] = [];
         let coverImage = "";
         let images: string[] = [];
+        let videoUrl = "";
         let assets: string[] = [];
 
         const assetsRes = await fetch(`/api/works/${entry.id}/assets`);
         if (assetsRes.ok) {
           const assetsData = await assetsRes.json();
           assets = assetsData.assets ?? assetsData;
+
+          // Detect final video for short-video works
+          const finalVid = assets.find((f: string) => /^(output\/)?final\.(mp4|mov|webm)$/i.test(f))
+            ?? assets.find((f: string) => /\.(mp4|mov|webm)$/i.test(f) && !/clip|norm|concat|raw|base/i.test(f));
+          if (finalVid) videoUrl = `/api/works/${entry.id}/assets/${finalVid}`;
 
           // Collect all output images (sorted by name for correct order)
           const outputImgs = assets
@@ -267,6 +276,7 @@
           title,
           coverImage,
           images,
+          videoUrl,
           body,
           tags,
           category: entry.category,
@@ -630,38 +640,53 @@
     {#if filteredShowcase.length > 0}
       {#each filteredShowcase as work}
         <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="work-card" onclick={() => { modalImageIdx = 0; selectedWork = work; }}>
-          {#if work.coverImage || work.images.length > 0}
-            <div class="work-cover">
-              <img src={work.coverImage || work.images[0]} alt={work.title} />
-              {#if work.images.length > 1}
-                <span class="work-cover-count">
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="2" width="15" height="15" rx="2"/><path d="M7 22h13a2 2 0 0 0 2-2V7"/></svg>
-                  {work.images.length}
-                </span>
-              {/if}
-              <div class="work-platform-tags">
-                {#each work.platforms as p}
-                  <span class="work-platform-tag" class:douyin={p === "douyin"} class:xhs={p === "xiaohongshu"}>
-                    {p === "douyin" ? tt("platformDouyin") : tt("platformXiaohongshu")}
+        <div class="work-card" onclick={() => { modalImageIdx = 0; dyPaused = true; selectedWork = work; }}>
+          {#if work.videoUrl}
+            <!-- Video card: cover fills card, title overlay at bottom -->
+            <div class="work-cover video-cover">
+              <video src={work.videoUrl} preload="metadata" muted></video>
+              <span class="work-cover-play">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><polygon points="8,5 19,12 8,19"/></svg>
+              </span>
+              <div class="video-card-bottom">
+                <h3 class="video-card-title">{work.title}</h3>
+              </div>
+            </div>
+          {:else}
+            <!-- Image-text card -->
+            {#if work.coverImage || work.images.length > 0}
+              <div class="work-cover">
+                <img src={work.coverImage || work.images[0]} alt={work.title} />
+                {#if work.images.length > 1}
+                  <span class="work-cover-count">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="2" width="15" height="15" rx="2"/><path d="M7 22h13a2 2 0 0 0 2-2V7"/></svg>
+                    {work.images.length}
                   </span>
-                {/each}
+                {/if}
+              </div>
+            {/if}
+            <div class="work-card-body">
+              <h3 class="work-card-title">{work.title}</h3>
+              {#if work.body}
+                <p class="work-card-text">{work.body.slice(0, 80)}{work.body.length > 80 ? "…" : ""}</p>
+              {/if}
+              <div class="work-card-footer">
+                <div class="work-card-author">
+                  <div class="work-card-avatar"></div>
+                  <span class="work-card-name">AutoViral</span>
+                </div>
+                {#if work.platforms.length}
+                  <div class="work-card-platforms">
+                    {#each work.platforms as p}
+                      <span class="work-card-plat" class:douyin={p === "douyin"} class:xhs={p === "xiaohongshu"}>
+                        {p === "douyin" ? "抖音" : "小红书"}
+                      </span>
+                    {/each}
+                  </div>
+                {/if}
               </div>
             </div>
           {/if}
-          <div class="work-card-body">
-            <h3 class="work-card-title">{work.title}</h3>
-            {#if work.body}
-              <p class="work-card-text">{work.body.slice(0, 120)}{work.body.length > 120 ? "…" : ""}</p>
-            {/if}
-            {#if work.tags.length}
-              <div class="work-card-tags">
-                {#each work.tags.slice(0, 3) as tag}
-                  <span class="work-card-tag">{tag}</span>
-                {/each}
-              </div>
-            {/if}
-          </div>
         </div>
       {/each}
     {:else}
@@ -683,72 +708,127 @@
       </button>
       <div class="phone-frame">
         <div class="phone-notch"></div>
-        <div class="phone-screen">
-          <div class="xhs-post">
-            {#if selectedWork.images.length > 0}
-              <div class="xhs-cover">
-                <img src={selectedWork.images[modalImageIdx]} alt={selectedWork.title} />
-                {#if selectedWork.images.length > 1}
-                  <!-- Left/right tap zones -->
-                  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-                  <div class="cover-tap-left" onclick={(e) => { e.stopPropagation(); if (modalImageIdx > 0) modalImageIdx--; }}></div>
-                  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-                  <div class="cover-tap-right" onclick={(e) => { e.stopPropagation(); if (modalImageIdx < selectedWork!.images.length - 1) modalImageIdx++; }}></div>
-                  <!-- Dot indicators -->
-                  <div class="cover-dots">
-                    {#each selectedWork.images as _, i}
-                      <span class="cover-dot" class:active={i === modalImageIdx}></span>
+        {#if selectedWork.videoUrl}
+          <!-- Douyin-style fullscreen video player -->
+          <div class="phone-screen dy-screen">
+            <div class="dy-video-container">
+              <!-- svelte-ignore a11y_media_has_caption -->
+              <video
+                class="dy-video"
+                src={selectedWork.videoUrl}
+                loop
+                playsinline
+                preload="auto"
+                onclick={(e) => {
+                  const v = e.currentTarget as HTMLVideoElement;
+                  if (v.paused) v.play(); else v.pause();
+                  dyPaused = v.paused;
+                }}
+                onplay={() => dyPaused = false}
+                onpause={() => dyPaused = true}
+              ></video>
+              {#if dyPaused}
+                <div class="dy-play-overlay">
+                  <svg width="52" height="52" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)"><polygon points="6,3 20,12 6,21"/></svg>
+                </div>
+              {/if}
+              <!-- Right-side action buttons (Douyin style) -->
+              <div class="dy-sidebar">
+                <div class="dy-action">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                  <span class="dy-action-count">2.4w</span>
+                </div>
+                <div class="dy-action">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                  <span class="dy-action-count">3.6k</span>
+                </div>
+                <div class="dy-action">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                  <span class="dy-action-count">8.1k</span>
+                </div>
+              </div>
+              <!-- Bottom overlay: author + description + tags -->
+              <div class="dy-bottom">
+                <div class="dy-author">
+                  <span class="dy-author-name">@AutoViral</span>
+                </div>
+                <p class="dy-desc">{selectedWork.title}</p>
+                {#if selectedWork.tags.length}
+                  <div class="dy-tags">
+                    {#each selectedWork.tags.slice(0, 4) as tag}
+                      <span class="dy-tag">{tag}</span>
                     {/each}
                   </div>
-                  <!-- Counter badge -->
-                  <span class="cover-counter">{modalImageIdx + 1}/{selectedWork.images.length}</span>
                 {/if}
-              </div>
-            {:else if selectedWork.coverImage}
-              <div class="xhs-cover">
-                <img src={selectedWork.coverImage} alt={selectedWork.title} />
-              </div>
-            {/if}
-            <div class="xhs-body">
-              <h3 class="xhs-title">{selectedWork.title}</h3>
-              <div class="xhs-author">
-                <div class="xhs-avatar"></div>
-                <span class="xhs-name">{tt("autoviralCreation")}</span>
-                <div class="xhs-platform-badges">
-                  {#each selectedWork.platforms as p}
-                    <span class="work-platform-tag" class:douyin={p === "douyin"} class:xhs={p === "xiaohongshu"}>
-                      {p === "douyin" ? tt("platformDouyin") : tt("platformXiaohongshu")}
-                    </span>
-                  {/each}
-                </div>
-              </div>
-              {#if selectedWork.body}
-                <p class="xhs-fulltext">{selectedWork.body}</p>
-              {/if}
-              {#if selectedWork.tags.length}
-                <div class="xhs-tags">
-                  {#each selectedWork.tags as tag}
-                    <span class="xhs-tag">{tag}</span>
-                  {/each}
-                </div>
-              {/if}
-              <div class="xhs-actions">
-                <span class="xhs-action">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-                  2.4w
-                </span>
-                <span class="xhs-action">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 4H5a2 2 0 0 0-2 2v14l3.5-2 3.5 2 3.5-2 3.5 2V6a2 2 0 0 0-2-2z"/></svg>
-                  8.1k
-                </span>
-                <span class="xhs-action">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-                  3.6k
-                </span>
               </div>
             </div>
           </div>
-        </div>
+        {:else}
+          <!-- Image/text post (XHS style) -->
+          <div class="phone-screen">
+            <div class="xhs-post">
+              {#if selectedWork.images.length > 0}
+                <div class="xhs-cover">
+                  <img src={selectedWork.images[modalImageIdx]} alt={selectedWork.title} />
+                  {#if selectedWork.images.length > 1}
+                    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                    <div class="cover-tap-left" onclick={(e) => { e.stopPropagation(); if (modalImageIdx > 0) modalImageIdx--; }}></div>
+                    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                    <div class="cover-tap-right" onclick={(e) => { e.stopPropagation(); if (modalImageIdx < selectedWork!.images.length - 1) modalImageIdx++; }}></div>
+                    <div class="cover-dots">
+                      {#each selectedWork.images as _, i}
+                        <span class="cover-dot" class:active={i === modalImageIdx}></span>
+                      {/each}
+                    </div>
+                    <span class="cover-counter">{modalImageIdx + 1}/{selectedWork.images.length}</span>
+                  {/if}
+                </div>
+              {:else if selectedWork.coverImage}
+                <div class="xhs-cover">
+                  <img src={selectedWork.coverImage} alt={selectedWork.title} />
+                </div>
+              {/if}
+              <div class="xhs-body">
+                <h3 class="xhs-title">{selectedWork.title}</h3>
+                <div class="xhs-author">
+                  <div class="xhs-avatar"></div>
+                  <span class="xhs-name">{tt("autoviralCreation")}</span>
+                  <div class="xhs-platform-badges">
+                    {#each selectedWork.platforms as p}
+                      <span class="work-platform-tag" class:douyin={p === "douyin"} class:xhs={p === "xiaohongshu"}>
+                        {p === "douyin" ? tt("platformDouyin") : tt("platformXiaohongshu")}
+                      </span>
+                    {/each}
+                  </div>
+                </div>
+                {#if selectedWork.body}
+                  <p class="xhs-fulltext">{selectedWork.body}</p>
+                {/if}
+                {#if selectedWork.tags.length}
+                  <div class="xhs-tags">
+                    {#each selectedWork.tags as tag}
+                      <span class="xhs-tag">{tag}</span>
+                    {/each}
+                  </div>
+                {/if}
+                <div class="xhs-actions">
+                  <span class="xhs-action">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                    2.4w
+                  </span>
+                  <span class="xhs-action">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 4H5a2 2 0 0 0-2 2v14l3.5-2 3.5 2 3.5-2 3.5 2V6a2 2 0 0 0-2-2z"/></svg>
+                    8.1k
+                  </span>
+                  <span class="xhs-action">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    3.6k
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        {/if}
         <div class="phone-home-bar"></div>
       </div>
     </div>
@@ -915,7 +995,8 @@
   /* Showcase grid */
   .showcase-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-auto-rows: 1fr;
     gap: 1rem;
   }
 
@@ -953,6 +1034,8 @@
     cursor: pointer;
     transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
     animation: fadeUp 0.3s ease both;
+    display: flex;
+    flex-direction: column;
   }
 
   .work-card:hover {
@@ -963,7 +1046,7 @@
 
   .work-cover {
     width: 100%;
-    aspect-ratio: 4/3;
+    aspect-ratio: 3/4;
     overflow: hidden;
     background: #f5e6e0;
     position: relative;
@@ -1017,43 +1100,85 @@
   }
 
   .work-card-body {
-    padding: 0.85rem;
+    padding: 0.6rem 0.7rem 0.55rem;
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 0.3rem;
+    flex: 1;
   }
 
   .work-card-title {
-    font-size: 0.92rem;
+    font-size: 0.82rem;
     font-weight: 700;
     color: var(--text);
     margin: 0;
     line-height: 1.35;
     letter-spacing: -0.01em;
-  }
-
-  .work-card-text {
-    font-size: 0.8rem;
-    color: var(--text-muted);
-    line-height: 1.6;
-    margin: 0;
     display: -webkit-box;
-    -webkit-line-clamp: 3;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
 
-  .work-card-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.25rem;
-    margin-top: 0.15rem;
+  .work-card-text {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
   }
 
-  .work-card-tag {
-    font-size: 0.68rem;
-    color: var(--spark-red, #FE2C55);
+  .work-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: auto;
+    padding-top: 0.3rem;
+  }
+
+  .work-card-author {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .work-card-avatar {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #FE2C55, #FF6B6B);
+    flex-shrink: 0;
+  }
+
+  .work-card-name {
+    font-size: 0.65rem;
+    color: var(--text-dim);
     font-weight: 500;
+  }
+
+  .work-card-platforms {
+    display: flex;
+    gap: 3px;
+  }
+
+  .work-card-plat {
+    font-size: 0.55rem;
+    font-weight: 600;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  .work-card-plat.douyin {
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--text-muted);
+  }
+
+  .work-card-plat.xhs {
+    background: rgba(254, 44, 85, 0.1);
+    color: #FE2C55;
   }
 
   /* Work detail modal — phone frame */
@@ -1298,6 +1423,162 @@
     background: rgba(255,255,255,0.3);
     border-radius: 2px;
     margin: 6px auto 2px;
+  }
+
+  /* Video cover card styles — fills entire card */
+  .work-cover.video-cover {
+    aspect-ratio: unset;
+    flex: 1;
+  }
+  .work-cover video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .work-cover-play {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .work-cover-play svg {
+    margin-left: 2px;
+  }
+
+  /* Video card bottom overlay — title on top of video */
+  .video-card-bottom {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 24px 10px 8px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+  }
+  .video-card-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
+  }
+
+  /* Douyin-style fullscreen video player */
+  .dy-screen {
+    background: #000 !important;
+    max-height: 600px !important;
+    overflow: hidden !important;
+  }
+
+  .dy-video-container {
+    position: relative;
+    width: 100%;
+    height: 600px;
+    background: #000;
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  .dy-video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+  }
+
+  .dy-play-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    opacity: 0.9;
+  }
+
+  /* Right sidebar — Douyin action buttons */
+  .dy-sidebar {
+    position: absolute;
+    right: 8px;
+    bottom: 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    z-index: 3;
+  }
+
+  .dy-action {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .dy-action svg {
+    filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
+  }
+
+  .dy-action-count {
+    font-size: 10px;
+    color: #fff;
+    font-weight: 600;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+  }
+
+  /* Bottom overlay — author, description, tags */
+  .dy-bottom {
+    position: absolute;
+    bottom: 12px;
+    left: 10px;
+    right: 54px;
+    z-index: 3;
+  }
+
+  .dy-author {
+    margin-bottom: 6px;
+  }
+
+  .dy-author-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+  }
+
+  .dy-desc {
+    font-size: 12px;
+    color: #fff;
+    line-height: 1.5;
+    margin: 0 0 6px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .dy-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .dy-tag {
+    font-size: 11px;
+    color: #fff;
+    font-weight: 500;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
   }
 
   .ranking-grid {

@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { t, getLanguage, subscribe } from "../lib/i18n";
-  import { fetchWork, startWorkSession, type Work } from "../lib/api";
+  import { fetchWork, startWorkSession, forcePassEval, retryWithGuidance, toggleEvalMode, type Work, type EvalResult } from "../lib/api";
   import { createWorkWs } from "../lib/ws";
   import PipelineSteps from "../components/PipelineSteps.svelte";
   import MarkdownBlock from "../components/MarkdownBlock.svelte";
@@ -14,11 +14,13 @@
   }
 
   interface StreamBlock {
-    type: "thinking" | "tool_use" | "tool_result" | "text" | "user" | "step_divider" | "ask_question";
+    type: "thinking" | "tool_use" | "tool_result" | "text" | "user" | "step_divider" | "ask_question" | "eval_result";
     text: string;
     toolName?: string;
     collapsed?: boolean;
     questions?: AskQuestion[];
+    source?: "creator" | "evaluator";
+    evalResult?: EvalResult;
   }
 
   let { workId, onBack, initialPrompt = "" }: { workId: string; onBack: () => void; initialPrompt?: string } = $props();
@@ -57,6 +59,8 @@
   let showNextStep = $state(false);
   let aborted = $state(false);
   let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
+  let evalRetryGuidance = $state("");
+  let evalEnabled = $state(true);
 
   // Derived: check if all steps done or any pending
   let allStepsDone = $derived(
@@ -74,6 +78,9 @@
   // Auto-advance: immediately start next step when current one completes
   $effect(() => {
     if (showNextStep && !streaming && !aborted && work?.pipeline) {
+      // Don't auto-advance if current step is being evaluated or blocked
+      const curStatus = work.pipeline[currentStep]?.status;
+      if (curStatus === "evaluating" || curStatus === "eval_blocked") return;
       const keys = Object.keys(work.pipeline);
       const currentIdx = keys.indexOf(currentStep);
       if (currentIdx >= 0 && currentIdx < keys.length - 1) {
@@ -249,11 +256,48 @@
     scrollToBottom();
   }
 
+  async function handleToggleEval() {
+    const result = await toggleEvalMode(workId);
+    evalEnabled = result.evaluationMode;
+  }
+
+  async function handleForcePass(evalResult: EvalResult) {
+    if (!work) return;
+    const stepKeys = Object.keys(work.pipeline);
+    const currentIdx = stepKeys.indexOf(evalResult.step);
+    const nextKey = currentIdx < stepKeys.length - 1 ? stepKeys[currentIdx + 1] : undefined;
+    const result = await forcePassEval(workId, evalResult.step, nextKey);
+    work.pipeline = result.pipeline;
+    work = { ...work };
+    showNextStep = true;
+  }
+
+  async function handleRetryWithGuidance(evalResult: EvalResult) {
+    if (!work || !evalRetryGuidance.trim()) return;
+    await retryWithGuidance(workId, evalResult.step, evalRetryGuidance);
+    evalRetryGuidance = "";
+    streaming = true;
+    showNextStep = false;
+  }
+
   function wsHandler(event: string, data: any) {
     if (event === "title_updated" && data.title && work) {
       work.title = data.title;
       work.titleLocked = true;
       work = { ...work };
+      return;
+    }
+    if (event === "eval_start" && data.step) {
+      streamBlocks = [...streamBlocks, { type: "step_divider", text: tt("evalReviewing") }];
+      streaming = true;
+      scrollToBottom();
+      return;
+    }
+    if (event === "eval_complete" && data.result) {
+      streaming = false;
+      const result = data.result as EvalResult;
+      streamBlocks = [...streamBlocks, { type: "eval_result", text: "", evalResult: result }];
+      scrollToBottom();
       return;
     }
     if (event === "pipeline_updated" && data.pipeline && work) {
@@ -314,7 +358,19 @@
         streaming = true;
         activeToolName = "";
         resetInactivityTimer();
-        appendToLastBlock("text", data.text ?? "");
+        if (data.source === "evaluator") {
+          // Evaluator text — append with source marker
+          const last = streamBlocks[streamBlocks.length - 1];
+          if (last && last.type === "text" && last.source === "evaluator") {
+            last.text += data.text ?? "";
+            streamBlocks = [...streamBlocks];
+          } else {
+            streamBlocks = [...streamBlocks, { type: "text", text: data.text ?? "", source: "evaluator" }];
+          }
+          scrollToBottom();
+        } else {
+          appendToLastBlock("text", data.text ?? "");
+        }
         break;
       case "turn_complete":
         if (inactivityTimer) clearTimeout(inactivityTimer);
@@ -347,16 +403,18 @@
 
     try {
       work = await fetchWork(workId);
-      if (work?.pipeline) {
-        const keys = Object.keys(work.pipeline);
-        const activeKey = keys.find(k => work!.pipeline[k].status === "active");
-        if (activeKey) {
-          currentStep = activeKey;
-        } else if (keys.length > 0) {
-          currentStep = keys[0];
+      if (work) {
+        evalEnabled = work.evaluationMode ?? true;
+        if (work.pipeline) {
+          const keys = Object.keys(work.pipeline);
+          const activeKey = keys.find(k => work!.pipeline[k].status === "active");
+          if (activeKey) {
+            currentStep = activeKey;
+          } else if (keys.length > 0) {
+            currentStep = keys[0];
+          }
         }
       }
-
     } catch { /* fetch failed */ }
 
     wsConn = createWorkWs(workId, wsHandler);
@@ -430,6 +488,12 @@
       {/if}
     </div>
     <div class="header-controls">
+      <div class="eval-switch-row">
+        <span class="eval-switch-label">{tt("evalReviewing")}</span>
+        <button class="switch" class:on={evalEnabled} onclick={handleToggleEval}>
+          <span class="switch-thumb"></span>
+        </button>
+      </div>
     </div>
   </div>
 
@@ -506,9 +570,57 @@
                 </div>
               {/each}
             </div>
+          {:else if block.type === "eval_result" && block.evalResult}
+            {@const er = block.evalResult}
+            <div class="stream-block eval-result-block" class:eval-pass={er.verdict === "pass"} class:eval-fail={er.verdict === "fail"}>
+              <div class="eval-header">
+                <span class="eval-verdict-badge" class:pass={er.verdict === "pass"} class:fail={er.verdict === "fail"}>
+                  {er.verdict === "pass" ? tt("evalPass") : tt("evalFail")}
+                </span>
+              </div>
+              {#if Object.keys(er.scores).length > 0}
+                <div class="eval-scores">
+                  {#each Object.entries(er.scores) as [dim, score]}
+                    <div class="score-row">
+                      <span class="score-dim">{dim}</span>
+                      <div class="score-bar-bg">
+                        <div class="score-bar-fill" style="width: {(score as number) * 10}%;" class:score-low={(score as number) < 6} class:score-mid={(score as number) >= 6 && (score as number) < 7}></div>
+                      </div>
+                      <span class="score-value" class:score-low={(score as number) < 6}>{score}/10</span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+              {#if er.issues.length > 0}
+                <div class="eval-issues">
+                  {#each er.issues as issue}
+                    <div class="issue-item issue-{issue.severity}">
+                      <span class="issue-severity">{issue.severity === "critical" ? tt("evalSeverityCritical") : issue.severity === "major" ? tt("evalSeverityMajor") : tt("evalSeverityMinor")}</span>
+                      <span>{issue.description}</span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
+              {#if er.suggestions.length > 0}
+                <div class="eval-suggestions">
+                  {#each er.suggestions as s}
+                    <div class="suggestion-item">{s}</div>
+                  {/each}
+                </div>
+              {/if}
+              {#if er.verdict === "fail"}
+                <div class="eval-actions">
+                  <button class="eval-btn eval-force-pass" onclick={() => handleForcePass(er)}>{tt("evalForcePass")}</button>
+                  <div class="eval-retry-row">
+                    <textarea class="eval-retry-input" bind:value={evalRetryGuidance} placeholder={tt("evalRetryPlaceholder")} rows="2"></textarea>
+                    <button class="eval-btn eval-retry" onclick={() => handleRetryWithGuidance(er)} disabled={!evalRetryGuidance.trim()}>{tt("evalRetry")}</button>
+                  </div>
+                </div>
+              {/if}
+            </div>
           {:else}
-            <div class="stream-block text-block">
-              <div class="block-label text-label">Agent</div>
+            <div class="stream-block text-block" class:evaluator-block={block.source === "evaluator"}>
+              <div class="block-label text-label">{block.source === "evaluator" ? tt("evalReviewing") : "Agent"}</div>
               <div class="block-content text-content">
                 <MarkdownBlock text={block.text} />
               </div>
@@ -1007,6 +1119,112 @@
     color: var(--text-dim);
     line-height: 1.35;
   }
+
+  /* Eval switch */
+  .eval-switch-row {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+  .eval-switch-label {
+    font-size: 0.7rem;
+    font-weight: 500;
+    color: var(--text-dim);
+  }
+  .switch {
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+    background: var(--text-dim);
+    border: none;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.2s ease;
+    flex-shrink: 0;
+    padding: 0;
+  }
+  .switch.on { background: var(--spark-red, #FE2C55); }
+  .switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  }
+  .switch.on .switch-thumb { transform: translateX(16px); }
+
+  /* Evaluator blocks */
+  .evaluator-block {
+    border-left: 2px solid #f59e0b;
+    padding-left: 0.75rem;
+    margin-left: 0.25rem;
+  }
+  .evaluator-block .block-label { color: #f59e0b; }
+
+  /* Eval result card */
+  .eval-result-block {
+    background: var(--bg-surface);
+    border: 1.5px solid var(--border);
+    border-radius: 12px;
+    padding: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+  .eval-result-block.eval-pass { border-color: rgba(34, 197, 94, 0.4); }
+  .eval-result-block.eval-fail { border-color: rgba(239, 68, 68, 0.4); }
+
+  .eval-header { display: flex; align-items: center; gap: 0.5rem; }
+  .eval-verdict-badge {
+    font-size: 0.75rem;
+    font-weight: 700;
+    padding: 0.2rem 0.6rem;
+    border-radius: 6px;
+  }
+  .eval-verdict-badge.pass { background: rgba(34, 197, 94, 0.15); color: #16a34a; }
+  .eval-verdict-badge.fail { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+
+  .eval-scores { display: flex; flex-direction: column; gap: 0.3rem; }
+  .score-row { display: flex; align-items: center; gap: 0.5rem; font-size: 0.75rem; }
+  .score-dim { width: 5rem; color: var(--text-muted); font-weight: 500; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .score-bar-bg { flex: 1; height: 6px; background: var(--bg-inset); border-radius: 3px; overflow: hidden; }
+  .score-bar-fill { height: 100%; border-radius: 3px; background: #22c55e; transition: width 0.3s; }
+  .score-bar-fill.score-low { background: #ef4444; }
+  .score-bar-fill.score-mid { background: #f59e0b; }
+  .score-value { font-weight: 650; font-variant-numeric: tabular-nums; min-width: 2.5rem; text-align: right; }
+  .score-value.score-low { color: #ef4444; }
+
+  .eval-issues { display: flex; flex-direction: column; gap: 0.25rem; }
+  .issue-item { font-size: 0.74rem; line-height: 1.4; display: flex; gap: 0.4rem; align-items: baseline; }
+  .issue-severity {
+    font-size: 0.62rem; font-weight: 700; text-transform: uppercase; padding: 0.08rem 0.35rem; border-radius: 4px; flex-shrink: 0;
+  }
+  .issue-critical .issue-severity { background: rgba(239, 68, 68, 0.15); color: #dc2626; }
+  .issue-major .issue-severity { background: rgba(245, 158, 11, 0.15); color: #d97706; }
+  .issue-minor .issue-severity { background: rgba(148, 163, 184, 0.15); color: var(--text-muted); }
+
+  .eval-suggestions { display: flex; flex-direction: column; gap: 0.2rem; }
+  .suggestion-item { font-size: 0.74rem; color: var(--text-muted); line-height: 1.4; padding-left: 0.75rem; position: relative; }
+  .suggestion-item::before { content: "→"; position: absolute; left: 0; color: var(--text-dim); }
+
+  .eval-actions { display: flex; flex-direction: column; gap: 0.5rem; padding-top: 0.35rem; border-top: 1px solid var(--border); }
+  .eval-btn {
+    font-family: inherit; font-size: 0.78rem; font-weight: 600; padding: 0.4rem 0.85rem; border-radius: 8px; cursor: pointer; border: 1.5px solid var(--border); background: var(--bg-surface); color: var(--text); transition: all 0.12s;
+  }
+  .eval-btn:hover { background: var(--bg-hover); }
+  .eval-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .eval-force-pass { align-self: flex-start; }
+  .eval-retry { flex-shrink: 0; }
+  .eval-retry-row { display: flex; gap: 0.4rem; align-items: flex-end; }
+  .eval-retry-input {
+    flex: 1; font-family: inherit; font-size: 0.78rem; padding: 0.4rem 0.65rem; border: 1.5px solid var(--border); border-radius: 8px; background: var(--bg-inset); color: var(--text); resize: none; line-height: 1.4;
+  }
+  .eval-retry-input:focus { outline: none; border-color: var(--text-muted); }
+  .eval-retry-input::placeholder { color: var(--text-dim); }
 
   /* Responsive */
   @media (max-width: 1024px) {

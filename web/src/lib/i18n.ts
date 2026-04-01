@@ -120,6 +120,20 @@ const translations: Record<Language, Record<string, string>> = {
     stepAssets: "Image Generation",
     stepAssembly: "Video Assembly",
     stepAssemblyImageText: "Layout Assembly",
+    stepEvaluatingLabel: "Evaluating...",
+    stepEvalBlockedLabel: "Review Failed",
+    evalPass: "Review Passed",
+    evalFail: "Review Failed",
+    evalForcePass: "Force Pass",
+    evalRetry: "Retry with Feedback",
+    evalRetryPlaceholder: "Enter revision guidance...",
+    evalScores: "Scores",
+    evalIssues: "Issues",
+    evalSuggestions: "Suggestions",
+    evalSeverityCritical: "Critical",
+    evalSeverityMajor: "Major",
+    evalSeverityMinor: "Minor",
+    evalReviewing: "Quality Review",
 
     // Tool display names
     toolSearching: "Searching...",
@@ -271,6 +285,10 @@ const translations: Record<Language, Record<string, string>> = {
     outputFiles: "Output Files",
     downloadAllBtn: "Download All",
     modifyFilePrefix: "Please modify",
+
+    // Portrait reference
+    usePortraitLabel: "Link Portrait",
+    usePortraitTooltip: "When enabled, your portrait reference images will be used to guide asset generation for consistent style",
 
     // SharedAssets
     playAudio: "Play",
@@ -488,6 +506,20 @@ const translations: Record<Language, Record<string, string>> = {
     stepAssets: "图片生成",
     stepAssembly: "视频合成",
     stepAssemblyImageText: "图文排版",
+    stepEvaluatingLabel: "评审中...",
+    stepEvalBlockedLabel: "评审未通过",
+    evalPass: "评审通过",
+    evalFail: "评审未通过",
+    evalForcePass: "强制通过",
+    evalRetry: "根据反馈重做",
+    evalRetryPlaceholder: "输入修改指导意见...",
+    evalScores: "评分详情",
+    evalIssues: "问题列表",
+    evalSuggestions: "修改建议",
+    evalSeverityCritical: "严重",
+    evalSeverityMajor: "重要",
+    evalSeverityMinor: "轻微",
+    evalReviewing: "质量评审",
 
     // Tool display names
     toolSearching: "正在搜索...",
@@ -639,6 +671,10 @@ const translations: Record<Language, Record<string, string>> = {
     outputFiles: "输出文件",
     downloadAllBtn: "全部下载",
     modifyFilePrefix: "请修改",
+
+    // Portrait reference
+    usePortraitLabel: "关联你的画像",
+    usePortraitTooltip: "开启后，生成素材时会使用「你的画像」里的参考图，确保风格一致",
 
     // SharedAssets
     playAudio: "播放",

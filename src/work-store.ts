@@ -13,10 +13,26 @@ export type WorkStatus = "draft" | "creating" | "ready" | "failed";
 
 export interface PipelineStep {
   name: string;
-  status: "pending" | "active" | "done" | "skipped";
+  status: "pending" | "active" | "done" | "skipped" | "evaluating" | "eval_blocked";
   startedAt?: string;
   completedAt?: string;
   note?: string;
+}
+
+export interface EvalIssue {
+  severity: "critical" | "major" | "minor";
+  description: string;
+  file?: string;
+}
+
+export interface EvalResult {
+  step: string;
+  attempt: number;
+  verdict: "pass" | "fail";
+  scores: Record<string, number>;
+  issues: EvalIssue[];
+  suggestions: string[];
+  timestamp: string;
 }
 
 export type ContentCategory = "info" | "beauty" | "comedy" | "anxiety" | "conflict" | "envy";
@@ -37,6 +53,8 @@ export interface Work {
   topicHint?: string;
   titleLocked?: boolean;
   language?: "en" | "zh";
+  evaluationMode?: boolean;
+  usePortrait?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -321,6 +339,19 @@ export async function listAssets(id: string): Promise<string[]> {
   await walk(join(baseDir, "output"));
   await walk(join(baseDir, "output_en"));
 
+  // Also pick up media files in the work root directory (agent sometimes puts final.mp4 here)
+  const mediaExts = new Set([".mp4", ".mov", ".mp3", ".wav", ".png", ".jpg", ".jpeg", ".webp", ".gif"]);
+  try {
+    const rootEntries = await readdir(baseDir, { withFileTypes: true });
+    for (const entry of rootEntries) {
+      if (!entry.isFile()) continue;
+      const ext = entry.name.substring(entry.name.lastIndexOf(".")).toLowerCase();
+      if (mediaExts.has(ext)) {
+        results.push(entry.name);
+      }
+    }
+  } catch { /* ignore */ }
+
   return results;
 }
 
@@ -357,5 +388,31 @@ export async function loadWorkChat(id: string): Promise<unknown | null> {
     return JSON.parse(raw);
   } catch {
     return null;
+  }
+}
+
+// ── Eval result persistence ─────────────────────────────────────────────────
+
+/** Save an eval result for a pipeline step (appended to history). */
+export async function saveEvalResult(id: string, stepKey: string, result: EvalResult): Promise<void> {
+  const evalDir = join(workDir(id), "eval");
+  await mkdir(evalDir, { recursive: true });
+  const filePath = join(evalDir, `${stepKey}.json`);
+  let results: EvalResult[] = [];
+  try {
+    const raw = await readFile(filePath, "utf-8");
+    results = JSON.parse(raw);
+  } catch { /* no previous results */ }
+  results.push(result);
+  await writeFile(filePath, JSON.stringify(results, null, 2), "utf-8");
+}
+
+/** Load all eval results for a pipeline step. */
+export async function loadEvalResults(id: string, stepKey: string): Promise<EvalResult[]> {
+  try {
+    const raw = await readFile(join(workDir(id), "eval", `${stepKey}.json`), "utf-8");
+    return JSON.parse(raw);
+  } catch {
+    return [];
   }
 }

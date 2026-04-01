@@ -389,6 +389,17 @@ ffmpeg -i concat.mp4 -vf "ass=subs.ass" -c:v libx264 -crf 23 -c:a copy -y subtit
 
 #### 第4步：添加背景音乐
 
+**BGM 获取优先级（必须按此顺序）：**
+
+1. **首选：Lyria AI 生成** — 根据内容情绪和用户画像生成匹配的原创 BGM
+   ```bash
+   python3 skills/asset-generation/scripts/music_generate.py \
+     --prompt "cinematic, powerful drums, motivational, 120 BPM, gym workout energy" \
+     --output <作品目录>/assets/music/bgm.mp3
+   ```
+2. **次选：用户共享素材中的音乐** — `curl http://localhost:3271/api/shared-assets` 检查 music 分类
+3. **最后：搜索下载** — 仅当以上两种都不可用时，用 yt-dlp 搜索
+
 **音乐获取规则：指定知名歌曲时**
 
 当用户指定了一首具体歌曲名时，必须遵循以下规则：
@@ -429,6 +440,24 @@ ffmpeg -i subtitled.mp4 -i music.mp3 \
 - 淡入时长：1-2 秒
 - 淡出时长：结尾 2-3 秒
 
+#### 第4.5步：去除 AI 水印（必做）
+
+AI 生成的视频片段（如即梦/Jimeng、可灵等）通常在**左上角**带有平台水印。在最终输出前**必须**去除。
+
+**方法：使用 delogo 滤镜模糊左上角水印区域：**
+```bash
+# 模糊左上角水印（x=0, y=0, w=200, h=50 根据实际水印大小调整）
+ffmpeg -i final.mp4 -vf "delogo=x=0:y=0:w=200:h=50" -c:v libx264 -crf 23 -c:a copy -y final_clean.mp4
+```
+
+**如果 delogo 效果不佳，可用裁剪方式去除顶部水印区域后重新缩放：**
+```bash
+# 裁掉顶部50px水印区域，然后缩放回1080x1920
+ffmpeg -i final.mp4 -vf "crop=iw:ih-50:0:50,scale=1080:1920" -c:v libx264 -crf 23 -c:a copy -y final_clean.mp4
+```
+
+处理完成后用 `final_clean.mp4` 替代 `final.mp4` 进入下一步。
+
 #### 第5步：最终输出
 
 按照对应平台参考文档中的编码设置进行最终编码，然后：
@@ -438,6 +467,40 @@ ffmpeg -i subtitled.mp4 -i music.mp3 \
 mkdir -p output/
 cp final.mp4 output/final.mp4
 ```
+
+#### 第6步：自动选择最佳封面帧（短视频必做）
+
+封面是用户第一眼看到的画面，直接决定点击率。**必须从成片中自动挑选最有爆点、最好看、最吸引人的一帧作为封面图。**
+
+**选帧策略（按优先级）：**
+
+1. **情绪高潮帧** — 人物表情最强烈的瞬间（惊讶、大笑、感动等）
+2. **视觉冲击帧** — 色彩最鲜艳、构图最饱满、光影最有张力的画面
+3. **悬念/好奇帧** — 能引发"这是什么？"好奇心的画面，让人想点进去看
+4. **避开** — 转场模糊帧、纯黑/纯白帧、文字遮挡过多的帧、水印残留帧
+
+**执行方法：**
+
+```bash
+# 1. 每隔0.5秒抽一帧，生成候选帧
+mkdir -p /tmp/cover_candidates
+ffmpeg -i output/final.mp4 -vf "fps=2,scale=1080:1920:force_original_aspect_ratio=decrease" -q:v 2 -y /tmp/cover_candidates/frame_%04d.jpg
+
+# 2. 查看候选帧总数
+ls /tmp/cover_candidates/ | wc -l
+```
+
+然后从候选帧中选出**最具吸引力的一帧**（综合考虑情绪、色彩、构图），复制为封面：
+
+```bash
+# 选定最佳帧（替换 XXXX 为选中的帧编号）
+cp /tmp/cover_candidates/frame_XXXX.jpg output/cover.jpg
+
+# 清理临时文件
+rm -rf /tmp/cover_candidates
+```
+
+> **选帧判断依据：** 打开候选帧图片，快速浏览，想象自己在刷信息流——哪一帧会让你停下来？那就是最佳封面。优先选人脸表情清晰、画面饱满、色彩对比强的帧。
 
 ---
 
@@ -708,7 +771,7 @@ curl -X PUT http://localhost:3271/api/works/{workId} \
 
 ### 使用流程
 
-1. 需要 BGM → 先读 `modules/music-search.md`，用 yt-dlp 搜索下载
+1. 需要 BGM → **优先使用 Lyria AI 生成**：运行 `python3 skills/asset-generation/scripts/music_generate.py --prompt "描述音乐风格" --output <输出路径>/bgm.mp3`（需要 OPENROUTER_API_KEY）。仅当 Lyria 不可用时，才读 `modules/music-search.md` 用 yt-dlp 搜索下载
 2. 需要分析节拍 → 运行 `detect_beats.py` 获取 beats.json
 3. 需要卡点剪辑 → 运行 `beat_sync_edit.py` 一键完成
 4. 需要手动精调 → 参考 `modules/beat-sync.md` 中的手动流程
