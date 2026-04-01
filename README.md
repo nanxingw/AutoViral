@@ -17,7 +17,7 @@
 
 <div align="center">
 
-https://github.com/nanxingw/AutoViral/raw/refs/heads/main/docs/assets/demo.mp4
+https://github.com/user-attachments/assets/2a14f0b4-08e4-4367-b11e-5d128daf5974
 
 *AI 全自动创作的健身短视频 — 从选题到成片，零人工干预*
 
