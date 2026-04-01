@@ -113,11 +113,13 @@ const translations: Record<Language, Record<string, string>> = {
     stepRunningLabel: "Running...",
     stepCompletedLabel: "Done",
     stepFailedLabel: "Failed",
-    stepMaterialSearch: "Search",
-    stepResearch: "Research",
-    stepPlan: "Plan",
-    stepAssets: "Assets",
-    stepAssembly: "Assemble",
+    stepMaterialSearch: "Material Search",
+    stepResearch: "Topic Research",
+    stepPlan: "Storyboard",
+    stepPlanImageText: "Content Planning",
+    stepAssets: "Image Generation",
+    stepAssembly: "Video Assembly",
+    stepAssemblyImageText: "Layout Assembly",
 
     // Tool display names
     toolSearching: "Searching...",
@@ -221,7 +223,7 @@ const translations: Record<Language, Record<string, string>> = {
     uploadAsset: "Upload",
 
     // Settings
-    settingsTitle: "Your Profile",
+    settingsTitle: "Your Portrait",
     languageSetting: "Language",
     themeSetting: "Theme",
     darkTheme: "Dark",
@@ -480,10 +482,12 @@ const translations: Record<Language, Record<string, string>> = {
     stepCompletedLabel: "已完成",
     stepFailedLabel: "失败",
     stepMaterialSearch: "素材搜索",
-    stepResearch: "调研",
-    stepPlan: "策划",
-    stepAssets: "素材",
-    stepAssembly: "合成",
+    stepResearch: "话题调研",
+    stepPlan: "分镜规划",
+    stepPlanImageText: "内容规划",
+    stepAssets: "图片生成",
+    stepAssembly: "视频合成",
+    stepAssemblyImageText: "图文排版",
 
     // Tool display names
     toolSearching: "正在搜索...",
