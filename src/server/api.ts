@@ -5,11 +5,12 @@ import { promisify } from "node:util";
 import { join, extname } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
-import { loadConfig, saveConfig, type Config } from "../config.js";
+import { loadConfig, saveConfig, dataDir, type Config } from "../config.js";
 import {
   listWorks, getWork, createWork as storeCreateWork,
   updateWork as storeUpdateWork, deleteWork as storeDeleteWork,
   listAssets, getAssetPath, saveStepHistory, loadStepHistory,
+  saveEvalResult, loadEvalResults, type EvalResult,
 } from "../work-store.js";
 import { MemoryClient } from "../memory.js";
 import type { WsBridge } from "../ws-bridge.js";
@@ -146,18 +147,25 @@ apiRoutes.put("/api/config", async (c) => {
 apiRoutes.get("/api/works", async (c) => {
   try {
     const works = await listWorks();
-    // Attach coverImage: prefer final video (for keyframe), then output image, then first asset image
+    // Attach coverImage: prefer cover image, then final video, then output image, then first asset image
     const enriched = await Promise.all(works.map(async (w) => {
       try {
         const assets = await listAssets(w.id);
-        // 1. Final video — browser will show keyframe as poster
+        // 1. Explicit cover image in output/ (best frame selected during assembly)
+        const coverImage = assets.find((a: string) =>
+          /\.(png|jpe?g|webp)$/i.test(a) && a.startsWith("output/") && /cover/i.test(a)
+        );
+        if (coverImage) {
+          return { ...w, coverImage: `/api/works/${w.id}/assets/${coverImage.split("/").map(encodeURIComponent).join("/")}` };
+        }
+        // 2. Final video — browser will show keyframe as poster
         const finalVideo = assets.find((a: string) =>
           /\.(mp4|mov|webm)$/i.test(a) && /final/i.test(a)
         );
         if (finalVideo) {
           return { ...w, coverImage: `/api/works/${w.id}/assets/${finalVideo.split("/").map(encodeURIComponent).join("/")}`, coverIsVideo: true };
         }
-        // 2. Output image (thumbnail/cover)
+        // 3. Output image (thumbnail)
         const outputImage = assets.find((a: string) =>
           /\.(png|jpe?g|webp|gif)$/i.test(a) && a.startsWith("output/")
         );
@@ -368,7 +376,7 @@ apiRoutes.post("/api/generate/image", async (c) => {
 // POST /api/generate/video
 apiRoutes.post("/api/generate/video", async (c) => {
   const body = await c.req.json();
-  const { workId, prompt, firstFrame, lastFrame, resolution, filename, provider: providerName } = body;
+  const { workId, prompt, firstFrame, lastFrame, resolution, filename, provider: providerName, modelVersion } = body;
   if (!workId || !prompt || !filename) {
     return c.json({ success: false, error: "Missing required fields", code: "INVALID_PARAMS" }, 400);
   }
@@ -377,7 +385,7 @@ apiRoutes.post("/api/generate/video", async (c) => {
     return c.json({ success: false, error: "No video provider available", code: "INVALID_PARAMS" }, 400);
   }
   try {
-    const result = await provider.generateVideo({ prompt, firstFrame, lastFrame, resolution, workId, filename });
+    const result = await provider.generateVideo({ prompt, firstFrame, lastFrame, resolution, workId, filename, modelVersion });
     return c.json(result);
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
@@ -1448,10 +1456,212 @@ apiRoutes.post("/api/works/:id/pipeline/advance", async (c) => {
       }
     }
 
+    // ── Evaluator trigger ──────────────────────────────────────────────
+    const evalEnabled = work.evaluationMode ?? true; // default on
+    if (evalEnabled && wsBridge && completedStep) {
+      // Don't eval the last step (assembly) — it has its own final eval
+      const isLastStep = !nextStep;
+      if (!isLastStep) {
+        const session = wsBridge.getSession(id);
+        if (session) {
+          // Set step to evaluating
+          work.pipeline[completedStep].status = "evaluating";
+          // Revert next step to pending during eval
+          if (nextStep && work.pipeline[nextStep]) {
+            work.pipeline[nextStep].status = "pending";
+          }
+          await storeUpdateWork(id, { pipeline: work.pipeline });
+
+          // Broadcast evaluating status
+          wsBridge.broadcastToBrowsers(id, {
+            event: "pipeline_updated",
+            data: { workId: id, pipeline: work.pipeline, title: work.title },
+          });
+
+          // Add eval divider to chat
+          wsBridge.broadcastToBrowsers(id, {
+            event: "eval_start",
+            data: { workId: id, step: completedStep },
+          });
+
+          session.evalStep = completedStep;
+
+          // Build eval prompt
+          const evalPrompt = await buildEvalPrompt(work, completedStep);
+
+          // Spawn evaluator asynchronously (don't block response)
+          wsBridge.spawnEvaluator(session, evalPrompt)
+            .then(async (evalResult) => {
+              evalResult.step = completedStep;
+              evalResult.timestamp = new Date().toISOString();
+              await saveEvalResult(id, completedStep, evalResult);
+
+              const freshWork = await getWork(id);
+              if (!freshWork) return;
+
+              if (evalResult.verdict === "pass") {
+                freshWork.pipeline[completedStep].status = "done";
+                if (nextStep && freshWork.pipeline[nextStep]) {
+                  freshWork.pipeline[nextStep].status = "active";
+                  freshWork.pipeline[nextStep].startedAt = new Date().toISOString();
+                }
+              } else {
+                freshWork.pipeline[completedStep].status = "eval_blocked";
+              }
+              await storeUpdateWork(id, { pipeline: freshWork.pipeline });
+
+              wsBridge.broadcastToBrowsers(id, {
+                event: "eval_complete",
+                data: { workId: id, step: completedStep, result: evalResult },
+              });
+              wsBridge.broadcastToBrowsers(id, {
+                event: "pipeline_updated",
+                data: { workId: id, pipeline: freshWork.pipeline, title: freshWork.title },
+              });
+            })
+            .catch(async () => {
+              // Eval failed — fall through to pass
+              const freshWork = await getWork(id);
+              if (!freshWork) return;
+              freshWork.pipeline[completedStep].status = "done";
+              if (nextStep && freshWork.pipeline[nextStep]) {
+                freshWork.pipeline[nextStep].status = "active";
+                freshWork.pipeline[nextStep].startedAt = new Date().toISOString();
+              }
+              await storeUpdateWork(id, { pipeline: freshWork.pipeline });
+              wsBridge.broadcastToBrowsers(id, {
+                event: "pipeline_updated",
+                data: { workId: id, pipeline: freshWork.pipeline },
+              });
+            });
+
+          return c.json({ ok: true, pipeline: work.pipeline, evaluating: true });
+        }
+      }
+    }
+
     return c.json({ ok: true, pipeline: work.pipeline });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : "Pipeline advance error" }, 500);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Evaluator prompt builder
+// ---------------------------------------------------------------------------
+
+async function buildEvalPrompt(work: { id: string; type: string; pipeline: Record<string, any> }, completedStep: string): Promise<string> {
+  const skillDir = join(process.cwd(), "skills", "content-evaluator");
+  let skillMd = "";
+  try { skillMd = await readFile(join(skillDir, "SKILL.md"), "utf-8"); } catch { /* missing */ }
+
+  const criteriaMap: Record<string, string> = {
+    research: "research.md",
+    plan: "plan.md",
+    assets: "assets.md",
+    assembly: "assembly.md",
+  };
+  let criteriaMd = "";
+  const criteriaFile = criteriaMap[completedStep];
+  if (criteriaFile) {
+    try { criteriaMd = await readFile(join(skillDir, "criteria", criteriaFile), "utf-8"); } catch { /* missing */ }
+  }
+
+  const workDir = join(dataDir, "works", work.id);
+
+  return `${skillMd}
+
+## 本次评审任务
+
+评审阶段：${completedStep}（${work.pipeline[completedStep]?.name ?? completedStep}）
+作品ID：${work.id}
+作品类型：${work.type}
+作品目录：${workDir}
+
+### 阶段评审标准
+${criteriaMd}
+
+请按照评审流程，检查 ${workDir} 下的产出文件，逐维度评分，最后输出结构化 JSON 评审结果。`;
+}
+
+// ---------------------------------------------------------------------------
+// Evaluation API routes
+// ---------------------------------------------------------------------------
+
+// POST /api/works/:id/eval/toggle — toggle evaluation mode
+apiRoutes.post("/api/works/:id/eval/toggle", async (c) => {
+  const id = c.req.param("id");
+  const work = await getWork(id);
+  if (!work) return c.json({ error: "Work not found" }, 404);
+  const newMode = !(work.evaluationMode ?? true);
+  await storeUpdateWork(id, { evaluationMode: newMode } as any);
+  return c.json({ evaluationMode: newMode });
+});
+
+// POST /api/works/:id/eval/force-pass — force pass a blocked eval
+apiRoutes.post("/api/works/:id/eval/force-pass", async (c) => {
+  const id = c.req.param("id");
+  const { step, nextStep } = await c.req.json<{ step: string; nextStep?: string }>();
+  const work = await getWork(id);
+  if (!work) return c.json({ error: "Work not found" }, 404);
+
+  // Kill running evaluator
+  if (wsBridge) {
+    const session = wsBridge.getSession(id);
+    if (session?.evalProcess) {
+      try { session.evalProcess.kill("SIGTERM"); } catch { /* already dead */ }
+      session.evalProcess = undefined;
+    }
+  }
+
+  work.pipeline[step].status = "done";
+  work.pipeline[step].completedAt = new Date().toISOString();
+  if (nextStep && work.pipeline[nextStep]) {
+    work.pipeline[nextStep].status = "active";
+    work.pipeline[nextStep].startedAt = new Date().toISOString();
+  }
+  await storeUpdateWork(id, { pipeline: work.pipeline });
+
+  if (wsBridge) {
+    wsBridge.broadcastToBrowsers(id, {
+      event: "pipeline_updated",
+      data: { workId: id, pipeline: work.pipeline },
+    });
+  }
+
+  return c.json({ pipeline: work.pipeline });
+});
+
+// POST /api/works/:id/eval/retry — retry step with guidance
+apiRoutes.post("/api/works/:id/eval/retry", async (c) => {
+  const id = c.req.param("id");
+  const { step, guidance } = await c.req.json<{ step: string; guidance: string }>();
+  const work = await getWork(id);
+  if (!work) return c.json({ error: "Work not found" }, 404);
+
+  work.pipeline[step].status = "active";
+  work.pipeline[step].startedAt = new Date().toISOString();
+  delete work.pipeline[step].completedAt;
+  await storeUpdateWork(id, { pipeline: work.pipeline });
+
+  if (wsBridge) {
+    const guidanceMsg = `评审反馈要求重做此步骤。请根据以下评审意见修改：\n\n${guidance}`;
+    await wsBridge.sendMessage(id, guidanceMsg);
+    wsBridge.broadcastToBrowsers(id, {
+      event: "pipeline_updated",
+      data: { workId: id, pipeline: work.pipeline },
+    });
+  }
+
+  return c.json({ ok: true });
+});
+
+// GET /api/works/:id/eval/results/:step — fetch eval results
+apiRoutes.get("/api/works/:id/eval/results/:step", async (c) => {
+  const id = c.req.param("id");
+  const step = c.req.param("step");
+  const results = await loadEvalResults(id, step);
+  return c.json({ results });
 });
 
 // ---------------------------------------------------------------------------

@@ -1,1 +1,0 @@
-{"version":3,"file":"shared-assets.d.ts","sourceRoot":"","sources":["../src/shared-assets.ts"],"names":[],"mappings":"AAKA,QAAA,MAAM,UAAU,+CAAgD,CAAA;AAGhE,wBAAsB,gBAAgB,kBAIrC;AAED,wBAAsB,gBAAgB,IAAI,OAAO,CAAC,MAAM,CAAC,MAAM,EAAE,MAAM,EAAE,CAAC,CAAC,CAO1E;AAED,wBAAgB,kBAAkB,CAAC,QAAQ,EAAE,MAAM,EAAE,QAAQ,EAAE,MAAM,GAAG,MAAM,CAE7E;AAED,OAAO,EAAE,UAAU,EAAE,CAAA"}

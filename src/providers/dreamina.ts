@@ -88,7 +88,7 @@ export class DreaminaProvider implements GenerateProvider {
   async generateVideo(opts: VideoOpts): Promise<GenerateResult> {
     const { prompt, workId, filename } = opts
     const duration = opts.duration ?? 5
-    const modelVersion = opts.modelVersion ?? 'seedance2.0fast'
+    const modelVersion = opts.modelVersion ?? 'seedance2.0'
 
     try {
       let args: string[]

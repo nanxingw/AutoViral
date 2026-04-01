@@ -60,6 +60,8 @@
     const active = key === currentStep ? " step-current" : "";
     if (status === "done") return "step-done" + active;
     if (status === "active") return "step-running" + active;
+    if (status === "evaluating") return "step-evaluating" + active;
+    if (status === "eval_blocked") return "step-eval-blocked" + active;
     if (status === "aborted") return "step-aborted" + active;
     if (status === "skipped") return "step-failed" + active;
     return "step-pending" + active;
@@ -116,9 +118,13 @@
             class:step-clickable={status === "done" || status === "aborted" || key === currentStep}
             onclick={() => { if ((status === "done" || status === "aborted" || key === currentStep) && onSelectStep) onSelectStep(key); }}
           >
-            <span class="step-indicator" class:pulse={status === "active"}>
+            <span class="step-indicator" class:pulse={status === "active" || status === "evaluating"}>
               {#if isDone(status)}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+              {:else if status === "evaluating"}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              {:else if status === "eval_blocked"}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
               {:else}
                 {i + 1}
               {/if}
@@ -136,6 +142,13 @@
                   {#if elapsed(step)}
                     <span class="step-time">{elapsed(step)}</span>
                   {/if}
+                {:else if status === "evaluating"}
+                  {tt("stepEvaluatingLabel")}
+                  {#if elapsed(step)}
+                    <span class="step-time">{elapsed(step)}</span>
+                  {/if}
+                {:else if status === "eval_blocked"}
+                  {tt("stepEvalBlockedLabel")}
                 {:else if status === "aborted"}
                   {tt("abortTask")}
                 {:else if status === "skipped"}
@@ -354,6 +367,22 @@
     0%, 100% { box-shadow: 0 0 0 0 rgba(254, 44, 85, 0.25); }
     50% { box-shadow: 0 0 0 5px rgba(254, 44, 85, 0); }
   }
+
+  /* Evaluating */
+  .step-evaluating .step-indicator {
+    border-color: #f59e0b;
+    color: #f59e0b;
+    background: none;
+  }
+  .step-evaluating .step-status-text { color: #f59e0b; }
+
+  /* Eval blocked */
+  .step-eval-blocked .step-indicator {
+    border-color: #ef4444;
+    color: #fff;
+    background: #ef4444;
+  }
+  .step-eval-blocked .step-status-text { color: #ef4444; }
 
   /* Aborted */
   .step-aborted .step-indicator {
