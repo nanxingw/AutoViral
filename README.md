@@ -16,10 +16,20 @@
 ---
 
 <div align="center">
+<table>
+  <tr>
+    <td align="center" width="50%">
+      <video src="https://github.com/user-attachments/assets/2a14f0b4-08e4-4367-b11e-5d128daf5974" controls width="100%"></video>
+      <br><em>AI 全自动创作的健身短视频</em>
+    </td>
+    <td align="center" width="50%">
+      <video src="https://github.com/user-attachments/assets/31c24cba-9b3c-427f-954d-7659330f09b1" controls width="100%"></video>
+      <br><em>AI 全自动创作的科幻短视频</em>
+    </td>
+  </tr>
+</table>
 
-https://github.com/user-attachments/assets/2a14f0b4-08e4-4367-b11e-5d128daf5974
-
-*AI 全自动创作的健身短视频 — 从选题到成片，零人工干预*
+*从选题到成片，零人工干预*
 
 </div>
 
