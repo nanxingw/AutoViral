@@ -178,9 +178,11 @@ export class WsBridge {
 
 ## 你的能力
 - 调研：使用WebSearch搜索 + 数据获取脚本（详见 trend-research skill）
-- 生图：脚本工具 python3 ~/.claude/skills/asset-generation/scripts/openrouter_generate.py 或 jimeng_generate.py（详见 asset-generation skill）
+- 生图：脚本工具 python3 skills/asset-generation/scripts/openrouter_generate.py 或 jimeng_generate.py（详见 asset-generation skill）
+- 生配乐：python3 skills/asset-generation/scripts/lyria_music.py --prompt "音乐描述" --output bgm.mp3（Google Lyria AI 原创配乐）
+- 生旁白：edge-tts --text "旁白文本" --voice zh-CN-YunxiNeural --write-media narration.mp3
 - 生视频：调用 curl http://localhost:${port}/api/generate/video 或使用即梦脚本
-- 合成：使用ffmpeg命令剪辑视频（拼接片段+字幕+配乐+转场）
+- 合成：使用ffmpeg命令剪辑视频（拼接片段+字幕+旁白+配乐+转场）
 - 公共素材：通过 curl http://localhost:${port}/api/shared-assets 查看可用素材
 - 流水线管理：调用 curl -X POST http://localhost:${port}/api/works/${work.id}/pipeline/advance 更新流水线状态
 

@@ -1048,6 +1048,39 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
           `4. Merge the narration audio with the video clips using ffmpeg`,
           ``,
         );
+        // Background music generation with Lyria
+        promptParts.push(
+          `## REQUIRED: Generate Background Music with Lyria`,
+          ``,
+          `Generate original background music that matches the content mood using Google Lyria:`,
+          `\`\`\`bash`,
+          `python3 skills/asset-generation/scripts/lyria_music.py \\`,
+          `  --prompt "YOUR MUSIC DESCRIPTION" \\`,
+          `  --output <work_dir>/assets/clips/bgm.mp3`,
+          `\`\`\``,
+          ``,
+          `**Music prompt tips:**`,
+          `- Be specific: genre, tempo (BPM), mood, instruments`,
+          `- Match the content emotion:`,
+          isEn ? [
+            `  - Resonance/emotional content → soft piano, gentle strings, melancholic, 70-90 BPM`,
+            `  - Debate/controversy → tense, dramatic, driving percussion, 100-120 BPM`,
+            `  - Comedy/absurd → quirky, playful, upbeat, fun synths, 110-130 BPM`,
+            `  - Aspiration/envy → dreamy, luxurious, lo-fi chill, warm pads, 80-100 BPM`,
+          ].join("\n") : [
+            `  - 深度共鸣类 → 轻柔钢琴、弦乐、感性氛围、70-90 BPM`,
+            `  - 观点分歧类 → 紧张感、节奏驱动、适度戏剧性、100-120 BPM`,
+            `  - 搞笑抽象类 → 活泼、俏皮、欢快合成器、110-130 BPM`,
+            `  - 向往拥有类 → 梦幻、精致、lo-fi chill、温暖音色、80-100 BPM`,
+          ].join("\n"),
+          `- Use \`google/lyria-3-clip-preview\` for 30s clips (default, good for short videos)`,
+          `- Use \`--model google/lyria-3-pro-preview\` for longer tracks if needed`,
+          ``,
+          `**In the final ffmpeg mix**, layer the BGM under the narration:`,
+          `- BGM volume should be ~20-30% of narration volume (use \`-filter_complex "[1:a]volume=0.25[bgm];[0:a][bgm]amix=inputs=2:duration=first"\`)`,
+          `- Fade in BGM at start (2s) and fade out at end (3s)`,
+          ``,
+        );
         promptParts.push(
           `## CRITICAL: Horizontal-to-Vertical Video Conversion`,
           `The final output MUST be 9:16 vertical (1080x1920). If any source clip is horizontal (wider than tall):`,

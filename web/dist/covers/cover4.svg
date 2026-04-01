@@ -1,0 +1,107 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="450" viewBox="0 0 720 450">
+  <defs>
+    <linearGradient id="bg4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0a0a1a"/>
+      <stop offset="50%" style="stop-color:#12102a"/>
+      <stop offset="100%" style="stop-color:#08081a"/>
+    </linearGradient>
+    <linearGradient id="purple4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#8b5cf6"/>
+      <stop offset="100%" style="stop-color:#a78bfa"/>
+    </linearGradient>
+    <linearGradient id="purpfade" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#8b5cf6;stop-opacity:0.4"/>
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:0"/>
+    </linearGradient>
+    <radialGradient id="radar" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" style="stop-color:#8b5cf6;stop-opacity:0.15"/>
+      <stop offset="100%" style="stop-color:#8b5cf6;stop-opacity:0"/>
+    </radialGradient>
+    <filter id="glow4" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="10" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="bigglow4" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="35" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow4">
+      <feDropShadow dx="0" dy="3" stdDeviation="6" flood-color="#8b5cf6" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="720" height="450" fill="url(#bg4)"/>
+
+  <!-- Ambient blobs -->
+  <ellipse cx="260" cy="200" rx="220" ry="200" fill="#8b5cf6" opacity="0.03"/>
+  <ellipse cx="520" cy="300" rx="180" ry="150" fill="#a78bfa" opacity="0.025"/>
+
+  <!-- Radar / scan circle (left side) -->
+  <g transform="translate(220, 195)">
+    <!-- Radar rings -->
+    <circle cx="0" cy="0" r="140" fill="none" stroke="#8b5cf6" stroke-width="0.5" opacity="0.1"/>
+    <circle cx="0" cy="0" r="105" fill="none" stroke="#8b5cf6" stroke-width="0.5" opacity="0.12"/>
+    <circle cx="0" cy="0" r="70" fill="none" stroke="#8b5cf6" stroke-width="0.8" opacity="0.15"/>
+    <circle cx="0" cy="0" r="35" fill="none" stroke="#8b5cf6" stroke-width="1" opacity="0.2"/>
+
+    <!-- Radar sweep (pie slice) -->
+    <path d="M0,0 L0,-140 A140,140 0 0,1 99,-99 Z" fill="url(#radar)" opacity="0.6"/>
+
+    <!-- Cross hairs -->
+    <line x1="-145" y1="0" x2="145" y2="0" stroke="#8b5cf6" stroke-width="0.5" opacity="0.1"/>
+    <line x1="0" y1="-145" x2="0" y2="145" stroke="#8b5cf6" stroke-width="0.5" opacity="0.1"/>
+
+    <!-- Center dot -->
+    <circle cx="0" cy="0" r="4" fill="#a78bfa" filter="url(#glow4)"/>
+
+    <!-- Detected targets (blind spots) -->
+    <g filter="url(#glow4)">
+      <circle cx="55" cy="-70" r="5" fill="#ef4444" opacity="0.9"/>
+      <circle cx="55" cy="-70" r="12" fill="none" stroke="#ef4444" stroke-width="1" opacity="0.4"/>
+    </g>
+    <g filter="url(#glow4)">
+      <circle cx="-40" cy="50" r="4" fill="#f59e0b" opacity="0.7"/>
+      <circle cx="-40" cy="50" r="10" fill="none" stroke="#f59e0b" stroke-width="1" opacity="0.3"/>
+    </g>
+    <g>
+      <circle cx="80" cy="30" r="3.5" fill="#4ade80" opacity="0.6"/>
+      <circle cx="80" cy="30" r="9" fill="none" stroke="#4ade80" stroke-width="0.8" opacity="0.3"/>
+    </g>
+  </g>
+
+  <!-- Right side content -->
+  <g transform="translate(430, 80)">
+    <!-- Glass card -->
+    <rect x="0" y="0" width="250" height="290" rx="14" fill="#fff" opacity="0.025"/>
+    <rect x="0" y="0" width="250" height="290" rx="14" fill="none" stroke="#fff" stroke-width="0.5" opacity="0.05"/>
+
+    <!-- Title -->
+    <text x="25" y="45" font-family="'SF Pro Display',Arial,sans-serif" font-weight="900" font-size="32" fill="#fff" opacity="0.9" letter-spacing="-1">BLIND</text>
+    <text x="25" y="82" font-family="'SF Pro Display',Arial,sans-serif" font-weight="900" font-size="32" fill="url(#purple4)" filter="url(#shadow4)" letter-spacing="-1">SPOTS</text>
+
+    <!-- Divider -->
+    <rect x="25" y="98" width="80" height="2" rx="1" fill="url(#purple4)" opacity="0.4"/>
+
+    <!-- Insight items -->
+    <circle cx="35" cy="130" r="4" fill="#ef4444" opacity="0.8"/>
+    <text x="50" y="134" font-family="'SF Pro Text',Arial,sans-serif" font-weight="500" font-size="13" fill="#fff" opacity="0.45">Untapped niches</text>
+
+    <circle cx="35" cy="162" r="4" fill="#f59e0b" opacity="0.7"/>
+    <text x="50" y="166" font-family="'SF Pro Text',Arial,sans-serif" font-weight="500" font-size="13" fill="#fff" opacity="0.4">Weak content gaps</text>
+
+    <circle cx="35" cy="194" r="4" fill="#4ade80" opacity="0.6"/>
+    <text x="50" y="198" font-family="'SF Pro Text',Arial,sans-serif" font-weight="500" font-size="13" fill="#fff" opacity="0.35">Audience overlap</text>
+
+    <!-- Badge -->
+    <rect x="25" y="230" width="100" height="30" rx="15" fill="#8b5cf6" opacity="0.12"/>
+    <text x="75" y="250" font-family="'SF Pro Text',Arial,sans-serif" font-weight="700" font-size="11" fill="#a78bfa" text-anchor="middle" letter-spacing="1">DRAFT</text>
+  </g>
+
+  <!-- Scan line animation hint -->
+  <line x1="220" y1="55" x2="319" y2="96" stroke="#8b5cf6" stroke-width="1" opacity="0.15"/>
+
+  <!-- Bottom accent -->
+  <rect x="0" y="442" width="720" height="8" fill="url(#purple4)" opacity="0.45"/>
+  <rect x="0" y="442" width="720" height="8" fill="#8b5cf6" opacity="0.06" filter="url(#bigglow4)"/>
+</svg>
