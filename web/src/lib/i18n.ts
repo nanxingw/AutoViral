@@ -155,8 +155,8 @@ const translations: Record<Language, Record<string, string>> = {
     oppRed: "Red Ocean",
     platformDouyin: "Douyin",
     platformXiaohongshu: "Xiaohongshu",
-    noWorksYet: "Inspiration Gallery",
-    noWorksYetDesc: "Discover excellent works created with AutoViral",
+    noWorksYet: "No featured works yet",
+    noWorksYetDesc: "",
     autoviralCreation: "AutoViral Creation",
     filterAllPlatforms: "All",
     autoResearchOnDesc: "Auto research is on. Turn off to stop.",
@@ -221,7 +221,7 @@ const translations: Record<Language, Record<string, string>> = {
     uploadAsset: "Upload",
 
     // Settings
-    settingsTitle: "Settings",
+    settingsTitle: "Your Profile",
     languageSetting: "Language",
     themeSetting: "Theme",
     darkTheme: "Dark",
@@ -521,8 +521,8 @@ const translations: Record<Language, Record<string, string>> = {
     oppRed: "红海",
     platformDouyin: "抖音",
     platformXiaohongshu: "小红书",
-    noWorksYet: "灵感画廊",
-    noWorksYetDesc: "发现使用 AutoViral 创作的优秀作品",
+    noWorksYet: "暂无优秀作品展示",
+    noWorksYetDesc: "",
     autoviralCreation: "AutoViral 创作",
     filterAllPlatforms: "全部",
     autoResearchOnDesc: "自动调研已开启，关闭后将停止自动调研。",
@@ -587,7 +587,7 @@ const translations: Record<Language, Record<string, string>> = {
     uploadAsset: "自己上传",
 
     // Settings
-    settingsTitle: "设置",
+    settingsTitle: "你的画像",
     languageSetting: "语言",
     themeSetting: "主题",
     darkTheme: "深色",

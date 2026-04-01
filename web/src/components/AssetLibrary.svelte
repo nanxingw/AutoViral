@@ -14,7 +14,7 @@
   let assets: Record<string, AssetFile[]> = $state({});
   let activeCat = $state("characters");
   let viewMode: "grid" | "list" = "grid";
-  let expanded = $state(false);
+  let expanded = $state(true);
   let loading = $state(false);
   let dragOver = $state(false);
   let lightboxUrl: string | null = $state(null);
@@ -154,15 +154,7 @@
 </script>
 
 <div class="asset-library">
-  <!-- Header -->
-  <button class="section-header" onclick={() => expanded = !expanded}>
-    <span class="section-title">我的素材{#if totalCount > 0} · {totalCount}{/if}</span>
-    <svg class="chevron" class:open={expanded} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
-  </button>
-
-  {#if expanded}
-    <div class="panel">
-      <p class="guide-text">上传你的照片、场景、品牌素材等，它们将作为所有视频生成的参照物，让 AI 更准确地还原你的形象与风格。</p>
+  <p class="guide-text">上传你的照片、场景、品牌素材等，它们将作为所有视频生成的参照物，让 AI 更准确地还原你的形象与风格。</p>
 
       <!-- Category tabs -->
       <div class="cat-tabs">
@@ -180,21 +172,22 @@
         {/each}
       </div>
 
-      <!-- Toolbar -->
-      <div class="toolbar">
-        <button class="upload-btn" onclick={() => fileInput?.click()}>+ 上传</button>
-        <input
-          bind:this={fileInput}
-          type="file"
-          multiple
-          class="hidden-input"
-          onchange={(e) => {
-            const input = e.currentTarget as HTMLInputElement;
-            if (input.files) handleUpload(input.files);
-            input.value = "";
-          }}
-        />
-      </div>
+      <!-- Upload area -->
+      <button class="upload-zone" onclick={() => fileInput?.click()}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span>点击或拖放文件上传</span>
+      </button>
+      <input
+        bind:this={fileInput}
+        type="file"
+        multiple
+        class="hidden-input"
+        onchange={(e) => {
+          const input = e.currentTarget as HTMLInputElement;
+          if (input.files) handleUpload(input.files);
+          input.value = "";
+        }}
+      />
 
       <!-- Drop zone -->
       <div
@@ -265,9 +258,6 @@
           </table>
         {/if}
       </div>
-    </div>
-  {/if}
-
   <!-- Context menu -->
   {#if contextMenu}
     <div
@@ -297,33 +287,6 @@
 <style>
   .asset-library {}
 
-  .section-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    padding: 0;
-    background: none;
-    border: none;
-    cursor: pointer;
-    color: var(--text);
-  }
-  .section-title {
-    font-size: var(--size-sm, 0.8rem);
-    font-weight: 600;
-    color: var(--text-muted);
-  }
-  .chevron {
-    color: var(--text-dim);
-    transition: transform 0.2s ease;
-  }
-  .chevron.open {
-    transform: rotate(180deg);
-  }
-
-  .panel {
-    margin-top: 0.65rem;
-  }
 
   .guide-text {
     font-size: var(--size-sm, 0.78rem);
@@ -366,26 +329,30 @@
     margin-left: 0.15rem;
   }
 
-  /* Toolbar */
-  .toolbar {
+  /* Upload zone */
+  .upload-zone {
     display: flex;
     align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    width: 100%;
+    padding: 0.65rem;
     margin-bottom: 0.5rem;
-  }
-  .upload-btn {
-    padding: 0.25rem 0.65rem;
-    font-size: var(--size-xs, 0.7rem);
-    font-weight: 500;
-    background: none;
-    color: var(--text-muted);
-    border: 1px dashed var(--border);
-    border-radius: 6px;
+    font-size: var(--size-sm, 0.78rem);
+    color: var(--text-dim);
+    background: var(--bg-surface);
+    border: 1.5px dashed var(--border);
+    border-radius: 8px;
     cursor: pointer;
     transition: all 0.15s;
   }
-  .upload-btn:hover {
-    color: var(--text);
+  .upload-zone:hover {
+    color: var(--text-muted);
     border-color: var(--text-dim);
+    background: var(--bg-elevated);
+  }
+  .upload-zone svg {
+    flex-shrink: 0;
   }
   .hidden-input { display: none; }
 
