@@ -15,29 +15,43 @@ import sys
 from pathlib import Path
 
 # 查找 .env 文件
-# 查找顺序：AUTOVIRAL_PROJECT_DIR → ~/.autoviral/ → 脚本目录向上 → cwd 向上
-def find_env_file() -> Path | None:
-    if env_path := os.environ.get("AUTOVIRAL_ENV"):
-        p = Path(env_path)
-        if p.exists():
-            return p
+# 查找所有 .env 文件并合并，后找到的覆盖先找到的
+# 查找顺序：~/.autoviral/ → 脚本目录向上 → cwd 向上 → AUTOVIRAL_PROJECT_DIR
+# 越靠后优先级越高（项目根目录的 .env 覆盖全局配置）
+def find_all_env_files() -> list[Path]:
+    """找到所有 .env 文件，返回按优先级从低到高排列的列表"""
+    found: list[Path] = []
+    seen: set[str] = set()
 
     search_roots = []
-    if project_dir := os.environ.get("AUTOVIRAL_PROJECT_DIR"):
-        search_roots.append(Path(project_dir))
     search_roots.append(Path.home() / ".autoviral")
     search_roots.append(Path(__file__).resolve().parent)
     search_roots.append(Path.cwd())
+    if project_dir := os.environ.get("AUTOVIRAL_PROJECT_DIR"):
+        search_roots.append(Path(project_dir))
 
     for root in search_roots:
         current = root
         for _ in range(10):
             candidate = current / ".env"
-            if candidate.exists():
-                return candidate
+            resolved = str(candidate.resolve())
+            if candidate.exists() and resolved not in seen:
+                found.append(candidate)
+                seen.add(resolved)
             current = current.parent
 
-    return None
+    if env_path := os.environ.get("AUTOVIRAL_ENV"):
+        p = Path(env_path)
+        if p.exists() and str(p.resolve()) not in seen:
+            found.append(p)
+
+    return found
+
+
+def find_env_file() -> Path | None:
+    """兼容旧接口，返回最高优先级的 .env 文件"""
+    files = find_all_env_files()
+    return files[-1] if files else None
 
 
 def parse_env(env_path: Path) -> dict[str, str]:
@@ -54,9 +68,67 @@ def parse_env(env_path: Path) -> dict[str, str]:
     return env_vars
 
 
+def check_dreamina_cli() -> dict:
+    """检查 Dreamina CLI 是否已安装且已登录"""
+    import shutil
+    import subprocess
+
+    result = {
+        "name": "dreamina",
+        "display_name": "Dreamina CLI (即梦官方)",
+        "available": False,
+        "installed": False,
+        "logged_in": False,
+        "supports_image": True,
+        "supports_video": True,
+        "missing_keys": [],
+        "script": "dreamina (CLI)",
+        "note": "视频生成首选，Seedance 2.0 模型，支持多模态/多帧/首尾帧视频生成",
+        "commands": [
+            "text2video", "image2video", "frames2video",
+            "multiframe2video", "multimodal2video",
+            "text2image", "image2image", "image_upscale",
+        ],
+    }
+
+    # Check if installed
+    if not shutil.which("dreamina"):
+        result["missing_keys"] = ["CLI 未安装 (curl -fsSL https://jimeng.jianying.com/cli | bash)"]
+        return result
+    result["installed"] = True
+
+    # Check if logged in
+    try:
+        proc = subprocess.run(
+            ["dreamina", "user_credit"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if proc.returncode == 0:
+            import json as _json
+            try:
+                credit_data = _json.loads(proc.stdout)
+                result["logged_in"] = True
+                result["available"] = True
+                credit = credit_data.get("credit") or credit_data.get("remaining", "?")
+                result["note"] += f"，剩余积分: {credit}"
+            except Exception:
+                result["logged_in"] = True
+                result["available"] = True
+        else:
+            result["missing_keys"] = ["未登录 (dreamina login)"]
+    except Exception:
+        result["missing_keys"] = ["登录检查失败"]
+
+    return result
+
+
 def check_providers(env_vars: dict[str, str]) -> dict:
     """检查各个 provider 的配置状态"""
     providers = []
+
+    # Dreamina CLI — 视频生成首选
+    dreamina_result = check_dreamina_cli()
+    providers.append(dreamina_result)
 
     # OpenRouter (Gemini) — 主力图片生成
     openrouter_key = env_vars.get("OPENROUTER_API_KEY", "")
@@ -77,13 +149,13 @@ def check_providers(env_vars: dict[str, str]) -> dict:
         "features": ["aspect_ratio", "image_size (0.5K-4K)", "seed", "ref-image", "temperature"],
     })
 
-    # 即梦 (Jimeng / VolcEngine) — 视频生成 + 备用图片
+    # 即梦 API (Jimeng / VolcEngine) — 视频生成备用 + 备用图片
     jimeng_ak = env_vars.get("JIMENG_ACCESS_KEY", "")
     jimeng_sk = env_vars.get("JIMENG_SECRET_KEY", "")
     jimeng_ready = bool(jimeng_ak and jimeng_sk)
     providers.append({
         "name": "jimeng",
-        "display_name": "即梦 AI (VolcEngine)",
+        "display_name": "即梦 API (VolcEngine)",
         "available": jimeng_ready,
         "supports_image": True,
         "supports_video": True,
@@ -94,7 +166,7 @@ def check_providers(env_vars: dict[str, str]) -> dict:
             ] if not v
         ],
         "script": "jimeng_generate.py",
-        "note": "视频生成主力 + 备用图片，支持文生图/文生视频/图生视频",
+        "note": "视频生成备用 + 备用图片（Dreamina CLI 不可用时使用）",
     })
 
     # Google Lyria 3 Pro — 音乐生成（复用 OpenRouter key）
@@ -115,14 +187,26 @@ def check_providers(env_vars: dict[str, str]) -> dict:
     can_video = any(p["available"] and p.get("supports_video") for p in providers)
     can_music = any(p["available"] and p.get("supports_music") for p in providers)
 
-    # 推荐选择
+    # 推荐选择（图片优先 OpenRouter/Gemini，视频优先 Dreamina CLI）
     recommended_image = next(
-        (p["script"] for p in providers if p["available"] and p.get("supports_image")),
-        None,
+        (p["script"] for p in providers
+         if p["available"] and p.get("supports_image") and p["name"] == "openrouter"),
+        next(
+            (p["script"] for p in providers
+             if p["available"] and p.get("supports_image") and p["name"] != "dreamina"),
+            next(
+                (p["script"] for p in providers if p["available"] and p.get("supports_image")),
+                None,
+            ),
+        ),
     )
     recommended_video = next(
-        (p["script"] for p in providers if p["available"] and p.get("supports_video")),
-        None,
+        (p["script"] for p in providers
+         if p["available"] and p.get("supports_video") and p["name"] == "dreamina"),
+        next(
+            (p["script"] for p in providers if p["available"] and p.get("supports_video")),
+            None,
+        ),
     )
     recommended_music = next(
         (p["script"] for p in providers if p["available"] and p.get("supports_music")),
@@ -180,13 +264,16 @@ def main():
     parser.add_argument("--format", choices=["json", "table"], default="json")
     args = parser.parse_args()
 
-    env_path = find_env_file()
-    if not env_path:
+    env_files = find_all_env_files()
+    if not env_files:
         print("[错误] 找不到 .env 文件", file=sys.stderr)
         sys.exit(1)
 
-    print(f"[*] 读取配置: {env_path}", file=sys.stderr)
-    env_vars = parse_env(env_path)
+    # 合并所有 .env 文件，后面的覆盖前面的
+    env_vars: dict[str, str] = {}
+    for ef in env_files:
+        print(f"[*] 读取配置: {ef}", file=sys.stderr)
+        env_vars.update(parse_env(ef))
     result = check_providers(env_vars)
 
     if args.format == "table":

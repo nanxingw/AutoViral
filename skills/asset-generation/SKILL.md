@@ -207,10 +207,115 @@ python3 skills/asset-generation/scripts/openrouter_generate.py \
 - `google/gemini-3.1-flash-image-preview`（**默认，推荐**）— 最强画质，支持扩展比例和 0.5K
 - `google/gemini-2.5-flash-image` — 性价比高，适合大批量生成
 
-#### 3. `jimeng_generate.py` — 即梦 AI（**视频生成 + 备用图片**）
-需要 `JIMENG_ACCESS_KEY` + `JIMENG_SECRET_KEY`。
+#### 3. Dreamina CLI — 即梦官方命令行工具（**视频生成首选**）
+
+即梦官方 CLI 工具，使用即梦账号认证（无需 API Key），支持 Seedance 2.0 模型。**视频生成的首选工具。**
+
+> **完整方法论** — 详见 `modules/dreamina-mastery.md`，包含命令选择决策、高阶多模态技巧、批量生产工作流、模型选择策略等。
+
+**安装与登录：**
 ```bash
-# 文生图（备用，优先用 OpenRouter）
+# 安装（一次性）
+curl -fsSL https://jimeng.jianying.com/cli | bash
+
+# 登录（浏览器 OAuth 授权）
+dreamina login
+
+# 检查积分余额
+dreamina user_credit
+```
+
+**视频生成命令一览：**
+
+| 命令 | 用途 | 模型 | 时长 | 分辨率 |
+|------|------|------|------|--------|
+| `text2video` | 文生视频 | seedance2.0 / seedance2.0fast | 4-15s | 720p |
+| `image2video` | 单图生视频 | 3.0-3.5pro / seedance2.0 | 3-15s | 720p-1080p |
+| `frames2video` | 首尾帧生视频 | 3.0 / 3.5pro / seedance2.0 | 3-15s | 720p-1080p |
+| `multiframe2video` | 多帧叙事视频（2-20图） | 自动 | 每段0.5-8s | 自动 |
+| `multimodal2video` | 旗舰多模态（图+视频+音频） | seedance2.0 | 4-15s | 720p |
+
+**常用示例：**
+
+```bash
+# 文生视频（Seedance 2.0，最高画质）
+dreamina text2video \
+  --prompt="镜头推进，一只橘猫从沙发上跳下来" \
+  --duration=5 --ratio=9:16 --model_version=seedance2.0 \
+  --poll=120
+
+# 图生视频（首帧驱动，推荐工作流）
+dreamina image2video \
+  --image ./frames/frame-01.png \
+  --prompt="镜头慢慢推近，人物转头微笑" \
+  --duration=5 --model_version=seedance2.0 \
+  --poll=120
+
+# 首尾帧生视频（精确控制起止画面）
+dreamina frames2video \
+  --first=./frames/frame-01.png --last=./frames/frame-02.png \
+  --prompt="人物从站立到坐下，镜头缓慢下移" \
+  --duration=5 --model_version=seedance2.0 \
+  --poll=120
+
+# 多帧叙事视频（多镜头故事一次生成）
+dreamina multiframe2video \
+  --images ./frames/frame-01.png,./frames/frame-02.png,./frames/frame-03.png \
+  --transition-prompt="镜头切换到新场景" \
+  --transition-prompt="人物走向远方" \
+  --poll=120
+
+# 旗舰多模态视频（图+音频混合输入）
+dreamina multimodal2video \
+  --image ./frames/frame-01.png \
+  --audio ./music/bgm.mp3 \
+  --prompt="配合音乐节奏，人物跳舞" \
+  --duration=10 --ratio=9:16 --model_version=seedance2.0 \
+  --poll=120
+```
+
+**图片生成命令：**
+
+```bash
+# 文生图（Seedream 5.0，最高 4K）
+dreamina text2image \
+  --prompt="一位穿着白色连衣裙的年轻女性，自然光线，摄影风格" \
+  --ratio=3:4 --resolution_type=2k --model_version=5.0 \
+  --poll=30
+
+# 图生图（风格迁移）
+dreamina image2image \
+  --images ./input.png \
+  --prompt="改成水彩画风格" \
+  --ratio=3:4 --resolution_type=2k --model_version=5.0 \
+  --poll=30
+
+# 图片超分（最高 8K，VIP）
+dreamina image_upscale --image=./input.png --resolution_type=4k --poll=30
+```
+
+**异步任务管理：**
+
+```bash
+# 查询任务结果（提交后返回 submit_id）
+dreamina query_result --submit_id=<id>
+
+# 查询并下载到指定目录
+dreamina query_result --submit_id=<id> --download_dir=./output
+
+# 查看最近任务列表
+dreamina list_task --limit=10
+dreamina list_task --gen_status=success
+```
+
+**判断提交是否成功：** 不要只看 shell 退出码，必须检查 JSON 输出中的 `submit_id` 和 `gen_status`。`gen_status=querying` 或 `success` 才算成功；`fail` 时查看 `fail_reason`。
+
+#### 4. `jimeng_generate.py` — 即梦 API（**视频生成备用 + 备用图片**）
+
+需要 `JIMENG_ACCESS_KEY` + `JIMENG_SECRET_KEY`。**仅在 Dreamina CLI 不可用时使用。**
+
+```bash
+# 文生图（备用）
 python3 skills/asset-generation/scripts/jimeng_generate.py image \
   --prompt "描述" --width 1088 --height 1920 --output output.png
 
@@ -218,16 +323,16 @@ python3 skills/asset-generation/scripts/jimeng_generate.py image \
 python3 skills/asset-generation/scripts/jimeng_generate.py image \
   --prompt "描述" --ref-image ref.png --output output.png
 
-# 文生视频
+# 文生视频（备用）
 python3 skills/asset-generation/scripts/jimeng_generate.py video \
   --prompt "镜头动作描述" --resolution 9:16 --output clip.mp4
 
-# 图生视频（首帧驱动）
+# 图生视频（首帧驱动，备用）
 python3 skills/asset-generation/scripts/jimeng_generate.py video \
   --prompt "动作描述" --first-frame frame.png --output clip.mp4
 ```
 
-#### 4. `music_generate.py` — Lyria 音乐生成（**BGM/配乐**）
+#### 5. `music_generate.py` — Lyria 音乐生成（**BGM/配乐**）
 
 需要 `OPENROUTER_API_KEY`。模型 `google/lyria-3-pro-preview`，生成 ~2 分钟完整音乐。
 
@@ -265,14 +370,20 @@ python3 skills/asset-generation/scripts/music_generate.py \
 > 详细的 prompt 工程技巧和情绪-风格映射请阅读 `modules/music-generation.md`
 
 **选择策略：**
-1. **图片生成** → 优先 `openrouter_generate.py`（Gemini 3.1 Flash，画质最好，参数最丰富）
-2. **视频生成** → 使用 `jimeng_generate.py`（即梦是唯一支持视频的服务）
-3. **音乐生成** → 使用 `music_generate.py`（Lyria Pro，~2分钟完整曲目）
-4. **图文排版** → 使用 `poster_render.py`（HTML/CSS 模板渲染，文字清晰可控）
-5. **图片备用** → OpenRouter 不可用时，用 `jimeng_generate.py image`
-6. 先运行 `check_providers.py` 确认可用服务
+1. **视频生成** → **优先 Dreamina CLI**（`dreamina` 命令，Seedance 2.0 模型，功能最全最强）
+2. **视频备用** → Dreamina CLI 未登录时，回退到 `jimeng_generate.py`（需要 API Key）
+3. **图片生成** → 优先 `openrouter_generate.py`（Gemini 3.1 Flash，画质最好，参数最丰富）
+4. **图片备用** → Dreamina CLI `dreamina text2image`（Seedream 5.0，最高 4K）或 `jimeng_generate.py image`
+5. **音乐生成** → 使用 `music_generate.py`（Lyria Pro，~2分钟完整曲目）
+6. **图文排版** → 使用 `poster_render.py`（HTML/CSS 模板渲染，文字清晰可控）
+7. 先运行 `check_providers.py` 确认可用服务（包括 Dreamina CLI 登录态检查）
 
-#### 5. `font_manager.py` — 字体管理器（共享组件）
+> **视频生成决策树：**
+> Dreamina CLI 已登录？→ 用 `dreamina` 命令（首选）
+> Dreamina CLI 未登录 + JIMENG API Key 可用？→ 用 `jimeng_generate.py`（回退）
+> 都不可用？→ 提示用户执行 `dreamina login` 或配置 API Key
+
+#### 6. `font_manager.py` — 字体管理器（共享组件）
 
 统一管理字体下载，供 `poster_render.py` 和 `caption_generate.py` 共同使用。字体存储在 `~/.autoviral/fonts/`，首次使用时自动从 GitHub 下载。
 
@@ -295,7 +406,7 @@ python3 skills/asset-generation/scripts/font_manager.py --font source-han-sans -
 | `montserrat` | Montserrat | Regular, Bold |
 | `inter` | Inter | Regular, Bold |
 
-#### 6. `poster_render.py` — HTML/CSS 图文排版渲染
+#### 7. `poster_render.py` — HTML/CSS 图文排版渲染
 
 使用 Jinja2 模板 + Playwright 浏览器截图，生成专业级图文排版。适用于小红书图文、知识卡片、轮播图等需要精确文字排版的场景。
 
@@ -414,12 +525,26 @@ python3 skills/asset-generation/scripts/openrouter_generate.py \
 ```
 准备用首帧生成第 {N} 镜视频片段:
 动作描述: 「{运动/动作描述}」
-时长: ~5秒
+时长: 5秒
+模型: Seedance 2.0
 确认生成？
 ```
 
-**6. 等待确认后生成：**
+**6. 等待确认后生成（优先 Dreamina CLI，备用 API）：**
+
 ```bash
+# ── 首选：Dreamina CLI ──
+dreamina image2video \
+  --image {workDir}/assets/frames/frame-{NN}.png \
+  --prompt="{视频运动提示词}" \
+  --duration=5 --model_version=seedance2.0 \
+  --poll=120
+
+# 生成完成后，用 query_result 下载到作品目录
+dreamina query_result --submit_id=<返回的id> \
+  --download_dir={workDir}/assets/clips/
+
+# ── 备用：API 调用（Dreamina CLI 不可用时）──
 curl -X POST http://localhost:3271/api/generate/video \
   -H "Content-Type: application/json" \
   -d '{
@@ -434,10 +559,78 @@ curl -X POST http://localhost:3271/api/generate/video \
 **7. 报告并继续：**
 ```
 视频片段 {N} 生成完成 ✓
-预览: http://localhost:3271/api/works/{workId}/assets/clips/clip-{NN}.mp4
+文件: {workDir}/assets/clips/clip-{NN}.mp4
 ```
 
 **8. 重复以上步骤处理下一个镜头。**
+
+### 高级视频工作流
+
+以下是 Dreamina CLI 独有的高级工作流，可大幅提升视频质量和制作效率。详细方法论见 `modules/dreamina-mastery.md`。
+
+#### 首尾帧工作流（精确控制起止画面）
+
+当需要精确控制镜头的起始和结束画面时（如人物从 A 姿势变到 B 姿势）：
+
+```bash
+# 1. 生成首帧和末帧
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "{起始画面描述}" --ar 9:16 --size 2K \
+  --output {workDir}/assets/frames/frame-{NN}-start.png
+
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "{结束画面描述}" --ar 9:16 --size 2K \
+  --ref-image {workDir}/assets/frames/frame-{NN}-start.png --seed 42 \
+  --output {workDir}/assets/frames/frame-{NN}-end.png
+
+# 2. 用首尾帧生成过渡视频
+dreamina frames2video \
+  --first={workDir}/assets/frames/frame-{NN}-start.png \
+  --last={workDir}/assets/frames/frame-{NN}-end.png \
+  --prompt="平滑过渡，自然运动" \
+  --duration=5 --model_version=seedance2.0 \
+  --poll=120
+```
+
+#### 多帧叙事工作流（一次性生成多镜头连贯视频）
+
+当分镜脚本有 2-20 个关键帧时，可一次性生成一个连贯的叙事视频：
+
+```bash
+# 先生成所有关键帧图片，然后一次性传入
+dreamina multiframe2video \
+  --images frame-01.png,frame-02.png,frame-03.png,frame-04.png \
+  --transition-prompt="人物从窗边走向桌前" \
+  --transition-prompt="人物坐下翻开书本" \
+  --transition-prompt="镜头推近到书页特写" \
+  --transition-duration=4 --transition-duration=3 --transition-duration=3 \
+  --poll=180
+```
+
+> **注意**：N 张图需要 N-1 个 transition-prompt 和 N-1 个 transition-duration。
+
+#### 多模态旗舰工作流（图+音频联合生成）
+
+当需要视频配合特定音频节奏时（如卡点视频、口型同步）：
+
+```bash
+# 图片 + 音频 → 配合节奏的视频
+dreamina multimodal2video \
+  --image ./frames/frame-01.png \
+  --audio ./music/bgm-clip.mp3 \
+  --prompt="人物随着音乐节拍轻轻摇摆" \
+  --duration=10 --ratio=9:16 --model_version=seedance2.0 \
+  --poll=180
+
+# 多图 + 视频参考 + 音频 → 最强多模态
+dreamina multimodal2video \
+  --image ./ref-character.png --image ./ref-scene.png \
+  --video ./ref-motion.mp4 \
+  --audio ./bgm.mp3 \
+  --prompt="参考角色外观和场景，按照参考视频的运动方式，配合音乐节奏" \
+  --duration=10 --model_version=seedance2.0 \
+  --poll=180
+```
 
 ### 进度跟踪
 
@@ -759,9 +952,21 @@ python3 skills/asset-generation/scripts/openrouter_generate.py \
   --seed 42 --ar 3:4 --size 4K --output result.png
 ```
 
-### 即梦 AI 的参考图用法（备用）
+### Dreamina CLI 的参考图用法
 
-即梦支持**单张**参考图：
+Dreamina `image2image` 支持多张参考图输入：
+```bash
+# 图生图（风格迁移/编辑）
+dreamina image2image \
+  --images ./image-01.png \
+  --prompt="保持人物不变，改为水彩画风格" \
+  --ratio=3:4 --resolution_type=2k --model_version=5.0 \
+  --poll=30
+```
+
+### 即梦 API 的参考图用法（备用）
+
+即梦 API 支持**单张**参考图：
 ```bash
 python3 skills/asset-generation/scripts/jimeng_generate.py image \
   --prompt "类似参考图风格的新场景描述" \
@@ -898,6 +1103,7 @@ ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p
 
 | 模块 | 文档路径 | 用途 |
 |------|---------|------|
+| **Dreamina 高阶** | `modules/dreamina-mastery.md` | **Dreamina CLI 完整方法论——命令选择决策、模型策略、多模态工作流、批量生产、镜头串联** |
 | Prompt 进阶 | `modules/prompt-mastery.md` | 模型差异化策略、负向提示词库、高级质量关键词、风格一致性进阶 |
 | 质量门控 | `modules/quality-gate.md` | 生成后自检清单、常见问题修复、美学评分工具 |
 | 音乐生成 | `modules/music-generation.md` | Lyria BGM 生成方法论、情绪-风格映射、prompt 工程、平台适配 |

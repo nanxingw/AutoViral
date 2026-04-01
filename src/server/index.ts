@@ -27,7 +27,7 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   const config = await loadConfig();
 
   // 2. Initialize providers
-  initProviders(config);
+  await initProviders(config);
 
   // 3. Ensure shared asset directories
   await ensureSharedDirs();
