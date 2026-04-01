@@ -1,15 +1,21 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { fetchSharedAssets, uploadAsset, deleteAsset, moveAsset, type AssetFile } from "../lib/api";
+  import { t, getLanguage, subscribe } from "../lib/i18n";
 
-  const CATS = [
-    { key: "characters", label: "形象参照" },
-    { key: "scenes", label: "场景参照" },
-    { key: "music", label: "配乐风格" },
-    { key: "templates", label: "画面模板" },
-    { key: "branding", label: "品牌调性" },
-    { key: "general", label: "其他素材" },
-  ];
+  let lang = $state(getLanguage());
+  function tt(key: string): string { void lang; return t(key); }
+
+  const CATS_I18N: Record<string, { zh: string; en: string }> = {
+    characters: { zh: "形象参照", en: "Appearance" },
+    scenes:     { zh: "场景参照", en: "Scenes" },
+    music:      { zh: "配乐风格", en: "Music" },
+    templates:  { zh: "画面模板", en: "Templates" },
+    branding:   { zh: "品牌调性", en: "Branding" },
+    general:    { zh: "其他素材", en: "Other" },
+  };
+  const CATS = Object.keys(CATS_I18N).map(key => ({ key }));
+  function catLabel(key: string): string { return CATS_I18N[key]?.[lang] ?? key; }
 
   let assets: Record<string, AssetFile[]> = $state({});
   let activeCat = $state("characters");
@@ -30,9 +36,10 @@
 
   onMount(() => {
     load();
+    const unsub = subscribe(() => { lang = getLanguage(); });
     function handleClick() { contextMenu = null; }
     document.addEventListener("click", handleClick);
-    return () => document.removeEventListener("click", handleClick);
+    return () => { unsub(); document.removeEventListener("click", handleClick); };
   });
 
   async function load() {
@@ -154,7 +161,7 @@
 </script>
 
 <div class="asset-library">
-  <p class="guide-text">上传你的照片、场景、品牌素材等，它们将作为所有视频生成的参照物，让 AI 更准确地还原你的形象与风格。</p>
+  <p class="guide-text">{lang === "zh" ? "上传你的照片、场景、品牌素材等，它们将作为所有视频生成的参照物，让 AI 更准确地还原你的形象与风格。" : "Upload your photos, scenes, and brand assets — they'll be used as references for all video generation, helping AI accurately recreate your look and style."}</p>
 
       <!-- Category tabs -->
       <div class="cat-tabs">
@@ -164,7 +171,7 @@
             class:active={activeCat === cat.key}
             onclick={() => activeCat = cat.key}
           >
-            {cat.label}
+            {catLabel(cat.key)}
             {#if (assets[cat.key]?.length ?? 0) > 0}
               <span class="cat-count">{assets[cat.key].length}</span>
             {/if}
@@ -175,7 +182,7 @@
       <!-- Upload area -->
       <button class="upload-zone" onclick={() => fileInput?.click()}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-        <span>点击或拖放文件上传</span>
+        <span>{lang === "zh" ? "点击或拖放文件上传" : "Click or drag files to upload"}</span>
       </button>
       <input
         bind:this={fileInput}
@@ -198,9 +205,9 @@
         ondrop={onDrop}
       >
         {#if loading}
-          <div class="empty-msg">加载中...</div>
+          <div class="empty-msg">{lang === "zh" ? "加载中..." : "Loading..."}</div>
         {:else if currentFiles.length === 0}
-          <div class="empty-msg">暂无文件，拖放或点击上传</div>
+          <div class="empty-msg">{lang === "zh" ? "暂无文件" : "No files"}</div>
         {:else if viewMode === "grid"}
           <!-- Grid view -->
           <div class="grid-view">
@@ -222,6 +229,9 @@
                     <span class="file-icon">{fileIcon(file.name)}</span>
                   </div>
                 {/if}
+                <button class="card-delete" onclick={(e) => { e.stopPropagation(); handleDelete(activeCat, file.name); }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
                 <div class="card-name" title={file.name}>{truncate(file.name, 12)}</div>
                 <div class="card-size">{formatSize(file.size)}</div>
               </div>
@@ -232,9 +242,9 @@
           <table class="list-view">
             <thead>
               <tr>
-                <th>文件名</th>
-                <th>大小</th>
-                <th>日期</th>
+                <th>{lang === "zh" ? "文件名" : "Name"}</th>
+                <th>{lang === "zh" ? "大小" : "Size"}</th>
+                <th>{lang === "zh" ? "日期" : "Date"}</th>
               </tr>
             </thead>
             <tbody>
@@ -265,12 +275,12 @@
       style="left:{contextMenu.x}px;top:{contextMenu.y}px"
       onclick={(e) => e.stopPropagation()}
     >
-      <a class="ctx-item" href={assetUrl(activeCat, contextMenu.asset.name)} download={contextMenu.asset.name}>下载</a>
-      <button class="ctx-item danger" onclick={() => contextMenu && handleDelete(activeCat, contextMenu.asset.name)}>删除</button>
+      <a class="ctx-item" href={assetUrl(activeCat, contextMenu.asset.name)} download={contextMenu.asset.name}>{lang === "zh" ? "下载" : "Download"}</a>
+      <button class="ctx-item danger" onclick={() => contextMenu && handleDelete(activeCat, contextMenu.asset.name)}>{lang === "zh" ? "删除" : "Delete"}</button>
       <div class="ctx-divider"></div>
-      <div class="ctx-label">移动到</div>
+      <div class="ctx-label">{lang === "zh" ? "移动到" : "Move to"}</div>
       {#each CATS.filter(c => c.key !== activeCat) as cat}
-        <button class="ctx-item" onclick={() => contextMenu && handleMove(activeCat, cat.key, contextMenu.asset.name)}>{cat.label}</button>
+        <button class="ctx-item" onclick={() => contextMenu && handleMove(activeCat, cat.key, contextMenu.asset.name)}>{catLabel(cat.key)}</button>
       {/each}
     </div>
   {/if}
@@ -382,6 +392,7 @@
     gap: 0.35rem;
   }
   .grid-card {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -394,6 +405,31 @@
   }
   .grid-card:hover {
     border-color: var(--border);
+  }
+  .card-delete {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.55);
+    border: none;
+    border-radius: 50%;
+    color: #fff;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 1;
+    padding: 0;
+  }
+  .grid-card:hover .card-delete {
+    opacity: 1;
+  }
+  .card-delete:hover {
+    background: var(--spark-red, #FE2C55);
   }
 
   .card-thumb {

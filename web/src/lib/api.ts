@@ -193,10 +193,10 @@ export async function deleteAsset(category: string, filename: string): Promise<v
 }
 
 export async function moveAsset(from: string, to: string, file: string): Promise<void> {
-  const res = await fetch("/api/shared-assets/move", {
+  const res = await fetch(`/api/shared-assets/${encodeURIComponent(from)}/${encodeURIComponent(file)}/move`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ from, to, file }),
+    body: JSON.stringify({ toCat: to }),
   });
   if (!res.ok) throw new Error(await res.text());
 }

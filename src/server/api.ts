@@ -14,7 +14,7 @@ import {
 import { MemoryClient } from "../memory.js";
 import type { WsBridge } from "../ws-bridge.js";
 import { getProvider, getDefaultProvider, listProviders } from "../providers/registry.js";
-import { listSharedAssets, getSharedAssetPath, CATEGORIES } from "../shared-assets.js";
+import { listSharedAssets, listSharedAssetsWithMeta, getSharedAssetPath, saveSharedAsset, deleteSharedAsset, moveSharedAsset, sanitizeFilename, validateCategory, CATEGORIES } from "../shared-assets.js";
 import { getLatestCreatorData, getCreatorHistory } from "../analytics-collector.js";
 import { syncStepConversation } from "../memory-sync.js";
 import { log, readLogs } from "../logger.js";
@@ -392,7 +392,48 @@ apiRoutes.get("/api/generate/providers", (c) => c.json(listProviders()));
 // ---------------------------------------------------------------------------
 
 // GET /api/shared-assets
-apiRoutes.get("/api/shared-assets", async (c) => c.json(await listSharedAssets()));
+apiRoutes.get("/api/shared-assets", async (c) => c.json(await listSharedAssetsWithMeta()));
+
+// POST /api/shared-assets/:category — upload files
+apiRoutes.post("/api/shared-assets/:category", async (c) => {
+  const category = c.req.param("category");
+  try {
+    validateCategory(category);
+    const body = await c.req.parseBody({ all: true });
+    const files = Array.isArray(body["file"]) ? body["file"] : body["file"] ? [body["file"]] : [];
+    const saved = [];
+    for (const f of files) {
+      if (f instanceof File) {
+        const buf = Buffer.from(await f.arrayBuffer());
+        saved.push(await saveSharedAsset(category, f.name, buf));
+      }
+    }
+    return c.json({ uploaded: saved });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 400);
+  }
+});
+
+// DELETE /api/shared-assets/:category/:file
+apiRoutes.delete("/api/shared-assets/:category/:file", async (c) => {
+  try {
+    await deleteSharedAsset(c.req.param("category"), c.req.param("file"));
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 400);
+  }
+});
+
+// POST /api/shared-assets/:fromCat/:file/move — move file to another category
+apiRoutes.post("/api/shared-assets/:fromCat/:file/move", async (c) => {
+  try {
+    const { toCat } = await c.req.json<{ toCat: string }>();
+    await moveSharedAsset(c.req.param("fromCat"), toCat, c.req.param("file"));
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 400);
+  }
+});
 
 // GET /api/shared-assets/:category/:file — serve file with correct MIME type
 apiRoutes.get("/api/shared-assets/:category/:file", async (c) => {

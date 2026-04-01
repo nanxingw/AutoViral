@@ -11,7 +11,7 @@
   }: {
     open: boolean;
     onClose: () => void;
-    onCreate: (data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; imageSource: string; imageSearchQuery: string; topicHint: string }) => void;
+    onCreate: (data: { title: string; type: string; platforms: string[]; contentCategory: string; videoSource: string; videoSearchQuery: string; imageSource: string; imageSearchQuery: string; topicHint: string }) => void;
     prefillTitle?: string;
     prefillTopicHint?: string;
   } = $props();
@@ -20,6 +20,7 @@
   function tt(key: string): string { void lang; return t(key); }
 
   let title = $state("");
+  let selectedPlatforms: string[] = $state(["douyin"]);
   let selectedType = $state("short-video");
   let selectedCategory = $state("anxiety");
   let videoSource = $state("search");
@@ -45,10 +46,19 @@
     return unsub;
   });
 
+  function togglePlatform(p: string) {
+    if (selectedPlatforms.includes(p)) {
+      if (selectedPlatforms.length > 1) selectedPlatforms = selectedPlatforms.filter(x => x !== p);
+    } else {
+      selectedPlatforms = [...selectedPlatforms, p];
+    }
+  }
+
   function handleCreate() {
     onCreate({
       title,
       type: selectedType,
+      platforms: selectedPlatforms,
       contentCategory: selectedCategory,
       videoSource: selectedType === "short-video" ? videoSource : "",
       videoSearchQuery: videoSource === "search" ? videoSearchQuery : "",
@@ -57,6 +67,7 @@
       topicHint,
     });
     title = "";
+    selectedPlatforms = ["douyin"];
     selectedType = "short-video";
     selectedCategory = "anxiety";
     videoSource = "search";
@@ -84,7 +95,28 @@
         </button>
       </div>
 
-      <!-- Content Type: 2 large cards -->
+      <!-- Platform -->
+      <div class="form-section">
+        <span class="form-label">{lang === "zh" ? "发布平台" : "PLATFORM"}</span>
+        <div class="platform-row">
+          <button
+            class="platform-chip"
+            class:selected={selectedPlatforms.includes("douyin")}
+            onclick={() => togglePlatform("douyin")}
+          >
+            {tt("platformDouyin")}
+          </button>
+          <button
+            class="platform-chip"
+            class:selected={selectedPlatforms.includes("xiaohongshu")}
+            onclick={() => togglePlatform("xiaohongshu")}
+          >
+            {tt("platformXiaohongshu")}
+          </button>
+        </div>
+      </div>
+
+      <!-- Content Type: 2 cards -->
       <div class="form-section">
         <span class="form-label">{tt("selectType")}</span>
         <div class="type-grid">
@@ -94,7 +126,7 @@
             onclick={() => selectedType = "short-video"}
           >
             <span class="type-icon">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             </span>
             <span class="type-name">{tt("shortVideo")}</span>
           </button>
@@ -104,7 +136,7 @@
             onclick={() => selectedType = "image-text"}
           >
             <span class="type-icon">
-              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
             </span>
             <span class="type-name">{tt("imageText")}</span>
           </button>
@@ -358,7 +390,7 @@
   .modal-close:hover { color: var(--text); }
 
   .form-section {
-    margin-bottom: 1.1rem;
+    margin-bottom: 0.85rem;
   }
 
   .form-label {
@@ -378,12 +410,44 @@
     gap: 0.6rem;
   }
 
+  /* Platform chips */
+  .platform-row {
+    display: flex;
+    gap: 0.4rem;
+  }
+
+  .platform-chip {
+    display: flex;
+    align-items: center;
+    padding: 0.35rem 0.85rem;
+    border: 1.5px solid var(--border);
+    border-radius: 9999px;
+    background: none;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.8rem;
+    font-weight: 550;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .platform-chip:hover {
+    border-color: var(--text-dim);
+    color: var(--text);
+  }
+
+  .platform-chip.selected {
+    border-color: var(--spark-red, #FE2C55);
+    background: rgba(254, 44, 85, 0.04);
+    color: var(--spark-red, #FE2C55);
+  }
+
   .type-card {
     display: flex;
-    flex-direction: column;
+    flex-direction: row;
     align-items: center;
-    gap: 0.4rem;
-    padding: 1rem 0.75rem;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
     border: 1.5px solid var(--border);
     border-radius: 6px;
     background: none;
@@ -561,7 +625,7 @@
   .form-textarea::placeholder { color: var(--text-dim); }
 
   .modal-actions {
-    margin-top: 1.25rem;
+    margin-top: 0.85rem;
   }
 
   .btn-create {

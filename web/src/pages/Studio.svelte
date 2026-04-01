@@ -26,6 +26,24 @@
   let lang = $state(getLanguage());
   function tt(key: string): string { void lang; return t(key); }
 
+  const STEP_I18N_MAP: Record<string, string> = {
+    "material-search": "stepMaterialSearch",
+    research: "stepResearch",
+    plan: "stepPlan",
+    assets: "stepAssets",
+    assembly: "stepAssembly",
+  };
+  const IMAGE_TEXT_OVERRIDES: Record<string, string> = {
+    plan: "stepPlanImageText",
+    assembly: "stepAssemblyImageText",
+  };
+  function stepLabel(key: string): string {
+    const ct = work?.contentType ?? "short-video";
+    if (ct === "image-text" && IMAGE_TEXT_OVERRIDES[key]) return tt(IMAGE_TEXT_OVERRIDES[key]);
+    if (STEP_I18N_MAP[key]) return tt(STEP_I18N_MAP[key]);
+    return key;
+  }
+
   let work: Work | null = $state(null);
   let sessionReady = $state(false);
   let streaming = $state(false);
@@ -225,8 +243,7 @@
     if (!canStartStep(stepKey)) return;
     currentStep = stepKey;
     showNextStep = false;
-    const stepName = work.pipeline[stepKey]?.name ?? stepKey;
-    streamBlocks = [...streamBlocks, { type: "step_divider", text: stepName }];
+    streamBlocks = [...streamBlocks, { type: "step_divider", text: stepKey }];
     streaming = true;
     fetch(`/api/works/${encodeURIComponent(workId)}/step/${encodeURIComponent(stepKey)}`, { method: "POST" }).catch(() => {});
     scrollToBottom();
@@ -248,8 +265,7 @@
         currentStep = activeKey;
         streaming = true;
         resetInactivityTimer();
-        const stepName = data.pipeline[activeKey]?.name ?? activeKey;
-        streamBlocks = [...streamBlocks, { type: "step_divider", text: stepName }];
+        streamBlocks = [...streamBlocks, { type: "step_divider", text: activeKey }];
       }
       return;
     }
@@ -352,7 +368,7 @@
         currentStep = firstKey;
         streamBlocks = [
           { type: "user", text: initialPrompt },
-          { type: "step_divider", text: work.pipeline[firstKey]?.name ?? firstKey },
+          { type: "step_divider", text: firstKey },
         ];
         streaming = true;
         // Send via HTTP step trigger (creates CLI session + sends prompt)
@@ -440,7 +456,7 @@
           {#if block.type === "step_divider"}
             <div class="step-divider">
               <span class="divider-line"></span>
-              <span class="divider-label">{block.text}</span>
+              <span class="divider-label">{STEP_I18N_MAP[block.text] ? stepLabel(block.text) : block.text}</span>
               <span class="divider-line"></span>
             </div>
           {:else if block.type === "user"}

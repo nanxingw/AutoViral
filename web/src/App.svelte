@@ -91,7 +91,7 @@
     return parts.join("\n");
   }
 
-  async function handleCreateWork(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; imageSource: string; imageSearchQuery: string; topicHint: string }) {
+  async function handleCreateWork(data: { title: string; type: string; platforms: string[]; contentCategory: string; videoSource: string; videoSearchQuery: string; imageSource: string; imageSearchQuery: string; topicHint: string }) {
     showNewWorkModal = false;
     prefillTitle = "";
     prefillTopicHint = "";
@@ -102,7 +102,7 @@
         contentCategory: (data.contentCategory || "anxiety") as ContentCategory,
         videoSource: data.videoSource || undefined,
         videoSearchQuery: data.videoSearchQuery || undefined,
-        platforms: ["douyin", "xiaohongshu"],
+        platforms: data.platforms && data.platforms.length > 0 ? data.platforms : ["douyin", "xiaohongshu"],
         topicHint: data.topicHint || undefined,
         language: lang as "en" | "zh",
       });

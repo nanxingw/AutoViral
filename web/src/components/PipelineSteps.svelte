@@ -28,6 +28,23 @@
   let lang = $state(getLanguage());
   function tt(key: string): string { void lang; return t(key); }
 
+  const STEP_I18N_MAP: Record<string, string> = {
+    "material-search": "stepMaterialSearch",
+    research: "stepResearch",
+    plan: "stepPlan",
+    assets: "stepAssets",
+    assembly: "stepAssembly",
+  };
+  const IMAGE_TEXT_OVERRIDES: Record<string, string> = {
+    plan: "stepPlanImageText",
+    assembly: "stepAssemblyImageText",
+  };
+  function stepLabel(key: string): string {
+    if (contentType === "image-text" && IMAGE_TEXT_OVERRIDES[key]) return tt(IMAGE_TEXT_OVERRIDES[key]);
+    if (STEP_I18N_MAP[key]) return tt(STEP_I18N_MAP[key]);
+    return pipeline[key]?.name ?? key;
+  }
+
   onMount(() => {
     const unsub = subscribe(() => { lang = getLanguage(); });
     return unsub;
@@ -107,7 +124,7 @@
               {/if}
             </span>
             <div class="step-content">
-              <span class="step-name">{step?.name ?? key}</span>
+              <span class="step-name">{stepLabel(key)}</span>
               <span class="step-status-text">
                 {#if status === "done"}
                   {tt("stepCompletedLabel")}
