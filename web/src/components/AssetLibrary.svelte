@@ -3,17 +3,17 @@
   import { fetchSharedAssets, uploadAsset, deleteAsset, moveAsset, type AssetFile } from "../lib/api";
 
   const CATS = [
-    { key: "characters", label: "人物" },
-    { key: "scenes", label: "场景" },
-    { key: "music", label: "音乐" },
-    { key: "templates", label: "模板" },
-    { key: "branding", label: "品牌" },
-    { key: "general", label: "通用" },
+    { key: "characters", label: "形象参照" },
+    { key: "scenes", label: "场景参照" },
+    { key: "music", label: "配乐风格" },
+    { key: "templates", label: "画面模板" },
+    { key: "branding", label: "品牌调性" },
+    { key: "general", label: "其他素材" },
   ];
 
   let assets: Record<string, AssetFile[]> = $state({});
   let activeCat = $state("characters");
-  let viewMode: "grid" | "list" = $state("grid");
+  let viewMode: "grid" | "list" = "grid";
   let expanded = $state(false);
   let loading = $state(false);
   let dragOver = $state(false);
@@ -154,14 +154,16 @@
 </script>
 
 <div class="asset-library">
-  <!-- Title bar (always visible) -->
-  <button class="title-bar" onclick={() => expanded = !expanded}>
-    <span class="title-text">📁 素材库 · {totalCount} 个文件</span>
-    <span class="toggle-icon">{expanded ? "▲" : "▼"}</span>
+  <!-- Header -->
+  <button class="section-header" onclick={() => expanded = !expanded}>
+    <span class="section-title">我的素材{#if totalCount > 0} · {totalCount}{/if}</span>
+    <svg class="chevron" class:open={expanded} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
 
   {#if expanded}
     <div class="panel">
+      <p class="guide-text">上传你的照片、场景、品牌素材等，它们将作为所有视频生成的参照物，让 AI 更准确地还原你的形象与风格。</p>
+
       <!-- Category tabs -->
       <div class="cat-tabs">
         {#each CATS as cat}
@@ -192,10 +194,6 @@
             input.value = "";
           }}
         />
-        <div class="view-toggle">
-          <button class:active={viewMode === "grid"} onclick={() => viewMode = "grid"}>网格</button>
-          <button class:active={viewMode === "list"} onclick={() => viewMode = "list"}>列表</button>
-        </div>
       </div>
 
       <!-- Drop zone -->
@@ -297,74 +295,74 @@
 </div>
 
 <style>
-  .asset-library {
-    margin-bottom: 1rem;
-  }
+  .asset-library {}
 
-  .title-bar {
+  .section-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     width: 100%;
-    padding: 0.5rem 0.75rem;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    padding: 0;
+    background: none;
+    border: none;
     cursor: pointer;
-    font-size: 0.85rem;
     color: var(--text);
-    transition: background 0.15s;
   }
-  .title-bar:hover {
-    background: var(--bg-surface);
-  }
-  .title-text {
+  .section-title {
+    font-size: var(--size-sm, 0.8rem);
     font-weight: 600;
-  }
-  .toggle-icon {
-    font-size: 0.7rem;
     color: var(--text-muted);
+  }
+  .chevron {
+    color: var(--text-dim);
+    transition: transform 0.2s ease;
+  }
+  .chevron.open {
+    transform: rotate(180deg);
   }
 
   .panel {
-    max-height: 300px;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-top: none;
-    border-radius: 0 0 8px 8px;
-    background: var(--bg-elevated);
-    padding: 0.5rem;
+    margin-top: 0.65rem;
+  }
+
+  .guide-text {
+    font-size: var(--size-sm, 0.78rem);
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: 0 0 0.75rem 0;
+    padding: 0.5rem 0.75rem;
+    border-left: 2px solid var(--border);
   }
 
   /* Category tabs */
   .cat-tabs {
     display: flex;
-    gap: 0.25rem;
-    margin-bottom: 0.5rem;
+    gap: 0.35rem;
+    margin-bottom: 0.65rem;
     flex-wrap: wrap;
   }
   .cat-tab {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text-muted);
+    padding: 0.25rem 0.6rem;
+    font-size: var(--size-xs, 0.7rem);
+    border: none;
+    border-radius: 100px;
+    background: var(--bg-surface, rgba(255,255,255,0.06));
+    color: var(--text-dim);
     cursor: pointer;
     transition: all 0.15s;
+    font-weight: 500;
   }
   .cat-tab:hover {
     color: var(--text);
-    border-color: var(--text-dim);
+    background: var(--bg-elevated);
   }
   .cat-tab.active {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
+    background: var(--text);
+    color: var(--bg);
   }
   .cat-count {
-    font-size: 0.65rem;
-    opacity: 0.8;
+    font-size: 0.6rem;
+    opacity: 0.7;
     margin-left: 0.15rem;
   }
 
@@ -372,80 +370,63 @@
   .toolbar {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     margin-bottom: 0.5rem;
   }
   .upload-btn {
-    padding: 0.2rem 0.6rem;
-    font-size: 0.75rem;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: opacity 0.15s;
-  }
-  .upload-btn:hover { opacity: 0.85; }
-  .hidden-input { display: none; }
-
-  .view-toggle {
-    display: flex;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-  .view-toggle button {
-    padding: 0.15rem 0.45rem;
-    font-size: 0.7rem;
-    border: none;
-    background: transparent;
+    padding: 0.25rem 0.65rem;
+    font-size: var(--size-xs, 0.7rem);
+    font-weight: 500;
+    background: none;
     color: var(--text-muted);
+    border: 1px dashed var(--border);
+    border-radius: 6px;
     cursor: pointer;
     transition: all 0.15s;
   }
-  .view-toggle button.active {
-    background: var(--accent);
-    color: #fff;
+  .upload-btn:hover {
+    color: var(--text);
+    border-color: var(--text-dim);
   }
+  .hidden-input { display: none; }
 
   /* Drop zone */
   .drop-zone {
-    min-height: 60px;
+    min-height: 48px;
     border: 2px dashed transparent;
-    border-radius: 6px;
+    border-radius: 8px;
     transition: border-color 0.2s, background 0.2s;
   }
   .drop-zone.drag-over {
     border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
 
   .empty-msg {
     text-align: center;
-    padding: 1.5rem;
+    padding: 1.25rem;
     color: var(--text-dim);
-    font-size: 0.8rem;
+    font-size: var(--size-sm, 0.78rem);
   }
 
   /* Grid view */
   .grid-view {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-    gap: 0.4rem;
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 0.35rem;
   }
   .grid-card {
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 0.35rem;
-    border-radius: 6px;
+    padding: 0.3rem;
+    border-radius: 8px;
     background: var(--bg-surface);
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     transition: border-color 0.15s;
     cursor: default;
   }
   .grid-card:hover {
-    border-color: var(--text-dim);
+    border-color: var(--border);
   }
 
   .card-thumb {
@@ -454,7 +435,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 4px;
+    border-radius: 6px;
     overflow: hidden;
     border: none;
     background: transparent;
@@ -465,24 +446,24 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    border-radius: 4px;
+    border-radius: 6px;
   }
   .audio-thumb {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--bg-elevated);
   }
   .audio-icon {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
   }
   .file-thumb {
     background: var(--bg-elevated);
     cursor: default;
   }
   .file-icon {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
   }
   .card-name {
-    font-size: 0.65rem;
-    color: var(--text);
+    font-size: 0.6rem;
+    color: var(--text-muted);
     margin-top: 0.2rem;
     text-align: center;
     width: 100%;
@@ -491,14 +472,14 @@
     white-space: nowrap;
   }
   .card-size {
-    font-size: 0.55rem;
+    font-size: 0.52rem;
     color: var(--text-dim);
   }
 
   /* List view */
   .list-view {
     width: 100%;
-    font-size: 0.75rem;
+    font-size: var(--size-sm, 0.78rem);
     border-collapse: collapse;
   }
   .list-view th {
@@ -507,7 +488,7 @@
     color: var(--text-dim);
     font-weight: 500;
     border-bottom: 1px solid var(--border);
-    font-size: 0.7rem;
+    font-size: var(--size-xs, 0.7rem);
   }
   .list-view td {
     padding: 0.25rem 0.5rem;
@@ -545,16 +526,16 @@
     z-index: 1000;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.25rem 0;
+    border-radius: 8px;
+    padding: 0.3rem 0;
     min-width: 120px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
   }
   .ctx-item {
     display: block;
     width: 100%;
-    padding: 0.3rem 0.75rem;
-    font-size: 0.75rem;
+    padding: 0.35rem 0.75rem;
+    font-size: var(--size-sm, 0.78rem);
     color: var(--text);
     background: none;
     border: none;
@@ -575,7 +556,7 @@
   }
   .ctx-label {
     padding: 0.2rem 0.75rem;
-    font-size: 0.65rem;
+    font-size: var(--size-xs, 0.7rem);
     color: var(--text-dim);
     font-weight: 600;
   }

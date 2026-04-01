@@ -111,20 +111,7 @@
   }
   const SHOWCASE_ENTRIES: ShowcaseEntry[] = [
     { id: "w_20260325_1753_75d", category: "conflict" },
-    { id: "w_20260329_1710_ecf", category: "envy", en: {
-      title: "Just a normal Wednesday at Harvard.",
-      body: [
-        "8:00 Woke up to my roommate's Breville coffee machine. Grabbed a cup.",
-        "9:30 Went to my econ discussion section. 12 students. The professor remembers everyone's name and what they said last week.",
-        "12:00 Lunch at Annenberg Hall — the dining hall that looks like Hogwarts. The girl across from me is from Kenya, her dad works at the UN. We talked about summer plans. She's interning in Switzerland.",
-        "14:00 Returned books at Widener Library, ended up staying for two hours. Sunlight streaming through the stained glass windows. The air smells like old books.",
-        "17:00 Walked along the Charles River with a friend. Spring has finally arrived in Boston. Someone was rowing on the river.",
-        "19:00 Back at the dorm, opened my MacBook to start next week's essay. Snacks from my parents on the desk, and a bunch of tulips I picked up at the flower shop last week.",
-        "That's it. Just an ordinary day.",
-      ].join("\n"),
-      tags: ["#Harvard", "#StudyAbroad", "#BostonLife", "#CollegeLife", "#SpringVibes"],
-      imageDir: "output_en",
-    }},
+    { id: "w_20260329_1710_ecf", category: "envy" },
   ];
 
   function extractCopytextFromChat(blocks: { type: string; text: string }[]): { title: string; body: string; tags: string[] } | null {
