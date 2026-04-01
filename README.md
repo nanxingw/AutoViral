@@ -1,291 +1,269 @@
-<h1 align="center">AutoViral</h1>
+<div align="center">
 
-<p align="center">
-  <strong>AI 驱动的社交媒体内容创作平台 — 从选题调研到成片发布，一站式完成</strong>
-</p>
+# AutoViral
 
-<p align="center">
-  <a href="https://nodejs.org"><img src="https://img.shields.io/badge/Node.js-%3E%3D18-green" alt="Node.js >= 18"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-</p>
+**AI-native 社交媒体内容创作平台**
+
+从选题调研到成片发布，全程 AI Agent 驱动
+
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Claude Code](https://img.shields.io/badge/Claude_Code-Powered-6C47FF?logo=anthropic&logoColor=white)](https://docs.anthropic.com/en/docs/claude-code)
+[![Svelte 5](https://img.shields.io/badge/Svelte_5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+</div>
 
 ---
 
-AutoViral 是一个本地运行的 AI 内容创作工作台，专为**抖音**和**小红书**创作者设计。它通过 4 步流水线（调研 → 规划 → 生图/生视频 → 合成）将一个选题变成可发布的内容，全程由 AI Agent 驱动，你只需确认和反馈。
+<div align="center">
 
-## 核心流程
+https://github.com/user-attachments/assets/demo.mp4
+
+https://github.com/nanxingw/AutoViral/blob/main/docs/assets/demo.mp4
+
+<video src="docs/assets/demo.mp4" width="360" controls></video>
+
+*AI 全自动创作的健身短视频 — 从选题到成片，零人工干预*
+
+</div>
+
+---
+
+## 它能做什么
+
+AutoViral 是一个本地运行的 AI 内容工作台，你描述一个选题，AI Agent 完成从调研到成片的全部工作：
 
 ```
-选题调研  →  内容规划  →  素材生成  →  视频合成
-  │            │            │            │
-  │ AI 搜索    │ 分镜/图文   │ 即梦 API   │ FFmpeg
-  │ 热门趋势   │ 脚本策划    │ 生图/生视频  │ 拼接+字幕+配乐
-  ▼            ▼            ▼            ▼
- 调研报告    创作方案     图片/视频素材   成品视频/图文
+ 你："做一个月球战争的科幻短片"
+  │
+  ▼
+┌─────────┐    ┌─────────┐    ┌─────────┐    ┌─────────┐
+│ 话题调研  │───▶│ 内容规划  │───▶│ 素材生成  │───▶│ 合成输出  │
+│          │    │          │    │          │    │          │
+│ AI 搜索   │    │ 分镜脚本  │    │ AI 生图   │    │ 视频拼接  │
+│ 趋势分析  │    │ 文案策划  │    │ AI 生视频  │    │ 字幕配乐  │
+│ 竞品参考  │    │ 配乐规划  │    │ AI 配乐   │    │ 转场特效  │
+└─────────┘    └─────────┘    └─────────┘    └─────────┘
 ```
 
-**支持两种内容类型：**
-- **短视频** — 适用于抖音，从分镜脚本到成片
-- **图文** — 适用于小红书，从排版规划到成品图文
+每个步骤 AI 会先和你确认方案，等你同意后再执行。你随时可以在对话中给反馈、调整方向。
+
+### 支持的内容类型
+
+| 类型 | 目标平台 | 产出 |
+|------|---------|------|
+| **短视频** | 抖音 | 带字幕、配乐的完整视频 |
+| **图文** | 小红书 | 专业排版的多图 + 发布文案 |
+
+### 核心能力
+
+| 能力 | 技术方案 | 说明 |
+|------|---------|------|
+| AI 图片生成 | Gemini 3.1 Flash (OpenRouter) | 支持 4K、自定义宽高比、图生图 |
+| AI 视频生成 | Dreamina CLI (Seedance 2.0) | 文生视频、图生视频、首尾帧、多帧 |
+| AI 音乐生成 | Google Lyria 3 Pro | 文生音乐、图生音乐 |
+| 图文排版 | HTML/CSS + Playwright | 5 套小红书模板、专业字体 |
+| 视频合成 | FFmpeg | 拼接、字幕、配乐、转场 |
+| 趋势调研 | AI Web Search | 抖音/小红书实时热点 |
+| 数据分析 | 定时采集 | 粉丝/播放/互动数据追踪 |
+| 质量评审 | LLM-as-Judge | 每步可选质量门控 |
+
+---
 
 ## 快速开始
 
 ### 前置要求
 
 - **Node.js** >= 18
-- **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** 已安装并登录
-- **FFmpeg**（视频合成需要）：`brew install ffmpeg`
-- **即梦 AI API 密钥**（生图/生视频需要，见下方申请指南）
+- **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** — 已安装并登录
+- **FFmpeg** — `brew install ffmpeg`
 
 ### 安装
 
 ```bash
 git clone https://github.com/nanxingw/AutoViral.git
 cd AutoViral
-
-npm install
-npm run build
+npm install && npm run build
 ```
 
-### 配置 API 密钥
+### 配置
 
 ```bash
-# 复制环境变量模板
 cp .env.example .env
-
-# 编辑 .env，填入你的密钥
 ```
 
-`.env` 文件内容：
+编辑 `.env`：
 
 ```env
-# 即梦 AI（必填）
-JIMENG_ACCESS_KEY=你的AccessKeyId
-JIMENG_SECRET_KEY=你的SecretAccessKey
+# 图片生成（Gemini，推荐）
+OPENROUTER_API_KEY=sk-or-v1-xxxxxxxx
 
-# OpenRouter（可选，备用 LLM）
-OPENROUTER_API_KEY=
+# 视频生成备用（即梦 API，可选）
+JIMENG_ACCESS_KEY=AKLTxxxxxxxx
+JIMENG_SECRET_KEY=xxxxxxxx
+```
 
-# EverMemOS（可选，长期记忆）
-EVERMEMOS_API_KEY=
+**视频生成首选方案**：安装 [Dreamina CLI](https://jimeng.jianying.com/cli)（免费，浏览器登录即可）：
+
+```bash
+curl -fsSL https://jimeng.jianying.com/cli | bash
+dreamina login    # 浏览器弹窗登录
 ```
 
 ### 启动
 
 ```bash
-autoviral start          # 后台启动（守护进程）
-autoviral start --foreground  # 前台启动（可看日志）
+autoviral start                # 后台启动
+autoviral start --foreground   # 前台启动（看日志）
 ```
 
-打开浏览器访问 **http://localhost:3271**
+打开 **http://localhost:3271** 开始创作。
 
-### 其他命令
-
-```bash
-autoviral stop           # 停止服务
-autoviral dashboard      # 打开浏览器
-autoviral config get     # 查看配置
-autoviral config set model haiku  # 修改配置
-```
-
-## 即梦 AI API 申请指南
-
-即梦 AI 是字节跳动旗下的 AI 生成平台，提供文生图、图生视频等能力。AutoViral 通过即梦 API 生成图片和视频素材。
-
-### 第 1 步：注册火山引擎账号
-
-1. 打开 [火山引擎官网](https://www.volcengine.com/)
-2. 点击右上角「注册」，使用手机号注册
-3. 完成实名认证（个人认证即可）
-
-### 第 2 步：开通即梦 AI 服务
-
-1. 打开 [即梦官网](https://jimeng.jianying.com/)
-2. 点击左上角「API 调用」
-3. 进入新页面后点击「立即开通」
-4. 分别开通「图片生成」和「视频生成」服务
-
-> 也可直接访问 [火山引擎控制台](https://console.volcengine.com/ai/ability/detail/10) 开通
-
-### 第 3 步：获取 API 密钥
-
-1. 登录 [火山引擎控制台](https://console.volcengine.com/)
-2. 点击右上角头像 → 「API 访问密钥」
-3. 点击「新建密钥」
-4. 记录 **Access Key ID** 和 **Secret Access Key**
-
-> 密钥创建后 Secret Key 只显示一次，请妥善保存
-
-### 第 4 步：填入 AutoViral
-
-将获取的密钥填入项目根目录的 `.env` 文件：
-
-```env
-JIMENG_ACCESS_KEY=AKLTxxxxxxxxxxxxxxxx
-JIMENG_SECRET_KEY=xxxxxxxxxxxxxxxx
-```
-
-### 费用说明
-
-- 新用户有免费额度
-- 正式使用按量计费，图片生成和视频生成分别计费
-- 测试阶段有并发限制（约 1 并发）
-- 详见 [即梦 API 定价](https://www.volcengine.com/docs/6791/1397048)
+---
 
 ## 使用流程
 
-### 1. 探索趋势
+### 1. 创建作品
 
-进入「探索」页面，选择抖音或小红书，点击「刷新趋势」。AI 会实时搜索平台热门话题，展示搜索进度，最终生成趋势卡片。看到感兴趣的方向可以直接「以此创建作品」。
+点击「新建作品」，输入标题和创作方向（如"科幻短片，月球大战"），选择类型和平台。
 
-### 2. 创建作品
+### 2. 四步流水线
 
-进入「作品」页面，点击新建：
-- 输入标题（如"奶龙抽象新闻联播"）
-- 选择类型：短视频 / 图文
-- 选择平台：抖音 / 小红书
-- 可选：填写选题方向提示
+进入 Studio 工作台，AI Agent 按步骤推进：
 
-### 3. 流水线创作
+| 步骤 | 短视频 | 图文 |
+|------|--------|------|
+| **调研** | 搜索热点趋势、分析竞品 | 搜索话题热度、参考爆款 |
+| **规划** | 分镜脚本、画面描述、台词 | 每张图的内容规划、文案 |
+| **素材** | 生首帧 → 生视频片段 → 生配乐 | 生配图 → HTML 排版渲染 |
+| **合成** | FFmpeg 拼接 + 字幕 + 配乐 | 图片排序 + 发布文案 |
 
-点击作品卡片进入 Studio 工作台，左侧是 4 步流水线：
+### 3. 预览与导出
 
-**话题调研** — AI 搜索平台趋势，分析竞争度和热度，输出调研报告。你可以指定调研方向，也可以让 AI 广泛搜索。
+成品在右侧素材面板预览，保存在 `~/.autoviral/works/<id>/output/`。
 
-**内容规划** — 基于调研结果，AI 策划具体内容方案：
-- 短视频：分镜脚本、画面描述、台词、时长
-- 图文：每张图的内容规划、文案结构
+### 4. 数据追踪（可选）
 
-**素材生成** — AI 调用即梦 API 逐个生成素材：
-- 短视频：先生图（首帧）→ 再生视频片段
-- 图文：生成配图
+在「数据」页面粘贴抖音主页链接，系统定时采集播放、点赞、评论数据，AI 在后续创作中参考。
 
-**视频合成**（短视频）/ **图文排版**（图文）— 最终组装：
-- 短视频：FFmpeg 拼接片段 + 字幕 + 配乐 + 转场
-- 图文：排版输出 + 发布文案
+---
 
-每个步骤 AI 会先和你确认方案，等你同意后再执行。你可以随时在聊天中给反馈。
+## AI 生成服务
 
-### 4. 发布
+AutoViral 支持多个 AI 生成服务，按优先级自动选择：
 
-成品保存在作品的 `output/` 目录，右侧素材面板可以预览和下载。
+### 图片生成
 
-### 5. 数据分析
+| 优先级 | 服务 | 密钥 | 说明 |
+|--------|------|------|------|
+| 1 | **OpenRouter (Gemini 3.1 Flash)** | `OPENROUTER_API_KEY` | 推荐，画质最好，支持 4K |
+| 2 | 即梦 API | `JIMENG_ACCESS_KEY` + `SECRET_KEY` | 备用 |
 
-进入「数据」页面，连接你的抖音账号（粘贴主页链接），系统每小时自动采集：
-- 粉丝数、获赞数、互动率
-- 每条作品的播放/点赞/评论/分享/收藏
-- AI Agent 在创作时可按需查询这些数据，给出更精准的内容建议
+### 视频生成
 
-### 6. AI 记忆（可选）
+| 优先级 | 服务 | 配置方式 | 说明 |
+|--------|------|---------|------|
+| 1 | **Dreamina CLI (Seedance 2.0)** | `dreamina login` | 推荐，支持图生视频、多帧 |
+| 2 | 即梦 API | `JIMENG_ACCESS_KEY` + `SECRET_KEY` | 备用 |
 
-在设置中开启 EverMemOS 同步后，每次创作完成时对话记录自动同步到云端记忆系统。AI 在后续创作中可以搜索历史经验，避免重复选题，持续改进内容策略。
+### 音乐生成
+
+| 服务 | 密钥 | 说明 |
+|------|------|------|
+| **Google Lyria 3 Pro** | `OPENROUTER_API_KEY`（复用） | 文生音乐、图生音乐 |
+
+检查当前环境可用服务：
+
+```bash
+python3 skills/asset-generation/scripts/check_providers.py --format table
+```
+
+---
 
 ## 项目架构
 
 ```
-浏览器 (Svelte 5 SPA)
-     ↕ WebSocket 实时通信
-Node.js 服务器 (Hono)
-     ↕ stdout/stdin 管道
-Claude Code CLI (stream-json 模式)
-     ↕ 工具调用
-即梦 API / FFmpeg / WebSearch
+浏览器 (Svelte 5)  ──WebSocket──  Node.js (Hono)  ──stdin/stdout──  Claude Code CLI
+                                       │
+                              ┌────────┼────────┐
+                              ▼        ▼        ▼
+                          Dreamina   Gemini   Lyria
+                          (视频)    (图片)   (音乐)
 ```
 
 ### 目录结构
 
 ```
-src/
-  cli.ts                    # CLI 入口（start/stop/config）
-  config.ts                 # 配置管理（.env + config.yaml）
-  work-store.ts             # 作品持久化存储
-  ws-bridge.ts              # WebSocket 桥接（浏览器 ↔ Claude CLI）
-  analytics-collector.ts    # 创作者数据定时采集服务
-  memory.ts                 # EverMemOS 记忆客户端
-  memory-sync.ts            # 对话同步到 EverMemOS
+src/                          # 后端 TypeScript
+  cli.ts                      #   CLI 入口（start/stop/config）
+  config.ts                   #   配置管理（.env + config.yaml）
+  work-store.ts               #   作品存储（YAML 持久化）
+  ws-bridge.ts                #   WebSocket 桥接（浏览器 ↔ Claude CLI）
+  research-scheduler.ts       #   定时调研
+  analytics-collector.ts      #   数据采集
   server/
-    api.ts                  # REST API 路由
-    index.ts                # Web 服务器
-  providers/
-    jimeng.ts               # 即梦 API（HMAC-SHA256 签名）
-    nanobanana.ts           # OpenRouter/Gemini 生图
-    base.ts                 # Provider 接口
-    registry.ts             # Provider 注册
+    api.ts                    #   REST + WebSocket API
+    index.ts                  #   Hono 服务启动
 
-web/src/
+web/src/                      # 前端 Svelte 5
   pages/
-    Studio.svelte           # 创作工作台（聊天+流水线+画布）
-    Explore.svelte          # 趋势探索（兴趣驱动+增强卡片）
-    Works.svelte            # 作品列表（封面预览）
-    Analytics.svelte        # 创作者数据仪表盘
-    SettingsPanel.svelte    # 设置面板
-  components/
-    PipelineSteps.svelte    # 流水线侧边栏
-    ResearchProgress.svelte # 搜索进度+AI输出流
-    AssetPanel.svelte       # 素材浏览面板
-    CanvasWorkspace.svelte  # 画布工作区
-    InterestTags.svelte     # 兴趣标签编辑
+    Studio.svelte             #   创作工作台（对话 + 流水线 + 素材）
+    Explore.svelte            #   趋势探索
+    Works.svelte              #   作品管理
+    Analytics.svelte          #   数据仪表盘
 
-skills/                     # AI Agent 技能定义（模块化 references/ 结构）
-  trend-research/           # 趋势调研（含热搜脚本）
-  content-planning/         # 内容规划
-  asset-generation/         # 素材生成（含生图脚本）
-  content-assembly/         # 内容合成
-  creator-analytics/        # 创作者数据采集
+skills/                       # AI Agent 技能定义
+  trend-research/             #   话题调研（热搜脚本 + 方法论）
+  content-planning/           #   内容规划（分镜/图文策划）
+  asset-generation/           #   素材生成（Dreamina/Gemini/Lyria）
+  content-assembly/           #   合成输出（FFmpeg/字幕/配乐）
+  content-evaluator/          #   质量评审（LLM-as-Judge 评分）
+
+~/.autoviral/                 # 运行时数据
+  config.yaml                 #   配置
+  fonts/                      #   下载的专业字体
+  works/                      #   作品数据 + 素材 + 成品
+  trends/                     #   趋势缓存
 ```
 
-### 数据存储
+### 技术栈
 
-所有数据存储在 `~/.autoviral/`：
+| 层 | 技术 |
+|----|------|
+| 前端 | Svelte 5 (runes), Vite, Glass Noir 深色主题 |
+| 后端 | Node.js, Hono, TypeScript, WebSocket |
+| AI Agent | Claude Code CLI (stream-json 子进程) |
+| 图片生成 | OpenRouter → Gemini 3.1 Flash |
+| 视频生成 | Dreamina CLI (Seedance 2.0) / 即梦 API |
+| 音乐生成 | Google Lyria 3 Pro |
+| 图文排版 | HTML/CSS + Playwright + Jinja2 模板 |
+| 视频编辑 | FFmpeg |
 
-```
-~/.autoviral/
-  config.yaml            # 运行配置
-  works/
-    works.yaml           # 作品索引
-    w_20260319_1044_a1f/  # 每个作品独立目录
-      work.yaml           # 作品定义
-      research/            # 调研数据
-      plan/                # 规划方案
-      assets/              # 生成素材
-        frames/            # 首帧图片
-        clips/             # 视频片段
-        images/            # 图文配图
-      output/              # 最终成品
-  trends/
-    douyin/               # 抖音趋势缓存
-    xiaohongshu/          # 小红书趋势缓存
-```
+---
 
 ## 配置项
 
-配置优先级：`.env` 环境变量 > `~/.autoviral/config.yaml`
+配置优先级：`.env` > `~/.autoviral/config.yaml`
 
 | 配置项 | 默认值 | 说明 |
 |--------|--------|------|
 | `port` | `3271` | 仪表盘端口 |
-| `model` | `opus` | Claude 模型（opus/sonnet/haiku） |
-| `jimeng.accessKey` | — | 即梦 API AccessKey（建议在 .env 配置） |
-| `jimeng.secretKey` | — | 即梦 API SecretKey（建议在 .env 配置） |
-| `research.enabled` | `true` | 是否启用定时调研 |
-| `research.schedule` | `0 9,21 * * *` | 调研 cron 表达式 |
-| `analytics.douyinUrl` | — | 抖音主页链接（在数据页面配置） |
-| `analytics.collectInterval` | `60` | 采集间隔（分钟） |
-| `memory.syncEnabled` | `false` | 是否启用 EverMemOS 对话同步 |
-| `interests` | `[]` | 用户关注领域（在探索页面配置） |
+| `model` | `opus` | Claude 模型（opus / sonnet / haiku） |
+| `research.schedule` | `0 9,21 * * *` | 定时调研（每天 9:00 和 21:00） |
+| `analytics.collectInterval` | `60` | 数据采集间隔（分钟） |
+| `interests` | `[]` | 关注领域（在探索页面配置） |
 
-## 技术栈
+### CLI 命令
 
-| 层 | 技术 |
-|----|------|
-| 后端 | Node.js, Hono, TypeScript |
-| 前端 | Svelte 5 (runes), Vite |
-| AI | Claude Code CLI（子进程 stream-json） |
-| 图片/视频生成 | 即梦 AI API（火山引擎） |
-| 视频编辑 | FFmpeg |
-| 实时通信 | WebSocket |
-| 主题 | Glass Noir 深色主题 |
+```bash
+autoviral start [--foreground]     # 启动服务
+autoviral stop                     # 停止服务
+autoviral dashboard                # 打开浏览器
+autoviral config get [key]         # 查看配置
+autoviral config set <key> <value> # 修改配置
+```
+
+---
 
 ## License
 
