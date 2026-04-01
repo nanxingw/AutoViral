@@ -193,10 +193,11 @@
     </div>
     <button
       class="topbar-action"
-      aria-label="Settings"
+      aria-label="My Assets"
       onclick={() => { showSettings = !showSettings; }}
     >
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>{tt("settingsTitle")}</span>
     </button>
   </header>
 
@@ -229,35 +230,23 @@
       </div>
 
       <div class="drawer-body">
-        <div class="field-group">
-          <span class="field-label-upper">{tt("languageSetting")}</span>
-          <div class="lang-row">
-            <span class="lang-opt" class:active={lang === "en"}>EN</span>
+        <AssetLibrary />
+
+        <div class="drawer-footer">
+          <div class="switch-row">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            <button class="switch" class:on={theme === "dark"} onclick={toggleTheme}>
+              <span class="switch-thumb"></span>
+            </button>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <span class="switch-divider"></span>
+            <span class="switch-label">EN</span>
             <button class="switch" class:on={lang === "zh"} onclick={toggleLanguage}>
               <span class="switch-thumb"></span>
             </button>
-            <span class="lang-opt" class:active={lang === "zh"}>{tt("langZh")}</span>
+            <span class="switch-label">中</span>
           </div>
         </div>
-
-        <div class="field-group">
-          <span class="field-label-upper">{tt("themeSetting")}</span>
-          <button class="field-btn" onclick={toggleTheme}>
-            {#if theme === "dark"}
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-              {tt("darkTheme")}
-            {:else}
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-              {tt("lightTheme")}
-            {/if}
-          </button>
-        </div>
-
-        <div class="field-group">
-          <span class="field-label-upper">{lang === "zh" ? "我的素材" : "My Assets"}</span>
-          <AssetLibrary />
-        </div>
-
       </div>
     </aside>
   {/if}
@@ -500,12 +489,16 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
+    gap: 0.35rem;
     height: 32px;
+    padding: 0 0.5rem;
     border: 1px solid transparent;
     border-radius: 4px;
     background: none;
     color: var(--text-muted);
+    font-size: var(--size-sm, 0.8rem);
+    font-weight: 500;
+    white-space: nowrap;
     cursor: pointer;
     transition: all var(--transition-fast);
   }
@@ -598,6 +591,36 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+  }
+
+  .drawer-footer {
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.45rem;
+  }
+
+  .switch-label {
+    font-size: var(--size-xs, 0.7rem);
+    font-weight: 500;
+    color: var(--text-dim);
+  }
+
+  .switch-row svg {
+    color: var(--text-dim);
+  }
+
+  .switch-divider {
+    width: 1px;
+    height: 14px;
+    background: var(--border);
+    margin: 0 0.25rem;
   }
 
   .field-group {
