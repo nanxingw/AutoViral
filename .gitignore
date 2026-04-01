@@ -16,3 +16,4 @@ docs/superpowers/
 ..bfg-report/
 .superpowers/
 __pycache__/
+.vite/

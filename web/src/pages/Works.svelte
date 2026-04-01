@@ -3,7 +3,6 @@
   import { t, getLanguage, subscribe } from "../lib/i18n";
   import { fetchWorks, deleteWorkApi, type WorkSummary } from "../lib/api";
   import InterestTags from "../components/InterestTags.svelte";
-  import AssetLibrary from "../components/AssetLibrary.svelte";
 
   let {
     onOpenStudio,
@@ -336,8 +335,6 @@
 </script>
 
 <div class="works-page">
-  <AssetLibrary />
-
   <!-- ═══ Zone 1: Greeting + Viral Ideas ═══ -->
   <div class="hero-zone">
     <p class="hero-text">

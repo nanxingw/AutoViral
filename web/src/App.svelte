@@ -5,6 +5,7 @@
   import Studio from "./pages/Studio.svelte";
   import Works from "./pages/Works.svelte";
   import NewWorkModal from "./components/NewWorkModal.svelte";
+  import AssetLibrary from "./components/AssetLibrary.svelte";
   import { fetchConfig, updateConfig, fetchWorks, createWorkApi, type WorkSummary, type ContentCategory } from "./lib/api";
   import { t, getLanguage, setLanguage, subscribe } from "./lib/i18n";
 
@@ -253,46 +254,10 @@
         </div>
 
         <div class="field-group">
-          <span class="field-label-upper">{tt("researchConfig")}</span>
-          <div class="stack">
-            <label class="field-row">
-              <span class="field-label-sm">{tt("researchInterval")}</span>
-              <select bind:value={interval}>
-                <option value="15m">{tt("minutes15")}</option>
-                <option value="30m">{tt("minutes30")}</option>
-                <option value="1h">{tt("hour1")}</option>
-                <option value="2h">{tt("hours2")}</option>
-                <option value="4h">{tt("hours4")}</option>
-                <option value="8h">{tt("hours8")}</option>
-              </select>
-            </label>
-            <label class="field-row">
-              <span class="field-label-sm">{tt("aiModel")}</span>
-              <select bind:value={model}>
-                <option value="haiku">{tt("claudeHaikuFast")}</option>
-                <option value="sonnet">{tt("claudeSonnetBalanced")}</option>
-                <option value="opus">{tt("claudeOpusCapable")}</option>
-              </select>
-            </label>
-            <div class="field-row">
-              <span class="field-label-sm">{tt("autoResearch")}</span>
-              <button class="switch" class:on={autoRun} onclick={() => autoRun = !autoRun} role="switch" aria-checked={autoRun}>
-                <span class="switch-thumb"></span>
-              </button>
-            </div>
-          </div>
+          <span class="field-label-upper">{lang === "zh" ? "我的素材" : "My Assets"}</span>
+          <AssetLibrary />
         </div>
 
-        {#if settingsMessage}
-          <p class="msg-success">{settingsMessage}</p>
-        {/if}
-
-        <button class="btn-primary full" onclick={handleSaveSettings} disabled={saving}>
-          {#if saving}
-            <svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
-          {/if}
-          {saving ? tt("saving") : tt("saveChanges")}
-        </button>
       </div>
     </aside>
   {/if}
