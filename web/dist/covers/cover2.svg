@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="450" viewBox="0 0 720 450">
+  <defs>
+    <linearGradient id="bg2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#120a1f"/>
+      <stop offset="50%" style="stop-color:#1a0f2e"/>
+      <stop offset="100%" style="stop-color:#0f0818"/>
+    </linearGradient>
+    <linearGradient id="red2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#ff4757"/>
+      <stop offset="100%" style="stop-color:#ff6b81"/>
+    </linearGradient>
+    <linearGradient id="dimline" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#ff4757;stop-opacity:0.6"/>
+      <stop offset="100%" style="stop-color:#ff4757;stop-opacity:0"/>
+    </linearGradient>
+    <filter id="glow2" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="12" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="bigglow2" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="40" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="shadow2">
+      <feDropShadow dx="0" dy="6" stdDeviation="12" flood-color="#ff4757" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="720" height="450" fill="url(#bg2)"/>
+
+  <!-- Ambient blobs -->
+  <ellipse cx="240" cy="220" rx="200" ry="180" fill="#ff4757" opacity="0.04"/>
+  <ellipse cx="550" cy="300" rx="180" ry="160" fill="#ff6b81" opacity="0.03"/>
+
+  <!-- Flatline chart (views = 0) -->
+  <line x1="60" y1="340" x2="660" y2="340" stroke="#fff" stroke-width="0.5" opacity="0.06"/>
+  <line x1="60" y1="280" x2="660" y2="280" stroke="#fff" stroke-width="0.5" opacity="0.04"/>
+  <line x1="60" y1="220" x2="660" y2="220" stroke="#fff" stroke-width="0.5" opacity="0.03"/>
+  <!-- The flatline -->
+  <polyline points="80,330 180,328 280,332 380,330 480,331 580,329 650,330"
+            fill="none" stroke="#ff4757" stroke-width="2.5" opacity="0.5" stroke-linecap="round"/>
+  <!-- Sad flat dot -->
+  <circle cx="650" cy="330" r="4" fill="#ff4757" opacity="0.7"/>
+
+  <!-- Central play button (cracked/broken feel) -->
+  <g transform="translate(260, 120)">
+    <!-- Outer ring -->
+    <circle cx="100" cy="100" r="80" fill="none" stroke="#fff" stroke-width="2" opacity="0.08"/>
+    <circle cx="100" cy="100" r="65" fill="none" stroke="#ff4757" stroke-width="3" opacity="0.25" stroke-dasharray="12 8"/>
+    <!-- Inner dark circle -->
+    <circle cx="100" cy="100" r="52" fill="#1a0f2e" stroke="#ff4757" stroke-width="1.5" opacity="0.5"/>
+    <!-- Play triangle -->
+    <polygon points="85,72 85,128 130,100" fill="#ff4757" opacity="0.6"/>
+    <!-- Crack / X overlay -->
+    <line x1="65" y1="65" x2="135" y2="135" stroke="#ff4757" stroke-width="4" stroke-linecap="round" opacity="0.7"/>
+    <line x1="135" y1="65" x2="65" y2="135" stroke="#ff4757" stroke-width="4" stroke-linecap="round" opacity="0.5"/>
+    <!-- Glow behind -->
+    <circle cx="100" cy="100" r="50" fill="#ff4757" opacity="0.06" filter="url(#bigglow2)"/>
+  </g>
+
+  <!-- Big "0" views counter -->
+  <g transform="translate(480, 100)">
+    <text x="0" y="95" font-family="'SF Pro Display',Arial,sans-serif" font-weight="900" font-size="100" fill="url(#red2)" opacity="0.12" letter-spacing="-4">0</text>
+    <text x="80" y="70" font-family="'SF Pro Text',Arial,sans-serif" font-weight="600" font-size="16" fill="#fff" opacity="0.2" letter-spacing="4">VIEWS</text>
+  </g>
+
+  <!-- Question mark -->
+  <text x="540" y="330" font-family="'SF Pro Display',Arial,sans-serif" font-weight="900" font-size="80" fill="url(#red2)" opacity="0.25" filter="url(#glow2)">?</text>
+
+  <!-- Left side small text labels -->
+  <text x="65" y="372" font-family="'SF Pro Text',Arial,sans-serif" font-weight="600" font-size="11" fill="#fff" opacity="0.15" letter-spacing="2">ANALYTICS</text>
+  <rect x="65" y="380" width="120" height="1" fill="url(#dimline)"/>
+
+  <!-- Notification badges (zero) -->
+  <g transform="translate(80, 60)">
+    <rect width="54" height="24" rx="12" fill="#ff4757" opacity="0.12"/>
+    <text x="27" y="16" font-family="'SF Pro Text',Arial,sans-serif" font-weight="700" font-size="10" fill="#ff4757" text-anchor="middle" opacity="0.6">0 ♥</text>
+  </g>
+  <g transform="translate(145, 60)">
+    <rect width="54" height="24" rx="12" fill="#ff4757" opacity="0.08"/>
+    <text x="27" y="16" font-family="'SF Pro Text',Arial,sans-serif" font-weight="700" font-size="10" fill="#ff4757" text-anchor="middle" opacity="0.4">0 💬</text>
+  </g>
+
+  <!-- Bottom accent -->
+  <rect x="0" y="442" width="720" height="8" fill="url(#red2)" opacity="0.5"/>
+  <rect x="0" y="442" width="720" height="8" fill="#ff4757" opacity="0.08" filter="url(#bigglow2)"/>
+</svg>
