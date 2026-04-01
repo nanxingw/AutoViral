@@ -14,9 +14,9 @@ const SUBMIT_ACTION = 'CVSync2AsyncSubmitTask'
 const QUERY_ACTION = 'CVSync2AsyncGetResult'
 
 const IMAGE_REQ_KEY = 'jimeng_t2i_v40'
-// Video 3.0 Pro uses a unified req_key for both T2V and I2V
-const VIDEO_T2V_REQ_KEY = 'jimeng_ti2v_v30_pro'
-const VIDEO_I2V_REQ_KEY = 'jimeng_ti2v_v30_pro'
+// Video 3.0 Pro req_keys (new API format with req_json wrapper)
+const VIDEO_T2V_REQ_KEY = 'ImageGenerationTextToVideo'
+const VIDEO_I2V_REQ_KEY = 'ImageGenerationImageToVideo'
 
 const POLL_INTERVAL_MS = 2000
 const POLL_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
@@ -262,43 +262,34 @@ export class JimengProvider implements GenerateProvider {
       const isImageToVideo = !!opts.firstFrame
       const reqKey = isImageToVideo ? VIDEO_I2V_REQ_KEY : VIDEO_T2V_REQ_KEY
 
-      const payload: Record<string, unknown> = {
+      // Build req_json inner object per 3.0 Pro API spec
+      const reqJson: Record<string, unknown> = {
         req_key: reqKey,
         prompt,
-        return_url: true,
       }
 
-      if (opts.firstFrame) {
-        // If firstFrame looks like a URL, use image_urls; otherwise treat as base64
-        if (opts.firstFrame.startsWith('http://') || opts.firstFrame.startsWith('https://')) {
-          payload.image_urls = [opts.firstFrame]
-        } else {
-          payload.binary_data_base64 = [opts.firstFrame]
-        }
+      if (isImageToVideo && opts.firstFrame) {
+        reqJson.image_url = opts.firstFrame
       }
-      if (opts.lastFrame) {
-        if (opts.lastFrame.startsWith('http://') || opts.lastFrame.startsWith('https://')) {
-          // For first+last frame mode, image_urls takes [firstFrame, lastFrame]
-          if (payload.image_urls) {
-            (payload.image_urls as string[]).push(opts.lastFrame)
-          } else {
-            payload.image_urls = [opts.lastFrame]
-          }
-        } else {
-          payload.binary_data_base64 = payload.binary_data_base64 ?? []
-          ;(payload.binary_data_base64 as string[]).push(opts.lastFrame)
-        }
-      }
+
+      // Map resolution/aspect ratio (e.g. "16:9", "9:16", "1:1")
       if (opts.resolution) {
-        // Map resolution string to aspect_ratio format expected by API
-        payload.aspect_ratio = opts.resolution
+        reqJson.aspect_ratio = opts.resolution
+      } else {
+        reqJson.aspect_ratio = '9:16' // default vertical for Douyin/XHS
+      }
+
+      // Wrap in req_json string as the API expects
+      const payload: Record<string, unknown> = {
+        req_key: reqKey,
+        req_json: JSON.stringify(reqJson),
       }
 
       const result = await submitAndPoll(this.accessKey, this.secretKey, payload)
 
-      // Extract video URL from result (different API versions use different field names)
-      const videoUrl = result.data?.video_urls?.[0]
-        ?? result.data?.video_url
+      // Extract video URL from result
+      const videoUrl = result.data?.video_url
+        ?? result.data?.video_urls?.[0]
         ?? result.data?.resp_data?.[0]?.video_url
 
       if (!videoUrl) {
