@@ -392,6 +392,25 @@ apiRoutes.post("/api/generate/video", async (c) => {
   }
 });
 
+// POST /api/generate/lip-sync
+apiRoutes.post("/api/generate/lip-sync", async (c) => {
+  const body = await c.req.json();
+  const { workId, videoUrl, audioUrl, filename, provider: providerName } = body;
+  if (!workId || !videoUrl || !audioUrl || !filename) {
+    return c.json({ success: false, error: "Missing required fields (workId, videoUrl, audioUrl, filename)", code: "INVALID_PARAMS" }, 400);
+  }
+  const provider = providerName ? getProvider(providerName) : getProvider("jimeng");
+  if (!provider?.supportsLipSync || !provider.lipSync) {
+    return c.json({ success: false, error: "No lip-sync provider available (requires Jimeng)", code: "INVALID_PARAMS" }, 400);
+  }
+  try {
+    const result = await provider.lipSync({ videoUrl, audioUrl, workId, filename });
+    return c.json(result);
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+  }
+});
+
 // GET /api/generate/providers
 apiRoutes.get("/api/generate/providers", (c) => c.json(listProviders()));
 
@@ -782,15 +801,66 @@ apiRoutes.post("/api/works/:id/session", async (c) => {
     const work = await getWork(id);
     if (!work) return c.json({ error: "Work not found" }, 404);
 
+    // Detect existing assets for skip awareness
+    const sessionAssets = await listAssets(id);
+    const sessionHasClips = sessionAssets.some(a => a.includes("clips/") && (a.endsWith(".mp4") || a.endsWith(".mov")));
+    const sessionHasFrames = sessionAssets.some(a => a.includes("frames/") && (a.endsWith(".png") || a.endsWith(".jpg")));
+    const sessionHasImages = sessionAssets.some(a => a.includes("images/") && (a.endsWith(".png") || a.endsWith(".jpg")));
+    const sessionHasAssets = sessionHasClips || sessionHasFrames || sessionHasImages;
+    const sessionHasDirection = !!(work.topicHint && work.topicHint.length > 50);
+
+    // Auto-skip steps that are already covered by user-provided context
+    const stepEntries = Object.entries(work.pipeline);
+    let pipelineChanged = false;
+    for (const [key, s] of stepEntries) {
+      if (s.status !== "pending" && s.status !== "active") continue;
+      let canAutoSkip = false;
+      if (key === "research" && sessionHasDirection) canAutoSkip = true;
+      if (key === "plan" && sessionHasDirection && sessionHasAssets) canAutoSkip = true;
+      if (key === "material-search" && sessionHasClips) canAutoSkip = true;
+      if (key === "assets" && sessionHasImages) canAutoSkip = true;
+      if (canAutoSkip) {
+        s.status = "skipped";
+        s.completedAt = new Date().toISOString();
+        s.note = "Auto-skipped: user provided sufficient context";
+        pipelineChanged = true;
+      } else {
+        break; // Stop at the first step that can't be skipped
+      }
+    }
+    if (pipelineChanged) {
+      // Activate the next pending step
+      const nextPending = stepEntries.find(([, s]) => s.status === "pending");
+      if (nextPending) {
+        nextPending[1].status = "active";
+        nextPending[1].startedAt = new Date().toISOString();
+      }
+      await storeUpdateWork(id, { pipeline: work.pipeline });
+    }
+
     const steps = Object.entries(work.pipeline);
     const pendingStep = steps.find(([, s]) => s.status === "pending" || s.status === "active");
     const stepName = pendingStep ? pendingStep[1].name : steps[0]?.[1]?.name ?? "创作";
+
+    // Build skip context
+    const skipContext = (sessionHasAssets || sessionHasDirection) ? [
+      ``,
+      `NOTE: The user has already provided ${[
+        sessionHasClips ? "video clips" : "",
+        sessionHasFrames ? "frame images" : "",
+        sessionHasImages ? "content images" : "",
+        sessionHasDirection ? "detailed creative direction in the topic hint" : "",
+      ].filter(Boolean).join(", ")}.`,
+      `Use the user's direction as-is — do NOT propose alternatives or redo their creative decisions.`,
+      `Proceed directly with what the user described.`,
+    ] : [];
 
     const isEn = work.language === "en";
     const prompt = isEn ? [
       `You are a content creation assistant. You are helping the user create: "${work.title}" (type: ${work.type}).`,
       `Target platforms: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}.`,
       work.topicHint ? `Topic direction: ${work.topicHint}` : "",
+      ...skipContext,
       ``,
       `Current step: "${stepName}".`,
       `First confirm with the user: briefly explain what you'll do in this step, ask if they have specific directions or requirements, then wait for confirmation before starting.`,
@@ -801,6 +871,7 @@ apiRoutes.post("/api/works/:id/session", async (c) => {
       `你是一个内容创作助手。你正在帮助用户创作: "${work.title}" (类型: ${work.type})。`,
       `目标平台: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}。`,
       work.topicHint ? `选题方向: ${work.topicHint}` : "",
+      ...skipContext,
       ``,
       `当前步骤: "${stepName}"。`,
       `请先向用户确认：简要说明这个步骤你将做什么，询问用户是否有特定方向或要求，等用户确认后再开始工作。`,
@@ -852,14 +923,54 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
     const pipelineStep = work.pipeline[step];
     if (!pipelineStep) return c.json({ error: `Unknown pipeline step: ${step}` }, 404);
 
-    // Check prerequisites: all preceding steps must be done/skipped
+    // Detect what the user has already provided
+    const assets = await listAssets(id);
+    const hasClips = assets.some(a => a.includes("clips/") && (a.endsWith(".mp4") || a.endsWith(".mov")));
+    const hasFrames = assets.some(a => a.includes("frames/") && (a.endsWith(".png") || a.endsWith(".jpg")));
+    const hasImages = assets.some(a => a.includes("images/") && (a.endsWith(".png") || a.endsWith(".jpg")));
+    const hasNarration = assets.some(a => a.includes("narration"));
+    const hasMusic = assets.some(a => a.includes("music/") || a.includes("bgm"));
+    const hasAssets = hasClips || hasFrames || hasImages;
+    const hasDetailedDirection = !!(work.topicHint && work.topicHint.length > 50);
+    const hasTitle = !!(work.title && work.title.length > 10);
+
+    // Smart skip: auto-skip preceding steps when user already provided enough context
     const stepKeys = Object.keys(work.pipeline);
     const stepIdx = stepKeys.indexOf(step);
+    let skippedSteps: string[] = [];
     for (let i = 0; i < stepIdx; i++) {
       const prev = work.pipeline[stepKeys[i]];
       if (prev.status !== "done" && prev.status !== "skipped") {
-        return c.json({ error: `Previous step "${prev.name}" is not completed` }, 400);
+        // Determine if this step can be auto-skipped
+        const prevKey = stepKeys[i];
+        let canSkip = false;
+        if (prevKey === "research" && (hasDetailedDirection || hasAssets)) {
+          // User already has a clear direction or provided assets — skip research
+          canSkip = true;
+        } else if (prevKey === "plan" && hasAssets && hasDetailedDirection) {
+          // User provided assets and detailed direction — skip planning
+          canSkip = true;
+        } else if (prevKey === "material-search" && hasClips) {
+          // User already has video clips — skip material search
+          canSkip = true;
+        } else if (prevKey === "assets" && hasImages) {
+          // User already provided images — skip image generation
+          canSkip = true;
+        }
+
+        if (canSkip) {
+          prev.status = "skipped";
+          prev.completedAt = new Date().toISOString();
+          prev.note = "Auto-skipped: user provided sufficient context/assets";
+          skippedSteps.push(prevKey);
+        } else {
+          return c.json({ error: `Previous step "${prev.name}" is not completed` }, 400);
+        }
       }
+    }
+    // Persist any auto-skipped steps
+    if (skippedSteps.length > 0) {
+      await storeUpdateWork(id, { pipeline: work.pipeline });
     }
 
     const isEn = work.language === "en";
@@ -876,6 +987,34 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
         ``,
       ] : []),
     ];
+
+    // Inject context about existing assets and skipped steps
+    if (hasAssets || skippedSteps.length > 0) {
+      const assetSummary: string[] = [];
+      if (hasClips) assetSummary.push("video clips");
+      if (hasFrames) assetSummary.push("frame images");
+      if (hasImages) assetSummary.push("content images");
+      if (hasNarration) assetSummary.push("narration audio");
+      if (hasMusic) assetSummary.push("background music");
+      promptParts.push(
+        `## EXISTING CONTEXT`,
+        ``,
+        `The user has already provided: ${assetSummary.join(", ")}.`,
+        `Available assets: ${assets.filter(a => !a.includes("_sadtalker_tmp") && !a.includes(".mat") && !a.includes(".txt")).join(", ")}.`,
+        skippedSteps.length > 0
+          ? `Steps auto-skipped because user provided sufficient context: ${skippedSteps.join(", ")}.`
+          : "",
+        ``,
+        `**IMPORTANT:** The user already has a clear direction and/or assets. Do NOT redo work that the user has already provided.`,
+        hasDetailedDirection
+          ? `The user's topic hint contains detailed direction — use it as the creative brief. Do not contradict or reinterpret it.`
+          : "",
+        hasClips
+          ? `Video clips already exist — use them directly instead of generating new ones, unless the user asks otherwise.`
+          : "",
+        ``,
+      );
+    }
 
     if (step === "material-search" && work.videoSearchQuery) {
       promptParts.push(
@@ -913,6 +1052,31 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
         `IMPORTANT:`,
         `- Video files MUST have audio. Always use yt-dlp with audio merging, never plain curl/wget.`,
         `- Files must be actually downloaded and saved as assets so the inline player can play them.`,
+      );
+    } else if (step === "research" && hasDetailedDirection) {
+      // User already has detailed direction — fast-track research
+      promptParts.push(
+        `Execute the "${pipelineStep.name}" step.`,
+        ``,
+        `## FAST-TRACK: User has already provided detailed creative direction`,
+        ``,
+        `The user's topic hint already contains a clear, detailed description of what they want to create:`,
+        `"${work.topicHint}"`,
+        ``,
+        `**Do NOT generate 3 alternative proposals.** The user already knows what they want.`,
+        `Instead:`,
+        `1. Briefly confirm the direction with the user — summarize what you understand from their description`,
+        `2. If the direction is clear enough, write the research output (a single content brief based on their direction) and save it`,
+        `3. Mark this step as done and advance to the next step:`,
+        `   \`curl -X POST http://localhost:3271/api/works/${work.id}/pipeline/advance -H "Content-Type: application/json" -d '{"completedStep":"research","nextStep":"plan"}'\``,
+        ``,
+        `The research output should be a single, focused brief that captures:`,
+        `- The core emotion/hook`,
+        `- The narrative angle (first-person, coach, etc.)`,
+        `- The target audience reaction`,
+        `- Key talking points or content beats`,
+        ``,
+        `Do NOT search for trending topics or propose alternative directions. The user has already decided.`,
       );
     } else if (step === "research" && work.contentCategory && work.contentCategory !== "comedy") {
       const emotionEffect: Record<string, string> = {
@@ -1061,40 +1225,53 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
       );
       if (step === "assembly" && work.type === "short-video") {
         // Narration voice generation with edge-tts
-        const voiceConfig = isEn
-          ? { voice: "en-US-AndrewNeural", label: "male English voice (en-US-AndrewNeural)", lang: "English" }
-          : { voice: "zh-CN-YunxiNeural", label: "男声中文旁白 (zh-CN-YunxiNeural)", lang: "中文" };
         promptParts.push(
           ``,
           `## REQUIRED: Generate Narration Audio`,
           ``,
           `Before assembling the final video, you MUST generate a narration voiceover audio file.`,
           ``,
-          `**Voice selection:** You will use a **${voiceConfig.label}** for this narration.`,
-          `Before starting, tell the user in the chat: "${isEn
-            ? `I'll generate the narration using a ${voiceConfig.label}. Let me know if you'd prefer a different voice (e.g. female, different accent) before I proceed.`
-            : `我将使用${voiceConfig.label}来生成旁白。如果你希望换一种声音（比如女声、不同口音等），请在我开始前告诉我。`}"`,
-          ``,
-          `**How to generate:**`,
-          `Use the \`edge-tts\` command to convert the narration script to audio:`,
+          `**Step 0 — Detect person gender from video/image assets (MUST DO FIRST):**`,
+          `Before selecting a voice, you MUST identify the gender of the person appearing in the video clips or frame images.`,
+          `Extract a frame from the main video clip and examine it:`,
           `\`\`\`bash`,
-          `edge-tts --text "YOUR NARRATION TEXT HERE" --voice ${voiceConfig.voice} --write-media <work_dir>/assets/clips/narration.mp3`,
+          `ffmpeg -i <clip_file> -ss 00:00:01 -frames:v 1 -y /tmp/gender_check.png`,
           `\`\`\``,
-          ``,
-          `**Voice options (if user requests a change):**`,
+          `Look at the extracted frame to determine if the person is male or female. Then select a matching voice:`,
           isEn ? [
-            `- Male English: en-US-AndrewNeural, en-US-GuyNeural, en-GB-RyanNeural`,
-            `- Female English: en-US-JennyNeural, en-US-AriaNeural, en-GB-SoniaNeural`,
+            `- If female: use en-US-JennyNeural (confident female English voice)`,
+            `- If male: use en-US-AndrewNeural (confident male English voice)`,
+            `- Other female options: en-US-AriaNeural, en-GB-SoniaNeural`,
+            `- Other male options: en-US-GuyNeural, en-GB-RyanNeural`,
           ].join("\n") : [
-            `- 男声中文: zh-CN-YunxiNeural, zh-CN-YunyangNeural`,
-            `- 女声中文: zh-CN-XiaoxiaoNeural, zh-CN-XiaohanNeural`,
+            `- 如果是女性: 使用 zh-CN-XiaoxiaoNeural（自信女声）`,
+            `- 如果是男性: 使用 zh-CN-YunxiNeural（自信男声）`,
+            `- 其他女声: zh-CN-XiaohanNeural`,
+            `- 其他男声: zh-CN-YunyangNeural`,
           ].join("\n"),
           ``,
+          `**Then tell the user your detection result and chosen voice, and ask for confirmation before proceeding.** For example:`,
+          `"${isEn
+            ? `I can see the person in the video is female, so I'll use a female English voice (en-US-JennyNeural) for the narration. Does that work for you?`
+            : `视频中的人物是女性，我将使用女声中文旁白（zh-CN-XiaoxiaoNeural）。可以吗？`}"`,
+          ``,
+          `**How to generate (after user confirms):**`,
+          `Use the \`edge-tts\` command to convert the narration script to audio:`,
+          `\`\`\`bash`,
+          `edge-tts --text "YOUR NARRATION TEXT HERE" --voice <selected_voice> --write-media <work_dir>/assets/clips/narration.mp3`,
+          `\`\`\``,
+          ``,
           `**Steps:**`,
-          `1. Write the narration script based on the content plan`,
-          `2. Tell the user the voice you'll use and ask for confirmation`,
-          `3. After confirmation (or immediately if user says to proceed), run edge-tts to generate the audio file`,
-          `4. Merge the narration audio with the video clips using ffmpeg`,
+          `1. Extract a frame from the main video clip and detect the person's gender`,
+          `2. Select a matching voice and tell the user your choice — ask for confirmation`,
+          `3. Write the narration script based on the content plan`,
+          `4. After confirmation, run edge-tts to generate the audio file`,
+          `4. If the content plan uses talking-head/口播 style (marked as 口播（一镜到底）):`,
+          `   - The person video clip should already exist from asset-generation (no lip-sync applied yet)`,
+          `   - Call POST /api/generate/lip-sync with the person video URL and narration audio URL to generate lip-synced video`,
+          `   - The lip-synced video replaces the original person clip as the main footage`,
+          `   - Then overlay per-sentence subtitles at the bottom (synced to narration timing) + BGM`,
+          `5. For non-口播 style: merge clips + narration audio + subtitles + BGM using ffmpeg`,
           ``,
         );
         // Background music generation with Lyria
@@ -1510,11 +1687,11 @@ apiRoutes.post("/api/works/:id/pipeline/advance", async (c) => {
               }
               await storeUpdateWork(id, { pipeline: freshWork.pipeline });
 
-              wsBridge.broadcastToBrowsers(id, {
+              wsBridge?.broadcastToBrowsers(id, {
                 event: "eval_complete",
                 data: { workId: id, step: completedStep, result: evalResult },
               });
-              wsBridge.broadcastToBrowsers(id, {
+              wsBridge?.broadcastToBrowsers(id, {
                 event: "pipeline_updated",
                 data: { workId: id, pipeline: freshWork.pipeline, title: freshWork.title },
               });
@@ -1529,7 +1706,7 @@ apiRoutes.post("/api/works/:id/pipeline/advance", async (c) => {
                 freshWork.pipeline[nextStep].startedAt = new Date().toISOString();
               }
               await storeUpdateWork(id, { pipeline: freshWork.pipeline });
-              wsBridge.broadcastToBrowsers(id, {
+              wsBridge?.broadcastToBrowsers(id, {
                 event: "pipeline_updated",
                 data: { workId: id, pipeline: freshWork.pipeline },
               });
