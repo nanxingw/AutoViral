@@ -17,11 +17,13 @@ import { WebSocketServer, WebSocket } from "ws";
 import yaml from "js-yaml";
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
+import { appendFile } from "node:fs/promises";
 import { logBridge, logBridgeDebug } from "./logger.js";
 import { loadConfig, dataDir } from "./config.js";
 import { getWork, updateWork, saveStepHistory, loadStepHistory, saveWorkChat, loadWorkChat, type Work, type PipelineStep, type EvalResult } from "./work-store.js";
 import { listSharedAssets } from "./shared-assets.js";
 import { MemoryClient } from "./memory.js";
+import { syncMessage } from "./memory-sync.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -105,6 +107,16 @@ export class WsBridge {
   }
 
   /**
+   * Append a single chat block to the JSONL log on disk.
+   * Fire-and-forget — write failure does not block the main flow.
+   */
+  private appendToChatLog(workId: string, block: ChatBlock): void {
+    if (workId.startsWith("trends_")) return;
+    const chatFile = join(dataDir, "works", workId, "chat.jsonl");
+    appendFile(chatFile, JSON.stringify(block) + "\n", "utf-8").catch(() => {});
+  }
+
+  /**
    * Build a system prompt with full context for a given work.
    */
   private async buildSystemPrompt(work: Work): Promise<string> {
@@ -156,7 +168,16 @@ export class WsBridge {
 
     const platforms = work.platforms.join(", ");
 
-    return `你是AutoViral创作助手，正在帮用户创建一个${work.type}作品。
+    return `## 系统第一原则：质量优先
+
+- 宁可不交付，不可降质交付。如果所有路径都会导致不可接受的质量损失，停下来告知用户，而不是静默降质出一个"勉强能用"的结果
+- 降级必须最小让步：受阻时逐级尝试替代方案，每一级都优先保住对最终内容质量影响最大的环节
+- 降质决策必须透明：换模型、换生成方式、跳过步骤等任何涉及质量降级的决策，必须告知用户并获得确认，不可静默执行
+- 质量检测前置：批量生成前做样本测试，执行前检测环境能力，把问题拦在源头而非事后补救
+
+---
+
+你是AutoViral创作助手，正在帮用户创建一个${work.type}作品。
 目标平台：${platforms}
 当前阶段：${currentStep}
 
@@ -181,8 +202,18 @@ export class WsBridge {
 - 生图：脚本工具 python3 ~/.claude/skills/asset-generation/scripts/openrouter_generate.py 或 jimeng_generate.py（详见 asset-generation skill）
 - 生视频：调用 curl http://localhost:${port}/api/generate/video 或使用即梦脚本
 - 合成：使用ffmpeg命令剪辑视频（拼接片段+字幕+配乐+转场）
+- 字幕烧录：**必须**使用 python3 ~/.claude/skills/content-assembly/scripts/subtitle_burn.py（禁止自行用 ffmpeg drawtext 或手写方案）
 - 公共素材：通过 curl http://localhost:${port}/api/shared-assets 查看可用素材
 - 流水线管理：调用 curl -X POST http://localhost:${port}/api/works/${work.id}/pipeline/advance 更新流水线状态
+
+## 受阻降级策略
+
+当你在执行过程中遇到阻碍时，阅读 ~/.claude/skills/asset-generation/modules/fallback-strategy.md 获取完整的降级策略指导。核心原则：
+- **质量优先**：宁可告知用户不可行，不可静默降质
+- **最小让步**：逐级尝试，优先保住对最终内容质量影响最大的环节
+- **透明决策**：涉及质量降级的决策必须告知用户
+- **前置检测**：批量执行前先做样本测试和环境检测
+- **首帧驱动**：视频生成优先使用 image2video（保留首帧控制力），text2video 仅作为降级方案
 
 ## 可用数据源
 
@@ -242,12 +273,29 @@ ${memoryContext}
     this.sessions.set(workId, session);
 
     // Load persisted chat history (survives server restart)
+    // Try JSONL first (new format), fall back to JSON (legacy)
     try {
-      const existing = await loadWorkChat(session.workId);
-      if ((existing as any)?.blocks && Array.isArray((existing as any).blocks)) {
-        session.messageHistory = (existing as any).blocks;
+      const jsonlPath = join(dataDir, "works", session.workId, "chat.jsonl");
+      const raw = await readFile(jsonlPath, "utf-8");
+      const blocks: ChatBlock[] = [];
+      for (const line of raw.split("\n")) {
+        if (!line.trim()) continue;
+        try { blocks.push(JSON.parse(line)); } catch { /* skip malformed */ }
       }
-    } catch { /* ignore */ }
+      if (blocks.length > 0) session.messageHistory = blocks;
+    } catch {
+      // No JSONL — try legacy JSON
+      try {
+        const existing = await loadWorkChat(session.workId);
+        if ((existing as any)?.blocks && Array.isArray((existing as any).blocks)) {
+          session.messageHistory = (existing as any).blocks;
+          // Migrate: write as JSONL for future reads
+          const jsonlPath = join(dataDir, "works", session.workId, "chat.jsonl");
+          const jsonlContent = (existing as any).blocks.map((b: ChatBlock) => JSON.stringify(b)).join("\n") + "\n";
+          writeFile(jsonlPath, jsonlContent, "utf-8").catch(() => {});
+        }
+      } catch { /* ignore */ }
+    }
 
     // Load persisted cliSessionId from work.yaml (survives server restart)
     let savedSessionId: string | undefined;
@@ -331,11 +379,24 @@ ${memoryContext}
     const session = this.sessions.get(workId);
     if (!session) return false;
 
-    session.messageHistory.push({
+    const userBlock: ChatBlock = {
       type: "user",
       text,
       timestamp: new Date().toISOString(),
-    });
+    };
+    session.messageHistory.push(userBlock);
+    this.appendToChatLog(workId, userBlock);
+
+    // Real-time memory sync — user message
+    if (!workId.startsWith("trends_")) {
+      getWork(workId).then(w => {
+        if (!w) return;
+        const activeStep = Object.entries(w.pipeline).find(([, s]) => s.status === "active");
+        if (activeStep) {
+          syncMessage(workId, w.title, activeStep[0], "user", text).catch(() => {});
+        }
+      }).catch(() => {});
+    }
 
     // If CLI is still running (shouldn't normally be, but just in case)
     if (session.cliProcess) {
@@ -615,7 +676,9 @@ ${memoryContext}
                 }
                 turnText += block.text as string;
                 if (!session.workId.startsWith("trends_")) {
-                  session.messageHistory.push({ type: "text", text: block.text as string, timestamp: new Date().toISOString() });
+                  const textBlock: ChatBlock = { type: "text", text: block.text as string, timestamp: new Date().toISOString() };
+                  session.messageHistory.push(textBlock);
+                  this.appendToChatLog(session.workId, textBlock);
                 }
                 this.broadcastToBrowsers(session.workId, {
                   event: "assistant_text",
@@ -623,7 +686,9 @@ ${memoryContext}
                 });
               } else if (block.type === "thinking" && block.thinking) {
                 if (!session.workId.startsWith("trends_")) {
-                  session.messageHistory.push({ type: "thinking", text: block.thinking as string, collapsed: true });
+                  const thinkBlock: ChatBlock = { type: "thinking", text: block.thinking as string, collapsed: true };
+                  session.messageHistory.push(thinkBlock);
+                  this.appendToChatLog(session.workId, thinkBlock);
                 }
                 this.broadcastToBrowsers(session.workId, {
                   event: "assistant_thinking",
@@ -631,7 +696,9 @@ ${memoryContext}
                 });
               } else if (block.type === "tool_use") {
                 if (!session.workId.startsWith("trends_")) {
-                  session.messageHistory.push({ type: "tool_use", text: JSON.stringify(block.input), toolName: block.name as string });
+                  const toolBlock: ChatBlock = { type: "tool_use", text: JSON.stringify(block.input), toolName: block.name as string };
+                  session.messageHistory.push(toolBlock);
+                  this.appendToChatLog(session.workId, toolBlock);
                 }
                 this.broadcastToBrowsers(session.workId, {
                   event: "tool_use",
@@ -653,7 +720,9 @@ ${memoryContext}
                     ? block.content
                     : JSON.stringify(block.content);
                   if (!session.workId.startsWith("trends_")) {
-                    session.messageHistory.push({ type: "tool_result", text: resultContent, collapsed: true });
+                    const trBlock: ChatBlock = { type: "tool_result", text: resultContent, collapsed: true };
+                    session.messageHistory.push(trBlock);
+                    this.appendToChatLog(session.workId, trBlock);
                   }
                   this.broadcastToBrowsers(session.workId, {
                     event: "tool_result",
@@ -694,6 +763,16 @@ ${memoryContext}
             // Persist chat to disk (survives server restart)
             if (!session.workId.startsWith("trends_")) {
               saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
+            }
+            // Real-time memory sync — assistant text (complete turn, not fragments)
+            if (!session.workId.startsWith("trends_") && resultText) {
+              getWork(session.workId).then(w => {
+                if (!w) return;
+                const activeStep = Object.entries(w.pipeline).find(([, s]) => s.status === "active");
+                if (activeStep) {
+                  syncMessage(session.workId, w.title, activeStep[0], "assistant", resultText).catch(() => {});
+                }
+              }).catch(() => {});
             }
             // Auto-save step history from backend (doesn't rely on frontend)
             // Only save the NEW messages from this turn (not entire history)
@@ -851,34 +930,25 @@ ${memoryContext}
               for (const block of blocks) {
                 if (block.type === "text" && block.text) {
                   turnText += block.text as string;
-                  session.messageHistory.push({
-                    type: "text",
-                    text: block.text as string,
-                    source: "evaluator",
-                    timestamp: new Date().toISOString(),
-                  });
+                  const eb: ChatBlock = { type: "text", text: block.text as string, source: "evaluator", timestamp: new Date().toISOString() };
+                  session.messageHistory.push(eb);
+                  this.appendToChatLog(session.workId, eb);
                   this.broadcastToBrowsers(session.workId, {
                     event: "assistant_text",
                     data: { workId: session.workId, text: block.text, source: "evaluator" },
                   });
                 } else if (block.type === "thinking" && block.thinking) {
-                  session.messageHistory.push({
-                    type: "thinking",
-                    text: block.thinking as string,
-                    source: "evaluator",
-                    collapsed: true,
-                  });
+                  const eb: ChatBlock = { type: "thinking", text: block.thinking as string, source: "evaluator", collapsed: true };
+                  session.messageHistory.push(eb);
+                  this.appendToChatLog(session.workId, eb);
                   this.broadcastToBrowsers(session.workId, {
                     event: "assistant_thinking",
                     data: { workId: session.workId, text: block.thinking, source: "evaluator" },
                   });
                 } else if (block.type === "tool_use") {
-                  session.messageHistory.push({
-                    type: "tool_use",
-                    text: JSON.stringify(block.input),
-                    toolName: block.name as string,
-                    source: "evaluator",
-                  });
+                  const eb: ChatBlock = { type: "tool_use", text: JSON.stringify(block.input), toolName: block.name as string, source: "evaluator" };
+                  session.messageHistory.push(eb);
+                  this.appendToChatLog(session.workId, eb);
                   this.broadcastToBrowsers(session.workId, {
                     event: "tool_use",
                     data: { workId: session.workId, name: block.name, input: block.input, source: "evaluator" },
@@ -894,12 +964,9 @@ ${memoryContext}
                 if (block.type === "tool_result") {
                   const resultContent = typeof block.content === "string"
                     ? block.content : JSON.stringify(block.content);
-                  session.messageHistory.push({
-                    type: "tool_result",
-                    text: resultContent,
-                    source: "evaluator",
-                    collapsed: true,
-                  });
+                  const eb: ChatBlock = { type: "tool_result", text: resultContent, source: "evaluator", collapsed: true };
+                  session.messageHistory.push(eb);
+                  this.appendToChatLog(session.workId, eb);
                   this.broadcastToBrowsers(session.workId, {
                     event: "tool_result",
                     data: { workId: session.workId, content: resultContent, source: "evaluator" },

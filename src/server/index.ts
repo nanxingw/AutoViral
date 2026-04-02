@@ -13,7 +13,6 @@ import { initProviders } from "../providers/registry.js";
 import { ensureSharedDirs } from "../shared-assets.js";
 import { apiRoutes, setWsBridge } from "./api.js";
 import { WsBridge } from "../ws-bridge.js";
-import { startResearchScheduler } from "../research-scheduler.js";
 import { startAnalyticsCollector } from "../analytics-collector.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -88,8 +87,7 @@ export async function startServer(port: number): Promise<{ server: Server }> {
     socket.destroy();
   });
 
-  // 7. Start research scheduler
-  await startResearchScheduler();
+  // 7. Start background services
   await startAnalyticsCollector();
 
   return { server: httpServer };

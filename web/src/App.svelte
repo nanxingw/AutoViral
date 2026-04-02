@@ -56,21 +56,36 @@
       conflict: "观点分歧/愤怒",
       comedy: "搞笑抽象",
       envy: "向往拥有/羡慕",
+      other: "其他（用户自定义）",
     };
     const typeMap: Record<string, string> = {
       "short-video": "短视频",
       "image-text": "图文",
     };
+
+    const hasInfo = !!(data.topicHint || data.title);
     const parts: string[] = [];
-    parts.push(`开始创作。`);
-    parts.push(`内容形式：${typeMap[data.type] ?? data.type}`);
-    parts.push(`情绪品类：${categoryMap[data.contentCategory] ?? data.contentCategory}`);
-    if (data.title) parts.push(`标题：${data.title}`);
-    if (data.topicHint) parts.push(`创作方向：${data.topicHint}`);
-    if (data.videoSource === "search" && data.videoSearchQuery) parts.push(`视频素材搜索：${data.videoSearchQuery}`);
-    else if (data.videoSource === "ai-generate") parts.push(`视频素材：AI 生成`);
-    else if (data.videoSource === "upload") parts.push(`视频素材：用户上传`);
-    parts.push(`请从话题调研开始执行流水线。`);
+
+    if (hasInfo) {
+      parts.push(`开始创作。`);
+      parts.push(`内容形式：${typeMap[data.type] ?? data.type}`);
+      if (data.contentCategory !== "other") {
+        parts.push(`情绪品类：${categoryMap[data.contentCategory] ?? data.contentCategory}`);
+      }
+      if (data.title) parts.push(`标题：${data.title}`);
+      if (data.topicHint) parts.push(`创作方向：${data.topicHint}`);
+      if (data.videoSource === "search" && data.videoSearchQuery) parts.push(`视频素材搜索：${data.videoSearchQuery}`);
+      else if (data.videoSource === "ai-generate") parts.push(`视频素材：AI 生成`);
+      else if (data.videoSource === "upload") parts.push(`视频素材：用户上传`);
+      parts.push(`请从话题调研开始执行流水线。`);
+    } else {
+      // Insufficient info — let agent ask questions first
+      parts.push(`用户创建了一个新的${typeMap[data.type] ?? data.type}作品，但还没有指定具体创作方向。`);
+      if (data.contentCategory && data.contentCategory !== "other") {
+        parts.push(`情绪品类：${categoryMap[data.contentCategory] ?? data.contentCategory}`);
+      }
+      parts.push(`请先了解用户想做什么内容，再开始调研。`);
+    }
     return parts.join("\n");
   }
 
@@ -82,7 +97,7 @@
       const newWork = await createWorkApi({
         title: deriveTitle(data),
         type: data.type as any,
-        contentCategory: (data.contentCategory || "anxiety") as ContentCategory,
+        contentCategory: (data.contentCategory || "other") as ContentCategory,
         videoSource: data.videoSource || undefined,
         videoSearchQuery: data.videoSearchQuery || undefined,
         platforms: ["douyin", "xiaohongshu"],

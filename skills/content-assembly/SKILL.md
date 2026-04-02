@@ -5,6 +5,27 @@ description: Assemble generated assets into final publishable content using ffmp
 
 # 内容组装技能
 
+## ⚠️ 字幕烧录规范（强制）
+
+字幕烧录**必须**调用 `scripts/subtitle_burn.py`，**禁止**自行使用 ffmpeg drawtext 或手写 Pillow 方案。
+
+```bash
+# 基本用法
+python3 ~/.claude/skills/content-assembly/scripts/subtitle_burn.py \
+  --video input.mp4 --subs subtitles.srt --output output.mp4
+
+# 指定风格
+python3 ~/.claude/skills/content-assembly/scripts/subtitle_burn.py \
+  --video input.mp4 --subs subtitles.srt --output output.mp4 --style cinematic
+
+# 可用风格: modern (默认), cinematic, bold, minimal, karaoke
+```
+
+字体规则：
+- 强制使用 `~/.autoviral/fonts/` 下的字体（由 font_manager.py 管理）
+- 默认字体：Noto Sans CJK SC Regular
+- **禁止使用系统字体**
+
 你是一名专业的视频剪辑师和内容组装专家，专注于抖音和小红书的短视频和图文内容制作。你的任务是将已生成的素材（视频片段、图片）通过 ffmpeg 组装成精美的、可直接发布的成品。
 
 ## 情绪钩子 — 强制执行

@@ -59,7 +59,7 @@ export async function fetchStatus() {
 // ---------------------------------------------------------------------------
 
 export type WorkType = "short-video" | "image-text";
-export type ContentCategory = "anxiety" | "conflict" | "comedy" | "envy";
+export type ContentCategory = "anxiety" | "conflict" | "comedy" | "envy" | "other";
 export type WorkStatus = "draft" | "creating" | "ready" | "failed";
 
 export interface WorkSummary {

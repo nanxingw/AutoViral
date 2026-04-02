@@ -37,6 +37,7 @@
 
   let files: AssetFile[] = $state([]);
   let loading = $state(false);
+  let loadError = $state(false);
   let lightboxSrc = $state("");
   let mdPreview: { name: string; content: string } | null = $state(null);
   let activeSection: "assets" | "output" = $state("output");
@@ -202,9 +203,10 @@
   async function loadAssets() {
     if (!workId) return;
     loading = true;
+    loadError = false;
     try {
       const res = await fetch(`/api/works/${encodeURIComponent(workId)}/assets`);
-      if (!res.ok) { files = []; return; }
+      if (!res.ok) { files = []; loadError = true; return; }
       const data = await res.json();
       files = (data.assets ?? data.files ?? []).map((name: string) => ({
         name: name.split("/").pop() ?? name,
@@ -215,6 +217,7 @@
       }));
     } catch {
       files = [];
+      loadError = true;
     } finally {
       loading = false;
     }
@@ -295,6 +298,14 @@
         <div class="loading-state">
           <div class="mini-loader"></div>
           {tt("loading")}
+        </div>
+      {:else if loadError}
+        <div class="empty-state error-state">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="#e53e3e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.7">
+            <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/>
+          </svg>
+          <span style="color: #e53e3e;">服务器连接失败，请检查后端是否运行</span>
+          <button class="retry-btn" onclick={() => loadAssets()}>重试</button>
         </div>
       {:else if activeSection === "assets"}
         {#if assetFiles.length === 0}
@@ -558,14 +569,17 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    border-left: 1px solid var(--border);
-    background: var(--bg-elevated);
+    background: var(--bg, #f5f2ed);
+    /* subtle dot grid pattern for canvas feel */
+    background-image: radial-gradient(circle, var(--border) 0.5px, transparent 0.5px);
+    background-size: 20px 20px;
   }
 
   /* Header tabs */
   .panel-header {
     border-bottom: 1px solid var(--border);
     padding: 0;
+    background: var(--bg-elevated, #faf8f5);
   }
 
   .tab-row {
@@ -619,7 +633,7 @@
   .panel-body {
     flex: 1;
     overflow-y: auto;
-    padding: 0.5rem 0.75rem;
+    padding: 1rem 1.25rem;
   }
 
   .loading-state {
@@ -654,38 +668,55 @@
     padding: 2.5rem 0;
   }
 
+  .retry-btn {
+    margin-top: 0.5rem;
+    padding: 0.3rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: none;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .retry-btn:hover {
+    border-color: var(--text-dim);
+    color: var(--text);
+  }
+
   .section-label {
     font-size: 0.65rem;
     font-weight: 700;
-    color: var(--text-dim);
+    color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.06em;
-    margin: 0.75rem 0 0.35rem;
+    margin: 1rem 0 0.5rem;
     padding: 0 0.1rem;
   }
 
   /* Image grid */
   .image-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.4rem;
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+    gap: 0.75rem;
   }
 
   .thumb, .thumb-single {
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    background: var(--bg-elevated, #fff);
+    border: none;
+    border-radius: 10px;
     overflow: hidden;
     cursor: pointer;
     padding: 0;
-    transition: all 0.15s ease;
+    transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
     display: flex;
     flex-direction: column;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06), 0 0 0 1px rgba(0, 0, 0, 0.04);
   }
 
   .thumb:hover, .thumb-single:hover {
-    border-color: var(--accent);
-    transform: scale(1.02);
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.06);
   }
 
   .thumb img, .thumb-single img {
@@ -695,7 +726,7 @@
   }
 
   .thumb-single {
-    margin-bottom: 0.4rem;
+    margin-bottom: 0.5rem;
   }
 
   .thumb-single img {
@@ -705,10 +736,11 @@
   .thumb-name {
     font-size: 0.62rem;
     color: var(--text-dim);
-    padding: 0.2rem 0.35rem;
+    padding: 0.25rem 0.4rem;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    background: var(--bg-elevated, #fff);
   }
 
   /* Video */
@@ -718,15 +750,17 @@
 
   .video-wrapper {
     position: relative;
-    border-radius: 8px;
+    border-radius: 12px;
     overflow: hidden;
-    border: 1px solid var(--border);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(0, 0, 0, 0.04);
+    background: #000;
   }
 
   .video-item video,
   .output-showcase video {
     width: 100%;
     display: block;
+    border-radius: 12px;
   }
 
   .file-name {
@@ -946,16 +980,15 @@
     gap: 0.4rem;
   }
   .carousel-viewport {
-    /* Fixed iPhone 14 ratio, full width matching copytext card below */
     width: 100%;
     height: 480px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 12px;
     overflow: hidden;
     background: #000;
     display: flex;
     align-items: center;
     justify-content: center;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1), 0 0 0 1px rgba(0, 0, 0, 0.04);
   }
   .carousel-img {
     display: flex;
@@ -1035,13 +1068,14 @@
 
   /* Copytext card — native app feel */
   .copytext-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1rem 1.1rem;
+    background: var(--bg-elevated, #fff);
+    border: none;
+    border-radius: 12px;
+    padding: 1.1rem 1.25rem;
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05), 0 0 0 1px rgba(0, 0, 0, 0.04);
   }
 
   .ct-title {

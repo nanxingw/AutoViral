@@ -49,6 +49,49 @@
     delta?: Delta;
   }
 
+  // ── Top-level view toggle ──────────────────────────────────────────────────
+  type AnalyticsView = "dashboard" | "memory";
+  let activeView: AnalyticsView = $state("dashboard");
+
+  // ── Memory state ──────────────────────────────────────────────────────────
+  let memStyleProfile: string[] = $state([]);
+  let memLearnedRules: { content: string; category?: string }[] = $state([]);
+  let memSearchQuery = $state("");
+  let memSearchResults: { memory_type: string; relevance: number; content: string; summary?: string }[] = $state([]);
+  let memLoading = $state(false);
+  let memSearching = $state(false);
+
+  async function fetchMemProfile() {
+    memLoading = true;
+    try {
+      const res = await fetch("/api/memory/profile");
+      if (res.ok) {
+        const data = await res.json();
+        memStyleProfile = data.style ?? [];
+        memLearnedRules = data.rules ?? [];
+      }
+    } catch { /* silent */ }
+    finally { memLoading = false; }
+  }
+
+  async function handleMemSearch() {
+    if (!memSearchQuery.trim()) return;
+    memSearching = true;
+    try {
+      const params = new URLSearchParams({ q: memSearchQuery.trim(), method: "hybrid", topK: "10" });
+      const res = await fetch(`/api/memory/search?${params}`);
+      if (res.ok) {
+        const data = await res.json();
+        memSearchResults = data.memories ?? data.profiles ?? [];
+      }
+    } catch { memSearchResults = []; }
+    finally { memSearching = false; }
+  }
+
+  function handleMemKeydown(e: KeyboardEvent) {
+    if (e.key === "Enter") handleMemSearch();
+  }
+
   // ── State ──────────────────────────────────────────────────────────────────
   let loading = $state(true);
   let configured = $state(false);
@@ -178,7 +221,104 @@
 
 <!-- ─────────────────────────────────────────────────────────────────────── -->
 
-{#if loading}
+<!-- ── Top-level view tabs ──────────────────────────────────────────────── -->
+<div class="view-tabs">
+  <button class="view-tab" class:active={activeView === "dashboard"} onclick={() => activeView = "dashboard"}>
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+    数据看板
+  </button>
+  <button class="view-tab" class:active={activeView === "memory"} onclick={() => { activeView = "memory"; if (memStyleProfile.length === 0 && !memLoading) fetchMemProfile(); }}>
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2a7 7 0 0 1 7 7c0 3-2 5.5-4 7.5S12 20 12 22c0-2-1-2.5-3-4.5S5 12 5 9a7 7 0 0 1 7-7z"/></svg>
+    AI 记忆
+  </button>
+</div>
+
+{#if activeView === "memory"}
+  <!-- ── Memory View ──────────────────────────────────────────────────── -->
+  <div class="memory-view">
+    <!-- Style Profile -->
+    <div class="mem-card">
+      <h3 class="mem-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></svg>
+        风格画像
+      </h3>
+      {#if memLoading}
+        <p class="mem-empty">加载中…</p>
+      {:else if memStyleProfile.length === 0}
+        <p class="mem-empty">尚无风格画像，开始创作后 AI 将自动学习你的风格。</p>
+      {:else}
+        <div class="mem-list">
+          {#each memStyleProfile as item}
+            <div class="mem-item">
+              <span class="mem-dot"></span>
+              <span class="mem-text">{item}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+
+    <!-- Learned Rules -->
+    <div class="mem-card">
+      <h3 class="mem-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+        已学习规则
+      </h3>
+      {#if memLoading}
+        <p class="mem-empty">加载中…</p>
+      {:else if memLearnedRules.length === 0}
+        <p class="mem-empty">尚无平台规则。AI 将在调研过程中自动积累平台经验。</p>
+      {:else}
+        <div class="mem-list">
+          {#each memLearnedRules as rule}
+            <div class="mem-item">
+              {#if rule.category}
+                <span class="mem-badge">{rule.category}</span>
+              {/if}
+              <span class="mem-text">{rule.content}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+
+    <!-- Memory Search -->
+    <div class="mem-card">
+      <h3 class="mem-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        记忆搜索
+      </h3>
+      <div class="mem-search-bar">
+        <input
+          type="text"
+          class="mem-search-input"
+          placeholder="搜索历史创作经验…"
+          bind:value={memSearchQuery}
+          onkeydown={handleMemKeydown}
+        />
+        <button class="mem-search-btn" onclick={handleMemSearch} disabled={memSearching}>
+          {memSearching ? "搜索中…" : "搜索"}
+        </button>
+      </div>
+      {#if memSearchResults.length > 0}
+        <div class="mem-results">
+          {#each memSearchResults as result}
+            <div class="mem-result-item">
+              <div class="mem-result-header">
+                <span class="mem-badge">{result.memory_type}</span>
+                <span class="mem-result-score">{Math.round(result.relevance * 100)}%</span>
+              </div>
+              <p class="mem-result-content">{result.summary ?? result.content}</p>
+            </div>
+          {/each}
+        </div>
+      {:else if memSearchQuery && !memSearching}
+        <p class="mem-empty" style="margin-top: 0.5rem">未找到相关记忆。尝试其他关键词。</p>
+      {/if}
+    </div>
+  </div>
+
+{:else if loading}
   <div class="center-state">
     <div class="spinner"></div>
     <span class="hint-text">加载中…</span>
@@ -386,17 +526,17 @@
       </div>
       <div class="strip-sep"></div>
       <div class="strip-item">
-        <span class="strip-val">{fmtNum(creatorData.summary.avg_comment)}</span>
+        <span class="strip-val">{creatorData.summary.avg_comment ? fmtNum(creatorData.summary.avg_comment) : "-"}</span>
         <span class="strip-lbl">均评论</span>
       </div>
       <div class="strip-sep"></div>
       <div class="strip-item">
-        <span class="strip-val">{fmtNum(creatorData.summary.avg_share)}</span>
+        <span class="strip-val">{creatorData.summary.avg_share ? fmtNum(creatorData.summary.avg_share) : "-"}</span>
         <span class="strip-lbl">均分享</span>
       </div>
       <div class="strip-sep"></div>
       <div class="strip-item">
-        <span class="strip-val">{fmtNum(creatorData.summary.avg_collect)}</span>
+        <span class="strip-val">{creatorData.summary.avg_collect ? fmtNum(creatorData.summary.avg_collect) : "-"}</span>
         <span class="strip-lbl">均收藏</span>
       </div>
     </div>
@@ -446,8 +586,8 @@
                   <td class="col-date muted">{fmtDate(work.create_time)}</td>
                   <td class="col-num">{fmtNum(work.play_count)}</td>
                   <td class="col-num">{fmtNum(work.digg_count)}</td>
-                  <td class="col-num">{fmtNum(work.comment_count)}</td>
-                  <td class="col-num">{fmtNum(work.share_count)}</td>
+                  <td class="col-num">{work.comment_count ? fmtNum(work.comment_count) : "-"}</td>
+                  <td class="col-num">{work.share_count ? fmtNum(work.share_count) : "-"}</td>
                   <td class="col-bar">
                     <div class="bar-track">
                       <div
@@ -1272,6 +1412,201 @@
     font-size: 0.82rem;
     color: var(--text-dim);
     padding: 1rem 0;
+    margin: 0;
+  }
+
+  /* ── View Tabs (数据看板 / AI 记忆) ──────────────────────────────────────── */
+  .view-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 1rem;
+    padding: 0.25rem;
+    background: var(--bg-inset);
+    border-radius: 10px;
+    width: fit-content;
+  }
+
+  .view-tab {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    font-size: 0.82rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+
+  .view-tab:hover { color: var(--text); }
+
+  .view-tab.active {
+    background: var(--card-bg);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* ── Memory View ────────────────────────────────────────────────────────── */
+  .memory-view {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+
+  .mem-card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    border-radius: var(--card-radius, 20px);
+    padding: 1.25rem 1.375rem;
+    backdrop-filter: var(--card-blur);
+    -webkit-backdrop-filter: var(--card-blur);
+  }
+
+  .mem-title {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.92rem;
+    font-weight: 700;
+    margin: 0 0 0.875rem;
+    letter-spacing: -0.015em;
+    color: var(--text);
+  }
+
+  .mem-title svg { opacity: 0.85; }
+
+  .mem-empty {
+    font-size: 0.82rem;
+    color: var(--text-dim);
+    font-weight: 500;
+    line-height: 1.6;
+    padding: 0.5rem 0;
+    margin: 0;
+  }
+
+  .mem-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.375rem;
+  }
+
+  .mem-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.625rem;
+    padding: 0.6rem 0.5rem;
+    border-radius: 10px;
+    transition: background 0.15s ease;
+  }
+
+  .mem-item:hover { background: var(--bg-hover); }
+
+  .mem-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+    flex-shrink: 0;
+    margin-top: 0.4rem;
+  }
+
+  .mem-text {
+    font-size: 0.85rem;
+    font-weight: 550;
+    color: var(--text);
+    line-height: 1.5;
+  }
+
+  .mem-badge {
+    font-size: 0.68rem;
+    font-weight: 650;
+    padding: 0.2rem 0.6rem;
+    border-radius: 9999px;
+    background: var(--accent-soft);
+    color: var(--accent);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  .mem-search-bar {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 1rem;
+  }
+
+  .mem-search-input {
+    flex: 1;
+    padding: 0.6rem 0.875rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-inset);
+    color: var(--text);
+    font-size: 0.82rem;
+    font-weight: 500;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.15s ease;
+  }
+
+  .mem-search-input:focus { border-color: var(--accent); }
+  .mem-search-input::placeholder { color: var(--text-dim); }
+
+  .mem-search-btn {
+    padding: 0.6rem 1.125rem;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent-gradient);
+    color: var(--accent-text);
+    font-size: 0.82rem;
+    font-weight: 650;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.15s ease;
+  }
+
+  .mem-search-btn:hover { opacity: 0.9; }
+  .mem-search-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  .mem-results {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .mem-result-item {
+    padding: 0.75rem;
+    border-radius: 10px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border-subtle, var(--border));
+    transition: border-color 0.15s ease;
+  }
+
+  .mem-result-item:hover { border-color: var(--border); }
+
+  .mem-result-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.4rem;
+  }
+
+  .mem-result-score {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--success);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .mem-result-content {
+    font-size: 0.82rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    line-height: 1.55;
     margin: 0;
   }
 </style>

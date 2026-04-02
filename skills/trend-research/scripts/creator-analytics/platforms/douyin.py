@@ -214,7 +214,7 @@ class DouyinCollector(BaseCollector):
 
         total_engagement = avg_digg + avg_comment + avg_share + avg_collect
         engagement_rate = (
-            round(total_engagement / follower_count, 4) if follower_count > 0 else 0
+            round(total_engagement / avg_play, 4) if avg_play > 0 else 0
         )
 
         return {

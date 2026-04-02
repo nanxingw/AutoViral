@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
+import { readFile, writeFile, appendFile, mkdir, readdir } from "node:fs/promises";
 import { spawn, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, extname } from "node:path";
@@ -947,7 +947,57 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
         `- Video files MUST have audio. Always use yt-dlp with audio merging, never plain curl/wget.`,
         `- Files must be actually downloaded and saved as assets so the inline player can play them.`,
       );
-    } else if (step === "research" && work.contentCategory && work.contentCategory !== "comedy") {
+    } else if (step === "research") {
+      // Load user interests and competitors for topic relevance
+      const config = await loadConfig();
+      const userInterests = (config.interests ?? []) as string[];
+      const douyinUrl = (config as any).douyinUrl ?? "";
+      const cat = (work.contentCategory as string) ?? "";
+
+      // --- Info sufficiency check (OPT-1) ---
+      const hasTopicHint = !!(work.topicHint && work.topicHint.trim());
+      const hasTitle = !!(work.title && work.title.trim() && work.title !== "未命名作品" && work.title !== "Untitled");
+      const isOtherCategory = cat === "other" || !cat;
+
+      const sufficiencyCheck = [
+        `## 信息充分性检查（开始调研前必须执行）`,
+        ``,
+        `在开始调研之前，先评估用户提供的信息是否足够：`,
+        hasTopicHint
+          ? `✅ 用户指定了创作方向："${work.topicHint}"，围绕此方向深入调研。`
+          : `⚠️ 用户未指定具体创作方向。请先向用户提 1-2 个问题确认想做什么内容，不要用默认值硬跑。`,
+        hasTitle
+          ? `✅ 作品标题："${work.title}"`
+          : `⚠️ 无明确标题。`,
+        isOtherCategory
+          ? `ℹ️ 用户选择了"其他"类型或未选类型，请在对话中了解用户想做什么类型的内容（叙事/知识/展示/节奏/情绪驱动等），再决定调研方向。`
+          : `ℹ️ 情绪品类：${cat}`,
+        ``,
+        `如果以上信息不足以开始有针对性的调研，先和用户对话确认方向，再执行下面的调研步骤。`,
+        ``,
+      ].join("\n");
+
+      // --- Topic hint priority (BUG-1 / ARCH-3) ---
+      const topicDirective = hasTopicHint
+        ? [
+          `## 创作方向（最高优先级）`,
+          ``,
+          `用户明确指定了创作方向："${work.topicHint}"`,
+          `所有调研内容必须围绕此方向展开。热搜仅用于选标签蹭流量，不影响内容主题。`,
+          ``,
+        ].join("\n")
+        : "";
+
+      // --- Interests as soft reference (ARCH-3 fix) ---
+      const interestClause = userInterests.length > 0
+        ? `\n## 参考领域\n\n用户关注的领域：${userInterests.join("、")}。可以参考这些领域选择角度和标签，但不强制要求内容必须属于这些领域。${hasTopicHint ? "用户指定的创作方向优先级高于参考领域。" : ""}\n`
+        : "";
+
+      const competitorClause = douyinUrl
+        ? `\n用户的竞品账号：${douyinUrl}。选题风格和受众定位可以参考这个账号的方向。\n`
+        : "";
+
+      // --- Emotion-specific content (only for emotion categories, not "other") ---
       const emotionEffect: Record<string, string> = {
         anxiety: "看完之后感到焦虑、危机感、害怕自己落后或错过",
         conflict: "看完之后感到愤怒、不公、想站队、想在评论区吵架",
@@ -970,71 +1020,109 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
           `路线3 隐性阶层信号型：1-5张日常搜图（细节暗示阶层）+ 轻描淡写文案`,
         ].join("\n"),
       };
-      const cat = work.contentCategory as string;
-      // Load user interests and competitors for topic relevance
-      const config = await loadConfig();
-      const userInterests = (config.interests ?? []) as string[];
-      const douyinUrl = (config as any).douyinUrl ?? "";
-      const interestClause = userInterests.length > 0
-        ? `\n## 选题领域\n\n用户关注的领域：${userInterests.join("、")}。选题必须与这些领域相关——"我"的身份、经历、处境要自然地属于这些领域。\n`
-        : "";
-      const competitorClause = douyinUrl
-        ? `\n用户的竞品账号：${douyinUrl}。选题风格和受众定位可以参考这个账号的方向。\n`
-        : "";
-      promptParts.push([
-        `Execute the "${pipelineStep.name}" step.`,
-        ``,
-        `## 你要产出什么`,
-        ``,
-        `3 个完整的图文选题，每个可以直接复制粘贴去小红书/抖音发布。`,
-        interestClause,
-        competitorClause,
-        `## 内容视角：永远是"我"的故事`,
-        ``,
-        `这不是新闻报道。所有内容都是发布者以**第一人称**在聊自己的主观感受、自己的经历、自己的处境。`,
-        ``,
-        `正确示例：`,
-        `- "我今年28，单身，没房没车。我妈说我是废物。"（第一人称，聊自己）`,
-        `- "我老公今天突然送了我一束花，没有任何原因。"（第一人称，聊自己的关系）`,
-        `- "周三下午，一个人坐在阳台上喝咖啡。"（第一人称，聊自己的日常）`,
-        ``,
-        `错误示例（绝对禁止）：`,
-        `- "某地房价暴跌30%，购房者损失惨重"（这是新闻报道，不是个人帖子）`,
-        `- "年轻人就业压力增大，专家建议..."（这是客观分析，不是个人感受）`,
-        `- "据统计，2026年考研人数再创新高"（这是数据引用，不是个人故事）`,
-        ``,
-        `热点话题只用来选标签、蹭流量，内容本身必须是"我"的故事。`,
-        ``,
-        `## 第一步：搜索当前热门标签`,
-        ``,
-        `用 WebSearch 搜索"今日热搜""微博热搜""抖音热点"，找到当前有热度的话题。`,
-        `这些话题只用来选标签（蹭流量），不是用来写内容的。`,
-        ``,
-        `## 第二步：围绕热门话题，构造"我"的故事`,
-        ``,
-        `每个选题的核心是一个虚构但真实感极强的第一人称故事/感受，读完后让观众${emotionEffect[cat] ?? "产生强烈情绪"}。`,
-        ``,
-        `构造方法：`,
-        `1. 给"我"一个身份（年龄、职业、城市、处境）`,
-        `2. 讲"我"的一段具体经历或此刻的感受`,
-        `3. 让读者代入"我"的处境后，自然地${emotionEffect[cat] ?? "产生情绪"}`,
-        ``,
-        `## 3 条路线模板（3 个选题各用一条）`,
-        ``,
-        routeTemplates[cat] ?? "",
-        ``,
-        `## 输出格式：3 个完整选题`,
-        ``,
-        `每个选题包含：`,
-        `1. **蹭的热门话题**：用来选标签的热点`,
-        `2. **路线**：用的哪条路线`,
-        `3. **封面**：文字卡片写出完整文字（≤20字）；搜图类给出关键词`,
-        `4. **标题**：可以直接用的发布标题`,
-        `5. **完整文案**：以"我"的第一人称写的完整成品文案，读起来像一个真人在倾诉自己的经历/感受`,
-        `6. **标签**：5-6 个（从热搜中选）`,
-        ``,
-        `请用户从 3 个中选一个。`,
-      ].join("\n"));
+
+      const isEmotionCategory = ["anxiety", "conflict", "envy"].includes(cat);
+      const isComedy = cat === "comedy";
+
+      if (isComedy) {
+        // Comedy research handled below in the comedy block
+        promptParts.push([
+          `Execute the "${pipelineStep.name}" step.`,
+          ``,
+          sufficiencyCheck,
+          topicDirective,
+          interestClause,
+          competitorClause,
+        ].join("\n"));
+      } else if (isEmotionCategory) {
+        // Emotion-driven research (existing logic, restructured)
+        promptParts.push([
+          `Execute the "${pipelineStep.name}" step.`,
+          ``,
+          sufficiencyCheck,
+          topicDirective,
+          `## 你要产出什么`,
+          ``,
+          `3 个完整的图文选题，每个可以直接复制粘贴去小红书/抖音发布。`,
+          interestClause,
+          competitorClause,
+          `## 内容视角：永远是"我"的故事`,
+          ``,
+          `这不是新闻报道。所有内容都是发布者以**第一人称**在聊自己的主观感受、自己的经历、自己的处境。`,
+          ``,
+          `正确示例：`,
+          `- "我今年28，单身，没房没车。我妈说我是废物。"（第一人称，聊自己）`,
+          `- "我老公今天突然送了我一束花，没有任何原因。"（第一人称，聊自己的关系）`,
+          `- "周三下午，一个人坐在阳台上喝咖啡。"（第一人称，聊自己的日常）`,
+          ``,
+          `错误示例（绝对禁止）：`,
+          `- "某地房价暴跌30%，购房者损失惨重"（这是新闻报道，不是个人帖子）`,
+          `- "年轻人就业压力增大，专家建议..."（这是客观分析，不是个人感受）`,
+          `- "据统计，2026年考研人数再创新高"（这是数据引用，不是个人故事）`,
+          ``,
+          `热点话题只用来选标签、蹭流量，内容本身必须是"我"的故事。`,
+          ``,
+          `## 第一步：搜索当前热门标签`,
+          ``,
+          `用 WebSearch 搜索"今日热搜""微博热搜""抖音热点"，找到当前有热度的话题。`,
+          `这些话题只用来选标签（蹭流量），不是用来写内容的。`,
+          ``,
+          `## 第二步：围绕热门话题，构造"我"的故事`,
+          ``,
+          `每个选题的核心是一个虚构但真实感极强的第一人称故事/感受，读完后让观众${emotionEffect[cat] ?? "产生强烈情绪"}。`,
+          ``,
+          `构造方法：`,
+          `1. 给"我"一个身份（年龄、职业、城市、处境）`,
+          `2. 讲"我"的一段具体经历或此刻的感受`,
+          `3. 让读者代入"我"的处境后，自然地${emotionEffect[cat] ?? "产生情绪"}`,
+          ``,
+          `## 3 条路线模板（3 个选题各用一条）`,
+          ``,
+          routeTemplates[cat] ?? "",
+          ``,
+          `## 输出格式：3 个完整选题`,
+          ``,
+          `每个选题包含：`,
+          `1. **蹭的热门话题**：用来选标签的热点`,
+          `2. **路线**：用的哪条路线`,
+          `3. **封面**：文字卡片写出完整文字（≤20字）；搜图类给出关键词`,
+          `4. **标题**：可以直接用的发布标题`,
+          `5. **完整文案**：以"我"的第一人称写的完整成品文案，读起来像一个真人在倾诉自己的经历/感受`,
+          `6. **标签**：5-6 个（从热搜中选）`,
+          ``,
+          `请用户从 3 个中选一个。`,
+        ].join("\n"));
+      } else {
+        // "other" or unknown category — generic research with topic-driven approach
+        promptParts.push([
+          `Execute the "${pipelineStep.name}" step.`,
+          ``,
+          sufficiencyCheck,
+          topicDirective,
+          `## 你要产出什么`,
+          ``,
+          `针对用户的创作方向，进行深入调研并提出 3 个内容方案。`,
+          interestClause,
+          competitorClause,
+          `## 调研方法`,
+          ``,
+          `1. 用 WebSearch 围绕用户的创作方向搜索相关热点、趋势、优质案例`,
+          `2. 分析目标平台上同类内容的表现（标题风格、封面设计、标签策略）`,
+          `3. 找到可以蹭的热门标签`,
+          ``,
+          `## 输出格式：3 个内容方案`,
+          ``,
+          `每个方案包含：`,
+          `1. **内容定位**：这条内容是什么类型（叙事/知识/展示/情绪驱动/节奏型等）`,
+          `2. **核心卖点**：为什么观众会停下来看、会互动`,
+          `3. **标题**：可直接使用的发布标题`,
+          `4. **内容大纲**：简要描述内容结构`,
+          `5. **参考案例**：调研中发现的类似优质内容`,
+          `6. **标签**：5-6 个平台标签`,
+          ``,
+          `请用户从 3 个中选一个。`,
+        ].join("\n"));
+      }
     } else {
       promptParts.push(
         `Execute the "${pipelineStep.name}" step of the pipeline.`,
@@ -1589,6 +1677,20 @@ apiRoutes.post("/api/works/:id/pipeline/advance", async (c) => {
     if (nextStep && work.pipeline[nextStep]) {
       work.pipeline[nextStep].status = "active";
       work.pipeline[nextStep].startedAt = new Date().toISOString();
+
+      // Persist step_divider to chat.jsonl so it appears when reloading
+      const stepName = work.pipeline[nextStep].name ?? nextStep;
+      const dividerBlock = { type: "step_divider", text: stepName, timestamp: new Date().toISOString() };
+      const chatFile = join(dataDir, "works", id, "chat.jsonl");
+      appendFile(chatFile, JSON.stringify(dividerBlock) + "\n", "utf-8").catch(() => {});
+
+      // Also push to in-memory messageHistory if session exists
+      if (wsBridge) {
+        const session = wsBridge.getSession(id);
+        if (session) {
+          session.messageHistory.push(dividerBlock as any);
+        }
+      }
     }
 
     await storeUpdateWork(id, { pipeline: work.pipeline });

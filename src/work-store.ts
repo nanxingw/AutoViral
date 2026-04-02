@@ -19,7 +19,7 @@ export interface PipelineStep {
   note?: string;
 }
 
-export type ContentCategory = "info" | "beauty" | "comedy";
+export type ContentCategory = "anxiety" | "conflict" | "comedy" | "envy" | "other";
 export type VideoSource = "upload" | "search" | "ai-generate";
 
 export interface Work {

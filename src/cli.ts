@@ -4,7 +4,6 @@ import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { exec, spawn } from "node:child_process";
-import { stopResearchScheduler } from "./research-scheduler.js";
 
 const PID_FILE = join(homedir(), ".autoviral", "daemon.pid");
 const LOG_FILE = join(homedir(), ".autoviral", "daemon.log");
@@ -39,12 +38,30 @@ export function runCLI(): void {
     .command("start")
     .description("Start the AutoViral server")
     .option("--foreground", "Run in foreground (don't daemonize)")
-    .action(async (opts: { foreground?: boolean }) => {
+    .option("--pm2", "Start with pm2 process manager (auto-restart on crash)")
+    .action(async (opts: { foreground?: boolean; pm2?: boolean }) => {
       const existingPid = await readPid();
       if (existingPid && isProcessRunning(existingPid)) {
         console.log(`Server already running (PID ${existingPid})`);
         console.log(`Run 'autocode stop' first, then start again.`);
         return;
+      }
+
+      // pm2 mode: delegate to pm2
+      if (opts.pm2) {
+        try {
+          const { execSync: execSyncPm2 } = await import("node:child_process");
+          execSyncPm2("pm2 --version", { stdio: "ignore" });
+          const configPath = join(process.cwd(), "ecosystem.config.cjs");
+          execSyncPm2(`pm2 start ${configPath}`, { stdio: "inherit" });
+          console.log("AutoViral started with pm2 (auto-restart enabled)");
+          console.log("Use 'pm2 logs autoviral' to view logs");
+          console.log("Use 'pm2 stop autoviral' to stop");
+          return;
+        } catch {
+          console.error("pm2 not found. Install with: npm install -g pm2");
+          console.log("Falling back to normal start...");
+        }
       }
 
       // If not --foreground and not already a spawned daemon, fork to background
@@ -76,13 +93,21 @@ export function runCLI(): void {
         return;
       }
 
+      // Global error handlers — prevent process from crashing on unhandled errors
+      process.on("uncaughtException", (err) => {
+        console.error("[FATAL] Uncaught exception (process kept alive):", err);
+      });
+      process.on("unhandledRejection", (reason) => {
+        console.error("[FATAL] Unhandled rejection (process kept alive):", reason);
+      });
+
       const config = await loadConfig();
       await writeFile(PID_FILE, String(process.pid), "utf-8");
 
       console.log(`Starting AutoViral server (PID ${process.pid})`);
       console.log(`Model: ${config.model}`);
 
-      // Start web server (initializes providers, shared dirs, research scheduler, etc.)
+      // Start web server (initializes providers, shared dirs, etc.)
       const { startServer } = await import("./server/index.js");
       await startServer(config.port);
       console.log(`Dashboard: http://localhost:${config.port}`);
@@ -90,14 +115,14 @@ export function runCLI(): void {
       // Keep process alive
       process.on("SIGTERM", async () => {
         console.log("\nShutting down...");
-        stopResearchScheduler();
+
         try { await unlink(PID_FILE); } catch { /* ignore */ }
         process.exit(0);
       });
 
       process.on("SIGINT", async () => {
         console.log("\nShutting down...");
-        stopResearchScheduler();
+
         try { await unlink(PID_FILE); } catch { /* ignore */ }
         process.exit(0);
       });

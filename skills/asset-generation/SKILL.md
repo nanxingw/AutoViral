@@ -235,16 +235,18 @@ dreamina user_credit
 | `multiframe2video` | 多帧叙事视频（2-20图） | 自动 | 每段0.5-8s | 自动 |
 | `multimodal2video` | 旗舰多模态（图+视频+音频） | seedance2.0 | 4-15s | 720p |
 
+**⚠️ 重要：`image2video` / `frames2video` / `multiframe2video` 不需要 `--ratio`！比例自动从输入图片推断。只有 `text2video` 和 `multimodal2video` 需要 `--ratio`。**
+
 **常用示例：**
 
 ```bash
-# 文生视频（Seedance 2.0，最高画质）
+# 文生视频（Seedance 2.0，最高画质）— 需要 --ratio
 dreamina text2video \
   --prompt="镜头推进，一只橘猫从沙发上跳下来" \
   --duration=5 --ratio=9:16 --model_version=seedance2.0 \
   --poll=120
 
-# 图生视频（首帧驱动，推荐工作流）
+# 图生视频（首帧驱动，推荐工作流）— 不需要 --ratio
 dreamina image2video \
   --image ./frames/frame-01.png \
   --prompt="镜头慢慢推近，人物转头微笑" \

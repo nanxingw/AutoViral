@@ -46,6 +46,8 @@ description: Dreamina CLI 高阶方法论——命令选择决策、模型策略
 | 比例控制 | 6种 | 自动(从图) | 自动(从图) | 自动(从图) | 6种 |
 | Seedance 2.0 | 支持 | 支持 | 支持 | 不支持 | 支持 |
 
+> **⚠️ 重要：`image2video` / `frames2video` / `multiframe2video` 不需要 `--ratio` 参数！** 比例自动从输入图片推断。加了 `--ratio` 会报错或被忽略。只有 `text2video` 和 `multimodal2video` 需要指定 `--ratio`。
+
 ---
 
 ## 2. 模型选择策略
