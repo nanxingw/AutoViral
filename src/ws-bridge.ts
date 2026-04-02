@@ -178,11 +178,15 @@ export class WsBridge {
 
 ## 你的能力
 - 调研：使用WebSearch搜索 + 数据获取脚本（详见 trend-research skill）
-- 生图：脚本工具 python3 ~/.claude/skills/asset-generation/scripts/openrouter_generate.py 或 jimeng_generate.py（详见 asset-generation skill）
-- 生视频：调用 curl http://localhost:${port}/api/generate/video 或使用即梦脚本
-- 合成：使用ffmpeg命令剪辑视频（拼接片段+字幕+配乐+转场）
+- 生图：**首选 Dreamina CLI**：\`dreamina text2image --prompt="描述" --ratio=9:16 --resolution_type=2k --poll=120\`，备选：python3 scripts/openrouter_generate.py
+- 生视频：**必须使用 Dreamina CLI**：\`dreamina image2video --image=首帧图.png --prompt="运动描述" --model_version=seedance2.0 --duration=5 --poll=180\`。详见 \`modules/dreamina-mastery.md\`
+- 生配乐：python3 skills/asset-generation/scripts/music_generate.py --prompt "音乐描述" --output bgm.mp3（Google Lyria AI 原创配乐）
+- 生旁白：edge-tts --text "旁白文本" --voice zh-CN-YunxiNeural --write-media narration.mp3
+- 合成：使用ffmpeg命令剪辑视频（拼接片段+字幕+旁白+配乐+转场）
 - 公共素材：通过 curl http://localhost:${port}/api/shared-assets 查看可用素材
 - 流水线管理：调用 curl -X POST http://localhost:${port}/api/works/${work.id}/pipeline/advance 更新流水线状态
+
+**重要：视频生成必须使用 dreamina CLI（已安装并登录，积分充足），禁止使用 Jimeng API key 或 curl 调用服务器 API。** 遇到 Jimeng API 报错时不要降级到 ffmpeg Ken Burns，直接用 dreamina CLI。
 
 ## 可用数据源
 
@@ -198,6 +202,8 @@ export class WsBridge {
 **重要：你必须主动管理流水线状态。** 每次回答用户之前，根据对话上下文判断当前阶段是否已经完成、是否需要推进到下一步。
 - 当你判断当前阶段的工作已经完成（例如调研报告已输出、规划方案已确认），**立即调用** pipeline/advance API 更新状态：
   curl -X POST http://localhost:${port}/api/works/${work.id}/pipeline/advance -H "Content-Type: application/json" -d '{"completedStep":"当前步骤key","nextStep":"下一步骤key"}'
+- 当你为作品确定了标题（例如在规划阶段生成了发布标题），在调用 pipeline/advance 时加上 title 字段来更新作品标题：
+  curl -X POST http://localhost:${port}/api/works/${work.id}/pipeline/advance -H "Content-Type: application/json" -d '{"completedStep":"plan","nextStep":"assembly","title":"你生成的标题"}'
 - 当用户明确要求进入下一阶段时，同样调用此API。
 - 不要等用户来点按钮，你自己判断并更新。
 - 不要在工作未完成时提前推进。
@@ -208,7 +214,22 @@ ${workspacePath}
 ## 公共素材库
 ${sharedAssetsInfo}
 
-## 记忆上下文（如有）
+${work.usePortrait ? `## 画像关联（已开启）
+
+**重要：用户已开启「关联你的画像」功能。** 你在生成所有视觉素材时，必须使用用户画像中的参考图来确保一致性：
+
+### 强制规则
+1. **人脸一致性**：所有需要出现人物的素材，必须使用 characters 分类下的参考图作为 reference image。生成图片时传入 --ref-image 参数，确保人脸与参考图一致。
+2. **场景参照**：如果 scenes 分类下有参考图（如家里、健身房、办公室），生成对应场景时必须参照这些图片的风格、色调、布局。
+3. **品牌调性**：如果 branding 分类下有参考图，所有素材的视觉风格（色调、字体感、质感）必须与之保持一致。
+4. **整体风格**：所有生成的图片/视频帧之间必须保持风格统一，就像同一个人在同一天拍的。
+
+### 具体操作
+- 生成图片前，先用 \`curl http://localhost:${port}/api/shared-assets\` 获取画像文件列表
+- 将 characters 分类下的图片 URL（\`http://localhost:${port}/api/shared-assets/characters/<filename>\`）作为 reference image 传入生成脚本
+- 在 prompt 中明确描述参考图中人物的外貌特征（性别、体型、发型、肤色等）
+- 每次生成都要传入参考图，不能只在第一张传入
+` : ''}## 记忆上下文（如有）
 ${memoryContext}
 
 ## 规则
@@ -694,6 +715,28 @@ ${memoryContext}
             // Persist chat to disk (survives server restart)
             if (!session.workId.startsWith("trends_")) {
               saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
+            }
+            // Auto-extract title from plan step output (only once — skip if already locked)
+            if (!session.workId.startsWith("trends_") && resultText) {
+              getWork(session.workId).then(w => {
+                if (!w || w.titleLocked) return;
+                const activeStep = Object.entries(w.pipeline).find(([, s]) => s.status === "active");
+                if (activeStep && activeStep[0] === "plan") {
+                  // Look for title patterns like **标题**：xxx or **标题**: xxx
+                  const titleMatch = resultText.match(/\*{0,2}标题\*{0,2}\s*[：:]\s*(.+)/);
+                  if (titleMatch) {
+                    const newTitle = titleMatch[1].replace(/\*+/g, "").trim();
+                    if (newTitle && newTitle !== w.title) {
+                      updateWork(session.workId, { title: newTitle, titleLocked: true }).then(() => {
+                        this.broadcastToBrowsers(session.workId, {
+                          event: "title_updated",
+                          data: { workId: session.workId, title: newTitle },
+                        });
+                      }).catch(() => {});
+                    }
+                  }
+                }
+              }).catch(() => {});
             }
             // Auto-save step history from backend (doesn't rely on frontend)
             // Only save the NEW messages from this turn (not entire history)

@@ -24,6 +24,13 @@ export interface VideoOpts {
   filename: string
 }
 
+export interface LipSyncOpts {
+  videoUrl: string         // URL of the source video
+  audioUrl: string         // URL of the audio to lip-sync to
+  workId: string
+  filename: string
+}
+
 export interface GenerateResult {
   success: boolean
   assetPath?: string
@@ -36,6 +43,8 @@ export interface GenerateProvider {
   name: string
   supportsImage: boolean
   supportsVideo: boolean
+  supportsLipSync?: boolean
   generateImage(opts: ImageOpts): Promise<GenerateResult>
   generateVideo(opts: VideoOpts): Promise<GenerateResult>
+  lipSync?(opts: LipSyncOpts): Promise<GenerateResult>
 }

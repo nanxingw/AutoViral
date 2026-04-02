@@ -1,20 +1,26 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { fetchSharedAssets, uploadAsset, deleteAsset, moveAsset, type AssetFile } from "../lib/api";
+  import { t, getLanguage, subscribe } from "../lib/i18n";
 
-  const CATS = [
-    { key: "characters", label: "人物" },
-    { key: "scenes", label: "场景" },
-    { key: "music", label: "音乐" },
-    { key: "templates", label: "模板" },
-    { key: "branding", label: "品牌" },
-    { key: "general", label: "通用" },
-  ];
+  let lang = $state(getLanguage());
+  function tt(key: string): string { void lang; return t(key); }
+
+  const CATS_I18N: Record<string, { zh: string; en: string }> = {
+    characters: { zh: "形象参照", en: "Appearance" },
+    scenes:     { zh: "场景参照", en: "Scenes" },
+    music:      { zh: "配乐风格", en: "Music" },
+    templates:  { zh: "画面模板", en: "Templates" },
+    branding:   { zh: "品牌调性", en: "Branding" },
+    general:    { zh: "其他素材", en: "Other" },
+  };
+  const CATS = Object.keys(CATS_I18N).map(key => ({ key }));
+  function catLabel(key: string): string { return CATS_I18N[key]?.[lang] ?? key; }
 
   let assets: Record<string, AssetFile[]> = $state({});
   let activeCat = $state("characters");
-  let viewMode: "grid" | "list" = $state("grid");
-  let expanded = $state(false);
+  let viewMode: "grid" | "list" = "grid";
+  let expanded = $state(true);
   let loading = $state(false);
   let dragOver = $state(false);
   let lightboxUrl: string | null = $state(null);
@@ -30,9 +36,10 @@
 
   onMount(() => {
     load();
+    const unsub = subscribe(() => { lang = getLanguage(); });
     function handleClick() { contextMenu = null; }
     document.addEventListener("click", handleClick);
-    return () => document.removeEventListener("click", handleClick);
+    return () => { unsub(); document.removeEventListener("click", handleClick); };
   });
 
   async function load() {
@@ -154,14 +161,8 @@
 </script>
 
 <div class="asset-library">
-  <!-- Title bar (always visible) -->
-  <button class="title-bar" onclick={() => expanded = !expanded}>
-    <span class="title-text">📁 素材库 · {totalCount} 个文件</span>
-    <span class="toggle-icon">{expanded ? "▲" : "▼"}</span>
-  </button>
+  <p class="guide-text">{lang === "zh" ? "上传你的照片、场景、品牌素材等，它们将作为所有视频生成的参照物，让 AI 更准确地还原你的形象与风格。" : "Upload your photos, scenes, and brand assets — they'll be used as references for all video generation, helping AI accurately recreate your look and style."}</p>
 
-  {#if expanded}
-    <div class="panel">
       <!-- Category tabs -->
       <div class="cat-tabs">
         {#each CATS as cat}
@@ -170,7 +171,7 @@
             class:active={activeCat === cat.key}
             onclick={() => activeCat = cat.key}
           >
-            {cat.label}
+            {catLabel(cat.key)}
             {#if (assets[cat.key]?.length ?? 0) > 0}
               <span class="cat-count">{assets[cat.key].length}</span>
             {/if}
@@ -178,25 +179,22 @@
         {/each}
       </div>
 
-      <!-- Toolbar -->
-      <div class="toolbar">
-        <button class="upload-btn" onclick={() => fileInput?.click()}>+ 上传</button>
-        <input
-          bind:this={fileInput}
-          type="file"
-          multiple
-          class="hidden-input"
-          onchange={(e) => {
-            const input = e.currentTarget as HTMLInputElement;
-            if (input.files) handleUpload(input.files);
-            input.value = "";
-          }}
-        />
-        <div class="view-toggle">
-          <button class:active={viewMode === "grid"} onclick={() => viewMode = "grid"}>网格</button>
-          <button class:active={viewMode === "list"} onclick={() => viewMode = "list"}>列表</button>
-        </div>
-      </div>
+      <!-- Upload area -->
+      <button class="upload-zone" onclick={() => fileInput?.click()}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        <span>{lang === "zh" ? "点击或拖放文件上传" : "Click or drag files to upload"}</span>
+      </button>
+      <input
+        bind:this={fileInput}
+        type="file"
+        multiple
+        class="hidden-input"
+        onchange={(e) => {
+          const input = e.currentTarget as HTMLInputElement;
+          if (input.files) handleUpload(input.files);
+          input.value = "";
+        }}
+      />
 
       <!-- Drop zone -->
       <div
@@ -207,9 +205,9 @@
         ondrop={onDrop}
       >
         {#if loading}
-          <div class="empty-msg">加载中...</div>
+          <div class="empty-msg">{lang === "zh" ? "加载中..." : "Loading..."}</div>
         {:else if currentFiles.length === 0}
-          <div class="empty-msg">暂无文件，拖放或点击上传</div>
+          <div class="empty-msg">{lang === "zh" ? "暂无文件" : "No files"}</div>
         {:else if viewMode === "grid"}
           <!-- Grid view -->
           <div class="grid-view">
@@ -231,6 +229,9 @@
                     <span class="file-icon">{fileIcon(file.name)}</span>
                   </div>
                 {/if}
+                <button class="card-delete" onclick={(e) => { e.stopPropagation(); handleDelete(activeCat, file.name); }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                </button>
                 <div class="card-name" title={file.name}>{truncate(file.name, 12)}</div>
                 <div class="card-size">{formatSize(file.size)}</div>
               </div>
@@ -241,9 +242,9 @@
           <table class="list-view">
             <thead>
               <tr>
-                <th>文件名</th>
-                <th>大小</th>
-                <th>日期</th>
+                <th>{lang === "zh" ? "文件名" : "Name"}</th>
+                <th>{lang === "zh" ? "大小" : "Size"}</th>
+                <th>{lang === "zh" ? "日期" : "Date"}</th>
               </tr>
             </thead>
             <tbody>
@@ -267,9 +268,6 @@
           </table>
         {/if}
       </div>
-    </div>
-  {/if}
-
   <!-- Context menu -->
   {#if contextMenu}
     <div
@@ -277,12 +275,12 @@
       style="left:{contextMenu.x}px;top:{contextMenu.y}px"
       onclick={(e) => e.stopPropagation()}
     >
-      <a class="ctx-item" href={assetUrl(activeCat, contextMenu.asset.name)} download={contextMenu.asset.name}>下载</a>
-      <button class="ctx-item danger" onclick={() => contextMenu && handleDelete(activeCat, contextMenu.asset.name)}>删除</button>
+      <a class="ctx-item" href={assetUrl(activeCat, contextMenu.asset.name)} download={contextMenu.asset.name}>{lang === "zh" ? "下载" : "Download"}</a>
+      <button class="ctx-item danger" onclick={() => contextMenu && handleDelete(activeCat, contextMenu.asset.name)}>{lang === "zh" ? "删除" : "Delete"}</button>
       <div class="ctx-divider"></div>
-      <div class="ctx-label">移动到</div>
+      <div class="ctx-label">{lang === "zh" ? "移动到" : "Move to"}</div>
       {#each CATS.filter(c => c.key !== activeCat) as cat}
-        <button class="ctx-item" onclick={() => contextMenu && handleMove(activeCat, cat.key, contextMenu.asset.name)}>{cat.label}</button>
+        <button class="ctx-item" onclick={() => contextMenu && handleMove(activeCat, cat.key, contextMenu.asset.name)}>{catLabel(cat.key)}</button>
       {/each}
     </div>
   {/if}
@@ -297,155 +295,141 @@
 </div>
 
 <style>
-  .asset-library {
-    margin-bottom: 1rem;
-  }
+  .asset-library {}
 
-  .title-bar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    width: 100%;
-    padding: 0.5rem 0.75rem;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    cursor: pointer;
-    font-size: 0.85rem;
-    color: var(--text);
-    transition: background 0.15s;
-  }
-  .title-bar:hover {
-    background: var(--bg-surface);
-  }
-  .title-text {
-    font-weight: 600;
-  }
-  .toggle-icon {
-    font-size: 0.7rem;
+
+  .guide-text {
+    font-size: var(--size-sm, 0.78rem);
     color: var(--text-muted);
-  }
-
-  .panel {
-    max-height: 300px;
-    overflow-y: auto;
-    border: 1px solid var(--border);
-    border-top: none;
-    border-radius: 0 0 8px 8px;
-    background: var(--bg-elevated);
-    padding: 0.5rem;
+    line-height: 1.5;
+    margin: 0 0 0.75rem 0;
+    padding: 0.5rem 0.75rem;
+    border-left: 2px solid var(--border);
   }
 
   /* Category tabs */
   .cat-tabs {
     display: flex;
-    gap: 0.25rem;
-    margin-bottom: 0.5rem;
+    gap: 0.35rem;
+    margin-bottom: 0.65rem;
     flex-wrap: wrap;
   }
   .cat-tab {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: transparent;
-    color: var(--text-muted);
+    padding: 0.25rem 0.6rem;
+    font-size: var(--size-xs, 0.7rem);
+    border: none;
+    border-radius: 100px;
+    background: var(--bg-surface, rgba(255,255,255,0.06));
+    color: var(--text-dim);
     cursor: pointer;
     transition: all 0.15s;
+    font-weight: 500;
   }
   .cat-tab:hover {
     color: var(--text);
-    border-color: var(--text-dim);
+    background: var(--bg-elevated);
   }
   .cat-tab.active {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
+    background: var(--text);
+    color: var(--bg);
   }
   .cat-count {
-    font-size: 0.65rem;
-    opacity: 0.8;
+    font-size: 0.6rem;
+    opacity: 0.7;
     margin-left: 0.15rem;
   }
 
-  /* Toolbar */
-  .toolbar {
+  /* Upload zone */
+  .upload-zone {
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
+    gap: 0.4rem;
+    width: 100%;
+    padding: 0.65rem;
     margin-bottom: 0.5rem;
-  }
-  .upload-btn {
-    padding: 0.2rem 0.6rem;
-    font-size: 0.75rem;
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: opacity 0.15s;
-  }
-  .upload-btn:hover { opacity: 0.85; }
-  .hidden-input { display: none; }
-
-  .view-toggle {
-    display: flex;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    overflow: hidden;
-  }
-  .view-toggle button {
-    padding: 0.15rem 0.45rem;
-    font-size: 0.7rem;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
+    font-size: var(--size-sm, 0.78rem);
+    color: var(--text-dim);
+    background: var(--bg-surface);
+    border: 1.5px dashed var(--border);
+    border-radius: 8px;
     cursor: pointer;
     transition: all 0.15s;
   }
-  .view-toggle button.active {
-    background: var(--accent);
-    color: #fff;
+  .upload-zone:hover {
+    color: var(--text-muted);
+    border-color: var(--text-dim);
+    background: var(--bg-elevated);
   }
+  .upload-zone svg {
+    flex-shrink: 0;
+  }
+  .hidden-input { display: none; }
 
   /* Drop zone */
   .drop-zone {
-    min-height: 60px;
+    min-height: 48px;
     border: 2px dashed transparent;
-    border-radius: 6px;
+    border-radius: 8px;
     transition: border-color 0.2s, background 0.2s;
   }
   .drop-zone.drag-over {
     border-color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 8%, transparent);
+    background: color-mix(in srgb, var(--accent) 6%, transparent);
   }
 
   .empty-msg {
     text-align: center;
-    padding: 1.5rem;
+    padding: 1.25rem;
     color: var(--text-dim);
-    font-size: 0.8rem;
+    font-size: var(--size-sm, 0.78rem);
   }
 
   /* Grid view */
   .grid-view {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-    gap: 0.4rem;
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+    gap: 0.35rem;
   }
   .grid-card {
+    position: relative;
     display: flex;
     flex-direction: column;
     align-items: center;
-    padding: 0.35rem;
-    border-radius: 6px;
+    padding: 0.3rem;
+    border-radius: 8px;
     background: var(--bg-surface);
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     transition: border-color 0.15s;
     cursor: default;
   }
   .grid-card:hover {
-    border-color: var(--text-dim);
+    border-color: var(--border);
+  }
+  .card-delete {
+    position: absolute;
+    top: 4px;
+    right: 4px;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.55);
+    border: none;
+    border-radius: 50%;
+    color: #fff;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 1;
+    padding: 0;
+  }
+  .grid-card:hover .card-delete {
+    opacity: 1;
+  }
+  .card-delete:hover {
+    background: var(--spark-red, #FE2C55);
   }
 
   .card-thumb {
@@ -454,7 +438,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    border-radius: 4px;
+    border-radius: 6px;
     overflow: hidden;
     border: none;
     background: transparent;
@@ -465,24 +449,24 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    border-radius: 4px;
+    border-radius: 6px;
   }
   .audio-thumb {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--bg-elevated);
   }
   .audio-icon {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
   }
   .file-thumb {
     background: var(--bg-elevated);
     cursor: default;
   }
   .file-icon {
-    font-size: 1.5rem;
+    font-size: 1.3rem;
   }
   .card-name {
-    font-size: 0.65rem;
-    color: var(--text);
+    font-size: 0.6rem;
+    color: var(--text-muted);
     margin-top: 0.2rem;
     text-align: center;
     width: 100%;
@@ -491,14 +475,14 @@
     white-space: nowrap;
   }
   .card-size {
-    font-size: 0.55rem;
+    font-size: 0.52rem;
     color: var(--text-dim);
   }
 
   /* List view */
   .list-view {
     width: 100%;
-    font-size: 0.75rem;
+    font-size: var(--size-sm, 0.78rem);
     border-collapse: collapse;
   }
   .list-view th {
@@ -507,7 +491,7 @@
     color: var(--text-dim);
     font-weight: 500;
     border-bottom: 1px solid var(--border);
-    font-size: 0.7rem;
+    font-size: var(--size-xs, 0.7rem);
   }
   .list-view td {
     padding: 0.25rem 0.5rem;
@@ -545,16 +529,16 @@
     z-index: 1000;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.25rem 0;
+    border-radius: 8px;
+    padding: 0.3rem 0;
     min-width: 120px;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.25);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
   }
   .ctx-item {
     display: block;
     width: 100%;
-    padding: 0.3rem 0.75rem;
-    font-size: 0.75rem;
+    padding: 0.35rem 0.75rem;
+    font-size: var(--size-sm, 0.78rem);
     color: var(--text);
     background: none;
     border: none;
@@ -575,7 +559,7 @@
   }
   .ctx-label {
     padding: 0.2rem 0.75rem;
-    font-size: 0.65rem;
+    font-size: var(--size-xs, 0.7rem);
     color: var(--text-dim);
     font-weight: 600;
   }

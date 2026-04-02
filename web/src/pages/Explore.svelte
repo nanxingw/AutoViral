@@ -24,7 +24,7 @@
   }
 
   type ContentCategory = "anxiety" | "conflict" | "comedy" | "envy";
-  let activeCategory: ContentCategory = $state("anxiety");
+  let activeCategory: ContentCategory = $state("conflict");
 
   let interests: string[] = $state([]);
   let activePlatform: Platform = $state("douyin");
@@ -48,6 +48,244 @@
   let showConfigModal = $state(false);
   let configInterval = $state("1h");
   let configModel = $state("sonnet");
+
+  // Showcase: load all works with output content
+  interface ShowcaseWork {
+    id: string;
+    title: string;
+    coverImage: string;
+    images: string[];
+    videoUrl: string;
+    body: string;
+    tags: string[];
+    category: ContentCategory;
+    platforms: string[];
+  }
+  let showcaseWorks: ShowcaseWork[] = $state([]);
+  let selectedWork: ShowcaseWork | null = $state(null);
+  let showcasePlatform: "all" | "douyin" | "xiaohongshu" = $state("all");
+  let modalImageIdx = $state(0);
+  let dyPaused = $state(true);
+
+  let filteredShowcase = $derived(
+    showcaseWorks.filter(w =>
+      w.category === activeCategory &&
+      (showcasePlatform === "all" || w.platforms.includes(showcasePlatform))
+    )
+  );
+
+  function parseCopytext(raw: string): { title: string; body: string; tags: string[] } {
+    let title = "";
+    let bodyLines: string[] = [];
+    let tags: string[] = [];
+    let section = "";
+    for (const rawLine of raw.split("\n")) {
+      const line = rawLine.trim();
+      if (!line || line === "---" || line === "***") continue;
+      const m = line.match(/^#{1,3}\s+(.+)/);
+      if (m) {
+        const name = m[1].trim().toLowerCase();
+        if (/标题|title/.test(name)) section = "title";
+        else if (/标签|tag|话题|topic/.test(name)) section = "tags";
+        else if (/发布建议|publish.?tip|注意事项/.test(name)) section = "tips";
+        else section = "body";
+        continue;
+      }
+      const cleaned = line.replace(/\*\*(.+?)\*\*/g, "$1").replace(/^[-*]\s+/, "");
+      if (section === "title" && !title) title = cleaned;
+      else if (section === "tags") {
+        const found = cleaned.match(/#[\w\u4e00-\u9fff\u00c0-\u024f]+/g);
+        if (found) tags.push(...found);
+        else if (cleaned) tags.push(cleaned.startsWith("#") ? cleaned : "#" + cleaned);
+      } else if (section !== "tips") bodyLines.push(cleaned);
+    }
+    if (!title && bodyLines.length && bodyLines[0].length < 60) {
+      title = bodyLines.shift()!;
+    }
+    return { title, body: bodyLines.join("\n"), tags: [...new Set(tags)] };
+  }
+
+  // Hardcoded showcase entries — add works here to feature them
+  interface ShowcaseEntry {
+    id: string;
+    category: ContentCategory;
+    en?: { title: string; body: string; tags: string[]; imageDir?: string };
+  }
+  const SHOWCASE_ENTRIES: ShowcaseEntry[] = [
+    { id: "w_20260401_1537_1cf", category: "envy" },
+    { id: "w_20260325_1753_75d", category: "conflict" },
+    { id: "w_20260329_1710_ecf", category: "envy" },
+  ];
+
+  function extractCopytextFromChat(blocks: { type: string; text: string }[]): { title: string; body: string; tags: string[] } | null {
+    // Walk backwards to find the last agent message with copytext
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const b = blocks[i];
+      if (b.type !== "text") continue;
+      const text = b.text;
+      // Strategy: look for "标题" + "正文" pattern
+      const bodyMatch = text.match(/\*{0,2}正文\*{0,2}\s*[：:]\s*/);
+      if (bodyMatch) {
+        // Extract body: everything between 正文 and 标签/tags section
+        const bodyStart = text.indexOf(bodyMatch[0]) + bodyMatch[0].length;
+        let bodyEnd = text.length;
+        const tagsIdx = text.search(/\*{0,2}(标签|话题标签)\*{0,2}\s*[：:]/);
+        if (tagsIdx > bodyStart) bodyEnd = tagsIdx;
+        let body = text.slice(bodyStart, bodyEnd).replace(/^>\s*/gm, "").replace(/^\n+|\n+$/g, "").trim();
+        // Extract tags
+        let tags: string[] = [];
+        if (tagsIdx >= 0) {
+          const tagsSection = text.slice(tagsIdx);
+          const found = tagsSection.match(/#[\w\u4e00-\u9fff]+/g);
+          if (found) tags = [...new Set(found)];
+        }
+        // Title = first short line of body (matches 成品tab behavior)
+        let title = "";
+        const bodyLines = body.split("\n").filter(l => l.trim());
+        if (bodyLines.length > 1 && bodyLines[0].length < 60) {
+          title = bodyLines.shift()!;
+          body = bodyLines.join("\n");
+        }
+        if (body) return { title, body, tags };
+      }
+      // Fallback: look for quoted block after "发布文案"
+      if (/发布文案/.test(text)) {
+        const lines = text.split("\n");
+        let inQuote = false;
+        let bodyLines: string[] = [];
+        let tags: string[] = [];
+        for (const line of lines) {
+          if (line.startsWith(">")) {
+            inQuote = true;
+            bodyLines.push(line.replace(/^>\s*/, ""));
+          } else if (inQuote && !line.trim()) {
+            bodyLines.push("");
+          } else if (inQuote) {
+            inQuote = false;
+          }
+          const found = line.match(/#[\w\u4e00-\u9fff]+/g);
+          if (found && !line.startsWith(">")) tags.push(...found);
+        }
+        const cleanLines = bodyLines.filter(l => l.trim());
+        let title = "";
+        if (cleanLines.length > 1 && cleanLines[0].length < 60) {
+          title = cleanLines.shift()!;
+        }
+        const body = cleanLines.join("\n").trim();
+        if (body) return { title, body, tags: [...new Set(tags)] };
+      }
+    }
+    return null;
+  }
+
+  async function loadShowcaseWork() {
+    const results: ShowcaseWork[] = [];
+    for (const entry of SHOWCASE_ENTRIES) {
+      try {
+        const res = await fetch(`/api/works/${entry.id}`);
+        if (!res.ok) continue;
+        const work = await res.json();
+
+        let title = work.title ?? "";
+        let body = "";
+        let tags: string[] = [];
+        let coverImage = "";
+        let images: string[] = [];
+        let videoUrl = "";
+        let assets: string[] = [];
+
+        const assetsRes = await fetch(`/api/works/${entry.id}/assets`);
+        if (assetsRes.ok) {
+          const assetsData = await assetsRes.json();
+          assets = assetsData.assets ?? assetsData;
+
+          // Detect final video for short-video works
+          const finalVid = assets.find((f: string) => /^(output\/)?final\.(mp4|mov|webm)$/i.test(f))
+            ?? assets.find((f: string) => /\.(mp4|mov|webm)$/i.test(f) && !/clip|norm|concat|raw|base/i.test(f));
+          if (finalVid) videoUrl = `/api/works/${entry.id}/assets/${finalVid}`;
+
+          // Collect all output images (sorted by name for correct order)
+          const outputImgs = assets
+            .filter((f: string) => f.startsWith("output/") && /\.(png|jpe?g|webp)$/i.test(f))
+            .sort();
+          // Fallback to assets/images/ if no output images
+          const imgPool = outputImgs.length > 0
+            ? outputImgs
+            : assets.filter((f: string) => f.startsWith("assets/images/") && /\.(png|jpe?g|webp)$/i.test(f)).sort();
+          images = imgPool.map((f: string) => `/api/works/${entry.id}/assets/${f}`);
+
+          // Cover: prefer output dir cover, then any cover, then first output image
+          const cover = outputImgs.find((f: string) => /cover|p1/i.test(f))
+            ?? assets.find((f: string) => /cover/i.test(f) && /\.(png|jpe?g|webp)$/i.test(f))
+            ?? (outputImgs.length > 0 ? outputImgs[0] : null);
+          if (cover) coverImage = `/api/works/${entry.id}/assets/${cover}`;
+
+          const copytextFile = assets.find((f: string) =>
+            f.startsWith("output/") && /copy|caption|文案/.test(f) && /\.(md|txt)$/i.test(f)
+          ) ?? assets.find((f: string) => f.startsWith("output/") && /\.md$/i.test(f))
+            ?? assets.find((f: string) => /copy|caption|文案/.test(f) && /\.(md|txt)$/i.test(f));
+          if (copytextFile) {
+            const copyRes = await fetch(`/api/works/${entry.id}/assets/${copytextFile}`);
+            if (copyRes.ok) {
+              const parsed = parseCopytext(await copyRes.text());
+              if (parsed.title) title = parsed.title;
+              body = parsed.body;
+              tags = parsed.tags;
+            }
+          }
+        }
+
+        // Fallback: extract copytext from chat history if no file found
+        if (!body) {
+          try {
+            const chatRes = await fetch(`/api/works/${entry.id}/chat`);
+            if (chatRes.ok) {
+              const chatData = await chatRes.json();
+              const blocks = chatData.blocks ?? chatData;
+              const extracted = extractCopytextFromChat(blocks);
+              if (extracted) {
+                if (extracted.title) title = extracted.title;
+                body = extracted.body;
+                if (extracted.tags.length) tags = extracted.tags;
+              }
+            }
+          } catch {}
+        }
+
+        // Apply English overrides when language is English
+        if (lang === "en" && entry.en) {
+          title = entry.en.title;
+          body = entry.en.body;
+          tags = entry.en.tags;
+          // Switch to English images if available
+          if (entry.en.imageDir) {
+            const enDir = entry.en.imageDir;
+            const enImgs = assets
+              .filter((f: string) => f.startsWith(enDir + "/") && /\.(png|jpe?g|webp)$/i.test(f))
+              .sort();
+            if (enImgs.length > 0) {
+              images = enImgs.map((f: string) => `/api/works/${entry.id}/assets/${f}`);
+              const enCover = enImgs.find((f: string) => /cover|p1/i.test(f)) ?? enImgs[0];
+              coverImage = `/api/works/${entry.id}/assets/${enCover}`;
+            }
+          }
+        }
+
+        results.push({
+          id: entry.id,
+          title,
+          coverImage,
+          images,
+          videoUrl,
+          body,
+          tags,
+          category: entry.category,
+          platforms: work.platforms ?? [],
+        });
+      } catch {}
+    }
+    showcaseWorks = results;
+  }
 
   async function loadAutoResearch() {
     try {
@@ -107,7 +345,7 @@
       const arr = data.topics ?? data.directions ?? data.trends ?? data.items ?? data.videos;
       if (Array.isArray(arr) && arr.length > 0) {
         directions = arr.map((item: any) => ({
-          title: item.title ?? item.name ?? item.direction ?? "未知方向",
+          title: item.title ?? item.name ?? item.direction ?? tt("unknownDirection"),
           heat: Math.min(5, Math.max(1, Number(item.heat ?? item.hotness ?? item.score ?? 3))),
           competition: item.competition ?? item.competitionLevel ?? "中",
           opportunity: item.opportunity ?? "",
@@ -181,7 +419,7 @@
 
       if (!res.ok) {
         researchPhase = "error";
-        progressLines = [{ type: "error", text: "无法启动趋势调研" }];
+        progressLines = [{ type: "error", text: tt("cannotStartResearch") }];
         researchActive = false;
         return;
       }
@@ -194,14 +432,14 @@
           case "search_query":
             progressLines = [...progressLines, {
               type: "search",
-              text: `搜索 "${data.query}"`,
+              text: `${tt("searchLabel")} "${data.query}"`,
             }];
             break;
           case "search_result": {
             const updated = [...progressLines];
             for (let i = updated.length - 1; i >= 0; i--) {
               if (updated[i].type === "search") {
-                updated[i] = { type: "result", text: updated[i].text + "  " + (data.summary || "完成") };
+                updated[i] = { type: "result", text: updated[i].text + "  " + (data.summary || tt("done")) };
                 break;
               }
             }
@@ -220,7 +458,7 @@
             if (!progressLines.some(l => l.type === "analyzing")) {
               progressLines = [...progressLines, {
                 type: "analyzing",
-                text: "AI 正在分析整理...",
+                text: tt("aiAnalyzing"),
               }];
             }
             break;
@@ -260,7 +498,7 @@
             researchPhase = "error";
             progressLines = [...progressLines, {
               type: "error",
-              text: data.message || "调研失败",
+              text: data.message || tt("researchError"),
             }];
             researchActive = false;
             break;
@@ -271,7 +509,7 @@
       });
     } catch {
       researchPhase = "error";
-      progressLines = [{ type: "error", text: "网络错误，请重试" }];
+      progressLines = [{ type: "error", text: tt("networkError") }];
       researchActive = false;
     }
   }
@@ -310,8 +548,8 @@
     const hint = [
       dir.title,
       dir.description,
-      dir.contentAngles?.length ? `切入角度: ${dir.contentAngles.join("; ")}` : "",
-      dir.tags?.length ? `推荐标签: ${dir.tags.map(t => "#" + t).join(" ")}` : "",
+      dir.contentAngles?.length ? `${tt("angleLabel")} ${dir.contentAngles.join("; ")}` : "",
+      dir.tags?.length ? `${tt("tagsLabel")} ${dir.tags.map(t => "#" + t).join(" ")}` : "",
     ].filter(Boolean).join("\n");
 
     const event = new CustomEvent("createWork", {
@@ -322,14 +560,14 @@
   }
 
   function opportunityColor(opp: string): string {
-    if (opp === "金矿") return "opp-gold";
-    if (opp === "蓝海") return "opp-blue";
-    if (opp === "红海") return "opp-red";
+    if (opp === "金矿" || opp === "Gold Mine") return "opp-gold";
+    if (opp === "蓝海" || opp === "Blue Ocean") return "opp-blue";
+    if (opp === "红海" || opp === "Red Ocean") return "opp-red";
     return "";
   }
 
   let hasData = $derived(directions.length > 0 || rawContent.length > 0);
-  let platformLabel = $derived(activePlatform === "douyin" ? "抖音" : "小红书");
+  let platformLabel = $derived(activePlatform === "douyin" ? tt("platformDouyin") : tt("platformXiaohongshu"));
 
   async function loadReport() {
     try {
@@ -340,6 +578,12 @@
       }
     } catch {}
   }
+
+  // Reload showcase when language changes
+  $effect(() => {
+    void lang;
+    loadShowcaseWork();
+  });
 
   onMount(() => {
     const unsub = subscribe(() => { lang = getLanguage(); });
@@ -352,51 +596,221 @@
 </script>
 
 <div class="explore">
-  <!-- Category tabs -->
-  <div class="category-tabs">
-    <button class="cat-tab" class:active={activeCategory === "anxiety"} onclick={() => activeCategory = "anxiety"}>
-      <span class="cat-tab-name">{tt("categoryAnxiety")}</span>
-      <span class="cat-tab-desc">{tt("categoryAnxietyDesc")}</span>
-    </button>
-    <button class="cat-tab" class:active={activeCategory === "conflict"} onclick={() => activeCategory = "conflict"}>
-      <span class="cat-tab-name">{tt("categoryConflict")}</span>
-      <span class="cat-tab-desc">{tt("categoryConflictDesc")}</span>
-    </button>
-    <button class="cat-tab" class:active={activeCategory === "comedy"} onclick={() => activeCategory = "comedy"}>
-      <span class="cat-tab-name">{tt("categoryComedy")}</span>
-      <span class="cat-tab-desc">{tt("categoryComedyDesc")}</span>
-    </button>
-    <button class="cat-tab" class:active={activeCategory === "envy"} onclick={() => activeCategory = "envy"}>
-      <span class="cat-tab-name">{tt("categoryEnvy")}</span>
-      <span class="cat-tab-desc">{tt("categoryEnvyDesc")}</span>
-    </button>
+  <!-- Header: category tabs + platform filter -->
+  <div class="explore-header">
+    <div class="category-tabs">
+      <button class="cat-tab" class:active={activeCategory === "anxiety"} onclick={() => activeCategory = "anxiety"}>
+        <svg class="cat-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/></svg>
+        <span class="cat-tab-name">{tt("categoryAnxiety")}</span>
+        <span class="cat-tab-desc">{tt("categoryAnxietyDesc")}</span>
+      </button>
+      <button class="cat-tab" class:active={activeCategory === "conflict"} onclick={() => activeCategory = "conflict"}>
+        <svg class="cat-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+        <span class="cat-tab-name">{tt("categoryConflict")}</span>
+        <span class="cat-tab-desc">{tt("categoryConflictDesc")}</span>
+      </button>
+      <button class="cat-tab" class:active={activeCategory === "comedy"} onclick={() => activeCategory = "comedy"}>
+        <svg class="cat-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-3 7a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm6 0a1 1 0 1 1 0 2 1 1 0 0 1 0-2zm-7.5 5a.5.5 0 0 1 .42-.23h8.16a.5.5 0 0 1 .42.77A5.5 5.5 0 0 1 12 17a5.5 5.5 0 0 1-4.5-2.46.5.5 0 0 1 0-.54z"/></svg>
+        <span class="cat-tab-name">{tt("categoryComedy")}</span>
+        <span class="cat-tab-desc">{tt("categoryComedyDesc")}</span>
+      </button>
+      <button class="cat-tab" class:active={activeCategory === "envy"} onclick={() => activeCategory = "envy"}>
+        <svg class="cat-tab-icon" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+        <span class="cat-tab-name">{tt("categoryEnvy")}</span>
+        <span class="cat-tab-desc">{tt("categoryEnvyDesc")}</span>
+      </button>
+    </div>
+    <div class="platform-tabs">
+      <button class="plat-tab" class:active={showcasePlatform === "all"} onclick={() => showcasePlatform = "all"}>
+        {tt("filterAllPlatforms")}
+      </button>
+      <button class="plat-tab" class:active={showcasePlatform === "douyin"} onclick={() => showcasePlatform = "douyin"}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12.53 1.02c1.15-.04 2.29.02 3.43.14.17 1.38.76 2.71 1.74 3.66 1 .98 2.37 1.52 3.76 1.65v3.53c-1.3-.04-2.6-.35-3.76-.92-.5-.24-.97-.53-1.4-.87-.01 2.84.01 5.68-.02 8.51-.08 1.34-.53 2.67-1.31 3.76a7.24 7.24 0 01-5.6 3.15c-1.6.13-3.24-.3-4.56-1.2A7.18 7.18 0 012 17.02c0-.3.03-.6.07-.9.24-1.7 1.15-3.27 2.48-4.33a6.82 6.82 0 014.83-1.56c.01 1.3-.01 2.6-.02 3.9-.92-.28-1.97-.13-2.77.42a3.2 3.2 0 00-1.4 2.17c-.07.58.03 1.2.34 1.72.52 1 1.64 1.7 2.83 1.73 1.15.06 2.3-.5 2.97-1.42.22-.32.4-.68.46-1.06.12-.87.1-1.75.1-2.63V1.02h2.64z"/></svg>
+        {tt("douyin")}
+      </button>
+      <button class="plat-tab" class:active={showcasePlatform === "xiaohongshu"} onclick={() => showcasePlatform = "xiaohongshu"}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2 2h8.5v8.5H2V2zm11.5 0H22v8.5h-8.5V2zM2 13.5h8.5V22H2v-8.5zm11.5 0H22V22h-8.5v-8.5z"/></svg>
+        {tt("xiaohongshu")}
+      </button>
+    </div>
   </div>
 
-  <!-- Showcase examples -->
+  <!-- Showcase: works grid -->
   <div class="showcase-grid">
-    {#if activeCategory === "conflict"}
-      <div class="phone-showcase">
-        <div class="phone-frame">
-          <div class="phone-notch"></div>
-          <div class="phone-screen">
-            <!-- XHS post mockup -->
-            <div class="xhs-post">
-              <div class="xhs-cover">
-                <img src="/api/works/w_20260325_1753_75d/assets/images/cover_v2.png" alt="封面" />
+    {#if filteredShowcase.length > 0}
+      {#each filteredShowcase as work}
+        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+        <div class="work-card" onclick={() => { modalImageIdx = 0; dyPaused = true; selectedWork = work; }}>
+          {#if work.videoUrl}
+            <!-- Video card: cover fills card, title overlay at bottom -->
+            <div class="work-cover video-cover">
+              <video src={work.videoUrl} preload="metadata" muted></video>
+              <span class="work-cover-play">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><polygon points="8,5 19,12 8,19"/></svg>
+              </span>
+              <div class="video-card-bottom">
+                <h3 class="video-card-title">{work.title}</h3>
               </div>
+            </div>
+          {:else}
+            <!-- Image-text card -->
+            {#if work.coverImage || work.images.length > 0}
+              <div class="work-cover">
+                <img src={work.coverImage || work.images[0]} alt={work.title} />
+                {#if work.images.length > 1}
+                  <span class="work-cover-count">
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><rect x="2" y="2" width="15" height="15" rx="2"/><path d="M7 22h13a2 2 0 0 0 2-2V7"/></svg>
+                    {work.images.length}
+                  </span>
+                {/if}
+              </div>
+            {/if}
+            <div class="work-card-body">
+              <h3 class="work-card-title">{work.title}</h3>
+              {#if work.body}
+                <p class="work-card-text">{work.body.slice(0, 80)}{work.body.length > 80 ? "…" : ""}</p>
+              {/if}
+              <div class="work-card-footer">
+                <div class="work-card-author">
+                  <div class="work-card-avatar"></div>
+                  <span class="work-card-name">AutoViral</span>
+                </div>
+                {#if work.platforms.length}
+                  <div class="work-card-platforms">
+                    {#each work.platforms as p}
+                      <span class="work-card-plat" class:douyin={p === "douyin"} class:xhs={p === "xiaohongshu"}>
+                        {p === "douyin" ? "抖音" : "小红书"}
+                      </span>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            </div>
+          {/if}
+        </div>
+      {/each}
+    {:else}
+      <div class="showcase-empty">
+        <p class="showcase-empty-text">{tt("noWorksYet")}</p>
+        <p class="showcase-empty-sub">{tt("noWorksYetDesc")}</p>
+      </div>
+    {/if}
+  </div>
+</div>
+
+<!-- Work detail modal — phone frame -->
+{#if selectedWork}
+  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <div class="work-modal-overlay" onclick={(e) => { if ((e.target as HTMLElement).classList.contains('work-modal-overlay')) selectedWork = null; }}>
+    <div class="phone-modal">
+      <button class="phone-modal-close" onclick={() => selectedWork = null}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+      <div class="phone-frame">
+        <div class="phone-notch"></div>
+        {#if selectedWork.videoUrl}
+          <!-- Douyin-style fullscreen video player -->
+          <div class="phone-screen dy-screen">
+            <div class="dy-video-container">
+              <!-- svelte-ignore a11y_media_has_caption -->
+              <video
+                class="dy-video"
+                src={selectedWork.videoUrl}
+                loop
+                playsinline
+                preload="auto"
+                onclick={(e) => {
+                  const v = e.currentTarget as HTMLVideoElement;
+                  if (v.paused) v.play(); else v.pause();
+                  dyPaused = v.paused;
+                }}
+                onplay={() => dyPaused = false}
+                onpause={() => dyPaused = true}
+              ></video>
+              {#if dyPaused}
+                <div class="dy-play-overlay">
+                  <svg width="52" height="52" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)"><polygon points="6,3 20,12 6,21"/></svg>
+                </div>
+              {/if}
+              <!-- Right-side action buttons (Douyin style) -->
+              <div class="dy-sidebar">
+                <div class="dy-action">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                  <span class="dy-action-count">2.4w</span>
+                </div>
+                <div class="dy-action">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                  <span class="dy-action-count">3.6k</span>
+                </div>
+                <div class="dy-action">
+                  <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                  <span class="dy-action-count">8.1k</span>
+                </div>
+              </div>
+              <!-- Bottom overlay: author + description + tags -->
+              <div class="dy-bottom">
+                <div class="dy-author">
+                  <span class="dy-author-name">@AutoViral</span>
+                </div>
+                <p class="dy-desc">{selectedWork.title}</p>
+                {#if selectedWork.tags.length}
+                  <div class="dy-tags">
+                    {#each selectedWork.tags.slice(0, 4) as tag}
+                      <span class="dy-tag">{tag}</span>
+                    {/each}
+                  </div>
+                {/if}
+              </div>
+            </div>
+          </div>
+        {:else}
+          <!-- Image/text post (XHS style) -->
+          <div class="phone-screen">
+            <div class="xhs-post">
+              {#if selectedWork.images.length > 0}
+                <div class="xhs-cover">
+                  <img src={selectedWork.images[modalImageIdx]} alt={selectedWork.title} />
+                  {#if selectedWork.images.length > 1}
+                    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                    <div class="cover-tap-left" onclick={(e) => { e.stopPropagation(); if (modalImageIdx > 0) modalImageIdx--; }}></div>
+                    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                    <div class="cover-tap-right" onclick={(e) => { e.stopPropagation(); if (modalImageIdx < selectedWork!.images.length - 1) modalImageIdx++; }}></div>
+                    <div class="cover-dots">
+                      {#each selectedWork.images as _, i}
+                        <span class="cover-dot" class:active={i === modalImageIdx}></span>
+                      {/each}
+                    </div>
+                    <span class="cover-counter">{modalImageIdx + 1}/{selectedWork.images.length}</span>
+                  {/if}
+                </div>
+              {:else if selectedWork.coverImage}
+                <div class="xhs-cover">
+                  <img src={selectedWork.coverImage} alt={selectedWork.title} />
+                </div>
+              {/if}
               <div class="xhs-body">
-                <h3 class="xhs-title">一个能引发所有人讨论的价值观冲突很严重的话题</h3>
+                <h3 class="xhs-title">{selectedWork.title}</h3>
                 <div class="xhs-author">
                   <div class="xhs-avatar"></div>
-                  <span class="xhs-name">AutoViral 创作</span>
+                  <span class="xhs-name">{tt("autoviralCreation")}</span>
+                  <div class="xhs-platform-badges">
+                    {#each selectedWork.platforms as p}
+                      <span class="work-platform-tag" class:douyin={p === "douyin"} class:xhs={p === "xiaohongshu"}>
+                        {p === "douyin" ? tt("platformDouyin") : tt("platformXiaohongshu")}
+                      </span>
+                    {/each}
+                  </div>
                 </div>
-                <p class="xhs-text">我今年28，单身，没房，没车。不是我不努力，是这个社会疯了。凭什么结婚就必须买房？凭什么我爸妈辛苦了大半辈子，老了还要掏空自己来成全我的"面子"？</p>
-                <div class="xhs-tags">
-                  <span class="xhs-tag">#结婚必须买房吗</span>
-                  <span class="xhs-tag">#买房焦虑</span>
-                  <span class="xhs-tag">#年轻人不买房</span>
-                  <span class="xhs-tag">#婚姻观</span>
-                </div>
+                {#if selectedWork.body}
+                  <p class="xhs-fulltext">{selectedWork.body}</p>
+                {/if}
+                {#if selectedWork.tags.length}
+                  <div class="xhs-tags">
+                    {#each selectedWork.tags as tag}
+                      <span class="xhs-tag">{tag}</span>
+                    {/each}
+                  </div>
+                {/if}
                 <div class="xhs-actions">
                   <span class="xhs-action">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
@@ -414,21 +828,12 @@
               </div>
             </div>
           </div>
-          <div class="phone-home-bar"></div>
-        </div>
-        <div class="showcase-caption">
-          <span class="caption-tag">{tt("categoryConflict")}</span>
-          <span class="caption-route">{lang === "zh" ? "路线1 · 观点输出型" : "Route 1 · Opinion"}</span>
-        </div>
+        {/if}
+        <div class="phone-home-bar"></div>
       </div>
-    {:else}
-      <div class="showcase-empty">
-        <p class="showcase-empty-text">{lang === "zh" ? "优秀案例即将上线" : "Showcase examples coming soon"}</p>
-        <p class="showcase-empty-sub">{lang === "zh" ? "这里将展示由 AutoViral 生成的优秀作品" : "Featured works created with AutoViral will appear here"}</p>
-      </div>
-    {/if}
+    </div>
   </div>
-</div>
+{/if}
 
 {#if showConfigModal}
   <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
@@ -436,7 +841,7 @@
     <div class="config-modal">
       <h3 class="config-title">{tt("autoResearchLabel")}</h3>
       <p class="config-desc">
-        {autoResearchOn ? (lang === "zh" ? "自动调研已开启，关闭后将停止自动调研。" : "Auto research is on. Turn off to stop.") : (lang === "zh" ? "开启后，AI 会按设定频率自动调研热门趋势。" : "AI will automatically research trends at the set interval.")}
+        {autoResearchOn ? tt("autoResearchOnDesc") : tt("autoResearchOffDesc")}
       </p>
 
       <div class="config-field">
@@ -463,7 +868,7 @@
       <div class="config-actions">
         <button class="config-cancel" onclick={closeConfigModal}>{tt("cancel")}</button>
         <button class="config-confirm" onclick={saveConfig}>
-          {autoResearchOn ? (lang === "zh" ? "关闭" : "Turn Off") : (lang === "zh" ? "开启" : "Turn On")}
+          {autoResearchOn ? tt("turnOff") : tt("turnOn")}
         </button>
       </div>
     </div>
@@ -486,12 +891,20 @@
     margin-bottom: 1.5rem;
   }
 
+  /* Header layout */
+  .explore-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.25rem;
+    flex-wrap: wrap;
+  }
+
   /* Category tabs */
   .category-tabs {
     display: flex;
-    justify-content: center;
     gap: 0.4rem;
-    margin-bottom: 1.25rem;
   }
 
   .cat-tab {
@@ -520,6 +933,16 @@
     color: var(--text);
   }
 
+  .cat-tab-icon {
+    color: var(--text-dim);
+    flex-shrink: 0;
+    transition: color 0.15s;
+  }
+
+  .cat-tab.active .cat-tab-icon {
+    color: var(--spark-red, #FE2C55);
+  }
+
   .cat-tab-name {
     font-size: 0.85rem;
     font-weight: 650;
@@ -535,10 +958,45 @@
     color: var(--text-muted);
   }
 
-  /* Showcase */
+  /* Platform tabs */
+  .platform-tabs {
+    display: flex;
+    gap: 0.25rem;
+    background: var(--bg-inset, rgba(0,0,0,0.03));
+    border-radius: 8px;
+    padding: 0.2rem;
+    flex-shrink: 0;
+  }
+
+  .plat-tab {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.35rem 0.75rem;
+    border-radius: 6px;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    font-size: 0.78rem;
+    font-weight: 600;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+  }
+
+  .plat-tab:hover { color: var(--text); }
+  .plat-tab.active {
+    background: var(--bg-elevated, #fff);
+    color: var(--text);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  }
+
+  /* Showcase grid */
   .showcase-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    grid-auto-rows: 1fr;
     gap: 1rem;
   }
 
@@ -567,16 +1025,367 @@
     margin: 0;
   }
 
-  /* Phone showcase */
-  .phone-showcase {
-    grid-column: 1 / -1;
+  /* Work cards */
+  .work-card {
+    background: var(--card-bg, #fff);
+    border: 1px solid var(--card-border, #e5e7eb);
+    border-radius: 12px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+    animation: fadeUp 0.3s ease both;
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 0.75rem;
-    padding: 2rem 0;
   }
 
+  .work-card:hover {
+    border-color: rgba(0,0,0,0.25);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+  }
+
+  .work-cover {
+    width: 100%;
+    aspect-ratio: 3/4;
+    overflow: hidden;
+    background: #f5e6e0;
+    position: relative;
+  }
+
+  .work-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .work-cover-count {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    background: rgba(0,0,0,0.5);
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+  }
+
+  .work-platform-tags {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    display: flex;
+    gap: 4px;
+  }
+
+  .work-platform-tag {
+    font-size: 0.65rem;
+    font-weight: 650;
+    padding: 0.15rem 0.45rem;
+    border-radius: 4px;
+    backdrop-filter: blur(8px);
+  }
+
+  .work-platform-tag.douyin {
+    background: rgba(0, 0, 0, 0.65);
+    color: #fff;
+  }
+
+  .work-platform-tag.xhs {
+    background: rgba(254, 44, 85, 0.85);
+    color: #fff;
+  }
+
+  .work-card-body {
+    padding: 0.6rem 0.7rem 0.55rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    flex: 1;
+  }
+
+  .work-card-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text);
+    margin: 0;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .work-card-text {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    margin: 0;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .work-card-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: auto;
+    padding-top: 0.3rem;
+  }
+
+  .work-card-author {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .work-card-avatar {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #FE2C55, #FF6B6B);
+    flex-shrink: 0;
+  }
+
+  .work-card-name {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    font-weight: 500;
+  }
+
+  .work-card-platforms {
+    display: flex;
+    gap: 3px;
+  }
+
+  .work-card-plat {
+    font-size: 0.55rem;
+    font-weight: 600;
+    padding: 1px 4px;
+    border-radius: 3px;
+  }
+
+  .work-card-plat.douyin {
+    background: rgba(0, 0, 0, 0.08);
+    color: var(--text-muted);
+  }
+
+  .work-card-plat.xhs {
+    background: rgba(254, 44, 85, 0.1);
+    color: #FE2C55;
+  }
+
+  /* Work detail modal — phone frame */
+  .work-modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 1rem;
+    animation: fadeIn 0.15s ease;
+  }
+
+  .phone-modal {
+    position: relative;
+    animation: scaleIn 0.2s ease;
+  }
+
+  .phone-modal-close {
+    position: absolute;
+    top: -40px;
+    right: 0;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255,255,255,0.15);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 2;
+    transition: background 0.15s;
+  }
+
+  .phone-modal-close:hover {
+    background: rgba(255,255,255,0.3);
+  }
+
+  .phone-modal .phone-frame {
+    width: 320px;
+    background: #000;
+    border-radius: 36px;
+    padding: 8px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.08);
+  }
+
+  .phone-modal .phone-screen {
+    max-height: 600px;
+  }
+
+  /* XHS post inside phone */
+  .xhs-post {
+    font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    color: #333;
+  }
+
+  .xhs-cover {
+    width: 100%;
+    aspect-ratio: 3/4;
+    overflow: hidden;
+    background: #f5e6e0;
+    position: relative;
+  }
+
+  .xhs-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  /* Tap zones for prev/next — invisible, cover left/right halves */
+  .cover-tap-left, .cover-tap-right {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 40%;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .cover-tap-left { left: 0; }
+  .cover-tap-right { right: 0; }
+
+  /* Dot indicators — centered at bottom like XHS/Instagram */
+  .cover-dots {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 5px;
+    z-index: 3;
+  }
+  .cover-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.45);
+    transition: all 0.2s;
+  }
+  .cover-dot.active {
+    background: #fff;
+    transform: scale(1.2);
+  }
+
+  /* Counter badge — top right like XHS */
+  .cover-counter {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    background: rgba(0,0,0,0.45);
+    color: #fff;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 10px;
+    z-index: 3;
+    letter-spacing: 0.5px;
+  }
+
+  .xhs-body {
+    padding: 10px 14px 14px;
+  }
+
+  .xhs-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: #222;
+    margin: 0 0 8px;
+    line-height: 1.4;
+  }
+
+  .xhs-author {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 10px;
+  }
+
+  .xhs-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #FE2C55, #FF6B6B);
+    flex-shrink: 0;
+  }
+
+  .xhs-name {
+    font-size: 12px;
+    color: #999;
+    font-weight: 500;
+    flex: 1;
+  }
+
+  .xhs-platform-badges {
+    display: flex;
+    gap: 4px;
+  }
+
+  .xhs-fulltext {
+    font-size: 13.5px;
+    color: #333;
+    line-height: 1.75;
+    margin: 0 0 12px;
+    white-space: pre-wrap;
+  }
+
+  .xhs-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-bottom: 10px;
+  }
+
+  .xhs-tag {
+    font-size: 12px;
+    color: #FE2C55;
+    font-weight: 500;
+  }
+
+  .xhs-actions {
+    display: flex;
+    justify-content: space-around;
+    padding-top: 8px;
+    border-top: 1px solid #f0f0f0;
+  }
+
+  .xhs-action {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: #999;
+    font-weight: 500;
+  }
+
+  .xhs-action svg {
+    width: 14px;
+    height: 14px;
+    stroke: #999;
+  }
+
+  /* Phone frame shared */
   .phone-frame {
     width: 280px;
     background: #000;
@@ -601,9 +1410,9 @@
     background: #fff;
     border-radius: 24px;
     overflow: hidden;
+    overflow-y: auto;
     margin-top: -12px;
     max-height: 520px;
-    overflow-y: auto;
   }
 
   .phone-screen::-webkit-scrollbar { display: none; }
@@ -616,124 +1425,160 @@
     margin: 6px auto 2px;
   }
 
-  /* XHS post mockup */
-  .xhs-post {
-    font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
-    color: #333;
+  /* Video cover card styles — fills entire card */
+  .work-cover.video-cover {
+    aspect-ratio: unset;
+    flex: 1;
   }
-
-  .xhs-cover {
-    width: 100%;
-    aspect-ratio: 3/4;
-    overflow: hidden;
-    background: #f5e6e0;
-  }
-
-  .xhs-cover img {
+  .work-cover video {
     width: 100%;
     height: 100%;
     object-fit: cover;
   }
-
-  .xhs-body {
-    padding: 10px 12px 14px;
-  }
-
-  .xhs-title {
-    font-size: 14px;
-    font-weight: 700;
-    color: #222;
-    margin: 0 0 8px;
-    line-height: 1.35;
-  }
-
-  .xhs-author {
+  .work-cover-play {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    background: rgba(0,0,0,0.45);
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 8px;
+    justify-content: center;
+    pointer-events: none;
+  }
+  .work-cover-play svg {
+    margin-left: 2px;
   }
 
-  .xhs-avatar {
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    background: linear-gradient(135deg, #FE2C55, #FF6B6B);
-    flex-shrink: 0;
+  /* Video card bottom overlay — title on top of video */
+  .video-card-bottom {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 24px 10px 8px;
+    background: linear-gradient(transparent, rgba(0,0,0,0.7));
+  }
+  .video-card-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: #fff;
+    margin: 0;
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.5);
   }
 
-  .xhs-name {
-    font-size: 11px;
-    color: #999;
-    font-weight: 500;
+  /* Douyin-style fullscreen video player */
+  .dy-screen {
+    background: #000 !important;
+    max-height: 600px !important;
+    overflow: hidden !important;
   }
 
-  .xhs-text {
-    font-size: 12.5px;
-    color: #444;
-    line-height: 1.65;
-    margin: 0 0 8px;
+  .dy-video-container {
+    position: relative;
+    width: 100%;
+    height: 600px;
+    background: #000;
+    overflow: hidden;
+    cursor: pointer;
+  }
+
+  .dy-video {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    background: #000;
+  }
+
+  .dy-play-overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    opacity: 0.9;
+  }
+
+  /* Right sidebar — Douyin action buttons */
+  .dy-sidebar {
+    position: absolute;
+    right: 8px;
+    bottom: 140px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 18px;
+    z-index: 3;
+  }
+
+  .dy-action {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+
+  .dy-action svg {
+    filter: drop-shadow(0 1px 3px rgba(0,0,0,0.5));
+  }
+
+  .dy-action-count {
+    font-size: 10px;
+    color: #fff;
+    font-weight: 600;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
+  }
+
+  /* Bottom overlay — author, description, tags */
+  .dy-bottom {
+    position: absolute;
+    bottom: 12px;
+    left: 10px;
+    right: 54px;
+    z-index: 3;
+  }
+
+  .dy-author {
+    margin-bottom: 6px;
+  }
+
+  .dy-author-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.7);
+  }
+
+  .dy-desc {
+    font-size: 12px;
+    color: #fff;
+    line-height: 1.5;
+    margin: 0 0 6px;
+    text-shadow: 0 1px 4px rgba(0,0,0,0.7);
     display: -webkit-box;
-    -webkit-line-clamp: 4;
+    -webkit-line-clamp: 2;
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
 
-  .xhs-tags {
+  .dy-tags {
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
-    margin-bottom: 10px;
   }
 
-  .xhs-tag {
+  .dy-tag {
     font-size: 11px;
-    color: #FE2C55;
+    color: #fff;
     font-weight: 500;
-  }
-
-  .xhs-actions {
-    display: flex;
-    justify-content: space-around;
-    padding-top: 8px;
-    border-top: 1px solid #f0f0f0;
-  }
-
-  .xhs-action {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    font-size: 11px;
-    color: #999;
-    font-weight: 500;
-  }
-
-  .xhs-action svg {
-    width: 14px;
-    height: 14px;
-    stroke: #999;
-  }
-
-  .showcase-caption {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-
-  .caption-tag {
-    font-size: 0.72rem;
-    font-weight: 650;
-    color: var(--spark-red, #FE2C55);
-    padding: 0.15rem 0.5rem;
-    border: 1px solid rgba(254, 44, 85, 0.2);
-    border-radius: 4px;
-    background: rgba(254, 44, 85, 0.04);
-  }
-
-  .caption-route {
-    font-size: 0.72rem;
-    color: var(--text-dim);
-    font-weight: 500;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.6);
   }
 
   .ranking-grid {

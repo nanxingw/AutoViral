@@ -5,6 +5,7 @@
   import Studio from "./pages/Studio.svelte";
   import Works from "./pages/Works.svelte";
   import NewWorkModal from "./components/NewWorkModal.svelte";
+  import AssetLibrary from "./components/AssetLibrary.svelte";
   import { fetchConfig, updateConfig, fetchWorks, createWorkApi, type WorkSummary, type ContentCategory } from "./lib/api";
   import { t, getLanguage, setLanguage, subscribe } from "./lib/i18n";
 
@@ -50,17 +51,29 @@
 
   let initialPrompt = $state("");
 
-  function buildInitialPrompt(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; topicHint: string }): string {
-    const categoryMap: Record<string, string> = {
-      anxiety: "危机感/焦虑",
-      conflict: "观点分歧/愤怒",
-      comedy: "搞笑抽象",
-      envy: "向往拥有/羡慕",
-    };
-    const typeMap: Record<string, string> = {
-      "short-video": "短视频",
-      "image-text": "图文",
-    };
+  function buildInitialPrompt(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; imageSource: string; imageSearchQuery: string; topicHint: string }): string {
+    const isEn = lang === "en";
+    if (isEn) {
+      const categoryMap: Record<string, string> = { anxiety: "Resonance", conflict: "Debate/Anger", comedy: "Comedy/Absurd", envy: "Aspiration/Envy" };
+      const typeMap: Record<string, string> = { "short-video": "Short Video", "image-text": "Image & Text" };
+      const parts: string[] = [];
+      parts.push(`Start creating.`);
+      parts.push(`Format: ${typeMap[data.type] ?? data.type}`);
+      parts.push(`Emotion category: ${categoryMap[data.contentCategory] ?? data.contentCategory}`);
+      if (data.title) parts.push(`Title: ${data.title}`);
+      if (data.topicHint) parts.push(`Direction: ${data.topicHint}`);
+      if (data.videoSource === "search" && data.videoSearchQuery) parts.push(`Video search: ${data.videoSearchQuery}`);
+      else if (data.videoSource === "ai-generate") parts.push(`Video source: AI generated`);
+      else if (data.videoSource === "upload") parts.push(`Video source: User upload`);
+      if (data.imageSource === "search" && data.imageSearchQuery) parts.push(`Image search: ${data.imageSearchQuery}`);
+      else if (data.imageSource === "search") parts.push(`Image source: Web search`);
+      else if (data.imageSource === "ai-generate") parts.push(`Image source: AI generated`);
+      else if (data.imageSource === "upload") parts.push(`Image source: User upload`);
+      parts.push(`Please start from the research step of the pipeline. Respond in English.`);
+      return parts.join("\n");
+    }
+    const categoryMap: Record<string, string> = { anxiety: "深度共鸣", conflict: "观点分歧/争议感", comedy: "搞笑抽象", envy: "向往拥有/羡慕" };
+    const typeMap: Record<string, string> = { "short-video": "短视频", "image-text": "图文" };
     const parts: string[] = [];
     parts.push(`开始创作。`);
     parts.push(`内容形式：${typeMap[data.type] ?? data.type}`);
@@ -70,11 +83,15 @@
     if (data.videoSource === "search" && data.videoSearchQuery) parts.push(`视频素材搜索：${data.videoSearchQuery}`);
     else if (data.videoSource === "ai-generate") parts.push(`视频素材：AI 生成`);
     else if (data.videoSource === "upload") parts.push(`视频素材：用户上传`);
+    if (data.imageSource === "search" && data.imageSearchQuery) parts.push(`图片素材搜索：${data.imageSearchQuery}`);
+    else if (data.imageSource === "search") parts.push(`图片素材：全网搜索下载`);
+    else if (data.imageSource === "ai-generate") parts.push(`图片素材：AI 生成`);
+    else if (data.imageSource === "upload") parts.push(`图片素材：用户上传`);
     parts.push(`请从话题调研开始执行流水线。`);
     return parts.join("\n");
   }
 
-  async function handleCreateWork(data: { title: string; type: string; contentCategory: string; videoSource: string; videoSearchQuery: string; topicHint: string }) {
+  async function handleCreateWork(data: { title: string; type: string; platforms: string[]; contentCategory: string; videoSource: string; videoSearchQuery: string; imageSource: string; imageSearchQuery: string; topicHint: string }) {
     showNewWorkModal = false;
     prefillTitle = "";
     prefillTopicHint = "";
@@ -85,8 +102,9 @@
         contentCategory: (data.contentCategory || "anxiety") as ContentCategory,
         videoSource: data.videoSource || undefined,
         videoSearchQuery: data.videoSearchQuery || undefined,
-        platforms: ["douyin", "xiaohongshu"],
+        platforms: data.platforms && data.platforms.length > 0 ? data.platforms : ["douyin", "xiaohongshu"],
         topicHint: data.topicHint || undefined,
+        language: lang as "en" | "zh",
       });
       initialPrompt = buildInitialPrompt(data);
       currentWorkId = newWork.id;
@@ -175,10 +193,11 @@
     </div>
     <button
       class="topbar-action"
-      aria-label="Settings"
+      aria-label="My Assets"
       onclick={() => { showSettings = !showSettings; }}
     >
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>{tt("settingsTitle")}</span>
     </button>
   </header>
 
@@ -211,71 +230,23 @@
       </div>
 
       <div class="drawer-body">
-        <div class="field-group">
-          <span class="field-label-upper">{tt("languageSetting")}</span>
-          <div class="lang-row">
-            <span class="lang-opt" class:active={lang === "en"}>EN</span>
+        <AssetLibrary />
+
+        <div class="drawer-footer">
+          <div class="switch-row">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
+            <button class="switch" class:on={theme === "dark"} onclick={toggleTheme}>
+              <span class="switch-thumb"></span>
+            </button>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+            <span class="switch-divider"></span>
+            <span class="switch-label">EN</span>
             <button class="switch" class:on={lang === "zh"} onclick={toggleLanguage}>
               <span class="switch-thumb"></span>
             </button>
-            <span class="lang-opt" class:active={lang === "zh"}>中文</span>
+            <span class="switch-label">中</span>
           </div>
         </div>
-
-        <div class="field-group">
-          <span class="field-label-upper">{tt("themeSetting")}</span>
-          <button class="field-btn" onclick={toggleTheme}>
-            {#if theme === "dark"}
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>
-              {tt("darkTheme")}
-            {:else}
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-              {tt("lightTheme")}
-            {/if}
-          </button>
-        </div>
-
-        <div class="field-group">
-          <span class="field-label-upper">{tt("researchConfig")}</span>
-          <div class="stack">
-            <label class="field-row">
-              <span class="field-label-sm">{tt("researchInterval")}</span>
-              <select bind:value={interval}>
-                <option value="15m">{tt("minutes15")}</option>
-                <option value="30m">{tt("minutes30")}</option>
-                <option value="1h">{tt("hour1")}</option>
-                <option value="2h">{tt("hours2")}</option>
-                <option value="4h">{tt("hours4")}</option>
-                <option value="8h">{tt("hours8")}</option>
-              </select>
-            </label>
-            <label class="field-row">
-              <span class="field-label-sm">{tt("aiModel")}</span>
-              <select bind:value={model}>
-                <option value="haiku">{tt("claudeHaikuFast")}</option>
-                <option value="sonnet">{tt("claudeSonnetBalanced")}</option>
-                <option value="opus">{tt("claudeOpusCapable")}</option>
-              </select>
-            </label>
-            <div class="field-row">
-              <span class="field-label-sm">{tt("autoResearch")}</span>
-              <button class="switch" class:on={autoRun} onclick={() => autoRun = !autoRun} role="switch" aria-checked={autoRun}>
-                <span class="switch-thumb"></span>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        {#if settingsMessage}
-          <p class="msg-success">{settingsMessage}</p>
-        {/if}
-
-        <button class="btn-primary full" onclick={handleSaveSettings} disabled={saving}>
-          {#if saving}
-            <svg class="spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>
-          {/if}
-          {saving ? tt("saving") : tt("saveChanges")}
-        </button>
       </div>
     </aside>
   {/if}
@@ -518,12 +489,16 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
+    gap: 0.35rem;
     height: 32px;
+    padding: 0 0.5rem;
     border: 1px solid transparent;
     border-radius: 4px;
     background: none;
     color: var(--text-muted);
+    font-size: var(--size-sm, 0.8rem);
+    font-weight: 500;
+    white-space: nowrap;
     cursor: pointer;
     transition: all var(--transition-fast);
   }
@@ -616,6 +591,36 @@
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+  }
+
+  .drawer-footer {
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .switch-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.45rem;
+  }
+
+  .switch-label {
+    font-size: var(--size-xs, 0.7rem);
+    font-weight: 500;
+    color: var(--text-dim);
+  }
+
+  .switch-row svg {
+    color: var(--text-dim);
+  }
+
+  .switch-divider {
+    width: 1px;
+    height: 14px;
+    background: var(--border);
+    margin: 0 0.25rem;
   }
 
   .field-group {

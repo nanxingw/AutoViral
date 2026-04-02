@@ -3,7 +3,6 @@
   import { t, getLanguage, subscribe } from "../lib/i18n";
   import { fetchWorks, deleteWorkApi, type WorkSummary } from "../lib/api";
   import InterestTags from "../components/InterestTags.svelte";
-  import AssetLibrary from "../components/AssetLibrary.svelte";
 
   let {
     onOpenStudio,
@@ -308,10 +307,10 @@
 
   function dispatchCreate(dir: TrendDirection) {
     const hint = [
-      dir.emotionType ? `目标情绪: ${dir.emotionType}${dir.emotionSubtype ? `（${dir.emotionSubtype}）` : ""}` : "",
+      dir.emotionType ? `${tt("labelTargetEmotion")}: ${dir.emotionType}${dir.emotionSubtype ? `（${dir.emotionSubtype}）` : ""}` : "",
       dir.description,
-      dir.contentAngles?.length ? `切入角度: ${dir.contentAngles.join("; ")}` : "",
-      dir.exampleHook ? `爆款钩子: ${dir.exampleHook}` : "",
+      dir.contentAngles?.length ? `${tt("labelContentAngle")}: ${dir.contentAngles.join("; ")}` : "",
+      dir.exampleHook ? `${tt("labelViralHookColon")}: ${dir.exampleHook}` : "",
       dir.tags?.length ? dir.tags.map(t => "#" + t).join(" ") : "",
     ].filter(Boolean).join("\n");
     onCreateFromTrend(dir.title, hint);
@@ -336,8 +335,6 @@
 </script>
 
 <div class="works-page">
-  <AssetLibrary />
-
   <!-- ═══ Zone 1: Greeting + Viral Ideas ═══ -->
   <div class="hero-zone">
     <p class="hero-text">

@@ -2,7 +2,7 @@ import { createHmac, createHash } from 'node:crypto'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { dataDir } from '../config.js'
-import type { GenerateProvider, ImageOpts, VideoOpts, GenerateResult } from './base.js'
+import type { GenerateProvider, ImageOpts, VideoOpts, LipSyncOpts, GenerateResult } from './base.js'
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -12,11 +12,15 @@ const SERVICE = 'cv'
 const API_VERSION = '2022-08-31'
 const SUBMIT_ACTION = 'CVSync2AsyncSubmitTask'
 const QUERY_ACTION = 'CVSync2AsyncGetResult'
+// Lip-sync uses a different action pair
+const LIPSYNC_SUBMIT_ACTION = 'CVSubmitTask'
+const LIPSYNC_QUERY_ACTION = 'CVGetResult'
+const LIPSYNC_REQ_KEY = 'realman_change_lips'
 
 const IMAGE_REQ_KEY = 'jimeng_t2i_v40'
-// Video 3.0 Pro uses a unified req_key for both T2V and I2V
-const VIDEO_T2V_REQ_KEY = 'jimeng_ti2v_v30_pro'
-const VIDEO_I2V_REQ_KEY = 'jimeng_ti2v_v30_pro'
+// Video 3.0 Pro req_keys (new API format with req_json wrapper)
+const VIDEO_T2V_REQ_KEY = 'ImageGenerationTextToVideo'
+const VIDEO_I2V_REQ_KEY = 'ImageGenerationImageToVideo'
 
 const POLL_INTERVAL_MS = 2000
 const POLL_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
@@ -122,10 +126,12 @@ async function submitAndPoll(
   accessKey: string,
   secretKey: string,
   submitPayload: Record<string, unknown>,
+  submitAction = SUBMIT_ACTION,
+  queryAction = QUERY_ACTION,
 ): Promise<{ data: any }> {
   // Submit task
   const submitBody = JSON.stringify(submitPayload)
-  const submitReq = signRequest(accessKey, secretKey, SUBMIT_ACTION, submitBody)
+  const submitReq = signRequest(accessKey, secretKey, submitAction, submitBody)
   const submitRes = await fetch(submitReq.url, {
     method: 'POST',
     headers: submitReq.headers,
@@ -149,7 +155,7 @@ async function submitAndPoll(
     await new Promise(r => setTimeout(r, POLL_INTERVAL_MS))
 
     const queryPayload = JSON.stringify({ req_key: submitPayload.req_key, task_id: taskId })
-    const queryReq = signRequest(accessKey, secretKey, QUERY_ACTION, queryPayload)
+    const queryReq = signRequest(accessKey, secretKey, queryAction, queryPayload)
     const queryRes = await fetch(queryReq.url, {
       method: 'POST',
       headers: queryReq.headers,
@@ -187,6 +193,7 @@ export class JimengProvider implements GenerateProvider {
   readonly name = 'jimeng'
   readonly supportsImage = true
   readonly supportsVideo = true
+  readonly supportsLipSync = true
 
   private accessKey: string
   private secretKey: string
@@ -262,43 +269,34 @@ export class JimengProvider implements GenerateProvider {
       const isImageToVideo = !!opts.firstFrame
       const reqKey = isImageToVideo ? VIDEO_I2V_REQ_KEY : VIDEO_T2V_REQ_KEY
 
-      const payload: Record<string, unknown> = {
+      // Build req_json inner object per 3.0 Pro API spec
+      const reqJson: Record<string, unknown> = {
         req_key: reqKey,
         prompt,
-        return_url: true,
       }
 
-      if (opts.firstFrame) {
-        // If firstFrame looks like a URL, use image_urls; otherwise treat as base64
-        if (opts.firstFrame.startsWith('http://') || opts.firstFrame.startsWith('https://')) {
-          payload.image_urls = [opts.firstFrame]
-        } else {
-          payload.binary_data_base64 = [opts.firstFrame]
-        }
+      if (isImageToVideo && opts.firstFrame) {
+        reqJson.image_url = opts.firstFrame
       }
-      if (opts.lastFrame) {
-        if (opts.lastFrame.startsWith('http://') || opts.lastFrame.startsWith('https://')) {
-          // For first+last frame mode, image_urls takes [firstFrame, lastFrame]
-          if (payload.image_urls) {
-            (payload.image_urls as string[]).push(opts.lastFrame)
-          } else {
-            payload.image_urls = [opts.lastFrame]
-          }
-        } else {
-          payload.binary_data_base64 = payload.binary_data_base64 ?? []
-          ;(payload.binary_data_base64 as string[]).push(opts.lastFrame)
-        }
-      }
+
+      // Map resolution/aspect ratio (e.g. "16:9", "9:16", "1:1")
       if (opts.resolution) {
-        // Map resolution string to aspect_ratio format expected by API
-        payload.aspect_ratio = opts.resolution
+        reqJson.aspect_ratio = opts.resolution
+      } else {
+        reqJson.aspect_ratio = '9:16' // default vertical for Douyin/XHS
+      }
+
+      // Wrap in req_json string as the API expects
+      const payload: Record<string, unknown> = {
+        req_key: reqKey,
+        req_json: JSON.stringify(reqJson),
       }
 
       const result = await submitAndPoll(this.accessKey, this.secretKey, payload)
 
-      // Extract video URL from result (different API versions use different field names)
-      const videoUrl = result.data?.video_urls?.[0]
-        ?? result.data?.video_url
+      // Extract video URL from result
+      const videoUrl = result.data?.video_url
+        ?? result.data?.video_urls?.[0]
         ?? result.data?.resp_data?.[0]?.video_url
 
       if (!videoUrl) {
@@ -307,6 +305,52 @@ export class JimengProvider implements GenerateProvider {
 
       const assetPath = join(dataDir, 'works', workId, 'assets', 'clips', filename)
       await downloadFile(videoUrl, assetPath)
+
+      return {
+        success: true,
+        assetPath,
+        previewUrl: `/api/works/${workId}/assets/clips/${filename}`,
+      }
+    } catch (err: any) {
+      if (err.message?.includes('timed out')) {
+        return { success: false, error: err.message, code: 'TIMEOUT' }
+      }
+      if (err.message?.includes('Download failed')) {
+        return { success: false, error: err.message, code: 'DOWNLOAD_FAILED' }
+      }
+      return { success: false, error: err.message, code: 'API_ERROR' }
+    }
+  }
+
+  async lipSync(opts: LipSyncOpts): Promise<GenerateResult> {
+    const { videoUrl, audioUrl, workId, filename } = opts
+
+    try {
+      const payload: Record<string, unknown> = {
+        req_key: LIPSYNC_REQ_KEY,
+        video_url: videoUrl,
+        audio_url: audioUrl,
+      }
+
+      const result = await submitAndPoll(
+        this.accessKey,
+        this.secretKey,
+        payload,
+        LIPSYNC_SUBMIT_ACTION,
+        LIPSYNC_QUERY_ACTION,
+      )
+
+      // Extract output video URL
+      const outputUrl = result.data?.resp_data?.[0]?.url
+        ?? result.data?.video_url
+        ?? result.data?.video_urls?.[0]
+
+      if (!outputUrl) {
+        return { success: false, error: 'No video URL in lip-sync response', code: 'API_ERROR' }
+      }
+
+      const assetPath = join(dataDir, 'works', workId, 'assets', 'clips', filename)
+      await downloadFile(outputUrl, assetPath)
 
       return {
         success: true,

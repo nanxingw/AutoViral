@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { t, getLanguage, subscribe } from "../lib/i18n";
+  import { updateWorkApi } from "../lib/api";
   import MarkdownBlock from "./MarkdownBlock.svelte";
 
   let {
@@ -8,15 +9,17 @@
     visible = false,
     refreshTrigger = 0,
     showOutput = false,
-    onEditAsset,
     topicHint = "",
+    chatBlocks = [],
+    onTitleFound,
   }: {
     workId: string;
     visible: boolean;
     refreshTrigger: number;
     showOutput?: boolean;
-    onEditAsset?: (assetName: string, assetUrl: string) => void;
     topicHint?: string;
+    chatBlocks?: Array<{ type: string; text: string }>;
+    onTitleFound?: (title: string) => void;
   } = $props();
 
   // When showOutput changes to true, switch to output tab
@@ -37,11 +40,19 @@
 
   let files: AssetFile[] = $state([]);
   let loading = $state(false);
+  let usePortrait = $state(false);
+  let showPortraitTooltip = $state(false);
+
+  async function togglePortrait() {
+    usePortrait = !usePortrait;
+    await updateWorkApi(workId, { usePortrait } as any).catch(() => {});
+  }
   let lightboxSrc = $state("");
   let mdPreview: { name: string; content: string } | null = $state(null);
   let activeSection: "assets" | "output" = $state("output");
   let pollTimer: ReturnType<typeof setInterval> | null = null;
   let outputCopytext = $state("");
+  let dyPaused = $state(true);
 
   interface PlatformCopy {
     platform: string; // "douyin" | "xiaohongshu"
@@ -98,7 +109,7 @@
         else if (/文案|正文|body|caption|copy/.test(name)) currentSection = "body";
         else if (/标签|tag|hashtag/.test(name)) currentSection = "tags";
         else if (/话题|topic/.test(name)) currentSection = "topics";
-        else if (/发布|建议|publish|tip/.test(name)) currentSection = "tips";
+        else if (/发布建议|publish.?tip|注意事项/.test(name)) currentSection = "tips";
         else currentSection = "body"; // unknown sections go to body
         continue;
       }
@@ -230,13 +241,22 @@
     }
   }
 
-  function handleEditAsset(file: AssetFile) {
-    onEditAsset?.(file.name, file.url);
-  }
-
-  function handleDownloadAll() {
-    // Open the download endpoint
-    window.open(`/api/works/${encodeURIComponent(workId)}/assets/download`, "_blank");
+  async function loadChatFallback() {
+    try {
+      const res = await fetch(`/api/works/${workId}/chat`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const blocks = (data?.blocks ?? []) as Array<{ type: string; text: string }>;
+      const extracted = extractCopytextFromChat(blocks);
+      if (extracted) {
+        outputCopytext = extracted;
+        if (onTitleFound) {
+          const platforms = parseCopytextMulti(extracted);
+          const title = platforms[0]?.title;
+          if (title) onTitleFound(title);
+        }
+      }
+    } catch {}
   }
 
   async function loadCopytext() {
@@ -244,14 +264,115 @@
     try {
       const res = await fetch(outputCopytextFile.url);
       outputCopytext = await res.text();
+      // Extract title from copytext and notify parent to update work title
+      if (outputCopytext && onTitleFound) {
+        const platforms = parseCopytextMulti(outputCopytext);
+        const title = platforms[0]?.title;
+        if (title) onTitleFound(title);
+      }
     } catch { outputCopytext = ""; }
   }
 
-  // Load copytext whenever the file appears
+  // Load copytext whenever the file appears; fall back to chat extraction
   $effect(() => {
-    if (outputCopytextFile) loadCopytext();
-    else outputCopytext = "";
+    if (outputCopytextFile) {
+      loadCopytext();
+    } else {
+      // Fallback: extract copytext from chat blocks (agent may have written it inline)
+      let extracted = extractCopytextFromChat(chatBlocks);
+      // If current session blocks don't have it, try loading persisted chat history
+      if (!extracted) {
+        loadChatFallback();
+      } else {
+        outputCopytext = extracted;
+        if (onTitleFound) {
+          const platforms = parseCopytextMulti(extracted);
+          const title = platforms[0]?.title;
+          if (title) onTitleFound(title);
+        }
+      }
+    }
   });
+
+  function extractCopytextFromChat(blocks: Array<{ type: string; text: string }>): string {
+    if (!blocks.length) return "";
+    const allText = blocks.filter(b => b.type === "text" && b.text.length > 80).map(b => b.text);
+
+    // Strategy 1: Find "发布文案" or "配套发布文案" section with quoted (>) or plain text
+    for (const text of [...allText].reverse()) {
+      const match = text.match(/(?:配套)?发布文案[：:\s]*\n([\s\S]+?)(?:\n\n(?:标签|最佳|互动|预期|---)|$)/);
+      if (match) {
+        const body = match[1].replace(/^>\s?/gm, "").trim();
+        if (body.length > 50) return buildCopytext(text, body);
+      }
+    }
+
+    // Strategy 2: Find "完整文案" section (research step output)
+    for (const text of [...allText].reverse()) {
+      const match = text.match(/完整文案[：:\s]*\n([\s\S]+?)(?:\n\n\*{0,2}标签|$)/);
+      if (match) {
+        const body = match[1].replace(/^>\s?/gm, "").trim();
+        if (body.length > 80) return buildCopytext(text, body);
+      }
+    }
+
+    // Strategy 3: Find substantial quoted text blocks (> lines) = inline copytext
+    for (const text of [...allText].reverse()) {
+      const quotedLines = text.split("\n").filter(l => /^>\s/.test(l));
+      if (quotedLines.length >= 5) {
+        const body = quotedLines.map(l => l.replace(/^>\s?/, "")).join("\n").trim();
+        if (body.length > 100) return buildCopytext(text, body);
+      }
+    }
+
+    return "";
+  }
+
+  function buildCopytext(fullBlock: string, body: string): string {
+    // Extract tags: multiple formats
+    let tags = "";
+    // Format: **标签**：`#tag1` `#tag2` or 标签：#tag1 #tag2
+    const inlineTagMatch = fullBlock.match(/\*{0,2}标签\*{0,2}[：:]\s*(.+)/g);
+    if (inlineTagMatch) {
+      tags = inlineTagMatch
+        .map(l => l.replace(/\*{0,2}标签\*{0,2}[：:]\s*/, "").replace(/`/g, ""))
+        .join("\n");
+    }
+    // Format: ### 标签 (section header) followed by tag lines
+    if (!tags) {
+      const sectionMatch = fullBlock.match(/#{1,3}\s*标签\s*\n([\s\S]+?)(?:\n\n|$)/);
+      if (sectionMatch) {
+        tags = sectionMatch[1].trim();
+      }
+    }
+    // Format: 话题标签 section
+    if (!tags) {
+      const topicMatch = fullBlock.match(/#{1,3}\s*话题标签?\s*\n([\s\S]+?)(?:\n\n|$)/);
+      if (topicMatch) {
+        tags = topicMatch[1].trim();
+      }
+    }
+    // Last resort: collect all lines that are mostly hashtags
+    if (!tags) {
+      const tagLines = fullBlock.split("\n").filter(l => {
+        const ht = l.match(/#[\w\u4e00-\u9fff]+/g);
+        return ht && ht.length >= 2 && l.trim().length < 120;
+      });
+      if (tagLines.length) tags = tagLines.join("\n");
+    }
+
+    // Extract title
+    const titleMatch = fullBlock.match(/\*{0,2}标题\*{0,2}[：:]\s*(.+)/);
+    let title = titleMatch ? titleMatch[1].replace(/\*+|`/g, "").trim() : "";
+    const lines = body.split("\n").filter(l => l.trim());
+    if (!title && lines[0] && lines[0].length < 50) title = lines.shift()!;
+
+    const parts = [];
+    if (title) parts.push(`## 标题\n${title}`);
+    parts.push(`## 正文\n${lines.join("\n")}`);
+    if (tags) parts.push(`## 标签\n${tags.replace(/`/g, "")}`);
+    return parts.join("\n\n");
+  }
 
 
   onMount(() => {
@@ -297,6 +418,22 @@
           {tt("loading")}
         </div>
       {:else if activeSection === "assets"}
+        <div class="portrait-switch-row">
+          <span class="portrait-label">{tt("usePortraitLabel")}</span>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <span class="portrait-info"
+            onmouseenter={() => showPortraitTooltip = true}
+            onmouseleave={() => showPortraitTooltip = false}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+            {#if showPortraitTooltip}
+              <span class="portrait-tooltip">{tt("usePortraitTooltip")}</span>
+            {/if}
+          </span>
+          <button class="switch" class:on={usePortrait} onclick={togglePortrait}>
+            <span class="switch-thumb"></span>
+          </button>
+        </div>
         {#if assetFiles.length === 0}
           <div class="empty-state">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
@@ -311,13 +448,10 @@
             <div class="image-grid">
               {#each framesFiles as file}
                 {#if isImage(file.name)}
-                  <div class="asset-card">
-                    <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
-                      <img src={file.url} alt={file.name} loading="lazy" />
-                      <span class="thumb-name">{file.name}</span>
-                    </button>
-                    {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
-                  </div>
+                  <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
+                    <img src={file.url} alt={file.name} loading="lazy" />
+                    <span class="thumb-name">{file.name}</span>
+                  </button>
                 {:else}
                   <a class="file-item-sm" href={file.url} download={file.name}>
                     <span>{file.name}</span>
@@ -336,10 +470,7 @@
                   <div class="video-wrapper">
                     <video controls preload="metadata" src={file.url}></video>
                   </div>
-                  <div class="asset-row">
-                    <span class="file-name">{file.name}</span>
-                    {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
-                  </div>
+                  <span class="file-name">{file.name}</span>
                 </div>
               {:else}
                 <a class="file-item-sm" href={file.url} download={file.name}>
@@ -355,13 +486,10 @@
             <div class="image-grid">
               {#each imagesFiles as file}
                 {#if isImage(file.name)}
-                  <div class="asset-card">
-                    <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
-                      <img src={file.url} alt={file.name} loading="lazy" />
-                      <span class="thumb-name">{file.name}</span>
-                    </button>
-                    {#if onEditAsset}<button class="edit-btn" onclick={() => handleEditAsset(file)} title="编辑此素材">✏️ 编辑</button>{/if}
-                  </div>
+                  <button class="thumb" onclick={() => { lightboxSrc = file.url; }}>
+                    <img src={file.url} alt={file.name} loading="lazy" />
+                    <span class="thumb-name">{file.name}</span>
+                  </button>
                 {:else}
                   <a class="file-item-sm" href={file.url} download={file.name}>
                     <span>{file.name}</span>
@@ -407,7 +535,7 @@
         {/if}
 
       {:else}
-        <!-- Output section: final video or images + copytext -->
+        <!-- Output section: phone-frame preview -->
         {#if !hasOutput}
           <div class="empty-state">
             <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.3">
@@ -419,80 +547,125 @@
           </div>
         {:else}
           <div class="output-showcase">
-            {#if finalVideo}
-              <div class="video-wrapper">
-                <video controls preload="metadata" src={finalVideo.url}></video>
-              </div>
-            {/if}
-            {#if outputImages.length > 0}
-              <div class="carousel">
-                <div class="carousel-viewport">
-                  <button class="carousel-img" onclick={() => { lightboxSrc = outputImages[carouselIdx].url; }}>
-                    <img src={outputImages[carouselIdx].url} alt={outputImages[carouselIdx].name} />
-                  </button>
-                </div>
-                {#if outputImages.length > 1}
-                  <div class="carousel-controls">
-                    <button class="carousel-arrow" disabled={carouselIdx <= 0} onclick={() => carouselIdx--}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
-                    </button>
-                    <span class="carousel-counter">{carouselIdx + 1} / {outputImages.length}</span>
-                    <button class="carousel-arrow" disabled={carouselIdx >= outputImages.length - 1} onclick={() => carouselIdx++}>
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
-                    </button>
+            <div class="preview-phone">
+              <div class="preview-notch"></div>
+              {#if finalVideo}
+                <!-- Douyin-style video preview -->
+                <div class="preview-screen preview-screen-dark">
+                  <div class="dy-container">
+                    <!-- svelte-ignore a11y_media_has_caption -->
+                    <video
+                      class="dy-video"
+                      src={finalVideo.url}
+                      loop
+                      playsinline
+                      preload="auto"
+                      onclick={(e) => {
+                        const v = e.currentTarget as HTMLVideoElement;
+                        if (v.paused) v.play(); else v.pause();
+                        dyPaused = v.paused;
+                      }}
+                      onplay={() => dyPaused = false}
+                      onpause={() => dyPaused = true}
+                    ></video>
+                    {#if dyPaused}
+                      <div class="dy-play-btn">
+                        <svg width="40" height="40" viewBox="0 0 24 24" fill="rgba(255,255,255,0.85)"><polygon points="6,3 20,12 6,21"/></svg>
+                      </div>
+                    {/if}
+                    <div class="dy-side">
+                      <div class="dy-act">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+                        <span class="dy-act-n">2.4w</span>
+                      </div>
+                      <div class="dy-act">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                        <span class="dy-act-n">3.6k</span>
+                      </div>
+                      <div class="dy-act">
+                        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+                        <span class="dy-act-n">8.1k</span>
+                      </div>
+                    </div>
+                    {#if outputCopytext}
+                      {@const allPlatforms = parseCopytextMulti(outputCopytext)}
+                      {@const currentCopy = allPlatforms.find(p => p.platform === copyPlatform) ?? allPlatforms[0]}
+                      {#if currentCopy}
+                        <div class="dy-info">
+                          <span class="dy-author">@AutoViral</span>
+                          <p class="dy-desc">{currentCopy.title || currentCopy.body.slice(0, 60)}</p>
+                          {#if currentCopy.tags.length}
+                            <div class="dy-tags">
+                              {#each currentCopy.tags.slice(0, 4) as tag}
+                                <span class="dy-tag">{tag}</span>
+                              {/each}
+                            </div>
+                          {/if}
+                        </div>
+                      {/if}
+                    {/if}
                   </div>
-                {/if}
-              </div>
-            {/if}
-            {#if outputCopytext}
-              {@const allPlatforms = parseCopytextMulti(outputCopytext)}
-              {@const currentCopy = allPlatforms.find(p => p.platform === copyPlatform) ?? allPlatforms[0]}
-              {#if allPlatforms.length > 1}
-                <div class="platform-filter">
-                  <button class="pf-btn" class:active={copyPlatform === "douyin"} onclick={() => copyPlatform = "douyin"}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12.53 1.02c1.15-.04 2.29.02 3.43.14.17 1.38.76 2.71 1.74 3.66 1 .98 2.37 1.52 3.76 1.65v3.53c-1.3-.04-2.6-.35-3.76-.92-.5-.24-.97-.53-1.4-.87-.01 2.84.01 5.68-.02 8.51-.08 1.34-.53 2.67-1.31 3.76a7.24 7.24 0 01-5.6 3.15c-1.6.13-3.24-.3-4.56-1.2A7.18 7.18 0 012 17.02c0-.3.03-.6.07-.9.24-1.7 1.15-3.27 2.48-4.33a6.82 6.82 0 014.83-1.56c.01 1.3-.01 2.6-.02 3.9-.92-.28-1.97-.13-2.77.42a3.2 3.2 0 00-1.4 2.17c-.07.58.03 1.2.34 1.72.52 1 1.64 1.7 2.83 1.73 1.15.06 2.3-.5 2.97-1.42.22-.32.4-.68.46-1.06.12-.87.1-1.75.1-2.63V1.02h2.64z"/></svg>
-                    {tt("douyin")}
-                  </button>
-                  <button class="pf-btn" class:active={copyPlatform === "xiaohongshu"} onclick={() => copyPlatform = "xiaohongshu"}>
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M2 2h8.5v8.5H2V2zm11.5 0H22v8.5h-8.5V2zM2 13.5h8.5V22H2v-8.5zm11.5 0H22V22h-8.5v-8.5z"/></svg>
-                    {tt("xiaohongshu")}
-                  </button>
-                </div>
-              {/if}
-              {#if currentCopy}
-                <div class="copytext-card">
-                  {#if currentCopy.title}
-                    <h3 class="ct-title">{currentCopy.title}</h3>
-                  {/if}
-                  {#if currentCopy.body}
-                    <p class="ct-body">{currentCopy.body}</p>
-                  {/if}
-                  {#if currentCopy.tags.length || currentCopy.topics.length}
-                    <div class="ct-tags">
-                      {#each currentCopy.topics as topic}
-                        <span class="ct-tag ct-topic">{topic}</span>
-                      {/each}
-                      {#each currentCopy.tags as tag}
-                        <span class="ct-tag">{tag}</span>
-                      {/each}
-                    </div>
-                  {/if}
-                  {#if currentCopy.publishTips.length}
-                    <div class="ct-tips">
-                      {#each currentCopy.publishTips as tip}
-                        <p class="ct-tip">{tip}</p>
-                      {/each}
-                    </div>
-                  {/if}
                 </div>
               {:else}
-                <div class="copytext-card"><p class="ct-body">{outputCopytext}</p></div>
+                <!-- XHS-style image-text preview -->
+                <div class="preview-screen">
+                  <div class="xhs-post">
+                    {#if outputImages.length > 0}
+                      <div class="xhs-cover">
+                        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                        <img src={outputImages[carouselIdx].url} alt={outputImages[carouselIdx].name} onclick={() => { lightboxSrc = outputImages[carouselIdx].url; }} />
+                        {#if outputImages.length > 1}
+                          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                          <div class="xhs-tap-left" onclick={(e) => { e.stopPropagation(); if (carouselIdx > 0) carouselIdx--; }}></div>
+                          <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+                          <div class="xhs-tap-right" onclick={(e) => { e.stopPropagation(); if (carouselIdx < outputImages.length - 1) carouselIdx++; }}></div>
+                          <div class="xhs-dots">
+                            {#each outputImages as _, i}
+                              <span class="xhs-dot" class:active={i === carouselIdx}></span>
+                            {/each}
+                          </div>
+                          <span class="xhs-counter">{carouselIdx + 1}/{outputImages.length}</span>
+                        {/if}
+                      </div>
+                    {/if}
+                    <div class="xhs-body">
+                      {#if outputCopytext}
+                        {@const allPlatforms = parseCopytextMulti(outputCopytext)}
+                        {@const currentCopy = allPlatforms.find(p => p.platform === copyPlatform) ?? allPlatforms[0]}
+                        {#if currentCopy}
+                          {#if currentCopy.title}
+                            <h3 class="xhs-title">{currentCopy.title}</h3>
+                          {/if}
+                          <div class="xhs-author-row">
+                            <div class="xhs-avatar"></div>
+                            <span class="xhs-name">AutoViral</span>
+                          </div>
+                          {#if currentCopy.body}
+                            <p class="xhs-text">{currentCopy.body}</p>
+                          {/if}
+                          {#if currentCopy.tags.length || currentCopy.topics.length}
+                            <div class="xhs-tags">
+                              {#each currentCopy.topics as topic}
+                                <span class="xhs-tag">{topic}</span>
+                              {/each}
+                              {#each currentCopy.tags as tag}
+                                <span class="xhs-tag">{tag}</span>
+                              {/each}
+                            </div>
+                          {/if}
+                        {/if}
+                      {/if}
+                      <div class="xhs-actions">
+                        <span class="xhs-act"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg> 2.4w</span>
+                        <span class="xhs-act"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 4H5a2 2 0 0 0-2 2v14l3.5-2 3.5 2 3.5-2 3.5 2V6a2 2 0 0 0-2-2z"/></svg> 8.1k</span>
+                        <span class="xhs-act"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg> 3.6k</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
               {/if}
-            {:else if topicHint}
-              <div class="copytext-card">
-                <p class="ct-body">{topicHint}</p>
-              </div>
-            {/if}
+              <div class="preview-home-bar"></div>
+            </div>
           </div>
         {/if}
       {/if}
@@ -513,7 +686,7 @@
             fetch(`/api/works/${encodeURIComponent(workId)}/assets/upload`, { method: "POST", body: formData }).then(() => loadAssets()).catch(() => {});
           }} />
         </label>
-        <button class="footer-btn secondary" onclick={handleDownloadAll}>
+        <button class="footer-btn secondary" onclick={() => window.open(`/api/works/${encodeURIComponent(workId)}/assets/download`, "_blank")}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           {tt("downloadAll")}
         </button>
@@ -554,6 +727,73 @@
 {/if}
 
 <style>
+  /* Portrait switch */
+  .portrait-switch-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.55rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  .portrait-label {
+    font-size: 0.72rem;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+  .portrait-info {
+    position: relative;
+    display: flex;
+    align-items: center;
+    color: var(--text-dim);
+    cursor: help;
+    margin-right: auto;
+  }
+  .portrait-tooltip {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.68rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+    line-height: 1.45;
+    white-space: normal;
+    width: 200px;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    pointer-events: none;
+  }
+  .switch {
+    width: 36px;
+    height: 20px;
+    border-radius: 10px;
+    background: var(--text-dim);
+    border: none;
+    cursor: pointer;
+    position: relative;
+    transition: background 0.2s ease;
+    flex-shrink: 0;
+    padding: 0;
+  }
+  .switch.on { background: var(--spark-red, #FE2C55); }
+  .switch-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    transition: transform 0.2s ease;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  }
+  .switch.on .switch-thumb { transform: translateX(16px); }
+
   .asset-panel {
     display: flex;
     flex-direction: column;
@@ -786,43 +1026,6 @@
   .file-item:hover { border-color: var(--accent); }
   .dl-icon { color: var(--accent); display: flex; }
 
-  /* Asset card with edit button */
-  .asset-card {
-    display: flex;
-    flex-direction: column;
-  }
-
-  .asset-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.3rem;
-  }
-
-  .edit-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.15rem;
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.15rem 0.35rem;
-    font-size: 0.6rem;
-    font-family: inherit;
-    color: var(--text-dim);
-    cursor: pointer;
-    transition: all 0.12s;
-    white-space: nowrap;
-    margin-top: 0.15rem;
-    align-self: stretch;
-  }
-
-  .edit-btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-    background: var(--accent-soft);
-  }
-
   /* Footer */
   .panel-footer {
     padding: 0.6rem 0.75rem;
@@ -933,165 +1136,246 @@
   .link-confirm:hover { opacity: 0.85; }
   .link-confirm:disabled { opacity: 0.4; cursor: not-allowed; }
 
-  /* Output showcase */
+  /* Output showcase — phone frame preview */
   .output-showcase {
     display: flex;
     flex-direction: column;
-    gap: 0.75rem;
+    align-items: center;
+    padding: 0.5rem 0;
   }
 
-  .carousel {
-    display: flex;
-    flex-direction: column;
-    gap: 0.4rem;
-  }
-  .carousel-viewport {
-    /* Fixed iPhone 14 ratio, full width matching copytext card below */
-    width: 100%;
-    height: 480px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    overflow: hidden;
+  .preview-phone {
+    width: 280px;
     background: #000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    border-radius: 32px;
+    padding: 8px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.25), 0 0 0 1px rgba(255,255,255,0.06);
+    position: relative;
   }
-  .carousel-img {
-    display: flex;
-    align-items: center;
-    justify-content: center;
+  .preview-notch {
+    width: 72px;
+    height: 20px;
+    background: #000;
+    border-radius: 0 0 12px 12px;
+    margin: 0 auto -10px;
+    position: relative;
+    z-index: 2;
+  }
+  .preview-screen {
+    background: #fff;
+    border-radius: 24px;
+    overflow: hidden;
+    overflow-y: auto;
+    max-height: 500px;
+  }
+  .preview-screen::-webkit-scrollbar { display: none; }
+  .preview-screen-dark {
+    background: #000;
+  }
+  .preview-home-bar {
+    width: 90px;
+    height: 4px;
+    background: rgba(255,255,255,0.3);
+    border-radius: 2px;
+    margin: 6px auto 2px;
+  }
+
+  /* Douyin video preview inside phone */
+  .dy-container {
+    position: relative;
+    width: 100%;
+    height: 500px;
+    background: #000;
+    cursor: pointer;
+    border-radius: 24px;
+    overflow: hidden;
+  }
+  .dy-video {
     width: 100%;
     height: 100%;
-    padding: 0;
-    border: none;
-    background: none;
-    cursor: pointer;
-  }
-  .carousel-img img {
-    max-width: 100%;
-    max-height: 100%;
     object-fit: contain;
-    display: block;
+    background: #000;
   }
-  .carousel-controls {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 0.75rem;
+  .dy-play-btn {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    opacity: 0.9;
   }
-  .carousel-arrow {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: none;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-muted);
-    width: 28px;
-    height: 28px;
-    cursor: pointer;
-    transition: all 0.12s;
-    padding: 0;
-  }
-  .carousel-arrow:hover:not(:disabled) { color: var(--text); border-color: var(--text-muted); }
-  .carousel-arrow:disabled { opacity: 0.25; cursor: not-allowed; }
-  .carousel-counter {
-    font-size: 0.72rem;
-    font-weight: 600;
-    color: var(--text-muted);
-    min-width: 3em;
-    text-align: center;
-  }
-
-  /* Platform filter */
-  .platform-filter {
-    display: flex;
-    gap: 0.35rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .pf-btn {
-    display: flex;
-    align-items: center;
-    gap: 0.3rem;
-    padding: 0.35rem 0.7rem;
-    border: 1.5px solid var(--border);
-    border-radius: 9999px;
-    background: none;
-    color: var(--text-muted);
-    font-family: inherit;
-    font-size: 0.72rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.12s;
-  }
-  .pf-btn:hover { border-color: var(--text-dim); color: var(--text); }
-  .pf-btn.active {
-    border-color: var(--text);
-    background: var(--text);
-    color: var(--bg);
-  }
-
-  /* Copytext card — native app feel */
-  .copytext-card {
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 1rem 1.1rem;
+  .dy-side {
+    position: absolute;
+    right: 6px;
+    bottom: 120px;
     display: flex;
     flex-direction: column;
-    gap: 0.6rem;
+    align-items: center;
+    gap: 14px;
+    z-index: 3;
   }
-
-  .ct-title {
-    font-size: 0.92rem;
+  .dy-act {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+  }
+  .dy-act svg { filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+  .dy-act-n {
+    font-size: 9px;
+    color: #fff;
+    font-weight: 600;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+  }
+  .dy-info {
+    position: absolute;
+    bottom: 10px;
+    left: 8px;
+    right: 44px;
+    z-index: 3;
+  }
+  .dy-author {
+    font-size: 11px;
     font-weight: 700;
-    color: var(--text);
-    line-height: 1.45;
-    margin: 0;
+    color: #fff;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+    margin-bottom: 4px;
+  }
+  .dy-desc {
+    font-size: 10px;
+    color: #fff;
+    line-height: 1.4;
+    margin: 0 0 4px;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .dy-tags { display: flex; flex-wrap: wrap; gap: 3px; }
+  .dy-tag {
+    font-size: 9px;
+    color: #fff;
+    font-weight: 500;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.6);
   }
 
-  .ct-body {
-    font-size: 0.8rem;
-    color: var(--text);
-    line-height: 1.75;
-    white-space: pre-line;
-    margin: 0;
+  /* XHS image-text preview inside phone */
+  .xhs-post {
+    font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+    color: #333;
   }
-
-  .ct-tags {
+  .xhs-cover {
+    width: 100%;
+    aspect-ratio: 3/4;
+    overflow: hidden;
+    background: #f5e6e0;
+    position: relative;
+  }
+  .xhs-cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    cursor: pointer;
+  }
+  .xhs-tap-left, .xhs-tap-right {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 40%;
+    cursor: pointer;
+    z-index: 2;
+  }
+  .xhs-tap-left { left: 0; }
+  .xhs-tap-right { right: 0; }
+  .xhs-dots {
+    position: absolute;
+    bottom: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 4px;
+    z-index: 3;
+  }
+  .xhs-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.45);
+    transition: all 0.2s;
+  }
+  .xhs-dot.active { background: #fff; transform: scale(1.2); }
+  .xhs-counter {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: rgba(0,0,0,0.45);
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 600;
+    padding: 2px 6px;
+    border-radius: 8px;
+    z-index: 3;
+  }
+  .xhs-body { padding: 8px 12px 12px; }
+  .xhs-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: #222;
+    margin: 0 0 6px;
+    line-height: 1.4;
+  }
+  .xhs-author-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 8px;
+  }
+  .xhs-avatar {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #FE2C55, #FF6B6B);
+    flex-shrink: 0;
+  }
+  .xhs-name {
+    font-size: 11px;
+    color: #999;
+    font-weight: 500;
+  }
+  .xhs-text {
+    font-size: 12px;
+    color: #333;
+    line-height: 1.7;
+    margin: 0 0 8px;
+    white-space: pre-wrap;
+  }
+  .xhs-tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.25rem 0.15rem;
-    margin-top: 0.1rem;
+    gap: 3px;
+    margin-bottom: 8px;
   }
-
-  .ct-tag {
-    font-size: 0.72rem;
+  .xhs-tag {
+    font-size: 11px;
+    color: #FE2C55;
     font-weight: 500;
-    color: #4b9bff;
-    background: none;
-    padding: 0;
   }
-  :global([data-theme="light"]) .ct-tag { color: #2563eb; }
-
-  .ct-topic {
-    font-weight: 600;
+  .xhs-actions {
+    display: flex;
+    justify-content: space-around;
+    padding-top: 6px;
+    border-top: 1px solid #f0f0f0;
   }
-
-  .ct-tips {
-    border-top: 1px solid var(--border);
-    padding-top: 0.5rem;
-    margin-top: 0.15rem;
+  .xhs-act {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    color: #999;
+    font-weight: 500;
   }
-
-  .ct-tip {
-    font-size: 0.68rem;
-    color: var(--text-muted);
-    line-height: 1.55;
-    margin: 0.1rem 0;
-  }
+  .xhs-act svg { width: 12px; height: 12px; stroke: #999; }
 
   /* Publish button & dropdown */
   .publish-wrap {

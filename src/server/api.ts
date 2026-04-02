@@ -5,18 +5,17 @@ import { promisify } from "node:util";
 import { join, extname } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
-import { loadConfig, saveConfig, dataDir } from "../config.js";
+import { loadConfig, saveConfig, dataDir, type Config } from "../config.js";
 import {
   listWorks, getWork, createWork as storeCreateWork,
   updateWork as storeUpdateWork, deleteWork as storeDeleteWork,
   listAssets, getAssetPath, saveStepHistory, loadStepHistory,
-  saveWorkChat, saveEvalResult, loadAllEvalResults,
-  type Work, type PipelineStep, type EvalResult,
+  saveEvalResult, loadEvalResults, type EvalResult,
 } from "../work-store.js";
 import { MemoryClient } from "../memory.js";
 import type { WsBridge } from "../ws-bridge.js";
 import { getProvider, getDefaultProvider, listProviders } from "../providers/registry.js";
-import { listSharedAssetsWithMeta, getSharedAssetPath, validateCategory, sanitizeFilename, saveSharedAsset, deleteSharedAsset, moveSharedAsset } from "../shared-assets.js";
+import { listSharedAssets, listSharedAssetsWithMeta, getSharedAssetPath, saveSharedAsset, deleteSharedAsset, moveSharedAsset, sanitizeFilename, validateCategory, CATEGORIES } from "../shared-assets.js";
 import { getLatestCreatorData, getCreatorHistory } from "../analytics-collector.js";
 import { syncStepConversation } from "../memory-sync.js";
 import { log, readLogs } from "../logger.js";
@@ -148,18 +147,25 @@ apiRoutes.put("/api/config", async (c) => {
 apiRoutes.get("/api/works", async (c) => {
   try {
     const works = await listWorks();
-    // Attach coverImage: prefer final video (for keyframe), then output image, then first asset image
+    // Attach coverImage: prefer cover image, then final video, then output image, then first asset image
     const enriched = await Promise.all(works.map(async (w) => {
       try {
         const assets = await listAssets(w.id);
-        // 1. Final video — browser will show keyframe as poster
+        // 1. Explicit cover image in output/ (best frame selected during assembly)
+        const coverImage = assets.find((a: string) =>
+          /\.(png|jpe?g|webp)$/i.test(a) && a.startsWith("output/") && /cover/i.test(a)
+        );
+        if (coverImage) {
+          return { ...w, coverImage: `/api/works/${w.id}/assets/${coverImage.split("/").map(encodeURIComponent).join("/")}` };
+        }
+        // 2. Final video — browser will show keyframe as poster
         const finalVideo = assets.find((a: string) =>
           /\.(mp4|mov|webm)$/i.test(a) && /final/i.test(a)
         );
         if (finalVideo) {
           return { ...w, coverImage: `/api/works/${w.id}/assets/${finalVideo.split("/").map(encodeURIComponent).join("/")}`, coverIsVideo: true };
         }
-        // 2. Output image (thumbnail/cover)
+        // 3. Output image (thumbnail)
         const outputImage = assets.find((a: string) =>
           /\.(png|jpe?g|webp|gif)$/i.test(a) && a.startsWith("output/")
         );
@@ -193,6 +199,7 @@ apiRoutes.post("/api/works", async (c) => {
       videoSearchQuery?: string;
       platforms: string[];
       topicHint?: string;
+      language?: "en" | "zh";
     }>();
     if (!body.title || !body.type || !body.platforms) {
       return c.json({ error: "title, type, and platforms are required" }, 400);
@@ -205,6 +212,7 @@ apiRoutes.post("/api/works", async (c) => {
       videoSearchQuery: body.videoSearchQuery,
       platforms: body.platforms,
       topicHint: body.topicHint,
+      language: body.language,
     });
     return c.json(work, 201);
   } catch (err) {
@@ -272,40 +280,9 @@ apiRoutes.get("/api/works/:id/assets/*", async (c) => {
   try {
     // nestedPath maps directly to workspace subdirectory (e.g. "images/xxx.png", "output/xxx.png")
     const filePath = getAssetPath(id, nestedPath);
-    const { stat } = await import("node:fs/promises");
-    const fileStat = await stat(filePath);
-    const fileSize = fileStat.size;
-    const mimeType = getMimeType(filePath);
-    const rangeHeader = c.req.header("range");
-
-    // Support HTTP Range requests (required for browser video/audio playback)
-    if (rangeHeader && (mimeType.startsWith("video/") || mimeType.startsWith("audio/"))) {
-      const match = rangeHeader.match(/bytes=(\d+)-(\d*)/);
-      if (match) {
-        const start = parseInt(match[1], 10);
-        const end = match[2] ? parseInt(match[2], 10) : fileSize - 1;
-        const chunkSize = end - start + 1;
-        const fullContent = await readFile(filePath);
-        const slice = fullContent.subarray(start, end + 1);
-        return new Response(slice, {
-          status: 206,
-          headers: {
-            "Content-Type": mimeType,
-            "Content-Range": `bytes ${start}-${end}/${fileSize}`,
-            "Content-Length": String(chunkSize),
-            "Accept-Ranges": "bytes",
-          },
-        });
-      }
-    }
-
     const content = await readFile(filePath);
     return new Response(content, {
-      headers: {
-        "Content-Type": mimeType,
-        "Content-Length": String(fileSize),
-        "Accept-Ranges": "bytes",
-      },
+      headers: { "Content-Type": getMimeType(filePath) },
     });
   } catch {
     return c.json({ error: "Asset not found" }, 404);
@@ -380,8 +357,7 @@ apiRoutes.get("/api/analytics/creator/history", async (c) => {
 // POST /api/generate/image
 apiRoutes.post("/api/generate/image", async (c) => {
   const body = await c.req.json();
-  const { workId, prompt, width, height, filename, provider: providerName, referenceImage,
-    aspectRatio, imageSize, seed, temperature, model } = body;
+  const { workId, prompt, width, height, filename, provider: providerName, referenceImage } = body;
   if (!workId || !prompt || !filename) {
     return c.json({ success: false, error: "Missing required fields", code: "INVALID_PARAMS" }, 400);
   }
@@ -390,10 +366,7 @@ apiRoutes.post("/api/generate/image", async (c) => {
     return c.json({ success: false, error: "No image provider available", code: "INVALID_PARAMS" }, 400);
   }
   try {
-    const result = await provider.generateImage({
-      prompt, width, height, workId, filename, referenceImage,
-      aspectRatio, imageSize, seed, temperature, model,
-    });
+    const result = await provider.generateImage({ prompt, width, height, workId, filename, referenceImage });
     return c.json(result);
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
@@ -403,7 +376,7 @@ apiRoutes.post("/api/generate/image", async (c) => {
 // POST /api/generate/video
 apiRoutes.post("/api/generate/video", async (c) => {
   const body = await c.req.json();
-  const { workId, prompt, firstFrame, lastFrame, resolution, filename, provider: providerName } = body;
+  const { workId, prompt, firstFrame, lastFrame, resolution, filename, provider: providerName, modelVersion } = body;
   if (!workId || !prompt || !filename) {
     return c.json({ success: false, error: "Missing required fields", code: "INVALID_PARAMS" }, 400);
   }
@@ -412,7 +385,26 @@ apiRoutes.post("/api/generate/video", async (c) => {
     return c.json({ success: false, error: "No video provider available", code: "INVALID_PARAMS" }, 400);
   }
   try {
-    const result = await provider.generateVideo({ prompt, firstFrame, lastFrame, resolution, workId, filename });
+    const result = await provider.generateVideo({ prompt, firstFrame, lastFrame, resolution, workId, filename, modelVersion });
+    return c.json(result);
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+  }
+});
+
+// POST /api/generate/lip-sync
+apiRoutes.post("/api/generate/lip-sync", async (c) => {
+  const body = await c.req.json();
+  const { workId, videoUrl, audioUrl, filename, provider: providerName } = body;
+  if (!workId || !videoUrl || !audioUrl || !filename) {
+    return c.json({ success: false, error: "Missing required fields (workId, videoUrl, audioUrl, filename)", code: "INVALID_PARAMS" }, 400);
+  }
+  const provider = providerName ? getProvider(providerName) : getProvider("jimeng");
+  if (!provider?.supportsLipSync || !provider.lipSync) {
+    return c.json({ success: false, error: "No lip-sync provider available (requires Jimeng)", code: "INVALID_PARAMS" }, 400);
+  }
+  try {
+    const result = await provider.lipSync({ videoUrl, audioUrl, workId, filename });
     return c.json(result);
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
@@ -426,84 +418,60 @@ apiRoutes.get("/api/generate/providers", (c) => c.json(listProviders()));
 // Shared Assets
 // ---------------------------------------------------------------------------
 
-apiRoutes.get("/api/shared-assets", async (c) => {
-  const assets = await listSharedAssetsWithMeta();
-  return c.json(assets);
-});
+// GET /api/shared-assets
+apiRoutes.get("/api/shared-assets", async (c) => c.json(await listSharedAssetsWithMeta()));
 
-apiRoutes.get("/api/shared-assets/:category/:file", async (c) => {
-  const category = c.req.param("category");
-  const file = c.req.param("file");
-  try {
-    validateCategory(category);
-    const filePath = getSharedAssetPath(category, file);
-    const data = await readFile(filePath);
-    const mime = getMimeType(filePath);
-    const isMedia = mime.startsWith("image/") || mime.startsWith("audio/") || mime.startsWith("video/");
-    return new Response(data, {
-      headers: {
-        "Content-Type": mime,
-        "Content-Length": String(data.length),
-        "X-Content-Type-Options": "nosniff",
-        "Content-Disposition": isMedia ? "inline" : `attachment; filename="${encodeURIComponent(sanitizeFilename(file))}"`,
-      },
-    });
-  } catch (e: any) {
-    if (e.code === "ENOENT") return c.json({ error: "File not found" }, 404);
-    if (e.message?.includes("Invalid")) return c.json({ error: e.message }, 400);
-    return c.json({ error: "Failed to read file" }, 500);
-  }
-});
-
-apiRoutes.post("/api/shared-assets/move", async (c) => {
-  try {
-    const { from, to, file } = await c.req.json<{ from: string; to: string; file: string }>();
-    if (!from || !to || !file) return c.json({ error: "from, to, and file are required" }, 400);
-    await moveSharedAsset(from, to, file);
-    return c.json({ moved: true, from, to, file });
-  } catch (e: any) {
-    if (e.code === "ENOENT") return c.json({ error: "File not found" }, 404);
-    if (e.message?.includes("Invalid")) return c.json({ error: e.message }, 400);
-    if (e.message?.includes("already exists")) return c.json({ error: e.message }, 409);
-    return c.json({ error: e.message ?? "Move failed" }, 500);
-  }
-});
-
+// POST /api/shared-assets/:category — upload files
 apiRoutes.post("/api/shared-assets/:category", async (c) => {
   const category = c.req.param("category");
   try {
     validateCategory(category);
-  } catch {
-    return c.json({ error: `Invalid category: ${category}` }, 400);
-  }
-  try {
     const body = await c.req.parseBody({ all: true });
     const files = Array.isArray(body["file"]) ? body["file"] : body["file"] ? [body["file"]] : [];
-    const uploaded = [];
+    const saved = [];
     for (const f of files) {
-      if (!(f instanceof File)) continue;
-      if (f.size > 100 * 1024 * 1024) return c.json({ error: `File ${f.name} exceeds 100MB limit` }, 400);
-      const buf = Buffer.from(await f.arrayBuffer());
-      const asset = await saveSharedAsset(category, f.name, buf);
-      uploaded.push({ ...asset, url: `/api/shared-assets/${category}/${encodeURIComponent(asset.name)}` });
+      if (f instanceof File) {
+        const buf = Buffer.from(await f.arrayBuffer());
+        saved.push(await saveSharedAsset(category, f.name, buf));
+      }
     }
-    if (uploaded.length === 0) return c.json({ error: "No files provided" }, 400);
-    return c.json({ uploaded });
+    return c.json({ uploaded: saved });
   } catch (e: any) {
-    return c.json({ error: e.message ?? "Upload failed" }, 500);
+    return c.json({ error: e.message }, 400);
   }
 });
 
+// DELETE /api/shared-assets/:category/:file
 apiRoutes.delete("/api/shared-assets/:category/:file", async (c) => {
-  const category = c.req.param("category");
-  const file = c.req.param("file");
   try {
-    await deleteSharedAsset(category, file);
-    return c.json({ deleted: true });
+    await deleteSharedAsset(c.req.param("category"), c.req.param("file"));
+    return c.json({ ok: true });
   } catch (e: any) {
-    if (e.code === "ENOENT") return c.json({ error: "File not found" }, 404);
-    if (e.message?.includes("Invalid")) return c.json({ error: e.message }, 400);
-    return c.json({ error: "Delete failed" }, 500);
+    return c.json({ error: e.message }, 400);
+  }
+});
+
+// POST /api/shared-assets/:fromCat/:file/move — move file to another category
+apiRoutes.post("/api/shared-assets/:fromCat/:file/move", async (c) => {
+  try {
+    const { toCat } = await c.req.json<{ toCat: string }>();
+    await moveSharedAsset(c.req.param("fromCat"), toCat, c.req.param("file"));
+    return c.json({ ok: true });
+  } catch (e: any) {
+    return c.json({ error: e.message }, 400);
+  }
+});
+
+// GET /api/shared-assets/:category/:file — serve file with correct MIME type
+apiRoutes.get("/api/shared-assets/:category/:file", async (c) => {
+  const filePath = getSharedAssetPath(c.req.param("category"), c.req.param("file"));
+  try {
+    const data = await readFile(filePath);
+    return new Response(data, {
+      headers: { "Content-Type": getMimeType(filePath) },
+    });
+  } catch {
+    return c.json({ error: "File not found" }, 404);
   }
 });
 
@@ -742,12 +710,12 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       `## 核心创作方向（强制执行）`,
       ``,
       `每个推荐的话题/方向必须能触发以下四种情绪中的至少一种，否则不予推荐：`,
-      `1. **焦虑**（落后焦虑/错过焦虑/被替代焦虑/身份下坠焦虑）— 让观众觉得"我是不是落后了"`,
-      `2. **愤怒**（不公/冒犯/双标/欺骗/价值观冲突）— 让观众觉得"这不对/凭什么"`,
+      `1. **共鸣**（身份认同/处境代入/被戳中的感觉）— 让观众觉得"这说的不就是我吗"`,
+      `2. **争议感**（不公/双标/价值观碰撞/辩论欲）— 让观众觉得"这不对/凭什么"，想站队`,
       `3. **搞笑/抽象**（反转/共鸣/错位）— 让观众笑出来想转发`,
       `4. **羡慕**（想成为/想拥有）— 让观众觉得"我也想要这样的生活"`,
       ``,
-      `每个话题必须在 JSON 中标注 "emotionType"（焦虑/愤怒/搞笑/羡慕）和 "emotionSubtype"（具体子类型）。`,
+      `每个话题必须在 JSON 中标注 "emotionType"（共鸣/争议/搞笑/羡慕）和 "emotionSubtype"（具体子类型）。`,
       ``,
       `如果上面的 API 数据不够充分，请使用 WebSearch 补充搜索：`,
       `- "${platformLabel} 爆款内容 趋势 2026"`,
@@ -762,8 +730,8 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       `  "heat":4,`,
       `  "competition":"中",`,
       `  "opportunity":"金矿",`,
-      `  "emotionType":"焦虑",`,
-      `  "emotionSubtype":"被替代焦虑",`,
+      `  "emotionType":"共鸣",`,
+      `  "emotionSubtype":"处境代入",`,
       `  "description":"趋势描述和为什么值得做",`,
       `  "tags":["推荐标签1","推荐标签2","推荐标签3"],`,
       `  "contentAngles":["切入角度1","切入角度2"],`,
@@ -773,7 +741,7 @@ apiRoutes.post("/api/trends/refresh-stream", async (c) => {
       `- topics 至少 10 个`,
       `- heat 为 1-5 整数，competition 为 "低"/"中"/"高"`,
       `- opportunity 为 "金矿"(高热低竞)/"蓝海"(低热低竞)/"红海"(高热高竞)`,
-      `- emotionType 必填，为 "焦虑"/"愤怒"/"搞笑"/"羡慕" 之一`,
+      `- emotionType 必填，为 "共鸣"/"争议"/"搞笑"/"羡慕" 之一`,
       `- emotionSubtype 必填，为该情绪的具体子类型`,
       `- tags 3-5 个平台推荐标签`,
       `- contentAngles 2-3 个具体的内容切入角度`,
@@ -833,14 +801,77 @@ apiRoutes.post("/api/works/:id/session", async (c) => {
     const work = await getWork(id);
     if (!work) return c.json({ error: "Work not found" }, 404);
 
+    // Detect existing assets for skip awareness
+    const sessionAssets = await listAssets(id);
+    const sessionHasClips = sessionAssets.some(a => a.includes("clips/") && (a.endsWith(".mp4") || a.endsWith(".mov")));
+    const sessionHasFrames = sessionAssets.some(a => a.includes("frames/") && (a.endsWith(".png") || a.endsWith(".jpg")));
+    const sessionHasImages = sessionAssets.some(a => a.includes("images/") && (a.endsWith(".png") || a.endsWith(".jpg")));
+    const sessionHasAssets = sessionHasClips || sessionHasFrames || sessionHasImages;
+    const sessionHasDirection = !!(work.topicHint && work.topicHint.length > 50);
+
+    // Auto-skip steps that are already covered by user-provided context
+    const stepEntries = Object.entries(work.pipeline);
+    let pipelineChanged = false;
+    for (const [key, s] of stepEntries) {
+      if (s.status !== "pending" && s.status !== "active") continue;
+      let canAutoSkip = false;
+      if (key === "research" && sessionHasDirection) canAutoSkip = true;
+      if (key === "plan" && sessionHasDirection && sessionHasAssets) canAutoSkip = true;
+      if (key === "material-search" && sessionHasClips) canAutoSkip = true;
+      if (key === "assets" && sessionHasImages) canAutoSkip = true;
+      if (canAutoSkip) {
+        s.status = "skipped";
+        s.completedAt = new Date().toISOString();
+        s.note = "Auto-skipped: user provided sufficient context";
+        pipelineChanged = true;
+      } else {
+        break; // Stop at the first step that can't be skipped
+      }
+    }
+    if (pipelineChanged) {
+      // Activate the next pending step
+      const nextPending = stepEntries.find(([, s]) => s.status === "pending");
+      if (nextPending) {
+        nextPending[1].status = "active";
+        nextPending[1].startedAt = new Date().toISOString();
+      }
+      await storeUpdateWork(id, { pipeline: work.pipeline });
+    }
+
     const steps = Object.entries(work.pipeline);
     const pendingStep = steps.find(([, s]) => s.status === "pending" || s.status === "active");
     const stepName = pendingStep ? pendingStep[1].name : steps[0]?.[1]?.name ?? "创作";
 
-    const prompt = [
+    // Build skip context
+    const skipContext = (sessionHasAssets || sessionHasDirection) ? [
+      ``,
+      `NOTE: The user has already provided ${[
+        sessionHasClips ? "video clips" : "",
+        sessionHasFrames ? "frame images" : "",
+        sessionHasImages ? "content images" : "",
+        sessionHasDirection ? "detailed creative direction in the topic hint" : "",
+      ].filter(Boolean).join(", ")}.`,
+      `Use the user's direction as-is — do NOT propose alternatives or redo their creative decisions.`,
+      `Proceed directly with what the user described.`,
+    ] : [];
+
+    const isEn = work.language === "en";
+    const prompt = isEn ? [
+      `You are a content creation assistant. You are helping the user create: "${work.title}" (type: ${work.type}).`,
+      `Target platforms: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}.`,
+      work.topicHint ? `Topic direction: ${work.topicHint}` : "",
+      ...skipContext,
+      ``,
+      `Current step: "${stepName}".`,
+      `First confirm with the user: briefly explain what you'll do in this step, ask if they have specific directions or requirements, then wait for confirmation before starting.`,
+      `Do not start executing immediately — communicate with the user first.`,
+      ``,
+      `IMPORTANT: All your responses, generated content, titles, copytext, and tags must be in English.`,
+    ].filter(Boolean).join("\n") : [
       `你是一个内容创作助手。你正在帮助用户创作: "${work.title}" (类型: ${work.type})。`,
       `目标平台: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}。`,
       work.topicHint ? `选题方向: ${work.topicHint}` : "",
+      ...skipContext,
       ``,
       `当前步骤: "${stepName}"。`,
       `请先向用户确认：简要说明这个步骤你将做什么，询问用户是否有特定方向或要求，等用户确认后再开始工作。`,
@@ -892,23 +923,98 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
     const pipelineStep = work.pipeline[step];
     if (!pipelineStep) return c.json({ error: `Unknown pipeline step: ${step}` }, 404);
 
-    // Check prerequisites: all preceding steps must be done/skipped
+    // Detect what the user has already provided
+    const assets = await listAssets(id);
+    const hasClips = assets.some(a => a.includes("clips/") && (a.endsWith(".mp4") || a.endsWith(".mov")));
+    const hasFrames = assets.some(a => a.includes("frames/") && (a.endsWith(".png") || a.endsWith(".jpg")));
+    const hasImages = assets.some(a => a.includes("images/") && (a.endsWith(".png") || a.endsWith(".jpg")));
+    const hasNarration = assets.some(a => a.includes("narration"));
+    const hasMusic = assets.some(a => a.includes("music/") || a.includes("bgm"));
+    const hasAssets = hasClips || hasFrames || hasImages;
+    const hasDetailedDirection = !!(work.topicHint && work.topicHint.length > 50);
+    const hasTitle = !!(work.title && work.title.length > 10);
+
+    // Smart skip: auto-skip preceding steps when user already provided enough context
     const stepKeys = Object.keys(work.pipeline);
     const stepIdx = stepKeys.indexOf(step);
+    let skippedSteps: string[] = [];
     for (let i = 0; i < stepIdx; i++) {
       const prev = work.pipeline[stepKeys[i]];
       if (prev.status !== "done" && prev.status !== "skipped") {
-        return c.json({ error: `Previous step "${prev.name}" is not completed` }, 400);
+        // Determine if this step can be auto-skipped
+        const prevKey = stepKeys[i];
+        let canSkip = false;
+        if (prevKey === "research" && (hasDetailedDirection || hasAssets)) {
+          // User already has a clear direction or provided assets — skip research
+          canSkip = true;
+        } else if (prevKey === "plan" && hasAssets && hasDetailedDirection) {
+          // User provided assets and detailed direction — skip planning
+          canSkip = true;
+        } else if (prevKey === "material-search" && hasClips) {
+          // User already has video clips — skip material search
+          canSkip = true;
+        } else if (prevKey === "assets" && hasImages) {
+          // User already provided images — skip image generation
+          canSkip = true;
+        }
+
+        if (canSkip) {
+          prev.status = "skipped";
+          prev.completedAt = new Date().toISOString();
+          prev.note = "Auto-skipped: user provided sufficient context/assets";
+          skippedSteps.push(prevKey);
+        } else {
+          return c.json({ error: `Previous step "${prev.name}" is not completed` }, 400);
+        }
       }
     }
+    // Persist any auto-skipped steps
+    if (skippedSteps.length > 0) {
+      await storeUpdateWork(id, { pipeline: work.pipeline });
+    }
 
+    const isEn = work.language === "en";
     const promptParts = [
       `You are working on a content piece: "${work.title}" (type: ${work.type}).`,
       work.contentCategory ? `Content category: ${work.contentCategory}.` : "",
       `Platforms: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}.`,
       work.topicHint ? `Topic hint: ${work.topicHint}` : "",
       ``,
+      ...(isEn ? [
+        `## LANGUAGE REQUIREMENT`,
+        `ALL your responses, generated content, titles, copytext, tags, and text overlays on images must be in **English**.`,
+        `Do NOT output Chinese text. The user interface is in English and all deliverables must be English.`,
+        ``,
+      ] : []),
     ];
+
+    // Inject context about existing assets and skipped steps
+    if (hasAssets || skippedSteps.length > 0) {
+      const assetSummary: string[] = [];
+      if (hasClips) assetSummary.push("video clips");
+      if (hasFrames) assetSummary.push("frame images");
+      if (hasImages) assetSummary.push("content images");
+      if (hasNarration) assetSummary.push("narration audio");
+      if (hasMusic) assetSummary.push("background music");
+      promptParts.push(
+        `## EXISTING CONTEXT`,
+        ``,
+        `The user has already provided: ${assetSummary.join(", ")}.`,
+        `Available assets: ${assets.filter(a => !a.includes("_sadtalker_tmp") && !a.includes(".mat") && !a.includes(".txt")).join(", ")}.`,
+        skippedSteps.length > 0
+          ? `Steps auto-skipped because user provided sufficient context: ${skippedSteps.join(", ")}.`
+          : "",
+        ``,
+        `**IMPORTANT:** The user already has a clear direction and/or assets. Do NOT redo work that the user has already provided.`,
+        hasDetailedDirection
+          ? `The user's topic hint contains detailed direction — use it as the creative brief. Do not contradict or reinterpret it.`
+          : "",
+        hasClips
+          ? `Video clips already exist — use them directly instead of generating new ones, unless the user asks otherwise.`
+          : "",
+        ``,
+      );
+    }
 
     if (step === "material-search" && work.videoSearchQuery) {
       promptParts.push(
@@ -947,28 +1053,36 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
         `- Video files MUST have audio. Always use yt-dlp with audio merging, never plain curl/wget.`,
         `- Files must be actually downloaded and saved as assets so the inline player can play them.`,
       );
+    } else if (step === "research" && hasDetailedDirection) {
+      // User already has detailed direction — fast-track research
+      promptParts.push(
+        `Execute the "${pipelineStep.name}" step.`,
+        ``,
+        `## FAST-TRACK: User has already provided detailed creative direction`,
+        ``,
+        `The user's topic hint already contains a clear, detailed description of what they want to create:`,
+        `"${work.topicHint}"`,
+        ``,
+        `**Do NOT generate 3 alternative proposals.** The user already knows what they want.`,
+        `Instead:`,
+        `1. Briefly confirm the direction with the user — summarize what you understand from their description`,
+        `2. If the direction is clear enough, write the research output (a single content brief based on their direction) and save it`,
+        `3. Mark this step as done and advance to the next step:`,
+        `   \`curl -X POST http://localhost:3271/api/works/${work.id}/pipeline/advance -H "Content-Type: application/json" -d '{"completedStep":"research","nextStep":"plan"}'\``,
+        ``,
+        `The research output should be a single, focused brief that captures:`,
+        `- The core emotion/hook`,
+        `- The narrative angle (first-person, coach, etc.)`,
+        `- The target audience reaction`,
+        `- Key talking points or content beats`,
+        ``,
+        `Do NOT search for trending topics or propose alternative directions. The user has already decided.`,
+      );
     } else if (step === "research" && work.contentCategory && work.contentCategory !== "comedy") {
       const emotionEffect: Record<string, string> = {
-        anxiety: "看完之后感到焦虑、危机感、害怕自己落后或错过",
-        conflict: "看完之后感到愤怒、不公、想站队、想在评论区吵架",
-        envy: "看完之后感到羡慕、向往、想收藏、想拥有同样的生活",
-      };
-      const routeTemplates: Record<string, string> = {
-        anxiety: [
-          `路线1 观点输出型：文字卡片封面（≤20字，一句极端观点）+ 文案（第一人称+身边案例+绝对表态）`,
-          `路线2 对话截图型：微信对话截图封面 + 一句话文案`,
-          `路线3 清单盘点型：极端判断句封面 + 清单图 + 文案`,
-        ].join("\n"),
-        conflict: [
-          `路线1 观点输出型：文字卡片封面（≤20字，一句极端观点）+ 文案（第一人称+身边案例+绝对表态）`,
-          `路线2 对话截图型：微信对话截图封面 + 一句话文案`,
-          `路线3 清单盘点型：极端判断句封面 + 清单图 + 文案`,
-        ].join("\n"),
-        envy: [
-          `路线1 反差跃迁型：before/after 两张搜图 + 文案强调路径短`,
-          `路线2 关系羡慕型：1-5张甜蜜瞬间搜图（风格统一）+ 一句话文案`,
-          `路线3 隐性阶层信号型：1-5张日常搜图（细节暗示阶层）+ 轻描淡写文案`,
-        ].join("\n"),
+        anxiety: "看完之后感到被戳中、共鸣强烈、忍不住分享给朋友",
+        conflict: "看完之后产生强烈的争议感、正义感、想站队、想在评论区辩论",
+        envy: "看完之后强烈羡慕、想拥有同样的生活——展示的必须是极少数人才能享有的精致/富裕/甜蜜生活，而非普通人日常",
       };
       const cat = work.contentCategory as string;
       // Load user interests and competitors for topic relevance
@@ -981,87 +1095,219 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
       const competitorClause = douyinUrl
         ? `\n用户的竞品账号：${douyinUrl}。选题风格和受众定位可以参考这个账号的方向。\n`
         : "";
-      promptParts.push([
-        `Execute the "${pipelineStep.name}" step.`,
-        ``,
-        `## 你要产出什么`,
-        ``,
-        `3 个完整的图文选题，每个可以直接复制粘贴去小红书/抖音发布。`,
-        interestClause,
-        competitorClause,
-        `## 内容视角：永远是"我"的故事`,
-        ``,
-        `这不是新闻报道。所有内容都是发布者以**第一人称**在聊自己的主观感受、自己的经历、自己的处境。`,
-        ``,
-        `正确示例：`,
-        `- "我今年28，单身，没房没车。我妈说我是废物。"（第一人称，聊自己）`,
-        `- "我老公今天突然送了我一束花，没有任何原因。"（第一人称，聊自己的关系）`,
-        `- "周三下午，一个人坐在阳台上喝咖啡。"（第一人称，聊自己的日常）`,
-        ``,
-        `错误示例（绝对禁止）：`,
-        `- "某地房价暴跌30%，购房者损失惨重"（这是新闻报道，不是个人帖子）`,
-        `- "年轻人就业压力增大，专家建议..."（这是客观分析，不是个人感受）`,
-        `- "据统计，2026年考研人数再创新高"（这是数据引用，不是个人故事）`,
-        ``,
-        `热点话题只用来选标签、蹭流量，内容本身必须是"我"的故事。`,
-        ``,
-        `## 第一步：搜索当前热门标签`,
-        ``,
-        `用 WebSearch 搜索"今日热搜""微博热搜""抖音热点"，找到当前有热度的话题。`,
-        `这些话题只用来选标签（蹭流量），不是用来写内容的。`,
-        ``,
-        `## 第二步：围绕热门话题，构造"我"的故事`,
-        ``,
-        `每个选题的核心是一个虚构但真实感极强的第一人称故事/感受，读完后让观众${emotionEffect[cat] ?? "产生强烈情绪"}。`,
-        ``,
-        `构造方法：`,
-        `1. 给"我"一个身份（年龄、职业、城市、处境）`,
-        `2. 讲"我"的一段具体经历或此刻的感受`,
-        `3. 让读者代入"我"的处境后，自然地${emotionEffect[cat] ?? "产生情绪"}`,
-        ``,
-        `## 3 条路线模板（3 个选题各用一条）`,
-        ``,
-        routeTemplates[cat] ?? "",
-        ``,
-        `## 输出格式：3 个完整选题`,
-        ``,
-        `每个选题包含：`,
-        `1. **蹭的热门话题**：用来选标签的热点`,
-        `2. **路线**：用的哪条路线`,
-        `3. **封面**：文字卡片写出完整文字（≤20字）；搜图类给出关键词`,
-        `4. **标题**：可以直接用的发布标题`,
-        `5. **完整文案**：以"我"的第一人称写的完整成品文案，读起来像一个真人在倾诉自己的经历/感受`,
-        `6. **标签**：5-6 个（从热搜中选）`,
-        ``,
-        `请用户从 3 个中选一个。`,
-      ].join("\n"));
+
+      // Envy category uses a two-step research flow
+      if (cat === "envy") {
+        promptParts.push([
+          `Execute the "${pipelineStep.name}" step.`,
+          ``,
+          `## 向往拥有类 — 两轮选题流程`,
+          ``,
+          `这个流程分两轮。请严格按照步骤执行，不要跳步。`,
+          interestClause,
+          competitorClause,
+          ``,
+          `### 第一轮：展示 3 个主方向`,
+          ``,
+          `先用 WebSearch 调研当前平台热门趋势，然后向用户展示以下 3 个创作主方向，每个方向只需简要说明（2-3 句话），不要给出具体选题：`,
+          ``,
+          `**方向 A：反差跃迁型**`,
+          `before/after 对比，展示从平凡到惊艳的跃迁。核心是"路径很短但反差巨大"，让观众觉得"我花点心思也能做到"。`,
+          ``,
+          `**方向 B：关系羡慕型**`,
+          `展示甜蜜关系中的具体细节和瞬间。核心是"用心对待"的具体行为，触发对理想关系的向往。`,
+          ``,
+          `**方向 C：隐性阶层信号型**`,
+          `看似随意的日常，细节透露出高于普通人的生活层级——时间自由、空间品质、不赶不挤。`,
+          ``,
+          `对每个方向，基于你搜索到的趋势数据，简要分析：`,
+          `- 当前热度和素材丰富度`,
+          `- 平台匹配度（抖音 vs 小红书）`,
+          `- 竞争程度和差异化空间`,
+          ``,
+          `然后给出推荐排序，并**请用户选择一个方向**。`,
+          ``,
+          `⚠️ 第一轮到此为止！不要给出具体选题，不要自行决定子方向。等用户回复后再进入第二轮。`,
+          ``,
+          `### 第二轮：给出 7-10 个具体子方向（等用户选择后再执行）`,
+          ``,
+          `用户选定主方向后，根据所选方向给出 **7-10 个具体的子方向/选题角度**。`,
+          `每个子方向包含：`,
+          `1. **子方向名称**：一句话概括（如"独居女生的周三下午"）`,
+          `2. **内容概述**：2-3 句话描述这个选题要拍/写什么`,
+          `3. **情绪触发点**：观众看到后会产生什么感受`,
+          `4. **素材方向**：大致需要什么类型的图片/视频`,
+          ``,
+          `然后请用户从中选择一个子方向，进入下一步。`,
+          ``,
+          `## 内容视角：永远是"我"的故事`,
+          ``,
+          `所有内容都是发布者以**第一人称**在展示自己的生活。不是新闻，不是报道，是"我"的日常。`,
+          ``,
+          `## 核心要求`,
+          ``,
+          `图片/视频展示的生活方式必须是极少数人才能享有的，绝对不可以是普通人日常。`,
+          `可以是精致/富裕的生活，也可以是极少数人才有的视角或甜蜜关系中的细节。`,
+        ].join("\n"));
+      } else {
+        // anxiety / conflict: original single-round flow
+        const routeTemplates: Record<string, string> = {
+          anxiety: [
+            `路线1 观点输出型：文字卡片封面（≤20字，一句极端观点）+ 文案（第一人称+身边案例+绝对表态）`,
+            `路线2 对话截图型：微信对话截图封面 + 一句话文案`,
+            `路线3 清单盘点型：极端判断句封面 + 清单图 + 文案`,
+          ].join("\n"),
+          conflict: [
+            `路线1 观点输出型：文字卡片封面（≤20字，一句极端观点）+ 文案（第一人称+身边案例+绝对表态）`,
+            `路线2 对话截图型：微信对话截图封面 + 一句话文案`,
+            `路线3 清单盘点型：极端判断句封面 + 清单图 + 文案`,
+          ].join("\n"),
+        };
+        promptParts.push([
+          `Execute the "${pipelineStep.name}" step.`,
+          ``,
+          `## 你要产出什么`,
+          ``,
+          `3 个完整的图文选题，每个可以直接复制粘贴去小红书/抖音发布。`,
+          interestClause,
+          competitorClause,
+          `## 内容视角：永远是"我"的故事`,
+          ``,
+          `这不是新闻报道。所有内容都是发布者以**第一人称**在聊自己的主观感受、自己的经历、自己的处境。`,
+          ``,
+          `正确示例：`,
+          `- "我今年28，单身，没房没车。我妈说我是废物。"（第一人称，聊自己）`,
+          `- "我老公今天突然送了我一束花，没有任何原因。"（第一人称，聊自己的关系）`,
+          `- "周三下午，一个人坐在阳台上喝咖啡。"（第一人称，聊自己的日常）`,
+          ``,
+          `错误示例（绝对禁止）：`,
+          `- "某地房价暴跌30%，购房者损失惨重"（这是新闻报道，不是个人帖子）`,
+          `- "年轻人就业压力增大，专家建议..."（这是客观分析，不是个人感受）`,
+          `- "据统计，2026年考研人数再创新高"（这是数据引用，不是个人故事）`,
+          ``,
+          `热点话题只用来选标签、蹭流量，内容本身必须是"我"的故事。`,
+          ``,
+          `## 第一步：搜索当前热门标签`,
+          ``,
+          `用 WebSearch 搜索"今日热搜""微博热搜""抖音热点"，找到当前有热度的话题。`,
+          `这些话题只用来选标签（蹭流量），不是用来写内容的。`,
+          ``,
+          `## 第二步：围绕热门话题，构造"我"的故事`,
+          ``,
+          `每个选题的核心是一个虚构但真实感极强的第一人称故事/感受，读完后让观众${emotionEffect[cat] ?? "产生强烈情绪"}。`,
+          ``,
+          `构造方法：`,
+          `1. 给"我"一个身份（年龄、职业、城市、处境）`,
+          `2. 讲"我"的一段具体经历或此刻的感受`,
+          `3. 让读者代入"我"的处境后，自然地${emotionEffect[cat] ?? "产生情绪"}`,
+          ``,
+          `## 3 条路线模板（3 个选题各用一条）`,
+          ``,
+          routeTemplates[cat] ?? "",
+          ``,
+          `## 输出格式：3 个完整选题`,
+          ``,
+          `每个选题包含：`,
+          `1. **蹭的热门话题**：用来选标签的热点`,
+          `2. **路线**：用的哪条路线`,
+          `3. **封面**：文字卡片写出完整文字（≤20字）；搜图类给出关键词`,
+          `4. **标题**：可以直接用的发布标题`,
+          `5. **完整文案**：以"我"的第一人称写的完整成品文案，读起来像一个真人在倾诉自己的经历/感受`,
+          `6. **标签**：5-6 个（从热搜中选）`,
+          ``,
+          `请用户从 3 个中选一个。`,
+        ].join("\n"));
+      }
     } else {
       promptParts.push(
         `Execute the "${pipelineStep.name}" step of the pipeline.`,
         `Produce output appropriate for this step. Be thorough and creative.`,
       );
-      if (step === "assets" && work.type === "short-video") {
-        promptParts.push(
-          ``,
-          `## Asset Acquisition Strategy`,
-          `For this step, you should acquire video materials by **downloading real clips from the internet** using yt-dlp.`,
-          `Do NOT use AI generation APIs unless the user explicitly requests it.`,
-          ``,
-          `### Workflow:`,
-          `1. Read the storyboard/plan from the previous step to understand what clips are needed`,
-          `2. For each shot, construct search keywords based on the scene description`,
-          `3. Search YouTube/Bilibili: \`yt-dlp "ytsearch5:keywords" --get-title --get-url --get-duration\``,
-          `4. Download best quality: \`yt-dlp -f "bestvideo[height<=1080]+bestaudio/best" --merge-output-format mp4 -o "clips/clip-NN.mp4" "URL"\``,
-          `5. Trim to needed segment: \`ffmpeg -i clip.mp4 -ss START -to END -c copy -y trimmed.mp4\``,
-          `6. Verify audio exists: \`ffprobe -v error -show_entries stream=codec_type -of csv=p=0 clip.mp4 | grep audio\``,
-          ``,
-          `Read the SKILL.md section "素材获取方式：全网搜索下载" for full details.`,
-          `Save all clips to the work assets directory under clips/.`,
-        );
-      }
       if (step === "assembly" && work.type === "short-video") {
+        // Narration voice generation with edge-tts
         promptParts.push(
           ``,
+          `## REQUIRED: Generate Narration Audio`,
+          ``,
+          `Before assembling the final video, you MUST generate a narration voiceover audio file.`,
+          ``,
+          `**Step 0 — Detect person gender from video/image assets (MUST DO FIRST):**`,
+          `Before selecting a voice, you MUST identify the gender of the person appearing in the video clips or frame images.`,
+          `Extract a frame from the main video clip and examine it:`,
+          `\`\`\`bash`,
+          `ffmpeg -i <clip_file> -ss 00:00:01 -frames:v 1 -y /tmp/gender_check.png`,
+          `\`\`\``,
+          `Look at the extracted frame to determine if the person is male or female. Then select a matching voice:`,
+          isEn ? [
+            `- If female: use en-US-JennyNeural (confident female English voice)`,
+            `- If male: use en-US-AndrewNeural (confident male English voice)`,
+            `- Other female options: en-US-AriaNeural, en-GB-SoniaNeural`,
+            `- Other male options: en-US-GuyNeural, en-GB-RyanNeural`,
+          ].join("\n") : [
+            `- 如果是女性: 使用 zh-CN-XiaoxiaoNeural（自信女声）`,
+            `- 如果是男性: 使用 zh-CN-YunxiNeural（自信男声）`,
+            `- 其他女声: zh-CN-XiaohanNeural`,
+            `- 其他男声: zh-CN-YunyangNeural`,
+          ].join("\n"),
+          ``,
+          `**Then tell the user your detection result and chosen voice, and ask for confirmation before proceeding.** For example:`,
+          `"${isEn
+            ? `I can see the person in the video is female, so I'll use a female English voice (en-US-JennyNeural) for the narration. Does that work for you?`
+            : `视频中的人物是女性，我将使用女声中文旁白（zh-CN-XiaoxiaoNeural）。可以吗？`}"`,
+          ``,
+          `**How to generate (after user confirms):**`,
+          `Use the \`edge-tts\` command to convert the narration script to audio:`,
+          `\`\`\`bash`,
+          `edge-tts --text "YOUR NARRATION TEXT HERE" --voice <selected_voice> --write-media <work_dir>/assets/clips/narration.mp3`,
+          `\`\`\``,
+          ``,
+          `**Steps:**`,
+          `1. Extract a frame from the main video clip and detect the person's gender`,
+          `2. Select a matching voice and tell the user your choice — ask for confirmation`,
+          `3. Write the narration script based on the content plan`,
+          `4. After confirmation, run edge-tts to generate the audio file`,
+          `4. If the content plan uses talking-head/口播 style (marked as 口播（一镜到底）):`,
+          `   - The person video clip should already exist from asset-generation (no lip-sync applied yet)`,
+          `   - Call POST /api/generate/lip-sync with the person video URL and narration audio URL to generate lip-synced video`,
+          `   - The lip-synced video replaces the original person clip as the main footage`,
+          `   - Then overlay per-sentence subtitles at the bottom (synced to narration timing) + BGM`,
+          `5. For non-口播 style: merge clips + narration audio + subtitles + BGM using ffmpeg`,
+          ``,
+        );
+        // Background music generation with Lyria
+        promptParts.push(
+          `## REQUIRED: Generate Background Music with Lyria`,
+          ``,
+          `Generate original background music that matches the content mood using Google Lyria:`,
+          `\`\`\`bash`,
+          `python3 skills/asset-generation/scripts/lyria_music.py \\`,
+          `  --prompt "YOUR MUSIC DESCRIPTION" \\`,
+          `  --output <work_dir>/assets/clips/bgm.mp3`,
+          `\`\`\``,
+          ``,
+          `**Music prompt tips:**`,
+          `- Be specific: genre, tempo (BPM), mood, instruments`,
+          `- Match the content emotion:`,
+          isEn ? [
+            `  - Resonance/emotional content → soft piano, gentle strings, melancholic, 70-90 BPM`,
+            `  - Debate/controversy → tense, dramatic, driving percussion, 100-120 BPM`,
+            `  - Comedy/absurd → quirky, playful, upbeat, fun synths, 110-130 BPM`,
+            `  - Aspiration/envy → dreamy, luxurious, lo-fi chill, warm pads, 80-100 BPM`,
+          ].join("\n") : [
+            `  - 深度共鸣类 → 轻柔钢琴、弦乐、感性氛围、70-90 BPM`,
+            `  - 观点分歧类 → 紧张感、节奏驱动、适度戏剧性、100-120 BPM`,
+            `  - 搞笑抽象类 → 活泼、俏皮、欢快合成器、110-130 BPM`,
+            `  - 向往拥有类 → 梦幻、精致、lo-fi chill、温暖音色、80-100 BPM`,
+          ].join("\n"),
+          `- Use \`google/lyria-3-clip-preview\` for 30s clips (default, good for short videos)`,
+          `- Use \`--model google/lyria-3-pro-preview\` for longer tracks if needed`,
+          ``,
+          `**In the final ffmpeg mix**, layer the BGM under the narration:`,
+          `- BGM volume should be ~20-30% of narration volume (use \`-filter_complex "[1:a]volume=0.25[bgm];[0:a][bgm]amix=inputs=2:duration=first"\`)`,
+          `- Fade in BGM at start (2s) and fade out at end (3s)`,
+          ``,
+        );
+        promptParts.push(
           `## CRITICAL: Horizontal-to-Vertical Video Conversion`,
           `The final output MUST be 9:16 vertical (1080x1920). If any source clip is horizontal (wider than tall):`,
           ``,
@@ -1111,8 +1357,8 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
       }
       // Inject emotion-driven directives based on content category
       const emotionMap: Record<string, string> = {
-        anxiety: "焦虑 (anxiety/crisis). Read modules/emotional-hooks.md and apply the 焦虑 emotion rules. For image-text, use one of the 3 mandatory routes (观点输出/对话截图/清单盘点).",
-        conflict: "愤怒 (conflict/debate). Read modules/emotional-hooks.md and apply the 愤怒 emotion rules. For image-text, use one of the 3 mandatory routes (观点输出/对话截图/清单盘点).",
+        anxiety: "深度共鸣 (resonance). Read modules/emotional-hooks.md and apply the 共鸣 emotion rules. For image-text, use one of the 3 mandatory routes (观点输出/对话截图/清单盘点).",
+        conflict: "观点分歧/争议感 (debate/controversy). Read modules/emotional-hooks.md and apply the 争议 emotion rules. For image-text, use one of the 3 mandatory routes (观点输出/对话截图/清单盘点).",
         comedy: "搞笑/抽象 (comedy/abstract). Read genres/comedy.md and apply its rules to this step.",
         envy: "羡慕 (aspiration/envy). Read modules/emotional-hooks.md and apply the 羡慕 emotion rules. For image-text, use one of the 3 mandatory routes (反差跃迁/关系羡慕/隐性阶层信号).",
       };
@@ -1122,51 +1368,82 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
           ``,
           `## IMPORTANT: Target emotion for this content is ${emotionDirective}`,
         );
-        // Additional comedy-specific directives
-        if (work.contentCategory === "comedy") {
-          promptParts.push(
-            `## IMPORTANT: This is comedy/abstract content (搞笑/抽象类).`,
-            `You MUST read the genres/comedy.md file in the current step's skill directory and apply its rules.`,
-          );
-          const comedyByStep: Record<string, string> = {
-            research: [
-              `For the research step, focus on:`,
-              `- Finding trending comedy/abstract topics, memes, and formats on the target platform`,
-              `- Analyzing what reversal types (经典反转/递进荒诞/错位/重复打破/平行对比/紧张崩塌/微观共鸣) are currently performing well`,
-              `- For abstract content: which "mismatch dimensions" (感官错配/过度认真/过度随意/语境位移/形式解构/真实解构/平行宇宙) are trending`,
-              `- Identifying comedy hooks and BGM trends`,
-            ].join("\n"),
-            plan: [
-              `For the planning step, the script/storyboard MUST follow the comedy genre rules (see genres/comedy.md):`,
-              `- Choose a specific structure from the 7 comedy types or 7 abstract types in the skill`,
-              `- Design the Hook (first 3 seconds) using the Hook types table`,
-              `- Write dialogue following the comedy dialogue rules (短句为王, 口语化, 留白)`,
-              `- Plan BGM strategy (情绪铺垫反转 / 卡点强化 / 反差配乐 / 梗音乐)`,
-              `- Plan sound effects at key moments (反转点必须有声音标记)`,
-              `- For abstract content: define the two "mismatch dimensions" and ensure purity of each extreme`,
-              `- Run the 爆款自检清单 before finalizing`,
-            ].join("\n"),
-            assembly: [
-              `For the assembly step, you handle BOTH asset generation AND editing/compositing.`,
-              ``,
-              `### Editing & Compositing:`,
-              `- Editing rhythm: normal during setup, sudden change at reversal point`,
-              `- BGM must have a sound marker at the reversal point (静音/音效/换曲)`,
-              `- Jump cuts for comedy, longer takes for abstract`,
-              `- Add sound effects precisely (急刹车 at reversals, 静音0.3-0.5s before twists)`,
-              `- For abstract: consider using silence instead of sound effects to maintain the "dead serious" tone`,
-              `- Volume: dialogue 100%, BGM 15-25% during speech, 40-60% during visual-only`,
-              ``,
-              `### Available Scripts (MUST USE, do NOT write inline code):`,
-              `- **BGM search**: Read \`modules/music-search.md\` for yt-dlp search/download workflow`,
-              `- **Beat detection**: \`python3 ~/.claude/skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json\``,
-              `- **Beat-sync editing**: \`python3 ~/.claude/skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic\``,
-              `- Read \`modules/beat-sync.md\` for detailed usage of 3 styles (fast/smooth/dramatic)`,
-            ].join("\n"),
-          };
-          const comedyDirective = comedyByStep[step];
-          if (comedyDirective) promptParts.push(comedyDirective);
-        }
+      }
+
+      // Category-specific title rules
+      const titleRules: Record<string, string> = {
+        envy: [
+          `## 羡慕类标题规则`,
+          `标题必须**简短**（一般≤15字），并且直接点明发布者令人羡慕的身份/特征。`,
+          `标题的作用是让读者一眼就知道"这个人拥有我想要的东西"。`,
+          ``,
+          `好的标题示例：`,
+          `- "哈佛本科生普通的周三"（身份：哈佛学生）`,
+          `- "北京三套房女生的日常"（资产：三套房）`,
+          `- "25岁年薪百万后的生活"（收入：年薪百万）`,
+          `- "和男朋友在巴黎的第3天"（关系+地点：甜蜜关系+巴黎）`,
+          `- "辞职后在大理的第100天"（生活方式：自由+大理）`,
+          ``,
+          `坏的标题示例（禁止）：`,
+          `- "记录一下我很普通的生活"（没有点明令人羡慕的点）`,
+          `- "今天也是元气满满的一天！"（空洞，没有信息量）`,
+          `- "分享我的日常vlog"（太泛，没有差异化）`,
+        ].join("\n"),
+        anxiety: [
+          `## 深度共鸣类标题规则`,
+          `标题必须**简短**（一般≤15字），直接点明发布者的身份/处境中令人共鸣的痛点。`,
+          `标题的作用是让读者一眼就觉得"这说的不就是我吗"，产生强烈代入感。`,
+          ``,
+          `好的标题示例：`,
+          `- "我今年28，单身，没房，没车。"（处境：年龄+现状）`,
+          `- "月薪5000，在北京租房的第6年"（收入+城市+时间）`,
+          `- "考研二战失败后的第一天"（经历：考研失败）`,
+          `- "35岁被裁后，我妈说我活该"（年龄+事件+家庭关系）`,
+          `- "存款为0的我，刚查出甲状腺结节"（经济+健康）`,
+          ``,
+          `坏的标题示例（禁止）：`,
+          `- "当代年轻人的压力有多大？"（新闻腔，不是第一人称）`,
+          `- "生活好难啊"（太笼统，没有具体信息）`,
+          `- "来聊聊你们的压力源"（互动征集，不是个人故事）`,
+        ].join("\n"),
+        conflict: [
+          `## 观点分歧类标题规则`,
+          `标题必须**简短**（一般≤15字），直接点明发布者的身份/处境中引发争议的点。`,
+          `标题的作用是让读者一眼就产生"这说的对/不对"的站队冲动，忍不住点进来看。`,
+          ``,
+          `好的标题示例：`,
+          `- "我拒绝了月薪3万的offer"（反常行为引发好奇+争议）`,
+          `- "相亲对象AA制，我直接走了"（事件+态度，引发站队）`,
+          `- "我劝你别考公"（逆主流观点，引发反驳欲）`,
+          `- "婆婆住进来第3天，我搬走了"（关系冲突+行动）`,
+          `- "同事天天迟到，领导只骂我"（不公平处境，引发正义感和辩论欲）`,
+          ``,
+          `坏的标题示例（禁止）：`,
+          `- "你们觉得AA制合理吗？"（提问式，不是个人故事）`,
+          `- "关于婆媳关系的一些看法"（议论文标题，没有冲突感）`,
+          `- "职场那些事儿"（太泛，没有具体矛盾点）`,
+        ].join("\n"),
+        comedy: [
+          `## 搞笑类标题规则`,
+          `标题必须**简短**（一般≤15字），**绝对不能暴露笑点**。`,
+          `标题的作用是用一个引人代入的情绪或处境制造好奇心，让读者忍不住点进来，看到内容后才笑出来。`,
+          ``,
+          `好的标题示例：`,
+          `- "我妈今天的操作让我彻底崩溃了"（情绪引导+悬念，笑点在内容里）`,
+          `- "合租室友的脑回路我真的服了"（吐槽情绪+好奇，不知道具体发生了什么）`,
+          `- "相亲回来我整个人都不好了"（情绪+悬念，可能搞笑可能离谱）`,
+          `- "公司新来的同事第一天就干了这事"（悬念+好奇，不知道是什么事）`,
+          `- "我终于知道我单身的原因了"（自嘲情绪+悬念）`,
+          ``,
+          `坏的标题示例（禁止）：`,
+          `- "我爸把猫剃成了光头哈哈哈"（笑点直接暴露了，没必要点进去看）`,
+          `- "搞笑！外卖小哥送错了三次"（直接标注"搞笑"，缺少悬念）`,
+          `- "史上最离谱的翻车现场"（夸张空洞，没有代入感）`,
+        ].join("\n"),
+      };
+      const cat = work.contentCategory as string;
+      if (titleRules[cat]) {
+        promptParts.push(``, titleRules[cat]);
       }
 
       // For image-text assets step: enforce correct asset acquisition method per category
@@ -1174,30 +1451,61 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
         const assetMethod: Record<string, string> = {
           envy: [
             ``,
-            `## 严禁 AI 生图！严禁 ffmpeg 生成文字卡片！所有图片（包括封面）必须从网上搜索下载真实照片`,
+            `## 图片核心原则`,
             ``,
-            `"向往拥有/羡慕"类图文的**所有图片（封面图 + 内容图）**都必须是从网上搜索下载的真实照片。`,
-            `- ❌ 禁止使用 AI 生成图片`,
+            `**内容要求：必须展示极少数人才能享有的生活**`,
+            `图片必须让观众产生强烈的"我也想要"的冲动。展示的生活方式**必须是极少数人才能享有的**，绝对不可以是普通人的日常。`,
+            ``,
+            `**风格要求：绝对真实、日常、零 stock image 感**`,
+            `图片必须看起来像真人用手机随手拍的生活片段，而不是商业图库素材。`,
+            `- ✅ 构图随意、不完美，像顺手拿起手机拍一张`,
+            `- ✅ 自然光线，有真实环境的杂乱细节（桌上的水杯、背景里的路人）`,
+            `- ✅ 轻微的手抖、焦点偏移、过曝/欠曝都可以接受`,
+            `- ❌ 完美居中构图、纯净背景、均匀打光 = stock image，绝对不要`,
+            `- ❌ 模特摆拍姿势、刻意的微笑、眼神直视镜头`,
+            `- ❌ 图片水印、图库logo`,
+            ``,
+            `**可以展现的内容方向：**`,
+            `- 精致/富裕的生活方式：高端餐厅、私人泳池、海景别墅、头等舱、精品酒店`,
+            `- 极少数人才有的视角：CEO在会议室顶端俯瞰所有参会人员、私人飞机窗外的云海、游艇甲板上的日落`,
+            `- 恋爱中的甜蜜视角：精致礼物盒特写、伴侣牵手的第一人称视角、精致餐厅桌面对面是穿着考究的伴侣、被鲜花包围的早餐托盘`,
+            `- 隐性阶层信号：不直接展示奢侈品logo，但通过细节（空间、光线、质感）传达高品质生活`,
+            ``,
+            `**绝对禁止：**`,
+            `- ❌ 普通人的日常生活（普通公寓、快餐店、拥挤的公共交通）`,
+            `- ❌ 过于直白的炫富（堆砌奢侈品logo、晒存款截图）`,
+            `- ❌ 任何有 stock image 感的图片（构图太完美、光线太均匀、背景太干净）`,
+            ``,
+            `## 图片获取方式`,
+            ``,
+            `优先全网搜索真实照片，如果搜不到合适的可以用 AI 生图。`,
+            `- ✅ 搜图关键词要加"candid""real""iPhone""casual"等限定词，避免搜到图库图`,
+            `  示例："luxury restaurant candid iPhone photo"、"holding hands boyfriend pov real"、"CEO boardroom candid shot"`,
+            `- ✅ AI 生图提示词必须强调：candid snapshot, iPhone photo, natural lighting, slightly imperfect composition, real life moment`,
             `- ❌ 禁止使用 ffmpeg 生成文字卡片作为封面`,
-            `- ✅ 封面图也必须是真实照片——看似普通，但细节透露"中产以上层级"的照片`,
             ``,
-            `### 封面图要求`,
-            `通过细节（不是直接展示奢侈品）传达阶层信号：`,
-            `- 地点：某个特定区域/场所（独立咖啡馆、大落地窗客厅、安静的街区）`,
-            `- 时间：工作日白天在做某件悠闲的事（暗示不用上班）`,
-            `- 行为：不赶时间、从容不迫的状态`,
-            `照片风格：像 iPhone 随手拍的，自然光线，构图不能太精心，不能有摆拍痕迹。`,
+            `### 封面图要求（最重要！）`,
+            `封面首图决定了用户是否点击，必须在视觉上**极度震撼、壮丽、精致、吸引眼球**。`,
+            `- 画面必须有强烈的视觉美感：大气的构图、饱和的色彩、惊艳的光影`,
+            `- 适合封面的场景：绝美海景日落、高空俯瞰城市灯火、雪山星空、无边泳池倒映天空、巴黎屋顶的晨光、圣托里尼的蓝白教堂、满桌精致法餐的航拍视角`,
+            `- 封面图可以比内页图更"精致"——因为它的任务是吸引点击，而不是讲故事`,
+            `- 色彩要浓郁鲜明（金色夕阳、湛蓝海水、翠绿植被），不要灰暗沉闷的色调`,
+            `- 构图要有纵深感和层次感，避免平面化的随手拍`,
+            `- AI 生图提示词要强调：breathtaking, cinematic lighting, stunning colors, ultra high quality, magazine cover worthy`,
+            `- 搜图关键词要加：breathtaking, stunning, beautiful, dreamy, aesthetic`,
+            `- ❌ 禁止用普通的随手拍作为封面——内页可以日常，但封面必须惊艳`,
             ``,
             `### 图2-5 要求`,
             `每张图内容不同，但**风格、清晰度、色调、画风必须完全一致**，像同一部手机同一天拍的。`,
             ``,
             `### 执行步骤`,
-            `1. 从内容规划方案中提取每张图的搜图关键词（关键词要具体到场景细节）`,
-            `2. 所有搜图关键词加上统一的风格限定词（如"自然光 手机拍摄 日常 真实"）`,
-            `3. 用 WebSearch 搜索对应的图片`,
-            `4. 用 curl 下载找到的图片，保存到作品的 assets/images/ 目录`,
-            `5. 下载后用 ffmpeg 统一调色（亮度/对比度/色温），消除不同来源的色差`,
-            `6. 如果某张图风格偏离太大，弃用重搜，不要强行调色凑数`,
+            `1. 从内容规划方案中提取每张图的关键词（要具体到场景细节，突出"极少数人才有"的特征）`,
+            `2. 所有关键词加上"candid real iPhone casual snapshot"等反stock限定词`,
+            `3. 优先用 WebSearch 搜索图片，筛选时严格排除任何stock感的结果`,
+            `4. 搜不到合适的就用 AI 生图脚本，提示词必须包含 candid/snapshot/iPhone 等关键词`,
+            `5. 用 curl 下载图片，保存到作品的 assets/images/ 目录`,
+            `6. 下载后用 ffmpeg 统一调色（亮度/对比度/色温），确保风格一致`,
+            `7. 最终检查：如果任何一张图看起来像图库素材（太完美、太干净），必须弃用重新获取`,
             ``,
             `参考 modules/emotional-hooks.md 中羡慕类的素材生成指令获取详细规则。`,
           ].join("\n"),
@@ -1205,21 +1513,21 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
             ``,
             `## 图片生成方式`,
             ``,
-            `"危机感/焦虑"类图文：只有封面是文字卡片（用 ffmpeg 生成）。`,
+            `"深度共鸣"类图文：只有封面是文字卡片（用 ffmpeg 生成）。`,
             `**除封面外的其他图片禁止写文字观点！** 文字观点全部在文案正文里体现。`,
             `其余配图用与话题相关的真实照片（全网搜索下载）。`,
             `如果方案使用的是路线2（对话截图型），对话截图仅限封面，其余图用真实照片。`,
-            `参考 modules/emotional-hooks.md 中焦虑类的素材生成指令。`,
+            `参考 modules/emotional-hooks.md 中共鸣类的素材生成指令。`,
           ].join("\n"),
           conflict: [
             ``,
             `## 图片生成方式`,
             ``,
-            `"观点分歧/愤怒"类图文：只有封面是文字卡片（用 ffmpeg 生成）。`,
+            `"观点分歧/争议感"类图文：只有封面是文字卡片（用 ffmpeg 生成）。`,
             `**除封面外的其他图片禁止写文字观点！** 文字观点全部在文案正文里体现。`,
             `其余配图用与话题相关的真实照片（全网搜索下载）。`,
             `如果方案使用的是路线2（对话截图型），对话截图仅限封面，其余图用真实照片。`,
-            `参考 modules/emotional-hooks.md 中焦虑类的素材生成指令。`,
+            `参考 modules/emotional-hooks.md 中共鸣类的素材生成指令。`,
           ].join("\n"),
         };
         const method = assetMethod[work.contentCategory as string];
@@ -1243,337 +1551,25 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
   }
 });
 
-// ── Evaluation helpers ──────────────────────────────────────────────────────
-
-function broadcastPipelineUpdate(workId: string, pipeline: Record<string, PipelineStep>): void {
-  if (!wsBridge) return;
-  const session = wsBridge.getSession(workId);
-  if (!session) return;
-  for (const ws of session.browserSockets) {
-    if (ws.readyState === 1) {
-      ws.send(JSON.stringify({
-        event: "pipeline_updated",
-        data: { workId, pipeline },
-        timestamp: new Date().toISOString(),
-      }));
-    }
-  }
-}
-
-async function waitForCreatorIdle(workId: string, timeoutMs = 120_000): Promise<void> {
-  if (!wsBridge) return;
-  const session = wsBridge.getSession(workId);
-  if (!session) return;
-
-  // If creator CLI is still running, wait for it to exit
-  if (session.cliProcess) {
-    log("info", "api", "eval_waiting_for_creator", workId, {});
-    const start = Date.now();
-    await new Promise<void>((resolve) => {
-      const check = () => {
-        if (!session.cliProcess || Date.now() - start > timeoutMs) {
-          resolve();
-          return;
-        }
-        setTimeout(check, 500);
-      };
-      // Listen for the process exit directly if possible
-      if (session.cliProcess) {
-        session.cliProcess.once("exit", () => {
-          // Give a small delay for final messages to flush
-          setTimeout(resolve, 1000);
-        });
-        // Fallback timeout
-        setTimeout(check, 500);
-      } else {
-        resolve();
-      }
-    });
-    log("info", "api", "eval_creator_idle", workId, { waitedMs: Date.now() - start });
-  }
-}
-
-async function runEvaluation(workId: string, completedStep: string, nextStep?: string): Promise<void> {
-  if (!wsBridge) throw new Error("WsBridge not initialized");
-
-  // CRITICAL: Wait for creator agent's CLI process to finish before starting evaluator
-  // The creator calls pipeline/advance as a tool use during its turn — we must not
-  // start the evaluator until the creator's turn is fully complete to avoid interleaved output.
-  await waitForCreatorIdle(workId);
-
-  const work = await getWork(workId);
-  if (!work) throw new Error("Work not found");
-
-  const session = wsBridge.ensureSession(workId);
-  session.evalStep = completedStep;
-
-  const attempt = (work.evalAttempts?.[completedStep] ?? 0) + 1;
-
-  // Load step history for context
-  const stepHistory = await loadStepHistory(workId, completedStep);
-  const historyText = (stepHistory as any)?.blocks
-    ?.filter((b: any) => b.type === "text")
-    .map((b: any) => b.text)
-    .join("\n\n")
-    .slice(0, 8000) ?? "";
-
-  // Load previous eval results
-  const prevResults = await loadAllEvalResults(workId, completedStep);
-  const prevResultsText = prevResults.length > 0
-    ? prevResults.map(r => `第${r.attempt}轮评审: ${r.verdict}\n问题: ${r.issues.map(i => i.description).join("; ")}\n建议: ${r.suggestions.join("; ")}`).join("\n\n")
-    : "";
-
-  // Build evaluator prompt with work directory path
-  const workDir = join(dataDir, "works", workId);
-  const evalPrompt = buildEvalPrompt(work, completedStep, attempt, historyText, prevResultsText, workDir);
-
-  // Broadcast eval_divider start
-  session.messageHistory.push({
-    type: "eval_divider" as any,
-    text: `评审开始 (第${attempt}轮)`,
-    source: "evaluator",
-    timestamp: new Date().toISOString(),
-  });
-  wsBridge.broadcastToBrowsers(workId, {
-    event: "eval_divider",
-    data: { type: "start", step: completedStep, attempt },
-  });
-
-  // Always spawn a fresh evaluator session (no --resume) so it reads the latest files
-  // from disk without relying on cached file content from prior eval rounds.
-  try {
-    const evalResult = await wsBridge.spawnEvaluator(session, evalPrompt);
-    evalResult.step = completedStep;
-    evalResult.attempt = attempt;
-    evalResult.timestamp = new Date().toISOString();
-
-    // Save result
-    await saveEvalResult(workId, completedStep, attempt, evalResult);
-
-    // Update attempts
-    const evalAttempts = { ...(work.evalAttempts ?? {}), [completedStep]: attempt };
-    // Also persist evalSessionId
-    const evalSessionIds = { ...(work.evalSessionIds ?? {}), [completedStep]: session.evalSessionId ?? "" };
-    await storeUpdateWork(workId, { evalAttempts, evalSessionIds } as any);
-
-    if (evalResult.verdict === "pass") {
-      // PASS — advance pipeline
-      session.messageHistory.push({
-        type: "eval_divider" as any,
-        text: "评审通过 ✓",
-        source: "evaluator",
-        timestamp: new Date().toISOString(),
-      });
-      wsBridge.broadcastToBrowsers(workId, {
-        event: "eval_divider",
-        data: { type: "end", step: completedStep, verdict: "pass", scores: evalResult.scores },
-      });
-
-      // Clean up eval session for this step
-      const cleanedEvalSessionIds = { ...evalSessionIds };
-      delete cleanedEvalSessionIds[completedStep];
-
-      const freshWork = await getWork(workId);
-      if (freshWork) {
-        freshWork.pipeline[completedStep].status = "done";
-        freshWork.pipeline[completedStep].completedAt = new Date().toISOString();
-        if (nextStep && freshWork.pipeline[nextStep]) {
-          freshWork.pipeline[nextStep].status = "active";
-          freshWork.pipeline[nextStep].startedAt = new Date().toISOString();
-        }
-        await storeUpdateWork(workId, {
-          pipeline: freshWork.pipeline,
-          evalSessionIds: cleanedEvalSessionIds,
-          evalAttempts: { ...(freshWork.evalAttempts ?? {}), [completedStep]: 0 },
-        } as any);
-        broadcastPipelineUpdate(workId, freshWork.pipeline);
-      }
-
-      // Persist chat
-      saveWorkChat(workId, { blocks: session.messageHistory }).catch(() => {});
-
-      // Auto-resume creator agent to continue with next step
-      if (nextStep) {
-        const continuePrompt = `评审已通过，pipeline 已自动推进到「${freshWork?.pipeline[nextStep]?.name ?? nextStep}」阶段。请继续执行该阶段的工作。`;
-        await wsBridge.sendMessage(workId, continuePrompt);
-      }
-    } else {
-      // FAIL — send feedback to creator agent
-      session.messageHistory.push({
-        type: "eval_divider" as any,
-        text: `评审未通过 ✗ (${evalResult.issues.length}个问题)`,
-        source: "evaluator",
-        timestamp: new Date().toISOString(),
-      });
-      wsBridge.broadcastToBrowsers(workId, {
-        event: "eval_divider",
-        data: { type: "end", step: completedStep, verdict: "fail", scores: evalResult.scores, issues: evalResult.issues },
-      });
-
-      // Check iteration limit
-      if (attempt >= 3) {
-        const freshWork = await getWork(workId);
-        if (freshWork) {
-          freshWork.pipeline[completedStep].status = "eval_blocked" as any;
-          await storeUpdateWork(workId, { pipeline: freshWork.pipeline });
-          broadcastPipelineUpdate(workId, freshWork.pipeline);
-        }
-        wsBridge.broadcastToBrowsers(workId, {
-          event: "eval_blocked",
-          data: { workId, step: completedStep, attempt, result: evalResult },
-        });
-        saveWorkChat(workId, { blocks: session.messageHistory }).catch(() => {});
-        return;
-      }
-
-      // Set step back to active
-      const freshWork = await getWork(workId);
-      if (freshWork) {
-        freshWork.pipeline[completedStep].status = "active";
-        await storeUpdateWork(workId, { pipeline: freshWork.pipeline });
-        broadcastPipelineUpdate(workId, freshWork.pipeline);
-      }
-
-      // Inject feedback into creator agent via resume
-      const feedbackPrompt = buildFeedbackPrompt(evalResult, attempt);
-      await wsBridge.sendMessage(workId, feedbackPrompt);
-
-      // Persist chat
-      saveWorkChat(workId, { blocks: session.messageHistory }).catch(() => {});
-    }
-  } catch (err) {
-    log("error", "api", "eval_error", workId, { error: (err as Error).message });
-    // On evaluator failure, revert to active
-    const freshWork = await getWork(workId);
-    if (freshWork) {
-      freshWork.pipeline[completedStep].status = "active";
-      await storeUpdateWork(workId, { pipeline: freshWork.pipeline });
-      broadcastPipelineUpdate(workId, freshWork.pipeline);
-    }
-  }
-}
-
-function buildFeedbackPrompt(evalResult: EvalResult, attempt: number): string {
-  const issueList = evalResult.issues
-    .map((i, idx) => `${idx + 1}. [${i.severity}] ${i.description}${i.file ? ` (文件: ${i.file})` : ""}`)
-    .join("\n");
-  const suggestionList = evalResult.suggestions
-    .map((s, idx) => `${idx + 1}. ${s}`)
-    .join("\n");
-
-  return `## 评审反馈 (第${attempt}轮)
-
-评审未通过，请根据以下反馈修复问题后重新提交：
-
-### 问题列表
-${issueList}
-
-### 修改建议
-${suggestionList}
-
-请修复以上问题，修复完成后再次调用 pipeline/advance 提交评审。`;
-}
-
-function buildEvalPrompt(work: Work, step: string, attempt: number, historyText: string, prevResultsText: string, workDir: string): string {
-  const stepName = work.pipeline[step]?.name ?? step;
-  const platforms = work.platforms?.join(", ") ?? "未指定";
-
-  return `你是一位严格的内容质量评审专家。你的任务是审查「${work.title}」的「${stepName}」阶段产出。
-
-## 你的角色
-- 你是独立的评审者，不是创作者。你的职责是发现问题，而不是赞美。
-- AI 存在"自我评价偏差"——倾向于赞美自己的产出。你必须刻意克服这种倾向。
-- 使用硬性阈值，不要模糊通过。任何维度低于 6/10 分必须打回。
-
-## 作品信息
-- 标题: ${work.title}
-- 类型: ${work.type}
-- 平台: ${platforms}
-- 当前阶段: ${stepName}
-- 评审轮次: 第${attempt}轮
-- **作品目录: ${workDir}**
-
-## 评审标准
-请阅读 skills/content-evaluator/criteria/${step}.md 获取该阶段的详细评审标准。如果文件不存在，请使用通用的内容质量标准进行评审。
-
-## 创作产出摘要
-${historyText.slice(0, 6000) || "(无文本产出记录)"}
-
-## 评审指令
-
-**重要：你必须从磁盘重新读取文件的最新内容。不要依赖之前会话中缓存的文件内容。创作者可能已经修改了文件。**
-
-1. 使用 Read 工具从 ${workDir} 目录读取实际文件（必须重新读取，不要使用缓存）
-2. 对于图片文件：使用 Read 工具查看图片，评估视觉质量
-3. 对于视频文件：使用 ffprobe 检查技术参数（分辨率、时长、编码、音频轨）
-4. 根据评审标准逐项评分
-5. 输出结构化评审结果
-
-常用文件路径：
-- 调研报告: ${workDir}/research/report.md
-- 内容方案: ${workDir}/plan/plan.md
-- 图片素材: ${workDir}/assets/images/
-- 视频素材: ${workDir}/assets/clips/
-- 最终输出: ${workDir}/output/
-
-${prevResultsText ? `## 历史评审记录\n${prevResultsText}\n\n请特别关注之前指出的问题是否已修复。**必须重新读取文件确认修复，不要依赖之前的缓存内容。**` : ""}
-
-## 输出格式（必须严格遵循）
-
-在你的分析之后，输出以下 JSON 代码块：
-
-\`\`\`json
-{
-  "verdict": "pass" 或 "fail",
-  "scores": {
-    "维度1": 1-10,
-    "维度2": 1-10
-  },
-  "issues": [
-    {"severity": "critical/major/minor", "description": "问题描述", "file": "相关文件路径（可选）"}
-  ],
-  "suggestions": ["修改建议1", "修改建议2"]
-}
-\`\`\`
-
-规则：
-- 任何 critical 问题 → 必须 fail
-- 任何维度 < 6/10 → 必须 fail
-- 所有维度 ≥ 7/10 且无 critical 问题 → pass`;
-}
-
 // POST /api/works/:id/pipeline/advance — agent calls this to advance pipeline
 apiRoutes.post("/api/works/:id/pipeline/advance", async (c) => {
   const id = c.req.param("id");
   try {
-    const body = await c.req.json<{ completedStep: string; nextStep?: string }>().catch(() => ({} as any));
-    log("info", "api", "pipeline_advance", id, { completedStep: body.completedStep, nextStep: body.nextStep });
+    const body = await c.req.json<{ completedStep: string; nextStep?: string; title?: string }>().catch(() => ({} as any));
+    log("info", "api", "pipeline_advance", id, { completedStep: body.completedStep, nextStep: body.nextStep, title: body.title });
     const work = await getWork(id);
     if (!work) return c.json({ error: "Work not found" }, 404);
 
     const { completedStep, nextStep } = body;
     if (!completedStep) return c.json({ error: "completedStep is required" }, 400);
 
-    // ── Evaluation gate ─────────────────────────────────────────────────
-    if (work.evaluationMode && work.pipeline[completedStep]?.status !== "evaluating") {
-      work.pipeline[completedStep].status = "evaluating" as any;
-      await storeUpdateWork(id, { pipeline: work.pipeline });
-      broadcastPipelineUpdate(id, work.pipeline);
-
-      // Start evaluation asynchronously (don't await — return immediately)
-      runEvaluation(id, completedStep, nextStep).catch((err) => {
-        log("error", "api", "eval_failed", id, { error: (err as Error).message });
-      });
-
-      return c.json({ ok: true, evaluating: true, pipeline: work.pipeline });
-    }
-
-    // ── Normal advance (eval off or already passed) ─────────────────────
+    // Mark completed step as done
     if (work.pipeline[completedStep]) {
       work.pipeline[completedStep].status = "done";
       work.pipeline[completedStep].completedAt = new Date().toISOString();
     }
 
+    // Also mark all steps before completedStep as done (in case agent skipped)
     const stepKeys = Object.keys(work.pipeline);
     const completedIdx = stepKeys.indexOf(completedStep);
     if (completedIdx > 0) {
@@ -1586,29 +1582,141 @@ apiRoutes.post("/api/works/:id/pipeline/advance", async (c) => {
       }
     }
 
+    // Mark next step as active if provided
     if (nextStep && work.pipeline[nextStep]) {
       work.pipeline[nextStep].status = "active";
       work.pipeline[nextStep].startedAt = new Date().toISOString();
     }
 
-    await storeUpdateWork(id, { pipeline: work.pipeline });
+    // Update title if agent provided one (only once — skip if already locked)
+    const titleUpdate: Partial<typeof work> = { pipeline: work.pipeline };
+    if (body.title && typeof body.title === "string" && !work.titleLocked) {
+      const trimmedTitle = body.title.trim();
+      titleUpdate.title = trimmedTitle;
+      titleUpdate.titleLocked = true;
+      work.title = trimmedTitle;
+    }
 
-    // Memory sync (keep existing logic)
+    await storeUpdateWork(id, titleUpdate);
+
+    // Sync conversation to EverMemOS (fire and forget)
     if (completedStep) {
       loadStepHistory(id, completedStep).then(history => {
         const h = history as { blocks?: { type: string; text: string }[] } | null;
         if (h?.blocks) {
           getWork(id).then(w => {
             syncStepConversation(
-              id, w?.title ?? "Untitled", completedStep,
-              w?.pipeline?.[completedStep]?.name ?? completedStep, h.blocks!,
-            ).catch(() => {});
-          }).catch(() => {});
+              id,
+              w?.title ?? "Untitled",
+              completedStep,
+              w?.pipeline?.[completedStep]?.name ?? completedStep,
+              h.blocks!,
+            ).catch(() => {})
+          }).catch(() => {})
         }
-      }).catch(() => {});
+      }).catch(() => {})
     }
 
-    broadcastPipelineUpdate(id, work.pipeline);
+    // Broadcast pipeline update to browsers via WsBridge
+    if (wsBridge) {
+      const session = wsBridge.getSession(id);
+      if (session) {
+        for (const ws of session.browserSockets) {
+          if (ws.readyState === 1) {
+            ws.send(JSON.stringify({
+              event: "pipeline_updated",
+              data: { workId: id, pipeline: work.pipeline, title: work.title },
+              timestamp: new Date().toISOString(),
+            }));
+          }
+        }
+      }
+    }
+
+    // ── Evaluator trigger ──────────────────────────────────────────────
+    const evalEnabled = work.evaluationMode ?? true; // default on
+    if (evalEnabled && wsBridge && completedStep) {
+      // Don't eval the last step (assembly) — it has its own final eval
+      const isLastStep = !nextStep;
+      if (!isLastStep) {
+        const session = wsBridge.getSession(id);
+        if (session) {
+          // Set step to evaluating
+          work.pipeline[completedStep].status = "evaluating";
+          // Revert next step to pending during eval
+          if (nextStep && work.pipeline[nextStep]) {
+            work.pipeline[nextStep].status = "pending";
+          }
+          await storeUpdateWork(id, { pipeline: work.pipeline });
+
+          // Broadcast evaluating status
+          wsBridge.broadcastToBrowsers(id, {
+            event: "pipeline_updated",
+            data: { workId: id, pipeline: work.pipeline, title: work.title },
+          });
+
+          // Add eval divider to chat
+          wsBridge.broadcastToBrowsers(id, {
+            event: "eval_start",
+            data: { workId: id, step: completedStep },
+          });
+
+          session.evalStep = completedStep;
+
+          // Build eval prompt
+          const evalPrompt = await buildEvalPrompt(work, completedStep);
+
+          // Spawn evaluator asynchronously (don't block response)
+          wsBridge.spawnEvaluator(session, evalPrompt)
+            .then(async (evalResult) => {
+              evalResult.step = completedStep;
+              evalResult.timestamp = new Date().toISOString();
+              await saveEvalResult(id, completedStep, evalResult);
+
+              const freshWork = await getWork(id);
+              if (!freshWork) return;
+
+              if (evalResult.verdict === "pass") {
+                freshWork.pipeline[completedStep].status = "done";
+                if (nextStep && freshWork.pipeline[nextStep]) {
+                  freshWork.pipeline[nextStep].status = "active";
+                  freshWork.pipeline[nextStep].startedAt = new Date().toISOString();
+                }
+              } else {
+                freshWork.pipeline[completedStep].status = "eval_blocked";
+              }
+              await storeUpdateWork(id, { pipeline: freshWork.pipeline });
+
+              wsBridge?.broadcastToBrowsers(id, {
+                event: "eval_complete",
+                data: { workId: id, step: completedStep, result: evalResult },
+              });
+              wsBridge?.broadcastToBrowsers(id, {
+                event: "pipeline_updated",
+                data: { workId: id, pipeline: freshWork.pipeline, title: freshWork.title },
+              });
+            })
+            .catch(async () => {
+              // Eval failed — fall through to pass
+              const freshWork = await getWork(id);
+              if (!freshWork) return;
+              freshWork.pipeline[completedStep].status = "done";
+              if (nextStep && freshWork.pipeline[nextStep]) {
+                freshWork.pipeline[nextStep].status = "active";
+                freshWork.pipeline[nextStep].startedAt = new Date().toISOString();
+              }
+              await storeUpdateWork(id, { pipeline: freshWork.pipeline });
+              wsBridge?.broadcastToBrowsers(id, {
+                event: "pipeline_updated",
+                data: { workId: id, pipeline: freshWork.pipeline },
+              });
+            });
+
+          return c.json({ ok: true, pipeline: work.pipeline, evaluating: true });
+        }
+      }
+    }
+
     return c.json({ ok: true, pipeline: work.pipeline });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : "Pipeline advance error" }, 500);
@@ -1616,29 +1724,73 @@ apiRoutes.post("/api/works/:id/pipeline/advance", async (c) => {
 });
 
 // ---------------------------------------------------------------------------
-// Evaluation API endpoints
+// Evaluator prompt builder
 // ---------------------------------------------------------------------------
 
-// POST /api/works/:id/eval/toggle
+async function buildEvalPrompt(work: { id: string; type: string; pipeline: Record<string, any> }, completedStep: string): Promise<string> {
+  const skillDir = join(process.cwd(), "skills", "content-evaluator");
+  let skillMd = "";
+  try { skillMd = await readFile(join(skillDir, "SKILL.md"), "utf-8"); } catch { /* missing */ }
+
+  const criteriaMap: Record<string, string> = {
+    research: "research.md",
+    plan: "plan.md",
+    assets: "assets.md",
+    assembly: "assembly.md",
+  };
+  let criteriaMd = "";
+  const criteriaFile = criteriaMap[completedStep];
+  if (criteriaFile) {
+    try { criteriaMd = await readFile(join(skillDir, "criteria", criteriaFile), "utf-8"); } catch { /* missing */ }
+  }
+
+  const workDir = join(dataDir, "works", work.id);
+
+  return `${skillMd}
+
+## 本次评审任务
+
+评审阶段：${completedStep}（${work.pipeline[completedStep]?.name ?? completedStep}）
+作品ID：${work.id}
+作品类型：${work.type}
+作品目录：${workDir}
+
+### 阶段评审标准
+${criteriaMd}
+
+请按照评审流程，检查 ${workDir} 下的产出文件，逐维度评分，最后输出结构化 JSON 评审结果。`;
+}
+
+// ---------------------------------------------------------------------------
+// Evaluation API routes
+// ---------------------------------------------------------------------------
+
+// POST /api/works/:id/eval/toggle — toggle evaluation mode
 apiRoutes.post("/api/works/:id/eval/toggle", async (c) => {
   const id = c.req.param("id");
   const work = await getWork(id);
   if (!work) return c.json({ error: "Work not found" }, 404);
-  const newMode = !(work.evaluationMode ?? false);
+  const newMode = !(work.evaluationMode ?? true);
   await storeUpdateWork(id, { evaluationMode: newMode } as any);
-  return c.json({ ok: true, evaluationMode: newMode });
+  return c.json({ evaluationMode: newMode });
 });
 
-// POST /api/works/:id/eval/force-pass
+// POST /api/works/:id/eval/force-pass — force pass a blocked eval
 apiRoutes.post("/api/works/:id/eval/force-pass", async (c) => {
   const id = c.req.param("id");
-  const body = await c.req.json<{ step: string; nextStep?: string }>().catch(() => ({} as any));
+  const { step, nextStep } = await c.req.json<{ step: string; nextStep?: string }>();
   const work = await getWork(id);
   if (!work) return c.json({ error: "Work not found" }, 404);
-  const { step, nextStep } = body;
-  if (!step || !["eval_blocked", "evaluating"].includes(work.pipeline[step]?.status as string)) {
-    return c.json({ error: "Step not in eval_blocked/evaluating state" }, 400);
+
+  // Kill running evaluator
+  if (wsBridge) {
+    const session = wsBridge.getSession(id);
+    if (session?.evalProcess) {
+      try { session.evalProcess.kill("SIGTERM"); } catch { /* already dead */ }
+      session.evalProcess = undefined;
+    }
   }
+
   work.pipeline[step].status = "done";
   work.pipeline[step].completedAt = new Date().toISOString();
   if (nextStep && work.pipeline[nextStep]) {
@@ -1646,33 +1798,46 @@ apiRoutes.post("/api/works/:id/eval/force-pass", async (c) => {
     work.pipeline[nextStep].startedAt = new Date().toISOString();
   }
   await storeUpdateWork(id, { pipeline: work.pipeline });
-  broadcastPipelineUpdate(id, work.pipeline);
-  return c.json({ ok: true, pipeline: work.pipeline });
+
+  if (wsBridge) {
+    wsBridge.broadcastToBrowsers(id, {
+      event: "pipeline_updated",
+      data: { workId: id, pipeline: work.pipeline },
+    });
+  }
+
+  return c.json({ pipeline: work.pipeline });
 });
 
-// POST /api/works/:id/eval/retry
+// POST /api/works/:id/eval/retry — retry step with guidance
 apiRoutes.post("/api/works/:id/eval/retry", async (c) => {
   const id = c.req.param("id");
-  const body = await c.req.json<{ step: string; guidance: string }>().catch(() => ({} as any));
+  const { step, guidance } = await c.req.json<{ step: string; guidance: string }>();
   const work = await getWork(id);
   if (!work) return c.json({ error: "Work not found" }, 404);
-  const { step, guidance } = body;
-  if (!step) return c.json({ error: "step required" }, 400);
+
   work.pipeline[step].status = "active";
-  const evalAttempts = { ...(work.evalAttempts ?? {}), [step]: 0 };
-  await storeUpdateWork(id, { pipeline: work.pipeline, evalAttempts } as any);
-  broadcastPipelineUpdate(id, work.pipeline);
-  if (wsBridge && guidance) {
-    await wsBridge.sendMessage(id, `## 用户指导\n\n${guidance}\n\n请根据以上指导修改当前阶段的产出，完成后重新提交。`);
+  work.pipeline[step].startedAt = new Date().toISOString();
+  delete work.pipeline[step].completedAt;
+  await storeUpdateWork(id, { pipeline: work.pipeline });
+
+  if (wsBridge) {
+    const guidanceMsg = `评审反馈要求重做此步骤。请根据以下评审意见修改：\n\n${guidance}`;
+    await wsBridge.sendMessage(id, guidanceMsg);
+    wsBridge.broadcastToBrowsers(id, {
+      event: "pipeline_updated",
+      data: { workId: id, pipeline: work.pipeline },
+    });
   }
+
   return c.json({ ok: true });
 });
 
-// GET /api/works/:id/eval/results/:step
+// GET /api/works/:id/eval/results/:step — fetch eval results
 apiRoutes.get("/api/works/:id/eval/results/:step", async (c) => {
   const id = c.req.param("id");
   const step = c.req.param("step");
-  const results = await loadAllEvalResults(id, step);
+  const results = await loadEvalResults(id, step);
   return c.json({ results });
 });
 

@@ -101,7 +101,7 @@ description: Generate images and videos for Douyin (抖音) and Xiaohongshu (小
 开始生成前，先收集所有上下文信息：
 
 ```bash
-# 1. 获取作品详情和方案
+# 1. 获取作品详情和方案（检查 usePortrait 字段）
 curl http://localhost:3271/api/works/{workId}
 
 # 2. 查看共享素材（参考图、角色参考、音乐等）
@@ -112,6 +112,32 @@ curl http://localhost:3271/api/works/{workId}/assets
 
 # 4. 检查可用的生成服务，确定使用哪些脚本
 python3 skills/asset-generation/scripts/check_providers.py
+```
+
+### 画像关联模式
+
+检查作品详情中的 `usePortrait` 字段。如果为 `true`，**所有生成必须使用用户画像中的参考图**：
+
+| 画像分类 | 用途 | 生成时操作 |
+|---------|------|----------|
+| **characters（形象参照）** | 人脸/体型/穿搭一致性 | **每次生成含人物的图片/视频都必须传入** `--ref-image http://localhost:3271/api/shared-assets/characters/<文件名>` |
+| **scenes（场景参照）** | 家里/健身房/办公室等环境风格 | 在 prompt 中描述场景细节，并传入 `--ref-image` 确保环境一致 |
+| **branding（品牌调性）** | 色调/字体/视觉风格 | 在 prompt 中明确要求匹配品牌风格 |
+| **templates（画面模板）** | 构图/排版参照 | 参照模板的构图方式生成 |
+
+**关键规则：**
+- 人物图片必须每张都传入 characters 参考图，不能只在第一张用
+- prompt 中必须用文字描述参考图中人物的具体特征（性别、体型、发型、肤色、穿搭风格）
+- 所有图片之间必须保持风格/色调/人物外观的一致性
+- 如果有多张 characters 参考图，选择角度最匹配当前需求的那张
+
+```bash
+# 示例：使用画像参考图生成
+python3 skills/asset-generation/scripts/openrouter_generate.py \
+  --prompt "阳光健身男性在晨光中做引体向上，侧面特写，电影质感" \
+  --ref-image http://localhost:3271/api/shared-assets/characters/face-ref.jpg \
+  --ref-image http://localhost:3271/api/shared-assets/scenes/gym.jpg \
+  --ar 9:16 --output {workDir}/assets/images/shot-01.png
 ```
 
 ---
@@ -310,6 +336,7 @@ dreamina list_task --gen_status=success
 
 **判断提交是否成功：** 不要只看 shell 退出码，必须检查 JSON 输出中的 `submit_id` 和 `gen_status`。`gen_status=querying` 或 `success` 才算成功；`fail` 时查看 `fail_reason`。
 
+
 #### 4. `jimeng_generate.py` — 即梦 API（**视频生成备用 + 备用图片**）
 
 需要 `JIMENG_ACCESS_KEY` + `JIMENG_SECRET_KEY`。**仅在 Dreamina CLI 不可用时使用。**
@@ -331,6 +358,42 @@ python3 skills/asset-generation/scripts/jimeng_generate.py video \
 python3 skills/asset-generation/scripts/jimeng_generate.py video \
   --prompt "动作描述" --first-frame frame.png --output clip.mp4
 ```
+
+#### 4.5 即梦对嘴型（Lip-Sync）— 让视频人物说指定的话
+
+需要 `JIMENG_ACCESS_KEY` + `JIMENG_SECRET_KEY`。使用火山引擎 `realman_change_lips` API，对一个**已生成的视频**进行口型同步，让其中的人物对着指定音频说话。
+
+**适用场景：**
+- 口播类视频：先用 AI 生成人物视频片段，再用 TTS 生成配音，最后对嘴型合成
+- 需要人物"说话"但又不是真人拍摄的内容
+
+**通过 API 调用：**
+
+```bash
+curl -X POST http://localhost:3271/api/generate/lip-sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workId": "work-xxx",
+    "videoUrl": "https://..../source_video.mp4",
+    "audioUrl": "https://..../narration.mp3",
+    "filename": "lipsync_talking.mp4"
+  }'
+```
+
+**输入限制：**
+- 视频：3-350 秒，360p-1080p，MP4/MOV，H.264，24-60fps，≤500MB
+- 音频：1-240 秒
+- 人脸角度：左右 ≤30°，上下 ≤15°，倾斜 ≤20°
+- 输出：MP4，25fps，时长跟随音频长度
+
+**口播视频推荐流程：**
+1. 用 Dreamina/即梦生成人物视频片段（正面中景，表情自然）
+2. 用 edge-tts 生成旁白音频
+3. 将视频和音频上传获取 URL（或使用已有 URL）
+4. 调用 lip-sync API 合成对嘴型视频
+5. 在 content-assembly 阶段叠加字幕和 BGM
+
+> **⚠️ 注意：** 视频和音频参数需要传入可访问的 URL。如果素材是本地文件，需要先通过 `/api/works/{workId}/assets` 上传获取 URL。
 
 #### 5. `music_generate.py` — Lyria 音乐生成（**BGM/配乐**）
 
@@ -369,19 +432,68 @@ python3 skills/asset-generation/scripts/music_generate.py \
 
 > 详细的 prompt 工程技巧和情绪-风格映射请阅读 `modules/music-generation.md`
 
-**选择策略：**
-1. **视频生成** → **优先 Dreamina CLI**（`dreamina` 命令，Seedance 2.0 模型，功能最全最强）
-2. **视频备用** → Dreamina CLI 未登录时，回退到 `jimeng_generate.py`（需要 API Key）
-3. **图片生成** → 优先 `openrouter_generate.py`（Gemini 3.1 Flash，画质最好，参数最丰富）
-4. **图片备用** → Dreamina CLI `dreamina text2image`（Seedream 5.0，最高 4K）或 `jimeng_generate.py image`
-5. **音乐生成** → 使用 `music_generate.py`（Lyria Pro，~2分钟完整曲目）
-6. **图文排版** → 使用 `poster_render.py`（HTML/CSS 模板渲染，文字清晰可控）
-7. 先运行 `check_providers.py` 确认可用服务（包括 Dreamina CLI 登录态检查）
+**选择策略（严格按此顺序）：**
+1. **视频生成** → **必须使用 Dreamina CLI**（`dreamina image2video` / `dreamina multiframe2video`，Seedance 2.0 模型）。**禁止使用 jimeng_generate.py 或 Jimeng API key，禁止降级到 ffmpeg Ken Burns**
+2. **口播说话视频** → 使用 `sadtalker_generate.py`（用户照片 + 旁白音频 → 口型同步说话视频）
+3. **图片生成** → 优先 `openrouter_generate.py`（Gemini 3.1 Flash），备选 `dreamina text2image`
+4. **音乐生成** → 使用 `music_generate.py`（Lyria Pro）
+5. **图文排版** → 使用 `poster_render.py`（HTML/CSS 模板渲染）
 
-> **视频生成决策树：**
-> Dreamina CLI 已登录？→ 用 `dreamina` 命令（首选）
-> Dreamina CLI 未登录 + JIMENG API Key 可用？→ 用 `jimeng_generate.py`（回退）
-> 都不可用？→ 提示用户执行 `dreamina login` 或配置 API Key
+> **⚠️ 素材阶段禁止添加背景音乐：** 生成视频片段（clips）时，**不要**混入 BGM 或任何音频。每个 clip 应该是纯视频（或静音）。背景音乐只在 content-assembly 最终合成阶段统一添加，这样才能保证音乐节奏与整体剪辑匹配。
+
+> **Dreamina CLI 已安装并登录（积分充足）。直接使用 `dreamina` 命令，不需要 API key。**
+> 详细用法请阅读 `modules/dreamina-mastery.md`
+
+#### 7. `sadtalker_generate.py` — 口型同步说话视频（**口播视频必用**）
+
+用用户的照片 + 旁白音频生成口型同步的说话视频。适用于 dating advice、观点输出、情感分析等口播类短视频。
+
+**安装 SadTalker（一次性）：**
+```bash
+git clone https://github.com/OpenTalker/SadTalker.git ~/SadTalker
+cd ~/SadTalker && pip install -r requirements.txt
+bash scripts/download_models.sh
+```
+
+**口播视频完整工作流：**
+
+```bash
+# 1. 用 edge-tts 生成旁白音频
+edge-tts --text "旁白文本内容" --voice zh-CN-YunxiNeural \
+  --write-media {workDir}/assets/clips/narration.mp3
+
+# 2. 用 SadTalker 生成说话视频（用户照片 + 旁白音频 → 说话视频）
+python3 skills/asset-generation/scripts/sadtalker_generate.py \
+  --image {workDir}/assets/frames/face.png \
+  --audio {workDir}/assets/clips/narration.mp3 \
+  --output {workDir}/assets/clips/talking.mp4 \
+  --still --enhancer gfpgan
+
+# 3. 用 Dreamina 生成 B-roll 辅助画面（穿插在口播之间）
+dreamina image2video \
+  --image {workDir}/assets/frames/broll-01.png \
+  --prompt="场景描述" \
+  --duration=5 --model_version=seedance2.0 --poll=120
+```
+
+**参数说明：**
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--image` | 用户人脸照片（正面，清晰）| 必填 |
+| `--audio` | 旁白音频文件 | 必填 |
+| `--output` | 输出视频路径 | 必填 |
+| `--still` | 减少头部晃动（口播推荐开启）| 默认开启 |
+| `--enhancer gfpgan` | 人脸增强（提升清晰度）| 默认 gfpgan |
+| `--size 256/512` | 人脸裁剪尺寸 | 256 |
+| `--expression-scale` | 表情强度 0.0-2.0 | 1.0 |
+| `--device` | cpu/cuda/mps（Mac 用 cpu）| 自动检测 |
+
+**人脸照片要求：**
+- 正面照，眼睛看镜头
+- 嘴巴自然闭合（不要张嘴）
+- 光线均匀，背景简洁
+- 优先使用用户上传的 `characters/` 目录中的照片
 
 #### 6. `font_manager.py` — 字体管理器（共享组件）
 

@@ -171,8 +171,6 @@ ffmpeg -i clip-01.mp4 -vf "scale=1080:1920:force_original_aspect_ratio=decrease,
 - 编码：`-c:v libx264 -preset medium -crf 23`
 - 音频：`-c:a aac -ar 44100`
 
-> **可选：视频增强处理** — 如果AI生成的素材存在帧率低、分辨率不足或画面微抖等问题，参考 `modules/video-enhancement.md` 进行增强处理。推荐处理链：RIFE帧插值 → Real-ESRGAN超分 → vid.stab稳定。
-
 #### 第1.5步：剪除静音/停顿片段（有人声的素材必做）
 
 当视频中有人物说话时，**必须剪掉所有无声停顿片段**，只保留人物在说话的部分。这能大幅提升节奏感和完播率。
@@ -389,9 +387,18 @@ ASSEOF
 ffmpeg -i concat.mp4 -vf "ass=subs.ass" -c:v libx264 -crf 23 -c:a copy -y subtitled.mp4
 ```
 
-> **进阶字幕样式** — 需要花字、动画字幕或自动语音转字幕等高级功能，参考 `modules/subtitle-aesthetics.md`。
-
 #### 第4步：添加背景音乐
+
+**BGM 获取优先级（必须按此顺序）：**
+
+1. **首选：Lyria AI 生成** — 根据内容情绪和用户画像生成匹配的原创 BGM
+   ```bash
+   python3 skills/asset-generation/scripts/music_generate.py \
+     --prompt "cinematic, powerful drums, motivational, 120 BPM, gym workout energy" \
+     --output <作品目录>/assets/music/bgm.mp3
+   ```
+2. **次选：用户共享素材中的音乐** — `curl http://localhost:3271/api/shared-assets` 检查 music 分类
+3. **最后：搜索下载** — 仅当以上两种都不可用时，用 yt-dlp 搜索
 
 **音乐获取规则：指定知名歌曲时**
 
@@ -433,19 +440,63 @@ ffmpeg -i subtitled.mp4 -i music.mp3 \
 - 淡入时长：1-2 秒
 - 淡出时长：结尾 2-3 秒
 
-#### 第4.5步：调色（可选但推荐）
+#### 第4.5步：口播视频对嘴型（口播类内容必做）
 
-为成品视频添加统一的调色风格，大幅提升观感：
+如果内容方案是口播/对镜说话类型（分镜中标注了 `口播（一镜到底）`），在最终输出前必须执行对嘴型处理。
 
+**流程：**
+
+1. **生成旁白音频**（如果还没有生成）：
 ```bash
-# 应用LUT调色
-ffmpeg -i final-no-grade.mp4 -vf "lut3d=cinematic.cube" -c:a copy -y final.mp4
-
-# 或使用基础参数调色（暖调示例）
-ffmpeg -i final-no-grade.mp4 -vf "eq=brightness=0.03:contrast=1.1:saturation=1.15:gamma=1.02" -c:a copy -y final.mp4
+edge-tts --text "完整的口播脚本内容" --voice zh-CN-YunxiNeural --write-media narration.mp3
 ```
 
-> 详细调色指南和内容类型专属参数，参考 `modules/color-grading.md`。
+2. **上传素材获取 URL**（lip-sync API 需要可访问的 URL）：
+```bash
+# 确认人物视频片段和旁白音频的 URL
+# 如果是本地文件，通过 /api/works/{workId}/assets 获取可访问的 URL
+```
+
+3. **调用即梦 lip-sync API 对嘴型**：
+```bash
+curl -X POST http://localhost:3271/api/generate/lip-sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workId": "work-xxx",
+    "videoUrl": "人物视频片段的URL",
+    "audioUrl": "旁白音频的URL",
+    "filename": "lipsync_talking.mp4"
+  }'
+```
+
+4. **用对嘴型后的视频替换原始人物片段**，然后继续叠加字幕和 BGM。
+
+**对嘴型后的字幕叠加：**
+
+口播视频的字幕必须在底部逐句显示，跟随语音节奏同步。使用 ASS 字幕格式精确控制每句话的出现时间：
+
+```bash
+# 生成逐句字幕文件（根据旁白脚本的断句和音频时长手动对齐）
+cat > subs.ass << 'EOF'
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,52,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,1,2,40,40,120,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:03.50,Default,,0,0,0,,第一句话的内容
+Dialogue: 0,0:00:03.50,0:00:07.00,Default,,0,0,0,,第二句话的内容
+EOF
+
+ffmpeg -i lipsync_talking.mp4 -vf "ass=subs.ass" -c:v libx264 -crf 23 -c:a copy -y subtitled.mp4
+```
+
+> **⚠️ 注意：** 对嘴型是口播类视频的最后一个素材处理步骤。之后直接进入 BGM 混音和最终输出。非口播类视频跳过此步。
 
 #### 第5步：最终输出
 
@@ -456,6 +507,40 @@ ffmpeg -i final-no-grade.mp4 -vf "eq=brightness=0.03:contrast=1.1:saturation=1.1
 mkdir -p output/
 cp final.mp4 output/final.mp4
 ```
+
+#### 第6步：自动选择最佳封面帧（短视频必做）
+
+封面是用户第一眼看到的画面，直接决定点击率。**必须从成片中自动挑选最有爆点、最好看、最吸引人的一帧作为封面图。**
+
+**选帧策略（按优先级）：**
+
+1. **情绪高潮帧** — 人物表情最强烈的瞬间（惊讶、大笑、感动等）
+2. **视觉冲击帧** — 色彩最鲜艳、构图最饱满、光影最有张力的画面
+3. **悬念/好奇帧** — 能引发"这是什么？"好奇心的画面，让人想点进去看
+4. **避开** — 转场模糊帧、纯黑/纯白帧、文字遮挡过多的帧、水印残留帧
+
+**执行方法：**
+
+```bash
+# 1. 每隔0.5秒抽一帧，生成候选帧
+mkdir -p /tmp/cover_candidates
+ffmpeg -i output/final.mp4 -vf "fps=2,scale=1080:1920:force_original_aspect_ratio=decrease" -q:v 2 -y /tmp/cover_candidates/frame_%04d.jpg
+
+# 2. 查看候选帧总数
+ls /tmp/cover_candidates/ | wc -l
+```
+
+然后从候选帧中选出**最具吸引力的一帧**（综合考虑情绪、色彩、构图），复制为封面：
+
+```bash
+# 选定最佳帧（替换 XXXX 为选中的帧编号）
+cp /tmp/cover_candidates/frame_XXXX.jpg output/cover.jpg
+
+# 清理临时文件
+rm -rf /tmp/cover_candidates
+```
+
+> **选帧判断依据：** 打开候选帧图片，快速浏览，想象自己在刷信息流——哪一帧会让你停下来？那就是最佳封面。优先选人脸表情清晰、画面饱满、色彩对比强的帧。
 
 ---
 
@@ -646,129 +731,7 @@ ffmpeg -i audio1.mp3 -i audio2.mp3 \
 
 ---
 
-## 垂类专项指南
-
-执行前检查 `genres/` 目录。如果当前作品的内容类型（如搞笑、美食、教育等）有对应的 `genres/<type>.md` 文件，**必须读取并遵循其中的专项规则**——特别是剪辑节奏、BGM 策略和音效使用方面，垂类文件的规则优先级高于本文件的通用规则。
-
-## 扩展能力模块
-
-本 skill 自带以下模块和脚本，**必须优先使用这些工具，不要自己写内联代码替代**：
-
-### 可用模块
-
-| 模块 | 文档路径 | 用途 |
-|------|---------|------|
-| 热门音乐搜索 | `modules/music-search.md` | 从 YouTube/B站搜索下载 BGM，按情绪/BPM 匹配 |
-| 卡点剪辑 | `modules/beat-sync.md` | 节拍检测 + 视频与音乐节拍对齐 |
-| 调色指南 | `modules/color-grading.md` | LUT调色、内容类型调色参数、AI调色工具 |
-| 字幕美学 | `modules/subtitle-aesthetics.md` | 字幕规范、花字样式、ASS高级样式、自动字幕流水线 |
-| 专业字幕 | `modules/pro-captions.md` | 逐词高亮 karaoke 字幕、自动语音识别、5种预设样式 |
-| 视频增强 | `modules/video-enhancement.md` | 帧插值(RIFE)、超分(Real-ESRGAN)、视频稳定(vid.stab) |
-
-### 可用脚本
-
-| 脚本 | 路径 | 用途 | 用法示例 |
-|------|------|------|---------|
-| 节拍检测 | `scripts/beat-sync/detect_beats.py` | 分析音乐节拍、BPM、强拍 | `python3 skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json` |
-| 一键卡点 | `scripts/beat-sync/beat_sync_edit.py` | 自动按节拍切割视频+混入BGM | `python3 skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic` |
-| 专业字幕 | `scripts/caption_generate.py` | 逐词高亮 karaoke ASS 字幕生成 | `python3 skills/content-assembly/scripts/caption_generate.py --input video.mp4 --output subs.ass --style douyin-highlight` |
-
-**⚠️ 重要：当需要节拍分析或卡点剪辑时，必须调用上述脚本，禁止自己写 librosa/numpy 内联代码。**
-
-### 使用流程
-
-1. 需要 BGM → 先读 `modules/music-search.md`，用 yt-dlp 搜索下载
-2. 需要分析节拍 → 运行 `detect_beats.py` 获取 beats.json
-3. 需要卡点剪辑 → 运行 `beat_sync_edit.py` 一键完成
-4. 需要手动精调 → 参考 `modules/beat-sync.md` 中的手动流程
-
----
-
-## 专业字幕生成（caption_generate.py）
-
-逐词高亮（karaoke）字幕生成脚本，支持自动语音识别和外部时间戳两种模式，内置 5 种平台预设样式。
-
-> **完整方法论** — 详见 `modules/pro-captions.md`，包含何时加字幕的判断、样式选择决策树、与 beat-sync 配合等。
-
-### 参数列表
-
-| 参数 | 类型 | 说明 | 默认值 |
-|------|------|------|--------|
-| `--input` | str | 视频/音频路径（auto 模式，与 `--timestamps` 互斥） | — |
-| `--timestamps` | str | 时间戳 JSON 路径（手动模式，与 `--input` 互斥） | — |
-| `--output` | str（必填） | 输出 ASS 文件路径 | — |
-| `--style` | str | 预设样式：`douyin-highlight`/`douyin-bold`/`xhs-soft`/`funny`/`minimal` | `douyin-highlight` |
-| `--language` | str | 语言代码（auto 模式） | `zh` |
-| `--model` | str | Whisper 模型（auto 模式） | `medium` |
-| `--font` | str | 覆盖预设字体 ID | 由样式决定 |
-| `--font-size` | int | 覆盖预设字号 | 由样式决定 |
-| `--highlight-color` | str | 高亮颜色 hex，如 `#FFFF00` | 由样式决定 |
-| `--base-color` | str | 基础颜色 hex，如 `#FFFFFF` | 由样式决定 |
-| `--stroke-width` | int | 描边宽度 | 由样式决定 |
-| `--position` | str | `center`/`top`/`bottom` | 由样式决定 |
-| `--max-words` | int | 每行最大词数 | `8` |
-| `--lead-time` | int | 字幕提前出现毫秒数 | `80` |
-
-### 使用示例
-
-```bash
-# Auto 模式：自动识别视频中的语音
-python3 skills/content-assembly/scripts/caption_generate.py \
-  --input video.mp4 --output subtitles.ass \
-  --style douyin-highlight --language zh
-
-# Timestamps 模式：从 JSON 文件读取词级时间戳
-python3 skills/content-assembly/scripts/caption_generate.py \
-  --timestamps captions.json --output subtitles.ass \
-  --style xhs-soft
-
-# 自定义颜色
-python3 skills/content-assembly/scripts/caption_generate.py \
-  --input video.mp4 --output subtitles.ass \
-  --style douyin-highlight --highlight-color "#FF6699" --font-size 56
-
-# 烧录到视频
-ffmpeg -i video.mp4 -vf "ass=subtitles.ass" -c:v libx264 -crf 18 -c:a copy output.mp4
-```
-
-### 输出格式（stdout JSON）
-
-```json
-{
-  "success": true,
-  "output": "/abs/path/subtitles.ass",
-  "segments": 12,
-  "words": 87,
-  "duration_sec": 45.2,
-  "style": "douyin-highlight",
-  "mode": "auto",
-  "model": "medium"
-}
-```
-
-### 依赖
-
-- **auto 模式**：`pip install stable-ts`（含 Whisper + torch）
-- **timestamps 模式**：无额外依赖
-- **烧录**：系统 ffmpeg
-- **字体**：通过 `font_manager.py` 自动下载
-
----
-
 ## 错误处理
-
-### 音频丢失防护（极重要）
-
-**每一步 ffmpeg 处理后，都必须验证输出文件包含音频流：**
-```bash
-ffprobe -v error -show_entries stream=codec_type -of csv=p=0 output.mp4 | grep audio
-```
-如果没有 `audio` 行，说明音频丢失了。常见原因：
-- 使用 `-map 0:v` 时忘记同时 `-map 0:a`（或用 `-map 0` 映射所有流）
-- 使用 `-vf` 视频滤镜时没有用 `-c:a copy` 保留音频
-- 多步骤处理时中间文件丢了音频（letterbox、字幕叠加等步骤特别容易出问题）
-
-**安全做法：** 在 pad/crop/overlay 等纯视频操作中始终加 `-c:a copy` 或 `-map 0:a`。
 
 ### 常见 ffmpeg 错误
 
@@ -843,13 +806,12 @@ curl -X PUT http://localhost:3271/api/works/{workId} \
 |------|------|------|---------|
 | 节拍检测 | `scripts/beat-sync/detect_beats.py` | 分析音乐节拍、BPM、强拍 | `python3 skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json` |
 | 一键卡点 | `scripts/beat-sync/beat_sync_edit.py` | 自动按节拍切割视频+混入BGM | `python3 skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic` |
-| 专业字幕 | `scripts/caption_generate.py` | 逐词高亮 karaoke ASS 字幕生成 | `python3 skills/content-assembly/scripts/caption_generate.py --input video.mp4 --output subs.ass --style douyin-highlight` |
 
 **重要：当需要节拍分析或卡点剪辑时，必须调用上述脚本，禁止自己写 librosa/numpy 内联代码。**
 
 ### 使用流程
 
-1. 需要 BGM → 先读 `modules/music-search.md`，用 yt-dlp 搜索下载
+1. 需要 BGM → **优先使用 Lyria AI 生成**：运行 `python3 skills/asset-generation/scripts/music_generate.py --prompt "描述音乐风格" --output <输出路径>/bgm.mp3`（需要 OPENROUTER_API_KEY）。仅当 Lyria 不可用时，才读 `modules/music-search.md` 用 yt-dlp 搜索下载
 2. 需要分析节拍 → 运行 `detect_beats.py` 获取 beats.json
 3. 需要卡点剪辑 → 运行 `beat_sync_edit.py` 一键完成
 4. 需要手动精调 → 参考 `modules/beat-sync.md` 中的手动流程

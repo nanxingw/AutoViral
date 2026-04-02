@@ -1,6 +1,8 @@
 <script lang="ts">
   import { t, getLanguage } from "../lib/i18n";
 
+  function tt(key: string): string { return t(key); }
+
   let {
     interests = $bindable([]),
     competitors = $bindable([]),
@@ -13,11 +15,19 @@
     onUpdateCompetitors?: (competitors: string[]) => void;
   } = $props();
 
-  const PRESET_TOPICS = [
+  const PRESET_TOPICS_ZH = [
     "美食", "科技", "穿搭", "美妆", "生活",
     "情感", "职场", "健身", "旅行", "宠物",
     "教育", "游戏", "音乐", "家居", "育儿",
   ];
+
+  const PRESET_TOPICS_EN = [
+    "Food", "Tech", "Fashion", "Beauty", "Lifestyle",
+    "Relationships", "Career", "Fitness", "Travel", "Pets",
+    "Education", "Gaming", "Music", "Home", "Parenting",
+  ];
+
+  let PRESET_TOPICS = $derived(getLanguage() === "zh" ? PRESET_TOPICS_ZH : PRESET_TOPICS_EN);
 
   let showModal = $state(false);
   let inputValue = $state("");
@@ -30,8 +40,6 @@
         )
       : PRESET_TOPICS.filter((t) => !interests.includes(t))
   );
-
-  let lang = getLanguage();
 
   function removeTag(tag: string) {
     const next = interests.filter((t) => t !== tag);
@@ -79,12 +87,12 @@
 <span class="interest-inline">
   <button class="count-link" onclick={openModal}>
     <span class="count-num">{interests.length}</span>
-    {getLanguage() === "zh" ? " 关注话题" : interests.length === 1 ? " topic" : " topics"}
+    {" "}{interests.length === 1 ? tt("followingTopic") : tt("followingTopics")}
   </button>
   <span class="count-sep">·</span>
   <button class="count-link" onclick={openModal}>
     <span class="count-num">{competitors?.length ?? 0}</span>
-    {getLanguage() === "zh" ? " 关注竞品" : competitors?.length === 1 ? " competitor" : " competitors"}
+    {" "}{competitors?.length === 1 ? tt("followingCompetitor") : tt("followingCompetitors")}
   </button>
 </span>
 
@@ -93,7 +101,7 @@
   <div class="interest-overlay" onclick={handleOverlayClick}>
     <div class="interest-modal">
       <div class="modal-head">
-        <h3>{getLanguage() === "zh" ? "关注的话题" : "Followed Topics"}</h3>
+        <h3>{tt("followedTopics")}</h3>
         <button class="modal-close" onclick={closeModal}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
@@ -112,7 +120,7 @@
             {/each}
           </div>
         {:else}
-          <p class="empty-hint">{getLanguage() === "zh" ? "还没有关注的话题" : "No topics followed yet"}</p>
+          <p class="empty-hint">{tt("noTopicsFollowed")}</p>
         {/if}
 
         <div class="add-section">
@@ -121,7 +129,7 @@
             bind:value={inputValue}
             class="add-input"
             type="text"
-            placeholder={getLanguage() === "zh" ? "添加话题..." : "Add topic..."}
+            placeholder={tt("addTopicPlaceholder")}
             onkeydown={handleInputKeydown}
           />
           {#if suggestions.length > 0}
