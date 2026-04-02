@@ -20,7 +20,7 @@
   <tr>
     <td align="center" width="50%">
       <video src="https://github.com/user-attachments/assets/2a14f0b4-08e4-4367-b11e-5d128daf5974" controls width="100%"></video>
-      <br><em>原始版本</em>
+      <br><em>成品样本</em>
     </td>
     <td align="center" width="50%">
       <video src="https://github.com/user-attachments/assets/3be005df-d8e2-4dab-8f32-9a8bd84a1d34" controls width="100%"></video>
