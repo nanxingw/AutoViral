@@ -148,30 +148,30 @@ apiRoutes.put("/api/config", async (c) => {
 apiRoutes.get("/api/works", async (c) => {
   try {
     const works = await listWorks();
-    // Attach coverImage: prefer final video (for keyframe), then output image, then first asset image
+    // Attach coverImage: prefer output image, then any image, then final video as last resort
     const enriched = await Promise.all(works.map(async (w) => {
       try {
         const assets = await listAssets(w.id);
-        // 1. Final video — browser will show keyframe as poster
-        const finalVideo = assets.find((a: string) =>
-          /\.(mp4|mov|webm)$/i.test(a) && /final/i.test(a)
-        );
-        if (finalVideo) {
-          return { ...w, coverImage: `/api/works/${w.id}/assets/${finalVideo.split("/").map(encodeURIComponent).join("/")}`, coverIsVideo: true };
-        }
-        // 2. Output image (thumbnail/cover)
+        // 1. Output image (thumbnail/cover)
         const outputImage = assets.find((a: string) =>
           /\.(png|jpe?g|webp|gif)$/i.test(a) && a.startsWith("output/")
         );
         if (outputImage) {
           return { ...w, coverImage: `/api/works/${w.id}/assets/${outputImage.split("/").map(encodeURIComponent).join("/")}` };
         }
-        // 3. Any asset image
+        // 2. Any asset image
         const firstImage = assets.find((a: string) =>
           /\.(png|jpe?g|webp|gif)$/i.test(a)
         );
         if (firstImage) {
           return { ...w, coverImage: `/api/works/${w.id}/assets/${firstImage.split("/").map(encodeURIComponent).join("/")}` };
+        }
+        // 3. Final video — fallback, rendered as <video> on frontend
+        const finalVideo = assets.find((a: string) =>
+          /\.(mp4|mov|webm)$/i.test(a) && /final/i.test(a)
+        );
+        if (finalVideo) {
+          return { ...w, coverImage: `/api/works/${w.id}/assets/${finalVideo.split("/").map(encodeURIComponent).join("/")}`, coverIsVideo: true };
         }
       } catch {}
       return w;

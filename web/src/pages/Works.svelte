@@ -474,7 +474,9 @@
         <div class="work-card" onclick={() => onOpenStudio(w.id)}>
           <!-- Cover -->
           <div class="card-cover">
-            {#if w.coverImage}
+            {#if w.coverImage && w.coverIsVideo}
+              <video src={w.coverImage} muted preload="metadata" style="width:100%;height:100%;object-fit:cover;"></video>
+            {:else if w.coverImage}
               <img src={w.coverImage} alt={w.title} />
             {:else}
               <div class="cover-gradient" style="background: {cardGradient(w.id)};">

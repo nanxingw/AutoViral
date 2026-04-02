@@ -70,6 +70,7 @@ export interface WorkSummary {
   status: WorkStatus;
   platforms: string[];
   coverImage?: string;
+  coverIsVideo?: boolean;
   updatedAt: string;
 }
 
