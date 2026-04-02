@@ -24,7 +24,7 @@
     </td>
     <td align="center" width="50%">
       <video src="https://github.com/user-attachments/assets/3be005df-d8e2-4dab-8f32-9a8bd84a1d34" controls width="100%"></video>
-      <br><em>替换人物形象</em>
+      <br><em>人脸适应功能</em>
     </td>
   </tr>
 </table>
