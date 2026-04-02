@@ -23,7 +23,7 @@
       <br><em>原始版本</em>
     </td>
     <td align="center" width="50%">
-      <video src="https://github.com/user-attachments/assets/31c24cba-9b3c-427f-954d-7659330f09b1" controls width="100%"></video>
+      <video src="https://github.com/user-attachments/assets/3be005df-d8e2-4dab-8f32-9a8bd84a1d34" controls width="100%"></video>
       <br><em>替换人物形象</em>
     </td>
   </tr>
