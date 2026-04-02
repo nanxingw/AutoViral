@@ -134,6 +134,7 @@ const translations: Record<Language, Record<string, string>> = {
     evalSeverityMajor: "Major",
     evalSeverityMinor: "Minor",
     evalReviewing: "Quality Review",
+    evalTooltip: "When enabled, an AI reviewer automatically checks the output of each pipeline step before moving on. It scores quality, flags issues, and can block progress if standards aren't met. Turn off to skip reviews and move faster.",
 
     // Tool display names
     toolSearching: "Searching...",
@@ -520,6 +521,7 @@ const translations: Record<Language, Record<string, string>> = {
     evalSeverityMajor: "重要",
     evalSeverityMinor: "轻微",
     evalReviewing: "质量评审",
+    evalTooltip: "开启后，AI 评审员会在每个流水线步骤完成后自动检查产出质量，评分并标记问题，不达标时会阻止进入下一步。关闭可跳过评审，加快流程。",
 
     // Tool display names
     toolSearching: "正在搜索...",

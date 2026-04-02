@@ -440,23 +440,63 @@ ffmpeg -i subtitled.mp4 -i music.mp3 \
 - 淡入时长：1-2 秒
 - 淡出时长：结尾 2-3 秒
 
-#### 第4.5步：去除 AI 水印（必做）
+#### 第4.5步：口播视频对嘴型（口播类内容必做）
 
-AI 生成的视频片段（如即梦/Jimeng、可灵等）通常在**左上角**带有平台水印。在最终输出前**必须**去除。
+如果内容方案是口播/对镜说话类型（分镜中标注了 `口播（一镜到底）`），在最终输出前必须执行对嘴型处理。
 
-**方法：使用 delogo 滤镜模糊左上角水印区域：**
+**流程：**
+
+1. **生成旁白音频**（如果还没有生成）：
 ```bash
-# 模糊左上角水印（x=0, y=0, w=200, h=50 根据实际水印大小调整）
-ffmpeg -i final.mp4 -vf "delogo=x=0:y=0:w=200:h=50" -c:v libx264 -crf 23 -c:a copy -y final_clean.mp4
+edge-tts --text "完整的口播脚本内容" --voice zh-CN-YunxiNeural --write-media narration.mp3
 ```
 
-**如果 delogo 效果不佳，可用裁剪方式去除顶部水印区域后重新缩放：**
+2. **上传素材获取 URL**（lip-sync API 需要可访问的 URL）：
 ```bash
-# 裁掉顶部50px水印区域，然后缩放回1080x1920
-ffmpeg -i final.mp4 -vf "crop=iw:ih-50:0:50,scale=1080:1920" -c:v libx264 -crf 23 -c:a copy -y final_clean.mp4
+# 确认人物视频片段和旁白音频的 URL
+# 如果是本地文件，通过 /api/works/{workId}/assets 获取可访问的 URL
 ```
 
-处理完成后用 `final_clean.mp4` 替代 `final.mp4` 进入下一步。
+3. **调用即梦 lip-sync API 对嘴型**：
+```bash
+curl -X POST http://localhost:3271/api/generate/lip-sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workId": "work-xxx",
+    "videoUrl": "人物视频片段的URL",
+    "audioUrl": "旁白音频的URL",
+    "filename": "lipsync_talking.mp4"
+  }'
+```
+
+4. **用对嘴型后的视频替换原始人物片段**，然后继续叠加字幕和 BGM。
+
+**对嘴型后的字幕叠加：**
+
+口播视频的字幕必须在底部逐句显示，跟随语音节奏同步。使用 ASS 字幕格式精确控制每句话的出现时间：
+
+```bash
+# 生成逐句字幕文件（根据旁白脚本的断句和音频时长手动对齐）
+cat > subs.ass << 'EOF'
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: Default,Arial,52,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,1,0,0,0,100,100,0,0,1,3,1,2,40,40,120,1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+Dialogue: 0,0:00:00.00,0:00:03.50,Default,,0,0,0,,第一句话的内容
+Dialogue: 0,0:00:03.50,0:00:07.00,Default,,0,0,0,,第二句话的内容
+EOF
+
+ffmpeg -i lipsync_talking.mp4 -vf "ass=subs.ass" -c:v libx264 -crf 23 -c:a copy -y subtitled.mp4
+```
+
+> **⚠️ 注意：** 对嘴型是口播类视频的最后一个素材处理步骤。之后直接进入 BGM 混音和最终输出。非口播类视频跳过此步。
 
 #### 第5步：最终输出
 

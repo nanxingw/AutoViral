@@ -61,6 +61,7 @@
   let inactivityTimer: ReturnType<typeof setTimeout> | null = null;
   let evalRetryGuidance = $state("");
   let evalEnabled = $state(true);
+  let showEvalTooltip = $state(false);
 
   // Derived: check if all steps done or any pending
   let allStepsDone = $derived(
@@ -490,6 +491,16 @@
     <div class="header-controls">
       <div class="eval-switch-row">
         <span class="eval-switch-label">{tt("evalReviewing")}</span>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <span class="eval-info"
+          onmouseenter={() => showEvalTooltip = true}
+          onmouseleave={() => showEvalTooltip = false}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>
+          {#if showEvalTooltip}
+            <span class="eval-tooltip">{tt("evalTooltip")}</span>
+          {/if}
+        </span>
         <button class="switch" class:on={evalEnabled} onclick={handleToggleEval}>
           <span class="switch-thumb"></span>
         </button>
@@ -1130,6 +1141,31 @@
     font-size: 0.7rem;
     font-weight: 500;
     color: var(--text-dim);
+  }
+  .eval-info {
+    position: relative;
+    display: flex;
+    align-items: center;
+    color: var(--text-dim);
+    cursor: help;
+  }
+  .eval-tooltip {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.45rem 0.65rem;
+    font-size: 0.68rem;
+    font-weight: 400;
+    color: var(--text-secondary);
+    line-height: 1.45;
+    white-space: normal;
+    width: 220px;
+    z-index: 100;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    pointer-events: none;
   }
   .switch {
     width: 36px;
