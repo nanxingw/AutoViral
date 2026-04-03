@@ -187,7 +187,7 @@
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: var(--bg-primary, #0A0A0F);
+    background: var(--bg-secondary);
   }
 
   /* ── Image grid section ── */
@@ -209,11 +209,11 @@
   .image-card {
     flex-shrink: 0;
     position: relative;
-    width: 80px;
-    height: 80px;
+    width: 96px;
+    height: 96px;
     border-radius: 8px;
-    border: 2px solid rgba(255, 255, 255, 0.08);
-    background: rgba(255, 255, 255, 0.04);
+    border: 2px solid var(--border);
+    background: var(--bg-surface);
     cursor: pointer;
     overflow: hidden;
     padding: 0;
@@ -221,7 +221,7 @@
   }
 
   .image-card:hover {
-    border-color: rgba(255, 255, 255, 0.2);
+    border-color: var(--text-dim);
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
   }
 
@@ -300,13 +300,14 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: rgba(255, 255, 255, 0.3);
+    color: var(--text-dim);
     border-style: dashed;
+    border-color: var(--text-dim);
   }
 
   .add-card:hover {
-    color: rgba(255, 255, 255, 0.6);
-    border-color: rgba(255, 255, 255, 0.2);
+    color: var(--text-muted);
+    border-color: var(--text-muted);
   }
 
   /* ── Divider ── */
@@ -329,14 +330,14 @@
     margin: 0 0 8px;
     font-size: 15px;
     font-weight: 650;
-    color: rgba(255, 255, 255, 0.92);
+    color: var(--text);
     line-height: 1.4;
   }
 
   .copytext-body {
     margin: 0 0 12px;
     font-size: 13px;
-    color: rgba(255, 255, 255, 0.65);
+    color: var(--text-muted);
     line-height: 1.7;
     white-space: pre-wrap;
   }
@@ -374,7 +375,7 @@
     justify-content: center;
     gap: 10px;
     height: 100%;
-    color: rgba(255, 255, 255, 0.25);
+    color: var(--text-dim);
     font-size: 13px;
     font-weight: 500;
   }

@@ -89,18 +89,19 @@
     position: relative;
   }
   .connector::after {
-    content: "";
+    content: "\2192";
     position: absolute;
-    right: -2px;
-    top: -3px;
-    border: 4px solid transparent;
-    border-left: 5px solid var(--border);
+    right: -6px;
+    top: -8px;
+    font-size: 12px;
+    color: var(--border);
+    line-height: 1;
   }
   .connector-done {
     background: var(--state-done, #22c55e);
   }
   .connector-done::after {
-    border-left-color: var(--state-done, #22c55e);
+    color: var(--state-done, #22c55e);
   }
 
   .step {
@@ -158,8 +159,8 @@
 
   /* Eval blocked */
   .step-blocked {
-    color: #ef4444;
-    border-color: #ef4444;
+    color: var(--spark-red, #ef4444);
+    border-color: var(--spark-red, #ef4444);
   }
 
   /* Pending */

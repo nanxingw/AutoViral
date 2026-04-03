@@ -719,7 +719,7 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 0.5rem 0;
+    padding: 0.5rem 1rem;
     gap: 0.75rem;
     flex-shrink: 0;
     border-bottom: 1px solid var(--border);
@@ -929,13 +929,13 @@
     margin-left: 16px;
     padding: 6px 14px;
     border-radius: 20px;
-    background: rgba(0, 0, 0, 0.06);
-    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
     transition: all 0.2s ease;
   }
 
   .eval-toggle:hover {
-    background: rgba(0, 0, 0, 0.1);
+    background: var(--bg-elevated);
   }
 
   .toggle-switch {
@@ -951,7 +951,7 @@
   .toggle-slider {
     position: absolute;
     inset: 0;
-    background: #ccc;
+    background: var(--border);
     border-radius: 11px;
     cursor: pointer;
     transition: background 0.25s ease;
@@ -971,7 +971,7 @@
   }
 
   .toggle-switch input:checked + .toggle-slider {
-    background: #f59e0b;
+    background: var(--amber, #f59e0b);
   }
 
   .toggle-switch input:checked + .toggle-slider::before {
@@ -980,7 +980,7 @@
 
   .toggle-label {
     font-size: 13px;
-    color: #555;
+    color: var(--text-muted);
     font-weight: 600;
     letter-spacing: 0.3px;
     user-select: none;

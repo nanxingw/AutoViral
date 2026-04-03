@@ -66,7 +66,7 @@
   });
 
   function assetUrl(path: string): string {
-    return `/api/works/${encodeURIComponent(workId)}/assets/${encodeURIComponent(path)}`;
+    return `/api/works/${encodeURIComponent(workId)}/assets/${path.split("/").map(encodeURIComponent).join("/")}`;
   }
 
   function toggleGroup(g: string) {
@@ -104,7 +104,7 @@
                     title={item.filename}
                   >
                     {#if g === "IMAGES"}
-                      <img src={assetUrl(item.path)} alt={item.filename} loading="lazy" />
+                      <img src={assetUrl(item.path)} alt={item.filename} loading="lazy" onerror={(e) => { const el = e.currentTarget as HTMLImageElement; el.style.display = 'none'; el.parentElement?.classList.add('thumb-broken'); }} />
                     {:else}
                       <div class="clip-thumb">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
@@ -138,7 +138,14 @@
     {/if}
   {/each}
   {#if assets.length === 0}
-    <div class="empty-state">暂无素材</div>
+    <div class="empty-state">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.5">
+        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+        <circle cx="8.5" cy="8.5" r="1.5"/>
+        <polyline points="21 15 16 10 5 21"/>
+      </svg>
+      暂无素材
+    </div>
   {/if}
 </div>
 
@@ -148,9 +155,10 @@
     height: 100%;
     overflow-y: auto;
     overflow-x: hidden;
-    background: var(--bg-secondary, #1a1a2e);
+    background: var(--bg-secondary, var(--bg));
     padding: 0.5rem 0;
     font-size: 0.75rem;
+    font-family: var(--font-body, 'DM Sans', sans-serif);
   }
 
   .group {
@@ -170,6 +178,7 @@
     text-transform: uppercase;
     user-select: none;
     transition: color 0.12s;
+    border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
   }
 
   .group-header:hover {
@@ -186,8 +195,8 @@
   }
 
   .group-count {
-    background: var(--bg-surface, #2a2a3e);
-    color: var(--text-dim, #64748b);
+    background: color-mix(in srgb, var(--text-dim, #64748b) 15%, transparent);
+    color: var(--text-muted, #94a3b8);
     font-size: 0.6rem;
     font-weight: 700;
     padding: 0.05rem 0.35rem;
@@ -211,8 +220,8 @@
   /* Thumbnail grid */
   .thumb-grid {
     display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 4px;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 6px;
   }
 
   .thumb-item {
@@ -328,5 +337,21 @@
     text-align: center;
     color: var(--text-dim, #64748b);
     font-size: 0.75rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  /* Broken image fallback */
+  :global(.thumb-broken) {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-dim, #64748b);
+  }
+  :global(.thumb-broken)::after {
+    content: "📄";
+    font-size: 1.2rem;
   }
 </style>

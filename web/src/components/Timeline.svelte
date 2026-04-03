@@ -186,8 +186,8 @@
 
 <style>
   .timeline-container {
-    background: #12122a;
-    border-top: 1px solid rgba(255,255,255,0.08);
+    background: var(--bg-secondary, #12121A);
+    border-top: 1px solid var(--border);
     flex-shrink: 0;
     user-select: none;
     position: relative;
@@ -198,8 +198,8 @@
     display: flex;
     height: 24px;
     cursor: pointer;
-    background: #0e0e22;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: var(--bg-primary, #0A0A0F);
+    border-bottom: 1px solid var(--border);
   }
 
   .ruler-label-spacer {
@@ -217,7 +217,7 @@
     position: absolute;
     top: 0;
     bottom: 0;
-    border-left: 1px solid rgba(255,255,255,0.1);
+    border-left: 1px solid var(--border);
   }
 
   .tick-label {
@@ -225,7 +225,7 @@
     top: 4px;
     left: 4px;
     font-size: 9px;
-    color: rgba(255,255,255,0.35);
+    color: var(--text-dim);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
@@ -235,7 +235,7 @@
     top: 0;
     bottom: 0;
     width: 2px;
-    background: #FE2C55;
+    background: var(--spark-red, #FE2C55);
     z-index: 5;
     pointer-events: none;
     transition: left 0.1s linear;
@@ -245,8 +245,8 @@
   .ctx-menu {
     position: fixed;
     z-index: 200;
-    background: #1e1e3a;
-    border: 1px solid rgba(255,255,255,0.12);
+    background: var(--bg-elevated, #1e1e3a);
+    border: 1px solid var(--border);
     border-radius: 6px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     padding: 4px;
@@ -259,7 +259,7 @@
     text-align: left;
     background: none;
     border: none;
-    color: rgba(255,255,255,0.75);
+    color: var(--text-muted);
     font-size: 12px;
     font-family: inherit;
     padding: 6px 10px;
@@ -268,12 +268,12 @@
   }
 
   .ctx-item:hover {
-    background: rgba(255,255,255,0.08);
-    color: #fff;
+    background: var(--bg-surface);
+    color: var(--text);
   }
 
   .ctx-danger:hover {
-    background: rgba(254, 44, 85, 0.15);
-    color: #FE2C55;
+    background: color-mix(in srgb, var(--spark-red, #FE2C55) 15%, transparent);
+    color: var(--spark-red, #FE2C55);
   }
 </style>

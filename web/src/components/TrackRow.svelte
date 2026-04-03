@@ -120,8 +120,8 @@
     display: flex;
     align-items: stretch;
     height: 48px;
-    background: #1a1a2e;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
   }
 
   .track-label {
@@ -132,10 +132,10 @@
     justify-content: center;
     font-size: 10px;
     font-weight: 600;
-    color: rgba(255,255,255,0.5);
+    color: var(--text-dim);
     letter-spacing: 0.5px;
-    border-right: 1px solid rgba(255,255,255,0.06);
-    background: #151527;
+    border-right: 1px solid var(--border);
+    background: var(--bg-primary);
   }
 
   .track-items {
@@ -152,35 +152,36 @@
     position: relative;
     height: 100%;
     min-width: 20px;
-    border-radius: 4px;
+    border-radius: 6px;
     cursor: pointer;
     display: flex;
     align-items: center;
     overflow: hidden;
     flex-shrink: 0;
+    padding: 0 2px;
     transition: outline 0.1s;
   }
 
   .track-item:hover {
-    outline: 1px solid rgba(255,255,255,0.3);
+    outline: 1px solid var(--text-dim);
     outline-offset: -1px;
   }
 
   .track-item.drag-over {
-    outline: 2px solid #FE2C55;
+    outline: 2px solid var(--spark-red, #FE2C55);
     outline-offset: -2px;
   }
 
   .track-item.clip {
-    background: linear-gradient(135deg, #2d2d5e 0%, #1e1e4a 100%);
+    background: color-mix(in srgb, var(--spark-cyan, #25F4EE) 8%, var(--bg-surface, #2a2a3e));
   }
 
   .track-item.audio {
-    background: linear-gradient(135deg, #1e3a2e 0%, #15302a 100%);
+    background: color-mix(in srgb, var(--state-done, #22c55e) 8%, var(--bg-surface, #2a2a3e));
   }
 
   .track-item.subtitle {
-    background: linear-gradient(135deg, #3a2d1e 0%, #302515 100%);
+    background: color-mix(in srgb, var(--amber, #f59e0b) 8%, var(--bg-surface, #2a2a3e));
   }
 
   .clip-thumb {
@@ -195,8 +196,8 @@
     position: relative;
     z-index: 1;
     font-size: 10px;
-    color: rgba(255,255,255,0.8);
-    padding: 0 6px;
+    color: var(--text);
+    padding: 0 8px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -214,7 +215,7 @@
     top: 0;
     bottom: 0;
     width: 2px;
-    background: #FE2C55;
+    background: var(--spark-red, #FE2C55);
     z-index: 10;
     pointer-events: none;
     transition: left 0.1s linear;
