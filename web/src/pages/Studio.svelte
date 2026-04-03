@@ -9,7 +9,6 @@
   import PreviewArea from "../components/PreviewArea.svelte";
   import ImageLayout from "../components/ImageLayout.svelte";
   import Timeline from "../components/Timeline.svelte";
-  import TrackRow from "../components/TrackRow.svelte";
   import type { ChatAttachment } from "../components/ChatPanel.svelte";
   import type { StreamBlockData } from "../components/StreamBlock.svelte";
 
@@ -32,6 +31,11 @@
   // aborted state removed — after stop, user just sends a new message
   let showTypeDropdown = $state(false);
   let showCategoryDropdown = $state(false);
+
+  // 4-zone layout state
+  let chatPanelWidth = $state(380);
+  let timelineHeight = $state(220);
+  let currentTime = $state(0);
 
   const pipelineTemplates: Record<string, Record<string, string>> = {
     "short-video": { research: "话题调研", plan: "分镜规划", assembly: "视频合成" },
@@ -125,6 +129,40 @@
   let assetFiles: string[] = $state([]);
   let selectedAsset: string | null = $state(null);
 
+  // Helper to build asset URL
+  function assetUrl(path: string): string {
+    return `/api/works/${encodeURIComponent(workId)}/assets/${path.split('/').map(encodeURIComponent).join('/')}`;
+  }
+
+  // Video clips for Timeline
+  let videoClips = $derived.by(() => {
+    return assetFiles
+      .filter(a => /\.(mp4|mov|webm)$/i.test(a) && !/final/i.test(a))
+      .map((path, i) => ({
+        id: `clip-${i}`,
+        path,
+        duration: 5,
+        thumbnail: assetUrl(path),
+      }));
+  });
+
+  // Audio/BGM info
+  let audioInfo = $derived.by(() => {
+    const bgm = assetFiles.find(a => /bgm/i.test(a) && /\.(mp3|wav|aac|m4a|ogg)$/i.test(a));
+    if (!bgm) return null;
+    return { path: bgm, name: bgm.split('/').pop() ?? bgm, duration: 0 };
+  });
+
+  // Images for ImageLayout
+  let imageFiles = $derived.by(() => {
+    return assetFiles
+      .filter(a => /\.(png|jpe?g|webp|gif)$/i.test(a))
+      .map((path, i) => ({ path, order: i }));
+  });
+
+  // Copytext (simplified)
+  let parsedCopytext = $state<{ title: string; body: string; tags: string[]; topics: string[] } | null>(null);
+
   // Auto-advance to next step when current step completes
   // Auto-advance: immediately start next step when current one completes
   $effect(() => {
@@ -174,6 +212,47 @@
     if (!work || !evalBlocked || !guidance.trim()) return;
     await retryWithGuidance(workId, evalBlocked.step, guidance);
     evalBlocked = null;
+  }
+
+  function handleTimelineAction(type: string, payload: any) {
+    const messages: Record<string, string> = {
+      reorder: `请把视频片段重新排列为: ${Array.isArray(payload) ? payload.join(', ') : payload}`,
+      delete: `请删除视频片段 ${payload?.target ?? payload}`,
+      replace: `请重新生成视频片段 ${payload?.target ?? payload}`,
+    };
+    const text = messages[type] ?? `请调整视频: ${type}`;
+    handleChatSend({ text, attachments: [] });
+  }
+
+  function handleImageAction(type: string, payload: any) {
+    const messages: Record<string, string> = {
+      reorder: `请把图片重新排列为: ${Array.isArray(payload) ? payload.join(', ') : payload}`,
+      delete: `请删除图片 ${payload?.target ?? payload}`,
+      replace: `请重新生成图片 ${payload?.target ?? payload}`,
+      add: `请添加一张新图片`,
+    };
+    const text = messages[type] ?? `请调整图片: ${type}`;
+    handleChatSend({ text, attachments: [] });
+  }
+
+  function handleChatResize(e: PointerEvent) {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = chatPanelWidth;
+    const onMove = (ev: PointerEvent) => { chatPanelWidth = Math.max(280, Math.min(600, startW + (startX - ev.clientX))); };
+    const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  }
+
+  function handleTimelineResize(e: PointerEvent) {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startH = timelineHeight;
+    const onMove = (ev: PointerEvent) => { timelineHeight = Math.max(150, Math.min(400, startH + (startY - ev.clientY))); };
+    const onUp = () => { window.removeEventListener('pointermove', onMove); window.removeEventListener('pointerup', onUp); };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
   }
 
   function handleCanvasSend(text: string) {
@@ -549,13 +628,56 @@
   </div>
 
   <div class="studio-body">
-    <!-- Left: Asset Sidebar -->
+    <!-- Left: Asset Sidebar (200px) -->
     <div class="panel-left">
       <AssetSidebar {workId} assets={assetFiles} {selectedAsset} onSelect={(path) => selectedAsset = path} />
     </div>
 
-    <!-- Center: Chat -->
-    <div class="panel-main">
+    <!-- Center: Preview + Timeline/ImageLayout -->
+    <div class="panel-center">
+      <div class="preview-wrapper">
+        <PreviewArea
+          contentType={work?.type ?? "short-video"}
+          {workId}
+          assets={assetFiles}
+          {selectedAsset}
+          onSelect={(path) => selectedAsset = path}
+          onTimeUpdate={(t) => currentTime = t}
+        />
+      </div>
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="timeline-resize-handle" onpointerdown={handleTimelineResize}></div>
+      <div class="timeline-wrapper" style="height: {timelineHeight}px;">
+        {#if work?.type === "short-video"}
+          <Timeline
+            clips={videoClips}
+            audio={audioInfo}
+            subtitles={[]}
+            {currentTime}
+            {workId}
+            onReorder={(order) => handleTimelineAction("reorder", order)}
+            onAction={(action) => handleTimelineAction(action.type, action)}
+            onSeek={(t) => currentTime = t}
+          />
+        {:else}
+          <ImageLayout
+            images={imageFiles}
+            copytext={parsedCopytext}
+            {workId}
+            onReorder={(order) => handleImageAction("reorder", order)}
+            onSelect={(path) => selectedAsset = path}
+            onAction={(action) => handleImageAction(action.type, action)}
+          />
+        {/if}
+      </div>
+    </div>
+
+    <!-- Resize handle for chat width -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="panel-resize-handle" onpointerdown={handleChatResize}></div>
+
+    <!-- Right: Chat Panel -->
+    <div class="panel-right" style="width: {chatPanelWidth}px;">
       <ChatPanel
         bind:this={chatPanelRef}
         {streamBlocks}
@@ -572,7 +694,6 @@
         onEditAsset={handleEditAsset}
       />
     </div>
-
   </div>
 
   <PipelineBar
@@ -723,7 +844,7 @@
     border-color: var(--spark-red, #FE2C55);
   }
 
-  /* Body: 3 panels */
+  /* Body: 4-zone layout */
   .studio-body {
     display: flex;
     flex: 1;
@@ -738,18 +859,66 @@
     border-right: 1px solid var(--border);
   }
 
-  .panel-main {
+  .panel-center {
     flex: 1;
-    min-width: 320px;
+    min-width: 400px;
     display: flex;
     flex-direction: column;
-    position: relative;
+    overflow: hidden;
+  }
+
+  .preview-wrapper {
+    flex: 1;
+    min-height: 200px;
+    overflow: hidden;
+    background: var(--bg-primary, #0A0A0F);
+  }
+
+  .timeline-wrapper {
+    flex-shrink: 0;
+    overflow: hidden;
+    border-top: 1px solid var(--border);
+  }
+
+  .timeline-resize-handle {
+    height: 5px;
+    flex-shrink: 0;
+    cursor: row-resize;
+    background: transparent;
+    transition: background 0.15s;
+  }
+  .timeline-resize-handle:hover,
+  .timeline-resize-handle:active {
+    background: var(--spark-red, #FE2C55);
+    opacity: 0.3;
+  }
+
+  .panel-resize-handle {
+    width: 5px;
+    flex-shrink: 0;
+    cursor: col-resize;
+    background: transparent;
+    transition: background 0.15s;
+    z-index: 5;
+  }
+  .panel-resize-handle:hover,
+  .panel-resize-handle:active {
+    background: var(--spark-red, #FE2C55);
+    opacity: 0.3;
+  }
+
+  .panel-right {
+    flex-shrink: 0;
+    overflow: hidden;
+    border-left: 1px solid var(--border);
   }
 
   /* Responsive */
-  @media (max-width: 768px) {
+  @media (max-width: 1024px) {
     .panel-left { display: none; }
-    .studio-body { border-radius: 12px; }
+  }
+  @media (max-width: 768px) {
+    .panel-right { display: none; }
   }
 
   /* Eval toggle — impeccable design: clean, readable on both light/dark themes */
