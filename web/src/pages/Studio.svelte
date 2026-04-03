@@ -4,8 +4,9 @@
   import { fetchWork, startWorkSession, type Work, toggleEvalMode, forcePassEval, retryWithGuidance } from "../lib/api";
   import { createWorkWs } from "../lib/ws";
   import PipelineBar from "../components/PipelineBar.svelte";
-  import AssetPanel from "../components/AssetPanel.svelte";
+  import AssetSidebar from "../components/AssetSidebar.svelte";
   import ChatPanel from "../components/ChatPanel.svelte";
+  import PreviewArea from "../components/PreviewArea.svelte";
   import type { ChatAttachment } from "../components/ChatPanel.svelte";
   import type { StreamBlockData } from "../components/StreamBlock.svelte";
 
@@ -118,6 +119,10 @@
   // Asset panel refresh
   let assetRefresh = $state(0);
   let showOutputTab = $state(false);
+
+  // Asset sidebar state
+  let assetFiles: string[] = $state([]);
+  let selectedAsset: string | null = $state(null);
 
   // Auto-advance to next step when current step completes
   // Auto-advance: immediately start next step when current one completes
