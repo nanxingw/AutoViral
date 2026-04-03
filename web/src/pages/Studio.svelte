@@ -95,8 +95,6 @@
   let evaluationMode = $state(false);
   let evalBlocked = $state<{ step: string; attempt: number } | null>(null);
 
-  // --- Attachment system ---
-  let rightPanelWidth = $state(480);
   let chatPanelRef: ChatPanel | undefined = $state();
 
   function handleEditAsset(assetName: string, assetUrl: string) {
@@ -427,6 +425,15 @@
 
     wsConn = createWorkWs(workId, wsHandler);
 
+    // Poll asset list
+    const fetchAssets = () =>
+      fetch(`/api/works/${encodeURIComponent(workId)}/assets`)
+        .then(r => r.ok ? r.json() : [])
+        .then((a: string[]) => { assetFiles = a; })
+        .catch(() => {});
+    fetchAssets();
+    const pollAssets = setInterval(fetchAssets, 5000);
+
     // If we have an initial prompt (from new work creation), send it to start the pipeline
     if (initialPrompt && work?.pipeline) {
       const firstKey = Object.keys(work.pipeline)[0];
@@ -444,6 +451,7 @@
 
     return () => {
       unsub();
+      clearInterval(pollAssets);
       if (inactivityTimer) clearTimeout(inactivityTimer);
       // Leaving Studio = abort any running task on the server
       if (streaming) {
@@ -538,6 +546,11 @@
   </div>
 
   <div class="studio-body">
+    <!-- Left: Asset Sidebar -->
+    <div class="panel-left">
+      <AssetSidebar {workId} assets={assetFiles} {selectedAsset} onSelect={(path) => selectedAsset = path} />
+    </div>
+
     <!-- Center: Chat -->
     <div class="panel-main">
       <ChatPanel
@@ -557,30 +570,6 @@
       />
     </div>
 
-    <!-- Resize handle -->
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="panel-resize-handle"
-      onpointerdown={(e) => {
-        e.preventDefault();
-        const startX = e.clientX;
-        const startW = rightPanelWidth;
-        const onMove = (ev: PointerEvent) => {
-          const delta = startX - ev.clientX;
-          rightPanelWidth = Math.max(320, Math.min(900, startW + delta));
-        };
-        const onUp = () => {
-          window.removeEventListener('pointermove', onMove);
-          window.removeEventListener('pointerup', onUp);
-        };
-        window.addEventListener('pointermove', onMove);
-        window.addEventListener('pointerup', onUp);
-      }}
-    ></div>
-
-    <!-- Right: Assets -->
-    <div class="panel-right" style="width: {rightPanelWidth}px;">
-      <AssetPanel {workId} visible={true} refreshTrigger={assetRefresh} showOutput={showOutputTab} onEditAsset={handleEditAsset} topicHint={work?.topicHint ?? ""} />
-    </div>
   </div>
 
   <PipelineBar
@@ -739,6 +728,13 @@
     overflow: hidden;
   }
 
+  .panel-left {
+    width: 200px;
+    flex-shrink: 0;
+    overflow: hidden;
+    border-right: 1px solid var(--border);
+  }
+
   .panel-main {
     flex: 1;
     min-width: 320px;
@@ -747,63 +743,9 @@
     position: relative;
   }
 
-  .panel-right {
-    flex-shrink: 0;
-    overflow: hidden;
-    position: relative;
-    border-left: 1px solid var(--border);
-  }
-
-  .panel-resize-handle {
-    width: 5px;
-    flex-shrink: 0;
-    cursor: col-resize;
-    background: transparent;
-    transition: background 0.15s;
-    position: relative;
-    z-index: 5;
-  }
-  .panel-resize-handle:hover,
-  .panel-resize-handle:active {
-    background: var(--spark-red, #FE2C55);
-    opacity: 0.3;
-  }
-
-  .panel-expand-toggle {
-    position: absolute;
-    left: -16px;
-    top: 50%;
-    transform: translateY(-50%);
-    z-index: 10;
-    width: 16px;
-    height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: var(--bg-surface);
-    border: 1px solid var(--border);
-    border-right: none;
-    border-radius: 6px 0 0 6px;
-    cursor: pointer;
-    color: var(--text-muted);
-    transition: all 0.15s;
-    padding: 0;
-    opacity: 0.6;
-  }
-
-  .panel-expand-toggle:hover {
-    color: var(--text);
-    background: var(--accent-soft, rgba(254, 44, 85, 0.08));
-    border-color: var(--accent, #FE2C55);
-    opacity: 1;
-  }
-
   /* Responsive */
-  @media (max-width: 1024px) {
-    .panel-right { display: none; }
-    .panel-expand-toggle { display: none; }
-  }
   @media (max-width: 768px) {
+    .panel-left { display: none; }
     .studio-body { border-radius: 12px; }
   }
 
