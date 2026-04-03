@@ -7,6 +7,7 @@
   import AssetSidebar from "../components/AssetSidebar.svelte";
   import ChatPanel from "../components/ChatPanel.svelte";
   import PreviewArea from "../components/PreviewArea.svelte";
+  import ImageLayout from "../components/ImageLayout.svelte";
   import Timeline from "../components/Timeline.svelte";
   import TrackRow from "../components/TrackRow.svelte";
   import type { ChatAttachment } from "../components/ChatPanel.svelte";
