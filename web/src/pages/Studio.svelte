@@ -510,8 +510,8 @@
     // Poll asset list
     const fetchAssets = () =>
       fetch(`/api/works/${encodeURIComponent(workId)}/assets`)
-        .then(r => r.ok ? r.json() : [])
-        .then((a: string[]) => { assetFiles = a; })
+        .then(r => r.ok ? r.json() : { assets: [] })
+        .then((data: any) => { assetFiles = Array.isArray(data) ? data : (data.assets ?? []); })
         .catch(() => {});
     fetchAssets();
     const pollAssets = setInterval(fetchAssets, 5000);
