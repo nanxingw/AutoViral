@@ -3,7 +3,7 @@
   import { t, getLanguage, subscribe } from "../lib/i18n";
   import { fetchWork, startWorkSession, type Work, toggleEvalMode, forcePassEval, retryWithGuidance } from "../lib/api";
   import { createWorkWs } from "../lib/ws";
-  import PipelineSteps from "../components/PipelineSteps.svelte";
+  import PipelineBar from "../components/PipelineBar.svelte";
   import AssetPanel from "../components/AssetPanel.svelte";
   import ChatPanel from "../components/ChatPanel.svelte";
   import type { ChatAttachment } from "../components/ChatPanel.svelte";
@@ -533,21 +533,6 @@
   </div>
 
   <div class="studio-body">
-    <!-- Left: Pipeline (~240px) -->
-    <div class="panel-left">
-      <PipelineSteps
-        pipeline={work?.pipeline ?? {}}
-        contentType={work?.type ?? "short-video"}
-        platforms={work?.platforms ?? []}
-        {currentStep}
-        workTitle={work?.title ?? ""}
-        topicHint={work?.topicHint ?? ""}
-        onNextStep={triggerStep}
-        onSelectStep={(key) => { if (!streaming) triggerStep(key); }}
-        canAdvance={showNextStep && !streaming}
-      />
-    </div>
-
     <!-- Center: Chat -->
     <div class="panel-main">
       <ChatPanel
@@ -592,6 +577,14 @@
       <AssetPanel {workId} visible={true} refreshTrigger={assetRefresh} showOutput={showOutputTab} onEditAsset={handleEditAsset} topicHint={work?.topicHint ?? ""} />
     </div>
   </div>
+
+  <PipelineBar
+    pipeline={work?.pipeline ?? {}}
+    {currentStep}
+    {streaming}
+    canAdvance={showNextStep && !streaming}
+    onSelectStep={(key) => { if (!streaming) triggerStep(key); }}
+  />
 </div>
 
 <style>
@@ -741,14 +734,6 @@
     overflow: hidden;
   }
 
-  .panel-left {
-    width: 180px;
-    flex-shrink: 0;
-    overflow-y: auto;
-    overflow-x: hidden;
-    border-right: 1px solid var(--border);
-  }
-
   .panel-main {
     flex: 1;
     min-width: 320px;
@@ -814,7 +799,6 @@
     .panel-expand-toggle { display: none; }
   }
   @media (max-width: 768px) {
-    .panel-left { display: none; }
     .studio-body { border-radius: 12px; }
   }
 
