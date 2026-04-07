@@ -1,41 +1,123 @@
 <script lang="ts">
+  import { renderFilmstrip } from "../lib/filmstrip";
+  import { renderWaveform, renderFakeWaveform } from "../lib/waveform";
+
   export interface TrackItem {
     id: string;
     start: number;
     duration: number;
     label: string;
     thumbnail?: string;
+    audioUrl?: string;
     type: "clip" | "audio" | "subtitle";
   }
 
   let {
     label = "",
+    icon = "",
     items = [],
     totalDuration = 0,
     currentTime = 0,
+    trackHeight = 65,
     draggable = false,
+    selectedItemId = null,
     onItemClick,
     onReorder,
     onContextMenu,
+    onTrim,
   }: {
     label?: string;
+    icon?: string;
     items?: TrackItem[];
     totalDuration?: number;
     currentTime?: number;
+    trackHeight?: number;
     draggable?: boolean;
+    selectedItemId?: string | null;
     onItemClick?: (itemId: string) => void;
     onReorder?: (newOrder: string[]) => void;
     onContextMenu?: (itemId: string, event: MouseEvent) => void;
+    onTrim?: (itemId: string, side: "left" | "right", deltaSec: number) => void;
   } = $props();
 
+  // --- Drag & drop state ---
   let dragSourceId: string | null = $state(null);
   let dragOverId: string | null = $state(null);
 
+  // --- Canvas refs ---
+  let canvasRefs: Map<string, HTMLCanvasElement> = new Map();
+  let trackItemsEl: HTMLDivElement | undefined = $state(undefined);
+
+  // --- Trim state ---
+  let trimming: { itemId: string; side: "left" | "right"; startX: number } | null = $state(null);
+
+  // --- Helpers ---
   function pct(seconds: number): string {
     if (totalDuration <= 0) return "0%";
     return `${(seconds / totalDuration) * 100}%`;
   }
 
+  function pctNum(seconds: number): number {
+    if (totalDuration <= 0) return 0;
+    return (seconds / totalDuration) * 100;
+  }
+
+  function formatDur(s: number): string {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, "0")}`;
+  }
+
+  function itemWidthPx(item: TrackItem): number {
+    if (!trackItemsEl || totalDuration <= 0) return 0;
+    const containerWidth = trackItemsEl.clientWidth;
+    return Math.max(40, (item.duration / totalDuration) * containerWidth);
+  }
+
+  // --- Canvas rendering ---
+  $effect(() => {
+    // Re-run when items or trackItemsEl change
+    const _items = items;
+    const _el = trackItemsEl;
+    if (!_el) return;
+
+    const computedStyle = getComputedStyle(document.documentElement);
+    const waveformColor = computedStyle.getPropertyValue("--waveform-color").trim() || "rgba(168, 85, 247, 0.6)";
+
+    for (const item of _items) {
+      const canvas = canvasRefs.get(item.id);
+      if (!canvas) continue;
+
+      const w = itemWidthPx(item);
+      const h = trackHeight - 8;
+      if (w <= 0 || h <= 0) continue;
+
+      if (item.type === "clip" && item.thumbnail) {
+        renderFilmstrip({
+          videoUrl: item.thumbnail,
+          canvas,
+          width: w,
+          height: h,
+        });
+      } else if (item.type === "audio") {
+        if (item.audioUrl) {
+          renderWaveform({
+            audioUrl: item.audioUrl,
+            canvas,
+            width: w,
+            height: h,
+            color: waveformColor,
+          }).then((ok) => {
+            if (!ok) renderFakeWaveform(canvas, w, h, waveformColor);
+          });
+        } else {
+          renderFakeWaveform(canvas, w, h, waveformColor);
+        }
+      }
+    }
+  });
+
+  // --- Drag handlers ---
   function handleDragStart(e: DragEvent, id: string) {
     if (!draggable) return;
     dragSourceId = id;
@@ -56,7 +138,7 @@
       dragOverId = null;
       return;
     }
-    const ids = items.map(i => i.id);
+    const ids = items.map((i) => i.id);
     const srcIdx = ids.indexOf(dragSourceId);
     const tgtIdx = ids.indexOf(targetId);
     if (srcIdx < 0 || tgtIdx < 0) return;
@@ -72,22 +154,54 @@
     dragOverId = null;
   }
 
-  function formatDur(s: number): string {
-    const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60);
-    return `${m}:${sec.toString().padStart(2, "0")}`;
+  // --- Trim handlers ---
+  function handleTrimStart(e: PointerEvent, itemId: string, side: "left" | "right") {
+    e.stopPropagation();
+    e.preventDefault();
+    trimming = { itemId, side, startX: e.clientX };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+  }
+
+  function handleTrimMove(e: PointerEvent) {
+    if (!trimming || !trackItemsEl) return;
+    // Visual feedback is handled via CSS on the trim handle
+  }
+
+  function handleTrimEnd(e: PointerEvent) {
+    if (!trimming || !trackItemsEl) return;
+    const deltaX = e.clientX - trimming.startX;
+    const containerWidth = trackItemsEl.clientWidth;
+    const deltaSec = (deltaX / containerWidth) * totalDuration;
+    if (Math.abs(deltaSec) > 0.01) {
+      onTrim?.(trimming.itemId, trimming.side, deltaSec);
+    }
+    trimming = null;
+  }
+
+  function bindCanvas(el: HTMLCanvasElement, id: string) {
+    canvasRefs.set(id, el);
   }
 </script>
 
-<div class="track-row">
-  <div class="track-label">{label}</div>
-  <div class="track-items">
+<div class="track-row" style="height: {trackHeight}px;">
+  <div class="track-label">
+    {#if icon}
+      <span class="track-icon">{icon}</span>
+    {/if}
+    {#if label}
+      <span class="track-label-text">{label}</span>
+    {/if}
+  </div>
+
+  <div class="track-items" bind:this={trackItemsEl}>
     {#each items as item (item.id)}
-      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
       <div
         class="track-item {item.type}"
         class:drag-over={dragOverId === item.id}
-        style="width: {pct(item.duration)}; left: {pct(item.start)};"
+        class:selected={selectedItemId === item.id}
+        class:dragging={dragSourceId === item.id}
+        style="flex: 0 0 {pctNum(item.duration)}%; min-width: 40px; height: {trackHeight - 8}px;"
         draggable={draggable}
         ondragstart={(e) => handleDragStart(e, item.id)}
         ondragover={(e) => handleDragOver(e, item.id)}
@@ -96,15 +210,41 @@
         onclick={() => onItemClick?.(item.id)}
         oncontextmenu={(e) => { e.preventDefault(); onContextMenu?.(item.id, e); }}
       >
-        {#if item.type === "clip" && item.thumbnail}
-          <div class="clip-thumb" style="background-image: url({item.thumbnail})"></div>
+        <!-- Canvas for clip / audio -->
+        {#if item.type === "clip" || item.type === "audio"}
+          <canvas
+            class="item-canvas"
+            use:bindCanvas={item.id}
+          ></canvas>
         {/if}
-        <span class="item-label">
-          {item.label}
+
+        <!-- Label overlay -->
+        <div class="item-overlay" class:subtitle-overlay={item.type === "subtitle"}>
+          <span class="item-label">{item.label}</span>
           {#if item.type === "clip"}
             <span class="item-dur">{formatDur(item.duration)}</span>
           {/if}
-        </span>
+        </div>
+
+        <!-- Trim handles (only when selected) -->
+        {#if selectedItemId === item.id}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="trim-handle trim-left"
+            class:trim-active={trimming?.itemId === item.id && trimming?.side === "left"}
+            onpointerdown={(e) => handleTrimStart(e, item.id, "left")}
+            onpointermove={handleTrimMove}
+            onpointerup={handleTrimEnd}
+          ></div>
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="trim-handle trim-right"
+            class:trim-active={trimming?.itemId === item.id && trimming?.side === "right"}
+            onpointerdown={(e) => handleTrimStart(e, item.id, "right")}
+            onpointermove={handleTrimMove}
+            onpointerup={handleTrimEnd}
+          ></div>
+        {/if}
       </div>
     {/each}
 
@@ -119,23 +259,37 @@
   .track-row {
     display: flex;
     align-items: stretch;
-    height: 48px;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
   }
 
   .track-label {
-    width: 40px;
+    width: var(--track-header-width, 80px);
     flex-shrink: 0;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 2px;
     font-size: 10px;
     font-weight: 600;
     color: var(--text-dim);
     letter-spacing: 0.5px;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--border-subtle, var(--border));
     background: var(--bg-primary);
+  }
+
+  .track-icon {
+    font-size: 14px;
+    line-height: 1;
+  }
+
+  .track-label-text {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    text-align: center;
   }
 
   .track-items {
@@ -150,16 +304,14 @@
 
   .track-item {
     position: relative;
-    height: 100%;
-    min-width: 20px;
-    border-radius: 6px;
+    min-width: 40px;
+    border-radius: var(--radius-element, 12px);
     cursor: pointer;
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     overflow: hidden;
     flex-shrink: 0;
-    padding: 0 2px;
-    transition: outline 0.1s;
+    transition: outline 0.12s;
   }
 
   .track-item:hover {
@@ -172,44 +324,105 @@
     outline-offset: -2px;
   }
 
+  .track-item.selected {
+    outline: 2px solid var(--spark-cyan, #25F4EE);
+    outline-offset: -2px;
+    z-index: 2;
+  }
+
+  .track-item.dragging {
+    opacity: 0.4;
+  }
+
+  /* Type-specific backgrounds */
   .track-item.clip {
     background: color-mix(in srgb, var(--spark-cyan, #25F4EE) 8%, var(--bg-surface, #2a2a3e));
   }
 
   .track-item.audio {
-    background: color-mix(in srgb, var(--state-done, #22c55e) 8%, var(--bg-surface, #2a2a3e));
+    background: color-mix(in srgb, var(--waveform-color, rgba(168, 85, 247, 0.6)) 15%, var(--bg-surface, #2a2a3e));
   }
 
   .track-item.subtitle {
-    background: color-mix(in srgb, var(--amber, #f59e0b) 8%, var(--bg-surface, #2a2a3e));
+    background: var(--subtitle-color, rgba(37, 244, 238, 0.15));
   }
 
-  .clip-thumb {
+  /* Canvas fills the item */
+  .item-canvas {
     position: absolute;
     inset: 0;
-    background-size: cover;
-    background-position: center;
-    opacity: 0.4;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+  }
+
+  /* Label overlay at bottom */
+  .item-overlay {
+    position: relative;
+    z-index: 1;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(2px);
+  }
+
+  .item-overlay.subtitle-overlay {
+    background: transparent;
+    backdrop-filter: none;
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 6px;
   }
 
   .item-label {
-    position: relative;
-    z-index: 1;
     font-size: 10px;
     color: var(--text);
-    padding: 0 8px;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    max-width: 100%;
+    flex: 1;
+    min-width: 0;
   }
 
   .item-dur {
     font-size: 9px;
     opacity: 0.6;
-    margin-left: 4px;
+    flex-shrink: 0;
   }
 
+  /* Trim handles */
+  .trim-handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    z-index: 3;
+    cursor: col-resize;
+    transition: background 0.12s;
+  }
+
+  .trim-handle:hover,
+  .trim-handle.trim-active {
+    background: rgba(37, 244, 238, 0.3);
+  }
+
+  .trim-left {
+    left: 0;
+    border-radius: var(--radius-element, 12px) 0 0 var(--radius-element, 12px);
+  }
+
+  .trim-right {
+    right: 0;
+    border-radius: 0 var(--radius-element, 12px) var(--radius-element, 12px) 0;
+  }
+
+  /* Playhead */
   .playhead {
     position: absolute;
     top: 0;
