@@ -134,10 +134,23 @@
     return `/api/works/${encodeURIComponent(workId)}/assets/${path.split('/').map(encodeURIComponent).join('/')}`;
   }
 
-  // Video clips for Timeline
+  // Video clips for Timeline — only show actual clip files (clip-XX), exclude all intermediate artifacts
   let videoClips = $derived.by(() => {
     return assetFiles
-      .filter(a => /\.(mp4|mov|webm)$/i.test(a) && !/final/i.test(a))
+      .filter(a => {
+        if (!/\.(mp4|mov|webm)$/i.test(a)) return false;
+        const filename = (a.split('/').pop() ?? '').toLowerCase();
+        // Only include files that match "clip-NN" pattern (the actual scene clips)
+        if (/^clip[-_]?\d+/i.test(filename)) return true;
+        // Exclude known intermediate artifacts
+        return false;
+      })
+      .sort((a, b) => {
+        // Sort by clip number
+        const numA = parseInt(a.match(/clip[-_]?(\d+)/i)?.[1] ?? '0');
+        const numB = parseInt(b.match(/clip[-_]?(\d+)/i)?.[1] ?? '0');
+        return numA - numB;
+      })
       .map((path, i) => ({
         id: `clip-${i}`,
         path,
@@ -146,11 +159,28 @@
       }));
   });
 
-  // Audio/BGM info
-  let audioInfo = $derived.by(() => {
-    const bgm = assetFiles.find(a => /bgm/i.test(a) && /\.(mp3|wav|aac|m4a|ogg)$/i.test(a));
-    if (!bgm) return null;
-    return { path: bgm, name: bgm.split('/').pop() ?? bgm, duration: 0 };
+  // Audio files — collect all audio assets, classify by type (BGM, voiceover, SFX)
+  let audioFiles = $derived.by(() => {
+    const audioExts = /\.(mp3|wav|aac|m4a|ogg)$/i;
+    return assetFiles
+      .filter(a => audioExts.test(a))
+      .map(path => {
+        const filename = (path.split('/').pop() ?? path).toLowerCase();
+        let audioType: "bgm" | "voiceover" | "sfx" = "sfx";
+        if (/bgm|music|soundtrack/i.test(filename) || path.includes('bgm/')) audioType = "bgm";
+        else if (/voice|narrat|vo[_-]|speech|dialogue/i.test(filename)) audioType = "voiceover";
+        return { path, name: path.split('/').pop() ?? path, audioType, duration: 0 };
+      });
+  });
+
+  // Keep backward compat: first BGM for simple access
+  let audioInfo = $derived(audioFiles.find(a => a.audioType === "bgm") ?? audioFiles[0] ?? null);
+
+  // Map selectedAsset → clip ID for timeline highlighting
+  let selectedClipId = $derived.by(() => {
+    if (!selectedAsset) return null;
+    const clip = videoClips.find(c => c.path === selectedAsset);
+    return clip?.id ?? null;
   });
 
   // Images for ImageLayout
@@ -215,24 +245,37 @@
   }
 
   function handleTimelineAction(type: string, payload: any) {
+    // "select" = preview in PreviewArea, not a chat command
+    if (type === "select") {
+      const clipId = payload?.target ?? payload;
+      const clip = videoClips.find(c => c.id === clipId);
+      if (clip) selectedAsset = clip.path;
+      return;
+    }
     const messages: Record<string, string> = {
       reorder: `请把视频片段重新排列为: ${Array.isArray(payload) ? payload.join(', ') : payload}`,
       delete: `请删除视频片段 ${payload?.target ?? payload}`,
       replace: `请重新生成视频片段 ${payload?.target ?? payload}`,
     };
-    const text = messages[type] ?? `请调整视频: ${type}`;
-    handleChatSend({ text, attachments: [] });
+    const text = messages[type];
+    if (text) handleChatSend({ text, attachments: [] });
   }
 
   function handleImageAction(type: string, payload: any) {
+    // "select" = preview in PreviewArea, not a chat command
+    if (type === "select") {
+      const target = payload?.target ?? payload;
+      if (target) selectedAsset = target;
+      return;
+    }
     const messages: Record<string, string> = {
       reorder: `请把图片重新排列为: ${Array.isArray(payload) ? payload.join(', ') : payload}`,
       delete: `请删除图片 ${payload?.target ?? payload}`,
       replace: `请重新生成图片 ${payload?.target ?? payload}`,
       add: `请添加一张新图片`,
     };
-    const text = messages[type] ?? `请调整图片: ${type}`;
-    handleChatSend({ text, attachments: [] });
+    const text = messages[type];
+    if (text) handleChatSend({ text, attachments: [] });
   }
 
   function handleChatResize(e: PointerEvent) {
@@ -651,10 +694,11 @@
         {#if work?.type === "short-video"}
           <Timeline
             clips={videoClips}
-            audio={audioInfo}
+            audioTracks={audioFiles}
             subtitles={[]}
             {currentTime}
             {workId}
+            {selectedClipId}
             onReorder={(order) => handleTimelineAction("reorder", order)}
             onAction={(action) => handleTimelineAction(action.type, action)}
             onSeek={(t) => currentTime = t}
@@ -722,7 +766,8 @@
     padding: 0.5rem 1rem;
     gap: 0.75rem;
     flex-shrink: 0;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-sm);
     margin-bottom: 0;
   }
 
@@ -746,7 +791,7 @@
     font-weight: 500;
     font-family: var(--font-body, inherit);
     cursor: pointer;
-    transition: color 0.12s;
+    transition: all var(--transition-fast);
     flex-shrink: 0;
   }
   .back-btn:hover { color: var(--text); }
@@ -772,7 +817,7 @@
     color: var(--text-dim);
     padding: 0.1rem 0.4rem;
     border: 1px solid var(--border);
-    border-radius: 3px;
+    border-radius: var(--radius-element);
     white-space: nowrap;
     flex-shrink: 0;
   }
@@ -784,7 +829,7 @@
     gap: 0.2rem;
     background: none;
     font-family: inherit;
-    transition: all 0.12s;
+    transition: all var(--transition-fast);
   }
   .header-tag.clickable:hover {
     border-color: var(--text-muted);
@@ -802,8 +847,8 @@
     left: 0;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
-    border-radius: 6px;
-    box-shadow: var(--shadow-lg, 0 8px 24px rgba(0,0,0,0.15));
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-lg);
     z-index: 100;
     min-width: 100px;
     padding: 0.2rem;
@@ -821,7 +866,7 @@
     font-size: 0.72rem;
     font-weight: 500;
     padding: 0.35rem 0.6rem;
-    border-radius: 4px;
+    border-radius: var(--radius-element);
     cursor: pointer;
     transition: all 0.1s;
   }
@@ -856,7 +901,8 @@
     width: 200px;
     flex-shrink: 0;
     overflow: hidden;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-sm);
   }
 
   .panel-center {
@@ -872,6 +918,7 @@
     min-height: 200px;
     overflow: hidden;
     background: var(--bg-primary, #0A0A0F);
+    border-radius: var(--radius-panel);
   }
 
   .timeline-wrapper {
@@ -891,6 +938,7 @@
   .timeline-resize-handle:active {
     background: var(--spark-red, #FE2C55);
     opacity: 0.3;
+    border-radius: 3px;
   }
 
   .panel-resize-handle {
@@ -905,12 +953,14 @@
   .panel-resize-handle:active {
     background: var(--spark-red, #FE2C55);
     opacity: 0.3;
+    border-radius: 3px;
   }
 
   .panel-right {
     flex-shrink: 0;
     overflow: hidden;
-    border-left: 1px solid var(--border);
+    border-left: 1px solid var(--border-subtle);
+    box-shadow: var(--shadow-sm);
   }
 
   /* Responsive */
@@ -928,7 +978,7 @@
     gap: 8px;
     margin-left: 16px;
     padding: 6px 14px;
-    border-radius: 20px;
+    border-radius: var(--radius-pill);
     background: var(--bg-surface);
     border: 1px solid var(--border);
     transition: all 0.2s ease;
@@ -984,6 +1034,10 @@
     font-weight: 600;
     letter-spacing: 0.3px;
     user-select: none;
+  }
+
+  .step-clickable {
+    transition: all var(--transition-fast);
   }
 
 </style>

@@ -107,7 +107,17 @@
                       <img src={assetUrl(item.path)} alt={item.filename} loading="lazy" onerror={(e) => { const el = e.currentTarget as HTMLImageElement; el.style.display = 'none'; el.parentElement?.classList.add('thumb-broken'); }} />
                     {:else}
                       <div class="clip-thumb">
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
+                        <video
+                          class="clip-video-thumb"
+                          src={assetUrl(item.path)}
+                          preload="metadata"
+                          muted
+                          onloadeddata={(e) => { const v = e.currentTarget as HTMLVideoElement; v.currentTime = 0.5; }}
+                          onerror={(e) => { (e.currentTarget as HTMLVideoElement).style.display = 'none'; }}
+                        ></video>
+                        <div class="clip-play-icon">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21"/></svg>
+                        </div>
                       </div>
                     {/if}
                     <span class="stage-tag">{item.stageTag}</span>
@@ -177,12 +187,15 @@
     letter-spacing: 0.04em;
     text-transform: uppercase;
     user-select: none;
-    transition: color 0.12s;
+    transition: color 0.12s, background 0.12s;
     border-bottom: 1px solid var(--border, rgba(255,255,255,0.06));
+    border-radius: var(--radius-element);
+    margin: 0 8px;
   }
 
   .group-header:hover {
     color: var(--text, #e2e8f0);
+    background: color-mix(in srgb, var(--text-dim, #64748b) 8%, transparent);
   }
 
   .group-icon {
@@ -200,7 +213,7 @@
     font-size: 0.6rem;
     font-weight: 700;
     padding: 0.05rem 0.35rem;
-    border-radius: 8px;
+    border-radius: var(--radius-pill);
     min-width: 1.2rem;
     text-align: center;
   }
@@ -214,7 +227,7 @@
   }
 
   .group-content {
-    padding: 0.2rem 0.4rem 0.4rem;
+    padding: 0.4rem 0.6rem 0.6rem;
   }
 
   /* Thumbnail grid */
@@ -228,20 +241,23 @@
     position: relative;
     width: 100%;
     aspect-ratio: 1;
-    border-radius: 4px;
+    border-radius: var(--radius-card);
     overflow: hidden;
     cursor: pointer;
     border: 2px solid transparent;
-    transition: border-color 0.12s;
+    transition: border-color 0.12s, box-shadow 0.12s;
     background: var(--bg-surface, #2a2a3e);
+    box-shadow: var(--shadow-sm);
   }
 
   .thumb-item:hover {
     border-color: var(--text-dim, #64748b);
+    box-shadow: var(--shadow-hover);
   }
 
   .thumb-item.selected {
     border-color: var(--spark-red, #FE2C55);
+    box-shadow: 0 0 0 2px var(--spark-red), var(--shadow-md);
   }
 
   .thumb-item img {
@@ -254,11 +270,36 @@
   .clip-thumb {
     width: 100%;
     height: 100%;
+    position: relative;
     display: flex;
     align-items: center;
     justify-content: center;
     color: var(--text-dim, #64748b);
     background: var(--bg-surface, #2a2a3e);
+  }
+
+  .clip-video-thumb {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  .clip-play-icon {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.3);
+    color: rgba(255, 255, 255, 0.8);
+    pointer-events: none;
+    transition: background 0.15s;
+    border-radius: var(--radius-element);
+  }
+  .thumb-item:hover .clip-play-icon {
+    background: rgba(0, 0, 0, 0.5);
+    color: #fff;
   }
 
   .stage-tag {
@@ -294,7 +335,7 @@
     align-items: center;
     gap: 0.3rem;
     padding: 0.3rem 0.4rem;
-    border-radius: 4px;
+    border-radius: var(--radius-element);
     cursor: pointer;
     color: var(--text-dim, #64748b);
     position: relative;
@@ -341,6 +382,7 @@
     flex-direction: column;
     align-items: center;
     gap: 0.5rem;
+    border-radius: var(--radius-card);
   }
 
   /* Broken image fallback */
