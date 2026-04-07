@@ -48,16 +48,21 @@
 
     let stageTag = "AI生成";
     if (/research\/|trends\//.test(path)) stageTag = "调研";
-    else if (/output\//.test(path)) stageTag = "成品";
+    else if (isOutputAsset(path)) stageTag = "成品";
     else if (/bgm\//.test(path)) stageTag = "配乐";
 
     return { path, group, stageTag, filename };
   }
 
+  // Detect output/final assets
+  function isOutputAsset(path: string): boolean {
+    return /output\//i.test(path) || /final[._-]/i.test(path.split('/').pop() ?? '');
+  }
+
   // Output/final assets — shown in a dedicated top section
   let outputAssets = $derived.by(() => {
     return assets
-      .filter(p => /output\//i.test(p))
+      .filter(p => isOutputAsset(p))
       .map(p => classifyAsset(p));
   });
 
@@ -67,7 +72,7 @@
     };
     for (const p of assets) {
       // Skip output files — they go in the dedicated section
-      if (/output\//i.test(p)) continue;
+      if (isOutputAsset(p)) continue;
       const c = classifyAsset(p);
       map[c.group].push(c);
     }

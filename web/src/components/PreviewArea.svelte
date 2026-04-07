@@ -46,10 +46,11 @@
     return filteredImages.length > 0 ? "image" : "none";
   });
 
-  // For video: find the best video asset to show
+  // For video: find the best video asset to show (prioritize output/final)
   let effectiveVideoAsset = $derived.by(() => {
     if (selectedAsset && isVideo(selectedAsset)) return selectedAsset;
-    const finals = filteredVideos.filter(a => /final/i.test(a));
+    // Prioritize output/final videos
+    const finals = filteredVideos.filter(a => /output\//i.test(a) || /final[._-]/i.test(a.split('/').pop() ?? ''));
     if (finals.length > 0) return finals[0];
     return filteredVideos.length > 0 ? filteredVideos[0] : null;
   });
