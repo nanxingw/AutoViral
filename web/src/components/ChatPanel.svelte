@@ -352,7 +352,7 @@
     align-items: center;
     gap: 0.6rem;
     padding: 0.6rem 1rem;
-    border-radius: 10px;
+    border-radius: var(--radius-card);
     margin: 0.25rem 0;
   }
 
@@ -421,13 +421,13 @@
     gap: 0;
     background: var(--bg-surface, var(--bg-inset));
     border: 1.5px solid var(--border);
-    border-radius: 16px;
+    border-radius: var(--radius-card);
     transition: border-color 0.15s ease, box-shadow 0.15s ease;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+    box-shadow: var(--shadow-sm);
   }
   .input-wrapper:focus-within {
     border-color: var(--spark-red, #FE2C55);
-    box-shadow: 0 0 0 3px rgba(254, 44, 85, 0.08);
+    box-shadow: 0 0 0 2px var(--spark-red), var(--shadow-md);
   }
 
   .msg-input {
@@ -452,7 +452,7 @@
     background: none;
     color: var(--text-muted);
     border: none;
-    border-radius: 0 14px 14px 0;
+    border-radius: 0 var(--radius-element) var(--radius-element) 0;
     padding: 0.65rem 0.75rem;
     display: flex;
     align-items: center;
@@ -477,7 +477,7 @@
   }
   .attachment-chip {
     display: flex; align-items: center; gap: 0.25rem;
-    background: var(--bg-surface); border: 1px solid var(--border); border-radius: 6px;
+    background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-pill);
     padding: 0.2rem 0.4rem; font-size: 0.72rem;
   }
   .att-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -492,14 +492,14 @@
 
   .asset-picker-popover {
     position: absolute; bottom: 100%; left: 0; right: 0;
-    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 8px;
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: var(--radius-card);
     box-shadow: 0 -4px 12px rgba(0,0,0,0.15); max-height: 280px; overflow: hidden;
     display: flex; flex-direction: column; z-index: 100;
   }
   .picker-header { font-size: 0.75rem; font-weight: 600; padding: 0.5rem 0.6rem; color: var(--text-muted); }
   .picker-cats { display: flex; gap: 0.2rem; padding: 0 0.5rem 0.4rem; flex-wrap: wrap; }
   .picker-cat-btn {
-    font-size: 0.68rem; padding: 0.15rem 0.4rem; border-radius: 4px;
+    font-size: 0.68rem; padding: 0.15rem 0.4rem; border-radius: var(--radius-element);
     background: var(--bg-surface); border: 1px solid var(--border); color: var(--text-muted); cursor: pointer;
   }
   .picker-cat-btn.active { background: var(--spark-red); color: #fff; border-color: transparent; }
@@ -509,11 +509,11 @@
   }
   .picker-item {
     display: flex; flex-direction: column; align-items: center; gap: 0.15rem;
-    padding: 0.3rem; border-radius: 6px; border: 1px solid transparent;
+    padding: 0.3rem; border-radius: var(--radius-element); border: 1px solid transparent;
     background: none; cursor: pointer; color: var(--text);
   }
   .picker-item:hover { background: var(--bg-surface); border-color: var(--border); }
-  .picker-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 4px; }
+  .picker-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: var(--radius-element); }
   .picker-icon { font-size: 1.5rem; }
   .picker-name { font-size: 0.6rem; max-width: 60px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
   .picker-empty { grid-column: 1/-1; text-align: center; color: var(--text-dim); font-size: 0.72rem; padding: 1rem; }
@@ -528,7 +528,7 @@
   .eval-blocked-panel {
     margin: 8px 16px;
     padding: 16px;
-    border-radius: 12px;
+    border-radius: var(--radius-card);
     background: #fef2f2;
     border: 1px solid #fecaca;
     animation: slideUp 0.3s ease-out;
@@ -559,7 +559,7 @@
 
   .eval-btn {
     padding: 8px 16px;
-    border-radius: 8px;
+    border-radius: var(--radius-element);
     border: none;
     font-size: 13px;
     font-weight: 600;
@@ -584,7 +584,7 @@
   .eval-guidance-input {
     flex: 1;
     padding: 8px 12px;
-    border-radius: 8px;
+    border-radius: var(--radius-element);
     border: 1px solid #d1d5db;
     background: white;
     color: #333;

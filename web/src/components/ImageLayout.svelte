@@ -211,18 +211,20 @@
     position: relative;
     width: 96px;
     height: 96px;
-    border-radius: 8px;
+    border-radius: var(--radius-card);
     border: 2px solid var(--border);
     background: var(--bg-surface);
     cursor: pointer;
     overflow: hidden;
     padding: 0;
-    transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
+    transition: border-color 0.15s, box-shadow 0.15s, opacity 0.15s, transform 0.15s;
+    box-shadow: var(--shadow-sm);
   }
 
   .image-card:hover {
     border-color: var(--text-dim);
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-2px);
   }
 
   .image-card.dragging {
@@ -274,7 +276,7 @@
   .overlay-btn {
     width: 28px;
     height: 28px;
-    border-radius: 6px;
+    border-radius: var(--radius-element);
     border: none;
     background: rgba(255, 255, 255, 0.15);
     color: rgba(255, 255, 255, 0.9);
@@ -351,7 +353,7 @@
   .pill {
     display: inline-block;
     padding: 2px 8px;
-    border-radius: 10px;
+    border-radius: var(--radius-pill);
     font-size: 11px;
     font-weight: 500;
     line-height: 1.5;

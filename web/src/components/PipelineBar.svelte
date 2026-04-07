@@ -76,9 +76,11 @@
     padding: 0 1rem;
     gap: 0;
     border-top: 1px solid var(--border);
+    border-radius: 0;
     background: var(--bg-elevated);
     flex-shrink: 0;
     font-family: var(--font-display, 'Space Grotesk', sans-serif);
+    box-shadow: 0 -1px 3px rgba(0,0,0,0.1);
   }
 
   .connector {
@@ -87,6 +89,7 @@
     background: var(--border);
     flex-shrink: 0;
     position: relative;
+    border-radius: 1px;
   }
   .connector::after {
     content: "\2192";
@@ -108,8 +111,8 @@
     display: flex;
     align-items: center;
     gap: 0.35rem;
-    padding: 0.3rem 0.65rem;
-    border-radius: 6px;
+    padding: 0.35rem 0.75rem;
+    border-radius: var(--radius-element);
     border: 1px solid var(--border);
     background: none;
     cursor: default;
@@ -178,6 +181,7 @@
   .step-current {
     background: var(--selected, rgba(254, 44, 85, 0.08));
     opacity: 1;
+    box-shadow: var(--shadow-sm);
   }
 
   /* Clickable */
@@ -187,6 +191,9 @@
   .step-clickable:hover {
     background: var(--bg-hover, rgba(148, 163, 184, 0.08));
     opacity: 1;
+    box-shadow: var(--shadow-hover);
+    transform: translateY(-1px);
+    transition: all var(--transition-fast);
   }
 
   /* Pulse animation */

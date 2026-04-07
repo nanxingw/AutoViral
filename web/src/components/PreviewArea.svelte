@@ -18,39 +18,58 @@
   const videoExts = ['mp4', 'mov', 'webm'];
   const imageExts = ['png', 'jpg', 'jpeg', 'webp', 'gif'];
 
-  let filteredAssets = $derived.by(() => {
-    const exts = contentType === "short-video" ? videoExts : imageExts;
-    return assets.filter(a => exts.includes(a.split('.').pop()?.toLowerCase() ?? ''));
-  });
+  function isVideo(path: string): boolean {
+    return videoExts.includes(path.split('.').pop()?.toLowerCase() ?? '');
+  }
+
+  function isImage(path: string): boolean {
+    return imageExts.includes(path.split('.').pop()?.toLowerCase() ?? '');
+  }
+
+  let filteredVideos = $derived(assets.filter(a => isVideo(a)));
+  let filteredImages = $derived(assets.filter(a => isImage(a)));
 
   function assetUrl(path: string): string {
     return `/api/works/${encodeURIComponent(workId)}/assets/${path.split('/').map(encodeURIComponent).join('/')}`;
   }
 
-  // For short-video: find a final video if nothing selected
-  let effectiveVideoAsset = $derived.by(() => {
-    if (selectedAsset) return selectedAsset;
-    const finals = filteredAssets.filter(a => /final/i.test(a));
-    if (finals.length > 0) return finals[0];
-    return filteredAssets.length > 0 ? filteredAssets[0] : null;
+  // Determine what to show: respect user selection first, regardless of content type
+  let displayMode = $derived.by<"video" | "image" | "none">(() => {
+    if (selectedAsset) {
+      if (isVideo(selectedAsset)) return "video";
+      if (isImage(selectedAsset)) return "image";
+    }
+    // Fallback to content type default
+    if (contentType === "short-video") {
+      return filteredVideos.length > 0 ? "video" : (filteredImages.length > 0 ? "image" : "none");
+    }
+    return filteredImages.length > 0 ? "image" : "none";
   });
 
-  // For image-text: current index in the filtered list
+  // For video: find the best video asset to show
+  let effectiveVideoAsset = $derived.by(() => {
+    if (selectedAsset && isVideo(selectedAsset)) return selectedAsset;
+    const finals = filteredVideos.filter(a => /final/i.test(a));
+    if (finals.length > 0) return finals[0];
+    return filteredVideos.length > 0 ? filteredVideos[0] : null;
+  });
+
+  // For image: current index in the filtered list
   let currentImageIndex = $derived.by(() => {
     if (!selectedAsset) return 0;
-    const idx = filteredAssets.indexOf(selectedAsset);
+    const idx = filteredImages.indexOf(selectedAsset);
     return idx >= 0 ? idx : 0;
   });
 
   let effectiveImageAsset = $derived.by(() => {
-    if (selectedAsset && filteredAssets.includes(selectedAsset)) return selectedAsset;
-    return filteredAssets.length > 0 ? filteredAssets[0] : null;
+    if (selectedAsset && isImage(selectedAsset)) return selectedAsset;
+    return filteredImages.length > 0 ? filteredImages[0] : null;
   });
 
   function navigateImage(delta: number) {
-    if (filteredAssets.length === 0) return;
-    const newIdx = (currentImageIndex + delta + filteredAssets.length) % filteredAssets.length;
-    onSelect?.(filteredAssets[newIdx]);
+    if (filteredImages.length === 0) return;
+    const newIdx = (currentImageIndex + delta + filteredImages.length) % filteredImages.length;
+    onSelect?.(filteredImages[newIdx]);
   }
 
   function handleTimeUpdate(e: Event) {
@@ -60,8 +79,7 @@
 </script>
 
 <div class="preview-area">
-  {#if contentType === "short-video"}
-    <!-- Video mode -->
+  {#if displayMode === "video"}
     {#if effectiveVideoAsset}
       <video
         class="video-player"
@@ -71,21 +89,12 @@
       >
         <track kind="captions" />
       </video>
-    {:else}
-      <div class="placeholder">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.4">
-          <path d="M23 7l-7 5 7 5V7z"/>
-          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
-        </svg>
-        <span class="placeholder-text">暂无视频</span>
-      </div>
     {/if}
-  {:else}
-    <!-- Image-text mode -->
+  {:else if displayMode === "image"}
     {#if effectiveImageAsset}
       <div class="image-viewer">
         <div class="image-main">
-          {#if filteredAssets.length > 1}
+          {#if filteredImages.length > 1}
             <button class="nav-btn nav-prev" onclick={() => navigateImage(-1)}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
@@ -95,15 +104,15 @@
             src={assetUrl(effectiveImageAsset)}
             alt={effectiveImageAsset}
           />
-          {#if filteredAssets.length > 1}
+          {#if filteredImages.length > 1}
             <button class="nav-btn nav-next" onclick={() => navigateImage(1)}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           {/if}
         </div>
-        {#if filteredAssets.length > 1}
+        {#if filteredImages.length > 1}
           <div class="thumbnail-strip">
-            {#each filteredAssets as asset}
+            {#each filteredImages as asset}
               <button
                 class="thumbnail"
                 class:selected={asset === effectiveImageAsset}
@@ -115,16 +124,22 @@
           </div>
         {/if}
       </div>
-    {:else}
-      <div class="placeholder">
-        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.4">
+    {/if}
+  {:else}
+    <div class="placeholder">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.4">
+        {#if contentType === "short-video"}
+          <path d="M23 7l-7 5 7 5V7z"/>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+        {:else}
           <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
           <circle cx="8.5" cy="8.5" r="1.5"/>
           <polyline points="21 15 16 10 5 21"/>
-        </svg>
-        <span class="placeholder-text">暂无图片</span>
-      </div>
-    {/if}
+        {/if}
+      </svg>
+      <span class="placeholder-text">暂无素材预览</span>
+      <span class="placeholder-hint">从左侧选择素材或等待 AI 生成</span>
+    </div>
   {/if}
 </div>
 
@@ -163,6 +178,12 @@
     font-weight: 500;
     letter-spacing: 0.5px;
     color: var(--text-dim);
+  }
+
+  .placeholder-hint {
+    font-size: 12px;
+    color: var(--text-dim);
+    opacity: 0.6;
   }
 
   /* Image viewer */
@@ -209,6 +230,7 @@
     cursor: pointer;
     transition: all 0.15s;
     padding: 0;
+    box-shadow: var(--shadow-md);
   }
 
   .nav-btn:hover {
@@ -228,13 +250,14 @@
     padding: 8px 12px;
     overflow-x: auto;
     background: var(--bg-secondary, rgba(0, 0, 0, 0.3));
+    border-radius: 0 0 var(--radius-panel) var(--radius-panel);
   }
 
   .thumbnail {
     flex-shrink: 0;
     width: 48px;
     height: 48px;
-    border-radius: 4px;
+    border-radius: var(--radius-element);
     border: 2px solid transparent;
     padding: 0;
     cursor: pointer;
@@ -245,6 +268,7 @@
 
   .thumbnail.selected {
     border-color: var(--spark-red, #FE2C55);
+    box-shadow: 0 0 0 2px var(--spark-red);
   }
 
   .thumbnail:hover:not(.selected) {
