@@ -342,7 +342,7 @@
 
   /* Type-specific backgrounds */
   .track-item.clip {
-    background: color-mix(in srgb, var(--spark-cyan, #25F4EE) 8%, var(--bg-surface, #2a2a3e));
+    background: var(--bg-primary, #0a0a0f);
   }
 
   .track-item.audio {

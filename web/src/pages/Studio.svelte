@@ -183,12 +183,21 @@
     return clip?.id ?? null;
   });
 
-  // Images for ImageLayout
-  let imageFiles = $derived.by(() => {
+  // Images for ImageLayout — split into output (成品) and source (素材)
+  let outputImages = $derived.by(() => {
     return assetFiles
-      .filter(a => /\.(png|jpe?g|webp|gif)$/i.test(a))
+      .filter(a => /\.(png|jpe?g|webp|gif)$/i.test(a) && /output\//i.test(a))
       .map((path, i) => ({ path, order: i }));
   });
+
+  let sourceImages = $derived.by(() => {
+    return assetFiles
+      .filter(a => /\.(png|jpe?g|webp|gif)$/i.test(a) && !/output\//i.test(a))
+      .map((path, i) => ({ path, order: i }));
+  });
+
+  // Combined for backward compat
+  let imageFiles = $derived([...outputImages, ...sourceImages]);
 
   // Copytext (simplified)
   let parsedCopytext = $state<{ title: string; body: string; tags: string[]; topics: string[] } | null>(null);
@@ -718,7 +727,8 @@
           />
         {:else}
           <ImageLayout
-            images={imageFiles}
+            images={outputImages}
+            sourceImages={sourceImages}
             copytext={parsedCopytext}
             {workId}
             onReorder={(order) => handleImageAction("reorder", order)}
