@@ -354,13 +354,31 @@
     --scrollbar: rgba(255,255,255,0.05);
     --selection: rgba(254, 44, 85, 0.15);
     --selected: rgba(254, 44, 85, 0.08);
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.5);
-    --shadow-md: 0 8px 30px rgba(0,0,0,0.5);
-    --shadow-lg: 0 24px 64px rgba(0,0,0,0.6);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.3), 0 1px 2px rgba(0, 0, 0, 0.2);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.45);
+    --shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.25);
+
+    /* Timeline */
+    --track-height-video: 65px;
+    --track-height-audio: 50px;
+    --track-height-subtitle: 28px;
+    --track-header-width: 80px;
+    --timeline-toolbar-height: 40px;
+    --waveform-color: rgba(168, 85, 247, 0.6);
+    --waveform-bg: rgba(168, 85, 247, 0.08);
+    --subtitle-color: rgba(37, 244, 238, 0.15);
+
     --glow: none;
     --card-bg: #161616;
     --card-border: rgba(255, 255, 255, 0.06);
-    --card-radius: 6px;
+    --card-radius: var(--radius-card);
+
+    /* Border radius scale */
+    --radius-panel: 8px;
+    --radius-card: 10px;
+    --radius-element: 12px;
+    --radius-pill: 9999px;
     --card-blur: none;
     --transition-fast: 0.12s ease;
     --transition-normal: 0.25s ease;
@@ -408,13 +426,31 @@
     --info-soft: rgba(37, 99, 235, 0.05);
     --scrollbar: rgba(0,0,0,0.06);
     --selection: rgba(254, 44, 85, 0.12);
-    --shadow-sm: 0 1px 3px rgba(0,0,0,0.04);
-    --shadow-md: 0 8px 24px rgba(0,0,0,0.06);
-    --shadow-lg: 0 20px 60px rgba(0,0,0,0.08);
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.12);
+    --shadow-hover: 0 6px 16px rgba(0, 0, 0, 0.08);
+
+    /* Border radius scale */
+    --radius-panel: 8px;
+    --radius-card: 10px;
+    --radius-element: 12px;
+    --radius-pill: 9999px;
+
+    /* Timeline */
+    --track-height-video: 65px;
+    --track-height-audio: 50px;
+    --track-height-subtitle: 28px;
+    --track-header-width: 80px;
+    --timeline-toolbar-height: 40px;
+    --waveform-color: rgba(168, 85, 247, 0.5);
+    --waveform-bg: rgba(168, 85, 247, 0.06);
+    --subtitle-color: rgba(37, 244, 238, 0.12);
+
     --glow: none;
     --card-bg: #faf8f5;
     --card-border: rgba(0, 0, 0, 0.06);
-    --card-radius: 6px;
+    --card-radius: var(--radius-card);
     --card-blur: none;
     --transition-fast: 0.12s ease;
     --transition-normal: 0.25s ease;
