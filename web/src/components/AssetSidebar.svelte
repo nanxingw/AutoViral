@@ -54,11 +54,20 @@
     return { path, group, stageTag, filename };
   }
 
+  // Output/final assets — shown in a dedicated top section
+  let outputAssets = $derived.by(() => {
+    return assets
+      .filter(p => /output\//i.test(p))
+      .map(p => classifyAsset(p));
+  });
+
   let grouped = $derived.by(() => {
     const map: Record<AssetGroup, ClassifiedAsset[]> = {
       IMAGES: [], CLIPS: [], AUDIO: [], BGM: [], REFERENCE: [],
     };
     for (const p of assets) {
+      // Skip output files — they go in the dedicated section
+      if (/output\//i.test(p)) continue;
       const c = classifyAsset(p);
       map[c.group].push(c);
     }
@@ -79,6 +88,40 @@
 </script>
 
 <div class="asset-sidebar">
+  <!-- Output / Final section -->
+  {#if outputAssets.length > 0}
+    <div class="output-section">
+      <div class="output-header">
+        <span class="output-icon">✅</span>
+        <span class="output-label">成品</span>
+        <span class="output-count">{outputAssets.length}</span>
+      </div>
+      <div class="output-list">
+        {#each outputAssets as item}
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
+          <div
+            class="output-item"
+            class:selected={selectedAsset === item.path}
+            onclick={() => onSelect?.(item.path)}
+            onkeydown={() => {}}
+            title={item.filename}
+          >
+            {#if /\.(mp4|mov|webm)$/i.test(item.filename)}
+              <span class="output-file-icon">🎬</span>
+            {:else if /\.(png|jpe?g|webp|gif)$/i.test(item.filename)}
+              <span class="output-file-icon">🖼</span>
+            {:else if /\.(mp3|wav|aac|m4a|ogg)$/i.test(item.filename)}
+              <span class="output-file-icon">🎵</span>
+            {:else}
+              <span class="output-file-icon">📄</span>
+            {/if}
+            <span class="output-filename">{item.filename}</span>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
   {#each groupOrder as g}
     {@const items = grouped[g]}
     {#if items.length > 0}
@@ -169,6 +212,88 @@
     padding: 0.5rem 0;
     font-size: 0.75rem;
     font-family: var(--font-body, 'DM Sans', sans-serif);
+  }
+
+  /* ── Output / Final section ── */
+  .output-section {
+    margin: 8px;
+    padding: 8px;
+    background: color-mix(in srgb, var(--success, #22c55e) 6%, var(--bg-surface));
+    border: 1px solid color-mix(in srgb, var(--success, #22c55e) 20%, transparent);
+    border-radius: var(--radius-card);
+    margin-bottom: 12px;
+  }
+
+  .output-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid color-mix(in srgb, var(--success, #22c55e) 12%, transparent);
+    margin-bottom: 6px;
+  }
+
+  .output-icon {
+    font-size: 12px;
+    line-height: 1;
+  }
+
+  .output-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--success, #22c55e);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .output-count {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--success, #22c55e);
+    background: color-mix(in srgb, var(--success, #22c55e) 12%, transparent);
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+  }
+
+  .output-list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .output-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 5px 8px;
+    border-radius: var(--radius-element);
+    cursor: pointer;
+    transition: background 0.12s;
+    color: var(--text-muted);
+  }
+
+  .output-item:hover {
+    background: color-mix(in srgb, var(--success, #22c55e) 8%, transparent);
+    color: var(--text);
+  }
+
+  .output-item.selected {
+    background: color-mix(in srgb, var(--success, #22c55e) 12%, transparent);
+    color: var(--text);
+  }
+
+  .output-file-icon {
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+
+  .output-filename {
+    font-size: 11px;
+    font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .group {
