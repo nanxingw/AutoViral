@@ -658,19 +658,30 @@
     pointer-events: none;
   }
 
-  /* ---- Playhead handle (circle on ruler) ---- */
+  /* ---- Playhead handle (triangle + wider hit area on ruler) ---- */
   .playhead-handle {
     position: absolute;
-    top: 6px;
-    width: 12px;
-    height: 12px;
-    border-radius: 50%;
-    background: var(--spark-red, #FE2C55);
-    box-shadow: 0 0 6px rgba(254, 44, 85, 0.4);
-    transform: translateX(-6px);
+    top: 0;
+    width: 24px;
+    height: 24px;
+    transform: translateX(-12px);
     cursor: grab;
     z-index: 31;
     touch-action: none;
+  }
+  /* Visual triangle */
+  .playhead-handle::after {
+    content: "";
+    position: absolute;
+    top: 4px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 0;
+    height: 0;
+    border-left: 6px solid transparent;
+    border-right: 6px solid transparent;
+    border-top: 8px solid var(--spark-red, #FE2C55);
+    filter: drop-shadow(0 0 4px rgba(254, 44, 85, 0.4));
   }
 
   .playhead-handle:active {

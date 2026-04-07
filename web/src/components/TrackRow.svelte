@@ -301,17 +301,17 @@
   .track-items {
     flex: 1;
     position: relative;
-    padding: 4px 2px;
+    padding: 4px 0;
     display: flex;
     align-items: center;
-    gap: 2px;
+    gap: 0;
     overflow: hidden;
   }
 
   .track-item {
     position: relative;
     min-width: 40px;
-    border-radius: var(--radius-element, 12px);
+    border-radius: 4px;
     cursor: pointer;
     display: flex;
     align-items: flex-end;

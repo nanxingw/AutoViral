@@ -120,7 +120,7 @@
                         </div>
                       </div>
                     {/if}
-                    <span class="stage-tag">{item.stageTag}</span>
+                    <span class="stage-tag" class:stage-tag-output={item.stageTag === '成品'}>{item.stageTag}</span>
                   </div>
                 {/each}
               </div>
@@ -137,7 +137,7 @@
                   >
                     <span class="item-icon">{g === "BGM" ? "🎵" : g === "AUDIO" ? "🎙" : "📄"}</span>
                     <span class="item-name">{item.filename}</span>
-                    <span class="stage-tag">{item.stageTag}</span>
+                    <span class="stage-tag" class:stage-tag-output={item.stageTag === '成品'}>{item.stageTag}</span>
                   </div>
                 {/each}
               </div>
@@ -321,6 +321,14 @@
   .thumb-item:hover .stage-tag,
   .list-item:hover .stage-tag {
     opacity: 1;
+  }
+
+  /* Always show "成品" tags */
+  .stage-tag-output {
+    opacity: 1 !important;
+    background: rgba(34, 197, 94, 0.85);
+    color: #fff;
+    font-weight: 700;
   }
 
   /* List items */
