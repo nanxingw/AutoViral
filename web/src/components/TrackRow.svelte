@@ -74,9 +74,10 @@
     return Math.max(40, (item.duration / totalDuration) * containerWidth);
   }
 
-  // --- Canvas rendering ---
+  // --- Canvas rendering (guarded to prevent infinite re-render loops) ---
+  let renderedKeys = new Set<string>();
+
   $effect(() => {
-    // Re-run when items or trackItemsEl change
     const _items = items;
     const _el = trackItemsEl;
     if (!_el) return;
@@ -91,6 +92,11 @@
       const w = itemWidthPx(item);
       const h = trackHeight - 8;
       if (w <= 0 || h <= 0) continue;
+
+      // Build a unique key from item id + dimensions to avoid re-rendering
+      const key = `${item.id}:${Math.round(w)}x${Math.round(h)}`;
+      if (renderedKeys.has(key)) continue;
+      renderedKeys.add(key);
 
       if (item.type === "clip" && item.thumbnail) {
         renderFilmstrip({
