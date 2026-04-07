@@ -199,8 +199,39 @@
   // Combined for backward compat
   let imageFiles = $derived([...outputImages, ...sourceImages]);
 
-  // Copytext (simplified)
+  // Copytext — parsed from publish-text.md asset
   let parsedCopytext = $state<{ title: string; body: string; tags: string[]; topics: string[] } | null>(null);
+
+  // Watch for publish-text.md in assets and fetch+parse it
+  let publishTextPath = $derived(assetFiles.find(a => /publish-text/i.test(a)));
+
+  $effect(() => {
+    const path = publishTextPath;
+    if (!path) { parsedCopytext = null; return; }
+
+    fetch(assetUrl(path))
+      .then(r => r.ok ? r.text() : "")
+      .then(md => {
+        if (!md) { parsedCopytext = null; return; }
+        // Parse the markdown — extract first platform section
+        const titleMatch = md.match(/\*\*标题:\*\*\s*(.+)/);
+        const bodyMatch = md.match(/\*\*正文:\*\*\s*\n([\s\S]*?)(?=\n-\s*\*\*|---)/);
+        const tagsMatch = md.match(/\*\*标签:\*\*\s*(.+)/);
+        const topicsMatch = md.match(/\*\*话题:\*\*\s*(.+)/);
+
+        const title = titleMatch?.[1]?.trim() ?? "";
+        const body = bodyMatch?.[1]?.trim() ?? "";
+        const tags = (tagsMatch?.[1] ?? "").match(/#[\w\u4e00-\u9fff]+/g) ?? [];
+        const topics = (topicsMatch?.[1] ?? "").match(/#[\w\u4e00-\u9fff]+/g) ?? [];
+
+        if (title || body) {
+          parsedCopytext = { title, body, tags, topics };
+        } else {
+          parsedCopytext = null;
+        }
+      })
+      .catch(() => { parsedCopytext = null; });
+  });
 
   // Auto-advance to next step when current step completes
   // Auto-advance: immediately start next step when current one completes
@@ -725,6 +756,20 @@
             onSeek={(t) => currentTime = t}
             onTrim={handleTimelineTrim}
           />
+          <!-- Copytext for short-video mode -->
+          {#if parsedCopytext}
+            <div class="copytext-bar">
+              <div class="copytext-bar-title">{parsedCopytext.title}</div>
+              <div class="copytext-bar-tags">
+                {#each parsedCopytext.topics as topic}
+                  <span class="copytext-pill copytext-pill--topic">{topic}</span>
+                {/each}
+                {#each parsedCopytext.tags as tag}
+                  <span class="copytext-pill copytext-pill--tag">{tag}</span>
+                {/each}
+              </div>
+            </div>
+          {/if}
         {:else}
           <ImageLayout
             images={outputImages}
@@ -1061,6 +1106,57 @@
 
   .step-clickable {
     transition: all var(--transition-fast);
+  }
+
+  /* ── Copytext bar (short-video mode) ── */
+  .copytext-bar {
+    flex-shrink: 0;
+    padding: 8px 16px;
+    background: var(--bg-elevated);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  .copytext-bar-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    flex-shrink: 0;
+    max-width: 300px;
+  }
+
+  .copytext-bar-tags {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    overflow-x: auto;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .copytext-pill {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    white-space: nowrap;
+  }
+
+  .copytext-pill--topic {
+    background: rgba(37, 244, 238, 0.1);
+    color: var(--spark-cyan, #25F4EE);
+  }
+
+  .copytext-pill--tag {
+    background: rgba(254, 44, 85, 0.08);
+    color: var(--spark-red, #FE2C55);
   }
 
 </style>
