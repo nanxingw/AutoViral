@@ -261,6 +261,18 @@
     if (text) handleChatSend({ text, attachments: [] });
   }
 
+  function handleTimelineTrim(clipId: string, side: "left" | "right", deltaSec: number) {
+    const clip = videoClips.find(c => c.id === clipId);
+    if (!clip) return;
+    const filename = clip.path.split('/').pop() ?? clip.path;
+    const action = side === "left" ? "开头" : "结尾";
+    const direction = deltaSec > 0 ? "延长" : "缩短";
+    handleChatSend({
+      text: `请调整视频片段 ${filename} 的${action}，${direction} ${Math.abs(deltaSec).toFixed(1)} 秒`,
+      attachments: [],
+    });
+  }
+
   function handleImageAction(type: string, payload: any) {
     // "select" = preview in PreviewArea, not a chat command
     if (type === "select") {
@@ -702,6 +714,7 @@
             onReorder={(order) => handleTimelineAction("reorder", order)}
             onAction={(action) => handleTimelineAction(action.type, action)}
             onSeek={(t) => currentTime = t}
+            onTrim={handleTimelineTrim}
           />
         {:else}
           <ImageLayout
