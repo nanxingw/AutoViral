@@ -46,8 +46,8 @@ function runCmd(cmd: string, args: string[], timeoutMs = 30_000): Promise<string
 const NO_AUDIO: AudioAnalysis = {
   hasAudio: false,
   hasMeaningfulAudio: false,
-  avgVolume: -Infinity,
-  peakVolume: -Infinity,
+  avgVolume: -999,
+  peakVolume: -999,
   silenceRatio: 1.0,
 };
 
@@ -83,8 +83,8 @@ export async function analyzeAudio(filePath: string): Promise<AudioAnalysis> {
   const meanMatch = volOutput.match(/mean_volume:\s*([-\d.]+)\s*dB/);
   const maxMatch = volOutput.match(/max_volume:\s*([-\d.]+)\s*dB/);
 
-  const avgVolume = meanMatch ? parseFloat(meanMatch[1]) : -Infinity;
-  const peakVolume = maxMatch ? parseFloat(maxMatch[1]) : -Infinity;
+  const avgVolume = meanMatch ? parseFloat(meanMatch[1]) : -999;
+  const peakVolume = maxMatch ? parseFloat(maxMatch[1]) : -999;
 
   // ── Step 3: Silence detection ───────────────────────────────────────────
   const durationOutput = await runCmd("ffprobe", [
