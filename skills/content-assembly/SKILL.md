@@ -412,47 +412,26 @@ ffmpeg -i concat.mp4 -vf "ass=subs.ass" -c:v libx264 -crf 23 -c:a copy -y subtit
 
 > **进阶字幕样式** — 需要花字、动画字幕或自动语音转字幕等高级功能，参考 `modules/subtitle-aesthetics.md`。
 
-#### 第4步：添加背景音乐
+#### 第4步：智能音频混音
 
-**音乐获取规则：指定知名歌曲时**
+> 详细决策流程和参数参考 `modules/audio-mixing.md`
 
-当用户指定了一首具体歌曲名时，必须遵循以下规则：
+**不再简单替换音频。** 对每个 clip 先调用 `POST /api/audio/analyze` 分析音频属性，结合你自己的生成上下文（该 clip 是否被要求生成人声），决定混音策略。
 
-1. **必须使用官方音源**：从官方音乐平台（YouTube Music、网易云音乐、QQ音乐等）获取，不能使用真人翻唱、live版、cover版或任何非官方录音
-2. **直接从高潮部分开始**：不要从歌曲开头播放。用 ffmpeg 裁切到副歌/高潮段落，跳过前奏和主歌
-3. **高潮定位方法**：
-   - 大多数流行歌曲高潮在 50-70% 位置（如4分钟的歌，高潮大约在 2:00-2:48）
-   - 用 `ffmpeg -i song.mp3 -ss 120 -to 150 -c copy chorus.mp3` 裁切高潮段
-   - 如果不确定高潮位置，搜索"[歌名] 高潮 时间点"或听几个位置找到能量最高的段落
+然后调用 `POST /api/audio/mix` 执行多轨混音，支持：
+- 多轨叠加（原始音频 + BGM + 配音 + 音效）
+- 自动 ducking（人声响时 BGM 自动降低）
+- 逐轨音量、延迟、淡入淡出控制
+
+**音乐获取规则不变：** 当用户指定了具体歌曲名时，仍需从官方音源获取，裁切高潮部分。获取方式参考原有流程。
 
 ```bash
-# 下载官方音源（用 yt-dlp 从官方MV提取音频）
+# 下载官方音源
 yt-dlp -x --audio-format mp3 --audio-quality 0 -o "song.%(ext)s" "OFFICIAL_MV_URL"
 
-# 裁切高潮部分（示例：从2:00开始取30秒）
+# 裁切高潮部分
 ffmpeg -i song.mp3 -ss 120 -to 150 -c copy -y chorus.mp3
 ```
-
-```bash
-# 简单的音乐叠加，带音量控制
-ffmpeg -i subtitled.mp4 -i music.mp3 \
-  -filter_complex "[1:a]volume=0.3,afade=t=in:st=0:d=1,afade=t=out:st=22:d=2[music];[0:a][music]amix=inputs=2:duration=first[a]" \
-  -map 0:v -map "[a]" -c:v copy -c:a aac -y final.mp4
-```
-
-**如果输入视频没有音频轨：**
-```bash
-ffmpeg -i subtitled.mp4 -i music.mp3 \
-  -filter_complex "[1:a]volume=0.3,afade=t=in:st=0:d=1,afade=t=out:st=22:d=2[a]" \
-  -map 0:v -map "[a]" -c:v copy -c:a aac -shortest -y final.mp4
-```
-
-**音乐音量参考：**
-- 仅背景音乐：`volume=0.3` 到 `volume=0.5`
-- 音乐+旁白：`volume=0.15` 到 `volume=0.25`
-- 音乐为主音频：`volume=0.7` 到 `volume=1.0`
-- 淡入时长：1-2 秒
-- 淡出时长：结尾 2-3 秒
 
 #### 第4.5步：调色（可选但推荐）
 
