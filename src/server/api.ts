@@ -419,6 +419,8 @@ apiRoutes.post("/api/generate/video", async (c) => {
   }
 });
 
+const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
+
 // POST /api/generate/image/batch — generate multiple candidate frames for a shot
 apiRoutes.post("/api/generate/image/batch", async (c) => {
   const body = await c.req.json();
@@ -431,43 +433,51 @@ apiRoutes.post("/api/generate/image/batch", async (c) => {
   if (!workId || !prompt || !shotId) {
     return c.json({ success: false, error: "Missing required fields (workId, prompt, shotId)", code: "INVALID_PARAMS" }, 400);
   }
+  if (!SAFE_ID.test(workId) || !SAFE_ID.test(shotId)) {
+    return c.json({ success: false, error: "Invalid workId or shotId", code: "INVALID_PARAMS" }, 400);
+  }
+  const n = Math.min(Math.max(1, Number(count) || 4), 8);
   const provider = providerName ? getProvider(providerName) : getDefaultProvider("image");
   if (!provider) {
     return c.json({ success: false, error: "No image provider available", code: "INVALID_PARAMS" }, 400);
   }
 
-  const candidatesDir = join(dataDir, "works", workId, "assets", "frames", "candidates", shotId);
-  await mkdir(candidatesDir, { recursive: true });
+  try {
+    const candidatesDir = join(dataDir, "works", workId, "assets", "frames", "candidates", shotId);
+    await mkdir(candidatesDir, { recursive: true });
 
-  // Generate `count` random seeds and fire all requests concurrently
-  const seeds = Array.from({ length: count }, () => Math.floor(Math.random() * 2_147_483_647));
-  const results = await Promise.allSettled(
-    seeds.map((seed) =>
-      provider.generateImage({
-        prompt, width, height, aspectRatio, workId, seed,
-        filename: `frames/candidates/${shotId}/seed-${seed}.png`,
-      }),
-    ),
-  );
+    // Generate `n` random seeds and fire all requests concurrently
+    const seeds = Array.from({ length: n }, () => Math.floor(Math.random() * 2_147_483_647));
+    const results = await Promise.allSettled(
+      seeds.map((seed) =>
+        provider.generateImage({
+          prompt, width, height, aspectRatio, workId, seed,
+          filename: `frames/candidates/${shotId}/seed-${seed}.png`,
+        }),
+      ),
+    );
 
-  const candidates: { path: string; seed: number; previewUrl: string }[] = [];
-  for (let i = 0; i < results.length; i++) {
-    const r = results[i];
-    if (r.status === "fulfilled" && r.value.success) {
-      candidates.push({
-        path: r.value.assetPath ?? `frames/candidates/${shotId}/seed-${seeds[i]}.png`,
-        seed: seeds[i],
-        previewUrl: r.value.previewUrl ?? `/api/works/${workId}/assets/frames/candidates/${shotId}/seed-${seeds[i]}.png`,
-      });
+    const candidates: { path: string; seed: number; previewUrl: string }[] = [];
+    for (let i = 0; i < results.length; i++) {
+      const r = results[i];
+      if (r.status === "fulfilled" && r.value.success) {
+        candidates.push({
+          path: r.value.assetPath ?? `frames/candidates/${shotId}/seed-${seeds[i]}.png`,
+          seed: seeds[i],
+          previewUrl: r.value.previewUrl ?? `/api/works/${workId}/assets/frames/candidates/${shotId}/seed-${seeds[i]}.png`,
+        });
+      }
+      // silently skip failed candidates
     }
-    // silently skip failed candidates
-  }
 
-  if (candidates.length === 0) {
-    return c.json({ success: false, error: "All candidate generations failed", code: "API_ERROR" }, 500);
-  }
+    if (candidates.length === 0) {
+      return c.json({ success: false, error: "All candidate generations failed", code: "API_ERROR" }, 500);
+    }
 
-  return c.json({ success: true, shotId, candidates });
+    return c.json({ success: true, shotId, candidates });
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+  }
 });
 
 // POST /api/frames/select — pick a winning frame from candidates
@@ -476,6 +486,9 @@ apiRoutes.post("/api/frames/select", async (c) => {
   const { workId, shotId, selectedSeed } = body;
   if (!workId || !shotId || selectedSeed == null) {
     return c.json({ success: false, error: "Missing required fields (workId, shotId, selectedSeed)", code: "INVALID_PARAMS" }, 400);
+  }
+  if (!SAFE_ID.test(workId) || !SAFE_ID.test(shotId)) {
+    return c.json({ success: false, error: "Invalid workId or shotId", code: "INVALID_PARAMS" }, 400);
   }
 
   const candidatesDir = join(dataDir, "works", workId, "assets", "frames", "candidates", shotId);
@@ -487,35 +500,39 @@ apiRoutes.post("/api/frames/select", async (c) => {
     return c.json({ success: false, error: "Candidates directory not found", code: "INVALID_PARAMS" }, 404);
   }
 
-  // Strip any previous _rejected suffixes to support re-selection
-  for (const f of files) {
-    if (f.includes("_rejected")) {
-      const restored = f.replace("_rejected", "");
-      await rename(join(candidatesDir, f), join(candidatesDir, restored));
+  try {
+    // Strip any previous _rejected suffixes to support re-selection
+    for (const f of files) {
+      if (f.includes("_rejected")) {
+        const restored = f.replaceAll("_rejected", "");
+        await rename(join(candidatesDir, f), join(candidatesDir, restored));
+      }
     }
+
+    // Re-read after rename
+    files = await readdir(candidatesDir);
+
+    const selectedFile = files.find((f) => f.includes(`seed-${selectedSeed}`));
+    if (!selectedFile) {
+      return c.json({ success: false, error: `No candidate found for seed ${selectedSeed}`, code: "INVALID_PARAMS" }, 404);
+    }
+
+    // Copy selected frame to the final location
+    const framePath = `frames/frame-${shotId}.png`;
+    await copyFile(join(candidatesDir, selectedFile), join(framesDir, `frame-${shotId}.png`));
+
+    // Rename non-selected candidates with _rejected suffix
+    for (const f of files) {
+      if (f === selectedFile) continue;
+      const ext = extname(f);
+      const base = f.slice(0, -ext.length);
+      await rename(join(candidatesDir, f), join(candidatesDir, `${base}_rejected${ext}`));
+    }
+
+    return c.json({ success: true, framePath });
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
   }
-
-  // Re-read after rename
-  files = await readdir(candidatesDir);
-
-  const selectedFile = files.find((f) => f.includes(`seed-${selectedSeed}`));
-  if (!selectedFile) {
-    return c.json({ success: false, error: `No candidate found for seed ${selectedSeed}`, code: "INVALID_PARAMS" }, 404);
-  }
-
-  // Copy selected frame to the final location
-  const framePath = `frames/frame-${shotId}.png`;
-  await copyFile(join(candidatesDir, selectedFile), join(framesDir, `frame-${shotId}.png`));
-
-  // Rename non-selected candidates with _rejected suffix
-  for (const f of files) {
-    if (f === selectedFile) continue;
-    const ext = extname(f);
-    const base = f.slice(0, -ext.length);
-    await rename(join(candidatesDir, f), join(candidatesDir, `${base}_rejected${ext}`));
-  }
-
-  return c.json({ success: true, framePath });
 });
 
 // GET /api/generate/providers
