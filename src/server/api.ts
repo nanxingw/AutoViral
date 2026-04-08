@@ -22,7 +22,7 @@ import { syncStepConversation } from "../memory-sync.js";
 import { log, readLogs } from "../logger.js";
 import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } from "../test-runner.js";
 import { evaluateWork } from "../test-evaluator.js";
-import { analyzeAudio } from "../audio-tools.js";
+import { analyzeAudio, mixAudioTracks } from "../audio-tools.js";
 
 export const apiRoutes = new Hono();
 
@@ -550,6 +550,58 @@ apiRoutes.post("/api/audio/analyze", async (c) => {
     const fullPath = join(dataDir, "works", workId, assetPath);
     const analysis = await analyzeAudio(fullPath);
     return c.json({ success: true, ...analysis });
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+  }
+});
+
+// POST /api/audio/mix — multi-track audio mixing with ducking
+apiRoutes.post("/api/audio/mix", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { workId, videoPath, tracks, outputFilename } = body;
+
+    // Validate required fields
+    if (!workId || !videoPath || !tracks || !outputFilename) {
+      return c.json(
+        { success: false, error: "Missing required fields (workId, videoPath, tracks, outputFilename)", code: "INVALID_PARAMS" },
+        400,
+      );
+    }
+    if (!SAFE_ID.test(workId)) {
+      return c.json({ success: false, error: "Invalid workId", code: "INVALID_PARAMS" }, 400);
+    }
+    if (!Array.isArray(tracks) || tracks.length === 0) {
+      return c.json(
+        { success: false, error: "tracks must be a non-empty array", code: "INVALID_PARAMS" },
+        400,
+      );
+    }
+
+    // Resolve paths
+    const workBase = join(dataDir, "works", workId);
+    const fullVideoPath = join(workBase, videoPath);
+    const outputDir = join(workBase, "output");
+    await mkdir(outputDir, { recursive: true });
+    const fullOutputPath = join(outputDir, outputFilename);
+
+    // Resolve each track source to an absolute path under the work directory
+    const resolvedTracks = tracks.map((t: any) => ({
+      ...t,
+      source: join(workBase, t.source),
+    }));
+
+    await mixAudioTracks({
+      videoPath: fullVideoPath,
+      tracks: resolvedTracks,
+      outputPath: fullOutputPath,
+    });
+
+    return c.json({
+      success: true,
+      assetPath: `output/${outputFilename}`,
+      previewUrl: `/api/works/${workId}/assets/output/${outputFilename}`,
+    });
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
   }
