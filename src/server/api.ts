@@ -22,6 +22,7 @@ import { syncStepConversation } from "../memory-sync.js";
 import { log, readLogs } from "../logger.js";
 import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } from "../test-runner.js";
 import { evaluateWork } from "../test-evaluator.js";
+import { analyzeAudio } from "../audio-tools.js";
 
 export const apiRoutes = new Hono();
 
@@ -530,6 +531,25 @@ apiRoutes.post("/api/frames/select", async (c) => {
     }
 
     return c.json({ success: true, framePath });
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+  }
+});
+
+// POST /api/audio/analyze — detect audio properties of a clip
+apiRoutes.post("/api/audio/analyze", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { workId, assetPath } = body;
+    if (!workId || !assetPath) {
+      return c.json({ success: false, error: "Missing required fields (workId, assetPath)", code: "INVALID_PARAMS" }, 400);
+    }
+    if (!SAFE_ID.test(workId)) {
+      return c.json({ success: false, error: "Invalid workId", code: "INVALID_PARAMS" }, 400);
+    }
+    const fullPath = join(dataDir, "works", workId, assetPath);
+    const analysis = await analyzeAudio(fullPath);
+    return c.json({ success: true, ...analysis });
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
   }
