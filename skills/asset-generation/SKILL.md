@@ -500,27 +500,17 @@ python3 skills/asset-generation/scripts/poster_render.py \
 
 **2. 等待用户确认。**
 
-**3. 生成首帧图片：**
-```bash
-# 推荐：使用 OpenRouter (Gemini 3.1) 生成高清首帧
-python3 skills/asset-generation/scripts/openrouter_generate.py \
-  --prompt "{优化后的提示词}" \
-  --ar 9:16 --size 2K \
-  --output {workDir}/assets/frames/frame-{NN}.png
+**3. 首帧抽卡 — 批量生成候选首帧：**
 
-# 如需保持角色一致性，加 --seed 和 --ref-image
-python3 skills/asset-generation/scripts/openrouter_generate.py \
-  --prompt "{提示词}" \
-  --ar 9:16 --size 2K --seed 42 \
-  --ref-image {workDir}/assets/frames/frame-01.png \
-  --output {workDir}/assets/frames/frame-{NN}.png
-```
+> 详细流程参考 `modules/frame-gacha.md`
+
+调用 `POST /api/generate/image/batch` 为该镜头生成 4 张候选首帧，展示给用户选择。用户选定后调用 `POST /api/frames/select` 锁定首帧。
 
 **4. 报告结果并展示预览：**
 ```
-首帧生成完成 ✓
-预览: http://localhost:3271/api/works/{workId}/assets/frames/frame-{NN}.png
-满意吗？如需调整请告诉我，满意则继续生成视频片段。
+首帧已锁定 ✓
+预览: http://localhost:3271/api/works/{workId}/assets/frames/frame-{shotId}.png
+继续生成视频片段。
 ```
 
 **5. 用户满意后，用首帧生成视频片段：**
