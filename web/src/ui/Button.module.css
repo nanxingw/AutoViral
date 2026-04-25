@@ -1,0 +1,24 @@
+.btn {
+  padding: 7px 14px;
+  border-radius: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-0);
+  color: var(--text);
+  cursor: pointer;
+  letter-spacing: -0.005em;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+.btn:hover { background: var(--surface-2); }
+.primary {
+  background: linear-gradient(180deg, var(--accent-hi), var(--accent));
+  color: var(--accent-fg);
+  border-color: var(--accent-hi);
+  box-shadow: 0 4px 16px var(--accent-glow);
+}
+.ghost { background: transparent; }
