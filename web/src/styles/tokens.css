@@ -1,0 +1,98 @@
+/* tokens.css — design tokens, aligned with autoviral design v3 */
+
+:root {
+  --accent: #a8c5d6;
+  --accent-hi: #d6e4ee;
+  --accent-lo: #5a7a8c;
+  --accent-glow: rgba(168, 197, 214, 0.3);
+  --accent-fg: #0a0b0f;
+
+  --bg: #0a0b0f;
+  --bg-grad:
+    radial-gradient(1400px 900px at 85% -10%, rgba(120, 160, 200, 0.05), transparent 60%),
+    radial-gradient(1000px 700px at -10% 110%, rgba(140, 110, 180, 0.04), transparent 55%),
+    #0a0b0f;
+
+  --surface-0: rgba(20, 22, 28, 0.55);
+  --surface-1: rgba(26, 28, 34, 0.7);
+  --surface-2: rgba(36, 38, 46, 0.78);
+  --glass-border: rgba(255, 255, 255, 0.07);
+  --glass-hi: rgba(255, 255, 255, 0.12);
+  --divider: rgba(255, 255, 255, 0.05);
+
+  --text: #ecedf0;
+  --text-dim: #9a9ea6;
+  --text-dimmer: #62656c;
+  --text-muted: #42454b;
+
+  --status-running: #7dd3fc;
+  --status-done: #86efac;
+  --status-pending: #6b6e76;
+  --status-error: #f97066;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+}
+
+[data-theme="light"] {
+  --accent: #2a3a4a;
+  --accent-hi: #0f1822;
+  --accent-lo: #5a6a7c;
+  --accent-glow: rgba(42, 58, 74, 0.08);
+  --accent-fg: #fafaf7;
+
+  --bg: #fafaf7;
+  --bg-grad:
+    radial-gradient(1200px 900px at 80% -5%, rgba(100, 130, 160, 0.05), transparent 60%),
+    radial-gradient(1000px 800px at -10% 110%, rgba(180, 170, 200, 0.04), transparent 55%),
+    #fafaf7;
+
+  --surface-0: rgba(255, 255, 255, 0.6);
+  --surface-1: rgba(255, 255, 255, 0.78);
+  --surface-2: rgba(246, 246, 242, 0.88);
+  --glass-border: rgba(15, 24, 34, 0.08);
+  --glass-hi: rgba(15, 24, 34, 0.1);
+  --divider: rgba(15, 24, 34, 0.06);
+
+  --text: #0f1822;
+  --text-dim: #545c66;
+  --text-dimmer: #8c929a;
+  --text-muted: #b8bcc2;
+
+  --status-running: #0369a1;
+  --status-done: #15803d;
+  --status-pending: #9ca3af;
+  --status-error: #dc2626;
+}
+
+/* Accent variants — opt-in via [data-accent] */
+[data-accent="violet"] {
+  --accent: #c084fc;
+  --accent-hi: #e4c5ff;
+  --accent-lo: #7c3aed;
+  --accent-glow: rgba(192, 132, 252, 0.4);
+  --accent-fg: #1a1022;
+}
+[data-accent="cyan"] {
+  --accent: #7dd3fc;
+  --accent-hi: #bae6fd;
+  --accent-lo: #0284c7;
+  --accent-glow: rgba(125, 211, 252, 0.4);
+  --accent-fg: #022035;
+}
+[data-accent="coral"] {
+  --accent: #ff7a5c;
+  --accent-hi: #ffb199;
+  --accent-lo: #c2410c;
+  --accent-glow: rgba(255, 122, 92, 0.4);
+  --accent-fg: #2a0e05;
+}
+[data-accent="lime"] {
+  --accent: #bef264;
+  --accent-hi: #d9f99d;
+  --accent-lo: #65a30d;
+  --accent-glow: rgba(190, 242, 100, 0.4);
+  --accent-fg: #1a2005;
+}
