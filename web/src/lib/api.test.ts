@@ -2,13 +2,11 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { apiFetch, ApiError } from "./api";
 
 describe("apiFetch", () => {
-  const originalFetch = global.fetch;
-
   beforeEach(() => {
-    global.fetch = vi.fn();
+    vi.stubGlobal("fetch", vi.fn());
   });
   afterEach(() => {
-    global.fetch = originalFetch;
+    vi.unstubAllGlobals();
   });
 
   it("returns parsed JSON on 200", async () => {
