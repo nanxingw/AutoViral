@@ -1,0 +1,21 @@
+.row { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 14px; margin-bottom: 18px; }
+.panel { padding: 20px; border: 1px solid var(--glass-border); background: var(--surface-1); border-radius: var(--radius-lg); }
+.h3 {
+  margin: 0 0 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+.h3 em { font-family: "Instrument Serif", serif; font-style: italic; color: var(--text); font-size: 15px; }
+.bars { display: flex; flex-direction: column; gap: 8px; }
+.barRow { display: grid; grid-template-columns: 36px 1fr 36px; gap: 10px; align-items: center; font-family: "JetBrains Mono", monospace; font-size: 11px; }
+.lbl { color: var(--text-dim); }
+.track { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.fill { height: 100%; background: linear-gradient(90deg, var(--accent-lo), var(--accent)); border-radius: 3px; }
+.pct { color: var(--text); text-align: right; }
+.legend { display: flex; flex-direction: column; gap: 8px; }
+.legendRow { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.swatch { width: 10px; height: 10px; border-radius: 2px; }
