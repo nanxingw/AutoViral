@@ -23,7 +23,9 @@ describe("apiFetch", () => {
     (global.fetch as any).mockResolvedValue(
       new Response(JSON.stringify({ error: "bad" }), { status: 400, headers: { "content-type": "application/json" } }),
     );
-    await expect(apiFetch("/api/works")).rejects.toMatchObject({
+    const promise = apiFetch("/api/works");
+    await expect(promise).rejects.toBeInstanceOf(ApiError);
+    await expect(promise).rejects.toMatchObject({
       name: "ApiError",
       status: 400,
     });
