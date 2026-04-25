@@ -46,4 +46,22 @@ describe("ReconnectingWS", () => {
     ws.dispose();
     vi.useRealTimers();
   });
+
+  it("resets backoff after successful open", async () => {
+    vi.useFakeTimers();
+    const ws = new ReconnectingWS("ws://x", { backoffMs: 50, maxBackoffMs: 800 });
+
+    await Promise.resolve(); // first open
+    // simulate close → reconnect → open → close again
+    MockWS.instances[0].close();
+    vi.advanceTimersByTime(60); // 50ms backoff first wait
+    await Promise.resolve(); // open second instance
+    // After successful open, backoff should reset to 50; close again and verify next reconnect uses ~50ms
+    MockWS.instances[1].close();
+    vi.advanceTimersByTime(60); // if backoff reset, this should fire; if it grew to 100ms, it would not
+    expect(MockWS.instances.length).toBe(3);
+
+    ws.dispose();
+    vi.useRealTimers();
+  });
 });

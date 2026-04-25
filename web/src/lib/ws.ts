@@ -10,6 +10,7 @@ export class ReconnectingWS<T = string> {
   private buffer: string[] = [];
   private listeners = new Set<Listener<T>>();
   private disposed = false;
+  private readonly initialBackoff: number;
   private backoff: number;
   private readonly maxBackoff: number;
 
@@ -17,16 +18,19 @@ export class ReconnectingWS<T = string> {
     private readonly url: string,
     opts: ReconnectingWSOptions = {},
   ) {
-    this.backoff = opts.backoffMs ?? 500;
+    this.initialBackoff = opts.backoffMs ?? 500;
+    this.backoff = this.initialBackoff;
     this.maxBackoff = opts.maxBackoffMs ?? 8000;
     this.connect();
   }
 
-  private connect() {
+  private connect(): void {
     if (this.disposed) return;
     const sock = new WebSocket(this.url);
     this.socket = sock;
     sock.addEventListener("open", () => {
+      // Successful connection — reset backoff so the next failure starts fresh
+      this.backoff = this.initialBackoff;
       while (this.buffer.length) sock.send(this.buffer.shift()!);
     });
     sock.addEventListener("message", (e: MessageEvent) => {
@@ -38,20 +42,24 @@ export class ReconnectingWS<T = string> {
       setTimeout(() => this.connect(), this.backoff);
       this.backoff = Math.min(this.backoff * 2, this.maxBackoff);
     });
+    // error → close cascade is intentional: a connect-error storm should back off,
+    // and the close handler is the single place backoff grows.
     sock.addEventListener("error", () => sock.close());
   }
 
-  send(data: string) {
-    if (this.socket && this.socket.readyState === 1) this.socket.send(data);
+  send(data: string): void {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) this.socket.send(data);
     else this.buffer.push(data);
   }
 
-  on(fn: Listener<T>) {
+  on(fn: Listener<T>): () => void {
     this.listeners.add(fn);
-    return () => this.listeners.delete(fn);
+    return () => {
+      this.listeners.delete(fn);
+    };
   }
 
-  dispose() {
+  dispose(): void {
     this.disposed = true;
     this.socket?.close();
     this.listeners.clear();

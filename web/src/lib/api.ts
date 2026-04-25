@@ -26,14 +26,14 @@ function buildUrl(path: string, query?: ApiOptions["query"]): string {
 
 export async function apiFetch<T = unknown>(path: string, opts: ApiOptions = {}): Promise<T> {
   const { body, query, headers, ...rest } = opts;
-  const init: RequestInit = {
-    ...rest,
-    headers: {
-      "content-type": body ? "application/json" : "",
-      ...(headers as Record<string, string> | undefined),
-    },
-  };
-  if (body !== undefined) init.body = JSON.stringify(body);
+  const finalHeaders: Record<string, string> = { ...(headers as Record<string, string> | undefined) };
+  const init: RequestInit = { ...rest, headers: finalHeaders };
+  if (body !== undefined) {
+    if (!finalHeaders["content-type"] && !finalHeaders["Content-Type"]) {
+      finalHeaders["content-type"] = "application/json";
+    }
+    init.body = JSON.stringify(body);
+  }
 
   const res = await fetch(buildUrl(path, query), init);
   const ct = res.headers.get("content-type") ?? "";

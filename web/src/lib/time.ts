@@ -1,5 +1,6 @@
 export function secToTimecode(sec: number): string {
-  const m = Math.floor(sec / 60);
-  const s = sec % 60;
+  const cs = Math.round(sec * 100);
+  const m = Math.floor(cs / 6000);
+  const s = (cs % 6000) / 100;
   return `${String(m).padStart(2, "0")}:${s.toFixed(2).padStart(5, "0")}`;
 }

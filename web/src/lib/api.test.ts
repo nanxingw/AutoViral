@@ -33,4 +33,36 @@ describe("apiFetch", () => {
     (global.fetch as any).mockResolvedValue(new Response("plain", { status: 200 }));
     expect(await apiFetch<string>("/api/x")).toBe("plain");
   });
+
+  it("does NOT set content-type header when there is no body", async () => {
+    let captured: HeadersInit | undefined;
+    (global.fetch as any).mockImplementation((_url: string, init: RequestInit) => {
+      captured = init.headers;
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    await apiFetch("/api/x");
+    const ct = new Headers(captured ?? {}).get("content-type");
+    expect(ct).toBeNull();
+  });
+
+  it("sets content-type=application/json when body is provided", async () => {
+    let captured: HeadersInit | undefined;
+    (global.fetch as any).mockImplementation((_url: string, init: RequestInit) => {
+      captured = init.headers;
+      return Promise.resolve(new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } }));
+    });
+    await apiFetch("/api/x", { method: "POST", body: { a: 1 } });
+    const ct = new Headers(captured ?? {}).get("content-type");
+    expect(ct).toBe("application/json");
+  });
+
+  it("appends defined query params and omits undefined", async () => {
+    let url = "";
+    (global.fetch as any).mockImplementation((u: string) => {
+      url = u;
+      return Promise.resolve(new Response("ok", { status: 200 }));
+    });
+    await apiFetch("/api/x", { query: { a: 1, b: undefined, c: "z", d: false } });
+    expect(url).toBe("/api/x?a=1&c=z&d=false");
+  });
 });
