@@ -16,3 +16,6 @@ docs/superpowers/
 ..bfg-report/
 .superpowers/
 __pycache__/
+test-results/
+playwright-report/
+playwright/.cache/
