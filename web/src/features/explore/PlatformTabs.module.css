@@ -1,0 +1,27 @@
+.tabs { display: flex; gap: 8px; margin-bottom: 24px; }
+.tab {
+  padding: 8px 16px;
+  border-radius: 9px;
+  font-size: 12px;
+  cursor: pointer;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-0);
+  color: var(--text-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font: inherit;
+}
+.tab[data-active="true"] {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--glass-hi);
+  box-shadow: 0 0 0 1px var(--glass-hi);
+}
+.live {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-running);
+  box-shadow: 0 0 6px currentColor;
+}

@@ -1,0 +1,46 @@
+import clsx from "clsx";
+import type { TrendItem, Platform } from "@/queries/trends";
+import { compactNumber } from "@/lib/format";
+import styles from "./TrendingPanel.module.css";
+
+const PLATFORM_LABEL: Record<Platform, string> = {
+  youtube: "▶ YouTube",
+  tiktok: "♪ TikTok",
+  xiaohongshu: "小红书",
+  douyin: "抖音",
+};
+
+export function TrendingPanel({ platform, items }: { platform: Platform; items: TrendItem[] }) {
+  return (
+    <section className={styles.panel}>
+      <div className={styles.head}>
+        <h2 className={styles.title}>
+          {PLATFORM_LABEL[platform]} <em>Trending</em>
+        </h2>
+        <span className={styles.meta}>TOP {items.length} · 24H</span>
+      </div>
+      {items.map((it) => (
+        <div key={it.rank} className={styles.row}>
+          <div className={styles.rank}>{String(it.rank).padStart(2, "0")}</div>
+          <div className={styles.thumb}>{it.thumbAspect}</div>
+          <div>
+            <h3 className={styles.title3}>{it.title}</h3>
+            <div className={styles.stats}>
+              <span>▶ {compactNumber(it.views)}</span>
+              <span>♥ {compactNumber(it.likes)}</span>
+              <span>💬 {compactNumber(it.comments)}</span>
+            </div>
+          </div>
+          <div
+            className={clsx(
+              styles.arrow,
+              it.change > 0 ? styles.up : it.change < 0 ? styles.down : styles.flat,
+            )}
+          >
+            {it.change > 0 ? `↑ ${it.change}` : it.change < 0 ? `↓ ${Math.abs(it.change)}` : "— 0"}
+          </div>
+        </div>
+      ))}
+    </section>
+  );
+}
