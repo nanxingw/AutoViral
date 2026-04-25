@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Works page", () => {
-  // Plan §6 D3 forbids "auto-research" / "every 1h" / "researched X pieces" / "pipeline" / "stage" / "阶段" appearing in product copy.
+  // NEGATIVE assertion: Plan §6 D3 forbids "auto-research" / "every 1h" / "researched X pieces" / "pipeline" / "stage" / "阶段" in product copy.
   test("does NOT mention auto-research / cron forbidden words", async ({ page }) => {
     await page.goto("/");
     const body = await page.locator("body").innerText();
