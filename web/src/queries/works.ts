@@ -13,21 +13,31 @@ export interface WorkSummary {
 export interface CreateWorkInput {
   title: string;
   type: WorkSummary["type"];
+  platforms?: string[];
 }
 
 export const worksKey = ["works"] as const;
 
+const DEFAULT_PLATFORMS = ["douyin", "xiaohongshu"];
+
 export function useWorks() {
   return useQuery({
     queryKey: worksKey,
-    queryFn: () => apiFetch<WorkSummary[]>("/api/works"),
+    queryFn: async () => {
+      const res = await apiFetch<{ works: WorkSummary[] } | WorkSummary[]>("/api/works");
+      return Array.isArray(res) ? res : res.works;
+    },
   });
 }
 
 export function useCreateWork() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: CreateWorkInput) => apiFetch<WorkSummary>("/api/works", { method: "POST", body: input }),
+    mutationFn: (input: CreateWorkInput) =>
+      apiFetch<WorkSummary>("/api/works", {
+        method: "POST",
+        body: { ...input, platforms: input.platforms ?? DEFAULT_PLATFORMS },
+      }),
     onSuccess: () => qc.invalidateQueries({ queryKey: worksKey }),
   });
 }

@@ -32,6 +32,7 @@ export function useChatSocket(workId: string | null) {
     return () => {
       off();
       ws.dispose();
+      ref.current = null;
     };
   }, [workId, push, setStreaming]);
 
