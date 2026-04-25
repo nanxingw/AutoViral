@@ -1,0 +1,16 @@
+.btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-0);
+  color: var(--text-dim);
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  transition: color 0.15s, background 0.15s;
+}
+.btn:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
