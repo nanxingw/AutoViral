@@ -1,0 +1,7 @@
+.wrap { padding: 56px 0 32px; }
+.eyebrow { display: inline-flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 8px currentColor; }
+.h1 { font-size: 56px; line-height: 1.05; letter-spacing: -0.025em; margin: 0 0 12px; max-width: 900px; font-weight: 500; }
+.h1 em { font-family: "Instrument Serif", serif; font-style: italic; }
+.h1 .num { color: var(--accent); font-feature-settings: "tnum" 1; }
+.sub { font-size: 14px; color: var(--text-dim); display: flex; gap: 14px; flex-wrap: wrap; }
