@@ -94,7 +94,7 @@ Claude 会执行 3 组搜索：
 
 ## 第一步：话题调研
 
-**技能文件：** `skills/trend-research/SKILL.md`
+**技能文件：** `skills/autoviral/modules/research/SKILL.md`
 
 ### 两种调研模式
 
@@ -163,7 +163,7 @@ Agent 用热度/竞争度矩阵评估每个方向：
 
 ## 第二步：内容规划
 
-**技能文件：** `skills/content-planning/SKILL.md`
+**技能文件：** `skills/autoviral/modules/planning/SKILL.md`
 
 ### 核心能力
 
@@ -252,7 +252,7 @@ Negative: blurry, distorted, oversaturated, artificial
 
 ## 第三步：素材生成
 
-**技能文件：** `skills/asset-generation/SKILL.md`
+**技能文件：** `skills/autoviral/modules/assets/SKILL.md`
 
 ### 核心原则
 
@@ -347,7 +347,7 @@ Negative: blurry, distorted, oversaturated, artificial
 
 ## 第四步：视频合成 / 图文排版
 
-**技能文件：** `skills/content-assembly/SKILL.md`
+**技能文件：** `skills/autoviral/modules/assembly/SKILL.md`
 
 ### 短视频合成流程
 

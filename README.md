@@ -65,7 +65,7 @@ AutoViral 是一个本地运行的 AI 内容工作台，你描述一个选题，
 
 | 能力 | 技术方案 | 说明 |
 |------|---------|------|
-| AI 图片生成 | Gemini 3.1 Flash (OpenRouter) | 支持 4K、自定义宽高比、图生图 |
+| AI 图片生成 | OpenAI GPT-5.4 Image (via OpenRouter) | 支持 4K、自定义宽高比、图生图 |
 | AI 视频生成 | Dreamina CLI (Seedance 2.0) | 文生视频、图生视频、首尾帧、多帧 |
 | AI 音乐生成 | Google Lyria 3 Pro | 文生音乐、图生音乐 |
 | 图文排版 | HTML/CSS + Playwright | 5 套小红书模板、专业字体 |
@@ -190,8 +190,7 @@ AutoViral 支持多个 AI 生成服务，按优先级自动选择：
 
 | 优先级 | 服务 | 密钥 | 说明 |
 |--------|------|------|------|
-| 1 | **OpenRouter (Gemini 3.1 Flash)** | `OPENROUTER_API_KEY` | 推荐，画质最好，支持 4K |
-| 2 | 即梦 API | `JIMENG_ACCESS_KEY` + `SECRET_KEY` | 备用 |
+| — | **OpenRouter (openai/gpt-5.4-image-2)** | `OPENROUTER_API_KEY` | 唯一通道，支持 4K/宽高比/图生图。不再保留备用路径。 |
 
 ### 视频生成
 
@@ -209,7 +208,7 @@ AutoViral 支持多个 AI 生成服务，按优先级自动选择：
 检查当前环境可用服务：
 
 ```bash
-python3 skills/asset-generation/scripts/check_providers.py --format table
+python3 skills/autoviral/modules/assets/scripts/check_providers.py --format table
 ```
 
 ---
@@ -247,11 +246,15 @@ web/src/                      # 前端 Svelte 5
     Analytics.svelte          #   数据仪表盘
 
 skills/                       # AI Agent 技能定义
-  trend-research/             #   话题调研（热搜脚本 + 方法论）
-  content-planning/           #   内容规划（分镜/图文策划）
-  asset-generation/           #   素材生成（Dreamina/Gemini/Lyria）
-  content-assembly/           #   合成输出（FFmpeg/字幕/配乐）
-  content-evaluator/          #   质量评审（LLM-as-Judge 评分）
+  autoviral/                  #   一体化创作技能（单 skill，任意起点切入）
+    SKILL.md                  #     主入口（prime directive + 模块地图 + 任意起点原则）
+    taste/                    #     品味读物（7 份：叙事 / 镜头 / 节奏 / 排版 / schema / rubric）
+    modules/
+      research/               #     事实收集（热搜脚本 + 达人分析 + 视频解构）
+      planning/               #     情感意图 → 可执行 brief（镜头表 / 图文结构 / 文案）
+      assets/                 #     生成引擎（OpenRouter / Dreamina / Jimeng / Lyria / Playwright）
+      assembly/               #     成片引擎（ffmpeg / subtitle_burn / beat-sync / audio-mix）
+    references/               #     模块间契约
 
 ~/.autoviral/                 # 运行时数据
   config.yaml                 #   配置

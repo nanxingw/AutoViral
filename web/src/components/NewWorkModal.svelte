@@ -62,12 +62,12 @@
 </script>
 
 {#if open}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="modal-overlay" onclick={handleOverlayClick}>
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="modal-overlay" role="dialog" aria-modal="true" aria-label="New work" tabindex="-1" onclick={handleOverlayClick}>
     <div class="modal-card">
       <div class="modal-head">
         <h2 class="modal-title">{tt("newWorkTitle")}</h2>
-        <button class="modal-close" onclick={onClose}>
+        <button class="modal-close" aria-label="Close" onclick={onClose}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>

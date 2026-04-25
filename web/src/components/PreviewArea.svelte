@@ -17,6 +17,7 @@
 
   const videoExts = ['mp4', 'mov', 'webm'];
   const imageExts = ['png', 'jpg', 'jpeg', 'webp', 'gif'];
+  const audioExts = ['mp3', 'wav', 'aac', 'm4a', 'ogg', 'flac'];
 
   function isVideo(path: string): boolean {
     return videoExts.includes(path.split('.').pop()?.toLowerCase() ?? '');
@@ -24,6 +25,10 @@
 
   function isImage(path: string): boolean {
     return imageExts.includes(path.split('.').pop()?.toLowerCase() ?? '');
+  }
+
+  function isAudio(path: string): boolean {
+    return audioExts.includes(path.split('.').pop()?.toLowerCase() ?? '');
   }
 
   let filteredVideos = $derived(assets.filter(a => isVideo(a)));
@@ -34,10 +39,11 @@
   }
 
   // Determine what to show: respect user selection first, regardless of content type
-  let displayMode = $derived.by<"video" | "image" | "none">(() => {
+  let displayMode = $derived.by<"video" | "image" | "audio" | "none">(() => {
     if (selectedAsset) {
       if (isVideo(selectedAsset)) return "video";
       if (isImage(selectedAsset)) return "image";
+      if (isAudio(selectedAsset)) return "audio";
     }
     // Fallback to content type default
     if (contentType === "short-video") {
@@ -91,12 +97,31 @@
         <track kind="captions" />
       </video>
     {/if}
+  {:else if displayMode === "audio"}
+    {#if selectedAsset}
+      <div class="audio-viewer">
+        <div class="audio-card">
+          <div class="audio-icon-big">
+            <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+          </div>
+          <div class="audio-filename" title={selectedAsset}>{selectedAsset.split('/').pop() ?? selectedAsset}</div>
+          <audio
+            class="audio-player"
+            src={assetUrl(selectedAsset)}
+            controls
+            preload="metadata"
+          >
+            <track kind="captions" />
+          </audio>
+        </div>
+      </div>
+    {/if}
   {:else if displayMode === "image"}
     {#if effectiveImageAsset}
       <div class="image-viewer">
         <div class="image-main">
           {#if filteredImages.length > 1}
-            <button class="nav-btn nav-prev" onclick={() => navigateImage(-1)}>
+            <button class="nav-btn nav-prev" aria-label="上一张" onclick={() => navigateImage(-1)}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>
             </button>
           {/if}
@@ -106,7 +131,7 @@
             alt={effectiveImageAsset}
           />
           {#if filteredImages.length > 1}
-            <button class="nav-btn nav-next" onclick={() => navigateImage(1)}>
+            <button class="nav-btn nav-next" aria-label="下一张" onclick={() => navigateImage(1)}>
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
             </button>
           {/if}
@@ -280,5 +305,52 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
+  }
+
+  /* Audio viewer */
+  .audio-viewer {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+  }
+
+  .audio-card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 32px 40px;
+    background: var(--bg-elevated, rgba(255, 255, 255, 0.04));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-panel);
+    min-width: 320px;
+    max-width: 480px;
+    box-shadow: var(--shadow-md);
+  }
+
+  .audio-icon-big {
+    color: var(--spark-red, #FE2C55);
+    opacity: 0.85;
+  }
+
+  .audio-filename {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    text-align: center;
+    word-break: break-all;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .audio-player {
+    width: 100%;
   }
 </style>

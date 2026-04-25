@@ -1,192 +1,154 @@
-# Skill 结构规范
+# Skill 结构规范（v2 — 统一模型）
 
-本文档定义了 `skills/` 目录的组织规则。所有 skill 的新增、修改和扩展都必须遵循本规范。
+本文档定义 `skills/` 目录的组织规则。整个 AutoViral 的创作能力封装为**一个** skill，不再按 pipeline 阶段切分成多个。
 
 ---
 
 ## 核心原则
 
-1. **4+1 Skill 模型**：4 个创作 skill 与 pipeline 一一对应，加 1 个跨阶段评审 skill
-2. **SKILL.md 只包含通用方法论**：不在 SKILL.md 中写垂类专项内容
-3. **垂类知识通过 genres/ 按需加载**：每种内容类型一个文件
-4. **新能力通过 modules/ 插入**：不膨胀主文件
-5. **平台规范在 references/ 中维护**：每个平台一个文件
+1. **单一 skill 模型**：所有创作能力都在 `skills/autoviral/` 下
+2. **taste 是灵魂，modules 是术**：taste 负责品味与判断，modules 负责工具与机制
+3. **任意起点**：用户可从任意 module 切入，不强制流程顺序
+4. **内容 > 平台**：平台只作为技术约束存在，不进 taste 作为创作建议
+5. **evaluator 已融入 taste**：最终评审 = `taste/06-rubric.md` 对照执行
 
 ---
 
 ## 目录结构
 
 ```
-skills/
-  <skill-name>/                    # 与 pipeline 步骤对应
-    SKILL.md                       # 通用方法论（必须）
-    references/                    # 平台规范（按需）
-      douyin.md
-      xiaohongshu.md
-    scripts/                       # 脚本工具（按需）
-    genres/                        # 垂类专项指南（按需）
-      comedy.md
-      food.md
-      education.md
-      ...
-    modules/                       # 可插拔能力模块（按需）
-      creator-analytics.md
-      video-understanding.md
-      ...
+skills/autoviral/
+  SKILL.md                         # 主入口（prime directive 引用 + 模块地图 + 任意起点原则）
+  taste/                           # 品味与判断。内化读物，非查询
+    00-prime-directive.md          # 内容 > 平台 宣言
+    01-emotional-storytelling.md   # 叙事与情感弧
+    02-visual-grammar.md           # 镜头 / 机位 / 运动 / 构图
+    03-rhythm-and-editing.md       # 剪辑节奏 / Kuleshov / Murch 六原则
+    04-design-and-text.md          # 视觉层级 / 排版 / 色彩
+    05-creative-schema.md          # 情感意图 → 生产参数决策 schema
+    06-rubric.md                   # 最终评审标尺（8 维度，1-5 分）
+    evaluator-criteria/            # 各模块补充的阶段性评审细则（由 api.ts 按需读取）
+      research.md  plan.md  assets.md  assembly.md
+  modules/                         # 正交能力。不是阶段
+    research/
+      SKILL.md                     # 本模块入口
+      scripts/                     # 可执行脚本
+      capabilities/                # 扩展能力文档（按需加载）
+      references/                  # 平台技术规格（忽略其中的创作建议）
+      genres/                      # 历史遗留，如仍有价值保留
+    planning/
+      SKILL.md
+      capabilities/                # 扩展能力
+      references/                  # 平台技术规格
+      genres/                      # 历史遗留
+    assets/
+      SKILL.md
+      scripts/                     # openrouter / jimeng / music / poster / font_manager
+      capabilities/                # dreamina-mastery / prompt-mastery / quality-gate / fallback-strategy / ...
+      references/  genres/  templates/
+    assembly/
+      SKILL.md
+      scripts/                     # ffmpeg 片段 / subtitle_burn / caption_generate / beat-sync/
+      capabilities/                # pro-captions / audio-mixing / color-grading / ...
+      references/  genres/
+  references/
+    module-contracts.md            # 模块间输入输出契约
 ```
-
----
-
-## 4+1 个 Skill
-
-### 4 个创作 Skill（与 Pipeline 一一对应）
-
-| Skill 目录 | Pipeline 步骤 | 职责 |
-|------------|--------------|------|
-| `trend-research` | Research（调研） | 趋势调研、选题发现、竞品分析 |
-| `content-planning` | Plan（策划） | 分镜脚本、内容结构、创意策划 |
-| `asset-generation` | Assets（素材） | 图片/视频生成、提示词工程 |
-| `content-assembly` | Assembly（合成） | 剪辑、字幕、配乐、最终输出 |
-
-### 1 个跨阶段评审 Skill
-
-| Skill 目录 | 类型 | 职责 |
-|------------|------|------|
-| `content-evaluator` | 跨阶段质量门禁 | 对各阶段产出进行结构化评审，输出评分与改进建议 |
-
-`content-evaluator` 不对应任何 pipeline 步骤，而是作为 quality gate 横跨所有阶段，可在任意步骤的产出上运行。
-
-**不允许在 `skills/` 下新建第 6 个顶层目录。** 除上述 4+1 个 skill 外，所有新能力都必须归入已有 skill 之一。
 
 ---
 
 ## 扩展规则
 
-### 规则一：新增内容垂类（Genre）
+### 添加新的生成工具 / 脚本
 
-当需要支持新的内容类型（如美食、教育、情感、旅行等）时：
+放到对应 module 的 `scripts/`：
+- 生图/视频/音乐/海报 → `modules/assets/scripts/`
+- 剪辑/字幕/混音/调色 → `modules/assembly/scripts/`
+- 数据采集 / 爬虫 / 视频解构 → `modules/research/scripts/`
 
-1. 在**每个** skill 的 `genres/` 下创建 `<genre-name>.md`
-2. 文件名使用英文小写，用连字符分隔：`comedy.md`、`food.md`、`pet-life.md`
-3. 每个文件只包含**该阶段**的专项指导，不要重复通用内容
-4. 文件开头用一句话说明本文档的用途和覆盖范围
+脚本本身的使用方法**可以**简短写在该 module 的 `SKILL.md` 里；复杂用法写成独立 `capabilities/<name>.md`。
 
-**内容拆分原则**：
+### 添加新的扩展能力文档
 
-| 阶段 | 垂类文件应包含 |
-|------|--------------|
-| research | 该品类的爆款模式识别、选题评估标准、调研关注点 |
-| plan | 该品类的结构公式、Hook 设计、台词/文案规则、自检清单 |
-| assets | 该品类的视觉风格、色调策略、构图规则、提示词调整 |
-| assembly | 该品类的剪辑节奏、BGM 策略、音效使用、转场规则 |
+放 `capabilities/<name>.md`，然后在对应 module 的 `SKILL.md` 底部 "Capabilities 索引" 列表里加一行。
 
-**不需要为每个 genre 都创建全部 4 个文件**。如果某个 genre 在某个阶段没有特殊规则（与通用方法论一致），就不创建对应文件。
+**不要**新建 module 顶层目录。只能在 research / planning / assets / assembly 四个之一下扩展。
 
-### 规则二：新增能力模块（Module）
+### 添加新的平台技术规格
 
-当需要添加新能力（如视频理解、配乐生成、自动字幕等）时：
+放 `modules/<相关 module>/references/<platform>.md`。**只写技术规格**（aspect ratio / duration / encoding / API / safe zone），**不写创作建议**（"XX 平台喜欢..."）。创作建议的位置在 `taste/`。
 
-1. 确定该能力**主要服务于哪个 pipeline 阶段**
-2. 在对应 skill 的 `modules/` 下创建 `<capability-name>.md`
-3. 如果需要脚本，在该 skill 的 `scripts/<capability-name>/` 下放置
-4. 文件名使用英文小写，用连字符分隔
+### 添加新的 taste 内容
 
-**能力归属参考**：
+谨慎。taste 是稳定的品味根，不是更新日志。新增 taste 文件需要满足：
 
-| 能力 | 归属 Skill | 原因 |
-|------|-----------|------|
-| 达人数据采集 | trend-research | 数据采集是调研的一部分 |
-| 视频理解/分析 | trend-research | 理解已有视频是调研的输入 |
-| 配乐生成 | content-assembly | 配乐是后期制作的一部分 |
-| 自动字幕 | content-assembly | 字幕是后期制作的一部分 |
-| AI 配音/TTS | asset-generation | 音频素材是素材生成的一部分 |
-| 封面设计 | asset-generation | 封面图是视觉素材 |
-
-**如果一个能力横跨多个阶段**，在主要阶段放完整模块，在其他阶段的 SKILL.md 或 genres/ 文件中引用即可。
-
-### 规则三：新增平台支持
-
-当需要支持新平台（如 B站、视频号、快手等）时：
-
-1. 在**每个** skill 的 `references/` 下创建 `<platform>.md`
-2. 文件名使用英文小写：`bilibili.md`、`wechat-channels.md`
-3. 包含该平台在该阶段的特定规范（算法规则、尺寸规格、编码要求、发布模板等）
+- **普世**：不绑定任何平台或潮流
+- **可内化**：能被 agent 作为默认语言使用，不是每次查询
+- **有操作指向**：能被 creative schema 引用或产生自检清单
 
 ---
 
 ## SKILL.md 编写规范
 
-### 必须包含的段落
-
-每个 SKILL.md 末尾必须包含以下两段动态加载指令：
-
-```markdown
-## 垂类专项指南
-
-执行前检查 `genres/` 目录。如果当前作品的内容类型有对应的 `genres/<type>.md` 文件，
-**必须读取并遵循其中的专项规则**——它们覆盖本文件中的通用指导。
-
-## 扩展能力模块
-
-检查 `modules/` 目录，根据当前任务需要加载相关能力模块。
-```
-
-### SKILL.md 不应包含
-
-- 特定内容垂类的专项规则（应放在 `genres/` 中）
-- 可插拔能力的详细说明（应放在 `modules/` 中）
-- 其他 skill 的职责范围内的内容
-
-### frontmatter 格式
+### frontmatter
 
 ```yaml
 ---
-name: <skill-name>
-description: <一行描述，用于触发匹配>
+name: <skill-or-module-name>
+description: <一行描述，用于 agent 判断何时展开>
 ---
 ```
 
+### 主 SKILL.md 应包含
+
+- 入口宣言（一句话定位）
+- 必读起手（指向 taste/00, 05, 06）
+- 模块地图（是能力列表，不是顺序流程）
+- 任意起点原则（举例）
+- 工具入口（scripts 简表）
+- 服务端交互（常用 API endpoint）
+- 禁止项与自检
+
+### 模块 SKILL.md 应包含
+
+- 定位（本模块的边界 + 哪些判断不属于这里）
+- 什么时候进 / 什么时候跳过
+- 工具矩阵（脚本 / 命令 / API）
+- 输入输出契约（引用 `references/module-contracts.md`）
+- Capabilities 索引
+- 与 `taste/` 的边界（哪些是术，哪些属于品味）
+- 自检清单
+
+### SKILL.md **不应**包含
+
+- 特定平台的**创作建议**（只写技术规格）
+- 复制 taste 里已有的内容（应该引用，不是复述）
+- 硬编码的"四阶段"流水线框架
+
 ---
 
-## 文件命名约定
+## 命名约定
 
-| 类型 | 命名规则 | 示例 |
-|------|---------|------|
-| Skill 目录 | 英文小写，连字符分隔 | `trend-research` |
-| Genre 文件 | `genres/<name>.md`，英文小写 | `genres/comedy.md` |
-| Module 文件 | `modules/<name>.md`，英文小写 | `modules/creator-analytics.md` |
+| 类型 | 规则 | 示例 |
+|---|---|---|
+| Module 目录 | 英文短单词 | `research` / `planning` / `assets` / `assembly` |
+| Capability 文件 | `capabilities/<name>.md`，连字符分隔 | `capabilities/prompt-mastery.md` |
+| Script 目录 | `scripts/<name>/` 或单文件 `scripts/<name>.py` | `scripts/beat-sync/` |
 | Reference 文件 | `references/<platform>.md` | `references/douyin.md` |
-| Script 目录 | `scripts/<name>/` | `scripts/creator-analytics/` |
+| Taste 文件 | `NN-<slug>.md`（按 00-06 编号） | `taste/02-visual-grammar.md` |
 
 ---
 
-## 当前结构快照
+## 历史结构清理
 
-```
-skills/
-  trend-research/
-    SKILL.md
-    references/douyin.md, xiaohongshu.md
-    scripts/douyin_hot_search.py, newsnow_trends.py, creator-analytics/
-    genres/comedy.md
-    modules/creator-analytics.md
-  content-planning/
-    SKILL.md
-    references/douyin.md, xiaohongshu.md
-    genres/comedy.md
-    modules/
-  asset-generation/
-    SKILL.md
-    references/douyin.md, xiaohongshu.md
-    scripts/jimeng_generate.py, openrouter_generate.py, check_providers.py
-    genres/comedy.md
-    modules/
-  content-assembly/
-    SKILL.md
-    references/douyin.md, xiaohongshu.md
-    genres/comedy.md
-    modules/
-  content-evaluator/              # 跨阶段评审 skill
-    SKILL.md
-    modules/
-```
+v1 的 4+1 模型（trend-research / content-planning / asset-generation / content-assembly / content-evaluator 五个并列 skill）已全部合并进 `skills/autoviral/`：
+
+- 旧 `trend-research/` → `autoviral/modules/research/`
+- 旧 `content-planning/` → `autoviral/modules/planning/`
+- 旧 `asset-generation/` → `autoviral/modules/assets/`
+- 旧 `content-assembly/` → `autoviral/modules/assembly/`
+- 旧 `content-evaluator/` → **吸收进 `autoviral/taste/06-rubric.md`**；原 criteria/ 文件作为各模块评审细则保留在 `autoviral/taste/evaluator-criteria/`
+
+各 module 原先的 `modules/` 子目录已重命名为 `capabilities/`，避免与新结构的 `autoviral/modules/` 嵌套混淆。
+
+原 `short-video-guide/` 7 份品味资料已全部重写（剥离平台建议、统一语气）并吸收进 `autoviral/taste/`。

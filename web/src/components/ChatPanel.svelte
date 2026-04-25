@@ -78,6 +78,10 @@
 
   $effect(() => {
     void streamBlocks.length;
+    void streaming;
+    void activeToolName;
+    const lastBlock = streamBlocks[streamBlocks.length - 1];
+    void lastBlock?.text;
     scrollToBottom();
   });
 
@@ -280,7 +284,7 @@
           {#each (pickerAssets[pickerCategory] ?? []) as asset}
             <button class="picker-item" onclick={() => addAttachment({ name: asset.name, url: `/api/shared-assets/${encodeURIComponent(asset.category)}/${encodeURIComponent(asset.name)}`, category: asset.category, size: asset.size })}>
               {#if asset.name.match(/\.(png|jpg|jpeg|gif|webp|svg)$/i)}
-                <img src="/api/shared-assets/{encodeURIComponent(asset.category)}/{encodeURIComponent(asset.name)}" alt={asset.name} class="picker-thumb" />
+                <img src={`/api/shared-assets/${encodeURIComponent(asset.category)}/${encodeURIComponent(asset.name)}`} alt={asset.name} class="picker-thumb" />
               {:else}
                 <span class="picker-icon">{asset.name.match(/\.(mp3|wav)$/i) ? '🎵' : '📄'}</span>
               {/if}
@@ -313,11 +317,11 @@
           rows="1"
         ></textarea>
         {#if streaming}
-          <button class="send-btn abort-mode" onclick={onAbort}>
+          <button class="send-btn abort-mode" aria-label="中止生成" onclick={onAbort}>
             <svg width="16" height="16" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor"/></svg>
           </button>
         {:else}
-          <button class="send-btn" onclick={handleSend} disabled={!sessionReady || (!inputText.trim() && attachments.length === 0)}>
+          <button class="send-btn" aria-label="发送" onclick={handleSend} disabled={!sessionReady || (!inputText.trim() && attachments.length === 0)}>
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
           </button>
         {/if}

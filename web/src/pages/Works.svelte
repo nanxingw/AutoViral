@@ -470,8 +470,7 @@
     <!-- Gallery grid -->
     <div class="gallery-grid">
       {#each filteredWorks as w}
-        <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-        <div class="work-card" onclick={() => onOpenStudio(w.id)}>
+        <div class="work-card" role="button" tabindex="0" aria-label={w.title} onclick={() => onOpenStudio(w.id)} onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpenStudio(w.id); } }}>
           <!-- Cover -->
           <div class="card-cover">
             {#if w.coverImage && w.coverIsVideo}
@@ -537,8 +536,8 @@
 </div>
 
 {#if selectedTrend}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="trend-overlay" onclick={(e) => { if ((e.target as HTMLElement).classList.contains('trend-overlay')) selectedTrend = null; }}>
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="trend-overlay" role="dialog" aria-modal="true" aria-label="Trend detail" tabindex="-1" onclick={(e) => { if ((e.target as HTMLElement).classList.contains('trend-overlay')) selectedTrend = null; }}>
     <div class="trend-modal">
       <div class="trend-modal-head">
         <div class="trend-modal-meta">
@@ -552,7 +551,7 @@
             <span class="tm-badge tm-comp">{lang === "zh" ? "竞争" : "Competition: "}{selectedTrend.competition}</span>
           {/if}
         </div>
-        <button class="trend-modal-close" onclick={() => selectedTrend = null}>
+        <button class="trend-modal-close" aria-label="Close" onclick={() => selectedTrend = null}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -596,12 +595,12 @@
 {/if}
 
 {#if showResearchModal}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="research-overlay" onclick={(e) => { if ((e.target as HTMLElement).classList.contains('research-overlay')) showResearchModal = false; }}>
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="research-overlay" role="dialog" aria-modal="true" aria-label="Research config" tabindex="-1" onclick={(e) => { if ((e.target as HTMLElement).classList.contains('research-overlay')) showResearchModal = false; }}>
     <div class="research-modal">
       <div class="rm-head">
         <h3 class="rm-title">{lang === "zh" ? "想新思路" : "New Ideas"}</h3>
-        <button class="rm-close" onclick={() => showResearchModal = false}>
+        <button class="rm-close" aria-label="Close" onclick={() => showResearchModal = false}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -630,7 +629,7 @@
 
         <div class="rm-switch-field">
           <span class="rm-label">{tt("autoResearchLabel")}</span>
-          <button class="apple-switch" class:on={autoResearchOn} onclick={toggleAutoResearch} role="switch" aria-checked={autoResearchOn}>
+          <button class="apple-switch" class:on={autoResearchOn} onclick={toggleAutoResearch} role="switch" aria-checked={autoResearchOn} aria-label="Toggle auto research">
             <span class="apple-switch-thumb"></span>
           </button>
         </div>

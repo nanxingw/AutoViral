@@ -37,7 +37,6 @@
       {@const step = pipeline[key]}
       {@const status = step?.status ?? "pending"}
       {@const isCurrent = key === currentStep}
-      <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
       <div
         class="step"
         class:step-done={status === "done"}
@@ -48,7 +47,12 @@
         class:step-skipped={status === "skipped"}
         class:step-current={isCurrent}
         class:step-clickable={isClickable(status, key)}
+        role="button"
+        tabindex="0"
+        aria-label="{step?.name ?? key}: {status}"
+        aria-disabled={!isClickable(status, key)}
         onclick={() => handleClick(key)}
+        onkeydown={(e) => { if ((e.key === "Enter" || e.key === " ") && isClickable(status, key)) { e.preventDefault(); handleClick(key); } }}
       >
         <span class="step-dot">
           {#if status === "done"}

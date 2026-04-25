@@ -201,19 +201,22 @@
 
   <div class="track-items" bind:this={trackItemsEl}>
     {#each items as item (item.id)}
-      <!-- svelte-ignore a11y_no_static_element_interactions a11y_click_events_have_key_events -->
       <div
         class="track-item {item.type}"
         class:drag-over={dragOverId === item.id}
         class:selected={selectedItemId === item.id}
         class:dragging={dragSourceId === item.id}
         style="flex: 0 0 {pctNum(item.duration)}%; min-width: 40px; height: {trackHeight - 8}px;"
+        role="button"
+        tabindex="0"
+        aria-label={item.label}
         draggable={draggable}
         ondragstart={(e) => handleDragStart(e, item.id)}
         ondragover={(e) => handleDragOver(e, item.id)}
         ondrop={(e) => handleDrop(e, item.id)}
         ondragend={handleDragEnd}
         onclick={() => onItemClick?.(item.id)}
+        onkeydown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onItemClick?.(item.id); } }}
         oncontextmenu={(e) => { e.preventDefault(); onContextMenu?.(item.id, e); }}
       >
         <!-- Canvas for clip / audio -->

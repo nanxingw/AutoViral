@@ -2,44 +2,33 @@
 
 ## Skill 结构规范
 
-编辑或扩展 `skills/` 目录时，必须遵循 `docs/skill-structure-guide.md` 中的规则：
+整个创作能力封装成**一个** skill：`skills/autoviral/`。它不是一条流水线，而是一组可从任意起点切入的正交能力。
 
-- **4+1 个 skill（4个创作 + 1个评审）**：4 个创作 skill 对应 pipeline 步骤（research → plan → assets → assembly），1 个跨阶段评审 skill（content-evaluator）
-- **新垂类**放 `genres/`，**新能力**放 `modules/`，**新平台**放 `references/`
-- 不允许新建第 6 个顶层 skill 目录（4 个创作 + 1 个评审已封顶）
-- SKILL.md 只写通用方法论，垂类专项内容放 genres/ 下的独立文件
+```
+skills/autoviral/
+  SKILL.md            # 主入口
+  taste/              # 品味与判断（内化读物，7 份）
+  modules/            # 正交能力（4 个）
+    research/         # 事实与参考收集
+    planning/         # 情感意图 → 可执行 brief
+    assets/           # 图/视频/音乐/海报生成
+    assembly/         # 剪辑/字幕/混音/节拍对齐
+  references/         # 跨模块契约与索引
+```
+
+核心原则：
+
+- **一个 skill，四个模块**——不再有 "research → plan → assets → assembly" 的强制顺序
+- **`taste/` 是灵魂**（内容质量 > 平台），`modules/` 是术（工具/脚本/API）
+- **任意起点**：用户可以从任何模块切入，缺上下文就反问具体问题（优先问情感意图）
+- **每个模块的 `capabilities/` 子目录**放扩展能力文档，`scripts/` 放脚本，`references/` 放平台技术规格
+- **平台创作建议不进 taste**——平台只作为技术约束（aspect ratio / duration / safe zone）存在
 
 详细规则见：[docs/skill-structure-guide.md](docs/skill-structure-guide.md)
 
 
 <rules>
-启动subagents模式时，所有subagents必须使用Opus 4.6 模型驱动。
+启动subagents模式时，所有subagents必须使用Opus模型驱动。
 不要随便push代码，但可以commit保证记录
+在构建和重构skill时，必须确保自己阅读过https://github.com/obra/superpowers，https://github.com/garrytan/gstack等业界权威skill，对怎么构建skill了如指掌。
 </rules>
-
-## Design Context
-
-### Users
-中国社交媒体内容创作者（抖音/小红书），需要从选题到成片的全流程 AI 辅助。使用场景：在 Web dashboard 中与 AI Agent 对话协作，监控创作流水线进度，查看和管理生成的素材。用户不一定懂技术，界面必须直观易懂。
-
-### Brand Personality
-**创意 · 前卫 · 大胆** — 不是一个企业级工具，而是一个有视觉冲击力的创作者工作台。像一个顶尖创意工作室的内部工具，兼具专业深度和视觉张力。
-
-### Emotional Goals
-- **惊喜感**：AI 产出超预期时界面应该放大这种 wow 感，用视觉节奏和微交互强化
-- **成就感**：每完成一个阶段（调研→策划→素材→成片）应有明确正反馈，流水线进度像升级打怪
-
-### Aesthetic Direction
-- **调性**：温暖、大胆、现代。暗色主题以暖炭色为主（不是冷蓝/冷灰），亮色主题以暖米色为主
-- **主色**：TikTok spark-red (#FE2C55) 作为强调色，贯穿整个系统
-- **字体**：DM Sans（正文），Space Grotesk（标题）— 几何感但保持温度
-- **圆角**：6px（卡片），偏克制不过度圆润
-- **动画**：0.12s-0.25s，快速精准，不花哨不浮夸
-- **反面参考**：绝对不要像传统 CMS 后台（按钮太多、企业感太重）或终端/极客风（太技术化、普通用户看不懂）
-
-### Design Principles
-1. **内容优先**：界面是创作内容的画框，不是主角。素材预览、视频播放、文案展示应该是视觉焦点，UI chrome 退后
-2. **过程透明**：AI 在后台做复杂工作时，用户应该清楚看到发生了什么（工具调用、思考过程），但以优雅的折叠卡片呈现，而非原始日志
-3. **节奏感**：流水线 4 步（调研→策划→素材→合成）应有清晰的阶段感和进度感，每一步完成都是一个小高潮
-4. **温暖专业**：既不冰冷也不浮夸。暖色调 + 克制动画 + 精确排版 = 让创作者感到被尊重
-5. **亮暗一致**：两套主题必须同等重视，颜色对比度、可读性、组件可见性在两个主题下都经过验证

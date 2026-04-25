@@ -106,6 +106,7 @@
         start: 0,
         duration: dur > 0 ? dur : totalDuration,
         label,
+        audioUrl: assetUrl(a.path),
         type: "audio" as const,
       };
     });
@@ -458,8 +459,8 @@
 
   <!-- Context Menu -->
   {#if ctxMenu}
-    <!-- svelte-ignore a11y_no_static_element_interactions -->
-    <div class="ctx-menu" style="left: {ctxMenu.x}px; top: {ctxMenu.y}px;" onclick={(e) => e.stopPropagation()}>
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="ctx-menu" role="menu" tabindex="-1" style="left: {ctxMenu.x}px; top: {ctxMenu.y}px;" onclick={(e) => e.stopPropagation()}>
       <button class="ctx-item" onclick={() => handleCtxAction("replace")}>替换片段</button>
       <button class="ctx-item ctx-danger" onclick={() => handleCtxAction("delete")}>删除片段</button>
     </div>

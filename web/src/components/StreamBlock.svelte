@@ -126,6 +126,9 @@
 </script>
 
 {#if block.type === "eval_divider"}
+  {@const scores = block.evalData?.scores}
+  {@const issues = Array.isArray(block.evalData?.issues) ? block.evalData!.issues : []}
+  {@const hasDetails = (scores && Object.keys(scores).length > 0) || issues.length > 0}
   <div class="eval-divider" class:eval-pass={block.evalData?.verdict === "pass"} class:eval-fail={block.evalData?.verdict === "fail"}>
     <span class="eval-divider-line"></span>
     <span class="eval-divider-label">
@@ -140,6 +143,37 @@
     </span>
     <span class="eval-divider-line"></span>
   </div>
+  {#if hasDetails}
+    <div class="eval-details" class:eval-details-pass={block.evalData?.verdict === "pass"} class:eval-details-fail={block.evalData?.verdict === "fail"}>
+      {#if scores && Object.keys(scores).length > 0}
+        <div class="eval-scores">
+          {#each Object.entries(scores) as [dim, raw]}
+            {@const val = typeof raw === "number" ? raw : Number(raw) || 0}
+            {@const pct = Math.max(0, Math.min(100, val <= 1 ? val * 100 : val))}
+            <div class="eval-score-row">
+              <span class="eval-score-dim">{dim}</span>
+              <div class="eval-score-bar">
+                <div class="eval-score-fill" style="width: {pct}%"></div>
+              </div>
+              <span class="eval-score-val">{val <= 1 ? (val * 100).toFixed(0) : val.toFixed(0)}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+      {#if issues.length > 0}
+        <ul class="eval-issues">
+          {#each issues as issue}
+            {@const msg = typeof issue === "string" ? issue : (issue?.message ?? issue?.text ?? JSON.stringify(issue))}
+            {@const sev = typeof issue === "object" && issue?.severity ? String(issue.severity) : ""}
+            <li class="eval-issue" class:eval-issue-high={sev === "high" || sev === "critical"} class:eval-issue-med={sev === "medium"}>
+              {#if sev}<span class="eval-issue-sev">{sev}</span>{/if}
+              <span class="eval-issue-msg">{msg}</span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </div>
+  {/if}
 {:else if block.type === "step_divider"}
   <div class="step-divider">
     <span class="divider-line"></span>
@@ -679,4 +713,108 @@
   .eval-divider.eval-fail .eval-divider-label { color: #ef4444; }
 
   .eval-icon { font-size: 14px; font-weight: 700; }
+
+  /* ── Eval details (scores + issues) ── */
+  .eval-details {
+    margin: -8px 16px 16px;
+    padding: 10px 14px;
+    border: 1px solid color-mix(in srgb, var(--amber, #f59e0b) 25%, transparent);
+    border-radius: var(--radius-card);
+    background: color-mix(in srgb, var(--amber, #f59e0b) 6%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .eval-details.eval-details-pass {
+    border-color: color-mix(in srgb, #22c55e 25%, transparent);
+    background: color-mix(in srgb, #22c55e 6%, transparent);
+  }
+  .eval-details.eval-details-fail {
+    border-color: color-mix(in srgb, #ef4444 25%, transparent);
+    background: color-mix(in srgb, #ef4444 6%, transparent);
+  }
+
+  .eval-scores {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .eval-score-row {
+    display: grid;
+    grid-template-columns: 90px 1fr 34px;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+  .eval-score-dim {
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .eval-score-bar {
+    height: 6px;
+    border-radius: 3px;
+    background: var(--bg-surface, rgba(0,0,0,0.08));
+    overflow: hidden;
+  }
+  .eval-score-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--spark-red, #FE2C55), var(--amber, #f59e0b));
+    border-radius: 3px;
+    transition: width 0.25s ease;
+  }
+  .eval-details.eval-details-pass .eval-score-fill {
+    background: linear-gradient(90deg, #22c55e, #10b981);
+  }
+  .eval-details.eval-details-fail .eval-score-fill {
+    background: linear-gradient(90deg, #ef4444, #f97316);
+  }
+  .eval-score-val {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    text-align: right;
+    color: var(--text);
+  }
+
+  .eval-issues {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .eval-issue {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    font-size: 11px;
+    line-height: 1.55;
+    color: var(--text-muted);
+    padding-left: 10px;
+    border-left: 2px solid var(--border);
+  }
+  .eval-issue-high { border-left-color: #ef4444; color: var(--text); }
+  .eval-issue-med  { border-left-color: var(--amber, #f59e0b); }
+  .eval-issue-sev {
+    text-transform: uppercase;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    padding: 1px 6px;
+    border-radius: var(--radius-pill);
+    background: var(--bg-surface, rgba(0,0,0,0.08));
+    color: var(--text);
+    flex-shrink: 0;
+  }
+  .eval-issue-high .eval-issue-sev {
+    background: color-mix(in srgb, #ef4444 18%, transparent);
+    color: #ef4444;
+  }
+  .eval-issue-med .eval-issue-sev {
+    background: color-mix(in srgb, var(--amber, #f59e0b) 18%, transparent);
+    color: var(--amber, #f59e0b);
+  }
 </style>

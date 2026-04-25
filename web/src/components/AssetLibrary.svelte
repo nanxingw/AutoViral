@@ -129,19 +129,40 @@
     contextMenu = { asset, x: e.clientX, y: e.clientY };
   }
 
-  function toggleAudio(name: string) {
+  async function toggleAudio(name: string) {
     if (playingAudioName === name && audioEl) {
       audioEl.pause();
       playingAudioName = null;
       audioEl = null;
       return;
     }
-    if (audioEl) audioEl.pause();
+    if (audioEl) {
+      audioEl.pause();
+      audioEl = null;
+    }
     const el = new Audio(assetUrl(activeCat, name));
-    el.play();
-    el.onended = () => { playingAudioName = null; audioEl = null; };
+    el.onended = () => {
+      if (audioEl === el) {
+        playingAudioName = null;
+        audioEl = null;
+      }
+    };
+    el.onerror = () => {
+      if (audioEl === el) {
+        playingAudioName = null;
+        audioEl = null;
+      }
+    };
     audioEl = el;
     playingAudioName = name;
+    try {
+      await el.play();
+    } catch {
+      if (audioEl === el) {
+        playingAudioName = null;
+        audioEl = null;
+      }
+    }
   }
 
   function formatDate(mtime: string): string {
@@ -202,6 +223,8 @@
       <div
         class="drop-zone"
         class:drag-over={dragOver}
+        role="region"
+        aria-label="Asset drop zone"
         ondragover={onDragOver}
         ondragleave={onDragLeave}
         ondrop={onDrop}
@@ -214,6 +237,7 @@
           <!-- Grid view -->
           <div class="grid-view">
             {#each currentFiles as file}
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
               <div
                 class="grid-card"
                 oncontextmenu={(e) => onContextMenu(e, file)}
@@ -272,8 +296,11 @@
 
   <!-- Context menu -->
   {#if contextMenu}
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
     <div
       class="context-menu"
+      role="menu"
+      tabindex="-1"
       style="left:{contextMenu.x}px;top:{contextMenu.y}px"
       onclick={(e) => e.stopPropagation()}
     >
@@ -289,9 +316,10 @@
 
   <!-- Lightbox -->
   {#if lightboxUrl}
-    <div class="lightbox" onclick={() => lightboxUrl = null}>
-      <button class="lightbox-close" onclick={() => lightboxUrl = null}>✕</button>
-      <img src={lightboxUrl} alt="preview" onclick={(e) => e.stopPropagation()} />
+    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+    <div class="lightbox" role="dialog" aria-modal="true" aria-label="Image preview" tabindex="-1" onclick={() => lightboxUrl = null}>
+      <button class="lightbox-close" aria-label="Close preview" onclick={() => lightboxUrl = null}>✕</button>
+      <img src={lightboxUrl} alt="preview" />
     </div>
   {/if}
 </div>

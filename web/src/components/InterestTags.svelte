@@ -89,12 +89,12 @@
 </span>
 
 {#if showModal}
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-  <div class="interest-overlay" onclick={handleOverlayClick}>
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
+  <div class="interest-overlay" role="dialog" aria-modal="true" aria-label="Followed topics" tabindex="-1" onclick={handleOverlayClick}>
     <div class="interest-modal">
       <div class="modal-head">
         <h3>{getLanguage() === "zh" ? "关注的话题" : "Followed Topics"}</h3>
-        <button class="modal-close" onclick={closeModal}>
+        <button class="modal-close" aria-label="Close" onclick={closeModal}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -105,7 +105,7 @@
             {#each interests as tag}
               <div class="topic-item">
                 <span class="topic-name">{tag}</span>
-                <button class="topic-remove" onclick={() => removeTag(tag)}>
+                <button class="topic-remove" aria-label="Remove {tag}" onclick={() => removeTag(tag)}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 </button>
               </div>

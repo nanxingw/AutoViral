@@ -13,7 +13,6 @@ const API_VERSION = '2022-08-31'
 const SUBMIT_ACTION = 'CVSync2AsyncSubmitTask'
 const QUERY_ACTION = 'CVSync2AsyncGetResult'
 
-const IMAGE_REQ_KEY = 'jimeng_t2i_v40'
 // Video 3.0 Pro uses a unified req_key for both T2V and I2V
 const VIDEO_T2V_REQ_KEY = 'jimeng_ti2v_v30_pro'
 const VIDEO_I2V_REQ_KEY = 'jimeng_ti2v_v30_pro'
@@ -185,7 +184,7 @@ async function downloadFile(url: string, destPath: string): Promise<void> {
 
 export class JimengProvider implements GenerateProvider {
   readonly name = 'jimeng'
-  readonly supportsImage = true
+  readonly supportsImage = false
   readonly supportsVideo = true
 
   private accessKey: string
@@ -196,62 +195,11 @@ export class JimengProvider implements GenerateProvider {
     this.secretKey = config.secretKey
   }
 
-  async generateImage(opts: ImageOpts): Promise<GenerateResult> {
-    const { prompt, workId, filename } = opts
-    const width = opts.width ?? 1088
-    const height = opts.height ?? 1088
-
-    // Clamp dimensions to valid range
-    const clampedWidth = Math.min(1728, Math.max(576, width))
-    const clampedHeight = Math.min(1728, Math.max(576, height))
-
-    try {
-      const payload: Record<string, unknown> = {
-        req_key: IMAGE_REQ_KEY,
-        prompt,
-        width: clampedWidth,
-        height: clampedHeight,
-        return_url: true,
-        logo_info: { add_logo: false },
-      }
-
-      if (opts.referenceImage) {
-        payload.binary_data_base64 = [opts.referenceImage]
-      }
-
-      const result = await submitAndPoll(this.accessKey, this.secretKey, payload)
-
-      // Extract image URL or base64 data from result
-      const imageUrl = result.data?.image_urls?.[0]
-        ?? result.data?.resp_data?.[0]?.image_url
-      const imageBase64 = result.data?.binary_data_base64?.[0]
-
-      const assetPath = join(dataDir, 'works', workId, 'assets', 'images', filename)
-
-      if (imageUrl) {
-        await downloadFile(imageUrl, assetPath)
-      } else if (imageBase64) {
-        // API returned raw base64 image data — write directly
-        const dir = assetPath.substring(0, assetPath.lastIndexOf('/'))
-        await mkdir(dir, { recursive: true })
-        await writeFile(assetPath, Buffer.from(imageBase64, 'base64'))
-      } else {
-        return { success: false, error: 'No image URL or base64 data in response', code: 'API_ERROR' }
-      }
-
-      return {
-        success: true,
-        assetPath,
-        previewUrl: `/api/works/${workId}/assets/images/${filename}`,
-      }
-    } catch (err: any) {
-      if (err.message?.includes('timed out')) {
-        return { success: false, error: err.message, code: 'TIMEOUT' }
-      }
-      if (err.message?.includes('Download failed')) {
-        return { success: false, error: err.message, code: 'DOWNLOAD_FAILED' }
-      }
-      return { success: false, error: err.message, code: 'API_ERROR' }
+  async generateImage(_opts: ImageOpts): Promise<GenerateResult> {
+    return {
+      success: false,
+      error: 'Jimeng image generation has been disabled. Image generation goes through OpenRouter (openai/gpt-5.4-image-2).',
+      code: 'INVALID_PARAMS',
     }
   }
 

@@ -152,7 +152,7 @@ export async function runPipeline(wsBridge: WsBridge, config: RunConfig): Promis
 
         // For assets step, add instruction to use scripts
         if (stepKey === "assets") {
-          prompt += " 使用 python3 ~/.claude/skills/asset-generation/scripts/openrouter_generate.py 生成图片，不需要逐张确认，直接全部生成。";
+          prompt += " 使用 python3 ~/.claude/skills/autoviral/modules/assets/scripts/openrouter_generate.py 生成图片，不需要逐张确认，直接全部生成。";
         }
         if (stepKey === "assembly") {
           prompt += " 生成小红书发布文案写入 output/publish-text.md，然后推进pipeline到完成。";

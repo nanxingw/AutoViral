@@ -15,7 +15,8 @@ export function getDefaultProvider(type: 'image' | 'video') {
     if (dreamina) return dreamina
   }
   if (type === 'image') {
-    // Image: prefer OpenRouter/Gemini, skip Dreamina
+    // Image: only NanoBanana (OpenRouter → openai/gpt-5.4-image-2) is supported.
+    // Jimeng image is intentionally disabled; Dreamina is video-only.
     for (const p of providers.values()) {
       if (p.supportsImage && p.name !== 'dreamina') return p
     }

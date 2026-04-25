@@ -4,7 +4,7 @@ import { dataDir } from '../config.js'
 import type { GenerateProvider, ImageOpts, VideoOpts, GenerateResult } from './base.js'
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
-const DEFAULT_MODEL = 'google/gemini-3.1-flash-image-preview'
+const DEFAULT_MODEL = 'openai/gpt-5.4-image-2'
 
 export class NanoBananaProvider implements GenerateProvider {
   readonly name = 'nanobanana'

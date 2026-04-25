@@ -31,7 +31,7 @@ export const apiRoutes = new Hono();
 const execFileAsync = promisify(execFile);
 
 async function runTrendScript(platform: string): Promise<string> {
-  const scriptsDir = join(process.cwd(), 'skills', 'trend-research', 'scripts');
+  const scriptsDir = join(process.cwd(), 'skills', 'autoviral', 'modules', 'research', 'scripts');
 
   try {
     if (platform === 'douyin') {
@@ -1434,10 +1434,10 @@ apiRoutes.post("/api/works/:id/step/:step", async (c) => {
               `- Volume: dialogue 100%, BGM 15-25% during speech, 40-60% during visual-only`,
               ``,
               `### Available Scripts (MUST USE, do NOT write inline code):`,
-              `- **BGM search**: Read \`modules/music-search.md\` for yt-dlp search/download workflow`,
-              `- **Beat detection**: \`python3 ~/.claude/skills/content-assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json\``,
-              `- **Beat-sync editing**: \`python3 ~/.claude/skills/content-assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic\``,
-              `- Read \`modules/beat-sync.md\` for detailed usage of 3 styles (fast/smooth/dramatic)`,
+              `- **BGM search**: Read \`~/.claude/skills/autoviral/modules/assembly/capabilities/music-search.md\` for yt-dlp search/download workflow`,
+              `- **Beat detection**: \`python3 ~/.claude/skills/autoviral/modules/assembly/scripts/beat-sync/detect_beats.py bgm.mp3 -o beats.json\``,
+              `- **Beat-sync editing**: \`python3 ~/.claude/skills/autoviral/modules/assembly/scripts/beat-sync/beat_sync_edit.py --video source.mp4 --music bgm.mp3 --output final.mp4 --style dramatic\``,
+              `- Read \`~/.claude/skills/autoviral/modules/assembly/capabilities/beat-sync.md\` for detailed usage of 3 styles (fast/smooth/dramatic)`,
             ].join("\n"),
           };
           const comedyDirective = comedyByStep[step];
@@ -1770,7 +1770,7 @@ function buildEvalPrompt(work: Work, step: string, attempt: number, historyText:
 - **作品目录: ${workDir}**
 
 ## 评审标准
-请阅读 skills/content-evaluator/criteria/${step}.md 获取该阶段的详细评审标准。如果文件不存在，请使用通用的内容质量标准进行评审。
+先读 \`skills/autoviral/taste/06-rubric.md\` 获取通用评审 rubric，再读 \`skills/autoviral/taste/evaluator-criteria/${step}.md\` 获取该阶段的补充细则。细则缺失就只用通用 rubric。
 
 ## 创作产出摘要
 ${historyText.slice(0, 6000) || "(无文本产出记录)"}

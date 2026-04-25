@@ -31,6 +31,8 @@
   // aborted state removed — after stop, user just sends a new message
   let showTypeDropdown = $state(false);
   let showCategoryDropdown = $state(false);
+  let typeDropdownWrap: HTMLDivElement | undefined = $state();
+  let categoryDropdownWrap: HTMLDivElement | undefined = $state();
 
   // 4-zone layout state
   let chatPanelWidth = $state(380);
@@ -221,8 +223,9 @@
 
         const title = titleMatch?.[1]?.trim() ?? "";
         const body = bodyMatch?.[1]?.trim() ?? "";
-        const tags = (tagsMatch?.[1] ?? "").match(/#[\w\u4e00-\u9fff]+/g) ?? [];
-        const topics = (topicsMatch?.[1] ?? "").match(/#[\w\u4e00-\u9fff]+/g) ?? [];
+        const stripHash = (s: string) => s.replace(/^#+/, "");
+        const tags = ((tagsMatch?.[1] ?? "").match(/#[\w\u4e00-\u9fff]+/g) ?? []).map(stripHash);
+        const topics = ((topicsMatch?.[1] ?? "").match(/#[\w\u4e00-\u9fff]+/g) ?? []).map(stripHash);
 
         if (title || body) {
           parsedCopytext = { title, body, tags, topics };
@@ -263,10 +266,20 @@
   }
 
   // --- Evaluation handlers ---
+  function pushErrorBlock(message: string) {
+    streamBlocks = [...streamBlocks, { type: "text", text: `⚠️ ${message}`, source: "evaluator" }];
+    scrollToBottom();
+  }
+
   async function handleToggleEval() {
     if (!work) return;
-    const result = await toggleEvalMode(workId);
-    evaluationMode = result.evaluationMode;
+    try {
+      const result = await toggleEvalMode(workId);
+      evaluationMode = result.evaluationMode;
+    } catch (err) {
+      // UI 绑定 checked={evaluationMode}，会自动回滚到真实状态
+      pushErrorBlock(`质量评审开关切换失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
   async function handleForcePass() {
@@ -274,14 +287,22 @@
     const stepKeys = Object.keys(work.pipeline);
     const idx = stepKeys.indexOf(evalBlocked.step);
     const nextStep = idx < stepKeys.length - 1 ? stepKeys[idx + 1] : undefined;
-    await forcePassEval(workId, evalBlocked.step, nextStep);
-    evalBlocked = null;
+    try {
+      await forcePassEval(workId, evalBlocked.step, nextStep);
+      evalBlocked = null;
+    } catch (err) {
+      pushErrorBlock(`强制通过评审失败：${err instanceof Error ? err.message : String(err)}。请重试或使用「带建议重试」。`);
+    }
   }
 
   async function handleRetryWithGuidance(guidance: string) {
     if (!work || !evalBlocked || !guidance.trim()) return;
-    await retryWithGuidance(workId, evalBlocked.step, guidance);
-    evalBlocked = null;
+    try {
+      await retryWithGuidance(workId, evalBlocked.step, guidance);
+      evalBlocked = null;
+    } catch (err) {
+      pushErrorBlock(`带建议重试失败：${err instanceof Error ? err.message : String(err)}。您可以修改建议后再试。`);
+    }
   }
 
   function handleTimelineAction(type: string, payload: any) {
@@ -292,10 +313,23 @@
       if (clip) selectedAsset = clip.path;
       return;
     }
+    const idToPath = (id: string) => videoClips.find(c => c.id === id)?.path ?? id;
+    const idToLabel = (id: string) => {
+      const p = idToPath(id);
+      return p.split('/').pop() ?? p;
+    };
+    if (type === "reorder") {
+      const ids: string[] = Array.isArray(payload) ? payload : [payload];
+      const labels = ids.map(idToLabel);
+      handleChatSend({ text: `请把视频片段重新排列为: ${labels.join(', ')}`, attachments: [] });
+      return;
+    }
+    const targetId = payload?.target ?? payload;
+    const targetLabel = idToLabel(targetId);
     const messages: Record<string, string> = {
-      reorder: `请把视频片段重新排列为: ${Array.isArray(payload) ? payload.join(', ') : payload}`,
-      delete: `请删除视频片段 ${payload?.target ?? payload}`,
-      replace: `请重新生成视频片段 ${payload?.target ?? payload}`,
+      delete: `请删除视频片段 ${targetLabel}`,
+      replace: `请重新生成视频片段 ${targetLabel}`,
+      split: `请在当前播放头位置分割视频片段 ${targetLabel}`,
     };
     const text = messages[type];
     if (text) handleChatSend({ text, attachments: [] });
@@ -640,9 +674,20 @@
       activeToolName = "";
     };
   });
+
+  function handleWindowPointerDown(event: PointerEvent) {
+    const target = event.target as Node | null;
+    if (!target) return;
+    if (typeDropdownWrap && !typeDropdownWrap.contains(target)) {
+      showTypeDropdown = false;
+    }
+    if (categoryDropdownWrap && !categoryDropdownWrap.contains(target)) {
+      showCategoryDropdown = false;
+    }
+  }
 </script>
 
-<svelte:window on:pointerdown={() => { showTypeDropdown = false; showCategoryDropdown = false; }} />
+<svelte:window on:pointerdown={handleWindowPointerDown} />
 <div class="studio-layout">
   <div class="studio-header">
     <div class="header-left-group">
@@ -675,7 +720,7 @@
         onkeydown={(e) => { if (e.key === "Enter") { e.preventDefault(); (e.target as HTMLElement).blur(); } }}
       >{work?.title ?? tt("studio")}</h2>
       {#if work}
-        <div class="tag-dropdown-wrap">
+        <div class="tag-dropdown-wrap" bind:this={typeDropdownWrap}>
           <button class="header-tag clickable" onclick={() => showTypeDropdown = !showTypeDropdown}>
             {work.type === "short-video" ? tt("shortVideo") : tt("imageText")}
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
@@ -692,7 +737,7 @@
           {/if}
         </div>
         {#if work.contentCategory}
-          <div class="tag-dropdown-wrap">
+          <div class="tag-dropdown-wrap" bind:this={categoryDropdownWrap}>
             <button class="header-tag clickable" onclick={() => showCategoryDropdown = !showCategoryDropdown}>
               {work.contentCategory === "anxiety" ? tt("categoryAnxiety") : work.contentCategory === "conflict" ? tt("categoryConflict") : work.contentCategory === "comedy" ? tt("categoryComedy") : work.contentCategory === "envy" ? tt("categoryEnvy") : work.contentCategory}
               <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
@@ -762,10 +807,10 @@
               <div class="copytext-bar-title">{parsedCopytext.title}</div>
               <div class="copytext-bar-tags">
                 {#each parsedCopytext.topics as topic}
-                  <span class="copytext-pill copytext-pill--topic">{topic}</span>
+                  <span class="copytext-pill copytext-pill--topic">#{topic}</span>
                 {/each}
                 {#each parsedCopytext.tags as tag}
-                  <span class="copytext-pill copytext-pill--tag">{tag}</span>
+                  <span class="copytext-pill copytext-pill--tag">#{tag}</span>
                 {/each}
               </div>
             </div>
@@ -1102,10 +1147,6 @@
     font-weight: 600;
     letter-spacing: 0.3px;
     user-select: none;
-  }
-
-  .step-clickable {
-    transition: all var(--transition-fast);
   }
 
   /* ── Copytext bar (short-video mode) ── */

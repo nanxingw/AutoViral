@@ -92,10 +92,12 @@
       <div class="section-label section-label--output">✅ 成品 · {images.length}张</div>
       <div class="image-grid">
         {#each images as img, i}
-          <button
+          <div
             class="image-card"
             class:dragging={dragIndex === i}
             class:drag-over={dragOverIndex === i && dragIndex !== i}
+            role="button"
+            tabindex="0"
             draggable="true"
             ondragstart={(e) => handleDragStart(e, i)}
             ondragover={(e) => handleDragOver(e, i)}
@@ -103,6 +105,12 @@
             ondrop={(e) => handleDrop(e, i)}
             ondragend={handleDragEnd}
             onclick={() => handleClick(img.path)}
+            onkeydown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                handleClick(img.path);
+              }
+            }}
             oncontextmenu={(e) => handleContextMenu(e, img.path)}
             onmouseenter={() => (hoveredIndex = i)}
             onmouseleave={() => (hoveredIndex = null)}
@@ -111,15 +119,15 @@
             <img class="thumb" src={assetUrl(img.path)} alt="成品 {i + 1}" draggable="false" />
             {#if hoveredIndex === i}
               <div class="hover-overlay">
-                <button class="overlay-btn" onclick={(e) => { e.stopPropagation(); onAction?.({ type: "replace", target: img.path }); }} title="替换">
+                <button type="button" class="overlay-btn" onclick={(e) => { e.stopPropagation(); onAction?.({ type: "replace", target: img.path }); }} title="替换">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6"/><path d="M2.5 22v-6h6"/><path d="M2.5 11.5a10 10 0 0 1 18.8-4.3"/><path d="M21.5 12.5a10 10 0 0 1-18.8 4.3"/></svg>
                 </button>
-                <button class="overlay-btn overlay-btn--danger" onclick={(e) => { e.stopPropagation(); onAction?.({ type: "delete", target: img.path }); }} title="删除">
+                <button type="button" class="overlay-btn overlay-btn--danger" onclick={(e) => { e.stopPropagation(); onAction?.({ type: "delete", target: img.path }); }} title="删除">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/></svg>
                 </button>
               </div>
             {/if}
-          </button>
+          </div>
         {/each}
         <button class="image-card add-card" onclick={() => onAction?.({ type: "add", target: "" })} title="添加图片">
           <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>

@@ -170,11 +170,11 @@
 <div class="shell" data-lang={lang}>
   <header class="topbar">
     <div class="topbar-left">
-      <a class="logo-mark" href="#" onclick={(e) => { e.preventDefault(); activeTab = "works"; showStudio = false; currentWorkId = null; }}>
+      <button type="button" class="logo-mark" aria-label="AutoViral Home" onclick={() => { activeTab = "works"; showStudio = false; currentWorkId = null; }}>
         <img class="logo-img" src="/logo.svg" alt="AutoViral" />
         <span class="logo-wordmark">AutoViral</span>
-      </a>
-      <nav class="nav" role="tablist">
+      </button>
+      <div class="nav" role="tablist">
         {#each navItems as item}
           <button
             class="nav-link"
@@ -186,7 +186,7 @@
             {tt(item.labelKey)}
           </button>
         {/each}
-      </nav>
+      </div>
     </div>
     <button
       class="topbar-action"
@@ -215,12 +215,12 @@
   </main>
 
   {#if showSettings}
-    <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
-    <div class="overlay" onclick={() => showSettings = false}></div>
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div class="overlay" role="button" tabindex="-1" aria-label="Close settings overlay" onclick={() => showSettings = false}></div>
     <aside class="drawer">
       <div class="drawer-head">
         <h2>{tt("settingsTitle")}</h2>
-        <button class="drawer-close" onclick={() => showSettings = false}>
+        <button class="drawer-close" aria-label="Close settings" onclick={() => showSettings = false}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
@@ -230,7 +230,7 @@
           <span class="field-label-upper">{tt("languageSetting")}</span>
           <div class="lang-row">
             <span class="lang-opt" class:active={lang === "en"}>EN</span>
-            <button class="switch" class:on={lang === "zh"} onclick={toggleLanguage}>
+            <button class="switch" class:on={lang === "zh"} onclick={toggleLanguage} role="switch" aria-checked={lang === "zh"} aria-label="Toggle language">
               <span class="switch-thumb"></span>
             </button>
             <span class="lang-opt" class:active={lang === "zh"}>中文</span>
@@ -274,7 +274,7 @@
             </label>
             <div class="field-row">
               <span class="field-label-sm">{tt("autoResearch")}</span>
-              <button class="switch" class:on={autoRun} onclick={() => autoRun = !autoRun} role="switch" aria-checked={autoRun}>
+              <button class="switch" class:on={autoRun} onclick={() => autoRun = !autoRun} role="switch" aria-checked={autoRun} aria-label="Toggle auto research">
                 <span class="switch-thumb"></span>
               </button>
             </div>
