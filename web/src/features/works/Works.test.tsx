@@ -15,6 +15,7 @@ function wrap(ui: ReactNode) {
 }
 
 describe("Works page", () => {
+  // "Hook Formula" originates from the MSW mock at web/src/test/msw.ts (GET /api/works fixture).
   it("renders hero and grid with mock works", async () => {
     render(wrap(<Works />));
     await waitFor(() => expect(screen.getByText(/Hook Formula/i)).toBeInTheDocument());
