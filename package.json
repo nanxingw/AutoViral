@@ -19,7 +19,9 @@
     "dev": "tsc --watch",
     "dev:frontend": "vite dev",
     "postinstall": "node dist/postinstall.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:web": "vitest --config web/vitest.config.ts run",
+    "test:web:watch": "vitest --config web/vitest.config.ts"
   },
   "keywords": [
     "claude-code",
