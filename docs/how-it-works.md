@@ -1,6 +1,9 @@
 # AutoViral 技术原理详解
 
-本文档详细解释 AutoViral 的探索功能和四步创作流水线的工作原理，包括每个阶段使用的 AI 技能、API 调用、提示词工程和平台适配策略。
+> ⚠️ **ARCHIVED — legacy architecture (pre-D3)**
+> 本文描述 2026-04 之前以"四步流水线 / pipeline / 阶段顺序"为核心的旧架构，已被 modules-as-capabilities 模式取代。新架构请参考 `README.md` §2、`docs/skill-structure-guide.md`、`docs/superpowers/specs/2026-04-25-ui-redesign-design.md`。本文保留作为历史参考。
+
+本文档详细解释 AutoViral 旧版本（pre-D3）的探索功能和四步创作流水线的工作原理。
 
 ---
 

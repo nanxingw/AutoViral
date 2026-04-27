@@ -2,7 +2,7 @@
 
 ## Skill 结构规范
 
-整个创作能力封装成**一个** skill：`skills/autoviral/`。它不是一条流水线，而是一组可从任意起点切入的正交能力。
+整个创作能力封装成**一个** skill：`skills/autoviral/`。它不是强制顺序的流程，而是一组可从任意起点切入的正交能力。
 
 ```
 skills/autoviral/

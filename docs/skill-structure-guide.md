@@ -1,6 +1,6 @@
 # Skill 结构规范（v2 — 统一模型）
 
-本文档定义 `skills/` 目录的组织规则。整个 AutoViral 的创作能力封装为**一个** skill，不再按 pipeline 阶段切分成多个。
+本文档定义 `skills/` 目录的组织规则。整个 AutoViral 的创作能力封装为**一个** skill，作为正交能力词典而非顺序流程。
 
 ---
 
@@ -27,9 +27,9 @@ skills/autoviral/
     04-design-and-text.md          # 视觉层级 / 排版 / 色彩
     05-creative-schema.md          # 情感意图 → 生产参数决策 schema
     06-rubric.md                   # 最终评审标尺（8 维度，1-5 分）
-    evaluator-criteria/            # 各模块补充的阶段性评审细则（由 api.ts 按需读取）
+    evaluator-criteria/            # 各模块补充的评审细则（由 /api/works/:id/rubric/:module 按需读取）
       research.md  plan.md  assets.md  assembly.md
-  modules/                         # 正交能力。不是阶段
+  modules/                         # 正交能力（research/planning/assets/assembly），任意起点切入
     research/
       SKILL.md                     # 本模块入口
       scripts/                     # 可执行脚本
@@ -123,7 +123,7 @@ description: <一行描述，用于 agent 判断何时展开>
 
 - 特定平台的**创作建议**（只写技术规格）
 - 复制 taste 里已有的内容（应该引用，不是复述）
-- 硬编码的"四阶段"流水线框架
+- 把 modules 描述成必须按顺序走的流程框架
 
 ---
 

@@ -1,5 +1,8 @@
 # WsBridge 会话管理经验
 
+> ⚠️ **ARCHIVED — describes pre-D3 ws-bridge with auto-run pipeline / `turn_complete → 下一阶段` semantics**
+> D3 重构后，WS 不再发送 `step_divider` / `eval_divider` / `pipeline_updated` 事件，agent 不再自动推进流水线，evaluator 从 gate 降级为只读 rubric 工具。新架构的协议契约见 `src/ws-bridge.ts` 当前实现与 `src/ws-bridge.test.ts` 中的 `ALLOWED_STREAM_TYPES` 白名单。本文保留作为旧实现参考。
+
 > Studio 页面与 Claude CLI 之间的 WebSocket 桥接
 
 ## 架构

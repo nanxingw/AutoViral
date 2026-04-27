@@ -161,16 +161,18 @@ autoviral start --foreground   # 前台启动（看日志）
 
 点击「新建作品」，输入标题和创作方向（如"科幻短片，月球大战"），选择类型和平台。
 
-### 2. 四步流水线
+### 2. 四个能力模块（modules-as-capabilities，无强制顺序）
 
-进入 Studio 工作台，AI Agent 按步骤推进：
+进入 Studio（视频）或 Editor（图文），按用户意图调用任意模块：
 
-| 步骤 | 短视频 | 图文 |
+| 模块 | 短视频 | 图文 |
 |------|--------|------|
-| **调研** | 搜索热点趋势、分析竞品 | 搜索话题热度、参考爆款 |
-| **规划** | 分镜脚本、画面描述、台词 | 每张图的内容规划、文案 |
-| **素材** | 生首帧 → 生视频片段 → 生配乐 | 生配图 → HTML 排版渲染 |
-| **合成** | FFmpeg 拼接 + 字幕 + 配乐 | 图片排序 + 发布文案 |
+| **research** | 搜索热点趋势、分析竞品 | 搜索话题热度、参考爆款 |
+| **planning** | 分镜脚本、画面描述、台词 | 每张图的内容规划、文案 |
+| **assets** | 生首帧 → 生视频片段 → 生配乐 | 生配图 → 排版渲染 |
+| **assembly** | Remotion 合成 + 字幕 + 配乐 | Konva 多图层 + 排序 + 发布文案 |
+
+任何模块都可以做起点。用户给完整 brief 就直接进 assets/assembly；想试趋势就单独调 research。Agent 不会反问"我们应该先做哪一步"——按你的意图直接动手。
 
 ### 3. 预览与导出
 
@@ -216,7 +218,7 @@ python3 skills/autoviral/modules/assets/scripts/check_providers.py --format tabl
 ## 项目架构
 
 ```
-浏览器 (Svelte 5)  ──WebSocket──  Node.js (Hono)  ──stdin/stdout──  Claude Code CLI
+浏览器 (React 18 + Vite)  ──WebSocket──  Node.js (Hono)  ──stdin/stdout──  Claude Code CLI
                                        │
                               ┌────────┼────────┐
                               ▼        ▼        ▼
@@ -232,18 +234,23 @@ src/                          # 后端 TypeScript
   config.ts                   #   配置管理（.env + config.yaml）
   work-store.ts               #   作品存储（YAML 持久化）
   ws-bridge.ts                #   WebSocket 桥接（浏览器 ↔ Claude CLI）
-  research-scheduler.ts       #   定时调研
   analytics-collector.ts      #   数据采集
   server/
-    api.ts                    #   REST + WebSocket API
+    api.ts                    #   REST + WebSocket API（/invoke 端点；评审为只读 rubric 工具）
     index.ts                  #   Hono 服务启动
+  remotion-renderer.ts        #   服务端 @remotion/renderer mp4 导出
 
-web/src/                      # 前端 Svelte 5
+web/src/                      # 前端 React 18 + Vite + Zustand + TanStack Query
   pages/
-    Studio.svelte             #   创作工作台（对话 + 流水线 + 素材）
-    Explore.svelte            #   趋势探索
-    Works.svelte              #   作品管理
-    Analytics.svelte          #   数据仪表盘
+    Works.tsx                 #   作品 hub（pick up where you left off）
+    Studio.tsx                #   视频创作（Remotion Player + 多轨 Timeline + Tweaks）
+    Editor.tsx                #   图文创作（Konva 多图层 + Inspector + Filmstrip）
+    Explore.tsx               #   趋势探索
+    Analytics.tsx             #   数据仪表盘
+  features/
+    studio/                   #   视频合成数据模型 / Remotion composition / Tweaks
+    editor/                   #   图文 carousel / Konva canvas / Inspector
+    chat/                     #   WS 客户端 + StreamBlock
 
 skills/                       # AI Agent 技能定义
   autoviral/                  #   一体化创作技能（单 skill，任意起点切入）
