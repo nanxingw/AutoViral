@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { join, extname } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
-import { loadConfig, saveConfig, dataDir } from "../config.js";
+import { loadConfig, saveConfig, dataDir, repoRoot } from "../config.js";
 import {
   listWorks, getWork, createWork as storeCreateWork,
   updateWork as storeUpdateWork, deleteWork as storeDeleteWork,
@@ -1107,6 +1107,37 @@ apiRoutes.post("/api/works/:id/invoke", async (c) => {
   }
 
   return c.json({ triggered: true, workId: id, module: mod }, 202);
+});
+
+// GET /api/works/:id/rubric/:module — read-only rubric tool (agent self-eval).
+// Returns the generic taste rubric concatenated with module-specific criteria
+// (if a file exists). The agent decides whether/how to apply scores; this
+// endpoint never writes state and never blocks.
+const RUBRIC_FILENAMES: Record<ModuleName, string> = {
+  research: "research.md",
+  planning: "plan.md",     // legacy filename on disk
+  assets: "assets.md",
+  assembly: "assembly.md",
+};
+
+apiRoutes.get("/api/works/:id/rubric/:module", async (c) => {
+  const mod = c.req.param("module") as ModuleName;
+  if (!KNOWN_MODULES.includes(mod)) return c.json({ error: "Unknown module" }, 404);
+
+  const work = await getWork(c.req.param("id"));
+  if (!work) return c.json({ error: "Work not found" }, 404);
+
+  const generic = await readFile(
+    join(repoRoot, "skills/autoviral/taste/06-rubric.md"),
+    "utf-8",
+  ).catch(() => "");
+  const moduleSpecific = await readFile(
+    join(repoRoot, "skills/autoviral/taste/evaluator-criteria", RUBRIC_FILENAMES[mod]),
+    "utf-8",
+  ).catch(() => "");
+
+  const rubric = [generic.trim(), moduleSpecific.trim()].filter(Boolean).join("\n\n---\n\n");
+  return c.json({ module: mod, rubric });
 });
 
 // ── Legacy stage-coupled routes — removed in D3 cleanup. Always 410 Gone. ──
