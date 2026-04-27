@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { listAssets, loadStepHistory } from "./work-store.js";
+import { listAssets, loadWorkChat } from "./work-store.js";
 import { log } from "./logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -97,25 +97,21 @@ async function checkProcess(workId: string): Promise<CheckResult[]> {
     return checks;
   }
 
-  // Check all steps done
-  const steps = Object.entries(work.pipeline);
-  for (const [key, step] of steps) {
-    checks.push({
-      name: `步骤 ${step.name} 完成`,
-      passed: step.status === "done",
-      detail: `status: ${step.status}`,
-    });
-  }
+  checks.push({
+    name: "作品存在",
+    passed: true,
+    detail: `id=${work.id} type=${work.type} status=${work.status}`,
+  });
 
-  // Check step histories exist
-  for (const [key] of steps) {
-    const history = await loadStepHistory(workId, key);
-    checks.push({
-      name: `步骤 ${key} 有聊天记录`,
-      passed: !!(history && (history as any).blocks?.length > 0),
-      detail: history ? `${(history as any).blocks?.length ?? 0} blocks` : "无记录",
-    });
-  }
+  // Single chat-history check replaces the per-module checks. In D3 the agent
+  // owns its own progress tracking; we only verify the agent did *something*.
+  const chat = await loadWorkChat(workId);
+  const blocks = (chat as any)?.blocks ?? [];
+  checks.push({
+    name: "作品已有对话记录",
+    passed: Array.isArray(blocks) && blocks.length > 0,
+    detail: Array.isArray(blocks) ? `${blocks.length} blocks` : "无记录",
+  });
 
   return checks;
 }

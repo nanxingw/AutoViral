@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt } from "./ws-bridge.js";
+import { buildSystemPrompt, ALLOWED_STREAM_TYPES } from "./ws-bridge.js";
 
 const baseWork = (overrides: Record<string, unknown> = {}) => ({
   id: "w_test",
@@ -46,5 +46,12 @@ describe("buildSystemPrompt", () => {
   it("works for image-text type without referencing video-only modules", () => {
     const p = buildSystemPrompt(baseWork({ type: "image-text" }) as any, { port: 3271 });
     expect(p).toMatch(/图文|image[- ]text/i);
+  });
+});
+
+describe("WS event types — D3", () => {
+  it("does not include step_divider or eval_divider", () => {
+    expect(ALLOWED_STREAM_TYPES).not.toContain("step_divider");
+    expect(ALLOWED_STREAM_TYPES).not.toContain("eval_divider");
   });
 });

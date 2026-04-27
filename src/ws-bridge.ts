@@ -20,7 +20,7 @@ import type { Duplex } from "node:stream";
 import { appendFile } from "node:fs/promises";
 import { logBridge, logBridgeDebug } from "./logger.js";
 import { loadConfig, dataDir } from "./config.js";
-import { getWork, updateWork, saveStepHistory, loadStepHistory, saveWorkChat, loadWorkChat, type Work, type PipelineStep, type EvalResult } from "./work-store.js";
+import { getWork, updateWork, saveWorkChat, loadWorkChat, type Work } from "./work-store.js";
 import { listSharedAssets } from "./shared-assets.js";
 import { MemoryClient } from "./memory.js";
 import { syncMessage } from "./memory-sync.js";
@@ -28,7 +28,7 @@ import { syncMessage } from "./memory-sync.js";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface ChatBlock {
-  type: "user" | "text" | "thinking" | "tool_use" | "tool_result" | "step_divider" | "eval_divider";
+  type: "user" | "text" | "thinking" | "tool_use" | "tool_result";
   text: string;
   toolName?: string;
   collapsed?: boolean;
@@ -39,11 +39,8 @@ export interface ChatBlock {
 export interface WsSession {
   workId: string;
   cliSessionId?: string;
-  evalSessionId?: string;
-  evalStep?: string;
   browserSockets: Set<WebSocket>;
   cliProcess?: ChildProcess;
-  evalProcess?: ChildProcess;
   idle: boolean;
   messageHistory: ChatBlock[];
   model?: string;
@@ -442,14 +439,6 @@ export class WsBridge {
       session.cliProcess = undefined;
     }
 
-    // Kill evaluator process if running
-    if (session.evalProcess) {
-      try { session.evalProcess.kill("SIGTERM"); } catch { /* dead */ }
-      const evalProc = session.evalProcess;
-      setTimeout(() => { try { evalProc.kill("SIGKILL"); } catch { /* dead */ } }, 5000);
-      session.evalProcess = undefined;
-    }
-
     session.idle = true;
     this.broadcastToBrowsers(workId, { event: "session_killed", data: { workId } });
     return true;
@@ -754,48 +743,12 @@ export class WsBridge {
             if (!session.workId.startsWith("trends_")) {
               saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
             }
-            // Real-time memory sync — assistant text (complete turn, not fragments)
+            // Real-time memory sync — assistant text (complete turn, not fragments).
+            // D3: no pipeline — sync against the work title with a generic "chat" key.
             if (!session.workId.startsWith("trends_") && resultText) {
               getWork(session.workId).then(w => {
                 if (!w) return;
-                const activeStep = Object.entries(w.pipeline).find(([, s]) => s.status === "active");
-                if (activeStep) {
-                  syncMessage(session.workId, w.title, activeStep[0], "assistant", resultText).catch(() => {});
-                }
-              }).catch(() => {});
-            }
-            // Auto-save step history from backend (doesn't rely on frontend)
-            // Only save the NEW messages from this turn (not entire history)
-            if (!session.workId.startsWith("trends_") && resultText) {
-              getWork(session.workId).then(w => {
-                if (!w) return;
-                const activeStep = Object.entries(w.pipeline).find(([, s]) => s.status === "active");
-                if (activeStep) {
-                  const [stepKey, stepInfo] = activeStep;
-                  // Build blocks from this turn only: the last user message + resultText
-                  const lastUserMsg = [...session.messageHistory].reverse().find(m => m.type === "user");
-                  const blocks: Array<{type: string; text: string}> = [];
-                  if (lastUserMsg) blocks.push({ type: "user", text: lastUserMsg.text });
-                  blocks.push({ type: "text", text: resultText });
-                  // Append to existing step history (don't overwrite)
-                  loadStepHistory(session.workId, stepKey).then(existing => {
-                    const existingBlocks = (existing as any)?.blocks ?? [];
-                    saveStepHistory(session.workId, stepKey, {
-                      stepKey,
-                      stepName: stepInfo.name,
-                      completedAt: new Date().toISOString(),
-                      blocks: [...existingBlocks, ...blocks],
-                    }).catch(() => {});
-                  }).catch(() => {
-                    // No existing history, save fresh
-                    saveStepHistory(session.workId, stepKey, {
-                      stepKey,
-                      stepName: stepInfo.name,
-                      completedAt: new Date().toISOString(),
-                      blocks,
-                    }).catch(() => {});
-                  });
-                }
+                syncMessage(session.workId, w.title, "chat", "assistant", resultText).catch(() => {});
               }).catch(() => {});
             }
             continue;
@@ -861,192 +814,6 @@ export class WsBridge {
     });
   }
 
-  /**
-   * Spawn an evaluator CLI agent for quality review.
-   * Routes messages with source:"evaluator" and parses structured eval results.
-   */
-  spawnEvaluator(
-    session: WsSession,
-    prompt: string,
-    resumeEvalSessionId?: string,
-  ): Promise<EvalResult> {
-    return new Promise((resolve, reject) => {
-      const args = [
-        "-p", prompt,
-        "--output-format", "stream-json",
-        "--verbose",
-        "--dangerously-skip-permissions",
-      ];
-
-      if (resumeEvalSessionId) {
-        args.push("--resume", resumeEvalSessionId);
-      }
-
-      if (session.model) {
-        args.push("--model", session.model);
-      }
-
-      const proc = spawn("claude", args, {
-        cwd: homedir(),
-        stdio: ["ignore", "pipe", "pipe"],
-        env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli", AUTOVIRAL_PROJECT_DIR: process.cwd() },
-      });
-
-      // Store on session so killSession() can kill it
-      session.evalProcess = proc;
-
-      let turnText = "";
-      let buffer = "";
-      let resolved = false;
-
-      proc.stdout?.on("data", (data: Buffer) => {
-        buffer += data.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
-
-        for (const line of lines) {
-          if (!line.trim()) continue;
-          try {
-            const msg: NdjsonMessage = JSON.parse(line);
-
-            // Capture evaluator session ID
-            if (msg.type === "system" && msg.subtype === "init" && msg.session_id) {
-              session.evalSessionId = msg.session_id;
-            }
-
-            // Forward assistant blocks with source: "evaluator"
-            if (msg.type === "assistant" && msg.message?.content) {
-              const blocks = msg.message.content as Array<Record<string, unknown>>;
-              for (const block of blocks) {
-                if (block.type === "text" && block.text) {
-                  turnText += block.text as string;
-                  const eb: ChatBlock = { type: "text", text: block.text as string, source: "evaluator", timestamp: new Date().toISOString() };
-                  session.messageHistory.push(eb);
-                  this.appendToChatLog(session.workId, eb);
-                  this.broadcastToBrowsers(session.workId, {
-                    event: "assistant_text",
-                    data: { workId: session.workId, text: block.text, source: "evaluator" },
-                  });
-                } else if (block.type === "thinking" && block.thinking) {
-                  const eb: ChatBlock = { type: "thinking", text: block.thinking as string, source: "evaluator", collapsed: true };
-                  session.messageHistory.push(eb);
-                  this.appendToChatLog(session.workId, eb);
-                  this.broadcastToBrowsers(session.workId, {
-                    event: "assistant_thinking",
-                    data: { workId: session.workId, text: block.thinking, source: "evaluator" },
-                  });
-                } else if (block.type === "tool_use") {
-                  const eb: ChatBlock = { type: "tool_use", text: JSON.stringify(block.input), toolName: block.name as string, source: "evaluator" };
-                  session.messageHistory.push(eb);
-                  this.appendToChatLog(session.workId, eb);
-                  this.broadcastToBrowsers(session.workId, {
-                    event: "tool_use",
-                    data: { workId: session.workId, name: block.name, input: block.input, source: "evaluator" },
-                  });
-                }
-              }
-            }
-
-            // Forward tool results with source: "evaluator"
-            if (msg.type === "user" && (msg as any).message?.content) {
-              const content = (msg as any).message.content as Array<Record<string, unknown>>;
-              for (const block of content) {
-                if (block.type === "tool_result") {
-                  const resultContent = typeof block.content === "string"
-                    ? block.content : JSON.stringify(block.content);
-                  const eb: ChatBlock = { type: "tool_result", text: resultContent, source: "evaluator", collapsed: true };
-                  session.messageHistory.push(eb);
-                  this.appendToChatLog(session.workId, eb);
-                  this.broadcastToBrowsers(session.workId, {
-                    event: "tool_result",
-                    data: { workId: session.workId, content: resultContent, source: "evaluator" },
-                  });
-                }
-              }
-            }
-
-            // result — eval turn complete, parse JSON result
-            if (msg.type === "result") {
-              if (msg.session_id) {
-                session.evalSessionId = msg.session_id;
-              }
-              const resultText = typeof msg.result === "string" && msg.result ? msg.result : turnText;
-
-              // Parse eval result JSON from response
-              let evalResult: EvalResult;
-              try {
-                // Try extracting JSON from markdown code block first
-                const jsonMatch = resultText.match(/```json\s*([\s\S]*?)\s*```/);
-                if (jsonMatch) {
-                  evalResult = JSON.parse(jsonMatch[1]);
-                } else {
-                  // Try parsing entire text as JSON
-                  evalResult = JSON.parse(resultText);
-                }
-              } catch {
-                // Fallback: if we can't parse JSON, create a default pass result
-                evalResult = {
-                  step: session.evalStep ?? "unknown",
-                  attempt: 1,
-                  verdict: "pass" as const,
-                  scores: {},
-                  issues: [],
-                  suggestions: [],
-                  timestamp: new Date().toISOString(),
-                };
-              }
-
-              // Persist chat
-              saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
-
-              if (!resolved) {
-                resolved = true;
-                resolve(evalResult);
-              }
-            }
-          } catch { /* ignore non-JSON lines */ }
-        }
-      });
-
-      proc.stderr?.on("data", (data: Buffer) => {
-        const text = data.toString();
-        if (text.trim()) {
-          this.broadcastToBrowsers(session.workId, {
-            event: "cli_stderr",
-            data: { text, source: "evaluator" },
-          });
-        }
-      });
-
-      proc.on("exit", (code) => {
-        session.evalProcess = undefined;
-        if (!resolved) {
-          resolved = true;
-          if (code !== 0) {
-            reject(new Error(`Evaluator exited with code ${code}`));
-          } else {
-            // If exited cleanly but no result parsed, return default pass
-            resolve({
-              step: session.evalStep ?? "unknown",
-              attempt: 1,
-              verdict: "pass" as const,
-              scores: {},
-              issues: [],
-              suggestions: [],
-              timestamp: new Date().toISOString(),
-            });
-          }
-        }
-      });
-
-      proc.on("error", (err) => {
-        if (!resolved) {
-          resolved = true;
-          reject(err);
-        }
-      });
-    });
-  }
 
   // ── Browser WebSocket handler ────────────────────────────────────────────
 
