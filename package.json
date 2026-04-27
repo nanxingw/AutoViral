@@ -22,6 +22,8 @@
     "test": "vitest run",
     "test:web": "vitest --config web/vitest.config.ts run",
     "test:web:watch": "vitest --config web/vitest.config.ts",
+    "test:server": "vitest run --config vitest.server.config.ts",
+    "test:server:watch": "vitest --config vitest.server.config.ts",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui"
   },

@@ -1,5 +1,6 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
 import dotenv from "dotenv";
@@ -24,8 +25,14 @@ export interface Config {
 const CONFIG_DIR = join(homedir(), ".autoviral");
 const CONFIG_PATH = join(CONFIG_DIR, "config.yaml");
 
-/** Base data directory for works, trends, etc. */
-export const dataDir = CONFIG_DIR;
+/** Base data directory for works, trends, etc.
+ *  Tests can override via AUTOVIRAL_DATA_DIR; resolved at module load. */
+export const dataDir = process.env.AUTOVIRAL_DATA_DIR ?? CONFIG_DIR;
+
+/** Repo root directory — used by the rubric reader and any code that needs
+ *  to load files shipped with the package. Resolves to the parent of the
+ *  directory containing this module (src/ in dev, dist/ in prod). */
+export const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 export function getDefaultConfig(): Config {
   return {
