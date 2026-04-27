@@ -12,12 +12,15 @@ import { Timeline } from "@/features/studio/panels/Timeline";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
 import { ChatPanel } from "@/features/studio/panels/Chat";
 import { TopBar } from "@/features/studio/panels/TopBar";
+import { useShortcuts } from "@/features/studio/hooks/useShortcuts";
 
 export default function Studio() {
   const { workId } = useParams();
   const loadComp = useComposition((s) => s.loadComposition);
   const comp = useComposition((s) => s.comp);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+
+  useShortcuts(workId ?? null);
 
   useEffect(() => {
     if (!workId) return;
