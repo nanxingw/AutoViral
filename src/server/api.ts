@@ -270,6 +270,34 @@ apiRoutes.put("/api/works/:id/composition", async (c) => {
   return c.json({ ok: true });
 });
 
+// POST /api/works/:id/render — renders composition.yaml to mp4 via @remotion/renderer
+apiRoutes.post("/api/works/:id/render", async (c) => {
+  const id = c.req.param("id");
+  const w = await getWork(id);
+  if (!w) return c.json({ error: "Work not found" }, 404);
+  let comp: any;
+  try {
+    const raw = await readFile(
+      join(dataDir, "works", id, "composition.yaml"),
+      "utf-8",
+    );
+    comp = yaml.load(raw);
+  } catch {
+    return c.json({ error: "Composition missing — save first" }, 400);
+  }
+  const outDir = join(dataDir, "works", id, "output");
+  await mkdir(outDir, { recursive: true });
+  try {
+    const { renderCompositionToMp4 } = await import(
+      "./remotion-renderer.js"
+    );
+    const file = await renderCompositionToMp4(comp, outDir);
+    return c.json({ ok: true, output: file });
+  } catch (err: any) {
+    return c.json({ error: err?.message ?? "Render failed" }, 500);
+  }
+});
+
 // GET /api/works/:id/assets
 apiRoutes.get("/api/works/:id/assets", async (c) => {
   const id = c.req.param("id");
