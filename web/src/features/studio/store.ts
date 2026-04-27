@@ -7,6 +7,7 @@ interface CompState {
   selection: string | null;
   currentFrame: number;
   isPlaying: boolean;
+  beats: number[];
   loadComposition: (c: Composition) => void;
   addClip: (trackId: string, clip: Clip) => void;
   updateClip: (clipId: string, patch: Partial<Clip>) => void;
@@ -14,6 +15,7 @@ interface CompState {
   setSelection: (id: string | null) => void;
   setFrame: (f: number) => void;
   setPlaying: (p: boolean) => void;
+  setBeats: (b: number[]) => void;
   recomputeDuration: () => void;
 }
 
@@ -29,6 +31,7 @@ export const useComposition = create<CompState>()(
     selection: null,
     currentFrame: 0,
     isPlaying: false,
+    beats: [],
     loadComposition: (c) =>
       set((s) => {
         s.comp = c;
@@ -76,6 +79,10 @@ export const useComposition = create<CompState>()(
     setPlaying: (p) =>
       set((s) => {
         s.isPlaying = p;
+      }),
+    setBeats: (b) =>
+      set((s) => {
+        s.beats = b;
       }),
     recomputeDuration: () =>
       set((s) => {

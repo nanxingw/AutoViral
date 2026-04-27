@@ -1,4 +1,5 @@
 import { useComposition } from "../../store";
+import { snapToBeat } from "./snapToBeat";
 import clsx from "clsx";
 
 export function Clip({
@@ -27,11 +28,11 @@ export function Clip({
     const startOffset = clip.trackOffset;
     const move = (ev: PointerEvent) => {
       const delta = (ev.clientX - startX) / pxPerSecond;
-      const next = Math.max(
-        0,
-        Math.round((startOffset + delta) * 10) / 10,
-      );
-      updateClip(clipId, { trackOffset: next });
+      const raw = Math.max(0, (startOffset + delta));
+      const grid = Math.round(raw * 10) / 10;
+      const beats = useComposition.getState().beats;
+      const snapped = snapToBeat(grid, beats, 0.06);
+      updateClip(clipId, { trackOffset: snapped });
     };
     const up = () => {
       window.removeEventListener("pointermove", move);
