@@ -1,39 +1,89 @@
 import { useParams } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { useComposition } from "@/features/studio/store";
+import { makeEmptyComposition } from "@/features/studio/types";
+import {
+  loadComposition,
+  saveComposition,
+} from "@/features/studio/services/composition";
+import { exportMp4 } from "@/features/studio/services/render";
+import { PreviewPanel } from "@/features/studio/panels/PreviewPanel";
+import { Timeline } from "@/features/studio/panels/Timeline";
+import { TweaksPanel } from "@/features/studio/panels/Tweaks";
+import { ChatPanel } from "@/features/studio/panels/Chat";
+import { TopBar } from "@/features/studio/panels/TopBar";
 
 export default function Studio() {
   const { workId } = useParams();
+  const loadComp = useComposition((s) => s.loadComposition);
+  const comp = useComposition((s) => s.comp);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!workId) return;
+    (async () => {
+      const found = await loadComposition(workId);
+      loadComp(found ?? makeEmptyComposition({ workId }));
+    })();
+  }, [workId, loadComp]);
+
+  // Autosave on change (debounced)
+  useEffect(() => {
+    if (!comp || !workId) return;
+    const t = setTimeout(() => {
+      saveComposition(workId, comp).then(() =>
+        setSavedAt(new Date().toLocaleTimeString()),
+      );
+    }, 800);
+    return () => clearTimeout(t);
+  }, [comp, workId]);
+
+  if (!workId) return <div>Missing workId</div>;
 
   return (
     <div
+      className="studio-shell"
+      data-work-id={workId}
       style={{
         display: "grid",
         gridTemplateColumns: "360px 1fr 300px",
         gridTemplateRows: "56px 1fr 320px",
-        gridTemplateAreas: `"top top top" "chat preview aside" "chat timeline aside"`,
-        gap: 12,
-        padding: 12,
-        height: "100vh",
-        maxHeight: "100vh",
+        gridTemplateAreas:
+          '"top top top" "chat preview aside" "chat timeline aside"',
+        height: "calc(100vh - 56px)",
       }}
-      data-work-id={workId}
     >
-      <div style={{ gridArea: "top", border: "1px solid var(--glass-border)", borderRadius: "var(--radius-lg)", background: "var(--surface-1)" }}>top bar</div>
-      <div style={{ gridArea: "chat", border: "1px solid var(--glass-border)", borderRadius: "var(--radius-lg)", background: "var(--surface-1)" }}>chat (Plan 2)</div>
-      <div style={{ gridArea: "preview", border: "1px solid var(--glass-border)", borderRadius: "var(--radius-lg)", background: "var(--surface-1)", display: "grid", placeItems: "center", color: "var(--text-dim)" }}>
-        <PreviewPlaceholder workId={workId ?? "?"} />
+      <div style={{ gridArea: "top" }}>
+        <TopBar
+          workId={workId}
+          savedAt={savedAt}
+          onExport={() => {
+            void exportMp4(workId);
+          }}
+        />
       </div>
-      <div style={{ gridArea: "aside", border: "1px solid var(--glass-border)", borderRadius: "var(--radius-lg)", background: "var(--surface-1)" }}>tweaks (Plan 2)</div>
-      <div style={{ gridArea: "timeline", border: "1px solid var(--glass-border)", borderRadius: "var(--radius-lg)", background: "var(--surface-1)" }}>timeline (Plan 2)</div>
-    </div>
-  );
-}
-
-function PreviewPlaceholder({ workId }: { workId: string }) {
-  return (
-    <div style={{ textAlign: "center" }}>
-      <div className="font-editorial-italic" style={{ fontSize: 28 }}>Studio</div>
-      <div className="font-mono" style={{ marginTop: 8, color: "var(--text-dimmer)" }}>workId: {workId}</div>
-      <div className="font-mono" style={{ marginTop: 4, color: "var(--text-dimmer)" }}>Remotion Player · Plan 2</div>
+      <div
+        style={{ gridArea: "chat", borderRight: "1px solid var(--border)" }}
+      >
+        <ChatPanel workId={workId} />
+      </div>
+      <div style={{ gridArea: "preview", overflow: "hidden" }}>
+        <PreviewPanel />
+      </div>
+      <div
+        style={{
+          gridArea: "timeline",
+          borderTop: "1px solid var(--border)",
+          overflow: "hidden",
+        }}
+      >
+        <Timeline />
+      </div>
+      <div
+        style={{ gridArea: "aside", borderLeft: "1px solid var(--border)" }}
+      >
+        <TweaksPanel />
+      </div>
     </div>
   );
 }
