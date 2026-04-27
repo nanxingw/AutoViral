@@ -25,8 +25,14 @@ export default function Studio() {
   useEffect(() => {
     if (!workId) return;
     (async () => {
-      const found = await loadComposition(workId);
-      loadComp(found ?? makeEmptyComposition({ workId }));
+      try {
+        const found = await loadComposition(workId);
+        loadComp(found ?? makeEmptyComposition({ workId }));
+      } catch {
+        // Backend unavailable or work not yet provisioned — fall back to a
+        // fresh empty composition so the studio is still usable.
+        loadComp(makeEmptyComposition({ workId }));
+      }
     })();
   }, [workId, loadComp]);
 
