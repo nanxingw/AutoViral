@@ -270,6 +270,38 @@ apiRoutes.put("/api/works/:id/composition", async (c) => {
   return c.json({ ok: true });
 });
 
+// GET /api/works/:id/carousel — returns carousel.yaml as JSON
+apiRoutes.get("/api/works/:id/carousel", async (c) => {
+  const id = c.req.param("id");
+  const w = await getWork(id);
+  if (!w) return c.json({ error: "Work not found" }, 404);
+  try {
+    const raw = await readFile(
+      join(dataDir, "works", id, "carousel.yaml"),
+      "utf-8",
+    );
+    return c.json(yaml.load(raw));
+  } catch {
+    return c.json({ error: "Carousel not found" }, 404);
+  }
+});
+
+// PUT /api/works/:id/carousel — persists carousel as yaml
+apiRoutes.put("/api/works/:id/carousel", async (c) => {
+  const id = c.req.param("id");
+  const w = await getWork(id);
+  if (!w) return c.json({ error: "Work not found" }, 404);
+  const body = await c.req.json();
+  const wDir = join(dataDir, "works", id);
+  await mkdir(wDir, { recursive: true });
+  await writeFile(
+    join(wDir, "carousel.yaml"),
+    yaml.dump(body, { lineWidth: -1 }),
+    "utf-8",
+  );
+  return c.json({ ok: true });
+});
+
 // POST /api/works/:id/render — renders composition.yaml to mp4 via @remotion/renderer
 apiRoutes.post("/api/works/:id/render", async (c) => {
   const id = c.req.param("id");
