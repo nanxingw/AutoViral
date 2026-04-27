@@ -1,6 +1,6 @@
 ---
 name: autoviral-planning
-description: 把情感意图翻译成可执行的结构化 brief——镜头表 / 图文结构 / 文案骨架。创作判断依赖 taste/。
+description: Use when the user wants a brief, shot list, layout plan, or wants you to translate an emotional intent into something executable. Do NOT use when the user already has a brief and just wants generation — go to assets directly. Do NOT use when the user only wants references — research is the right call.
 ---
 
 # Planning Module

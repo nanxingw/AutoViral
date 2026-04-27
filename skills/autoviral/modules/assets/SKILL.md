@@ -1,6 +1,6 @@
 ---
 name: autoviral-assets
-description: 图片、视频、音乐、海报的生成工具链——OpenRouter / Dreamina / Jimeng / Lyria / Playwright。创作判断全部指向 taste/。
+description: Use when the user wants generation — images, video clips, music, posters, fonts. Pick this directly when the user has a clear visual idea and a brief; you do not need a planning pass first. Do NOT use for editing already-generated material — go to assembly.
 ---
 
 # Assets Module

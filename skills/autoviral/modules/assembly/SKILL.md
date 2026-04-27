@@ -1,6 +1,6 @@
 ---
 name: autoviral-assembly
-description: 剪辑、字幕、配乐、调色的工具链——ffmpeg / subtitle_burn / beat-sync / audio-mix。节奏判断指向 taste/03。
+description: Use when the user wants final-cut work — cutting, captions, music mixing, beat sync, color grading, packaging. Pick this directly when the user has materials and just wants a deliverable. Do NOT use to *create* footage; that lives in assets.
 ---
 
 # Assembly Module

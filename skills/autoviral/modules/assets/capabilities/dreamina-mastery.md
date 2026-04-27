@@ -178,7 +178,7 @@ dreamina image2video \
 ```
 
 **优势**：每个镜头可独立控制模型和时长，支持 Seedance 2.0。
-**限制**：镜头间的过渡需要在 assembly 阶段用转场效果处理。
+**限制**：镜头间的过渡需要在 assembly 模块用转场效果处理。
 
 ### 方法 C：首尾帧精确控制
 
@@ -377,9 +377,9 @@ dreamina <subcommand> -h
 
 ---
 
-## 9. 与 Pipeline 其他阶段的衔接
+## 9. 与 其它模块的衔接
 
-### 与 Assembly 阶段
+### 与 assembly 模块
 
 Dreamina CLI 生成的视频通过 `query_result --download_dir` 下载到本地后，可直接用 ffmpeg 处理：
 
@@ -388,7 +388,7 @@ Dreamina CLI 生成的视频通过 `query_result --download_dir` 下载到本地
 dreamina query_result --submit_id=<id> \
   --download_dir={workDir}/assets/clips/
 
-# 后续在 assembly 阶段用 ffmpeg 拼接、加字幕、混音等
+# 后续在 assembly 模块用 ffmpeg 拼接、加字幕、混音等
 ```
 
 ### 与首帧生成的衔接

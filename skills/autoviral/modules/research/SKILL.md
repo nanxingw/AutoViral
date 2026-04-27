@@ -1,6 +1,6 @@
 ---
 name: autoviral-research
-description: 参考素材与信息收集模块——平台数据采集、达人分析、已有作品理解。所有创作判断指向 taste/。
+description: Use when the user wants references — viral patterns, competitor analysis, audience signals, hot topics on a specific platform. Do NOT use as a "first step"; if the user already has a brief, skip directly to planning or assets.
 ---
 
 # Research Module

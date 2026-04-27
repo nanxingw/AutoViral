@@ -1132,7 +1132,7 @@ const D3_GONE_BODY = {
 };
 
 apiRoutes.all("/api/works/:id/step/:step", (c) => c.json(D3_GONE_BODY, 410));
-apiRoutes.all("/api/works/:id/pipeline/advance", (c) => c.json(D3_GONE_BODY, 410));
+apiRoutes.all("/api/works/:id/pipeline/advance", (c) => c.json(D3_GONE_BODY, 410)); // D3-OK: 410 stub path
 apiRoutes.all("/api/works/:id/evaluation-mode", (c) => c.json(D3_GONE_BODY, 410));
 apiRoutes.all("/api/works/:id/eval/toggle", (c) => c.json(D3_GONE_BODY, 410));
 apiRoutes.all("/api/works/:id/eval/force-pass", (c) => c.json(D3_GONE_BODY, 410));

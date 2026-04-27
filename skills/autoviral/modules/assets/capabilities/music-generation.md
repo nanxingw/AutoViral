@@ -5,7 +5,7 @@ description: AI 音乐生成方法论。使用 Google Lyria 3 Pro 生成 BGM 和
 
 # AI 音乐生成指南
 
-本模块说明如何在 assets 阶段使用 Google Lyria 3 Pro 生成 BGM 和配乐。生成的音乐在 assembly 阶段由 ffmpeg 混入最终视频。
+本模块说明如何在 assets 模块使用 Google Lyria 3 Pro 生成 BGM 和配乐。生成的音乐在 assembly 模块由 ffmpeg 混入最终视频。
 
 ---
 
@@ -199,7 +199,7 @@ slow tempo 80 BPM, warm pads, in G major, unobtrusive background feel
 
 ---
 
-## 与 Assembly 阶段的衔接
+## 与 assembly 模块的衔接
 
 **文件存放规范：**
 ```

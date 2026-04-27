@@ -207,7 +207,7 @@ ffmpeg -i shaky.mp4 \
 AI 生成视频 → RIFE 帧插值（流畅度）→ Real-ESRGAN 超分（清晰度）→ vid.stab 稳定（消除微抖）→ LUT 调色（氛围感）
 ```
 
-### 完整命令流水线
+### 完整命令链
 
 ```bash
 # 假设 AI 生成的原始视频为 ai_raw.mp4
