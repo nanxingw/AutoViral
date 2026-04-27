@@ -56,9 +56,15 @@ export const useEditor = create<EditorState>()(
         const orig = s.car.slides.find((x) => x.id === id);
         if (!orig) return;
         const copy: Slide = JSON.parse(JSON.stringify(orig));
-        copy.id = `${id}_dup_${Date.now().toString(36)}`;
+        const dupSuffix = Date.now().toString(36);
+        copy.id = `${id}_dup_${dupSuffix}`;
+        // Regenerate every layer's id — without this, updateLayer (which finds
+        // the first matching id across all slides) edited the original slide's
+        // layer instead of the duplicate's. (Codex review 2026-04-27)
+        copy.layers = copy.layers.map((l, i) => ({ ...l, id: `${l.id}_dup_${dupSuffix}_${i}` }));
         const idx = s.car.slides.findIndex((x) => x.id === id);
         s.car.slides.splice(idx + 1, 0, copy);
+        s.currentSlideId = copy.id;
       }),
     reorderSlides: (from, to) =>
       set((s) => {

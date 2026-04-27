@@ -23,16 +23,28 @@ export default function Editor() {
   const stageRef = useRef<Konva.Stage | null>(null);
   const { setStage, exportCurrent, exportAll } = useExport();
 
+  const [loadError, setLoadError] = useState<string | null>(null);
   useEffect(() => {
     if (!workId) return;
+    // Reset car + savedAt on workId change so we don't autosave A's car into B.
+    loadCar(null as any);
+    setSavedAt(null);
+    setLoadError(null);
     let cancelled = false;
     (async () => {
       try {
         const found = await loadCarousel(workId);
         if (cancelled) return;
         loadCar(found ?? makeEmptyCarousel(workId));
-      } catch {
-        if (!cancelled) loadCar(makeEmptyCarousel(workId));
+      } catch (err: any) {
+        if (cancelled) return;
+        const status = err?.status;
+        if (typeof status === "number" && status >= 500) {
+          // Don't overwrite a corrupt carousel.yaml with an empty one.
+          setLoadError(`无法加载作品数据：${err?.message ?? "服务端错误"}`);
+        } else {
+          loadCar(makeEmptyCarousel(workId));
+        }
       }
     })();
     return () => {
@@ -42,6 +54,7 @@ export default function Editor() {
 
   useEffect(() => {
     if (!car || !workId) return;
+    if (car.workId !== workId) return;   // load-in-progress; don't save stale data
     const t = setTimeout(() => {
       saveCarousel(workId, car)
         .then(() => setSavedAt(new Date().toLocaleTimeString()))
@@ -51,6 +64,17 @@ export default function Editor() {
   }, [car, workId]);
 
   if (!workId) return <div>Missing workId</div>;
+  if (loadError) {
+    return (
+      <div style={{ padding: 32, fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
+        <h2>载入失败</h2>
+        <p>{loadError}</p>
+        <p style={{ fontSize: 12, opacity: 0.7 }}>
+          自动保存已暂停以防覆盖损坏的数据。请手动检查 ~/.autoviral/works/{workId}/carousel.yaml
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div

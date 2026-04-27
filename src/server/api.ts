@@ -244,14 +244,18 @@ apiRoutes.get("/api/works/:id/composition", async (c) => {
   const id = c.req.param("id");
   const w = await getWork(id);
   if (!w) return c.json({ error: "Work not found" }, 404);
+  // Return 404 only on ENOENT; corrupt YAML or read errors must not silently
+  // become "no composition" — the client treats null as "fresh" and would
+  // overwrite the broken file with an empty composition. (Codex review 2026-04-27)
   try {
     const raw = await readFile(
       join(dataDir, "works", id, "composition.yaml"),
       "utf-8",
     );
     return c.json(yaml.load(raw));
-  } catch {
-    return c.json({ error: "Composition not found" }, 404);
+  } catch (err: any) {
+    if (err?.code === "ENOENT") return c.json({ error: "Composition not found" }, 404);
+    return c.json({ error: `Composition unreadable: ${err?.message ?? "unknown"}` }, 500);
   }
 });
 
@@ -282,8 +286,9 @@ apiRoutes.get("/api/works/:id/carousel", async (c) => {
       "utf-8",
     );
     return c.json(yaml.load(raw));
-  } catch {
-    return c.json({ error: "Carousel not found" }, 404);
+  } catch (err: any) {
+    if (err?.code === "ENOENT") return c.json({ error: "Carousel not found" }, 404);
+    return c.json({ error: `Carousel unreadable: ${err?.message ?? "unknown"}` }, 500);
   }
 });
 

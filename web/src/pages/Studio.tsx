@@ -22,23 +22,42 @@ export default function Studio() {
 
   useShortcuts(workId ?? null);
 
+  const [loadError, setLoadError] = useState<string | null>(null);
+  // Reset comp + savedAt synchronously when workId changes — prevents A's
+  // composition from being saved into B during a route hop. (Codex review 2026-04-27)
   useEffect(() => {
     if (!workId) return;
+    loadComp(null as any);
+    setSavedAt(null);
+    setLoadError(null);
+    let cancelled = false;
     (async () => {
       try {
         const found = await loadComposition(workId);
+        if (cancelled) return;
         loadComp(found ?? makeEmptyComposition({ workId }));
-      } catch {
-        // Backend unavailable or work not yet provisioned — fall back to a
-        // fresh empty composition so the studio is still usable.
-        loadComp(makeEmptyComposition({ workId }));
+      } catch (err: any) {
+        if (cancelled) return;
+        const status = err?.status;
+        if (typeof status === "number" && status >= 500) {
+          // Corrupt yaml or server bug — DO NOT overwrite by autosaving an
+          // empty comp. Show the error and leave comp null so autosave is
+          // skipped (it requires comp.workId === workId). (Codex review 2026-04-27)
+          setLoadError(`无法加载作品数据：${err?.message ?? "服务端错误"}`);
+        } else {
+          // Network unreachable / 4xx other than 404 → safe fresh-start fallback.
+          loadComp(makeEmptyComposition({ workId }));
+        }
       }
     })();
+    return () => { cancelled = true; };
   }, [workId, loadComp]);
 
-  // Autosave on change (debounced)
+  // Autosave on change (debounced) — guard with workId match so a stale
+  // comp doesn't get saved into the new route's work id.
   useEffect(() => {
     if (!comp || !workId) return;
+    if (comp.workId !== workId) return;   // load-in-progress
     const t = setTimeout(() => {
       saveComposition(workId, comp).then(() =>
         setSavedAt(new Date().toLocaleTimeString()),
@@ -48,6 +67,17 @@ export default function Studio() {
   }, [comp, workId]);
 
   if (!workId) return <div>Missing workId</div>;
+  if (loadError) {
+    return (
+      <div style={{ padding: 32, fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
+        <h2>载入失败</h2>
+        <p>{loadError}</p>
+        <p style={{ fontSize: 12, opacity: 0.7 }}>
+          自动保存已暂停以防覆盖损坏的数据。请手动检查 ~/.autoviral/works/{workId}/composition.yaml
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div

@@ -17,6 +17,7 @@ interface CompState {
   setPlaying: (p: boolean) => void;
   setBeats: (b: number[]) => void;
   recomputeDuration: () => void;
+  moveClipWithinTrack: (trackId: string, fromIndex: number, toIndex: number) => void;
 }
 
 function clipEnd(c: Clip): number {
@@ -49,13 +50,46 @@ export const useComposition = create<CompState>()(
     updateClip: (clipId, patch) =>
       set((s) => {
         if (!s.comp) return;
+        let touched = false;
         for (const t of s.comp.tracks) {
           const c = (t.clips as Clip[]).find((c) => c.id === clipId);
           if (c) {
             Object.assign(c, patch);
+            touched = true;
             break;
           }
         }
+        // If clip timing changed, duration may need to grow OR shrink.
+        // Plain `if (end > duration)` (the previous behaviour) only ever grew it,
+        // so dragging a clip earlier left stale empty tail. (Codex review 2026-04-27)
+        if (touched) {
+          s.comp.duration = Math.max(
+            0,
+            ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
+          );
+        }
+      }),
+    moveClipWithinTrack: (trackId: string, fromIndex: number, toIndex: number) =>
+      set((s) => {
+        if (!s.comp) return;
+        const t = s.comp.tracks.find((t) => t.id === trackId);
+        if (!t) return;
+        const clips = t.clips as Clip[];
+        if (fromIndex < 0 || fromIndex >= clips.length || toIndex < 0 || toIndex >= clips.length) return;
+        const [moved] = clips.splice(fromIndex, 1);
+        clips.splice(toIndex, 0, moved);
+        // Re-pack trackOffsets so visual order matches time order
+        let cursor = 0;
+        for (const c of clips) {
+          c.trackOffset = cursor;
+          cursor += c.kind === "video" || c.kind === "audio"
+            ? (c.out - c.in)
+            : c.duration;
+        }
+        s.comp.duration = Math.max(
+          0,
+          ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
+        );
       }),
     removeClip: (clipId) =>
       set((s) => {
