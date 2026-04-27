@@ -21,6 +21,7 @@ import { log, readLogs } from "../logger.js";
 import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } from "../test-runner.js";
 import { evaluateWork } from "../test-evaluator.js";
 import { analyzeAudio, mixAudioTracks } from "../audio-tools.js";
+import { resolveAssetPath, resolveAssetSubpath, UnsafePathError, SAFE_ID } from "./safe-paths.js";
 
 export const apiRoutes = new Hono();
 
@@ -347,12 +348,31 @@ apiRoutes.get("/api/works/:id/assets/*", async (c) => {
   // Extract the nested path after /assets/
   const url = new URL(c.req.url);
   const prefix = `/api/works/${id}/assets/`;
-  const nestedPath = url.pathname.slice(prefix.length);
+  const nestedPath = decodeURIComponent(url.pathname.slice(prefix.length));
   if (!nestedPath) return c.json({ error: "Asset path required" }, 400);
 
   try {
-    // nestedPath maps directly to workspace subdirectory (e.g. "images/xxx.png", "output/xxx.png")
-    const filePath = getAssetPath(id, nestedPath);
+    // Map URL → physical asset root. Only assets/ and output/ are reachable —
+    // work.yaml / chat.json / eval-*.json are NEVER served. (Codex review 2026-04-27)
+    //
+    // URL forms:
+    //   /assets/output/<path>  → workDir/output/<path>
+    //   /assets/assets/<path>  → workDir/assets/<path>
+    //   /assets/<path>         → workDir/assets/<path>  (legacy, default to assets/)
+    let root: "assets" | "output";
+    let rest: string;
+    if (nestedPath.startsWith("output/")) {
+      root = "output";
+      rest = nestedPath.slice("output/".length);
+    } else if (nestedPath.startsWith("assets/")) {
+      root = "assets";
+      rest = nestedPath.slice("assets/".length);
+    } else {
+      root = "assets";
+      rest = nestedPath;
+    }
+    if (!rest) return c.json({ error: "Asset path required" }, 400);
+    const filePath = resolveAssetPath(id, root, rest);
     const { stat } = await import("node:fs/promises");
     const fileStat = await stat(filePath);
     const fileSize = fileStat.size;
@@ -396,6 +416,11 @@ apiRoutes.get("/api/works/:id/assets/*", async (c) => {
 // POST /api/works/:id/assets/upload — upload file to work assets
 apiRoutes.post("/api/works/:id/assets/upload", async (c) => {
   const workId = c.req.param("id");
+  if (!SAFE_ID.test(workId)) return c.json({ error: "Invalid workId" }, 400);
+
+  const work = await getWork(workId);
+  if (!work) return c.json({ error: "Work not found" }, 404);
+
   const body = await c.req.parseBody();
   const file = body.file;
   const subdir = (body.subdir as string) ?? "images";
@@ -404,16 +429,29 @@ apiRoutes.post("/api/works/:id/assets/upload", async (c) => {
     return c.json({ error: "No file provided" }, 400);
   }
 
-  const assetsDir = join(homedir(), ".autoviral", "works", workId, "assets", subdir);
-  await mkdir(assetsDir, { recursive: true });
-  const filePath = join(assetsDir, file.name);
+  // Sanitize basename to prevent path traversal (Codex review 2026-04-27)
+  const safeBasename = file.name.replace(/[/\\]/g, "_").replace(/^\.+/, "");
+  if (!safeBasename) return c.json({ error: "Invalid filename" }, 400);
+
+  let filePath: string;
+  try {
+    filePath = resolveAssetSubpath(workId, "assets", subdir, safeBasename);
+  } catch (err) {
+    if (err instanceof UnsafePathError) return c.json({ error: err.message }, 400);
+    throw err;
+  }
+
+  // Ensure parent directory exists
+  const { dirname } = await import("node:path");
+  await mkdir(dirname(filePath), { recursive: true });
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(filePath, buffer);
 
+  // Clean URL — GET defaults to workDir/assets/ when no explicit root prefix
   return c.json({
     success: true,
-    path: `${subdir}/${file.name}`,
-    url: `/api/works/${workId}/assets/${subdir}/${encodeURIComponent(file.name)}`,
+    path: `assets/${subdir}/${safeBasename}`,
+    url: `/api/works/${workId}/assets/${subdir}/${encodeURIComponent(safeBasename)}`,
   });
 });
 
@@ -500,7 +538,7 @@ apiRoutes.post("/api/generate/video", async (c) => {
   }
 });
 
-const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
+// SAFE_ID imported from ./safe-paths.js — single source of truth
 
 // POST /api/generate/image/batch — generate multiple candidate frames for a shot
 apiRoutes.post("/api/generate/image/batch", async (c) => {
@@ -627,7 +665,24 @@ apiRoutes.post("/api/audio/analyze", async (c) => {
     if (!SAFE_ID.test(workId)) {
       return c.json({ success: false, error: "Invalid workId", code: "INVALID_PARAMS" }, 400);
     }
-    const fullPath = join(dataDir, "works", workId, assetPath);
+    // Resolve under workDir/assets/ or workDir/output/ — never raw workDir.
+    // Path traversal hardening (Codex review 2026-04-27).
+    let fullPath: string;
+    try {
+      const cleaned = String(assetPath).replace(/^\/+/, "");
+      if (cleaned.startsWith("output/")) {
+        fullPath = resolveAssetPath(workId, "output", cleaned.slice("output/".length));
+      } else if (cleaned.startsWith("assets/")) {
+        fullPath = resolveAssetPath(workId, "assets", cleaned.slice("assets/".length));
+      } else {
+        fullPath = resolveAssetPath(workId, "assets", cleaned);
+      }
+    } catch (err) {
+      if (err instanceof UnsafePathError) {
+        return c.json({ success: false, error: err.message, code: "INVALID_PATH" }, 400);
+      }
+      throw err;
+    }
     const analysis = await analyzeAudio(fullPath);
     return c.json({ success: true, ...analysis });
   } catch (err: any) {
@@ -658,18 +713,34 @@ apiRoutes.post("/api/audio/mix", async (c) => {
       );
     }
 
-    // Resolve paths
-    const workBase = join(dataDir, "works", workId);
-    const fullVideoPath = join(workBase, videoPath);
-    const outputDir = join(workBase, "output");
-    await mkdir(outputDir, { recursive: true });
-    const fullOutputPath = join(outputDir, outputFilename);
+    // Path traversal hardening (Codex review 2026-04-27): resolve every user-supplied
+    // path through resolveAssetPath. videoPath/track.source default to assets/ root;
+    // outputFilename is restricted to a basename under output/.
+    function resolveUnderWork(p: string): string {
+      const cleaned = String(p).replace(/^\/+/, "");
+      if (cleaned.startsWith("output/")) return resolveAssetPath(workId, "output", cleaned.slice(7));
+      if (cleaned.startsWith("assets/")) return resolveAssetPath(workId, "assets", cleaned.slice(7));
+      return resolveAssetPath(workId, "assets", cleaned);
+    }
 
-    // Resolve each track source to an absolute path under the work directory
-    const resolvedTracks = tracks.map((t: any) => ({
-      ...t,
-      source: join(workBase, t.source),
-    }));
+    let fullVideoPath: string;
+    let fullOutputPath: string;
+    let resolvedTracks: any[];
+    try {
+      fullVideoPath = resolveUnderWork(videoPath);
+      // outputFilename is a basename only — prevent traversal even if user passes "../foo"
+      const safeOutName = String(outputFilename).replace(/[/\\]/g, "_").replace(/^\.+/, "");
+      if (!safeOutName) return c.json({ success: false, error: "Invalid outputFilename", code: "INVALID_PARAMS" }, 400);
+      fullOutputPath = resolveAssetPath(workId, "output", safeOutName);
+      resolvedTracks = tracks.map((t: any) => ({ ...t, source: resolveUnderWork(t.source) }));
+    } catch (err) {
+      if (err instanceof UnsafePathError) {
+        return c.json({ success: false, error: err.message, code: "INVALID_PATH" }, 400);
+      }
+      throw err;
+    }
+    const { dirname: _dirname } = await import("node:path");
+    await mkdir(_dirname(fullOutputPath), { recursive: true });
 
     await mixAudioTracks({
       videoPath: fullVideoPath,
