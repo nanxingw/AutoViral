@@ -15,8 +15,10 @@ interface BackgroundProps {
  */
 export function parseGradientStops(value: string): [string, string] {
   const matches = value.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/g) ?? [];
-  if (matches.length >= 2) return [matches[0], matches[matches.length - 1]];
-  if (matches.length === 1) return [matches[0], matches[0]];
+  const first = matches[0];
+  const last = matches[matches.length - 1];
+  if (first && last && matches.length >= 2) return [first, last];
+  if (first) return [first, first];
   return ["#fafaf7", "#e8e6df"];
 }
 
