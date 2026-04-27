@@ -1,5 +1,8 @@
+import { useState } from "react";
+import { useParams } from "react-router-dom";
 import { useComposition } from "../../store";
 import type { AudioClip, Clip, TextClip, VideoClip } from "../../types";
+import { fetchCaptions } from "../../services/captions";
 
 function Slider({
   label,
@@ -106,6 +109,45 @@ function VideoControls({ clip }: { clip: VideoClip }) {
 
 function AudioControls({ clip }: { clip: AudioClip }) {
   const update = useComposition((s) => s.updateClip);
+  const addClip = useComposition((s) => s.addClip);
+  const { workId } = useParams();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const onGenerateCaptions = async () => {
+    if (!workId) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const lines = await fetchCaptions({ workId, assetPath: clip.src });
+      let i = 0;
+      for (const line of lines) {
+        const id = `cap_${clip.id}_${i++}_${Date.now()}`;
+        const text: TextClip = {
+          id,
+          kind: "text",
+          text: line.text,
+          trackOffset: line.start,
+          duration: Math.max(0.1, line.end - line.start),
+          style: {
+            font: "Inter",
+            size: 64,
+            weight: 700,
+            italic: false,
+            tracking: 0,
+            color: "#ffffff",
+          },
+          position: { anchor: "bottom", xPct: 50, yPct: 85 },
+        };
+        addClip("text-0", text);
+      }
+    } catch (e: any) {
+      setError(e?.message ?? "Captions failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <>
       <Slider
@@ -138,6 +180,21 @@ function AudioControls({ clip }: { clip: AudioClip }) {
           update(clip.id, { fadeOut: v } as Partial<Clip>)
         }
       />
+      <button
+        onClick={onGenerateCaptions}
+        disabled={busy}
+        style={{ marginTop: 8 }}
+        data-testid="generate-captions"
+      >
+        {busy ? "Generating…" : "Generate captions"}
+      </button>
+      {error && (
+        <div
+          style={{ color: "var(--text-warn, #f88)", fontSize: 11, marginTop: 4 }}
+        >
+          {error}
+        </div>
+      )}
     </>
   );
 }
