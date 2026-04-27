@@ -91,8 +91,6 @@ apiRoutes.get("/api/config", async (c) => {
     jimengAccessKey: config.jimeng?.accessKey ?? "",
     jimengSecretKey: config.jimeng?.secretKey ?? "",
     openrouterKey: config.openrouter?.apiKey ?? "",
-    researchEnabled: config.research?.enabled ?? false,
-    researchCron: config.research?.schedule ?? "0 9 * * *",
     douyinUrl: config.analytics?.douyinUrl ?? "",
     memorySyncEnabled: config.memory?.syncEnabled ?? false,
   });
@@ -114,14 +112,6 @@ apiRoutes.put("/api/config", async (c) => {
   }
   if (body.openrouterKey !== undefined) {
     config.openrouter = { apiKey: body.openrouterKey as string };
-  }
-  if (body.researchEnabled !== undefined) {
-    if (!config.research) config.research = { enabled: false, schedule: "0 9 * * *", platforms: ["douyin", "xiaohongshu"] };
-    config.research.enabled = body.researchEnabled as boolean;
-  }
-  if (body.researchCron !== undefined) {
-    if (!config.research) config.research = { enabled: false, schedule: "0 9 * * *", platforms: ["douyin", "xiaohongshu"] };
-    config.research.schedule = body.researchCron as string;
   }
   if (body.model !== undefined) {
     config.model = body.model as string;
