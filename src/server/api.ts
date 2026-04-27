@@ -238,6 +238,38 @@ apiRoutes.delete("/api/works/:id", async (c) => {
   }
 });
 
+// GET /api/works/:id/composition — returns composition.yaml as JSON
+apiRoutes.get("/api/works/:id/composition", async (c) => {
+  const id = c.req.param("id");
+  const w = await getWork(id);
+  if (!w) return c.json({ error: "Work not found" }, 404);
+  try {
+    const raw = await readFile(
+      join(dataDir, "works", id, "composition.yaml"),
+      "utf-8",
+    );
+    return c.json(yaml.load(raw));
+  } catch {
+    return c.json({ error: "Composition not found" }, 404);
+  }
+});
+
+// PUT /api/works/:id/composition — persists composition as yaml
+apiRoutes.put("/api/works/:id/composition", async (c) => {
+  const id = c.req.param("id");
+  const w = await getWork(id);
+  if (!w) return c.json({ error: "Work not found" }, 404);
+  const body = await c.req.json();
+  const wDir = join(dataDir, "works", id);
+  await mkdir(wDir, { recursive: true });
+  await writeFile(
+    join(wDir, "composition.yaml"),
+    yaml.dump(body, { lineWidth: -1 }),
+    "utf-8",
+  );
+  return c.json({ ok: true });
+});
+
 // GET /api/works/:id/assets
 apiRoutes.get("/api/works/:id/assets", async (c) => {
   const id = c.req.param("id");
