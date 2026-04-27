@@ -1067,6 +1067,50 @@ apiRoutes.post("/api/works/:id/chat", async (c) => {
   }
 });
 
+// ── Module-as-capability invocation ─────────────────────────────────────────
+
+const KNOWN_MODULES = ["research", "planning", "assets", "assembly"] as const;
+type ModuleName = (typeof KNOWN_MODULES)[number];
+
+// POST /api/works/:id/invoke — module-as-capability dispatcher (no ordering)
+apiRoutes.post("/api/works/:id/invoke", async (c) => {
+  const id = c.req.param("id");
+  let body: { module?: string; input?: unknown } = {};
+  try {
+    body = await c.req.json<{ module?: string; input?: unknown }>();
+  } catch {
+    // empty body — fall through to validation below
+  }
+  const mod = body.module as ModuleName | undefined;
+  if (!mod || !KNOWN_MODULES.includes(mod)) {
+    return c.json({ error: `module must be one of ${KNOWN_MODULES.join("|")}` }, 400);
+  }
+
+  const work = await getWork(id);
+  if (!work) return c.json({ error: "Work not found" }, 404);
+
+  if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 500);
+
+  const userBrief = typeof body.input === "string"
+    ? body.input
+    : body.input != null ? JSON.stringify(body.input) : "(no extra brief)";
+  const message = [
+    `请使用 \`${mod}\` 模块的能力处理当前作品。`,
+    `用户附带的输入：${userBrief}`,
+    `这是一次能力调用，按你判断完成本次工作即可。`,
+  ].join("\n");
+
+  const config = await loadConfig();
+  let session = wsBridge.getSession(id);
+  if (!session) {
+    await wsBridge.createSession(id, message, config.model);
+  } else {
+    await wsBridge.sendMessage(id, message);
+  }
+
+  return c.json({ triggered: true, workId: id, module: mod }, 202);
+});
+
 // POST /api/works/:id/step/:step
 apiRoutes.post("/api/works/:id/step/:step", async (c) => {
   const id = c.req.param("id");
