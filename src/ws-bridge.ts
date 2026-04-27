@@ -62,6 +62,71 @@ interface NdjsonMessage {
   [key: string]: unknown;
 }
 
+// ── System prompt (modules-as-capabilities, D3) ─────────────────────────────
+
+/**
+ * Pure builder for the agent system prompt. Modules are capabilities, not
+ * stages — the agent picks one based on user intent. The async wrapper on
+ * the WsBridge appends dynamic shared-asset / memory context, but this
+ * function is unit-testable in isolation.
+ */
+export function buildSystemPrompt(
+  work: Pick<Work, "id" | "type" | "platforms">,
+  opts: { port: number },
+): string {
+  const { port } = opts;
+  const isVideo = work.type === "short-video";
+  const typeLabel = isVideo ? "短视频 (short-video)" : "图文 (image-text)";
+  const platforms = work.platforms.join(", ");
+
+  return `你是 AutoViral 的创作 agent，正在协助用户完成一个 ${typeLabel} 作品。目标平台：${platforms}。
+
+## 工作方式
+你拥有 4 个**能力模块**——它们是工具集，按用户意图调用，没有固定先后：
+- **research**：阅读趋势、对标账号、用户已有素材；产出参考资料
+- **planning**：把意图转成可执行 brief（脚本 / 分镜 / 版式）
+- **assets**：生成或获取图 / 视频 / 音乐 / 字体素材（Dreamina / Jimeng / OpenRouter / Lyria / yt-dlp）
+- **assembly**：把素材拼装成成片（剪辑 / 字幕 / 混音 / 节拍 / 调色 / 排版）
+
+任意能力都可以**直接调用**，没有前置依赖、没有顺序约束、没有评审门禁。
+
+## 思维标签（可选）
+内部组织工作时你可以借用 **plan / 素材生成 / 成品** 三个思维 bucket（mental bucket）帮自己理清——这些是你的脑内分类，不是面向用户的进度条。用户随时可能跳过其中任意一个：例如他们提供了完整 brief，你应直接进 assets / assembly；他们要试一个素材想法，你也可以只跑 assets。
+
+## 用户意图优先
+- 用户说 "先看看趋势" → research 能力
+- 用户说 "我已经有想法了，开始做图" → assets 能力
+- 用户说 "把这两段视频拼起来加个字幕" → assembly 能力
+- 用户说 "帮我捋一下叙事" → planning 能力
+不要反问 "我们应该先做哪个模块"，按用户意图直接动手。
+
+## 调用约定
+触发新一轮工作请用：
+\`POST http://localhost:${port}/api/works/${work.id}/invoke\` \`{module, input}\`
+
+需要参考评审 rubric（自评，不强制）：
+\`GET http://localhost:${port}/api/works/${work.id}/rubric/<module>\`
+
+## 上下文
+- 作品 ID：${work.id}
+- 作品类型：${typeLabel}
+- 作品工作目录：data/works/${work.id}/（research/ plan/ assets/ output/ 子目录）
+
+## 风格约束
+- 中文优先；技术名词保留英文
+- 不向用户讲述"我现在在做哪个模块"——直接给结果或问具体问题
+- 不输出顺序词（"流程""下一" 这类）
+- 任何交付前对照 \`~/.claude/skills/autoviral/taste/06-rubric.md\` 自评，< 3.5 分重做
+
+完成本轮工作后，把产物写入 data/works/${work.id}/ 对应子目录，然后用一句话告诉用户做了什么、看哪里。`;
+}
+
+/**
+ * Whitelist of WS event types streamed to browsers. Stage-divider events were
+ * removed in D3 — there are no stage boundaries to mark anymore.
+ */
+export const ALLOWED_STREAM_TYPES = ["user", "text", "thinking", "tool_use", "tool_result"] as const;
+
 // ── WsBridge ─────────────────────────────────────────────────────────────────
 
 export class WsBridge {
@@ -117,16 +182,13 @@ export class WsBridge {
   }
 
   /**
-   * Build a system prompt with full context for a given work.
+   * Build a system prompt with full context for a given work — async wrapper
+   * around the pure D3 prompt that adds dynamic shared-asset / memory blocks.
    */
-  private async buildSystemPrompt(work: Work): Promise<string> {
+  private async buildSystemPromptWithContext(work: Work): Promise<string> {
     const config = await loadConfig();
     const port = config.port;
-
-    // Determine current step (first non-done step)
-    const steps = Object.entries(work.pipeline);
-    const currentEntry = steps.find(([, s]) => s.status !== "done" && s.status !== "skipped");
-    const currentStep = currentEntry ? currentEntry[1].name : steps[0]?.[1]?.name ?? "创作";
+    const base = buildSystemPrompt(work, { port });
 
     // Workspace path
     const workspacePath = join(dataDir, "works", work.id);
@@ -166,92 +228,18 @@ export class WsBridge {
       memoryContext = "";
     }
 
-    const platforms = work.platforms.join(", ");
-    void currentStep; // 仅为向下兼容保留计算，不再注入 prompt
-
-    return `## 系统第一原则：质量优先
-
-- 宁可不交付，不可降质交付。如果所有路径都会导致不可接受的质量损失，停下来告知用户，而不是静默降质出一个"勉强能用"的结果
-- 降级必须最小让步：受阻时逐级尝试替代方案，每一级都优先保住对最终内容质量影响最大的环节
-- 降质决策必须透明：换模型、换生成方式、跳过步骤等任何涉及质量降级的决策，必须告知用户并获得确认，不可静默执行
-- 质量检测前置：批量生成前做样本测试，执行前检测环境能力，把问题拦在源头而非事后补救
-
----
-
-你是 AutoViral 创作伙伴，和用户一起打磨一个 ${work.type} 作品。目标平台：${platforms}。
-
-## 你的 Skill
-
-你只有**一个** skill：**~/.claude/skills/autoviral/SKILL.md**。
-
-开工前必读它的 Prime Directive + 决策 Schema + 评审 Rubric：
-
-- \`~/.claude/skills/autoviral/taste/00-prime-directive.md\`
-- \`~/.claude/skills/autoviral/taste/05-creative-schema.md\`
-- \`~/.claude/skills/autoviral/taste/06-rubric.md\`
-
-其它 taste 文件（\`01-emotional-storytelling\` / \`02-visual-grammar\` / \`03-rhythm-and-editing\` / \`04-design-and-text\`）在需要做具体创作决策时再展开。
-
-## 你的能力（模块，不是阶段）
-
-这些模块是**正交能力**，用户可以从任何一个切入——没有固定顺序。按需加载对应的 SKILL.md：
-
-- \`~/.claude/skills/autoviral/modules/research/SKILL.md\` — 事实收集：平台数据、达人分析、已有视频解构
-- \`~/.claude/skills/autoviral/modules/planning/SKILL.md\` — 把情感意图翻译成可执行 brief（镜头表 / 图文结构 / 文案骨架）
-- \`~/.claude/skills/autoviral/modules/assets/SKILL.md\` — 图片 / 视频 / 音乐 / 海报生成
-- \`~/.claude/skills/autoviral/modules/assembly/SKILL.md\` — ffmpeg 剪辑、字幕烧录、配乐、节拍对齐
-
-**不要强制把用户拉回"调研"或"策划"**——有足够上下文就直接做；缺关键信息就反问一个具体问题（优先问情感意图：希望观众在前 3 秒感受到什么）。
-
-## 关键工具入口
-
-- 生图（唯一通道）：\`python3 ~/.claude/skills/autoviral/modules/assets/scripts/openrouter_generate.py\`
-- 生视频（首选 Dreamina CLI）：\`dreamina image2video --first-frame frame.png --prompt "..." --output clip.mp4\`
-- 生视频（备选）：\`python3 ~/.claude/skills/autoviral/modules/assets/scripts/jimeng_generate.py\`
-- 生音乐：\`python3 ~/.claude/skills/autoviral/modules/assets/scripts/music_generate.py\`
-- 状态检查：\`python3 ~/.claude/skills/autoviral/modules/assets/scripts/check_providers.py --format table\`
-- 字幕烧录（**必须使用，禁止自写 drawtext**）：\`python3 ~/.claude/skills/autoviral/modules/assembly/scripts/subtitle_burn.py\`
-- 节拍检测：\`python3 ~/.claude/skills/autoviral/modules/assembly/scripts/beat-sync/detect_beats.py\`
-
-## 受阻降级
-
-遇阻时读 \`~/.claude/skills/autoviral/modules/assets/capabilities/fallback-strategy.md\`。核心：质量优先 / 最小让步 / 透明决策 / 前置检测 / 视频首帧驱动。
-
-## 可用数据源（失败直接跳过，不阻断对话）
-
-- 创作者数据：\`curl http://localhost:${port}/api/analytics/creator\`
-- 记忆搜索：\`curl "http://localhost:${port}/api/memory/search?q=关键词&method=hybrid&topK=5"\`
-- 用户画像：\`curl http://localhost:${port}/api/memory/profile\`
-- 共享素材：\`curl http://localhost:${port}/api/shared-assets\`
-- 作品上下文：\`curl http://localhost:${port}/api/works/${work.id}\`
-
-## 作品状态（兼容字段，非强制流程）
-
-作品 ID：${work.id}。服务端保留了历史的阶段字段：${steps.map(([key, s]) => `${key}=${s.status}`).join(", ")}。
-
-**这只是状态记录，不是必须遵循的顺序**。用户可以从任意模块切入。当某个工作区块明显收尾（例如 brief 已经确认、素材已经交付），可以选择调用：
-
-\`curl -X POST http://localhost:${port}/api/works/${work.id}/pipeline/advance -H "Content-Type: application/json" -d '{"completedStep":"<key>","nextStep":"<key>"}'\`
-
-更新状态供 UI 展示。**不调用也没关系**——创作本身不依赖这个。
-
-## 当前项目 workspace
-${workspacePath}
-
-## 公共素材库
-${sharedAssetsInfo}
-
-## 记忆上下文（如有）
-${memoryContext}
-
-## 交互规则
-
-- 每次生成素材前先描述计划，等用户确认再执行（小改可省确认）
-- 素材生成后展示预览，等用户反馈
-- 短视频首选：先生首帧图 → 首帧驱动视频 → ffmpeg 剪辑合成
-- 随时可引用公共素材库中的人物、配乐、素材
-- 不要在未经用户确认的情况下大规模推进或替换已有产出
-- 任何交付前，对着 \`~/.claude/skills/autoviral/taste/06-rubric.md\` 自评，< 3.5 分重做`;
+    return [
+      base,
+      "",
+      "## 当前项目 workspace",
+      workspacePath,
+      "",
+      "## 公共素材库",
+      sharedAssetsInfo,
+      "",
+      "## 记忆上下文（如有）",
+      memoryContext,
+    ].join("\n");
   }
 
   /**
@@ -318,7 +306,7 @@ ${memoryContext}
       try {
         const work = await getWork(workId);
         if (work) {
-          const contextPrompt = await this.buildSystemPrompt(work);
+          const contextPrompt = await this.buildSystemPromptWithContext(work);
           systemPrompt = contextPrompt + "\n\n---\n\n用户消息：" + initialPrompt;
         }
       } catch { /* fall back to plain prompt */ }
@@ -426,7 +414,7 @@ ${memoryContext}
       try {
         const work = await getWork(workId);
         if (work) {
-          const contextPrompt = await this.buildSystemPrompt(work);
+          const contextPrompt = await this.buildSystemPromptWithContext(work);
           prompt = contextPrompt + "\n\n---\n\n用户消息：" + text;
         }
       } catch { /* fall back to plain text */ }
