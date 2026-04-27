@@ -55,6 +55,10 @@ export default function Editor() {
   useEffect(() => {
     if (!car || !workId) return;
     if (car.workId !== workId) return;   // load-in-progress; don't save stale data
+    // Skip empty carousel — persisting blank slate shadows future legacy auto-build
+    // (and is just noise for "user opened the page but didn't edit").
+    const isEmpty = car.slides.length <= 1 && car.slides[0]?.layers.length === 0;
+    if (isEmpty) return;
     const t = setTimeout(() => {
       saveCarousel(workId, car)
         .then(() => setSavedAt(new Date().toLocaleTimeString()))

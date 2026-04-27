@@ -19,28 +19,35 @@ export function TopBar({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 12,
-        padding: "8px 16px",
-        borderBottom: "1px solid var(--border)",
+        gap: 14,
+        padding: "10px 18px",
+        height: "100%",
       }}
     >
       <Button variant="ghost" onClick={() => navigate("/")}>
         ← Works
       </Button>
-      <strong
-        style={{ fontFamily: "var(--font-editorial)", fontSize: 18 }}
+      <em
+        style={{
+          fontFamily: "var(--font-editorial)",
+          fontSize: 22,
+          fontStyle: "italic",
+          letterSpacing: "-0.02em",
+        }}
       >
         {comp?.id ?? workId}
-      </strong>
+      </em>
       <span
         style={{
           marginLeft: "auto",
           fontFamily: "var(--font-mono)",
           fontSize: 11,
-          color: "var(--text-soft)",
+          letterSpacing: "0.05em",
+          textTransform: "uppercase",
+          color: "var(--text-dim)",
         }}
       >
-        {savedAt ? `Saved · ${savedAt}` : "Unsaved"}
+        {savedAt ? `SAVED · ${savedAt}` : "UNSAVED"}
       </span>
       <Button variant="primary" onClick={onExport}>
         Export MP4

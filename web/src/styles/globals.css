@@ -42,3 +42,19 @@ button { font: inherit; }
   margin: 0 auto;
   padding: 28px 24px 80px;
 }
+
+/* Glass surfaces — applied to TopBar / Tweaks / Chat / Timeline panels */
+.glass {
+  background: var(--surface-1);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+}
+.glass-lo {
+  background: var(--surface-0);
+  backdrop-filter: blur(16px) saturate(130%);
+  -webkit-backdrop-filter: blur(16px) saturate(130%);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-lg);
+}

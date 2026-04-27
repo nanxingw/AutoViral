@@ -34,6 +34,17 @@
   --radius-md: 10px;
   --radius-lg: 16px;
   --radius-xl: 22px;
+
+  /* Typography — exposed as CSS variables for inline styles */
+  --font-editorial: "Instrument Serif", Georgia, serif;
+  --font-sans: "Inter", "PingFang SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Aliases for variable names earlier components referenced. Without these,
+     `var(--border)` etc. fell back to browser defaults — flat look. */
+  --border: var(--divider);
+  --text-soft: var(--text-dim);
+  --surface-glass: var(--surface-1);
 }
 
 [data-theme="light"] {

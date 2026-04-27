@@ -54,10 +54,14 @@ export default function Studio() {
   }, [workId, loadComp]);
 
   // Autosave on change (debounced) — guard with workId match so a stale
-  // comp doesn't get saved into the new route's work id.
+  // comp doesn't get saved into the new route's work id. Also skip when the
+  // composition is empty (no clips on any track); persisting an empty comp
+  // shadows the server-side legacy auto-build for unedited works.
   useEffect(() => {
     if (!comp || !workId) return;
     if (comp.workId !== workId) return;   // load-in-progress
+    const isEmpty = comp.tracks.every((t) => t.clips.length === 0);
+    if (isEmpty) return;                  // don't persist a blank slate
     const t = setTimeout(() => {
       saveComposition(workId, comp).then(() =>
         setSavedAt(new Date().toLocaleTimeString()),
@@ -90,9 +94,11 @@ export default function Studio() {
         gridTemplateAreas:
           '"top top top" "chat preview aside" "chat timeline aside"',
         height: "calc(100vh - 56px)",
+        gap: 12,
+        padding: 12,
       }}
     >
-      <div style={{ gridArea: "top" }}>
+      <div style={{ gridArea: "top" }} className="glass" >
         <TopBar
           workId={workId}
           savedAt={savedAt}
@@ -101,26 +107,16 @@ export default function Studio() {
           }}
         />
       </div>
-      <div
-        style={{ gridArea: "chat", borderRight: "1px solid var(--border)" }}
-      >
+      <div className="glass" style={{ gridArea: "chat", overflow: "hidden" }}>
         <ChatPanel workId={workId} />
       </div>
-      <div style={{ gridArea: "preview", overflow: "hidden" }}>
+      <div className="glass-lo" style={{ gridArea: "preview", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
         <PreviewPanel />
       </div>
-      <div
-        style={{
-          gridArea: "timeline",
-          borderTop: "1px solid var(--border)",
-          overflow: "hidden",
-        }}
-      >
+      <div className="glass" style={{ gridArea: "timeline", overflow: "hidden" }}>
         <Timeline />
       </div>
-      <div
-        style={{ gridArea: "aside", borderLeft: "1px solid var(--border)" }}
-      >
+      <div className="glass" style={{ gridArea: "aside", overflow: "auto" }}>
         <TweaksPanel />
       </div>
     </div>

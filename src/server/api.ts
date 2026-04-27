@@ -239,7 +239,12 @@ apiRoutes.delete("/api/works/:id", async (c) => {
   }
 });
 
-// GET /api/works/:id/composition — returns composition.yaml as JSON
+// GET /api/works/:id/composition — returns composition.yaml as JSON.
+// For legacy works (created before Plan 2's composition format), no
+// composition.yaml exists yet but the work usually has assets/clips/ + assets/music/
+// + output/final*.mp4. Synthesise a starter composition from those assets so the
+// user sees their content immediately on first open. Persisted only when the
+// client autosaves.
 apiRoutes.get("/api/works/:id/composition", async (c) => {
   const id = c.req.param("id");
   const w = await getWork(id);
@@ -254,10 +259,103 @@ apiRoutes.get("/api/works/:id/composition", async (c) => {
     );
     return c.json(yaml.load(raw));
   } catch (err: any) {
-    if (err?.code === "ENOENT") return c.json({ error: "Composition not found" }, 404);
-    return c.json({ error: `Composition unreadable: ${err?.message ?? "unknown"}` }, 500);
+    if (err?.code !== "ENOENT") {
+      return c.json({ error: `Composition unreadable: ${err?.message ?? "unknown"}` }, 500);
+    }
+    // Legacy auto-build path
+    const synthesised = await synthesiseLegacyComposition(id, w.type);
+    if (synthesised) return c.json(synthesised);
+    return c.json({ error: "Composition not found" }, 404);
   }
 });
+
+async function synthesiseLegacyComposition(
+  workId: string,
+  workType: string,
+): Promise<unknown | null> {
+  if (workType !== "short-video") return null;
+  const wDir = join(dataDir, "works", workId);
+  const collect = async (dir: string, exts: RegExp): Promise<string[]> => {
+    try {
+      const items = await readdir(dir);
+      return items.filter((f) => exts.test(f)).sort();
+    } catch { return []; }
+  };
+  const finalVids = await collect(join(wDir, "output"), /\.(mp4|mov|webm)$/i);
+  const clips = await collect(join(wDir, "assets", "clips"), /\.(mp4|mov|webm)$/i);
+  const music = await collect(join(wDir, "assets", "music"), /\.(mp3|m4a|wav|aac)$/i);
+  const hasAny = finalVids.length || clips.length || music.length;
+  if (!hasAny) return null;
+
+  // ffprobe-based duration; fall back to 5s defaults when ffprobe absent or fails
+  async function probeDuration(absPath: string): Promise<number> {
+    try {
+      const { stdout } = await execFileAsync("ffprobe", [
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "csv=p=0",
+        absPath,
+      ], { timeout: 5_000 });
+      const n = parseFloat(stdout.trim());
+      return Number.isFinite(n) && n > 0 ? n : 5;
+    } catch { return 5; }
+  }
+
+  const videoClips: any[] = [];
+  let cursor = 0;
+  // Prefer one final*.mp4 as the primary clip. Otherwise sequence the assets/clips/.
+  const sourceList = finalVids.length
+    ? finalVids.map((f) => ({ rel: `output/${f}`, abs: join(wDir, "output", f) }))
+    : clips.map((f) => ({ rel: `assets/clips/${f}`, abs: join(wDir, "assets", "clips", f) }));
+  for (const { rel, abs } of sourceList) {
+    const dur = await probeDuration(abs);
+    videoClips.push({
+      id: `vc_${cursor.toFixed(2)}`,
+      kind: "video",
+      src: `/api/works/${workId}/assets/${rel}`,
+      in: 0,
+      out: dur,
+      trackOffset: cursor,
+      transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+      filters: { brightness: 0, contrast: 0, saturation: 0 },
+    });
+    cursor += dur;
+  }
+
+  const audioClips: any[] = [];
+  if (music[0]) {
+    const abs = join(wDir, "assets", "music", music[0]);
+    const dur = await probeDuration(abs);
+    audioClips.push({
+      id: `ac_bgm`,
+      kind: "audio",
+      src: `/api/works/${workId}/assets/assets/music/${encodeURIComponent(music[0])}`,
+      in: 0,
+      out: Math.min(dur, cursor || dur),
+      trackOffset: 0,
+      volume: 0.8,
+      fadeIn: 0,
+      fadeOut: 0,
+    });
+  }
+
+  return {
+    id: `c_${workId}`,
+    workId,
+    fps: 30,
+    width: 1080,
+    height: 1920,
+    duration: Math.max(cursor, audioClips[0]?.out ?? 0),
+    aspect: "9:16",
+    tracks: [
+      { id: "video-0", kind: "video", label: "Video", muted: false, hidden: false, clips: videoClips },
+      { id: "audio-0", kind: "audio", label: "BGM", muted: false, hidden: false, clips: audioClips },
+      { id: "text-0", kind: "text", label: "Subtitles", muted: false, hidden: false, clips: [] },
+      { id: "overlay-0", kind: "overlay", label: "Overlay", muted: false, hidden: false, clips: [] },
+    ],
+    updatedAt: new Date().toISOString(),
+  };
+}
 
 // PUT /api/works/:id/composition — persists composition as yaml
 apiRoutes.put("/api/works/:id/composition", async (c) => {
