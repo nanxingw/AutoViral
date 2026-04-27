@@ -374,14 +374,11 @@ export class WsBridge {
     session.messageHistory.push(userBlock);
     this.appendToChatLog(workId, userBlock);
 
-    // Real-time memory sync — user message
+    // Real-time memory sync — user message (D3: no pipeline keyed sync)
     if (!workId.startsWith("trends_")) {
       getWork(workId).then(w => {
         if (!w) return;
-        const activeStep = Object.entries(w.pipeline).find(([, s]) => s.status === "active");
-        if (activeStep) {
-          syncMessage(workId, w.title, activeStep[0], "user", text).catch(() => {});
-        }
+        syncMessage(workId, w.title, "chat", "user", text).catch(() => {});
       }).catch(() => {});
     }
 

@@ -1,5 +1,6 @@
-// Work store — manages persistent work (content) definitions for AutoViral
-// Each work is a content piece flowing through a 4-step pipeline.
+// Work store — manages persistent work (content) definitions for AutoViral.
+// D3: a Work is a content piece with module-as-capability semantics — no
+// stage-coupled fields. The agent owns its own progress tracking via chat.
 
 import { readFile, writeFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
@@ -10,14 +11,6 @@ import { dataDir } from "./config.js";
 
 export type WorkType = "short-video" | "image-text";
 export type WorkStatus = "draft" | "creating" | "ready" | "failed";
-
-export interface PipelineStep {
-  name: string;
-  status: "pending" | "active" | "evaluating" | "done" | "skipped" | "eval_blocked";
-  startedAt?: string;
-  completedAt?: string;
-  note?: string;
-}
 
 export type ContentCategory = "anxiety" | "conflict" | "comedy" | "envy" | "other";
 export type VideoSource = "upload" | "search" | "ai-generate";
@@ -31,16 +24,16 @@ export interface Work {
   videoSearchQuery?: string;
   status: WorkStatus;
   platforms: string[];
-  pipeline: Record<string, PipelineStep>;
   cliSessionId?: string;
   coverImage?: string;
   topicHint?: string;
-  evaluationMode?: boolean;
-  evalSessionIds?: Record<string, string>;
-  evalAttempts?: Record<string, number>;
   createdAt: string;
   updatedAt: string;
 }
+
+/** Keys removed in D3 — silently dropped from update inputs and on read so
+ *  legacy YAML files do not bleed back into the in-memory Work shape. */
+const STRIP_KEYS = ["pipeline", "evaluationMode", "evalSessionIds", "evalAttempts"] as const;
 
 /** Lightweight summary stored in the index file. */
 export interface WorkSummary {
@@ -106,7 +99,11 @@ function outputDir(id: string): string {
 async function readWorkFile(id: string): Promise<Work | undefined> {
   try {
     const raw = await readFile(workFilePath(id), "utf-8");
-    return yaml.load(raw) as Work;
+    const parsed = yaml.load(raw) as (Work & Record<string, unknown>) | null;
+    if (!parsed) return undefined;
+    // Strip legacy stage-coupled fields on read so callers never see them.
+    for (const k of STRIP_KEYS) delete (parsed as Record<string, unknown>)[k];
+    return parsed as Work;
   } catch {
     return undefined;
   }
@@ -122,26 +119,6 @@ async function writeWorkFile(work: Work): Promise<void> {
 
 function toSummary(w: Work): WorkSummary {
   return { id: w.id, title: w.title, type: w.type, contentCategory: w.contentCategory, platforms: w.platforms, status: w.status, updatedAt: w.updatedAt };
-}
-
-// ── Pipeline templates ───────────────────────────────────────────────────────
-
-function defaultPipeline(type: WorkType, videoSource?: VideoSource): Record<string, PipelineStep> {
-  const result: Record<string, PipelineStep> = {};
-
-  // Prepend material-search step if user chose web search for video source
-  if (type === "short-video" && videoSource === "search") {
-    result["material-search"] = { name: "素材搜索", status: "active", startedAt: new Date().toISOString() };
-  }
-
-  const names: Record<string, Record<string, string>> = {
-    "short-video": { research: "话题调研", plan: "分镜规划", assets: "素材准备", assembly: "视频合成" },
-    "image-text": { research: "话题调研", plan: "内容规划", assets: "图片生成", assembly: "图文排版" },
-  };
-  for (const [key, name] of Object.entries(names[type])) {
-    result[key] = { name, status: "pending" };
-  }
-  return result;
 }
 
 // ── ID generation ────────────────────────────────────────────────────────────
@@ -184,7 +161,6 @@ export async function createWork(input: {
     videoSearchQuery: input.videoSearchQuery,
     status: input.videoSource === "search" ? "creating" : "draft",
     platforms: input.platforms,
-    pipeline: defaultPipeline(input.type, input.videoSource as VideoSource | undefined),
     topicHint: input.topicHint,
     createdAt: now,
     updatedAt: now,
@@ -213,7 +189,9 @@ export async function updateWork(id: string, updates: Partial<Work>): Promise<Wo
   const work = await readWorkFile(id);
   if (!work) return undefined;
 
-  const updated: Work = { ...work, ...updates, id, updatedAt: new Date().toISOString() };
+  const cleaned: Record<string, unknown> = { ...(updates as Record<string, unknown>) };
+  for (const k of STRIP_KEYS) delete cleaned[k];
+  const updated: Work = { ...work, ...(cleaned as Partial<Work>), id, updatedAt: new Date().toISOString() };
   await writeWorkFile(updated);
 
   // Sync index

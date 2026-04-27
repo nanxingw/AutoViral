@@ -1009,23 +1009,18 @@ apiRoutes.post("/api/works/:id/session", async (c) => {
     const work = await getWork(id);
     if (!work) return c.json({ error: "Work not found" }, 404);
 
-    const steps = Object.entries(work.pipeline);
-    const pendingStep = steps.find(([, s]) => s.status === "pending" || s.status === "active");
-    const stepName = pendingStep ? pendingStep[1].name : steps[0]?.[1]?.name ?? "创作";
-
     const prompt = [
-      `你是一个内容创作助手。你正在帮助用户创作: "${work.title}" (类型: ${work.type})。`,
-      `目标平台: ${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}。`,
-      work.topicHint ? `选题方向: ${work.topicHint}` : "",
+      `你是一个内容创作助手。你正在帮助用户创作："${work.title}"（类型：${work.type}）。`,
+      `目标平台：${work.platforms.map((p: any) => typeof p === "string" ? p : p.platform).join(", ")}。`,
+      work.topicHint ? `选题方向：${work.topicHint}` : "",
       ``,
-      `当前步骤: "${stepName}"。`,
-      `请先向用户确认：简要说明这个步骤你将做什么，询问用户是否有特定方向或要求，等用户确认后再开始工作。`,
-      `不要直接开始执行，先和用户沟通。`,
+      `先和用户简短打个招呼，问一句他想从哪开始（趋势调研 / 直接做素材 / 已经有 brief / 想拼成片）。`,
+      `不要预设流程，按用户意图直接动手。`,
     ].filter(Boolean).join("\n");
 
     const config = await loadConfig();
     await wsBridge.createSession(id, prompt, config.model);
-    return c.json({ status: "started", workId: id, step: stepName });
+    return c.json({ status: "started", workId: id });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : "Session start error" }, 500);
   }

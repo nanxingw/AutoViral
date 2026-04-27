@@ -128,66 +128,61 @@ export async function runPipeline(wsBridge: WsBridge, config: RunConfig): Promis
     result.workId = work.id;
     log("info", "server", "test_work_created", work.id, { runId });
 
-    // 2. Execute each pipeline step
-    const stepKeys = Object.keys(work.pipeline);
+    // 2. Invoke each capability module in turn (test runner exercises the
+    //    full agent loop sequentially — this is internal QA, not a pipeline).
+    const MODULE_NAMES: Record<string, string> = {
+      research: "话题调研",
+      plan: "内容规划",
+      assets: "素材生成",
+      assembly: "成片合成",
+    };
+    const moduleKeys = Object.keys(MODULE_NAMES);
 
-    for (const stepKey of stepKeys) {
+    for (const moduleKey of moduleKeys) {
       const stepStart = Date.now();
-      const stepInfo = work.pipeline[stepKey];
+      const moduleName = MODULE_NAMES[moduleKey];
       const stepResult: StepResult = {
-        key: stepKey,
-        name: stepInfo.name,
+        key: moduleKey,
+        name: moduleName,
         status: "failed",
         duration: 0,
         messageCount: 0,
         toolCalls: [],
       };
 
-      log("info", "server", "test_step_started", work.id, { runId, step: stepKey });
+      log("info", "server", "test_module_started", work.id, { runId, module: moduleKey });
 
       try {
-        // Build step prompt (same logic as /step/:step API)
-        const extraMsg = config.stepMessages?.[stepKey] ?? "";
-        let prompt = `请开始执行「${stepInfo.name}」步骤。${extraMsg}`;
+        const extraMsg = config.stepMessages?.[moduleKey] ?? "";
+        let prompt = `请使用「${moduleName}」（${moduleKey}）能力处理本作品。${extraMsg}`;
 
-        // For assets step, add instruction to use scripts
-        if (stepKey === "assets") {
+        if (moduleKey === "assets") {
           prompt += " 使用 python3 ~/.claude/skills/autoviral/modules/assets/scripts/openrouter_generate.py 生成图片，不需要逐张确认，直接全部生成。";
         }
-        if (stepKey === "assembly") {
-          prompt += " 生成小红书发布文案写入 output/publish-text.md，然后推进pipeline到完成。";
+        if (moduleKey === "assembly") {
+          prompt += " 生成小红书发布文案写入 output/publish-text.md。";
         }
 
-        // Wait for step completion via event listener
-        const completion = await waitForStepCompletion(wsBridge, work.id, stepKey, prompt, model, stepTimeout);
+        const completion = await waitForStepCompletion(wsBridge, work.id, moduleKey, prompt, model, stepTimeout);
 
         stepResult.status = completion.status;
         stepResult.messageCount = completion.messageCount;
         stepResult.toolCalls = completion.toolCalls;
         if (completion.error) stepResult.error = completion.error;
-
       } catch (err) {
         stepResult.status = "timeout";
         stepResult.error = err instanceof Error ? err.message : String(err);
-        log("warn", "server", "test_step_timeout", work.id, { runId, step: stepKey });
+        log("warn", "server", "test_module_timeout", work.id, { runId, module: moduleKey });
       }
 
       stepResult.duration = Math.round((Date.now() - stepStart) / 1000);
       result.steps.push(stepResult);
-      log("info", "server", "test_step_completed", work.id, {
-        runId, step: stepKey, status: stepResult.status, duration: stepResult.duration,
+      log("info", "server", "test_module_completed", work.id, {
+        runId, module: moduleKey, status: stepResult.status, duration: stepResult.duration,
       });
 
-      // Re-read work to check pipeline state
       const updatedWork = await getWork(work.id);
       if (!updatedWork) break;
-
-      // If this step failed and it's critical, stop
-      if (stepResult.status === "failed" || stepResult.status === "timeout") {
-        // Try to continue anyway — agent may have advanced
-        const nextPending = Object.entries(updatedWork.pipeline).find(([, s]) => s.status === "pending");
-        if (!nextPending) break; // All done or no more steps
-      }
     }
 
     // 3. Final status
@@ -261,59 +256,42 @@ async function waitForStepCompletion(
         lastAssistantText += (data.text ?? "");
       }
 
-      // turn_complete: just check if step is done (agent may still be working on tool calls)
+      // turn_complete: agent finished this turn — resolve as completed.
+      // D3: there is no pipeline gate; the test runner advances on each turn.
       if (event === "turn_complete") {
-        getWork(workId).then(w => {
-          if (!w || settled) return;
-          if (w.pipeline[stepKey]?.status === "done") {
-            settled = true;
-            clearTimeout(timer);
-            cleanup();
-            resolve({ status: "completed", messageCount, toolCalls });
-          }
-        }).catch(() => {});
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        cleanup();
+        resolve({ status: "completed", messageCount, toolCalls });
       }
 
-      // cli_exited: CLI process has exited — agent is truly done with this turn
-      // If step is not done, agent is waiting for user input → simulate reply
+      // cli_exited: CLI process has exited — agent is waiting for user input.
+      // If we have not seen turn_complete yet (rare), simulate a reply up to MAX_TURNS.
       if (event === "cli_exited") {
         turnCount++;
+        if (settled) return;
+
+        if (turnCount >= MAX_TURNS) {
+          settled = true;
+          clearTimeout(timer);
+          cleanup();
+          resolve({ status: "completed", messageCount, toolCalls });
+          return;
+        }
 
         getWork(workId).then(async w => {
           if (!w || settled) return;
-          const step = w.pipeline[stepKey];
-
-          // Step is done — resolve
-          if (step?.status === "done") {
-            settled = true;
-            clearTimeout(timer);
-            cleanup();
-            resolve({ status: "completed", messageCount, toolCalls });
-            return;
-          }
-
-          // Safety limit
-          if (turnCount >= MAX_TURNS) {
-            settled = true;
-            clearTimeout(timer);
-            cleanup();
-            resolve({ status: "completed", messageCount, toolCalls });
-            return;
-          }
-
-          // Agent exited but step not done → simulate user reply
           log("info", "server", "test_simulating_user", workId, {
-            stepKey, turnCount, agentTextLen: lastAssistantText.length,
+            module: stepKey, turnCount, agentTextLen: lastAssistantText.length,
           });
 
           try {
             const userReply = await generateUserReply(lastAssistantText, stepKey, w.title);
-            lastAssistantText = ""; // Reset for next turn
-
+            lastAssistantText = "";
             log("info", "server", "test_user_reply", workId, {
-              stepKey, reply: userReply.slice(0, 100),
+              module: stepKey, reply: userReply.slice(0, 100),
             });
-
             await wsBridge.sendMessage(workId, userReply);
           } catch (err) {
             log("warn", "server", "test_user_reply_failed", workId, {
