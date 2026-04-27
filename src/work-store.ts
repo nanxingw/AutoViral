@@ -272,41 +272,8 @@ export async function loadWorkChat(id: string): Promise<unknown | null> {
   }
 }
 
-// ── Evaluation results ──────────────────────────────────────────────────────
-
-export interface EvalResult {
-  step: string;
-  attempt: number;
-  verdict: "pass" | "fail";
-  scores: Record<string, number>;
-  issues: Array<{ severity: "critical" | "major" | "minor"; description: string; file?: string }>;
-  suggestions: string[];
-  timestamp: string;
-}
-
-export async function saveEvalResult(id: string, step: string, attempt: number, result: EvalResult): Promise<void> {
-  const dir = workDir(id);
-  await mkdir(dir, { recursive: true });
-  const filePath = join(dir, `eval-${step}-${attempt}.json`);
-  await writeFile(filePath, JSON.stringify(result, null, 2), "utf-8");
-}
-
-export async function loadEvalResult(id: string, step: string, attempt: number): Promise<EvalResult | null> {
-  try {
-    const filePath = join(workDir(id), `eval-${step}-${attempt}.json`);
-    const raw = await readFile(filePath, "utf-8");
-    return JSON.parse(raw) as EvalResult;
-  } catch {
-    return null;
-  }
-}
-
-export async function loadAllEvalResults(id: string, step: string): Promise<EvalResult[]> {
-  const results: EvalResult[] = [];
-  for (let i = 1; i <= 10; i++) {
-    const r = await loadEvalResult(id, step, i);
-    if (r) results.push(r);
-    else break;
-  }
-  return results;
-}
+// Evaluation result helpers were removed in the D3 cleanup — the evaluator was
+// demoted from a gate to a read-only rubric tool (GET /api/works/:id/rubric/:module),
+// so per-step EvalResult persistence has no consumer. Removed by Codex review
+// follow-up 2026-04-27. If a future feature needs to log evaluator scores, add
+// it back through a fresh, deliberate path (e.g. a single eval-log.jsonl).

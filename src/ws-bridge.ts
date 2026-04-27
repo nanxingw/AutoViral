@@ -112,7 +112,7 @@ export function buildSystemPrompt(
 ## 风格约束
 - 中文优先；技术名词保留英文
 - 不向用户讲述"我现在在做哪个模块"——直接给结果或问具体问题
-- 不输出顺序词（"流程""下一" 这类）
+- 不输出暗示固定顺序的 progression 词汇
 - 任何交付前对照 \`~/.claude/skills/autoviral/taste/06-rubric.md\` 自评，< 3.5 分重做
 
 完成本轮工作后，把产物写入 data/works/${work.id}/ 对应子目录，然后用一句话告诉用户做了什么、看哪里。`;
@@ -362,6 +362,31 @@ export class WsBridge {
    * Send a follow-up message using --resume + new -p.
    * Kills current CLI (if busy) and spawns a new one that resumes the session.
    */
+  /**
+   * Record a user-typed message in chat history without sending it to the CLI.
+   * Used by `/api/works/:id/chat` after `createSession` (which sends the prompt
+   * but doesn't push a user block).
+   */
+  recordUserMessage(workId: string, text: string): void {
+    const session = this.sessions.get(workId);
+    if (!session) return;
+    const userBlock: ChatBlock = {
+      type: "user",
+      text,
+      timestamp: new Date().toISOString(),
+    };
+    session.messageHistory.push(userBlock);
+    this.appendToChatLog(workId, userBlock);
+    // Broadcast so any already-connected browser sees it immediately
+    this.broadcastToBrowsers(workId, { event: "block", data: userBlock });
+    if (!workId.startsWith("trends_")) {
+      getWork(workId).then(w => {
+        if (!w) return;
+        syncMessage(workId, w.title, "chat", "user", text).catch(() => {});
+      }).catch(() => {});
+    }
+  }
+
   async sendMessage(workId: string, text: string): Promise<boolean> {
     const session = this.sessions.get(workId);
     if (!session) return false;
@@ -870,8 +895,12 @@ export class WsBridge {
     ws.on("close", () => {
       session.browserSockets.delete(ws);
       if (session.browserSockets.size === 0 && session.cliProcess) {
-        // Kill CLI process when all browsers disconnect (leaving the page = abort)
-        const delay = session.workId.startsWith("trends_") ? 3000 : 1000;
+        // Idle reconnect grace — React StrictMode double-mount, route nav, tab
+        // switch, brief network hiccup all trigger ws.close. Aborting the agent
+        // mid-turn after 1s was destructive; bump to 60s for normal works,
+        // 90s for trends (which run shorter prompts but still benefit from a
+        // grace window). (Codex review 2026-04-27)
+        const delay = session.workId.startsWith("trends_") ? 90_000 : 60_000;
         setTimeout(() => {
           if (session.browserSockets.size === 0 && session.cliProcess) {
             try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }

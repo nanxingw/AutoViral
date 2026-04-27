@@ -42,4 +42,21 @@ if [ -n "$HITS" ]; then
   echo "$HITS"
   exit 1
 fi
+
+# Also scan commit subjects on this branch since plan1-scaffold-complete.
+# Allow subjects that describe REMOVAL of the legacy concept — those have to
+# spell out the term being removed (e.g. "drop step_divider events").
+if git rev-parse plan1-scaffold-complete >/dev/null 2>&1; then
+  COMMIT_HITS=$(git log --format='%h %s' plan1-scaffold-complete..HEAD \
+    | grep -E "$PATTERN" \
+    | grep -v "D3-OK" \
+    | grep -viE "drop|remove|delete|rip out|legacy|migrate from|抹除|去掉|废弃" \
+    || true)
+  if [ -n "$COMMIT_HITS" ]; then
+    echo "D3 forbidden words in commit messages:"
+    echo "$COMMIT_HITS"
+    exit 1
+  fi
+fi
+
 echo "D3 sweep clean."

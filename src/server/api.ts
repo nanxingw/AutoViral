@@ -763,6 +763,123 @@ apiRoutes.post("/api/audio/mix", async (c) => {
   }
 });
 
+// POST /api/audio/beats — beat detection via skills/.../detect_beats.py
+// Studio's useBeatSnap hook calls this to populate the snap-target list.
+// Returns: { success, beats: number[], bpm: number } when librosa is installed,
+// 503 with a friendly install hint otherwise.
+apiRoutes.post("/api/audio/beats", async (c) => {
+  try {
+    const body = await c.req.json<{ workId?: string; assetPath?: string }>();
+    const { workId, assetPath } = body;
+    if (!workId || !assetPath) return c.json({ success: false, error: "Missing workId/assetPath" }, 400);
+    if (!SAFE_ID.test(workId)) return c.json({ success: false, error: "Invalid workId" }, 400);
+
+    let fullPath: string;
+    try {
+      const cleaned = String(assetPath).replace(/^\/+/, "");
+      const root = cleaned.startsWith("output/") ? "output" : "assets";
+      const rest = cleaned.startsWith("output/") ? cleaned.slice(7)
+                 : cleaned.startsWith("assets/") ? cleaned.slice(7)
+                 : cleaned;
+      fullPath = resolveAssetPath(workId, root, rest);
+    } catch (err) {
+      if (err instanceof UnsafePathError) return c.json({ success: false, error: err.message }, 400);
+      throw err;
+    }
+
+    const script = join(repoRoot, "skills/autoviral/modules/assembly/scripts/beat-sync/detect_beats.py");
+    try {
+      const { stdout } = await execFileAsync("python3", [script, fullPath], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
+      const parsed = JSON.parse(stdout);
+      return c.json({
+        success: true,
+        beats: Array.isArray(parsed.beat_times) ? parsed.beat_times : [],
+        strongBeats: Array.isArray(parsed.strong_beats) ? parsed.strong_beats : [],
+        bpm: typeof parsed.bpm === "number" ? parsed.bpm : null,
+      });
+    } catch (err: any) {
+      const msg = err?.stderr ?? err?.message ?? "";
+      if (/ModuleNotFoundError.*librosa/.test(msg) || /No module named.*librosa/.test(msg)) {
+        return c.json({
+          success: false,
+          error: "librosa not installed. Run `pip install librosa numpy` to enable beat detection.",
+          code: "PYTHON_DEP_MISSING",
+        }, 503);
+      }
+      return c.json({ success: false, error: msg, code: "API_ERROR" }, 500);
+    }
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+  }
+});
+
+// POST /api/audio/captions — ASR caption generation via caption_generate.py
+// Studio's caption import button calls this to populate the text track with
+// time-coded captions. Returns:
+//   { success, captions: [{start, end, text}, ...] } when stable-ts works
+//   503 with install hint when stable-ts/whisper not available
+apiRoutes.post("/api/audio/captions", async (c) => {
+  try {
+    const body = await c.req.json<{ workId?: string; assetPath?: string; language?: string }>();
+    const { workId, assetPath, language } = body;
+    if (!workId || !assetPath) return c.json({ success: false, error: "Missing workId/assetPath" }, 400);
+    if (!SAFE_ID.test(workId)) return c.json({ success: false, error: "Invalid workId" }, 400);
+
+    let fullPath: string;
+    try {
+      const cleaned = String(assetPath).replace(/^\/+/, "");
+      const root = cleaned.startsWith("output/") ? "output" : "assets";
+      const rest = cleaned.startsWith("output/") ? cleaned.slice(7)
+                 : cleaned.startsWith("assets/") ? cleaned.slice(7)
+                 : cleaned;
+      fullPath = resolveAssetPath(workId, root, rest);
+    } catch (err) {
+      if (err instanceof UnsafePathError) return c.json({ success: false, error: err.message }, 400);
+      throw err;
+    }
+
+    // Use caption_generate.py in --transcribe-only mode to emit JSON segments.
+    // The script's existing CLI emits ASS by default; use the helper output via
+    // a sidecar JSON path. For now, shell out to a small inline python that
+    // calls stable_whisper.transcribe and dumps segments.
+    const py = `
+import json, sys
+try:
+    import stable_whisper
+except Exception as e:
+    print(json.dumps({"error": "stable-whisper not installed: " + str(e)}), file=sys.stdout)
+    sys.exit(0)
+model = stable_whisper.load_model("base")
+result = model.transcribe(${JSON.stringify(fullPath)}${language ? `, language=${JSON.stringify(language)}` : ""})
+segs = []
+for s in result.segments:
+    segs.append({"start": float(s.start), "end": float(s.end), "text": s.text.strip()})
+print(json.dumps({"segments": segs}))
+`;
+    try {
+      const { stdout } = await execFileAsync("python3", ["-c", py], { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
+      const parsed = JSON.parse(stdout);
+      if (parsed.error) {
+        return c.json({
+          success: false,
+          error: `${parsed.error}. Run \`pip install stable-whisper\` to enable ASR.`,
+          code: "PYTHON_DEP_MISSING",
+        }, 503);
+      }
+      const captions = (parsed.segments ?? []).map((s: any) => ({
+        start: Number(s.start),
+        end: Number(s.end),
+        text: String(s.text ?? ""),
+      }));
+      return c.json({ success: true, captions });
+    } catch (err: any) {
+      return c.json({ success: false, error: err?.stderr ?? err?.message ?? "ASR failed", code: "API_ERROR" }, 500);
+    }
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+  }
+});
+
 // GET /api/generate/providers
 apiRoutes.get("/api/generate/providers", (c) => c.json(listProviders()));
 
@@ -1207,6 +1324,11 @@ apiRoutes.post("/api/works/:id/chat", async (c) => {
     if (!session) {
       const config = await loadConfig();
       session = await wsBridge.createSession(id, body.text, config.model);
+      // Record the first user message in chat history — createSession only sends
+      // the prompt to the CLI; it does NOT append a user block to messageHistory
+      // or chat.jsonl. Without this, persisted chat starts at the agent's first
+      // turn, missing the user's opening line. (Codex review 2026-04-27)
+      wsBridge.recordUserMessage(id, body.text);
       return c.json({ sent: true, sessionCreated: true, workId: id });
     }
 
