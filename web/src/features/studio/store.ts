@@ -8,7 +8,7 @@ interface CompState {
   currentFrame: number;
   isPlaying: boolean;
   beats: number[];
-  loadComposition: (c: Composition) => void;
+  loadComposition: (c: Composition | null) => void;
   addClip: (trackId: string, clip: Clip) => void;
   updateClip: (clipId: string, patch: Partial<Clip>) => void;
   removeClip: (clipId: string) => void;

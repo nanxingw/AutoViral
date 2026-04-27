@@ -509,13 +509,22 @@ apiRoutes.post("/api/generate/image", async (c) => {
   if (!workId || !prompt || !filename) {
     return c.json({ success: false, error: "Missing required fields", code: "INVALID_PARAMS" }, 400);
   }
+  // Sanitize workId + filename — provider does raw join() that would otherwise
+  // accept ../ traversal. (Codex round 2: provider files still raw)
+  if (!SAFE_ID.test(workId)) {
+    return c.json({ success: false, error: "Invalid workId", code: "INVALID_PARAMS" }, 400);
+  }
+  const safeFilename = String(filename).replace(/[/\\]/g, "_").replace(/^\.+/, "");
+  if (!safeFilename) {
+    return c.json({ success: false, error: "Invalid filename", code: "INVALID_PARAMS" }, 400);
+  }
   const provider = providerName ? getProvider(providerName) : getDefaultProvider("image");
   if (!provider) {
     return c.json({ success: false, error: "No image provider available", code: "INVALID_PARAMS" }, 400);
   }
   try {
     const result = await provider.generateImage({
-      prompt, width, height, workId, filename, referenceImage,
+      prompt, width, height, workId, filename: safeFilename, referenceImage,
       aspectRatio, imageSize, seed, temperature, model,
     });
     return c.json(result);
@@ -531,12 +540,36 @@ apiRoutes.post("/api/generate/video", async (c) => {
   if (!workId || !prompt || !filename) {
     return c.json({ success: false, error: "Missing required fields", code: "INVALID_PARAMS" }, 400);
   }
+  if (!SAFE_ID.test(workId)) {
+    return c.json({ success: false, error: "Invalid workId", code: "INVALID_PARAMS" }, 400);
+  }
+  const safeFilename = String(filename).replace(/[/\\]/g, "_").replace(/^\.+/, "");
+  if (!safeFilename) {
+    return c.json({ success: false, error: "Invalid filename", code: "INVALID_PARAMS" }, 400);
+  }
+  // firstFrame/lastFrame are also user-controlled paths — sanitize via assets/-rooted resolve
+  const safeFirstFrame = firstFrame
+    ? (() => {
+        try {
+          const cleaned = String(firstFrame).replace(/^\/+/, "");
+          const root = cleaned.startsWith("output/") ? "output" : "assets";
+          const rest = cleaned.startsWith("output/") ? cleaned.slice(7)
+                     : cleaned.startsWith("assets/") ? cleaned.slice(7) : cleaned;
+          return resolveAssetPath(workId, root, rest);
+        } catch { return undefined; }
+      })()
+    : undefined;
+  if (firstFrame && !safeFirstFrame) {
+    return c.json({ success: false, error: "Invalid firstFrame path", code: "INVALID_PATH" }, 400);
+  }
   const provider = providerName ? getProvider(providerName) : getDefaultProvider("video");
   if (!provider) {
     return c.json({ success: false, error: "No video provider available", code: "INVALID_PARAMS" }, 400);
   }
   try {
-    const result = await provider.generateVideo({ prompt, firstFrame, lastFrame, resolution, workId, filename });
+    const result = await provider.generateVideo({
+      prompt, firstFrame: safeFirstFrame ?? firstFrame, lastFrame, resolution, workId, filename: safeFilename,
+    });
     return c.json(result);
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
@@ -731,10 +764,11 @@ apiRoutes.post("/api/audio/mix", async (c) => {
     let fullVideoPath: string;
     let fullOutputPath: string;
     let resolvedTracks: any[];
+    let safeOutName: string;
     try {
       fullVideoPath = resolveUnderWork(videoPath);
       // outputFilename is a basename only — prevent traversal even if user passes "../foo"
-      const safeOutName = String(outputFilename).replace(/[/\\]/g, "_").replace(/^\.+/, "");
+      safeOutName = String(outputFilename).replace(/[/\\]/g, "_").replace(/^\.+/, "");
       if (!safeOutName) return c.json({ success: false, error: "Invalid outputFilename", code: "INVALID_PARAMS" }, 400);
       fullOutputPath = resolveAssetPath(workId, "output", safeOutName);
       resolvedTracks = tracks.map((t: any) => ({ ...t, source: resolveUnderWork(t.source) }));
@@ -753,10 +787,13 @@ apiRoutes.post("/api/audio/mix", async (c) => {
       outputPath: fullOutputPath,
     });
 
+    // Response uses the SANITIZED basename. Earlier version returned raw
+    // outputFilename, which would break asset references AND leak the unsafe
+    // input back to the client. (Codex round 2 finding #3)
     return c.json({
       success: true,
-      assetPath: `output/${outputFilename}`,
-      previewUrl: `/api/works/${workId}/assets/output/${outputFilename}`,
+      assetPath: `output/${safeOutName}`,
+      previewUrl: `/api/works/${workId}/assets/output/${encodeURIComponent(safeOutName)}`,
     });
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
@@ -788,26 +825,51 @@ apiRoutes.post("/api/audio/beats", async (c) => {
     }
 
     const script = join(repoRoot, "skills/autoviral/modules/assembly/scripts/beat-sync/detect_beats.py");
+    // detect_beats.py emits structured JSON ({"error": "..."}) on stdout for both
+    // success and known failures (incl. ImportError on librosa), exiting 1 on
+    // failure. Parse stdout regardless of exit code, then look at stderr only as
+    // a fallback for crashes that didn't reach the script's own error handler.
+    // (Codex round 2 finding #2)
+    let stdout = "";
+    let stderr = "";
     try {
-      const { stdout } = await execFileAsync("python3", [script, fullPath], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
-      const parsed = JSON.parse(stdout);
-      return c.json({
-        success: true,
-        beats: Array.isArray(parsed.beat_times) ? parsed.beat_times : [],
-        strongBeats: Array.isArray(parsed.strong_beats) ? parsed.strong_beats : [],
-        bpm: typeof parsed.bpm === "number" ? parsed.bpm : null,
-      });
+      const result = await execFileAsync("python3", [script, fullPath], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
+      stdout = result.stdout;
+      stderr = result.stderr;
     } catch (err: any) {
-      const msg = err?.stderr ?? err?.message ?? "";
-      if (/ModuleNotFoundError.*librosa/.test(msg) || /No module named.*librosa/.test(msg)) {
+      stdout = err?.stdout ?? "";
+      stderr = err?.stderr ?? err?.message ?? "";
+    }
+    let parsed: any = null;
+    try { parsed = JSON.parse(stdout); } catch { /* not JSON */ }
+    if (parsed?.error) {
+      const errMsg = String(parsed.error);
+      if (/librosa/i.test(errMsg)) {
         return c.json({
           success: false,
           error: "librosa not installed. Run `pip install librosa numpy` to enable beat detection.",
           code: "PYTHON_DEP_MISSING",
         }, 503);
       }
-      return c.json({ success: false, error: msg, code: "API_ERROR" }, 500);
+      return c.json({ success: false, error: errMsg, code: "API_ERROR" }, 500);
     }
+    if (parsed && Array.isArray(parsed.beat_times)) {
+      return c.json({
+        success: true,
+        beats: parsed.beat_times,
+        strongBeats: Array.isArray(parsed.strong_beats) ? parsed.strong_beats : [],
+        bpm: typeof parsed.bpm === "number" ? parsed.bpm : null,
+      });
+    }
+    // Fallback: examine stderr for raw Python tracebacks
+    if (/ModuleNotFoundError.*librosa|No module named.*librosa/.test(stderr)) {
+      return c.json({
+        success: false,
+        error: "librosa not installed. Run `pip install librosa numpy` to enable beat detection.",
+        code: "PYTHON_DEP_MISSING",
+      }, 503);
+    }
+    return c.json({ success: false, error: stderr || "Beat detection produced no output", code: "API_ERROR" }, 500);
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
   }

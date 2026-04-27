@@ -7,7 +7,7 @@ interface EditorState {
   car: Carousel | null;
   currentSlideId: string | null;
   selectionLayerId: string | null;
-  loadCarousel: (c: Carousel) => void;
+  loadCarousel: (c: Carousel | null) => void;
   setCurrentSlide: (id: string) => void;
   addSlide: () => void;
   removeSlide: (id: string) => void;
@@ -28,8 +28,11 @@ export const useEditor = create<EditorState>()(
     selectionLayerId: null,
     loadCarousel: (c) =>
       set((s) => {
+        // Accept null — Editor.tsx calls loadCar(null) during workId-switch
+        // reset to clear stale state before the new carousel loads. Earlier
+        // version dereferenced c.slides[0] and crashed. (Codex round 2 #1)
         s.car = c;
-        s.currentSlideId = c.slides[0]?.id ?? null;
+        s.currentSlideId = c ? (c.slides[0]?.id ?? null) : null;
         s.selectionLayerId = null;
       }),
     setCurrentSlide: (id) =>

@@ -27,7 +27,7 @@ export default function Studio() {
   // composition from being saved into B during a route hop. (Codex review 2026-04-27)
   useEffect(() => {
     if (!workId) return;
-    loadComp(null as any);
+    loadComp(null);
     setSavedAt(null);
     setLoadError(null);
     let cancelled = false;

@@ -44,16 +44,22 @@ if [ -n "$HITS" ]; then
 fi
 
 # Also scan commit subjects on this branch since plan1-scaffold-complete.
-# Allow subjects that describe REMOVAL of the legacy concept — those have to
-# spell out the term being removed (e.g. "drop step_divider events").
+# Allow only when:
+#   (a) subject contains explicit "D3-OK" marker, OR
+#   (b) a removal verb adjoins the forbidden word: "drop step_divider", "delete
+#       pipeline/advance", "去掉 阶段" etc. Plain keywords like "remove" or
+#       "legacy" alone are NOT enough — they must be IMMEDIATELY before/after the
+#       forbidden token (≤ 24 chars between). (Codex round 2 finding #4)
 if git rev-parse plan1-scaffold-complete >/dev/null 2>&1; then
+  REMOVAL='drop|remove|delete|rip[[:space:]]out|抹除|去掉|废弃'
+  ADJACENT="(($REMOVAL)[^[:space:]]{0,24}[[:space:]]+\S{0,40}($PATTERN)|($PATTERN)\S{0,40}[[:space:]]+\S{0,24}($REMOVAL))"
   COMMIT_HITS=$(git log --format='%h %s' plan1-scaffold-complete..HEAD \
     | grep -E "$PATTERN" \
     | grep -v "D3-OK" \
-    | grep -viE "drop|remove|delete|rip out|legacy|migrate from|抹除|去掉|废弃" \
+    | grep -viE "$ADJACENT" \
     || true)
   if [ -n "$COMMIT_HITS" ]; then
-    echo "D3 forbidden words in commit messages:"
+    echo "D3 forbidden words in commit messages (no D3-OK marker, no adjacent removal verb):"
     echo "$COMMIT_HITS"
     exit 1
   fi

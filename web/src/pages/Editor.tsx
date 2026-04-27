@@ -27,7 +27,7 @@ export default function Editor() {
   useEffect(() => {
     if (!workId) return;
     // Reset car + savedAt on workId change so we don't autosave A's car into B.
-    loadCar(null as any);
+    loadCar(null);
     setSavedAt(null);
     setLoadError(null);
     let cancelled = false;
