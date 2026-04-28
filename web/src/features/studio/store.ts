@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { Composition, Clip } from "./types";
+import type { Composition, Clip, AssetEntry, ProvenanceEdge } from "./types";
 
 interface CompState {
   comp: Composition | null;
@@ -18,6 +18,10 @@ interface CompState {
   setBeats: (b: number[]) => void;
   recomputeDuration: () => void;
   moveClipWithinTrack: (trackId: string, fromIndex: number, toIndex: number) => void;
+  // Phase 1.6 — provenance graph mutations
+  addAsset: (asset: AssetEntry) => void;
+  addProvenance: (edge: ProvenanceEdge) => void;
+  removeAsset: (assetId: string) => void;
 }
 
 function clipEnd(c: Clip): number {
@@ -124,6 +128,26 @@ export const useComposition = create<CompState>()(
         s.comp.duration = Math.max(
           0,
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
+        );
+      }),
+    // ─── Phase 1.6 — provenance graph mutations ───────────────────────────
+    addAsset: (asset) =>
+      set((s) => {
+        if (!s.comp) return;
+        if (s.comp.assets.some((a) => a.id === asset.id)) return;
+        s.comp.assets.push(asset);
+      }),
+    addProvenance: (edge) =>
+      set((s) => {
+        if (!s.comp) return;
+        s.comp.provenance.push(edge);
+      }),
+    removeAsset: (assetId) =>
+      set((s) => {
+        if (!s.comp) return;
+        s.comp.assets = s.comp.assets.filter((a) => a.id !== assetId);
+        s.comp.provenance = s.comp.provenance.filter(
+          (e) => e.toAssetId !== assetId,
         );
       }),
   })),
