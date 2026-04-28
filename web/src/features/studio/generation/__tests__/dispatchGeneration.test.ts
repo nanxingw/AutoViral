@@ -18,6 +18,7 @@ describe("buildGenerationNotification — create image", () => {
   it("embeds a fenced JSON block with the script + script_args", () => {
     expect(n.message).toContain("```json");
     expect(n.message).toContain('"script": "modules/assets/scripts/openrouter_generate.py"');
+    expect(n.message).toContain('"executable_kind": "python"');
     expect(n.message).toContain('"--aspect-ratio": "9:16"');
   });
   it("provenance_hint has from_asset_id=null + operation_type=generate", () => {
@@ -51,7 +52,8 @@ describe("buildGenerationNotification — variant video", () => {
   });
   it("auto-wires source.uri as --image-url for the from-image script", () => {
     expect(n.message).toContain('"--image-url": "/api/works/w_x/assets/clips/panda-v1.mp4"');
-    expect(n.message).toContain('"script": "modules/assets/scripts/dreamina_generate.py from-image"');
+    expect(n.message).toContain('"script": "dreamina image2video"');
+    expect(n.message).toContain('"executable_kind": "shell"');
   });
   it("operation_type=derive + from_asset_id=source.id", () => {
     expect(n.message).toContain('"operation_type": "derive"');

@@ -150,6 +150,10 @@ interface JsonPayload {
     voice?: string | null;
   };
   script: string;
+  /** "shell" if `script` is a binary in PATH (run as `<script> [args]`);
+   *  "python" if `script` is a Python module path (run as `python3 <script> [args]`).
+   *  Image/audio scripts are Python wrappers; video uses the `dreamina` CLI binary. */
+  executable_kind: "shell" | "python";
   script_args: Record<string, string | number>;
   provenance_hint: {
     operation_type: "generate" | "derive";
@@ -162,7 +166,7 @@ interface JsonPayload {
 
 function buildPayload(req: GenerationRequest): JsonPayload {
   const isVariant = req.mode === "variant";
-  const base: Omit<JsonPayload, "params" | "script" | "script_args" | "provenance_hint"> = {
+  const base: Omit<JsonPayload, "params" | "script" | "executable_kind" | "script_args" | "provenance_hint"> = {
     mode: req.mode,
     kind: req.params.kind,
   };
@@ -193,6 +197,7 @@ function buildPayload(req: GenerationRequest): JsonPayload {
     ...base,
     params: r.params,
     script: r.script,
+    executable_kind: r.executableKind,
     script_args: r.scriptArgs,
     provenance_hint: r.provenance,
   };
@@ -201,6 +206,7 @@ function buildPayload(req: GenerationRequest): JsonPayload {
 interface Resolved {
   params: Record<string, unknown>;
   script: string;
+  executableKind: "shell" | "python";
   scriptArgs: Record<string, string | number>;
   provenance: JsonPayload["provenance_hint"];
 }
@@ -229,6 +235,7 @@ function resolveScriptForRequest(req: GenerationRequest): Resolved {
           style: p.style ?? null,
         },
         script: "modules/assets/scripts/openrouter_generate.py",
+        executableKind: "python",
         scriptArgs: args,
         provenance: {
           operation_type: operationType,
@@ -264,8 +271,9 @@ function resolveScriptForRequest(req: GenerationRequest): Resolved {
           image_url: resolvedImageUrl ?? null,
         },
         script: useFromImage
-          ? "modules/assets/scripts/dreamina_generate.py from-image"
-          : "modules/assets/scripts/dreamina_generate.py",
+          ? "dreamina image2video"
+          : "dreamina multimodal2video",
+        executableKind: "shell",
         scriptArgs: args,
         provenance: {
           operation_type: operationType,
@@ -293,6 +301,7 @@ function resolveScriptForRequest(req: GenerationRequest): Resolved {
         script: isTts
           ? "modules/assets/scripts/tts_generate.py"
           : "modules/assets/scripts/music_generate.py",
+        executableKind: "python",
         scriptArgs: args,
         provenance: {
           operation_type: operationType,

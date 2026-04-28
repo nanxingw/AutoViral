@@ -9,7 +9,7 @@ description: 用于多参考图/参考视频驱动生成时——例如 "用 ima
 
 最常见的失败 = 把 reference 模式当成 `from-image` 多塞几张图，期望模型自己挑出谁是主角、谁是环境。**别这样。** 真正的能力来自给每张 ref 命名，并在 prompt 里明确告诉模型"用它来做什么"。
 
-> **当前实现：**video 多参考能力今天通过 `dreamina` CLI 的 `multimodal2video` 子命令暴露（见 `capabilities/dreamina-mastery.md`）。Python 包装 `modules/assets/scripts/dreamina_generate.py` 的 port 仍在 Phase 2.x 待补；envelope 协议层（dispatchGeneration.ts）已默认引用后者，运行时如脚本不存在请降级到直接调 `dreamina` CLI 或退到 `jimeng_generate.py`（仅支持单首帧 / 单末帧，不支持多 ref）。
+> **当前实现：**video 多参考能力今天通过 `dreamina` CLI 的 `multimodal2video` 子命令暴露（见 `capabilities/dreamina-mastery.md`）。envelope 协议层（dispatchGeneration.ts）现在直接调用该 CLI（`script: "dreamina multimodal2video"` / `dreamina image2video`，`executable_kind: "shell"`），无需 Python 包装。降级路径：`jimeng_generate.py` 仅支持单首帧 / 单末帧，不支持多 ref。
 
 ## @addressing 语法
 
@@ -116,7 +116,7 @@ dreamina multimodal2video \
 
 - `capabilities/dreamina-mastery.md` — `multimodal2video` 完整命令矩阵、模型选型、ratio 规则
 - `capabilities/character-consistency.md` — 真人角色 ref 的特殊处理（Phase 2.9 待补）
-- `capabilities/filter-retries.md` — content-policy 拒绝（含 audio-output reject）的恢复路径（Phase 2.8 待补）
+- `capabilities/filter-retries.md` — content-policy 拒绝（含 audio-output reject）的恢复路径（signature decision tree）
 - `capabilities/structured-generation.md` — variant 模式自动注入 `--image-url` 的 envelope 协议
 - `modules/assets/scripts/jimeng_generate.py` — 当前可用的 video 生成脚本（仅支持 first-frame / last-frame，不支持多 ref；多 ref 走 `dreamina` CLI）
 - `skills/autoviral/SKILL.md` — Content-policy 重试模式与"默认静音 + 后期混音"约定

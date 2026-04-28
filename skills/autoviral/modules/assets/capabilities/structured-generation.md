@@ -24,7 +24,8 @@ AutoViral 的 viewer（GenerationDialog 与 dive-canvas 变体按钮）不会自
 | `change_direction` | `string` | 仅 `mode=variant` | 用户的修改方向，需要与 `source.prompt` **融合**而非替换 |
 | `params` | `object` | 必填 | 物理参数（aspect_ratio / duration / style …），用于写入 asset.metadata |
 | `source` | `object` | 仅 `mode=variant` | 源 asset 的 frozen identity（id / name / uri / 原 prompt / 模型 / 尺寸） |
-| `script` | `string` | 必填 | 目标脚本相对路径，**不要重写** |
+| `script` | `string` | 必填 | 目标脚本相对路径或 CLI 命令，**不要重写** |
+| `executable_kind` | `"shell"` \| `"python"` | 必填 | `"shell"` → 直接 spawn binary，args 用 shell 风格；`"python"` → 用 `python3` 解释器跑模块 |
 | `script_args` | `object` | 必填 | flag→value 映射，**不要重命名 flag**，照搬即可 |
 | `provenance_hint` | `object` | 必填 | `operation_type` / `from_asset_id` / `agent_id` / `label` / `model`，逐字段写入 provenance 边 |
 
@@ -54,6 +55,7 @@ AutoViral 的 viewer（GenerationDialog 与 dive-canvas 变体按钮）不会自
     "style": null
   },
   "script": "modules/assets/scripts/openrouter_generate.py",
+  "executable_kind": "python",
   "script_args": {
     "--prompt": "深夜便利店门口，少女蹲在地上吃关东煮，霓虹灯反光，胶片颗粒",
     "--aspect-ratio": "9:16"
@@ -85,6 +87,11 @@ AutoViral 的 viewer（GenerationDialog 与 dive-canvas 变体按钮）不会自
 挑输出路径：assets/{kind}/<semantic-id>.<ext>
             image→.png · video→.mp4 · audio→.mp3
   ↓
+按 executable_kind 派发 runtime：
+  - "shell"  → 用 Bash 工具执行：`<script> <expanded_args> --output <path>`
+  - "python" → 用 Bash 工具执行：`python3 <script> <expanded_args> --output <path>`
+  其中 <path> 始终是 task 决定的 semantic 路径
+  ↓
 调脚本：原样使用 envelope.script + envelope.script_args，
        仅追加 `--output <挑好的路径>`
   ↓
@@ -96,6 +103,7 @@ AutoViral 的 viewer（GenerationDialog 与 dive-canvas 变体按钮）不会自
 不要往任何 track 上加 clip — 时间线放置是用户的另一次决定
   ↓
 返回 <viewer-locator/> 卡片指向新 asset + 一句简短确认
+（卡片格式见下文「Locator 卡片格式」节，必须 label-first，否则 parser 静默丢弃）
 ```
 
 ## Worked example 1 — create-asset（图片）
@@ -157,7 +165,7 @@ Agent 执行步骤：
 
    ```
    已生成新图片 asset-night-store-girl-v2。
-   <viewer-locator asset="asset-night-store-girl-v2" />
+   <viewer-locator label="✦ asset-night-store-girl-v2" data='{"assetId":"asset-night-store-girl-v2"}' />
    ```
 
 ## Worked example 2 — generate-variant（视频）
@@ -188,7 +196,8 @@ envelope 节选：
     "aspect_ratio": "9:16",
     "duration": null, "voice": null
   },
-  "script": "modules/assets/scripts/dreamina_generate.py from-image",
+  "script": "dreamina image2video",
+  "executable_kind": "shell",
   "script_args": {
     "--prompt": "深夜便利店门口，少女蹲在地上吃关东煮，霓虹灯反光，胶片颗粒",
     "--duration": "6",
@@ -215,7 +224,7 @@ envelope 节选：
 5. 注册 asset：`type: video`、`metadata` 抄 `params` 里的 duration/aspect/resolution。
 6. provenance edge：`operation.type=derive`、`from=asset-night-store-girl-v2`，其余字段照 hint 字面。
 7. **不要修改源 asset**——variant switcher 依赖原 asset 仍然存在且 uri 不变。
-8. 返回 `<viewer-locator asset="asset-night-store-girl-v3" />`。
+8. 返回 `<viewer-locator label="✦ asset-night-store-girl-v3" data='{"assetId":"asset-night-store-girl-v3"}' />`。
 
 ## 不要做的事
 
@@ -234,23 +243,49 @@ envelope 节选：
 - **`uri` 在 `status: generating` 阶段可以为空字符串**：脚本完成后再回填。viewer 收到空 uri 会显示占位图。
 - **`kind` 字段决定文件子目录**：`image → assets/image/`、`video → assets/video/`、`audio → assets/audio/`。**不要**把视频写进 `image/` 哪怕路径正确——viewer 列表按子目录过滤。
 - **`prompt` 是 flag 不是 positional**：AutoViral 的 `openrouter_generate.py` 用 `--prompt`，不像 pneuma 的脚本可能是 positional。envelope 的 `script_args` 已替你决定了，**不要二次猜测**。
-- **视频变体的 `--image-url` 已自动注入**：dispatchGeneration.ts 在 `mode=variant` 且 `source.uri` 存在时会自动把 `source.uri` 写进 `script_args["--image-url"]`，并把 `script` 切到 `dreamina_generate.py from-image`。**不要**手工再加一次，也不要切回 text-to-video。
+- **视频变体的 `--image-url` 已自动注入**：dispatchGeneration.ts 在 `mode=variant` 且 `source.uri` 存在时会自动把 `source.uri` 写进 `script_args["--image-url"]`，并把 `script` 切到 `dreamina image2video`（image-to-video）。**不要**手工再加一次，也不要切回 `dreamina multimodal2video` 的 text-to-video 形态。
 - **`source` 是 frozen identity**：`source.prompt` / `source.model` / `source.width` 等是源 asset 的不可变快照，用户的修改方向只在 `change_direction` 里。把 `change_direction` 当作"在 source 基础上的 delta"，融合时**保留** subject / setting / lighting / palette，除非 delta 明示更改。
 - **图像变体的小幅改动优先 edit 模式**：当 `change_direction` 是文字替换、颗粒/调色微调时，给 image script 追加 `--ref-image <source.uri>` 走 edit 路径，比纯 prompt 重生成稳定得多。
 - **audio 的 sub_kind 决定脚本和 flag 名**：`sub_kind=tts` → `tts_generate.py`，flag 是 `--text`；`sub_kind=bgm` → `music_generate.py`，flag 是 `--prompt`。两个 sub_kind 的 flag 不互通。
 - **不要从 envelope 推断 platform 美学**：envelope 只携带技术约束（aspect / duration / resolution）。平台风格（小红书 / 抖音 / 视频号）的 taste 决定不在 envelope 范围内——已经由 viewer 上游模块处理过；agent 只负责忠实执行。
 
+## Locator 卡片格式（必读）
+
+Agent 发出的 locator card 必须严格遵循以下属性顺序，否则 parser 会静默丢弃：
+
+`<viewer-locator label="<人类可读的标签>" data='{"assetId":"...","clipId":"...","time":<秒数>}' />`
+
+- `label` 必须在 `data` 之前
+- 两个属性都必须用 quote 包裹（双引号或单引号都可，混用 OK）
+- `data` 内是 JSON 对象，至少包含 `assetId` 字段；`clipId` 和 `time` 视上下文可选
+
+错误的写法（**会被静默丢弃**）：
+
+```
+<viewer-locator asset="asset-x" />              ← 缺 label / data，parser 跳过
+<viewer-locator data='{"assetId":"x"}' label="x" />  ← label 在 data 之后，parser 跳过
+```
+
+正确的写法：
+
+```
+<viewer-locator label="✦ asset-night-store-girl-v2" data='{"assetId":"asset-night-store-girl-v2"}' />
+<viewer-locator label="片段 03 · 0:12" data='{"clipId":"clip-03","time":12}' />
+```
+
+真源：`web/src/features/chat/types.ts` 的 `LOCATOR_RX`。
+
 ## See also
 
 | 路径 | 作用 |
 |------|------|
-| `capabilities/filter-retries.md` | 脚本报错时的恢复路径 (Phase 2.8 — 待新增) |
-| `capabilities/reference-directives.md` | variant 模式下 reference 角色分配 (Phase 2.7 — 待新增) |
+| `capabilities/filter-retries.md` | 脚本报错时的恢复路径（Phase 2.8 — signature decision tree） |
+| `capabilities/reference-directives.md` | variant 模式下 reference 角色分配（Phase 2.7 — `@addressing` 协议） |
 | `capabilities/dreamina-mastery.md` | dreamina/seedance-pro 命令选择与参数排错 |
 | `capabilities/fallback-strategy.md` | 受阻时的降级路径（与 envelope 协议正交） |
 | `capabilities/quality-gate.md` | 生成完成后的自检清单 |
 | `scripts/openrouter_generate.py` | image 路径的脚本 |
-| `scripts/dreamina_generate.py` | video 路径的脚本 (Phase 2.4 引用 — 当前仓库内为 `jimeng_generate.py`，正在过渡) |
+| `dreamina` CLI | video 路径直接调用外部二进制（`dreamina image2video` / `dreamina multimodal2video`，`executable_kind=shell`） |
 | `scripts/music_generate.py` | BGM 路径的脚本 |
 | `scripts/tts_generate.py` | TTS 路径的脚本 (Phase 3.E 待新增) |
 | `web/src/features/studio/generation/dispatchGeneration.ts` | envelope 协议的真源（TS 类型定义） |
