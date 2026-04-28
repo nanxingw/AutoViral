@@ -20,6 +20,71 @@ const FiltersSchema = z.object({
 });
 export type Filters = z.infer<typeof FiltersSchema>;
 
+// ─── Asset registry ─────────────────────────────────────────────────────────
+// AssetEntry promotes raw file paths to a first-class object with semantic id
+// and physical metadata. metadata holds ONLY physical/format properties (size,
+// dimensions, duration, codec). All "how the asset came to exist" fields
+// (model, prompt, seed, costUsd, durationMs) live on ProvenanceEdge.params,
+// NEVER on metadata. This separation is borrowed from pneuma; it's the rule
+// that prevents schema drift.
+
+export const AssetMetadataSchema = z.object({
+  width: z.number().optional(),
+  height: z.number().optional(),
+  duration: z.number().optional(),
+  fps: z.number().optional(),
+  codec: z.string().optional(),
+  sampleRate: z.number().optional(),
+  channels: z.number().optional(),
+  sizeBytes: z.number().optional(),
+});
+export type AssetMetadata = z.infer<typeof AssetMetadataSchema>;
+
+export const AssetEntrySchema = z.object({
+  id: z.string(),
+  uri: z.string(),
+  kind: z.enum(["image", "video", "audio", "subtitle"]),
+  name: z.string().optional(),
+  metadata: AssetMetadataSchema.default({}),
+  tags: z.array(z.string()).optional(),
+  createdAt: z.string().optional(),
+  status: z.enum(["pending", "ready", "failed"]).default("ready"),
+});
+export type AssetEntry = z.infer<typeof AssetEntrySchema>;
+
+// ─── Provenance graph ───────────────────────────────────────────────────────
+// One edge per asset. fromAssetId === null means the asset is a root (user
+// upload, third-party import, or pure-text generation with no source asset).
+// fromAssetId === <id> means the new asset was derived from that one (variant,
+// edit, trim, mix). operation.params is intentionally Record<string,any> — the
+// shape varies per operation.type and we don't constrain it at the schema layer.
+
+export const ProvenanceOperationSchema = z.object({
+  type: z.enum([
+    "generate",  // text → asset
+    "derive",    // asset → asset (variant, edit, regen)
+    "upload",    // user upload from disk
+    "import",    // third-party import (URL, screen recording, etc.)
+    "trim",      // clip-level trim that produces a new physical asset
+    "mix",       // multi-track audio mix output
+    "caption",   // STT → SRT/ASS asset
+    "grade",     // color-graded variant
+  ]),
+  actor: z.enum(["user", "agent", "system"]),
+  agentId: z.string().optional(),
+  timestamp: z.string(),
+  label: z.string().optional(),
+  params: z.record(z.any()).default({}),
+});
+export type ProvenanceOperation = z.infer<typeof ProvenanceOperationSchema>;
+
+export const ProvenanceEdgeSchema = z.object({
+  toAssetId: z.string(),
+  fromAssetId: z.string().nullable(),
+  operation: ProvenanceOperationSchema,
+});
+export type ProvenanceEdge = z.infer<typeof ProvenanceEdgeSchema>;
+
 export const VideoClipSchema = z.object({
   id: z.string(),
   kind: z.literal("video"),
