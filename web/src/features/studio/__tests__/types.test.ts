@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { AssetEntrySchema, ProvenanceEdgeSchema } from "../types";
+import {
+  AssetEntrySchema,
+  ProvenanceEdgeSchema,
+  CompositionSchema,
+  makeEmptyComposition,
+} from "../types";
 
 describe("AssetEntrySchema", () => {
   it("parses a minimum valid image entry", () => {
@@ -73,5 +78,66 @@ describe("ProvenanceEdgeSchema", () => {
         operation: { type: "magic", actor: "agent", timestamp: "t", params: {} },
       }),
     ).toThrow();
+  });
+});
+
+describe("CompositionSchema (extended)", () => {
+  it("accepts a composition with assets, provenance, scenes, captionStyle", () => {
+    const r = CompositionSchema.parse({
+      id: "c_w_x",
+      workId: "w_x",
+      fps: 30,
+      width: 1080,
+      height: 1920,
+      duration: 4,
+      aspect: "9:16",
+      tracks: [],
+      updatedAt: "2026-04-28T10:00:00Z",
+      assets: [
+        { id: "asset-hero", uri: "/api/works/w_x/assets/images/h.png",
+          kind: "image", metadata: { width: 1080, height: 1920 } },
+      ],
+      provenance: [
+        { toAssetId: "asset-hero", fromAssetId: null,
+          operation: { type: "generate", actor: "agent",
+            timestamp: "2026-04-28T10:00:00Z", params: {} } },
+      ],
+      scenes: [
+        { id: "scene-hook", order: 0, title: "Hook",
+          memberClipIds: [], memberAssetIds: ["asset-hero"], intent: "hook" },
+      ],
+      captionStyle: {
+        fontSize: 40, color: "#fff", background: "rgba(0,0,0,0.65)",
+        bottomPercent: 0.08, fontWeight: 600, maxWidthPercent: 0.95,
+      },
+      exportPresets: [],
+    });
+    expect(r.assets).toHaveLength(1);
+    expect(r.provenance).toHaveLength(1);
+    expect(r.scenes?.[0].intent).toBe("hook");
+    expect(r.captionStyle?.fontSize).toBe(40);
+  });
+
+  it("defaults assets/provenance to empty arrays when omitted (backward compat)", () => {
+    const r = CompositionSchema.parse({
+      id: "c_legacy",
+      workId: "w_legacy",
+      fps: 30,
+      width: 1080,
+      height: 1920,
+      duration: 0,
+      aspect: "9:16",
+      tracks: [],
+      updatedAt: "2026-04-28T10:00:00Z",
+    });
+    expect(r.assets).toEqual([]);
+    expect(r.provenance).toEqual([]);
+  });
+
+  it("makeEmptyComposition seeds empty assets/provenance/scenes", () => {
+    const c = makeEmptyComposition({ workId: "w_new" });
+    expect(c.assets).toEqual([]);
+    expect(c.provenance).toEqual([]);
+    expect(c.scenes).toBeUndefined();
   });
 });

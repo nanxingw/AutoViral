@@ -184,21 +184,81 @@ export const TrackSchema = z.object({
 });
 export type Track = z.infer<typeof TrackSchema>;
 
+// ─── Scenes ─────────────────────────────────────────────────────────────────
+// Scenes are semantic groupings of clip ids — "this is the hook section",
+// "this is the payoff". They have no rendering effect; they're purely a
+// planning + dive-canvas affordance. order is the user's intended sequence,
+// independent of timeline order. memberAssetIds lets a scene reference assets
+// not yet placed (e.g. an unused alt take that belongs to the same scene).
+
+export const SceneSchema = z.object({
+  id: z.string(),
+  order: z.number(),
+  title: z.string(),
+  prompt: z.string().optional(),
+  memberClipIds: z.array(z.string()).default([]),
+  memberAssetIds: z.array(z.string()).default([]),
+  intent: z.enum(["hook", "build", "payoff", "cta"]).optional(),
+});
+export type Scene = z.infer<typeof SceneSchema>;
+
+// ─── Caption styling default ────────────────────────────────────────────────
+// Project-level default caption style. Individual TextClips can override per
+// clip. This is what the unified subtitle renderer (Phase 3 task) consumes.
+
+export const CaptionStyleSchema = z.object({
+  fontSize: z.number().default(40),
+  color: z.string().default("#ffffff"),
+  background: z.string().default("rgba(0,0,0,0.65)"),
+  bottomPercent: z.number().default(0.08),
+  fontWeight: z.number().default(600),
+  maxWidthPercent: z.number().default(0.95),
+  lineHeight: z.number().default(1.4),
+});
+export type CaptionStyle = z.infer<typeof CaptionStyleSchema>;
+
+// ─── Export presets ─────────────────────────────────────────────────────────
+// Per-platform export configuration. Phase 6 will expand this with full ffmpeg
+// post-process chains. Phase 1 only locks the schema so old composition.yaml
+// files round-trip without losing data.
+
+export const ExportPresetSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  platform: z.enum([
+    "douyin", "xiaohongshu", "weixin-channels", "bilibili",
+    "tiktok", "reels", "shorts", "youtube-long", "custom",
+  ]),
+  width: z.number(),
+  height: z.number(),
+  fps: z.number(),
+  videoBitrate: z.number(),
+  audioBitrate: z.number(),
+  codec: z.enum(["h264", "h265", "vp9", "av1"]).default("h264"),
+  container: z.enum(["mp4", "mov", "webm"]).default("mp4"),
+  maxDurationSec: z.number().optional(),
+  loudnessTargetLufs: z.number().default(-14),
+  safeZonePct: z.number().default(0.05),
+  notes: z.string().optional(),
+});
+export type ExportPreset = z.infer<typeof ExportPresetSchema>;
+
 export const CompositionSchema = z.object({
   id: z.string(),
   workId: z.string(),
-  fps: z.union([
-    z.literal(24),
-    z.literal(25),
-    z.literal(30),
-    z.literal(60),
-  ]),
+  fps: z.union([z.literal(24), z.literal(25), z.literal(30), z.literal(60)]),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
   duration: z.number().min(0),
   aspect: z.enum(ASPECTS),
   tracks: z.array(TrackSchema),
   updatedAt: z.string(),
+  // ─── New in Phase 1 ─────────────────────────────────────────────────────
+  assets: z.array(AssetEntrySchema).default([]),
+  provenance: z.array(ProvenanceEdgeSchema).default([]),
+  scenes: z.array(SceneSchema).optional(),
+  captionStyle: CaptionStyleSchema.optional(),
+  exportPresets: z.array(ExportPresetSchema).default([]),
 });
 export type Composition = z.infer<typeof CompositionSchema>;
 
@@ -261,5 +321,8 @@ export function makeEmptyComposition(opts: {
       },
     ],
     updatedAt: now,
+    assets: [],
+    provenance: [],
+    exportPresets: [],
   };
 }
