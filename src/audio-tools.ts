@@ -267,11 +267,11 @@ export async function mixAudioTracks(opts: MixOptions): Promise<void> {
   }
 
   // ── Step 5: Final amix ──────────────────────────────────────────────────
-  // Collect final labels for each track
-  const finalLabels = tracks.map((_, i) => {
-    // If ducked, use the ducked label (t{i}); otherwise use the original label
-    return hasDucking[i] ? `t${i}` : `t${i}`;
-  });
+  // Final label is `t${i}` regardless of ducking — non-ducked tracks emit
+  // directly with that label (see line ~236), and ducked tracks' sidechain
+  // output is also labeled `t${i}` (see line ~265). The hasDucking branch
+  // is preserved here in comments for documentation only.
+  const finalLabels = tracks.map((_, i) => `t${i}`);
   const amixInputs = finalLabels.map((l) => `[${l}]`).join("");
   filterParts.push(`${amixInputs}amix=inputs=${tracks.length}:duration=first[out]`);
 
