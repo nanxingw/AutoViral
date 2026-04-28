@@ -429,11 +429,18 @@ apiRoutes.put("/api/works/:id/composition", async (c) => {
   const w = await getWork(id);
   if (!w) return c.json({ error: "Work not found" }, 404);
   const body = await c.req.json();
+  const parsed = CompositionSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      { error: "Composition schema invalid", issues: parsed.error.issues },
+      400,
+    );
+  }
   const wDir = join(dataDir, "works", id);
   await mkdir(wDir, { recursive: true });
   await writeFile(
     join(wDir, "composition.yaml"),
-    yaml.dump(body, { lineWidth: -1 }),
+    yaml.dump(parsed.data, { lineWidth: -1 }),
     "utf-8",
   );
   return c.json({ ok: true });
@@ -477,15 +484,21 @@ apiRoutes.post("/api/works/:id/render", async (c) => {
   const id = c.req.param("id");
   const w = await getWork(id);
   if (!w) return c.json({ error: "Work not found" }, 404);
-  let comp: any;
+  let raw: string;
   try {
-    const raw = await readFile(
+    raw = await readFile(
       join(dataDir, "works", id, "composition.yaml"),
       "utf-8",
     );
-    comp = yaml.load(raw);
   } catch {
     return c.json({ error: "Composition missing — save first" }, 400);
+  }
+  const parsed = CompositionSchema.safeParse(yaml.load(raw));
+  if (!parsed.success) {
+    return c.json(
+      { error: "Composition on disk is invalid", issues: parsed.error.issues },
+      400,
+    );
   }
   const outDir = join(dataDir, "works", id, "output");
   await mkdir(outDir, { recursive: true });
@@ -493,7 +506,7 @@ apiRoutes.post("/api/works/:id/render", async (c) => {
     const { renderCompositionToMp4 } = await import(
       "./remotion-renderer.js"
     );
-    const file = await renderCompositionToMp4({ ...comp, title: w.title }, outDir);
+    const file = await renderCompositionToMp4({ ...parsed.data, title: w.title }, outDir);
     return c.json({ ok: true, output: file });
   } catch (err: any) {
     return c.json({ error: err?.message ?? "Render failed" }, 500);
