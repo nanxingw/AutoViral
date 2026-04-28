@@ -3,6 +3,8 @@ import {
   AssetEntrySchema,
   ProvenanceEdgeSchema,
   CompositionSchema,
+  CaptionStyleSchema,
+  ExportPresetSchema,
   makeEmptyComposition,
 } from "../types";
 
@@ -139,5 +141,37 @@ describe("CompositionSchema (extended)", () => {
     expect(c.assets).toEqual([]);
     expect(c.provenance).toEqual([]);
     expect(c.scenes).toBeUndefined();
+  });
+});
+
+describe("ExportPresetSchema", () => {
+  it("applies codec/container/LUFS/safeZone defaults", () => {
+    const p = ExportPresetSchema.parse({
+      id: "p1",
+      label: "Douyin 9:16",
+      platform: "douyin",
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      videoBitrate: 8_000_000,
+      audioBitrate: 192_000,
+    });
+    expect(p.codec).toBe("h264");
+    expect(p.container).toBe("mp4");
+    expect(p.loudnessTargetLufs).toBe(-14);
+    expect(p.safeZonePct).toBe(0.05);
+  });
+});
+
+describe("CaptionStyleSchema", () => {
+  it("applies all defaults when given empty input", () => {
+    const cs = CaptionStyleSchema.parse({});
+    expect(cs.fontSize).toBe(40);
+    expect(cs.lineHeight).toBe(1.4);
+    expect(cs.bottomPercent).toBe(0.08);
+    expect(cs.fontWeight).toBe(600);
+    expect(cs.maxWidthPercent).toBe(0.95);
+    expect(cs.color).toBe("#ffffff");
+    expect(cs.background).toBe("rgba(0,0,0,0.65)");
   });
 });
