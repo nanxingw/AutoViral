@@ -28,12 +28,15 @@ import { syncMessage } from "./memory-sync.js";
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface ChatBlock {
-  type: "user" | "text" | "thinking" | "tool_use" | "tool_result";
+  type: "user" | "text" | "thinking" | "tool_use" | "tool_result" | "locator";
   text: string;
   toolName?: string;
   collapsed?: boolean;
   timestamp?: string;
   source?: "creator" | "evaluator";
+  // ─── Locator-specific fields (Phase 2.1) ───
+  label?: string;
+  data?: { clipId?: string; time?: number; assetId?: string; trackId?: string };
 }
 
 export interface WsSession {
@@ -122,7 +125,7 @@ export function buildSystemPrompt(
  * Whitelist of WS event types streamed to browsers. Stage-divider events were
  * removed in D3 — there are no stage boundaries to mark anymore.
  */
-export const ALLOWED_STREAM_TYPES = ["user", "text", "thinking", "tool_use", "tool_result"] as const;
+export const ALLOWED_STREAM_TYPES = ["user", "text", "thinking", "tool_use", "tool_result", "locator"] as const;
 
 // ── WsBridge ─────────────────────────────────────────────────────────────────
 
