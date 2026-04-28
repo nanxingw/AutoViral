@@ -493,7 +493,7 @@ apiRoutes.post("/api/works/:id/render", async (c) => {
     const { renderCompositionToMp4 } = await import(
       "./remotion-renderer.js"
     );
-    const file = await renderCompositionToMp4(comp, outDir);
+    const file = await renderCompositionToMp4({ ...comp, title: w.title }, outDir);
     return c.json({ ok: true, output: file });
   } catch (err: any) {
     return c.json({ error: err?.message ?? "Render failed" }, 500);
