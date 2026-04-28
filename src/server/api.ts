@@ -22,6 +22,12 @@ import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } fro
 import { evaluateWork } from "../test-evaluator.js";
 import { analyzeAudio, mixAudioTracks } from "../audio-tools.js";
 import { resolveAssetPath, resolveAssetSubpath, UnsafePathError, SAFE_ID } from "./safe-paths.js";
+import {
+  type Composition,
+  type AssetEntry,
+  type ProvenanceEdge,
+  CompositionSchema,
+} from "../shared/composition.js";
 
 export const apiRoutes = new Hono();
 
@@ -257,14 +263,18 @@ apiRoutes.get("/api/works/:id/composition", async (c) => {
       join(dataDir, "works", id, "composition.yaml"),
       "utf-8",
     );
-    return c.json(yaml.load(raw));
+    const parsed = CompositionSchema.parse(yaml.load(raw));
+    return c.json(synthesiseLegacyAssetsAndProvenance(parsed));
   } catch (err: any) {
     if (err?.code !== "ENOENT") {
       return c.json({ error: `Composition unreadable: ${err?.message ?? "unknown"}` }, 500);
     }
     // Legacy auto-build path
     const synthesised = await synthesiseLegacyComposition(id, w.type);
-    if (synthesised) return c.json(synthesised);
+    if (synthesised) {
+      const parsedSynth = CompositionSchema.parse(synthesised);
+      return c.json(synthesiseLegacyAssetsAndProvenance(parsedSynth));
+    }
     return c.json({ error: "Composition not found" }, 404);
   }
 });
@@ -355,6 +365,62 @@ async function synthesiseLegacyComposition(
     ],
     updatedAt: new Date().toISOString(),
   };
+}
+
+/**
+ * For compositions that pre-date Phase 1 (no assets/provenance arrays), walk
+ * every clip's `src` and produce one AssetEntry per unique uri plus one
+ * `import` provenance edge per asset. Idempotent: if assets[] is already
+ * populated, the comp is returned unchanged.
+ */
+export function synthesiseLegacyAssetsAndProvenance(
+  comp: Composition,
+): Composition {
+  if (comp.assets.length > 0) return comp;
+
+  const assets: AssetEntry[] = [];
+  const provenance: ProvenanceEdge[] = [];
+  const seen = new Map<string, string>(); // uri → assetId
+
+  for (const track of comp.tracks) {
+    for (const clip of track.clips) {
+      // Only video / audio / overlay clips reference a `src`. Text clips inline.
+      if (clip.kind === "text") continue;
+      const src = (clip as { src: string }).src;
+      if (!src) continue;
+      if (seen.has(src)) continue;
+
+      const id = `asset-${clip.id}`;
+      seen.set(src, id);
+
+      const kind: AssetEntry["kind"] =
+        clip.kind === "video" ? "video"
+        : clip.kind === "audio" ? "audio"
+        : "image"; // overlay → still image
+
+      assets.push({
+        id,
+        uri: src,
+        kind,
+        name: src.split("/").pop() ?? id,
+        metadata: {},
+        status: "ready",
+      });
+      provenance.push({
+        toAssetId: id,
+        fromAssetId: null,
+        operation: {
+          type: "import",
+          actor: "system",
+          timestamp: comp.updatedAt,
+          label: "legacy migration — pre-Phase-1 composition",
+          params: {},
+        },
+      });
+    }
+  }
+
+  return { ...comp, assets, provenance };
 }
 
 // PUT /api/works/:id/composition — persists composition as yaml
