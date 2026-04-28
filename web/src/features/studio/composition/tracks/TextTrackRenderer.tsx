@@ -3,29 +3,80 @@ import {
   AbsoluteFill,
   useVideoConfig,
   interpolate,
+  spring,
   useCurrentFrame,
 } from "remotion";
 import type { TextClip, Track } from "../../types";
 import { resolvePosition } from "../layout/positionResolve";
 
+// ─── Animation primitives (pure, exported for tests) ───────────────────────
+
+/**
+ * Kinetic-pop: spring-driven scale from 0 → 1.05 (overshoot) → 1.0.
+ * Damping intentionally low for a brisk attention-grabbing entrance.
+ */
+export function computeKineticPopScale(frame: number, fps: number): number {
+  return spring({
+    frame,
+    fps,
+    config: { damping: 12, mass: 0.6, stiffness: 180 },
+    durationInFrames: 18,
+  });
+}
+
+/**
+ * Typewriter: number of chars to reveal at the given frame. Default cadence
+ * is 2 frames per character (≈15 chars/sec @ 30fps), capped at text length.
+ */
+export function computeTypewriterChars(
+  text: string,
+  frame: number,
+  _fps: number,
+  framesPerChar = 2,
+): number {
+  const max = text.length;
+  const revealed = Math.floor(frame / framesPerChar);
+  return Math.max(0, Math.min(max, revealed));
+}
+
+// ─── Component ─────────────────────────────────────────────────────────────
+
 function AnimatedText({ clip }: { clip: TextClip }) {
   const frame = useCurrentFrame();
-  const { width, height } = useVideoConfig();
-  const opacity =
-    clip.animation === "fade"
-      ? interpolate(frame, [0, 8], [0, 1], { extrapolateRight: "clamp" })
-      : 1;
-  const yOffset =
-    clip.animation === "slide-up"
-      ? interpolate(frame, [0, 12], [40, 0], { extrapolateRight: "clamp" })
-      : 0;
+  const { width, height, fps } = useVideoConfig();
   const pos = resolvePosition(clip.position, { width, height });
+
+  let opacity = 1;
+  let yOffset = 0;
+  let scale = 1;
+  let renderedText = clip.text;
+
+  switch (clip.animation) {
+    case "fade":
+      opacity = interpolate(frame, [0, 8], [0, 1], { extrapolateRight: "clamp" });
+      break;
+    case "slide-up":
+      yOffset = interpolate(frame, [0, 12], [40, 0], { extrapolateRight: "clamp" });
+      break;
+    case "kinetic-pop":
+      scale = computeKineticPopScale(frame, fps);
+      // Light fade-in companion so the pop doesn't appear from solid full
+      opacity = interpolate(frame, [0, 4], [0, 1], { extrapolateRight: "clamp" });
+      break;
+    case "typewriter":
+      renderedText = clip.text.slice(0, computeTypewriterChars(clip.text, frame, fps));
+      break;
+    default:
+      break;
+  }
+
   return (
     <div
       style={{
         ...pos,
         opacity,
-        transform: `${pos.transform} translateY(${yOffset}px)`,
+        transform: `${pos.transform} translateY(${yOffset}px) scale(${scale})`,
+        transformOrigin: "center center",
         fontFamily: clip.style.font,
         fontSize: clip.style.size,
         fontWeight: clip.style.weight,
@@ -39,7 +90,7 @@ function AnimatedText({ clip }: { clip: TextClip }) {
         textAlign: "center",
       }}
     >
-      {clip.text}
+      {renderedText}
     </div>
   );
 }
