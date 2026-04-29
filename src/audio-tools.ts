@@ -309,3 +309,118 @@ export async function mixAudioTracks(opts: MixOptions): Promise<void> {
     throw new Error("mixAudioTracks: output file is empty — mixing failed");
   }
 }
+
+// ─── Phase 3.A — LUFS two-pass normalization ───────────────────────────────
+
+export interface LoudnormOptions {
+  /** Integrated-loudness target in LUFS. -14 for YouTube/TikTok/Bilibili,
+   *  -16 for podcasts and 小红书/视频号. */
+  target: number;
+  /** True-peak ceiling in dBTP. -1.5 typical, -1.0 if downstream re-encoding
+   *  is known to be lossy. */
+  truePeak: number;
+  /** Loudness range target. 11 is the EBU R128 default; smaller values mean
+   *  more aggressive limiting. */
+  lra: number;
+}
+
+export interface LoudnormMeasurement {
+  input_i: string;
+  input_tp: string;
+  input_lra: string;
+  input_thresh: string;
+  output_i: string;
+  output_tp: string;
+  output_lra: string;
+  output_thresh: string;
+  normalization_type: string;
+  target_offset: string;
+}
+
+/**
+ * Pure helper: extract the loudnorm JSON block from ffmpeg's stderr.
+ * Returns null when no loudnorm-shaped JSON block is found.
+ *
+ * The regex looks for a curly block containing the canonical "input_i"
+ * key, which uniquely identifies a loudnorm measurement (no other ffmpeg
+ * filter emits this key).
+ */
+export function parseLoudnormJson(stderr: string): LoudnormMeasurement | null {
+  const m = stderr.match(/\{[^{}]*?"input_i"[^{}]*?\}/);
+  if (!m) return null;
+  try {
+    return JSON.parse(m[0]) as LoudnormMeasurement;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Two-pass EBU R128 loudness normalization.
+ *
+ * Pass 1: ffmpeg measures input_i / input_tp / input_lra / input_thresh
+ *         via the loudnorm filter with print_format=json to stderr.
+ * Pass 2: ffmpeg applies the actual normalization with measured values
+ *         pinned, ensuring the output hits the target without dynamic-range
+ *         pumping. Two-pass is required for ±0.5 LU accuracy on speech.
+ */
+export async function normalizeLufs(
+  inputPath: string,
+  outputPath: string,
+  opts: LoudnormOptions = { target: -14, truePeak: -1.5, lra: 11 },
+): Promise<void> {
+  const pass1Filter =
+    `loudnorm=I=${opts.target}:LRA=${opts.lra}:tp=${opts.truePeak}:print_format=json`;
+  const pass1Stderr = await runCmd(
+    "ffmpeg",
+    ["-i", inputPath, "-af", pass1Filter, "-f", "null", "-"],
+    60_000,
+  );
+  const measured = parseLoudnormJson(pass1Stderr);
+  if (!measured) {
+    throw new Error(
+      `normalizeLufs pass-1 failed: no loudnorm JSON in stderr. ` +
+        `First 500 chars: ${pass1Stderr.slice(0, 500)}`,
+    );
+  }
+
+  const pass2Filter = [
+    `loudnorm=I=${opts.target}`,
+    `LRA=${opts.lra}`,
+    `tp=${opts.truePeak}`,
+    `measured_I=${measured.input_i}`,
+    `measured_LRA=${measured.input_lra}`,
+    `measured_TP=${measured.input_tp}`,
+    `measured_thresh=${measured.input_thresh}`,
+    `linear=true`,
+    `print_format=summary`,
+  ].join(":");
+
+  await runCmd(
+    "ffmpeg",
+    [
+      "-i", inputPath,
+      "-af", pass2Filter,
+      "-c:a", "pcm_s16le",
+      "-ar", "48000",
+      "-y",
+      outputPath,
+    ],
+    120_000,
+  );
+}
+
+/**
+ * Re-measure the integrated loudness of a file (for tests / verification).
+ * Returns the integrated-loudness value as a number (e.g. -14.02).
+ */
+export async function measureLufs(filePath: string): Promise<number> {
+  const stderr = await runCmd(
+    "ffmpeg",
+    ["-i", filePath, "-af", "loudnorm=I=-14:LRA=11:tp=-1.5:print_format=json", "-f", "null", "-"],
+    60_000,
+  );
+  const m = parseLoudnormJson(stderr);
+  if (!m) throw new Error(`measureLufs: no loudnorm block in stderr`);
+  return parseFloat(m.input_i);
+}
