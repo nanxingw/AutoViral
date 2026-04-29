@@ -50,6 +50,7 @@
   .glass { background: var(--surface-1); backdrop-filter: blur(24px) saturate(140%);
     -webkit-backdrop-filter: blur(24px) saturate(140%); border: 1px solid var(--glass-border);
     border-radius: var(--radius-lg); }
+  .nowrap { white-space: nowrap; }
   body::before { content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 9999;
     opacity: 0.035; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence baseFrequency='0.9' seed='3'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
     mix-blend-mode: overlay; }

@@ -9,9 +9,11 @@ import {
 import { exportMp4 } from "@/features/studio/services/render";
 import { PreviewPanel } from "@/features/studio/panels/PreviewPanel";
 import { Timeline } from "@/features/studio/panels/Timeline";
-import { TweaksPanel } from "@/features/studio/panels/Tweaks";
 import { ChatPanel } from "@/features/studio/panels/Chat";
+import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { TopBar } from "@/features/studio/panels/TopBar";
+import { TweaksPanel } from "@/features/studio/panels/Tweaks";
+import { PipelineRail } from "@/features/studio/panels/PipelineRail";
 import { useShortcuts } from "@/features/studio/hooks/useShortcuts";
 
 export default function Studio() {
@@ -89,16 +91,17 @@ export default function Studio() {
       data-work-id={workId}
       style={{
         display: "grid",
-        gridTemplateColumns: "360px 1fr 300px",
-        gridTemplateRows: "56px 1fr 320px",
+        gridTemplateColumns: "360px 1fr 320px",
+        gridTemplateRows: "56px 48px 1fr 280px",
         gridTemplateAreas:
-          '"top top top" "chat preview aside" "chat timeline aside"',
-        height: "calc(100vh - 56px)",
+          '"top top top" "rail rail rail" "chat preview aside" "chat timeline aside"',
+        height: "100vh",
         gap: 12,
         padding: 12,
+        boxSizing: "border-box",
       }}
     >
-      <div style={{ gridArea: "top" }} className="glass" >
+      <div style={{ gridArea: "top" }} className="glass">
         <TopBar
           workId={workId}
           savedAt={savedAt}
@@ -107,18 +110,23 @@ export default function Studio() {
           }}
         />
       </div>
-      <div className="glass" style={{ gridArea: "chat", overflow: "hidden" }}>
+      <div style={{ gridArea: "rail" }} className="glass">
+        <PipelineRail />
+      </div>
+      <div className="glass" style={{ gridArea: "chat", overflow: "hidden", minHeight: 0 }}>
         <ChatPanel workId={workId} />
       </div>
-      <div className="glass-lo" style={{ gridArea: "preview", overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+      <div className="glass" style={{ gridArea: "preview", overflow: "hidden", minHeight: 0 }}>
         <PreviewPanel />
       </div>
-      <div className="glass" style={{ gridArea: "timeline", overflow: "hidden" }}>
+      <div className="glass" style={{ gridArea: "timeline", overflow: "hidden", minHeight: 0 }}>
         <Timeline />
       </div>
-      <div className="glass" style={{ gridArea: "aside", overflow: "auto" }}>
-        <TweaksPanel />
+      <div className="glass" style={{ gridArea: "aside", overflow: "hidden", minHeight: 0 }}>
+        <AssetSidebar workId={workId} />
       </div>
+
+      <TweaksPanel />
     </div>
   );
 }

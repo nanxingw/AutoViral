@@ -45,8 +45,8 @@
   .ring-wrap { display: flex; align-items: center; gap: 18px; }
   .ring { width: 110px; height: 110px; flex-shrink: 0; }
   .legend { display: flex; flex-direction: column; gap: 8px; }
-  .legend-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
-  .swatch { width: 10px; height: 10px; border-radius: 2px; }
+  .legend-row { display: flex; align-items: center; gap: 8px; font-size: 12px; white-space: nowrap; color: var(--text); }
+  .swatch { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; display: inline-block; }
 
   /* regions */
   .region-row { display: grid; grid-template-columns: 90px 1fr 36px; gap: 10px; align-items: center; padding: 4px 0; }
@@ -177,8 +177,8 @@
   <!-- Research overview -->
   <section style="margin-top:36px; margin-bottom:18px">
     <div class="sec-head" style="display:flex; align-items:baseline; justify-content:space-between; margin-bottom:18px">
-      <h2 style="margin:0; font-size:22px; font-weight:500; letter-spacing:-0.02em">Research <em style="font-family:'Instrument Serif', serif; font-style:italic">Overview</em></h2>
-      <span class="font-mono" style="font-size:11px; color:var(--text-dimmer); letter-spacing:0.06em">LAST 7 DAYS</span>
+      <h2 style="margin:0; font-size:22px; font-weight:500; letter-spacing:-0.02em; white-space:nowrap">Research&nbsp;<em style="font-family:'Instrument Serif', serif; font-style:italic">Overview</em></h2>
+      <span class="font-mono" style="font-size:11px; color:var(--text-dimmer); letter-spacing:0.06em; white-space:nowrap">LAST 7 DAYS</span>
     </div>
   </section>
   <section class="research-grid">

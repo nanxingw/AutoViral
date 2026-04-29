@@ -61,16 +61,17 @@ body::after { content: ''; position: fixed; inset: 0; pointer-events: none; z-in
   display: flex; align-items: center; gap: 18px;
   padding: 10px 14px;
 }
-.app-nav a.brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; }
-.app-nav .logo { width: 28px; height: 28px; border-radius: 7px;
+.app-nav a.brand { display: flex; align-items: center; gap: 10px; color: var(--text); text-decoration: none; flex-shrink: 0; white-space: nowrap; }
+.app-nav a.brand > div { white-space: nowrap; }
+.app-nav .logo { width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0;
   background: linear-gradient(135deg, var(--accent-hi), var(--accent-lo));
   display: grid; place-items: center; color: var(--accent-fg); font-weight: 700; font-size: 13px; }
-.app-nav .nav-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 999px;
+.app-nav .nav-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 999px; flex-shrink: 0;
   background: var(--surface-0); border: 1px solid var(--glass-border); }
 .app-nav .nav-tabs a {
   padding: 6px 14px; border-radius: 999px; font-size: 12px; font-weight: 500;
   color: var(--text-dim); text-decoration: none; transition: all .15s;
-  display: inline-flex; align-items: center; gap: 6px;
+  display: inline-flex; align-items: center; gap: 6px; white-space: nowrap;
 }
 .app-nav .nav-tabs a.active { background: var(--surface-2); color: var(--text); box-shadow: 0 0 0 1px var(--glass-border); }
 .app-nav .nav-tabs a:hover:not(.active) { color: var(--text); }

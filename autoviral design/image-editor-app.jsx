@@ -24,20 +24,20 @@ const palettes = [
 // ========== TOP BAR ==========
 function TopBar({ onToggleTheme, theme }) {
   return (
-    <div style={{gridArea: 'top', display: 'flex', alignItems: 'center', gap: 16, padding: '0 18px'}} className="glass">
+    <div style={{gridArea: 'top', display: 'flex', alignItems: 'center', gap: 16, padding: '0 18px', whiteSpace: 'nowrap', overflow: 'hidden'}} className="glass">
       <a href="Index.html" style={{display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text)', textDecoration: 'none'}}>
         <div style={{width: 24, height: 24, borderRadius: 6, background: 'linear-gradient(135deg, var(--accent-hi), var(--accent-lo))', display: 'grid', placeItems: 'center', color: 'var(--accent-fg)', fontSize: 11, fontWeight: 700}}>A</div>
         <div className="font-editorial" style={{fontSize: 15, fontStyle: 'italic'}}>Autoviral</div>
       </a>
       <div style={{width: 1, height: 18, background: 'var(--divider)'}}/>
-      <div style={{display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-dim)'}}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text-dim)', whiteSpace: 'nowrap', minWidth: 0, overflow: 'hidden'}}>
         <span style={{color: 'var(--text-dimmer)'}}>Works</span>
         <span style={{color: 'var(--text-muted)'}}>›</span>
-        <span style={{color: 'var(--text)'}}>《钩子公式》图文版 · v3</span>
-        <span className="font-mono" style={{padding: '2px 6px', borderRadius: 4, background: 'var(--surface-2)', fontSize: 9, letterSpacing: '0.08em', color: 'var(--text-dim)', marginLeft: 6}}>IMAGE · 4 SLIDES</span>
+        <span style={{color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis'}}>《钩子公式》图文版 · v3</span>
+        <span className="font-mono" style={{padding: '2px 6px', borderRadius: 4, background: 'var(--surface-2)', fontSize: 9, letterSpacing: '0.08em', color: 'var(--text-dim)', marginLeft: 6, flexShrink: 0}}>IMAGE · 4 SLIDES</span>
       </div>
       <div style={{flex: 1}}/>
-      <div style={{display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-dim)'}}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-dim)', whiteSpace: 'nowrap', flexShrink: 0}}>
         <span style={{width: 6, height: 6, borderRadius: '50%', background: 'var(--status-done)', boxShadow: '0 0 8px currentColor'}}/>
         <span className="font-mono" style={{letterSpacing: '0.06em'}}>SAVED · 2s ago</span>
       </div>

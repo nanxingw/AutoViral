@@ -3,22 +3,22 @@ const { useState, useEffect, useRef } = React;
 // ========== TOP BAR ==========
 function TopBar({ onToggleTheme, theme }) {
   return (
-    <div style={{gridArea: 'top', display: 'flex', alignItems: 'center', gap: 16, padding: '0 18px'}} className="glass">
-      <button style={{background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13}}>
+    <div style={{gridArea: 'top', display: 'flex', alignItems: 'center', gap: 16, padding: '0 18px', whiteSpace: 'nowrap', overflow: 'hidden'}} className="glass">
+      <button style={{background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, flexShrink: 0}}>
         <Icon d={Icons.back}/> <B zh="返回" en="Back"/>
       </button>
-      <div style={{width: 1, height: 20, background: 'var(--divider)'}}/>
-      <div style={{display: 'flex', alignItems: 'baseline', gap: 10, flex: 1}}>
-        <span className="font-editorial" style={{fontSize: 22, fontStyle: 'italic', color: 'var(--accent)', letterSpacing: '-0.02em'}}>Autoviral</span>
-        <span style={{fontSize: 11, color: 'var(--text-dimmer)', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '0.08em', textTransform: 'uppercase'}}>Studio ∙ v4.0</span>
-        <div style={{width: 1, height: 14, background: 'var(--divider)', margin: '0 8px'}}/>
-        <div style={{display: 'flex', alignItems: 'baseline', gap: 6}}>
-          <span style={{fontSize: 14, fontWeight: 500, color: 'var(--text)', letterSpacing: '-0.015em'}}>{mockWork.title}</span>
-          <span style={{fontSize: 11, color: 'var(--text-dimmer)', fontStyle: 'italic'}} className="font-editorial">— {mockWork.titleEn}</span>
+      <div style={{width: 1, height: 20, background: 'var(--divider)', flexShrink: 0}}/>
+      <div style={{display: 'flex', alignItems: 'baseline', gap: 10, flex: 1, minWidth: 0, overflow: 'hidden'}}>
+        <span className="font-editorial" style={{fontSize: 22, fontStyle: 'italic', color: 'var(--accent)', letterSpacing: '-0.02em', flexShrink: 0}}>Autoviral</span>
+        <span style={{fontSize: 11, color: 'var(--text-dimmer)', fontFamily: 'JetBrains Mono, monospace', letterSpacing: '0.08em', textTransform: 'uppercase', flexShrink: 0}}>Studio ∙ v4.0</span>
+        <div style={{width: 1, height: 14, background: 'var(--divider)', margin: '0 8px', flexShrink: 0}}/>
+        <div style={{display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0, overflow: 'hidden'}}>
+          <span style={{fontSize: 14, fontWeight: 500, color: 'var(--text)', letterSpacing: '-0.015em', flexShrink: 0}}>{mockWork.title}</span>
+          <span style={{fontSize: 11, color: 'var(--text-dimmer)', fontStyle: 'italic', overflow: 'hidden', textOverflow: 'ellipsis'}} className="font-editorial">— {mockWork.titleEn}</span>
         </div>
       </div>
-      <StatusDot status="running" label="ASSETS · 5m 32s"/>
-      <div style={{width: 1, height: 20, background: 'var(--divider)'}}/>
+      <div style={{flexShrink: 0}}><StatusDot status="running" label="ASSETS · 5m 32s"/></div>
+      <div style={{width: 1, height: 20, background: 'var(--divider)', flexShrink: 0}}/>
       <IconButton tip="Search"><Icon d={Icons.search}/></IconButton>
       <IconButton tip="Theme" onClick={onToggleTheme}>
         <Icon d={theme === 'dark'
@@ -36,7 +36,7 @@ function TopBar({ onToggleTheme, theme }) {
 // ========== PIPELINE BAR (embedded in top area) ==========
 function PipelineRail() {
   return (
-    <div style={{display: 'flex', alignItems: 'center', gap: 4, padding: '10px 14px'}} className="glass">
+    <div style={{display: 'flex', alignItems: 'center', gap: 4, padding: '10px 14px', whiteSpace: 'nowrap', overflowX: 'auto'}} className="glass">
       {mockPipeline.map((step, i) => (
         <React.Fragment key={step.id}>
           <div style={{
@@ -44,10 +44,10 @@ function PipelineRail() {
             background: step.status === 'running' ? 'var(--accent-glow)' : (step.status === 'done' ? 'rgba(163,230,53,0.08)' : 'transparent'),
             border: `1px solid ${step.status === 'running' ? 'var(--accent)' : (step.status === 'done' ? 'rgba(163,230,53,0.25)' : 'var(--glass-border)')}`,
             borderRadius: 999,
-            flex: step.status === 'running' ? '0 0 auto' : '0 0 auto',
+            flex: '0 0 auto',
           }}>
             <span style={{
-              width: 22, height: 22, borderRadius: '50%', display: 'grid', placeItems: 'center',
+              width: 22, height: 22, borderRadius: '50%', display: 'grid', placeItems: 'center', flexShrink: 0,
               background: step.status === 'done' ? 'var(--status-done)' : (step.status === 'running' ? 'var(--accent)' : 'transparent'),
               border: step.status === 'pending' ? '1px dashed var(--text-muted)' : 'none',
               color: step.status === 'done' ? 'var(--accent-fg)' : (step.status === 'running' ? 'var(--accent-fg)' : 'var(--text-dimmer)'),
@@ -55,9 +55,9 @@ function PipelineRail() {
             }}>
               {step.status === 'done' ? <Icon d={Icons.check} size={12} stroke={2.5}/> : (i+1).toString().padStart(2,'0')}
             </span>
-            <div style={{display: 'flex', flexDirection: 'column', lineHeight: 1.15}}>
+            <div style={{display: 'flex', flexDirection: 'column', lineHeight: 1.15, whiteSpace: 'nowrap'}}>
               <span style={{fontSize: 12, fontWeight: 500, color: 'var(--text)'}}>{step.zh}</span>
-              <span style={{fontSize: 9, color: 'var(--text-dimmer)', letterSpacing: '0.08em', textTransform: 'uppercase'}} className="font-mono">{step.en} · {step.duration}</span>
+              <span style={{fontSize: 9, color: 'var(--text-dimmer)', letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap'}} className="font-mono">{step.en} · {step.duration}</span>
             </div>
             {step.status === 'running' && <StatusDot status="running"/>}
           </div>
@@ -68,8 +68,8 @@ function PipelineRail() {
           )}
         </React.Fragment>
       ))}
-      <div style={{flex: 1}}/>
-      <div style={{display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, color: 'var(--text-dimmer)'}} className="font-mono">
+      <div style={{flex: 1, minWidth: 16}}/>
+      <div style={{display: 'flex', alignItems: 'center', gap: 10, fontSize: 11, color: 'var(--text-dimmer)', whiteSpace: 'nowrap', flexShrink: 0}} className="font-mono">
         <span>TOTAL 11:54</span>
         <span>·</span>
         <span>EVAL ON</span>
