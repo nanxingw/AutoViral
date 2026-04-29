@@ -22,7 +22,7 @@ export interface AssetItem {
 
 const VIDEO_EXT = /\.(mp4|mov|webm|m4v)$/i;
 const IMAGE_EXT = /\.(png|jpe?g|webp|gif|avif)$/i;
-const AUDIO_EXT = /\.(mp3|m4a|wav|aac|flac|ogg)$/i;
+const AUDIO_EXT = /\.(mp3|m4a|wav|aac|flac|ogg|opus)$/i;
 const TEXT_EXT = /\.(txt|md|srt|vtt|json|yaml|yml)$/i;
 
 function classify(path: string): AssetItem["kind"] {

@@ -14,6 +14,7 @@ vi.mock("@/lib/api", () => ({
       "assets/images/cover.jpeg",
       "assets/audio/bgm.mp3",
       "output/voiceover.m4a",
+      "output/voiceover.opus",
       "scripts/script.txt",
       "chat.json",
       "weird.unknown",
@@ -38,8 +39,9 @@ describe("useWorkAssets", () => {
     const byKey = Object.fromEntries(groups.map((g) => [g.group, g]));
     expect(byKey.CLIPS.count).toBe(3);
     expect(byKey.IMAGES.count).toBe(2);
-    expect(byKey.AUDIO.count).toBe(2);
+    expect(byKey.AUDIO.count).toBe(3); // mp3, m4a, opus
     expect(byKey.TEXT.count).toBe(2);
+    expect(byKey.AUDIO.items.some((i) => i.path.endsWith(".opus"))).toBe(true);
     expect(groups.flatMap((g) => g.items).map((i) => i.path)).not.toContain(
       "weird.unknown",
     );
