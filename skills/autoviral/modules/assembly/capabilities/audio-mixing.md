@@ -71,41 +71,44 @@ curl -X POST http://localhost:3271/api/audio/analyze \
 curl -X POST http://localhost:3271/api/audio/mix \
   -H "Content-Type: application/json" \
   -d '{
-    "outputPath": "/path/to/output/mixed_audio.mp3",
+    "workId": "w_20260428_xxxxx_xxxx",
+    "videoPath": "input.mp4",
+    "outputFilename": "mixed_output.mp4",
     "tracks": [
       {
-        "filePath": "/path/to/clip_01.mp4",
+        "source": "/path/to/clip_01.mp4",
         "type": "original",
         "volume": 0.25,
-        "delayMs": 0,
-        "fadeInMs": 0,
-        "fadeOutMs": 500
+        "delay": 0,
+        "fadeIn": 0,
+        "fadeOut": 0.5
       },
       {
-        "filePath": "/path/to/bgm_chorus.mp3",
+        "source": "/path/to/bgm_chorus.mp3",
         "type": "bgm",
         "volume": 0.5,
-        "delayMs": 0,
-        "fadeInMs": 1000,
-        "fadeOutMs": 2000,
+        "delay": 0,
+        "fadeIn": 1.0,
+        "fadeOut": 2.0,
         "ducking": {
-          "enabled": true,
-          "triggerTrack": "voiceover",
+          "trigger": "voiceover",
           "ratio": 4,
           "threshold": 0.02
         }
       },
       {
-        "filePath": "/path/to/voiceover.mp3",
+        "source": "/path/to/voiceover.mp3",
         "type": "voiceover",
         "volume": 0.9,
-        "delayMs": 500,
-        "fadeInMs": 200,
-        "fadeOutMs": 300
+        "delay": 0.5,
+        "fadeIn": 0.2,
+        "fadeOut": 0.3
       }
     ]
   }'
 ```
+
+> **字段命名约定（与 `MixTrack` 接口一致）：** 顶层 body 必须包含 `workId` / `videoPath` / `tracks` / `outputFilename`。每个 track 的字段是 `source`（不是 `filePath`）、`delay` / `fadeIn` / `fadeOut`（单位**秒**，不是毫秒）。`ducking` 子对象用 `trigger`（不是 `triggerTrack`），且不需要 `enabled`——只要存在 `ducking` 对象就启用。注意：`/api/audio/analyze` 端点用的是 `filePath`，与 mix API 不同。
 
 上面这个示例演示了一个典型的三轨混音：
 1. **原始音频** — clip 自带的环境音，降低音量作为氛围
