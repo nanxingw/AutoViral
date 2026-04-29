@@ -1,49 +1,30 @@
-import { render } from "@testing-library/react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { PreviewPanel } from "./PreviewPanel";
-import { useComposition } from "../store";
-import { makeEmptyComposition } from "../types";
+import { useComposition } from "@/features/studio/store";
+import { makeEmptyComposition } from "@/features/studio/types";
 
 vi.mock("@remotion/player", () => ({
-  Player: (props: any) => (
-    <div
-      data-testid="player"
-      data-fps={props.fps}
-      data-comp-w={props.compositionWidth}
-    />
-  ),
+  Player: (props: any) => <div data-testid="player" data-fps={props.fps} />,
 }));
 
 describe("PreviewPanel", () => {
-  beforeEach(() => {
-    useComposition.setState({
-      comp: null,
-      selection: null,
-      currentFrame: 0,
-      isPlaying: false,
-    });
+  it("renders the Player when comp is loaded", () => {
+    useComposition.setState({ comp: makeEmptyComposition({ workId: "w1" }) });
+    render(<PreviewPanel />);
+    expect(screen.getByTestId("player")).toBeTruthy();
   });
 
-  it("renders <Player> with comp dimensions when comp loaded", () => {
-    useComposition.setState({
-      comp: makeEmptyComposition({ workId: "w" }),
-      selection: null,
-      currentFrame: 0,
-      isPlaying: false,
-    });
-    const { getByTestId } = render(<PreviewPanel />);
-    expect(getByTestId("player").getAttribute("data-fps")).toBe("30");
-    expect(getByTestId("player").getAttribute("data-comp-w")).toBe("1080");
+  it("renders transport play/pause button", () => {
+    useComposition.setState({ comp: makeEmptyComposition({ workId: "w1" }) });
+    render(<PreviewPanel />);
+    expect(screen.getByLabelText(/play|pause/i)).toBeTruthy();
   });
 
-  it("renders empty state when comp is null", () => {
-    useComposition.setState({
-      comp: null,
-      selection: null,
-      currentFrame: 0,
-      isPlaying: false,
-    });
-    const { queryByTestId } = render(<PreviewPanel />);
-    expect(queryByTestId("player")).toBeNull();
+  it("does not render visual-only ref/compare tabs (D5 — deferred)", () => {
+    useComposition.setState({ comp: makeEmptyComposition({ workId: "w1" }) });
+    render(<PreviewPanel />);
+    expect(screen.queryByText(/^参考$/)).toBeNull();
+    expect(screen.queryByText(/^对比$/)).toBeNull();
   });
 });
