@@ -46,12 +46,14 @@ export function ThemeSection() {
       </h4>
       <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
         <button
+          data-testid="theme-toggle-dark"
           className={theme === "dark" ? "active" : ""}
           onClick={() => setTheme("dark")}
         >
           Dark
         </button>
         <button
+          data-testid="theme-toggle-light"
           className={theme === "light" ? "active" : ""}
           onClick={() => setTheme("light")}
         >

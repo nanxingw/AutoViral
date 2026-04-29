@@ -1,3 +1,14 @@
+/**
+ * @deprecated Studio v4.0 — not mounted in the new floating TweaksPanel.
+ *
+ * Preserved on disk because Phase 8 (per-clip inspector) is expected to
+ * re-introduce these sliders as a side-drawer triggered by clip selection.
+ * Until then this file is dead code; LayerSection.test.tsx mounts it
+ * directly to keep the brightness-mutation contract under test.
+ *
+ * If you're consuming this from a new surface, talk to the Phase 8 lead
+ * first — the contract may change (per-clip vs global filters).
+ */
 import { useComposition } from "../../store";
 import { ASPECTS, FPS_VALUES, type Aspect } from "../../types";
 
