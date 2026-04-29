@@ -32,6 +32,11 @@ describe("mapExpressiveTagsToSsml", () => {
     expect(r).toContain("AT&amp;T");
     expect(r).toContain("&lt;html&gt;");
   });
+
+  it("matches [short pause] before [pause] (specificity ordering)", () => {
+    expect(mapExpressiveTagsToSsml("[short pause]")).toContain("200ms");
+    expect(mapExpressiveTagsToSsml("[short pause]")).not.toContain("500ms");
+  });
 });
 
 describe("pickProvider", () => {
@@ -47,8 +52,10 @@ describe("pickProvider", () => {
 });
 
 describe("edgeTtsProvider.generate (smoke)", () => {
-  const skip = process.env.SKIP_TTS_SMOKE === "1";
-  it.skipIf(skip)("produces an audio file from a 1-line prompt", async () => {
+  // Opt-in: CI default-skips this binary-dependent test to avoid ENOENT on
+  // machines without edge-tts. Local devs run with RUN_TTS_SMOKE=1.
+  const run = process.env.RUN_TTS_SMOKE === "1";
+  it.skipIf(!run)("produces an audio file from a 1-line prompt", async () => {
     const out = join(tmpdir(), `tts-${Date.now()}.mp3`);
     const r = await edgeTtsProvider.generate({
       text: "Hello world from AutoViral",

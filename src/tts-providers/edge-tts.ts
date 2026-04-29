@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { stat } from "node:fs/promises";
 import type { TtsProvider, TtsRequest, TtsResult } from "./types.js";
 
 /**
@@ -43,7 +44,10 @@ async function runEdgeTtsCli(
   outputPath: string,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn("edge-tts", [
+    // EDGE_TTS_PATH override: dev machines where pipx put edge-tts outside
+    // the inherited PATH (e.g. ~/.local/bin) can point Node at the binary.
+    const bin = process.env.EDGE_TTS_PATH ?? "edge-tts";
+    const child = spawn(bin, [
       "--voice",
       voice,
       "--text",
@@ -119,6 +123,14 @@ export const edgeTtsProvider: TtsProvider = {
   async generate(req: TtsRequest): Promise<TtsResult> {
     const ssml = mapExpressiveTagsToSsml(req.text);
     await runEdgeTtsCli(ssml, req.voice, req.outputPath);
+    // Defensive: edge-tts can exit 0 on partial-write / network glitch and
+    // leave a 0-byte file. Catch this here rather than letting ffprobe fail
+    // with a confusing "non-numeric" error. Mirrors normalizeLufs (3.A) and
+    // burnSubtitles (3.B).
+    const s = await stat(req.outputPath);
+    if (s.size === 0) {
+      throw new Error(`edge-tts produced empty file: ${req.outputPath}`);
+    }
     const duration = await ffprobeDuration(req.outputPath);
     return {
       outputPath: req.outputPath,
