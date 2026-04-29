@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { withTempDataDir, jsonReq } from "./_helpers.js";
 
-vi.mock("../remotion-renderer.js", () => ({
-  renderCompositionToMp4: vi.fn(async () => "/tmp/fake.mp4"),
+vi.mock("../render-pipeline.js", () => ({
+  runRenderPipeline: vi.fn(async () => "/tmp/fake.mp4"),
 }));
 
 describe("POST /api/works/:id/render", () => {
