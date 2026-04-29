@@ -408,6 +408,13 @@ export async function normalizeLufs(
     ],
     120_000,
   );
+
+  const outStat = await stat(outputPath);
+  if (outStat.size === 0) {
+    throw new Error(
+      `normalizeLufs pass-2 produced empty output (ffmpeg may have failed silently). Output: ${outputPath}`,
+    );
+  }
 }
 
 /**
@@ -417,7 +424,7 @@ export async function normalizeLufs(
 export async function measureLufs(filePath: string): Promise<number> {
   const stderr = await runCmd(
     "ffmpeg",
-    ["-i", filePath, "-af", "loudnorm=I=-14:LRA=11:tp=-1.5:print_format=json", "-f", "null", "-"],
+    ["-i", filePath, "-af", "loudnorm=print_format=json", "-f", "null", "-"],
     60_000,
   );
   const m = parseLoudnormJson(stderr);

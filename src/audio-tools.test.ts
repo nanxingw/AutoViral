@@ -54,10 +54,12 @@ describe("normalizeLufs (integration)", () => {
 });
 
 describe("measureLufs", () => {
-  it("returns a number close to -3 dB for a known-loud tone", async () => {
+  it("returns the integrated loudness of a known -27 LUFS source", async () => {
     const inFile = join(process.cwd(), "tests/fixtures/quiet-tone.wav");
     const r = await measureLufs(inFile);
     expect(typeof r).toBe("number");
-    expect(r).toBeLessThan(-20);
+    // Fixture is a 1kHz tone at volume=0.5 → ~-27.15 LUFS on ffmpeg 8.x. Allow ±1 LU drift across versions.
+    expect(r).toBeGreaterThan(-28.5);
+    expect(r).toBeLessThan(-26);
   }, 15_000);
 });
