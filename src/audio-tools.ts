@@ -1,5 +1,7 @@
 import { spawn } from "node:child_process";
-import { stat } from "node:fs/promises";
+import { stat, writeFile, mkdtemp } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
+import { join } from "node:path";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -430,4 +432,111 @@ export async function measureLufs(filePath: string): Promise<number> {
   const m = parseLoudnormJson(stderr);
   if (!m) throw new Error(`measureLufs: no loudnorm block in stderr`);
   return parseFloat(m.input_i);
+}
+
+// ─── Phase 3.B — Subtitle burning adapter ─────────────────────────────────
+
+const DEFAULT_FONT_PATH = join(homedir(), ".autoviral", "fonts", "NotoSansCJKsc-Regular.otf");
+
+/**
+ * Pure helper: walk a Composition's tracks and emit flat-list subtitle JSON
+ * matching subtitle_burn.py's parse_json_subs() expected shape:
+ *   [{ start: number, end: number, text: string }, ...]
+ *
+ * Returns the FIRST text track's clips, sorted by trackOffset. If the comp
+ * has no text track, returns an empty array. Animations and styling are
+ * dropped here — the burn renders static text per Phase 3 decision D2.
+ */
+export function compositionTextTrackToJson(
+  comp: {
+    tracks: Array<{
+      kind: string;
+      clips: Array<{ kind: string; text?: string; trackOffset: number; duration?: number }>;
+    }>;
+  },
+): Array<{ start: number; end: number; text: string }> {
+  const textTrack = comp.tracks.find((t) => t.kind === "text");
+  if (!textTrack) return [];
+  return textTrack.clips
+    .filter((c) => c.kind === "text" && typeof c.text === "string")
+    .slice()
+    .sort((a, b) => a.trackOffset - b.trackOffset)
+    .map((c) => ({
+      start: c.trackOffset,
+      end: c.trackOffset + (c.duration ?? 0),
+      text: c.text!,
+    }));
+}
+
+/**
+ * Phase 3.B font guard. subtitle_burn.py's font_manager import is dead
+ * code (audit §11.11), so the script silently relies on the canonical
+ * font being pre-installed. Asserting here BEFORE invoking the script gives
+ * a "missing font" failure with clear remediation instead of a cryptic
+ * moviepy traceback.
+ */
+export async function assertFontInstalled(
+  fontPath: string = DEFAULT_FONT_PATH,
+): Promise<string> {
+  try {
+    const s = await stat(fontPath);
+    if (!s.isFile()) {
+      throw new Error(`Font path is not a file: ${fontPath}`);
+    }
+    return fontPath;
+  } catch {
+    throw new Error(
+      `Font not installed at ${fontPath}. ` +
+        `Run: python3 skills/autoviral/modules/assets/scripts/font_manager.py install ` +
+        `(or set AUTOVIRAL_FONT_PATH to a TTF/OTF you have locally).`,
+    );
+  }
+}
+
+/**
+ * Burn the composition's text track into a video by:
+ *   1. Adapting comp's text-track clips to flat-list JSON
+ *   2. Writing the JSON to a temp file
+ *   3. Asserting the canonical font is installed
+ *   4. Invoking subtitle_burn.py with the input video, JSON, output path
+ *
+ * Animations are lost (D2). Output codec is libx264+aac (subtitle_burn defaults).
+ */
+export async function burnSubtitles(opts: {
+  inputVideo: string;
+  comp: Parameters<typeof compositionTextTrackToJson>[0];
+  outputVideo: string;
+  fontPath?: string;
+  style?: "modern" | "cinematic" | "bold" | "minimal" | "karaoke";
+}): Promise<void> {
+  const segments = compositionTextTrackToJson(opts.comp);
+  if (segments.length === 0) {
+    throw new Error("burnSubtitles: composition has no text-track clips to burn");
+  }
+
+  const fontPath = await assertFontInstalled(
+    opts.fontPath ?? process.env.AUTOVIRAL_FONT_PATH ?? DEFAULT_FONT_PATH,
+  );
+
+  // Use os.tmpdir() so we don't depend on ~/.autoviral/ existing on a fresh
+  // dev machine. mkdtemp creates a unique sub-dir whose parent (the system
+  // temp dir) is guaranteed to exist.
+  const tmpDir = await mkdtemp(join(tmpdir(), "autoviral-burnsubs-"));
+  const segPath = join(tmpDir, "segments.json");
+  await writeFile(segPath, JSON.stringify(segments), "utf-8");
+
+  // Invoke subtitle_burn.py — flag names verified against the actual script:
+  //   --video, --subs, --output, --style, --font
+  await runCmd(
+    "python3",
+    [
+      "skills/autoviral/modules/assembly/scripts/subtitle_burn.py",
+      "--video", opts.inputVideo,
+      "--subs", segPath,
+      "--output", opts.outputVideo,
+      "--style", opts.style ?? "modern",
+      "--font", fontPath,
+    ],
+    300_000, // 5 minutes (subtitle burn is slow with moviepy)
+  );
 }

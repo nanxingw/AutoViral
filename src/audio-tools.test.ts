@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { normalizeLufs, parseLoudnormJson, measureLufs } from "./audio-tools.js";
+import {
+  normalizeLufs,
+  parseLoudnormJson,
+  measureLufs,
+  compositionTextTrackToJson,
+  assertFontInstalled,
+} from "./audio-tools.js";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -62,4 +68,75 @@ describe("measureLufs", () => {
     expect(r).toBeGreaterThan(-28.5);
     expect(r).toBeLessThan(-26);
   }, 15_000);
+});
+
+// ─── Phase 3.B — burnSubtitles helpers ────────────────────────────────────
+
+describe("compositionTextTrackToJson", () => {
+  it("emits flat-list shape from a Composition's first text track", () => {
+    // Minimal structurally-typed Composition. The adapter's input type is
+    // structural-loose (only reads tracks/clips), so 'as any' is fine here
+    // and avoids dragging in the full CompositionSchema field set.
+    const c = {
+      tracks: [
+        {
+          id: "video-0",
+          kind: "video",
+          label: "Video",
+          muted: false,
+          hidden: false,
+          clips: [],
+        },
+        {
+          id: "text-0",
+          kind: "text",
+          label: "Subtitles",
+          muted: false,
+          hidden: false,
+          clips: [
+            // Intentionally out-of-order to verify sort.
+            {
+              id: "t2",
+              kind: "text",
+              text: "Line 2",
+              trackOffset: 2.5,
+              duration: 1.8,
+            },
+            {
+              id: "t1",
+              kind: "text",
+              text: "Line 1",
+              trackOffset: 0,
+              duration: 2,
+            },
+          ],
+        },
+      ],
+    } as any;
+    const r = compositionTextTrackToJson(c);
+    expect(r).toEqual([
+      { start: 0, end: 2, text: "Line 1" },
+      { start: 2.5, end: 4.3, text: "Line 2" },
+    ]);
+  });
+
+  it("returns empty array when the comp has no text track", () => {
+    const c = { tracks: [] } as any;
+    expect(compositionTextTrackToJson(c)).toEqual([]);
+  });
+});
+
+describe("assertFontInstalled", () => {
+  it("returns the path when the font exists", async () => {
+    const ok = process.env.AUTOVIRAL_TEST_FONT;
+    if (!ok) return; // skip when not running with a test font available
+    const r = await assertFontInstalled(ok);
+    expect(r).toBe(ok);
+  });
+
+  it("throws a clear error when the font is missing", async () => {
+    await expect(assertFontInstalled("/nonexistent/font.otf")).rejects.toThrow(
+      /font_manager\.py install/,
+    );
+  });
 });
