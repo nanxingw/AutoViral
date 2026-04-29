@@ -90,6 +90,13 @@ describe("runRenderPipeline — with burn-in subtitles", () => {
     await runRenderPipeline({ comp: compWithText, outDir: "/tmp/out" });
     expect(burnSubtitles).not.toHaveBeenCalled();
   });
+
+  it("throws when burnSubtitles=true but the composition has no text track", async () => {
+    // baseComp has tracks: [] — no text track
+    await expect(
+      runRenderPipeline({ comp: baseComp, outDir: "/tmp/out", burnSubtitles: true }),
+    ).rejects.toThrow(/burnSubtitles=true but the composition has no text-track/);
+  });
 });
 
 describe("runRenderPipeline — onProgress hook", () => {

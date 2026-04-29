@@ -12,6 +12,8 @@ import { join } from "node:path";
 import { rename } from "node:fs/promises";
 import type { Composition } from "../shared/composition.js";
 
+export type RenderStage = "render" | "duck" | "loudnorm" | "burn" | "encode";
+
 export interface RenderJobOptions {
   comp: Composition;
   outDir: string;
@@ -21,10 +23,10 @@ export interface RenderJobOptions {
   /** Override the loudness target. Default -14 (YouTube/抖音/TikTok). */
   loudnessTargetLufs?: number;
   /** Override the title used in the output filename. Defaults to
-   *  comp.title if present, else "autoviral-export". */
+   *  "autoviral-export" via buildSafeOutputFilename when undefined. */
   outputTitle?: string;
   /** Hook for the render queue / API client to surface progress. */
-  onProgress?: (stage: "render" | "duck" | "loudnorm" | "burn" | "encode", pct: number) => void;
+  onProgress?: (stage: RenderStage, pct: number) => void;
 }
 
 /**
@@ -72,7 +74,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   // Stage 1: Remotion render
   onP("render", 0);
   let workingPath = await renderCompositionToMp4(
-    { ...opts.comp, title: opts.outputTitle ?? (opts.comp as any).title },
+    { ...opts.comp, title: opts.outputTitle },
     opts.outDir,
   );
   onP("render", 1);
@@ -94,9 +96,16 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
     onP("duck", 1);
   }
 
-  // Stage 3: subtitle burn (optional)
-  const hasTextTrack = compositionTextTrackToJson(opts.comp).length > 0;
-  if (opts.burnSubtitles && hasTextTrack) {
+  // Stage 3: subtitle burn (optional). Explicit opt-in must not silently no-op:
+  // a missing text track when burnSubtitles=true is a programming error, not
+  // graceful degradation. Callers can pre-check via compositionTextTrackToJson.
+  if (opts.burnSubtitles) {
+    const hasTextTrack = compositionTextTrackToJson(opts.comp).length > 0;
+    if (!hasTextTrack) {
+      throw new Error(
+        "runRenderPipeline: burnSubtitles=true but the composition has no text-track clips to burn",
+      );
+    }
     onP("burn", 0);
     const burned = workingPath.replace(/\.mp4$/, "-burned.mp4");
     await burnSubtitles({
