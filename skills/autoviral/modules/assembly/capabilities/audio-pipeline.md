@@ -20,9 +20,11 @@ runRenderPipeline(opts)
     └── 有 → mixAudioTracks（sidechaincompress trigger="voiceover"）→ ducked.mp4
     └── 无 → 跳过
   ↓
-[3] opts.burnSubtitles=true 且有 text track？
-    └── 是 → burnSubtitles（subtitle_burn.py，flat-list JSON）→ burned.mp4
+[3] opts.burnSubtitles=true？
     └── 否 → 跳过（保留软字幕由 TextTrackRenderer 在 Remotion 渲）
+    └── 是 → 检查 comp 是否有 text track
+              └── 无 → 抛错（"runRenderPipeline: burnSubtitles=true but the composition has no text-track clips to burn"）
+              └── 有 → burnSubtitles（subtitle_burn.py，flat-list JSON）→ burned.mp4
   ↓
 [4] loudnorm 二段归一化（默认 -14 LUFS）→ normalized.mp4
   ↓
@@ -42,6 +44,8 @@ runRenderPipeline(opts)
 | Spotify | -14 | -1.0 | 11 |
 
 调用时通过 `loudnessTargetLufs` body 字段覆盖默认 -14。
+
+> **当前限制：** `runRenderPipeline` 仅暴露 `loudnessTargetLufs`（target LUFS）；LRA 在内部固定为 11、true peak 固定为 -1.5。Phase 5+ 会让 LRA / true peak 可配置。表中的 LRA 列是 `normalizeLufs` 底层的能力，今天通过 `runRenderPipeline` 间接调用时不可调。
 
 ## AudioClip.type 的语义
 
@@ -63,9 +67,11 @@ Phase 3.0 在 `AudioClipSchema` 上加了 `type: "original"|"bgm"|"voiceover"|"s
 
 **实践建议：** 默认 `burnSubtitles=false`，让 Remotion 软字幕持续供编辑使用（动画完整保留）。只在导出的最终成片需要兼容不支持软字幕的播放环境（部分平台 / 部分播放器）时打开 burn。
 
+**注意：** `burnSubtitles=true` 但 comp 中无 text track 不是静默 no-op——pipeline 直接抛错（programming error 而非 graceful degradation）。调用前先用 `compositionTextTrackToJson(comp).length > 0` 自检。
+
 ## ducking trigger 的限制（Phase 3 MVP）
 
-当前实现：trigger 永远是 `"voiceover"`——即任何带 ducking 的 BGM/SFX/Original 都按"compose 中是否存在 voiceover"判定要不要 duck。如果 comp 没有 voiceover，ducking 不会触发，BGM 按 base volume 播。
+当前推荐：用 `trigger: "voiceover"`——schema 层支持任意 type 字符串，但 `mixAudioTracks` 是 type→first-match-index 选 trigger，存在多条同类型时只会压一条。`runRenderPipeline` 的 `compositionToMixTracks` 适配器目前硬编码 trigger 为 `"voiceover"`：当 comp 中存在 voiceover 时，所有带 `ducking` 的非-voiceover clip 都对它降低；comp 中无 voiceover 时 ducking 不触发，BGM 按 base volume 播。
 
 未来：Phase 5 / Phase 6 会让 trigger 可配置（per-clip ducking → trigger by id 而非 type），支持 BGM 之间互相 duck（intro 段 BGM 在 build-up BGM 来时降）。
 
