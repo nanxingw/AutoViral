@@ -1,10 +1,15 @@
 import { useChatSocket } from "@/features/chat/useChatSocket";
 import { useChatStore } from "@/features/chat/store";
-import type { LocatorData } from "@/features/chat/types";
+import type { StreamBlock, LocatorData } from "@/features/chat/types";
 import { LocatorBlockView } from "@/features/chat/LocatorBlock";
 import { useComposition } from "@/features/studio/store";
-import { useState } from "react";
+import { apiFetch } from "@/lib/api";
+import { useEffect, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { QuickActions } from "./QuickActions";
+
+const SKIP_TYPES = new Set(["step_divider"]); // D3 removed; ignore legacy markers
 
 // Phase 2.3 — split a text body into alternating markdown / locator segments.
 // Uses a g-flagged regex to find every <viewer-locator/> tag; the regex shape
@@ -64,53 +69,402 @@ function jumpTo(data: LocatorData) {
 export function ChatPanel({ workId }: { workId: string }) {
   const { send } = useChatSocket(workId);
   const blocks = useChatStore((s) => s.blocks);
+  const setBlocks = useChatStore((s) => s.setBlocks);
+  const streaming = useChatStore((s) => s.streaming);
   const [input, setInput] = useState("");
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Load chat history on mount / workId change. Without this, switching into a
+  // work showed an empty panel even when chat.json had hundreds of past blocks.
+  useEffect(() => {
+    let cancelled = false;
+    setLoadingHistory(true);
+    setBlocks([]);
+    (async () => {
+      try {
+        const data = await apiFetch<{ blocks: StreamBlock[] }>(`/api/works/${workId}/chat`);
+        if (cancelled) return;
+        const seeded = (data.blocks ?? [])
+          .filter((b) => !SKIP_TYPES.has(b.type as string))
+          .map((b, i) => ({
+            ...b,
+            // Backend blocks may not carry id/ts in the legacy shape — synthesise stable ones.
+            id: b.id ?? `hist_${i}`,
+            ts: typeof b.ts === "number" ? b.ts : Date.now() - (1000 * (1000 - i)),
+          }));
+        setBlocks(seeded);
+      } catch {
+        // 404 / network — leave empty, the user can still chat.
+      } finally {
+        if (!cancelled) setLoadingHistory(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [workId, setBlocks]);
+
+  // Auto-scroll on append.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
+  }, [blocks.length]);
+
   const submit = () => {
-    if (input.trim()) {
-      send(input);
-      setInput("");
-    }
+    if (!input.trim()) return;
+    send(input);
+    setInput("");
   };
+
   return (
-    <div
-      style={{ display: "flex", flexDirection: "column", height: "100%" }}
-    >
-      <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
-        {blocks.map((b) => (
-          <div key={b.id} className={`chat-block chat-${b.type}`}>
-            {segmentTextWithLocators(b.text).map((seg, i) =>
-              seg.kind === "markdown" ? (
-                <span key={i}>{seg.text}</span>
-              ) : (
-                <LocatorBlockView
-                  key={i}
-                  label={seg.label}
-                  data={seg.data}
-                  onJump={jumpTo}
-                />
-              ),
-            )}
-          </div>
-        ))}
-      </div>
-      <QuickActions />
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+      {/* Header */}
       <div
         style={{
-          padding: 12,
-          borderTop: "1px solid var(--border)",
+          padding: "16px 18px",
+          borderBottom: "1px solid var(--divider)",
           display: "flex",
-          gap: 8,
+          alignItems: "center",
+          gap: 10,
+          flexShrink: 0,
         }}
       >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && submit()}
-          placeholder="问点什么…"
-          style={{ flex: 1 }}
-        />
-        <button onClick={submit}>↵</button>
+        <div
+          style={{
+            width: 28,
+            height: 28,
+            borderRadius: 8,
+            background: "linear-gradient(135deg, var(--accent-hi), var(--accent-lo))",
+            display: "grid",
+            placeItems: "center",
+            color: "var(--accent-fg)",
+            fontSize: 14,
+            fontWeight: 700,
+          }}
+        >
+          ✦
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.015em" }}>创作代理</div>
+          <div
+            style={{
+              fontSize: 10,
+              color: "var(--text-dimmer)",
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.06em",
+            }}
+          >
+            CLAUDE-SONNET-4.5{streaming ? " · STREAMING" : ""}
+          </div>
+        </div>
+        <span
+          style={{
+            fontSize: 10,
+            fontFamily: "var(--font-mono)",
+            color: "var(--text-dimmer)",
+            letterSpacing: "0.06em",
+          }}
+        >
+          {blocks.length} MSG
+        </span>
       </div>
+
+      {/* Messages */}
+      <div
+        ref={scrollRef}
+        style={{
+          flex: 1,
+          overflowY: "auto",
+          padding: "14px 16px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
+      >
+        {loadingHistory && (
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: 11,
+              color: "var(--text-dimmer)",
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.06em",
+              padding: "20px 8px",
+            }}
+          >
+            LOADING HISTORY…
+          </div>
+        )}
+        {!loadingHistory && blocks.length === 0 && (
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: 11,
+              color: "var(--text-dimmer)",
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.04em",
+              padding: "32px 8px",
+            }}
+          >
+            <span
+              style={{
+                padding: "3px 10px",
+                border: "1px solid var(--divider)",
+                borderRadius: 999,
+              }}
+            >
+              · 跟它说一句话开始 ·
+            </span>
+          </div>
+        )}
+        {blocks.map((b) => (
+          <ChatBlock key={b.id} block={b} />
+        ))}
+        {streaming && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "8px 12px",
+              background: "var(--surface-0)",
+              borderRadius: 10,
+              alignSelf: "flex-start",
+              maxWidth: "85%",
+            }}
+          >
+            <div style={{ display: "flex", gap: 3 }}>
+              <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent)" }} />
+              <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent)", animationDelay: "0.2s" }} />
+              <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent)", animationDelay: "0.4s" }} />
+            </div>
+            <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+              thinking…
+            </span>
+          </div>
+        )}
+      </div>
+
+      <QuickActions />
+
+      {/* Composer */}
+      <div style={{ padding: 12, borderTop: "1px solid var(--divider)", flexShrink: 0 }}>
+        <div
+          style={{
+            background: "var(--surface-0)",
+            borderRadius: 12,
+            border: "1px solid var(--glass-border)",
+            padding: 10,
+            display: "flex",
+            flexDirection: "column",
+            gap: 8,
+          }}
+        >
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder="问点什么…"
+            rows={2}
+            style={{
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              resize: "none",
+              color: "var(--text)",
+              fontSize: 13,
+              fontFamily: "inherit",
+              lineHeight: 1.5,
+              minHeight: 38,
+              letterSpacing: "-0.01em",
+              width: "100%",
+            }}
+          />
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span
+              style={{
+                fontSize: 10,
+                color: "var(--text-dimmer)",
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.06em",
+              }}
+            >
+              ⌘↵ SEND
+            </span>
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={submit}
+              disabled={!input.trim()}
+              style={{
+                width: 28,
+                height: 28,
+                display: "grid",
+                placeItems: "center",
+                background: input.trim() ? "var(--accent)" : "var(--surface-2)",
+                border: "none",
+                borderRadius: 7,
+                color: input.trim() ? "var(--accent-fg)" : "var(--text-dimmer)",
+                cursor: input.trim() ? "pointer" : "default",
+                boxShadow: input.trim() ? "0 0 12px var(--accent-glow)" : "none",
+                transition: "background 0.15s",
+                fontWeight: 700,
+              }}
+              aria-label="Send"
+            >
+              ↑
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChatBlock({ block }: { block: StreamBlock }) {
+  const { type } = block;
+
+  // User → right-side bubble
+  if (type === "user") {
+    return (
+      <div className="slide-up" style={{ alignSelf: "flex-end", maxWidth: "90%" }}>
+        <div
+          style={{
+            padding: "10px 13px",
+            background: "linear-gradient(135deg, var(--accent-glow), rgba(168,197,214,0.08))",
+            border: "1px solid var(--accent)",
+            borderRadius: "14px 14px 4px 14px",
+            fontSize: 13,
+            lineHeight: 1.55,
+            letterSpacing: "-0.005em",
+            color: "var(--text)",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {block.text}
+        </div>
+      </div>
+    );
+  }
+
+  // Tool use / result → compact mono chip
+  if (type === "tool_use" || type === "tool_result") {
+    const label = type === "tool_use" ? "▸" : "✓";
+    const text = (() => {
+      if (type === "tool_use") {
+        try {
+          const parsed = JSON.parse(block.text);
+          return parsed.skill ?? parsed.name ?? block.toolName ?? "tool";
+        } catch {
+          return block.toolName ?? block.text.slice(0, 50);
+        }
+      }
+      return block.text.split("\n")[0].slice(0, 80);
+    })();
+    return (
+      <div
+        style={{
+          alignSelf: "flex-start",
+          maxWidth: "90%",
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "4px 10px",
+          fontSize: 10,
+          fontFamily: "var(--font-mono)",
+          color: type === "tool_use" ? "var(--accent)" : "var(--text-dim)",
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          background: "var(--surface-0)",
+          border: "1px solid var(--glass-border)",
+          borderRadius: 999,
+        }}
+      >
+        <span>{label}</span>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {text}
+        </span>
+      </div>
+    );
+  }
+
+  // Thinking → dimmed italic
+  if (type === "thinking") {
+    return (
+      <div
+        style={{
+          alignSelf: "flex-start",
+          maxWidth: "90%",
+          padding: "6px 12px",
+          fontSize: 11,
+          color: "var(--text-dimmer)",
+          fontStyle: "italic",
+          letterSpacing: "-0.005em",
+          borderLeft: "2px solid var(--divider)",
+          opacity: 0.7,
+        }}
+      >
+        {block.text.length > 240 ? block.text.slice(0, 240) + "…" : block.text}
+      </div>
+    );
+  }
+
+  // Default (text / ask_question / unknown) → assistant bubble with markdown
+  return (
+    <div className="slide-up" style={{ alignSelf: "flex-start", maxWidth: "90%" }}>
+      <div
+        className="md-bubble"
+        style={{
+          padding: "10px 13px",
+          background: "var(--surface-0)",
+          border: "1px solid var(--glass-border)",
+          borderRadius: "14px 14px 14px 4px",
+          fontSize: 13,
+          lineHeight: 1.55,
+          letterSpacing: "-0.005em",
+          color: "var(--text)",
+          wordBreak: "break-word",
+        }}
+      >
+        {segmentTextWithLocators(block.text).map((seg, i) =>
+          seg.kind === "markdown" ? (
+            <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
+              {seg.text}
+            </ReactMarkdown>
+          ) : (
+            <LocatorBlockView
+              key={i}
+              label={seg.label}
+              data={seg.data}
+              onJump={jumpTo}
+            />
+          ),
+        )}
+      </div>
+      {block.questions && block.questions.length > 0 && (
+        <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
+          {block.questions.map((q, i) => (
+            <div
+              key={i}
+              style={{
+                fontSize: 12,
+                padding: "6px 10px",
+                background: "var(--surface-2)",
+                borderRadius: 8,
+                color: "var(--text-dim)",
+                border: "1px solid var(--glass-border)",
+              }}
+            >
+              {q}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
