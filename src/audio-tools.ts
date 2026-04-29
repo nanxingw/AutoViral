@@ -484,9 +484,10 @@ export async function assertFontInstalled(
       throw new Error(`Font path is not a file: ${fontPath}`);
     }
     return fontPath;
-  } catch {
+  } catch (e) {
+    const cause = e instanceof Error ? e.message : String(e);
     throw new Error(
-      `Font not installed at ${fontPath}. ` +
+      `Font not installed at ${fontPath} (${cause}). ` +
         `Run: python3 skills/autoviral/modules/assets/scripts/font_manager.py install ` +
         `(or set AUTOVIRAL_FONT_PATH to a TTF/OTF you have locally).`,
     );
@@ -539,4 +540,14 @@ export async function burnSubtitles(opts: {
     ],
     300_000, // 5 minutes (subtitle burn is slow with moviepy)
   );
+
+  // runCmd does not throw on non-zero exit, and moviepy can exit non-zero
+  // with a partial-or-missing output. Defensive stat matches the pattern
+  // used by mixAudioTracks / normalizeLufs.
+  const outStat = await stat(opts.outputVideo);
+  if (!outStat.isFile() || outStat.size === 0) {
+    throw new Error(
+      `burnSubtitles: subtitle_burn.py produced no output at ${opts.outputVideo}`,
+    );
+  }
 }

@@ -6,7 +6,7 @@ import {
   compositionTextTrackToJson,
   assertFontInstalled,
 } from "./audio-tools.js";
-import { stat } from "node:fs/promises";
+import { stat, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -127,11 +127,15 @@ describe("compositionTextTrackToJson", () => {
 });
 
 describe("assertFontInstalled", () => {
-  it("returns the path when the font exists", async () => {
-    const ok = process.env.AUTOVIRAL_TEST_FONT;
-    if (!ok) return; // skip when not running with a test font available
-    const r = await assertFontInstalled(ok);
-    expect(r).toBe(ok);
+  it("returns the path when the font file exists", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "autoviral-fonttest-"));
+    const fakeFont = join(dir, "fake.otf");
+    await writeFile(fakeFont, "x");
+    try {
+      expect(await assertFontInstalled(fakeFont)).toBe(fakeFont);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("throws a clear error when the font is missing", async () => {
