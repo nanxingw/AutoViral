@@ -114,6 +114,7 @@ export const AudioClipSchema = z.object({
       release: z.number(),
     })
     .optional(),
+  type: z.enum(["original", "bgm", "voiceover", "sfx"]).default("bgm"),
 });
 export type AudioClip = z.infer<typeof AudioClipSchema>;
 

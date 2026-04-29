@@ -5,6 +5,7 @@ import {
   CompositionSchema,
   CaptionStyleSchema,
   ExportPresetSchema,
+  AudioClipSchema,
   makeEmptyComposition,
 } from "../types";
 
@@ -173,5 +174,48 @@ describe("CaptionStyleSchema", () => {
     expect(cs.maxWidthPercent).toBe(0.95);
     expect(cs.color).toBe("#ffffff");
     expect(cs.background).toBe("rgba(0,0,0,0.65)");
+  });
+});
+
+describe("AudioClipSchema (Phase 3 type extension)", () => {
+  it("defaults type to 'bgm' when omitted", () => {
+    const r = AudioClipSchema.parse({
+      id: "audio-1",
+      kind: "audio",
+      src: "/x.mp3",
+      in: 0,
+      out: 4,
+      trackOffset: 0,
+    });
+    expect(r.type).toBe("bgm");
+  });
+
+  it("accepts the four valid types", () => {
+    for (const t of ["original", "bgm", "voiceover", "sfx"] as const) {
+      const r = AudioClipSchema.parse({
+        id: "a",
+        kind: "audio",
+        src: "/x.mp3",
+        in: 0,
+        out: 4,
+        trackOffset: 0,
+        type: t,
+      });
+      expect(r.type).toBe(t);
+    }
+  });
+
+  it("rejects unknown type values", () => {
+    expect(() =>
+      AudioClipSchema.parse({
+        id: "a",
+        kind: "audio",
+        src: "/x.mp3",
+        in: 0,
+        out: 4,
+        trackOffset: 0,
+        type: "noise",
+      }),
+    ).toThrow();
   });
 });
