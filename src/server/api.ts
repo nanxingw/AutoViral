@@ -314,7 +314,10 @@ async function synthesiseLegacyComposition(
 
   const videoClips: any[] = [];
   let cursor = 0;
-  // Prefer one final*.mp4 as the primary clip. Otherwise sequence the assets/clips/.
+  // The output/final*.mp4 is the user's already-curated cut (transitions, trims,
+  // ordering all baked in). Sequencing assets/clips/ raw would 4×-ify duration
+  // and undo the edit. So: if a final exists, it IS the timeline. The raw
+  // clips/ stay reachable in the Assets sidebar for re-cutting.
   const sourceList = finalVids.length
     ? finalVids.map((f) => ({ rel: `output/${f}`, abs: join(wDir, "output", f) }))
     : clips.map((f) => ({ rel: `assets/clips/${f}`, abs: join(wDir, "assets", "clips", f) }));
@@ -459,10 +462,63 @@ apiRoutes.get("/api/works/:id/carousel", async (c) => {
     );
     return c.json(yaml.load(raw));
   } catch (err: any) {
-    if (err?.code === "ENOENT") return c.json({ error: "Carousel not found" }, 404);
+    if (err?.code === "ENOENT") {
+      // No persisted carousel — try to synthesise one from output/*.png
+      // (the user's already-finished carousel images). Mirrors the legacy
+      // composition fallback for short-video works.
+      const synthesised = await synthesiseLegacyCarousel(id, w.type);
+      if (synthesised) return c.json(synthesised);
+      return c.json({ error: "Carousel not found" }, 404);
+    }
     return c.json({ error: `Carousel unreadable: ${err?.message ?? "unknown"}` }, 500);
   }
 });
+
+async function synthesiseLegacyCarousel(
+  workId: string,
+  workType: string,
+): Promise<unknown | null> {
+  if (workType !== "image-text") return null;
+  const wDir = join(dataDir, "works", workId);
+  const collect = async (dir: string, exts: RegExp): Promise<string[]> => {
+    try {
+      const items = await readdir(dir);
+      return items.filter((f) => exts.test(f)).sort();
+    } catch { return []; }
+  };
+  // Prefer output/*.png (already-rendered final carousel pages),
+  // fall back to assets/images/*.png if no output exists.
+  const outputImgs = await collect(join(wDir, "output"), /\.(png|jpe?g|webp)$/i);
+  const assetImgs = await collect(join(wDir, "assets", "images"), /\.(png|jpe?g|webp)$/i);
+  const sources = outputImgs.length
+    ? outputImgs.map((f) => ({ rel: `output/${f}`, name: f }))
+    : assetImgs.map((f) => ({ rel: `assets/images/${f}`, name: f }));
+  if (sources.length === 0) return null;
+
+  const slides = sources.map((s, i) => ({
+    id: `s_legacy_${i}`,
+    bg: {
+      type: "image" as const,
+      value: `/api/works/${workId}/assets/${s.rel.split("/").map(encodeURIComponent).join("/")}`,
+    },
+    layers: [],
+  }));
+
+  return {
+    id: `car_${workId}`,
+    workId,
+    width: 1080,
+    height: 1350,
+    globals: {
+      headlineFont: "serif",
+      palette: "mono",
+      layout: "centered",
+      effects: { grain: 0.03, gradient: 0.5, sharpen: 0 },
+    },
+    slides,
+    updatedAt: new Date().toISOString(),
+  };
+}
 
 // PUT /api/works/:id/carousel — persists carousel as yaml
 apiRoutes.put("/api/works/:id/carousel", async (c) => {
