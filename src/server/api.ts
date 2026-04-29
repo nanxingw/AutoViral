@@ -21,6 +21,7 @@ import { log, readLogs } from "../logger.js";
 import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } from "../test-runner.js";
 import { evaluateWork } from "../test-evaluator.js";
 import { analyzeAudio, mixAudioTracks } from "../audio-tools.js";
+import { pickProvider } from "../tts-providers/registry.js";
 import { resolveAssetPath, resolveAssetSubpath, UnsafePathError, SAFE_ID } from "./safe-paths.js";
 import {
   type Composition,
@@ -1123,6 +1124,37 @@ print(json.dumps({"segments": segs}))
     }
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+  }
+});
+
+// POST /api/audio/tts — TTS generation via Phase 3.E provider registry
+apiRoutes.post("/api/audio/tts", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  if (!body || typeof body !== "object" || !body.text || !body.voice || !body.output_path) {
+    return c.json(
+      { error: "TTS request missing required fields", required: ["text", "voice", "output_path"] },
+      400,
+    );
+  }
+  const provider = pickProvider({
+    language: typeof body.language === "string" ? body.language : undefined,
+  });
+  try {
+    const r = await provider.generate({
+      text: String(body.text),
+      voice: String(body.voice),
+      style: typeof body.style === "string" ? body.style : undefined,
+      outputPath: String(body.output_path),
+    });
+    return c.json({
+      ok: true,
+      outputPath: r.outputPath,
+      duration: r.duration,
+      sampleRate: r.sampleRate,
+      channels: r.channels,
+    });
+  } catch (e: any) {
+    return c.json({ error: "TTS provider error", message: e?.message ?? String(e) }, 500);
   }
 });
 
