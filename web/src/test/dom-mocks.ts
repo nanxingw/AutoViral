@@ -55,7 +55,24 @@ export function installAudioContextMock(): void {
   (globalThis as Record<string, unknown>).webkitAudioContext = MockAudioContext;
 }
 
+// Per-element currentTime store at module scope so re-invocations of
+// mockHTMLMediaElement (e.g. with a different durationSec) don't orphan
+// values previously written by existing elements.
+const mediaCurrentTime = new WeakMap<HTMLMediaElement, number>();
+
 export function mockHTMLMediaElement(durationSec = 10): void {
+  const proto = HTMLMediaElement.prototype as unknown as {
+    __mocked?: boolean;
+  };
+  if (proto.__mocked) {
+    // Allow duration override on re-call, but skip re-installing setters that
+    // would otherwise trash existing prototype state.
+    Object.defineProperty(HTMLMediaElement.prototype, "duration", {
+      configurable: true,
+      get: () => durationSec,
+    });
+    return;
+  }
   Object.defineProperty(HTMLMediaElement.prototype, "duration", {
     configurable: true,
     get: () => durationSec,
@@ -75,21 +92,18 @@ export function mockHTMLMediaElement(durationSec = 10): void {
   HTMLMediaElement.prototype.load = vi.fn();
   HTMLMediaElement.prototype.play = vi.fn(async () => undefined);
   HTMLMediaElement.prototype.pause = vi.fn();
-  // currentTime: setting it fires `seeked` async; getter returns the last set value.
-  const store = new WeakMap<HTMLMediaElement, number>();
   Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
     configurable: true,
     set(this: HTMLMediaElement, v: number) {
-      store.set(this, v);
+      mediaCurrentTime.set(this, v);
       queueMicrotask(() => {
-        // `canplay` is needed for waitForVideo's listener path when readyState
-        // somehow falls below 2; safe to fire alongside seeked.
         this.dispatchEvent(new Event("canplay"));
         this.dispatchEvent(new Event("seeked"));
       });
     },
     get(this: HTMLMediaElement) {
-      return store.get(this) ?? 0;
+      return mediaCurrentTime.get(this) ?? 0;
     },
   });
+  proto.__mocked = true;
 }

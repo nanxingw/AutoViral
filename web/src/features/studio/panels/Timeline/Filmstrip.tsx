@@ -45,6 +45,27 @@ export function Filmstrip({ clip, pxPerSecond, height }: Props) {
   const thumbWidth = renderStep * pxPerSecond;
   const totalWidth = dur * pxPerSecond;
 
+  // Pre-snap each render-time to its nearest cached timestamp ONCE per zoom
+  // change; without this, every progressive-paint repaint would rerun an
+  // O(renderTimes × cacheTimestamps) loop inside the JSX .map.
+  const renderToCache = useMemo(() => {
+    const map = new Map<number, number>();
+    if (cacheTimestamps.length === 0) return map;
+    for (const t of renderTimes) {
+      let best = cacheTimestamps[0];
+      let bestDelta = Math.abs(best - t);
+      for (const c of cacheTimestamps) {
+        const d = Math.abs(c - t);
+        if (d < bestDelta) {
+          bestDelta = d;
+          best = c;
+        }
+      }
+      map.set(t, best);
+    }
+    return map;
+  }, [renderTimes, cacheTimestamps]);
+
   return (
     <div
       aria-label="filmstrip"
@@ -62,17 +83,8 @@ export function Filmstrip({ clip, pxPerSecond, height }: Props) {
       }}
     >
       {renderTimes.map((t) => {
-        // Snap each render-time to the nearest cached timestamp for lookup.
-        let cacheT = cacheTimestamps[0] ?? 0;
-        let bestDelta = Math.abs(cacheT - t);
-        for (const c of cacheTimestamps) {
-          const d = Math.abs(c - t);
-          if (d < bestDelta) {
-            bestDelta = d;
-            cacheT = c;
-          }
-        }
-        const url = frames.get(cacheT);
+        const cacheT = renderToCache.get(t);
+        const url = cacheT !== undefined ? frames.get(cacheT) : undefined;
         return (
           <div
             key={t}
