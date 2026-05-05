@@ -53,7 +53,13 @@ describe("Track (dnd-kit)", () => {
   it("renders all clips in order", () => {
     const comp = useComposition.getState().comp!;
     const { container } = render(
-      <Track track={comp.tracks[0]} pxPerSecond={50} />,
+      <Track
+        track={comp.tracks[0]}
+        pxPerSecond={50}
+        totalWidth={400}
+        color="var(--accent)"
+        label="Video"
+      />,
     );
     const clips = container.querySelectorAll(".timeline-clip");
     expect(clips.length).toBe(3);

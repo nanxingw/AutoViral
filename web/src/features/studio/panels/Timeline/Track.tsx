@@ -1,50 +1,98 @@
 import { Clip } from "./Clip";
 import type { Track as TrackType } from "../../types";
 
-// Earlier this component wrapped clips in <DndContext> + <SortableContext>, but
-// Clip never called `useSortable` — so onDragEnd never fired and the reorder
-// affordance was inert. (Codex review 2026-04-27)
-//
-// In practice, free-position drag (handled inside Clip's onPointerDown) already
-// gives the user spatial reorder by changing trackOffset. The store now also
-// exposes `moveClipWithinTrack(trackId, from, to)` which any future explicit
-// reorder UI (e.g. right-click → "move left") can call. dnd-kit can be re-added
-// later via a Sortable wrapper around Clip without changing the data path.
-
-export function Track({
-  track,
-  pxPerSecond,
-}: {
+interface Props {
   track: TrackType;
   pxPerSecond: number;
-}) {
+  totalWidth: number;
+  color: string;
+  label: string;
+}
+
+const KIND_ICON: Record<string, JSX.Element> = {
+  video: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <rect x="2" y="6" width="14" height="12" rx="2" />
+      <path d="M22 8l-6 4 6 4V8z" />
+    </svg>
+  ),
+  audio: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <path d="M9 18V5l12-2v13" />
+      <circle cx="6" cy="18" r="3" />
+      <circle cx="18" cy="16" r="3" />
+    </svg>
+  ),
+  text: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
+    </svg>
+  ),
+  overlay: (
+    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+    </svg>
+  ),
+};
+
+export function Track({ track, pxPerSecond, totalWidth, color, label }: Props) {
+  const compact = track.kind === "text";
+  const height = compact ? 36 : 56;
   return (
     <div
-      className="timeline-track"
       data-kind={track.kind}
       style={{
-        position: "relative",
-        height: 56,
-        borderTop: "1px solid var(--border)",
+        display: "flex",
+        borderBottom: "1px solid var(--divider)",
+        minHeight: height,
       }}
     >
+      {/* Label column (sticky-ish) */}
       <div
-        className="track-label"
         style={{
-          position: "absolute",
-          left: -120,
           width: 110,
-          textAlign: "right",
-          fontSize: 11,
-          fontFamily: "var(--font-mono)",
-          color: "var(--text-soft)",
+          flexShrink: 0,
+          padding: "8px 12px",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          borderRight: "1px solid var(--divider)",
+          background: "var(--surface-0)",
+          position: "sticky",
+          left: 0,
+          zIndex: 3,
         }}
       >
-        {track.label}
+        <span style={{ color, display: "grid", placeItems: "center" }}>
+          {KIND_ICON[track.kind] ?? KIND_ICON.video}
+        </span>
+        <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-dim)" }}>
+          {label}
+        </span>
       </div>
-      {track.clips.map((c) => (
-        <Clip key={c.id} clipId={c.id} pxPerSecond={pxPerSecond} />
-      ))}
+
+      {/* Clip lane */}
+      <div
+        style={{
+          flex: 1,
+          padding: 6,
+          position: "relative",
+          minWidth: totalWidth,
+          height,
+        }}
+      >
+        {track.clips.map((c) => (
+          <Clip
+            key={c.id}
+            clipId={c.id}
+            pxPerSecond={pxPerSecond}
+            trackKind={track.kind}
+            color={color}
+          />
+        ))}
+      </div>
     </div>
   );
 }

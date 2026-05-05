@@ -26,14 +26,18 @@ beforeEach(() => {
 
 describe("Clip", () => {
   it("renders with proportional width", () => {
-    const { container } = render(<Clip clipId="v1" pxPerSecond={50} />);
+    const { container } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
     const el = container.firstChild as HTMLElement;
     expect(el.style.width).toBe("200px");
     expect(el.style.left).toBe("50px");
   });
 
   it("clicking selects", () => {
-    const { container } = render(<Clip clipId="v1" pxPerSecond={50} />);
+    const { container } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
     fireEvent.pointerDown(container.firstChild as HTMLElement, {
       clientX: 0,
       pointerId: 1,
