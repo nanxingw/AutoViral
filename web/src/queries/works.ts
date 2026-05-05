@@ -7,6 +7,10 @@ export interface WorkSummary {
   type: "short-video" | "image-text";
   status: "draft" | "published" | "archived";
   thumbnail: string | null;
+  /** Backend-attached preview asset URL (image or video). May be undefined for empty works. */
+  coverImage?: string | null;
+  /** True when coverImage points to a video (last-resort fallback when no image asset exists). */
+  coverIsVideo?: boolean;
   updatedAt: string;
 }
 

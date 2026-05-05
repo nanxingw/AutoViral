@@ -21,6 +21,21 @@ function FilmThumb({ slide, index }: { slide: Slide; index: number }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: slide.id });
 
+  // Render the actual slide background — prior version only handled "solid",
+  // so image-typed slides (the most common case for legacy auto-built carousels)
+  // showed up as blank surface-1 boxes.
+  const bgStyle: React.CSSProperties = (() => {
+    if (slide.bg.type === "solid") return { background: slide.bg.value };
+    if (slide.bg.type === "gradient") return { background: slide.bg.value };
+    if (slide.bg.type === "image")
+      return {
+        backgroundImage: `url(${slide.bg.value})`,
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      };
+    return { background: "var(--surface-1)" };
+  })();
+
   return (
     <div
       ref={setNodeRef}
@@ -33,20 +48,16 @@ function FilmThumb({ slide, index }: { slide: Slide; index: number }) {
         opacity: isDragging ? 0.4 : 1,
         width: 80,
         height: 100,
-        borderRadius: 4,
-        background:
-          slide.bg.type === "solid" ? slide.bg.value : "var(--surface-1)",
+        borderRadius: 6,
+        ...bgStyle,
         border: isCurrent
-          ? "2px solid var(--accent, #2a3a4a)"
-          : "1px solid var(--border, rgba(0,0,0,0.1))",
+          ? "2px solid var(--accent)"
+          : "1px solid var(--glass-border)",
+        boxShadow: isCurrent ? "0 0 12px var(--accent-glow)" : "none",
         flexShrink: 0,
         position: "relative",
         cursor: "pointer",
-        display: "grid",
-        placeItems: "center",
-        fontFamily: "var(--font-mono)",
-        fontSize: 10,
-        color: "var(--text-dimmer)",
+        overflow: "hidden",
       }}
       data-slide-id={slide.id}
     >
@@ -56,12 +67,33 @@ function FilmThumb({ slide, index }: { slide: Slide; index: number }) {
           top: 4,
           left: 6,
           fontSize: 9,
-          color: "var(--text-dimmer)",
+          fontFamily: "var(--font-mono)",
+          color: "rgba(255,255,255,0.9)",
+          background: "rgba(0,0,0,0.4)",
+          padding: "1px 5px",
+          borderRadius: 3,
+          letterSpacing: "0.06em",
         }}
       >
         {String(index + 1).padStart(2, "0")}
       </span>
-      <span>{slide.layers.length} layers</span>
+      {slide.layers.length > 0 && (
+        <span
+          style={{
+            position: "absolute",
+            bottom: 4,
+            right: 6,
+            fontSize: 9,
+            fontFamily: "var(--font-mono)",
+            color: "rgba(255,255,255,0.9)",
+            background: "rgba(0,0,0,0.4)",
+            padding: "1px 5px",
+            borderRadius: 3,
+          }}
+        >
+          {slide.layers.length}L
+        </span>
+      )}
     </div>
   );
 }
