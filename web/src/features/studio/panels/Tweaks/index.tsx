@@ -1,20 +1,17 @@
 import { ThemeSection } from "./ThemeSection";
 
-/**
- * Studio v4.0 floating Tweaks overlay.
- *
- * Mounted as a fixed-position glass card in the top-right corner of the
- * viewport (mockup: autoviral design/studio-app.jsx:514-525). Contains
- * only the Theme + Accent controls in this batch — the legacy
- * LayerSection / CompositionSection / DensitySection are kept on disk
- * with @deprecated JSDoc and may be re-introduced as a per-clip
- * inspector in Phase 8.
- */
-export function TweaksPanel() {
+export function TweaksPanel({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose?: () => void;
+}) {
+  if (!open) return null;
   return (
     <aside
       data-testid="tweaks-panel"
-      aria-label="Tweaks"
+      aria-label="Settings"
       style={{
         position: "fixed",
         top: 76,
@@ -30,6 +27,34 @@ export function TweaksPanel() {
         overflow: "hidden",
       }}
     >
+      {onClose ? (
+        <button
+          type="button"
+          data-bare
+          aria-label="Close settings"
+          data-testid="tweaks-close"
+          onClick={onClose}
+          style={{
+            position: "absolute",
+            top: 8,
+            right: 8,
+            width: 22,
+            height: 22,
+            borderRadius: 6,
+            border: "none",
+            background: "transparent",
+            color: "var(--text-dim)",
+            cursor: "pointer",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 1,
+          }}
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M18 6L6 18M6 6l12 12" />
+          </svg>
+        </button>
+      ) : null}
       <ThemeSection />
     </aside>
   );

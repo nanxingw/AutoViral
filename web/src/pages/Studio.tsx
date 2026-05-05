@@ -21,6 +21,7 @@ export default function Studio() {
   const loadComp = useComposition((s) => s.loadComposition);
   const comp = useComposition((s) => s.comp);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   useShortcuts(workId ?? null);
 
@@ -108,6 +109,8 @@ export default function Studio() {
           onExport={() => {
             void exportMp4(workId);
           }}
+          onToggleSettings={() => setSettingsOpen((v) => !v)}
+          settingsOpen={settingsOpen}
         />
       </div>
       <div style={{ gridArea: "rail" }} className="glass">
@@ -126,7 +129,7 @@ export default function Studio() {
         <AssetSidebar workId={workId} />
       </div>
 
-      <TweaksPanel />
+      <TweaksPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   );
 }

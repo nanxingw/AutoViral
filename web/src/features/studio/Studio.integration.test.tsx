@@ -87,9 +87,11 @@ describe("Studio integration", () => {
     expect(tracks[0].clips).toHaveLength(1);
   });
 
-  it("Theme toggle in the floating TweaksPanel writes to the theme store (A2)", async () => {
-    const { findByTestId } = mount();
+  it("Settings toggle reveals the floating TweaksPanel and theme writes through (A2)", async () => {
+    const { findByTestId, queryByTestId } = mount();
     await findByTestId("player");
+    expect(queryByTestId("tweaks-panel")).toBeNull();
+    fireEvent.click(await findByTestId("settings-toggle"));
     const lightBtn = await findByTestId("theme-toggle-light");
     fireEvent.click(lightBtn);
     expect(useTheme.getState().theme).toBe("light");
