@@ -31,6 +31,7 @@ skills/autoviral/
 启动subagents模式时，所有subagents必须使用Opus模型驱动。
 不要随便push代码，但可以commit保证记录
 在构建和重构skill时，必须确保自己阅读过https://github.com/obra/superpowers，https://github.com/garrytan/gstack等业界权威skill，对怎么构建skill了如指掌。
+https://github.com/pandazki/pneuma-skills是你需要参考的项目地址。
 </rules>
 
 ### Aesthetic Direction
