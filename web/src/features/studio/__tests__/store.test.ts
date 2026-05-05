@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useComposition } from "../store";
 import { makeEmptyComposition } from "../types";
 import {
@@ -315,5 +315,129 @@ describe("resizeClip (Phase 4.I)", () => {
     expect(aAfter.trackOffset).toBeCloseTo(1.95);
     // remaining duration ≥ 0.05
     expect(aAfter.out - aAfter.in).toBeGreaterThanOrEqual(0.05);
+  });
+});
+
+describe("splitClip (Phase 4.G)", () => {
+  beforeEach(() => {
+    const a = makeVideoClip({ id: "a", trackOffset: 2, in: 0, out: 6 }); // duration 6 → on timeline 2..8
+    useComposition.setState({
+      comp: makeCompositionWithClips([a]),
+      selection: null,
+      dragState: null,
+      currentFrame: 0,
+      isPlaying: false,
+    });
+  });
+
+  it("splits a video clip at the playhead time", () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "new-id" as `${string}-${string}-${string}-${string}-${string}`,
+    );
+    useComposition.getState().splitClip("a", 5);
+    const clips = useComposition.getState().comp!.tracks[0].clips;
+    expect(clips.length).toBe(2);
+    const sorted = clips
+      .slice()
+      .sort((x, y) => x.trackOffset - y.trackOffset);
+    const [first, second] = sorted;
+    expect(first.id).toBe("a");
+    expect(first.trackOffset).toBeCloseTo(2);
+    expect((first as any).in).toBeCloseTo(0);
+    expect((first as any).out).toBeCloseTo(3);
+    expect(second.id).toBe("new-id");
+    expect(second.trackOffset).toBeCloseTo(5);
+    expect((second as any).in).toBeCloseTo(3);
+    expect((second as any).out).toBeCloseTo(6);
+    vi.restoreAllMocks();
+  });
+
+  it("is a no-op when atSec is outside the clip", () => {
+    useComposition.getState().splitClip("a", 0.5); // before clip
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(1);
+    useComposition.getState().splitClip("a", 9); // after clip
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(1);
+  });
+
+  it("is a no-op when atSec is exactly at the clip boundary (zero-width guard)", () => {
+    useComposition.getState().splitClip("a", 2); // start boundary
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(1);
+    useComposition.getState().splitClip("a", 8); // end boundary
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(1);
+  });
+
+  it("is a no-op when clipId is unknown", () => {
+    expect(() =>
+      useComposition.getState().splitClip("missing", 4),
+    ).not.toThrow();
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(1);
+  });
+
+  it("inherits transforms + filters identically (audit Q3)", () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "uuid-2" as `${string}-${string}-${string}-${string}-${string}`,
+    );
+    useComposition.setState((s) => {
+      const a = s.comp!.tracks[0].clips[0] as any;
+      a.transforms = { scale: 1.5, x: 5, y: 0, rotation: 0 };
+      a.filters = { brightness: 0.1, contrast: 0, saturation: 0 };
+    });
+    useComposition.getState().splitClip("a", 4);
+    const clips = useComposition.getState().comp!.tracks[0].clips as any[];
+    const sorted = clips.slice().sort((x, y) => x.trackOffset - y.trackOffset);
+    const [first, second] = sorted;
+    expect(first.transforms.scale).toBeCloseTo(1.5);
+    expect(second.transforms.scale).toBeCloseTo(1.5);
+    expect(first.transforms.x).toBeCloseTo(5);
+    expect(second.transforms.x).toBeCloseTo(5);
+    expect(first.filters.brightness).toBeCloseTo(0.1);
+    expect(second.filters.brightness).toBeCloseTo(0.1);
+    vi.restoreAllMocks();
+  });
+
+  it("splits a text clip via duration (not in/out)", () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "text-2" as `${string}-${string}-${string}-${string}-${string}`,
+    );
+    const t = makeTextClip({ id: "t", trackOffset: 1, duration: 4 });
+    useComposition.setState({
+      comp: makeCompositionWithClips([t as any]),
+      selection: null,
+      dragState: null,
+    });
+    useComposition.getState().splitClip("t", 3);
+    const clips = useComposition.getState().comp!.tracks[0].clips as any[];
+    const sorted = clips.slice().sort((x, y) => x.trackOffset - y.trackOffset);
+    expect(sorted[0].id).toBe("t");
+    expect(sorted[0].trackOffset).toBeCloseTo(1);
+    expect(sorted[0].duration).toBeCloseTo(2);
+    expect(sorted[1].id).toBe("text-2");
+    expect(sorted[1].trackOffset).toBeCloseTo(3);
+    expect(sorted[1].duration).toBeCloseTo(2);
+    vi.restoreAllMocks();
+  });
+
+  it("recomputes comp.duration after split", () => {
+    useComposition.getState().splitClip("a", 5);
+    // No change to total end (still 8) but pipeline must run
+    expect(useComposition.getState().comp!.duration).toBeCloseTo(8);
+  });
+});
+
+describe("bladeMode flag (Phase 4.G)", () => {
+  it("defaults to false", () => {
+    useComposition.setState({
+      comp: makeCompositionWithClips([
+        makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 2 }),
+      ]),
+    });
+    expect(useComposition.getState().bladeMode).toBe(false);
+  });
+
+  it("setBladeMode toggles on and off", () => {
+    useComposition.getState().setBladeMode(true);
+    expect(useComposition.getState().bladeMode).toBe(true);
+    useComposition.getState().setBladeMode(false);
+    expect(useComposition.getState().bladeMode).toBe(false);
   });
 });

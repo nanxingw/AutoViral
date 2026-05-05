@@ -53,6 +53,15 @@ interface CompState {
   // and enforces minDuration 0.05s on both edges. Branches on clip kind:
   // video/audio mutate `in`/`out`; text/overlay mutate `duration`.
   resizeClip: (clipId: string, edge: "left" | "right", newTime: number) => void;
+  // Phase 4.G — click-to-split tool (BladeTool). `bladeMode` toggles the
+  // overlay; `splitClip` splits the clip whose time-range contains
+  // `atSec` into two halves at `atSec`. D7: new id from
+  // `crypto.randomUUID()`. D4: split-on-gap (or out-of-clip) is a silent
+  // no-op. Audit Q3: both children inherit transforms/filters/style/
+  // position/volume/fadeIn/fadeOut identically.
+  bladeMode: boolean;
+  setBladeMode: (on: boolean) => void;
+  splitClip: (clipId: string, atSec: number) => void;
   setSelection: (id: string | null) => void;
   setFrame: (f: number) => void;
   setPlaying: (p: boolean) => void;
@@ -78,6 +87,7 @@ export const useComposition = create<CompState>()(
     isPlaying: false,
     beats: [],
     dragState: null,
+    bladeMode: false,
     loadComposition: (c) =>
       set((s) => {
         s.comp = c;
@@ -226,6 +236,66 @@ export const useComposition = create<CompState>()(
               c.duration -= delta;
               c.trackOffset = clamped;
             }
+          }
+          s.comp.duration = Math.max(
+            0,
+            ...s.comp.tracks.flatMap((t) =>
+              (t.clips as Clip[]).map(clipEnd),
+            ),
+          );
+          return;
+        }
+      }),
+    // ─── Phase 4.G — BladeTool (click-to-split) ──────────────────────────
+    // Pneuma reference: master plan §4.2.G + `useSplitHoverSnap.ts`. We
+    // diverge from pneuma's CompositionCommand pipeline (it dispatches a
+    // SPLIT command); here we mutate state directly. Math: at timeline-
+    // time `t` where `clip.trackOffset ≤ t < clip.trackOffset +
+    // clipDuration(clip)`, child A keeps the original id and shrinks to
+    // `[trackOffset, t)`; child B gets `crypto.randomUUID()` (D7) and
+    // covers `[t, end)`. Boundary equality (`t === start` or `t === end`)
+    // is a silent no-op — would otherwise produce a zero-width child.
+    setBladeMode: (on) =>
+      set((s) => {
+        s.bladeMode = on;
+      }),
+    splitClip: (clipId, atSec) =>
+      set((s) => {
+        if (!s.comp) return;
+        for (const track of s.comp.tracks) {
+          const clips = track.clips as Clip[];
+          const idx = clips.findIndex((c) => c.id === clipId);
+          if (idx < 0) continue;
+          const orig = clips[idx];
+          const start = orig.trackOffset;
+          const dur = clipDuration(orig);
+          const end = start + dur;
+          // D4 — split-on-gap (out-of-clip) is a silent no-op. Boundary
+          // equality (within OFFSET_EPSILON) also no-ops to prevent
+          // zero-width children.
+          if (atSec <= start + OFFSET_EPSILON) return;
+          if (atSec >= end - OFFSET_EPSILON) return;
+          const offsetIntoClip = atSec - start;
+          const newId = crypto.randomUUID();
+          if (orig.kind === "video" || orig.kind === "audio") {
+            const childA = { ...orig, out: orig.in + offsetIntoClip };
+            const childB = {
+              ...orig,
+              id: newId,
+              in: orig.in + offsetIntoClip,
+              trackOffset: atSec,
+            };
+            (track.clips as Clip[]).splice(idx, 1, childA, childB);
+          } else {
+            // text / overlay — duration-based
+            const childA = { ...orig, duration: offsetIntoClip };
+            const childB = {
+              ...orig,
+              id: newId,
+              trackOffset: atSec,
+              duration: dur - offsetIntoClip,
+            };
+            (track.clips as Clip[]).splice(idx, 1, childA, childB);
           }
           s.comp.duration = Math.max(
             0,

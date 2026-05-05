@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useComposition } from "../../store";
 import { Track } from "./Track";
+import { BladeTool } from "./BladeTool";
 
 const TRACK_COLORS: Record<string, string> = {
   video: "var(--accent)",
@@ -107,6 +108,13 @@ export function Timeline() {
               label={TRACK_LABELS[t.kind] ?? t.kind.toUpperCase()}
             />
           ))}
+          {/* Phase 4.G — click-to-split overlay; renders only while
+              bladeMode is on. 4.J wires `B` / `Cmd+B` to toggle. */}
+          <BladeTool
+            pxPerSecond={pxPerSecond}
+            totalWidth={totalWidth}
+            labelColumnWidth={110}
+          />
         </div>
       </div>
     </div>
