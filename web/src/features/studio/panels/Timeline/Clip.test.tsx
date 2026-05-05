@@ -21,6 +21,8 @@ beforeEach(() => {
     selection: null,
     currentFrame: 0,
     isPlaying: false,
+    beats: [],
+    dragState: null,
   });
 });
 
@@ -34,7 +36,7 @@ describe("Clip", () => {
     expect(el.style.left).toBe("50px");
   });
 
-  it("clicking selects", () => {
+  it("clicking begins a drag and selects the clip", () => {
     const { container } = render(
       <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
     );
@@ -43,5 +45,27 @@ describe("Clip", () => {
       pointerId: 1,
     });
     expect(useComposition.getState().selection).toBe("v1");
+    const ds = useComposition.getState().dragState;
+    expect(ds?.clipId).toBe("v1");
+    expect(ds?.originalStart).toBeCloseTo(1);
+    expect(ds?.preview.get("v1")).toBeCloseTo(1);
+  });
+
+  it("dragState preview overrides clip.trackOffset for the rendered left edge", () => {
+    useComposition.setState((s) => ({
+      ...s,
+      dragState: {
+        clipId: "v1",
+        originalStart: 1,
+        candidateStart: 3,
+        preview: new Map([["v1", 3]]),
+        snapTime: null,
+      },
+    }));
+    const { container } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    const el = container.firstChild as HTMLElement;
+    expect(el.style.left).toBe("150px");
   });
 });

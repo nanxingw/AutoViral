@@ -1,5 +1,4 @@
 import { useComposition } from "../../store";
-import { snapToBeat } from "./snapToBeat";
 import clsx from "clsx";
 
 function hueFromString(s: string): number {
@@ -24,11 +23,20 @@ export function Clip({
   );
   const selection = useComposition((s) => s.selection);
   const setSelection = useComposition((s) => s.setSelection);
-  const updateClip = useComposition((s) => s.updateClip);
+  const dragState = useComposition((s) => s.dragState);
+  const beginDrag = useComposition((s) => s.beginDrag);
+  const updateDragCandidate = useComposition((s) => s.updateDragCandidate);
+  const commitDrag = useComposition((s) => s.commitDrag);
+  const cancelDrag = useComposition((s) => s.cancelDrag);
   if (!clip) return null;
 
   const dur = "duration" in clip ? clip.duration : clip.out - clip.in;
-  const left = clip.trackOffset * pxPerSecond;
+  // Phase 4.B — render the dragState preview position when the clip is
+  // mid-drag (or being cascaded by another clip's drag). Falls back to the
+  // committed trackOffset otherwise.
+  const previewStart = dragState?.preview.get(clipId);
+  const renderedOffset = previewStart ?? clip.trackOffset;
+  const left = renderedOffset * pxPerSecond;
   const width = dur * pxPerSecond;
   const isSelected = selection === clipId;
   const isLight =
@@ -38,22 +46,38 @@ export function Clip({
   const onPointerDown = (e: React.PointerEvent) => {
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     setSelection(clipId);
+    beginDrag(clipId);
     const startX = e.clientX;
     const startOffset = clip.trackOffset;
     const move = (ev: PointerEvent) => {
       const delta = (ev.clientX - startX) / pxPerSecond;
       const raw = Math.max(0, startOffset + delta);
-      const grid = Math.round(raw * 10) / 10;
-      const beats = useComposition.getState().beats;
-      const snapped = snapToBeat(grid, beats, 0.06);
-      updateClip(clipId, { trackOffset: snapped });
+      updateDragCandidate(raw);
     };
-    const up = () => {
+    const cleanup = () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("keydown", esc);
+    };
+    const up = () => {
+      cleanup();
+      commitDrag();
+    };
+    const cancel = () => {
+      cleanup();
+      cancelDrag();
+    };
+    const esc = (kev: KeyboardEvent) => {
+      if (kev.key === "Escape") {
+        cleanup();
+        cancelDrag();
+      }
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("keydown", esc);
   };
 
   const label =

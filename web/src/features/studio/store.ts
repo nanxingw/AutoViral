@@ -1,9 +1,29 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
+import { enableMapSet } from "immer";
 import type { Composition, Clip, AssetEntry, ProvenanceEdge } from "./types";
 import { clipDuration, clipEnd } from "./panels/Timeline/clipMath";
+import {
+  computeRipplePreview,
+  snapDraggedStartFull,
+} from "./panels/Timeline/dragEngine";
+
+// Phase 4.B — `dragState.preview` is a Map; immer needs the MapSet plugin
+// enabled at module load to draft map mutations under produce().
+enableMapSet();
 
 export { clipDuration, clipEnd };
+
+// Phase 4.B — drag-preview state. `preview` is keyed by clipId; values are
+// candidate trackOffset (= start) seconds. `snapTime` surfaces the world-time
+// of the active snap line so D10 (Playhead overlay) can render it.
+export interface DragState {
+  clipId: string;
+  originalStart: number;
+  candidateStart: number;
+  preview: Map<string, number>;
+  snapTime: number | null;
+}
 
 interface CompState {
   comp: Composition | null;
@@ -11,6 +31,7 @@ interface CompState {
   currentFrame: number;
   isPlaying: boolean;
   beats: number[];
+  dragState: DragState | null;
   loadComposition: (c: Composition | null) => void;
   addClip: (trackId: string, clip: Clip) => void;
   updateClip: (clipId: string, patch: Partial<Clip>) => void;
@@ -25,6 +46,11 @@ interface CompState {
   addAsset: (asset: AssetEntry) => void;
   addProvenance: (edge: ProvenanceEdge) => void;
   removeAsset: (assetId: string) => void;
+  // Phase 4.B — drag-preview actions (begin → update → commit/cancel)
+  beginDrag: (clipId: string) => void;
+  updateDragCandidate: (candidateStart: number) => void;
+  commitDrag: () => void;
+  cancelDrag: () => void;
 }
 
 export const useComposition = create<CompState>()(
@@ -34,6 +60,7 @@ export const useComposition = create<CompState>()(
     currentFrame: 0,
     isPlaying: false,
     beats: [],
+    dragState: null,
     loadComposition: (c) =>
       set((s) => {
         s.comp = c;
@@ -144,6 +171,77 @@ export const useComposition = create<CompState>()(
         s.comp.provenance = s.comp.provenance.filter(
           (e) => e.toAssetId !== assetId,
         );
+      }),
+    // ─── Phase 4.B — drag-preview pipeline ────────────────────────────────
+    // Pneuma's dragState lives in the React store (not React component
+    // state) so the Playhead overlay can read `snapTime` for its full-height
+    // snap line (D10) and Track/Filmstrip can render ghost positions.
+    beginDrag: (clipId) =>
+      set((s) => {
+        if (!s.comp) return;
+        const all = s.comp.tracks.flatMap((t) => t.clips as Clip[]);
+        const clip = all.find((c) => c.id === clipId);
+        if (!clip) return;
+        s.dragState = {
+          clipId,
+          originalStart: clip.trackOffset,
+          candidateStart: clip.trackOffset,
+          preview: new Map([[clipId, clip.trackOffset]]),
+          snapTime: null,
+        };
+      }),
+    updateDragCandidate: (candidateStart) =>
+      set((s) => {
+        if (!s.comp || !s.dragState) return;
+        const draggedId = s.dragState.clipId;
+        // Ripple stays within the dragged clip's own track — cross-track
+        // clips are visible via collectSnapPoints (for snap lines) but never
+        // get pushed by the cascade.
+        const track = s.comp.tracks.find((t) =>
+          (t.clips as Clip[]).some((c) => c.id === draggedId),
+        );
+        if (!track) return;
+        const dragged = (track.clips as Clip[]).find((c) => c.id === draggedId);
+        if (!dragged) return;
+        const draggedDur = clipDuration(dragged);
+        const fps = s.comp.fps || 30;
+        const playhead = s.currentFrame / fps;
+        const snap = snapDraggedStartFull(
+          s.comp,
+          draggedId,
+          draggedDur,
+          candidateStart,
+          playhead,
+          0.06,
+        );
+        const preview = computeRipplePreview(
+          track.clips as Clip[],
+          draggedId,
+          snap.start,
+        );
+        s.dragState.candidateStart = candidateStart;
+        s.dragState.preview = preview;
+        s.dragState.snapTime = snap.snapTime;
+      }),
+    commitDrag: () =>
+      set((s) => {
+        if (!s.comp || !s.dragState) return;
+        const preview = s.dragState.preview;
+        for (const t of s.comp.tracks) {
+          for (const c of t.clips as Clip[]) {
+            const newStart = preview.get(c.id);
+            if (newStart !== undefined) c.trackOffset = newStart;
+          }
+        }
+        s.comp.duration = Math.max(
+          0,
+          ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
+        );
+        s.dragState = null;
+      }),
+    cancelDrag: () =>
+      set((s) => {
+        s.dragState = null;
       }),
   })),
 );
