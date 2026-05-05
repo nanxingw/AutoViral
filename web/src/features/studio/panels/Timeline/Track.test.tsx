@@ -147,4 +147,56 @@ describe("Track (dnd-kit)", () => {
     const strips = container.querySelectorAll('[aria-label="filmstrip"]');
     expect(strips.length).toBe(0);
   });
+
+  // Phase 4.E — waveform overlay mounting (mirrors filmstrip gating).
+  it("mounts a WaveformBars overlay for each audio clip on an audio track", () => {
+    const comp = useComposition.getState().comp!;
+    const { container } = render(
+      <Track
+        track={comp.tracks[1]}
+        pxPerSecond={50}
+        totalWidth={400}
+        color="var(--accent)"
+        label="BGM"
+      />,
+    );
+    const overlays = container.querySelectorAll(
+      '[aria-label="waveform-loading"], [aria-label="waveform"]',
+    );
+    expect(overlays.length).toBe(1);
+  });
+
+  it("does not mount WaveformBars for video tracks", () => {
+    const comp = useComposition.getState().comp!;
+    const { container } = render(
+      <Track
+        track={comp.tracks[0]}
+        pxPerSecond={50}
+        totalWidth={400}
+        color="var(--accent)"
+        label="Video"
+      />,
+    );
+    const overlays = container.querySelectorAll(
+      '[aria-label="waveform-loading"], [aria-label="waveform"]',
+    );
+    expect(overlays.length).toBe(0);
+  });
+
+  it("does not mount WaveformBars for text tracks", () => {
+    const comp = useComposition.getState().comp!;
+    const { container } = render(
+      <Track
+        track={comp.tracks[2]}
+        pxPerSecond={50}
+        totalWidth={400}
+        color="var(--accent)"
+        label="Subtitles"
+      />,
+    );
+    const overlays = container.querySelectorAll(
+      '[aria-label="waveform-loading"], [aria-label="waveform"]',
+    );
+    expect(overlays.length).toBe(0);
+  });
 });

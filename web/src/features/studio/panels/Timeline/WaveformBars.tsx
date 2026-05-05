@@ -1,0 +1,95 @@
+// Phase 4.E — WaveformBars.
+//
+// Pneuma upstream:
+// .cache/pneuma-clipcraft/modes/clipcraft/viewer/timeline/WaveformBars.tsx
+// (35 lines). Pneuma's component is purely presentational: takes
+// `peaks: number[]`, `height`, `color` and renders a flex row of `<div>`
+// bars. We adapt for this codebase's mounting site (under an audio clip
+// inside Track.tsx) by:
+//
+//   - Wrapping the pneuma presentational shell with a small subscriber
+//     that calls useWaveform(clip.src) — pneuma calls the hook in the
+//     parent. Doing it here keeps Track.tsx small and matches how 4.D's
+//     Filmstrip is structured.
+//   - Rendering as a fixed-width SVG instead of pneuma's flex `<div>`s
+//     when peaks are loaded. SVG keeps the bar widths uniform across
+//     zoom changes without re-flow flicker on Track resize.
+//   - Loading placeholder uses --accent-glow gradient to match the
+//     codebase's editorial-cool palette.
+import { useWaveform } from "../../hooks/useWaveform";
+import type { AudioClip } from "../../types";
+
+interface Props {
+  clip: AudioClip;
+  pxPerSecond: number;
+  height: number;
+}
+
+export function WaveformBars({ clip, pxPerSecond, height }: Props) {
+  const { peaks } = useWaveform(clip.src);
+  const dur = Math.max(0, clip.out - clip.in);
+  const width = dur * pxPerSecond;
+
+  if (!peaks || width <= 0) {
+    return (
+      <div
+        aria-label="waveform-loading"
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          width: Math.max(0, width),
+          height,
+          background:
+            "linear-gradient(90deg, rgba(168,197,214,0.10), rgba(168,197,214,0.04))",
+          borderRadius: 4,
+        }}
+      />
+    );
+  }
+
+  // The hook returns 128 peaks across the entire decoded audio. Slice
+  // the window corresponding to [clip.in, clip.out] so trimmed clips
+  // render their actual visible region.
+  const totalDur = clip.in + dur;
+  const startFrac = totalDur > 0 ? clip.in / totalDur : 0;
+  const startIdx = Math.min(peaks.length - 1, Math.floor(startFrac * peaks.length));
+  const endFrac = totalDur > 0 ? (clip.in + dur) / totalDur : 1;
+  const endIdx = Math.max(
+    startIdx + 1,
+    Math.min(peaks.length, Math.ceil(endFrac * peaks.length)),
+  );
+  const visible = peaks.slice(startIdx, endIdx);
+  const barCount = Math.max(1, visible.length);
+
+  return (
+    <svg
+      aria-label="waveform"
+      width={width}
+      height={height}
+      viewBox={`0 0 ${barCount} 100`}
+      preserveAspectRatio="none"
+      style={{
+        position: "absolute",
+        left: 0,
+        top: 0,
+        pointerEvents: "none",
+        opacity: 0.55,
+      }}
+    >
+      {Array.from(visible).map((p, i) => {
+        const h = Math.max(2, p * 100);
+        return (
+          <rect
+            key={i}
+            x={i}
+            y={(100 - h) / 2}
+            width={1}
+            height={h}
+            fill="var(--accent, #a8c5d6)"
+          />
+        );
+      })}
+    </svg>
+  );
+}

@@ -1,5 +1,6 @@
 import { Clip } from "./Clip";
 import { Filmstrip } from "./Filmstrip";
+import { WaveformBars } from "./WaveformBars";
 import type { Track as TrackType } from "../../types";
 
 interface Props {
@@ -100,6 +101,29 @@ export function Track({ track, pxPerSecond, totalWidth, color, label }: Props) {
                 }}
               >
                 <Filmstrip
+                  clip={c}
+                  pxPerSecond={pxPerSecond}
+                  height={height - 8}
+                />
+              </div>
+            ) : null,
+          )}
+        {/* Phase 4.E — waveform overlays beneath audio clips. Same
+            mounting pattern as the filmstrip overlay above. */}
+        {track.kind === "audio" &&
+          track.clips.map((c) =>
+            c.kind === "audio" ? (
+              <div
+                key={`wf-${c.id}`}
+                style={{
+                  position: "absolute",
+                  left: c.trackOffset * pxPerSecond,
+                  top: 4,
+                  height: height - 8,
+                  pointerEvents: "none",
+                }}
+              >
+                <WaveformBars
                   clip={c}
                   pxPerSecond={pxPerSecond}
                   height={height - 8}
