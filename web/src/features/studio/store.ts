@@ -1,6 +1,9 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { Composition, Clip, AssetEntry, ProvenanceEdge } from "./types";
+import { clipDuration, clipEnd } from "./panels/Timeline/clipMath";
+
+export { clipDuration, clipEnd };
 
 interface CompState {
   comp: Composition | null;
@@ -22,12 +25,6 @@ interface CompState {
   addAsset: (asset: AssetEntry) => void;
   addProvenance: (edge: ProvenanceEdge) => void;
   removeAsset: (assetId: string) => void;
-}
-
-function clipEnd(c: Clip): number {
-  if (c.kind === "video" || c.kind === "audio")
-    return c.trackOffset + (c.out - c.in);
-  return c.trackOffset + c.duration;
 }
 
 export const useComposition = create<CompState>()(
@@ -86,9 +83,7 @@ export const useComposition = create<CompState>()(
         let cursor = 0;
         for (const c of clips) {
           c.trackOffset = cursor;
-          cursor += c.kind === "video" || c.kind === "audio"
-            ? (c.out - c.in)
-            : c.duration;
+          cursor += clipDuration(c);
         }
         s.comp.duration = Math.max(
           0,
