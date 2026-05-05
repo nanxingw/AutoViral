@@ -1,4 +1,5 @@
 import { Clip } from "./Clip";
+import { Filmstrip } from "./Filmstrip";
 import type { Track as TrackType } from "../../types";
 
 interface Props {
@@ -83,6 +84,29 @@ export function Track({ track, pxPerSecond, totalWidth, color, label }: Props) {
           height,
         }}
       >
+        {/* Phase 4.D — filmstrip overlays render BENEATH the clip overlay
+            (rendered first so the Clip header/handles z-index above them). */}
+        {track.kind === "video" &&
+          track.clips.map((c) =>
+            c.kind === "video" ? (
+              <div
+                key={`fs-${c.id}`}
+                style={{
+                  position: "absolute",
+                  left: c.trackOffset * pxPerSecond,
+                  top: 4,
+                  height: height - 8,
+                  pointerEvents: "none",
+                }}
+              >
+                <Filmstrip
+                  clip={c}
+                  pxPerSecond={pxPerSecond}
+                  height={height - 8}
+                />
+              </div>
+            ) : null,
+          )}
         {track.clips.map((c) => (
           <Clip
             key={c.id}
