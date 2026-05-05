@@ -22,6 +22,12 @@
 //   only commits a single trim command on mouseup; we mutate live, so
 //   Escape needs an explicit revert (pneuma lines 217-237 emit the
 //   commit; AutoViral inverts to a per-move dispatch + revert).
+// - Pneuma additionally clamps right-edge outPoint to `assetDuration`
+//   (pneuma:148,188). AutoViral's Clip schema has no source-duration
+//   field today, so this upper bound is silently dropped — the only
+//   cap on the right edge is the next clip's start (D2). TODO: once
+//   Clip carries `assetDuration` (asset metadata schema work), add
+//   `Math.min(cap, assetDuration)` inside resizeClip.
 //
 // The hook is pointer-event source-agnostic: it exposes
 // `beginResize / dragResize / endResize / cancelResize` as imperative
