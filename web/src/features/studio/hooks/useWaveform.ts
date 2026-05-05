@@ -8,14 +8,18 @@
 // USER DECISION 3A — Pneuma fidelity with explicit local divergence (D9):
 //   - Bucket count is a fixed 128 (D9), not a per-call `bars` option as in
 //     pneuma. We render uniformly across all clips in this codebase.
-//   - Cache is module-scoped `Map<string, Promise<Float32Array>>` keyed on
-//     `src` only, so concurrent hooks for the same audio share the
-//     in-flight decode (D9 promise dedupe). Pneuma uses a useRef map keyed
-//     on `${url}:${bars}` and would re-fetch on remount; module scope is
-//     the correct level for cache lifetime in this React tree.
-//   - Returned shape is `{ peaks: number[] | null; loading: boolean }`
-//     (drops `duration` field — clip duration is already known from
-//     AudioClip.in/out at the call site).
+//   - Cache is module-scoped, keyed on `src` only, so concurrent hooks for
+//     the same audio share the in-flight decode (D9 promise dedupe).
+//     Pneuma uses a useRef map keyed on `${url}:${bars}` and would re-fetch
+//     on remount; module scope is the correct level for cache lifetime in
+//     this React tree.
+//   - Returned shape is `{ peaks: Float32Array | null; loading: boolean;
+//     sourceDuration: number | null }`. Pneuma returns
+//     `{ waveform: { peaks; duration } | null; loading }` — we keep the
+//     fields flat at the top level. `sourceDuration` is the decoded
+//     AudioBuffer.duration (the SOURCE audio's full length, not the
+//     trimmed clip duration); WaveformBars needs it to slice peaks by
+//     source-relative position when clip.in > 0.
 //   - Normalization preserved from pneuma upstream lines 75-77 (divide by
 //     globalMax with 0.001 floor) — keeps quiet clips visible without
 //     blowing up an all-zero stub.
@@ -23,9 +27,14 @@ import { useEffect, useState } from "react";
 
 const BUCKETS = 128;
 
-const cache = new Map<string, Promise<Float32Array>>();
+interface DecodedWaveform {
+  peaks: Float32Array;
+  durationSec: number;
+}
 
-async function decodeAndBucket(src: string): Promise<Float32Array> {
+const cache = new Map<string, Promise<DecodedWaveform>>();
+
+async function decodeAndBucket(src: string): Promise<DecodedWaveform> {
   const cached = cache.get(src);
   if (cached) return cached;
   const promise = (async () => {
@@ -56,7 +65,7 @@ async function decodeAndBucket(src: string): Promise<Float32Array> {
       for (let i = 0; i < peaks.length; i++) {
         peaks[i] = Math.min(1, peaks[i] / globalMax);
       }
-      return peaks;
+      return { peaks, durationSec: audio.duration };
     } finally {
       ctx.close?.();
     }
@@ -66,30 +75,41 @@ async function decodeAndBucket(src: string): Promise<Float32Array> {
   return promise;
 }
 
-export function useWaveform(src: string): {
+export interface UseWaveformResult {
   peaks: Float32Array | null;
   loading: boolean;
-} {
+  /** Duration of the SOURCE audio (decoded AudioBuffer.duration), in seconds.
+   *  Null while loading or on failure. Callers slicing peaks for a trimmed
+   *  clip must compute indices as `clip.in / sourceDuration` and
+   *  `clip.out / sourceDuration` — the peaks array spans the full source. */
+  sourceDuration: number | null;
+}
+
+export function useWaveform(src: string): UseWaveformResult {
   const [peaks, setPeaks] = useState<Float32Array | null>(null);
+  const [sourceDuration, setSourceDuration] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (!src) {
       setPeaks(null);
+      setSourceDuration(null);
       setLoading(false);
       return;
     }
     let alive = true;
     setLoading(true);
     decodeAndBucket(src)
-      .then((p) => {
+      .then(({ peaks: p, durationSec }) => {
         if (!alive) return;
         setPeaks(p);
+        setSourceDuration(durationSec);
         setLoading(false);
       })
       .catch(() => {
         if (!alive) return;
         setPeaks(null);
+        setSourceDuration(null);
         setLoading(false);
       });
     return () => {
@@ -97,7 +117,7 @@ export function useWaveform(src: string): {
     };
   }, [src]);
 
-  return { peaks, loading };
+  return { peaks, loading, sourceDuration };
 }
 
 /** Test-only escape hatch for the module-scoped decode cache. */

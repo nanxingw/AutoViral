@@ -26,11 +26,16 @@ interface Props {
 }
 
 export function WaveformBars({ clip, pxPerSecond, height }: Props) {
-  const { peaks } = useWaveform(clip.src);
+  const { peaks, sourceDuration } = useWaveform(clip.src);
   const dur = Math.max(0, clip.out - clip.in);
   const width = dur * pxPerSecond;
 
-  if (!peaks || width <= 0) {
+  if (
+    !peaks ||
+    sourceDuration == null ||
+    sourceDuration <= 0 ||
+    width <= 0
+  ) {
     return (
       <div
         aria-label="waveform-loading"
@@ -48,18 +53,19 @@ export function WaveformBars({ clip, pxPerSecond, height }: Props) {
     );
   }
 
-  // The hook returns 128 peaks across the entire decoded audio. Slice
-  // the window corresponding to [clip.in, clip.out] so trimmed clips
-  // render their actual visible region.
-  const totalDur = clip.in + dur;
-  const startFrac = totalDur > 0 ? clip.in / totalDur : 0;
-  const startIdx = Math.min(peaks.length - 1, Math.floor(startFrac * peaks.length));
-  const endFrac = totalDur > 0 ? (clip.in + dur) / totalDur : 1;
-  const endIdx = Math.max(
-    startIdx + 1,
-    Math.min(peaks.length, Math.ceil(endFrac * peaks.length)),
+  // The hook returns 128 peaks spanning the entire decoded source audio.
+  // Slice the window corresponding to [clip.in, clip.out] using the
+  // source's true duration (NOT clip.in + dur, which collapses to
+  // clip.out and yields a wrong region for any clip with in > 0).
+  const startIdx = Math.max(
+    0,
+    Math.floor((clip.in / sourceDuration) * peaks.length),
   );
-  const visible = peaks.slice(startIdx, endIdx);
+  const endIdx = Math.min(
+    peaks.length,
+    Math.ceil((clip.out / sourceDuration) * peaks.length),
+  );
+  const visible = peaks.slice(startIdx, Math.max(startIdx + 1, endIdx));
   const barCount = Math.max(1, visible.length);
 
   return (

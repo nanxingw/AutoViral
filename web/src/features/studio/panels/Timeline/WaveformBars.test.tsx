@@ -105,6 +105,26 @@ describe("WaveformBars", () => {
     expect(svg.getAttribute("width")).toBe("160");
   });
 
+  it("slices peaks by source-relative window for trimmed (in > 0) clips", async () => {
+    // Regression test for the latent bug in the prior implementation,
+    // which used `totalDur = clip.in + dur` as if it were the source's
+    // duration. With dom-mocks AudioContext returning a 1s source and a
+    // clip {in: 0.4, out: 0.8}, the correct slice is
+    //   peaks[floor(0.4/1 * 128) .. ceil(0.8/1 * 128)] = peaks[51..103]
+    // i.e. 52 bars. The buggy math returned peaks[51..128] = 77 bars,
+    // since totalDur collapsed to clip.out.
+    const trimmed: AudioClip = { ...audioClip, in: 0.4, out: 0.8 };
+    const { container } = render(
+      <WaveformBars clip={trimmed} pxPerSecond={50} height={48} />,
+    );
+    await waitFor(() =>
+      expect(container.querySelector('[aria-label="waveform"]')).not.toBeNull(),
+    );
+    const svg = container.querySelector('[aria-label="waveform"]') as SVGElement;
+    const rects = svg.querySelectorAll("rect");
+    expect(rects.length).toBe(52);
+  });
+
   it("returns the loading placeholder for a zero-duration clip", () => {
     const zero: AudioClip = { ...audioClip, in: 2, out: 2 };
     const { container } = render(

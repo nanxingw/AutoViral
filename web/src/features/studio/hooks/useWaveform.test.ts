@@ -118,6 +118,16 @@ describe("useWaveform", () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it("exposes sourceDuration matching the decoded AudioBuffer.duration", async () => {
+    const { result } = renderHook(() => useWaveform("/dur.mp3"));
+    expect(result.current.sourceDuration).toBeNull();
+    await waitFor(() => expect(result.current.peaks).not.toBeNull());
+    // dom-mocks installs an AudioContext mock whose decodeAudioData returns
+    // a 1-second AudioBuffer (48000 samples at 48kHz). Hook must surface
+    // that through the new sourceDuration field.
+    expect(result.current.sourceDuration).toBe(1);
+  });
+
   it("does not setState after unmount (alive guard)", async () => {
     let resolveDecode: ((v: unknown) => void) | null = null;
     const pending = new Promise((resolve) => {
