@@ -2,7 +2,12 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { enableMapSet } from "immer";
 import type { Composition, Clip, AssetEntry, ProvenanceEdge } from "./types";
-import { clipDuration, clipEnd } from "./panels/Timeline/clipMath";
+import {
+  clipDuration,
+  clipEnd,
+  MIN_CLIP_DUR,
+  OFFSET_EPSILON,
+} from "./panels/Timeline/clipMath";
 import {
   computeRipplePreview,
   snapDraggedStartFull,
@@ -181,7 +186,6 @@ export const useComposition = create<CompState>()(
     resizeClip: (clipId, edge, newTime) =>
       set((s) => {
         if (!s.comp) return;
-        const MIN_DUR = 0.05;
         for (const track of s.comp.tracks) {
           const clips = track.clips as Clip[];
           const idx = clips.findIndex((c) => c.id === clipId);
@@ -196,13 +200,13 @@ export const useComposition = create<CompState>()(
             // have no neighbour → cap = +∞.
             const next = clips
               .filter(
-                (x) => x.id !== clipId && x.trackOffset > start + 1e-6,
+                (x) => x.id !== clipId && x.trackOffset > start + OFFSET_EPSILON,
               )
               .sort((x, y) => x.trackOffset - y.trackOffset)[0];
             const cap = next ? next.trackOffset : Infinity;
             const clamped = Math.min(
               cap,
-              Math.max(start + MIN_DUR, newTime),
+              Math.max(start + MIN_CLIP_DUR, newTime),
             );
             if (c.kind === "video" || c.kind === "audio") {
               c.out = c.in + (clamped - start);
@@ -211,8 +215,8 @@ export const useComposition = create<CompState>()(
               c.duration = clamped - start;
             }
           } else {
-            // Left edge: clamp to [0, end - MIN_DUR].
-            const clamped = Math.min(end - MIN_DUR, Math.max(0, newTime));
+            // Left edge: clamp to [0, end - MIN_CLIP_DUR].
+            const clamped = Math.min(end - MIN_CLIP_DUR, Math.max(0, newTime));
             const delta = clamped - start;
             if (c.kind === "video" || c.kind === "audio") {
               // pneuma: left edge increments inPoint, anchors right edge.

@@ -68,4 +68,69 @@ describe("Clip", () => {
     const el = container.firstChild as HTMLElement;
     expect(el.style.left).toBe("150px");
   });
+
+  it("renders left + right resize handles", () => {
+    const { getByTestId } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    expect(getByTestId("resize-left")).toBeInTheDocument();
+    expect(getByTestId("resize-right")).toBeInTheDocument();
+  });
+
+  it("pointerdown on the right handle does NOT begin a body-drag (4.B regression)", () => {
+    const { getByTestId } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    fireEvent.pointerDown(getByTestId("resize-right"), {
+      clientX: 0,
+      pointerId: 7,
+    });
+    // body-drag would set dragState; resize doesn't touch dragState.
+    expect(useComposition.getState().dragState).toBeNull();
+  });
+
+  it("right handle pointermove dispatches resizeClip (out grows)", () => {
+    const { getByTestId } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    fireEvent.pointerDown(getByTestId("resize-right"), {
+      clientX: 0,
+      pointerId: 7,
+    });
+    // anchor = trackOffset(1) + dur(4) = 5; +50px → +1s → newTime = 6 → out = 0 + (6-1) = 5
+    fireEvent(
+      window,
+      new PointerEvent("pointermove", { clientX: 50 }),
+    );
+    fireEvent(window, new PointerEvent("pointerup"));
+    const v = useComposition.getState().comp!.tracks[0].clips.find(
+      (c) => c.id === "v1",
+    )! as { out: number };
+    expect(v.out).toBeCloseTo(5);
+  });
+
+  it("Escape during a resize drag reverts the clip", () => {
+    const { getByTestId } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    fireEvent.pointerDown(getByTestId("resize-right"), {
+      clientX: 0,
+      pointerId: 7,
+    });
+    fireEvent(
+      window,
+      new PointerEvent("pointermove", { clientX: 50 }),
+    );
+    // mid-drag: out should be 5 (4 + 1)
+    const mid = useComposition.getState().comp!.tracks[0].clips.find(
+      (c) => c.id === "v1",
+    )! as { out: number };
+    expect(mid.out).toBeCloseTo(5);
+    fireEvent.keyDown(window, { key: "Escape" });
+    const after = useComposition.getState().comp!.tracks[0].clips.find(
+      (c) => c.id === "v1",
+    )! as { out: number };
+    // anchorTime = 1 + 4 = 5 → out reverts to 0 + (5 - 1) = 4
+    expect(after.out).toBeCloseTo(4);
+  });
 });

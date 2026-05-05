@@ -1,4 +1,5 @@
 import { useComposition } from "../../store";
+import { useClipResize } from "./hooks/useClipResize";
 import clsx from "clsx";
 
 function hueFromString(s: string): number {
@@ -28,6 +29,10 @@ export function Clip({
   const updateDragCandidate = useComposition((s) => s.updateDragCandidate);
   const commitDrag = useComposition((s) => s.commitDrag);
   const cancelDrag = useComposition((s) => s.cancelDrag);
+  // Phase 4.F — edge-drag resize hook. The hook is pointer-source agnostic;
+  // we wire window-level pointermove/up/cancel/keydown listeners below so
+  // resize works even when the cursor leaves the handle.
+  const resize = useClipResize({ clipId, pxPerSecond });
   if (!clip) return null;
 
   const dur = "duration" in clip ? clip.duration : clip.out - clip.in;
@@ -78,6 +83,40 @@ export function Clip({
     window.addEventListener("pointerup", up);
     window.addEventListener("pointercancel", cancel);
     window.addEventListener("keydown", esc);
+  };
+
+  // Phase 4.F — handles. `stopPropagation` prevents the body-drag pipeline
+  // (4.B) from also firing on edge pointerdown. Window-level listeners live
+  // for the duration of one drag and are torn down on pointerup/cancel.
+  const onHandleDown = (edge: "left" | "right") => (e: React.PointerEvent) => {
+    e.stopPropagation();
+    (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
+    resize.beginResize(edge, e.clientX);
+    const move = (ev: PointerEvent) => resize.dragResize(ev.clientX);
+    const cleanup = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+      window.removeEventListener("keydown", key);
+    };
+    const up = () => {
+      cleanup();
+      resize.endResize();
+    };
+    const cancel = () => {
+      cleanup();
+      resize.cancelResize();
+    };
+    const key = (kev: KeyboardEvent) => {
+      if (kev.key === "Escape") {
+        cleanup();
+        resize.cancelResize();
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    window.addEventListener("keydown", key);
   };
 
   const label =
@@ -165,6 +204,32 @@ export function Clip({
       >
         {label}
       </div>
+      <div
+        data-testid="resize-left"
+        onPointerDown={onHandleDown("left")}
+        style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          left: -4,
+          width: 8,
+          cursor: "ew-resize",
+          zIndex: 5,
+        }}
+      />
+      <div
+        data-testid="resize-right"
+        onPointerDown={onHandleDown("right")}
+        style={{
+          position: "absolute",
+          top: 0,
+          bottom: 0,
+          right: -4,
+          width: 8,
+          cursor: "ew-resize",
+          zIndex: 5,
+        }}
+      />
     </div>
   );
 }

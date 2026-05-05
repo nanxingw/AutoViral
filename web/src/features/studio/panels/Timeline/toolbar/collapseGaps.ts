@@ -1,5 +1,5 @@
 import type { Track, Clip } from "../../../types";
-import { clipDuration } from "../clipMath";
+import { clipDuration, OFFSET_EPSILON } from "../clipMath";
 
 /**
  * Repack a track's clips back-to-back from `trackOffset = 0`, in
@@ -20,7 +20,7 @@ export function collapseGapsOnTrack(track: Track): Track {
     .sort((a, b) => a.trackOffset - b.trackOffset)
     .map((c) => {
       let next: Clip = c;
-      if (Math.abs(c.trackOffset - cursor) > 1e-6) {
+      if (Math.abs(c.trackOffset - cursor) > OFFSET_EPSILON) {
         next = { ...c, trackOffset: cursor } as Clip;
       }
       cursor += clipDuration(next);

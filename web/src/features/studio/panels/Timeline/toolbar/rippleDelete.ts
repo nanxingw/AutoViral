@@ -1,5 +1,5 @@
 import type { Track, Clip } from "../../../types";
-import { clipDuration } from "../clipMath";
+import { clipDuration, OFFSET_EPSILON } from "../clipMath";
 
 /**
  * Ripple-delete a clip from a track: remove it, and shift every later clip
@@ -26,7 +26,7 @@ export function rippleDeleteFromTrack(track: Track, clipId: string): Track {
   const newClips = track.clips
     .filter((c) => c.id !== clipId)
     .map((c) =>
-      c.trackOffset > removedStart + 1e-6
+      c.trackOffset > removedStart + OFFSET_EPSILON
         ? ({ ...c, trackOffset: Math.max(0, c.trackOffset - removedDur) } as Clip)
         : c,
     );
