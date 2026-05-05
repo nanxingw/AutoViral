@@ -4,6 +4,7 @@ import { makeEmptyComposition } from "../types";
 import {
   makeCompositionWithClips,
   makeVideoClip,
+  makeTextClip,
 } from "../../../test/composition-fixtures";
 
 describe("studio store provenance actions", () => {
@@ -245,5 +246,74 @@ describe("rippleDeleteClip + collapseGaps store actions (Phase 4.C)", () => {
     ).not.toThrow();
     const clips = useComposition.getState().comp!.tracks[0].clips;
     expect(clips.map((c) => c.trackOffset)).toEqual([1, 5]);
+  });
+});
+
+describe("resizeClip (Phase 4.I)", () => {
+  it("resizes the right edge of a video clip; clamps to next clip's start (D2)", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 2 });
+    const b = makeVideoClip({ id: "b", trackOffset: 3, in: 0, out: 1 });
+    useComposition.setState({ comp: makeCompositionWithClips([a, b]), dragState: null });
+    useComposition.getState().resizeClip("a", "right", 4); // would pass b
+    const aAfter = useComposition.getState().comp!.tracks[0].clips.find((c) => c.id === "a")! as any;
+    expect(aAfter.out).toBeCloseTo(3); // clamped at b.start = 3
+  });
+
+  it("resizes the left edge of a video clip", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 0, in: 1, out: 4 });
+    useComposition.setState({ comp: makeCompositionWithClips([a]), dragState: null });
+    useComposition.getState().resizeClip("a", "left", 1); // pull right by 1s
+    const aAfter = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    expect(aAfter.trackOffset).toBeCloseTo(1);
+    expect(aAfter.in).toBeCloseTo(2); // 1 + (1 - 0) = 2
+    expect(aAfter.out).toBeCloseTo(4);
+  });
+
+  it("clamps left edge at 0", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 1, in: 1, out: 4 });
+    useComposition.setState({ comp: makeCompositionWithClips([a]), dragState: null });
+    useComposition.getState().resizeClip("a", "left", -2);
+    const aAfter = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    expect(aAfter.trackOffset).toBeCloseTo(0);
+  });
+
+  it("resizes right edge of a text clip via duration", () => {
+    const t = makeTextClip({ id: "t", trackOffset: 1, duration: 3 });
+    useComposition.setState({ comp: makeCompositionWithClips([t as any]), dragState: null });
+    useComposition.getState().resizeClip("t", "right", 5);
+    const tAfter = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    expect(tAfter.duration).toBeCloseTo(4); // 5 - 1
+  });
+
+  it("enforces minDuration 0.05s on right edge", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 2 });
+    useComposition.setState({ comp: makeCompositionWithClips([a]), dragState: null });
+    useComposition.getState().resizeClip("a", "right", 0); // would set out=in
+    const aAfter = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    expect(aAfter.out - aAfter.in).toBeGreaterThanOrEqual(0.05);
+  });
+
+  it("right edge of last clip with no neighbour clamps only at minDuration (no upper bound)", () => {
+    // Single clip on its track — no `next` cap; should extend freely.
+    const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 2 });
+    useComposition.setState({ comp: makeCompositionWithClips([a]), dragState: null });
+    useComposition.getState().resizeClip("a", "right", 99);
+    const aAfter = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    // out - in == 99 - 0 (trackOffset) = 99
+    expect(aAfter.out).toBeCloseTo(99);
+    // Composition duration grew to cover the new end
+    expect(useComposition.getState().comp!.duration).toBeCloseTo(99);
+  });
+
+  it("minDuration prevents zero-width on left edge too", () => {
+    // Try to drag the left edge past the right edge — should clamp at end - 0.05.
+    const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 2 });
+    useComposition.setState({ comp: makeCompositionWithClips([a]), dragState: null });
+    useComposition.getState().resizeClip("a", "left", 5); // way past the right edge (2)
+    const aAfter = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    // trackOffset clamped to end(=2) - MIN_DUR(=0.05) = 1.95
+    expect(aAfter.trackOffset).toBeCloseTo(1.95);
+    // remaining duration ≥ 0.05
+    expect(aAfter.out - aAfter.in).toBeGreaterThanOrEqual(0.05);
   });
 });

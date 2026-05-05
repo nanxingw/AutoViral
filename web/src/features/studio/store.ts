@@ -43,6 +43,11 @@ interface CompState {
   // removeClip and Shift+Backspace to rippleDeleteClip in 4.J.
   rippleDeleteClip: (clipId: string) => void;
   collapseGaps: (trackId: string) => void;
+  // Phase 4.I — edge-drag resize. `newTime` is the proposed timeline-time of
+  // the moving edge. Clamps left at 0, right at next clip's trackOffset (D2),
+  // and enforces minDuration 0.05s on both edges. Branches on clip kind:
+  // video/audio mutate `in`/`out`; text/overlay mutate `duration`.
+  resizeClip: (clipId: string, edge: "left" | "right", newTime: number) => void;
   setSelection: (id: string | null) => void;
   setFrame: (f: number) => void;
   setPlaying: (p: boolean) => void;
@@ -167,6 +172,65 @@ export const useComposition = create<CompState>()(
           0,
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
         );
+      }),
+    // ─── Phase 4.I — edge-drag resize ─────────────────────────────────────
+    // Adopts pneuma's clamp expressions (`.cache/pneuma-clipcraft/.../
+    // useClipResize.ts:132-156`) — pneuma dispatches commands; we mutate
+    // state directly. D2 caps the right edge at the next clip's trackOffset
+    // to avoid overlap. Both edges enforce minDuration 0.05s.
+    resizeClip: (clipId, edge, newTime) =>
+      set((s) => {
+        if (!s.comp) return;
+        const MIN_DUR = 0.05;
+        for (const track of s.comp.tracks) {
+          const clips = track.clips as Clip[];
+          const idx = clips.findIndex((c) => c.id === clipId);
+          if (idx < 0) continue;
+          const c = clips[idx] as Clip;
+          const start = c.trackOffset;
+          const dur = clipDuration(c);
+          const end = start + dur;
+          if (edge === "right") {
+            // D2 — right-edge cap at the next clip's start (any neighbour
+            // strictly after `start`, on the same track). Single-clip tracks
+            // have no neighbour → cap = +∞.
+            const next = clips
+              .filter(
+                (x) => x.id !== clipId && x.trackOffset > start + 1e-6,
+              )
+              .sort((x, y) => x.trackOffset - y.trackOffset)[0];
+            const cap = next ? next.trackOffset : Infinity;
+            const clamped = Math.min(
+              cap,
+              Math.max(start + MIN_DUR, newTime),
+            );
+            if (c.kind === "video" || c.kind === "audio") {
+              c.out = c.in + (clamped - start);
+            } else {
+              // text / overlay
+              c.duration = clamped - start;
+            }
+          } else {
+            // Left edge: clamp to [0, end - MIN_DUR].
+            const clamped = Math.min(end - MIN_DUR, Math.max(0, newTime));
+            const delta = clamped - start;
+            if (c.kind === "video" || c.kind === "audio") {
+              // pneuma: left edge increments inPoint, anchors right edge.
+              c.in += delta;
+              c.trackOffset = clamped;
+            } else {
+              c.duration -= delta;
+              c.trackOffset = clamped;
+            }
+          }
+          s.comp.duration = Math.max(
+            0,
+            ...s.comp.tracks.flatMap((t) =>
+              (t.clips as Clip[]).map(clipEnd),
+            ),
+          );
+          return;
+        }
       }),
     setSelection: (id) =>
       set((s) => {
