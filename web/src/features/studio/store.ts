@@ -7,6 +7,8 @@ import {
   computeRipplePreview,
   snapDraggedStartFull,
 } from "./panels/Timeline/dragEngine";
+import { rippleDeleteFromTrack } from "./panels/Timeline/toolbar/rippleDelete";
+import { collapseGapsOnTrack } from "./panels/Timeline/toolbar/collapseGaps";
 
 // Phase 4.B — `dragState.preview` is a Map; immer needs the MapSet plugin
 // enabled at module load to draft map mutations under produce().
@@ -36,6 +38,11 @@ interface CompState {
   addClip: (trackId: string, clip: Clip) => void;
   updateClip: (clipId: string, patch: Partial<Clip>) => void;
   removeClip: (clipId: string) => void;
+  // Phase 4.C — ripple-delete + collapse-gaps. `rippleDeleteClip` is
+  // separate from `removeClip` (which leaves a gap). D6 binds Backspace to
+  // removeClip and Shift+Backspace to rippleDeleteClip in 4.J.
+  rippleDeleteClip: (clipId: string) => void;
+  collapseGaps: (trackId: string) => void;
   setSelection: (id: string | null) => void;
   setFrame: (f: number) => void;
   setPlaying: (p: boolean) => void;
@@ -123,6 +130,39 @@ export const useComposition = create<CompState>()(
         for (const t of s.comp.tracks) {
           t.clips = (t.clips as Clip[]).filter((c) => c.id !== clipId) as typeof t.clips;
         }
+        s.comp.duration = Math.max(
+          0,
+          ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
+        );
+      }),
+    // ─── Phase 4.C — ripple-delete + collapse-gaps ───────────────────────
+    // Both delegate to pure-track helpers under
+    // `panels/Timeline/toolbar/{rippleDelete,collapseGaps}.ts`. Adapted
+    // from pneuma's CompositionCommand[] builders (see those files for
+    // citations) and gated behind D3 (`clipDuration` from clipMath.ts).
+    rippleDeleteClip: (clipId) =>
+      set((s) => {
+        if (!s.comp) return;
+        for (let i = 0; i < s.comp.tracks.length; i++) {
+          const t = s.comp.tracks[i];
+          if ((t.clips as Clip[]).some((c) => c.id === clipId)) {
+            s.comp.tracks[i] = rippleDeleteFromTrack(t, clipId) as typeof t;
+            break;
+          }
+        }
+        s.comp.duration = Math.max(
+          0,
+          ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
+        );
+      }),
+    collapseGaps: (trackId) =>
+      set((s) => {
+        if (!s.comp) return;
+        const idx = s.comp.tracks.findIndex((t) => t.id === trackId);
+        if (idx < 0) return;
+        s.comp.tracks[idx] = collapseGapsOnTrack(
+          s.comp.tracks[idx],
+        ) as typeof s.comp.tracks[number];
         s.comp.duration = Math.max(
           0,
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),

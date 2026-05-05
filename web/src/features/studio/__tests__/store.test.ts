@@ -185,3 +185,65 @@ describe("composition store — drag-preview actions (Phase 4.B)", () => {
     expect(b.trackOffset).toBeCloseTo(3);
   });
 });
+
+describe("rippleDeleteClip + collapseGaps store actions (Phase 4.C)", () => {
+  it("rippleDeleteClip removes + shifts in store", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 2 });
+    const b = makeVideoClip({ id: "b", trackOffset: 2, in: 0, out: 3 });
+    const c = makeVideoClip({ id: "c", trackOffset: 5, in: 0, out: 1 });
+    useComposition.setState({
+      comp: makeCompositionWithClips([a, b, c]),
+      selection: "b",
+    });
+    useComposition.getState().rippleDeleteClip("b");
+    const clips = useComposition.getState().comp!.tracks[0].clips;
+    expect(clips.map((cl) => cl.id)).toEqual(["a", "c"]);
+    expect(clips.find((cl) => cl.id === "c")!.trackOffset).toBeCloseTo(2);
+    // duration shrinks accordingly
+    expect(useComposition.getState().comp!.duration).toBeCloseTo(3);
+  });
+
+  it("rippleDeleteClip is a no-op when clipId is unknown", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 2 });
+    const b = makeVideoClip({ id: "b", trackOffset: 2, in: 0, out: 3 });
+    useComposition.setState({
+      comp: makeCompositionWithClips([a, b]),
+      selection: null,
+    });
+    const beforeIds = useComposition
+      .getState()
+      .comp!.tracks[0].clips.map((c) => c.id);
+    expect(() =>
+      useComposition.getState().rippleDeleteClip("missing"),
+    ).not.toThrow();
+    const afterIds = useComposition
+      .getState()
+      .comp!.tracks[0].clips.map((c) => c.id);
+    expect(afterIds).toEqual(beforeIds);
+  });
+
+  it("collapseGaps re-packs the named track", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 1, in: 0, out: 2 });
+    const b = makeVideoClip({ id: "b", trackOffset: 5, in: 0, out: 1 });
+    useComposition.setState({
+      comp: makeCompositionWithClips([a, b]),
+    });
+    const trackId = useComposition.getState().comp!.tracks[0].id;
+    useComposition.getState().collapseGaps(trackId);
+    const clips = useComposition.getState().comp!.tracks[0].clips;
+    expect(clips.map((c) => c.trackOffset)).toEqual([0, 2]);
+  });
+
+  it("collapseGaps is a no-op when trackId is unknown", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 1, in: 0, out: 2 });
+    const b = makeVideoClip({ id: "b", trackOffset: 5, in: 0, out: 1 });
+    useComposition.setState({
+      comp: makeCompositionWithClips([a, b]),
+    });
+    expect(() =>
+      useComposition.getState().collapseGaps("nope-no-such-track"),
+    ).not.toThrow();
+    const clips = useComposition.getState().comp!.tracks[0].clips;
+    expect(clips.map((c) => c.trackOffset)).toEqual([1, 5]);
+  });
+});
