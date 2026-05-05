@@ -13,7 +13,6 @@ import { ChatPanel } from "@/features/studio/panels/Chat";
 import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { TopBar } from "@/features/studio/panels/TopBar";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
-import { PipelineRail } from "@/features/studio/panels/PipelineRail";
 import { useShortcuts } from "@/features/studio/hooks/useShortcuts";
 
 export default function Studio() {
@@ -93,9 +92,9 @@ export default function Studio() {
       style={{
         display: "grid",
         gridTemplateColumns: "360px 1fr 320px",
-        gridTemplateRows: "56px 48px 1fr 280px",
+        gridTemplateRows: "56px 1fr 280px",
         gridTemplateAreas:
-          '"top top top" "rail rail rail" "chat preview aside" "chat timeline aside"',
+          '"top top top" "chat preview aside" "chat timeline aside"',
         height: "100vh",
         gap: 12,
         padding: 12,
@@ -112,9 +111,6 @@ export default function Studio() {
           onToggleSettings={() => setSettingsOpen((v) => !v)}
           settingsOpen={settingsOpen}
         />
-      </div>
-      <div style={{ gridArea: "rail" }} className="glass">
-        <PipelineRail />
       </div>
       <div className="glass" style={{ gridArea: "chat", overflow: "hidden", minHeight: 0 }}>
         <ChatPanel workId={workId} />

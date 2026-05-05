@@ -1,6 +1,5 @@
 import { useComposition } from "../store";
 import { useNavigate } from "react-router-dom";
-import { useTheme } from "@/stores/theme";
 
 export function TopBar({
   workId,
@@ -17,7 +16,6 @@ export function TopBar({
 }) {
   const navigate = useNavigate();
   const comp = useComposition((s) => s.comp);
-  const { theme, toggle } = useTheme();
 
   return (
     <div
@@ -109,37 +107,6 @@ export function TopBar({
       </span>
 
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
-
-      <button
-        type="button"
-        data-bare
-        onClick={toggle}
-        aria-label="Toggle theme"
-        title="Theme"
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 8,
-          border: "1px solid var(--glass-border)",
-          background: "var(--surface-0)",
-          color: "var(--text-dim)",
-          display: "grid",
-          placeItems: "center",
-          cursor: "pointer",
-          flexShrink: 0,
-        }}
-      >
-        {theme === "dark" ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="4" />
-            <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-          </svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-          </svg>
-        )}
-      </button>
 
       {onToggleSettings ? (
         <button
