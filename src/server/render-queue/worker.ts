@@ -55,9 +55,12 @@ export class RenderQueueWorker {
 
   stop(): void {
     this.started = false;
+    this.stopped = true;
     for (const ac of this.inflight.values()) ac.abort();
     this.wakeup();
   }
+
+  private stopped = false;
 
   on(jobId: string, fn: (ev: WorkerProgressEvent) => void): () => void {
     const handler = (ev: WorkerProgressEvent) => fn(ev);
@@ -155,10 +158,12 @@ export class RenderQueueWorker {
         proxy: job.type === "proxy",
         signal: ac.signal,
         onProgress: (stage, pct) => {
+          if (this.stopped) return;
           this.deps.store.update(jobId, { stage, progress: pct });
           this.emit(jobId, { status: "running", progress: pct, stage });
         },
       });
+      if (this.stopped) return;
       // If cancel was requested between progress events and resolve, treat as cancelled.
       if (ac.signal.aborted) {
         this.deps.store.update(jobId, { status: "cancelled" });
@@ -172,6 +177,7 @@ export class RenderQueueWorker {
         this.emit(jobId, { status: "done", progress: 1 });
       }
     } catch (err: any) {
+      if (this.stopped) return;
       if (ac.signal.aborted) {
         this.deps.store.update(jobId, { status: "cancelled" });
         this.emit(jobId, { status: "cancelled", progress: 0 });
