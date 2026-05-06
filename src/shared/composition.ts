@@ -107,6 +107,11 @@ export const KeyframePropertySchema = z.enum([
   "rotation",
   "opacity",
   "volume",
+  // Phase 8.3 (D2/D11) — speed reuses the keyframes infrastructure rather than
+  // a separate SpeedRampSchema. Per-clip semantics differ from transforms (D8):
+  // speed feeds Remotion's playbackRate, NOT a CSS transform. AudioClip schema
+  // accepts speed keyframes but the renderer/exporter ignore them in v1 (D1).
+  "speed",
 ]);
 export type KeyframeProperty = z.infer<typeof KeyframePropertySchema>;
 
@@ -118,7 +123,33 @@ export const KeyframeSchema = z.object({
 });
 export type Keyframe = z.infer<typeof KeyframeSchema>;
 
-export const VideoClipSchema = z.object({
+// Phase 8.3.A — D4/D10: speed keyframes must lie in [0.1, 4.0]. We refine at
+// the parent clip level (not on KeyframeSchema itself) because the property ×
+// value constraint depends on `property === "speed"`; a free `value: number`
+// inside KeyframeSchema lets non-speed keyframes (e.g. scale=10) pass through.
+export const SPEED_MIN = 0.1;
+export const SPEED_MAX = 4.0;
+
+function refineSpeedKeyframes<
+  T extends { keyframes?: { property: string; value: number }[] },
+>(val: T, ctx: z.RefinementCtx) {
+  if (!val.keyframes) return;
+  val.keyframes.forEach((kf, i) => {
+    if (kf.property !== "speed") return;
+    if (kf.value < SPEED_MIN || kf.value > SPEED_MAX) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["keyframes", i, "value"],
+        message: `speed keyframe value ${kf.value} out of range [${SPEED_MIN}, ${SPEED_MAX}]`,
+      });
+    }
+  });
+}
+
+// Internal raw object schema — exported `VideoClipSchema` wraps this with the
+// speed-keyframe superRefine. The raw form is also re-used inside the
+// discriminatedUnion below (zod requires ZodObject members, not ZodEffects).
+const VideoClipObjectSchema = z.object({
   id: z.string(),
   kind: z.literal("video"),
   src: z.string(),
@@ -129,9 +160,12 @@ export const VideoClipSchema = z.object({
   filters: FiltersSchema.default({}),
   keyframes: z.array(KeyframeSchema).optional(),
 });
+export const VideoClipSchema = VideoClipObjectSchema.superRefine(
+  refineSpeedKeyframes,
+);
 export type VideoClip = z.infer<typeof VideoClipSchema>;
 
-export const AudioClipSchema = z.object({
+const AudioClipObjectSchema = z.object({
   id: z.string(),
   kind: z.literal("audio"),
   src: z.string(),
@@ -151,6 +185,9 @@ export const AudioClipSchema = z.object({
   type: z.enum(["original", "bgm", "voiceover", "sfx"]).default("bgm"),
   keyframes: z.array(KeyframeSchema).optional(),
 });
+export const AudioClipSchema = AudioClipObjectSchema.superRefine(
+  refineSpeedKeyframes,
+);
 export type AudioClip = z.infer<typeof AudioClipSchema>;
 
 export const TextClipSchema = z.object({
@@ -185,7 +222,7 @@ export const TextClipSchema = z.object({
 });
 export type TextClip = z.infer<typeof TextClipSchema>;
 
-export const OverlayClipSchema = z.object({
+const OverlayClipObjectSchema = z.object({
   id: z.string(),
   kind: z.literal("overlay"),
   src: z.string(),
@@ -200,25 +237,51 @@ export const OverlayClipSchema = z.object({
   opacity: z.number().min(0).max(1).default(1),
   keyframes: z.array(KeyframeSchema).optional(),
 });
+export const OverlayClipSchema = OverlayClipObjectSchema.superRefine(
+  refineSpeedKeyframes,
+);
 export type OverlayClip = z.infer<typeof OverlayClipSchema>;
 
 export type Clip = VideoClip | AudioClip | TextClip | OverlayClip;
 
-export const TrackSchema = z.object({
-  id: z.string(),
-  kind: z.enum(["video", "audio", "text", "overlay"]),
-  label: z.string(),
-  muted: z.boolean().default(false),
-  hidden: z.boolean().default(false),
-  clips: z.array(
-    z.discriminatedUnion("kind", [
-      VideoClipSchema,
-      AudioClipSchema,
-      TextClipSchema,
-      OverlayClipSchema,
-    ]),
-  ),
-});
+// Discriminated union uses the raw object schemas (zod doesn't accept
+// ZodEffects as union members). The speed-keyframe range constraint is
+// re-applied at the Track level via superRefine so a Composition.parse()
+// also rejects out-of-range speed keyframes (D10).
+export const TrackSchema = z
+  .object({
+    id: z.string(),
+    kind: z.enum(["video", "audio", "text", "overlay"]),
+    label: z.string(),
+    muted: z.boolean().default(false),
+    hidden: z.boolean().default(false),
+    clips: z.array(
+      z.discriminatedUnion("kind", [
+        VideoClipObjectSchema,
+        AudioClipObjectSchema,
+        TextClipSchema,
+        OverlayClipObjectSchema,
+      ]),
+    ),
+  })
+  .superRefine((track, ctx) => {
+    track.clips.forEach((clip, ci) => {
+      if (clip.kind === "text") return;
+      const kfs = (clip as { keyframes?: { property: string; value: number }[] })
+        .keyframes;
+      if (!kfs) return;
+      kfs.forEach((kf, ki) => {
+        if (kf.property !== "speed") return;
+        if (kf.value < SPEED_MIN || kf.value > SPEED_MAX) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["clips", ci, "keyframes", ki, "value"],
+            message: `speed keyframe value ${kf.value} out of range [${SPEED_MIN}, ${SPEED_MAX}]`,
+          });
+        }
+      });
+    });
+  });
 export type Track = z.infer<typeof TrackSchema>;
 
 // ─── Scenes ─────────────────────────────────────────────────────────────────
