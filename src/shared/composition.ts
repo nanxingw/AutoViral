@@ -69,6 +69,7 @@ export const ProvenanceOperationSchema = z.object({
     "mix",       // multi-track audio mix output
     "caption",   // STT → SRT/ASS asset
     "grade",     // color-graded variant
+    "reframe",   // aspect-ratio reframe (smart crop) output
   ]),
   actor: z.enum(["user", "agent", "system"]),
   agentId: z.string().optional(),
