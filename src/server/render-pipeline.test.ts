@@ -246,6 +246,147 @@ describe("runRenderPipeline — encode stage wiring", () => {
   });
 });
 
+// Phase 8.3.E — speed-ramp pre-pass tests. For each VideoClip with a static
+// non-1 speed, the pipeline invokes ffmpeg with `setpts=PTS/<k>` + chained
+// `atempo` BEFORE Remotion renders. Variable-speed clips emit a warning and
+// are not pre-passed.
+describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
+  // Drive every spawn child to a clean exit on the next tick. The pipeline
+  // awaits each ffmpeg call inline, so we close children as soon as they're
+  // spawned via setImmediate batches.
+  async function drainSpawnsToClose(): Promise<void> {
+    // Multiple drain rounds because each await boundary may trigger a fresh
+    // spawn that wasn't visible on the previous tick.
+    for (let i = 0; i < 8; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      for (const r of _spawn.mock.results) {
+        const proc = r.value;
+        if (!proc._closed) {
+          proc._closed = true;
+          proc.emit("close", 0);
+        }
+      }
+    }
+  }
+
+  function makeVideoCompWithSpeed(
+    clipId: string,
+    speed: number | Array<{ time: number; value: number }>,
+    src = "/src.mp4",
+  ): Composition {
+    const kfs = Array.isArray(speed)
+      ? speed.map((p) => ({
+          property: "speed" as const,
+          time: p.time,
+          value: p.value,
+          easing: "linear" as const,
+        }))
+      : [
+          { property: "speed" as const, time: 0, value: speed, easing: "linear" as const },
+          { property: "speed" as const, time: 4, value: speed, easing: "linear" as const },
+        ];
+    return {
+      ...baseComp,
+      tracks: [
+        {
+          id: "video-0",
+          kind: "video",
+          label: "Video",
+          muted: false,
+          hidden: false,
+          clips: [
+            {
+              id: clipId,
+              kind: "video",
+              src,
+              in: 0,
+              out: 4,
+              trackOffset: 0,
+              transforms: {},
+              filters: {},
+              keyframes: kfs,
+            } as any,
+          ],
+        },
+      ],
+    };
+  }
+
+  it("static speed=2 invokes ffmpeg with setpts=PTS/2 and chained atempo", async () => {
+    _spawn.mockClear();
+    const comp = makeVideoCompWithSpeed("clip-1", 2.0);
+    const promise = runRenderPipeline({ comp, outDir: "/tmp/out-speed-2" });
+    await drainSpawnsToClose();
+    await promise;
+    // First spawn call IS the speed pre-pass (Stage 0), before any other
+    // ffmpeg-invoking stage.
+    expect(_spawn).toHaveBeenCalled();
+    const firstCall = _spawn.mock.calls[0];
+    expect(firstCall[0]).toBe("ffmpeg");
+    const args = firstCall[1] as string[];
+    const filterIdx = args.indexOf("-filter_complex");
+    expect(filterIdx).toBeGreaterThan(-1);
+    const filter = args[filterIdx + 1];
+    expect(filter).toContain("setpts=PTS/2");
+    expect(filter).toContain("atempo=2.0000");
+    // Output filename should encode the clip id + speed for caching.
+    const output = args[args.length - 1];
+    expect(output).toContain("clip-1-speed-200.mp4");
+  });
+
+  it("static speed=0.5 invokes ffmpeg with setpts=PTS/0.5 and atempo=0.5", async () => {
+    _spawn.mockClear();
+    const comp = makeVideoCompWithSpeed("clip-1", 0.5);
+    const promise = runRenderPipeline({ comp, outDir: "/tmp/out-speed-0_5" });
+    await drainSpawnsToClose();
+    await promise;
+    const args = _spawn.mock.calls[0][1] as string[];
+    const filterIdx = args.indexOf("-filter_complex");
+    const filter = args[filterIdx + 1];
+    expect(filter).toContain("setpts=PTS/0.5");
+    expect(filter).toContain("atempo=0.5000");
+    expect(args[args.length - 1]).toContain("clip-1-speed-50.mp4");
+  });
+
+  it("static speed=4.0 chains atempo=2.0,atempo=2.0", async () => {
+    _spawn.mockClear();
+    const comp = makeVideoCompWithSpeed("clip-1", 4.0);
+    const promise = runRenderPipeline({ comp, outDir: "/tmp/out-speed-4" });
+    await drainSpawnsToClose();
+    await promise;
+    const args = _spawn.mock.calls[0][1] as string[];
+    const filter = args[args.indexOf("-filter_complex") + 1];
+    expect(filter).toContain("setpts=PTS/4");
+    // chainAtempo(4) → "atempo=2.0000,atempo=2.0000"
+    expect(filter).toContain("atempo=2.0000,atempo=2.0000");
+  });
+
+  it("variable speed → warning emitted, no setpts pre-pass spawned", async () => {
+    _spawn.mockClear();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Two distinct keyframe values → variable speed (D6 falls back to 1×)
+    const comp = makeVideoCompWithSpeed("clip-1", [
+      { time: 0, value: 1.0 },
+      { time: 4, value: 2.0 },
+    ]);
+    const promise = runRenderPipeline({ comp, outDir: "/tmp/out-var" });
+    await drainSpawnsToClose();
+    await promise;
+    // None of the spawned ffmpeg invocations should be a speed pass —
+    // i.e. their filter_complex args don't mention setpts=PTS/.
+    for (const call of _spawn.mock.calls) {
+      const args = call[1] as string[];
+      const filterIdx = args.indexOf("-filter_complex");
+      const filter = filterIdx >= 0 ? (args[filterIdx + 1] as string) : "";
+      expect(filter).not.toContain("setpts=PTS/");
+    }
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/Variable-speed export/i),
+    );
+    warnSpy.mockRestore();
+  });
+});
+
 describe("runRenderPipeline — proxy mode (Phase 7.C)", () => {
   it("halves width/height (rounded to even) and clamps fps to 24 in the Remotion render call", async () => {
     await runRenderPipeline({ comp: baseComp, outDir: "/tmp/out", proxy: true });

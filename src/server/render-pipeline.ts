@@ -1,6 +1,7 @@
 // src/server/render-pipeline.ts
 
 import { renderCompositionToMp4 } from "./remotion-renderer.js";
+import { applySpeedRampPrePass } from "./speed-ramp-ffmpeg.js";
 import {
   mixAudioTracks,
   normalizeLufs,
@@ -164,7 +165,7 @@ export async function runEncodeStage(
 
 export async function runRenderPipeline(opts: RenderJobOptions): Promise<string> {
   // Phase 7.C — apply proxy transform (deep-clone, never mutates caller's comp).
-  const comp = opts.proxy ? applyProxy(opts.comp) : opts.comp;
+  const compProxy = opts.proxy ? applyProxy(opts.comp) : opts.comp;
   const target = opts.loudnessTargetLufs ?? -14;
   const onP = opts.onProgress ?? (() => undefined);
   const checkAbort = () => {
@@ -172,6 +173,21 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
       throw new Error("runRenderPipeline: aborted");
     }
   };
+
+  // Stage 0 (Phase 8.3.E) — speed-ramp pre-pass for static-speed VideoClips.
+  // For each video clip with a static, non-1 speed (D6) we run an ffmpeg
+  // setpts/atempo invocation that resamples the source MP4 *before* Remotion
+  // ever sees it, rewriting clip.src to the cached output. Variable-speed
+  // clips emit a console warning and fall back to 1× export (deferred to
+  // Phase 8.3.5). Pre-Remotion lives upstream of every other stage so that
+  // ducking / loudnorm / encode all see the resampled audio + video.
+  checkAbort();
+  const comp = await applySpeedRampPrePass(
+    compProxy,
+    opts.outDir,
+    opts.signal,
+  );
+  checkAbort();
 
   // Stage 1: Remotion render
   // TODO(phase-7): renderCompositionToMp4 does not yet accept an AbortSignal;
