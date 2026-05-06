@@ -1,0 +1,170 @@
+import { createPortal } from "react-dom";
+import { useEffect } from "react";
+
+export interface ReframeClipSummary {
+  id: string;
+  src: string;
+  label?: string;
+}
+
+interface Props {
+  open: boolean;
+  presetLabel: string;
+  fromAspect: string;
+  toAspect: string;
+  clips: ReframeClipSummary[];
+  onConfirm: () => void;
+  onCancel: () => void;
+}
+
+/**
+ * Phase 6.D — D3 confirmation modal. Lists every video clip that would be
+ * reframed when the chosen platform preset is applied. On confirm: caller
+ * dispatches `applyPlatformPreset` + parallel `/api/video/reframe` calls. On
+ * cancel: caller does nothing (D6 — full no-op, neither preset metadata nor
+ * clips change).
+ *
+ * ESC and backdrop click both fire `onCancel`. Portals to `document.body` so
+ * the floating Tweaks panel (240px wide) doesn't clip the modal.
+ */
+export function ReframeConfirmDialog({
+  open,
+  presetLabel,
+  fromAspect,
+  toAspect,
+  clips,
+  onConfirm,
+  onCancel,
+}: Props) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onCancel]);
+
+  if (!open) return null;
+  return createPortal(
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="reframe-dialog-title"
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.55)",
+        backdropFilter: "blur(8px)",
+        display: "grid",
+        placeItems: "center",
+        zIndex: 100,
+      }}
+      onClick={onCancel}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 460,
+          maxHeight: "76vh",
+          overflow: "auto",
+          background: "var(--surface-1)",
+          border: "1px solid var(--glass-border)",
+          borderRadius: 16,
+          padding: 24,
+          boxShadow: "0 24px 64px rgba(0,0,0,0.32)",
+        }}
+      >
+        <div
+          id="reframe-dialog-title"
+          style={{
+            fontFamily: "var(--font-editorial)",
+            fontSize: 22,
+            fontStyle: "italic",
+            letterSpacing: "-0.015em",
+            color: "var(--text)",
+            marginBottom: 8,
+          }}
+        >
+          Apply <span style={{ color: "var(--accent-hi)" }}>{presetLabel}</span>?
+        </div>
+        <div
+          style={{
+            fontSize: 12,
+            color: "var(--text-dim)",
+            fontFamily: "var(--font-mono)",
+            letterSpacing: "0.04em",
+            marginBottom: 16,
+          }}
+        >
+          Reframe from {fromAspect} → {toAspect}
+        </div>
+        {clips.length === 0 ? (
+          <div style={{ fontSize: 13, color: "var(--text-dimmer)", padding: "12px 0" }}>
+            No video clips in this composition — only the preset metadata will be applied.
+          </div>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: "0 0 18px 0" }}>
+            {clips.map((c) => (
+              <li
+                key={c.id}
+                style={{
+                  padding: "8px 10px",
+                  borderRadius: 6,
+                  background: "var(--surface-0)",
+                  marginBottom: 4,
+                  fontSize: 13,
+                  display: "flex",
+                  justifyContent: "space-between",
+                }}
+              >
+                <span>{c.label ?? c.id}</span>
+                <span style={{ fontFamily: "var(--font-mono)", color: "var(--text-dimmer)", fontSize: 11 }}>
+                  {c.src.split("/").pop()}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button
+            type="button"
+            onClick={onCancel}
+            data-bare
+            style={{
+              padding: "8px 14px",
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.06em",
+              border: "1px solid var(--glass-border)",
+              background: "transparent",
+              color: "var(--text-dim)",
+              borderRadius: 6,
+              cursor: "pointer",
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            style={{
+              padding: "8px 14px",
+              fontSize: 12,
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.06em",
+              border: "1px solid var(--accent)",
+              background: "var(--accent-glow)",
+              color: "var(--accent-hi)",
+              borderRadius: 6,
+              cursor: "pointer",
+            }}
+          >
+            Confirm
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
