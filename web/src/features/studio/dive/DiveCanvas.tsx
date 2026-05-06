@@ -10,6 +10,7 @@ import "reactflow/dist/style.css";
 import { useComposition } from "../store";
 import type { AssetEntry, Clip } from "../types";
 import { findAssetByUri } from "./walkProvenance";
+import { useTreeLayout } from "./useTreeLayout";
 import { VisualNode } from "./nodes/VisualNode";
 import { AudioNode } from "./nodes/AudioNode";
 import { TextNode } from "./nodes/TextNode";
@@ -41,16 +42,22 @@ export function DiveCanvas({ open, onClose }: Props) {
   }, [comp, selection]);
 
   // Build ReactFlow nodes + edges from comp.assets / comp.provenance.
-  // Layout x/y here is a quick column-grid placeholder; Phase 5.D replaces
-  // this with Dagre via useTreeLayout.
+  // Layout is computed by Dagre via `useTreeLayout` (LR rankdir).
   const { nodes, edges } = useMemo(() => {
     if (!comp) return { nodes: [] as Node[], edges: [] as Edge[] };
-    const assets = comp.assets;
-    const provenance = comp.provenance;
-    const flowNodes: Node[] = assets.map((asset, i) => ({
+    const assets = comp.assets ?? [];
+    const provenance = comp.provenance ?? [];
+
+    const layoutInputNodes = assets.map((a) => ({ id: a.id, width: 180, height: 120 }));
+    const layoutInputEdges = provenance
+      .filter((e) => e.fromAssetId != null)
+      .map((e) => ({ source: e.fromAssetId as string, target: e.toAssetId }));
+    const positions = useTreeLayout(layoutInputNodes, layoutInputEdges);
+
+    const flowNodes: Node[] = assets.map((asset) => ({
       id: asset.id,
       type: kindToNodeType(asset),
-      position: { x: i * 240, y: 0 }, // placeholder layout — replaced in 5.D
+      position: positions.get(asset.id) ?? { x: 0, y: 0 },
       data: {
         asset,
         isCurrent: asset.id === currentAssetId,
@@ -59,13 +66,11 @@ export function DiveCanvas({ open, onClose }: Props) {
         },
       },
     }));
-    const flowEdges: Edge[] = provenance
-      .filter((e) => e.fromAssetId != null)
-      .map((e) => ({
-        id: `${e.fromAssetId}->${e.toAssetId}`,
-        source: e.fromAssetId as string,
-        target: e.toAssetId,
-      }));
+    const flowEdges: Edge[] = layoutInputEdges.map((e) => ({
+      id: `${e.source}->${e.target}`,
+      source: e.source,
+      target: e.target,
+    }));
     return { nodes: flowNodes, edges: flowEdges };
   }, [comp, currentAssetId, selection, rebindClip]);
 
