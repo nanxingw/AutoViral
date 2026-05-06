@@ -618,6 +618,62 @@ apiRoutes.get("/api/works/:id/assets", async (c) => {
   }
 });
 
+// ── Phase 8.1.B: CLIP semantic search ────────────────────────────────────────
+// Registered BEFORE the wildcard /api/works/:id/assets/* so this exact route
+// wins precedence — Hono matches in registration order for static segments.
+
+// GET /api/works/:id/assets/search?q=<text>&topK=<n>  (CLIP semantic search)
+apiRoutes.get("/api/works/:id/assets/search", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId" }, 400);
+  const q = c.req.query("q")?.trim();
+  if (!q) return c.json({ error: "q required" }, 400);
+  const rawK = parseInt(c.req.query("topK") ?? "20", 10);
+  const topK = Number.isFinite(rawK)
+    ? Math.max(1, Math.min(100, rawK))
+    : 20;
+  try {
+    const { searchClipIndex } = await import("./clip-index.js");
+    return c.json(await searchClipIndex(id, q, topK));
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 500);
+  }
+});
+
+// POST /api/clip-index/build — build/refresh the per-work CLIP index
+apiRoutes.post("/api/clip-index/build", async (c) => {
+  let body: { workId?: string };
+  try {
+    body = await c.req.json<{ workId: string }>();
+  } catch {
+    return c.json({ error: "Invalid JSON body" }, 400);
+  }
+  const workId = body?.workId;
+  if (!workId || !SAFE_ID.test(workId)) {
+    return c.json({ error: "Invalid workId" }, 400);
+  }
+  try {
+    const { buildClipIndex } = await import("./clip-index.js");
+    return c.json(await buildClipIndex(workId));
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 500);
+  }
+});
+
+// GET /api/clip-index/status?workId=<id>
+apiRoutes.get("/api/clip-index/status", async (c) => {
+  const workId = c.req.query("workId");
+  if (!workId || !SAFE_ID.test(workId)) {
+    return c.json({ error: "Invalid workId" }, 400);
+  }
+  try {
+    const { getClipIndexStatus } = await import("./clip-index.js");
+    return c.json(await getClipIndexStatus(workId));
+  } catch (e) {
+    return c.json({ error: (e as Error).message }, 500);
+  }
+});
+
 // GET /api/works/:id/assets/* — serve asset files (supports nested paths like images/scene-01.png or output/final.mp4)
 apiRoutes.get("/api/works/:id/assets/*", async (c) => {
   const id = c.req.param("id");

@@ -75,7 +75,7 @@ describe("buildClipIndex", () => {
 
     const result = await buildClipIndex("work-abc");
     expect(result.stub).toBe(true);
-    expect(result.reason).toMatch(/open_clip/);
+    if (result.stub) expect(result.reason).toMatch(/open_clip/);
   });
 
   it("rejects an unsafe workId before invoking python", async () => {
@@ -89,7 +89,7 @@ describe("buildClipIndex", () => {
     await setupAssets("work-empty", ["assets/notes/script.txt"]);
     const result = await buildClipIndex("work-empty");
     expect(result.stub).toBe(true);
-    expect(result.reason).toBe("no_indexable_assets");
+    if (result.stub) expect(result.reason).toBe("no_indexable_assets");
     expect(_runPython).not.toHaveBeenCalled();
   });
 
@@ -157,7 +157,7 @@ describe("searchClipIndex", () => {
     });
     const result = await searchClipIndex("work-abc", "panda", 20);
     expect(result.stub).toBe(true);
-    expect(result.reason).toBe("no_index");
+    if (result.stub) expect(result.reason).toBe("no_index");
   });
 });
 
