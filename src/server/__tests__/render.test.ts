@@ -1,19 +1,50 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+// Legacy POST /api/works/:id/render guard tests.
+//
+// Phase 7.B re-shaped the contract to {jobId} (enqueue), so success-path now
+// goes through RenderQueue. We keep the cheap guard cases (404 missing work,
+// 400 missing composition) here; success-shape coverage lives in
+// src/server/api.render.test.ts with a FakeQueue.
+
+import { describe, it, expect, beforeEach } from "vitest";
 import { withTempDataDir, jsonReq } from "./_helpers.js";
+import type { RenderJob, RenderJobOptions } from "../render-queue/index.js";
 
-vi.mock("../render-pipeline.js", () => ({
-  runRenderPipeline: vi.fn(async () => "/tmp/fake.mp4"),
-}));
+class FakeQueue {
+  private rows = new Map<string, RenderJob>();
+  private n = 0;
+  enqueue(opts: RenderJobOptions): RenderJob {
+    const id = `job_${this.n++}`;
+    const job: RenderJob = {
+      id,
+      workId: opts.workId,
+      type: opts.type,
+      status: "queued",
+      progress: 0,
+      log: [],
+      createdAt: new Date().toISOString(),
+    };
+    this.rows.set(id, job);
+    return job;
+  }
+  get(id: string): RenderJob | null { return this.rows.get(id) ?? null; }
+  cancel(id: string): void {
+    const r = this.rows.get(id);
+    if (r) r.status = "cancelled";
+  }
+  list(): RenderJob[] { return [...this.rows.values()]; }
+}
 
-describe("POST /api/works/:id/render", () => {
+describe("POST /api/works/:id/render — legacy guards", () => {
   beforeEach(() => {
-    vi.resetModules();
+    // Each test creates its own queue; this keeps tests isolated even though
+    // setRenderQueue stores a module-level singleton.
   });
 
   it("returns 400 if composition missing", async () => {
     await withTempDataDir(async () => {
-      const { apiRoutes } = await import("../api.js");
+      const { apiRoutes, setRenderQueue } = await import("../api.js");
       const { createWork } = await import("../../work-store.js");
+      setRenderQueue(new FakeQueue() as any);
       const w = await createWork({
         title: "T",
         type: "short-video",
@@ -28,7 +59,8 @@ describe("POST /api/works/:id/render", () => {
 
   it("returns 404 if work missing", async () => {
     await withTempDataDir(async () => {
-      const { apiRoutes } = await import("../api.js");
+      const { apiRoutes, setRenderQueue } = await import("../api.js");
+      setRenderQueue(new FakeQueue() as any);
       const res = await apiRoutes.fetch(
         jsonReq("POST", `/api/works/nope/render`, {}),
       );
@@ -36,37 +68,21 @@ describe("POST /api/works/:id/render", () => {
     });
   });
 
-  it("returns 200 with output path when renderer mock resolves", async () => {
+  it("503 when RenderQueue is not yet initialized", async () => {
     await withTempDataDir(async () => {
-      const { apiRoutes } = await import("../api.js");
+      const { apiRoutes, setRenderQueue } = await import("../api.js");
+      // Force the un-initialized state.
+      setRenderQueue(null as any);
       const { createWork } = await import("../../work-store.js");
       const w = await createWork({
         title: "T",
         type: "short-video",
         platforms: ["douyin"],
       });
-      const comp = {
-        id: "c1",
-        workId: w.id,
-        fps: 30,
-        width: 1080,
-        height: 1920,
-        duration: 1,
-        aspect: "9:16",
-        tracks: [],
-        updatedAt: "2026-04-25T00:00:00Z",
-      };
-      const put = await apiRoutes.fetch(
-        jsonReq("PUT", `/api/works/${w.id}/composition`, comp),
-      );
-      expect(put.status).toBe(200);
       const res = await apiRoutes.fetch(
         jsonReq("POST", `/api/works/${w.id}/render`, {}),
       );
-      expect(res.status).toBe(200);
-      const j: any = await res.json();
-      expect(j.ok).toBe(true);
-      expect(j.output).toContain("fake.mp4");
+      expect(res.status).toBe(503);
     });
   });
 });

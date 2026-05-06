@@ -14,6 +14,7 @@ import {
 } from "../work-store.js";
 import { MemoryClient } from "../memory.js";
 import type { WsBridge } from "../ws-bridge.js";
+import type { RenderQueue } from "./render-queue/index.js";
 import { getProvider, getDefaultProvider, listProviders } from "../providers/registry.js";
 import { listSharedAssetsWithMeta, getSharedAssetPath, validateCategory, sanitizeFilename, saveSharedAsset, deleteSharedAsset, moveSharedAsset } from "../shared-assets.js";
 import { getLatestCreatorData, getCreatorHistory } from "../analytics-collector.js";
@@ -80,6 +81,15 @@ let wsBridge: WsBridge | null = null;
 
 export function setWsBridge(bridge: WsBridge): void {
   wsBridge = bridge;
+}
+
+// ── RenderQueue accessor (set by server/index.ts after construction) ──────
+// Phase 7.B — POST /api/works/:id/render now enqueues into this queue
+// instead of running the pipeline synchronously.
+let renderQueue: RenderQueue | null = null;
+
+export function setRenderQueue(q: RenderQueue | null): void {
+  renderQueue = q;
 }
 
 // ── Status & Config ─────────────────────────────────────────────────────────
@@ -539,45 +549,62 @@ apiRoutes.put("/api/works/:id/carousel", async (c) => {
   return c.json({ ok: true });
 });
 
-// POST /api/works/:id/render — renders composition.yaml to mp4 via runRenderPipeline
-// (Remotion → ducking → optional burn-in → loudnorm → final mux). Phase 3.D rewire.
+// POST /api/works/:id/render — enqueues a render job; the worker drains it.
+// Phase 7.B — contract changed: now returns { jobId } (was { ok, output }).
+// Body: { type?: "full"|"proxy", presetId?: string, burnSubtitles?: boolean,
+//         loudnessTargetLufs?: number }
 apiRoutes.post("/api/works/:id/render", async (c) => {
   const id = c.req.param("id");
+  if (!renderQueue) {
+    return c.json({ error: "RenderQueue not initialized" }, 503);
+  }
   const w = await getWork(id);
   if (!w) return c.json({ error: "Work not found" }, 404);
-  let raw: string;
+  // Cheap fail-fast: composition.yaml must exist on disk before we enqueue.
+  // The worker re-loads + validates it via loadComposition; this just gives
+  // the user a synchronous 400 instead of a queued-then-failed job.
   try {
-    raw = await readFile(
-      join(dataDir, "works", id, "composition.yaml"),
-      "utf-8",
-    );
+    await readFile(join(dataDir, "works", id, "composition.yaml"), "utf-8");
   } catch {
     return c.json({ error: "Composition missing — save first" }, 400);
   }
-  const parsed = CompositionSchema.safeParse(yaml.load(raw));
-  if (!parsed.success) {
-    return c.json(
-      { error: "Composition on disk is invalid", issues: parsed.error.issues },
-      400,
-    );
+  const body = await c.req.json().catch(() => ({}));
+  const type: "full" | "proxy" = body.type === "proxy" ? "proxy" : "full";
+  const job = renderQueue.enqueue({
+    workId: id,
+    type,
+    presetId: typeof body.presetId === "string" ? body.presetId : undefined,
+    burnSubtitles: !!body.burnSubtitles,
+    loudnessTargetLufs:
+      typeof body.loudnessTargetLufs === "number"
+        ? body.loudnessTargetLufs
+        : undefined,
+  });
+  return c.json({ jobId: job.id });
+});
+
+// GET /api/render/jobs/:id — Phase 7.B
+apiRoutes.get("/api/render/jobs/:id", (c) => {
+  if (!renderQueue) {
+    return c.json({ error: "RenderQueue not initialized" }, 503);
   }
-  const outDir = join(dataDir, "works", id, "output");
-  await mkdir(outDir, { recursive: true });
-  try {
-    const body = await c.req.json().catch(() => ({}));
-    const { runRenderPipeline } = await import("./render-pipeline.js");
-    const file = await runRenderPipeline({
-      comp: parsed.data,
-      outDir,
-      outputTitle: w.title,
-      burnSubtitles: !!body.burnSubtitles,
-      loudnessTargetLufs:
-        typeof body.loudnessTargetLufs === "number" ? body.loudnessTargetLufs : undefined,
-    });
-    return c.json({ ok: true, output: file });
-  } catch (err: any) {
-    return c.json({ error: err?.message ?? "Render failed" }, 500);
+  const job = renderQueue.get(c.req.param("id"));
+  if (!job) return c.json({ error: "Job not found" }, 404);
+  return c.json(job);
+});
+
+// DELETE /api/render/jobs/:id — Phase 7.B
+// Cancels a queued or running job. D9: cancelling queued is synchronous;
+// running jobs receive an AbortSignal which the pipeline honours.
+apiRoutes.delete("/api/render/jobs/:id", (c) => {
+  if (!renderQueue) {
+    return c.json({ error: "RenderQueue not initialized" }, 503);
   }
+  const id = c.req.param("id");
+  renderQueue.cancel(id);
+  const job = renderQueue.get(id);
+  if (!job) return c.json({ error: "Job not found" }, 404);
+  return c.json(job);
 });
 
 // GET /api/works/:id/assets
