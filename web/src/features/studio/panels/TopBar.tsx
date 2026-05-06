@@ -1,21 +1,46 @@
+import { useEffect, useState } from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useComposition } from "../store";
 import { useNavigate } from "react-router-dom";
+import { enqueueRender, type EnqueueRenderOptions } from "../services/render";
+import { ExportProgress } from "../render-status/ExportProgress";
 
-export function TopBar({
-  workId,
-  onExport,
-  savedAt,
-  onToggleSettings,
-  settingsOpen,
-}: {
+export interface TopBarProps {
   workId: string;
-  onExport: () => void;
   savedAt: string | null;
   onToggleSettings?: () => void;
   settingsOpen?: boolean;
-}) {
+}
+
+export function TopBar({
+  workId,
+  savedAt,
+  onToggleSettings,
+  settingsOpen,
+}: TopBarProps) {
   const navigate = useNavigate();
   const comp = useComposition((s) => s.comp);
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [lastOpts, setLastOpts] = useState<EnqueueRenderOptions>({
+    type: "full",
+  });
+
+  async function startExport(opts: EnqueueRenderOptions) {
+    setLastOpts(opts);
+    const { jobId } = await enqueueRender(workId, opts);
+    setActiveJobId(jobId);
+  }
+
+  // Escape closes the modal — keeps WebSocket subscription cleanup tied to
+  // unmount of <ExportProgress /> via useRenderJob's useEffect cleanup.
+  useEffect(() => {
+    if (!activeJobId) return;
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setActiveJobId(null);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeJobId]);
 
   return (
     <div
@@ -137,32 +162,101 @@ export function TopBar({
         </button>
       ) : null}
 
-      <button
-        type="button"
-        data-bare
-        onClick={onExport}
-        style={{
-          padding: "7px 14px",
-          borderRadius: 9,
-          fontSize: 12,
-          fontWeight: 600,
-          border: "1px solid var(--accent-hi)",
-          background: "linear-gradient(180deg, var(--accent-hi), var(--accent))",
-          color: "var(--accent-fg)",
-          cursor: "pointer",
-          letterSpacing: "-0.005em",
-          display: "inline-flex",
-          alignItems: "center",
-          gap: 6,
-          boxShadow: "0 4px 16px var(--accent-glow)",
-          flexShrink: 0,
-        }}
-      >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
-        </svg>
-        导出
-      </button>
+      <div style={{ display: "inline-flex", flexShrink: 0 }}>
+        <button
+          type="button"
+          data-bare
+          onClick={() => void startExport({ type: "full" })}
+          aria-label="Export full render"
+          style={{
+            padding: "7px 14px",
+            borderRadius: "9px 0 0 9px",
+            fontSize: 12,
+            fontWeight: 600,
+            border: "1px solid var(--accent-hi)",
+            borderRight: "1px solid var(--accent)",
+            background: "linear-gradient(180deg, var(--accent-hi), var(--accent))",
+            color: "var(--accent-fg)",
+            cursor: "pointer",
+            letterSpacing: "-0.005em",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            boxShadow: "0 4px 16px var(--accent-glow)",
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
+          </svg>
+          导出
+        </button>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger asChild>
+            <button
+              type="button"
+              data-bare
+              aria-label="More export options"
+              style={{
+                padding: "7px 8px",
+                borderRadius: "0 9px 9px 0",
+                fontSize: 12,
+                fontWeight: 600,
+                border: "1px solid var(--accent-hi)",
+                borderLeft: "none",
+                background: "linear-gradient(180deg, var(--accent-hi), var(--accent))",
+                color: "var(--accent-fg)",
+                cursor: "pointer",
+                display: "inline-flex",
+                alignItems: "center",
+                boxShadow: "0 4px 16px var(--accent-glow)",
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Portal>
+            <DropdownMenu.Content
+              align="end"
+              sideOffset={6}
+              style={{
+                minWidth: 200,
+                background: "var(--surface-1)",
+                border: "1px solid var(--glass-border)",
+                borderRadius: 8,
+                padding: 4,
+                boxShadow: "0 12px 32px rgba(0,0,0,0.32)",
+                zIndex: 200,
+              }}
+            >
+              <DropdownMenu.Item
+                onSelect={() => void startExport({ type: "proxy" })}
+                style={{
+                  fontSize: 12,
+                  fontFamily: "var(--font-mono)",
+                  letterSpacing: "0.04em",
+                  color: "var(--text)",
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  outline: "none",
+                }}
+              >
+                Quick proxy export
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Portal>
+        </DropdownMenu.Root>
+      </div>
+
+      {activeJobId ? (
+        <ExportProgress
+          jobId={activeJobId}
+          onClose={() => setActiveJobId(null)}
+          onRetry={() => void startExport(lastOpts)}
+        />
+      ) : null}
     </div>
   );
 }

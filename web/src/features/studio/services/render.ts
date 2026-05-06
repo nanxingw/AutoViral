@@ -1,7 +1,23 @@
 import { apiFetch } from "@/lib/api";
 
-export async function exportMp4(
+export interface EnqueueRenderOptions {
+  type: "full" | "proxy";
+  presetId?: string;
+  burnSubtitles?: boolean;
+  loudnessTargetLufs?: number;
+}
+
+export async function enqueueRender(
   workId: string,
-): Promise<{ ok: boolean; output: string }> {
-  return apiFetch(`/api/works/${workId}/render`, { method: "POST" });
+  opts: EnqueueRenderOptions,
+): Promise<{ jobId: string }> {
+  return apiFetch(`/api/works/${workId}/render`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(opts),
+  });
+}
+
+export async function cancelRender(jobId: string): Promise<void> {
+  await apiFetch(`/api/render/jobs/${jobId}`, { method: "DELETE" });
 }

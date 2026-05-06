@@ -1,13 +1,31 @@
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { TopBar } from "./TopBar";
+import * as renderSvc from "../services/render";
+
+vi.mock("../services/render", () => ({
+  enqueueRender: vi.fn(),
+  cancelRender: vi.fn(),
+}));
+
+// Stub ExportProgress's internal hook so the modal renders without spinning up
+// a WebSocket subscription in tests. We only need to assert the dialog mounts
+// & unmounts; the wiring inside ExportProgress is covered by its own suite.
+vi.mock("../render-status/useRenderJob", () => ({
+  useRenderJob: () => ({ job: null, cancel: vi.fn() }),
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
 
 describe("TopBar (v4)", () => {
   it("renders the editorial Autoviral italic + Studio v4.0 eyebrow", () => {
     render(
       <MemoryRouter>
-        <TopBar workId="w1" savedAt={null} onExport={vi.fn()} />
+        <TopBar workId="w1" savedAt={null} />
       </MemoryRouter>,
     );
     expect(screen.getByText("Autoviral")).toBeTruthy();
@@ -17,7 +35,7 @@ describe("TopBar (v4)", () => {
   it("does NOT render a theme toggle (delegated to global TopNav)", () => {
     render(
       <MemoryRouter>
-        <TopBar workId="w1" savedAt={null} onExport={vi.fn()} />
+        <TopBar workId="w1" savedAt={null} />
       </MemoryRouter>,
     );
     expect(screen.queryByLabelText(/toggle theme/i)).toBeNull();
@@ -27,13 +45,13 @@ describe("TopBar (v4)", () => {
     const onToggle = vi.fn();
     const { rerender } = render(
       <MemoryRouter>
-        <TopBar workId="w1" savedAt={null} onExport={vi.fn()} />
+        <TopBar workId="w1" savedAt={null} />
       </MemoryRouter>,
     );
     expect(screen.queryByTestId("settings-toggle")).toBeNull();
     rerender(
       <MemoryRouter>
-        <TopBar workId="w1" savedAt={null} onExport={vi.fn()} onToggleSettings={onToggle} />
+        <TopBar workId="w1" savedAt={null} onToggleSettings={onToggle} />
       </MemoryRouter>,
     );
     fireEvent.click(screen.getByTestId("settings-toggle"));
@@ -43,9 +61,50 @@ describe("TopBar (v4)", () => {
   it("renders the Export button with 导出 label", () => {
     render(
       <MemoryRouter>
-        <TopBar workId="w1" savedAt={null} onExport={vi.fn()} />
+        <TopBar workId="w1" savedAt={null} />
       </MemoryRouter>,
     );
     expect(screen.getByText(/导出|Export/)).toBeTruthy();
+  });
+});
+
+describe("TopBar — queue-aware export (Phase 7.E)", () => {
+  it("clicking 导出 enqueues a full render and mounts ExportProgress", async () => {
+    (renderSvc.enqueueRender as any).mockResolvedValue({ jobId: "job_abc" });
+    render(
+      <MemoryRouter>
+        <TopBar workId="w-1" savedAt="now" />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /export full render/i }));
+    expect(renderSvc.enqueueRender).toHaveBeenCalledWith("w-1", { type: "full" });
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+  });
+
+  it("chevron menu offers Quick proxy export", async () => {
+    (renderSvc.enqueueRender as any).mockResolvedValue({ jobId: "job_proxy" });
+    render(
+      <MemoryRouter>
+        <TopBar workId="w-1" savedAt="now" />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /more export options/i }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /quick proxy export/i }));
+    await waitFor(() =>
+      expect(renderSvc.enqueueRender).toHaveBeenCalledWith("w-1", { type: "proxy" }),
+    );
+  });
+
+  it("closing the modal disposes the ws subscription (no leak)", async () => {
+    (renderSvc.enqueueRender as any).mockResolvedValue({ jobId: "job_x" });
+    render(
+      <MemoryRouter>
+        <TopBar workId="w-1" savedAt="now" />
+      </MemoryRouter>,
+    );
+    await userEvent.click(screen.getByRole("button", { name: /export full render/i }));
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+    await userEvent.keyboard("{Escape}");
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 });

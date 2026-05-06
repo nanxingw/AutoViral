@@ -6,7 +6,6 @@ import {
   loadComposition,
   saveComposition,
 } from "@/features/studio/services/composition";
-import { exportMp4 } from "@/features/studio/services/render";
 import { PreviewPanel } from "@/features/studio/panels/PreviewPanel";
 import { Timeline } from "@/features/studio/panels/Timeline";
 import { ChatPanel } from "@/features/studio/panels/Chat";
@@ -105,9 +104,6 @@ export default function Studio() {
         <TopBar
           workId={workId}
           savedAt={savedAt}
-          onExport={() => {
-            void exportMp4(workId);
-          }}
           onToggleSettings={() => setSettingsOpen((v) => !v)}
           settingsOpen={settingsOpen}
         />
