@@ -1,5 +1,12 @@
 import { Handle, Position } from "reactflow";
 import type { ReactNode } from "react";
+import type { AssetEntry } from "../../types";
+
+export interface DiveNodeData {
+  asset: AssetEntry;
+  isCurrent: boolean;
+  onUse: () => void;
+}
 
 export interface NodeShellProps {
   assetId: string;

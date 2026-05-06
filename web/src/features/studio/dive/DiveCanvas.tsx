@@ -45,8 +45,8 @@ export function DiveCanvas({ open, onClose }: Props) {
   // this with Dagre via useTreeLayout.
   const { nodes, edges } = useMemo(() => {
     if (!comp) return { nodes: [] as Node[], edges: [] as Edge[] };
-    const assets = comp.assets ?? [];
-    const provenance = comp.provenance ?? [];
+    const assets = comp.assets;
+    const provenance = comp.provenance;
     const flowNodes: Node[] = assets.map((asset, i) => ({
       id: asset.id,
       type: kindToNodeType(asset),
@@ -81,7 +81,7 @@ export function DiveCanvas({ open, onClose }: Props) {
 
   if (!open) return null;
 
-  const empty = !comp || (comp.assets ?? []).length === 0;
+  const empty = !comp || comp.assets.length === 0;
 
   return createPortal(
     <div
@@ -100,6 +100,9 @@ export function DiveCanvas({ open, onClose }: Props) {
       <div
         // Stop click-through so internal canvas clicks don't dismiss.
         onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="dive-title"
         style={{
           position: "absolute",
           inset: 40,
@@ -120,8 +123,10 @@ export function DiveCanvas({ open, onClose }: Props) {
             alignItems: "center",
           }}
         >
-          <span
+          <h2
+            id="dive-title"
             style={{
+              margin: 0,
               fontFamily: "var(--font-editorial)",
               fontStyle: "italic",
               fontSize: 22,
@@ -130,7 +135,7 @@ export function DiveCanvas({ open, onClose }: Props) {
             }}
           >
             Provenance Dive
-          </span>
+          </h2>
           <button type="button" onClick={onClose} aria-label="Close" data-bare>
             ×
           </button>

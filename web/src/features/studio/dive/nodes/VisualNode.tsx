@@ -1,14 +1,7 @@
 import type { NodeProps } from "reactflow";
-import type { AssetEntry } from "../../types";
-import { NodeShell } from "./NodeShell";
+import { NodeShell, type DiveNodeData } from "./NodeShell";
 
-export interface VisualNodeData {
-  asset: AssetEntry;
-  isCurrent: boolean;
-  onUse: () => void;
-}
-
-export function VisualNode({ data }: NodeProps<VisualNodeData>) {
+export function VisualNode({ data }: NodeProps<DiveNodeData>) {
   return (
     <NodeShell assetId={data.asset.id} isCurrent={data.isCurrent} onUse={data.onUse}>
       <img
