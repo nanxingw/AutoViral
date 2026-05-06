@@ -26,6 +26,16 @@ describe("InspectorTab", () => {
     expect(screen.getByText(/no clip selected/i)).toBeInTheDocument();
   });
 
+  it("mounts KeyframePanel below VariantSwitcher (Phase 8.2.D)", () => {
+    // No selection → KeyframePanel empty-state copy should render alongside
+    // the VariantSwitcher empty state.
+    useComposition.setState({ comp: null, selection: null });
+    render(<InspectorTab />);
+    expect(
+      screen.getByText(/select a clip in the timeline to add keyframes/i),
+    ).toBeInTheDocument();
+  });
+
   it("renders the 'Open in Dive' button (Phase 5.C trigger)", () => {
     const comp = makeAssetGraph({
       ids: ["a", "b"],

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { VariantSwitcher } from "./VariantSwitcher";
+import { KeyframePanel } from "./KeyframePanel";
 import { DiveCanvas } from "../../dive/DiveCanvas";
 
 export function InspectorTab() {
@@ -29,6 +30,7 @@ export function InspectorTab() {
           Inspector
         </div>
         <VariantSwitcher />
+        <KeyframePanel />
         <button
           type="button"
           onClick={() => setDiveOpen(true)}
