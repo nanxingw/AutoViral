@@ -86,6 +86,38 @@ export const ProvenanceEdgeSchema = z.object({
 });
 export type ProvenanceEdge = z.infer<typeof ProvenanceEdgeSchema>;
 
+// ─── Keyframes ──────────────────────────────────────────────────────────────
+// Phase 8.2 — keyframe curves on numeric clip properties. Each Keyframe self-
+// tags via `property`; clips carry a flat `keyframes?: Keyframe[]` array (D2).
+// We diverge from the master-plan §8.2 sketch (`prop`/`t`/`v`/`ease` short keys
+// + hyphen-cased easings) to camelCase parallel to the rest of this file.
+
+export const KeyframeEasingSchema = z.enum([
+  "linear",
+  "easeIn",
+  "easeOut",
+  "easeInOut",
+]);
+export type KeyframeEasing = z.infer<typeof KeyframeEasingSchema>;
+
+export const KeyframePropertySchema = z.enum([
+  "scale",
+  "x",
+  "y",
+  "rotation",
+  "opacity",
+  "volume",
+]);
+export type KeyframeProperty = z.infer<typeof KeyframePropertySchema>;
+
+export const KeyframeSchema = z.object({
+  property: KeyframePropertySchema,
+  time: z.number().min(0), // clip-local seconds
+  value: z.number(),
+  easing: KeyframeEasingSchema.default("linear"),
+});
+export type Keyframe = z.infer<typeof KeyframeSchema>;
+
 export const VideoClipSchema = z.object({
   id: z.string(),
   kind: z.literal("video"),
@@ -95,6 +127,7 @@ export const VideoClipSchema = z.object({
   trackOffset: z.number().min(0),
   transforms: TransformsSchema.default({}),
   filters: FiltersSchema.default({}),
+  keyframes: z.array(KeyframeSchema).optional(),
 });
 export type VideoClip = z.infer<typeof VideoClipSchema>;
 
@@ -116,6 +149,7 @@ export const AudioClipSchema = z.object({
     })
     .optional(),
   type: z.enum(["original", "bgm", "voiceover", "sfx"]).default("bgm"),
+  keyframes: z.array(KeyframeSchema).optional(),
 });
 export type AudioClip = z.infer<typeof AudioClipSchema>;
 
@@ -164,6 +198,7 @@ export const OverlayClipSchema = z.object({
     hPct: z.number(),
   }),
   opacity: z.number().min(0).max(1).default(1),
+  keyframes: z.array(KeyframeSchema).optional(),
 });
 export type OverlayClip = z.infer<typeof OverlayClipSchema>;
 
