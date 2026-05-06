@@ -29,6 +29,9 @@ import {
   type ProvenanceEdge,
   CompositionSchema,
 } from "../shared/composition.js";
+import { z } from "zod";
+import { tmpdir } from "node:os";
+import { runPythonScript } from "./python-bridge.js";
 
 export const apiRoutes = new Hono();
 
@@ -1935,4 +1938,191 @@ apiRoutes.get("/api/memory/context/:workId", async (c) => {
   const platform = typeof firstPlatform === "string" ? firstPlatform : (firstPlatform as any)?.platform ?? "通用";
   const context = await client.buildContext(topic, platform);
   return c.json({ workId, topic, platform, context });
+});
+
+// ── Phase 6.C — Smart Crop / Reframe ────────────────────────────────────────
+//
+// POST /api/video/reframe
+// Orchestrates the smart-crop Python pipeline:
+//   1. saliency.py     → ROIs JSON
+//   2. crop_9_16.py    → reframed mp4 in <workDir>/assets/reframed/
+//   3. composition.yaml updated with new AssetEntry + reframe ProvenanceEdge
+//
+// Phase 6 keeps this synchronous (5–30s wait); Phase 7 turns it into a
+// background job behind the render queue.
+
+const ASPECT_VALUES = ["9:16", "1:1", "16:9", "4:5"] as const;
+type AspectRatio = (typeof ASPECT_VALUES)[number];
+
+const ReframeBody = z.object({
+  workId: z.string().min(1),
+  videoId: z.string().min(1),
+  fromAspect: z.enum(ASPECT_VALUES),
+  toAspect: z.enum(ASPECT_VALUES),
+  strategy: z.enum(["face", "saliency", "center", "auto"]).optional(),
+});
+
+const TARGET_RES: Record<AspectRatio, string> = {
+  "9:16": "1080x1920",
+  "1:1": "1080x1080",
+  "16:9": "1920x1080",
+  "4:5": "1080x1350",
+};
+
+function safeTitleFromWork(title: string | undefined): string {
+  return (
+    (title ?? "")
+      .toLowerCase()
+      .replace(/[^\w.-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "autoviral-export"
+  );
+}
+
+apiRoutes.post("/api/video/reframe", async (c) => {
+  const parsed = ReframeBody.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.text(`invalid body: ${parsed.error.message}`, 400);
+  }
+  const body = parsed.data;
+
+  const work = await getWork(body.workId);
+  if (!work) return c.text(`work not found: ${body.workId}`, 404);
+
+  const wDir = join(dataDir, "works", body.workId);
+  const compYamlPath = join(wDir, "composition.yaml");
+  let compRaw: string;
+  try {
+    compRaw = await readFile(compYamlPath, "utf-8");
+  } catch {
+    return c.text(`composition not found for work: ${body.workId}`, 404);
+  }
+  const compDoc = yaml.load(compRaw) as Composition;
+  const sourceAsset = (compDoc.assets ?? []).find((a) => a.id === body.videoId);
+  if (!sourceAsset) {
+    return c.text(`videoId not found in composition: ${body.videoId}`, 404);
+  }
+
+  // Resolve the on-disk source path. Asset URIs follow the
+  // /api/works/<workId>/assets/<rel> convention; strip the prefix and
+  // re-anchor under the work directory.
+  const rel = sourceAsset.uri.replace(/^\/api\/works\/[^/]+\/assets\//, "");
+  const sourceAbsPath = join(wDir, "assets", rel);
+
+  // Stage 1 — saliency.py
+  const tmp = join(tmpdir(), `reframe-${body.workId}-${Date.now()}`);
+  await mkdir(tmp, { recursive: true });
+  const roisJsonPath = join(tmp, "rois.json");
+  const saliencyScript = join(
+    repoRoot,
+    "skills",
+    "autoviral",
+    "modules",
+    "assembly",
+    "scripts",
+    "smart_crop",
+    "saliency.py",
+  );
+  let saliencyResult: {
+    strategy_used: string;
+    strategy_requested: string;
+  };
+  try {
+    saliencyResult = await runPythonScript<{
+      strategy_used: string;
+      strategy_requested: string;
+    }>(
+      saliencyScript,
+      [
+        "--input",
+        sourceAbsPath,
+        "--output",
+        roisJsonPath,
+        "--strategy",
+        body.strategy ?? "auto",
+        "--target-aspect",
+        body.toAspect,
+      ],
+      { timeoutMs: 60_000 },
+    );
+  } catch (err) {
+    return c.text(String(err), 500);
+  }
+
+  // Stage 2 — crop_9_16.py
+  const safeTitle = safeTitleFromWork(work.title);
+  const iso = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const aspectSeg = body.toAspect.replace(":", "x");
+  const outName = `${safeTitle}__${aspectSeg}__${saliencyResult.strategy_used}__${iso}.mp4`;
+  const reframedDir = join(wDir, "assets", "reframed");
+  await mkdir(reframedDir, { recursive: true });
+  const outPath = join(reframedDir, outName);
+
+  const cropScript = join(
+    repoRoot,
+    "skills",
+    "autoviral",
+    "modules",
+    "assembly",
+    "scripts",
+    "smart_crop",
+    "crop_9_16.py",
+  );
+  let cropResult: { output: string; width: number; height: number };
+  try {
+    cropResult = await runPythonScript<{
+      output: string;
+      width: number;
+      height: number;
+    }>(
+      cropScript,
+      [
+        "--input",
+        sourceAbsPath,
+        "--rois",
+        roisJsonPath,
+        "--output",
+        outPath,
+        "--target-resolution",
+        TARGET_RES[body.toAspect],
+      ],
+      { timeoutMs: 5 * 60_000 },
+    );
+  } catch (err) {
+    return c.text(String(err), 500);
+  }
+
+  // Register new asset + provenance edge atomically (single yaml write).
+  const newAssetId = `reframe_${Math.random().toString(36).slice(2, 10)}`;
+  const newAsset: AssetEntry = {
+    id: newAssetId,
+    uri: `/api/works/${body.workId}/assets/reframed/${encodeURIComponent(outName)}`,
+    kind: "video",
+    metadata: { width: cropResult.width, height: cropResult.height },
+    status: "ready",
+  };
+  const newEdge: ProvenanceEdge = {
+    fromAssetId: body.videoId,
+    toAssetId: newAssetId,
+    operation: {
+      type: "reframe",
+      actor: "system",
+      timestamp: new Date().toISOString(),
+      params: {
+        fromAspect: body.fromAspect,
+        toAspect: body.toAspect,
+        strategyRequested: saliencyResult.strategy_requested,
+        strategyUsed: saliencyResult.strategy_used,
+        sourceVideoUri: sourceAsset.uri,
+      },
+    },
+  };
+  compDoc.assets = [...(compDoc.assets ?? []), newAsset];
+  compDoc.provenance = [...(compDoc.provenance ?? []), newEdge];
+  await writeFile(compYamlPath, yaml.dump(compDoc), "utf-8");
+
+  return c.json({
+    asset: newAsset,
+    edge: newEdge,
+    strategyUsed: saliencyResult.strategy_used,
+  });
 });
