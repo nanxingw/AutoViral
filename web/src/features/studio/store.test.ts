@@ -2,10 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useComposition } from "./store";
 import {
   makeEmptyComposition,
+  VideoClipSchema,
   type Composition,
   type VideoClip,
   type TextClip,
 } from "./types";
+import { effectiveClipDuration } from "@shared/speed-ramp";
 
 describe("useComposition store", () => {
   beforeEach(() => {
@@ -254,5 +256,48 @@ describe("useComposition — keyframe actions", () => {
       keyframes?: unknown;
     };
     expect(c.keyframes).toBeUndefined();
+  });
+
+  // ─── Phase 8.3.B — speed keyframes reuse the existing actions (D2) ─────────
+  it("adding speed keyframes shrinks the clip's effective timeline duration (D2 regression)", () => {
+    useComposition.setState({ comp: makeCompWithVideoClip("clip-1") });
+    {
+      const c = findClip(useComposition.getState().comp!, "clip-1") as VideoClip;
+      expect(effectiveClipDuration(c)).toBe(5);
+    }
+    // Reuse the existing addKeyframe action — no new store API per D2.
+    useComposition.getState().addKeyframe("clip-1", {
+      property: "speed",
+      time: 0,
+      value: 2.0,
+      easing: "linear",
+    });
+    useComposition.getState().addKeyframe("clip-1", {
+      property: "speed",
+      time: 5,
+      value: 2.0,
+      easing: "linear",
+    });
+    const c = findClip(useComposition.getState().comp!, "clip-1") as VideoClip;
+    expect(c.keyframes?.length).toBe(2);
+    expect(c.keyframes?.[0].property).toBe("speed");
+    // (out - in) / 2 = 5 / 2 = 2.5
+    expect(effectiveClipDuration(c)).toBeCloseTo(2.5, 3);
+  });
+
+  it("VideoClipSchema rejects speed keyframes outside [0.1, 4.0] (D4/D10)", () => {
+    expect(() =>
+      VideoClipSchema.parse({
+        id: "v1",
+        kind: "video",
+        src: "/x.mp4",
+        in: 0,
+        out: 1,
+        trackOffset: 0,
+        keyframes: [
+          { property: "speed", time: 0, value: 5, easing: "linear" },
+        ],
+      }),
+    ).toThrow();
   });
 });
