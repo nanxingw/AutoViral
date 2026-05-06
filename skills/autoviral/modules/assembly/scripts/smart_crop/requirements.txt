@@ -6,3 +6,8 @@
 mediapipe>=0.10.13
 opencv-python>=4.10.0
 numpy>=1.26.0
+# mediapipe's bundled gencode (protobuf 5.28.3) clashes with system protobuf
+# 5.27.x → "VersionError: Detected mismatched Protobuf Gencode/Runtime versions".
+# Pin floor here so a fresh `uv pip install -r requirements.txt` gets a
+# compatible runtime.
+protobuf>=5.28.3
