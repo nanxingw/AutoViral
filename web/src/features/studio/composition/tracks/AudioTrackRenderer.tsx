@@ -1,21 +1,30 @@
 import { Sequence, Audio, useVideoConfig, useCurrentFrame } from "remotion";
 import type { AudioClip, Track } from "../../types";
+import { interpolateProperty } from "@shared/keyframes";
 
 /**
  * Pure helper for testability: returns the effective volume for an audio
  * clip at a given frame counted from the clip's local 0 (i.e. inside the
- * Sequence). Both fadeIn and fadeOut are linear ramps in clip-local seconds.
+ * Sequence). Both fadeIn and fadeOut are linear ramps in clip-local seconds
+ * applied on top of `base`.
+ *
+ * Phase 8.2.C — the previous signature took `clip.volume` as the implicit
+ * base. We now accept `base` explicitly so the keyframe path
+ * (`base = interpolateProperty(...) ?? clip.volume`) and the static path
+ * share this fade math without `computeAudioVolumeForFrame` knowing about
+ * keyframes itself.
  */
 export function computeAudioVolumeForFrame(
-  clip: { volume: number; fadeIn: number; fadeOut: number; in: number; out: number },
+  clip: { fadeIn: number; fadeOut: number; in: number; out: number },
   localFrame: number,
   fps: number,
+  base: number,
 ): number {
   const localSec = localFrame / fps;
   const dur = clip.out - clip.in;
   const fadeIn = clip.fadeIn ?? 0;
   const fadeOut = clip.fadeOut ?? 0;
-  let v = clip.volume;
+  let v = base;
   if (fadeIn > 0 && localSec < fadeIn) {
     v *= Math.max(0, Math.min(1, localSec / fadeIn));
   }
@@ -33,7 +42,12 @@ function AudioClipRenderer({
 }) {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
-  const v = computeAudioVolumeForFrame(clip, frame, fps);
+  const localSec = frame / fps;
+  // D9: keyframe value when present, else fall back to the static clip.volume.
+  // Fades (fadeIn/fadeOut) are independent affordances and ride on top.
+  const base =
+    interpolateProperty(clip.keyframes, "volume", localSec) ?? clip.volume;
+  const v = computeAudioVolumeForFrame(clip, frame, fps, base);
   return (
     <Audio
       src={clip.src}
