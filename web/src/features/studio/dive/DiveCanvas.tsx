@@ -37,7 +37,7 @@ export function DiveCanvas({ open, onClose }: Props) {
     if (!comp || !selection) return null;
     for (const t of comp.tracks) {
       const c = (t.clips as Clip[]).find((c) => c.id === selection);
-      if (c && "src" in c) return findAssetByUri(comp, c.src)?.id ?? null;
+      if (c && c.kind !== "text") return findAssetByUri(comp, c.src)?.id ?? null;
     }
     return null;
   }, [comp, selection]);
@@ -46,8 +46,8 @@ export function DiveCanvas({ open, onClose }: Props) {
   // Layout is computed by Dagre via `computeTreeLayout` (LR rankdir).
   const { nodes, edges } = useMemo(() => {
     if (!comp) return { nodes: [] as Node[], edges: [] as Edge[] };
-    const assets = comp.assets ?? [];
-    const provenance = comp.provenance ?? [];
+    const assets = comp.assets;
+    const provenance = comp.provenance;
 
     const layoutInputNodes = assets.map((a) => ({ id: a.id, width: NODE_WIDTH, height: NODE_HEIGHT }));
     const layoutInputEdges = provenance
