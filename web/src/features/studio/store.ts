@@ -1,7 +1,15 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { enableMapSet } from "immer";
-import type { Composition, Clip, AssetEntry, ProvenanceEdge, ExportPreset } from "./types";
+import type {
+  Composition,
+  Clip,
+  AssetEntry,
+  ProvenanceEdge,
+  ExportPreset,
+  Keyframe,
+} from "./types";
+import { addOrReplaceKeyframe } from "@shared/keyframes";
 import {
   clipDuration,
   clipEnd,
@@ -77,6 +85,19 @@ interface CompState {
   // Phase 6.D — apply a platform export preset. Atomic per D5: updates
   // exportPresets[0] AND aspect/width/height/fps in a single transaction.
   applyPlatformPreset: (preset: ExportPreset) => void;
+  // ─── Phase 8.2.B — keyframe mutations for the Inspector KeyframePanel ──
+  // addKeyframe is idempotent on (property, time) collision (D4 — replace
+  // existing entry via addOrReplaceKeyframe). All three are no-ops for
+  // TextClip (D8 — text doesn't carry keyframes) and unknown clipIds.
+  // updateKeyframe / removeKeyframe operate on the *original-array index*,
+  // not the sorted-display index — the panel must track that mapping.
+  addKeyframe: (clipId: string, kf: Keyframe) => void;
+  removeKeyframe: (clipId: string, indexInClipArray: number) => void;
+  updateKeyframe: (
+    clipId: string,
+    indexInClipArray: number,
+    patch: Partial<Keyframe>,
+  ) => void;
   // Phase 4.B — drag-preview actions (begin → update → commit/cancel)
   beginDrag: (clipId: string) => void;
   updateDragCandidate: (candidateStart: number) => void;
@@ -349,6 +370,56 @@ export const useComposition = create<CompState>()(
         s.comp.fps = preset.fps as 24 | 25 | 30 | 60;
         s.comp.exportPresets = [preset]; // replace, not append
         s.comp.updatedAt = new Date().toISOString();
+      }),
+    // ─── Phase 8.2.B — keyframe mutations ─────────────────────────────────
+    // Walk every track, find the clip by id, then mutate `keyframes` on the
+    // draft. Skip TextClip (D8) and unknown clipIds (silent no-op). The
+    // (property, time) collision math lives inside `addOrReplaceKeyframe`
+    // (8.2.A) — we just delegate.
+    addKeyframe: (clipId, kf) =>
+      set((s) => {
+        if (!s.comp) return;
+        for (const t of s.comp.tracks) {
+          const c = (t.clips as Clip[]).find((c) => c.id === clipId);
+          if (!c) continue;
+          if (c.kind === "text") return; // D8
+          // c is VideoClip | AudioClip | OverlayClip — all have keyframes?: Keyframe[]
+          const target = c as { keyframes?: Keyframe[] };
+          target.keyframes = addOrReplaceKeyframe(target.keyframes, kf);
+          return;
+        }
+      }),
+    removeKeyframe: (clipId, indexInClipArray) =>
+      set((s) => {
+        if (!s.comp) return;
+        for (const t of s.comp.tracks) {
+          const c = (t.clips as Clip[]).find((c) => c.id === clipId);
+          if (!c) continue;
+          if (c.kind === "text") return;
+          const target = c as { keyframes?: Keyframe[] };
+          const arr = target.keyframes;
+          if (!arr) return;
+          if (indexInClipArray < 0 || indexInClipArray >= arr.length) return;
+          arr.splice(indexInClipArray, 1);
+          if (arr.length === 0) target.keyframes = undefined;
+          return;
+        }
+      }),
+    updateKeyframe: (clipId, indexInClipArray, patch) =>
+      set((s) => {
+        if (!s.comp) return;
+        for (const t of s.comp.tracks) {
+          const c = (t.clips as Clip[]).find((c) => c.id === clipId);
+          if (!c) continue;
+          if (c.kind === "text") return;
+          const target = c as { keyframes?: Keyframe[] };
+          const arr = target.keyframes;
+          if (!arr) return;
+          const entry = arr[indexInClipArray];
+          if (!entry) return;
+          Object.assign(entry, patch);
+          return;
+        }
       }),
     setSelection: (id) =>
       set((s) => {
