@@ -245,3 +245,37 @@ describe("runRenderPipeline — encode stage wiring", () => {
     expect(_spawn).not.toHaveBeenCalled();
   });
 });
+
+describe("runRenderPipeline — proxy mode (Phase 7.C)", () => {
+  it("halves width/height (rounded to even) and clamps fps to 24 in the Remotion render call", async () => {
+    await runRenderPipeline({ comp: baseComp, outDir: "/tmp/out", proxy: true });
+    const renderMock = renderCompositionToMp4 as unknown as ReturnType<typeof vi.fn>;
+    const compArg = renderMock.mock.calls[0]![0] as any;
+    expect(compArg.width).toBe(540);
+    expect(compArg.height).toBe(960);
+    expect(compArg.fps).toBe(24);
+  });
+
+  it("halves preset.videoBitrate (audio bitrate kept) when proxy + preset", async () => {
+    _spawn.mockClear();
+    const compWithPreset: Composition = {
+      ...baseComp,
+      exportPresets: [{
+        id: "p", label: "x", platform: "douyin",
+        width: 1080, height: 1920, fps: 30,
+        codec: "h264", container: "mp4",
+        videoBitrate: 8000, audioBitrate: 192,
+        loudnessTargetLufs: -14, safeZonePct: 0.18,
+      }],
+    };
+    const promise = runRenderPipeline({ comp: compWithPreset, outDir: "/tmp/out", proxy: true });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    for (const r of _spawn.mock.results) r.value.emit("close", 0);
+    await promise;
+    const args = _spawn.mock.calls[0]![1] as string[];
+    const bvIdx = args.indexOf("-b:v");
+    expect(args[bvIdx + 1]).toBe("4000k"); // halved from 8000
+    const baIdx = args.indexOf("-b:a");
+    expect(args[baIdx + 1]).toBe("192k");  // kept
+  });
+});

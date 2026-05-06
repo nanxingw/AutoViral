@@ -30,6 +30,39 @@ export interface RenderJobOptions {
   onProgress?: (stage: RenderStage, pct: number) => void;
   /** Phase 7.A — abort the in-flight pipeline. Wired into spawn() processes. */
   signal?: AbortSignal;
+  /** Phase 7.C — half-res / 24fps / half-bitrate proxy render. */
+  proxy?: boolean;
+}
+
+/** Round n/2 down to the nearest even integer (libx264 yuv420p requires even dims). */
+function evenHalf(n: number): number {
+  return Math.max(2, Math.floor(n / 2 / 2) * 2);
+}
+
+/**
+ * Phase 7.C — produce a deep-clone of `comp` with half-resolution (rounded
+ * to even ints), fps clamped to 24, and any export presets' videoBitrate
+ * halved. Audio bitrate is intentionally preserved for review-quality audio.
+ * Never mutates the input.
+ */
+function applyProxy(comp: Composition): Composition {
+  // Composition.fps is a literal union (24|25|30|60); proxy always lands at 24
+  // when the source is >= 24, otherwise we keep the original literal.
+  const proxyFps: Composition["fps"] = comp.fps >= 24 ? 24 : comp.fps;
+  const presets = (comp.exportPresets ?? []).map((p) => ({
+    ...p,
+    width: evenHalf(p.width),
+    height: evenHalf(p.height),
+    fps: Math.min(p.fps, 24),
+    videoBitrate: Math.max(500, Math.round(p.videoBitrate / 2)),
+  }));
+  return {
+    ...comp,
+    width: evenHalf(comp.width),
+    height: evenHalf(comp.height),
+    fps: proxyFps,
+    exportPresets: presets,
+  };
 }
 
 /**
@@ -130,6 +163,8 @@ export async function runEncodeStage(
 }
 
 export async function runRenderPipeline(opts: RenderJobOptions): Promise<string> {
+  // Phase 7.C — apply proxy transform (deep-clone, never mutates caller's comp).
+  const comp = opts.proxy ? applyProxy(opts.comp) : opts.comp;
   const target = opts.loudnessTargetLufs ?? -14;
   const onP = opts.onProgress ?? (() => undefined);
   const checkAbort = () => {
@@ -144,14 +179,14 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   checkAbort();
   onP("render", 0);
   let workingPath = await renderCompositionToMp4(
-    { ...opts.comp, title: opts.outputTitle },
+    { ...comp, title: opts.outputTitle },
     opts.outDir,
   );
   onP("render", 1);
   checkAbort();
 
   // Stage 2: ducking (optional, only if any audio clip has ducking)
-  const audioClips = opts.comp.tracks
+  const audioClips = comp.tracks
     .filter((t) => t.kind === "audio")
     .flatMap((t) => t.clips as any[]);
   const needsDucking = audioClips.some((c) => c.ducking);
@@ -160,7 +195,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
     const ducked = workingPath.replace(/\.mp4$/, "-ducked.mp4");
     await mixAudioTracks({
       videoPath: workingPath,
-      tracks: compositionToMixTracks(opts.comp),
+      tracks: compositionToMixTracks(comp),
       outputPath: ducked,
     });
     workingPath = ducked;
@@ -172,7 +207,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   // a missing text track when burnSubtitles=true is a programming error, not
   // graceful degradation. Callers can pre-check via compositionTextTrackToJson.
   if (opts.burnSubtitles) {
-    const hasTextTrack = compositionTextTrackToJson(opts.comp).length > 0;
+    const hasTextTrack = compositionTextTrackToJson(comp).length > 0;
     if (!hasTextTrack) {
       throw new Error(
         "runRenderPipeline: burnSubtitles=true but the composition has no text-track clips to burn",
@@ -182,7 +217,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
     const burned = workingPath.replace(/\.mp4$/, "-burned.mp4");
     await burnSubtitles({
       inputVideo: workingPath,
-      comp: opts.comp,
+      comp,
       outputVideo: burned,
     });
     workingPath = burned;
@@ -203,7 +238,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   // the prior behaviour: rename + done.
   onP("encode", 0);
   const finalPath = join(opts.outDir, `final-${Date.now()}.mp4`);
-  const preset = opts.comp.exportPresets?.[0];
+  const preset = comp.exportPresets?.[0];
   if (preset) {
     await runEncodeStage(workingPath, finalPath, preset, opts.signal);
   } else {
