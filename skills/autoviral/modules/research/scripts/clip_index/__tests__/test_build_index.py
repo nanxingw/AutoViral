@@ -199,3 +199,31 @@ def test_build_atomic_write_no_tmp_files_left(
     assert rc == 0
     leftovers = [p.name for p in out_dir.iterdir() if p.name.endswith(".tmp")]
     assert leftovers == []
+
+
+# --- Stub-mode coverage (D4 / D11) ----------------------------------------
+
+
+def test_build_stub_mode_when_open_clip_missing(
+    tmp_path, run_script, make_image, write_asset_list
+):
+    """When open_clip import fails, build_index.py emits {stub:true} and
+    exits 0 (per D4/D11). Should NOT crash and should NOT write any output."""
+    img = make_image("a.png")
+    asset_list = write_asset_list(
+        [{"workId": "w1", "relPath": "a.png", "absPath": str(img), "kind": "image"}]
+    )
+    out_dir = tmp_path / "out"
+    rc, payload, stderr = run_script(
+        "build_index.py",
+        _build_args(asset_list, out_dir),
+        stub_mode="force_no_open_clip",
+    )
+    assert rc == 0, stderr
+    assert payload is not None
+    assert payload["stub"] is True
+    assert "open_clip" in payload["reason"].lower()
+    # No index artifacts should have been written.
+    assert not (out_dir / "embeddings.npy").exists()
+    assert not (out_dir / "asset-uris.json").exists()
+    assert not (out_dir / "meta.json").exists()
