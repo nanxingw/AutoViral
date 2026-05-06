@@ -10,7 +10,8 @@ import {
 } from "../audio-tools.js";
 import { join } from "node:path";
 import { rename } from "node:fs/promises";
-import type { Composition } from "../shared/composition.js";
+import { spawn } from "node:child_process";
+import type { Composition, ExportPreset } from "../shared/composition.js";
 
 export type RenderStage = "render" | "duck" | "loudnorm" | "burn" | "encode";
 
@@ -65,6 +66,47 @@ function compositionToMixTracks(comp: Composition): MixTrack[] {
     tracks.push(mt);
   }
   return tracks;
+}
+
+const CODEC_MAP: Record<"h264" | "h265" | "vp9" | "av1", string> = {
+  h264: "libx264",
+  h265: "libx265",
+  vp9: "libvpx-vp9",
+  av1: "libaom-av1",
+};
+
+/**
+ * Phase 6.E — re-encode `input` to `output` using `preset` for codec /
+ * bitrate / audio settings. Loudnorm runs upstream (stage 4); this stage
+ * only honours codec + bitrate flags, plus a faststart container hint
+ * for web seek.
+ */
+export async function runEncodeStage(
+  input: string,
+  output: string,
+  preset: ExportPreset,
+): Promise<void> {
+  const vcodec = CODEC_MAP[preset.codec];
+  const args = [
+    "-y", "-loglevel", "error",
+    "-i", input,
+    "-c:v", vcodec,
+    "-b:v", `${preset.videoBitrate}k`,
+    "-c:a", "aac",
+    "-b:a", `${preset.audioBitrate}k`,
+    "-movflags", "+faststart",
+    output,
+  ];
+  return new Promise<void>((resolve, reject) => {
+    const child = spawn("ffmpeg", args);
+    let stderr = "";
+    child.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
+    child.on("close", (code: number | null) => {
+      if (code === 0) resolve();
+      else reject(new Error(`runEncodeStage: ffmpeg exit ${code}\n${stderr}`));
+    });
+    child.on("error", reject);
+  });
 }
 
 export async function runRenderPipeline(opts: RenderJobOptions): Promise<string> {
@@ -124,10 +166,17 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   workingPath = normalized;
   onP("loudnorm", 1);
 
-  // Stage 5: final encode (rename — encoder profiles deferred to Phase 6)
+  // Stage 5: final encode. If a platform preset is present, re-encode using
+  // its codec + bitrate. Otherwise (legacy compositions w/o presets), keep
+  // the prior behaviour: rename + done.
   onP("encode", 0);
   const finalPath = join(opts.outDir, `final-${Date.now()}.mp4`);
-  await rename(workingPath, finalPath);
+  const preset = opts.comp.exportPresets?.[0];
+  if (preset) {
+    await runEncodeStage(workingPath, finalPath, preset);
+  } else {
+    await rename(workingPath, finalPath);
+  }
   onP("encode", 1);
 
   return finalPath;
