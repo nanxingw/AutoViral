@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useComposition } from "../../store";
 import { Track } from "./Track";
 import { BladeTool } from "./BladeTool";
+import { Playhead } from "./Playhead";
 
 const TRACK_COLORS: Record<string, string> = {
   video: "var(--accent)",
@@ -19,6 +20,10 @@ const TRACK_LABELS: Record<string, string> = {
 
 export function Timeline() {
   const comp = useComposition((s) => s.comp);
+  // 4.H — D10: snap-line overlay reads `dragState.snapTime` exposed by the
+  // 4.B drag pipeline (store.ts:371-403). Renders only while a drag is active
+  // AND a snap point was found.
+  const dragState = useComposition((s) => s.dragState);
   const [zoom, setZoom] = useState(1.2);
   const pxPerSecond = 50 * zoom;
 
@@ -115,6 +120,44 @@ export function Timeline() {
             totalWidth={totalWidth}
             labelColumnWidth={110}
           />
+          {/* Phase 4.H — Playhead + snap-line overlays.
+              D5: Playhead is a sibling of <Ruler /> mounted full-height
+              within the lanes container, offset by the 110px label column
+              at the parent level. The wrapper itself is pointer-events:none
+              so it doesn't intercept clip drags below; Playhead re-enables
+              pointer events on its own hit area.
+              D10: snap-line is a separate vertical overlay driven by
+              `dragState.snapTime` (4.B store output). */}
+          <div
+            data-testid="playhead-overlay"
+            style={{
+              position: "absolute",
+              top: 0,
+              bottom: 0,
+              left: 110,
+              right: 0,
+              pointerEvents: "none",
+              zIndex: 6,
+            }}
+          >
+            <Playhead pxPerSecond={pxPerSecond} fps={comp.fps} />
+            {dragState && dragState.snapTime != null && (
+              <div
+                data-testid="snap-line"
+                style={{
+                  position: "absolute",
+                  left: dragState.snapTime * pxPerSecond,
+                  top: 22, // below the 22px ruler
+                  bottom: 0,
+                  width: 1,
+                  background: "var(--accent-hi)",
+                  boxShadow: "0 0 8px var(--accent-hi)",
+                  pointerEvents: "none",
+                  zIndex: 6,
+                }}
+              />
+            )}
+          </div>
         </div>
       </div>
     </div>
