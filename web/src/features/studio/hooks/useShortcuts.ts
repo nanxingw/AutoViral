@@ -39,6 +39,10 @@ export function useShortcuts(workId: string | null) {
         }
       }
 
+      // Held keys: ignore auto-repeat so a long-press of `B` doesn't
+      // rapid-toggle bladeMode (Phase 4.J quality review nit).
+      if (e.repeat) return;
+
       const state = useComposition.getState();
       const fps = state.comp?.fps ?? 30;
       const isMod = e.metaKey || e.ctrlKey;
