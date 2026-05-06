@@ -1,0 +1,8 @@
+# Phase 6 smart-crop dependencies. Install with:
+#   uv pip install -r skills/autoviral/modules/assembly/scripts/smart_crop/requirements.txt
+#
+# Apple Silicon: if `mediapipe` segfaults on import, replace with `mediapipe-silicon`.
+# Linux CI behind a firewall: pre-warm the FaceDetection model cache before running tests.
+mediapipe>=0.10.13
+opencv-python>=4.10.0
+numpy>=1.26.0
