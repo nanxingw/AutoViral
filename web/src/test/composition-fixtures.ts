@@ -1,4 +1,4 @@
-import type { Clip, Composition, Track, VideoClip, AudioClip, TextClip, OverlayClip } from "../features/studio/types";
+import type { AssetEntry, Clip, Composition, ProvenanceEdge, Track, VideoClip, AudioClip, TextClip, OverlayClip } from "../features/studio/types";
 import { makeEmptyComposition } from "../features/studio/types";
 
 const baseTransform = { scale: 1, x: 0, y: 0, rotation: 0 };
@@ -84,4 +84,55 @@ export function threeClipVideoTrack(): { track: Track; clips: VideoClip[] } {
     clips: [a, b, d],
   };
   return { track, clips: [a, b, d] };
+}
+
+export function makeAssetEntry(
+  over: Partial<AssetEntry> & Pick<AssetEntry, "id">,
+): AssetEntry {
+  return {
+    uri: `/assets/${over.id}.png`,
+    kind: "image",
+    metadata: {},
+    status: "ready",
+    ...over,
+  };
+}
+
+export function makeProvenanceEdge(
+  over: Partial<ProvenanceEdge> & Pick<ProvenanceEdge, "toAssetId">,
+): ProvenanceEdge {
+  return {
+    fromAssetId: null,
+    operation: {
+      type: "upload",
+      actor: "user",
+      timestamp: "2026-05-06T00:00:00Z",
+      params: {},
+    },
+    ...over,
+  };
+}
+
+/**
+ * Build a Composition pre-populated with an asset graph.
+ * `edges` is an array of [fromAssetId, toAssetId] pairs; assets without an
+ * incoming edge are roots (fromAssetId === null in the resulting edge).
+ *
+ * Example: makeAssetGraph({ ids: ["a", "b", "c"], edges: [["a", "b"], ["a", "c"]] })
+ *   → assets: [a, b, c]; provenance: [{to:a, from:null}, {to:b, from:a}, {to:c, from:a}]
+ */
+export function makeAssetGraph(opts: {
+  ids: string[];
+  edges?: Array<[string, string]>;
+  workId?: string;
+}): Composition {
+  const c = makeEmptyComposition({ workId: opts.workId ?? "w" });
+  const childToParent = new Map<string, string>();
+  for (const [from, to] of opts.edges ?? []) childToParent.set(to, from);
+
+  c.assets = opts.ids.map((id) => makeAssetEntry({ id }));
+  c.provenance = opts.ids.map((id) =>
+    makeProvenanceEdge({ toAssetId: id, fromAssetId: childToParent.get(id) ?? null }),
+  );
+  return c;
 }
