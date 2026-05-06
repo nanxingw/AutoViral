@@ -6,14 +6,23 @@ import { AssetSidebar } from "./index";
 import { useComposition } from "@/features/studio/store";
 import { makeAssetGraph, makeVideoClip } from "../../../../test/composition-fixtures";
 
+// Default mock — discriminate by URL so SearchBox's clip-index calls don't
+// collide with the assets list call. (Phase 8.1.C added /api/clip-index/* fan-
+// out from the LibraryTab → SearchBox tree.)
+const _defaultAssets = {
+  assets: [
+    "assets/clips/intro.mp4",
+    "output/final.mp4",
+    "assets/images/cover.png",
+  ],
+};
 vi.mock("@/lib/api", () => ({
-  apiFetch: vi.fn(async () => ({
-    assets: [
-      "assets/clips/intro.mp4",
-      "output/final.mp4",
-      "assets/images/cover.png",
-    ],
-  })),
+  apiFetch: vi.fn(async (url: string) => {
+    if (url.includes("/api/clip-index/status")) return { stub: true, reason: "no_index" };
+    if (url.includes("/assets/search")) return { stub: false, results: [], searchMs: 1 };
+    if (url.includes("/api/clip-index/build")) return { ok: true, stub: false, assetCount: 0, model: "ViT-B-32", indexedAt: "x", durationMs: 1 };
+    return _defaultAssets;
+  }),
 }));
 
 vi.mock("@/features/chat/useChatSocket", () => ({
@@ -45,7 +54,21 @@ describe("AssetSidebar", () => {
 
   it("shows NO ASSETS empty state when no buckets", async () => {
     const mod = await import("@/lib/api");
-    (mod.apiFetch as any).mockResolvedValueOnce({ assets: [] });
+    // Override the asset list specifically; SearchBox calls still get the
+    // default discriminating mock above.
+    (mod.apiFetch as any).mockImplementationOnce(async (url: string) => {
+      if (url.includes("/api/clip-index/status")) return { stub: true, reason: "no_index" };
+      if (url.includes("/assets/search")) return { stub: false, results: [], searchMs: 1 };
+      return { assets: [] };
+    });
+    // Subsequent calls fall through to the default mock; force assets-list to
+    // return [] for any later refetch.
+    (mod.apiFetch as any).mockImplementation(async (url: string) => {
+      if (url.includes("/api/clip-index/status")) return { stub: true, reason: "no_index" };
+      if (url.includes("/assets/search")) return { stub: false, results: [], searchMs: 1 };
+      if (url.includes("/api/clip-index/build")) return { ok: true, stub: false, assetCount: 0, model: "ViT-B-32", indexedAt: "x", durationMs: 1 };
+      return { assets: [] };
+    });
     wrap(<AssetSidebar workId="w1" />);
     await waitFor(() => expect(screen.getByText("NO ASSETS")).toBeTruthy());
   });

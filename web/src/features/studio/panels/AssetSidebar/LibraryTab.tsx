@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useWorkAssets, type AssetItem } from "@/queries/assets";
 import { GenerationDialog } from "@/features/studio/generation/GenerationDialog";
+import { SearchBox } from "./SearchBox";
 
 interface Props {
   workId: string;
@@ -116,6 +117,9 @@ export function LibraryTab({ workId }: Props) {
           })}
         </div>
       </div>
+
+      {/* Phase 8.1.C — CLIP semantic search */}
+      <SearchBox workId={workId} />
 
       {/* Grid */}
       <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
