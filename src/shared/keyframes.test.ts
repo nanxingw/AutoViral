@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { Keyframe } from "./composition";
-import { interpolateProperty, addOrReplaceKeyframe } from "./keyframes";
+import type { Keyframe } from "./composition.js";
+import { interpolateProperty, addOrReplaceKeyframe } from "./keyframes.js";
 
 describe("interpolateProperty", () => {
   it("returns null when no keyframe exists for the requested property", () => {
