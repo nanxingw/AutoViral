@@ -223,4 +223,17 @@ describe("KeyframePanel", () => {
     const options = Array.from(propertySelect.options).map((o) => o.value);
     expect(options).toEqual(["scale", "x", "y", "rotation", "opacity"]);
   });
+
+  // Phase 8.3.D — VideoClip gains "speed" in the property dropdown; AudioClip
+  // and OverlayClip explicitly do NOT (D1 — speed is VideoClip-only in v1).
+  it("VideoClip selection exposes 'speed' as the 5th property option (D1)", async () => {
+    const user = userEvent.setup();
+    const comp = makeCompWithVideoClip("v-1");
+    useComposition.setState({ comp, selection: "v-1" });
+    render(<KeyframePanel />);
+    await user.click(screen.getByRole("button", { name: /add keyframe/i }));
+    const propertySelect = screen.getByLabelText(/property/i) as HTMLSelectElement;
+    const options = Array.from(propertySelect.options).map((o) => o.value);
+    expect(options).toEqual(["scale", "x", "y", "rotation", "speed"]);
+  });
 });

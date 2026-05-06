@@ -23,7 +23,8 @@ const EASINGS: KeyframeEasing[] = ["linear", "easeIn", "easeOut", "easeInOut"];
 function propertiesForClip(kind: Clip["kind"]): KeyframeProperty[] {
   switch (kind) {
     case "video":
-      return ["scale", "x", "y", "rotation"];
+      // Phase 8.3.D — VideoClip gains "speed" (D1: VideoClip-only in v1).
+      return ["scale", "x", "y", "rotation", "speed"];
     case "overlay":
       return ["scale", "x", "y", "rotation", "opacity"];
     case "audio":
@@ -35,6 +36,9 @@ function propertiesForClip(kind: Clip["kind"]): KeyframeProperty[] {
 
 function defaultStaticValue(clip: Clip, prop: KeyframeProperty): number {
   if (clip.kind === "video") {
+    // Phase 8.3.D — VideoClip has no static `speed` field; 1.0 IS the
+    // no-keyframes baseline (D3). Return 1.0 to seed the AddForm input.
+    if (prop === "speed") return 1.0;
     if (prop === "scale") return clip.transforms.scale;
     if (prop === "x") return clip.transforms.x;
     if (prop === "y") return clip.transforms.y;
