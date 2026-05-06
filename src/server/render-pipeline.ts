@@ -28,6 +28,8 @@ export interface RenderJobOptions {
   outputTitle?: string;
   /** Hook for the render queue / API client to surface progress. */
   onProgress?: (stage: RenderStage, pct: number) => void;
+  /** Phase 7.A — abort the in-flight pipeline. Wired into spawn() processes. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -85,6 +87,7 @@ export async function runEncodeStage(
   input: string,
   output: string,
   preset: ExportPreset,
+  signal?: AbortSignal,
 ): Promise<void> {
   const vcodec = CODEC_MAP[preset.codec];
   const args = [
@@ -98,28 +101,54 @@ export async function runEncodeStage(
     output,
   ];
   return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("runEncodeStage: aborted before spawn"));
+      return;
+    }
     const child = spawn("ffmpeg", args);
     let stderr = "";
     child.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
+    const onAbort = () => {
+      try { child.kill("SIGTERM"); } catch { /* ignore */ }
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
     child.on("close", (code: number | null) => {
-      if (code === 0) resolve();
-      else reject(new Error(`runEncodeStage: ffmpeg exit ${code}\n${stderr}`));
+      signal?.removeEventListener("abort", onAbort);
+      if (signal?.aborted) {
+        reject(new Error("runEncodeStage: aborted"));
+      } else if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`runEncodeStage: ffmpeg exit ${code}\n${stderr}`));
+      }
     });
-    child.on("error", reject);
+    child.on("error", (err) => {
+      signal?.removeEventListener("abort", onAbort);
+      reject(err);
+    });
   });
 }
 
 export async function runRenderPipeline(opts: RenderJobOptions): Promise<string> {
   const target = opts.loudnessTargetLufs ?? -14;
   const onP = opts.onProgress ?? (() => undefined);
+  const checkAbort = () => {
+    if (opts.signal?.aborted) {
+      throw new Error("runRenderPipeline: aborted");
+    }
+  };
 
   // Stage 1: Remotion render
+  // TODO(phase-7): renderCompositionToMp4 does not yet accept an AbortSignal;
+  // we check between stages so cancellation takes effect at the next boundary.
+  checkAbort();
   onP("render", 0);
   let workingPath = await renderCompositionToMp4(
     { ...opts.comp, title: opts.outputTitle },
     opts.outDir,
   );
   onP("render", 1);
+  checkAbort();
 
   // Stage 2: ducking (optional, only if any audio clip has ducking)
   const audioClips = opts.comp.tracks
@@ -136,6 +165,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
     });
     workingPath = ducked;
     onP("duck", 1);
+    checkAbort();
   }
 
   // Stage 3: subtitle burn (optional). Explicit opt-in must not silently no-op:
@@ -157,6 +187,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
     });
     workingPath = burned;
     onP("burn", 1);
+    checkAbort();
   }
 
   // Stage 4: loudnorm two-pass
@@ -165,6 +196,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   await normalizeLufs(workingPath, normalized, { target, truePeak: -1.5, lra: 11 });
   workingPath = normalized;
   onP("loudnorm", 1);
+  checkAbort();
 
   // Stage 5: final encode. If a platform preset is present, re-encode using
   // its codec + bitrate. Otherwise (legacy compositions w/o presets), keep
@@ -173,7 +205,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   const finalPath = join(opts.outDir, `final-${Date.now()}.mp4`);
   const preset = opts.comp.exportPresets?.[0];
   if (preset) {
-    await runEncodeStage(workingPath, finalPath, preset);
+    await runEncodeStage(workingPath, finalPath, preset, opts.signal);
   } else {
     await rename(workingPath, finalPath);
   }

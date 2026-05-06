@@ -198,6 +198,29 @@ describe("runEncodeStage", () => {
   });
 });
 
+describe("runEncodeStage — abort signal", () => {
+  it("kills the spawned ffmpeg process when the AbortSignal fires", async () => {
+    _spawn.mockClear();
+    const ac = new AbortController();
+    let killed = false;
+    _spawn.mockImplementationOnce(() => {
+      const proc = new EventEmitter() as any;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.kill = () => {
+        killed = true;
+        proc.emit("close", 130);
+      };
+      return proc;
+    });
+    const promise = runEncodeStage("/in.mp4", "/out.mp4", douyin, ac.signal);
+    // Abort on the next tick so the spawn has registered its abort listener.
+    setTimeout(() => ac.abort(), 0);
+    await expect(promise).rejects.toThrow(/aborted/);
+    expect(killed).toBe(true);
+  });
+});
+
 describe("runRenderPipeline — encode stage wiring", () => {
   it("invokes ffmpeg via spawn when comp.exportPresets[0] is present", async () => {
     _spawn.mockClear();
