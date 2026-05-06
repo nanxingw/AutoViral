@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { AssetSidebar } from "../../panels/AssetSidebar";
@@ -47,13 +47,20 @@ describe("Phase 5 acceptance criteria", () => {
     expect(screen.getByTestId("variant-tile-gamma")).toBeInTheDocument();
 
     // Click USE THIS on beta.
-    act(() => {
-      fireEvent.click(screen.getByTestId("use-variant-beta"));
-    });
+    fireEvent.click(screen.getByTestId("use-variant-beta"));
 
     // Verify the store reflects the rebind.
-    const updated = useComposition.getState().comp!.tracks[0].clips[0] as any;
-    expect(updated.src).toBe("/assets/beta.png");
+    const updated = useComposition.getState().comp!.tracks[0].clips[0];
+    if (updated.kind === "video") {
+      expect(updated.src).toBe("/assets/beta.png");
+    } else {
+      throw new Error(`expected video clip, got ${updated.kind}`);
+    }
+
+    // Verify UI rerendered against the new binding
+    expect(screen.queryByTestId("variant-tile-beta")).toBeNull(); // beta is now CURRENT, not a sibling
+    expect(screen.getByTestId("variant-tile-alpha")).toBeInTheDocument(); // alpha now a sibling
+    expect(screen.getByTestId("variant-tile-gamma")).toBeInTheDocument();
   });
 
   it("AC2: DiveCanvas opens with full graph + USE THIS rebinds from a descendant node", () => {
@@ -76,11 +83,13 @@ describe("Phase 5 acceptance criteria", () => {
     expect(screen.getByTestId("dive-node-gamma")).toBeInTheDocument();
 
     // Click USE on a descendant.
-    act(() => {
-      fireEvent.click(screen.getByTestId("dive-use-gamma"));
-    });
+    fireEvent.click(screen.getByTestId("dive-use-gamma"));
 
-    const updated = useComposition.getState().comp!.tracks[0].clips[0] as any;
-    expect(updated.src).toBe("/assets/gamma.png");
+    const updated = useComposition.getState().comp!.tracks[0].clips[0];
+    if (updated.kind === "video") {
+      expect(updated.src).toBe("/assets/gamma.png");
+    } else {
+      throw new Error(`expected video clip, got ${updated.kind}`);
+    }
   });
 });
