@@ -4,6 +4,7 @@ import { VariantSwitcher } from "./VariantSwitcher";
 import { useComposition } from "../../store";
 import {
   makeAssetGraph,
+  makeTextClip,
   makeVideoClip,
 } from "../../../../test/composition-fixtures";
 
@@ -36,6 +37,15 @@ describe("VariantSwitcher", () => {
     useComposition.setState({ comp, selection: "c" });
     render(<VariantSwitcher />);
     expect(screen.getByText(/no variants/i)).toBeInTheDocument();
+  });
+
+  it("renders 'no media binding' when the selected clip is a text clip", () => {
+    const comp = makeAssetGraph({ ids: ["solo"] });
+    const textClip = makeTextClip({ id: "t1", text: "hello" });
+    comp.tracks[0].clips.push(textClip);
+    useComposition.setState({ comp, selection: "t1" });
+    render(<VariantSwitcher />);
+    expect(screen.getByText(/no media binding/i)).toBeInTheDocument();
   });
 
   it("renders one tile per sibling variant", () => {

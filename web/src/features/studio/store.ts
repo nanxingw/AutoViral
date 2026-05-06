@@ -318,8 +318,8 @@ export const useComposition = create<CompState>()(
           if (c) {
             // text clips have no `src` field — skip them; rebind only applies
             // to video / audio / overlay clips that bind to a media URI.
-            if ("src" in c) {
-              (c as { src: string }).src = newAsset.uri;
+            if (c.kind !== "text") {
+              c.src = newAsset.uri;
             }
             return;
           }

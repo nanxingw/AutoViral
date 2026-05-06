@@ -1,10 +1,6 @@
-import { useState } from "react";
 import { VariantSwitcher } from "./VariantSwitcher";
 
 export function InspectorTab() {
-  // 5.B placeholder: in 5.C this will open the DiveCanvas modal.
-  const [_diveOpen, setDiveOpen] = useState(false);
-
   return (
     <div
       style={{
@@ -30,7 +26,9 @@ export function InspectorTab() {
       <VariantSwitcher />
       <button
         type="button"
-        onClick={() => setDiveOpen(true)}
+        onClick={() => {
+          // Phase 5.C will wire this to open <DiveCanvas />
+        }}
         style={{
           padding: "8px 12px",
           fontSize: 11,

@@ -31,7 +31,7 @@ export function VariantSwitcher() {
       break;
     }
   }
-  if (!selectedClip || !("src" in selectedClip)) {
+  if (!selectedClip || selectedClip.kind === "text") {
     return <EmptyState message="Selected clip has no media binding" />;
   }
 
