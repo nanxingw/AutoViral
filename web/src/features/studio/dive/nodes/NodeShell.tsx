@@ -2,6 +2,9 @@ import { Handle, Position } from "reactflow";
 import type { ReactNode } from "react";
 import type { AssetEntry } from "../../types";
 
+export const NODE_WIDTH = 180;
+export const NODE_HEIGHT = 120;
+
 export interface DiveNodeData {
   asset: AssetEntry;
   isCurrent: boolean;
@@ -20,8 +23,8 @@ export function NodeShell({ assetId, isCurrent, onUse, children }: NodeShellProp
     <div
       data-testid={`dive-node-${assetId}`}
       style={{
-        width: 180,
-        height: 120,
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
         position: "relative",
         borderRadius: 10,
         border: `1px solid ${isCurrent ? "var(--accent)" : "var(--glass-border)"}`,

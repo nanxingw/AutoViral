@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { useTreeLayout } from "./useTreeLayout";
+import { computeTreeLayout } from "./useTreeLayout";
 
-describe("useTreeLayout", () => {
+describe("computeTreeLayout", () => {
   it("returns an empty map for an empty graph", () => {
-    const positions = useTreeLayout([], []);
+    const positions = computeTreeLayout([], []);
     expect(positions.size).toBe(0);
   });
 
   it("places a single node at a stable position", () => {
-    const positions = useTreeLayout(
+    const positions = computeTreeLayout(
       [{ id: "a", width: 180, height: 120 }],
       [],
     );
@@ -19,7 +19,7 @@ describe("useTreeLayout", () => {
   });
 
   it("places a chain A → B → C with monotonically increasing x (LR rankdir)", () => {
-    const positions = useTreeLayout(
+    const positions = computeTreeLayout(
       [
         { id: "a", width: 180, height: 120 },
         { id: "b", width: 180, height: 120 },
@@ -38,7 +38,7 @@ describe("useTreeLayout", () => {
   });
 
   it("siblings (A → B; A → C) sit at the same depth (same x), different y", () => {
-    const positions = useTreeLayout(
+    const positions = computeTreeLayout(
       [
         { id: "a", width: 180, height: 120 },
         { id: "b", width: 180, height: 120 },
@@ -63,8 +63,8 @@ describe("useTreeLayout", () => {
       { id: "b", width: 180, height: 120 },
     ];
     const inputEdges = [{ source: "a", target: "b" }];
-    const a = useTreeLayout(inputNodes, inputEdges);
-    const b = useTreeLayout(inputNodes, inputEdges);
+    const a = computeTreeLayout(inputNodes, inputEdges);
+    const b = computeTreeLayout(inputNodes, inputEdges);
     for (const id of ["a", "b"]) {
       expect(a.get(id)).toEqual(b.get(id));
     }

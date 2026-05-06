@@ -21,12 +21,10 @@ export interface NodePosition {
  * Returns a Map<id → {x, y}>. The x/y refer to the *top-left* corner
  * (Dagre's center-anchor is converted by subtracting half-width/height).
  *
- * Pure: same input → same output, no internal state. Despite the `use*`
- * name (kept to match master plan §5.0 file-structure spec), this is NOT
- * a React hook — no useState/useEffect — and is safe to call inside a
- * useMemo.
+ * Pure: same input → same output, no internal state. Safe to call inside
+ * a useMemo.
  */
-export function useTreeLayout(
+export function computeTreeLayout(
   nodes: LayoutNode[],
   edges: LayoutEdge[],
 ): Map<string, NodePosition> {

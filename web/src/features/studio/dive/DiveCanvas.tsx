@@ -10,7 +10,8 @@ import "reactflow/dist/style.css";
 import { useComposition } from "../store";
 import type { AssetEntry, Clip } from "../types";
 import { findAssetByUri } from "./walkProvenance";
-import { useTreeLayout } from "./useTreeLayout";
+import { computeTreeLayout } from "./useTreeLayout";
+import { NODE_WIDTH, NODE_HEIGHT } from "./nodes/NodeShell";
 import { VisualNode } from "./nodes/VisualNode";
 import { AudioNode } from "./nodes/AudioNode";
 import { TextNode } from "./nodes/TextNode";
@@ -42,22 +43,22 @@ export function DiveCanvas({ open, onClose }: Props) {
   }, [comp, selection]);
 
   // Build ReactFlow nodes + edges from comp.assets / comp.provenance.
-  // Layout is computed by Dagre via `useTreeLayout` (LR rankdir).
+  // Layout is computed by Dagre via `computeTreeLayout` (LR rankdir).
   const { nodes, edges } = useMemo(() => {
     if (!comp) return { nodes: [] as Node[], edges: [] as Edge[] };
     const assets = comp.assets ?? [];
     const provenance = comp.provenance ?? [];
 
-    const layoutInputNodes = assets.map((a) => ({ id: a.id, width: 180, height: 120 }));
+    const layoutInputNodes = assets.map((a) => ({ id: a.id, width: NODE_WIDTH, height: NODE_HEIGHT }));
     const layoutInputEdges = provenance
       .filter((e) => e.fromAssetId != null)
       .map((e) => ({ source: e.fromAssetId as string, target: e.toAssetId }));
-    const positions = useTreeLayout(layoutInputNodes, layoutInputEdges);
+    const positions = computeTreeLayout(layoutInputNodes, layoutInputEdges);
 
     const flowNodes: Node[] = assets.map((asset) => ({
       id: asset.id,
       type: kindToNodeType(asset),
-      position: positions.get(asset.id) ?? { x: 0, y: 0 },
+      position: positions.get(asset.id)!,
       data: {
         asset,
         isCurrent: asset.id === currentAssetId,
