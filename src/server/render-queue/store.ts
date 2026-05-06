@@ -128,11 +128,18 @@ export class RenderQueueStore {
     return rows.map(rowToJob);
   }
 
-  /** Returns the next queued job's id (FIFO by created_at), or null. */
+  /**
+   * Returns the next queued job's id (FIFO), or null.
+   *
+   * Tiebreak by SQLite's monotonic `rowid` rather than the random `id` —
+   * two jobs inserted in the same millisecond share `created_at`, and a
+   * random-id tiebreak made FIFO non-deterministic (~50/50), which surfaced
+   * as a flake in the concurrency=1 serial-processing test.
+   */
   nextQueued(): string | null {
     const row = this.db
       .prepare(
-        "SELECT id FROM render_jobs WHERE status='queued' ORDER BY created_at ASC, id ASC LIMIT 1",
+        "SELECT id FROM render_jobs WHERE status='queued' ORDER BY created_at ASC, rowid ASC LIMIT 1",
       )
       .get() as { id: string } | undefined;
     return row?.id ?? null;
