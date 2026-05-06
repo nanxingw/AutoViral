@@ -13,8 +13,7 @@ export async function enqueueRender(
 ): Promise<{ jobId: string }> {
   return apiFetch(`/api/works/${workId}/render`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(opts),
+    body: opts,
   });
 }
 
