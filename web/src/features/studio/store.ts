@@ -312,7 +312,13 @@ export const useComposition = create<CompState>()(
       }),
     setFrame: (f) =>
       set((s) => {
-        s.currentFrame = f;
+        // Clamp at the action so any caller (Playhead drag, 4.J keyboard
+        // nudge, future playback engine, devtools) can't write a negative
+        // or out-of-bounds frame. Upper bound = ceil(comp.duration * fps).
+        if (!Number.isFinite(f)) return;
+        const fps = s.comp?.fps ?? 30;
+        const max = s.comp ? Math.ceil(s.comp.duration * fps) : Infinity;
+        s.currentFrame = Math.max(0, Math.min(max, Math.round(f)));
       }),
     setPlaying: (p) =>
       set((s) => {

@@ -441,3 +441,40 @@ describe("bladeMode flag (Phase 4.G)", () => {
     expect(useComposition.getState().bladeMode).toBe(false);
   });
 });
+
+describe("setFrame action clamping (Phase 4.H follow-up)", () => {
+  beforeEach(() => {
+    useComposition.setState({
+      comp: makeCompositionWithClips([
+        makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 4 }),
+      ]),
+      currentFrame: 0,
+    });
+  });
+
+  it("clamps negative frames at 0", () => {
+    useComposition.getState().setFrame(-30);
+    expect(useComposition.getState().currentFrame).toBe(0);
+  });
+
+  it("clamps frames above comp.duration * fps", () => {
+    // comp.duration = 4, fps = 30 → max = 120
+    useComposition.getState().setFrame(500);
+    expect(useComposition.getState().currentFrame).toBe(120);
+  });
+
+  it("rejects NaN and Infinity without mutating state", () => {
+    useComposition.getState().setFrame(60);
+    useComposition.getState().setFrame(Number.NaN);
+    expect(useComposition.getState().currentFrame).toBe(60);
+    useComposition.getState().setFrame(Number.POSITIVE_INFINITY);
+    expect(useComposition.getState().currentFrame).toBe(60);
+  });
+
+  it("rounds non-integer frames to the nearest integer", () => {
+    useComposition.getState().setFrame(7.4);
+    expect(useComposition.getState().currentFrame).toBe(7);
+    useComposition.getState().setFrame(7.6);
+    expect(useComposition.getState().currentFrame).toBe(8);
+  });
+});

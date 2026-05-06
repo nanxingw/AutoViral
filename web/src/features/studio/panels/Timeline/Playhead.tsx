@@ -28,7 +28,9 @@ interface PlayheadProps {
 export function Playhead({ pxPerSecond, fps }: PlayheadProps) {
   const frame = useComposition((s) => s.currentFrame);
   const setFrame = useComposition((s) => s.setFrame);
+  const duration = useComposition((s) => s.comp?.duration ?? 0);
   const x = (frame / fps) * pxPerSecond;
+  const maxFrame = Math.ceil(duration * fps);
   // Drag baseline captured at pointerdown so that pointermove deltas are
   // computed against the *original* clientX/frame pair (not the previous
   // event), matching pneuma's `dragTime` snapshot semantics
@@ -47,12 +49,9 @@ export function Playhead({ pxPerSecond, fps }: PlayheadProps) {
   const onPointerMove = (e: React.PointerEvent) => {
     const d = dragRef.current;
     if (!d) return;
+    if (pxPerSecond <= 0) return; // defensive: pre-zoom-resolution paint
     const dx = e.clientX - d.startX;
-    const newFrame = Math.max(
-      0,
-      d.startFrame + Math.round((dx / pxPerSecond) * fps),
-    );
-    setFrame(newFrame);
+    setFrame(d.startFrame + Math.round((dx / pxPerSecond) * fps));
   };
 
   const onPointerUp = (e: React.PointerEvent) => {
@@ -68,6 +67,7 @@ export function Playhead({ pxPerSecond, fps }: PlayheadProps) {
       aria-label="Playhead"
       aria-valuenow={frame}
       aria-valuemin={0}
+      aria-valuemax={maxFrame}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
