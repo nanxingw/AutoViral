@@ -31,4 +31,16 @@ describe("TweaksPanel (v4 floating overlay)", () => {
     fireEvent.click(lightBtn);
     expect(useTheme.getState().theme).toBe("light");
   });
+
+  // Phase 6.D — section is gated on `workId` so existing tests that omit it
+  // continue to render the Theme section only.
+  it("mounts PlatformPresetSection when workId is provided", () => {
+    render(<TweaksPanel open={true} workId="w_test" />);
+    expect(screen.getByLabelText(/platform preset/i)).toBeInTheDocument();
+  });
+
+  it("does NOT mount PlatformPresetSection when workId is omitted", () => {
+    render(<TweaksPanel open={true} />);
+    expect(screen.queryByLabelText(/platform preset/i)).not.toBeInTheDocument();
+  });
 });

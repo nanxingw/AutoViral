@@ -1,11 +1,14 @@
 import { ThemeSection } from "./ThemeSection";
+import { PlatformPresetSection } from "./PlatformPresetSection";
 
 export function TweaksPanel({
   open,
   onClose,
+  workId,
 }: {
   open: boolean;
   onClose?: () => void;
+  workId?: string;
 }) {
   if (!open) return null;
   return (
@@ -56,6 +59,7 @@ export function TweaksPanel({
         </button>
       ) : null}
       <ThemeSection />
+      {workId ? <PlatformPresetSection workId={workId} /> : null}
     </aside>
   );
 }

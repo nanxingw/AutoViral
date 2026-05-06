@@ -125,7 +125,11 @@ export default function Studio() {
         <AssetSidebar workId={workId} />
       </div>
 
-      <TweaksPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <TweaksPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        workId={workId}
+      />
     </div>
   );
 }
