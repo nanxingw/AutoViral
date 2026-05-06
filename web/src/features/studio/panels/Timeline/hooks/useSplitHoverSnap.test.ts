@@ -11,7 +11,7 @@ describe("useSplitHoverSnap", () => {
   it("returns null snapTime when not hovering", () => {
     const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 4 });
     useComposition.setState({ comp: makeCompositionWithClips([a]) });
-    const { result } = renderHook(() => useSplitHoverSnap({ pxPerSecond: 50 }));
+    const { result } = renderHook(() => useSplitHoverSnap());
     expect(result.current.snapTime).toBeNull();
   });
 
@@ -19,7 +19,7 @@ describe("useSplitHoverSnap", () => {
     const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 4 });
     const b = makeVideoClip({ id: "b", trackOffset: 4, in: 0, out: 2 });
     useComposition.setState({ comp: makeCompositionWithClips([a, b]) });
-    const { result } = renderHook(() => useSplitHoverSnap({ pxPerSecond: 50 }));
+    const { result } = renderHook(() => useSplitHoverSnap());
     act(() => {
       result.current.setHoverTime(4.04);
     });
@@ -30,7 +30,7 @@ describe("useSplitHoverSnap", () => {
   it("returns the raw time outside threshold", () => {
     const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 4 });
     useComposition.setState({ comp: makeCompositionWithClips([a]) });
-    const { result } = renderHook(() => useSplitHoverSnap({ pxPerSecond: 50 }));
+    const { result } = renderHook(() => useSplitHoverSnap());
     act(() => {
       result.current.setHoverTime(2.5);
     });
@@ -41,7 +41,7 @@ describe("useSplitHoverSnap", () => {
   it("clears the hover state when setHoverTime(null) is called", () => {
     const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 4 });
     useComposition.setState({ comp: makeCompositionWithClips([a]) });
-    const { result } = renderHook(() => useSplitHoverSnap({ pxPerSecond: 50 }));
+    const { result } = renderHook(() => useSplitHoverSnap());
     act(() => {
       result.current.setHoverTime(2.5);
     });

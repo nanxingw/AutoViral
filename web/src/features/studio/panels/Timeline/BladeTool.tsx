@@ -29,9 +29,7 @@ export function BladeTool({
   const bladeMode = useComposition((s) => s.bladeMode);
   const splitClip = useComposition((s) => s.splitClip);
   const comp = useComposition((s) => s.comp);
-  const { snapTime, snappedToEdge, setHoverTime } = useSplitHoverSnap({
-    pxPerSecond,
-  });
+  const { snapTime, snappedToEdge, setHoverTime } = useSplitHoverSnap();
 
   if (!bladeMode || !comp) return null;
 

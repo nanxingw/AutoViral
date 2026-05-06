@@ -29,11 +29,7 @@ export interface SplitHoverSnap {
   setHoverTime: (t: number | null) => void;
 }
 
-export function useSplitHoverSnap({
-  pxPerSecond: _pxPerSecond,
-}: {
-  pxPerSecond: number;
-}): SplitHoverSnap {
+export function useSplitHoverSnap(): SplitHoverSnap {
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const comp = useComposition((s) => s.comp);
   const currentFrame = useComposition((s) => s.currentFrame);
