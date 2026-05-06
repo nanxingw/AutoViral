@@ -26,8 +26,8 @@ export function walkProvenance(
   comp: Composition,
   rootAssetId: string,
 ): ProvenanceWalk {
-  const assets = comp.assets ?? [];
-  const edges: ProvenanceEdge[] = comp.provenance ?? [];
+  const assets = comp.assets;
+  const edges: ProvenanceEdge[] = comp.provenance;
   const assetById = new Map(assets.map((a) => [a.id, a] as const));
   if (!assetById.has(rootAssetId)) {
     return { ancestors: [], descendants: [], siblings: [] };
@@ -91,6 +91,5 @@ export function findAssetByUri(
   comp: Composition,
   uri: string,
 ): AssetEntry | null {
-  const assets = comp.assets ?? [];
-  return assets.find((a) => a.uri === uri) ?? null;
+  return comp.assets.find((a) => a.uri === uri) ?? null;
 }

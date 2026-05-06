@@ -66,6 +66,17 @@ describe("walkProvenance", () => {
     const result = walkProvenance(comp, "missing");
     expect(result).toEqual({ ancestors: [], descendants: [], siblings: [] });
   });
+
+  it("makeAssetGraph honours per-id overrides", () => {
+    const comp = makeAssetGraph({
+      ids: ["v", "a"],
+      edges: [["v", "a"]],
+      overrides: { a: { kind: "audio", uri: "/clip.mp3" } },
+    });
+    expect(comp.assets.find((x) => x.id === "a")?.kind).toBe("audio");
+    expect(comp.assets.find((x) => x.id === "a")?.uri).toBe("/clip.mp3");
+    expect(comp.assets.find((x) => x.id === "v")?.kind).toBe("image"); // default preserved
+  });
 });
 
 describe("findAssetByUri", () => {

@@ -125,12 +125,20 @@ export function makeAssetGraph(opts: {
   ids: string[];
   edges?: Array<[string, string]>;
   workId?: string;
+  /**
+   * Per-id overrides applied on top of makeAssetEntry's defaults.
+   * Example: { b: { kind: "audio", uri: "/b.mp3" } } → asset b is an audio
+   * file at /b.mp3 instead of an image at /assets/b.png.
+   */
+  overrides?: Record<string, Partial<AssetEntry>>;
 }): Composition {
   const c = makeEmptyComposition({ workId: opts.workId ?? "w" });
   const childToParent = new Map<string, string>();
   for (const [from, to] of opts.edges ?? []) childToParent.set(to, from);
 
-  c.assets = opts.ids.map((id) => makeAssetEntry({ id }));
+  c.assets = opts.ids.map((id) =>
+    makeAssetEntry({ id, ...(opts.overrides?.[id] ?? {}) }),
+  );
   c.provenance = opts.ids.map((id) =>
     makeProvenanceEdge({ toAssetId: id, fromAssetId: childToParent.get(id) ?? null }),
   );
