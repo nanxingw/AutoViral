@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useComposition } from "../store";
 import { makeEmptyComposition } from "../types";
 import {
+  makeAssetEntry,
   makeCompositionWithClips,
   makeVideoClip,
   makeTextClip,
@@ -476,5 +477,53 @@ describe("setFrame action clamping (Phase 4.H follow-up)", () => {
     expect(useComposition.getState().currentFrame).toBe(7);
     useComposition.getState().setFrame(7.6);
     expect(useComposition.getState().currentFrame).toBe(8);
+  });
+});
+
+describe("rebindClip", () => {
+  it("rebinds a clip's src to the target asset's uri", () => {
+    const a = makeVideoClip({ id: "clip1", src: "/old.mp4" });
+    const comp = makeCompositionWithClips([a]);
+    comp.assets = [
+      makeAssetEntry({ id: "old", uri: "/old.mp4", kind: "video" }),
+      makeAssetEntry({ id: "new", uri: "/new.mp4", kind: "video" }),
+    ];
+    useComposition.setState({ comp });
+    useComposition.getState().rebindClip("clip1", "new");
+    const updated = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    expect(updated.src).toBe("/new.mp4");
+  });
+
+  it("is a silent no-op when clipId is unknown", () => {
+    const a = makeVideoClip({ id: "clip1", src: "/old.mp4" });
+    const comp = makeCompositionWithClips([a]);
+    comp.assets = [makeAssetEntry({ id: "new", uri: "/new.mp4", kind: "video" })];
+    useComposition.setState({ comp });
+    useComposition.getState().rebindClip("missing", "new");
+    const unchanged = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    expect(unchanged.src).toBe("/old.mp4");
+  });
+
+  it("is a silent no-op when newAssetId is not in comp.assets", () => {
+    const a = makeVideoClip({ id: "clip1", src: "/old.mp4" });
+    const comp = makeCompositionWithClips([a]);
+    comp.assets = [makeAssetEntry({ id: "old", uri: "/old.mp4", kind: "video" })];
+    useComposition.setState({ comp });
+    useComposition.getState().rebindClip("clip1", "ghost");
+    const unchanged = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    expect(unchanged.src).toBe("/old.mp4");
+  });
+
+  it("does NOT add a provenance edge (D4)", () => {
+    const a = makeVideoClip({ id: "clip1", src: "/old.mp4" });
+    const comp = makeCompositionWithClips([a]);
+    comp.assets = [
+      makeAssetEntry({ id: "old", uri: "/old.mp4", kind: "video" }),
+      makeAssetEntry({ id: "new", uri: "/new.mp4", kind: "video" }),
+    ];
+    comp.provenance = []; // start clean
+    useComposition.setState({ comp });
+    useComposition.getState().rebindClip("clip1", "new");
+    expect(useComposition.getState().comp!.provenance).toEqual([]);
   });
 });

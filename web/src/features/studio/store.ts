@@ -72,6 +72,8 @@ interface CompState {
   addAsset: (asset: AssetEntry) => void;
   addProvenance: (edge: ProvenanceEdge) => void;
   removeAsset: (assetId: string) => void;
+  // Phase 5.B — rebind a clip to a different asset (no provenance edge per D4)
+  rebindClip: (clipId: string, newAssetId: string) => void;
   // Phase 4.B — drag-preview actions (begin → update → commit/cancel)
   beginDrag: (clipId: string) => void;
   updateDragCandidate: (candidateStart: number) => void;
@@ -305,6 +307,24 @@ export const useComposition = create<CompState>()(
           );
           return;
         }
+      }),
+    rebindClip: (clipId, newAssetId) =>
+      set((s) => {
+        if (!s.comp) return;
+        const newAsset = s.comp.assets.find((a) => a.id === newAssetId);
+        if (!newAsset) return; // unknown asset → silent no-op (test contract)
+        for (const t of s.comp.tracks) {
+          const c = (t.clips as Clip[]).find((c) => c.id === clipId);
+          if (c) {
+            // text clips have no `src` field — skip them; rebind only applies
+            // to video / audio / overlay clips that bind to a media URI.
+            if ("src" in c) {
+              (c as { src: string }).src = newAsset.uri;
+            }
+            return;
+          }
+        }
+        // clipId not found → silent no-op
       }),
     setSelection: (id) =>
       set((s) => {
