@@ -8,12 +8,17 @@ import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import type { Server } from "node:http";
-import { loadConfig } from "../config.js";
+import { loadConfig, dataDir } from "../config.js";
 import { initProviders } from "../providers/registry.js";
 import { ensureSharedDirs } from "../shared-assets.js";
-import { apiRoutes, setWsBridge } from "./api.js";
+import { apiRoutes, setWsBridge, setRenderQueue } from "./api.js";
 import { WsBridge } from "../ws-bridge.js";
 import { startAnalyticsCollector } from "../analytics-collector.js";
+import { RenderQueue, defaultDbPath } from "./render-queue/index.js";
+import { RenderWsRouter } from "./render-ws.js";
+import { runRenderPipeline } from "./render-pipeline.js";
+import { CompositionSchema } from "../shared/composition.js";
+import yaml from "js-yaml";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -47,6 +52,30 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   const wsBridge = new WsBridge(port);
   setWsBridge(wsBridge);
 
+  // 4.5. Create RenderQueue + render-ws router (Phase 7.B).
+  const renderQueue = new RenderQueue({
+    dbPath: process.env.AUTOVIRAL_RENDER_DB ?? defaultDbPath(),
+    runRenderPipeline,
+    loadComposition: async (workId: string) => {
+      const raw = await readFile(
+        join(dataDir, "works", workId, "composition.yaml"),
+        "utf-8",
+      );
+      const parsed = CompositionSchema.safeParse(yaml.load(raw));
+      if (!parsed.success) {
+        throw new Error(`composition invalid: ${parsed.error.message}`);
+      }
+      return parsed.data;
+    },
+    outDirFor: (workId: string) => join(dataDir, "works", workId, "output"),
+    concurrency: Number.parseInt(
+      process.env.AUTOVIRAL_RENDER_CONCURRENCY ?? "1",
+      10,
+    ),
+  });
+  setRenderQueue(renderQueue);
+  const renderWs = new RenderWsRouter(renderQueue);
+
   const app = new Hono();
 
   // 5. Mount API routes
@@ -74,15 +103,12 @@ export async function startServer(port: number): Promise<{ server: Server }> {
 
   const httpServer = nodeServer as unknown as Server;
 
-  // Route HTTP upgrade events
+  // Route HTTP upgrade events.
+  // Render-ws goes FIRST so it gets first dibs on /ws/render/jobs/:id; the
+  // wsBridge handles /ws/browser/:workId; everything else is rejected.
   httpServer.on("upgrade", (req, socket, head) => {
-    const url = req.url ?? "";
-
-    // Try WsBridge first (handles /ws/browser/:workId)
-    if (wsBridge.handleUpgrade(req, socket, head)) {
-      return;
-    }
-
+    if (renderWs.handleUpgrade(req, socket, head)) return;
+    if (wsBridge.handleUpgrade(req, socket, head)) return;
     // Unknown upgrade — destroy socket
     socket.destroy();
   });
