@@ -527,3 +527,95 @@ describe("rebindClip", () => {
     expect(useComposition.getState().comp!.provenance).toEqual([]);
   });
 });
+
+describe("applyPlatformPreset (Phase 6.D)", () => {
+  it("D5: updates exportPresets[0] AND aspect/width/height/fps atomically", () => {
+    const comp = makeCompositionWithClips([]);
+    comp.aspect = "16:9";
+    comp.width = 1920;
+    comp.height = 1080;
+    comp.fps = 30;
+    comp.exportPresets = [];
+    useComposition.setState({ comp });
+    useComposition.getState().applyPlatformPreset({
+      id: "douyin-9-16",
+      label: "抖音 9:16",
+      platform: "douyin",
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      videoBitrate: 8000,
+      audioBitrate: 192,
+      codec: "h264",
+      container: "mp4",
+      maxDurationSec: 60,
+      loudnessTargetLufs: -14,
+      safeZonePct: 0.18,
+    });
+    const next = useComposition.getState().comp!;
+    expect(next.aspect).toBe("9:16");
+    expect(next.width).toBe(1080);
+    expect(next.height).toBe(1920);
+    expect(next.fps).toBe(30);
+    expect(next.exportPresets[0].platform).toBe("douyin");
+    expect(next.exportPresets[0].videoBitrate).toBe(8000);
+  });
+
+  it("replaces an existing exportPresets[0], does not append", () => {
+    const comp = makeCompositionWithClips([]);
+    comp.exportPresets = [
+      {
+        id: "old",
+        label: "old",
+        platform: "custom",
+        width: 1920,
+        height: 1080,
+        fps: 30,
+        videoBitrate: 5000,
+        audioBitrate: 192,
+        codec: "h264",
+        container: "mp4",
+        loudnessTargetLufs: -14,
+        safeZonePct: 0.05,
+      },
+    ];
+    useComposition.setState({ comp });
+    useComposition.getState().applyPlatformPreset({
+      id: "tiktok-9-16",
+      label: "TikTok",
+      platform: "tiktok",
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      videoBitrate: 8000,
+      audioBitrate: 192,
+      codec: "h264",
+      container: "mp4",
+      loudnessTargetLufs: -14,
+      safeZonePct: 0.18,
+    });
+    const next = useComposition.getState().comp!;
+    expect(next.exportPresets).toHaveLength(1);
+    expect(next.exportPresets[0].id).toBe("tiktok-9-16");
+  });
+
+  it("infers aspect from width/height (1080x1920 → 9:16)", () => {
+    const comp = makeCompositionWithClips([]);
+    useComposition.setState({ comp });
+    useComposition.getState().applyPlatformPreset({
+      id: "x",
+      label: "x",
+      platform: "custom",
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      videoBitrate: 8000,
+      audioBitrate: 192,
+      codec: "h264",
+      container: "mp4",
+      loudnessTargetLufs: -14,
+      safeZonePct: 0.05,
+    });
+    expect(useComposition.getState().comp!.aspect).toBe("9:16");
+  });
+});

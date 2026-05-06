@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { enableMapSet } from "immer";
-import type { Composition, Clip, AssetEntry, ProvenanceEdge } from "./types";
+import type { Composition, Clip, AssetEntry, ProvenanceEdge, ExportPreset } from "./types";
 import {
   clipDuration,
   clipEnd,
@@ -74,6 +74,9 @@ interface CompState {
   removeAsset: (assetId: string) => void;
   // Phase 5.B — rebind a clip to a different asset (no provenance edge per D4)
   rebindClip: (clipId: string, newAssetId: string) => void;
+  // Phase 6.D — apply a platform export preset. Atomic per D5: updates
+  // exportPresets[0] AND aspect/width/height/fps in a single transaction.
+  applyPlatformPreset: (preset: ExportPreset) => void;
   // Phase 4.B — drag-preview actions (begin → update → commit/cancel)
   beginDrag: (clipId: string) => void;
   updateDragCandidate: (candidateStart: number) => void;
@@ -325,6 +328,27 @@ export const useComposition = create<CompState>()(
           }
         }
         // clipId not found → silent no-op
+      }),
+    // ─── Phase 6.D — applyPlatformPreset (D5 atomic) ──────────────────────
+    // One zustand transaction: exportPresets[0] + aspect + width + height +
+    // fps all flip together. Aspect is inferred from preset width/height
+    // (9:16 / 1:1 / 16:9 / 4:5); non-canonical ratios keep the existing
+    // aspect untouched.
+    applyPlatformPreset: (preset) =>
+      set((s) => {
+        if (!s.comp) return;
+        const ratio = preset.width / preset.height;
+        let aspect: typeof s.comp.aspect = s.comp.aspect;
+        if (Math.abs(ratio - 9 / 16) < 0.01) aspect = "9:16";
+        else if (Math.abs(ratio - 1) < 0.01) aspect = "1:1";
+        else if (Math.abs(ratio - 16 / 9) < 0.01) aspect = "16:9";
+        else if (Math.abs(ratio - 4 / 5) < 0.01) aspect = "4:5";
+        s.comp.aspect = aspect;
+        s.comp.width = preset.width;
+        s.comp.height = preset.height;
+        s.comp.fps = preset.fps as 24 | 25 | 30 | 60;
+        s.comp.exportPresets = [preset]; // replace, not append
+        s.comp.updatedAt = new Date().toISOString();
       }),
     setSelection: (id) =>
       set((s) => {
