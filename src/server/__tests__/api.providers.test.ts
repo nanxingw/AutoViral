@@ -6,9 +6,10 @@ describe("Phase 8.4 provider endpoints", () => {
     delete process.env.RUNWAY_API_KEY;
     delete process.env.SORA_API_KEY;
     delete process.env.KLING_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
   });
 
-  it("GET /api/providers returns 3 providers", async () => {
+  it("GET /api/providers returns 4 providers", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
       const res = await apiRoutes.fetch(
@@ -16,10 +17,11 @@ describe("Phase 8.4 provider endpoints", () => {
       );
       expect(res.status).toBe(200);
       const json: any = await res.json();
-      expect(json.providers).toHaveLength(3);
+      expect(json.providers).toHaveLength(4);
       expect(json.providers.map((p: any) => p.id).sort()).toEqual([
         "kling",
         "runway",
+        "seedance",
         "sora",
       ]);
     });

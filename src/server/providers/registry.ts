@@ -1,13 +1,15 @@
 import { runwayProvider } from "./runway.js";
 import { soraProvider } from "./sora.js";
 import { klingProvider } from "./kling.js";
+import { seedanceProvider } from "./seedance.js";
 import type { VideoProvider } from "./types.js";
 
-const PROVIDERS: VideoProvider[] = [runwayProvider, soraProvider, klingProvider];
+const PROVIDERS: VideoProvider[] = [runwayProvider, soraProvider, klingProvider, seedanceProvider];
 const ENV_KEY: Record<string, string> = {
   runway: "RUNWAY_API_KEY",
   sora: "SORA_API_KEY",
   kling: "KLING_API_KEY",
+  seedance: "OPENROUTER_API_KEY",
 };
 
 export interface ProviderListing {
