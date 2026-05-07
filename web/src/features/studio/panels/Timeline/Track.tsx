@@ -1,3 +1,4 @@
+import type { ReactElement } from "react";
 import { Clip } from "./Clip";
 import { Filmstrip } from "./Filmstrip";
 import { WaveformBars } from "./WaveformBars";
@@ -11,7 +12,7 @@ interface Props {
   label: string;
 }
 
-const KIND_ICON: Record<string, JSX.Element> = {
+const KIND_ICON: Record<string, ReactElement> = {
   video: (
     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
       <rect x="2" y="6" width="14" height="12" rx="2" />

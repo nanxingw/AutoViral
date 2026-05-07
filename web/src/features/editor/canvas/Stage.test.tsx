@@ -13,6 +13,23 @@ vi.mock("react-konva", () => {
         { "data-kind": kind, ...rest },
         children as React.ReactNode,
       );
+  // Transformer mock: exposes the Konva-like methods production code calls
+  // through a forwarded ref. Under React 19, refs are committed before
+  // useEffect, so a plain <div> ref triggers `.nodes is not a function`.
+  const Transformer = React.forwardRef<
+    { nodes: () => void; getLayer: () => null },
+    { children?: React.ReactNode } & Record<string, unknown>
+  >(({ children, ...rest }, ref) => {
+    React.useImperativeHandle(ref, () => ({
+      nodes: () => undefined,
+      getLayer: () => null,
+    }));
+    return React.createElement(
+      "div",
+      { "data-kind": "transformer", ...rest },
+      children as React.ReactNode,
+    );
+  });
   return {
     Stage: passthrough("stage"),
     Layer: passthrough("layer"),
@@ -21,7 +38,7 @@ vi.mock("react-konva", () => {
     Line: passthrough("line"),
     Text: passthrough("text"),
     Image: passthrough("image"),
-    Transformer: passthrough("transformer"),
+    Transformer,
   };
 });
 vi.mock("use-image", () => ({ default: () => [undefined, "loaded"] }));
