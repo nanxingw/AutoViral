@@ -14,6 +14,9 @@ import { Filmstrip } from "@/features/editor/panels/Filmstrip";
 import { TopBar } from "@/features/editor/panels/TopBar";
 import { AIHint } from "@/features/editor/panels/AIHint";
 import { useExport } from "@/features/editor/hooks/useExport";
+import { ChatPanel } from "@/features/studio/panels/Chat";
+import { ChatQuickActions } from "@/features/editor/panels/ChatQuickActions";
+import type { LocatorData } from "@/features/chat/types";
 
 export default function Editor() {
   const { workId } = useParams();
@@ -108,10 +111,32 @@ export default function Editor() {
         style={{
           gridArea: "left",
           borderRight: "1px solid var(--border, rgba(0,0,0,0.08))",
-          overflowY: "auto",
+          display: "flex",
+          flexDirection: "column",
+          minHeight: 0,
         }}
       >
-        <SlidesNav />
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <ChatPanel
+            workId={workId}
+            quickActions={<ChatQuickActions />}
+            onJumpToLocator={(data: LocatorData) => {
+              // Carousel locator → jump to the named slide if provided.
+              const slideId = (data as { slideId?: string }).slideId;
+              if (slideId) useEditor.getState().setCurrentSlide(slideId);
+            }}
+          />
+        </div>
+        <div
+          style={{
+            flexShrink: 0,
+            maxHeight: 240,
+            overflowY: "auto",
+            borderTop: "1px solid var(--divider, rgba(0,0,0,0.08))",
+          }}
+        >
+          <SlidesNav />
+        </div>
       </div>
       <div
         style={{

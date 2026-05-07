@@ -4,7 +4,7 @@ import type { StreamBlock, LocatorData } from "@/features/chat/types";
 import { LocatorBlockView } from "@/features/chat/LocatorBlock";
 import { useComposition } from "@/features/studio/store";
 import { apiFetch } from "@/lib/api";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { QuickActions } from "./QuickActions";
@@ -56,7 +56,10 @@ function segmentTextWithLocators(
   return out;
 }
 
-function jumpTo(data: LocatorData) {
+/** Default jump handler — moves the studio playhead/selection to the locator
+ *  target. Editors that don't have a clip-based composition should pass an
+ *  alternative `onJumpToLocator` (e.g. the carousel editor's slide-jump). */
+function jumpToStudioComposition(data: LocatorData) {
   const s = useComposition.getState();
   if (data.clipId) {
     s.setSelection(data.clipId);
@@ -66,7 +69,21 @@ function jumpTo(data: LocatorData) {
   }
 }
 
-export function ChatPanel({ workId }: { workId: string }) {
+export interface ChatPanelProps {
+  workId: string;
+  /** Editor-specific shortcut buttons rendered between messages and composer.
+   *  Defaults to Studio's <QuickActions /> for backward compatibility. */
+  quickActions?: ReactNode;
+  /** Called when the user activates an inline `<viewer-locator/>` block in an
+   *  assistant message. Defaults to studio playhead/selection jump. */
+  onJumpToLocator?: (data: LocatorData) => void;
+}
+
+export function ChatPanel({
+  workId,
+  quickActions,
+  onJumpToLocator = jumpToStudioComposition,
+}: ChatPanelProps) {
   const { send } = useChatSocket(workId);
   const blocks = useChatStore((s) => s.blocks);
   const setBlocks = useChatStore((s) => s.setBlocks);
@@ -218,7 +235,7 @@ export function ChatPanel({ workId }: { workId: string }) {
           </div>
         )}
         {blocks.map((b) => (
-          <ChatBlock key={b.id} block={b} />
+          <ChatBlock key={b.id} block={b} onJumpToLocator={onJumpToLocator} />
         ))}
         {streaming && (
           <div
@@ -245,7 +262,7 @@ export function ChatPanel({ workId }: { workId: string }) {
         )}
       </div>
 
-      <QuickActions />
+      {quickActions ?? <QuickActions />}
 
       {/* Composer */}
       <div style={{ padding: 12, borderTop: "1px solid var(--divider)", flexShrink: 0 }}>
@@ -325,7 +342,13 @@ export function ChatPanel({ workId }: { workId: string }) {
   );
 }
 
-function ChatBlock({ block }: { block: StreamBlock }) {
+function ChatBlock({
+  block,
+  onJumpToLocator,
+}: {
+  block: StreamBlock;
+  onJumpToLocator: (data: LocatorData) => void;
+}) {
   const { type } = block;
 
   // User → right-side bubble
@@ -441,7 +464,7 @@ function ChatBlock({ block }: { block: StreamBlock }) {
               key={i}
               label={seg.label}
               data={seg.data}
-              onJump={jumpTo}
+              onJump={onJumpToLocator}
             />
           ),
         )}

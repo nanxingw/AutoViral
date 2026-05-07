@@ -9,6 +9,14 @@ vi.mock("@/features/editor/services/carousel", () => ({
   saveCarousel: vi.fn(async () => undefined),
 }));
 
+vi.mock("@/features/chat/useChatSocket", () => ({
+  useChatSocket: () => ({ send: vi.fn() }),
+}));
+
+vi.mock("@/lib/api", () => ({
+  apiFetch: vi.fn(async () => ({ blocks: [] })),
+}));
+
 vi.mock("@/features/editor/hooks/useExport", () => ({
   useExport: () => ({
     setStage: vi.fn(),
@@ -35,16 +43,18 @@ function mount() {
   );
 }
 
-describe("Editor (A3 — SlidesNav restored)", () => {
-  it("mounts SlidesNav in the left column (NOT ChatPanel)", () => {
+// User reversed the A3 decision (2026-05-07): the carousel editor now
+// mounts the same ChatPanel as Studio, with SlidesNav moved to a bottom
+// sub-pane in the same left column. Both surfaces render together.
+describe("Editor (post-A3 — ChatPanel + SlidesNav co-mount)", () => {
+  it("mounts SlidesNav in the left column", () => {
     mount();
-    // SlidesNav header reads "Slides · N" — uniquely identifies the panel.
     expect(screen.queryByText(/^Slides\s*·/i)).toBeTruthy();
   });
 
-  it("does not render the Studio ChatPanel header (A3 contract)", () => {
+  it("renders the ChatPanel header alongside SlidesNav", () => {
     mount();
-    // ChatPanel (SV.E) shows a "CLAUDE-SONNET" eyebrow header — must be absent.
-    expect(screen.queryByText(/CLAUDE-SONNET/i)).toBeNull();
+    // ChatPanel header shows the CLAUDE-SONNET eyebrow.
+    expect(screen.queryByText(/CLAUDE-SONNET/i)).toBeTruthy();
   });
 });

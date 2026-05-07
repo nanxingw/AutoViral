@@ -61,6 +61,7 @@ describe("resolveCompositionAssets", () => {
     updatedAt: "2026-05-07T00:00:00Z",
     assets: [],
     provenance: [],
+    exportPresets: [],
   });
 
   it("rewrites video/audio/overlay clip srcs and leaves text clips intact", () => {
