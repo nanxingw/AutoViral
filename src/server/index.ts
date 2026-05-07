@@ -27,6 +27,10 @@ const __dirname = dirname(__filename);
 const WEB_DIST = join(__dirname, "..", "..", "web", "dist");
 
 export async function startServer(port: number): Promise<{ server: Server }> {
+  // Expose the bound port so render-pipeline can rewrite relative asset
+  // URLs into HTTP URLs the Remotion renderer can fetch.
+  process.env.AUTOVIRAL_PORT = String(port);
+
   // 1. Load config
   const config = await loadConfig();
 

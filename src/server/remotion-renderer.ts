@@ -2,6 +2,10 @@ import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition } from "@remotion/renderer";
 import { join } from "node:path";
 
+// Mirror web/tsconfig.json paths so Remotion's webpack resolves `@shared/*`
+// imports inside the bundled composition tree the same way Vite does.
+const SHARED_ALIAS_TARGET = join(process.cwd(), "src/shared");
+
 export function buildSafeOutputFilename(
   title: string | undefined,
   now: Date = new Date(),
@@ -26,7 +30,21 @@ export async function renderCompositionToMp4(
       process.cwd(),
       "web/src/features/studio/composition/RemotionRoot.tsx",
     ),
-    webpackOverride: (c) => c,
+    webpackOverride: (c) => {
+      c.resolve = c.resolve ?? {};
+      c.resolve.alias = {
+        ...(c.resolve.alias ?? {}),
+        "@shared": SHARED_ALIAS_TARGET,
+      };
+      // src/shared/*.ts uses NodeNext-style explicit ".js" suffixes
+      // (e.g. `from "./composition.js"`). Webpack must map those to the
+      // .ts/.tsx source the bundler is actually loading.
+      c.resolve.extensionAlias = {
+        ...(c.resolve.extensionAlias ?? {}),
+        ".js": [".ts", ".tsx", ".js"],
+      };
+      return c;
+    },
   });
   const composition = await selectComposition({
     serveUrl: bundleLocation,

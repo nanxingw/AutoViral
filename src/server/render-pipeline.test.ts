@@ -226,16 +226,22 @@ describe("runRenderPipeline — encode stage wiring", () => {
     _spawn.mockClear();
     const compWithPreset: Composition = { ...baseComp, exportPresets: [douyin] };
     const promise = runRenderPipeline({ comp: compWithPreset, outDir: "/tmp/out" });
-    // Drive every spawned ffmpeg child to a clean exit.
-    // We poll mock.results until at least one encode-stage spawn shows up,
-    // then close it. The pipeline awaits the encode step inline, so we must
-    // close the child synchronously on the next tick.
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    for (const r of _spawn.mock.results) r.value.emit("close", 0);
+    // Drive every spawned ffmpeg child to a clean exit. Multi-tick drain
+    // because the loudnorm-stage audio probe adds an await before the
+    // encode-stage spawn, so a single setImmediate isn't enough.
+    for (let i = 0; i < 8; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      for (const r of _spawn.mock.results) {
+        const proc = r.value;
+        if (!proc._closed) { proc._closed = true; proc.emit("close", 0); }
+      }
+    }
     await promise;
     expect(_spawn).toHaveBeenCalled();
-    const args = _spawn.mock.calls[0][1] as string[];
-    expect(args).toContain("libx264");
+    const encodeCall = _spawn.mock.calls.find((c) =>
+      (c[1] as string[]).includes("libx264"),
+    );
+    expect(encodeCall, "expected an encode-stage spawn with libx264").toBeDefined();
   });
 
   it("falls back to rename passthrough when comp.exportPresets is empty", async () => {
@@ -410,10 +416,21 @@ describe("runRenderPipeline — proxy mode (Phase 7.C)", () => {
       }],
     };
     const promise = runRenderPipeline({ comp: compWithPreset, outDir: "/tmp/out", proxy: true });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-    for (const r of _spawn.mock.results) r.value.emit("close", 0);
+    // Multi-tick drain: the loudnorm-stage audio probe adds an await before
+    // the encode spawn, so a single setImmediate isn't enough.
+    for (let i = 0; i < 8; i++) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      for (const r of _spawn.mock.results) {
+        const proc = r.value;
+        if (!proc._closed) { proc._closed = true; proc.emit("close", 0); }
+      }
+    }
     await promise;
-    const args = _spawn.mock.calls[0]![1] as string[];
+    const encodeCall = _spawn.mock.calls.find((c) =>
+      (c[1] as string[]).includes("-b:v"),
+    );
+    expect(encodeCall, "expected an encode-stage spawn with -b:v").toBeDefined();
+    const args = encodeCall![1] as string[];
     const bvIdx = args.indexOf("-b:v");
     expect(args[bvIdx + 1]).toBe("4000k"); // halved from 8000
     const baIdx = args.indexOf("-b:a");

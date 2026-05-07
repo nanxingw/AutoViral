@@ -10,9 +10,89 @@ import {
   type MixTrack,
 } from "../audio-tools.js";
 import { join } from "node:path";
-import { rename } from "node:fs/promises";
+import { rename, stat as fsStat } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import type { Composition, ExportPreset } from "../shared/composition.js";
+
+/**
+ * Returns true iff `inputPath` has an audio stream AND that stream is not
+ * effectively silent. Remotion auto-fills a silent audio track during
+ * render, so a naive "has audio stream?" probe always returns true. Run
+ * ffmpeg's volumedetect to read max_volume — `-inf` (or extremely low)
+ * means silent, and the loudnorm pass-2 filter aborts on silent input
+ * without writing the output file (which surfaces later as ENOENT).
+ *
+ * Returns false on probe failure: skipping loudnorm on a borderline file
+ * is better than throwing the whole render away.
+ */
+async function hasMeaningfulAudio(inputPath: string): Promise<boolean> {
+  // If the file isn't on disk we have nothing to probe. Return true so the
+  // caller proceeds to normalizeLufs and surfaces the real problem there,
+  // rather than silently swallowing a missing-file bug behind a "no audio"
+  // skip. This also keeps unit tests that mock the renderer (returning a
+  // fake path that never lands on disk) on the same path as before.
+  try {
+    await fsStat(inputPath);
+  } catch {
+    return true;
+  }
+  return new Promise((resolve) => {
+    const proc = spawn("ffmpeg", [
+      "-hide_banner",
+      "-i", inputPath,
+      "-af", "volumedetect",
+      "-vn",
+      "-f", "null",
+      "-",
+    ]);
+    let stderr = "";
+    proc.stderr.on("data", (d: Buffer) => { stderr += d.toString(); });
+    proc.on("close", () => {
+      if (!/Stream #\d+:\d+.*Audio/.test(stderr)) return resolve(false);
+      const m = stderr.match(/max_volume:\s*(-?\d+(?:\.\d+)?|-inf)\s*dB/);
+      if (!m) return resolve(true); // probe inconclusive — try loudnorm anyway
+      if (m[1] === "-inf") return resolve(false);
+      const max = parseFloat(m[1]);
+      if (!Number.isFinite(max)) return resolve(false);
+      return resolve(max > -60); // > -60 dBFS counts as "real" signal
+    });
+    proc.on("error", () => resolve(false));
+  });
+}
+
+/**
+ * Composition.yaml stores `clip.src` as workspace-relative paths
+ * (e.g. "assets/videos/test.mp4") so the file is portable. Remotion's
+ * compositor on the other hand 404s on relative URLs and refuses
+ * file:// URLs (`@remotion/renderer` only accepts http/https). Rewrite
+ * relative paths to the local server's `/api/works/:id/assets/...`
+ * route, which is already wired for browser preview. URLs with an
+ * existing scheme (http://, https://, data:, blob:) pass through.
+ */
+function rewriteClipSrcsToAbsolute(comp: Composition): Composition {
+  const SCHEME = /^[a-z][a-z0-9+.\-]*:/i;
+  const port = process.env.AUTOVIRAL_PORT ?? "3271";
+  const baseUrl = `http://localhost:${port}/api/works/${comp.workId}`;
+  const resolveOne = (src: string): string => {
+    if (!src || SCHEME.test(src)) return src;
+    // Server route already prefixes "assets/", so we only need the suffix.
+    const trimmed = src.startsWith("assets/") ? src.slice("assets/".length) : src;
+    const segments = trimmed.split("/").map(encodeURIComponent).join("/");
+    return `${baseUrl}/assets/${segments}`;
+  };
+  return {
+    ...comp,
+    tracks: comp.tracks.map((t) => ({
+      ...t,
+      clips: t.clips.map((c) => {
+        if (c.kind === "text") return c;
+        const src = (c as { src?: string }).src;
+        if (typeof src !== "string") return c;
+        return { ...c, src: resolveOne(src) } as typeof c;
+      }),
+    })),
+  };
+}
 
 export type RenderStage = "render" | "duck" | "loudnorm" | "burn" | "encode";
 
@@ -194,8 +274,11 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   // we check between stages so cancellation takes effect at the next boundary.
   checkAbort();
   onP("render", 0);
+  const compForRender = rewriteClipSrcsToAbsolute(
+    { ...comp, title: opts.outputTitle } as Composition,
+  );
   let workingPath = await renderCompositionToMp4(
-    { ...comp, title: opts.outputTitle },
+    compForRender,
     opts.outDir,
   );
   onP("render", 1);
@@ -241,11 +324,17 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
     checkAbort();
   }
 
-  // Stage 4: loudnorm two-pass
+  // Stage 4: loudnorm two-pass.
+  // ffmpeg's loudnorm filter aborts when the input has no audio stream
+  // (e.g. user uploaded a silent screen-recording with no BGM). Probe
+  // the working file first; skip the stage if there is no audio.
   onP("loudnorm", 0);
-  const normalized = workingPath.replace(/\.mp4$/, "-normalized.mp4");
-  await normalizeLufs(workingPath, normalized, { target, truePeak: -1.5, lra: 11 });
-  workingPath = normalized;
+  const hasAudio = await hasMeaningfulAudio(workingPath);
+  if (hasAudio) {
+    const normalized = workingPath.replace(/\.mp4$/, "-normalized.mp4");
+    await normalizeLufs(workingPath, normalized, { target, truePeak: -1.5, lra: 11 });
+    workingPath = normalized;
+  }
   onP("loudnorm", 1);
   checkAbort();
 
