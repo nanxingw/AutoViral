@@ -17,5 +17,8 @@ export default defineConfig({
     css: true,
     include: [path.resolve(__dirname, "src/**/*.{test,spec}.{ts,tsx}")],
     exclude: ["**/node_modules/**", "**/dist/**", "**/e2e/**"],
+    poolOptions: {
+      threads: { maxThreads: 2, minThreads: 1 },
+    },
   },
 });

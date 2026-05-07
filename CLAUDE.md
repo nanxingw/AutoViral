@@ -31,8 +31,16 @@ skills/autoviral/
 启动subagents模式时，所有subagents必须使用Opus模型驱动。
 不要随便push代码，但可以commit保证记录
 在构建和重构skill时，必须确保自己阅读过https://github.com/obra/superpowers，https://github.com/garrytan/gstack等业界权威skill，对怎么构建skill了如指掌。
-https://github.com/pandazki/pneuma-skills是你需要参考的项目地址。
+https://github.com/pandazki/pneuma-skills是你需要着重参考的项目地址，任何有关视频剪辑和前端设计的问题应该第一时间学习他的设计。
 </rules>
+
+<testing>
+- **默认一次性运行**：验证代码请用 `npm run test:web`（跑完即退出），不要默认 `test:web:watch`。Server 端同理用 `npm run test:server` 而非 `:watch`。
+- **watch 模式仅用于主动调试**：只在反复迭代单个测试文件时短时启用，调完立刻 Ctrl+C，绝不让它常驻后台。
+- **vitest worker 必须封顶**：`web/vitest.config.ts` 的 `poolOptions.threads.maxThreads` 强制保留为 2（本机 8 核默认会开 8 个 happy-dom worker × ~150 MB ≈ 1.2 GB 常驻，已经炸过一次内存）。修改 vitest 配置时不要移除这个上限。
+- **跑完确认无残留进程**：怀疑有遗留时执行 `ps aux | grep -i vitest | grep -v grep`，有就 kill。
+- **不要用 watch 来"验证我刚改的代码"**：一次性 `test:web` 就足够，watch 只在你主动调试时才有意义。
+</testing>
 
 ### Aesthetic Direction
 - **调性**：editorial · cool · glass。暗色 #0a0b0f 真中性 / 亮色 #fafaf7 paper-white；噪点 overlay (mix-blend-mode: overlay, opacity 0.035)
