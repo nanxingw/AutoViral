@@ -15,6 +15,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { useState } from "react";
 import { useEditor } from "../store";
 import type { Slide } from "../types";
+import { useT } from "@/i18n/useT";
 
 function FilmThumb({
   slide,
@@ -29,6 +30,7 @@ function FilmThumb({
   const setCurrent = useEditor((s) => s.setCurrentSlide);
   const removeSlide = useEditor((s) => s.removeSlide);
   const [hover, setHover] = useState(false);
+  const t = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: slide.id });
 
@@ -110,7 +112,7 @@ function FilmThumb({
       {canDelete && (
         <button
           type="button"
-          aria-label={`Delete slide ${index + 1}`}
+          aria-label={t("editor.filmstrip.deleteSlide", { index: index + 1 })}
           onClick={(e) => {
             e.stopPropagation();
             removeSlide(slide.id);
@@ -148,6 +150,7 @@ function FilmThumb({
 export function Filmstrip() {
   const slides = useEditor((s) => s.car?.slides ?? []);
   const reorder = useEditor((s) => s.reorderSlides);
+  const t = useT();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
   );
@@ -181,7 +184,7 @@ export function Filmstrip() {
           color: "var(--text-dimmer)",
         }}
       >
-        Drag to reorder
+        {t("editor.filmstrip.dragToReorder")}
       </div>
       <div style={{ flex: 1, overflowX: "auto", overflowY: "hidden" }}>
         <DndContext

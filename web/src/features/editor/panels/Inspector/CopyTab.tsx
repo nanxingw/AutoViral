@@ -2,6 +2,7 @@ import { useEditor } from "../../store";
 import { apiFetch } from "@/lib/api";
 import { useState } from "react";
 import type { TextLayer } from "../../types";
+import { useT } from "@/i18n/useT";
 
 export function CopyTab({ workId }: { workId: string }) {
   const car = useEditor((s) => s.car);
@@ -10,6 +11,7 @@ export function CopyTab({ workId }: { workId: string }) {
   const updateLayer = useEditor((s) => s.updateLayer);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const t = useT();
 
   const slide = car?.slides.find((s) => s.id === currentSlideId);
   const candidate = slide?.layers.find((l) => l.id === selectionLayerId);
@@ -35,7 +37,7 @@ export function CopyTab({ workId }: { workId: string }) {
       if (typeof next === "string" && next.length > 0) {
         updateLayer(selected.id, { text: next });
       } else {
-        setError("Empty response from rewriter");
+        setError(t("editor.copyTab.emptyResponse"));
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "rewrite failed");
@@ -54,7 +56,7 @@ export function CopyTab({ workId }: { workId: string }) {
           padding: "12px 0",
         }}
       >
-        Select a text layer to edit its copy.
+        {t("editor.copyTab.empty")}
       </div>
     );
   }
@@ -70,7 +72,7 @@ export function CopyTab({ workId }: { workId: string }) {
           color: "var(--text-dimmer)",
         }}
       >
-        Headline
+        {t("editor.copyTab.headline")}
       </label>
       <textarea
         aria-label="Layer text"
@@ -105,7 +107,7 @@ export function CopyTab({ workId }: { workId: string }) {
           cursor: busy ? "wait" : "pointer",
         }}
       >
-        {busy ? "..." : "Rewrite with AI"}
+        {busy ? t("editor.copyTab.busy") : t("editor.copyTab.rewriteWithAI")}
       </button>
       {error && (
         <div style={{ color: "tomato", fontSize: 11 }}>{error}</div>

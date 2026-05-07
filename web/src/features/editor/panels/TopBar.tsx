@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/ui/Button";
 import { useEditor } from "../store";
+import { useT } from "@/i18n/useT";
 
 interface TopBarProps {
   workId: string;
@@ -19,6 +20,7 @@ export function TopBar({
   const navigate = useNavigate();
   const car = useEditor((s) => s.car);
   const [open, setOpen] = useState(false);
+  const t = useT();
 
   return (
     <div
@@ -33,7 +35,7 @@ export function TopBar({
       }}
     >
       <Button variant="ghost" onClick={() => navigate("/")}>
-        ← Works
+        {t("editor.topbar.backToWorks")}
       </Button>
       <strong
         style={{ fontFamily: "var(--font-editorial)", fontSize: 18 }}
@@ -48,11 +50,11 @@ export function TopBar({
           color: "var(--text-soft)",
         }}
       >
-        {savedAt ? `Saved · ${savedAt}` : "Unsaved"}
+        {savedAt ? `${t("common.saved")} · ${savedAt}` : t("common.unsaved")}
       </span>
       <div style={{ position: "relative" }}>
         <Button variant="primary" onClick={() => setOpen((v) => !v)}>
-          Export ▾
+          {t("editor.topbar.exportMenu")}
         </Button>
         {open && (
           <div
@@ -79,7 +81,7 @@ export function TopBar({
                 onExportCurrent();
               }}
             >
-              Current slide as PNG
+              {t("editor.topbar.exportCurrent")}
             </MenuItem>
             <MenuItem
               onClick={() => {
@@ -87,7 +89,7 @@ export function TopBar({
                 onExportAll();
               }}
             >
-              All slides as PNGs
+              {t("editor.topbar.exportAll")}
             </MenuItem>
           </div>
         )}

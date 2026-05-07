@@ -1,31 +1,35 @@
 import { useEditor } from "../../store";
 import { PALETTES } from "../../palettes";
 import type { PaletteId } from "../../types";
+import { useT, type MessageKey } from "@/i18n/useT";
 
-const FONT_OPTIONS: Array<{ id: "serif" | "sans" | "mono"; label: string }> = [
-  { id: "serif", label: "Serif" },
-  { id: "sans", label: "Sans" },
-  { id: "mono", label: "Mono" },
+// Font + layout option labels are i18n keys (not literal text) — resolved
+// inside the component so they re-render on locale toggle.
+const FONT_OPTIONS: Array<{ id: "serif" | "sans" | "mono"; key: MessageKey }> = [
+  { id: "serif", key: "editor.designTab.fontSerif" },
+  { id: "sans", key: "editor.designTab.fontSans" },
+  { id: "mono", key: "editor.designTab.fontMono" },
 ];
 
 const LAYOUT_OPTIONS: Array<{
   id: "centered" | "left" | "split";
-  label: string;
+  key: MessageKey;
 }> = [
-  { id: "centered", label: "Centered" },
-  { id: "left", label: "Left" },
-  { id: "split", label: "Split" },
+  { id: "centered", key: "editor.designTab.layoutCentered" },
+  { id: "left", key: "editor.designTab.layoutLeft" },
+  { id: "split", key: "editor.designTab.layoutSplit" },
 ];
 
 export function DesignTab() {
   const car = useEditor((s) => s.car);
   const updateGlobals = useEditor((s) => s.updateGlobals);
+  const t = useT();
   if (!car) return null;
   const g = car.globals;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      <Field label="Headline font">
+      <Field label={t("editor.designTab.headlineFont")}>
         <div style={btnRow}>
           {FONT_OPTIONS.map((f) => (
             <button
@@ -35,13 +39,13 @@ export function DesignTab() {
               data-active={g.headlineFont === f.id}
               style={chip(g.headlineFont === f.id)}
             >
-              {f.label}
+              {t(f.key)}
             </button>
           ))}
         </div>
       </Field>
 
-      <Field label="Palette">
+      <Field label={t("editor.designTab.palette")}>
         <div style={btnRow}>
           {(Object.keys(PALETTES) as PaletteId[]).map((id) => {
             const p = PALETTES[id];
@@ -75,7 +79,7 @@ export function DesignTab() {
         </div>
       </Field>
 
-      <Field label="Layout">
+      <Field label={t("editor.designTab.layout")}>
         <div style={btnRow}>
           {LAYOUT_OPTIONS.map((l) => (
             <button
@@ -85,15 +89,15 @@ export function DesignTab() {
               data-active={g.layout === l.id}
               style={chip(g.layout === l.id)}
             >
-              {l.label}
+              {t(l.key)}
             </button>
           ))}
         </div>
       </Field>
 
-      <Field label="Effects">
+      <Field label={t("editor.designTab.effects")}>
         <Slider
-          label="grain"
+          label={t("editor.designTab.effectGrain")}
           value={g.effects.grain}
           min={0}
           max={1}
@@ -103,7 +107,7 @@ export function DesignTab() {
           }
         />
         <Slider
-          label="gradient"
+          label={t("editor.designTab.effectGradient")}
           value={g.effects.gradient}
           min={0}
           max={1}
@@ -113,7 +117,7 @@ export function DesignTab() {
           }
         />
         <Slider
-          label="sharpen"
+          label={t("editor.designTab.effectSharpen")}
           value={g.effects.sharpen}
           min={0}
           max={1}
