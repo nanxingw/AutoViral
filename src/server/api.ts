@@ -37,6 +37,9 @@ import {
 import { z } from "zod";
 import { tmpdir } from "node:os";
 import { runPythonScript } from "./python-bridge.js";
+import { interpolateProcessor } from "./post-process/interpolate.js";
+import { superResolveProcessor } from "./post-process/super-resolve.js";
+import type { PostProcessor, PostProcessOptions } from "./post-process/types.js";
 
 export const apiRoutes = new Hono();
 
@@ -2243,5 +2246,117 @@ apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
     providerJobId: result.providerJobId,
     costUsd: result.costUsd,
     stub: result.stub,
+  });
+});
+
+// ── Phase 8.5 — Frame Interpolation + Super-Resolution ──────────────────────
+//
+// POST /api/post-process/:operation
+//   :operation ∈ { "frame-interpolate", "super-resolve" }
+//   body: { workId, assetId, options? }
+// Stub-only ship: when the corresponding model env var is unset / missing,
+// the adapter copies input → output and flags the result with stub:true.
+// We still register the resulting asset + a "grade" provenance edge so the
+// downstream UI can show the variant (with a STUB badge when applicable).
+
+const POST_PROCESSORS: Record<string, PostProcessor> = {
+  "frame-interpolate": interpolateProcessor,
+  "super-resolve": superResolveProcessor,
+};
+
+const PostProcessBody = z.object({
+  workId: z.string().min(1),
+  assetId: z.string().min(1),
+  options: z
+    .object({
+      scale: z.union([z.literal(2), z.literal(4)]).optional(),
+    })
+    .optional(),
+});
+
+apiRoutes.post("/api/post-process/:operation", async (c) => {
+  const operation = c.req.param("operation");
+  const processor = POST_PROCESSORS[operation];
+  if (!processor) {
+    return c.json({ error: `unknown operation: ${operation}` }, 400);
+  }
+
+  const parsed = PostProcessBody.safeParse(await c.req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return c.json({ error: `invalid body: ${parsed.error.message}` }, 400);
+  }
+  const body = parsed.data;
+
+  const work = await getWork(body.workId);
+  if (!work) return c.json({ error: `work not found: ${body.workId}` }, 404);
+
+  const wDir = join(dataDir, "works", body.workId);
+  const compYamlPath = join(wDir, "composition.yaml");
+  let compRaw: string;
+  try {
+    compRaw = await readFile(compYamlPath, "utf-8");
+  } catch {
+    return c.json({ error: `composition not found for work: ${body.workId}` }, 404);
+  }
+  const compDoc = yaml.load(compRaw) as Composition;
+  const sourceAsset = (compDoc.assets ?? []).find((a) => a.id === body.assetId);
+  if (!sourceAsset) {
+    return c.json({ error: `assetId not found in composition: ${body.assetId}` }, 404);
+  }
+
+  // Resolve the on-disk source path; same convention as /api/video/reframe.
+  const rel = sourceAsset.uri.replace(/^\/api\/works\/[^/]+\/assets\//, "");
+  const sourceAbsPath = join(wDir, "assets", rel);
+
+  const sourceExt = extname(rel) || ".mp4";
+  const safeTitle = safeTitleFromWork(work.title);
+  const iso = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+  const outName = `${safeTitle}__${operation}__${iso}${sourceExt}`;
+  const outDir = join(wDir, "assets", "post-process");
+  await mkdir(outDir, { recursive: true });
+  const outPath = join(outDir, outName);
+
+  const opts: PostProcessOptions = body.options ?? {};
+  let result: Awaited<ReturnType<PostProcessor["process"]>>;
+  try {
+    result = await processor.process(sourceAbsPath, outPath, opts);
+  } catch (err) {
+    return c.json({ error: String(err) }, 500);
+  }
+
+  const newAssetId = `pp_${operation}_${Math.random().toString(36).slice(2, 10)}`;
+  const newAsset: AssetEntry = {
+    id: newAssetId,
+    uri: `/api/works/${body.workId}/assets/post-process/${encodeURIComponent(outName)}`,
+    kind: sourceAsset.kind,
+    // Stub flag lives on the provenance edge; metadata stays inheritance-only
+    // so it conforms to the AssetMetadata schema.
+    metadata: { ...(sourceAsset.metadata ?? {}) },
+    status: "ready",
+  };
+  const newEdge: ProvenanceEdge = {
+    fromAssetId: body.assetId,
+    toAssetId: newAssetId,
+    operation: {
+      type: "grade",
+      actor: "user",
+      timestamp: new Date().toISOString(),
+      params: {
+        operation,
+        stub: result.stub,
+        ...(opts.scale !== undefined ? { scale: opts.scale } : {}),
+      },
+    },
+  };
+  compDoc.assets = [...(compDoc.assets ?? []), newAsset];
+  compDoc.provenance = [...(compDoc.provenance ?? []), newEdge];
+  await writeFile(compYamlPath, yaml.dump(compDoc), "utf-8");
+
+  return c.json({
+    asset: newAsset,
+    edge: newEdge,
+    assetUri: newAsset.uri,
+    stub: result.stub,
+    durationMs: result.durationMs,
   });
 });
