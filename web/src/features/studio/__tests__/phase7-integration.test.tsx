@@ -69,21 +69,7 @@ function jsonResponse(payload: unknown) {
 }
 
 function parseBody(raw: unknown): any {
-  if (typeof raw !== "string") return raw;
-  let v: any;
-  try {
-    v = JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-  if (typeof v === "string") {
-    try {
-      return JSON.parse(v);
-    } catch {
-      return v;
-    }
-  }
-  return v;
+  return typeof raw === "string" ? JSON.parse(raw) : raw;
 }
 
 let jobCounter = 0;
