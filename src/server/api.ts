@@ -16,6 +16,10 @@ import { MemoryClient } from "../memory.js";
 import type { WsBridge } from "../ws-bridge.js";
 import type { RenderQueue } from "./render-queue/index.js";
 import { getProvider, getDefaultProvider, listProviders } from "../providers/registry.js";
+import {
+  getProvider as getVideoProvider,
+  listProviders as listVideoProviders,
+} from "./providers/registry.js";
 import { listSharedAssetsWithMeta, getSharedAssetPath, validateCategory, sanitizeFilename, saveSharedAsset, deleteSharedAsset, moveSharedAsset } from "../shared-assets.js";
 import { getLatestCreatorData, getCreatorHistory } from "../analytics-collector.js";
 import { log, readLogs } from "../logger.js";
@@ -2207,5 +2211,37 @@ apiRoutes.post("/api/video/reframe", async (c) => {
     asset: newAsset,
     edge: newEdge,
     strategyUsed: saliencyResult.strategy_used,
+  });
+});
+
+// Phase 8.4 — provider listing
+apiRoutes.get("/api/providers", (c) => {
+  return c.json({ providers: listVideoProviders() });
+});
+
+// Phase 8.4 — provider dispatch (compact spec only; full asset registration deferred)
+apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
+  const providerId = c.req.param("providerId");
+  const body = await c.req.json<{
+    workId: string;
+    prompt: string;
+    durationSec: number;
+    aspectRatio: string;
+  }>();
+  const provider = getVideoProvider(providerId);
+  if (!provider) return c.json({ error: "unknown provider" }, 404);
+  if (!body.prompt || !body.workId) {
+    return c.json({ error: "prompt and workId required" }, 400);
+  }
+  const result = await provider.generateVideo({
+    prompt: body.prompt,
+    durationSec: body.durationSec ?? 4,
+    aspectRatio: body.aspectRatio ?? "9:16",
+  });
+  return c.json({
+    assetUri: result.assetUri,
+    providerJobId: result.providerJobId,
+    costUsd: result.costUsd,
+    stub: result.stub,
   });
 });
