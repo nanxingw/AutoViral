@@ -37,8 +37,10 @@ https://github.com/pandazki/pneuma-skills是你需要着重参考的项目地址
 <testing>
 - **默认一次性运行**：验证代码请用 `npm run test:web`（跑完即退出），不要默认 `test:web:watch`。Server 端同理用 `npm run test:server` 而非 `:watch`。
 - **watch 模式仅用于主动调试**：只在反复迭代单个测试文件时短时启用，调完立刻 Ctrl+C，绝不让它常驻后台。
-- **vitest worker 必须封顶**：`web/vitest.config.ts` 的 `poolOptions.threads.maxThreads` 强制保留为 2（本机 8 核默认会开 8 个 happy-dom worker × ~150 MB ≈ 1.2 GB 常驻，已经炸过一次内存）。修改 vitest 配置时不要移除这个上限。
-- **跑完确认无残留进程**：怀疑有遗留时执行 `ps aux | grep -i vitest | grep -v grep`，有就 kill。
+- **vitest worker 必须封顶（两个 pool 都要）**：`web/vitest.config.ts` 的 `poolOptions.threads.maxThreads = 2`，`vitest.server.config.ts` 的 `poolOptions.forks.maxForks = 2`。本机 8 核默认会开 7 个 worker × ~150 MB ≈ 1 GB 常驻，已经炸过两次内存。修改任一 vitest 配置时不要移除这两个上限。
+- **pretest 钩子已自动清残留**：`npm run test:web` / `test:server` 启动前会 `pkill -f` 上次同 config 的进程；不要绕过 npm 直接调 `vitest`，否则钩子失效。
+- **绝不并发跑两个 vitest**：不要在两个终端同时跑测试，也不要在 watch 还活着时另起一次 run——同一 config 第二次启动会绕开 maxThreads 形成双倍 worker。
+- **跑完自检命令**：`pgrep -f vitest | wc -l` 应 ≤ 3（1 主进程 + ≤2 worker）；≥5 立即 `pkill -f vitest` 然后排查。
 - **不要用 watch 来"验证我刚改的代码"**：一次性 `test:web` 就足够，watch 只在你主动调试时才有意义。
 </testing>
 
