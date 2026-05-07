@@ -11,15 +11,20 @@ function formatTime(s: number): string {
 
 export function PreviewPanel() {
   const comp = useComposition((s) => s.comp);
+  // Bridge Remotion playback to the Zustand store so Timeline's <Playhead>
+  // (which reads currentFrame from the store) advances during playback.
+  // Pneuma uses the same shared-state pattern (playback.currentTime) across
+  // preview + timeline + dive views.
+  const frame = useComposition((s) => s.currentFrame);
   const [playing, setPlaying] = useState(false);
-  const [frame, setFrame] = useState(0);
   const playerRef = useRef<PlayerRef | null>(null);
 
   // Subscribe to player frame updates so the scrubber + timecode track playback.
   useEffect(() => {
     const p = playerRef.current;
     if (!p) return;
-    const onFrame = (e: { detail: { frame: number } }) => setFrame(e.detail.frame);
+    const onFrame = (e: { detail: { frame: number } }) =>
+      useComposition.getState().setFrame(e.detail.frame);
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     p.addEventListener("frameupdate", onFrame as any);
@@ -45,7 +50,7 @@ export function PreviewPanel() {
     if (!p) return;
     const f = Math.max(0, Math.min(Math.round(seconds * fps), (comp?.duration ?? 0) * fps));
     p.seekTo(f);
-    setFrame(f);
+    useComposition.getState().setFrame(f);
   }, [comp]);
 
   if (!comp) {
