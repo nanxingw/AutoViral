@@ -2223,7 +2223,13 @@ apiRoutes.get("/api/providers", (c) => {
   return c.json({ providers: listVideoProviders() });
 });
 
-// Phase 8.4 — provider dispatch (compact spec only; full asset registration deferred)
+// Phase 8.4 — provider dispatch
+//
+// Calls the provider adapter, then registers the resulting clip as a fresh
+// AssetEntry + a "generate" ProvenanceEdge on the work's composition.yaml so
+// the dive canvas / asset library pick it up immediately.
+//
+// fromAssetId is null because text-to-video has no source asset on disk.
 apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
   const providerId = c.req.param("providerId");
   const body = await c.req.json<{
@@ -2242,7 +2248,52 @@ apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
     durationSec: body.durationSec ?? 4,
     aspectRatio: body.aspectRatio ?? "9:16",
   });
+
+  // Best-effort composition update — if there's no composition.yaml yet (legacy
+  // works) we still return the adapter result so the UI can show it.
+  let assetId: string | null = null;
+  const work = await getWork(body.workId);
+  if (work) {
+    const wDir = join(dataDir, "works", body.workId);
+    const compYamlPath = join(wDir, "composition.yaml");
+    try {
+      const compRaw = await readFile(compYamlPath, "utf-8");
+      const compDoc = yaml.load(compRaw) as Composition;
+      const { randomUUID } = await import("node:crypto");
+      assetId = `gen_${randomUUID().slice(0, 8)}`;
+      const newAsset: AssetEntry = {
+        id: assetId,
+        uri: result.assetUri,
+        kind: "video",
+        metadata: { duration: body.durationSec ?? 4 },
+        status: "ready",
+      };
+      const newEdge: ProvenanceEdge = {
+        fromAssetId: null,
+        toAssetId: assetId,
+        operation: {
+          type: "generate",
+          actor: "user",
+          timestamp: new Date().toISOString(),
+          params: {
+            providerId,
+            prompt: body.prompt,
+            costUsd: result.costUsd,
+            stub: result.stub,
+            providerJobId: result.providerJobId,
+          },
+        },
+      };
+      compDoc.assets = [...(compDoc.assets ?? []), newAsset];
+      compDoc.provenance = [...(compDoc.provenance ?? []), newEdge];
+      await writeFile(compYamlPath, yaml.dump(compDoc), "utf-8");
+    } catch {
+      // composition.yaml missing or unreadable — skip registration silently.
+    }
+  }
+
   return c.json({
+    assetId,
     assetUri: result.assetUri,
     providerJobId: result.providerJobId,
     costUsd: result.costUsd,
