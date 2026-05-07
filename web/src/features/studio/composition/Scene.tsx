@@ -1,14 +1,21 @@
+import { useMemo } from "react";
 import { AbsoluteFill } from "remotion";
 import type { Composition } from "../types";
 import { VideoTrackRenderer } from "./tracks/VideoTrackRenderer";
 import { AudioTrackRenderer } from "./tracks/AudioTrackRenderer";
 import { TextTrackRenderer } from "./tracks/TextTrackRenderer";
 import { OverlayTrackRenderer } from "./tracks/OverlayTrackRenderer";
+import { resolveCompositionAssets } from "./resolveAssetUrl";
 
 export function Scene({ comp }: { comp: Composition }) {
+  // Rewrite relative `assets/...` clip srcs to /api/works/:id/assets/...
+  // so browser-side <Video>/<Audio>/<Img> elements load via the dev
+  // server's proxy. Composition.yaml on disk stays portable. Render-side
+  // applies the equivalent rewrite in render-pipeline.ts.
+  const resolved = useMemo(() => resolveCompositionAssets(comp), [comp]);
   return (
     <AbsoluteFill style={{ backgroundColor: "#000" }}>
-      {comp.tracks.map((t) => {
+      {resolved.tracks.map((t) => {
         if (t.kind === "video")
           return <VideoTrackRenderer key={t.id} track={t} />;
         if (t.kind === "audio")

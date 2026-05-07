@@ -6,6 +6,8 @@
 // thumbnail is at least ~60px wide regardless of zoom.
 import { useMemo } from "react";
 import { useFrameExtractor } from "./hooks/useFrameExtractor";
+import { resolveAssetUrl } from "../../composition/resolveAssetUrl";
+import { useComposition } from "../../store";
 import type { VideoClip } from "../../types";
 
 const CACHE_INTERVAL = 0.5; // D8
@@ -17,6 +19,13 @@ interface Props {
 }
 
 export function Filmstrip({ clip, pxPerSecond, height }: Props) {
+  // composition.yaml stores clip.src as a workspace-relative path. The
+  // hidden <video> the extractor creates loads against the page origin
+  // (vite dev) which doesn't proxy `/assets/*` — only `/api/*`. Rewrite
+  // through the same helper Scene uses so the filmstrip and the preview
+  // stay in sync.
+  const workId = useComposition((s) => s.comp?.workId ?? "");
+  const resolvedSrc = workId ? resolveAssetUrl(clip.src, workId) : clip.src;
   const dur = clip.out - clip.in;
   const renderStep = Math.max(CACHE_INTERVAL, 60 / Math.max(1, pxPerSecond));
 
@@ -31,7 +40,7 @@ export function Filmstrip({ clip, pxPerSecond, height }: Props) {
   }, [clip.in, clip.out]);
 
   const { frames } = useFrameExtractor({
-    src: clip.src,
+    src: resolvedSrc,
     timestamps: cacheTimestamps,
   });
 
