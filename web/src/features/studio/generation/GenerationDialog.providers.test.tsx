@@ -86,3 +86,144 @@ describe("GenerationDialog provider dropdown (Phase 8.4)", () => {
     expect(select.value).toBe("kling");
   });
 });
+
+// ─── Generate dispatch wiring (Phase 8.4 — Option A) ─────────────────────────
+//
+// When kind === "video" and a provider is selected, clicking Generate should
+// also POST /api/providers/:id/generate-video with the right body, then
+// invalidate the ["assets", workId] query so AssetSidebar refetches.
+
+describe("GenerationDialog generate dispatch (Phase 8.4 wiring)", () => {
+  function dispatchFetchMock() {
+    return vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/generate-video") && init?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            assetId: "gen_abc12345",
+            assetUri: "/api/works/w1/assets/runway-x.mp4",
+            providerJobId: "jid",
+            costUsd: 0.05,
+            stub: true,
+          }),
+          text: async () => "",
+        } as unknown as Response;
+      }
+      if (u.includes("/api/providers")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ providers: PROVIDERS }),
+        } as unknown as Response;
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+        text: async () => "",
+      } as unknown as Response;
+    });
+  }
+
+  it("POSTs to /api/providers/:id/generate-video with prompt + durationSec + aspectRatio when video kind", async () => {
+    const fetchMock = dispatchFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    wrap(
+      <GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />,
+    );
+    // Wait for provider options
+    const select = (await screen.findByLabelText(
+      "Provider",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
+
+    // Switch to video kind tab
+    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
+
+    // Pick 9:16 aspect ratio for the dispatch (default state carries 1:1
+    // from the image tab; the field exists once VideoFields render).
+    const aspectSelect = screen.getByLabelText(
+      /aspect ratio/i,
+    ) as HTMLSelectElement;
+    fireEvent.change(aspectSelect, { target: { value: "9:16" } });
+
+    // Fill prompt
+    const prompt = screen.getByPlaceholderText(
+      /panda lazily blinking/i,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(prompt, {
+      target: { value: "a panda eating bamboo at golden hour" },
+    });
+
+    // Click Generate
+    const generateBtn = screen.getByRole("button", { name: /^generate$/i });
+    fireEvent.click(generateBtn);
+
+    await waitFor(() => {
+      const dispatchCall = fetchMock.mock.calls.find(
+        (c) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).includes("/generate-video") &&
+          (c[1] as RequestInit | undefined)?.method === "POST",
+      );
+      expect(dispatchCall).toBeDefined();
+    });
+    const dispatchCall = fetchMock.mock.calls.find(
+      (c) =>
+        typeof c[0] === "string" &&
+        (c[0] as string).includes("/generate-video") &&
+        (c[1] as RequestInit | undefined)?.method === "POST",
+    )!;
+    const url = dispatchCall[0] as string;
+    expect(url).toMatch(/\/api\/providers\/sora\/generate-video$/);
+    const body = JSON.parse(
+      (dispatchCall[1] as RequestInit).body as string,
+    );
+    expect(body).toMatchObject({
+      workId: "w1",
+      prompt: "a panda eating bamboo at golden hour",
+      aspectRatio: "9:16",
+    });
+    expect(typeof body.durationSec).toBe("number");
+  });
+
+  it("invalidates the ['assets', workId] query after a successful 200 response", async () => {
+    const fetchMock = dispatchFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    const qc = new QueryClient({
+      defaultOptions: {
+        queries: { retry: false, staleTime: 0, gcTime: 0 },
+      },
+    });
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    render(
+      <QueryClientProvider client={qc}>
+        <GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />
+      </QueryClientProvider>,
+    );
+    const select = (await screen.findByLabelText(
+      "Provider",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
+    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
+    fireEvent.change(
+      screen.getByPlaceholderText(/panda lazily blinking/i),
+      { target: { value: "a panda eating bamboo at golden hour" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+
+    await waitFor(() => {
+      const matchingCall = invalidateSpy.mock.calls.find((c) => {
+        const arg = c[0] as { queryKey?: unknown } | undefined;
+        return (
+          Array.isArray(arg?.queryKey) &&
+          (arg!.queryKey as unknown[])[0] === "assets" &&
+          (arg!.queryKey as unknown[])[1] === "w1"
+        );
+      });
+      expect(matchingCall).toBeDefined();
+    });
+  });
+});

@@ -23,7 +23,7 @@
 
 import * as Dialog from "@radix-ui/react-dialog";
 import { useState, useMemo, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   buildGenerationNotification,
   type GenerationRequest,
@@ -250,6 +250,8 @@ export function GenerationDialog(props: GenerationDialogProps) {
   }));
 
   const chat = useChatSocket(workId);
+  const queryClient = useQueryClient();
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
 
   // ── Provider dropdown (Phase 8.4) ─────────────────────────────────────────
   const providersQuery = useQuery({
@@ -273,11 +275,53 @@ export function GenerationDialog(props: GenerationDialogProps) {
     setForm((s) => ({ ...s, [key]: value }));
   }
 
-  function onGenerate() {
+  // Phase 8.4 — when generating a video clip with a real provider selected,
+  // call the dispatch endpoint directly so the new asset shows up in the
+  // library without requiring agent round-tripping. Variant mode and non-video
+  // kinds keep the chat-driven flow (no provider parity yet).
+  const shouldDispatchProvider =
+    !isVariant && form.kind === "video" && !!selectedProviderId;
+
+  async function dispatchProviderGenerate(): Promise<void> {
+    if (!selectedProviderId) return;
+    const aspectRatio = (form.aspectRatio ?? "9:16") as string;
+    const durationSec = Number(form.duration) || 4;
+    const res = await fetch(
+      `/api/providers/${selectedProviderId}/generate-video`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          workId,
+          prompt: form.prompt,
+          durationSec,
+          aspectRatio,
+        }),
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`provider dispatch failed (${res.status}) ${text}`);
+    }
+    await queryClient.invalidateQueries({ queryKey: ["assets", workId] });
+  }
+
+  async function onGenerate() {
     if (!isFormReady(form, source)) return;
+    setDispatchError(null);
     const request = formStateToRequest(form, source);
     const notification = buildGenerationNotification(request);
     chat.send(notification.message);
+    if (shouldDispatchProvider) {
+      try {
+        await dispatchProviderGenerate();
+      } catch (err) {
+        setDispatchError(
+          err instanceof Error ? err.message : "provider dispatch failed",
+        );
+        return; // keep dialog open so user sees the error
+      }
+    }
     onOpenChange(false);
   }
 
@@ -399,6 +443,11 @@ export function GenerationDialog(props: GenerationDialogProps) {
             )}
           </div>
 
+          {dispatchError && (
+            <div role="alert" style={errorStyle}>
+              {dispatchError}
+            </div>
+          )}
           <footer style={footerStyle}>
             <button
               type="button"
@@ -411,7 +460,9 @@ export function GenerationDialog(props: GenerationDialogProps) {
               type="button"
               style={generateBtnStyle(ready)}
               disabled={!ready}
-              onClick={onGenerate}
+              onClick={() => {
+                void onGenerate();
+              }}
             >
               Generate
             </button>
@@ -783,6 +834,17 @@ const sourceCardStyle: React.CSSProperties = {
   borderRadius: 10,
   padding: "10px 12px",
   fontSize: 12,
+};
+
+const errorStyle: React.CSSProperties = {
+  margin: "0 22px 12px",
+  padding: "8px 12px",
+  background: "rgba(220, 80, 80, 0.08)",
+  border: "1px solid rgba(220, 80, 80, 0.4)",
+  borderRadius: 8,
+  color: "#e08080",
+  fontSize: 12,
+  fontFamily: "var(--font-mono)",
 };
 
 const footerStyle: React.CSSProperties = {
