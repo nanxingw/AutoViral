@@ -1,15 +1,17 @@
-import { Handle, Position } from "reactflow";
+import { Handle, Position, type Node } from "@xyflow/react";
 import type { ReactNode } from "react";
 import type { AssetEntry } from "../../types";
 
 export const NODE_WIDTH = 180;
 export const NODE_HEIGHT = 120;
 
-export interface DiveNodeData {
+export interface DiveNodeData extends Record<string, unknown> {
   asset: AssetEntry;
   isCurrent: boolean;
   onUse: () => void;
 }
+
+export type DiveNode = Node<DiveNodeData>;
 
 export interface NodeShellProps {
   assetId: string;

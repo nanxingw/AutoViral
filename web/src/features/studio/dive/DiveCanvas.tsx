@@ -1,12 +1,13 @@
 import { useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
-import ReactFlow, {
+import {
+  ReactFlow,
   Background,
   Controls,
   type Edge,
   type Node,
-} from "reactflow";
-import "reactflow/dist/style.css";
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
 import { useComposition } from "../store";
 import type { AssetEntry, Clip } from "../types";
 import { findAssetByUri } from "./walkProvenance";

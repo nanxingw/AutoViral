@@ -1,7 +1,7 @@
-import type { NodeProps } from "reactflow";
-import { NodeShell, type DiveNodeData } from "./NodeShell";
+import type { NodeProps } from "@xyflow/react";
+import { NodeShell, type DiveNode } from "./NodeShell";
 
-export function VisualNode({ data }: NodeProps<DiveNodeData>) {
+export function VisualNode({ data }: NodeProps<DiveNode>) {
   return (
     <NodeShell assetId={data.asset.id} isCurrent={data.isCurrent} onUse={data.onUse}>
       <img
