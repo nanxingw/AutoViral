@@ -471,6 +471,119 @@ apiRoutes.put("/api/works/:id/composition", async (c) => {
   return c.json({ ok: true });
 });
 
+// POST /api/works/:id/composition/gc-orphans — garbage-collect AssetEntries
+// whose physical files no longer exist on disk. After commit ad67b9b some
+// works ended up with stale gen_* AssetEntries pointing at non-existent mp4s
+// (e.g., the renderer would 404 every time). This endpoint:
+//   1. Scans assets[] for video/image/audio kinds whose uri is a relative
+//      work path (skips http/api/absolute uris — those are out of scope).
+//   2. For each, tries both <wDir>/<uri> and <wDir>/assets/<uri> (uri shapes
+//      vary across the codebase: some are "clips/foo.mp4", some are
+//      "assets/clips/foo.mp4"). Marks asset status="failed" if both miss.
+//   3. Removes any timeline clip referencing the orphan asset's uri.
+//   4. Removes provenance edges whose toAssetId == an orphan id (orphan
+//      edges break the dive view).
+// Idempotent: re-running on the same composition produces the same result
+// (status==="failed" is left as-is, clips already removed stay removed).
+apiRoutes.post("/api/works/:id/composition/gc-orphans", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId" }, 400);
+  const w = await getWork(id);
+  if (!w) return c.json({ error: "Work not found" }, 404);
+  const wDir = join(dataDir, "works", id);
+  const compYamlPath = join(wDir, "composition.yaml");
+  let raw: string;
+  try {
+    raw = await readFile(compYamlPath, "utf-8");
+  } catch (err: any) {
+    if (err?.code === "ENOENT") return c.json({ error: "Composition not found" }, 404);
+    return c.json({ error: `Composition unreadable: ${err?.message ?? "unknown"}` }, 500);
+  }
+  let comp: Composition;
+  try {
+    comp = yaml.load(raw) as Composition;
+  } catch (err: any) {
+    return c.json({ error: `Composition YAML invalid: ${err?.message ?? "unknown"}` }, 500);
+  }
+
+  const { existsSync } = await import("node:fs");
+
+  // Skip uris that are absolute, http, or backed by /api/ — only
+  // work-relative paths can be GC'd here (anything else is unverifiable).
+  const isLocalRelativeUri = (uri: string): boolean => {
+    if (!uri) return false;
+    if (uri.startsWith("http://") || uri.startsWith("https://")) return false;
+    if (uri.startsWith("/api/")) return false;
+    if (uri.startsWith("/")) return false;
+    return true;
+  };
+
+  const fileExistsForUri = (uri: string): boolean => {
+    // Try BOTH <wDir>/<uri> and <wDir>/assets/<uri> (existing AssetEntry.uri
+    // shapes vary). Either match → asset is considered live.
+    const direct = join(wDir, uri);
+    if (existsSync(direct)) return true;
+    if (!uri.startsWith("assets/")) {
+      const underAssets = join(wDir, "assets", uri);
+      if (existsSync(underAssets)) return true;
+    }
+    return false;
+  };
+
+  const orphans: string[] = [];
+  let marked = 0;
+  const orphanUris = new Set<string>();
+  const assets = comp.assets ?? [];
+  for (const a of assets) {
+    if (!(a.kind === "video" || a.kind === "image" || a.kind === "audio")) continue;
+    if (!isLocalRelativeUri(a.uri)) continue;
+    if (fileExistsForUri(a.uri)) continue;
+    orphans.push(a.id);
+    orphanUris.add(a.uri);
+    if (a.status !== "failed") {
+      a.status = "failed";
+      marked += 1;
+    }
+  }
+
+  // Remove clips referencing orphan uris. We match by clip.src equality
+  // against orphan asset uris — both raw work-relative and the
+  // /api/works/:id/assets/<uri> URL shape are checked because the legacy
+  // synthesiser writes the URL form into clip.src.
+  const orphanClipSrcs = new Set<string>();
+  for (const u of orphanUris) {
+    orphanClipSrcs.add(u);
+    orphanClipSrcs.add(`/api/works/${id}/assets/${u}`);
+    if (u.startsWith("assets/")) {
+      const stripped = u.slice("assets/".length);
+      orphanClipSrcs.add(stripped);
+      orphanClipSrcs.add(`/api/works/${id}/assets/${stripped}`);
+    }
+  }
+  let removed = 0;
+  for (const track of comp.tracks ?? []) {
+    const before = track.clips.length;
+    track.clips = track.clips.filter((clip) => {
+      if (clip.kind === "text") return true;
+      const src = (clip as { src?: string }).src;
+      if (!src) return true;
+      return !orphanClipSrcs.has(src);
+    });
+    removed += before - track.clips.length;
+  }
+
+  // Drop provenance edges whose toAssetId points at an orphan — the dive
+  // view treats these as broken nodes.
+  const orphanIdSet = new Set(orphans);
+  if (comp.provenance) {
+    comp.provenance = comp.provenance.filter((edge) => !orphanIdSet.has(edge.toAssetId));
+  }
+
+  await writeFile(compYamlPath, yaml.dump(comp, { lineWidth: -1 }), "utf-8");
+
+  return c.json({ removed, marked, orphans });
+});
+
 // GET /api/works/:id/carousel — returns carousel.yaml as JSON
 apiRoutes.get("/api/works/:id/carousel", async (c) => {
   const id = c.req.param("id");
