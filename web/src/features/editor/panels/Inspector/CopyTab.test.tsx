@@ -55,13 +55,14 @@ describe("CopyTab", () => {
     expect(layer.text).toBe("hello world");
   });
 
-  it("Rewrite with AI calls /api/works/:id/invoke and applies returned text", async () => {
+  it("Rewrite with AI calls /api/works/:id/text-rewrite and applies returned text", async () => {
     seed();
     mswServer.use(
-      http.post("/api/works/w1/invoke", async ({ request }) => {
+      http.post("/api/works/w1/text-rewrite", async ({ request }) => {
         const body = (await request.json()) as Record<string, unknown>;
-        expect(body.module).toBe("planning");
-        return HttpResponse.json({ output: { text: "rewritten" } });
+        expect(body.intent).toBe("rewrite-copy");
+        expect(body.current).toBe("old");
+        return HttpResponse.json({ text: "rewritten" });
       }),
     );
     render(<CopyTab workId="w1" />);

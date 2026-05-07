@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { useEditor } from "../../store";
+import { loadCarousel } from "../../services/carousel";
 
 const QUICK_STYLES = [
   "minimal editorial",
@@ -13,10 +14,39 @@ const QUICK_STYLES = [
 
 export function AITab({ workId }: { workId: string }) {
   const car = useEditor((s) => s.car);
+  const reload = useEditor((s) => s.loadCarousel);
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState<null | "regen" | "quick">(null);
   const [msg, setMsg] = useState<string | null>(null);
   const slideCount = car?.slides.length ?? 0;
+
+  /**
+   * Poll carousel.updatedAt every 5s for up to 60s after triggering an
+   * agent run. When the file mtime moves past the snapshot we took at
+   * dispatch time, the agent has rewritten carousel.yaml — pull the
+   * fresh state into the store so the canvas refreshes without a
+   * manual reload.
+   */
+  const watchForCarouselUpdate = async (
+    sinceISO: string,
+    timeoutMs = 60_000,
+  ) => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      await new Promise((r) => setTimeout(r, 5_000));
+      try {
+        const next = await loadCarousel(workId);
+        if (next && next.updatedAt > sinceISO) {
+          reload(next);
+          setMsg("updated");
+          return;
+        }
+      } catch {
+        // ignore transient fetch failures, keep polling.
+      }
+    }
+    setMsg("queued (no update detected within 60s)");
+  };
 
   const runAssets = async (
     input: Record<string, unknown>,
@@ -24,12 +54,15 @@ export function AITab({ workId }: { workId: string }) {
   ) => {
     setBusy(label);
     setMsg(null);
+    const since = car?.updatedAt ?? new Date(0).toISOString();
     try {
       await apiFetch(`/api/works/${workId}/invoke`, {
         method: "POST",
         body: { module: "assets", input },
       });
-      setMsg("queued");
+      setMsg("queued — watching for carousel update…");
+      // Fire-and-forget poll; don't await so the button frees up.
+      void watchForCarouselUpdate(since);
     } catch (err) {
       setMsg(err instanceof Error ? err.message : "request failed");
     } finally {

@@ -21,19 +21,21 @@ export function CopyTab({ workId }: { workId: string }) {
     setBusy(true);
     setError(null);
     try {
-      const res = await apiFetch<{ output?: { text?: string } }>(
-        `/api/works/${workId}/invoke`,
+      // Synchronous rewrite. The agent /invoke route is async (202 + chat
+      // stream) and doesn't fit "click → text updates" UX. /text-rewrite
+      // thin-wraps OpenRouter chat-completions and returns { text }.
+      const res = await apiFetch<{ text?: string }>(
+        `/api/works/${workId}/text-rewrite`,
         {
           method: "POST",
-          body: {
-            module: "planning",
-            input: { intent: "rewrite-copy", current: selected.text },
-          },
+          body: { current: selected.text, intent: "rewrite-copy" },
         },
       );
-      const next = res?.output?.text;
+      const next = res?.text;
       if (typeof next === "string" && next.length > 0) {
         updateLayer(selected.id, { text: next });
+      } else {
+        setError("Empty response from rewriter");
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "rewrite failed");

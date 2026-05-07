@@ -2562,3 +2562,61 @@ apiRoutes.post("/api/post-process/:operation", async (c) => {
     durationMs: result.durationMs,
   });
 });
+
+/**
+ * POST /api/works/:id/text-rewrite — synchronous text rewrite via OpenRouter.
+ *
+ * The Inspector's Copy tab needs an immediate { text } response so it can
+ * splice the new copy back into the layer. The agent-based /invoke route
+ * is async (202 + chat-stream), which doesn't fit that UX. This endpoint
+ * is a thin pass-through to OpenRouter chat-completions; falls back to
+ * 503 if no openrouter.apiKey is configured.
+ */
+apiRoutes.post("/api/works/:id/text-rewrite", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId" }, 400);
+
+  const body = await c.req
+    .json<{ current?: string; intent?: string }>()
+    .catch(() => ({} as { current?: string; intent?: string }));
+  const current = (body.current ?? "").trim();
+  if (!current) return c.json({ error: "Missing 'current' text to rewrite" }, 400);
+
+  const config = await loadConfig();
+  const apiKey = config.openrouter?.apiKey;
+  if (!apiKey) return c.json({ error: "openrouter.apiKey not configured" }, 503);
+
+  const intent = body.intent ?? "rewrite";
+  const sys =
+    "You rewrite Chinese social-media headlines/captions for editorial small-red-book style. " +
+    "Return ONLY the rewritten text — no preamble, no quotes, no labels. " +
+    "Keep length close to the original (±20%). Preserve tone unless told otherwise.";
+  const usr = intent === "rewrite-copy"
+    ? `请重写下面这段文案，保持原意但更有节奏感：\n\n${current}`
+    : `请基于「${intent}」改写：\n\n${current}`;
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+      "HTTP-Referer": "http://localhost:3271",
+    },
+    body: JSON.stringify({
+      model: "anthropic/claude-haiku-4.5",
+      messages: [
+        { role: "system", content: sys },
+        { role: "user", content: usr },
+      ],
+      temperature: 0.7,
+    }),
+  });
+  if (!res.ok) {
+    const errBody = await res.text();
+    return c.json({ error: `OpenRouter ${res.status}: ${errBody.slice(0, 300)}` }, 502);
+  }
+  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const text = data?.choices?.[0]?.message?.content?.trim();
+  if (!text) return c.json({ error: "OpenRouter returned no text" }, 502);
+  return c.json({ text });
+});
