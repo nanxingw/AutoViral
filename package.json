@@ -3,6 +3,9 @@
   "version": "0.2.0",
   "description": "AutoCode — Self-evolving intelligence for Claude Code: skills, memory, and autonomous tasks",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "bin": {
     "autocode": "dist/index.js",
     "autoviral": "dist/index.js"
