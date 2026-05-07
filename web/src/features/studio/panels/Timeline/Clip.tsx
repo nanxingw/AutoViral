@@ -2,12 +2,6 @@ import { useComposition } from "../../store";
 import { useClipResize } from "./hooks/useClipResize";
 import clsx from "clsx";
 
-function hueFromString(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h % 360;
-}
-
 export function Clip({
   clipId,
   pxPerSecond,
@@ -132,13 +126,20 @@ export function Clip({
   let fgDim: string;
 
   if (trackKind === "video") {
-    const hue = hueFromString(clip.id);
-    background = isLight
-      ? `linear-gradient(135deg, hsl(${hue}, 35%, 82%), hsl(${(hue + 20) % 360}, 40%, 72%))`
-      : `linear-gradient(135deg, hsl(${hue}, 30%, 30%), hsl(${(hue + 20) % 360}, 35%, 20%))`;
-    borderColor = "rgba(128,128,128,0.15)";
-    fg = isLight ? "rgba(15,24,34,0.88)" : "rgba(255,255,255,0.92)";
-    fgDim = isLight ? "rgba(15,24,34,0.5)" : "rgba(255,255,255,0.6)";
+    // Bug 2 fix: video clip body must be transparent so the Filmstrip
+    // (rendered beneath in Track.tsx) shows through. Pneuma's VideoTrack
+    // (.cache/pneuma-clipcraft/.../timeline/VideoTrack.tsx:158-179) uses
+    // the same pattern — the clip frame is just a border + label, the
+    // thumbnails carry the visual identity. Selected state still adds a
+    // subtle accent tint so the active clip is distinguishable.
+    background = isSelected
+      ? isLight
+        ? "rgba(42,58,74,0.10)"
+        : "rgba(168,197,214,0.12)"
+      : "transparent";
+    borderColor = "rgba(128,128,128,0.18)";
+    fg = isLight ? "rgba(15,24,34,0.92)" : "rgba(255,255,255,0.95)";
+    fgDim = isLight ? "rgba(15,24,34,0.55)" : "rgba(255,255,255,0.7)";
   } else if (trackKind === "audio") {
     background = "linear-gradient(90deg, rgba(192,132,252,0.15), rgba(192,132,252,0.1))";
     borderColor = "rgba(192,132,252,0.25)";
@@ -186,6 +187,11 @@ export function Clip({
           fontFamily: "var(--font-mono)",
           color: fgDim,
           letterSpacing: "0.06em",
+          // Bug 2 follow-up: video clips no longer have an opaque background
+          // (the filmstrip is shown beneath), so labels need a soft shadow to
+          // stay legible over thumbnails.
+          textShadow:
+            trackKind === "video" ? "0 1px 2px rgba(0,0,0,0.6)" : undefined,
         }}
       >
         {dur.toFixed(1)}s
@@ -200,6 +206,8 @@ export function Clip({
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
+          textShadow:
+            trackKind === "video" ? "0 1px 2px rgba(0,0,0,0.6)" : undefined,
         }}
       >
         {label}
