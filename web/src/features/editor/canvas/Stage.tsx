@@ -3,6 +3,7 @@ import { Stage as KStage, Layer as KLayer } from "react-konva";
 import type Konva from "konva";
 import { useEditor } from "../store";
 import { Background } from "./background/Background";
+import { EffectsOverlay } from "./EffectsOverlay";
 import { TextLayerNode } from "./layers/TextLayerNode";
 import { ImageLayerNode } from "./layers/ImageLayerNode";
 import { ShapeLayerNode } from "./layers/ShapeLayerNode";
@@ -51,6 +52,14 @@ export const Stage = forwardRef<Konva.Stage, StageProps>(function Stage(
             return <ShapeLayerNode key={l.id} layer={l} />;
           return <StickerLayerNode key={l.id} layer={l} />;
         })}
+        {/* Editorial film-grain + bottom vignette per car.globals.effects.
+            Layered last so they sit above all content. */}
+        <EffectsOverlay
+          width={car.width}
+          height={car.height}
+          grain={car.globals.effects.grain}
+          gradient={car.globals.effects.gradient}
+        />
       </KLayer>
     </KStage>
   );
