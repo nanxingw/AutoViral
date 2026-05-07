@@ -252,6 +252,22 @@ export function GenerationDialog(props: GenerationDialogProps) {
   const chat = useChatSocket(workId);
   const queryClient = useQueryClient();
   const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [elapsedSec, setElapsedSec] = useState(0);
+
+  // Tick a per-second counter while a video provider dispatch is in flight so
+  // the user gets visible feedback during the 70-180s Seedance round-trip.
+  useEffect(() => {
+    if (!isGenerating) {
+      setElapsedSec(0);
+      return;
+    }
+    setElapsedSec(0);
+    const interval = setInterval(() => {
+      setElapsedSec((s) => s + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [isGenerating]);
 
   // ── Provider dropdown (Phase 8.4) ─────────────────────────────────────────
   const providersQuery = useQuery({
@@ -310,22 +326,33 @@ export function GenerationDialog(props: GenerationDialogProps) {
     if (!isFormReady(form, source)) return;
     setDispatchError(null);
     const request = formStateToRequest(form, source);
-    const notification = buildGenerationNotification(request);
-    chat.send(notification.message);
     if (shouldDispatchProvider) {
+      // Provider dispatch is the canonical path for video — skip the chat
+      // notification to avoid duplicate work (the agent would otherwise run
+      // its own pipeline: read SKILL.md, etc.).
+      setIsGenerating(true);
       try {
         await dispatchProviderGenerate();
       } catch (err) {
         setDispatchError(
           err instanceof Error ? err.message : "provider dispatch failed",
         );
+        setIsGenerating(false);
         return; // keep dialog open so user sees the error
       }
+      setIsGenerating(false);
+    } else {
+      const notification = buildGenerationNotification(request);
+      chat.send(notification.message);
     }
     onOpenChange(false);
   }
 
   const ready = isFormReady(form, source);
+  const selectedProvider = useMemo(
+    () => providers.find((p) => p.id === selectedProviderId) ?? null,
+    [providers, selectedProviderId],
+  );
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -443,6 +470,26 @@ export function GenerationDialog(props: GenerationDialogProps) {
             )}
           </div>
 
+          {isGenerating && shouldDispatchProvider && (
+            <div
+              role="status"
+              aria-live="polite"
+              data-testid="generation-progress"
+              style={progressStyle}
+            >
+              <span style={pulseDotStyle} aria-hidden="true" />
+              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <span style={progressLabelStyle}>
+                  Generating via {selectedProvider?.displayName ?? "provider"}
+                  {" · "}
+                  typically 70-180s for Seedance
+                </span>
+                <span style={progressTimerStyle}>
+                  Elapsed {formatElapsed(elapsedSec)}
+                </span>
+              </div>
+            </div>
+          )}
           {dispatchError && (
             <div role="alert" style={errorStyle}>
               {dispatchError}
@@ -458,13 +505,13 @@ export function GenerationDialog(props: GenerationDialogProps) {
             </button>
             <button
               type="button"
-              style={generateBtnStyle(ready)}
-              disabled={!ready}
+              style={generateBtnStyle(ready && !isGenerating)}
+              disabled={!ready || isGenerating}
               onClick={() => {
                 void onGenerate();
               }}
             >
-              Generate
+              {isGenerating ? "Generating…" : "Generate"}
             </button>
           </footer>
         </Dialog.Content>
@@ -685,6 +732,12 @@ function Row({ children }: { children: React.ReactNode }) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
+function formatElapsed(totalSec: number): string {
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 function promptPlaceholder(form: FormState): string {
   if (form.kind === "image") return "panda eating bamboo, editorial color grade";
   if (form.kind === "video")
@@ -834,6 +887,41 @@ const sourceCardStyle: React.CSSProperties = {
   borderRadius: 10,
   padding: "10px 12px",
   fontSize: 12,
+};
+
+const progressStyle: React.CSSProperties = {
+  margin: "0 22px 12px",
+  padding: "10px 12px",
+  background: "rgba(168, 197, 214, 0.08)",
+  border: "1px solid var(--glass-border)",
+  borderRadius: 10,
+  display: "flex",
+  alignItems: "center",
+  gap: 12,
+};
+
+const pulseDotStyle: React.CSSProperties = {
+  width: 8,
+  height: 8,
+  borderRadius: "50%",
+  background: "var(--accent)",
+  boxShadow: "0 0 12px var(--accent-glow)",
+  animation: "pulse-dot 1.4s ease-in-out infinite",
+  flexShrink: 0,
+};
+
+const progressLabelStyle: React.CSSProperties = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  letterSpacing: "0.04em",
+  color: "var(--text-soft)",
+};
+
+const progressTimerStyle: React.CSSProperties = {
+  fontFamily: "var(--font-serif-italic)",
+  fontStyle: "italic",
+  fontSize: 13,
+  color: "var(--accent)",
 };
 
 const errorStyle: React.CSSProperties = {

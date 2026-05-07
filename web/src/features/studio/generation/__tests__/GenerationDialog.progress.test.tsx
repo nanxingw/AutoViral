@@ -1,0 +1,206 @@
+// Tests for the inline wait-state UX and the chat-skip behavior
+// (Phase 8.4 follow-up — see GenerationDialog.tsx).
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { GenerationDialog } from "../GenerationDialog";
+
+// Mock useChatSocket so we can assert whether `send` was called.
+const sendMock = vi.fn();
+vi.mock("@/features/chat/useChatSocket", () => ({
+  useChatSocket: () => ({ send: sendMock }),
+}));
+
+const PROVIDERS = [
+  { id: "sora", displayName: "Sora", available: true, stub: false },
+  { id: "kling", displayName: "Kling", available: true, stub: false },
+];
+
+function wrap(ui: ReactNode) {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: 0, gcTime: 0 } },
+  });
+  return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
+}
+
+beforeEach(() => {
+  sendMock.mockClear();
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("GenerationDialog inline progress", () => {
+  it("renders elapsed counter and provider name during video dispatch", async () => {
+    // A pending dispatch promise we resolve manually so we can observe the
+    // mid-flight progress block.
+    let resolveDispatch: (() => void) | null = null;
+    const dispatchPromise = new Promise<void>((resolve) => {
+      resolveDispatch = resolve;
+    });
+
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/generate-video") && init?.method === "POST") {
+        await dispatchPromise;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ assetId: "x" }),
+          text: async () => "",
+        } as unknown as Response;
+      }
+      if (u.includes("/api/providers")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ providers: PROVIDERS }),
+        } as unknown as Response;
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+        text: async () => "",
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    wrap(<GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />);
+
+    const select = (await screen.findByLabelText(
+      "Provider",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
+    fireEvent.change(
+      screen.getByPlaceholderText(/panda lazily blinking/i),
+      { target: { value: "a panda eating bamboo at golden hour" } },
+    );
+
+    // Switch to fake timers AFTER initial async settling so that React
+    // effects already ran, but BEFORE we advance the elapsed counter.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+
+    fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+
+    // Progress block should appear with elapsed 00:00 and provider name.
+    const progress = await screen.findByTestId("generation-progress");
+    expect(progress.textContent ?? "").toMatch(/Sora/);
+    expect(progress.textContent ?? "").toMatch(/Elapsed 00:00/);
+    expect(progress.textContent ?? "").toMatch(/70-180s/);
+
+    // Advance time by 3 seconds, the counter should tick.
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(progress.textContent ?? "").toMatch(/Elapsed 00:03/);
+
+    // Resolve the dispatch so the test cleans up.
+    resolveDispatch!();
+    vi.useRealTimers();
+  });
+});
+
+describe("GenerationDialog chat side-effect gating", () => {
+  it("video + provider selected → dispatch fires, chat.send NOT called", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/generate-video") && init?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ assetId: "x" }),
+          text: async () => "",
+        } as unknown as Response;
+      }
+      if (u.includes("/api/providers")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ providers: PROVIDERS }),
+        } as unknown as Response;
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+        text: async () => "",
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    wrap(<GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />);
+
+    const select = (await screen.findByLabelText(
+      "Provider",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
+
+    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
+    fireEvent.change(
+      screen.getByPlaceholderText(/panda lazily blinking/i),
+      { target: { value: "a panda eating bamboo at golden hour" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+
+    await waitFor(() => {
+      const dispatchCall = fetchMock.mock.calls.find(
+        (c) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).includes("/generate-video"),
+      );
+      expect(dispatchCall).toBeDefined();
+    });
+    expect(sendMock).not.toHaveBeenCalled();
+  });
+
+  it("image kind (no provider dispatch) → chat.send still fires", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/api/providers")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ providers: PROVIDERS }),
+        } as unknown as Response;
+      }
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+        text: async () => "",
+      } as unknown as Response;
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    wrap(<GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />);
+
+    // Default kind is image. Wait until providers fetch settles so the dialog
+    // is fully rendered.
+    await screen.findByLabelText("Provider");
+
+    // Fill image prompt (>=10 chars).
+    const prompt = screen.getByPlaceholderText(
+      /panda eating bamboo, editorial color grade/i,
+    ) as HTMLTextAreaElement;
+    fireEvent.change(prompt, {
+      target: { value: "a calm editorial portrait of a panda" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+
+    await waitFor(() => {
+      expect(sendMock).toHaveBeenCalled();
+    });
+    // No /generate-video call should have fired for image kind.
+    const dispatchCall = fetchMock.mock.calls.find(
+      (c) =>
+        typeof c[0] === "string" &&
+        (c[0] as string).includes("/generate-video"),
+    );
+    expect(dispatchCall).toBeUndefined();
+  });
+});
