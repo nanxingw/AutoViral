@@ -22,13 +22,31 @@
 // exercise the kind-discrimination logic without rendering React.
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   buildGenerationNotification,
   type GenerationRequest,
   type AssetKind,
 } from "./dispatchGeneration";
 import { useChatSocket } from "@/features/chat/useChatSocket";
+
+// ─── Provider listing (Phase 8.4) ────────────────────────────────────────────
+
+export interface ProviderListing {
+  id: string;
+  displayName: string;
+  available: boolean;
+  stub: boolean;
+}
+
+async function fetchProviders(): Promise<ProviderListing[]> {
+  const res = await fetch("/api/providers");
+  if (!res.ok) return [];
+  const body = (await res.json()) as { providers?: ProviderListing[] } | ProviderListing[];
+  if (Array.isArray(body)) return body;
+  return body.providers ?? [];
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -233,6 +251,24 @@ export function GenerationDialog(props: GenerationDialogProps) {
 
   const chat = useChatSocket(workId);
 
+  // ── Provider dropdown (Phase 8.4) ─────────────────────────────────────────
+  const providersQuery = useQuery({
+    queryKey: ["providers"],
+    queryFn: fetchProviders,
+    staleTime: 60_000,
+  });
+  const providers = providersQuery.data ?? [];
+  const [selectedProviderId, setSelectedProviderId] = useState<string | null>(
+    null,
+  );
+  // Default selection: first non-stub provider, fallback to first.
+  useEffect(() => {
+    if (selectedProviderId !== null) return;
+    if (providers.length === 0) return;
+    const firstReal = providers.find((p) => !p.stub);
+    setSelectedProviderId((firstReal ?? providers[0]).id);
+  }, [providers, selectedProviderId]);
+
   function patch<K extends keyof FormState>(key: K, value: FormState[K]) {
     setForm((s) => ({ ...s, [key]: value }));
   }
@@ -299,6 +335,24 @@ export function GenerationDialog(props: GenerationDialogProps) {
                     </div>
                   )}
                 </div>
+              </Field>
+            )}
+
+            {providers.length > 0 && (
+              <Field label="Provider" hint="Video provider for generation">
+                <select
+                  aria-label="Provider"
+                  value={selectedProviderId ?? ""}
+                  onChange={(e) => setSelectedProviderId(e.target.value)}
+                  style={inputStyle}
+                >
+                  {providers.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.displayName}
+                      {p.stub ? " (stub)" : ""}
+                    </option>
+                  ))}
+                </select>
               </Field>
             )}
 
