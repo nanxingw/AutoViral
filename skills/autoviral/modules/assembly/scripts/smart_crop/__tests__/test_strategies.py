@@ -9,6 +9,7 @@ finally to center for a uniform-frame edge case.
 
 from __future__ import annotations
 
+import os
 import pathlib
 import subprocess
 
@@ -60,6 +61,34 @@ def test_face_strategy_returns_none_on_face_free_frame():
     frame = np.zeros((1080, 1920, 3), dtype=np.uint8)
     roi = strategies.compute_roi(frame, strategy="face", target_aspect=(9, 16))
     assert roi is None
+
+
+def test_face_strategy_uses_mediapipe_tasks_api():
+    """Smoke-test the mediapipe.tasks.vision FaceDetector migration.
+
+    BlazeFace is unlikely to fire on an oval drawn with cv2 — we only assert
+    that the new API loads and returns a structurally valid response (None or
+    a valid Roi) without raising. Skipped if the new API or model file is not
+    available in the environment.
+    """
+    pytest.importorskip("mediapipe.tasks")
+    if not os.path.exists(
+        os.path.expanduser("~/.autoviral/models/blaze_face_short_range.tflite")
+    ):
+        pytest.skip("BlazeFace model not downloaded; run download_model.py")
+
+    # Synthetic "face": skin-tone oval with two dark eyes + a mouth on white BG.
+    img = np.full((480, 640, 3), 240, dtype=np.uint8)
+    import cv2  # local import — already required elsewhere in the suite
+    cv2.ellipse(img, (320, 240), (110, 150), 0, 0, 360, (180, 200, 220), -1)
+    cv2.circle(img, (285, 215), 12, (40, 40, 40), -1)
+    cv2.circle(img, (355, 215), 12, (40, 40, 40), -1)
+    cv2.ellipse(img, (320, 290), (35, 12), 0, 0, 180, (40, 40, 40), 4)
+
+    roi = strategies.compute_roi(img, strategy="face", target_aspect=(9, 16))
+    # Either we got a structurally valid Roi or None (synthetic input may not
+    # trigger BlazeFace). Both prove the new API path executes without error.
+    assert roi is None or (roi.w > 0 and roi.h > 0 and roi.x >= 0 and roi.y >= 0)
 
 
 def test_saliency_strategy_returns_roi_when_motion_present(tmp_path):

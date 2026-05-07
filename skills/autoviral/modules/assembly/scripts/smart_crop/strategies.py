@@ -20,6 +20,9 @@ Public types:
 
 from __future__ import annotations
 
+import os
+import sys
+import threading
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 
@@ -36,6 +39,64 @@ try:
 except Exception:  # pragma: no cover — environment-dependent
     mp = None  # type: ignore[assignment]
     _MEDIAPIPE_OK = False
+
+# mediapipe ≥0.10 dropped the legacy `mp.solutions.face_detection` namespace in
+# some builds. The replacement is the Tasks API (`mp.tasks.vision`), which
+# requires an explicit .tflite model on disk. We lazily resolve both.
+_TASKS_VISION = None
+try:
+    if _MEDIAPIPE_OK:
+        from mediapipe.tasks.python import vision as _TASKS_VISION  # type: ignore[import]
+        from mediapipe.tasks.python.core.base_options import BaseOptions as _TasksBaseOptions  # type: ignore[import]
+except Exception:  # pragma: no cover — environment-dependent
+    _TASKS_VISION = None
+    _TasksBaseOptions = None  # type: ignore[assignment]
+
+_FACE_MODEL_PATH = os.path.expanduser("~/.autoviral/models/blaze_face_short_range.tflite")
+_FACE_DETECTOR = None  # cached `vision.FaceDetector`
+_FACE_DETECTOR_LOCK = threading.Lock()
+_FACE_DETECTOR_FAILED = False  # one-shot warn flag
+
+
+def _get_face_detector():
+    """Lazily build & cache the mediapipe.tasks FaceDetector. Returns None if
+    the new API or the model file is unavailable — caller degrades gracefully.
+    """
+    global _FACE_DETECTOR, _FACE_DETECTOR_FAILED
+    if _FACE_DETECTOR is not None:
+        return _FACE_DETECTOR
+    if _FACE_DETECTOR_FAILED:
+        return None
+    if _TASKS_VISION is None or _TasksBaseOptions is None:
+        return None
+    with _FACE_DETECTOR_LOCK:
+        if _FACE_DETECTOR is not None:
+            return _FACE_DETECTOR
+        if not os.path.exists(_FACE_MODEL_PATH):
+            if not _FACE_DETECTOR_FAILED:
+                print(
+                    f"[smart_crop] face model missing at {_FACE_MODEL_PATH}; "
+                    "run download_model.py to enable face strategy. "
+                    "Falling back to saliency/center.",
+                    file=sys.stderr,
+                )
+            _FACE_DETECTOR_FAILED = True
+            return None
+        try:
+            options = _TASKS_VISION.FaceDetectorOptions(
+                base_options=_TasksBaseOptions(model_asset_path=_FACE_MODEL_PATH),
+                min_detection_confidence=0.5,
+            )
+            _FACE_DETECTOR = _TASKS_VISION.FaceDetector.create_from_options(options)
+        except Exception as exc:  # pragma: no cover — environment-dependent
+            print(
+                f"[smart_crop] failed to init mediapipe FaceDetector: {exc}. "
+                "Falling back to saliency/center.",
+                file=sys.stderr,
+            )
+            _FACE_DETECTOR_FAILED = True
+            return None
+    return _FACE_DETECTOR
 
 
 @dataclass
@@ -82,30 +143,28 @@ def _center_roi(frame: np.ndarray, target_aspect: Tuple[int, int]) -> Roi:
 def _face_roi(frame: np.ndarray, target_aspect: Tuple[int, int]) -> Optional[Roi]:
     if not _MEDIAPIPE_OK:
         return None
+    detector = _get_face_detector()
+    if detector is None:
+        return None
     h, w = frame.shape[:2]
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    # mediapipe ≥0.10.x dropped the legacy `mp.solutions.face_detection` API
-    # in some builds. Try the legacy path first, then fall back to None on any
-    # API/runtime failure so the caller can degrade to saliency/center per D2.
     try:
-        face_detection = mp.solutions.face_detection  # type: ignore[attr-defined]
-        with face_detection.FaceDetection(
-            model_selection=0, min_detection_confidence=0.5
-        ) as fd:
-            result = fd.process(rgb)
+        mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)  # type: ignore[attr-defined]
+        result = detector.detect(mp_image)
     except Exception:  # pragma: no cover — environment-dependent
         return None
-    if not result.detections:
+    detections = getattr(result, "detections", None) or []
+    if not detections:
         return None
-    # Pick the largest detection by relative bbox area.
-    largest = max(
-        result.detections,
-        key=lambda d: d.location_data.relative_bounding_box.width
-        * d.location_data.relative_bounding_box.height,
-    )
-    bb = largest.location_data.relative_bounding_box
-    cx = (bb.xmin + bb.width / 2) * w
-    cy = (bb.ymin + bb.height / 2) * h
+    # Pick the largest detection by absolute pixel-space bbox area.
+    def _area(det) -> int:
+        bb = det.bounding_box
+        return int(bb.width) * int(bb.height)
+
+    largest = max(detections, key=_area)
+    bb = largest.bounding_box
+    cx = bb.origin_x + bb.width / 2
+    cy = bb.origin_y + bb.height / 2
     tw, th = _target_size((h, w), target_aspect)
     return _clamp_roi(int(cx - tw / 2), int(cy - th / 2), tw, th, w, h)
 
