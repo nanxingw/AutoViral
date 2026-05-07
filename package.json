@@ -68,6 +68,7 @@
     "js-yaml": "^4.1.0",
     "konva": "^9.3.22",
     "marked": "^17.0.4",
+    "motion": "^11",
     "node-cron": "^3.0.0",
     "playwright": "^1.58.2",
     "react": "^18.3.1",
