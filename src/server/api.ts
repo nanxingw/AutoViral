@@ -39,6 +39,7 @@ import { tmpdir } from "node:os";
 import { runPythonScript } from "./python-bridge.js";
 import { interpolateProcessor } from "./post-process/interpolate.js";
 import { superResolveProcessor } from "./post-process/super-resolve.js";
+import { lipSyncProcessor } from "./post-process/lip-sync.js";
 import type { PostProcessor, PostProcessOptions } from "./post-process/types.js";
 
 export const apiRoutes = new Hono();
@@ -2252,8 +2253,9 @@ apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
 // ── Phase 8.5 — Frame Interpolation + Super-Resolution ──────────────────────
 //
 // POST /api/post-process/:operation
-//   :operation ∈ { "frame-interpolate", "super-resolve" }
-//   body: { workId, assetId, options? }
+//   :operation ∈ { "frame-interpolate", "super-resolve", "lip-sync" }
+//   body: { workId, assetId, audioAssetId?, options? }
+//     - lip-sync REQUIRES audioAssetId (resolved → opts.audioPath); other ops ignore it.
 // Stub-only ship: when the corresponding model env var is unset / missing,
 // the adapter copies input → output and flags the result with stub:true.
 // We still register the resulting asset + a "grade" provenance edge so the
@@ -2262,11 +2264,13 @@ apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
 const POST_PROCESSORS: Record<string, PostProcessor> = {
   "frame-interpolate": interpolateProcessor,
   "super-resolve": superResolveProcessor,
+  "lip-sync": lipSyncProcessor,
 };
 
 const PostProcessBody = z.object({
   workId: z.string().min(1),
   assetId: z.string().min(1),
+  audioAssetId: z.string().min(1).optional(),
   options: z
     .object({
       scale: z.union([z.literal(2), z.literal(4)]).optional(),
@@ -2317,6 +2321,30 @@ apiRoutes.post("/api/post-process/:operation", async (c) => {
   const outPath = join(outDir, outName);
 
   const opts: PostProcessOptions = body.options ?? {};
+
+  // lip-sync needs a second input (audio). Resolve audioAssetId → opts.audioPath.
+  if (operation === "lip-sync") {
+    if (!body.audioAssetId) {
+      return c.json(
+        { error: "lip-sync requires audioAssetId in request body" },
+        400,
+      );
+    }
+    const audioAsset = (compDoc.assets ?? []).find(
+      (a) => a.id === body.audioAssetId,
+    );
+    if (!audioAsset) {
+      return c.json(
+        { error: `audioAssetId not found in composition: ${body.audioAssetId}` },
+        404,
+      );
+    }
+    const audioRel = audioAsset.uri.replace(
+      /^\/api\/works\/[^/]+\/assets\//,
+      "",
+    );
+    opts.audioPath = join(wDir, "assets", audioRel);
+  }
   let result: Awaited<ReturnType<PostProcessor["process"]>>;
   try {
     result = await processor.process(sourceAbsPath, outPath, opts);
