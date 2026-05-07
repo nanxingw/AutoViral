@@ -43,18 +43,24 @@ function mount() {
   );
 }
 
-// User reversed the A3 decision (2026-05-07): the carousel editor now
-// mounts the same ChatPanel as Studio, with SlidesNav moved to a bottom
-// sub-pane in the same left column. Both surfaces render together.
-describe("Editor (post-A3 — ChatPanel + SlidesNav co-mount)", () => {
-  it("mounts SlidesNav in the left column", () => {
-    mount();
-    expect(screen.queryByText(/^Slides\s*·/i)).toBeTruthy();
-  });
-
-  it("renders the ChatPanel header alongside SlidesNav", () => {
+// 2026-05-07: align with Studio layout. Left column is full-height
+// ChatPanel; SlidesNav has been removed (selection + reorder handled
+// by the bottom Filmstrip, which gained a hover × delete button).
+describe("Editor (post-A3 — Studio-aligned layout)", () => {
+  it("renders the ChatPanel header in the left column", () => {
     mount();
     // ChatPanel header shows the CLAUDE-SONNET eyebrow.
     expect(screen.queryByText(/CLAUDE-SONNET/i)).toBeTruthy();
+  });
+
+  it("does NOT mount the legacy SlidesNav in the left column", () => {
+    mount();
+    // SlidesNav header reads "Slides · N" — must be absent.
+    expect(screen.queryByText(/^Slides\s*·/i)).toBeNull();
+  });
+
+  it("still renders the bottom Filmstrip tray (DRAG TO REORDER)", () => {
+    mount();
+    expect(screen.queryByText(/drag to reorder/i)).toBeTruthy();
   });
 });

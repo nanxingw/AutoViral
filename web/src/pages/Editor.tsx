@@ -8,7 +8,6 @@ import {
   saveCarousel,
 } from "@/features/editor/services/carousel";
 import { Stage } from "@/features/editor/canvas/Stage";
-import { SlidesNav } from "@/features/editor/panels/SlidesNav";
 import { Inspector } from "@/features/editor/panels/Inspector";
 import { Filmstrip } from "@/features/editor/panels/Filmstrip";
 import { TopBar } from "@/features/editor/panels/TopBar";
@@ -111,32 +110,18 @@ export default function Editor() {
         style={{
           gridArea: "left",
           borderRight: "1px solid var(--border, rgba(0,0,0,0.08))",
-          display: "flex",
-          flexDirection: "column",
           minHeight: 0,
         }}
       >
-        <div style={{ flex: 1, minHeight: 0 }}>
-          <ChatPanel
-            workId={workId}
-            quickActions={<ChatQuickActions />}
-            onJumpToLocator={(data: LocatorData) => {
-              // Carousel locator → jump to the named slide if provided.
-              const slideId = (data as { slideId?: string }).slideId;
-              if (slideId) useEditor.getState().setCurrentSlide(slideId);
-            }}
-          />
-        </div>
-        <div
-          style={{
-            flexShrink: 0,
-            maxHeight: 240,
-            overflowY: "auto",
-            borderTop: "1px solid var(--divider, rgba(0,0,0,0.08))",
+        <ChatPanel
+          workId={workId}
+          quickActions={<ChatQuickActions />}
+          onJumpToLocator={(data: LocatorData) => {
+            // Carousel locator → jump to the named slide if provided.
+            const slideId = (data as { slideId?: string }).slideId;
+            if (slideId) useEditor.getState().setCurrentSlide(slideId);
           }}
-        >
-          <SlidesNav />
-        </div>
+        />
       </div>
       <div
         style={{

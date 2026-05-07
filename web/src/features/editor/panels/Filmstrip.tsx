@@ -12,12 +12,23 @@ import {
   useSortable,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useState } from "react";
 import { useEditor } from "../store";
 import type { Slide } from "../types";
 
-function FilmThumb({ slide, index }: { slide: Slide; index: number }) {
+function FilmThumb({
+  slide,
+  index,
+  canDelete,
+}: {
+  slide: Slide;
+  index: number;
+  canDelete: boolean;
+}) {
   const isCurrent = useEditor((s) => s.currentSlideId === slide.id);
   const setCurrent = useEditor((s) => s.setCurrentSlide);
+  const removeSlide = useEditor((s) => s.removeSlide);
+  const [hover, setHover] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: slide.id });
 
@@ -42,6 +53,8 @@ function FilmThumb({ slide, index }: { slide: Slide; index: number }) {
       {...attributes}
       {...listeners}
       onClick={() => setCurrent(slide.id)}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
@@ -93,6 +106,40 @@ function FilmThumb({ slide, index }: { slide: Slide; index: number }) {
         >
           {slide.layers.length}L
         </span>
+      )}
+      {canDelete && (
+        <button
+          type="button"
+          aria-label={`Delete slide ${index + 1}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            removeSlide(slide.id);
+          }}
+          // Block the sortable's drag listeners on this button so click
+          // selects-then-deletes instead of being absorbed as a drag start.
+          onPointerDown={(e) => e.stopPropagation()}
+          style={{
+            position: "absolute",
+            top: 4,
+            right: 4,
+            width: 18,
+            height: 18,
+            display: "grid",
+            placeItems: "center",
+            background: "rgba(0,0,0,0.55)",
+            color: "rgba(255,255,255,0.95)",
+            border: "none",
+            borderRadius: "50%",
+            cursor: "pointer",
+            fontSize: 11,
+            lineHeight: 1,
+            padding: 0,
+            opacity: hover ? 1 : 0,
+            transition: "opacity 0.12s",
+          }}
+        >
+          ×
+        </button>
       )}
     </div>
   );
@@ -148,7 +195,12 @@ export function Filmstrip() {
           >
             <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
               {slides.map((slide, idx) => (
-                <FilmThumb key={slide.id} slide={slide} index={idx} />
+                <FilmThumb
+                  key={slide.id}
+                  slide={slide}
+                  index={idx}
+                  canDelete={slides.length > 1}
+                />
               ))}
             </div>
           </SortableContext>
