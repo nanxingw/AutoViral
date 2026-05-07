@@ -1,5 +1,6 @@
 import { createPortal } from "react-dom";
 import { useEffect } from "react";
+import { AnimatePresence, motion } from "motion/react";
 
 export interface ReframeClipSummary {
   id: string;
@@ -45,36 +46,46 @@ export function ReframeConfirmDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onCancel]);
 
-  if (!open) return null;
   return createPortal(
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="reframe-dialog-title"
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(0,0,0,0.55)",
-        backdropFilter: "blur(8px)",
-        display: "grid",
-        placeItems: "center",
-        zIndex: 100,
-      }}
-      onClick={onCancel}
-    >
-      <div
-        onClick={(e) => e.stopPropagation()}
-        style={{
-          width: 460,
-          maxHeight: "76vh",
-          overflow: "auto",
-          background: "var(--surface-1)",
-          border: "1px solid var(--glass-border)",
-          borderRadius: 16,
-          padding: 24,
-          boxShadow: "0 24px 64px rgba(0,0,0,0.32)",
-        }}
-      >
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          key="reframe-backdrop"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reframe-dialog-title"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.55)",
+            backdropFilter: "blur(8px)",
+            display: "grid",
+            placeItems: "center",
+            zIndex: 100,
+          }}
+          onClick={onCancel}
+        >
+          <motion.div
+            onClick={(e) => e.stopPropagation()}
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+            style={{
+              width: 460,
+              maxHeight: "76vh",
+              overflow: "auto",
+              background: "var(--surface-1)",
+              border: "1px solid var(--glass-border)",
+              borderRadius: 16,
+              padding: 24,
+              boxShadow: "0 24px 64px rgba(0,0,0,0.32)",
+            }}
+          >
         <div
           id="reframe-dialog-title"
           style={{
@@ -163,8 +174,10 @@ export function ReframeConfirmDialog({
             Confirm
           </button>
         </div>
-      </div>
-    </div>,
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
     document.body,
   );
 }

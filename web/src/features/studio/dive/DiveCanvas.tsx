@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion } from "motion/react";
 import {
   ReactFlow,
   Background,
@@ -86,41 +87,50 @@ export function DiveCanvas({ open, onClose }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  if (!open) return null;
-
   const empty = !comp || comp.assets.length === 0;
 
   return createPortal(
-    <div
-      data-testid="dive-backdrop"
-      onClick={onClose}
-      style={{
-        position: "fixed",
-        inset: 0,
-        background: "rgba(10, 11, 15, 0.85)",
-        backdropFilter: "blur(8px)",
-        zIndex: 1000,
-        display: "grid",
-        placeItems: "stretch",
-      }}
-    >
-      <div
-        // Stop click-through so internal canvas clicks don't dismiss.
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="dive-title"
-        style={{
-          position: "absolute",
-          inset: 40,
-          borderRadius: 16,
-          border: "1px solid var(--glass-border)",
-          background: "var(--surface-0)",
-          overflow: "hidden",
-          display: "flex",
-          flexDirection: "column",
-        }}
-      >
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          key="dive-backdrop"
+          data-testid="dive-backdrop"
+          onClick={onClose}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(10, 11, 15, 0.85)",
+            backdropFilter: "blur(8px)",
+            zIndex: 1000,
+            display: "grid",
+            placeItems: "stretch",
+          }}
+        >
+          <motion.div
+            // Stop click-through so internal canvas clicks don't dismiss.
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="dive-title"
+            initial={{ opacity: 0, scale: 0.96 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+            style={{
+              position: "absolute",
+              inset: 40,
+              borderRadius: 16,
+              border: "1px solid var(--glass-border)",
+              background: "var(--surface-0)",
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+          >
         <header
           style={{
             padding: "14px 18px",
@@ -175,8 +185,10 @@ export function DiveCanvas({ open, onClose }: Props) {
             </ReactFlow>
           )}
         </div>
-      </div>
-    </div>,
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
     document.body,
   );
 }

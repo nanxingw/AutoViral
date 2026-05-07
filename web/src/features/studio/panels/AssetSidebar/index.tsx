@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { motion } from "motion/react";
 import { useComposition } from "@/features/studio/store";
 import { LibraryTab } from "./LibraryTab";
 import { InspectorTab } from "@/features/studio/panels/Inspector/InspectorTab";
@@ -30,8 +31,16 @@ export function AssetSidebar({ workId }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       <TabBar tab={tab} onChange={setTab} />
-      <div style={{ flex: 1, overflow: "hidden", minHeight: 0 }}>
-        {tab === "library" ? <LibraryTab workId={workId} /> : <InspectorTab />}
+      <div style={{ flex: 1, overflow: "hidden", minHeight: 0, position: "relative" }}>
+        <motion.div
+          key={tab}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ duration: 0.15, ease: [0.32, 0.72, 0, 1] }}
+          style={{ height: "100%" }}
+        >
+          {tab === "library" ? <LibraryTab workId={workId} /> : <InspectorTab />}
+        </motion.div>
       </div>
     </div>
   );

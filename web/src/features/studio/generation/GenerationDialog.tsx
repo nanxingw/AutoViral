@@ -24,6 +24,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "motion/react";
 import {
   buildGenerationNotification,
   type GenerationRequest,
@@ -356,9 +357,26 @@ export function GenerationDialog(props: GenerationDialogProps) {
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Portal>
-        <Dialog.Overlay style={overlayStyle} />
-        <Dialog.Content style={contentStyle} aria-describedby={undefined}>
+      <AnimatePresence>
+        {open && (
+          <Dialog.Portal forceMount key="generation-dialog-portal">
+            <Dialog.Overlay asChild forceMount>
+              <motion.div
+                style={overlayStyle}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+              />
+            </Dialog.Overlay>
+            <Dialog.Content asChild forceMount aria-describedby={undefined}>
+              <motion.div
+                style={contentStyle}
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+              >
           <header style={headerStyle}>
             <Dialog.Title style={titleStyle}>
               {isVariant ? "Create variant" : "Create asset"}
@@ -514,8 +532,11 @@ export function GenerationDialog(props: GenerationDialogProps) {
               {isGenerating ? "Generating…" : "Generate"}
             </button>
           </footer>
-        </Dialog.Content>
-      </Dialog.Portal>
+              </motion.div>
+            </Dialog.Content>
+          </Dialog.Portal>
+        )}
+      </AnimatePresence>
     </Dialog.Root>
   );
 }

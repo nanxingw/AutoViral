@@ -1,3 +1,4 @@
+import { motion } from "motion/react";
 import { useComposition } from "../../store";
 import { findAssetByUri, walkProvenance } from "../../dive/walkProvenance";
 import type { AssetEntry, Clip } from "../../types";
@@ -112,8 +113,10 @@ function VariantTile({
   onUse: () => void;
 }) {
   return (
-    <div
+    <motion.div
       data-testid={`variant-tile-${asset.id}`}
+      whileHover={{ boxShadow: "0 0 12px var(--accent-glow)" }}
+      transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
       style={{
         position: "relative",
         aspectRatio: "9/16",
@@ -159,6 +162,6 @@ function VariantTile({
       >
         USE THIS · {asset.id}
       </button>
-    </div>
+    </motion.div>
   );
 }
