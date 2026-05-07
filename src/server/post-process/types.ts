@@ -4,6 +4,8 @@
 export interface PostProcessOptions {
   /** Spatial scale factor for super-resolution; ignored by frame interpolation. */
   scale?: 2 | 4;
+  /** Absolute on-disk path to an audio file. Required for lip-sync; ignored otherwise. */
+  audioPath?: string;
 }
 
 export interface PostProcessResult {
