@@ -1,5 +1,6 @@
 import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useComposition } from "@/features/studio/store";
 import { makeEmptyComposition } from "@/features/studio/types";
 import {
@@ -13,6 +14,34 @@ import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { TopBar } from "@/features/studio/panels/TopBar";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
 import { useShortcuts } from "@/features/studio/hooks/useShortcuts";
+
+// Resize handle styling — slim editorial separator using --glass-border.
+// 4px-wide cool-steel rule that thickens on hover/drag for clear affordance.
+const handleBaseStyle: React.CSSProperties = {
+  flex: "0 0 4px",
+  background: "var(--glass-border)",
+  transition: "background 160ms ease",
+};
+
+function HResizeHandle({ id }: { id: string }) {
+  return (
+    <PanelResizeHandle
+      id={id}
+      data-testid={`resize-handle-${id}`}
+      style={{ ...handleBaseStyle, cursor: "col-resize" }}
+    />
+  );
+}
+
+function VResizeHandle({ id }: { id: string }) {
+  return (
+    <PanelResizeHandle
+      id={id}
+      data-testid={`resize-handle-${id}`}
+      style={{ ...handleBaseStyle, cursor: "row-resize", flex: "0 0 4px" }}
+    />
+  );
+}
 
 export default function Studio() {
   const { workId } = useParams();
@@ -89,18 +118,15 @@ export default function Studio() {
       className="studio-shell"
       data-work-id={workId}
       style={{
-        display: "grid",
-        gridTemplateColumns: "360px 1fr 320px",
-        gridTemplateRows: "56px 1fr 280px",
-        gridTemplateAreas:
-          '"top top top" "chat preview aside" "chat timeline aside"',
+        display: "flex",
+        flexDirection: "column",
         height: "100vh",
         gap: 12,
         padding: 12,
         boxSizing: "border-box",
       }}
     >
-      <div style={{ gridArea: "top" }} className="glass">
+      <div data-area="top" className="glass" style={{ flex: "0 0 56px" }}>
         <TopBar
           workId={workId}
           savedAt={savedAt}
@@ -108,17 +134,63 @@ export default function Studio() {
           settingsOpen={settingsOpen}
         />
       </div>
-      <div className="glass" style={{ gridArea: "chat", overflow: "hidden", minHeight: 0 }}>
-        <ChatPanel workId={workId} />
-      </div>
-      <div className="glass" style={{ gridArea: "preview", overflow: "hidden", minHeight: 0 }}>
-        <PreviewPanel />
-      </div>
-      <div className="glass" style={{ gridArea: "timeline", overflow: "hidden", minHeight: 0 }}>
-        <Timeline />
-      </div>
-      <div className="glass" style={{ gridArea: "aside", overflow: "hidden", minHeight: 0 }}>
-        <AssetSidebar workId={workId} />
+
+      <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+        <PanelGroup
+          direction="horizontal"
+          autoSaveId="autoviral-studio-v1"
+          style={{ height: "100%", gap: 0 }}
+        >
+          <Panel id="chat" order={1} defaultSize={18} minSize={14} maxSize={30}>
+            <div
+              data-area="chat"
+              className="glass"
+              style={{ height: "100%", overflow: "hidden", minHeight: 0 }}
+            >
+              <ChatPanel workId={workId} />
+            </div>
+          </Panel>
+
+          <HResizeHandle id="chat-center" />
+
+          <Panel id="center" order={2} defaultSize={65} minSize={30}>
+            <PanelGroup direction="vertical" autoSaveId="autoviral-studio-center-v1" style={{ height: "100%" }}>
+              <Panel id="preview" order={1} defaultSize={70} minSize={30}>
+                <div
+                  data-area="preview"
+                  className="glass"
+                  style={{ height: "100%", overflow: "hidden", minHeight: 0 }}
+                >
+                  <PreviewPanel />
+                </div>
+              </Panel>
+
+              <VResizeHandle id="preview-timeline" />
+
+              <Panel id="timeline" order={2} defaultSize={30} minSize={15}>
+                <div
+                  data-area="timeline"
+                  className="glass"
+                  style={{ height: "100%", overflow: "hidden", minHeight: 0 }}
+                >
+                  <Timeline />
+                </div>
+              </Panel>
+            </PanelGroup>
+          </Panel>
+
+          <HResizeHandle id="center-aside" />
+
+          <Panel id="aside" order={3} defaultSize={17} minSize={14} maxSize={28}>
+            <div
+              data-area="aside"
+              className="glass"
+              style={{ height: "100%", overflow: "hidden", minHeight: 0 }}
+            >
+              <AssetSidebar workId={workId} />
+            </div>
+          </Panel>
+        </PanelGroup>
       </div>
 
       <TweaksPanel
