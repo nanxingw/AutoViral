@@ -2243,19 +2243,29 @@ apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
   if (!body.prompt || !body.workId) {
     return c.json({ error: "prompt and workId required" }, 400);
   }
+  // Compute the per-work output dir so the adapter writes the mp4 into the
+  // work's asset tree (reachable via /api/works/:id/assets/<relpath>). The
+  // adapter returns an absolute path; we convert to work-relative for the
+  // AssetEntry.uri so existing asset-serving keeps working.
+  const wDirAbs = join(dataDir, "works", body.workId);
+  const seedanceDirAbs = join(wDirAbs, "assets", providerId);
   const result = await provider.generateVideo({
     prompt: body.prompt,
     durationSec: body.durationSec ?? 4,
     aspectRatio: body.aspectRatio ?? "9:16",
+    outputAbsoluteDir: seedanceDirAbs,
   });
+  // Convert absolute write path back to work-relative for the asset entry.
+  const relativeAssetUri = result.assetUri.startsWith(wDirAbs + "/")
+    ? result.assetUri.slice(wDirAbs.length + 1)
+    : result.assetUri;
 
   // Best-effort composition update — if there's no composition.yaml yet (legacy
   // works) we still return the adapter result so the UI can show it.
   let assetId: string | null = null;
   const work = await getWork(body.workId);
   if (work) {
-    const wDir = join(dataDir, "works", body.workId);
-    const compYamlPath = join(wDir, "composition.yaml");
+    const compYamlPath = join(wDirAbs, "composition.yaml");
     try {
       const compRaw = await readFile(compYamlPath, "utf-8");
       const compDoc = yaml.load(compRaw) as Composition;
@@ -2263,7 +2273,7 @@ apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
       assetId = `gen_${randomUUID().slice(0, 8)}`;
       const newAsset: AssetEntry = {
         id: assetId,
-        uri: result.assetUri,
+        uri: relativeAssetUri,
         kind: "video",
         metadata: { duration: body.durationSec ?? 4 },
         status: "ready",
@@ -2294,7 +2304,7 @@ apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
 
   return c.json({
     assetId,
-    assetUri: result.assetUri,
+    assetUri: relativeAssetUri,
     providerJobId: result.providerJobId,
     costUsd: result.costUsd,
     stub: result.stub,

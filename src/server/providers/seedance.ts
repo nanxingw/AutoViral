@@ -119,15 +119,19 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
       const buf = Buffer.from(await dlRes.arrayBuffer());
       const hash = hashPrompt(req.prompt);
       const filename = `seedance-${hash}.mp4`;
-      const outputPath = opts.outputDir
-        ? `${opts.outputDir}/${filename}`
+      // Per-request outputAbsoluteDir wins; falls back to construct-time
+      // outputDir for the test harness; if neither, return the relative path
+      // without writing (lets unit tests run without disk side effects).
+      const targetDir = req.outputAbsoluteDir ?? opts.outputDir;
+      const assetUri = targetDir
+        ? `${targetDir}/${filename}`
         : `assets/seedance/${filename}`;
-      if (opts.outputDir) {
-        await mkdir(opts.outputDir, { recursive: true });
-        await writeFile(outputPath, buf);
+      if (targetDir) {
+        await mkdir(targetDir, { recursive: true });
+        await writeFile(assetUri, buf);
       }
       return {
-        assetUri: outputPath,
+        assetUri,
         providerJobId: job.id,
         costUsd: final.usage?.cost ?? 0,
         stub: false,
