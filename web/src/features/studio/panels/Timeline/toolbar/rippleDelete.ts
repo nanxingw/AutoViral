@@ -1,5 +1,5 @@
 import type { Track, Clip } from "../../../types";
-import { clipDuration, OFFSET_EPSILON } from "../clipMath";
+import { clipDuration, OFFSET_EPSILON } from "@autoviral/timeline";
 
 /**
  * Ripple-delete a clip from a track: remove it, and shift every later clip

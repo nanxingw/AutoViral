@@ -15,11 +15,9 @@ import {
   clipEnd,
   MIN_CLIP_DUR,
   OFFSET_EPSILON,
-} from "./panels/Timeline/clipMath";
-import {
   computeRipplePreview,
   snapDraggedStartFull,
-} from "./panels/Timeline/dragEngine";
+} from "@autoviral/timeline";
 import { rippleDeleteFromTrack } from "./panels/Timeline/toolbar/rippleDelete";
 import { collapseGapsOnTrack } from "./panels/Timeline/toolbar/collapseGaps";
 

@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useComposition } from "../store";
 import { saveComposition } from "../services/composition";
-import { clipEnd, OFFSET_EPSILON } from "../panels/Timeline/clipMath";
+import { clipEnd, OFFSET_EPSILON } from "@autoviral/timeline";
 import type { Clip } from "../types";
 
 /**

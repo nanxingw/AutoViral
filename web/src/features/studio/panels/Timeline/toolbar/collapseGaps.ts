@@ -1,5 +1,5 @@
 import type { Track, Clip } from "../../../types";
-import { clipDuration, OFFSET_EPSILON } from "../clipMath";
+import { clipDuration, OFFSET_EPSILON } from "@autoviral/timeline";
 
 /**
  * Repack a track's clips back-to-back from `trackOffset = 0`, in

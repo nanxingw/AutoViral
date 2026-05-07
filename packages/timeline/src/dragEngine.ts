@@ -4,7 +4,7 @@
 // Pure helpers for the timeline drag/snap/ripple engine. Verbatim algorithm
 // from pneuma: a two-pass cascade (overlap-with-dragged → chain-resolve) that
 // pins the dragged clip and pushes neighbours forward.
-import type { Clip, Composition } from "../../types";
+import type { Clip, Composition } from "@shared/composition";
 import { clipDuration, clipEnd } from "./clipMath";
 import { collectSnapPoints, snapDraggedStartToPoints, type SnapPoint } from "./snapPoints";
 

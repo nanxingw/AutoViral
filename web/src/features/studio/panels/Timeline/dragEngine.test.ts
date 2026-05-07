@@ -2,7 +2,7 @@
 // .cache/pneuma-clipcraft/modes/clipcraft/viewer/timeline/__tests__/dragEngine.test.ts
 // (adapted: pneuma's clip.startTime/clip.duration → AutoViral trackOffset + clipDuration(c))
 import { describe, it, expect } from "vitest";
-import { computeRipplePreview, snapDraggedStart } from "./dragEngine";
+import { computeRipplePreview, snapDraggedStart } from "@autoviral/timeline";
 import { makeVideoClip } from "../../../../test/composition-fixtures";
 
 describe("computeRipplePreview", () => {

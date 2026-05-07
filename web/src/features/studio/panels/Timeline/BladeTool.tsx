@@ -14,7 +14,7 @@
 import type React from "react";
 import { useComposition } from "../../store";
 import { useSplitHoverSnap } from "./hooks/useSplitHoverSnap";
-import { clipEnd, OFFSET_EPSILON } from "./clipMath";
+import { clipEnd, OFFSET_EPSILON } from "@autoviral/timeline";
 import type { Clip } from "../../types";
 
 export function BladeTool({

@@ -37,8 +37,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useComposition } from "../../../store";
-import { collectSnapPoints, snapToNearest } from "../snapPoints";
-import { clipDuration } from "../clipMath";
+import { collectSnapPoints, snapToNearest, clipDuration } from "@autoviral/timeline";
 
 const SNAP_THRESHOLD = 0.06;
 

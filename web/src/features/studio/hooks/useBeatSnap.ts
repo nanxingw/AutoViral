@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { apiFetch } from "@/lib/api";
 import { useComposition } from "../store";
-import { snapToBeat } from "../panels/Timeline/snapToBeat";
+import { snapToBeat } from "@autoviral/timeline";
 
 interface BeatsResponse {
   success: boolean;

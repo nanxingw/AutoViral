@@ -1,6 +1,6 @@
 // port from .cache/pneuma-clipcraft/modes/clipcraft/viewer/timeline/snapPoints.ts:23-99
 // (adapted: pneuma's clip.startTime/clip.duration → AutoViral trackOffset + clipDuration(c))
-import type { Composition } from "../../types";
+import type { Composition } from "@shared/composition";
 import { clipEnd } from "./clipMath";
 
 export interface SnapPoint {

@@ -12,7 +12,7 @@
 // match our overlay shape).
 import { useState, useMemo } from "react";
 import { useComposition } from "../../../store";
-import { collectSnapPoints, snapToNearest } from "../snapPoints";
+import { collectSnapPoints, snapToNearest } from "@autoviral/timeline";
 
 // D1: 0.06s snap threshold — same constant as the drag-engine snap
 // (see `dragEngine.ts` / store.ts:323) so the magnetic feel matches.

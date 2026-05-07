@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { collectSnapPoints, snapToNearest, snapDraggedStartToPoints } from "./snapPoints";
+import { collectSnapPoints, snapToNearest, snapDraggedStartToPoints } from "@autoviral/timeline";
 import { makeVideoClip, makeCompositionWithClips } from "../../../../test/composition-fixtures";
 
 describe("collectSnapPoints", () => {

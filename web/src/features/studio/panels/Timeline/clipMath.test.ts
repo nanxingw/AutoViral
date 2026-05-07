@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { clipDuration, clipEnd } from "./clipMath";
+import { clipDuration, clipEnd } from "@autoviral/timeline";
 import { makeVideoClip, makeTextClip, makeAudioClip, makeOverlayClip } from "../../../../test/composition-fixtures";
 
 describe("clipMath", () => {

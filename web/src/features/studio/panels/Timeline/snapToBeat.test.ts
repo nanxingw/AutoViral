@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { snapToBeat } from "./snapToBeat";
+import { snapToBeat } from "@autoviral/timeline";
 
 describe("snapToBeat", () => {
   const beats = [0.5, 1.0, 1.5, 2.0, 2.5];

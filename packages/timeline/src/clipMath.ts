@@ -1,4 +1,4 @@
-import type { Clip } from "../../types";
+import type { Clip } from "@shared/composition";
 
 /**
  * Minimum allowed duration for a clip (seconds). Shared across the
