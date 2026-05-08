@@ -123,6 +123,11 @@ export const en = {
       missingWorkId: "Missing workId",
       serverFallbackMsg: "server error",
     },
+    diveCanvas: {
+      title: "Provenance Dive",
+      empty: "No assets yet — generate or upload some, then come back.",
+      btnUse: "USE · {id}",
+    },
     reframeDialog: {
       title: "Apply {preset}?",
       subtitle: "Reframe from {from} → {to}",
@@ -387,6 +392,11 @@ export const zh: DeepShape<Messages> = {
       helpText: "自动保存已暂停以防覆盖损坏的数据。请手动检查 ~/.autoviral/works/{workId}/composition.yaml",
       missingWorkId: "缺少 workId",
       serverFallbackMsg: "服务端错误",
+    },
+    diveCanvas: {
+      title: "素材衍生图谱",
+      empty: "暂无素材——先生成或上传一些，再回来查看。",
+      btnUse: "使用 · {id}",
     },
     reframeDialog: {
       title: "应用 {preset}？",

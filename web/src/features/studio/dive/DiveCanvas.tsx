@@ -17,6 +17,7 @@ import { NODE_WIDTH, NODE_HEIGHT } from "./nodes/NodeShell";
 import { VisualNode } from "./nodes/VisualNode";
 import { AudioNode } from "./nodes/AudioNode";
 import { TextNode } from "./nodes/TextNode";
+import { useT } from "@/i18n/useT";
 
 interface Props {
   open: boolean;
@@ -33,6 +34,7 @@ export function DiveCanvas({ open, onClose }: Props) {
   const comp = useComposition((s) => s.comp);
   const selection = useComposition((s) => s.selection);
   const rebindClip = useComposition((s) => s.rebindClip);
+  const t = useT();
 
   // Find the selected clip's currently-bound asset, if any.
   const currentAssetId = useMemo<string | null>(() => {
@@ -151,7 +153,7 @@ export function DiveCanvas({ open, onClose }: Props) {
               color: "var(--text)",
             }}
           >
-            Provenance Dive
+            {t("studio.diveCanvas.title")}
           </h2>
           <button type="button" onClick={onClose} aria-label="Close" data-bare>
             ×
@@ -170,7 +172,7 @@ export function DiveCanvas({ open, onClose }: Props) {
                 fontSize: 12,
               }}
             >
-              No assets yet — generate or upload some, then come back.
+              {t("studio.diveCanvas.empty")}
             </div>
           ) : (
             <ReactFlow

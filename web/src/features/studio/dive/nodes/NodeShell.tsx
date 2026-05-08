@@ -1,6 +1,7 @@
 import { Handle, Position, type Node } from "@xyflow/react";
 import type { ReactNode } from "react";
 import type { AssetEntry } from "../../types";
+import { useT } from "@/i18n/useT";
 
 export const NODE_WIDTH = 180;
 export const NODE_HEIGHT = 120;
@@ -21,6 +22,7 @@ export interface NodeShellProps {
 }
 
 export function NodeShell({ assetId, isCurrent, onUse, children }: NodeShellProps) {
+  const t = useT();
   return (
     <div
       data-testid={`dive-node-${assetId}`}
@@ -59,7 +61,7 @@ export function NodeShell({ assetId, isCurrent, onUse, children }: NodeShellProp
           opacity: isCurrent ? 0.6 : 1,
         }}
       >
-        {isCurrent ? "CURRENT" : `USE · ${assetId}`}
+        {isCurrent ? "CURRENT" : t("studio.diveCanvas.btnUse", { id: assetId })}
       </button>
       <Handle type="source" position={Position.Right} style={{ visibility: "hidden" }} />
     </div>
