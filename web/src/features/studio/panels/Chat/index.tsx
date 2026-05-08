@@ -4,7 +4,7 @@ import type { StreamBlock, LocatorData, TurnUsage } from "@/features/chat/types"
 import { LocatorBlockView } from "@/features/chat/LocatorBlock";
 import { useComposition } from "@/features/studio/store";
 import { apiFetch } from "@/lib/api";
-import { useT } from "@/i18n/useT";
+import { useT, type MessageKey } from "@/i18n/useT";
 import { useEffect, useRef, useState, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -290,6 +290,16 @@ export function ChatPanel({
     setInput("");
   };
 
+  // Onboarding chips wired into the empty state. Clicking writes the
+  // suggestion into the composer + focuses it; user can tweak then send.
+  // Pneuma's mode manifest has agent.greeting that auto-spawns an agent
+  // hello — same UX goal but token-free here.
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  const onboardingPick = (text: string) => {
+    setInput(text + " ");
+    requestAnimationFrame(() => composerRef.current?.focus());
+  };
+
   // POST /api/works/:id/abort — kills the running CLI process and lets the
   // turn complete handler broadcast cli_exited so streaming flips off.
   // Pneuma's ChatPanel has the same red-square button when an agent turn
@@ -396,23 +406,79 @@ export function ChatPanel({
         {!loadingHistory && blocks.length === 0 && (
           <div
             style={{
-              textAlign: "center",
-              fontSize: 11,
-              color: "var(--text-dimmer)",
-              fontFamily: "var(--font-mono)",
-              letterSpacing: "0.04em",
-              padding: "32px 8px",
+              padding: "16px 8px 4px",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: 14,
             }}
           >
-            <span
+            <div
               style={{
-                padding: "3px 10px",
-                border: "1px solid var(--divider)",
-                borderRadius: 999,
+                fontSize: 11,
+                color: "var(--text-dimmer)",
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
               }}
             >
-              {t("chat.emptyPrompt")}
-            </span>
+              ▾ {t("chat.onboardingTitle")}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: 6,
+                width: "100%",
+                maxWidth: 280,
+              }}
+            >
+              {(
+                [
+                  ["onboardingPlanning", "onboardingPlanningPrompt"],
+                  ["onboardingAssets", "onboardingAssetsPrompt"],
+                  ["onboardingResearch", "onboardingResearchPrompt"],
+                ] as const
+              ).map(([labelKey, promptKey]) => (
+                <button
+                  key={labelKey}
+                  type="button"
+                  onClick={() => onboardingPick(t(`chat.${promptKey}` as MessageKey))}
+                  style={{
+                    padding: "8px 12px",
+                    fontSize: 12,
+                    fontFamily: "inherit",
+                    border: "1px solid var(--glass-border)",
+                    background: "var(--surface-0)",
+                    color: "var(--text)",
+                    borderRadius: 10,
+                    cursor: "pointer",
+                    textAlign: "left",
+                    transition: "background 0.12s, border-color 0.12s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "var(--surface-2)";
+                    e.currentTarget.style.borderColor = "var(--accent)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "var(--surface-0)";
+                    e.currentTarget.style.borderColor = "var(--glass-border)";
+                  }}
+                >
+                  {t(`chat.${labelKey}` as MessageKey)}
+                </button>
+              ))}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: "var(--text-dimmer)",
+                fontFamily: "var(--font-mono)",
+                letterSpacing: "0.05em",
+              }}
+            >
+              {t("chat.onboardingSub")}
+            </div>
           </div>
         )}
         {blocks.map((b) => (
@@ -467,6 +533,7 @@ export function ChatPanel({
           }}
         >
           <textarea
+            ref={composerRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
