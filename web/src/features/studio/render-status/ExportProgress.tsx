@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { createPortal } from "react-dom";
 import { useRenderJob, type RenderJobView } from "./useRenderJob";
+import { useT } from "@/i18n/useT";
 
 const STAGES = ["render", "duck", "loudnorm", "burn", "encode"] as const;
 type Stage = (typeof STAGES)[number];
@@ -27,12 +28,13 @@ export interface ExportProgressProps {
  */
 export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps) {
   const { job, cancel } = useRenderJob(jobId);
+  const t = useT();
 
   useEffect(() => {
     if (!job) return;
     if (job.status === "done") {
-      const t = setTimeout(onClose, 1500);
-      return () => clearTimeout(t);
+      const tid = setTimeout(onClose, 1500);
+      return () => clearTimeout(tid);
     }
     if (job.status === "cancelled") {
       onClose();
@@ -48,12 +50,12 @@ export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps)
 
   const title =
     status === "done"
-      ? "Export complete · open file"
+      ? t("studio.exportProgress.titleDone")
       : status === "failed"
-        ? "Export failed"
+        ? t("studio.exportProgress.titleFailed")
         : status === "cancelled"
-          ? "Cancelled"
-          : "Rendering…";
+          ? t("studio.exportProgress.titleCancelled")
+          : t("studio.exportProgress.titleRendering");
 
   return createPortal(
     <div
@@ -215,7 +217,7 @@ export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps)
                 cursor: "pointer",
               }}
             >
-              Log ({job.log.length})
+              {t("studio.exportProgress.logSummary", { count: job.log.length })}
             </summary>
             <pre
               style={{
@@ -256,7 +258,7 @@ export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps)
               opacity: isTerminal ? 0.5 : 1,
             }}
           >
-            Cancel
+            {t("studio.exportProgress.btnCancel")}
           </button>
           {status === "failed" ? (
             <button
@@ -274,7 +276,7 @@ export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps)
                 cursor: "pointer",
               }}
             >
-              Retry
+              {t("studio.exportProgress.btnRetry")}
             </button>
           ) : null}
         </div>

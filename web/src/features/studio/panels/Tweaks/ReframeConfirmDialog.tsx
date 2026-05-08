@@ -1,6 +1,7 @@
 import { createPortal } from "react-dom";
 import { useEffect } from "react";
 import { AnimatePresence, motion } from "motion/react";
+import { useT } from "@/i18n/useT";
 
 export interface ReframeClipSummary {
   id: string;
@@ -37,6 +38,7 @@ export function ReframeConfirmDialog({
   onConfirm,
   onCancel,
 }: Props) {
+  const t = useT();
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -97,7 +99,17 @@ export function ReframeConfirmDialog({
             marginBottom: 8,
           }}
         >
-          Apply <span style={{ color: "var(--accent-hi)" }}>{presetLabel}</span>?
+          {(() => {
+            const tpl = t("studio.reframeDialog.title", { preset: "​" });
+            const [before, after] = tpl.split("​");
+            return (
+              <>
+                {before}
+                <span style={{ color: "var(--accent-hi)" }}>{presetLabel}</span>
+                {after}
+              </>
+            );
+          })()}
         </div>
         <div
           style={{
@@ -108,11 +120,11 @@ export function ReframeConfirmDialog({
             marginBottom: 16,
           }}
         >
-          Reframe from {fromAspect} → {toAspect}
+          {t("studio.reframeDialog.subtitle", { from: fromAspect, to: toAspect })}
         </div>
         {clips.length === 0 ? (
           <div style={{ fontSize: 13, color: "var(--text-dimmer)", padding: "12px 0" }}>
-            No video clips in this composition — only the preset metadata will be applied.
+            {t("studio.reframeDialog.emptyClips")}
           </div>
         ) : (
           <ul style={{ listStyle: "none", padding: 0, margin: "0 0 18px 0" }}>
@@ -154,7 +166,7 @@ export function ReframeConfirmDialog({
               cursor: "pointer",
             }}
           >
-            Cancel
+            {t("studio.reframeDialog.btnCancel")}
           </button>
           <button
             type="button"
@@ -171,7 +183,7 @@ export function ReframeConfirmDialog({
               cursor: "pointer",
             }}
           >
-            Confirm
+            {t("studio.reframeDialog.btnConfirm")}
           </button>
         </div>
           </motion.div>
