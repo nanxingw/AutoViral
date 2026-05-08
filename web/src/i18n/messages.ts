@@ -37,6 +37,7 @@ export const en = {
     versionTag: "v3 · DESIGN",
     localeToggleZh: "中",
     localeToggleEn: "EN",
+    themeToggleTitle: "Toggle theme",
   },
   editor: {
     loadError: {
@@ -320,6 +321,7 @@ export const zh: DeepShape<Messages> = {
     versionTag: "v3 · 设计版",
     localeToggleZh: "中",
     localeToggleEn: "EN",
+    themeToggleTitle: "切换主题",
   },
   editor: {
     loadError: {

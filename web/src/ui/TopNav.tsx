@@ -13,7 +13,14 @@ const TABS: Array<{ to: string; key: MessageKey }> = [
 
 export function TopNav() {
   const { pathname } = useLocation();
-  const active = (to: string) => (to === "/" ? pathname === "/" : pathname.startsWith(to));
+  // Works tab matches both "/" and "/works" (the alias route added in Round 1
+  // so that "/works" doesn't 404 on direct navigation). Without the alias
+  // check, the tab silently failed to highlight when user landed on /works,
+  // breaking the "where am I" affordance.
+  const active = (to: string) =>
+    to === "/"
+      ? pathname === "/" || pathname === "/works"
+      : pathname.startsWith(to);
   const t = useT();
 
   return (

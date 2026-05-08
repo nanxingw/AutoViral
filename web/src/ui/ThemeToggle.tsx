@@ -1,9 +1,11 @@
 import { useTheme } from "@/stores/theme";
+import { useT } from "@/i18n/useT";
 import styles from "./ThemeToggle.module.css";
 
 export function ThemeToggle() {
   const theme = useTheme((s) => s.theme);
   const toggle = useTheme((s) => s.toggle);
+  const t = useT();
 
   return (
     <button
@@ -11,7 +13,7 @@ export function ThemeToggle() {
       className={styles.btn}
       onClick={toggle}
       aria-label="toggle theme"
-      title="Toggle theme"
+      title={t("topnav.themeToggleTitle")}
     >
       {theme === "dark" ? (
         <svg data-icon="sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
