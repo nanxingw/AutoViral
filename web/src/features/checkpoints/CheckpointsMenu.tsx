@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { useT } from "@/i18n/useT";
 import { useCheckpoints, type Checkpoint } from "./useCheckpoints";
 
@@ -22,9 +23,47 @@ export function CheckpointsMenu({ workId }: { workId: string }) {
     setOpen(false);
   };
 
+  // Anchor + portal: previously the dropdown was `position:absolute` inside
+  // a wrapper sitting in a react-resizable-panels Panel, which creates a
+  // stacking/overflow context that visually clipped the menu (the absolute
+  // child rendered but was hidden behind the LIBRARY panel below). Solution:
+  // render the menu in a portal to <body> with `position:fixed`, anchored to
+  // the trigger button's bounding rect — escapes both the stacking context
+  // and any ancestor `overflow:hidden`.
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const update = () => {
+      if (btnRef.current) setAnchorRect(btnRef.current.getBoundingClientRect());
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open]);
+
+  // Close on outside click (clicking outside both trigger and menu).
+  useLayoutEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (btnRef.current?.contains(target)) return;
+      const menu = document.querySelector('[data-checkpoints-menu]');
+      if (menu?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
+
   return (
     <div style={{ position: "relative" }}>
       <button
+        ref={btnRef}
         type="button"
         data-bare
         onClick={() => setOpen((v) => !v)}
@@ -42,13 +81,14 @@ export function CheckpointsMenu({ workId }: { workId: string }) {
       >
         ↻ {t("checkpoints.button")}
       </button>
-      {open && (
+      {open && anchorRect && createPortal(
         <div
           role="menu"
+          data-checkpoints-menu
           style={{
-            position: "absolute",
-            right: 0,
-            top: "calc(100% + 4px)",
+            position: "fixed",
+            right: window.innerWidth - anchorRect.right,
+            top: anchorRect.bottom + 4,
             minWidth: 280,
             maxHeight: 360,
             overflowY: "auto",
@@ -57,7 +97,7 @@ export function CheckpointsMenu({ workId }: { workId: string }) {
             borderRadius: 8,
             padding: 4,
             boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
-            zIndex: 30,
+            zIndex: 1000,
           }}
         >
           {list.isLoading && (
@@ -104,7 +144,8 @@ export function CheckpointsMenu({ workId }: { workId: string }) {
               </span>
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
