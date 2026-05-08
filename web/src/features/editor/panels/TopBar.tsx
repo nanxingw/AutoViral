@@ -40,8 +40,9 @@ export function TopBar({
       </Button>
       <strong
         style={{ fontFamily: "var(--font-editorial)", fontSize: 18 }}
+        title={car?.id && car.id !== workId ? `carousel: ${car.id}` : undefined}
       >
-        {car?.id ?? workId}
+        {workId}
       </strong>
       <span
         style={{
