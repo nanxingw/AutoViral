@@ -14,8 +14,92 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useState } from "react";
 import { useEditor } from "../store";
-import type { Slide } from "../types";
+import { PALETTES } from "../palettes";
+import type { Slide, Layer, TextLayer, ImageLayer } from "../types";
 import { useT } from "@/i18n/useT";
+
+// Mirror TextLayerNode's font + palette resolution so thumbs and the main
+// canvas read the same — when the user swaps headlineFont or palette, both
+// follow.
+const THUMB_FONT_FAMILY: Record<TextLayer["style"]["font"], string> = {
+  serif: "Instrument Serif, serif",
+  sans: "Inter, sans-serif",
+  mono: "JetBrains Mono, monospace",
+};
+const PALETTE_FG = "palette:fg";
+const PALETTE_ACCENT = "palette:accent";
+
+function ThumbLayers({
+  layers,
+  scale,
+  palette,
+  globalsFont,
+}: {
+  layers: Layer[];
+  scale: number;
+  palette: { bg: string; fg: string; accent: string } | undefined;
+  globalsFont: TextLayer["style"]["font"];
+}) {
+  return (
+    <>
+      {layers.map((l) => {
+        if (l.kind === "text") {
+          const t = l as TextLayer;
+          const color = (() => {
+            if (t.style.color === PALETTE_FG && palette) return palette.fg;
+            if (t.style.color === PALETTE_ACCENT && palette) return palette.accent;
+            if (!t.style.color && palette) return palette.fg;
+            return t.style.color;
+          })();
+          return (
+            <div
+              key={t.id}
+              style={{
+                position: "absolute",
+                left: t.box.x * scale,
+                top: t.box.y * scale,
+                width: t.box.w * scale,
+                fontSize: Math.max(4, t.style.size * scale),
+                fontFamily: THUMB_FONT_FAMILY[t.style.font ?? globalsFont],
+                fontStyle: t.style.italic ? "italic" : "normal",
+                fontWeight: t.style.weight ?? 500,
+                color,
+                textAlign: t.style.align,
+                letterSpacing: t.style.tracking * scale,
+                lineHeight: 1.05,
+                pointerEvents: "none",
+                whiteSpace: "pre-line",
+                overflow: "hidden",
+              }}
+            >
+              {t.text}
+            </div>
+          );
+        }
+        if (l.kind === "image") {
+          const i = l as ImageLayer;
+          return (
+            <img
+              key={i.id}
+              src={i.src}
+              alt=""
+              style={{
+                position: "absolute",
+                left: i.box.x * scale,
+                top: i.box.y * scale,
+                width: i.box.w * scale,
+                height: i.box.h * scale,
+                objectFit: "cover",
+                pointerEvents: "none",
+              }}
+            />
+          );
+        }
+        return null;
+      })}
+    </>
+  );
+}
 
 function FilmThumb({
   slide,
@@ -30,6 +114,11 @@ function FilmThumb({
   const setCurrent = useEditor((s) => s.setCurrentSlide);
   const removeSlide = useEditor((s) => s.removeSlide);
   const duplicateSlide = useEditor((s) => s.duplicateSlide);
+  const carWidth = useEditor((s) => s.car?.width ?? 1080);
+  const carPalette = useEditor((s) => s.car?.globals.palette);
+  const carHeadlineFont = useEditor((s) => s.car?.globals.headlineFont ?? "serif");
+  const palette = carPalette ? PALETTES[carPalette] : undefined;
+  const thumbScale = 80 / carWidth;
   const [hover, setHover] = useState(false);
   const t = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
@@ -77,6 +166,12 @@ function FilmThumb({
       }}
       data-slide-id={slide.id}
     >
+      <ThumbLayers
+        layers={slide.layers}
+        scale={thumbScale}
+        palette={palette}
+        globalsFont={carHeadlineFont}
+      />
       <span
         style={{
           position: "absolute",
