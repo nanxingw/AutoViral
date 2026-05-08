@@ -175,6 +175,20 @@ export function ChatPanel({
     setInput("");
   };
 
+  // POST /api/works/:id/abort — kills the running CLI process and lets the
+  // turn complete handler broadcast cli_exited so streaming flips off.
+  // Pneuma's ChatPanel has the same red-square button when an agent turn
+  // is in flight; without it autoviral users have no way to bail out of a
+  // long-running thinking pass other than reload-page.
+  const abort = async () => {
+    if (!streaming) return;
+    try {
+      await apiFetch(`/api/works/${workId}/abort`, { method: "POST" });
+    } catch {
+      // server already gone or restart in progress — ignore
+    }
+  };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {/* Header */}
@@ -366,27 +380,52 @@ export function ChatPanel({
               {t("chat.sendHint")}
             </span>
             <div style={{ flex: 1 }} />
-            <button
-              onClick={submit}
-              disabled={!input.trim()}
-              style={{
-                width: 28,
-                height: 28,
-                display: "grid",
-                placeItems: "center",
-                background: input.trim() ? "var(--accent)" : "var(--surface-2)",
-                border: "none",
-                borderRadius: 7,
-                color: input.trim() ? "var(--accent-fg)" : "var(--text-dimmer)",
-                cursor: input.trim() ? "pointer" : "default",
-                boxShadow: input.trim() ? "0 0 12px var(--accent-glow)" : "none",
-                transition: "background 0.15s",
-                fontWeight: 700,
-              }}
-              aria-label="Send"
-            >
-              ↑
-            </button>
+            {streaming ? (
+              <button
+                onClick={abort}
+                style={{
+                  width: 28,
+                  height: 28,
+                  display: "grid",
+                  placeItems: "center",
+                  background: "var(--spark-red, #c44a4a)",
+                  border: "none",
+                  borderRadius: 7,
+                  color: "#fff",
+                  cursor: "pointer",
+                  boxShadow: "0 0 12px rgba(196,74,74,0.45)",
+                  transition: "background 0.15s",
+                  fontWeight: 700,
+                }}
+                aria-label="Stop"
+                title="Stop running turn"
+              >
+                {/* filled square — pneuma's universal "stop the agent" glyph */}
+                ◼
+              </button>
+            ) : (
+              <button
+                onClick={submit}
+                disabled={!input.trim()}
+                style={{
+                  width: 28,
+                  height: 28,
+                  display: "grid",
+                  placeItems: "center",
+                  background: input.trim() ? "var(--accent)" : "var(--surface-2)",
+                  border: "none",
+                  borderRadius: 7,
+                  color: input.trim() ? "var(--accent-fg)" : "var(--text-dimmer)",
+                  cursor: input.trim() ? "pointer" : "default",
+                  boxShadow: input.trim() ? "0 0 12px var(--accent-glow)" : "none",
+                  transition: "background 0.15s",
+                  fontWeight: 700,
+                }}
+                aria-label="Send"
+              >
+                ↑
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -575,7 +614,6 @@ function SessionTotals({ blocks }: { blocks: StreamBlock[] }) {
     outT += b.usage.outputTokens ?? 0;
   }
   if (cost === 0 && inT === 0 && outT === 0) return null;
-  const tokK = (inT + outT) / 1000;
   return (
     <span
       style={{
@@ -586,9 +624,19 @@ function SessionTotals({ blocks }: { blocks: StreamBlock[] }) {
       }}
       title={`session total: ${inT} in / ${outT} out tokens`}
     >
-      Σ ${cost.toFixed(3)} · {tokK.toFixed(1)}k
+      Σ ${cost.toFixed(3)} · {formatTokens(inT + outT)}
     </span>
   );
+}
+
+/** Token count formatter — shows the raw count for small numbers
+ *  (otherwise 12 tokens renders as "0.0k", which made the session badge
+ *  read like nothing was happening on cheap turns). M / k suffixes for
+ *  larger counts. */
+function formatTokens(n: number): string {
+  if (n < 1000) return `${n} tok`;
+  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
+  return `${(n / 1_000_000).toFixed(2)}M`;
 }
 
 /**
@@ -737,7 +785,11 @@ function UsageBadge({ usage }: { usage: TurnUsage }) {
   const inT = usage.inputTokens ?? 0;
   const outT = usage.outputTokens ?? 0;
   if (inT || outT) {
-    parts.push(`${inT}→${outT} tok`);
+    // For per-turn detail keep the asymmetric in→out form (informative for
+    // Opus where input dominates), but reuse formatTokens above 1k so a
+    // 25k-token turn doesn't blow the chip width.
+    const fmt = (n: number) => (n < 1000 ? `${n}` : `${(n / 1000).toFixed(1)}k`);
+    parts.push(`${fmt(inT)}→${fmt(outT)} tok`);
   }
   if (parts.length === 0) return null;
   return (
