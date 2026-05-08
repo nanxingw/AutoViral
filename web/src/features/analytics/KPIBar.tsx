@@ -1,5 +1,6 @@
 import clsx from "clsx";
 import { compactNumber, fmtDelta } from "@/lib/format";
+import { useT } from "@/i18n/useT";
 import styles from "./KPIBar.module.css";
 
 interface Props {
@@ -9,11 +10,12 @@ interface Props {
 }
 
 export function KPIBar({ todayLikes, likesDelta, todayComments, commentsDelta, engagement, engagementDelta }: Props) {
+  const t = useT();
   return (
     <div className={styles.bar}>
-      <KPI num={compactNumber(todayLikes)} lbl="Today Likes" delta={likesDelta} />
-      <KPI num={compactNumber(todayComments)} lbl="Today Comments" delta={commentsDelta} />
-      <KPI num={`${(engagement * 100).toFixed(1)}%`} lbl="Engagement" delta={engagementDelta} />
+      <KPI num={compactNumber(todayLikes)} lbl={t("analytics.kpiTodayLikes")} delta={likesDelta} />
+      <KPI num={compactNumber(todayComments)} lbl={t("analytics.kpiTodayComments")} delta={commentsDelta} />
+      <KPI num={`${(engagement * 100).toFixed(1)}%`} lbl={t("analytics.kpiEngagement")} delta={engagementDelta} />
     </div>
   );
 }

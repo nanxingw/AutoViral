@@ -1,3 +1,4 @@
+import { useT } from "@/i18n/useT";
 import styles from "./DemographicsRow.module.css";
 
 interface Props {
@@ -16,6 +17,7 @@ const emptyHint: React.CSSProperties = {
 };
 
 export function DemographicsRow({ age, gender, regions }: Props) {
+  const t = useT();
   const ageEntries = Object.entries(age);
   const ageEmpty = ageEntries.length === 0;
   const genderEmpty = gender.male === 0 && gender.female === 0;
@@ -23,9 +25,9 @@ export function DemographicsRow({ age, gender, regions }: Props) {
   return (
     <section className={styles.row}>
       <div className={styles.panel}>
-        <h3 className={styles.h3}>Age <em>distribution</em></h3>
+        <h3 className={styles.h3}>{t("analytics.demoAgeTitle")} <em>{t("analytics.demoAgeEm")}</em></h3>
         {ageEmpty ? (
-          <div style={emptyHint}>暂无年龄分布数据 — 等待后台采集首批样本</div>
+          <div style={emptyHint}>{t("analytics.demoEmptyAge")}</div>
         ) : (
           <div className={styles.bars}>
             {ageEntries.map(([range, ratio]) => (
@@ -40,21 +42,21 @@ export function DemographicsRow({ age, gender, regions }: Props) {
       </div>
 
       <div className={styles.panel}>
-        <h3 className={styles.h3}>Gender <em>split</em></h3>
+        <h3 className={styles.h3}>{t("analytics.demoGenderTitle")} <em>{t("analytics.demoGenderEm")}</em></h3>
         {genderEmpty ? (
-          <div style={emptyHint}>暂无性别分布数据 — 等待后台采集首批样本</div>
+          <div style={emptyHint}>{t("analytics.demoEmptyGender")}</div>
         ) : (
           <div className={styles.legend}>
-            <div className={styles.legendRow}><div className={styles.swatch} style={{ background: "var(--accent)" }} />Male · {Math.round(gender.male * 100)}%</div>
-            <div className={styles.legendRow}><div className={styles.swatch} style={{ background: "var(--surface-2)", border: "1px solid var(--glass-hi)" }} />Female · {Math.round(gender.female * 100)}%</div>
+            <div className={styles.legendRow}><div className={styles.swatch} style={{ background: "var(--accent)" }} />{t("analytics.demoMale")} · {Math.round(gender.male * 100)}%</div>
+            <div className={styles.legendRow}><div className={styles.swatch} style={{ background: "var(--surface-2)", border: "1px solid var(--glass-hi)" }} />{t("analytics.demoFemale")} · {Math.round(gender.female * 100)}%</div>
           </div>
         )}
       </div>
 
       <div className={styles.panel}>
-        <h3 className={styles.h3}>Top <em>regions</em></h3>
+        <h3 className={styles.h3}>{t("analytics.demoRegionsTitle")} <em>{t("analytics.demoRegionsEm")}</em></h3>
         {regionsEmpty ? (
-          <div style={emptyHint}>暂无地域分布数据 — 等待后台采集首批样本</div>
+          <div style={emptyHint}>{t("analytics.demoEmptyRegions")}</div>
         ) : (
           regions.map((r) => (
             <div key={r.name} className={styles.barRow}>

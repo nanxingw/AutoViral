@@ -19,6 +19,24 @@ export function TrendingPanel({ platform, items }: { platform: Platform; items: 
       <div className={styles.head}>
         <h2 className={styles.title}>
           {PLATFORM_LABEL[platform]} <em>Trending</em>
+          <span
+            style={{
+              marginLeft: 10,
+              padding: "2px 7px",
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              letterSpacing: "0.12em",
+              textTransform: "uppercase",
+              color: "var(--text-dimmer)",
+              border: "1px solid var(--glass-border)",
+              borderRadius: 4,
+              verticalAlign: "middle",
+            }}
+            title={t("explore.trendingSampleNote")}
+            aria-label="Thumbnails are placeholder until real fetcher lands"
+          >
+            Preview
+          </span>
         </h2>
         <span className={styles.meta}>
           {list.length === 0 ? "NO DATA" : `TOP ${list.length} · 24H`}

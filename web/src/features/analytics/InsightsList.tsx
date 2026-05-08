@@ -1,12 +1,14 @@
+import { useT } from "@/i18n/useT";
 import styles from "./InsightsList.module.css";
 
 interface Item { date: string; body: string; tag: string }
 
 export function InsightsList({ items }: { items: Item[] }) {
+  const t = useT();
   return (
     <section className={styles.card}>
-      <h2 className={styles.h2}>Latest research <em>insights</em></h2>
-      <div className={styles.sub}>Curated by Sonnet · ranked by relevance to your channel</div>
+      <h2 className={styles.h2}>{t("analytics.insightsTitle")} <em>{t("analytics.insightsTitleEm")}</em></h2>
+      <div className={styles.sub}>{t("analytics.insightsSub")}</div>
       {items.length === 0 ? (
         <div
           style={{
@@ -17,8 +19,7 @@ export function InsightsList({ items }: { items: Item[] }) {
             lineHeight: 1.6,
           }}
         >
-          暂无 research insights — Sonnet 还没分析过你最近的作品。
-          完成 1 个发布作品后会自动出现首批洞察。
+          {t("analytics.insightsEmpty")}
         </div>
       ) : (
         items.map((i, idx) => (

@@ -1,3 +1,4 @@
+import { useT } from "@/i18n/useT";
 import styles from "./AnglesCard.module.css";
 
 export interface Angle { num: string; body: string; score: string }
@@ -13,15 +14,13 @@ interface Props {
 }
 
 export function AnglesCard({ angles, note, onRegenerate }: Props) {
-  // When `note` is present, the data is placeholder/static — render a
-  // visible SAMPLE chip + visually de-emphasize each angle's "FIT score"
-  // so users don't read "FIT 94 · 5.2K est. reach" as real algorithm output.
+  const t = useT();
   const isDemo = !!note;
   return (
     <section className={styles.card}>
       <div className={styles.head}>
         <h2 className={styles.h2}>
-          Three <em>angles</em> AutoViral thinks you should chase
+          {t("explore.anglesH2")}
           {isDemo && (
             <span
               style={{
