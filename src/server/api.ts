@@ -236,10 +236,10 @@ apiRoutes.get("/api/works/:id", async (c) => {
   const id = c.req.param("id");
   try {
     const work = await getWork(id);
-    if (!work) return c.json({ error: "Work not found" }, 404);
+    if (!work) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
     return c.json(work);
   } catch {
-    return c.json({ error: "Work not found" }, 404);
+    return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
   }
 });
 
@@ -249,10 +249,10 @@ apiRoutes.put("/api/works/:id", async (c) => {
   try {
     const body = await c.req.json();
     const work = await storeUpdateWork(id, body);
-    if (!work) return c.json({ error: "Work not found" }, 404);
+    if (!work) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
     return c.json(work);
   } catch {
-    return c.json({ error: "Work not found" }, 404);
+    return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
   }
 });
 
@@ -261,10 +261,10 @@ apiRoutes.delete("/api/works/:id", async (c) => {
   const id = c.req.param("id");
   try {
     const deleted = await storeDeleteWork(id);
-    if (!deleted) return c.json({ error: "Work not found" }, 404);
+    if (!deleted) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
     return c.json({ deleted: true });
   } catch {
-    return c.json({ error: "Work not found" }, 404);
+    return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
   }
 });
 
@@ -277,7 +277,7 @@ apiRoutes.delete("/api/works/:id", async (c) => {
 apiRoutes.get("/api/works/:id/composition", async (c) => {
   const id = c.req.param("id");
   const w = await getWork(id);
-  if (!w) return c.json({ error: "Work not found" }, 404);
+  if (!w) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
   // Return 404 only on ENOENT; corrupt YAML or read errors must not silently
   // become "no composition" — the client treats null as "fresh" and would
   // overwrite the broken file with an empty composition. (Codex review 2026-04-27)
@@ -290,7 +290,7 @@ apiRoutes.get("/api/works/:id/composition", async (c) => {
     return c.json(synthesiseLegacyAssetsAndProvenance(parsed));
   } catch (err: any) {
     if (err?.code !== "ENOENT") {
-      return c.json({ error: `Composition unreadable: ${err?.message ?? "unknown"}` }, 500);
+      return c.json({ error: `Composition unreadable: ${err?.message ?? "unknown"}`, errorCode: "composition_unreadable", detail: err?.message }, 500);
     }
     // Legacy auto-build path
     const synthesised = await synthesiseLegacyComposition(id, w.type);
@@ -298,7 +298,7 @@ apiRoutes.get("/api/works/:id/composition", async (c) => {
       const parsedSynth = CompositionSchema.parse(synthesised);
       return c.json(synthesiseLegacyAssetsAndProvenance(parsedSynth));
     }
-    return c.json({ error: "Composition not found" }, 404);
+    return c.json({ error: "Composition not found", errorCode: "composition_not_found" }, 404);
   }
 });
 
@@ -453,7 +453,7 @@ export function synthesiseLegacyAssetsAndProvenance(
 apiRoutes.put("/api/works/:id/composition", async (c) => {
   const id = c.req.param("id");
   const w = await getWork(id);
-  if (!w) return c.json({ error: "Work not found" }, 404);
+  if (!w) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
   const body = await c.req.json();
   const parsed = CompositionSchema.safeParse(body);
   if (!parsed.success) {
@@ -490,21 +490,21 @@ apiRoutes.post("/api/works/:id/composition/gc-orphans", async (c) => {
   const id = c.req.param("id");
   if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId" }, 400);
   const w = await getWork(id);
-  if (!w) return c.json({ error: "Work not found" }, 404);
+  if (!w) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
   const wDir = join(dataDir, "works", id);
   const compYamlPath = join(wDir, "composition.yaml");
   let raw: string;
   try {
     raw = await readFile(compYamlPath, "utf-8");
   } catch (err: any) {
-    if (err?.code === "ENOENT") return c.json({ error: "Composition not found" }, 404);
-    return c.json({ error: `Composition unreadable: ${err?.message ?? "unknown"}` }, 500);
+    if (err?.code === "ENOENT") return c.json({ error: "Composition not found", errorCode: "composition_not_found" }, 404);
+    return c.json({ error: `Composition unreadable: ${err?.message ?? "unknown"}`, errorCode: "composition_unreadable", detail: err?.message }, 500);
   }
   let comp: Composition;
   try {
     comp = yaml.load(raw) as Composition;
   } catch (err: any) {
-    return c.json({ error: `Composition YAML invalid: ${err?.message ?? "unknown"}` }, 500);
+    return c.json({ error: `Composition YAML invalid: ${err?.message ?? "unknown"}`, errorCode: "composition_yaml_invalid", detail: err?.message }, 500);
   }
 
   const { existsSync } = await import("node:fs");
@@ -589,7 +589,7 @@ apiRoutes.post("/api/works/:id/composition/gc-orphans", async (c) => {
 apiRoutes.get("/api/works/:id/carousel", async (c) => {
   const id = c.req.param("id");
   const w = await getWork(id);
-  if (!w) return c.json({ error: "Work not found" }, 404);
+  if (!w) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
   try {
     const raw = await readFile(
       join(dataDir, "works", id, "carousel.yaml"),
@@ -605,7 +605,7 @@ apiRoutes.get("/api/works/:id/carousel", async (c) => {
       if (synthesised) return c.json(synthesised);
       return c.json({ error: "Carousel not found" }, 404);
     }
-    return c.json({ error: `Carousel unreadable: ${err?.message ?? "unknown"}` }, 500);
+    return c.json({ error: `Carousel unreadable: ${err?.message ?? "unknown"}`, errorCode: "carousel_unreadable", detail: err?.message }, 500);
   }
 });
 
@@ -659,7 +659,7 @@ async function synthesiseLegacyCarousel(
 apiRoutes.put("/api/works/:id/carousel", async (c) => {
   const id = c.req.param("id");
   const w = await getWork(id);
-  if (!w) return c.json({ error: "Work not found" }, 404);
+  if (!w) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
   const body = await c.req.json();
   const wDir = join(dataDir, "works", id);
   await mkdir(wDir, { recursive: true });
@@ -681,14 +681,14 @@ apiRoutes.post("/api/works/:id/render", async (c) => {
     return c.json({ error: "RenderQueue not initialized" }, 503);
   }
   const w = await getWork(id);
-  if (!w) return c.json({ error: "Work not found" }, 404);
+  if (!w) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
   // Cheap fail-fast: composition.yaml must exist on disk before we enqueue.
   // The worker re-loads + validates it via loadComposition; this just gives
   // the user a synchronous 400 instead of a queued-then-failed job.
   try {
     await readFile(join(dataDir, "works", id, "composition.yaml"), "utf-8");
   } catch {
-    return c.json({ error: "Composition missing — save first" }, 400);
+    return c.json({ error: "Composition missing — save first", errorCode: "composition_missing" }, 400);
   }
   const body = await c.req.json().catch(() => ({}));
   const type: "full" | "proxy" = body.type === "proxy" ? "proxy" : "full";
@@ -873,7 +873,7 @@ apiRoutes.post("/api/works/:id/assets/upload", async (c) => {
   if (!SAFE_ID.test(workId)) return c.json({ error: "Invalid workId" }, 400);
 
   const work = await getWork(workId);
-  if (!work) return c.json({ error: "Work not found" }, 404);
+  if (!work) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
 
   const body = await c.req.parseBody();
   const file = body.file;
@@ -1834,7 +1834,7 @@ apiRoutes.post("/api/works/:id/session", async (c) => {
     }
 
     const work = await getWork(id);
-    if (!work) return c.json({ error: "Work not found" }, 404);
+    if (!work) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
 
     const prompt = [
       `你是一个内容创作助手。你正在帮助用户创作："${work.title}"（类型：${work.type}）。`,
@@ -1902,7 +1902,7 @@ apiRoutes.post("/api/works/:id/invoke", async (c) => {
   }
 
   const work = await getWork(id);
-  if (!work) return c.json({ error: "Work not found" }, 404);
+  if (!work) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
 
   if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 500);
 
@@ -1942,7 +1942,7 @@ apiRoutes.get("/api/works/:id/rubric/:module", async (c) => {
   if (!KNOWN_MODULES.includes(mod)) return c.json({ error: "Unknown module" }, 404);
 
   const work = await getWork(c.req.param("id"));
-  if (!work) return c.json({ error: "Work not found" }, 404);
+  if (!work) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
 
   const generic = await readFile(
     join(repoRoot, "skills/autoviral/taste/06-rubric.md"),
@@ -2137,7 +2137,7 @@ apiRoutes.get("/api/memory/context/:workId", async (c) => {
   if (!client) return c.json({ error: "Memory not configured (missing apiKey)" }, 503);
   const workId = c.req.param("workId");
   const work = await getWork(workId);
-  if (!work) return c.json({ error: "Work not found" }, 404);
+  if (!work) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
   const topic = work.topicHint ?? work.title;
   const firstPlatform = work.platforms?.[0];
   const platform = typeof firstPlatform === "string" ? firstPlatform : (firstPlatform as any)?.platform ?? "通用";

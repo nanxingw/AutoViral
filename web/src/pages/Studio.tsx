@@ -17,6 +17,7 @@ import { TweaksPanel } from "@/features/studio/panels/Tweaks";
 import { useShortcuts } from "@/features/studio/hooks/useShortcuts";
 import { useT } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
+import { localizeApiError } from "@/i18n/serverError";
 import { useWorks } from "@/queries/works";
 import NotFound from "./NotFound";
 
@@ -108,9 +109,10 @@ export default function Studio() {
           // Corrupt yaml or server bug — DO NOT overwrite by autosaving an
           // empty comp. Show the error and leave comp null so autosave is
           // skipped (it requires comp.workId === workId). (Codex review 2026-04-27)
+          // R26: server-side errorCode → i18n. unmapped → fall back to msg.
           setLoadError(
             t("studio.loadError.body", {
-              msg: err?.message ?? t("studio.loadError.serverFallbackMsg"),
+              msg: localizeApiError(err, t) || t("studio.loadError.serverFallbackMsg"),
             }),
           );
         } else {

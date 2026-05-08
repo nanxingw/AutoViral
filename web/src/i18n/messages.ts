@@ -19,6 +19,17 @@ export const en = {
     saveFailed: "SAVE FAILED",
     saveFailedTitle: "Autosave failed: {msg}. Your edits are still in memory; copy them out before reloading.",
   },
+  // Server-side error codes (snake_case, mirrored in src/server/api.ts).
+  // ApiError.errorCode lookup falls back to err.message when key missing,
+  // so adding keys is opt-in per error path.
+  serverErrors: {
+    work_not_found: "Work not found",
+    composition_not_found: "Composition not found",
+    composition_unreadable: "Composition unreadable: {detail}",
+    composition_yaml_invalid: "Composition YAML invalid: {detail}",
+    carousel_unreadable: "Carousel unreadable: {detail}",
+    composition_missing: "Composition not saved yet — make an edit first.",
+  },
   notFound: {
     code: "404",
     title: "This page took a wrong turn",
@@ -315,6 +326,14 @@ export const zh: DeepShape<Messages> = {
     unsaved: "未保存",
     saveFailed: "保存失败",
     saveFailedTitle: "自动保存失败：{msg}。你的编辑仍在内存中——请先复制出来再刷新。",
+  },
+  serverErrors: {
+    work_not_found: "作品不存在",
+    composition_not_found: "合成数据未找到",
+    composition_unreadable: "合成数据无法读取：{detail}",
+    composition_yaml_invalid: "合成 YAML 格式错误：{detail}",
+    carousel_unreadable: "图文数据无法读取：{detail}",
+    composition_missing: "合成尚未保存——请先编辑一次。",
   },
   notFound: {
     code: "404",

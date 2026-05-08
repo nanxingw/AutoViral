@@ -1,11 +1,23 @@
 export class ApiError extends Error {
   override name = "ApiError";
+  /** R26: server-side error code (snake_case enum). Frontend can map this
+   *  to a localized i18n key under `serverErrors.<code>` for clean CN/EN
+   *  display, falling back to `message` when absent. */
+  public errorCode: string | undefined;
   constructor(
     message: string,
     public status: number,
     public body: unknown,
   ) {
     super(message);
+    if (
+      body &&
+      typeof body === "object" &&
+      "errorCode" in body &&
+      typeof (body as { errorCode: unknown }).errorCode === "string"
+    ) {
+      this.errorCode = (body as { errorCode: string }).errorCode;
+    }
   }
 }
 

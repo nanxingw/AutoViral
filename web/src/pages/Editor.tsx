@@ -19,6 +19,7 @@ import type { LocatorData } from "@/features/chat/types";
 import { buildEditorViewerContext } from "@/features/editor/services/viewerContext";
 import { useT } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
+import { localizeApiError } from "@/i18n/serverError";
 import { useWorks } from "@/queries/works";
 import NotFound from "./NotFound";
 
@@ -105,9 +106,11 @@ export default function Editor() {
         const status = err?.status;
         if (typeof status === "number" && status >= 500) {
           // Don't overwrite a corrupt carousel.yaml with an empty one.
+          // R26: localize the server error via errorCode → i18n key, fall
+          // back to err.message for unmapped codes.
           setLoadError(
             t("editor.loadError.body", {
-              msg: err?.message ?? t("editor.loadError.serverFallbackMsg"),
+              msg: localizeApiError(err, t) || t("editor.loadError.serverFallbackMsg"),
             }),
           );
         } else {
