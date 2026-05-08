@@ -16,7 +16,14 @@ const SCHEME = /^[a-z][a-z0-9+.\-]*:/i;
  * side uses a relative URL so vite/the page origin handles it.
  */
 export function resolveAssetUrl(src: string, workId: string): string {
-  if (!src || SCHEME.test(src)) return src;
+  // Short-circuit: empty / scheme-prefixed / page-absolute paths are already
+  // valid. The `/`-prefixed branch is the load-bearing one — server-side
+  // render pipelines have historically rewritten clip.src to
+  // "/api/works/<id>/assets/..." and persisted that into composition.yaml.
+  // Without this guard we'd double-wrap into
+  // "/api/works/<id>/assets//api/works/<id>/assets/..." and the video
+  // element silently 404s while throwing MediaPlaybackError. (2026-05-08)
+  if (!src || SCHEME.test(src) || src.startsWith("/")) return src;
   const trimmed = src.startsWith("assets/") ? src.slice("assets/".length) : src;
   const segments = trimmed.split("/").map(encodeURIComponent).join("/");
   return `/api/works/${workId}/assets/${segments}`;

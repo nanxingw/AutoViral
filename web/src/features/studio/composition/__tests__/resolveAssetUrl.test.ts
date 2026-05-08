@@ -46,6 +46,20 @@ describe("resolveAssetUrl", () => {
   it("returns the input unchanged for empty string", () => {
     expect(resolveAssetUrl("", "w_1")).toBe("");
   });
+
+  // Regression lock: server-side render pipelines have rewritten clip.src to
+  // absolute /api/... paths and persisted them into composition.yaml. Without
+  // a guard the function double-wraps into /api/works/<id>/assets//api/...
+  // and the video element silently 404s while throwing MediaPlaybackError.
+  // (Reported 2026-05-08 against w_20260407_1550_49d's output/final.mp4)
+  it("passes /api/-prefixed page-absolute paths through unchanged", () => {
+    const u = "/api/works/w_1/assets/output/final.mp4";
+    expect(resolveAssetUrl(u, "w_1")).toBe(u);
+  });
+
+  it("passes any /-prefixed absolute path through unchanged", () => {
+    expect(resolveAssetUrl("/static/foo.mp4", "w_1")).toBe("/static/foo.mp4");
+  });
 });
 
 describe("resolveCompositionAssets", () => {
