@@ -1,8 +1,9 @@
 import { Link } from "react-router-dom";
-import { format } from "date-fns";
 import clsx from "clsx";
 import type { WorkSummary } from "@/queries/works";
 import styles from "./WorksGrid.module.css";
+import { useT, type MessageKey } from "@/i18n/useT";
+import { useLocaleStore } from "@/i18n/store";
 
 interface Props {
   works: WorkSummary[];
@@ -30,11 +31,24 @@ function fallbackGradient(id: string): string {
 }
 
 export function WorksGrid({ works, filter }: Props) {
+  const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
+  const dateFmt = new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", {
+    month: "short",
+    day: "numeric",
+  });
   const visible = filter === "all" ? works : works.filter((w) => w.status === filter);
+  const STATUSES = new Set(["draft", "creating", "ready", "failed", "published", "archived"]);
   return (
     <div className={styles.grid}>
       {visible.map((w) => {
         const cover = w.coverImage ?? null;
+        const typeLabel = t(
+          (w.type === "short-video" ? "works.type.video" : "works.type.image") as MessageKey,
+        );
+        const statusLabel = t(
+          (`works.status.${STATUSES.has(w.status) ? w.status : "draft"}`) as MessageKey,
+        );
         return (
           <Link
             key={w.id}
@@ -76,13 +90,13 @@ export function WorksGrid({ works, filter }: Props) {
               <div className={styles.thumb} style={{ background: fallbackGradient(w.id) }} />
             )}
             <div className={clsx(styles.badge, w.status === "draft" && styles.badgeDraft)}>
-              {w.type === "short-video" ? "VIDEO" : "IMAGE"} · {w.status === "draft" ? "DRAFT" : "READY"}
+              {typeLabel} · {statusLabel}
             </div>
-            <div className={styles.typeTag}>{w.status.toUpperCase()}</div>
+            <div className={styles.typeTag}>{statusLabel}</div>
             <div className={styles.meta}>
               <h3>{w.title}</h3>
               <div className={styles.subline}>
-                <span>{format(new Date(w.updatedAt), "MMM d")}</span>
+                <span>{dateFmt.format(new Date(w.updatedAt))}</span>
               </div>
             </div>
           </Link>

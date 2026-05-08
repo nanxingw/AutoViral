@@ -4,6 +4,7 @@ import { WorksHero } from "@/features/works/WorksHero";
 import { NewWorkCard } from "@/features/works/NewWorkCard";
 import { WorksGrid } from "@/features/works/WorksGrid";
 import { InsightRibbon, type Insight } from "@/features/works/InsightRibbon";
+import { useT, type MessageKey } from "@/i18n/useT";
 
 const PLACEHOLDER_INSIGHTS: Insight[] = [
   { tag: "COMPETITOR GAP", body: "Tutorial content under-served in your niche — 3 of 5 top creators have abandoned it.", date: "—", cta: "+ Generate Work →" },
@@ -17,6 +18,7 @@ export default function Works() {
   const works = useWorks();
   const [filter, setFilter] = useState<WorkFilter>("all");
   const list = works.data ?? [];
+  const t = useT();
 
   const counts = useMemo(() => ({
     drafts: list.filter((w) => w.status === "draft").length,
@@ -49,7 +51,7 @@ export default function Works() {
                 cursor: "pointer", fontFamily: "inherit",
               }}
             >
-              {f[0].toUpperCase() + f.slice(1)}
+              {t(`works.filter.${f}` as MessageKey)}
             </button>
           ))}
         </div>

@@ -95,6 +95,26 @@ export const en = {
       toggleSettings: "Toggle settings",
     },
   },
+  works: {
+    filter: {
+      all: "All",
+      draft: "Draft",
+      published: "Published",
+      archived: "Archived",
+    },
+    type: {
+      video: "VIDEO",
+      image: "IMAGE",
+    },
+    status: {
+      draft: "DRAFT",
+      creating: "CREATING",
+      ready: "READY",
+      failed: "FAILED",
+      published: "PUBLISHED",
+      archived: "ARCHIVED",
+    },
+  },
   chat: {
     agentName: "Creative Agent",
     streaming: "STREAMING",
@@ -211,6 +231,26 @@ export const zh: DeepShape<Messages> = {
       moreExportOptions: "更多导出选项",
       quickProxyExport: "快速代理导出",
       toggleSettings: "切换设置",
+    },
+  },
+  works: {
+    filter: {
+      all: "全部",
+      draft: "草稿",
+      published: "已发布",
+      archived: "已归档",
+    },
+    type: {
+      video: "视频",
+      image: "图文",
+    },
+    status: {
+      draft: "草稿",
+      creating: "生成中",
+      ready: "就绪",
+      failed: "失败",
+      published: "已发布",
+      archived: "已归档",
     },
   },
   chat: {
