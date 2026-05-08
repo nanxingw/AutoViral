@@ -1,4 +1,4 @@
-import { Image as KImage, Transformer } from "react-konva";
+import { Image as KImage, Rect, Transformer } from "react-konva";
 import { useRef, useEffect } from "react";
 import type Konva from "konva";
 import useImage from "use-image";
@@ -11,7 +11,11 @@ export function ImageLayerNode({ layer }: { layer: ImageLayer }) {
   const updateLayer = useEditor((s) => s.updateLayer);
   const ref = useRef<Konva.Image | null>(null);
   const trRef = useRef<Konva.Transformer | null>(null);
-  const [img] = useImage(layer.src);
+  // R33: consume `status` from useImage. Previously the second tuple was
+  // ignored, so a broken URL silently rendered an invisible Konva image —
+  // user saw a blank layer with no clue why. Now render a red dashed Rect
+  // placeholder when loading fails so the user can re-pick or remove.
+  const [img, status] = useImage(layer.src);
 
   useEffect(() => {
     if (isSelected && ref.current && trRef.current) {
@@ -19,6 +23,24 @@ export function ImageLayerNode({ layer }: { layer: ImageLayer }) {
       trRef.current.getLayer()?.batchDraw();
     }
   }, [isSelected]);
+
+  if (status === "failed") {
+    return (
+      <Rect
+        x={layer.box.x}
+        y={layer.box.y}
+        width={layer.box.w}
+        height={layer.box.h}
+        rotation={layer.box.rotation}
+        stroke="#d4756c"
+        strokeWidth={2}
+        dash={[8, 6]}
+        fill="rgba(212, 117, 108, 0.06)"
+        onClick={() => setSelection(layer.id)}
+        onTap={() => setSelection(layer.id)}
+      />
+    );
+  }
 
   return (
     <>

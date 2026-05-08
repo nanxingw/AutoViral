@@ -58,6 +58,23 @@ function BgImage({
   // doesn't need CORS; drop the flag and let the browser use the simpler
   // request mode. Costs are: canvas filters that read pixels (toDataURL,
   // getImageData) will taint, but rendering itself is unaffected.
-  const [img] = useImage(src);
+  // R33: consume status. Failed background = render the same red dashed
+  // marker as image/sticker layers so the user sees "background failed"
+  // rather than thinking the slide is intentionally blank.
+  const [img, status] = useImage(src);
+  if (status === "failed") {
+    return (
+      <Rect
+        x={0}
+        y={0}
+        width={width}
+        height={height}
+        stroke="#d4756c"
+        strokeWidth={2}
+        dash={[12, 8]}
+        fill="rgba(212, 117, 108, 0.04)"
+      />
+    );
+  }
   return <KImage image={img} x={0} y={0} width={width} height={height} />;
 }
