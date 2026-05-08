@@ -14,9 +14,13 @@ export function WorksHero({ draftCount, ideaCount, unfinishedSceneCount }: Props
         <span className="eyebrow">PICK UP WHERE YOU LEFT OFF</span>
       </div>
       <h1 className={styles.h1}>
-        <span className={styles.num}>{draftCount}</span> drafts,{" "}
-        <em>{ideaCount} ideas</em> in queue,
-        <br />
+        <span className={styles.num}>{draftCount}</span> drafts
+        {ideaCount > 0 && (
+          <>
+            ,{" "}<em>{ideaCount} ideas</em> in queue
+          </>
+        )}
+        ,<br />
         and <em>{unfinishedSceneCount}</em> unfinished payoff{" "}
         {unfinishedSceneCount === 1 ? "scene" : "scenes"} waiting for you.
       </h1>
