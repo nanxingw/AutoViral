@@ -14,7 +14,45 @@ import {
   findRollbackTarget,
   type Checkpoint,
 } from "@/features/checkpoints/useCheckpoints";
+import { highlightCode } from "./highlight";
 import { QuickActions } from "./QuickActions";
+
+/** Render an agent-emitted ```yaml block``` with our hand-rolled highlighter.
+ *  Only fires for fenced code blocks (where react-markdown sets a className
+ *  like `language-yaml`). Inline `code` falls through to the default
+ *  rendering. */
+function HighlightedCode({
+  className,
+  children,
+  ...rest
+}: {
+  className?: string;
+  children?: React.ReactNode;
+  [k: string]: unknown;
+}) {
+  const langMatch = /language-(\w+)/.exec(className ?? "");
+  const isBlock = !!langMatch;
+  if (!isBlock) {
+    // inline code — let the parent <pre>/<code> CSS handle it
+    return <code className={className} {...rest}>{children}</code>;
+  }
+  const lang = langMatch![1];
+  const src = String(children ?? "");
+  const tokens = highlightCode(src, lang);
+  return (
+    <code className={`${className} chat-hl chat-hl-${lang}`}>
+      {tokens.map((t, i) =>
+        t[1] ? (
+          <span key={i} className={t[1]}>
+            {t[0]}
+          </span>
+        ) : (
+          t[0]
+        ),
+      )}
+    </code>
+  );
+}
 
 /** Render an `<img>` from agent markdown. If the src ends in a known video
  *  extension, swap to a muted/looping `<video>` so the user can watch
@@ -223,8 +261,26 @@ export function ChatPanel({
     };
   }, [workId, setBlocks]);
 
-  // Auto-scroll on append.
+  // Sticky-scroll: only auto-scroll to the bottom when the user was already
+  // near the bottom. If they've scrolled up to read history, the new agent
+  // tokens shouldn't yank them back down — pneuma's chat does this and it's
+  // one of those affordances you only notice when it's missing.
+  const stickyRef = useRef(true);
   useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      // 80px tolerance — counts as "at bottom" if scrolled within ~3 lines
+      // of the actual bottom, so easing out + flex alignment quirks don't
+      // break the heuristic.
+      const fromBottom = el.scrollHeight - (el.scrollTop + el.clientHeight);
+      stickyRef.current = fromBottom < 80;
+    };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    return () => el.removeEventListener("scroll", onScroll);
+  }, []);
+  useEffect(() => {
+    if (!stickyRef.current) return;
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [blocks.length]);
 
@@ -530,6 +586,7 @@ function ChatBlock({
       img: (props: { src?: string; alt?: string }) => (
         <ChatInlineMedia src={props.src} alt={props.alt} />
       ),
+      code: HighlightedCode,
     }),
     [],
   );
