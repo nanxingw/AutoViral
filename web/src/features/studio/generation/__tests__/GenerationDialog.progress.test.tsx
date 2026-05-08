@@ -25,6 +25,10 @@ function wrap(ui: ReactNode) {
   return render(<QueryClientProvider client={qc}>{ui}</QueryClientProvider>);
 }
 
+// R24: apiFetch reads res.headers.get("content-type"). Shared helper so
+// every Response literal in the file includes a Headers instance.
+const jsonHeaders = () => new Headers({ "content-type": "application/json" });
+
 beforeEach(() => {
   sendMock.mockClear();
 });
@@ -49,6 +53,8 @@ describe("GenerationDialog inline progress", () => {
         return {
           ok: true,
           status: 200,
+          statusText: "OK",
+          headers: jsonHeaders(),
           json: async () => ({ assetId: "x" }),
           text: async () => "",
         } as unknown as Response;
@@ -57,12 +63,16 @@ describe("GenerationDialog inline progress", () => {
         return {
           ok: true,
           status: 200,
+          statusText: "OK",
+          headers: jsonHeaders(),
           json: async () => ({ providers: PROVIDERS }),
         } as unknown as Response;
       }
       return {
         ok: false,
         status: 404,
+        statusText: "Not Found",
+        headers: jsonHeaders(),
         json: async () => ({}),
         text: async () => "",
       } as unknown as Response;
@@ -114,6 +124,8 @@ describe("GenerationDialog chat side-effect gating", () => {
         return {
           ok: true,
           status: 200,
+          statusText: "OK",
+          headers: jsonHeaders(),
           json: async () => ({ assetId: "x" }),
           text: async () => "",
         } as unknown as Response;
@@ -122,12 +134,16 @@ describe("GenerationDialog chat side-effect gating", () => {
         return {
           ok: true,
           status: 200,
+          statusText: "OK",
+          headers: jsonHeaders(),
           json: async () => ({ providers: PROVIDERS }),
         } as unknown as Response;
       }
       return {
         ok: false,
         status: 404,
+        statusText: "Not Found",
+        headers: jsonHeaders(),
         json: async () => ({}),
         text: async () => "",
       } as unknown as Response;
@@ -165,12 +181,16 @@ describe("GenerationDialog chat side-effect gating", () => {
         return {
           ok: true,
           status: 200,
+          statusText: "OK",
+          headers: jsonHeaders(),
           json: async () => ({ providers: PROVIDERS }),
         } as unknown as Response;
       }
       return {
         ok: false,
         status: 404,
+        statusText: "Not Found",
+        headers: jsonHeaders(),
         json: async () => ({}),
         text: async () => "",
       } as unknown as Response;

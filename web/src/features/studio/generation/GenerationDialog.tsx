@@ -32,6 +32,7 @@ import {
 } from "./dispatchGeneration";
 import { useChatSocket } from "@/features/chat/useChatSocket";
 import { useT } from "@/i18n/useT";
+import { apiFetch } from "@/lib/api";
 
 // ─── Provider listing (Phase 8.4) ────────────────────────────────────────────
 
@@ -43,9 +44,13 @@ export interface ProviderListing {
 }
 
 async function fetchProviders(): Promise<ProviderListing[]> {
-  const res = await fetch("/api/providers");
-  if (!res.ok) return [];
-  const body = (await res.json()) as { providers?: ProviderListing[] } | ProviderListing[];
+  // R24: switched from raw fetch to apiFetch so non-2xx surfaces as a thrown
+  // ApiError (useQuery sets isError=true) instead of silently degrading to
+  // an empty providers list — empty was previously indistinguishable from
+  // "endpoint failed".
+  const body = await apiFetch<{ providers?: ProviderListing[] } | ProviderListing[]>(
+    "/api/providers",
+  );
   if (Array.isArray(body)) return body;
   return body.providers ?? [];
 }
@@ -445,6 +450,33 @@ export function GenerationDialog(props: GenerationDialogProps) {
                   ))}
                 </select>
               </Field>
+            )}
+            {/* R24: surface providers fetch error. Previously fetchProviders
+                degraded silently to [], indistinguishable from "no providers
+                configured" — user saw the dialog with no provider field and
+                no clue why. Now apiFetch throws on non-2xx → providersQuery
+                .isError flips → render inline alert. */}
+            {providersQuery.isError && (
+              <div
+                role="alert"
+                style={{
+                  padding: "8px 10px",
+                  fontSize: 11,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--status-error, #d4756c)",
+                  background: "rgba(212, 117, 108, 0.08)",
+                  border: "1px solid var(--status-error, #d4756c)",
+                  borderRadius: 6,
+                  lineHeight: 1.5,
+                }}
+              >
+                {t("studio.generationDialog.providersLoadFailed", {
+                  msg:
+                    providersQuery.error instanceof Error
+                      ? providersQuery.error.message
+                      : String(providersQuery.error),
+                })}
+              </div>
             )}
 
             {isVariant ? (

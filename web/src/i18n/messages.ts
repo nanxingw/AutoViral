@@ -180,6 +180,7 @@ export const en = {
       fieldAspectRatio: "Aspect ratio",
       fieldResolution: "Resolution",
       fieldVoice: "Voice",
+      providersLoadFailed: "Couldn't load video providers: {msg}",
     },
   },
   works: {
@@ -473,6 +474,7 @@ export const zh: DeepShape<Messages> = {
       fieldAspectRatio: "宽高比",
       fieldResolution: "分辨率",
       fieldVoice: "音色",
+      providersLoadFailed: "无法加载视频 provider 列表：{msg}",
     },
   },
   works: {

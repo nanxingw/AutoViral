@@ -24,18 +24,28 @@ const PROVIDERS = [
   { id: "kling", displayName: "Kling", available: true, stub: false },
 ];
 
+// R24: include `headers` field (Headers instance) — apiFetch reads
+// res.headers.get("content-type") to decide json vs text parsing. Bare
+// mocks without headers used to work when the code called res.json()
+// directly, but apiFetch refactor surfaced the gap.
+const jsonHeaders = () => new Headers({ "content-type": "application/json" });
+
 beforeEach(() => {
   const fetchMock = vi.fn(async (url: string) => {
     if (url.includes("/api/providers")) {
       return {
         ok: true,
         status: 200,
+        statusText: "OK",
+        headers: jsonHeaders(),
         json: async () => ({ providers: PROVIDERS }),
       } as unknown as Response;
     }
     return {
       ok: false,
       status: 404,
+      statusText: "Not Found",
+      headers: jsonHeaders(),
       json: async () => ({}),
     } as unknown as Response;
   });
@@ -101,6 +111,8 @@ describe("GenerationDialog generate dispatch (Phase 8.4 wiring)", () => {
         return {
           ok: true,
           status: 200,
+          statusText: "OK",
+          headers: jsonHeaders(),
           json: async () => ({
             assetId: "gen_abc12345",
             assetUri: "/api/works/w1/assets/runway-x.mp4",
@@ -115,12 +127,16 @@ describe("GenerationDialog generate dispatch (Phase 8.4 wiring)", () => {
         return {
           ok: true,
           status: 200,
+          statusText: "OK",
+          headers: jsonHeaders(),
           json: async () => ({ providers: PROVIDERS }),
         } as unknown as Response;
       }
       return {
         ok: false,
         status: 404,
+        statusText: "Not Found",
+        headers: jsonHeaders(),
         json: async () => ({}),
         text: async () => "",
       } as unknown as Response;
