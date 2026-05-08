@@ -19,6 +19,8 @@ import type { LocatorData } from "@/features/chat/types";
 import { buildEditorViewerContext } from "@/features/editor/services/viewerContext";
 import { useT } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
+import { useWorks } from "@/queries/works";
+import NotFound from "./NotFound";
 
 // Locale-aware HH:MM time formatter for the savedAt indicator.
 // Keeps the topbar string short and predictable across locales —
@@ -68,18 +70,29 @@ export default function Editor() {
   const locale = useLocaleStore((s) => s.locale);
 
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Tracks "loadCarousel returned null" — i.e. the work id 404'd. Defer
+  // makeEmptyCarousel until we can cross-check works list (Round 16): a
+  // 404 on a real-but-unsaved work is fine (NewWorkCard just created it,
+  // yaml hasn't been written yet); a 404 on a typo'd workId should route
+  // to NotFound instead of silently auto-creating a ghost work.
+  const [loadEmpty, setLoadEmpty] = useState(false);
+  const works = useWorks();
   useEffect(() => {
     if (!workId) return;
-    // Reset car + savedAt on workId change so we don't autosave A's car into B.
     loadCar(null);
     setSavedAt(null);
     setLoadError(null);
+    setLoadEmpty(false);
     let cancelled = false;
     (async () => {
       try {
         const found = await loadCarousel(workId);
         if (cancelled) return;
-        loadCar(found ?? makeEmptyCarousel(workId));
+        if (found) {
+          loadCar(found);
+        } else {
+          setLoadEmpty(true);
+        }
       } catch (err: any) {
         if (cancelled) return;
         const status = err?.status;
@@ -91,6 +104,8 @@ export default function Editor() {
             }),
           );
         } else {
+          // Network unreachable / non-500 non-404 — fresh-start fallback,
+          // same legacy behaviour, doesn't trigger typo guard.
           loadCar(makeEmptyCarousel(workId));
         }
       }
@@ -99,6 +114,22 @@ export default function Editor() {
       cancelled = true;
     };
   }, [workId, loadCar, t]);
+
+  // 404-resolved load flow: once `works.data` arrives, decide whether the
+  // 404 was legitimate (work exists in list — fresh empty carousel) or a
+  // typo'd URL (work absent from list — render NotFound). We defer
+  // makeEmptyCarousel here so autosave doesn't accidentally persist a
+  // ghost work for typo'd ids.
+  const workInList =
+    works.data && workId ? works.data.some((w) => w.id === workId) : null;
+  useEffect(() => {
+    if (!loadEmpty || !workId) return;
+    if (workInList === true) {
+      loadCar(makeEmptyCarousel(workId));
+    }
+    // workInList === false → rendered as NotFound below; do nothing here.
+    // workInList === null → still waiting for works.data, keep waiting.
+  }, [loadEmpty, workInList, workId, loadCar]);
 
   useEffect(() => {
     if (!car || !workId) return;
@@ -116,6 +147,11 @@ export default function Editor() {
   }, [car, workId, locale]);
 
   if (!workId) return <div>{t("editor.loadError.missingWorkId")}</div>;
+  // Typo guard (Round 16): a 404 + workId absent from works list means
+  // the URL was wrong, not a freshly-created work. Render NotFound so
+  // user gets a clear "wrong page" affordance instead of an empty editor
+  // that silently autosaves a ghost work.
+  if (loadEmpty && workInList === false) return <NotFound />;
   if (loadError) {
     return (
       <div style={{ padding: 32, fontFamily: "var(--font-mono)", color: "var(--accent)" }}>

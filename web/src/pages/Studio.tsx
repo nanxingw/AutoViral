@@ -17,6 +17,8 @@ import { TweaksPanel } from "@/features/studio/panels/Tweaks";
 import { useShortcuts } from "@/features/studio/hooks/useShortcuts";
 import { useT } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
+import { useWorks } from "@/queries/works";
+import NotFound from "./NotFound";
 
 // Same locale-aware HH:MM helper as Editor.tsx — keeps the savedAt
 // indicator short + predictable instead of letting the browser default
@@ -69,6 +71,12 @@ export default function Studio() {
   useShortcuts(workId ?? null);
 
   const [loadError, setLoadError] = useState<string | null>(null);
+  // Mirror of Editor.tsx Round 16 typo guard — defer makeEmptyComposition
+  // until we can cross-check works list. 404 on a real-but-unsaved work
+  // is fine; 404 on a typo'd workId should NotFound instead of silently
+  // creating a ghost composition.
+  const [loadEmpty, setLoadEmpty] = useState(false);
+  const works = useWorks();
   // Reset comp + savedAt synchronously when workId changes — prevents A's
   // composition from being saved into B during a route hop. (Codex review 2026-04-27)
   useEffect(() => {
@@ -76,12 +84,17 @@ export default function Studio() {
     loadComp(null);
     setSavedAt(null);
     setLoadError(null);
+    setLoadEmpty(false);
     let cancelled = false;
     (async () => {
       try {
         const found = await loadComposition(workId);
         if (cancelled) return;
-        loadComp(found ?? makeEmptyComposition({ workId }));
+        if (found) {
+          loadComp(found);
+        } else {
+          setLoadEmpty(true);
+        }
       } catch (err: any) {
         if (cancelled) return;
         const status = err?.status;
@@ -95,13 +108,24 @@ export default function Studio() {
             }),
           );
         } else {
-          // Network unreachable / 4xx other than 404 → safe fresh-start fallback.
+          // Network unreachable / non-500 non-404 — fresh-start fallback,
+          // doesn't go through typo guard (no 404 → no ambiguity).
           loadComp(makeEmptyComposition({ workId }));
         }
       }
     })();
     return () => { cancelled = true; };
   }, [workId, loadComp, t]);
+
+  // 404 → typo guard. Once works.data arrives, decide.
+  const workInList =
+    works.data && workId ? works.data.some((w) => w.id === workId) : null;
+  useEffect(() => {
+    if (!loadEmpty || !workId) return;
+    if (workInList === true) {
+      loadComp(makeEmptyComposition({ workId }));
+    }
+  }, [loadEmpty, workInList, workId, loadComp]);
 
   // Autosave on change (debounced) — guard with workId match so a stale
   // comp doesn't get saved into the new route's work id. Also skip when the
@@ -121,6 +145,10 @@ export default function Studio() {
   }, [comp, workId, locale]);
 
   if (!workId) return <div>{t("studio.loadError.missingWorkId")}</div>;
+  // Typo guard (Round 16): 404 + workId absent from works list → user
+  // followed a stale/wrong URL. Render NotFound rather than silently
+  // bootstrap an empty composition that would later autosave a ghost.
+  if (loadEmpty && workInList === false) return <NotFound />;
   if (loadError) {
     return (
       <div style={{ padding: 32, fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
