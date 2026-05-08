@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useComposition } from "../../store";
 import type { Clip } from "../../types";
+import { useT } from "@/i18n/useT";
 
 // Minimal text-clip editor mounted in the Inspector when the selection is
 // a `kind: "text"` clip. Studio's Inspector previously had no editor for
@@ -12,6 +13,7 @@ export function TextClipPanel() {
   const comp = useComposition((s) => s.comp);
   const selection = useComposition((s) => s.selection);
   const updateClip = useComposition((s) => s.updateClip);
+  const t = useT();
 
   const selected = useMemo(() => {
     if (!comp || !selection) return null;
@@ -26,7 +28,7 @@ export function TextClipPanel() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <Label>Text</Label>
+      <Label>{t("studio.textClipPanel.labelText")}</Label>
       <textarea
         aria-label="Subtitle text"
         value={selected.text}
@@ -47,7 +49,7 @@ export function TextClipPanel() {
       />
       <div style={{ display: "flex", gap: 10 }}>
         <NumberField
-          label="Size"
+          label={t("studio.textClipPanel.labelSize")}
           value={selected.style?.size ?? 56}
           min={8}
           max={200}
@@ -69,7 +71,7 @@ export function TextClipPanel() {
           }
         />
         <NumberField
-          label="Duration"
+          label={t("studio.textClipPanel.labelDuration")}
           value={selected.duration ?? 0}
           min={0.1}
           max={60}

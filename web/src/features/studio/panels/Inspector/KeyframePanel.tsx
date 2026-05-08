@@ -6,6 +6,7 @@ import type {
   KeyframeEasing,
   KeyframeProperty,
 } from "../../types";
+import { useT } from "@/i18n/useT";
 
 // Phase 8.2.D — Inspector KeyframePanel.
 //
@@ -81,6 +82,7 @@ export function KeyframePanel() {
   const removeKeyframe = useComposition((s) => s.removeKeyframe);
   const updateKeyframe = useComposition((s) => s.updateKeyframe);
   const [adding, setAdding] = useState(false);
+  const t = useT();
 
   const clip = useMemo<Clip | null>(() => {
     if (!comp || !selection) return null;
@@ -92,10 +94,10 @@ export function KeyframePanel() {
   }, [comp, selection]);
 
   if (!clip) {
-    return <Empty>Select a clip in the timeline to add keyframes</Empty>;
+    return <Empty>{t("studio.keyframePanel.emptyNoClip")}</Empty>;
   }
   if (clip.kind === "text") {
-    return <Empty>Text clips use the animation enum, not keyframes</Empty>;
+    return <Empty>{t("studio.keyframePanel.emptyTextClip")}</Empty>;
   }
 
   const props = propertiesForClip(clip.kind);
@@ -150,10 +152,7 @@ export function KeyframePanel() {
         />
       )}
       {totalKfs === 0 && !adding && (
-        <Empty>
-          No keyframes yet — click &ldquo;Add keyframe&rdquo; to author your
-          first one
-        </Empty>
+        <Empty>{t("studio.keyframePanel.emptyNoKeyframes")}</Empty>
       )}
       {orderedGroups.map(([prop, rows]) => (
         <PropertyBlock
@@ -177,6 +176,7 @@ function Header({
   adding: boolean;
   onAddClick: () => void;
 }) {
+  const t = useT();
   return (
     <div
       style={{
@@ -185,7 +185,7 @@ function Header({
         justifyContent: "space-between",
       }}
     >
-      <div style={labelStyle}>Keyframes · {kfs}</div>
+      <div style={labelStyle}>{t("studio.keyframePanel.headerCount", { count: kfs })}</div>
       <button
         type="button"
         onClick={onAddClick}
@@ -204,7 +204,7 @@ function Header({
           opacity: adding ? 0.5 : 1,
         }}
       >
-        Add keyframe
+        {t("studio.keyframePanel.btnAdd")}
       </button>
     </div>
   );
@@ -225,6 +225,7 @@ function AddForm({
   const [time, setTime] = useState<string>("0");
   const [value, setValue] = useState<string>(String(defaultValueFor(properties[0])));
   const [easing, setEasing] = useState<KeyframeEasing>("linear");
+  const t = useT();
 
   const handleSubmit = () => {
     const t = Number(time);
@@ -251,7 +252,7 @@ function AddForm({
       }}
     >
       <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <span style={labelStyle}>Property</span>
+        <span style={labelStyle}>{t("studio.keyframePanel.formProperty")}</span>
         <select
           value={property}
           onChange={(e) => {
@@ -269,7 +270,7 @@ function AddForm({
         </select>
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <span style={labelStyle}>Time (s)</span>
+        <span style={labelStyle}>{t("studio.keyframePanel.formTime")}</span>
         <input
           type="number"
           step="0.1"
@@ -280,7 +281,7 @@ function AddForm({
         />
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <span style={labelStyle}>Value</span>
+        <span style={labelStyle}>{t("studio.keyframePanel.formValue")}</span>
         <input
           type="number"
           step="0.05"
@@ -290,7 +291,7 @@ function AddForm({
         />
       </label>
       <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <span style={labelStyle}>Easing</span>
+        <span style={labelStyle}>{t("studio.keyframePanel.formEasing")}</span>
         <select
           value={easing}
           onChange={(e) => setEasing(e.target.value as KeyframeEasing)}
@@ -320,7 +321,7 @@ function AddForm({
             cursor: "pointer",
           }}
         >
-          Submit
+          {t("studio.keyframePanel.btnSubmit")}
         </button>
         <button
           type="button"
@@ -338,7 +339,7 @@ function AddForm({
             cursor: "pointer",
           }}
         >
-          Cancel
+          {t("studio.keyframePanel.btnCancel")}
         </button>
       </div>
     </form>
