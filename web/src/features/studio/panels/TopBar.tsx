@@ -10,6 +10,9 @@ import { CheckpointsMenu } from "@/features/checkpoints/CheckpointsMenu";
 export interface TopBarProps {
   workId: string;
   savedAt: string | null;
+  /** R20: when truthy, replaces the SAVED indicator with a red SAVE FAILED
+   *  badge — autosave round-trip rejected. */
+  saveError?: string | null;
   onToggleSettings?: () => void;
   settingsOpen?: boolean;
 }
@@ -17,6 +20,7 @@ export interface TopBarProps {
 export function TopBar({
   workId,
   savedAt,
+  saveError,
   onToggleSettings,
   settingsOpen,
 }: TopBarProps) {
@@ -121,18 +125,39 @@ export function TopBar({
         </span>
       </div>
 
-      <span
-        style={{
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          letterSpacing: "0.05em",
-          textTransform: "uppercase",
-          color: savedAt ? "var(--status-done)" : "var(--text-dimmer)",
-          flexShrink: 0,
-        }}
-      >
-        {savedAt ? `${t("studio.topBar.saved")} · ${savedAt}` : t("studio.topBar.unsaved")}
-      </span>
+      {saveError ? (
+        <span
+          role="alert"
+          title={t("common.saveFailedTitle", { msg: saveError })}
+          style={{
+            padding: "2px 8px",
+            borderRadius: 4,
+            border: "1px solid var(--status-error, #d4756c)",
+            background: "rgba(212, 117, 108, 0.1)",
+            color: "var(--status-error, #d4756c)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: "0.08em",
+            flexShrink: 0,
+          }}
+        >
+          ⚠ {t("common.saveFailed")}
+        </span>
+      ) : (
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            color: savedAt ? "var(--status-done)" : "var(--text-dimmer)",
+            flexShrink: 0,
+          }}
+        >
+          {savedAt ? `${t("studio.topBar.saved")} · ${savedAt}` : t("studio.topBar.unsaved")}
+        </span>
+      )}
 
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
 

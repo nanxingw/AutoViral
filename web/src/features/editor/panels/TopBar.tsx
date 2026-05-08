@@ -9,6 +9,10 @@ import { CheckpointsMenu } from "@/features/checkpoints/CheckpointsMenu";
 interface TopBarProps {
   workId: string;
   savedAt: string | null;
+  /** Set when an autosave round-trip rejected. Renders a red badge in
+   *  place of the "Saved · time" indicator so the user doesn't trust the
+   *  stale time stamp. */
+  saveError?: string | null;
   onExportCurrent: () => void;
   onExportAll: () => void;
 }
@@ -16,6 +20,7 @@ interface TopBarProps {
 export function TopBar({
   workId,
   savedAt,
+  saveError,
   onExportCurrent,
   onExportAll,
 }: TopBarProps) {
@@ -80,16 +85,37 @@ export function TopBar({
       >
         {workId}
       </strong>
-      <span
-        style={{
-          marginLeft: "auto",
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          color: "var(--text-soft)",
-        }}
-      >
-        {savedAt ? `${t("common.saved")} · ${savedAt}` : t("common.unsaved")}
-      </span>
+      {saveError ? (
+        <span
+          role="alert"
+          title={t("common.saveFailedTitle", { msg: saveError })}
+          style={{
+            marginLeft: "auto",
+            padding: "2px 8px",
+            borderRadius: 4,
+            border: "1px solid var(--status-error, #d4756c)",
+            background: "rgba(212, 117, 108, 0.1)",
+            color: "var(--status-error, #d4756c)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: "0.08em",
+          }}
+        >
+          ⚠ {t("common.saveFailed")}
+        </span>
+      ) : (
+        <span
+          style={{
+            marginLeft: "auto",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            color: "var(--text-soft)",
+          }}
+        >
+          {savedAt ? `${t("common.saved")} · ${savedAt}` : t("common.unsaved")}
+        </span>
+      )}
       <CheckpointsMenu workId={workId} />
       <Button ref={btnRef} variant="primary" onClick={() => setOpen((v) => !v)}>
         {t("editor.topbar.exportMenu")}

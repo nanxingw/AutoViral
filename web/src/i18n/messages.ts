@@ -16,6 +16,8 @@ export const en = {
     loading: "Loading…",
     saved: "Saved",
     unsaved: "Unsaved",
+    saveFailed: "SAVE FAILED",
+    saveFailedTitle: "Autosave failed: {msg}. Your edits are still in memory; copy them out before reloading.",
   },
   notFound: {
     code: "404",
@@ -303,6 +305,8 @@ export const zh: DeepShape<Messages> = {
     loading: "加载中…",
     saved: "已保存",
     unsaved: "未保存",
+    saveFailed: "保存失败",
+    saveFailedTitle: "自动保存失败：{msg}。你的编辑仍在内存中——请先复制出来再刷新。",
   },
   notFound: {
     code: "404",

@@ -66,6 +66,11 @@ export default function Studio() {
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  // R20: surface autosave failures. Studio's autosave previously had NO
+  // .catch handler at all — unhandled rejection + silent UX. Now any
+  // rejection sets saveError so TopBar shows a red SAVE FAILED badge
+  // instead of the stale time-stamp.
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useShortcuts(workId ?? null);
@@ -83,6 +88,7 @@ export default function Studio() {
     if (!workId) return;
     loadComp(null);
     setSavedAt(null);
+    setSaveError(null);
     setLoadError(null);
     setLoadEmpty(false);
     let cancelled = false;
@@ -137,9 +143,15 @@ export default function Studio() {
     const isEmpty = comp.tracks.every((t) => t.clips.length === 0);
     if (isEmpty) return;                  // don't persist a blank slate
     const tid = setTimeout(() => {
-      saveComposition(workId, comp).then(() =>
-        setSavedAt(fmtSavedAt(new Date(), locale)),
-      );
+      saveComposition(workId, comp)
+        .then(() => {
+          setSavedAt(fmtSavedAt(new Date(), locale));
+          setSaveError(null);
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          setSaveError(msg);
+        });
     }, 800);
     return () => clearTimeout(tid);
   }, [comp, workId, locale]);
@@ -178,6 +190,7 @@ export default function Studio() {
         <TopBar
           workId={workId}
           savedAt={savedAt}
+          saveError={saveError}
           onToggleSettings={() => setSettingsOpen((v) => !v)}
           settingsOpen={settingsOpen}
         />

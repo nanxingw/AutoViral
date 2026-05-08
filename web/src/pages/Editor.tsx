@@ -64,6 +64,12 @@ export default function Editor() {
   const loadCar = useEditor((s) => s.loadCarousel);
   const car = useEditor((s) => s.car);
   const [savedAt, setSavedAt] = useState<string | null>(null);
+  // R20: surface autosave failures to UI. Previously `.catch(() => undefined)`
+  // silently swallowed errors, leaving the topbar showing a stale "Saved · X"
+  // even when 5+ minutes of edits never reached the server. Now setSaveError
+  // forces a red "SAVE FAILED" badge in TopBar so the user knows to copy
+  // their work out before refreshing.
+  const [saveError, setSaveError] = useState<string | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
   const { setStage, exportCurrent, exportAll } = useExport();
   const t = useT();
@@ -81,6 +87,7 @@ export default function Editor() {
     if (!workId) return;
     loadCar(null);
     setSavedAt(null);
+    setSaveError(null);
     setLoadError(null);
     setLoadEmpty(false);
     let cancelled = false;
@@ -140,8 +147,14 @@ export default function Editor() {
     if (isEmpty) return;
     const tid = setTimeout(() => {
       saveCarousel(workId, car)
-        .then(() => setSavedAt(fmtSavedAt(new Date(), locale)))
-        .catch(() => undefined);
+        .then(() => {
+          setSavedAt(fmtSavedAt(new Date(), locale));
+          setSaveError(null);
+        })
+        .catch((err: unknown) => {
+          const msg = err instanceof Error ? err.message : String(err);
+          setSaveError(msg);
+        });
     }, 800);
     return () => clearTimeout(tid);
   }, [car, workId, locale]);
@@ -181,6 +194,7 @@ export default function Editor() {
         <TopBar
           workId={workId}
           savedAt={savedAt}
+          saveError={saveError}
           onExportCurrent={() =>
             exportCurrent(`${car?.id ?? workId}-slide.png`)
           }
