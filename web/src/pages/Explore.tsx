@@ -1,9 +1,15 @@
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { PlatformTabs } from "@/features/explore/PlatformTabs";
 import { AnglesCard, type Angle } from "@/features/explore/AnglesCard";
 import { TrendingPanel } from "@/features/explore/TrendingPanel";
 import { usePlatformTrends, type Platform } from "@/queries/trends";
+import { apiFetch } from "@/lib/api";
+import { useT } from "@/i18n/useT";
 
+// Static recommendations — note marker rendered in AnglesCard so user knows
+// these aren't algorithm output yet. Replace once a "generate angles" agent
+// hook lands.
 const STATIC_ANGLES: Angle[] = [
   { num: "01", body: "Why nobody is teaching X anymore — competitor gap detected, 3 of 5 top creators abandoned tutorial content.", score: "FIT 94 · 5.2K est. reach" },
   { num: "02", body: "An 18s carousel: \"The first 1.5 seconds of every viral short, ranked\". Hot retention pattern in your niche.", score: "FIT 87 · 3.8K est. reach" },
@@ -13,6 +19,33 @@ const STATIC_ANGLES: Angle[] = [
 export default function Explore() {
   const [platform, setPlatform] = useState<Platform>("youtube");
   const trends = usePlatformTrends(platform);
+  const qc = useQueryClient();
+  const t = useT();
+  const [collecting, setCollecting] = useState(false);
+  const [collectMsg, setCollectMsg] = useState<string | null>(null);
+
+  const collectTrends = async () => {
+    setCollecting(true);
+    setCollectMsg(null);
+    try {
+      // The /api/trends/refresh endpoint runs sync research on the supported
+      // platforms and returns when the new yaml lands; we then nudge react-query.
+      await apiFetch(`/api/trends/refresh`, {
+        method: "POST",
+        body: { platforms: ["xiaohongshu", "douyin"] },
+      });
+      setCollectMsg(t("explore.collectQueued"));
+      qc.invalidateQueries({ queryKey: ["trends"] });
+    } catch (e) {
+      setCollectMsg(
+        t("explore.collectFailed", {
+          reason: e instanceof Error ? e.message : String(e),
+        }),
+      );
+    } finally {
+      setCollecting(false);
+    }
+  };
 
   return (
     <main className="page">
@@ -23,12 +56,37 @@ export default function Explore() {
           <br />
           across the platforms <em style={{ fontFamily: "Instrument Serif", fontStyle: "italic" }}>you care about</em>.
         </h1>
-        <div style={{ fontSize: 13, color: "var(--text-dim)" }}>
-          Aggregated from <strong style={{ color: "var(--text)" }}>YouTube</strong>, <strong style={{ color: "var(--text)" }}>TikTok</strong>, 小红书, 抖音.
+        <div style={{ fontSize: 13, color: "var(--text-dim)", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <span>
+            Aggregated from <strong style={{ color: "var(--text)" }}>YouTube</strong>, <strong style={{ color: "var(--text)" }}>TikTok</strong>, 小红书, 抖音.
+          </span>
+          <button
+            type="button"
+            onClick={collectTrends}
+            disabled={collecting}
+            style={{
+              padding: "5px 12px",
+              fontSize: 11,
+              borderRadius: 7,
+              border: "1px solid var(--accent)",
+              background: collecting ? "var(--surface-2)" : "var(--accent)",
+              color: collecting ? "var(--text-dim)" : "var(--accent-fg)",
+              cursor: collecting ? "wait" : "pointer",
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.04em",
+            }}
+          >
+            {collecting ? t("explore.collectInProgress") : `↻ ${t("explore.collectTrends")}`}
+          </button>
+          {collectMsg && (
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-soft)" }}>
+              {collectMsg}
+            </span>
+          )}
         </div>
       </section>
 
-      <AnglesCard angles={STATIC_ANGLES} onRegenerate={() => { /* hook to chat in Plan 4 */ }} />
+      <AnglesCard angles={STATIC_ANGLES} note={t("explore.anglesNote")} />
 
       <PlatformTabs value={platform} onChange={setPlatform} />
 

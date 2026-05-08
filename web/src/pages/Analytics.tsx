@@ -4,6 +4,7 @@ import { KPIBar } from "@/features/analytics/KPIBar";
 import { ProfileBar } from "@/features/analytics/ProfileBar";
 import { DemographicsRow } from "@/features/analytics/DemographicsRow";
 import { InsightsList } from "@/features/analytics/InsightsList";
+import { useT } from "@/i18n/useT";
 
 /**
  * Hero status label is a function of the channel's actual health, not a
@@ -24,6 +25,7 @@ export function audienceStatusLabel(engagement: number, todayLikes: number, toda
 export default function Analytics() {
   const a = useCreatorAnalytics();
   const m = useMemoryProfile();
+  const t = useT();
 
   if (a.isLoading || m.isLoading) return <main className="page">Loading…</main>;
   if (!a.data) return <main className="page">No analytics data.</main>;
@@ -34,6 +36,10 @@ export default function Analytics() {
     summary.todayLikes,
     summary.todayComments,
   );
+  const isEmpty =
+    summary.todayLikes === 0 &&
+    summary.todayComments === 0 &&
+    summary.engagementRate === 0;
 
   return (
     <main className="page">
@@ -56,6 +62,24 @@ export default function Analytics() {
           engagementDelta={summary.engagementDelta}
         />
       </section>
+
+      {isEmpty ? (
+        <div
+          style={{
+            margin: "0 0 16px",
+            padding: "10px 14px",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            letterSpacing: "0.04em",
+            color: "var(--text-soft)",
+            background: "var(--surface-1)",
+            border: "1px solid var(--glass-border)",
+            borderRadius: 8,
+          }}
+        >
+          ⓘ {t("analytics.collectionNote")}
+        </div>
+      ) : null}
 
       <ProfileBar nickname={account.nickname} followers={account.follower_count} tags={m.data?.tags ?? []} />
       <DemographicsRow age={demographics.age} gender={demographics.gender} regions={demographics.regions} />

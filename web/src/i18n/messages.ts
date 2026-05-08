@@ -115,6 +115,16 @@ export const en = {
       archived: "ARCHIVED",
     },
   },
+  explore: {
+    collectTrends: "Refresh trends now",
+    collectInProgress: "Collecting…",
+    collectQueued: "Collection queued — refresh in ~30s",
+    collectFailed: "Collection failed: {reason}",
+    anglesNote: "Static recommendations (algorithm not wired yet)",
+  },
+  analytics: {
+    collectionNote: "Data is collected by a background job hourly. If empty for long, check Python deps (browser_cookie3) on the host.",
+  },
   chat: {
     agentName: "Creative Agent",
     streaming: "STREAMING",
@@ -252,6 +262,16 @@ export const zh: DeepShape<Messages> = {
       published: "已发布",
       archived: "已归档",
     },
+  },
+  explore: {
+    collectTrends: "立即采集 Trends",
+    collectInProgress: "采集中…",
+    collectQueued: "已触发采集，约 30 秒后自动刷新",
+    collectFailed: "采集失败：{reason}",
+    anglesNote: "当前为静态推荐（算法尚未接入）",
+  },
+  analytics: {
+    collectionNote: "数据由后台任务每小时采集一次。若长期为空，请检查 host 上 Python 依赖（browser_cookie3）是否安装。",
   },
   chat: {
     agentName: "创作代理",
