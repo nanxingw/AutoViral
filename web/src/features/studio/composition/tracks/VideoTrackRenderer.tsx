@@ -1,4 +1,4 @@
-import { Sequence, OffthreadVideo, useVideoConfig, useCurrentFrame } from "remotion";
+import { Sequence, Video, useVideoConfig, useCurrentFrame } from "remotion";
 import type { VideoClip, Track } from "../../types";
 import { toCssFilter } from "../filters/cssFilters";
 import { interpolateProperty } from "@shared/keyframes";
@@ -43,8 +43,16 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // Phase 8.3.C — read speed keyframes (D3 fallback 1.0, D4 clamp). Routed
   // through Remotion's playbackRate prop, NOT the CSS transform (D8).
   const speed = computeVideoSpeedForFrame(clip, frame, fps);
+  // Browser-side player uses <Video> (single <video> element backed by
+  // browser native playback) instead of <OffthreadVideo>. OffthreadVideo
+  // is more accurate for server-side rendering (FFmpeg + worker, used by
+  // render-pipeline.ts), but in the player it spawns a chunk pool of ~16
+  // hidden <video> tags that exhaust Chrome's hardware decoder budget,
+  // producing periodic ~3s playback hitches as the browser LRU-evicts
+  // and re-decodes IDR frames. Server render path is unaffected — that
+  // goes through Remotion CLI, not this component. (2026-05-08)
   return (
-    <OffthreadVideo
+    <Video
       src={clip.src}
       startFrom={Math.round(clip.in * fps)}
       endAt={Math.round(clip.out * fps)}

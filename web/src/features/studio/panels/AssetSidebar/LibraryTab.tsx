@@ -157,6 +157,14 @@ export function LibraryTab({ workId }: Props) {
 function AssetTile({ item, index }: { item: AssetItem; index: number }) {
   const hue = hueFromString(item.path);
   const fallbackBg = `linear-gradient(145deg, hsl(${hue}, 40%, 25%), hsl(${(hue + 30) % 360}, 30%, 12%))`;
+  // Video tiles mount their <video> only on hover, then UNMOUNT on leave.
+  // Why unmount: Chrome holds a hardware decoder context for every <video>
+  // element with readyState=4. With ~7 thumbnails open at once we'd exceed
+  // the per-tab decoder budget; the browser then LRU-evicts and re-decodes
+  // an IDR frame, producing a ~3s playback hitch in the main preview. Pause
+  // + currentTime=0 alone does NOT release the decoder — only unmount does.
+  // (Diagnosed 2026-05-08; see commit msg.)
+  const [hovered, setHovered] = useState(false);
   return (
     <div
       style={{
@@ -172,18 +180,22 @@ function AssetTile({ item, index }: { item: AssetItem; index: number }) {
       onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = "var(--accent)";
         e.currentTarget.style.boxShadow = "0 0 12px var(--accent-glow)";
+        if (item.kind === "video") setHovered(true);
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.borderColor = "var(--glass-border)";
         e.currentTarget.style.boxShadow = "none";
+        if (item.kind === "video") setHovered(false);
       }}
     >
-      {item.kind === "video" && (
+      {item.kind === "video" && hovered && (
         <video
           src={item.url}
           muted
           playsInline
-          preload="metadata"
+          autoPlay
+          loop
+          preload="auto"
           style={{
             position: "absolute",
             inset: 0,
@@ -191,12 +203,24 @@ function AssetTile({ item, index }: { item: AssetItem; index: number }) {
             height: "100%",
             objectFit: "cover",
           }}
-          onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
-          onMouseLeave={(e) => {
-            e.currentTarget.pause();
-            e.currentTarget.currentTime = 0;
-          }}
         />
+      )}
+      {item.kind === "video" && !hovered && (
+        <div
+          aria-hidden
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "grid",
+            placeItems: "center",
+            color: "var(--text-dimmer)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 18,
+            opacity: 0.55,
+          }}
+        >
+          ▶
+        </div>
       )}
       {item.kind === "image" && (
         <img
