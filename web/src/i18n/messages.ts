@@ -114,6 +114,9 @@ export const en = {
       published: "PUBLISHED",
       archived: "ARCHIVED",
     },
+    searchPlaceholder: "Search works…",
+    newWork: "Create work",
+    emptySearch: "No works match {query}",
   },
   explore: {
     collectTrends: "Refresh trends now",
@@ -262,6 +265,9 @@ export const zh: DeepShape<Messages> = {
       published: "已发布",
       archived: "已归档",
     },
+    searchPlaceholder: "搜索作品…",
+    newWork: "新建作品",
+    emptySearch: "没有作品匹配 {query}",
   },
   explore: {
     collectTrends: "立即采集 Trends",

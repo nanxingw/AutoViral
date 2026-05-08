@@ -4,10 +4,24 @@
   border: 1px dashed var(--glass-hi);
   background: var(--surface-0);
   display: grid;
+  grid-template-rows: auto 1fr;
+  overflow: hidden;
+}
+.title {
+  padding: 10px 16px 8px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  border-bottom: 1px solid var(--glass-border);
+}
+.options {
+  display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 1px;
   padding: 1px;
-  overflow: hidden;
+  min-height: 0;
 }
 .opt {
   display: flex;

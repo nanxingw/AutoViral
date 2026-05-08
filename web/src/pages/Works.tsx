@@ -17,6 +17,7 @@ type WorkFilter = "all" | "draft" | "published" | "archived";
 export default function Works() {
   const works = useWorks();
   const [filter, setFilter] = useState<WorkFilter>("all");
+  const [query, setQuery] = useState("");
   const list = works.data ?? [];
   const t = useT();
 
@@ -26,34 +27,65 @@ export default function Works() {
     unfinished: list.filter((w) => w.status === "draft" && w.type === "short-video").length,
   }), [list]);
 
+  // Search is a substring match on title; status filter is layered on top.
+  // Both happen client-side because the works index is small (~tens) and
+  // already sits in memory.
+  const filteredList = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return list.filter((w) => {
+      if (filter !== "all" && w.status !== filter) return false;
+      if (!q) return true;
+      return w.title.toLowerCase().includes(q);
+    });
+  }, [list, filter, query]);
+
   return (
     <main className="page">
       <WorksHero draftCount={counts.drafts} ideaCount={counts.ideas} unfinishedSceneCount={counts.unfinished} />
 
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 18 }}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 18, gap: 16, flexWrap: "wrap" }}>
         <h2 style={{ fontSize: 22, margin: 0, fontWeight: 500, letterSpacing: "-0.02em" }}>
           My <em style={{ fontFamily: "Instrument Serif", fontStyle: "italic" }}>Works</em>
           <span style={{ marginLeft: 12, fontFamily: "JetBrains Mono", fontSize: 11, color: "var(--text-dimmer)" }}>
-            {list.length} TOTAL
+            {filteredList.length}/{list.length}
           </span>
         </h2>
-        <div style={{ display: "flex", gap: 4 }}>
-          {(["all", "draft", "published", "archived"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              data-active={filter === f}
-              style={{
-                padding: "5px 12px", fontSize: 11, borderRadius: 7,
-                border: "1px solid var(--glass-border)",
-                background: filter === f ? "var(--surface-2)" : "transparent",
-                color: filter === f ? "var(--text)" : "var(--text-dim)",
-                cursor: "pointer", fontFamily: "inherit",
-              }}
-            >
-              {t(`works.filter.${f}` as MessageKey)}
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t("works.searchPlaceholder")}
+            aria-label={t("works.searchPlaceholder")}
+            style={{
+              width: 200,
+              padding: "5px 10px",
+              fontSize: 12,
+              borderRadius: 7,
+              border: "1px solid var(--glass-border)",
+              background: "var(--surface-0)",
+              color: "var(--text)",
+              fontFamily: "inherit",
+            }}
+          />
+          <div style={{ display: "flex", gap: 4 }}>
+            {(["all", "draft", "published", "archived"] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setFilter(f)}
+                data-active={filter === f}
+                style={{
+                  padding: "5px 12px", fontSize: 11, borderRadius: 7,
+                  border: "1px solid var(--glass-border)",
+                  background: filter === f ? "var(--surface-2)" : "transparent",
+                  color: filter === f ? "var(--text)" : "var(--text-dim)",
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                {t(`works.filter.${f}` as MessageKey)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -61,7 +93,20 @@ export default function Works() {
         <NewWorkCard />
       </div>
 
-      <WorksGrid works={list} filter={filter} />
+      {filteredList.length === 0 && query.trim() ? (
+        <div
+          style={{
+            padding: "24px 0",
+            color: "var(--text-dim)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+          }}
+        >
+          {t("works.emptySearch", { query: `"${query.trim()}"` })}
+        </div>
+      ) : (
+        <WorksGrid works={filteredList} filter="all" />
+      )}
 
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 18 }}>
         <h2 style={{ fontSize: 22, margin: 0, fontWeight: 500, letterSpacing: "-0.02em" }}>
