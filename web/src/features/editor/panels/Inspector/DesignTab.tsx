@@ -24,6 +24,8 @@ export function DesignTab() {
   const car = useEditor((s) => s.car);
   const updateGlobals = useEditor((s) => s.updateGlobals);
   const applyLayout = useEditor((s) => s.applyLayout);
+  const applyHeadlineFont = useEditor((s) => s.applyHeadlineFont);
+  const applyPalette = useEditor((s) => s.applyPalette);
   const t = useT();
   if (!car) return null;
   const g = car.globals;
@@ -36,7 +38,7 @@ export function DesignTab() {
             <button
               key={f.id}
               type="button"
-              onClick={() => updateGlobals({ headlineFont: f.id })}
+              onClick={() => applyHeadlineFont(f.id)}
               data-active={g.headlineFont === f.id}
               style={chip(g.headlineFont === f.id)}
             >
@@ -55,7 +57,7 @@ export function DesignTab() {
               <button
                 key={id}
                 type="button"
-                onClick={() => updateGlobals({ palette: id })}
+                onClick={() => applyPalette(id)}
                 data-active={active}
                 style={{
                   ...chip(active),

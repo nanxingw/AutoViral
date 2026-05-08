@@ -1,8 +1,9 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
-import type { Carousel, Slide, Layer } from "./types";
+import type { Carousel, Slide, Layer, PaletteId } from "./types";
 import { makeEmptySlide } from "./types";
 import { applyLayoutToLayer } from "./services/layout";
+import { PALETTES } from "./palettes";
 
 interface EditorState {
   car: Carousel | null;
@@ -24,6 +25,15 @@ interface EditorState {
    *  design: a layout button is supposed to *re-layout*, not just toggle a
    *  flag. Falls back to plain updateGlobals when there's no carousel. */
   applyLayout: (layout: Carousel["globals"]["layout"]) => void;
+  /** Switch the headline font globally — overwrites every text layer's
+   *  style.font on every slide. Same destructive-by-design semantics as
+   *  applyLayout: a global control means a global re-skin. */
+  applyHeadlineFont: (font: Carousel["globals"]["headlineFont"]) => void;
+  /** Switch the palette globally. Overwrites every text layer's
+   *  style.color with palette.fg and every solid bg's value with
+   *  palette.bg. Image-typed backgrounds are preserved (those are
+   *  user-chosen art, not theme colors). */
+  applyPalette: (id: PaletteId) => void;
   updateSlideBg: (slideId: string, bg: Slide["bg"]) => void;
 }
 
@@ -123,6 +133,30 @@ export const useEditor = create<EditorState>()(
         const h = s.car.height;
         for (const sl of s.car.slides) {
           sl.layers = sl.layers.map((l) => applyLayoutToLayer(l, layout, w, h));
+        }
+      }),
+    applyHeadlineFont: (font) =>
+      set((s) => {
+        if (!s.car) return;
+        s.car.globals.headlineFont = font;
+        for (const sl of s.car.slides) {
+          for (const l of sl.layers) {
+            if (l.kind === "text") l.style.font = font;
+          }
+        }
+      }),
+    applyPalette: (id) =>
+      set((s) => {
+        if (!s.car) return;
+        const p = PALETTES[id];
+        if (!p) return;
+        s.car.globals.palette = id;
+        for (const sl of s.car.slides) {
+          // Solid bg follows the palette; image bg stays (user-chosen art).
+          if (sl.bg.type === "solid") sl.bg.value = p.bg;
+          for (const l of sl.layers) {
+            if (l.kind === "text") l.style.color = p.fg;
+          }
         }
       }),
     updateSlideBg: (slideId, bg) =>

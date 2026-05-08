@@ -149,6 +149,76 @@ describe("useEditor store", () => {
     expect(useEditor.getState().car!.globals.palette).toBe("noir");
   });
 
+  it("applyHeadlineFont overwrites every text layer's font on every slide", () => {
+    const c = makeEmptyCarousel("w1");
+    useEditor.getState().loadCarousel(c);
+    // seed a serif text layer on slide 1, dup the slide, then add a sans text on the copy
+    const layer: Layer = {
+      id: "t1",
+      kind: "text",
+      box: { x: 0, y: 0, w: 200, h: 60, rotation: 0 },
+      text: "Hi",
+      style: {
+        font: "serif",
+        size: 48,
+        weight: 700,
+        italic: false,
+        color: "#111",
+        align: "center",
+        tracking: 0,
+      },
+    };
+    useEditor.getState().addLayer(layer);
+    useEditor.getState().duplicateSlide(c.slides[0].id);
+    useEditor.getState().applyHeadlineFont("mono");
+    const fonts = useEditor
+      .getState()
+      .car!.slides.flatMap((s) => s.layers)
+      .filter((l): l is Extract<Layer, { kind: "text" }> => l.kind === "text")
+      .map((l) => l.style.font);
+    expect(fonts.every((f) => f === "mono")).toBe(true);
+    expect(useEditor.getState().car!.globals.headlineFont).toBe("mono");
+  });
+
+  it("applyPalette overwrites text color + solid bg, leaves image bg alone", () => {
+    const c = makeEmptyCarousel("w1");
+    useEditor.getState().loadCarousel(c);
+    // seed: slide 1 solid bg + text, slide 2 image bg + text
+    useEditor
+      .getState()
+      .updateSlideBg(c.slides[0].id, { type: "solid", value: "#fff" });
+    const text: Layer = {
+      id: "t1",
+      kind: "text",
+      box: { x: 0, y: 0, w: 200, h: 60, rotation: 0 },
+      text: "Hi",
+      style: {
+        font: "serif",
+        size: 48,
+        weight: 700,
+        italic: false,
+        color: "#000",
+        align: "center",
+        tracking: 0,
+      },
+    };
+    useEditor.getState().addLayer(text);
+    useEditor.getState().addSlide();
+    const slide2Id = useEditor.getState().car!.slides[1].id;
+    useEditor
+      .getState()
+      .updateSlideBg(slide2Id, { type: "image", value: "/some.png" });
+    useEditor.getState().applyPalette("neon");
+    const car = useEditor.getState().car!;
+    // neon palette: bg=#0a0b0f, fg=#fafaf7
+    expect(car.globals.palette).toBe("neon");
+    expect(car.slides[0].bg).toEqual({ type: "solid", value: "#0a0b0f" });
+    // image bg is preserved
+    expect(car.slides[1].bg).toEqual({ type: "image", value: "/some.png" });
+    const txt = car.slides[0].layers[0] as Extract<Layer, { kind: "text" }>;
+    expect(txt.style.color).toBe("#fafaf7");
+  });
+
   it("updateSlideBg replaces background", () => {
     const c = makeEmptyCarousel("w1");
     useEditor.getState().loadCarousel(c);
