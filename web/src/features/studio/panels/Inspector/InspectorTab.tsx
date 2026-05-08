@@ -3,9 +3,11 @@ import { VariantSwitcher } from "./VariantSwitcher";
 import { KeyframePanel } from "./KeyframePanel";
 import { TextClipPanel } from "./TextClipPanel";
 import { DiveCanvas } from "../../dive/DiveCanvas";
+import { useT } from "@/i18n/useT";
 
 export function InspectorTab() {
   const [diveOpen, setDiveOpen] = useState(false);
+  const t = useT();
 
   return (
     <>
@@ -28,7 +30,7 @@ export function InspectorTab() {
             color: "var(--text)",
           }}
         >
-          Inspector
+          {t("studio.inspector.header")}
         </div>
         <VariantSwitcher />
         <TextClipPanel />
@@ -49,7 +51,7 @@ export function InspectorTab() {
             alignSelf: "flex-start",
           }}
         >
-          Open in Dive
+          {t("studio.inspector.btnOpenDive")}
         </button>
       </div>
       <DiveCanvas open={diveOpen} onClose={() => setDiveOpen(false)} />

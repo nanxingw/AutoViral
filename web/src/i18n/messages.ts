@@ -144,6 +144,14 @@ export const en = {
       btnBuilding: "Building…",
       buildFailed: "Index build failed: {msg}",
     },
+    assetSidebar: {
+      tabLibrary: "Library",
+      tabInspector: "Inspector",
+    },
+    inspector: {
+      header: "Inspector",
+      btnOpenDive: "Open in Dive",
+    },
     textClipPanel: {
       labelText: "Text",
       labelSize: "Size",
@@ -473,6 +481,14 @@ export const zh: DeepShape<Messages> = {
       btnBuild: "构建索引",
       btnBuilding: "构建中…",
       buildFailed: "构建索引失败：{msg}",
+    },
+    assetSidebar: {
+      tabLibrary: "素材库",
+      tabInspector: "检视",
+    },
+    inspector: {
+      header: "检视",
+      btnOpenDive: "打开衍生图谱",
     },
     textClipPanel: {
       labelText: "文本",

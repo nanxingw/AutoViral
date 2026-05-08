@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { useComposition } from "@/features/studio/store";
 import { LibraryTab } from "./LibraryTab";
 import { InspectorTab } from "@/features/studio/panels/Inspector/InspectorTab";
+import { useT } from "@/i18n/useT";
 
 interface Props {
   workId: string;
@@ -47,6 +48,7 @@ export function AssetSidebar({ workId }: Props) {
 }
 
 function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
+  const t = useT();
   return (
     <div
       role="tablist"
@@ -58,10 +60,10 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
       }}
     >
       <TabButton active={tab === "library"} onClick={() => onChange("library")}>
-        Library
+        {t("studio.assetSidebar.tabLibrary")}
       </TabButton>
       <TabButton active={tab === "inspector"} onClick={() => onChange("inspector")}>
-        Inspector
+        {t("studio.assetSidebar.tabInspector")}
       </TabButton>
     </div>
   );
