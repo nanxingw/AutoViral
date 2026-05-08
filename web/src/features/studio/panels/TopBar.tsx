@@ -5,6 +5,7 @@ import { useNavigate } from "react-router-dom";
 import { useT } from "@/i18n/useT";
 import { enqueueRender, type EnqueueRenderOptions } from "../services/render";
 import { ExportProgress } from "../render-status/ExportProgress";
+import { CheckpointsMenu } from "@/features/checkpoints/CheckpointsMenu";
 
 export interface TopBarProps {
   workId: string;
@@ -132,6 +133,10 @@ export function TopBar({
       >
         {savedAt ? `${t("studio.topBar.saved")} · ${savedAt}` : t("studio.topBar.unsaved")}
       </span>
+
+      <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
+
+      <CheckpointsMenu workId={workId} />
 
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
 

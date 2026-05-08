@@ -7,6 +7,18 @@ export type StreamBlockType =
   | "ask_question"
   | "locator";
 
+export interface TurnUsage {
+  /** Cost of this single turn in USD (Claude CLI's `total_cost_usd`). */
+  costUsd?: number;
+  /** Total wall time of this turn in milliseconds. */
+  durationMs?: number;
+  /** Token counts as Claude CLI reports them. */
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
+}
+
 export interface StreamBlock {
   id: string;
   type: StreamBlockType;
@@ -15,6 +27,9 @@ export interface StreamBlock {
   collapsed?: boolean;
   questions?: string[];
   ts: number;
+  /** Set on the last text block of a turn when turn_complete arrives.
+   *  Lets the bubble render a small cost/duration/tokens badge. */
+  usage?: TurnUsage;
 }
 
 export interface LocatorData {

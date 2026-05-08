@@ -47,6 +47,7 @@ export function useChatSocket(
   const push = useChatStore((s) => s.push);
   const setBlocks = useChatStore((s) => s.setBlocks);
   const setStreaming = useChatStore((s) => s.setStreaming);
+  const attachUsage = useChatStore((s) => s.attachLastTurnUsage);
 
   useEffect(() => {
     if (!workId) return;
@@ -123,7 +124,31 @@ export function useChatSocket(
             setStreaming(true);
             break;
           }
-          case "turn_complete":
+          case "turn_complete": {
+            setStreaming(false);
+            // Fold cost/duration/tokens into the last text bubble so the
+            // user sees what this round actually consumed.
+            const cost =
+              typeof data.cost === "number" ? data.cost : undefined;
+            const durationMs =
+              typeof data.durationMs === "number" ? data.durationMs : undefined;
+            const usage = (data.usage ?? {}) as Record<string, number>;
+            if (
+              cost !== undefined ||
+              durationMs !== undefined ||
+              Object.keys(usage).length > 0
+            ) {
+              attachUsage({
+                costUsd: cost,
+                durationMs,
+                inputTokens: usage.input_tokens,
+                outputTokens: usage.output_tokens,
+                cacheCreationTokens: usage.cache_creation_input_tokens,
+                cacheReadTokens: usage.cache_read_input_tokens,
+              });
+            }
+            break;
+          }
           case "session_killed":
           case "session_closed":
           case "cli_exited": {
@@ -142,7 +167,7 @@ export function useChatSocket(
       ws.dispose();
       ref.current = null;
     };
-  }, [workId, push, setBlocks, setStreaming]);
+  }, [workId, push, setBlocks, setStreaming, attachUsage]);
 
   return {
     send(text: string) {

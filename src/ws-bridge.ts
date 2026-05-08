@@ -782,6 +782,23 @@ export class WsBridge {
             if (msg.session_id) {
               session.cliSessionId = msg.session_id;
             }
+            // Forward Claude CLI's per-turn cost + token usage if present.
+            // The CLI's stream-json result frame carries:
+            //   total_cost_usd, duration_ms, duration_api_ms, num_turns,
+            //   usage: { input_tokens, output_tokens, cache_creation_input_tokens,
+            //            cache_read_input_tokens }
+            // Surfacing these to the browser lets the chat UI badge each
+            // assistant turn with its real cost — pneuma calls this
+            // "modelUsage cumulative" (CLAUDE.md gotcha: use delta per turn).
+            const usage = (msg as Record<string, unknown>).usage as
+              | Record<string, number>
+              | undefined;
+            const cost = (msg as Record<string, unknown>).total_cost_usd as
+              | number
+              | undefined;
+            const durationMs = (msg as Record<string, unknown>).duration_ms as
+              | number
+              | undefined;
             this.broadcastToBrowsers(session.workId, {
               event: "turn_complete",
               data: {
@@ -790,6 +807,9 @@ export class WsBridge {
                 result: resultText,
                 sessionId: session.cliSessionId,
                 historyLength: session.messageHistory.length,
+                cost,
+                durationMs,
+                usage,
               },
             });
             // Persist chat to disk (survives server restart)

@@ -1,6 +1,6 @@
 import { useChatSocket } from "@/features/chat/useChatSocket";
 import { useChatStore } from "@/features/chat/store";
-import type { StreamBlock, LocatorData } from "@/features/chat/types";
+import type { StreamBlock, LocatorData, TurnUsage } from "@/features/chat/types";
 import { LocatorBlockView } from "@/features/chat/LocatorBlock";
 import { useComposition } from "@/features/studio/store";
 import { apiFetch } from "@/lib/api";
@@ -511,6 +511,7 @@ function ChatBlock({
           ),
         )}
       </div>
+      {block.usage ? <UsageBadge usage={block.usage} /> : null}
       {block.questions && block.questions.length > 0 && (
         <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
           {block.questions.map((q, i) => (
@@ -530,6 +531,42 @@ function ChatBlock({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Tiny mono-font badge under an assistant bubble showing what the turn
+ * cost. Inspired by pneuma's ChatPanel modelUsage row. Only renders the
+ * fields actually present (CLI sometimes omits cost on cached turns).
+ */
+function UsageBadge({ usage }: { usage: TurnUsage }) {
+  const parts: string[] = [];
+  if (typeof usage.costUsd === "number") {
+    parts.push(`$${usage.costUsd.toFixed(4)}`);
+  }
+  if (typeof usage.durationMs === "number") {
+    const s = usage.durationMs / 1000;
+    parts.push(s >= 60 ? `${(s / 60).toFixed(1)}m` : `${s.toFixed(1)}s`);
+  }
+  const inT = usage.inputTokens ?? 0;
+  const outT = usage.outputTokens ?? 0;
+  if (inT || outT) {
+    parts.push(`${inT}→${outT} tok`);
+  }
+  if (parts.length === 0) return null;
+  return (
+    <div
+      style={{
+        marginTop: 4,
+        marginLeft: 4,
+        fontFamily: "var(--font-mono)",
+        fontSize: 10,
+        color: "var(--text-dimmer)",
+        letterSpacing: "0.04em",
+      }}
+    >
+      {parts.join(" · ")}
     </div>
   );
 }

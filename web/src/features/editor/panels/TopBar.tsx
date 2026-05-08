@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/ui/Button";
 import { useEditor } from "../store";
 import { useT } from "@/i18n/useT";
-import { CheckpointsMenu } from "./CheckpointsMenu";
+import { CheckpointsMenu } from "@/features/checkpoints/CheckpointsMenu";
 
 interface TopBarProps {
   workId: string;

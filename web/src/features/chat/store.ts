@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { StreamBlock, StreamBlockType } from "./types";
+import type { StreamBlock, StreamBlockType, TurnUsage } from "./types";
 
 interface ChatStore {
   blocks: StreamBlock[];
@@ -8,6 +8,9 @@ interface ChatStore {
   /** Replace the whole conversation — used when seeding from server-side chat.json. */
   setBlocks: (blocks: StreamBlock[]) => void;
   setStreaming: (s: boolean) => void;
+  /** Attach Claude CLI's per-turn cost/duration/usage to the last assistant
+   *  text block. Called by useChatSocket on `turn_complete`. */
+  attachLastTurnUsage: (usage: TurnUsage) => void;
   clear: () => void;
 }
 
@@ -43,5 +46,19 @@ export const useChatStore = create<ChatStore>((set) => ({
     }),
   setBlocks: (blocks) => set({ blocks }),
   setStreaming: (streaming) => set({ streaming }),
+  attachLastTurnUsage: (usage) =>
+    set((s) => {
+      // Walk back from the end to find the most recent assistant text block.
+      // Anything past it (e.g. an unterminated thinking) shouldn't grow
+      // a cost badge — only one bubble per turn carries it.
+      const blocks = s.blocks.slice();
+      for (let i = blocks.length - 1; i >= 0; i--) {
+        if (blocks[i].type === "text") {
+          blocks[i] = { ...blocks[i], usage };
+          return { blocks };
+        }
+      }
+      return s;
+    }),
   clear: () => set({ blocks: [] }),
 }));
