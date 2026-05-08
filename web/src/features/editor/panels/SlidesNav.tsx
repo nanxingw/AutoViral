@@ -15,6 +15,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useEditor } from "../store";
 import type { Slide } from "../types";
+import { useT } from "@/i18n/useT";
 
 function SlideThumb({ slide, index }: { slide: Slide; index: number }) {
   const isCurrent = useEditor((s) => s.currentSlideId === slide.id);
@@ -22,6 +23,7 @@ function SlideThumb({ slide, index }: { slide: Slide; index: number }) {
   const duplicate = useEditor((s) => s.duplicateSlide);
   const remove = useEditor((s) => s.removeSlide);
   const slideCount = useEditor((s) => s.car?.slides.length ?? 0);
+  const t = useT();
 
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: slide.id });
@@ -78,7 +80,7 @@ function SlideThumb({ slide, index }: { slide: Slide; index: number }) {
           fontFamily: "var(--font-mono)",
         }}
       >
-        {slide.layers.length} layers
+        {t("editor.slidesNav.layersLabel", { count: slide.layers.length })}
       </div>
       <div
         style={{
@@ -97,7 +99,7 @@ function SlideThumb({ slide, index }: { slide: Slide; index: number }) {
           }}
           style={btn}
         >
-          dup
+          {t("editor.slidesNav.btnDuplicate")}
         </button>
         <button
           type="button"
@@ -108,7 +110,7 @@ function SlideThumb({ slide, index }: { slide: Slide; index: number }) {
           }}
           style={{ ...btn, opacity: slideCount <= 1 ? 0.4 : 1 }}
         >
-          del
+          {t("editor.slidesNav.btnDelete")}
         </button>
       </div>
     </div>
@@ -130,6 +132,7 @@ export function SlidesNav() {
   const slides = useEditor((s) => s.car?.slides ?? []);
   const reorder = useEditor((s) => s.reorderSlides);
   const addSlide = useEditor((s) => s.addSlide);
+  const t = useT();
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -166,7 +169,7 @@ export function SlidesNav() {
           color: "var(--text-dimmer)",
         }}
       >
-        Slides · {slides.length}
+        {t("editor.slidesNav.header", { count: slides.length })}
       </div>
       <div style={{ flex: 1, overflowY: "auto" }}>
         <DndContext
@@ -200,7 +203,7 @@ export function SlidesNav() {
           color: "var(--text-soft)",
         }}
       >
-        + Add slide
+        {t("editor.slidesNav.btnAdd")}
       </button>
     </div>
   );

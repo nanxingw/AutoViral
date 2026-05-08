@@ -78,6 +78,13 @@ export const en = {
       copy: "Copy",
       ai: "AI",
     },
+    slidesNav: {
+      header: "Slides · {count}",
+      layersLabel: "{count} layers",
+      btnDuplicate: "dup",
+      btnDelete: "del",
+      btnAdd: "+ Add slide",
+    },
     designTab: {
       headlineFont: "Headline font",
       fontSerif: "Serif",
@@ -415,6 +422,13 @@ export const zh: DeepShape<Messages> = {
       exportMenu: "导出 ▾",
       exportCurrent: "当前页导出为 PNG",
       exportAll: "全部页面导出为 PNG",
+    },
+    slidesNav: {
+      header: "页 · {count}",
+      layersLabel: "{count} 图层",
+      btnDuplicate: "复制",
+      btnDelete: "删除",
+      btnAdd: "+ 新页",
     },
     inspectorTabs: {
       design: "设计",
