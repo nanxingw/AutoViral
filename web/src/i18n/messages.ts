@@ -116,6 +116,13 @@ export const en = {
       emptyNoSiblings: "No variants — this asset has no sibling derivations",
       useThis: "USE THIS · {id}",
     },
+    loadError: {
+      title: "Failed to load",
+      body: "Could not load composition data: {msg}",
+      helpText: "Autosave paused to avoid overwriting corrupted data. Please inspect ~/.autoviral/works/{workId}/composition.yaml manually.",
+      missingWorkId: "Missing workId",
+      serverFallbackMsg: "server error",
+    },
   },
   works: {
     filter: {
@@ -338,6 +345,13 @@ export const zh: DeepShape<Messages> = {
       emptyNoBoundAsset: "暂无变体——片段未绑定到已知素材",
       emptyNoSiblings: "暂无变体——此素材没有衍生兄弟",
       useThis: "使用此变体 · {id}",
+    },
+    loadError: {
+      title: "载入失败",
+      body: "无法加载作品数据：{msg}",
+      helpText: "自动保存已暂停以防覆盖损坏的数据。请手动检查 ~/.autoviral/works/{workId}/composition.yaml",
+      missingWorkId: "缺少 workId",
+      serverFallbackMsg: "服务端错误",
     },
   },
   works: {

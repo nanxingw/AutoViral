@@ -15,6 +15,19 @@ import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { TopBar } from "@/features/studio/panels/TopBar";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
 import { useShortcuts } from "@/features/studio/hooks/useShortcuts";
+import { useT } from "@/i18n/useT";
+import { useLocaleStore } from "@/i18n/store";
+
+// Same locale-aware HH:MM helper as Editor.tsx — keeps the savedAt
+// indicator short + predictable instead of letting the browser default
+// surface seconds / timezone.
+function fmtSavedAt(d: Date, locale: string): string {
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: locale !== "zh",
+  }).format(d);
+}
 
 // Resize handle styling — slim editorial separator using --glass-border.
 // 4px-wide cool-steel rule that thickens on hover/drag for clear affordance.
@@ -48,6 +61,8 @@ export default function Studio() {
   const { workId } = useParams();
   const loadComp = useComposition((s) => s.loadComposition);
   const comp = useComposition((s) => s.comp);
+  const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
@@ -74,7 +89,11 @@ export default function Studio() {
           // Corrupt yaml or server bug — DO NOT overwrite by autosaving an
           // empty comp. Show the error and leave comp null so autosave is
           // skipped (it requires comp.workId === workId). (Codex review 2026-04-27)
-          setLoadError(`无法加载作品数据：${err?.message ?? "服务端错误"}`);
+          setLoadError(
+            t("studio.loadError.body", {
+              msg: err?.message ?? t("studio.loadError.serverFallbackMsg"),
+            }),
+          );
         } else {
           // Network unreachable / 4xx other than 404 → safe fresh-start fallback.
           loadComp(makeEmptyComposition({ workId }));
@@ -82,7 +101,7 @@ export default function Studio() {
       }
     })();
     return () => { cancelled = true; };
-  }, [workId, loadComp]);
+  }, [workId, loadComp, t]);
 
   // Autosave on change (debounced) — guard with workId match so a stale
   // comp doesn't get saved into the new route's work id. Also skip when the
@@ -93,22 +112,22 @@ export default function Studio() {
     if (comp.workId !== workId) return;   // load-in-progress
     const isEmpty = comp.tracks.every((t) => t.clips.length === 0);
     if (isEmpty) return;                  // don't persist a blank slate
-    const t = setTimeout(() => {
+    const tid = setTimeout(() => {
       saveComposition(workId, comp).then(() =>
-        setSavedAt(new Date().toLocaleTimeString()),
+        setSavedAt(fmtSavedAt(new Date(), locale)),
       );
     }, 800);
-    return () => clearTimeout(t);
-  }, [comp, workId]);
+    return () => clearTimeout(tid);
+  }, [comp, workId, locale]);
 
-  if (!workId) return <div>Missing workId</div>;
+  if (!workId) return <div>{t("studio.loadError.missingWorkId")}</div>;
   if (loadError) {
     return (
       <div style={{ padding: 32, fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
-        <h2>载入失败</h2>
+        <h2>{t("studio.loadError.title")}</h2>
         <p>{loadError}</p>
         <p style={{ fontSize: 12, opacity: 0.7 }}>
-          自动保存已暂停以防覆盖损坏的数据。请手动检查 ~/.autoviral/works/{workId}/composition.yaml
+          {t("studio.loadError.helpText", { workId })}
         </p>
       </div>
     );
