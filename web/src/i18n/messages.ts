@@ -118,6 +118,12 @@ export const en = {
     newWork: "Create work",
     emptySearch: "No works match {query}",
   },
+  checkpoints: {
+    button: "History",
+    empty: "No snapshots yet — they appear after each agent turn.",
+    restoreLabel: "Restore",
+    restored: "Restored {deliverable}",
+  },
   explore: {
     collectTrends: "Refresh trends now",
     collectInProgress: "Collecting…",
@@ -268,6 +274,12 @@ export const zh: DeepShape<Messages> = {
     searchPlaceholder: "搜索作品…",
     newWork: "新建作品",
     emptySearch: "没有作品匹配 {query}",
+  },
+  checkpoints: {
+    button: "历史",
+    empty: "暂无快照——agent 每完成一次对话会自动保存一份。",
+    restoreLabel: "恢复",
+    restored: "已恢复 {deliverable}",
   },
   explore: {
     collectTrends: "立即采集 Trends",

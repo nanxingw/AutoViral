@@ -21,6 +21,7 @@ import { appendFile } from "node:fs/promises";
 import { logBridge, logBridgeDebug } from "./logger.js";
 import { loadConfig, dataDir } from "./config.js";
 import { getWork, updateWork, saveWorkChat, loadWorkChat, type Work } from "./work-store.js";
+import { createCheckpoint } from "./server/checkpoints.js";
 import { listSharedAssets } from "./shared-assets.js";
 import { MemoryClient } from "./memory.js";
 import { syncMessage } from "./memory-sync.js";
@@ -794,6 +795,10 @@ export class WsBridge {
             // Persist chat to disk (survives server restart)
             if (!session.workId.startsWith("trends_")) {
               saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
+              // Snapshot the deliverable yaml so the user can roll back if
+              // this turn made things worse. createCheckpoint dedupes on
+              // content hash — turns that didn't touch yaml don't add rows.
+              createCheckpoint(session.workId).catch(() => {});
             }
             // Real-time memory sync — assistant text (complete turn, not fragments).
             // D3: no pipeline — sync against the work title with a generic "chat" key.

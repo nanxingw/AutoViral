@@ -28,6 +28,7 @@ import { evaluateWork } from "../test-evaluator.js";
 import { analyzeAudio, mixAudioTracks } from "../audio-tools.js";
 import { pickProvider } from "../tts-providers/registry.js";
 import { resolveAssetPath, resolveAssetSubpath, UnsafePathError, SAFE_ID } from "./safe-paths.js";
+import { listCheckpoints, restoreCheckpoint, createCheckpoint } from "./checkpoints.js";
 import {
   type Composition,
   type AssetEntry,
@@ -2619,4 +2620,40 @@ apiRoutes.post("/api/works/:id/text-rewrite", async (c) => {
   const text = data?.choices?.[0]?.message?.content?.trim();
   if (!text) return c.json({ error: "OpenRouter returned no text" }, 502);
   return c.json({ text });
+});
+
+// GET /api/works/:id/checkpoints — list yaml snapshots for a work, newest first.
+// Snapshots are taken automatically on every agent turn_complete; this is the
+// read side of that. UI uses it to render a "history" dropdown for rollback.
+apiRoutes.get("/api/works/:id/checkpoints", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId" }, 400);
+  const items = await listCheckpoints(id);
+  return c.json({ items });
+});
+
+// POST /api/works/:id/checkpoints/restore — overwrite the live deliverable
+// with a previously-snapshotted yaml. Body: { file: "<filename>" }. The
+// filename is what GET returned in `items[].file`.
+apiRoutes.post("/api/works/:id/checkpoints/restore", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId" }, 400);
+  const body = await c.req
+    .json<{ file?: string }>()
+    .catch(() => ({} as { file?: string }));
+  const file = ((body.file as string | undefined) ?? "").trim();
+  if (!file) return c.json({ error: "Missing 'file'" }, 400);
+  const out = await restoreCheckpoint(id, file);
+  if (!out) return c.json({ error: "Checkpoint not found or invalid name" }, 404);
+  return c.json({ ok: true, deliverable: out.deliverable });
+});
+
+// POST /api/works/:id/checkpoints — manual snapshot trigger. Useful before
+// the user is about to ask the agent for a risky change. Idempotent: if the
+// yaml hasn't changed since the latest snapshot, returns an empty list.
+apiRoutes.post("/api/works/:id/checkpoints", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId" }, 400);
+  const written = await createCheckpoint(id);
+  return c.json({ written });
 });

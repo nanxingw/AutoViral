@@ -1,0 +1,166 @@
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { apiFetch } from "@/lib/api";
+import { useT } from "@/i18n/useT";
+
+interface Checkpoint {
+  file: string;
+  deliverable: "carousel.yaml" | "composition.yaml";
+  ts: string;
+  sha: string;
+  bytes: number;
+}
+
+/**
+ * Header dropdown listing yaml snapshots for the current work. One click
+ * restores the deliverable to that snapshot's content; the surrounding
+ * page's react-query subscription pulls the new yaml on the next read.
+ *
+ * The list is taken automatically by the backend on every agent turn
+ * complete (see src/server/checkpoints.ts + src/ws-bridge.ts). Users can
+ * also press the button when closed to take a manual snapshot before a
+ * risky chat.
+ */
+export function CheckpointsMenu({ workId }: { workId: string }) {
+  const [open, setOpen] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
+  const t = useT();
+  const qc = useQueryClient();
+
+  const list = useQuery({
+    queryKey: ["checkpoints", workId],
+    queryFn: () =>
+      apiFetch<{ items: Checkpoint[] }>(`/api/works/${workId}/checkpoints`),
+    enabled: open, // only fetch when dropdown is open
+    staleTime: 5_000,
+  });
+
+  const restore = async (file: string) => {
+    setRestoring(file);
+    try {
+      const res = await apiFetch<{ deliverable: string }>(
+        `/api/works/${workId}/checkpoints/restore`,
+        { method: "POST", body: { file } },
+      );
+      // Force the page to pick up the restored yaml.
+      qc.invalidateQueries({ queryKey: ["carousel", workId] });
+      qc.invalidateQueries({ queryKey: ["composition", workId] });
+      // Cheap refresh fallback for editor/studio that don't subscribe via
+      // react-query — the page-level useEffect that reads yaml on workId
+      // change will pick up new content on next mount, but for live reload
+      // we tell the user to expect it.
+      console.info("[checkpoints] restored", res.deliverable);
+      setOpen(false);
+      setTimeout(() => location.reload(), 80);
+    } catch (e) {
+      console.error("[checkpoints] restore failed", e);
+    } finally {
+      setRestoring(null);
+    }
+  };
+
+  return (
+    <div style={{ position: "relative" }}>
+      <button
+        type="button"
+        data-bare
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          padding: "5px 11px",
+          fontSize: 11,
+          borderRadius: 7,
+          border: "1px solid var(--glass-border)",
+          background: open ? "var(--surface-2)" : "transparent",
+          color: "var(--text-soft)",
+          cursor: "pointer",
+          fontFamily: "var(--font-mono)",
+          letterSpacing: "0.04em",
+        }}
+      >
+        ↻ {t("checkpoints.button")}
+      </button>
+      {open && (
+        <div
+          role="menu"
+          style={{
+            position: "absolute",
+            right: 0,
+            top: "calc(100% + 4px)",
+            minWidth: 280,
+            maxHeight: 360,
+            overflowY: "auto",
+            background: "var(--surface-1, #fff)",
+            border: "1px solid var(--glass-border)",
+            borderRadius: 8,
+            padding: 4,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+            zIndex: 30,
+          }}
+        >
+          {list.isLoading && (
+            <div style={menuMutedRow}>{/* loading shim */}…</div>
+          )}
+          {list.data && list.data.items.length === 0 && (
+            <div style={menuMutedRow}>{t("checkpoints.empty")}</div>
+          )}
+          {list.data?.items.map((c) => (
+            <button
+              key={c.file}
+              type="button"
+              onClick={() => void restore(c.file)}
+              disabled={restoring === c.file}
+              style={{
+                width: "100%",
+                display: "grid",
+                gridTemplateColumns: "auto 1fr auto",
+                gap: 8,
+                alignItems: "center",
+                padding: "8px 10px",
+                border: "none",
+                background: "transparent",
+                cursor: restoring === c.file ? "wait" : "pointer",
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: "var(--text)",
+                borderRadius: 4,
+                textAlign: "left",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "var(--surface-2)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "transparent";
+              }}
+            >
+              <span style={{ color: "var(--accent)" }}>{c.sha}</span>
+              <span style={{ color: "var(--text-soft)" }}>
+                {fmtTs(c.ts)} · {c.deliverable.replace(".yaml", "")}
+              </span>
+              <span style={{ fontSize: 10, color: "var(--text-dimmer)" }}>
+                {(c.bytes / 1024).toFixed(1)}KB
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function fmtTs(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso.slice(0, 19);
+  const now = new Date();
+  const sec = Math.round((now.getTime() - d.getTime()) / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  if (sec < 3600) return `${Math.round(sec / 60)}m ago`;
+  if (sec < 86400) return `${Math.round(sec / 3600)}h ago`;
+  return d.toLocaleDateString();
+}
+
+const menuMutedRow: React.CSSProperties = {
+  padding: "10px 12px",
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  color: "var(--text-dimmer)",
+};

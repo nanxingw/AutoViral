@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Button } from "@/ui/Button";
 import { useEditor } from "../store";
 import { useT } from "@/i18n/useT";
+import { CheckpointsMenu } from "./CheckpointsMenu";
 
 interface TopBarProps {
   workId: string;
@@ -52,6 +53,7 @@ export function TopBar({
       >
         {savedAt ? `${t("common.saved")} · ${savedAt}` : t("common.unsaved")}
       </span>
+      <CheckpointsMenu workId={workId} />
       <div style={{ position: "relative" }}>
         <Button variant="primary" onClick={() => setOpen((v) => !v)}>
           {t("editor.topbar.exportMenu")}
