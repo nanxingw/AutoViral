@@ -22,7 +22,7 @@ description: Use when the user wants generation — images, video clips, music, 
 | **图片** | `openrouter_generate.py`（`openai/gpt-5.4-image-2`） | — | 所有静态画面、封面、图文笔记插图 |
 | **视频** | `dreamina` CLI（Seedance 2.0） | `jimeng_generate.py`（火山 Visual API） | Dreamina 首选；未登录/额度不足降级到 Jimeng |
 | **音乐** | `music_generate.py`（Google Lyria 3 Pro） | — | AI 原创音乐，~2 分钟完整曲目 |
-| **图文排版** | `poster_render.py`（Playwright + HTML/CSS） | — | 小红书笔记、封面、信息卡片 |
+| **图文排版** | `poster_render.py`（Playwright + HTML/CSS） | — | 图文卡片、封面、信息卡片 |
 | **状态检查** | `check_providers.py` | — | 开工前或降级决策前 |
 
 ## 图片生成（OpenRouter → `openai/gpt-5.4-image-2`）
@@ -141,7 +141,7 @@ python3 scripts/music_generate.py \
 
 ## 图文排版（Playwright + HTML 模板）
 
-用于小红书笔记、封面、信息卡片——**不是** AI 画出来的图，是用 HTML/CSS 精确渲染。
+用于图文卡片、封面、信息卡片——**不是** AI 画出来的图，是用 HTML/CSS 精确渲染。
 
 ```bash
 # 内置模板
@@ -164,7 +164,8 @@ python3 scripts/poster_render.py \
   --output out.png
 ```
 
-内置模板：`xhs-fresh` / `xhs-premium` / `xhs-infocard` / `xhs-photo-title` / `xhs-cover`
+内置模板（命名以"用途"为轴，与平台无关）：`xhs-fresh` / `xhs-premium` / `xhs-infocard` / `xhs-photo-title` / `xhs-cover`。
+> 注：模板前缀 `xhs-` 是历史遗留命名（曾来自小红书风格采样），现在表达**通用图文卡片设计语言**——`fresh = 浅色干净`、`premium = 高级深色`、`infocard = 信息密集`、`photo-title = 摄影 + 主标题`、`cover = 封面型`。下一轮重命名为 `card-*` 时同步更新 `poster_render.py`。
 
 详见 `capabilities/poster-design.md` 和 `templates/` 目录。
 
@@ -217,13 +218,14 @@ done
 
 **本节只讲技术约束，不讲创作**。创作由 `taste/` 决定。
 
-| 平台 | 视频宽高比 | 时长上限 | 图片宽高比（主流） |
-|---|---|---|---|
-| 抖音 | 9:16 | 单条 3 分钟（最长 15 分钟） | 3:4 / 9:16 |
-| 小红书 | 9:16 / 3:4 | 单条 15 分钟 | 3:4 / 1:1 |
-| 视频号 | 9:16 / 1:1 / 16:9 | 1 分钟（最长 60 分钟） | 1:1 |
+完整的宽高比 / 编码 / 码率 / 安全区 / 时长表统一查 `../assembly/references/platform-specs.md`——这是 frontend `PlatformPresetSection.tsx` 的同源真值表。
 
-`references/douyin.md` 和 `references/xiaohongshu.md` 有更完整的技术规格（编码、码率、安全区）。**忽略里面的创作建议**。
+assets 模块只关心两个工具维度：
+
+| 维度 | 取值范围 |
+|---|---|
+| 视频宽高比 | `9:16` / `3:4` / `1:1` / `16:9`（决定 dreamina/jimeng 参数） |
+| 图片宽高比 | `1:1` / `3:4` / `4:3` / `9:16` / `16:9` / `2:3` / `3:2`（OpenRouter 支持值） |
 
 ## Capabilities 索引
 

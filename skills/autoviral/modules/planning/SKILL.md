@@ -31,9 +31,10 @@ description: Use when the user wants a brief, shot list, layout plan, or wants y
 {
   "work_type": "short_video | image_text_carousel | single_poster",
   "format_spec": {
-    "aspect_ratio": "9:16 | 1:1 | 16:9",
+    "aspect_ratio": "9:16 | 1:1 | 16:9 | 3:4",
     "duration_sec": <数字或段区间>,
-    "target_platforms": ["抖音", "小红书", ...]
+    "max_size_mb": <可选；用于压缩约束>,
+    "safe_zone_pct": <可选；底部安全区占比，如 0.18>
   },
   "creative_schema": {
     "emotional_intent": "<单一情感词，参 taste/01 词表>",
@@ -74,7 +75,7 @@ Brief 除核心字段外，补充**镜头表**：
 - 主体 3-5 句
 - 落点句（不用机械 CTA）
 
-### image-text（图文 / 小红书笔记）
+### image-text（图文卡片）
 
 Brief 补充**每张图的结构**：
 
@@ -85,7 +86,7 @@ Brief 补充**每张图的结构**：
 | 2 | 正文-1   | 3:4  | ...  | ...  | 要点     | ...     |
 ```
 
-所有视觉风格字段对齐 `taste/02` 与 `taste/04` 的术语。**不要**用"国风"、"赛博"这种一词多义的风格标签，用具体的视觉语法描述（"对称构图 + 低饱和中性色 + 衬线字体"）。
+所有视觉风格字段对齐 `taste/02` 与 `taste/04` 的术语。**不要**用"国风"、"赛博"这种一词多义的风格标签，更**不要**用"小红书风"、"抖音感"这种平台集体人格——用具体的视觉语法描述（"对称构图 + 低饱和中性色 + 衬线字体"）。
 
 ### single-poster（单图海报）
 
@@ -125,7 +126,7 @@ curl -X POST http://localhost:${port}/api/works/{workId}/assets \
 ## Capabilities（扩展能力）
 
 - `capabilities/` 下按需加载（保留原有能力文档）
-- 平台技术规格（封面比例、字数上限等）见 `references/`
+- 平台技术规格（封面比例、安全区、时长上限等）统一查 `../assembly/references/platform-specs.md`——这是工具约束，不是创作判断
 
 ## 与其他模块的边界
 

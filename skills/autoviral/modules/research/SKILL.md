@@ -22,13 +22,15 @@ description: Use when the user wants references — viral patterns, competitor a
 
 ## 可用工具
 
-### 平台热搜脚本
+### 趋势采集脚本（按需调用，不强制）
+
+> 这些脚本是**可选采集工具**——只有用户明确需要某个平台当下话题/数据时才调，本身不带平台偏见。**不要**主动用某平台数据反推创作方向；创作方向永远从 `taste/` 出发。
 
 ```bash
-# 抖音实时热搜
-python3 scripts/douyin_hot_search.py --limit 20 --output douyin_trends.json
+# 单平台实时热搜（按平台脚本封装）
+python3 scripts/douyin_hot_search.py --limit 20 --output trends.json
 
-# newsnow 多平台聚合（含抖音、微博、知乎等）
+# newsnow 多平台聚合（抖音 / 微博 / 知乎 / B 站等）
 python3 scripts/newsnow_trends.py --platforms douyin,weibo --limit 30
 ```
 
@@ -75,12 +77,9 @@ curl http://localhost:${port}/api/memory/context/{workId}
 
 ## 平台参考资料
 
-平台规范（算法机制、标签格式、发布接口等**技术性**信息）在 `references/`：
+平台**技术规格**（宽高比 / 编码 / 时长 / 安全区）统一查 `../assembly/references/platform-specs.md`——这是 frontend `PlatformPresetSection.tsx` 的同源真值表，不混任何创作建议。
 
-- `references/douyin.md` — 抖音平台技术规范
-- `references/xiaohongshu.md` — 小红书平台技术规范
-
-**注意**：这两份文件里混有一些历史创作建议（"抖音用户喜欢..."类）。**忽略这部分**——创作判断以 `taste/` 为准。我们只用它们的技术规格、API、数据字段定义。
+历史上这里曾有过 `references/{douyin,xiaohongshu}.md`，里面混入了"3 秒定律 / 钩子模板 / 标签金字塔"之类的**创作 SOP**——这跟 `taste/00-prime-directive.md` 的第一原则**直接冲突**，已于 2026-05-08 删除。所有创作判断只走 `taste/`。
 
 ## 输出结构（给下游模块用）
 
