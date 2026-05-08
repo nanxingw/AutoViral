@@ -8,7 +8,7 @@ import {
   saveComposition,
 } from "@/features/studio/services/composition";
 import { PreviewPanel } from "@/features/studio/panels/PreviewPanel";
-import { Timeline } from "@/features/studio/panels/Timeline";
+import { SafeTimeline as Timeline } from "@/features/studio/panels/Timeline/SafeTimeline";
 import { SafeChatPanel as ChatPanel } from "@/features/studio/panels/Chat/SafeChatPanel";
 import { buildStudioViewerContext } from "@/features/studio/services/viewerContext";
 import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";

@@ -148,6 +148,11 @@ export const en = {
       tabLibrary: "Library",
       tabInspector: "Inspector",
     },
+    timeline: {
+      crashTitle: "Timeline hit a render error",
+      crashBody: "Preview, Inspector, and Chat are still usable. Click reset to retry; if it persists, check composition.yaml for malformed clips or NaN keyframe values.",
+      crashReset: "Reset timeline",
+    },
     inspector: {
       header: "Inspector",
       btnOpenDive: "Open in Dive",
@@ -485,6 +490,11 @@ export const zh: DeepShape<Messages> = {
     assetSidebar: {
       tabLibrary: "素材库",
       tabInspector: "检视",
+    },
+    timeline: {
+      crashTitle: "时间轴渲染出错",
+      crashBody: "预览、检视、聊天仍可用。点击重置可重试；若反复出现，请检查 composition.yaml 是否有畸形 clip 或 NaN 关键帧值。",
+      crashReset: "重置时间轴",
     },
     inspector: {
       header: "检视",
