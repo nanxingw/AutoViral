@@ -72,12 +72,14 @@ interface NdjsonMessage {
  */
 export function buildSystemPrompt(
   work: Pick<Work, "id" | "type" | "platforms">,
-  opts: { port: number },
+  opts: { port: number; workspacePath: string },
 ): string {
-  const { port } = opts;
+  const { port, workspacePath } = opts;
   const isVideo = work.type === "short-video";
   const typeLabel = isVideo ? "短视频 (short-video)" : "图文 (image-text)";
   const platforms = work.platforms.join(", ");
+  const deliverableFile = isVideo ? "composition.yaml" : "carousel.yaml";
+  const deliverableAbs = `${workspacePath}/${deliverableFile}`;
 
   return `你是 AutoViral 的创作 agent，正在协助用户完成一个 ${typeLabel} 作品。目标平台：${platforms}。
 
@@ -110,7 +112,18 @@ export function buildSystemPrompt(
 ## 上下文
 - 作品 ID：${work.id}
 - 作品类型：${typeLabel}
-- 作品工作目录：data/works/${work.id}/（research/ plan/ assets/ output/ 子目录）
+- 作品工作目录（**绝对路径，写文件请始终使用绝对路径**）：
+  ${workspacePath}/
+  子目录：research/ plan/ assets/ output/
+
+## 产物契约（frontend 依赖，文件名固定）
+- **${typeLabel}** 的最终产物文件（必须写到这个绝对路径）：
+  ${deliverableAbs}
+- ${isVideo
+    ? "composition.yaml schema 见 src/shared/composition.ts 的 Composition 类型；包含 tracks/clips/keyframes/provenance"
+    : "carousel.yaml schema：{ id, workId, width, height, globals: { headlineFont, palette, layout, effects }, slides: [{ id, bg, layers }], updatedAt } —— 参考 src/server/__tests__/carousel.test.ts"}
+- **不要**写到相对路径 \`data/works/...\`，agent 的 cwd 是项目根目录而不是 workspace；相对路径会落到错位置导致 frontend 看不到产物。
+- 中间产物按子目录归类：research/ plan/ assets/(frames|clips|images) output/
 
 ## 风格约束
 - 中文优先；技术名词保留英文
@@ -118,7 +131,7 @@ export function buildSystemPrompt(
 - 不输出暗示固定顺序的 progression 词汇
 - 任何交付前对照 \`~/.claude/skills/autoviral/taste/06-rubric.md\` 自评，< 3.5 分重做
 
-完成本轮工作后，把产物写入 data/works/${work.id}/ 对应子目录，然后用一句话告诉用户做了什么、看哪里。`;
+完成本轮工作后，把最终产物写入 ${deliverableAbs}（其它中间产物落对应子目录），然后用一句话告诉用户做了什么、看哪里。`;
 }
 
 /**
@@ -188,10 +201,10 @@ export class WsBridge {
   private async buildSystemPromptWithContext(work: Work): Promise<string> {
     const config = await loadConfig();
     const port = config.port;
-    const base = buildSystemPrompt(work, { port });
 
     // Workspace path
     const workspacePath = join(dataDir, "works", work.id);
+    const base = buildSystemPrompt(work, { port, workspacePath });
 
     // Shared assets summary
     let sharedAssetsInfo = "";

@@ -63,6 +63,27 @@ description: AutoViral 创作总技能——中文短视频与图文笔记的一
 
 ---
 
+## 产物契约（强制 · frontend 依赖）
+
+每个 work 在磁盘上有一个**绝对路径**的 workspace（系统 prompt 里给你的"当前项目 workspace"那个绝对路径，形如 `~/.autoviral/works/<id>/`）。最终交付的 yaml 文件名 + 路径**必须**严格对齐下表，否则 frontend 看不到产物。
+
+| 作品类型 | 最终产物文件（绝对路径）| schema 参考 |
+|---|---|---|
+| 短视频 (short-video) | `<workspace>/composition.yaml` | `src/shared/composition.ts` 的 `Composition` |
+| 图文 (image-text) | `<workspace>/carousel.yaml` | `src/server/__tests__/carousel.test.ts` 里的样例 |
+
+**写文件一律用绝对路径**：你的 cwd 是仓库根目录、不是 workspace；`data/works/<id>/...` 这种相对路径会落到不存在的目录、silent fail，是历史 bug 来源。
+
+中间产物归子目录：
+- `<workspace>/research/` — 调研笔记 / 数据
+- `<workspace>/plan/` — brief / 镜头表 / 文案骨架
+- `<workspace>/assets/{frames,clips,images}/` — 生成或下载的素材
+- `<workspace>/output/` — 最终成片或导出 PNG
+
+写完最终 yaml 后用一句话告诉用户做了什么、产物路径是什么。
+
+---
+
 ## 工作流不是线性的
 
 允许也鼓励**回环**：
