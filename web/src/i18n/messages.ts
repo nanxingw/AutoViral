@@ -280,6 +280,9 @@ export const en = {
     wsConnecting: "CONNECTING…",
     wsReconnecting: "RECONNECTING…",
     wsReconnectingTitle: "Connection lost — your message will queue and send when the bridge is back.",
+    crashTitle: "Chat hit a render error",
+    crashBody: "The rest of the page is fine. Click reset to retry chat.",
+    crashReset: "Reset chat panel",
     quickActions: {
       editor: {
         rewriteHook: "Rewrite copy",
@@ -574,6 +577,9 @@ export const zh: DeepShape<Messages> = {
     wsConnecting: "连接中…",
     wsReconnecting: "重连中…",
     wsReconnectingTitle: "连接已断开——你的消息会暂存，bridge 恢复后会自动发送。",
+    crashTitle: "聊天面板渲染出错",
+    crashBody: "页面其余部分仍可用。点击重置可重试。",
+    crashReset: "重置聊天面板",
     quickActions: {
       editor: {
         rewriteHook: "写一段引导文案",

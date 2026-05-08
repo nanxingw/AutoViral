@@ -13,7 +13,7 @@ import { Inspector } from "@/features/editor/panels/Inspector";
 import { Filmstrip } from "@/features/editor/panels/Filmstrip";
 import { TopBar } from "@/features/editor/panels/TopBar";
 import { useExport } from "@/features/editor/hooks/useExport";
-import { ChatPanel } from "@/features/studio/panels/Chat";
+import { SafeChatPanel as ChatPanel } from "@/features/studio/panels/Chat/SafeChatPanel";
 import { ChatQuickActions } from "@/features/editor/panels/ChatQuickActions";
 import type { LocatorData } from "@/features/chat/types";
 import { buildEditorViewerContext } from "@/features/editor/services/viewerContext";

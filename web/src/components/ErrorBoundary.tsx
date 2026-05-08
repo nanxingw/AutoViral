@@ -16,6 +16,11 @@ import { useT } from "@/i18n/useT";
 
 interface Props {
   children: ReactNode;
+  /** Optional render prop for a scoped boundary (e.g. inside a Chat panel)
+   *  to render a compact inline fallback instead of the default editorial
+   *  full-page screen. Round 25 added this so a chat crash doesn't replace
+   *  the whole Studio. */
+  fallback?: (error: Error, reset: () => void) => ReactNode;
 }
 
 interface State {
@@ -42,6 +47,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.error) {
+      if (this.props.fallback) {
+        return this.props.fallback(this.state.error, this.handleReset);
+      }
       return <ErrorFallback error={this.state.error} onReset={this.handleReset} />;
     }
     return this.props.children;

@@ -9,7 +9,7 @@ import {
 } from "@/features/studio/services/composition";
 import { PreviewPanel } from "@/features/studio/panels/PreviewPanel";
 import { Timeline } from "@/features/studio/panels/Timeline";
-import { ChatPanel } from "@/features/studio/panels/Chat";
+import { SafeChatPanel as ChatPanel } from "@/features/studio/panels/Chat/SafeChatPanel";
 import { buildStudioViewerContext } from "@/features/studio/services/viewerContext";
 import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { TopBar } from "@/features/studio/panels/TopBar";
