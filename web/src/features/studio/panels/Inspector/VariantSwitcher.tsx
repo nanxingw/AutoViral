@@ -1,6 +1,7 @@
 import { motion } from "motion/react";
 import { useComposition } from "../../store";
 import { findAssetByUri, walkProvenance } from "../../dive/walkProvenance";
+import { useT } from "@/i18n/useT";
 import type { AssetEntry, Clip } from "../../types";
 
 /**
@@ -18,32 +19,33 @@ export function VariantSwitcher() {
   const comp = useComposition((s) => s.comp);
   const selection = useComposition((s) => s.selection);
   const rebindClip = useComposition((s) => s.rebindClip);
+  const t = useT();
 
   if (!comp || !selection) {
-    return <EmptyState message="No clip selected — pick one in the timeline" />;
+    return <EmptyState message={t("studio.variantSwitcher.emptyNoSelection")} />;
   }
 
   // Find the selected clip across all tracks.
   let selectedClip: Clip | null = null;
-  for (const t of comp.tracks) {
-    const c = (t.clips as Clip[]).find((c) => c.id === selection);
+  for (const tr of comp.tracks) {
+    const c = (tr.clips as Clip[]).find((c) => c.id === selection);
     if (c) {
       selectedClip = c;
       break;
     }
   }
   if (!selectedClip || selectedClip.kind === "text") {
-    return <EmptyState message="Selected clip has no media binding" />;
+    return <EmptyState message={t("studio.variantSwitcher.emptyNoBinding")} />;
   }
 
   const bound = findAssetByUri(comp, selectedClip.src);
   if (!bound) {
-    return <EmptyState message="No variants — clip is not bound to a known asset" />;
+    return <EmptyState message={t("studio.variantSwitcher.emptyNoBoundAsset")} />;
   }
 
   const { siblings } = walkProvenance(comp, bound.id);
   if (siblings.length === 0) {
-    return <EmptyState message="No variants — this asset has no sibling derivations" />;
+    return <EmptyState message={t("studio.variantSwitcher.emptyNoSiblings")} />;
   }
 
   return (
@@ -112,6 +114,7 @@ function VariantTile({
   asset: AssetEntry;
   onUse: () => void;
 }) {
+  const t = useT();
   return (
     <motion.div
       data-testid={`variant-tile-${asset.id}`}
@@ -160,7 +163,7 @@ function VariantTile({
           cursor: "pointer",
         }}
       >
-        USE THIS · {asset.id}
+        {t("studio.variantSwitcher.useThis", { id: asset.id })}
       </button>
     </motion.div>
   );

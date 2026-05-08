@@ -101,6 +101,13 @@ export const en = {
       btnBuild: "Build index",
       btnBuilding: "Building…",
     },
+    variantSwitcher: {
+      emptyNoSelection: "No clip selected — pick one in the timeline",
+      emptyNoBinding: "Selected clip has no media binding",
+      emptyNoBoundAsset: "No variants — clip is not bound to a known asset",
+      emptyNoSiblings: "No variants — this asset has no sibling derivations",
+      useThis: "USE THIS · {id}",
+    },
   },
   works: {
     filter: {
@@ -299,6 +306,13 @@ export const zh: DeepShape<Messages> = {
       stubInstall: "语义搜索不可用",
       btnBuild: "构建索引",
       btnBuilding: "构建中…",
+    },
+    variantSwitcher: {
+      emptyNoSelection: "未选中片段——在时间轴上点击一个片段",
+      emptyNoBinding: "所选片段无媒体绑定",
+      emptyNoBoundAsset: "暂无变体——片段未绑定到已知素材",
+      emptyNoSiblings: "暂无变体——此素材没有衍生兄弟",
+      useThis: "使用此变体 · {id}",
     },
   },
   works: {
