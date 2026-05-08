@@ -199,7 +199,7 @@ export function ChatPanel({
   getViewerContext,
   dispatchAction,
 }: ChatPanelProps) {
-  const { send } = useChatSocket(workId, getViewerContext, dispatchAction);
+  const { send, state: wsState } = useChatSocket(workId, getViewerContext, dispatchAction);
   // Pull the work's checkpoint list so each assistant text block can render
   // a "rollback to this turn" chip when its turn produced a snapshot. We
   // keep this enabled at all times — the route is cheap and the dropdown
@@ -353,6 +353,23 @@ export function ChatPanel({
             }}
           >
             {modelLabel}{streaming ? ` · ${t("chat.streaming")}` : ""}
+            {wsState !== "open" && (
+              <span
+                title={t("chat.wsReconnectingTitle")}
+                style={{
+                  marginLeft: 8,
+                  padding: "1px 6px",
+                  borderRadius: 4,
+                  border: "1px solid var(--status-error, #d4756c)",
+                  background: "rgba(212, 117, 108, 0.08)",
+                  color: "var(--status-error, #d4756c)",
+                  fontSize: 9,
+                  letterSpacing: "0.08em",
+                }}
+              >
+                {wsState === "connecting" ? t("chat.wsConnecting") : t("chat.wsReconnecting")}
+              </span>
+            )}
           </div>
         </div>
         <div

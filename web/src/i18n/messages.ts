@@ -270,6 +270,9 @@ export const en = {
     composerPlaceholder: "ask anything…",
     sendHint: "⌘↵ SEND",
     stopTitle: "Stop running turn",
+    wsConnecting: "CONNECTING…",
+    wsReconnecting: "RECONNECTING…",
+    wsReconnectingTitle: "Connection lost — your message will queue and send when the bridge is back.",
     quickActions: {
       editor: {
         rewriteHook: "Rewrite copy",
@@ -554,6 +557,9 @@ export const zh: DeepShape<Messages> = {
     composerPlaceholder: "问点什么…",
     sendHint: "⌘↵ 发送",
     stopTitle: "停止当前回合",
+    wsConnecting: "连接中…",
+    wsReconnecting: "重连中…",
+    wsReconnectingTitle: "连接已断开——你的消息会暂存，bridge 恢复后会自动发送。",
     quickActions: {
       editor: {
         rewriteHook: "写一段引导文案",

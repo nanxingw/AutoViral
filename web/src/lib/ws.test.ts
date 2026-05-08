@@ -64,4 +64,39 @@ describe("ReconnectingWS", () => {
     ws.dispose();
     vi.useRealTimers();
   });
+
+  it("emits state transitions: connecting → open → reconnecting → open", async () => {
+    vi.useFakeTimers();
+    const states: string[] = [];
+    const ws = new ReconnectingWS("ws://x", { backoffMs: 50 });
+    expect(ws.getState()).toBe("connecting");
+    const off = ws.onState((s) => states.push(s));
+
+    await Promise.resolve(); // first open
+    expect(ws.getState()).toBe("open");
+    expect(states).toEqual(["open"]);
+
+    MockWS.instances[0].close();
+    expect(ws.getState()).toBe("reconnecting");
+
+    vi.advanceTimersByTime(60);
+    await Promise.resolve(); // second open
+    expect(ws.getState()).toBe("open");
+    expect(states).toEqual(["open", "reconnecting", "open"]);
+
+    off();
+    ws.dispose();
+    vi.useRealTimers();
+  });
+
+  it("does not emit duplicate state transitions", async () => {
+    const states: string[] = [];
+    const ws = new ReconnectingWS("ws://x");
+    ws.onState((s) => states.push(s));
+    await Promise.resolve();
+    // open already fired once on the first connect; the listener was attached
+    // before — so we should see exactly one "open", not two.
+    expect(states).toEqual(["open"]);
+    ws.dispose();
+  });
 });

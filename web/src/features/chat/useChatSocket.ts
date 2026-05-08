@@ -1,5 +1,5 @@
-import { useEffect, useRef } from "react";
-import { ReconnectingWS } from "@/lib/ws";
+import { useEffect, useRef, useState } from "react";
+import { ReconnectingWS, type WSState } from "@/lib/ws";
 import { useChatStore } from "./store";
 import type { StreamBlock, StreamBlockType, ViewerAction } from "./types";
 import { extractViewerActions } from "./types";
@@ -48,11 +48,19 @@ export function useChatSocket(
   const setBlocks = useChatStore((s) => s.setBlocks);
   const setStreaming = useChatStore((s) => s.setStreaming);
   const attachUsage = useChatStore((s) => s.attachLastTurnUsage);
+  // Connection state surfaced to the chat UI so users see when the bridge
+  // is reconnecting instead of silently losing messages into the void.
+  const [wsState, setWsState] = useState<WSState>("connecting");
 
   useEffect(() => {
-    if (!workId) return;
+    if (!workId) {
+      setWsState("connecting");
+      return;
+    }
     const ws = new ReconnectingWS<string>(`/ws/browser/${workId}`);
     ref.current = ws;
+    setWsState(ws.getState());
+    const offState = ws.onState(setWsState);
     const off = ws.on((raw) => {
       try {
         const frame = JSON.parse(raw) as IncomingFrame;
@@ -164,12 +172,14 @@ export function useChatSocket(
     });
     return () => {
       off();
+      offState();
       ws.dispose();
       ref.current = null;
     };
   }, [workId, push, setBlocks, setStreaming, attachUsage]);
 
   return {
+    state: wsState,
     send(text: string) {
       // Optionally prepend a <viewer-context>...</viewer-context> envelope
       // describing what the user has selected / where the playhead is. The
