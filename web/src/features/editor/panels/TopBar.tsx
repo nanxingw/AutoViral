@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useState, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/ui/Button";
 import { useEditor } from "../store";
@@ -22,6 +23,41 @@ export function TopBar({
   const car = useEditor((s) => s.car);
   const [open, setOpen] = useState(false);
   const t = useT();
+
+  // Same portal-anchor pattern as CheckpointsMenu: the editor TopBar sits
+  // inside a react-resizable-panels Panel, so an absolutely-positioned
+  // dropdown gets clipped by the panel's stacking/overflow context. Render
+  // the menu in a portal to <body> with `position:fixed`, anchored to the
+  // trigger button's bounding rect — escapes both the stacking context
+  // and any ancestor `overflow:hidden`.
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
+  useLayoutEffect(() => {
+    if (!open || !btnRef.current) return;
+    const update = () => {
+      if (btnRef.current) setAnchorRect(btnRef.current.getBoundingClientRect());
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [open]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const onDocClick = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if (btnRef.current?.contains(target)) return;
+      const menu = document.querySelector("[data-export-menu]");
+      if (menu?.contains(target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, [open]);
 
   return (
     <div
@@ -55,48 +91,48 @@ export function TopBar({
         {savedAt ? `${t("common.saved")} · ${savedAt}` : t("common.unsaved")}
       </span>
       <CheckpointsMenu workId={workId} />
-      <div style={{ position: "relative" }}>
-        <Button variant="primary" onClick={() => setOpen((v) => !v)}>
-          {t("editor.topbar.exportMenu")}
-        </Button>
-        {open && (
-          <div
-            role="menu"
-            style={{
-              position: "absolute",
-              right: 0,
-              top: "calc(100% + 4px)",
-              minWidth: 200,
-              background: "var(--surface-1, #fff)",
-              border: "1px solid var(--border, rgba(0,0,0,0.12))",
-              borderRadius: 6,
-              padding: 4,
-              boxShadow: "0 8px 24px rgba(0,0,0,0.08)",
-              zIndex: 30,
-              display: "flex",
-              flexDirection: "column",
-              gap: 2,
+      <Button ref={btnRef} variant="primary" onClick={() => setOpen((v) => !v)}>
+        {t("editor.topbar.exportMenu")}
+      </Button>
+      {open && anchorRect && createPortal(
+        <div
+          role="menu"
+          data-export-menu
+          style={{
+            position: "fixed",
+            right: window.innerWidth - anchorRect.right,
+            top: anchorRect.bottom + 4,
+            minWidth: 200,
+            background: "var(--surface-1, #fff)",
+            border: "1px solid var(--border, rgba(0,0,0,0.12))",
+            borderRadius: 6,
+            padding: 4,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.10)",
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          <MenuItem
+            onClick={() => {
+              setOpen(false);
+              onExportCurrent();
             }}
           >
-            <MenuItem
-              onClick={() => {
-                setOpen(false);
-                onExportCurrent();
-              }}
-            >
-              {t("editor.topbar.exportCurrent")}
-            </MenuItem>
-            <MenuItem
-              onClick={() => {
-                setOpen(false);
-                onExportAll();
-              }}
-            >
-              {t("editor.topbar.exportAll")}
-            </MenuItem>
-          </div>
-        )}
-      </div>
+            {t("editor.topbar.exportCurrent")}
+          </MenuItem>
+          <MenuItem
+            onClick={() => {
+              setOpen(false);
+              onExportAll();
+            }}
+          >
+            {t("editor.topbar.exportAll")}
+          </MenuItem>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
