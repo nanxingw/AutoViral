@@ -58,6 +58,7 @@ export const en = {
       rewriteWithAI: "Rewrite with AI",
       busy: "...",
       emptyResponse: "Empty response from rewriter",
+      rewriteFailed: "Rewrite failed — please try again.",
     },
     aiTab: {
       stylePrompt: "Style prompt",
@@ -273,6 +274,7 @@ export const zh: DeepShape<Messages> = {
       rewriteWithAI: "AI 改写",
       busy: "…",
       emptyResponse: "改写结果为空",
+      rewriteFailed: "改写失败——请重试。",
     },
     aiTab: {
       stylePrompt: "风格描述",

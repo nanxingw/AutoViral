@@ -40,7 +40,7 @@ export function CopyTab({ workId }: { workId: string }) {
         setError(t("editor.copyTab.emptyResponse"));
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "rewrite failed");
+      setError(err instanceof Error ? err.message : t("editor.copyTab.rewriteFailed"));
     } finally {
       setBusy(false);
     }
@@ -81,14 +81,25 @@ export function CopyTab({ workId }: { workId: string }) {
         rows={6}
         style={{
           width: "100%",
-          padding: 8,
+          padding: "10px 12px",
           border: "1px solid var(--border, rgba(0,0,0,0.12))",
-          borderRadius: 6,
-          background: "transparent",
+          borderRadius: 8,
+          background: "var(--surface-0, transparent)",
           color: "var(--text)",
           fontFamily: "var(--font-mono)",
           fontSize: 13,
+          lineHeight: 1.55,
           resize: "vertical",
+          outline: "none",
+          transition: "border-color 0.15s, box-shadow 0.15s",
+        }}
+        onFocus={(e) => {
+          e.target.style.borderColor = "var(--accent)";
+          e.target.style.boxShadow = "0 0 0 3px var(--accent-glow, rgba(168,197,214,0.18))";
+        }}
+        onBlur={(e) => {
+          e.target.style.borderColor = "var(--border, rgba(0,0,0,0.12))";
+          e.target.style.boxShadow = "none";
         }}
       />
       <button
@@ -96,21 +107,36 @@ export function CopyTab({ workId }: { workId: string }) {
         disabled={busy}
         onClick={onRewrite}
         style={{
-          padding: "6px 12px",
+          padding: "10px 14px",
           fontFamily: "var(--font-mono)",
           fontSize: 11,
-          letterSpacing: "0.05em",
-          border: "1px solid var(--border, rgba(0,0,0,0.12))",
-          background: "transparent",
-          color: "var(--text-soft)",
-          borderRadius: 4,
+          fontWeight: 600,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          border: "1px solid var(--accent, #2a3a4a)",
+          background: busy ? "transparent" : "var(--accent, #2a3a4a)",
+          color: busy ? "var(--text-dim)" : "var(--bg, #fff)",
+          borderRadius: 6,
           cursor: busy ? "wait" : "pointer",
+          opacity: busy ? 0.65 : 1,
+          boxShadow: busy ? "none" : "0 1px 2px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04)",
+          transition: "transform 0.1s, box-shadow 0.15s, opacity 0.15s",
         }}
       >
         {busy ? t("editor.copyTab.busy") : t("editor.copyTab.rewriteWithAI")}
       </button>
       {error && (
-        <div style={{ color: "tomato", fontSize: 11 }}>{error}</div>
+        <div
+          style={{
+            color: "var(--text-warn, #c44a4a)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            letterSpacing: "0.02em",
+            lineHeight: 1.5,
+          }}
+        >
+          {error}
+        </div>
       )}
     </div>
   );
