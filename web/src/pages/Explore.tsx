@@ -50,15 +50,15 @@ export default function Explore() {
   return (
     <main className="page">
       <section style={{ padding: "48px 0 32px" }}>
-        <span className="eyebrow">PULSE OF THE ALGORITHM</span>
+        <span className="eyebrow">{t("explore.heroEyebrow")}</span>
         <h1 className="h-display" style={{ fontSize: 52, lineHeight: 1.05, margin: "12px 0 14px", maxWidth: 880, fontWeight: 500 }}>
-          What's <em style={{ fontFamily: "Instrument Serif", fontStyle: "italic" }}>moving</em> right now,
+          {t("explore.heroLine1")}
           <br />
-          across the platforms <em style={{ fontFamily: "Instrument Serif", fontStyle: "italic" }}>you care about</em>.
+          {t("explore.heroLine2")}
         </h1>
         <div style={{ fontSize: 13, color: "var(--text-dim)", display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
           <span>
-            Aggregated from <strong style={{ color: "var(--text)" }}>YouTube</strong>, <strong style={{ color: "var(--text)" }}>TikTok</strong>, 小红书, 抖音.
+            {t("explore.aggregatedFrom")} <strong style={{ color: "var(--text)" }}>YouTube</strong>, <strong style={{ color: "var(--text)" }}>TikTok</strong>, 小红书, 抖音.
           </span>
           <button
             type="button"
@@ -91,11 +91,11 @@ export default function Explore() {
       <PlatformTabs value={platform} onChange={setPlatform} />
 
       {trends.isLoading ? (
-        <div style={{ color: "var(--text-dim)" }}>Loading…</div>
+        <div style={{ color: "var(--text-dim)" }}>{t("explore.loadingTrends")}</div>
       ) : trends.data ? (
         <TrendingPanel platform={platform} items={trends.data.items} />
       ) : (
-        <div style={{ color: "var(--text-dim)" }}>No trends data.</div>
+        <div style={{ color: "var(--text-dim)" }}>{t("explore.noTrendsData")}</div>
       )}
     </main>
   );

@@ -1,6 +1,7 @@
 import clsx from "clsx";
 import type { TrendItem, Platform } from "@/queries/trends";
 import { compactNumber } from "@/lib/format";
+import { useT } from "@/i18n/useT";
 import styles from "./TrendingPanel.module.css";
 
 const PLATFORM_LABEL: Record<Platform, string> = {
@@ -12,6 +13,7 @@ const PLATFORM_LABEL: Record<Platform, string> = {
 
 export function TrendingPanel({ platform, items }: { platform: Platform; items: TrendItem[] }) {
   const list = items ?? [];
+  const t = useT();
   return (
     <section className={styles.panel}>
       <div className={styles.head}>
@@ -24,7 +26,7 @@ export function TrendingPanel({ platform, items }: { platform: Platform; items: 
       </div>
       {list.length === 0 && (
         <div style={{ padding: "20px 0", color: "var(--text-dimmer)", fontSize: 12 }}>
-          暂无该平台趋势数据。请在后台先采集一次 trends。
+          {t("explore.trendingPanelEmpty")}
         </div>
       )}
       {list.map((it) => (

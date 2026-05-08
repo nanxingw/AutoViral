@@ -1,7 +1,7 @@
 import { useState, useRef, useLayoutEffect } from "react";
 import { createPortal } from "react-dom";
 import { useT } from "@/i18n/useT";
-import { useCheckpoints, type Checkpoint } from "./useCheckpoints";
+import { useCheckpoints } from "./useCheckpoints";
 
 /**
  * Header dropdown listing yaml snapshots for the current work. One click
