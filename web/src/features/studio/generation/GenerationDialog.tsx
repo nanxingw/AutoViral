@@ -407,7 +407,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
 
           <div style={bodyStyle}>
             {isVariant && (
-              <Field label="Source">
+              <Field label={t("studio.generationDialog.fieldSource")}>
                 <div style={sourceCardStyle}>
                   <div style={{ fontWeight: 600 }}>{source?.name}</div>
                   <div style={{ color: "var(--text-dimmer)", fontSize: 11 }}>
@@ -430,7 +430,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
             )}
 
             {providers.length > 0 && (
-              <Field label="Provider" hint="Video provider for generation">
+              <Field label={t("studio.generationDialog.fieldProvider")} hint={t("studio.generationDialog.fieldProviderHint")}>
                 <select
                   aria-label="Provider"
                   value={selectedProviderId ?? ""}
@@ -449,7 +449,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
 
             {isVariant ? (
               <Field
-                label="Change direction"
+                label={t("studio.generationDialog.fieldChangeDirection")}
                 hint="What should differ from the source? Keep subject/setting unless you say otherwise."
               >
                 <textarea
@@ -462,11 +462,11 @@ export function GenerationDialog(props: GenerationDialogProps) {
               </Field>
             ) : (
               <Field
-                label={form.kind === "audio" && form.audioSubKind === "tts" ? "Script" : "Prompt"}
+                label={form.kind === "audio" && form.audioSubKind === "tts" ? t("studio.generationDialog.fieldScript") : t("studio.generationDialog.fieldPrompt")}
                 hint={
                   form.kind === "audio" && form.audioSubKind === "tts"
-                    ? "The narration text to read aloud"
-                    : "Describe what you want — at least 10 characters"
+                    ? t("studio.generationDialog.fieldScriptHint")
+                    : t("studio.generationDialog.fieldPromptHint")
                 }
               >
                 <textarea
@@ -570,10 +570,11 @@ function ImageFields({
   form: FormState;
   patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 }) {
+  const t = useT();
   return (
     <>
       <Row>
-        <Field label="Aspect ratio">
+        <Field label={t("studio.generationDialog.fieldAspectRatio")}>
           <select
             value={form.aspectRatio ?? "1:1"}
             onChange={(e) => patch("aspectRatio", e.target.value)}
@@ -631,6 +632,7 @@ function VideoFields({
   form: FormState;
   patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 }) {
+  const t = useT();
   return (
     <>
       <Row>
@@ -647,7 +649,7 @@ function VideoFields({
             ))}
           </select>
         </Field>
-        <Field label="Aspect ratio">
+        <Field label={t("studio.generationDialog.fieldAspectRatio")}>
           <select
             value={form.aspectRatio ?? "9:16"}
             onChange={(e) => patch("aspectRatio", e.target.value)}
@@ -660,7 +662,7 @@ function VideoFields({
             ))}
           </select>
         </Field>
-        <Field label="Resolution">
+        <Field label={t("studio.generationDialog.fieldResolution")}>
           <select
             value={form.resolution ?? "720p"}
             onChange={(e) =>
@@ -698,6 +700,7 @@ function AudioFields({
   patch: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
   disableSubKindToggle: boolean;
 }) {
+  const t = useT();
   return (
     <>
       {!disableSubKindToggle && (
@@ -715,7 +718,7 @@ function AudioFields({
         </div>
       )}
       {form.audioSubKind === "tts" ? (
-        <Field label="Voice">
+        <Field label={t("studio.generationDialog.fieldVoice")}>
           <select
             value={form.voice ?? TTS_VOICES[0].value}
             onChange={(e) => patch("voice", e.target.value)}
