@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link } from "react-router-dom";
 import clsx from "clsx";
 import type { WorkSummary } from "@/queries/works";
@@ -42,7 +43,6 @@ export function WorksGrid({ works, filter }: Props) {
   return (
     <div className={styles.grid}>
       {visible.map((w) => {
-        const cover = w.coverImage ?? null;
         const typeLabel = t(
           (w.type === "short-video" ? "works.type.video" : "works.type.image") as MessageKey,
         );
@@ -55,40 +55,7 @@ export function WorksGrid({ works, filter }: Props) {
             to={w.type === "short-video" ? `/studio/${w.id}` : `/editor/${w.id}`}
             className={styles.card}
           >
-            {cover && w.coverIsVideo ? (
-              <video
-                className={styles.thumb}
-                src={cover}
-                muted
-                loop
-                playsInline
-                preload="metadata"
-                onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
-                onMouseLeave={(e) => {
-                  e.currentTarget.pause();
-                  e.currentTarget.currentTime = 0;
-                }}
-                style={{ objectFit: "cover" }}
-              />
-            ) : cover ? (
-              <img
-                className={styles.thumb}
-                src={cover}
-                alt=""
-                // `loading="lazy"` was preventing thumbnails from ever
-                // initiating a fetch — every <img> stayed at complete:false,
-                // naturalW:0 even though the card was visible in viewport
-                // and the URL returned 200. The IntersectionObserver Chrome
-                // uses for native lazy must not be triggering for our
-                // glass-styled cards. Eager is fine — works grid renders
-                // ~9 cards above the fold and the rest are needed once
-                // user scrolls anyway.
-                loading="eager"
-                style={{ objectFit: "cover" }}
-              />
-            ) : (
-              <div className={styles.thumb} style={{ background: fallbackGradient(w.id) }} />
-            )}
+            <WorkCover work={w} />
             <div className={clsx(styles.badge, w.status === "draft" && styles.badgeDraft)}>
               {typeLabel} · {statusLabel}
             </div>
@@ -103,5 +70,59 @@ export function WorksGrid({ works, filter }: Props) {
         );
       })}
     </div>
+  );
+}
+
+/**
+ * R34: covers used to silently render broken icons when src 404'd or
+ * CORS'd. Per-card local state catches onError → swap to deterministic
+ * fallback gradient (same one used for no-cover works). User sees a
+ * stable card instead of a glitched thumbnail.
+ *
+ * Extracted as a sub-component because each card needs independent
+ * error state — couldn't keep it inline in the .map() above.
+ */
+function WorkCover({ work }: { work: WorkSummary }) {
+  const cover = work.coverImage ?? null;
+  const [failed, setFailed] = useState(false);
+  if (!cover || failed) {
+    return <div className={styles.thumb} style={{ background: fallbackGradient(work.id) }} />;
+  }
+  if (work.coverIsVideo) {
+    return (
+      <video
+        className={styles.thumb}
+        src={cover}
+        muted
+        loop
+        playsInline
+        preload="metadata"
+        onMouseEnter={(e) => void e.currentTarget.play().catch(() => {})}
+        onMouseLeave={(e) => {
+          e.currentTarget.pause();
+          e.currentTarget.currentTime = 0;
+        }}
+        onError={() => setFailed(true)}
+        style={{ objectFit: "cover" }}
+      />
+    );
+  }
+  return (
+    <img
+      className={styles.thumb}
+      src={cover}
+      alt=""
+      // `loading="lazy"` was preventing thumbnails from ever
+      // initiating a fetch — every <img> stayed at complete:false,
+      // naturalW:0 even though the card was visible in viewport
+      // and the URL returned 200. The IntersectionObserver Chrome
+      // uses for native lazy must not be triggering for our
+      // glass-styled cards. Eager is fine — works grid renders
+      // ~9 cards above the fold and the rest are needed once
+      // user scrolls anyway.
+      loading="eager"
+      onError={() => setFailed(true)}
+      style={{ objectFit: "cover" }}
+    />
   );
 }

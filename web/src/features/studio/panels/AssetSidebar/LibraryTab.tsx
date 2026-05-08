@@ -165,6 +165,11 @@ function AssetTile({ item, index }: { item: AssetItem; index: number }) {
   // + currentTime=0 alone does NOT release the decoder — only unmount does.
   // (Diagnosed 2026-05-08; see commit msg.)
   const [hovered, setHovered] = useState(false);
+  // R34: track media load failure. <video>.onerror fires for broken src
+  // (404 / CORS / corrupt). Without it the tile silently shows fallback
+  // gradient indistinguishable from "loading" state — user has no clue
+  // their asset is broken.
+  const [mediaFailed, setMediaFailed] = useState(false);
   return (
     <div
       style={{
@@ -188,7 +193,7 @@ function AssetTile({ item, index }: { item: AssetItem; index: number }) {
         if (item.kind === "video") setHovered(false);
       }}
     >
-      {item.kind === "video" && hovered && (
+      {item.kind === "video" && hovered && !mediaFailed && (
         <video
           src={item.url}
           muted
@@ -196,6 +201,7 @@ function AssetTile({ item, index }: { item: AssetItem; index: number }) {
           autoPlay
           loop
           preload="auto"
+          onError={() => setMediaFailed(true)}
           style={{
             position: "absolute",
             inset: 0,
@@ -205,7 +211,7 @@ function AssetTile({ item, index }: { item: AssetItem; index: number }) {
           }}
         />
       )}
-      {item.kind === "video" && !hovered && (
+      {item.kind === "video" && !hovered && !mediaFailed && (
         <>
           {/* Poster frame: <video preload=metadata> + seek to 0.1s renders the
               first decoded frame WITHOUT holding a hardware decoder slot.
@@ -226,6 +232,7 @@ function AssetTile({ item, index }: { item: AssetItem; index: number }) {
                 /* some browsers throw if duration is unknown — ignore */
               }
             }}
+            onError={() => setMediaFailed(true)}
             style={{
               position: "absolute",
               inset: 0,
@@ -254,11 +261,12 @@ function AssetTile({ item, index }: { item: AssetItem; index: number }) {
           </div>
         </>
       )}
-      {item.kind === "image" && (
+      {item.kind === "image" && !mediaFailed && (
         <img
           src={item.url}
           alt={item.name}
           loading="lazy"
+          onError={() => setMediaFailed(true)}
           style={{
             position: "absolute",
             inset: 0,
@@ -267,6 +275,29 @@ function AssetTile({ item, index }: { item: AssetItem; index: number }) {
             objectFit: "cover",
           }}
         />
+      )}
+      {/* R34: shared failure indicator for image/video kinds. Red dashed
+          border + ⚠ glyph centered over the fallback gradient. Audio is
+          unaffected — its SVG glyph is always visible regardless of url. */}
+      {(item.kind === "image" || item.kind === "video") && mediaFailed && (
+        <div
+          aria-label="Asset failed to load"
+          style={{
+            position: "absolute",
+            inset: 0,
+            display: "grid",
+            placeItems: "center",
+            border: "2px dashed var(--status-error, #d4756c)",
+            background: "rgba(212, 117, 108, 0.06)",
+            color: "var(--status-error, #d4756c)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            letterSpacing: "0.06em",
+            pointerEvents: "none",
+          }}
+        >
+          ⚠
+        </div>
       )}
       {item.kind === "audio" && (
         <div
