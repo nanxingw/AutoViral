@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCreateWork } from "@/queries/works";
 import { useT } from "@/i18n/useT";
+import { localizeApiError } from "@/i18n/serverError";
 import styles from "./NewWorkCard.module.css";
 
 export function NewWorkCard() {
@@ -20,7 +21,9 @@ export function NewWorkCard() {
       const w = await create.mutateAsync({ title: t("works.untitledWork"), type });
       navigate(type === "short-video" ? `/studio/${w.id}` : `/editor/${w.id}`);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : String(err);
+      // R27: prefer the localized server-error path (errorCode → i18n key)
+      // over raw err.message; falls back automatically for unmapped codes.
+      const msg = localizeApiError(err, t);
       setCreateError(t("works.createFailed", { msg }));
     }
   }

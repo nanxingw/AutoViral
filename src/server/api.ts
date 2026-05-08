@@ -214,7 +214,7 @@ apiRoutes.post("/api/works", async (c) => {
       topicHint?: string;
     }>();
     if (!body.title || !body.type || !body.platforms) {
-      return c.json({ error: "title, type, and platforms are required" }, 400);
+      return c.json({ error: "title, type, and platforms are required", errorCode: "create_work_validation" }, 400);
     }
     const work = await storeCreateWork({
       title: body.title,
@@ -227,7 +227,7 @@ apiRoutes.post("/api/works", async (c) => {
     });
     return c.json(work, 201);
   } catch (err) {
-    return c.json({ error: err instanceof Error ? err.message : "Failed to create work" }, 400);
+    return c.json({ error: err instanceof Error ? err.message : "Failed to create work", errorCode: "create_work_failed", detail: err instanceof Error ? err.message : undefined }, 400);
   }
 });
 
@@ -603,7 +603,7 @@ apiRoutes.get("/api/works/:id/carousel", async (c) => {
       // composition fallback for short-video works.
       const synthesised = await synthesiseLegacyCarousel(id, w.type);
       if (synthesised) return c.json(synthesised);
-      return c.json({ error: "Carousel not found" }, 404);
+      return c.json({ error: "Carousel not found", errorCode: "carousel_not_found" }, 404);
     }
     return c.json({ error: `Carousel unreadable: ${err?.message ?? "unknown"}`, errorCode: "carousel_unreadable", detail: err?.message }, 500);
   }
@@ -678,7 +678,7 @@ apiRoutes.put("/api/works/:id/carousel", async (c) => {
 apiRoutes.post("/api/works/:id/render", async (c) => {
   const id = c.req.param("id");
   if (!renderQueue) {
-    return c.json({ error: "RenderQueue not initialized" }, 503);
+    return c.json({ error: "RenderQueue not initialized", errorCode: "render_queue_unavailable" }, 503);
   }
   const w = await getWork(id);
   if (!w) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
@@ -708,10 +708,10 @@ apiRoutes.post("/api/works/:id/render", async (c) => {
 // GET /api/render/jobs/:id — Phase 7.B
 apiRoutes.get("/api/render/jobs/:id", (c) => {
   if (!renderQueue) {
-    return c.json({ error: "RenderQueue not initialized" }, 503);
+    return c.json({ error: "RenderQueue not initialized", errorCode: "render_queue_unavailable" }, 503);
   }
   const job = renderQueue.get(c.req.param("id"));
-  if (!job) return c.json({ error: "Job not found" }, 404);
+  if (!job) return c.json({ error: "Job not found", errorCode: "render_job_not_found" }, 404);
   return c.json(job);
 });
 
@@ -720,12 +720,12 @@ apiRoutes.get("/api/render/jobs/:id", (c) => {
 // running jobs receive an AbortSignal which the pipeline honours.
 apiRoutes.delete("/api/render/jobs/:id", (c) => {
   if (!renderQueue) {
-    return c.json({ error: "RenderQueue not initialized" }, 503);
+    return c.json({ error: "RenderQueue not initialized", errorCode: "render_queue_unavailable" }, 503);
   }
   const id = c.req.param("id");
   renderQueue.cancel(id);
   const job = renderQueue.get(id);
-  if (!job) return c.json({ error: "Job not found" }, 404);
+  if (!job) return c.json({ error: "Job not found", errorCode: "render_job_not_found" }, 404);
   return c.json(job);
 });
 
@@ -863,7 +863,7 @@ apiRoutes.get("/api/works/:id/assets/*", async (c) => {
       },
     });
   } catch {
-    return c.json({ error: "Asset not found" }, 404);
+    return c.json({ error: "Asset not found", errorCode: "asset_not_found" }, 404);
   }
 });
 
@@ -1418,7 +1418,7 @@ apiRoutes.post("/api/audio/tts", async (c) => {
       channels: r.channels,
     });
   } catch (e: any) {
-    return c.json({ error: "TTS provider error", message: e?.message ?? String(e) }, 500);
+    return c.json({ error: "TTS provider error", message: e?.message ?? String(e), errorCode: "tts_provider_error", detail: e?.message ?? String(e) }, 500);
   }
 });
 
