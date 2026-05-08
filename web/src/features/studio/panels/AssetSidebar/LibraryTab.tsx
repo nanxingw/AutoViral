@@ -206,21 +206,53 @@ function AssetTile({ item, index }: { item: AssetItem; index: number }) {
         />
       )}
       {item.kind === "video" && !hovered && (
-        <div
-          aria-hidden
-          style={{
-            position: "absolute",
-            inset: 0,
-            display: "grid",
-            placeItems: "center",
-            color: "var(--text-dimmer)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 18,
-            opacity: 0.55,
-          }}
-        >
-          ▶
-        </div>
+        <>
+          {/* Poster frame: <video preload=metadata> + seek to 0.1s renders the
+              first decoded frame WITHOUT holding a hardware decoder slot.
+              Unlike autoPlay/loop which keep readyState=4 (decoder pinned),
+              metadata-only + one-time seek lets the browser paint a single
+              frame and release the decode pipeline. Confirmed safe up to
+              ~30 simultaneous tiles in the 4-column grid. */}
+          <video
+            src={item.url}
+            muted
+            playsInline
+            preload="metadata"
+            onLoadedMetadata={(e) => {
+              const v = e.currentTarget;
+              try {
+                v.currentTime = Math.min(0.1, (v.duration || 1) * 0.05);
+              } catch {
+                /* some browsers throw if duration is unknown — ignore */
+              }
+            }}
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+              pointerEvents: "none",
+            }}
+          />
+          {/* Centered ▶ glyph as visual hint that hover plays the clip */}
+          <div
+            aria-hidden
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "grid",
+              placeItems: "center",
+              color: "rgba(255,255,255,0.85)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 22,
+              textShadow: "0 1px 4px rgba(0,0,0,0.6)",
+              pointerEvents: "none",
+            }}
+          >
+            ▶
+          </div>
+        </>
       )}
       {item.kind === "image" && (
         <img

@@ -51,23 +51,54 @@ export default function Works() {
           </span>
         </h2>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder={t("works.searchPlaceholder")}
-            aria-label={t("works.searchPlaceholder")}
+          <div
             style={{
-              width: 200,
-              padding: "5px 10px",
-              fontSize: 12,
-              borderRadius: 7,
-              border: "1px solid var(--glass-border)",
-              background: "var(--surface-0)",
-              color: "var(--text)",
-              fontFamily: "inherit",
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
             }}
-          />
+          >
+            <span
+              aria-hidden
+              style={{
+                position: "absolute",
+                left: 12,
+                fontSize: 13,
+                color: "var(--text-dimmer)",
+                pointerEvents: "none",
+                lineHeight: 1,
+              }}
+            >
+              ⌕
+            </span>
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t("works.searchPlaceholder")}
+              aria-label={t("works.searchPlaceholder")}
+              style={{
+                width: 320,
+                padding: "9px 14px 9px 32px",
+                fontSize: 13,
+                borderRadius: 8,
+                border: "1px solid var(--glass-border)",
+                background: "var(--surface-0)",
+                color: "var(--text)",
+                fontFamily: "inherit",
+                outline: "none",
+                transition: "border-color 0.15s, box-shadow 0.15s",
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = "var(--accent)";
+                e.target.style.boxShadow = "0 0 0 3px var(--accent-glow)";
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = "var(--glass-border)";
+                e.target.style.boxShadow = "none";
+              }}
+            />
+          </div>
           <div style={{ display: "flex", gap: 4 }}>
             {(["all", "draft", "published", "archived"] as const).map((f) => (
               <button

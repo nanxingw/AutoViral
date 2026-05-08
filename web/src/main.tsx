@@ -28,6 +28,7 @@ ReactDOM.createRoot(rootEl).render(
         <Routes>
           <Route element={<App />}>
             <Route index element={<Works />} />
+            <Route path="works" element={<Works />} />
             <Route path="explore" element={<Explore />} />
             <Route path="analytics" element={<Analytics />} />
             <Route path="studio/:workId" element={<Studio />} />
