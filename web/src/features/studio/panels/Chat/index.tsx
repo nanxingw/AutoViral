@@ -9,6 +9,11 @@ import { useEffect, useRef, useState, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { resolveAssetUrl } from "@/features/studio/composition/resolveAssetUrl";
+import {
+  useCheckpoints,
+  findRollbackTarget,
+  type Checkpoint,
+} from "@/features/checkpoints/useCheckpoints";
 import { QuickActions } from "./QuickActions";
 
 /** Render an `<img>` from agent markdown. If the src ends in a known video
@@ -157,6 +162,12 @@ export function ChatPanel({
   dispatchAction,
 }: ChatPanelProps) {
   const { send } = useChatSocket(workId, getViewerContext, dispatchAction);
+  // Pull the work's checkpoint list so each assistant text block can render
+  // a "rollback to this turn" chip when its turn produced a snapshot. We
+  // keep this enabled at all times — the route is cheap and the dropdown
+  // wants the same data, so caching across both is a win.
+  const { items: checkpointItems, restore: restoreCheckpoint, restoring } =
+    useCheckpoints(workId, true);
   const blocks = useChatStore((s) => s.blocks);
   const setBlocks = useChatStore((s) => s.setBlocks);
   const streaming = useChatStore((s) => s.streaming);
@@ -354,6 +365,9 @@ export function ChatPanel({
             block={b}
             onJumpToLocator={onJumpToLocator}
             workId={workId}
+            checkpoints={checkpointItems}
+            onRollback={(file) => void restoreCheckpoint(file)}
+            restoring={restoring}
           />
         ))}
         {streaming && (
@@ -490,12 +504,25 @@ function ChatBlock({
   block,
   onJumpToLocator,
   workId,
+  checkpoints,
+  onRollback,
+  restoring,
 }: {
   block: StreamBlock;
   onJumpToLocator: (data: LocatorData) => void;
   workId: string;
+  checkpoints: Checkpoint[];
+  onRollback: (file: string) => void;
+  restoring: string | null;
 }) {
   const { type } = block;
+  // Find the snapshot that captures this turn's yaml (if any). We only
+  // want this on assistant text blocks — user messages and tool chips
+  // don't represent agent output.
+  const rollbackTarget = useMemo(
+    () => (type === "text" ? findRollbackTarget(block.ts, checkpoints) : null),
+    [type, block.ts, checkpoints],
+  );
   // Memoise the markdown components so each block doesn't recreate the
   // closure on every store push (the chat stream pushes a lot).
   const mdComponents = useMemo(
@@ -647,7 +674,39 @@ function ChatBlock({
           ),
         )}
       </div>
-      {block.usage ? <UsageBadge usage={block.usage} /> : null}
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        {block.usage ? <UsageBadge usage={block.usage} /> : null}
+        {rollbackTarget ? (
+          <button
+            type="button"
+            onClick={() => onRollback(rollbackTarget.file)}
+            disabled={restoring === rollbackTarget.file}
+            title={`Roll back ${rollbackTarget.deliverable} to ${rollbackTarget.sha}`}
+            style={{
+              marginTop: 4,
+              padding: "2px 8px",
+              fontSize: 10,
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-dimmer)",
+              background: "transparent",
+              border: "1px solid var(--glass-border)",
+              borderRadius: 999,
+              cursor: restoring === rollbackTarget.file ? "wait" : "pointer",
+              letterSpacing: "0.04em",
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.color = "var(--accent)";
+              e.currentTarget.style.borderColor = "var(--accent)";
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.color = "var(--text-dimmer)";
+              e.currentTarget.style.borderColor = "var(--glass-border)";
+            }}
+          >
+            ↺ rollback to {rollbackTarget.sha}
+          </button>
+        ) : null}
+      </div>
       {block.questions && block.questions.length > 0 && (
         <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 4 }}>
           {block.questions.map((q, i) => (

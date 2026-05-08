@@ -1,15 +1,6 @@
 import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { apiFetch } from "@/lib/api";
 import { useT } from "@/i18n/useT";
-
-interface Checkpoint {
-  file: string;
-  deliverable: "carousel.yaml" | "composition.yaml";
-  ts: string;
-  sha: string;
-  bytes: number;
-}
+import { useCheckpoints, type Checkpoint } from "./useCheckpoints";
 
 /**
  * Header dropdown listing yaml snapshots for the current work. One click
@@ -23,40 +14,12 @@ interface Checkpoint {
  */
 export function CheckpointsMenu({ workId }: { workId: string }) {
   const [open, setOpen] = useState(false);
-  const [restoring, setRestoring] = useState<string | null>(null);
   const t = useT();
-  const qc = useQueryClient();
-
-  const list = useQuery({
-    queryKey: ["checkpoints", workId],
-    queryFn: () =>
-      apiFetch<{ items: Checkpoint[] }>(`/api/works/${workId}/checkpoints`),
-    enabled: open, // only fetch when dropdown is open
-    staleTime: 5_000,
-  });
-
-  const restore = async (file: string) => {
-    setRestoring(file);
-    try {
-      const res = await apiFetch<{ deliverable: string }>(
-        `/api/works/${workId}/checkpoints/restore`,
-        { method: "POST", body: { file } },
-      );
-      // Force the page to pick up the restored yaml.
-      qc.invalidateQueries({ queryKey: ["carousel", workId] });
-      qc.invalidateQueries({ queryKey: ["composition", workId] });
-      // Cheap refresh fallback for editor/studio that don't subscribe via
-      // react-query — the page-level useEffect that reads yaml on workId
-      // change will pick up new content on next mount, but for live reload
-      // we tell the user to expect it.
-      console.info("[checkpoints] restored", res.deliverable);
-      setOpen(false);
-      setTimeout(() => location.reload(), 80);
-    } catch (e) {
-      console.error("[checkpoints] restore failed", e);
-    } finally {
-      setRestoring(null);
-    }
+  const { items, isLoading, restore, restoring } = useCheckpoints(workId, open);
+  const list = { isLoading, data: { items } };
+  const onRestore = (file: string) => {
+    void restore(file);
+    setOpen(false);
   };
 
   return (
@@ -107,7 +70,7 @@ export function CheckpointsMenu({ workId }: { workId: string }) {
             <button
               key={c.file}
               type="button"
-              onClick={() => void restore(c.file)}
+              onClick={() => onRestore(c.file)}
               disabled={restoring === c.file}
               style={{
                 width: "100%",
