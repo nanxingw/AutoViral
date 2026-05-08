@@ -5,10 +5,58 @@ import { LocatorBlockView } from "@/features/chat/LocatorBlock";
 import { useComposition } from "@/features/studio/store";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/i18n/useT";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { resolveAssetUrl } from "@/features/studio/composition/resolveAssetUrl";
 import { QuickActions } from "./QuickActions";
+
+/** Render an `<img>` from agent markdown. If the src ends in a known video
+ *  extension, swap to a muted/looping `<video>` so the user can watch
+ *  generated clips inline without leaving the chat. */
+export function ChatInlineMedia({
+  src,
+  alt,
+}: {
+  src: string | undefined;
+  alt: string | undefined;
+}) {
+  if (!src) return null;
+  const isVideo = /\.(mp4|mov|webm)(?:[?#]|$)/i.test(src);
+  if (isVideo) {
+    return (
+      <video
+        src={src}
+        muted
+        loop
+        playsInline
+        controls
+        preload="metadata"
+        style={{
+          maxWidth: "100%",
+          maxHeight: 360,
+          borderRadius: 8,
+          display: "block",
+          margin: "6px 0",
+        }}
+      />
+    );
+  }
+  return (
+    <img
+      src={src}
+      alt={alt ?? ""}
+      loading="lazy"
+      style={{
+        maxWidth: "100%",
+        maxHeight: 360,
+        borderRadius: 8,
+        display: "block",
+        margin: "6px 0",
+      }}
+    />
+  );
+}
 
 const SKIP_TYPES = new Set(["step_divider"]); // D3 removed; ignore legacy markers
 
@@ -301,7 +349,12 @@ export function ChatPanel({
           </div>
         )}
         {blocks.map((b) => (
-          <ChatBlock key={b.id} block={b} onJumpToLocator={onJumpToLocator} />
+          <ChatBlock
+            key={b.id}
+            block={b}
+            onJumpToLocator={onJumpToLocator}
+            workId={workId}
+          />
         ))}
         {streaming && (
           <div
@@ -436,11 +489,27 @@ export function ChatPanel({
 function ChatBlock({
   block,
   onJumpToLocator,
+  workId,
 }: {
   block: StreamBlock;
   onJumpToLocator: (data: LocatorData) => void;
+  workId: string;
 }) {
   const { type } = block;
+  // Memoise the markdown components so each block doesn't recreate the
+  // closure on every store push (the chat stream pushes a lot).
+  const mdComponents = useMemo(
+    () => ({
+      img: (props: { src?: string; alt?: string }) => (
+        <ChatInlineMedia src={props.src} alt={props.alt} />
+      ),
+    }),
+    [],
+  );
+  const urlTransform = useMemo(
+    () => (url: string) => resolveAssetUrl(url, workId),
+    [workId],
+  );
 
   // User → right-side bubble
   if (type === "user") {
@@ -560,7 +629,12 @@ function ChatBlock({
       >
         {segmentTextWithLocators(block.text).map((seg, i) =>
           seg.kind === "markdown" ? (
-            <ReactMarkdown key={i} remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown
+              key={i}
+              remarkPlugins={[remarkGfm]}
+              urlTransform={urlTransform}
+              components={mdComponents}
+            >
               {seg.text}
             </ReactMarkdown>
           ) : (

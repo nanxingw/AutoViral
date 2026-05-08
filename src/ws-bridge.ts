@@ -140,6 +140,10 @@ export function buildSystemPrompt(
 
   示例："我把背景换成了 noir，并切到第二张让你看效果 \`<viewer-action type="select-slide" data='{"id":"s2"}' />\`"——用户的 viewer 会立刻跟过去。
 
+- **Asset inline preview**：当你刚刚通过 jimeng/dreamina/openrouter 等工具产出新的 image / video asset 后，用 markdown 图片语法 \`![alt](path)\` 把它嵌进回复——前端会在 chat 里直接 render 成可见的缩略图（视频会自动用 \`<video>\` 渲染，含 controls）。
+  - path 用相对 work 目录的 \`assets/images/foo.png\` 或 \`assets/clips/bar.mp4\` 即可，前端会自动 resolve 到 \`/api/works/<id>/assets/...\`
+  - 例："已生成第 3 张候选： ![v3](assets/images/v3.png)"——用户在 chat 里直接看图，不用切到 asset library。
+
 ## 风格约束
 - 中文优先；技术名词保留英文
 - 不向用户讲述"我现在在做哪个模块"——直接给结果或问具体问题
