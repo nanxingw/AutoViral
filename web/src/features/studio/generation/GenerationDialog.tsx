@@ -31,6 +31,7 @@ import {
   type AssetKind,
 } from "./dispatchGeneration";
 import { useChatSocket } from "@/features/chat/useChatSocket";
+import { useT } from "@/i18n/useT";
 
 // ─── Provider listing (Phase 8.4) ────────────────────────────────────────────
 
@@ -253,6 +254,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
   const chat = useChatSocket(workId);
   const queryClient = useQueryClient();
   const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const t = useT();
   const [isGenerating, setIsGenerating] = useState(false);
   const [elapsedSec, setElapsedSec] = useState(0);
 
@@ -336,7 +338,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
         await dispatchProviderGenerate();
       } catch (err) {
         setDispatchError(
-          err instanceof Error ? err.message : "provider dispatch failed",
+          err instanceof Error ? err.message : t("studio.generationDialog.errFallback"),
         );
         setIsGenerating(false);
         return; // keep dialog open so user sees the error
@@ -379,7 +381,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
               >
           <header style={headerStyle}>
             <Dialog.Title style={titleStyle}>
-              {isVariant ? "Create variant" : "Create asset"}
+              {isVariant ? t("studio.generationDialog.headerCreateVariant") : t("studio.generationDialog.headerCreateAsset")}
             </Dialog.Title>
             <Dialog.Description style={subtitleStyle}>
               {isVariant
@@ -503,7 +505,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
                   typically 70-180s for Seedance
                 </span>
                 <span style={progressTimerStyle}>
-                  Elapsed {formatElapsed(elapsedSec)}
+                  {t("studio.generationDialog.progressElapsed", { time: formatElapsed(elapsedSec) })}
                 </span>
               </div>
             </div>
@@ -529,7 +531,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
                 void onGenerate();
               }}
             >
-              {isGenerating ? "Generating…" : "Generate"}
+              {isGenerating ? t("studio.generationDialog.btnGenerating") : t("studio.generationDialog.btnGenerate")}
             </button>
           </footer>
               </motion.div>

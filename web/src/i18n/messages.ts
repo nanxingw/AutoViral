@@ -123,6 +123,14 @@ export const en = {
       missingWorkId: "Missing workId",
       serverFallbackMsg: "server error",
     },
+    generationDialog: {
+      headerCreateAsset: "Create asset",
+      headerCreateVariant: "Create variant",
+      btnGenerate: "Generate",
+      btnGenerating: "Generating…",
+      progressElapsed: "Elapsed {time}",
+      errFallback: "Generation provider dispatch failed",
+    },
   },
   works: {
     filter: {
@@ -352,6 +360,14 @@ export const zh: DeepShape<Messages> = {
       helpText: "自动保存已暂停以防覆盖损坏的数据。请手动检查 ~/.autoviral/works/{workId}/composition.yaml",
       missingWorkId: "缺少 workId",
       serverFallbackMsg: "服务端错误",
+    },
+    generationDialog: {
+      headerCreateAsset: "新建素材",
+      headerCreateVariant: "新建变体",
+      btnGenerate: "生成",
+      btnGenerating: "生成中…",
+      progressElapsed: "已用时 {time}",
+      errFallback: "生成 provider 调度失败",
     },
   },
   works: {
