@@ -45,7 +45,7 @@ export default function Works() {
 
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 18, gap: 16, flexWrap: "wrap" }}>
         <h2 style={{ fontSize: 22, margin: 0, fontWeight: 500, letterSpacing: "-0.02em" }}>
-          My <em style={{ fontFamily: "Instrument Serif", fontStyle: "italic" }}>Works</em>
+          {t("works.h2WorksLead")} <em style={{ fontFamily: "Instrument Serif", fontStyle: "italic" }}>{t("works.h2WorksEm")}</em>
           <span style={{ marginLeft: 12, fontFamily: "JetBrains Mono", fontSize: 11, color: "var(--text-dimmer)" }}>
             {filteredList.length}/{list.length}
           </span>
@@ -135,13 +135,36 @@ export default function Works() {
         >
           {t("works.emptySearch", { query: `"${query.trim()}"` })}
         </div>
+      ) : list.length === 0 ? (
+        // First-run empty: NewWorkCard is already visible above, but the
+        // bare grid below feels abandoned. Render a soft editorial
+        // pointer back up to the + card so new users have one obvious
+        // next step instead of a barren page.
+        <div
+          style={{
+            padding: "32px 0 8px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            color: "var(--text-dim)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+            lineHeight: 1.6,
+            borderTop: "1px dashed var(--glass-border)",
+          }}
+        >
+          <span style={{ color: "var(--text)", fontFamily: "Instrument Serif, var(--font-serif)", fontStyle: "italic", fontSize: 18 }}>
+            ↑ {t("works.emptyTitle")}
+          </span>
+          <span>{t("works.emptyBody")}</span>
+        </div>
       ) : (
         <WorksGrid works={filteredList} filter="all" />
       )}
 
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 18 }}>
         <h2 style={{ fontSize: 22, margin: 0, fontWeight: 500, letterSpacing: "-0.02em" }}>
-          Latest <em style={{ fontFamily: "Instrument Serif", fontStyle: "italic" }}>Inspiration</em>
+          {t("works.h2InspirationLead")} <em style={{ fontFamily: "Instrument Serif", fontStyle: "italic" }}>{t("works.h2InspirationEm")}</em>
         </h2>
       </div>
       <InsightRibbon insights={PLACEHOLDER_INSIGHTS} />
