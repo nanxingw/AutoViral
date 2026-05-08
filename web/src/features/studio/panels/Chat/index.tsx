@@ -4,6 +4,7 @@ import type { StreamBlock, LocatorData } from "@/features/chat/types";
 import { LocatorBlockView } from "@/features/chat/LocatorBlock";
 import { useComposition } from "@/features/studio/store";
 import { apiFetch } from "@/lib/api";
+import { useT } from "@/i18n/useT";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -79,6 +80,17 @@ export interface ChatPanelProps {
   onJumpToLocator?: (data: LocatorData) => void;
 }
 
+// CLI aliases → current 4.x family member. The backend stores a short alias
+// like "opus" / "sonnet" / "haiku" in config.model and passes it verbatim to
+// the Claude Code CLI (`--model opus`). The CLI resolves it to whatever the
+// latest version of that family is. Mirror that resolution in the UI badge so
+// it stops lying about the actual model behind the chat.
+const MODEL_ALIAS_LABEL: Record<string, string> = {
+  opus: "CLAUDE-OPUS-4.7",
+  sonnet: "CLAUDE-SONNET-4.6",
+  haiku: "CLAUDE-HAIKU-4.5",
+};
+
 export function ChatPanel({
   workId,
   quickActions,
@@ -90,7 +102,25 @@ export function ChatPanel({
   const streaming = useChatStore((s) => s.streaming);
   const [input, setInput] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [modelLabel, setModelLabel] = useState("CLAUDE-OPUS-4.7");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const t = useT();
+
+  // Pull the live model from the server once on mount. Falls back silently
+  // to the default opus label if the call fails.
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch<{ model?: string }>(`/api/status`)
+      .then((data) => {
+        if (cancelled) return;
+        const raw = (data.model ?? "opus").toLowerCase();
+        setModelLabel(MODEL_ALIAS_LABEL[raw] ?? raw.toUpperCase());
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Load chat history on mount / workId change. Without this, switching into a
   // work showed an empty panel even when chat.json had hundreds of past blocks.
@@ -162,7 +192,7 @@ export function ChatPanel({
           ✦
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.015em" }}>创作代理</div>
+          <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.015em" }}>{t("chat.agentName")}</div>
           <div
             style={{
               fontSize: 10,
@@ -171,7 +201,7 @@ export function ChatPanel({
               letterSpacing: "0.06em",
             }}
           >
-            CLAUDE-SONNET-4.5{streaming ? " · STREAMING" : ""}
+            {modelLabel}{streaming ? ` · ${t("chat.streaming")}` : ""}
           </div>
         </div>
         <span
@@ -182,7 +212,7 @@ export function ChatPanel({
             letterSpacing: "0.06em",
           }}
         >
-          {blocks.length} MSG
+          {blocks.length} {t("chat.msgCount")}
         </span>
       </div>
 
@@ -209,7 +239,7 @@ export function ChatPanel({
               padding: "20px 8px",
             }}
           >
-            LOADING HISTORY…
+            {t("chat.loadingHistory")}
           </div>
         )}
         {!loadingHistory && blocks.length === 0 && (
@@ -230,7 +260,7 @@ export function ChatPanel({
                 borderRadius: 999,
               }}
             >
-              · 跟它说一句话开始 ·
+              {t("chat.emptyPrompt")}
             </span>
           </div>
         )}
@@ -256,7 +286,7 @@ export function ChatPanel({
               <span className="pulse-dot" style={{ width: 5, height: 5, borderRadius: "50%", background: "var(--accent)", animationDelay: "0.4s" }} />
             </div>
             <span style={{ fontSize: 11, color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
-              thinking…
+              {t("chat.thinking")}
             </span>
           </div>
         )}
@@ -286,7 +316,7 @@ export function ChatPanel({
                 submit();
               }
             }}
-            placeholder="问点什么…"
+            placeholder={t("chat.composerPlaceholder")}
             rows={2}
             style={{
               background: "transparent",
@@ -311,7 +341,7 @@ export function ChatPanel({
                 letterSpacing: "0.06em",
               }}
             >
-              ⌘↵ SEND
+              {t("chat.sendHint")}
             </span>
             <div style={{ flex: 1 }} />
             <button

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import type Konva from "konva";
+import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useEditor } from "@/features/editor/store";
 import { makeEmptyCarousel } from "@/features/editor/types";
 import {
@@ -15,6 +16,31 @@ import { useExport } from "@/features/editor/hooks/useExport";
 import { ChatPanel } from "@/features/studio/panels/Chat";
 import { ChatQuickActions } from "@/features/editor/panels/ChatQuickActions";
 import type { LocatorData } from "@/features/chat/types";
+
+// Match Studio's resize-handle look so editor↔studio interaction stays uniform.
+const handleBaseStyle: React.CSSProperties = {
+  flex: "0 0 4px",
+  background: "var(--glass-border)",
+  transition: "background 160ms ease",
+};
+function HResizeHandle({ id }: { id: string }) {
+  return (
+    <PanelResizeHandle
+      id={id}
+      data-testid={`resize-handle-${id}`}
+      style={{ ...handleBaseStyle, cursor: "col-resize" }}
+    />
+  );
+}
+function VResizeHandle({ id }: { id: string }) {
+  return (
+    <PanelResizeHandle
+      id={id}
+      data-testid={`resize-handle-${id}`}
+      style={{ ...handleBaseStyle, cursor: "row-resize" }}
+    />
+  );
+}
 
 export default function Editor() {
   const { workId } = useParams();
@@ -86,14 +112,15 @@ export default function Editor() {
       className="editor-shell"
       data-work-id={workId}
       style={{
-        display: "grid",
-        gridTemplateColumns: "320px 1fr 340px",
-        gridTemplateRows: "56px 1fr 124px",
-        gridTemplateAreas: '"top top top" "left canvas right" "left tray right"',
+        display: "flex",
+        flexDirection: "column",
         height: "calc(100vh - 56px)",
+        gap: 8,
+        padding: 8,
+        boxSizing: "border-box",
       }}
     >
-      <div style={{ gridArea: "top" }}>
+      <div style={{ flex: "0 0 56px" }}>
         <TopBar
           workId={workId}
           savedAt={savedAt}
@@ -105,56 +132,83 @@ export default function Editor() {
           }}
         />
       </div>
-      <div
-        style={{
-          gridArea: "left",
-          borderRight: "1px solid var(--border, rgba(0,0,0,0.08))",
-          minHeight: 0,
-        }}
-      >
-        <ChatPanel
-          workId={workId}
-          quickActions={<ChatQuickActions />}
-          onJumpToLocator={(data: LocatorData) => {
-            // Carousel locator → jump to the named slide if provided.
-            const slideId = (data as { slideId?: string }).slideId;
-            if (slideId) useEditor.getState().setCurrentSlide(slideId);
-          }}
-        />
-      </div>
-      <div
-        style={{
-          gridArea: "canvas",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          overflow: "auto",
-          padding: 16,
-        }}
-      >
-        <Stage
-          ref={(s: Konva.Stage | null) => {
-            stageRef.current = s;
-            setStage(s);
-          }}
-        />
-      </div>
-      <div
-        style={{
-          gridArea: "right",
-          borderLeft: "1px solid var(--border, rgba(0,0,0,0.08))",
-          overflowY: "auto",
-        }}
-      >
-        <Inspector workId={workId} />
-      </div>
-      <div
-        style={{
-          gridArea: "tray",
-          borderTop: "1px solid var(--border, rgba(0,0,0,0.08))",
-        }}
-      >
-        <Filmstrip />
+
+      <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+        <PanelGroup
+          direction="horizontal"
+          autoSaveId="autoviral-editor-v1"
+          style={{ height: "100%", gap: 0 }}
+        >
+          <Panel id="chat" order={1} defaultSize={20} minSize={14} maxSize={32}>
+            <div
+              data-area="chat"
+              style={{ height: "100%", overflow: "hidden", minHeight: 0, borderRight: "1px solid var(--glass-border)" }}
+            >
+              <ChatPanel
+                workId={workId}
+                quickActions={<ChatQuickActions />}
+                onJumpToLocator={(data: LocatorData) => {
+                  const slideId = (data as { slideId?: string }).slideId;
+                  if (slideId) useEditor.getState().setCurrentSlide(slideId);
+                }}
+              />
+            </div>
+          </Panel>
+
+          <HResizeHandle id="chat-center" />
+
+          <Panel id="center" order={2} defaultSize={58} minSize={30}>
+            <PanelGroup
+              direction="vertical"
+              autoSaveId="autoviral-editor-center-v1"
+              style={{ height: "100%" }}
+            >
+              <Panel id="canvas" order={1} defaultSize={78} minSize={30}>
+                <div
+                  data-area="canvas"
+                  style={{
+                    height: "100%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    overflow: "auto",
+                    padding: 16,
+                    minHeight: 0,
+                  }}
+                >
+                  <Stage
+                    ref={(s: Konva.Stage | null) => {
+                      stageRef.current = s;
+                      setStage(s);
+                    }}
+                  />
+                </div>
+              </Panel>
+
+              <VResizeHandle id="canvas-tray" />
+
+              <Panel id="tray" order={2} defaultSize={22} minSize={12} maxSize={50}>
+                <div
+                  data-area="tray"
+                  style={{ height: "100%", overflow: "hidden", minHeight: 0, borderTop: "1px solid var(--glass-border)" }}
+                >
+                  <Filmstrip />
+                </div>
+              </Panel>
+            </PanelGroup>
+          </Panel>
+
+          <HResizeHandle id="center-aside" />
+
+          <Panel id="aside" order={3} defaultSize={22} minSize={14} maxSize={32}>
+            <div
+              data-area="aside"
+              style={{ height: "100%", overflowY: "auto", minHeight: 0, borderLeft: "1px solid var(--glass-border)" }}
+            >
+              <Inspector workId={workId} />
+            </div>
+          </Panel>
+        </PanelGroup>
       </div>
     </div>
   );

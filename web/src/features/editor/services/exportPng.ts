@@ -29,6 +29,11 @@ export function exportSinglePng(
  * Walks every slide in the current carousel, capturing each via the supplied
  * `capture` function, then triggers a download for each result. The caller is
  * responsible for swapping the active slide before each capture.
+ *
+ * Errors from `capture` (e.g. Konva stage not ready, tainted canvas, transient
+ * render hiccup) are caught per-slide so a single failure can't silently abort
+ * the rest of the iteration — the user gets every slide that *can* render
+ * plus a console warning for the ones that can't.
  */
 export async function exportAllPngs(
   carouselId: string,
@@ -37,11 +42,19 @@ export async function exportAllPngs(
   const slides = useEditor.getState().car?.slides ?? [];
   for (let i = 0; i < slides.length; i++) {
     const slide = slides[i];
-    const url = await capture(slide.id);
-    triggerDownload(
-      url,
-      `${carouselId}-${String(i + 1).padStart(2, "0")}.png`,
-    );
+    try {
+      const url = await capture(slide.id);
+      if (!url) {
+        console.warn(`[exportAllPngs] empty capture for slide ${slide.id}; skipping`);
+        continue;
+      }
+      triggerDownload(
+        url,
+        `${carouselId}-${String(i + 1).padStart(2, "0")}.png`,
+      );
+    } catch (err) {
+      console.warn(`[exportAllPngs] capture failed for slide ${slide.id}:`, err);
+    }
     await new Promise((r) => setTimeout(r, 150));
   }
 }

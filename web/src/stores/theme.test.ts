@@ -11,7 +11,7 @@ describe("useTheme store", () => {
   it("persists theme to localStorage and applies data-theme attribute", () => {
     useTheme.getState().setTheme("light");
     expect(document.documentElement.getAttribute("data-theme")).toBe("light");
-    expect(localStorage.getItem("av-theme")).toBe("light");
+    expect(localStorage.getItem("autoviral.theme")).toBe("light");
   });
 
   it("toggles between dark and light", () => {

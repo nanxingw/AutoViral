@@ -79,6 +79,42 @@ export const en = {
     filmstrip: {
       dragToReorder: "Drag to reorder",
       deleteSlide: "Delete slide {index}",
+      duplicateSlide: "Duplicate slide {index}",
+      addSlide: "Add slide",
+    },
+  },
+  studio: {
+    topBar: {
+      back: "Back",
+      versionTag: "Studio · v4.0",
+      saved: "SAVED",
+      unsaved: "UNSAVED",
+      exportFull: "Export",
+      moreExportOptions: "More export options",
+      quickProxyExport: "Quick proxy export",
+      toggleSettings: "Toggle settings",
+    },
+  },
+  chat: {
+    agentName: "Creative Agent",
+    streaming: "STREAMING",
+    msgCount: "MSG",
+    loadingHistory: "LOADING HISTORY…",
+    emptyPrompt: "· say hi to get started ·",
+    thinking: "thinking…",
+    composerPlaceholder: "ask anything…",
+    sendHint: "⌘↵ SEND",
+    quickActions: {
+      editor: {
+        rewriteHook: "Rewrite copy",
+        regenImage: "Regenerate this image",
+        swapPalette: "Swap palette",
+      },
+      studio: {
+        regenClip: "Regenerate this clip",
+        adjustRhythm: "Adjust rhythm",
+        swapBgm: "Swap BGM",
+      },
     },
   },
 } as const;
@@ -161,6 +197,42 @@ export const zh: DeepShape<Messages> = {
     filmstrip: {
       dragToReorder: "拖动可排序",
       deleteSlide: "删除第 {index} 页",
+      duplicateSlide: "复制第 {index} 页",
+      addSlide: "添加页面",
+    },
+  },
+  studio: {
+    topBar: {
+      back: "返回",
+      versionTag: "Studio · v4.0",
+      saved: "已保存",
+      unsaved: "未保存",
+      exportFull: "导出",
+      moreExportOptions: "更多导出选项",
+      quickProxyExport: "快速代理导出",
+      toggleSettings: "切换设置",
+    },
+  },
+  chat: {
+    agentName: "创作代理",
+    streaming: "流式中",
+    msgCount: "条",
+    loadingHistory: "正在加载历史…",
+    emptyPrompt: "· 跟它说一句话开始 ·",
+    thinking: "思考中…",
+    composerPlaceholder: "问点什么…",
+    sendHint: "⌘↵ 发送",
+    quickActions: {
+      editor: {
+        rewriteHook: "写一段引导文案",
+        regenImage: "重生成此图",
+        swapPalette: "换 palette",
+      },
+      studio: {
+        regenClip: "重生成此片段",
+        adjustRhythm: "调整节奏",
+        swapBgm: "换 BGM 风格",
+      },
     },
   },
 };

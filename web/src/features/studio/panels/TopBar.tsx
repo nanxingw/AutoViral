@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useComposition } from "../store";
 import { useNavigate } from "react-router-dom";
+import { useT } from "@/i18n/useT";
 import { enqueueRender, type EnqueueRenderOptions } from "../services/render";
 import { ExportProgress } from "../render-status/ExportProgress";
 
@@ -20,6 +21,7 @@ export function TopBar({
 }: TopBarProps) {
   const navigate = useNavigate();
   const comp = useComposition((s) => s.comp);
+  const t = useT();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [lastOpts, setLastOpts] = useState<EnqueueRenderOptions>({
     type: "full",
@@ -73,7 +75,7 @@ export function TopBar({
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
           <path d="M19 12H5M12 19l-7-7 7-7" />
         </svg>
-        Back
+        {t("studio.topBar.back")}
       </button>
 
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
@@ -101,7 +103,7 @@ export function TopBar({
             flexShrink: 0,
           }}
         >
-          Studio · v4.0
+          {t("studio.topBar.versionTag")}
         </span>
         <div style={{ width: 1, height: 14, background: "var(--divider)", margin: "0 8px", flexShrink: 0 }} />
         <span
@@ -128,7 +130,7 @@ export function TopBar({
           flexShrink: 0,
         }}
       >
-        {savedAt ? `SAVED · ${savedAt}` : "UNSAVED"}
+        {savedAt ? `${t("studio.topBar.saved")} · ${savedAt}` : t("studio.topBar.unsaved")}
       </span>
 
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
@@ -138,10 +140,10 @@ export function TopBar({
           type="button"
           data-bare
           onClick={onToggleSettings}
-          aria-label="Toggle settings"
+          aria-label={t("studio.topBar.toggleSettings")}
           aria-pressed={settingsOpen ? true : false}
           data-testid="settings-toggle"
-          title="Settings"
+          title={t("studio.topBar.toggleSettings")}
           style={{
             width: 32,
             height: 32,
@@ -188,14 +190,14 @@ export function TopBar({
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3" />
           </svg>
-          导出
+          {t("studio.topBar.exportFull")}
         </button>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <button
               type="button"
               data-bare
-              aria-label="More export options"
+              aria-label={t("studio.topBar.moreExportOptions")}
               style={{
                 padding: "7px 8px",
                 borderRadius: "0 9px 9px 0",
@@ -243,7 +245,7 @@ export function TopBar({
                   outline: "none",
                 }}
               >
-                Quick proxy export
+                {t("studio.topBar.quickProxyExport")}
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>

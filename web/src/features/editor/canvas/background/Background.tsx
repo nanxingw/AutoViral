@@ -52,6 +52,12 @@ function BgImage({
   width: number;
   height: number;
 }) {
-  const [img] = useImage(src, "anonymous");
+  // crossOrigin="anonymous" forces a CORS request — backend's /api/works/.../
+  // assets/* doesn't return Access-Control-Allow-Origin, so the image load
+  // fails silently and the canvas stays blank. Same-origin (via vite proxy)
+  // doesn't need CORS; drop the flag and let the browser use the simpler
+  // request mode. Costs are: canvas filters that read pixels (toDataURL,
+  // getImageData) will taint, but rendering itself is unaffected.
+  const [img] = useImage(src);
   return <KImage image={img} x={0} y={0} width={width} height={height} />;
 }

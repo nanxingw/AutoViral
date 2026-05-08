@@ -1,5 +1,6 @@
 import { useComposition } from "../../store";
 import { useChatSocket } from "@/features/chat/useChatSocket";
+import { useT } from "@/i18n/useT";
 import { useParams } from "react-router-dom";
 
 export function QuickActions() {
@@ -10,23 +11,26 @@ export function QuickActions() {
     .find((c) => c.id === sel);
   const { workId } = useParams();
   const { send } = useChatSocket(workId ?? null);
+  const t = useT();
   if (!clip) return null;
 
+  // Prompts stay Chinese — the agent's autoviral skill expects Mandarin
+  // for short-video flavor. Only labels are i18n'd.
   const actions: { label: string; prompt: string }[] = [];
   if (clip.kind === "video")
     actions.push(
       {
-        label: "重生成此片段",
+        label: t("chat.quickActions.studio.regenClip"),
         prompt: `请用 assets 能力为 clip ${clip.id} 产出新的视频内容`,
       },
       {
-        label: "调整节奏",
+        label: t("chat.quickActions.studio.adjustRhythm"),
         prompt: `请用 assembly 能力调整 clip ${clip.id} 周围的节奏`,
       },
     );
   if (clip.kind === "audio")
     actions.push({
-      label: "换 BGM 风格",
+      label: t("chat.quickActions.studio.swapBgm"),
       prompt: "请用 assets 能力提供 3 个不同风格的 BGM 候选",
     });
 

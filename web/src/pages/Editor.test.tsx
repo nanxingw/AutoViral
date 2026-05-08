@@ -49,8 +49,10 @@ function mount() {
 describe("Editor (post-A3 — Studio-aligned layout)", () => {
   it("renders the ChatPanel header in the left column", () => {
     mount();
-    // ChatPanel header shows the CLAUDE-SONNET eyebrow.
-    expect(screen.queryByText(/CLAUDE-SONNET/i)).toBeTruthy();
+    // ChatPanel header shows a Claude-family eyebrow. The default alias
+    // resolves to opus, but assert on the family root so the test stays
+    // robust as version numbers move.
+    expect(screen.queryByText(/CLAUDE-(OPUS|SONNET|HAIKU)/i)).toBeTruthy();
   });
 
   it("does NOT mount the legacy SlidesNav in the left column", () => {

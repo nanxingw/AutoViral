@@ -61,7 +61,15 @@ export function WorksGrid({ works, filter }: Props) {
                 className={styles.thumb}
                 src={cover}
                 alt=""
-                loading="lazy"
+                // `loading="lazy"` was preventing thumbnails from ever
+                // initiating a fetch — every <img> stayed at complete:false,
+                // naturalW:0 even though the card was visible in viewport
+                // and the URL returned 200. The IntersectionObserver Chrome
+                // uses for native lazy must not be triggering for our
+                // glass-styled cards. Eager is fine — works grid renders
+                // ~9 cards above the fold and the rest are needed once
+                // user scrolls anyway.
+                loading="eager"
                 style={{ objectFit: "cover" }}
               />
             ) : (

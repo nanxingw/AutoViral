@@ -11,7 +11,7 @@ export function ImageLayerNode({ layer }: { layer: ImageLayer }) {
   const updateLayer = useEditor((s) => s.updateLayer);
   const ref = useRef<Konva.Image | null>(null);
   const trRef = useRef<Konva.Transformer | null>(null);
-  const [img] = useImage(layer.src, "anonymous");
+  const [img] = useImage(layer.src);
 
   useEffect(() => {
     if (isSelected && ref.current && trRef.current) {

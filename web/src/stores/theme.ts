@@ -8,7 +8,10 @@ interface ThemeStore {
   toggle: () => void;
 }
 
-const STORAGE_KEY = "av-theme";
+const STORAGE_KEY = "autoviral.theme";
+// Legacy key from before naming was unified across stores; kept for one-time
+// migration so users don't lose their preference across this rename.
+const LEGACY_KEY = "av-theme";
 
 function applyToDOM(t: Theme) {
   if (typeof document !== "undefined") {
@@ -23,6 +26,13 @@ const initial: Theme = (() => {
   if (typeof localStorage !== "undefined") {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === "dark" || saved === "light") return saved;
+    // One-time migration from the legacy "av-theme" key.
+    const legacy = localStorage.getItem(LEGACY_KEY);
+    if (legacy === "dark" || legacy === "light") {
+      localStorage.setItem(STORAGE_KEY, legacy);
+      localStorage.removeItem(LEGACY_KEY);
+      return legacy;
+    }
   }
   if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: light)").matches) {
     return "light";

@@ -1,5 +1,6 @@
 import { useChatSocket } from "@/features/chat/useChatSocket";
 import { useEditor } from "../store";
+import { useT } from "@/i18n/useT";
 import { useParams } from "react-router-dom";
 
 /**
@@ -13,23 +14,27 @@ export function ChatQuickActions() {
   const sel = useEditor((s) => s.currentSlideId);
   const { workId } = useParams();
   const { send } = useChatSocket(workId ?? null);
+  const t = useT();
   if (!car || car.slides.length === 0) return null;
 
   const slide = car.slides.find((s) => s.id === sel) ?? car.slides[0];
   const slideIdx = car.slides.findIndex((s) => s.id === slide.id);
   const slideRef = `slide ${slideIdx + 1}`;
 
+  // Prompt strings stay Chinese intentionally — the upstream agent works
+  // best with Mandarin instructions for 小红书-flavored output. Only the
+  // user-visible button label is i18n'd.
   const actions: { label: string; prompt: string }[] = [
     {
-      label: "写一段引导文案",
+      label: t("chat.quickActions.editor.rewriteHook"),
       prompt: `请用 planning 能力为 ${slideRef} 写一段 30 字以内的引导文案，符合小红书图文调性。`,
     },
     {
-      label: "重生成此图",
+      label: t("chat.quickActions.editor.regenImage"),
       prompt: `请用 assets 能力为 ${slideRef} 重新生成背景图，保持当前风格但换一个角度。`,
     },
     {
-      label: "换 palette",
+      label: t("chat.quickActions.editor.swapPalette"),
       prompt: `请基于当前图文内容推荐 3 个不同的 palette 候选（mono / pastel / earth / noir / neon），说明每个的情绪取向。`,
     },
   ];

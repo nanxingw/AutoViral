@@ -38,8 +38,11 @@ describe("ChatPanel", () => {
     expect(screen.getAllByRole("listitem").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("renders the editorial header with CLAUDE-SONNET model label", async () => {
+  it("renders the editorial header with the live Claude model label", async () => {
+    // The mocked apiFetch returns no `model` field, so the alias resolver
+    // falls back to "opus" → CLAUDE-OPUS-4.7. Assert on the family slug so
+    // the test stays robust as the alias map evolves.
     render(<ChatPanel workId="w1" />);
-    expect(await screen.findByText(/CLAUDE-SONNET/i)).toBeTruthy();
+    expect(await screen.findByText(/CLAUDE-OPUS/i)).toBeTruthy();
   });
 });

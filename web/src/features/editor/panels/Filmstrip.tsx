@@ -29,6 +29,7 @@ function FilmThumb({
   const isCurrent = useEditor((s) => s.currentSlideId === slide.id);
   const setCurrent = useEditor((s) => s.setCurrentSlide);
   const removeSlide = useEditor((s) => s.removeSlide);
+  const duplicateSlide = useEditor((s) => s.duplicateSlide);
   const [hover, setHover] = useState(false);
   const t = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
@@ -143,6 +144,36 @@ function FilmThumb({
           ×
         </button>
       )}
+      <button
+        type="button"
+        aria-label={t("editor.filmstrip.duplicateSlide", { index: index + 1 })}
+        onClick={(e) => {
+          e.stopPropagation();
+          duplicateSlide(slide.id);
+        }}
+        onPointerDown={(e) => e.stopPropagation()}
+        style={{
+          position: "absolute",
+          top: 4,
+          right: 26,
+          width: 18,
+          height: 18,
+          display: "grid",
+          placeItems: "center",
+          background: "rgba(0,0,0,0.55)",
+          color: "rgba(255,255,255,0.95)",
+          border: "none",
+          borderRadius: "50%",
+          cursor: "pointer",
+          fontSize: 10,
+          lineHeight: 1,
+          padding: 0,
+          opacity: hover ? 1 : 0,
+          transition: "opacity 0.12s",
+        }}
+      >
+        ⎘
+      </button>
     </div>
   );
 }
@@ -150,6 +181,7 @@ function FilmThumb({
 export function Filmstrip() {
   const slides = useEditor((s) => s.car?.slides ?? []);
   const reorder = useEditor((s) => s.reorderSlides);
+  const addSlide = useEditor((s) => s.addSlide);
   const t = useT();
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -205,6 +237,37 @@ export function Filmstrip() {
                   canDelete={slides.length > 1}
                 />
               ))}
+              <button
+                type="button"
+                aria-label={t("editor.filmstrip.addSlide")}
+                onClick={addSlide}
+                style={{
+                  width: 80,
+                  height: 100,
+                  flexShrink: 0,
+                  display: "grid",
+                  placeItems: "center",
+                  background: "transparent",
+                  color: "var(--text-dimmer)",
+                  border: "1px dashed var(--glass-border)",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  fontSize: 24,
+                  fontWeight: 300,
+                  lineHeight: 1,
+                  transition: "color 0.15s, border-color 0.15s",
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = "var(--accent)";
+                  e.currentTarget.style.borderColor = "var(--accent)";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = "var(--text-dimmer)";
+                  e.currentTarget.style.borderColor = "var(--glass-border)";
+                }}
+              >
+                +
+              </button>
             </div>
           </SortableContext>
         </DndContext>

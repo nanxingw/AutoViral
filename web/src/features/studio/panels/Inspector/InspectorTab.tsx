@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { VariantSwitcher } from "./VariantSwitcher";
 import { KeyframePanel } from "./KeyframePanel";
+import { TextClipPanel } from "./TextClipPanel";
 import { DiveCanvas } from "../../dive/DiveCanvas";
 
 export function InspectorTab() {
@@ -30,6 +31,7 @@ export function InspectorTab() {
           Inspector
         </div>
         <VariantSwitcher />
+        <TextClipPanel />
         <KeyframePanel />
         <button
           type="button"
