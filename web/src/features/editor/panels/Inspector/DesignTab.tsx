@@ -23,6 +23,7 @@ const LAYOUT_OPTIONS: Array<{
 export function DesignTab() {
   const car = useEditor((s) => s.car);
   const updateGlobals = useEditor((s) => s.updateGlobals);
+  const applyLayout = useEditor((s) => s.applyLayout);
   const t = useT();
   if (!car) return null;
   const g = car.globals;
@@ -85,7 +86,7 @@ export function DesignTab() {
             <button
               key={l.id}
               type="button"
-              onClick={() => updateGlobals({ layout: l.id })}
+              onClick={() => applyLayout(l.id)}
               data-active={g.layout === l.id}
               style={chip(g.layout === l.id)}
             >

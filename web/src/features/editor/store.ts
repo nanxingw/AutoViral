@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { Carousel, Slide, Layer } from "./types";
 import { makeEmptySlide } from "./types";
+import { applyLayoutToLayer } from "./services/layout";
 
 interface EditorState {
   car: Carousel | null;
@@ -18,6 +19,11 @@ interface EditorState {
   removeLayer: (id: string) => void;
   setSelectionLayer: (id: string | null) => void;
   updateGlobals: (patch: Partial<Carousel["globals"]>) => void;
+  /** Switch the carousel's layout template AND reposition every text layer
+   *  on every slide to match. This is destructive to manual nudges — by
+   *  design: a layout button is supposed to *re-layout*, not just toggle a
+   *  flag. Falls back to plain updateGlobals when there's no carousel. */
+  applyLayout: (layout: Carousel["globals"]["layout"]) => void;
   updateSlideBg: (slideId: string, bg: Slide["bg"]) => void;
 }
 
@@ -108,6 +114,16 @@ export const useEditor = create<EditorState>()(
     updateGlobals: (patch) =>
       set((s) => {
         if (s.car) Object.assign(s.car.globals, patch);
+      }),
+    applyLayout: (layout) =>
+      set((s) => {
+        if (!s.car) return;
+        s.car.globals.layout = layout;
+        const w = s.car.width;
+        const h = s.car.height;
+        for (const sl of s.car.slides) {
+          sl.layers = sl.layers.map((l) => applyLayoutToLayer(l, layout, w, h));
+        }
       }),
     updateSlideBg: (slideId, bg) =>
       set((s) => {
