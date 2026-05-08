@@ -167,7 +167,7 @@ export default function Works() {
           {t("works.h2InspirationLead")} <em style={{ fontFamily: "Instrument Serif", fontStyle: "italic" }}>{t("works.h2InspirationEm")}</em>
         </h2>
       </div>
-      <InsightRibbon insights={PLACEHOLDER_INSIGHTS} />
+      <InsightRibbon insights={PLACEHOLDER_INSIGHTS} note={t("works.insightsRibbonNote")} />
     </main>
   );
 }

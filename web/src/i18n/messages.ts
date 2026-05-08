@@ -137,6 +137,7 @@ export const en = {
     h2InspirationEm: "Inspiration",
     emptyTitle: "Start your first work",
     emptyBody: "Click the + card above to begin. Carousel for image-text, Studio for short video.",
+    insightsRibbonNote: "Static placeholder cards — the analytics agent isn't producing per-user insights yet.",
   },
   checkpoints: {
     button: "History",
@@ -349,6 +350,7 @@ export const zh: DeepShape<Messages> = {
     h2InspirationEm: "灵感",
     emptyTitle: "开始你的第一个作品",
     emptyBody: "点击上方 + 卡片开始。图文走 Carousel，短视频走 Studio。",
+    insightsRibbonNote: "静态占位卡——数据分析 agent 尚未为你生成专属洞察。",
   },
   checkpoints: {
     button: "历史",
