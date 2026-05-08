@@ -16,6 +16,7 @@ import { useExport } from "@/features/editor/hooks/useExport";
 import { ChatPanel } from "@/features/studio/panels/Chat";
 import { ChatQuickActions } from "@/features/editor/panels/ChatQuickActions";
 import type { LocatorData } from "@/features/chat/types";
+import { buildEditorViewerContext } from "@/features/editor/services/viewerContext";
 
 // Match Studio's resize-handle look so editor↔studio interaction stays uniform.
 const handleBaseStyle: React.CSSProperties = {
@@ -150,6 +151,14 @@ export default function Editor() {
                 onJumpToLocator={(data: LocatorData) => {
                   const slideId = (data as { slideId?: string }).slideId;
                   if (slideId) useEditor.getState().setCurrentSlide(slideId);
+                }}
+                getViewerContext={() => {
+                  const s = useEditor.getState();
+                  return buildEditorViewerContext(
+                    s.car,
+                    s.currentSlideId,
+                    s.selectionLayerId,
+                  );
                 }}
               />
             </div>

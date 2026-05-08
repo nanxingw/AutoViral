@@ -10,6 +10,7 @@ import {
 import { PreviewPanel } from "@/features/studio/panels/PreviewPanel";
 import { Timeline } from "@/features/studio/panels/Timeline";
 import { ChatPanel } from "@/features/studio/panels/Chat";
+import { buildStudioViewerContext } from "@/features/studio/services/viewerContext";
 import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { TopBar } from "@/features/studio/panels/TopBar";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
@@ -147,7 +148,17 @@ export default function Studio() {
               className="glass"
               style={{ height: "100%", overflow: "hidden", minHeight: 0 }}
             >
-              <ChatPanel workId={workId} />
+              <ChatPanel
+                workId={workId}
+                getViewerContext={() => {
+                  const s = useComposition.getState();
+                  return buildStudioViewerContext(
+                    s.comp,
+                    s.selection,
+                    s.currentFrame,
+                  );
+                }}
+              />
             </div>
           </Panel>
 

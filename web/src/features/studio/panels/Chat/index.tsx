@@ -78,6 +78,11 @@ export interface ChatPanelProps {
   /** Called when the user activates an inline `<viewer-locator/>` block in an
    *  assistant message. Defaults to studio playhead/selection jump. */
   onJumpToLocator?: (data: LocatorData) => void;
+  /** Returns a `<viewer-context>...</viewer-context>` string describing the
+   *  current viewer selection / state. If provided, this is prepended to
+   *  every outgoing message so the agent knows what the user is looking at.
+   *  Pneuma clipcraft's extractContext, ported in (2026-05-08). */
+  getViewerContext?: () => string | null;
 }
 
 // CLI aliases → current 4.x family member. The backend stores a short alias
@@ -95,8 +100,9 @@ export function ChatPanel({
   workId,
   quickActions,
   onJumpToLocator = jumpToStudioComposition,
+  getViewerContext,
 }: ChatPanelProps) {
-  const { send } = useChatSocket(workId);
+  const { send } = useChatSocket(workId, getViewerContext);
   const blocks = useChatStore((s) => s.blocks);
   const setBlocks = useChatStore((s) => s.setBlocks);
   const streaming = useChatStore((s) => s.streaming);

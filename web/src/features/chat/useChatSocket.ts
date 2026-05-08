@@ -19,7 +19,21 @@ function asString(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : JSON.stringify(v);
 }
 
-export function useChatSocket(workId: string | null) {
+/**
+ * Optional callback that returns a `<viewer-context>...</viewer-context>`
+ * block summarising the user's current selection / playhead / page state.
+ * If provided, the block is prepended to every outgoing message before it
+ * hits the agent. The local chat bubble still shows only the user's typed
+ * text — the context envelope is for the agent's eyes, not the user's.
+ *
+ * Inspired by pneuma's ModeManifest.extractContext (clipcraft mode).
+ */
+export type GetViewerContext = () => string | null;
+
+export function useChatSocket(
+  workId: string | null,
+  getViewerContext?: GetViewerContext,
+) {
   const ref = useRef<ReconnectingWS | null>(null);
   const push = useChatStore((s) => s.push);
   const setBlocks = useChatStore((s) => s.setBlocks);
@@ -115,13 +129,18 @@ export function useChatSocket(workId: string | null) {
 
   return {
     send(text: string) {
+      // Optionally prepend a <viewer-context>...</viewer-context> envelope
+      // describing what the user has selected / where the playhead is. The
+      // agent reads it; the local bubble does not. Mirrors clipcraft's
+      // extractContext mechanism.
+      const ctx = getViewerContext?.() ?? null;
+      const wireText = ctx ? `${ctx}\n\n${text}` : text;
       // Bridge expects `{ action: "send", text }` — see ws-bridge.ts ws.on
       // 'message' handler. Sending `{ type: "user", text }` was a no-op.
-      ref.current?.send(JSON.stringify({ action: "send", text }));
-      // Optimistic local echo so the bubble appears instantly. The bridge
-      // will also broadcast a `block` event with type=user shortly after,
-      // which the receive side will append again — accept the duplicate
-      // for now; deduping needs an id-based merge that doesn't exist yet.
+      ref.current?.send(JSON.stringify({ action: "send", text: wireText }));
+      // Optimistic local echo: only the user's raw text, never the context
+      // envelope (otherwise every bubble would include a verbose tag the
+      // user neither typed nor cares about).
       push({ type: "user", text });
     },
   };
