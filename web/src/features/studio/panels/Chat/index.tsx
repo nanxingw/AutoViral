@@ -216,16 +216,26 @@ export function ChatPanel({
             {modelLabel}{streaming ? ` · ${t("chat.streaming")}` : ""}
           </div>
         </div>
-        <span
+        <div
           style={{
-            fontSize: 10,
-            fontFamily: "var(--font-mono)",
-            color: "var(--text-dimmer)",
-            letterSpacing: "0.06em",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-end",
+            gap: 2,
           }}
         >
-          {blocks.length} {t("chat.msgCount")}
-        </span>
+          <span
+            style={{
+              fontSize: 10,
+              fontFamily: "var(--font-mono)",
+              color: "var(--text-dimmer)",
+              letterSpacing: "0.06em",
+            }}
+          >
+            {blocks.length} {t("chat.msgCount")}
+          </span>
+          <SessionTotals blocks={blocks} />
+        </div>
       </div>
 
       {/* Messages */}
@@ -417,20 +427,9 @@ function ChatBlock({
     );
   }
 
-  // Tool use / result → compact mono chip
-  if (type === "tool_use" || type === "tool_result") {
-    const label = type === "tool_use" ? "▸" : "✓";
-    const text = (() => {
-      if (type === "tool_use") {
-        try {
-          const parsed = JSON.parse(block.text);
-          return parsed.skill ?? parsed.name ?? block.toolName ?? "tool";
-        } catch {
-          return block.toolName ?? block.text.slice(0, 50);
-        }
-      }
-      return block.text.split("\n")[0].slice(0, 80);
-    })();
+  // Tool use → compact mono chip with parameter preview
+  if (type === "tool_use") {
+    const summary = summarizeToolUse(block.toolName, block.text);
     return (
       <div
         style={{
@@ -442,20 +441,44 @@ function ChatBlock({
           padding: "4px 10px",
           fontSize: 10,
           fontFamily: "var(--font-mono)",
-          color: type === "tool_use" ? "var(--accent)" : "var(--text-dim)",
+          color: "var(--accent)",
           letterSpacing: "0.06em",
-          textTransform: "uppercase",
           background: "var(--surface-0)",
           border: "1px solid var(--glass-border)",
           borderRadius: 999,
         }}
       >
-        <span>{label}</span>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {text}
+        <span>▸</span>
+        <span
+          style={{
+            textTransform: "uppercase",
+            color: "var(--accent)",
+            flexShrink: 0,
+          }}
+        >
+          {summary.tool}
         </span>
+        {summary.detail ? (
+          <span
+            style={{
+              color: "var(--text-soft)",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              textTransform: "none",
+              letterSpacing: 0,
+            }}
+          >
+            {summary.detail}
+          </span>
+        ) : null}
       </div>
     );
+  }
+
+  // Tool result → click to expand the full body
+  if (type === "tool_result") {
+    return <ToolResultBlock text={block.text} />;
   }
 
   // Thinking → dimmed italic
@@ -531,6 +554,168 @@ function ChatBlock({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Header-corner running total of cost + tokens across this session's
+ * blocks. Sums the per-turn UsageBadge data — when the chat keeps using
+ * Opus this is the real cost the user is racking up. Updates live as new
+ * turn_complete events fold usage into the latest text block.
+ */
+function SessionTotals({ blocks }: { blocks: StreamBlock[] }) {
+  let cost = 0;
+  let inT = 0;
+  let outT = 0;
+  for (const b of blocks) {
+    if (!b.usage) continue;
+    cost += b.usage.costUsd ?? 0;
+    inT += b.usage.inputTokens ?? 0;
+    outT += b.usage.outputTokens ?? 0;
+  }
+  if (cost === 0 && inT === 0 && outT === 0) return null;
+  const tokK = (inT + outT) / 1000;
+  return (
+    <span
+      style={{
+        fontSize: 9,
+        fontFamily: "var(--font-mono)",
+        color: "var(--text-soft)",
+        letterSpacing: "0.04em",
+      }}
+      title={`session total: ${inT} in / ${outT} out tokens`}
+    >
+      Σ ${cost.toFixed(3)} · {tokK.toFixed(1)}k
+    </span>
+  );
+}
+
+/**
+ * Pretty-print a tool_use event. Returns (TOOL_NAME, optional detail).
+ * Tool names are uppercased CLI conventions; details are
+ * - READ / Read: basename of file_path
+ * - EDIT / Edit / Write / NotebookEdit: basename of file_path
+ * - BASH / Bash: first ~50 chars of `command`
+ * - GLOB / GREP: pattern (or pattern+path)
+ * - WEBFETCH / WEBSEARCH: url / query
+ * - default: collapsed JSON keys
+ */
+function summarizeToolUse(toolName: string | undefined, raw: string): {
+  tool: string;
+  detail: string | null;
+} {
+  let input: Record<string, unknown> = {};
+  try {
+    input = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    // not JSON — fall through with empty input
+  }
+  const name = (toolName ?? (input.name as string | undefined) ?? "tool").toString();
+  const norm = name.toLowerCase();
+  const basename = (p: unknown): string => {
+    if (typeof p !== "string") return "";
+    const m = p.match(/[^/\\]+$/);
+    return m ? m[0] : p;
+  };
+  if (norm === "read" || norm === "edit" || norm === "write" || norm === "notebookedit") {
+    return { tool: name, detail: basename(input.file_path ?? input.notebook_path) || null };
+  }
+  if (norm === "bash") {
+    const cmd = typeof input.command === "string" ? input.command : "";
+    return { tool: name, detail: cmd.length > 70 ? cmd.slice(0, 67) + "…" : cmd || null };
+  }
+  if (norm === "glob") {
+    const p = (input.pattern as string) ?? "";
+    return { tool: name, detail: p || null };
+  }
+  if (norm === "grep") {
+    const p = (input.pattern as string) ?? "";
+    const where = input.path ? ` in ${basename(input.path)}` : "";
+    return { tool: name, detail: (p + where) || null };
+  }
+  if (norm === "webfetch") {
+    return { tool: name, detail: (input.url as string) || null };
+  }
+  if (norm === "websearch") {
+    return { tool: name, detail: (input.query as string) || null };
+  }
+  // default: show first key:value as a hint
+  const k = Object.keys(input)[0];
+  if (k && typeof input[k] === "string") {
+    const v = input[k] as string;
+    return { tool: name, detail: v.length > 60 ? v.slice(0, 57) + "…" : v };
+  }
+  return { tool: name, detail: null };
+}
+
+/**
+ * Collapsed-by-default tool result. Click to toggle. Long bodies get
+ * truncated to ~600 chars with a "...show more" affordance — agent stdout
+ * can be 50+ lines and would otherwise wreck the chat scroll.
+ */
+function ToolResultBlock({ text }: { text: string }) {
+  const [open, setOpen] = useState(false);
+  const firstLine = text.split("\n")[0].slice(0, 80);
+  const lineCount = text.split("\n").length;
+  return (
+    <div style={{ alignSelf: "flex-start", maxWidth: "90%" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "4px 10px",
+          fontSize: 10,
+          fontFamily: "var(--font-mono)",
+          color: "var(--text-dim)",
+          letterSpacing: "0.06em",
+          background: "var(--surface-0)",
+          border: "1px solid var(--glass-border)",
+          borderRadius: 999,
+          cursor: "pointer",
+        }}
+        aria-expanded={open}
+      >
+        <span>{open ? "▾" : "✓"}</span>
+        <span
+          style={{
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            maxWidth: 280,
+          }}
+        >
+          {firstLine || "result"}
+        </span>
+        {lineCount > 1 && !open ? (
+          <span style={{ color: "var(--text-dimmer)", marginLeft: 4 }}>
+            +{lineCount - 1} lines
+          </span>
+        ) : null}
+      </button>
+      {open ? (
+        <pre
+          style={{
+            marginTop: 4,
+            padding: "8px 10px",
+            background: "var(--surface-0)",
+            border: "1px solid var(--glass-border)",
+            borderRadius: 8,
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            color: "var(--text-soft)",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            maxHeight: 360,
+            overflowY: "auto",
+          }}
+        >
+          {text.length > 4000 ? text.slice(0, 4000) + "\n…[truncated]" : text}
+        </pre>
+      ) : null}
     </div>
   );
 }
