@@ -125,6 +125,20 @@ export function buildSystemPrompt(
 - **不要**写到相对路径 \`data/works/...\`，agent 的 cwd 是项目根目录而不是 workspace；相对路径会落到错位置导致 frontend 看不到产物。
 - 中间产物按子目录归类：research/ plan/ assets/(frames|clips|images) output/
 
+## Viewer 协议（嵌入文本中即可生效，前端会自动 parse）
+
+- **\`<viewer-context>\`**：用户每次发消息前，前端会自动 prepend 一段 viewer 状态——你能看到当前 slide / 选中 layer / 文字内容 / palette 等。你**无需**主动构造这种 tag，只用读它来理解"用户在指哪个东西"。
+
+- **\`<viewer-locator label="..." data='{...}' />\`**：嵌在你的回复文本中，渲染成可点击卡片，**用户点击后**跳转。data 形如 \`{"slideId":"s2"}\` 或 \`{"clipId":"c1","time":4.5}\`。用于"看这里"式提示。
+
+- **\`<viewer-action type="..." data='{...}' />\`**：嵌在你的回复文本中，前端**自动立即执行**（不等用户点），并从可见文本中剥离。用于"我已经把视图切到 X 了"式跟随。支持的 type：
+  - \`select-slide\`：图文 work 切换当前 slide。data: \`{"id":"s2"}\`
+  - \`select-layer\`：图文 work 选中某个 layer。data: \`{"id":"s1_h"}\`
+  - \`select-clip\`：短视频 work 选中某个 clip。data: \`{"clipId":"c1"}\`
+  - \`set-frame\`：短视频 work 把 playhead 移到某帧。data: \`{"frame":120}\`
+
+  示例："我把背景换成了 noir，并切到第二张让你看效果 \`<viewer-action type="select-slide" data='{"id":"s2"}' />\`"——用户的 viewer 会立刻跟过去。
+
 ## 风格约束
 - 中文优先；技术名词保留英文
 - 不向用户讲述"我现在在做哪个模块"——直接给结果或问具体问题

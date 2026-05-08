@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { ReconnectingWS } from "@/lib/ws";
 import { useChatStore } from "./store";
-import type { StreamBlock, StreamBlockType } from "./types";
+import type { StreamBlock, StreamBlockType, ViewerAction } from "./types";
+import { extractViewerActions } from "./types";
 
 // The bridge speaks `{ event, data, timestamp }` frames in both directions —
 // see src/ws-bridge.ts. Frontend used to assume a flat `{ type, text }`
@@ -30,9 +31,17 @@ function asString(v: unknown): string {
  */
 export type GetViewerContext = () => string | null;
 
+/** Handler called for every `<viewer-action/>` tag the agent emits. The hook
+ *  strips the tag from the visible text and invokes this with the parsed
+ *  payload. Editors that don't care about a particular action type just
+ *  ignore it. Mirrors pneuma's actionRequest dispatcher (clipcraft's Plan
+ *  5+). */
+export type DispatchViewerAction = (action: ViewerAction) => void;
+
 export function useChatSocket(
   workId: string | null,
   getViewerContext?: GetViewerContext,
+  dispatchAction?: DispatchViewerAction,
 ) {
   const ref = useRef<ReconnectingWS | null>(null);
   const push = useChatStore((s) => s.push);
@@ -71,7 +80,15 @@ export function useChatSocket(
             break;
           }
           case "assistant_text": {
-            push({ type: "text", text: asString(data.text) });
+            // Strip <viewer-action/> tags + dispatch them before the text
+            // hits the chat bubble. Otherwise users see raw tags inline,
+            // and the action gets lost.
+            const raw = asString(data.text);
+            const { cleaned, actions } = extractViewerActions(raw);
+            for (const a of actions) {
+              try { dispatchAction?.(a); } catch { /* swallow handler errors */ }
+            }
+            push({ type: "text", text: cleaned });
             break;
           }
           case "assistant_thinking": {

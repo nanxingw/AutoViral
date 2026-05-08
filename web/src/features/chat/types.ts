@@ -49,3 +49,48 @@ export function parseLocatorTag(
     return null;
   }
 }
+
+// ── Viewer-Action protocol (port of pneuma's actionRequest) ──────────────────
+// Agent emits `<viewer-action type="..." data='{...}' />` inside its text;
+// the chat layer auto-dispatches the action on receive and strips the tag
+// from the visible bubble. Distinct from <viewer-locator/>: locators wait
+// for a user click; actions fire immediately. Use for "I switched you to
+// slide 2" / "playing from 4.5s" / "selected the headline" follow-through.
+export type ViewerActionType =
+  | "select-slide"
+  | "select-layer"
+  | "select-clip"
+  | "set-frame";
+
+export interface ViewerAction {
+  type: ViewerActionType;
+  /** Action payload — id / time / track depending on type. JSON in the tag. */
+  data: Record<string, unknown>;
+}
+
+const ACTION_RX_GLOBAL =
+  /<viewer-action\s+type\s*=\s*(?:"([^"]+)"|'([^']+)')\s+data\s*=\s*(?:"([^"]+)"|'([^']+)')\s*\/?>/gi;
+
+/** Parse all `<viewer-action/>` tags in a text fragment. Returns the
+ *  cleaned text (with every tag stripped) plus the list of actions found,
+ *  in document order. Bad JSON in the data attribute drops just that one
+ *  tag — the surrounding text is preserved. */
+export function extractViewerActions(text: string): {
+  cleaned: string;
+  actions: ViewerAction[];
+} {
+  const actions: ViewerAction[] = [];
+  const cleaned = text.replace(ACTION_RX_GLOBAL, (_match, t1, t2, d1, d2) => {
+    const type = (t1 ?? t2 ?? "") as ViewerActionType;
+    const dataRaw = d1 ?? d2 ?? "{}";
+    try {
+      const data = JSON.parse(dataRaw) as Record<string, unknown>;
+      actions.push({ type, data });
+    } catch {
+      // bad JSON — skip this action but still strip the tag (otherwise it
+      // sits in the user's bubble looking like garbage).
+    }
+    return "";
+  });
+  return { cleaned: cleaned.replace(/[ \t]{2,}/g, " ").trim(), actions };
+}

@@ -160,6 +160,17 @@ export default function Editor() {
                     s.selectionLayerId,
                   );
                 }}
+                dispatchAction={(action) => {
+                  const s = useEditor.getState();
+                  if (action.type === "select-slide") {
+                    const id = action.data.id;
+                    if (typeof id === "string") s.setCurrentSlide(id);
+                  } else if (action.type === "select-layer") {
+                    const id = action.data.id;
+                    if (typeof id === "string") s.setSelectionLayer(id);
+                  }
+                  // editor ignores select-clip / set-frame
+                }}
               />
             </div>
           </Panel>

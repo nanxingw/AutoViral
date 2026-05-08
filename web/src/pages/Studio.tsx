@@ -158,6 +158,17 @@ export default function Studio() {
                     s.currentFrame,
                   );
                 }}
+                dispatchAction={(action) => {
+                  const s = useComposition.getState();
+                  if (action.type === "select-clip") {
+                    const id = action.data.clipId ?? action.data.id;
+                    if (typeof id === "string") s.setSelection(id);
+                  } else if (action.type === "set-frame") {
+                    const f = action.data.frame;
+                    if (typeof f === "number") s.setFrame(f);
+                  }
+                  // studio ignores select-slide / select-layer
+                }}
               />
             </div>
           </Panel>

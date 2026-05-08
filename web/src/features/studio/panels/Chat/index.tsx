@@ -83,6 +83,11 @@ export interface ChatPanelProps {
    *  every outgoing message so the agent knows what the user is looking at.
    *  Pneuma clipcraft's extractContext, ported in (2026-05-08). */
   getViewerContext?: () => string | null;
+  /** Called for every `<viewer-action/>` tag the agent emits — the chat
+   *  layer strips the tag from the visible text before this fires. The
+   *  page should react by selecting / seeking / focusing as the action
+   *  describes. Mirrors pneuma's actionRequest. */
+  dispatchAction?: (action: import("@/features/chat/types").ViewerAction) => void;
 }
 
 // CLI aliases → current 4.x family member. The backend stores a short alias
@@ -101,8 +106,9 @@ export function ChatPanel({
   quickActions,
   onJumpToLocator = jumpToStudioComposition,
   getViewerContext,
+  dispatchAction,
 }: ChatPanelProps) {
-  const { send } = useChatSocket(workId, getViewerContext);
+  const { send } = useChatSocket(workId, getViewerContext, dispatchAction);
   const blocks = useChatStore((s) => s.blocks);
   const setBlocks = useChatStore((s) => s.setBlocks);
   const streaming = useChatStore((s) => s.streaming);
