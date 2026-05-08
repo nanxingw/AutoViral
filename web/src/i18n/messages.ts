@@ -23,6 +23,13 @@ export const en = {
     body: "The URL you followed doesn't match anything in AutoViral.",
     backHome: "← Back to Works",
   },
+  errorBoundary: {
+    title: "Something broke unexpectedly",
+    body: "The page hit a render error. Reloading usually clears it; if it keeps happening, the message below helps debug.",
+    btnReload: "Reload page",
+    btnHome: "← Back to Works",
+    detailsLabel: "Error details",
+  },
   topnav: {
     works: "Works · 作品",
     explore: "Explore · 灵感",
@@ -298,6 +305,13 @@ export const zh: DeepShape<Messages> = {
     title: "走错路了",
     body: "你访问的 URL 在 AutoViral 中找不到对应的页面。",
     backHome: "← 返回作品",
+  },
+  errorBoundary: {
+    title: "页面意外崩溃",
+    body: "渲染时出错了。刷新通常能恢复；如果反复出现，下方信息可以帮助排查。",
+    btnReload: "刷新页面",
+    btnHome: "← 返回作品",
+    detailsLabel: "错误详情",
   },
   topnav: {
     works: "作品",
