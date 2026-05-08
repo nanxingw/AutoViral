@@ -8,6 +8,7 @@ import Explore from "./pages/Explore";
 import Analytics from "./pages/Analytics";
 import Studio from "./pages/Studio";
 import Editor from "./pages/Editor";
+import NotFound from "./pages/NotFound";
 import "./styles/tokens.css";
 import "./styles/globals.css";
 import "./styles/typography.css";
@@ -33,6 +34,7 @@ ReactDOM.createRoot(rootEl).render(
             <Route path="analytics" element={<Analytics />} />
             <Route path="studio/:workId" element={<Studio />} />
             <Route path="editor/:workId" element={<Editor />} />
+            <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>
       </BrowserRouter>

@@ -17,6 +17,12 @@ export const en = {
     saved: "Saved",
     unsaved: "Unsaved",
   },
+  notFound: {
+    code: "404",
+    title: "This page took a wrong turn",
+    body: "The URL you followed doesn't match anything in AutoViral.",
+    backHome: "← Back to Works",
+  },
   topnav: {
     works: "Works · 作品",
     explore: "Explore · 灵感",
@@ -286,6 +292,12 @@ export const zh: DeepShape<Messages> = {
     loading: "加载中…",
     saved: "已保存",
     unsaved: "未保存",
+  },
+  notFound: {
+    code: "404",
+    title: "走错路了",
+    body: "你访问的 URL 在 AutoViral 中找不到对应的页面。",
+    backHome: "← 返回作品",
   },
   topnav: {
     works: "作品",
