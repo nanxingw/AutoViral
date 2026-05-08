@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from "react-router-dom";
 import { TopNav } from "@/ui/TopNav";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
+import { ToastViewport } from "@/components/ToastViewport";
 
 export default function App() {
   // Reset the boundary on route change so a previously-crashed page
@@ -15,6 +16,12 @@ export default function App() {
       <ErrorBoundary key={location.pathname}>
         <Outlet />
       </ErrorBoundary>
+      {/* R32: global toast layer — last-resort surfacing of unhandled
+          promise rejections that escape every other catch (R19-R24
+          inline UIs cover the known paths). Mounted outside the route
+          boundary so a route crash + unhandled rejection both still
+          show toasts. */}
+      <ToastViewport />
     </>
   );
 }

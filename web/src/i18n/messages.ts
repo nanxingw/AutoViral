@@ -43,6 +43,9 @@ export const en = {
     body: "The URL you followed doesn't match anything in AutoViral.",
     backHome: "← Back to Works",
   },
+  toast: {
+    viewportAriaLabel: "Notifications",
+  },
   errorBoundary: {
     title: "Something broke unexpectedly",
     body: "The page hit a render error. Reloading usually clears it; if it keeps happening, the message below helps debug.",
@@ -392,6 +395,9 @@ export const zh: DeepShape<Messages> = {
     title: "走错路了",
     body: "你访问的 URL 在 AutoViral 中找不到对应的页面。",
     backHome: "← 返回作品",
+  },
+  toast: {
+    viewportAriaLabel: "通知",
   },
   errorBoundary: {
     title: "页面意外崩溃",
