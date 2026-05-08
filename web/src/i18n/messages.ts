@@ -94,6 +94,13 @@ export const en = {
       quickProxyExport: "Quick proxy export",
       toggleSettings: "Toggle settings",
     },
+    assetSearch: {
+      placeholder: "Search assets…",
+      placeholderDisabled: "Semantic search unavailable",
+      stubInstall: "Semantic search unavailable",
+      btnBuild: "Build index",
+      btnBuilding: "Building…",
+    },
   },
   works: {
     filter: {
@@ -285,6 +292,13 @@ export const zh: DeepShape<Messages> = {
       moreExportOptions: "更多导出选项",
       quickProxyExport: "快速代理导出",
       toggleSettings: "切换设置",
+    },
+    assetSearch: {
+      placeholder: "搜索素材…",
+      placeholderDisabled: "语义搜索不可用",
+      stubInstall: "语义搜索不可用",
+      btnBuild: "构建索引",
+      btnBuilding: "构建中…",
     },
   },
   works: {

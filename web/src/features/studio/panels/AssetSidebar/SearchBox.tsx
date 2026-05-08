@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useT } from "@/i18n/useT";
 import {
   useClipIndexStatus,
   useClipSearch,
@@ -24,6 +25,7 @@ interface Props {
  *   5. Results list with score chips.
  */
 export function SearchBox({ workId, debounceMs = 300 }: Props) {
+  const t = useT();
   const [q, setQ] = useState("");
   const debounced = useDebouncedValue(q, debounceMs);
 
@@ -54,7 +56,7 @@ export function SearchBox({ workId, debounceMs = 300 }: Props) {
       <input
         type="text"
         aria-label="Search assets"
-        placeholder={inputDisabled ? "Semantic search unavailable" : "Search assets…"}
+        placeholder={inputDisabled ? t("studio.assetSearch.placeholderDisabled") : t("studio.assetSearch.placeholder")}
         value={q}
         onChange={(e) => setQ(e.target.value)}
         disabled={inputDisabled}
@@ -87,7 +89,7 @@ export function SearchBox({ workId, debounceMs = 300 }: Props) {
           }}
         >
           <div style={{ color: "var(--text-dim)", marginBottom: 2 }}>
-            Semantic search unavailable
+            {t("studio.assetSearch.stubInstall")}
           </div>
           <code style={{ fontSize: 10 }}>
             pip install -r skills/autoviral/modules/research/scripts/clip_index/requirements.txt
@@ -116,7 +118,7 @@ export function SearchBox({ workId, debounceMs = 300 }: Props) {
             cursor: build.isPending ? "default" : "pointer",
           }}
         >
-          {build.isPending ? "Building…" : "Build index"}
+          {build.isPending ? t("studio.assetSearch.btnBuilding") : t("studio.assetSearch.btnBuild")}
         </button>
       )}
 
