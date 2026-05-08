@@ -124,6 +124,7 @@ export const en = {
       stubInstall: "Semantic search unavailable",
       btnBuild: "Build index",
       btnBuilding: "Building…",
+      buildFailed: "Index build failed: {msg}",
     },
     variantSwitcher: {
       emptyNoSelection: "No clip selected — pick one in the timeline",
@@ -217,6 +218,7 @@ export const en = {
     empty: "No snapshots yet — they appear after each agent turn.",
     restoreLabel: "Restore",
     restored: "Restored {deliverable}",
+    restoreFailed: "Restore failed: {msg}",
   },
   explore: {
     collectTrends: "Refresh trends now",
@@ -414,6 +416,7 @@ export const zh: DeepShape<Messages> = {
       stubInstall: "语义搜索不可用",
       btnBuild: "构建索引",
       btnBuilding: "构建中…",
+      buildFailed: "构建索引失败：{msg}",
     },
     variantSwitcher: {
       emptyNoSelection: "未选中片段——在时间轴上点击一个片段",
@@ -507,6 +510,7 @@ export const zh: DeepShape<Messages> = {
     empty: "暂无快照——agent 每完成一次对话会自动保存一份。",
     restoreLabel: "恢复",
     restored: "已恢复 {deliverable}",
+    restoreFailed: "恢复失败：{msg}",
   },
   explore: {
     collectTrends: "立即采集 Trends",

@@ -21,6 +21,10 @@ export interface Checkpoint {
  */
 export function useCheckpoints(workId: string, enabled = true) {
   const [restoring, setRestoring] = useState<string | null>(null);
+  // R22: previously restore failures only console.error'd — user saw the
+  // spinner clear and nothing else, no clue why the rollback didn't take.
+  // Surface as state so the dropdown can render an inline error.
+  const [restoreError, setRestoreError] = useState<string | null>(null);
   const qc = useQueryClient();
   const list = useQuery({
     queryKey: ["checkpoints", workId],
@@ -32,6 +36,7 @@ export function useCheckpoints(workId: string, enabled = true) {
 
   const restore = async (file: string) => {
     setRestoring(file);
+    setRestoreError(null);
     try {
       await apiFetch<{ deliverable: string }>(
         `/api/works/${workId}/checkpoints/restore`,
@@ -42,6 +47,7 @@ export function useCheckpoints(workId: string, enabled = true) {
       setTimeout(() => location.reload(), 80);
     } catch (e) {
       console.error("[checkpoints] restore failed", e);
+      setRestoreError(e instanceof Error ? e.message : String(e));
     } finally {
       setRestoring(null);
     }
@@ -52,6 +58,8 @@ export function useCheckpoints(workId: string, enabled = true) {
     isLoading: list.isLoading,
     restore,
     restoring,
+    restoreError,
+    clearRestoreError: () => setRestoreError(null),
   };
 }
 

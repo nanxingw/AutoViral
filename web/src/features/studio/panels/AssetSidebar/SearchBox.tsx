@@ -99,27 +99,51 @@ export function SearchBox({ workId, debounceMs = 300 }: Props) {
 
       {/* No-index stub: surface the build button */}
       {!isInstallStub && (isNoIndex || !status.data || statusStub) && (
-        <button
-          type="button"
-          data-bare
-          onClick={() => build.mutate()}
-          disabled={build.isPending}
-          style={{
-            alignSelf: "flex-start",
-            padding: "5px 12px",
-            fontSize: 10,
-            fontFamily: "var(--font-mono)",
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-            background: build.isPending ? "transparent" : "var(--accent-glow)",
-            color: build.isPending ? "var(--text-dim)" : "var(--accent-hi)",
-            border: "1px solid var(--accent)",
-            borderRadius: 999,
-            cursor: build.isPending ? "default" : "pointer",
-          }}
-        >
-          {build.isPending ? t("studio.assetSearch.btnBuilding") : t("studio.assetSearch.btnBuild")}
-        </button>
+        <>
+          <button
+            type="button"
+            data-bare
+            onClick={() => build.mutate()}
+            disabled={build.isPending}
+            style={{
+              alignSelf: "flex-start",
+              padding: "5px 12px",
+              fontSize: 10,
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              background: build.isPending ? "transparent" : "var(--accent-glow)",
+              color: build.isPending ? "var(--text-dim)" : "var(--accent-hi)",
+              border: "1px solid var(--accent)",
+              borderRadius: 999,
+              cursor: build.isPending ? "default" : "pointer",
+            }}
+          >
+            {build.isPending ? t("studio.assetSearch.btnBuilding") : t("studio.assetSearch.btnBuild")}
+          </button>
+          {/* R22: build.error from React Query was previously unused — failures
+              were silent. Surface as an inline alert so users know to retry
+              instead of staring at an unchanged button. */}
+          {build.isError && (
+            <div
+              role="alert"
+              style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: "var(--status-error, #d4756c)",
+                padding: "4px 0",
+                lineHeight: 1.5,
+              }}
+            >
+              {t("studio.assetSearch.buildFailed", {
+                msg:
+                  build.error instanceof Error
+                    ? build.error.message
+                    : String(build.error),
+              })}
+            </div>
+          )}
+        </>
       )}
 
       {/* Loading indicator while a search is in flight */}

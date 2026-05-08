@@ -16,11 +16,16 @@ import { useCheckpoints } from "./useCheckpoints";
 export function CheckpointsMenu({ workId }: { workId: string }) {
   const [open, setOpen] = useState(false);
   const t = useT();
-  const { items, isLoading, restore, restoring } = useCheckpoints(workId, open);
+  const { items, isLoading, restore, restoring, restoreError } =
+    useCheckpoints(workId, open);
   const list = { isLoading, data: { items } };
+  // R22: previously this called `setOpen(false)` immediately on click — but
+  // if restore later rejected, the dropdown was already closed and the user
+  // never saw the error. Now we keep it open during the request so:
+  //   - success path: page reload erases dropdown anyway
+  //   - failure path: dropdown stays open, restoreError renders inline
   const onRestore = (file: string) => {
     void restore(file);
-    setOpen(false);
   };
 
   // Anchor + portal: previously the dropdown was `position:absolute` inside
@@ -144,6 +149,24 @@ export function CheckpointsMenu({ workId }: { workId: string }) {
               </span>
             </button>
           ))}
+          {restoreError && (
+            <div
+              role="alert"
+              style={{
+                padding: "8px 10px",
+                marginTop: 4,
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                color: "var(--status-error, #d4756c)",
+                background: "rgba(212, 117, 108, 0.08)",
+                border: "1px solid var(--status-error, #d4756c)",
+                borderRadius: 4,
+                lineHeight: 1.5,
+              }}
+            >
+              {t("checkpoints.restoreFailed", { msg: restoreError })}
+            </div>
+          )}
         </div>,
         document.body,
       )}
