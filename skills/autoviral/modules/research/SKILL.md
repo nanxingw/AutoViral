@@ -1,6 +1,8 @@
 ---
 name: autoviral-research
-description: Use when the user wants references — viral patterns, competitor analysis, audience signals, hot topics on a specific platform. Do NOT use as a "first step"; if the user already has a brief, skip directly to planning or assets.
+description: Use when the user wants facts — current trending topics, competitor video deconstruction, creator analytics, audience-signal data. Do NOT use as a default "first step"; if the user already has a creative direction, skip to planning or assets. Do NOT produce creative judgements ("这条值得做") — that lives in taste/. Output is structured facts only, never recommendations.
+type: capability
+priority: flexible
 ---
 
 # Research Module

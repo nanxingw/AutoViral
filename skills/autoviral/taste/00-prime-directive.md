@@ -1,7 +1,8 @@
 ---
 name: prime-directive
-description: AutoViral 创作的第一原则——内容质量是唯一北极星，平台不是
+description: Use as the first read before ANY creative decision and as the final filter before ANY delivery — establishes "content quality is the only north star, platform is not" and forbids platform-personality reasoning ("X 平台用户喜欢…"). Consult before every prompt, every cut, every export. Rigid; non-negotiable; not a reference to "look up when in doubt" — already-internalized language.
 type: taste
+priority: rigid
 ---
 
 # Prime Directive

@@ -1,6 +1,8 @@
 ---
 name: autoviral-assets
-description: Use when the user wants generation — images, video clips, music, posters, fonts. Pick this directly when the user has a clear visual idea and a brief; you do not need a planning pass first. Do NOT use for editing already-generated material — go to assembly.
+description: Use when the user wants raw generation — images, video clips, music, posters. Pick directly when the user has a clear visual idea or brief; planning pass NOT required. Do NOT use for editing already-generated material (→ assembly). Quality gate is mandatory — single-sample first, rubric ≥ 3.5, then batch with frame-gacha; never deliver "AI default mediocre".
+type: capability
+priority: flexible
 ---
 
 # Assets Module
@@ -229,13 +231,17 @@ assets 模块只关心两个工具维度：
 
 ## Capabilities 索引
 
-- `capabilities/prompt-mastery.md` — 图像 prompt 写法
-- `capabilities/dreamina-mastery.md` — Dreamina CLI 深度用法
+- `capabilities/video-prompt-narrative.md` — **视频 prompt 叙事层**（情感意图 → 4 拍微叙事 → 运动-情感映射 → 失败案例对比库）
+- `capabilities/dreamina-mastery.md` — Dreamina CLI 深度用法（命令矩阵 / Seedance prompt / 模型选型）
+- `capabilities/reference-directives.md` — 多参考图导演式 prompt 的 @addressing + role 词汇
+- `capabilities/prompt-mastery.md` — 图像 prompt 写法（部分内容针对已下线模型，待重构）
 - `capabilities/music-generation.md` — 音乐 prompt 与参数
 - `capabilities/poster-design.md` — 图文排版模板选择与自定义
 - `capabilities/frame-gacha.md` — 多候选批量抽签机制
 - `capabilities/quality-gate.md` — 质量门槛与自检流程
 - `capabilities/fallback-strategy.md` — 工具不可用时的降级路径
+- `capabilities/filter-retries.md` — content-policy 拒绝的恢复路径
+- `capabilities/structured-generation.md` — variant 模式 envelope 协议
 
 ## 自检
 

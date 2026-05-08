@@ -1,6 +1,8 @@
 ---
 name: autoviral-planning
-description: Use when the user wants a brief, shot list, layout plan, or wants you to translate an emotional intent into something executable. Do NOT use when the user already has a brief and just wants generation — go to assets directly. Do NOT use when the user only wants references — research is the right call.
+description: Use when the user has emotional intent or a fuzzy idea and wants it translated into an executable brief — shot list, image-text structure, copy skeleton. Do NOT use when the user already has a brief and just wants generation (→ assets). Do NOT use when the user only wants references (→ research). Brief must pass taste/06-rubric self-check ≥ 28 before delivery, otherwise rework.
+type: capability
+priority: flexible
 ---
 
 # Planning Module

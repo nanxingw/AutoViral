@@ -1,6 +1,8 @@
 ---
 name: autoviral-assembly
-description: Use when the user wants final-cut work — cutting, captions, music mixing, beat sync, color grading, packaging. Pick this directly when the user has materials and just wants a deliverable. Do NOT use to *create* footage; that lives in assets.
+description: Use when the user has materials and wants the final cut — ffmpeg ops, hard-burn subtitles via subtitle_burn.py (mandatory), beat-sync editing, multi-track audio mixing, color grading, platform-spec packaging. Do NOT use to CREATE footage (→ assets). Pacing/cut decisions follow taste/03-rhythm-and-editing exclusively; tools never replace judgment.
+type: capability
+priority: flexible
 ---
 
 # Assembly Module

@@ -1,6 +1,8 @@
 ---
 name: autoviral
-description: AutoViral 创作总技能——中文短视频与图文笔记的一体化创作能力。从情感意图到成片，taste 驱动，模块即能力，用户可从任意起点切入。
+description: Use when the user wants to create short-form video or image-text content with editorial-level taste — opinionated emotional intent → executable brief → assets → final cut. Pick this whenever the user says "make a 视频/图文/笔记/海报", references a creator workflow, or complains generic AI generators feel mediocre. Capability cluster (4 orthogonal modules), no forced order. Do NOT use as a generic chatbot — this skill enforces taste rules and refuses平庸合格品.
+type: capability-cluster
+priority: rigid
 ---
 
 # AutoViral
@@ -13,15 +15,18 @@ description: AutoViral 创作总技能——中文短视频与图文笔记的一
 
 ---
 
-## 起手式：读这三份
+## 起手式：读这三份 + 一份红旗
 
 开工前必读，不可跳：
 
 1. **`taste/00-prime-directive.md`** — 你的创作信仰。内容 > 平台。
 2. **`taste/05-creative-schema.md`** — 你的决策语言。情感意图 → 生产参数。
 3. **`taste/06-rubric.md`** — 你的交付门槛。不达标不交付。
+4. **`RED-FLAGS.md`** — 你的烟雾报警器。哪些念头一冒出来立刻停。
 
-这三份不是"参考资料"，是**已内化的语言**。每次对话你都带着它们。
+前三份是"应该怎么做"，红旗是"哪些念头是你在偷懒"。两者互补，缺一不可。
+
+这四份不是"参考资料"，是**已内化的语言**。每次对话你都带着它们。
 
 `taste/01 / 02 / 03 / 04` 是语言的血肉（叙事、镜头、节奏、排版），需要时再展开。
 
@@ -158,6 +163,7 @@ curl -X POST http://localhost:${port}/api/works/{workId}/assets -d '...'
 ```
 skills/autoviral/
 ├── SKILL.md                  ← 这份
+├── RED-FLAGS.md              ← rationalization 红旗清单 · 阻断"差不多了"创作疲软
 ├── taste/                    ← 品味与判断。读完、内化、不是查询
 │   ├── 00-prime-directive.md
 │   ├── 01-emotional-storytelling.md
@@ -170,10 +176,22 @@ skills/autoviral/
 │   ├── research/
 │   ├── planning/
 │   ├── assets/
+│   │   └── capabilities/video-prompt-narrative.md  ← 视频 prompt 叙事层（taste 与工具的桥梁）
 │   └── assembly/
 └── references/
     └── module-contracts.md   ← 模块间输入输出契约一览
 ```
+
+## frontmatter 协议（2026-05-08 起）
+
+每个 SKILL.md 头部必含：
+
+- `name`：唯一名（hyphen-case）
+- `description`：**只写"Use when..."**——什么场景该激活、什么场景**不**激活、关键反例。给 agent 路由器看的，不是给人类读者看的产品介绍
+- `type`：`taste` | `capability` | `meta` | `capability-cluster`
+- `priority`：`rigid`（不可商量）| `flexible`（场景判断）
+
+`taste/*` 全 `rigid`；`modules/*` 全 `flexible`；`RED-FLAGS.md` 是 `meta` + `rigid`。
 
 ---
 
