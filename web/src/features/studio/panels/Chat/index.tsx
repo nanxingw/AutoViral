@@ -588,7 +588,7 @@ export function ChatPanel({
                   fontWeight: 700,
                 }}
                 aria-label="Stop"
-                title="Stop running turn"
+                title={t("chat.stopTitle")}
               >
                 {/* filled square — pneuma's universal "stop the agent" glyph */}
                 ◼

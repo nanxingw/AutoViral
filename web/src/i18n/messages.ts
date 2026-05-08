@@ -138,6 +138,7 @@ export const en = {
     emptyTitle: "Start your first work",
     emptyBody: "Click the + card above to begin. Carousel for image-text, Studio for short video.",
     insightsRibbonNote: "Static placeholder cards — the analytics agent isn't producing per-user insights yet.",
+    untitledWork: "Untitled",
   },
   checkpoints: {
     button: "History",
@@ -199,6 +200,7 @@ export const en = {
     thinking: "thinking…",
     composerPlaceholder: "ask anything…",
     sendHint: "⌘↵ SEND",
+    stopTitle: "Stop running turn",
     quickActions: {
       editor: {
         rewriteHook: "Rewrite copy",
@@ -351,6 +353,7 @@ export const zh: DeepShape<Messages> = {
     emptyTitle: "开始你的第一个作品",
     emptyBody: "点击上方 + 卡片开始。图文走 Carousel，短视频走 Studio。",
     insightsRibbonNote: "静态占位卡——数据分析 agent 尚未为你生成专属洞察。",
+    untitledWork: "未命名",
   },
   checkpoints: {
     button: "历史",
@@ -412,6 +415,7 @@ export const zh: DeepShape<Messages> = {
     thinking: "思考中…",
     composerPlaceholder: "问点什么…",
     sendHint: "⌘↵ 发送",
+    stopTitle: "停止当前回合",
     quickActions: {
       editor: {
         rewriteHook: "写一段引导文案",

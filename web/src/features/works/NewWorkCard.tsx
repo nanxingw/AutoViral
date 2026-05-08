@@ -9,7 +9,7 @@ export function NewWorkCard() {
   const t = useT();
 
   async function pick(type: "short-video" | "image-text") {
-    const w = await create.mutateAsync({ title: "Untitled", type });
+    const w = await create.mutateAsync({ title: t("works.untitledWork"), type });
     navigate(type === "short-video" ? `/studio/${w.id}` : `/editor/${w.id}`);
   }
 
