@@ -160,6 +160,7 @@ export const en = {
       logSummary: "Log ({count})",
       btnCancel: "Cancel",
       btnRetry: "Retry",
+      cancelFailed: "Cancel failed: {msg}",
     },
     generationDialog: {
       headerCreateAsset: "Create asset",
@@ -452,6 +453,7 @@ export const zh: DeepShape<Messages> = {
       logSummary: "日志 ({count})",
       btnCancel: "取消",
       btnRetry: "重试",
+      cancelFailed: "取消失败：{msg}",
     },
     generationDialog: {
       headerCreateAsset: "新建素材",

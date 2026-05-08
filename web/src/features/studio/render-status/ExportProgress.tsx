@@ -27,7 +27,7 @@ export interface ExportProgressProps {
  * role="dialog", aria-modal="true", aria-labelledby on title id.
  */
 export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps) {
-  const { job, cancel } = useRenderJob(jobId);
+  const { job, cancel, cancelError } = useRenderJob(jobId);
   const t = useT();
 
   useEffect(() => {
@@ -280,6 +280,24 @@ export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps)
             </button>
           ) : null}
         </div>
+        {cancelError && (
+          <div
+            role="alert"
+            style={{
+              marginTop: 12,
+              padding: "8px 10px",
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              color: "var(--status-error, #d4756c)",
+              background: "rgba(212, 117, 108, 0.08)",
+              border: "1px solid var(--status-error, #d4756c)",
+              borderRadius: 6,
+              lineHeight: 1.5,
+            }}
+          >
+            {t("studio.exportProgress.cancelFailed", { msg: cancelError })}
+          </div>
+        )}
       </div>
     </div>,
     document.body,

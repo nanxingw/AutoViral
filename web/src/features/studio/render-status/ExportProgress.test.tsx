@@ -18,6 +18,7 @@ function mockJob(state: Partial<hookMod.RenderJobView> & { status: hookMod.Rende
     job: { id: "job_1", progress: 0.5, log: [], ...state } as hookMod.RenderJobView,
     connected: true,
     cancel: vi.fn(async () => {}),
+    cancelError: null,
   });
 }
 
@@ -71,6 +72,7 @@ describe("ExportProgress", () => {
       } as hookMod.RenderJobView,
       connected: true,
       cancel: cancelSpy,
+      cancelError: null,
     });
     render(<ExportProgress jobId="job_1" onClose={() => {}} onRetry={() => {}} />);
     const cancelBtn = screen.getByRole("button", { name: /cancel/i });

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { cancelRender } from "../services/render";
 
 const TERMINAL = new Set(["done", "failed", "cancelled"]);
 
@@ -39,6 +40,12 @@ interface RenderEvent {
 export function useRenderJob(jobId: string | null) {
   const [job, setJob] = useState<RenderJobView | null>(null);
   const [connected, setConnected] = useState(false);
+  // R23: cancel was previously raw `fetch()` with no status check, no try/catch
+  // — a 4xx/5xx silently returned, leaving the user thinking they cancelled
+  // a runaway 5-min render. Now cancel uses cancelRender (apiFetch, throws
+  // on non-2xx) and exposes a cancelError state so ExportProgress can show
+  // the failure inline.
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
 
   useEffect(() => {
@@ -96,8 +103,19 @@ export function useRenderJob(jobId: string | null) {
 
   const cancel = useCallback(async () => {
     if (!jobId) return;
-    await fetch(`/api/render/jobs/${jobId}`, { method: "DELETE" });
+    setCancelError(null);
+    try {
+      await cancelRender(jobId);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setCancelError(msg);
+    }
   }, [jobId]);
 
-  return { job, connected, cancel };
+  // Reset cancelError when jobId switches — old job's failure shouldn't bleed.
+  useEffect(() => {
+    setCancelError(null);
+  }, [jobId]);
+
+  return { job, connected, cancel, cancelError };
 }
