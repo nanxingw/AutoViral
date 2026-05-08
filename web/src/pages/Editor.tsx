@@ -17,6 +17,20 @@ import { ChatPanel } from "@/features/studio/panels/Chat";
 import { ChatQuickActions } from "@/features/editor/panels/ChatQuickActions";
 import type { LocatorData } from "@/features/chat/types";
 import { buildEditorViewerContext } from "@/features/editor/services/viewerContext";
+import { useT } from "@/i18n/useT";
+import { useLocaleStore } from "@/i18n/store";
+
+// Locale-aware HH:MM time formatter for the savedAt indicator.
+// Keeps the topbar string short and predictable across locales —
+// previously toLocaleTimeString() would surface seconds + sometimes a
+// timezone suffix depending on browser, cluttering the chrome.
+function fmtSavedAt(d: Date, locale: string): string {
+  return new Intl.DateTimeFormat(locale === "zh" ? "zh-CN" : "en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: locale !== "zh",
+  }).format(d);
+}
 
 // Match Studio's resize-handle look so editor↔studio interaction stays uniform.
 const handleBaseStyle: React.CSSProperties = {
@@ -50,6 +64,8 @@ export default function Editor() {
   const [savedAt, setSavedAt] = useState<string | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
   const { setStage, exportCurrent, exportAll } = useExport();
+  const t = useT();
+  const locale = useLocaleStore((s) => s.locale);
 
   const [loadError, setLoadError] = useState<string | null>(null);
   useEffect(() => {
@@ -69,7 +85,11 @@ export default function Editor() {
         const status = err?.status;
         if (typeof status === "number" && status >= 500) {
           // Don't overwrite a corrupt carousel.yaml with an empty one.
-          setLoadError(`无法加载作品数据：${err?.message ?? "服务端错误"}`);
+          setLoadError(
+            t("editor.loadError.body", {
+              msg: err?.message ?? t("editor.loadError.serverFallbackMsg"),
+            }),
+          );
         } else {
           loadCar(makeEmptyCarousel(workId));
         }
@@ -78,7 +98,7 @@ export default function Editor() {
     return () => {
       cancelled = true;
     };
-  }, [workId, loadCar]);
+  }, [workId, loadCar, t]);
 
   useEffect(() => {
     if (!car || !workId) return;
@@ -87,22 +107,22 @@ export default function Editor() {
     // (and is just noise for "user opened the page but didn't edit").
     const isEmpty = car.slides.length <= 1 && car.slides[0]?.layers.length === 0;
     if (isEmpty) return;
-    const t = setTimeout(() => {
+    const tid = setTimeout(() => {
       saveCarousel(workId, car)
-        .then(() => setSavedAt(new Date().toLocaleTimeString()))
+        .then(() => setSavedAt(fmtSavedAt(new Date(), locale)))
         .catch(() => undefined);
     }, 800);
-    return () => clearTimeout(t);
-  }, [car, workId]);
+    return () => clearTimeout(tid);
+  }, [car, workId, locale]);
 
-  if (!workId) return <div>Missing workId</div>;
+  if (!workId) return <div>{t("editor.loadError.missingWorkId")}</div>;
   if (loadError) {
     return (
       <div style={{ padding: 32, fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
-        <h2>载入失败</h2>
+        <h2>{t("editor.loadError.title")}</h2>
         <p>{loadError}</p>
         <p style={{ fontSize: 12, opacity: 0.7 }}>
-          自动保存已暂停以防覆盖损坏的数据。请手动检查 ~/.autoviral/works/{workId}/carousel.yaml
+          {t("editor.loadError.helpText", { workId })}
         </p>
       </div>
     );

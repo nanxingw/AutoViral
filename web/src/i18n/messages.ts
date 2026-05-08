@@ -26,6 +26,13 @@ export const en = {
     localeToggleEn: "EN",
   },
   editor: {
+    loadError: {
+      title: "Failed to load",
+      body: "Could not load carousel data: {msg}",
+      helpText: "Autosave paused to avoid overwriting corrupted data. Please inspect ~/.autoviral/works/{workId}/carousel.yaml manually.",
+      missingWorkId: "Missing workId",
+      serverFallbackMsg: "server error",
+    },
     topbar: {
       backToWorks: "← Works",
       exportMenu: "Export ▾",
@@ -242,6 +249,13 @@ export const zh: DeepShape<Messages> = {
     localeToggleEn: "EN",
   },
   editor: {
+    loadError: {
+      title: "载入失败",
+      body: "无法加载作品数据：{msg}",
+      helpText: "自动保存已暂停以防覆盖损坏的数据。请手动检查 ~/.autoviral/works/{workId}/carousel.yaml",
+      missingWorkId: "缺少 workId",
+      serverFallbackMsg: "服务端错误",
+    },
     topbar: {
       backToWorks: "← 作品",
       exportMenu: "导出 ▾",
