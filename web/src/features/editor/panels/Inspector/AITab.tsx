@@ -94,18 +94,29 @@ export function AITab({ workId }: { workId: string }) {
           aria-label="Style prompt"
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          rows={4}
+          rows={5}
           placeholder={t("editor.aiTab.stylePlaceholder")}
           style={{
             width: "100%",
-            padding: 8,
+            padding: "10px 12px",
             border: "1px solid var(--border, rgba(0,0,0,0.12))",
-            borderRadius: 6,
-            background: "transparent",
+            borderRadius: 8,
+            background: "var(--surface-0, transparent)",
             color: "var(--text)",
             fontFamily: "var(--font-mono)",
             fontSize: 12,
+            lineHeight: 1.55,
             resize: "vertical",
+            outline: "none",
+            transition: "border-color 0.15s, box-shadow 0.15s",
+          }}
+          onFocus={(e) => {
+            e.target.style.borderColor = "var(--accent)";
+            e.target.style.boxShadow = "0 0 0 3px var(--accent-glow, rgba(168,197,214,0.18))";
+          }}
+          onBlur={(e) => {
+            e.target.style.borderColor = "var(--border, rgba(0,0,0,0.12))";
+            e.target.style.boxShadow = "none";
           }}
         />
       </div>
@@ -124,17 +135,24 @@ export function AITab({ workId }: { workId: string }) {
           {t("editor.aiTab.quickStyles")}
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-          {QUICK_STYLES.map((q) => (
-            <button
-              key={q.prompt}
-              type="button"
-              onClick={() => runAssets({ stylePrompt: q.prompt }, "quick")}
-              disabled={busy !== null}
-              style={chipBtn}
-            >
-              {t(q.key)}
-            </button>
-          ))}
+          {QUICK_STYLES.map((q) => {
+            const isDisabled = busy !== null;
+            return (
+              <button
+                key={q.prompt}
+                type="button"
+                onClick={() => runAssets({ stylePrompt: q.prompt }, "quick")}
+                disabled={isDisabled}
+                style={{
+                  ...chipBtn,
+                  opacity: isDisabled ? 0.45 : 1,
+                  cursor: isDisabled ? "not-allowed" : "pointer",
+                }}
+              >
+                {t(q.key)}
+              </button>
+            );
+          })}
         </div>
       </div>
 
@@ -178,14 +196,17 @@ const chipBtn: React.CSSProperties = {
 };
 
 const primaryBtn: React.CSSProperties = {
-  padding: "8px 14px",
+  padding: "10px 14px",
   fontFamily: "var(--font-mono)",
   fontSize: 11,
-  letterSpacing: "0.05em",
+  fontWeight: 600,
+  letterSpacing: "0.06em",
   textTransform: "uppercase",
   border: "1px solid var(--accent, #2a3a4a)",
   background: "var(--accent, #2a3a4a)",
   color: "var(--bg, #fff)",
-  borderRadius: 4,
+  borderRadius: 6,
   cursor: "pointer",
+  boxShadow: "0 1px 2px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04)",
+  transition: "transform 0.1s, box-shadow 0.15s",
 };
