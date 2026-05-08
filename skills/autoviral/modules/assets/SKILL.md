@@ -57,11 +57,13 @@ python3 scripts/openrouter_generate.py --prompt "..." --seed 42 --output out.png
 - `--aspect-ratio`：`1:1` / `3:4` / `4:3` / `9:16` / `16:9` / `2:3` / `3:2`
 - `--temperature`：默认 1.0，精确复现参考图用 0.3-0.5
 
-**Prompt 写法** 详见 `capabilities/prompt-mastery.md`。核心原则：
+**Prompt 写法** 详见 `capabilities/image-prompt-narrative.md`（rigid · 必读，针对 OpenRouter `gpt-5.4-image-2` 主通道）。核心原则：
 
-- **指定镜头语法**（按 `taste/02` 术语：`wide shot / low angle / slow push-in / negative space`）
-- **一帧一构图**，不要让 prompt 里的构图指令打架
-- **显式对抗默认**（AI 倾向中景居中，需要明确覆盖）
+- **Camera/equipment 短语前置**（"Editorial portrait on Hasselblad X2D 100C with XCD 90V at f/4: ..."）
+- **主体用方括号高亮**（`[a young Asian woman in her late twenties...]`）
+- **Lighting 4 要素**（direction + color temp + quality + 1 个高级 phrase 如 subsurface scattering / halation）
+- **Closing style line 必须**（cinematic + film stock + grain + color grade + mood）
+- **显式对抗默认**（AI 倾向中景居中、平庸 stock photo 美学，需要明确覆盖）
 
 ## 视频生成（Dreamina 首选，Jimeng 备选）
 
@@ -231,12 +233,23 @@ assets 模块只关心两个工具维度：
 
 ## Capabilities 索引
 
-- `capabilities/video-prompt-narrative.md` — **视频 prompt 叙事层**（情感意图 → 4 拍微叙事 → 运动-情感映射 → 失败案例对比库）
-- `capabilities/dreamina-mastery.md` — Dreamina CLI 深度用法（命令矩阵 / Seedance prompt / 模型选型）
+### Prompt 工程（**rigid · 必读**——基于 2026 年业界 OSS 范式 + 官方文档调研）
+
+- `capabilities/video-prompt-narrative.md` — **视频 prompt 叙事层**（Seedance 2.0 timeline 协议：`[Xs]` 方括号 + 4-component beat + closing style line + subject 一致性 + lip-sync + 相机型号 + 反向引导，含 5 个完整可运行 prompt 示例）
+- `capabilities/image-prompt-narrative.md` — **图像 prompt 叙事层**（OpenRouter `gpt-5.4-image-2` 主通道：camera-first paragraph + 主体方括号 + lighting 4 要素 + closing style line，含 5 个完整可运行 prompt 示例）
+- `capabilities/viral-archetypes.md` — **4 大 viral 原型**（满足感转化 / 情感叙事钩子 / 高能量动作 / 喜剧荒诞，每原型 3+ 真实可运行 prompt 范本）
+- `capabilities/keyword-library.md` — **惊艳关键词分类索引**（subsurface scattering / halation / solarpunk / Black Pro-Mist 1/4 等，按光线/调色/质感/镜头/运镜/美学/构图/防御性 negative 分类）
+- `capabilities/model-paradigms.md` — **模型范式分化**（Sora 2=physics / Veo 3=rendering / Kling 3=choreographer / Seedance 2=timeline，跨模型 prompt 转换表）
+
+### 工具与命令
+
+- `capabilities/dreamina-mastery.md` — Dreamina CLI 深度用法（命令矩阵 / 模型选型 / 工具书）
 - `capabilities/reference-directives.md` — 多参考图导演式 prompt 的 @addressing + role 词汇
-- `capabilities/prompt-mastery.md` — 图像 prompt 写法（部分内容针对已下线模型，待重构）
-- `capabilities/music-generation.md` — 音乐 prompt 与参数
-- `capabilities/poster-design.md` — 图文排版模板选择与自定义
+- `capabilities/music-generation.md` — 音乐 prompt 与参数（Lyria 3 Pro）
+- `capabilities/poster-design.md` — 图文排版模板（Playwright + HTML）
+
+### 质量与降级
+
 - `capabilities/frame-gacha.md` — 多候选批量抽签机制
 - `capabilities/quality-gate.md` — 质量门槛与自检流程
 - `capabilities/fallback-strategy.md` — 工具不可用时的降级路径
