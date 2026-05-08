@@ -17,47 +17,69 @@ priority: flexible
 2. 选择合适的工具与降级路径
 3. 批量执行 + 质量门槛把关 + 重生机制
 
-## 工具矩阵
+## 工具矩阵（2026-05-08 起：图片 + 视频统一走 OpenRouter）
 
-| 需求 | 首选 | 备选 | 适用情况 |
+| 需求 | PRIMARY | LEGACY FALLBACK | 适用情况 |
 |---|---|---|---|
-| **图片** | `openrouter_generate.py`（`openai/gpt-5.4-image-2`） | — | 所有静态画面、封面、图文笔记插图 |
-| **视频** | `dreamina` CLI（Seedance 2.0） | `jimeng_generate.py`（火山 Visual API） | Dreamina 首选；未登录/额度不足降级到 Jimeng |
-| **音乐** | `music_generate.py`（Google Lyria 3 Pro） | — | AI 原创音乐，~2 分钟完整曲目 |
-| **图文排版** | `poster_render.py`（Playwright + HTML/CSS） | — | 图文卡片、封面、信息卡片 |
-| **状态检查** | `check_providers.py` | — | 开工前或降级决策前 |
+| **图片** | OpenRouter `POST /api/v1/chat/completions` + `openai/gpt-5.4-image-2` | — | 所有静态画面、封面、图文笔记插图。备选模型见 `capabilities/image-prompt-narrative.md` §10 |
+| **视频** | OpenRouter `POST /api/v1/videos` + `bytedance/seedance-2.0`（async job） | Dreamina CLI（仅 OpenRouter 故障时） | 7 模型可选见 `capabilities/dreamina-mastery.md` §2 |
+| **音乐** | `music_generate.py`（Google Lyria 3 Pro，复用 `OPENROUTER_API_KEY`）| — | AI 原创音乐，~2 分钟完整曲目 |
+| **图文排版** | `poster_render.py`（Playwright + HTML/CSS） | — | 图文卡片、封面、信息卡片（非 AI 通道）|
+| **状态检查** | `curl https://openrouter.ai/api/v1/credits` | — | 开工前查配额 |
 
-## 图片生成（OpenRouter → `openai/gpt-5.4-image-2`）
+**统一鉴权**：所有 AI 调用复用 `OPENROUTER_API_KEY`（autoviral 已统一这个 env 名）。Dreamina CLI / Jimeng 的独立鉴权（`JIMENG_ACCESS_KEY` 等）已**DEPRECATED**，新代码不要引用。
 
-**这是唯一的图片生成通道。** Gemini 3.1 与 Jimeng 图片能力已下线。
+## 图片生成（OpenRouter `/api/v1/chat/completions` · 同步）
+
+**主模型**：`openai/gpt-5.4-image-2`（默认）。备选 5 模型（Nano Banana 2 / Seedream 4.5 / Flux.2 Pro / Recraft v3）见 `capabilities/image-prompt-narrative.md` §10。
+
+### 基础调用
 
 ```bash
-# 基础用法
-python3 scripts/openrouter_generate.py \
-  --prompt "<视觉描述，结合 taste/02 的镜头语法术语>" \
-  --aspect-ratio 9:16 \
-  --image-size 2K \
-  --output out.png
-
-# 参考图（图生图）
-python3 scripts/openrouter_generate.py \
-  --prompt "<prompt>" \
-  --ref-image reference.jpg \
-  --aspect-ratio 3:4 \
-  --image-size 2K \
-  --output out.png
-
-# 指定 seed 保证可复现
-python3 scripts/openrouter_generate.py --prompt "..." --seed 42 --output out.png
+curl -X POST "https://openrouter.ai/api/v1/chat/completions" \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-5.4-image-2",
+    "messages": [{ "role": "user", "content": "<完整 prompt 见 image-prompt-narrative.md>" }],
+    "modalities": ["image", "text"],
+    "image_config": { "aspect_ratio": "9:16", "image_size": "2K" }
+  }'
 ```
 
-**参数约束**：
+返回的 `choices[0].message.images[0].image_url.url` 是结果 URL。
 
-- `--image-size`：只支持 `1K` 或 `2K`（`0.5K` 和 `4K` 会返回 400）
-- `--aspect-ratio`：`1:1` / `3:4` / `4:3` / `9:16` / `16:9` / `2:3` / `3:2`
-- `--temperature`：默认 1.0，精确复现参考图用 0.3-0.5
+### 参考图（图生图）
 
-**Prompt 写法** 详见 `capabilities/image-prompt-narrative.md`（rigid · 必读，针对 OpenRouter `gpt-5.4-image-2` 主通道）。核心原则：
+```bash
+curl -X POST "https://openrouter.ai/api/v1/chat/completions" \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-5.4-image-2",
+    "messages": [{
+      "role": "user",
+      "content": [
+        { "type": "text", "text": "Generate in same style as reference: ..." },
+        { "type": "image_url", "image_url": { "url": "https://cdn.com/ref.jpg" } }
+      ]
+    }],
+    "modalities": ["image", "text"],
+    "image_config": { "aspect_ratio": "3:4", "image_size": "2K", "strength": 0.65 }
+  }'
+```
+
+### 参数约束
+
+- `image_config.image_size`：`1K` / `2K`（不支持 0.5K / 4K）
+- `image_config.aspect_ratio`：`1:1` / `3:4` / `4:3` / `9:16` / `16:9` / `2:3` / `3:2`
+- `image_config.strength`：0.0-1.0，参考图引导强度（精确复现 0.3-0.5）
+
+完整 API 调用 + 5 备选模型选型表 + Backend 实现代码见 **`capabilities/image-prompt-narrative.md` §9-§11**。
+
+### Prompt 写法（rigid · 必读）
+
+详见 `capabilities/image-prompt-narrative.md`。核心原则：
 
 - **Camera/equipment 短语前置**（"Editorial portrait on Hasselblad X2D 100C with XCD 90V at f/4: ..."）
 - **主体用方括号高亮**（`[a young Asian woman in her late twenties...]`）
@@ -65,63 +87,63 @@ python3 scripts/openrouter_generate.py --prompt "..." --seed 42 --output out.png
 - **Closing style line 必须**（cinematic + film stock + grain + color grade + mood）
 - **显式对抗默认**（AI 倾向中景居中、平庸 stock photo 美学，需要明确覆盖）
 
-## 视频生成（Dreamina 首选，Jimeng 备选）
+## 视频生成（OpenRouter `/api/v1/videos` · async job）
 
-### Dreamina CLI（首选）
+**主模型**：`bytedance/seedance-2.0`（默认）。7 模型可选（Seedance 2.0 / 2.0-fast / 1.5-pro / Veo 3.1 / Wan 2.7/2.6 / Sora 2 Pro）见 `capabilities/dreamina-mastery.md` §2。
 
-命令行工具，支持 Seedance 2.0 模型。安装：
+### Async job 流程
 
-```bash
-curl -fsSL https://jimeng.jianying.com/cli | bash
-dreamina login   # 需手动扫码登录
-dreamina user_credit   # 查看剩余积分
+```
+1. POST /api/v1/videos        → 返回 {id, status: "pending"}
+2. GET  /api/v1/videos/{id}   → 轮询，5-10s 间隔；状态 pending/running/succeeded/failed
+3. GET  /api/v1/videos/{id}/content?index=0  → 下载 .mp4
 ```
 
-常用命令：
+### Text-to-Video
 
 ```bash
-# 文生视频
-dreamina text2video --prompt "..." --aspect-ratio 9:16 --output clip.mp4
-
-# 图生视频（首帧驱动，推荐）
-dreamina image2video --first-frame frame.png --prompt "镜头缓慢推进..." --output clip.mp4
-
-# 首尾帧视频
-dreamina frames2video --first-frame a.png --last-frame b.png --output clip.mp4
-
-# 多帧驱动
-dreamina multiframe2video --frames "a.png,b.png,c.png" --output clip.mp4
-
-# 文字到图（补充能力）
-dreamina text2image --prompt "..." --aspect-ratio 9:16 --output img.png
-
-# 图生图
-dreamina image2image --input img.png --prompt "..." --output out.png
+curl -X POST "https://openrouter.ai/api/v1/videos" \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bytedance/seedance-2.0",
+    "prompt": "<完整 timeline prompt 见 video-prompt-narrative.md>",
+    "aspect_ratio": "9:16",
+    "duration": 8
+  }'
 ```
 
-详细 mastery 见 `capabilities/dreamina-mastery.md`。
-
-### Jimeng（备选，HTTP API）
-
-只在 Dreamina 不可用时使用。图片生成能力已禁用，**仅用于视频**。
+### Image-to-Video（首帧 / 末帧 / 首尾帧驱动）
 
 ```bash
-python3 scripts/jimeng_generate.py video \
-  --prompt "..." \
-  --first-frame frame.png \
-  --resolution 9:16 \
-  --output clip.mp4
+curl -X POST "https://openrouter.ai/api/v1/videos" \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "bytedance/seedance-2.0",
+    "prompt": "<timeline prompt>",
+    "frame_images": [
+      { "type": "image_url", "image_url": { "url": "..." }, "frame_type": "first_frame" }
+    ],
+    "duration": 8
+  }'
 ```
 
-环境变量：`JIMENG_ACCESS_KEY` / `JIMENG_SECRET_KEY`（从 `.env` 读取）。
+> **关键**：`frame_images` 给定时不要再传 `aspect_ratio`，比例自动从图推断。
 
-### 视频生成的首帧优先原则
+### Multimodal Reference-to-Video
 
-**优先使用 image2video**（首帧驱动）而非 text2video：
+多 ref 编排（替换角色 / 切换环境 / 借运镜），用 `input_references` 数组——详见 **`capabilities/reference-directives.md`**（OpenRouter `input_references` 协议 + role 词汇）。
 
-- 首帧控制力强 → 风格一致
-- 首帧用 `openrouter_generate.py` 先生精，再驱动视频
-- text2video 只在首帧约束不重要时使用
+### 首帧优先原则
+
+**永远先生首帧再 image-to-video**：
+
+- 首帧用 `openai/gpt-5.4-image-2` 生精
+- `frame_images.first_frame` 驱动视频
+- text-to-video 只在首帧约束不重要时使用
+
+完整 API 矩阵 + 7 模型选型 + Backend 实现代码见 **`capabilities/dreamina-mastery.md`**。
 
 ## 音乐生成（Lyria 3 Pro）
 
@@ -180,10 +202,20 @@ python3 scripts/poster_render.py \
 开工前或降级决策前：
 
 ```bash
-python3 scripts/check_providers.py --format table
+# 查询配额
+curl https://openrouter.ai/api/v1/credits \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY"
+
+# 查询当前可用视频模型 + 价格 + 比例
+curl https://openrouter.ai/api/v1/videos/models \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY"
+
+# 查询当前可用图像模型
+curl https://openrouter.ai/api/v1/models \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY" | jq '.data[] | select(.architecture.modality | contains("image"))'
 ```
 
-会输出 OpenRouter、Dreamina、Jimeng、Lyria 的可用状态与剩余积分（如有），并给出每个能力的推荐通道。
+返回字段含 `total_credits` / `total_usage` / `is_blocked`——批量前必查。
 
 ## 质量门槛（必读）
 
@@ -201,10 +233,14 @@ python3 scripts/check_providers.py --format table
 一张关键画面经常需要生 5-10 张候选挑选。使用 `capabilities/frame-gacha.md` 里的批量循环：
 
 ```bash
+# OpenRouter 不暴露 seed 参数（DALL-E 系），靠多次 sampling 拿候选
 for i in {1..8}; do
-  python3 scripts/openrouter_generate.py \
-    --prompt "..." --aspect-ratio 9:16 --image-size 2K \
-    --seed $i --output candidate_$i.png
+  curl -X POST "https://openrouter.ai/api/v1/chat/completions" \
+    -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"openai/gpt-5.4-image-2\",\"messages\":[{\"role\":\"user\",\"content\":\"...\"}],\"modalities\":[\"image\",\"text\"],\"image_config\":{\"aspect_ratio\":\"9:16\",\"image_size\":\"2K\"}}" \
+    | jq -r '.choices[0].message.images[0].image_url.url' \
+    | xargs -I{} curl -o "candidate_$i.png" "{}"
 done
 # 然后对 8 张做 rubric 评分，留最高分
 ```
@@ -214,9 +250,9 @@ done
 工具不可用 / 配额耗尽时的优雅降级路径在 `capabilities/fallback-strategy.md`。核心原则：
 
 1. **质量优先**：宁可告知用户不可行，不可静默降质
-2. **最小让步**：逐级尝试（Dreamina → Jimeng → 高质量静帧 + 轻动效）
+2. **最小让步**：OpenRouter PRIMARY → 切换备选模型（Nano Banana 2 / Wan 2.7 等）→ Dreamina CLI legacy fallback → 高质量静帧 + 轻动效
 3. **透明决策**：任何降级必须告知用户并获得确认
-4. **首帧驱动**：视频优先 image2video 保留首帧控制力
+4. **首帧驱动**：视频永远先 OpenRouter 生精首帧，再 image-to-video 保留控制力
 
 ## 平台技术规格（非创作建议）
 
@@ -228,8 +264,8 @@ assets 模块只关心两个工具维度：
 
 | 维度 | 取值范围 |
 |---|---|
-| 视频宽高比 | `9:16` / `3:4` / `1:1` / `16:9`（决定 dreamina/jimeng 参数） |
-| 图片宽高比 | `1:1` / `3:4` / `4:3` / `9:16` / `16:9` / `2:3` / `3:2`（OpenRouter 支持值） |
+| 视频宽高比 | `9:16` / `3:4` / `1:1` / `16:9`（OpenRouter videos API `aspect_ratio`） |
+| 图片宽高比 | `1:1` / `3:4` / `4:3` / `9:16` / `16:9` / `2:3` / `3:2`（OpenRouter `image_config.aspect_ratio`） |
 
 ## Capabilities 索引
 
@@ -243,8 +279,8 @@ assets 模块只关心两个工具维度：
 
 ### 工具与命令
 
-- `capabilities/dreamina-mastery.md` — Dreamina CLI 深度用法（命令矩阵 / 模型选型 / 工具书）
-- `capabilities/reference-directives.md` — 多参考图导演式 prompt 的 @addressing + role 词汇
+- `capabilities/dreamina-mastery.md` — **Video toolkit**（OpenRouter `/api/v1/videos` PRIMARY · 7 模型选型 · Dreamina CLI legacy fallback · backend 实现代码）
+- `capabilities/reference-directives.md` — 多 ref 编排式 prompt（OpenRouter `input_references` 数组 + role 词汇 + 槽位预算 ≤9 image/3 video/3 audio）
 - `capabilities/music-generation.md` — 音乐 prompt 与参数（Lyria 3 Pro）
 - `capabilities/poster-design.md` — 图文排版模板（Playwright + HTML）
 

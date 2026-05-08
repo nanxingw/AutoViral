@@ -289,11 +289,197 @@ balance, natural sage and travertine palette, premium artisanal mood.
 
 ---
 
+## 9. OpenRouter API 调用（PRIMARY 通道）
+
+autoviral 图像生成全量走 OpenRouter `/api/v1/chat/completions`——这是 OpenAI 兼容接口的扩展（多 `modalities` 字段返回 image+text）。
+
+### 9.1 鉴权
+
+```bash
+Authorization: Bearer $OPENROUTER_API_KEY
+```
+
+### 9.2 基础调用（同步，不是 async）
+
+```bash
+curl -X POST "https://openrouter.ai/api/v1/chat/completions" \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-5.4-image-2",
+    "messages": [
+      {
+        "role": "user",
+        "content": "Editorial portrait on Hasselblad X2D 100C with XCD 90V at f/2.8: [a young Asian woman in her late twenties with shoulder-length black hair in soft natural waves, almond eyes with subtle eye smile, wearing a cream linen blouse], warm golden-hour key light from camera-left through sheer linen curtain, 3200K, soft diffused with subsurface scattering on her cheek, shallow DOF rendering background into amber bokeh. Cinematic editorial still, Kodak Portra 400 emulation, fine grain, Morandi muted warm palette, contemplative and serene mood. Negative: no distortion, no extra fingers, no anime."
+      }
+    ],
+    "modalities": ["image", "text"],
+    "image_config": {
+      "aspect_ratio": "3:4",
+      "image_size": "2K"
+    }
+  }'
+```
+
+返回：
+```json
+{
+  "id": "gen-...",
+  "model": "openai/gpt-5.4-image-2",
+  "choices": [
+    {
+      "message": {
+        "role": "assistant",
+        "content": "...optional text response...",
+        "images": [
+          { "type": "image_url", "image_url": { "url": "https://..." } }
+        ]
+      }
+    }
+  ]
+}
+```
+
+### 9.3 `image_config` 字段
+
+| 字段 | 取值 | 用途 |
+|---|---|---|
+| `aspect_ratio` | `1:1` / `3:4` / `4:3` / `9:16` / `16:9` / `2:3` / `3:2` | 比例 |
+| `image_size` | `1K` / `2K` | 分辨率（不支持 0.5K/4K） |
+| `strength` | 0.0-1.0 | reference-driven 强度 |
+| `text_layout` | object | 文字排版（in-image text）|
+| `style` | string | 风格预设 |
+| `rgb_colors` | array | 强制色板 |
+| `super_resolution_references` | array | 高清化参考 |
+
+### 9.4 Reference-driven（图生图 / 以图为参考）
+
+把参考图放到 `messages.content` 的多模态数组中：
+
+```bash
+curl -X POST "https://openrouter.ai/api/v1/chat/completions" \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-5.4-image-2",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          { "type": "text", "text": "Generate a new image in the same visual style as this reference: ..." },
+          { "type": "image_url", "image_url": { "url": "https://cdn.com/style-ref.jpg" } }
+        ]
+      }
+    ],
+    "modalities": ["image", "text"],
+    "image_config": { "aspect_ratio": "9:16", "image_size": "2K", "strength": 0.65 }
+  }'
+```
+
+### 9.5 流式输出（可选）
+
+```bash
+# 加 "stream": true 启用 SSE 流式
+... -d '{ "model": "...", "messages": [...], "modalities": ["image","text"], "stream": true }'
+```
+
+适合渐进式预览。autoviral backend 默认**不开 stream**——直接拿最终 URL 更简单。
+
+---
+
+## 10. OpenRouter 图像模型选型表（5 大可选）
+
+```bash
+# 查询当前所有图像模型
+curl https://openrouter.ai/api/v1/models | jq '.data[] | select(.architecture.modality | contains("image"))'
+```
+
+| 模型 ID | 范式 | 强项 | 弱项 | autoviral 默认级 |
+|---|---|---|---|---|
+| **`openai/gpt-5.4-image-2`** | DALL-E 系（创作 brief）| 上下文理解最强、文字 in image、构图复杂 | 偶尔不严格按 prompt | ⭐⭐⭐⭐⭐ **PRIMARY** |
+| `google/gemini-3.1-flash-image-preview` (Nano Banana 2) | Multimodal reasoning | 实物 grounding、高保真、编辑能力强 | 偏 photorealistic，艺术化弱 | ⭐⭐⭐⭐ 写实 / 商业 |
+| `google/gemini-2.5-flash-image` (Nano Banana) | Conversational image | 多轮对话编辑（"把背景换 X"）| 单次质量略低于 3.1 | ⭐⭐⭐ 迭代式编辑 |
+| `bytedance/seedream-4.5` | ByteDance image | 编辑一致性最强、亚洲面孔表现好 | 创意发散弱 | ⭐⭐⭐⭐ 角色一致性 |
+| `black-forest-labs/flux.2-pro` | Flux T5+CLIP | 自然语言、capitalization 敏感、文字 in image | 不支持 negative prompt | ⭐⭐⭐ Flux 专长场景 |
+| `recraft/recraft-v3` | Vector + raster | 矢量风格、SVG 输出 | 写实弱 | ⭐⭐ 图标/插画 |
+
+### 10.1 默认选型策略
+
+```
+通用场景 / 上下文复杂
+  → openai/gpt-5.4-image-2  （PRIMARY）
+
+需要照片级写实人像 + 实物 grounding
+  → google/gemini-3.1-flash-image-preview  (Nano Banana 2)
+
+需要多轮对话编辑（"换背景"、"把衣服改成 X"）
+  → google/gemini-2.5-flash-image  (Nano Banana)
+
+需要同一角色多张图、角色一致性
+  → bytedance/seedream-4.5
+
+需要图中显式文字 / Flux 自然语言强项
+  → black-forest-labs/flux.2-pro
+
+需要矢量图 / 图标 / 简笔插画
+  → recraft/recraft-v3
+```
+
+### 10.2 跨模型 prompt 范式提示
+
+**关键认知**：OpenRouter 抽象的是**调用方式**，不是 prompt 语法。同一个 prompt 在 `gpt-5.4-image-2` 和 `flux.2-pro` 上效果可能差很多——参 `model-paradigms.md` 第 3 节。
+
+**最 robust 的做法**：本文件 §1-§7 的 **camera-first paragraph + 主体方括号 + closing line** 范式在 5 个模型上**都能工作**——因为它对齐 DALL-E 3 / Flux / Nano Banana 的共通最佳实践。**特定模型微调**才需要看 `model-paradigms.md`。
+
+---
+
+## 11. autoviral 集成层（Backend 实现）
+
+```typescript
+async function generateImage(envelope: ImageEnvelope): Promise<ImageResult> {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: envelope.model ?? "openai/gpt-5.4-image-2",
+      messages: [
+        {
+          role: "user",
+          content: envelope.referenceUrl
+            ? [
+                { type: "text", text: envelope.prompt },
+                { type: "image_url", image_url: { url: envelope.referenceUrl } },
+              ]
+            : envelope.prompt,
+        },
+      ],
+      modalities: ["image", "text"],
+      image_config: {
+        aspect_ratio: envelope.aspectRatio ?? "1:1",
+        image_size: envelope.imageSize ?? "2K",
+        ...(envelope.strength && { strength: envelope.strength }),
+      },
+    }),
+  });
+  const json = await res.json();
+  const url = json.choices[0].message.images[0].image_url.url;
+  return { url, model: json.model };
+}
+```
+
+> autoviral 后端 `dispatchGeneration.ts` 当前已经走 OpenRouter chat/completions。新代码统一这个路径，**不要**回退到 `openrouter_generate.py` 老脚本。
+
+---
+
 ## See also
 
 - `taste/04-design-and-text.md` — 排版与封面设计原则（道）
 - `viral-archetypes.md` — Viral 短视频/图文的 4 大原型（含图文 case）
 - `keyword-library.md` — 惊艳关键词分类索引
-- `model-paradigms.md` — DALL-E / Flux / SD 不同模型范式差异
+- `model-paradigms.md` — 不同图像模型的范式差异（DALL-E / Flux / Nano Banana / Seedream）
+- `dreamina-mastery.md` — 视频侧 OpenRouter API 总览（视频图片同栈）
 - `frame-gacha.md` — 一帧多生候选机制（关键画面必过）
 - `quality-gate.md` — 单样小测 / 批量 / rubric 评分流程

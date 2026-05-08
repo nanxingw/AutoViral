@@ -274,18 +274,75 @@ bad anatomy, watermark, text, signature, cartoon, anime
 
 ---
 
-## 6. autoviral 当前的范式锁定
+## 6. OpenRouter — 统一调用层 ≠ 统一 prompt 层
 
-| 模块 | 模型 | 范式文档 |
+**关键认知**：autoviral 的图像 + 视频生成全量走 OpenRouter（PRIMARY）——但 OpenRouter 抽象的是**调用方式**（统一 endpoint / 统一鉴权 / 统一 async job 格式），**不是 prompt 语法**。
+
+```
+┌──── OpenRouter 抽象的部分（统一）───────────┐
+│  • Endpoint URL                              │
+│  • 鉴权（Bearer $OPENROUTER_API_KEY）        │
+│  • Async job lifecycle（视频）/ sync（图像）│
+│  • 错误码 / 限流 / 计费                      │
+└──────────────────────────────────────────────┘
+        │ 一份 HTTP client 跑所有模型
+        ▼
+┌──── 模型范式不变（必须各自适配）────────────┐
+│  • Seedance 2.0  → [Xs] timeline 协议       │
+│  • Veo 3.1       → JSON schema              │
+│  • Wan 2.7       → 自然语言 + camera prose  │
+│  • Sora 2 Pro    → 因果叙事段落             │
+│  • GPT-5.4 Image → DALL-E 创作 brief        │
+│  • Flux.2 Pro    → 自然语言 + capitalization│
+│  • Nano Banana   → 多模态推理 + 实物 ground │
+└──────────────────────────────────────────────┘
+```
+
+**铁律**：在 OpenRouter 上换 model 字段 ≠ 跨模型可直接用同 prompt。每次切模型都要回头查这份文件对应的 prompt 范式。
+
+### 6.1 OpenRouter 完整模型 ID 表（autoviral 已通的）
+
+#### 视频（统一 endpoint `POST /api/v1/videos`）
+
+| OpenRouter Model ID | 范式 | 详细文档 |
 |---|---|---|
-| 视频生成主通道 | Seedance 2.0 (Dreamina CLI) | **`video-prompt-narrative.md`**（rigid） |
-| 视频生成备选 | Jimeng (单首帧/末帧) | `dreamina-mastery.md` 第 1 节 fallback |
-| 图像生成主通道 | OpenRouter `openai/gpt-5.4-image-2` | **`image-prompt-narrative.md`**（rigid） |
-| 多 ref 视频 | Seedance multimodal2video | `reference-directives.md` |
-| 音乐生成 | Lyria 3 Pro | `music-generation.md` |
-| 图文排版 | Playwright + HTML | `poster-design.md` |
+| `bytedance/seedance-2.0` ⭐ PRIMARY | Timeline 导演 | `video-prompt-narrative.md` |
+| `bytedance/seedance-2.0-fast` | Timeline 导演 | 同上 |
+| `bytedance/seedance-1.5-pro` | Timeline 导演 | 同上（1080p 输出） |
+| `google/veo-3.1` | Rendering engine | `model-paradigms.md` §1.2（JSON schema） |
+| `alibaba/wan-2.7` | MoE diffusion | `model-paradigms.md` §1.x |
+| `alibaba/wan-2.6` | MoE diffusion | 同上（旧版） |
+| `openai/sora-2-pro` | Physics simulator | `model-paradigms.md` §1.1 |
 
-**铁律**：写 prompt 前先确认目标模型，再来这查范式。**不要把 Sora 2 prompt 直接给 Seedance 跑**。
+#### 图像（统一 endpoint `POST /api/v1/chat/completions` + `modalities`）
+
+| OpenRouter Model ID | 范式 | 详细文档 |
+|---|---|---|
+| `openai/gpt-5.4-image-2` ⭐ PRIMARY | DALL-E 创作 brief | `image-prompt-narrative.md` |
+| `google/gemini-3.1-flash-image-preview` (Nano Banana 2) | Multimodal reasoning + grounding | 同上 §10 |
+| `google/gemini-2.5-flash-image` (Nano Banana) | Conversational editing | 同上 §10 |
+| `bytedance/seedream-4.5` | Image consistency | 同上 §10 |
+| `black-forest-labs/flux.2-pro` | T5 自然语言 | `model-paradigms.md` §3.2 |
+| `recraft/recraft-v3` | Vector + raster | 同上 §10 |
+
+---
+
+## 7. autoviral 当前的范式锁定（2026-05-08）
+
+| 模块 | 主模型 (PRIMARY) | OpenRouter Model ID | Prompt 范式文档 |
+|---|---|---|---|
+| 视频生成 | Seedance 2.0 | `bytedance/seedance-2.0` | **`video-prompt-narrative.md`**（rigid · 必读） |
+| 图像生成 | GPT-5.4 Image 2 | `openai/gpt-5.4-image-2` | **`image-prompt-narrative.md`**（rigid · 必读） |
+| 多 ref 视频 | Seedance 2.0 | `bytedance/seedance-2.0` | `reference-directives.md`（OpenRouter `input_references` 语法） |
+| 音乐生成 | Lyria 3 Pro | （独立通道） | `music-generation.md` |
+| 图文排版 | Playwright + HTML | （非 AI 通道） | `poster-design.md` |
+
+**API 调用层**：全部走 OpenRouter，**不再使用** Dreamina CLI（legacy fallback only）/ Jimeng（DEPRECATED）/ `openrouter_generate.py` 老脚本。
+
+**铁律**：
+1. 写 prompt 前先确认目标模型（默认 PRIMARY），再来这查范式
+2. **不要**把 Sora 2 prompt 直接给 Seedance 跑（同理反向）
+3. **不要**把 OpenRouter 的"统一"误解为"prompt 也统一"——每个模型仍是各自的语言
 
 ---
 

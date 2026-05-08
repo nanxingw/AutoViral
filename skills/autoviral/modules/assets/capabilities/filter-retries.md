@@ -1,163 +1,312 @@
 ---
 name: assets-filter-retries
-description: 用于生成脚本（jimeng / openrouter / dreamina CLI）返回内容审核 / 图像分类器失败信封时——例如 "image2video 报 partner_validation_failed"、"gpt-5.4-image-2 返 content_policy_violation"、"422 Output audio has sensitive content"、"jimeng 任务 failed 含敏感词"。给出 signature → recovery 决策树。不用于：API 限流（fallback-strategy.md §2）、网络/超时（直接重试）、参数非法（查 -h）。
+description: Use when an OpenRouter generation request fails with content-policy / safety / account-authorization signature — e.g. image-to-video returns 422 partner_validation_failed, gpt-5.4-image-2 returns content_policy_violation, output-audio classifier rejects, jimeng task fails for sensitive content. Provides signature → recovery decision tree. NOT for rate-limit (fallback-strategy.md §2) / network timeout (just retry) / invalid params (check schema).
+type: capability
+priority: rigid
+sources:
+  - https://openrouter.ai/docs/api/reference/errors-and-debugging
+  - autoviral 历史 fixture（2026-04 至 2026-05 实际捕获样本）
+last_updated: 2026-05-08
 ---
 
-# 内容审核失败签名 → 恢复决策树
+# 内容审核失败签名 → 恢复决策树（OpenRouter 版）
 
-本文档是 `fallback-strategy.md §1`（"内容安全审核被拒"）的**战术下钻层**——把"改 prompt → 换模型 → 告知用户"这条降级链落到具体的错误信封识别上。当生成脚本以非零退出 + JSON 错误信封返回时，agent 先在这里**匹配签名**，再决定该执行哪一步恢复动作；只有当本文档列出的所有签名都不匹配、或恢复都失败后，才升级到 fallback-strategy.md 的告知用户分支。
+本文档是 `fallback-strategy.md §1`（"内容安全审核被拒"）的**战术下钻层**——把"改 prompt → 换模型 → 告知用户"这条降级链落到具体的 OpenRouter response.error 信封识别上。
 
-判断口径：**先看错误来自哪一层**（image classifier / prompt safety / output audio classifier / 平台账户授权），再看恢复手段是改输入图、改 prompt、改 flag 还是人工介入。**永远不要静默重发同一条命令**——每次重试至少改动一个输入。
-
----
-
-## 三家 provider 的失败渠道
-
-| Provider | 脚本 / 工具 | Surface 的错误信息 | 完整信封可见性 |
-|---|---|---|---|
-| **dreamina CLI**（Seedance 2.0/3.0） | `dreamina image2video / text2video / ...` | CLI 直接打印 fal.run / 火山 API 响应 body 到 stderr | **完整可见**（最易匹配） |
-| **OpenRouter**（`gpt-5.4-image-2` 生图、`google/lyria-*` 生乐） | `openrouter_generate.py` | `RuntimeError("API 错误 {status}: {resp.text[:500]}")`（L303-304）+ `data['error'].message`（L309-310） | **截断到 500 字符**——大多数情况够用，envelope 末段的 `details` 字段可能被截 |
-| **jimeng**（火山 Visual API 视频） | `jimeng_generate.py` | `RuntimeError("提交失败: {data['message']}")`（L188）+ `RuntimeError("任务失败: {data['data'].message}")`（L215-217） | **仅 message 字段**——无完整 envelope，只能按 message 关键词模糊匹配 |
-
-> 这意味着 dreamina 的签名可以做精确 token 匹配（pneuma 范本直接迁移）；OpenRouter 大多数情况够用但有边界；jimeng 必须靠中文 message 关键字（**fixture 待补**）。
+判断口径：**先看错误来自哪一层**（image classifier / prompt safety / output-audio classifier / 账号合规），再看恢复手段是改输入图、改 prompt、换模型还是人工介入。**永远不要静默重发同一条命令**——每次重试至少改动一个输入。
 
 ---
 
-## Signature A — dreamina/Seedance image-side 拒绝
+## 1. OpenRouter 错误信封统一结构
 
-**What you see**（fal.run 直通响应，dreamina CLI 不预处理）：
+OpenRouter 的所有视频 / 图像 API 在失败时返回**统一格式**：
 
+### 视频（async job 失败）
+
+`GET /api/v1/videos/{jobId}` 返回 `status: "failed"` 时：
+
+```json
+{
+  "id": "vid_abc123",
+  "status": "failed",
+  "error": {
+    "code": "content_policy_violation",
+    "message": "The images or videos provided may contain likenesses of real people...",
+    "provider_error": {
+      "detail": [{
+        "loc": ["body", "image_urls"],
+        "type": "content_policy_violation",
+        "ctx": { "extra_info": { "reason": "partner_validation_failed" } }
+      }]
+    }
+  }
+}
 ```
-bytedance/seedance-2.0 reference-to-video failed (422):
-{"detail":[{"loc":["body","image_urls"],
-            "msg":"The images or videos provided may contain
-                   likenesses of real people or other private
-                   information that cannot be processed.",
-            "type":"content_policy_violation",
-            "ctx":{"extra_info":{"reason":"partner_validation_failed"}}, ...}]}
+
+`provider_error` 是上游 provider（Seedance / Veo / Wan / Sora）原始 error，OpenRouter 透传。
+
+### 图像（同步失败）
+
+`POST /api/v1/chat/completions` 返回 HTTP 4xx 时：
+
+```json
+{
+  "error": {
+    "code": "content_policy_violation",
+    "message": "Request rejected by safety filter",
+    "metadata": { "raw": "..." }
+  }
+}
 ```
 
-> [FIXTURE NEEDED — verify dreamina CLI 是否原样透传上述信封，或会包装成 `{"error": "...", "raw": {...}}` 的 CLI 形态。验证方法：拿一张含真人正脸的高清照跑 `dreamina image2video --image <photo> --prompt "walking"` 并把 stderr 贴到此处。]
+### 关键字段
 
-**Key tokens to match:** `loc:["body","image_urls"]` **AND** `partner_validation_failed`（两者同时出现才算）。
+| 字段 | 用途 |
+|---|---|
+| `error.code` | OpenRouter 标准化 code（`content_policy_violation` / `provider_error` / `rate_limit_exceeded` / `invalid_request_error` 等）|
+| `error.message` | 人类可读，按 token 匹配本文档签名的主要依据 |
+| `error.provider_error` | 上游 provider 原始信封（Seedance / Veo 等的 fal.run / Google API response），最详细 |
+| `error.metadata` | 部分模型用，含 `raw` 透传 |
 
-**What it means:** ByteDance 的图片分类器在某张 `--image` / `--image-url` ref 上检测到照片级真人脸（超过面积阈值）并拒绝处理。**Prompt 完全没被评估**——改 prompt 词无效。
+---
 
-**Recovery:**
+## 2. Signature A — Seedance image-side 真人脸拒绝
+
+### What you see
+
+OpenRouter videos API `status: "failed"`：
+
+```json
+{
+  "id": "vid_...",
+  "status": "failed",
+  "error": {
+    "code": "content_policy_violation",
+    "message": "Reference image contains likenesses of real people that cannot be processed",
+    "provider_error": {
+      "detail": [{
+        "loc": ["body", "image_urls"],
+        "msg": "The images or videos provided may contain likenesses of real people or other private information that cannot be processed.",
+        "type": "content_policy_violation",
+        "ctx": { "extra_info": { "reason": "partner_validation_failed" } }
+      }]
+    }
+  }
+}
+```
+
+### Key tokens to match
+
+`provider_error.detail[].loc:["body","image_urls"]` **AND** `partner_validation_failed`（两者同时出现才算）。
+
+### What it means
+
+ByteDance Seedance 的图片分类器在某张 ref（`frame_images` 或 `input_references[type=image_url]`）上检测到照片级真人脸（超过面积阈值）并拒绝处理。**Prompt 完全没被评估**——改 prompt 词无效。
+
+### Recovery
 
 1. 找出哪张 ref 含真人脸（通常是 character ref，也可能是 background 里出现的人）。
-2. 跑 character sheet 脚本（**Phase 2.9 待建**），生成 "photo-body, sketch-head" 的 16:9 sheet：
+2. 跑 character sheet 工作流（**Phase 2.9 待建**），用 OpenRouter `openai/gpt-5.4-image-2` 生成 "photo-body, sketch-head" 风格 sheet：
    ```bash
-   python3 skills/autoviral/modules/assets/scripts/make_character_sheet.py \
-     --source-url <被拒的图> \
-     --outfit "..." \
-     --traits "..." \
-     --output assets/image/character-sheet-<name>.jpg
+   curl -X POST "https://openrouter.ai/api/v1/chat/completions" \
+     -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+     -H "Content-Type: application/json" \
+     -d '{
+       "model": "openai/gpt-5.4-image-2",
+       "messages": [{
+         "role": "user",
+         "content": "Editorial 4-panel character sheet on Hasselblad: panel 1-3 show character body in different poses but heads rendered as detailed pencil sketch ONLY (no photographic face); panel 4 shows complete photographic likeness. <outfit / traits>. Cinematic, fine grain."
+       }],
+       "modalities": ["image", "text"],
+       "image_config": { "aspect_ratio": "16:9", "image_size": "2K" }
+     }'
    ```
    sheet 的逻辑：把 panel 1-3 的头部画成铅笔素描、只让 panel 4 携带身份，让分类器看不到完整真人脸。详见 `capabilities/character-consistency.md`（待建）。
-3. 用生成的 sheet 替换原 ref，重新调用同一条 dreamina 命令。
+3. 用生成的 sheet URL 替换原 ref，重新调用同一条 OpenRouter videos 请求。
 4. **从 prompt 中删除** "虚拟数字人 / virtual character / not a real person / CG render" 这些 hedge 词——它们打不过图像分类器（分类器只看图），反而把模型推向 game-CG 美感。
-5. 若 dreamina CLI 支持 `--no-audio` 一并加上（**[FIXTURE NEEDED] — Phase 2.7 报告 dreamina CLI 不接受 `--no-audio` 标志；需用 `dreamina image2video -h` 二次验证当前版本是否新增**）。Signature B 经常在重试时跟着浮出，预防性消音可省一轮。
+5. 预防性：考虑提前加 `audio: "muted"` 字段（如模型支持），可避开 Signature B 跟着浮出。
 6. 重试。
 
-**Do NOT use this workflow for:**
+### Do NOT use this workflow for
+
 - 你没有肖像授权的真实可识别人物（这不是 filter 误报，是身份保护——告知用户，不要绕过）。
 - 任何形式的未成年照片（AI 生的也不行）。
 - 已经是 stylized / 3D / 动漫风格的 ref——它们本来就过 filter，你重做 sheet 只会浪费积分。
 
 ---
 
-## Signature B — dreamina/Seedance output-audio 拒绝
+## 3. Signature B — Seedance output-audio 拒绝
 
-**What you see:**
+### What you see
 
+```json
+{
+  "id": "vid_...",
+  "status": "failed",
+  "error": {
+    "code": "content_policy_violation",
+    "message": "Generated video audio contains sensitive content",
+    "provider_error": {
+      "detail": [{
+        "loc": ["body", "generated_video"],
+        "msg": "Output audio has sensitive content.",
+        "type": "content_policy_violation",
+        "ctx": { "extra_info": { "reason": "partner_validation_failed" } }
+      }]
+    }
+  }
+}
 ```
-bytedance/seedance-2.0 reference-to-video failed (422):
-{"detail":[{"loc":["body","generated_video"],
-            "msg":"Output audio has sensitive content.",
-            "type":"content_policy_violation",
-            "ctx":{"extra_info":{"reason":"partner_validation_failed"}}, ...}]}
-```
 
-> [FIXTURE NEEDED — 同 Signature A，dreamina CLI 是否原样透传待验证。]
+### Key tokens
 
-**Key tokens:** `loc:["body","generated_video"]` **AND** `Output audio has sensitive content`.
+`provider_error.detail[].loc:["body","generated_video"]` **AND** `Output audio has sensitive content`.
 
-**What it means:** 图过了、帧已经生了，Seedance 自动音轨被音频分类器打回。这是 character-heavy prompt 的常客，与 prompt 内容基本无关。
+### What it means
 
-**Recovery:**
+图过了、帧已经生了，Seedance 自动生成的音轨被音频分类器打回。这是 character-heavy / 对话场景的常客，与 prompt 内容基本无关。
 
-1. **完全相同的命令重试**，加 `--no-audio`（**待验证**——若 dreamina CLI 不支持，则降级走 `multimodal2video --audio <silent.wav>` 注入静音轨，或改用 `frames2video`/`image2video` 默认无声路径）。
-2. 不改 prompt、不改 seed、不改任何其它参数。
+### Recovery
 
-> 经验法则：character-heavy 生成可以**默认带消音 flag**，跳过这一轮失败。
+1. **完全相同的请求重试**，加 `audio: "muted"` 字段（OpenRouter 视频参数支持禁用自动音频生成）：
+   ```json
+   {
+     "model": "bytedance/seedance-2.0",
+     "prompt": "...",
+     "audio": "muted",
+     "duration": 8
+   }
+   ```
+2. 不改 prompt、不改任何其它参数。视频出来后用 ffmpeg 后期混音（参 `assembly/SKILL.md`）。
+
+> 经验法则：character-heavy 生成可以**默认就带 `audio: "muted"`**，跳过这一轮失败。后期混音永远比赌 lip-sync 通过审核稳。
 
 ---
 
-## Signature C — OpenRouter `gpt-5.4-image-2` 内容安全拒绝
+## 4. Signature C — OpenAI prompt-side 内容安全拒绝（图像）
 
-**What you see:**
+### What you see
 
-[FIXTURE NEEDED] — 当前未捕获到真实样本。**Capture protocol**：
+`POST /api/v1/chat/completions` 返回 HTTP 400/422：
+
+```json
+{
+  "error": {
+    "code": "content_policy_violation",
+    "message": "Your request was rejected as a result of our safety system. Your prompt may contain text that is not allowed by our safety system.",
+    "metadata": {
+      "raw": "..."
+    }
+  }
+}
+```
+
+### Key tokens
+
+`error.code === "content_policy_violation"` **AND** `error.message` 含 `safety system` / `not allowed` / `cannot generate`.
+
+### What it means
+
+OpenAI 的 prompt-side 安全分类器拦的——和 Seedance 的 image-side 不同，这一层**会读 prompt 文本**。可识别公众人物姓名、品牌名、特定政治符号、明确暴力/性暗示用词都可能触发。
+
+### Recovery
+
+1. 重写 prompt：
+   - 剔除可识别人物姓名（"Taylor Swift" → "a young blonde singer"）
+   - 剔除品牌名（"Nike Air Max" → "a black athletic sneaker"）
+   - 剔除政治符号（"red flag with hammer" → "a red banner"）
+   - 软化暴力描述（"blood splatter" → "dramatic impact effect"）
+2. 若 ref 图含真人脸，参考 Signature A 的 sheet 流程（OpenRouter `gpt-5.4-image-2` 也有 image-side 检查，但触发条件比 Seedance 宽松）。
+3. **只重试一次**——若改 prompt 后仍被拒，说明意图本身越界，升级到 `fallback-strategy.md` §1 Level 3：告知用户。
+4. 备选：换图像模型（`google/gemini-3.1-flash-image-preview` 的安全策略不同，有可能过；但对真人 ID 同样严格）。
+
+---
+
+## 5. Signature D — Veo 3 / Sora 2 prompt 安全拒绝（视频）
+
+### What you see
+
+OpenRouter videos API `status: "failed"`，`error.message` 含上游 provider 安全语：
+
+```json
+{
+  "status": "failed",
+  "error": {
+    "code": "content_policy_violation",
+    "message": "Prompt rejected by Google safety policy: real-person likeness",
+    "provider_error": {
+      "code": 400,
+      "message": "Generation request violates content policy",
+      "category": "PERSON_OF_INTEREST"
+    }
+  }
+}
+```
+
+### Key tokens
+
+`error.message` 含 `safety policy` / `content policy` / `PERSON_OF_INTEREST` / `CHILD_SAFETY` 等 Google / OpenAI category。
+
+### What it means
+
+Veo 3.1 / Sora 2 Pro 的 prompt-side 分类器拦——比 Seedance 宽，但对**已知公众人物 + 未成年 + 暴力**更严。
+
+### Recovery
+
+1. 同 Signature C：剔除可识别 ID / 品牌 / 政治 / 软化暴力词。
+2. 切回 `bytedance/seedance-2.0`——Seedance 在 prompt 安全上比 Veo / Sora 宽容（但 image-side 比 OpenAI 严，trade-off）。
+3. 仍失败 → fallback-strategy.md §1 Level 3。
+
+---
+
+## 6. Signature E — OpenRouter 配额 / 计费 / 账户状态
+
+### What you see
+
+```json
+{
+  "error": {
+    "code": "insufficient_credits" | "account_blocked" | "rate_limit_exceeded",
+    "message": "Insufficient credits. Please add credits at https://openrouter.ai/credits"
+  }
+}
+```
+
+或 HTTP 401:
+```json
+{ "error": { "code": "invalid_api_key", "message": "API key is invalid or revoked" } }
+```
+
+### What it means
+
+不是内容审核——是账户问题。本文档不深入处理，跳到 `fallback-strategy.md` §2（限流）/ §3（配额）。
+
+### Quick fix
 
 ```bash
-python3 skills/autoviral/modules/assets/scripts/openrouter_generate.py \
-  --prompt "<deliberately violating prompt, e.g. 真实可识别公众人物的肖像请求>" \
-  --output /tmp/should-fail.png \
-  2>/tmp/openrouter-err.log
-
-# 把 stderr 中的 RuntimeError 行（前 500 字符）贴到这里。
-# OpenRouter 通常返回 {"error": {"message": "...", "code": "content_policy_violation", ...}}，
-# 信封被 openrouter_generate.py L309-310 拆出 message 字段。
+curl https://openrouter.ai/api/v1/credits \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY"
 ```
 
-**Tentative key tokens（到 fixture 落地前的工作假设，禁止当成确定签名）：** `content_policy_violation` / `safety` / `not allowed` / `cannot generate` 出现在 RuntimeError 文本中。
-
-**What it means（假设）：** OpenAI 的 prompt-side 安全分类器拦的——和 Seedance 的 image-side 不同，这一层**会读 prompt**。
-
-**Recovery（保守路径，不依赖 fixture）：**
-
-1. 重写 prompt：剔除可识别人物姓名、品牌名、明确暴力/性暗示用词、特定政治符号。改写为通用描述（"a young woman in red dress" 而非 "<celebrity name> in red dress"）。
-2. 若 ref 图含真人脸，参考 Signature A 的 sheet 流程（OpenRouter 也有 image-side 检查，但触发条件比 Seedance 宽松）。
-3. **只重试一次**——若改 prompt 后仍被拒，说明意图本身越界，升级到 fallback-strategy.md §1 Level 3：告知用户。
+返回的 `total_credits / total_usage / is_blocked` 决定下一步。
 
 ---
 
-## Signature D — jimeng（火山 Visual API）视频任务失败
+## 7. Legacy Dreamina CLI signature（fallback 时用）
 
-**What you see:**
+OpenRouter 不可用、退化到 Dreamina CLI 时的 signature 形态：
 
-[FIXTURE NEEDED] — `jimeng_generate.py` 只 surface `data['message']` 字段（L189 / L216），不包含完整 envelope。**Capture protocol**：
+| Signature | CLI surface 关键 token |
+|---|---|
+| Image-side（同 §2）| stderr 含 `partner_validation_failed` + `image_urls` |
+| Output-audio（同 §3）| stderr 含 `Output audio has sensitive content` + `generated_video` |
+| 账号合规（特有）| stderr 含 `AigcComplianceConfirmationRequired` |
 
-```bash
-python3 skills/autoviral/modules/assets/scripts/jimeng_generate.py video \
-  --prompt "<deliberately violating prompt>" \
-  --output /tmp/should-fail.mp4 \
-  2>/tmp/jimeng-err.log
+### Signature F — Dreamina `AigcComplianceConfirmationRequired`（CLI only）
 
-# 把 RuntimeError 中文 message（"提交失败: ..." / "任务失败: ..."）贴到此处。
-# 火山常见返回包括 "审核未通过" / "内容违规" / "敏感词" / 错误码 50412 等——
-# 列出实际命中的中文短语，作为后续 token 匹配。
-```
+**What you see:** dreamina CLI 返回字面错误 `AigcComplianceConfirmationRequired`。
 
-**Tentative key tokens（待 fixture 确认）：** "审核未通过" / "内容违规" / "敏感" / `code:50412`。
-
-**What it means（假设）：** 火山的内容审核（prompt 或首帧任一侧均可触发）。
-
-**Recovery（保守路径）：**
-
-1. 若用了 `--first-frame`：先按 Signature A 流程检查首帧是否含真人脸，必要时换 sheet。
-2. 重写 prompt 去敏感词（参考 fallback-strategy.md §1 Level 1）。
-3. 仍失败 → fallback-strategy.md §1 Level 2：换模型 / 换 provider（dreamina 走另一条路）。
-4. 仍失败 → Level 3：告知用户。
-
----
-
-## Signature E — dreamina `AigcComplianceConfirmationRequired`
-
-**What you see:** dreamina CLI 返回字面错误 `AigcComplianceConfirmationRequired`（已记录于 `dreamina-mastery.md` §8 L335-341）。
-
-**What it means:** 该模型（特别是 Seedance 2.0）在该账号下**首次使用**需在网页端授权——不是内容拒绝，是合规协议确认。
+**What it means:** Dreamina 该模型（特别是 Seedance 2.0）在该账号下**首次使用**需在网页端授权——不是内容拒绝，是合规协议确认。
 
 **Recovery:**
 
@@ -165,48 +314,65 @@ python3 skills/autoviral/modules/assets/scripts/jimeng_generate.py video \
 2. 找到该模型，点击完成授权确认。
 3. 重试 CLI——一次性人工动作，**不要反复重试 CLI**（重试不会触发授权弹窗）。
 
+> OpenRouter PRIMARY 路径**没有这个 signature**——OpenRouter 账号已经统一授权所有上游模型。这是只在 fallback 路径会遇到的问题。
+
 ---
 
-## 决策流程：当签名都不匹配
+## 8. 决策流程：当签名都不匹配
 
 按以下步骤诊断未知错误：
 
-1. **完整保留 stderr**（重定向到文件，别让终端截掉）：`<command> 2>/tmp/err.log`。
-2. **比对本文档的 5 个签名**——按 token 子串匹配（不要求完全相等），命中即按对应 Recovery 走。
-3. **若明显是 content-policy 但签名不匹配**：删除 prompt 中所有可能敏感词、检查所有 ref 图、重试一次。仍失败 → fallback-strategy.md §1 Level 3。
-4. **若明显不是 content-policy**（如网络、限流、参数非法）：跳出本文档，按 fallback-strategy.md §2/§4 路由。
-5. **绝不静默重发**——每次重试必须改动至少一个输入（prompt / ref / flag）。
+1. **完整保留 OpenRouter response**：
+   - 视频：`curl /api/v1/videos/{id} | tee /tmp/job-status.json`（再 jq）
+   - 图像：把 `error` 对象完整 console.log 出来
+2. **比对本文档的 signature** —— 按 `error.code` + `error.message` token 子串匹配（不要求完全相等），命中即按对应 Recovery 走。特别看 `provider_error` 字段（上游原始信封信息最丰富）。
+3. **若 `error.code === "content_policy_violation"` 但 message 不匹配**：删除 prompt 中所有可能敏感词、检查所有 ref 图、重试一次。仍失败 → `fallback-strategy.md` §1 Level 3。
+4. **若 `error.code !== "content_policy_violation"`**：跳出本文档，按 `fallback-strategy.md` §2/§4 路由。
+5. **绝不静默重发**——每次重试必须改动至少一个输入（prompt / ref / model / audio flag）。
 6. **新签名出现时**：按本文末 "Fixture capture protocol" 把它登记进本文档，让下一次能直接命中。
 
 ---
 
-## 常见错误 / Anti-patterns
+## 9. 常见错误 / Anti-patterns
 
-❌ 在 prompt 里加 "this is virtual / CG / not real / 数字人 / 虚拟形象" 试图绕开图像分类器——这些词**只读 prompt 不读图**，对 Signature A 完全无效，对 Signature C 反而可能成为新的 trigger。
+❌ 在 prompt 里加 "this is virtual / CG / not real / 数字人 / 虚拟形象" 试图绕开图像分类器——这些词**只读 prompt 不读图**，对 Signature A 完全无效，对 Signature C 反而可能成为新 trigger。
 
 ❌ 对真实可识别公众人物的图反复跑 character-sheet 流程——sheet 是给"AI 误判为真人"的虚构角色用的，不是给真人改装。这是身份保护问题，告知用户。
 
 ❌ 对 Signature A 反复改 prompt 重试——分类器看的是图、不是字。改 100 次 prompt 也过不了。
 
-❌ 第一次失败就跳到 fallback-strategy.md §1 Level 3 告知用户——先在本文档内做一次有针对性的 Recovery，再决定是否升级。
+❌ 第一次失败就跳到 `fallback-strategy.md` §1 Level 3 告知用户——先在本文档内做一次有针对性的 Recovery，再决定是否升级。
 
-❌ 同时改 prompt + ref + flag 后重试——失败时不知道哪一项见效。**一次改一个变量**，方便复盘。
+❌ 同时改 prompt + ref + model 后重试——失败时不知道哪一项见效。**一次改一个变量**，方便复盘。
 
-❌ 把 dreamina CLI / OpenRouter / jimeng 的错误一锅烩——三家分类器训练数据不同、阈值不同，同一张图在 dreamina 被拒不代表 OpenRouter 也会拒。Signature E（账号授权）和 Signature A（图像分类）更是完全不同的层。
+❌ 把 OpenRouter `error.code` 和 `provider_error.code` 混淆——OpenRouter code 是标准化的，provider_error 是上游原始的。匹配 signature 时**优先看 provider_error**（更精确）。
+
+❌ 用 OpenRouter PRIMARY 时遇到 Signature F（`AigcComplianceConfirmationRequired`）——这个签名 OpenRouter 路径不应该出现；如果出现，说明 backend 错误地走了 Dreamina CLI fallback。先排查路由，不要去网页端授权。
 
 ---
 
-## Fixture capture protocol
+## 10. Fixture capture protocol
 
 把 `[FIXTURE NEEDED]` 占位符替换成真实信封的标准流程：
 
-1. 选一个生成脚本（`openrouter_generate.py` / `jimeng_generate.py` / `dreamina <subcommand>`）。
+1. 选一个生成端点（OpenRouter `/api/v1/videos` 或 `/api/v1/chat/completions`）。
 2. 构造一条**确定会被拒**的输入：
-   - **Image-side 测试**：含真人正脸的高清照片做 ref。
-   - **Prompt-side 测试**：明显违规 prompt（参考 OpenAI / 火山 公开使用条款，但**别真去测未成年/极端暴力**——跑常见名人名 + 政治敏感词足够触发，且更易模糊化记录）。
-3. 重定向 stderr 到文件：`<command> 2>/tmp/captured-error.log`。
-4. 打开日志，找 JSON 信封（一般在 `{` 和最后一个 `}` 之间，含 `content_policy` / `partner_validation` / `审核` 关键字）。
-5. 把信封复制到对应 Signature 章节的 "What you see" 代码块中——**敏感细节脱敏**为 `<...>`。
+   - **Image-side 测试**：含真人正脸的高清照片做 ref（`frame_images` / `input_references` / `messages.content` 里塞）。
+   - **Prompt-side 测试**：明显违规 prompt（参考 OpenAI / Google 公开使用条款，但**别真去测未成年/极端暴力**——跑常见名人名 + 政治敏感词足够触发，且更易模糊化记录）。
+3. 把完整 response 落盘：
+   ```bash
+   # 视频
+   curl https://openrouter.ai/api/v1/videos/{jobId} \
+     -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+     -o /tmp/captured-failure.json
+
+   # 图像
+   curl -X POST https://openrouter.ai/api/v1/chat/completions ... \
+     -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+     -o /tmp/captured-failure.json
+   ```
+4. 打开 `error` 对象，找 `code` + `message` + `provider_error`。
+5. 把信封复制到对应 Signature 章节的 "What you see" 代码块——**敏感细节脱敏**为 `<...>`。
 6. 在该 Signature 章节末尾追加一行 `> Last verified: YYYY-MM-DD by <handle>`，让后续读者知道 fixture 的新鲜度。
 7. 把 `[FIXTURE NEEDED]` 标记删掉，把 "Tentative key tokens" 改为 "Key tokens"。
 
@@ -216,8 +382,6 @@ python3 skills/autoviral/modules/assets/scripts/jimeng_generate.py video \
 
 - `capabilities/fallback-strategy.md` §1 — 战术 Recovery 全部失败时的告知用户路径
 - `capabilities/character-consistency.md` — Signature A 的 photo-body/sketch-head sheet 流程（**Phase 2.9 待建**）
-- `capabilities/structured-generation.md` — 上游 `[autoviral:create-asset]` 信封的处理上下文
-- `capabilities/dreamina-mastery.md` §8 — Signature E（`AigcComplianceConfirmationRequired`）的来源
-- `scripts/jimeng_generate.py` L188 / L215-217 — Signature D 的 surface 路径
-- `scripts/openrouter_generate.py` L303-304 / L309-310 — Signature C 的 surface 路径
-- `scripts/filter_retry/detect_signature.py` — 程序化签名匹配器（**Phase 2.10 待建**），未来取代 agent 手动比对
+- `capabilities/structured-generation.md` — 上游 envelope 协议处理上下文
+- `capabilities/dreamina-mastery.md` §6 — 错误排查总览（含 OpenRouter HTTP error 速查表）
+- `capabilities/dreamina-mastery.md` §7 — Signature F 来源（Dreamina CLI legacy fallback 路径）

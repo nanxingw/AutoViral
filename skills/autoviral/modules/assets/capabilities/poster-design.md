@@ -171,18 +171,28 @@ assets/posters/
 ### 步骤
 
 ```
-1. openrouter_generate.py → 生成背景图（纯视觉，不含文字）
+1. OpenRouter chat/completions → 生成背景图（纯视觉，不含文字）
 2. poster_render.py --template xhs-photo-title --bg-image bg.png → 叠加排版
 ```
 
 ### 详细流程
 
 ```bash
-# 第1步：用 AI 生成高质量背景图
-python3 skills/autoviral/modules/assets/scripts/openrouter_generate.py \
-  --prompt "春季公园樱花盛开，温暖阳光，清新自然，摄影风格" \
-  --ar 3:4 --size 2K \
-  --output assets/posters/bg-cover.png
+# 第1步：用 OpenRouter `openai/gpt-5.4-image-2` 生成高质量背景图
+# 完整 prompt 写法见 capabilities/image-prompt-narrative.md
+curl -X POST "https://openrouter.ai/api/v1/chat/completions" \
+  -H "Authorization: Bearer $OPENROUTER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-5.4-image-2",
+    "messages": [{
+      "role": "user",
+      "content": "Editorial cover photography on Hasselblad X2D 100C with XCD 80mm at f/2.8: [a serene spring park scene with cherry blossoms in soft bloom, sunlight filtering through pink petals, no people, composition leaves the bottom third empty for typography], warm golden-hour key light, subsurface scattering through petals, halation on highlights. Cinematic editorial still, Kodak Portra 400 emulation, fine grain, soft pastel palette, fresh and serene mood. Negative: no text, no subtitles, no people."
+    }],
+    "modalities": ["image", "text"],
+    "image_config": { "aspect_ratio": "3:4", "image_size": "2K" }
+  }' | jq -r '.choices[0].message.images[0].image_url.url' \
+    | xargs curl -o assets/posters/bg-cover.png
 
 # 第2步：用 xhs-photo-title 模板叠加文字
 python3 skills/autoviral/modules/assets/scripts/poster_render.py \
