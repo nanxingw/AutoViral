@@ -2,6 +2,7 @@
 
 import { renderCompositionToMp4 } from "./remotion-renderer.js";
 import { applySpeedRampPrePass } from "./speed-ramp-ffmpeg.js";
+import { pickEncoder } from "./render/gpu-encoder.js";
 import {
   mixAudioTracks,
   normalizeLufs,
@@ -184,6 +185,10 @@ function compositionToMixTracks(comp: Composition): MixTrack[] {
   return tracks;
 }
 
+// R46 — software-codec fallbacks. Kept for backwards compat with any
+// caller that imports CODEC_MAP directly; the active path now goes
+// through pickEncoder() which probes for hardware accel and translates
+// the preset vocabulary so we don't crash NVENC with "medium".
 const CODEC_MAP: Record<"h264" | "h265" | "vp9" | "av1", string> = {
   h264: "libx264",
   h265: "libx265",
@@ -196,6 +201,11 @@ const CODEC_MAP: Record<"h264" | "h265" | "vp9" | "av1", string> = {
  * bitrate / audio settings. Loudnorm runs upstream (stage 4); this stage
  * only honours codec + bitrate flags, plus a faststart container hint
  * for web seek.
+ *
+ * R46: hardware encoder auto-detection. Was hard-coded to libx264 (CPU
+ * software encoder); now probes ffmpeg -encoders once and prefers
+ * h264_nvenc / h264_videotoolbox / h264_vaapi / h264_qsv. macOS Apple
+ * Silicon now uses VideoToolbox = ~2-4× faster on the same h264 baseline.
  */
 export async function runEncodeStage(
   input: string,
@@ -203,11 +213,13 @@ export async function runEncodeStage(
   preset: ExportPreset,
   signal?: AbortSignal,
 ): Promise<void> {
-  const vcodec = CODEC_MAP[preset.codec];
+  const choice = await pickEncoder(preset.codec, "medium");
   const args = [
     "-y", "-loglevel", "error",
     "-i", input,
-    "-c:v", vcodec,
+    "-c:v", choice.codec,
+    ...choice.presetArgs,
+    ...choice.extraArgs,
     "-b:v", `${preset.videoBitrate}k`,
     "-c:a", "aac",
     "-b:a", `${preset.audioBitrate}k`,

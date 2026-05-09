@@ -21,6 +21,10 @@ vi.mock("node:fs/promises", async (orig) => {
   return { ...real, rename: vi.fn(async () => undefined) };
 });
 // Mock node:child_process so runEncodeStage doesn't actually invoke ffmpeg.
+// R46 — also stub execFile so gpu-encoder's detect path is callable
+// (we keep encoder list deterministic via AUTOVIRAL_FAKE_ENCODERS env var
+// instead of going through this mock — but we still need execFile/promisify
+// to import without throwing).
 vi.mock("node:child_process", () => {
   return {
     spawn: vi.fn(() => {
@@ -28,6 +32,13 @@ vi.mock("node:child_process", () => {
       proc.stdout = new EventEmitter();
       proc.stderr = new EventEmitter();
       return proc;
+    }),
+    execFile: vi.fn((_cmd: string, _args: string[], cb: any) => {
+      // gpu-encoder calls promisify(execFile) which uses (cmd, args, cb).
+      // We don't actually need ffmpeg output here because tests using
+      // runEncodeStage will set AUTOVIRAL_FAKE_ENCODERS, but the import
+      // itself fails if execFile isn't exported.
+      if (typeof cb === "function") cb(null, "", "");
     }),
   };
 });
@@ -48,6 +59,16 @@ const baseComp: Composition = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // R46 — force software-encoder fallback in tests so we keep asserting
+  // on stable codec names like `libx264`. Without this, tests would
+  // pass on dev machines where ffmpeg has h264_videotoolbox / nvenc and
+  // fail in CI (or vice-versa). AUTOVIRAL_FAKE_ENCODERS is a backdoor
+  // gpu-encoder reads instead of probing ffmpeg.
+  process.env.AUTOVIRAL_FAKE_ENCODERS = "libx264,libx265,libvpx-vp9,libaom-av1";
+  // Reset cached detection between tests so the env var takes effect.
+  void import("./render/gpu-encoder.js").then((m) =>
+    m._resetEncoderCacheForTests(),
+  );
 });
 
 describe("runRenderPipeline — minimal pipeline (no ducking, no burn)", () => {
@@ -141,8 +162,16 @@ const douyin: ExportPreset = {
 describe("runEncodeStage", () => {
   beforeEach(() => { _spawn.mockClear(); });
 
+  // R46 — runEncodeStage now awaits pickEncoder() before spawning ffmpeg.
+  // Tests need to flush one microtask so the spawn has happened before
+  // we reach into _spawn.mock.results.
+  const flushMicrotasks = async () => {
+    await new Promise<void>((r) => setImmediate(r));
+  };
+
   it("AC2 — builds an ffmpeg command with -c:v libx264 -b:v 8000k for the douyin preset", async () => {
     const promise = runEncodeStage("/in.mp4", "/out.mp4", douyin);
+    await flushMicrotasks();
     const proc = _spawn.mock.results[0].value;
     proc.emit("close", 0);
     await promise;
@@ -164,6 +193,7 @@ describe("runEncodeStage", () => {
 
   it("maps codec names: h265 → libx265", async () => {
     const promise = runEncodeStage("/in.mp4", "/out.mp4", { ...douyin, codec: "h265" });
+    await flushMicrotasks();
     const proc = _spawn.mock.results[0].value;
     proc.emit("close", 0);
     await promise;
@@ -173,6 +203,7 @@ describe("runEncodeStage", () => {
 
   it("maps codec names: vp9 → libvpx-vp9", async () => {
     const promise = runEncodeStage("/in.mp4", "/out.mp4", { ...douyin, codec: "vp9" });
+    await flushMicrotasks();
     const proc = _spawn.mock.results[0].value;
     proc.emit("close", 0);
     await promise;
@@ -182,6 +213,7 @@ describe("runEncodeStage", () => {
 
   it("maps codec names: av1 → libaom-av1", async () => {
     const promise = runEncodeStage("/in.mp4", "/out.mp4", { ...douyin, codec: "av1" });
+    await flushMicrotasks();
     const proc = _spawn.mock.results[0].value;
     proc.emit("close", 0);
     await promise;
@@ -191,6 +223,7 @@ describe("runEncodeStage", () => {
 
   it("rejects when ffmpeg exits non-zero, including stderr", async () => {
     const promise = runEncodeStage("/in.mp4", "/out.mp4", douyin);
+    await flushMicrotasks();
     const proc = _spawn.mock.results[0].value;
     proc.stderr.emit("data", Buffer.from("encoder boom"));
     proc.emit("close", 2);
