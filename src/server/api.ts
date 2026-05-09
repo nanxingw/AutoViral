@@ -729,6 +729,88 @@ apiRoutes.delete("/api/render/jobs/:id", (c) => {
   return c.json(job);
 });
 
+// POST /api/render/reveal — R43. Reveal a render output in the OS file
+// browser (Finder on macOS, Explorer on Windows, xdg-open on Linux).
+// Body: { workId, filename }. Returns { ok: true } on success or 501 if
+// the platform isn't supported. Constrained to filenames inside
+// <workDir>/output/ so an injection-safe filename can't escape.
+apiRoutes.post("/api/render/reveal", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const workId = String(body.workId ?? "");
+  const filename = String(body.filename ?? "");
+  if (!SAFE_ID.test(workId)) {
+    return c.json({ error: "Invalid workId", errorCode: "invalid_work_id" }, 400);
+  }
+  // Hard-fail any path-traversal attempts; resolveAssetPath also enforces
+  // this via UnsafePathError, but earlier rejection produces a clearer
+  // 400 and avoids touching the FS.
+  if (!filename || filename.includes("/") || filename.includes("\\") || filename.startsWith(".")) {
+    return c.json({ error: "Invalid filename", errorCode: "invalid_filename" }, 400);
+  }
+  let absolutePath: string;
+  try {
+    absolutePath = resolveAssetPath(workId, "output", filename);
+  } catch (err) {
+    if (err instanceof UnsafePathError) {
+      return c.json({ error: err.message, errorCode: "invalid_path" }, 400);
+    }
+    throw err;
+  }
+  // Confirm the file actually exists before invoking the OS — otherwise
+  // we'd open Finder on a missing path which is just confusing.
+  try {
+    const { stat } = await import("node:fs/promises");
+    await stat(absolutePath);
+  } catch {
+    return c.json({ error: "Output file not found", errorCode: "output_not_found" }, 404);
+  }
+  const platform = process.platform;
+  // execFile with separate args (NOT `exec` with shell=true) so the file
+  // path can't be parsed as shell metacharacters even if it slipped past
+  // the safety checks above.
+  try {
+    if (platform === "darwin") {
+      // -R reveals the file in Finder (selects it inside its folder)
+      // rather than opening the file itself in QuickTime.
+      await new Promise<void>((res, rej) => {
+        execFile("open", ["-R", absolutePath], (err) =>
+          err ? rej(err) : res(),
+        );
+      });
+      return c.json({ ok: true, platform });
+    }
+    if (platform === "win32") {
+      await new Promise<void>((res, rej) => {
+        execFile("explorer", [`/select,${absolutePath}`], (err) =>
+          err ? rej(err) : res(),
+        );
+      });
+      return c.json({ ok: true, platform });
+    }
+    if (platform === "linux") {
+      // xdg-open opens the *containing folder*; selecting the file
+      // depends on the file manager (nautilus supports --select but
+      // dolphin uses different flags). Folder-only is the safe baseline.
+      const { dirname } = await import("node:path");
+      await new Promise<void>((res, rej) => {
+        execFile("xdg-open", [dirname(absolutePath)], (err) =>
+          err ? rej(err) : res(),
+        );
+      });
+      return c.json({ ok: true, platform });
+    }
+    return c.json(
+      { error: `reveal unsupported on ${platform}`, errorCode: "reveal_unsupported_platform" },
+      501,
+    );
+  } catch (err: any) {
+    return c.json(
+      { error: `reveal failed: ${err?.message ?? String(err)}`, errorCode: "reveal_failed" },
+      500,
+    );
+  }
+});
+
 // GET /api/works/:id/assets
 apiRoutes.get("/api/works/:id/assets", async (c) => {
   const id = c.req.param("id");

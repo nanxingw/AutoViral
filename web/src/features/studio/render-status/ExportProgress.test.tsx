@@ -49,12 +49,20 @@ describe("ExportProgress", () => {
     });
     expect(onClose).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /close/i })).toBeInTheDocument();
-    // Open link points to the served URL, derived from outputPath basename.
-    const openLink = screen.getByRole("link", { name: /open/i });
-    expect(openLink).toHaveAttribute(
+    // R43 — done state surfaces three explicit affordances:
+    //   - Download (anchor with `download` attr forcing save-as)
+    //   - Show in Finder (button posting to /api/render/reveal)
+    //   - Preview (anchor opening in new tab for inline play)
+    // Pre-fix only one ambiguous "Open" link existed, which prompted
+    // "怎么下载这个视频" feedback.
+    const downloadLink = screen.getByRole("link", { name: /download/i });
+    expect(downloadLink).toHaveAttribute(
       "href",
       "/api/works/w-1/assets/output/out.mp4",
     );
+    expect(downloadLink).toHaveAttribute("download", "out.mp4");
+    expect(screen.getByRole("button", { name: /finder/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /preview/i })).toBeInTheDocument();
   });
 
   it("shows error + Retry button when status=failed", async () => {

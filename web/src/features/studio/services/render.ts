@@ -20,3 +20,21 @@ export async function enqueueRender(
 export async function cancelRender(jobId: string): Promise<void> {
   await apiFetch(`/api/render/jobs/${jobId}`, { method: "DELETE" });
 }
+
+/**
+ * R43 — reveal a render output in the OS file browser (Finder /
+ * Explorer / xdg-open). Server-side runs `open -R <path>` on macOS,
+ * `explorer /select,<path>` on Windows, `xdg-open <dir>` on Linux.
+ * Throws with errorCode 'reveal_unsupported_platform' if running on
+ * something else (callers should hide the button rather than show the
+ * raw error).
+ */
+export async function revealRenderOutput(
+  workId: string,
+  filename: string,
+): Promise<void> {
+  await apiFetch(`/api/render/reveal`, {
+    method: "POST",
+    body: { workId, filename },
+  });
+}

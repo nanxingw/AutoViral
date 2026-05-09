@@ -1,8 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useRenderJob, type RenderJobView } from "./useRenderJob";
 import { useT } from "@/i18n/useT";
 import { useModalFocus } from "@/hooks/useModalFocus";
+import { revealRenderOutput } from "../services/render";
 
 const STAGES = ["render", "duck", "loudnorm", "burn", "encode"] as const;
 type Stage = (typeof STAGES)[number];
@@ -31,6 +32,12 @@ export interface ExportProgressProps {
  * a11y mirrors Phase 5.C / 6.D pattern: portal to document.body,
  * role="dialog", aria-modal="true", aria-labelledby on title id.
  */
+/** R43 — extract just the basename from an absolute path. */
+function filenameOf(absolutePath: string): string {
+  const parts = absolutePath.split("/");
+  return parts[parts.length - 1] ?? absolutePath;
+}
+
 /**
  * R43 — derive a browser-fetchable URL from the absolute disk path the
  * worker writes. Server exposes /api/works/<id>/assets/output/<file>
@@ -40,8 +47,7 @@ export interface ExportProgressProps {
  */
 function toOutputUrl(absolutePath: string, workId: string | undefined): string | null {
   if (!workId) return null;
-  const parts = absolutePath.split("/");
-  const filename = parts[parts.length - 1];
+  const filename = filenameOf(absolutePath);
   if (!filename) return null;
   return `/api/works/${workId}/assets/output/${encodeURIComponent(filename)}`;
 }
@@ -49,6 +55,10 @@ function toOutputUrl(absolutePath: string, workId: string | undefined): string |
 export function ExportProgress({ jobId, workId, onClose, onRetry }: ExportProgressProps) {
   const { job, cancel, cancelError } = useRenderJob(jobId);
   const t = useT();
+  // R43 — surface reveal failures inline. Most likely cause is the user
+  // running the dev server in a non-supported platform (returns 501) or
+  // the output file getting moved between done event and reveal click.
+  const [revealError, setRevealError] = useState<string | null>(null);
   // R41: focus management. Without this, opening Export modal during a
   // 5-min render leaves keyboard users unable to reach the Cancel button.
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -268,16 +278,18 @@ export function ExportProgress({ jobId, workId, onClose, onRetry }: ExportProgre
           </details>
         ) : null}
 
-        {/* R43 — done state surfaces the produced file. Pre-fix, the
-            modal closed 1500ms after done with no link to the output, so
-            users saw "走完所有流程后没有任何结果". Now we show the path
-            (truncated) with an "open" link that targets the served URL. */}
+        {/* R43 — done state surfaces three explicit actions:
+              1. 下载   ─ <a download> forces save-to-Downloads
+              2. 在 Finder 显示 ─ POST /api/render/reveal → open -R (Mac)
+              3. 预览   ─ open in tab for inline playback
+            Earlier we shipped only "open" which was ambiguous — users
+            asked "怎么下载这个视频". 现在三个动作含义都明确。 */}
         {status === "done" && job?.outputPath && toOutputUrl(job.outputPath, workId) ? (
           <div
             data-testid="export-output-row"
             style={{
               marginTop: 16,
-              padding: "10px 12px",
+              padding: "12px 14px",
               background: "var(--surface-0)",
               border: "1px solid var(--accent-lo, var(--glass-border))",
               borderRadius: 8,
@@ -285,39 +297,119 @@ export function ExportProgress({ jobId, workId, onClose, onRetry }: ExportProgre
               fontSize: 11,
               color: "var(--text-dim)",
               display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 12,
+              flexDirection: "column",
+              gap: 10,
             }}
           >
-            <span
+            <div
               title={job.outputPath}
               style={{
                 overflow: "hidden",
                 textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
-                flex: 1,
-                minWidth: 0,
+                color: "var(--text)",
+                fontSize: 12,
               }}
             >
-              {job.outputPath.split("/").slice(-2).join("/")}
-            </span>
-            <a
-              href={toOutputUrl(job.outputPath, workId) ?? "#"}
-              target="_blank"
-              rel="noopener noreferrer"
+              {filenameOf(job.outputPath)}
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {/* Primary action: 下载. The `download` attribute on a
+                  same-origin <a> tells the browser to save the response
+                  body as a file (with the supplied filename) instead of
+                  navigating to it / playing it inline. Mac and Windows
+                  both honor this. The `download="..."` value overrides
+                  the filename Chrome would otherwise infer from the URL. */}
+              <a
+                href={toOutputUrl(job.outputPath, workId) ?? "#"}
+                download={filenameOf(job.outputPath)}
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 10,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  fontWeight: 600,
+                  border: "1px solid var(--accent)",
+                  background: "var(--accent-glow)",
+                  color: "var(--accent-hi)",
+                  borderRadius: 6,
+                  textDecoration: "none",
+                  cursor: "pointer",
+                }}
+              >
+                ↓ {t("studio.exportProgress.btnDownload")}
+              </a>
+              {workId ? (
+                <button
+                  type="button"
+                  data-bare
+                  onClick={async () => {
+                    setRevealError(null);
+                    try {
+                      await revealRenderOutput(workId, filenameOf(job.outputPath!));
+                    } catch (err: any) {
+                      setRevealError(err?.message ?? String(err));
+                    }
+                  }}
+                  style={{
+                    padding: "6px 12px",
+                    fontSize: 10,
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
+                    border: "1px solid var(--glass-border)",
+                    background: "transparent",
+                    color: "var(--text-dim)",
+                    borderRadius: 6,
+                    cursor: "pointer",
+                  }}
+                >
+                  {t("studio.exportProgress.btnReveal")}
+                </button>
+              ) : null}
+              <a
+                href={toOutputUrl(job.outputPath, workId) ?? "#"}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 10,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  border: "1px solid var(--glass-border)",
+                  background: "transparent",
+                  color: "var(--text-dim)",
+                  borderRadius: 6,
+                  textDecoration: "none",
+                  cursor: "pointer",
+                }}
+              >
+                {t("studio.exportProgress.btnPreview")}
+              </a>
+            </div>
+            {revealError ? (
+              <div
+                role="alert"
+                style={{
+                  fontSize: 10,
+                  color: "var(--status-error, #d4756c)",
+                  lineHeight: 1.5,
+                }}
+              >
+                {revealError}
+              </div>
+            ) : null}
+            <div
+              title={job.outputPath}
               style={{
-                color: "var(--accent-hi)",
-                textDecoration: "none",
-                fontWeight: 500,
-                letterSpacing: "0.06em",
-                textTransform: "uppercase",
                 fontSize: 10,
+                color: "var(--text-dimmer)",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
                 whiteSpace: "nowrap",
               }}
             >
-              {t("studio.exportProgress.btnOpen")}
-            </a>
+              {job.outputPath}
+            </div>
           </div>
         ) : null}
 

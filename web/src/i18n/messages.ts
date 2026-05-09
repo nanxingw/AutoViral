@@ -217,7 +217,7 @@ export const en = {
       btnConfirm: "Confirm",
     },
     exportProgress: {
-      titleDone: "Export complete · open file",
+      titleDone: "Export complete",
       titleFailed: "Export failed",
       titleCancelled: "Cancelled",
       titleRendering: "Rendering…",
@@ -225,7 +225,9 @@ export const en = {
       btnCancel: "Cancel",
       btnRetry: "Retry",
       btnClose: "Close",
-      btnOpen: "Open",
+      btnDownload: "Download",
+      btnReveal: "Show in Finder",
+      btnPreview: "Preview",
       cancelFailed: "Cancel failed: {msg}",
     },
     generationDialog: {
@@ -577,7 +579,7 @@ export const zh: DeepShape<Messages> = {
       btnConfirm: "确认",
     },
     exportProgress: {
-      titleDone: "导出完成 · 打开文件",
+      titleDone: "导出完成",
       titleFailed: "导出失败",
       titleCancelled: "已取消",
       titleRendering: "正在渲染…",
@@ -585,7 +587,9 @@ export const zh: DeepShape<Messages> = {
       btnCancel: "取消",
       btnRetry: "重试",
       btnClose: "关闭",
-      btnOpen: "打开",
+      btnDownload: "下载",
+      btnReveal: "在 Finder 显示",
+      btnPreview: "预览",
       cancelFailed: "取消失败：{msg}",
     },
     generationDialog: {
