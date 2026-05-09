@@ -262,11 +262,45 @@ export async function saveWorkChat(id: string, data: unknown): Promise<void> {
   await writeFile(join(workDir(id), "chat.json"), JSON.stringify(data), "utf-8");
 }
 
-/** Load full conversation from chat.json. */
-export async function loadWorkChat(id: string): Promise<unknown | null> {
+/** Load full conversation. Tries chat.json (single-shot snapshot saved by
+ *  PUT /api/works/:id/chat) first, falling back to chat.jsonl (the live
+ *  stream log appended by ws-bridge.appendToChatLog). Without the jsonl
+ *  fallback, refreshing the studio page wiped the entire visible chat
+ *  history because no caller actually writes chat.json today — only the
+ *  jsonl path is on disk for live work sessions. */
+export async function loadWorkChat(
+  id: string,
+): Promise<{ blocks: unknown[] } | null> {
   try {
     const raw = await readFile(join(workDir(id), "chat.json"), "utf-8");
-    return JSON.parse(raw);
+    return JSON.parse(raw) as { blocks: unknown[] };
+  } catch {
+    /* fall through to jsonl */
+  }
+  try {
+    const raw = await readFile(join(workDir(id), "chat.jsonl"), "utf-8");
+    const blocks = raw
+      .split("\n")
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0)
+      .map((line) => {
+        try {
+          const b = JSON.parse(line) as Record<string, unknown>;
+          // Normalize ISO timestamp → ms epoch so the client's hydration
+          // path (which expects b.ts: number) shows real timestamps
+          // instead of fabricated `Date.now() - i*1000` values.
+          if (typeof b.timestamp === "string" && b.ts === undefined) {
+            const t = Date.parse(b.timestamp);
+            if (!Number.isNaN(t)) b.ts = t;
+          }
+          return b;
+        } catch {
+          return null;
+        }
+      })
+      .filter((b): b is Record<string, unknown> => b !== null);
+    if (blocks.length === 0) return null;
+    return { blocks };
   } catch {
     return null;
   }

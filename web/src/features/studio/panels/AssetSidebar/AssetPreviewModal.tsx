@@ -174,8 +174,19 @@ export function AssetPreviewModal({ asset, onClose }: Props) {
                   src={asset.url}
                   alt={asset.name}
                   style={{
-                    maxWidth: "100%",
-                    maxHeight: "100%",
+                    // R47-fix2 — earlier attempt used max-height: 100% on a
+                    // flex child, but flex resolves percentages against a
+                    // *definite* parent height. Our modal only has
+                    // max-height (no explicit height), so 100% degraded
+                    // to the image's natural height and the image got
+                    // cropped by the parent overflow:hidden. Switch to
+                    // viewport units directly on the image — this
+                    // resolves against the viewport, not the flex
+                    // hierarchy, so portrait + landscape both fit.
+                    maxWidth: "min(88vw, 1100px)",
+                    // 92vh - ~100px (header + footer + borders) buffer so
+                    // the image clears the surrounding chrome.
+                    maxHeight: "min(82vh, 700px)",
                     width: "auto",
                     height: "auto",
                     objectFit: "contain",
