@@ -115,7 +115,13 @@ Skill('autoviral')
   - **配音 (TTS)** — \`POST /api/audio/tts\` { text, voice, output_path }。Edge TTS 内置免费，支持 zh-CN-XiaoxiaoNeural / zh-CN-YunxiNeural 等 8+ 中文音色。**短视频默认应该有人声**——纯音乐铺底+全屏文字的形式只在特定调性（editorial slow-paced）下成立，绝大多数 viral 短视频靠 narration 推进节奏。**做完 brief 后主动 propose**："我来给这段加个 narration，用 zh-CN-XiaoxiaoNeural（warm conversational）" 然后跑 TTS。
   - **字幕生成 (ASR)** — \`POST /api/audio/captions\` { workId, assetPath, language }。stable-whisper 自动转写音频（人声 / TTS / 视频音轨），返回 word-level 时间戳。**任何带音频的视频都应自动跑 ASR + 烧字幕**——抖音 70% 用户静音浏览，没字幕等于零完播。如果端点返回 errorCode=PYTHON_DEP_MISSING，告诉用户 \`pip install stable-ts\` (注意：不是 stable-whisper)。
   - **字幕烧录** — \`subtitle_burn.py\`（assembly module/scripts）：karaoke-style ASS 字幕，支持 douyin-highlight / xhs-soft 等平台预设。**禁止手写 ffmpeg drawtext**。
-  - **过场转场** — \`POST /api/transitions/light-leak\` { workId, clipARelative, clipBRelative, outputFilename, clipADuration, transitionDuration? }。在两段 clip 之间叠一道 cinematic 橙色光斑扫光 + cross-fade，做出胶片烧片质感。**适合**：editorial / 文艺向短片场景切换、蒙太奇序列。**不适合**：快剪情节驱动（用直接 cut）、口播单镜（用 fade）。transitionDuration 默认 0.8s（典型 viral 节奏）；如果你想更慢的 editorial 感，传 1.2-1.5。**绝对不要**用 ffmpeg drawtext / 手写 xfade filter——已封装。
+  - **过场转场** — 4 个 cinematic 转场端点，body 都接受 { workId, clipARelative, clipBRelative, outputFilename, clipADuration, transitionDuration? }。**绝对不要**手写 ffmpeg drawtext / xfade filter——已全部封装。
+    - \`POST /api/transitions/light-leak\` —— 橙色光斑扫光 + cross-fade，胶片烧片质感。**适合**：editorial / 文艺片段切换、蒙太奇序列、回忆插入。typical duration 0.8s（紧凑 viral 节奏）/ 1.2-1.5s（slow editorial）。
+    - \`POST /api/transitions/glitch\` —— RGB 通道分离 + 周期性水平 jitter，故障美学。**适合**：科技 / 赛博 / 数字主题、紧张悬疑节点、节拍重音 cut。typical duration 0.4-0.6s（短促有冲击力）。
+    - \`POST /api/transitions/domain-warp\` —— 正弦波形像素位移让 B 帧从波纹中浮现，水波 / 涟漪质感。**适合**：梦境 / 回忆 / 治愈系 / 旅行 vlog 场景切换。typical duration 1.0-1.5s（让波形完整展开）。
+    - \`POST /api/transitions/grav-lens\` —— 径向放大畸变（黑洞效应），从中心吞噬扩张。**适合**：戏剧化反转、命运感叙事、空间穿越主题。typical duration 1.0-1.4s。
+    - **不适合所有转场的场景**：快剪情节驱动（用直接 cut）、口播单镜（用 fade 或不加转场）。每段视频里同种转场 ≤2 次——多了会显廉价。
+  - **流式渲染（实验性）** — Stage 1 默认走 \`@remotion/renderer\` 直接出 mp4。设 env \`AUTOVIRAL_USE_STREAMING_RENDERER=1\` 或 \`composition.experimentalFlags.streamingRenderer = true\` 切到 streaming bridge（renderFrames + ffmpeg image2pipe），失败自动 fallback。普通用户**不需要**碰这个 flag。
 
 任意能力都可以**直接调用**，没有前置依赖、没有顺序约束、没有评审门禁。
 
