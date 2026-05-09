@@ -1,7 +1,8 @@
 import { createPortal } from "react-dom";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useT } from "@/i18n/useT";
+import { useModalFocus } from "@/hooks/useModalFocus";
 
 export interface ReframeClipSummary {
   id: string;
@@ -39,6 +40,11 @@ export function ReframeConfirmDialog({
   onCancel,
 }: Props) {
   const t = useT();
+  // R41: focus management for keyboard / screen reader users. Without
+  // this the modal opened but Tab stayed on background elements,
+  // making the Cancel/Confirm buttons unreachable.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(open, dialogRef);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -72,6 +78,7 @@ export function ReframeConfirmDialog({
           onClick={onCancel}
         >
           <motion.div
+            ref={dialogRef}
             onClick={(e) => e.stopPropagation()}
             initial={{ opacity: 0, scale: 0.96 }}
             animate={{ opacity: 1, scale: 1 }}

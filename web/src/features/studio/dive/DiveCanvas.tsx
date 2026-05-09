@@ -1,4 +1,5 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
+import { useModalFocus } from "@/hooks/useModalFocus";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -35,6 +36,10 @@ export function DiveCanvas({ open, onClose }: Props) {
   const selection = useComposition((s) => s.selection);
   const rebindClip = useComposition((s) => s.rebindClip);
   const t = useT();
+  // R41: focus management for keyboard users. Dive canvas is a full-
+  // screen overlay—focus needs to enter it on open + return on close.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(open, dialogRef);
 
   // Find the selected clip's currently-bound asset, if any.
   const currentAssetId = useMemo<string | null>(() => {
@@ -113,6 +118,7 @@ export function DiveCanvas({ open, onClose }: Props) {
           }}
         >
           <motion.div
+            ref={dialogRef}
             // Stop click-through so internal canvas clicks don't dismiss.
             onClick={(e) => e.stopPropagation()}
             role="dialog"

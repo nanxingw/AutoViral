@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useRenderJob, type RenderJobView } from "./useRenderJob";
 import { useT } from "@/i18n/useT";
+import { useModalFocus } from "@/hooks/useModalFocus";
 
 const STAGES = ["render", "duck", "loudnorm", "burn", "encode"] as const;
 type Stage = (typeof STAGES)[number];
@@ -29,6 +30,10 @@ export interface ExportProgressProps {
 export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps) {
   const { job, cancel, cancelError } = useRenderJob(jobId);
   const t = useT();
+  // R41: focus management. Without this, opening Export modal during a
+  // 5-min render leaves keyboard users unable to reach the Cancel button.
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useModalFocus(jobId !== null, dialogRef);
 
   useEffect(() => {
     if (!job) return;
@@ -74,6 +79,7 @@ export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps)
       }}
     >
       <div
+        ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
         style={{
           width: 460,
