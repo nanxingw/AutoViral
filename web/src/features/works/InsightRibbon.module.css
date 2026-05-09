@@ -11,7 +11,21 @@
   min-height: 130px;
 }
 .tag { font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.1em; color: var(--accent); }
-.head { margin: 0; font-size: 16px; font-weight: 500; line-height: 1.3; }
+/* R39: cap insight body at 4 lines so a 3-col grid row stays aligned
+   when one card has a much longer body than its siblings. */
+.head {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+}
 .foot {
   display: flex;
   justify-content: space-between;

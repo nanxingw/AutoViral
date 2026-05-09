@@ -25,7 +25,23 @@
   font-family: "JetBrains Mono", monospace;
   letter-spacing: 0.06em;
 }
-.title3 { margin: 0 0 4px; font-size: 13px; font-weight: 500; line-height: 1.3; }
+/* R39: clamp trending row title to 2 lines. Row uses
+   grid-template-columns: 28px 64px 1fr auto — a long title in the 1fr
+   cell would wrap to many lines and stretch the row, knocking the
+   thumb/rank/arrow out of vertical alignment with sibling rows. */
+.title3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+}
 .stats { display: flex; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: 10px; color: var(--text-dimmer); }
 .up { background: rgba(134,239,172,0.12); color: var(--status-done); }
 .flat { background: var(--surface-2); color: var(--text-dimmer); }
