@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { apiFetch } from "@/lib/api";
 import { useEditor } from "../../store";
 import { loadCarousel } from "../../services/carousel";
@@ -25,6 +25,22 @@ export function AITab({ workId }: { workId: string }) {
   const [msg, setMsg] = useState<string | null>(null);
   const slideCount = car?.slides.length ?? 0;
   const t = useT();
+  // R36: cancellation flag for in-flight polls. The poll loop is
+  // fire-and-forget by design (button frees up immediately) — but if
+  // the component unmounts (user closes Editor / switches workId) we
+  // need to stop polling so the loop doesn't:
+  //   - call reload() on stale store state
+  //   - call setMsg() on an unmounted component (React warning)
+  //   - hold closures to old workId for up to 60s
+  // Ref-based flag (not state) so polling reads the latest value
+  // without re-subscribing.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   /**
    * Poll carousel.updatedAt every 5s for up to 60s after triggering an
@@ -32,6 +48,9 @@ export function AITab({ workId }: { workId: string }) {
    * dispatch time, the agent has rewritten carousel.yaml — pull the
    * fresh state into the store so the canvas refreshes without a
    * manual reload.
+   *
+   * R36: every iteration checks aliveRef before doing any state-mutating
+   * work — early return if the component already unmounted.
    */
   const watchForCarouselUpdate = async (
     sinceISO: string,
@@ -40,8 +59,10 @@ export function AITab({ workId }: { workId: string }) {
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       await new Promise((r) => setTimeout(r, 5_000));
+      if (!aliveRef.current) return;
       try {
         const next = await loadCarousel(workId);
+        if (!aliveRef.current) return;
         if (next && next.updatedAt > sinceISO) {
           reload(next);
           setMsg(t("editor.aiTab.msgUpdated"));
@@ -51,6 +72,7 @@ export function AITab({ workId }: { workId: string }) {
         // ignore transient fetch failures, keep polling.
       }
     }
+    if (!aliveRef.current) return;
     setMsg(t("editor.aiTab.msgQueuedTimeout"));
   };
 
