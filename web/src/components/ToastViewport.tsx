@@ -59,17 +59,26 @@ export function ToastViewport() {
     };
   }, [entries, dismiss]);
 
-  if (entries.length === 0) return null;
-
+  // R40 a11y: don't early-return when entries empty. Live regions only
+  // announce when a child appears IF the region was already in the DOM.
+  // Mounting the whole tree the moment a toast arrives can race the
+  // assistive tech's polling. Keep the region permanently mounted; let
+  // empty state render an empty container with no visible footprint.
   return (
     <div
       role="region"
       aria-label={t("toast.viewportAriaLabel" as MessageKey)}
+      // role="region" does NOT imply aria-live (unlike role="status" /
+      // role="alert"). Set explicitly so screen readers track child
+      // additions. Polite default; per-toast variant escalates to
+      // assertive for errors.
+      aria-live="polite"
+      aria-relevant="additions"
       style={{
         position: "fixed",
         right: 16,
         bottom: 16,
-        display: "flex",
+        display: entries.length === 0 ? "none" : "flex",
         flexDirection: "column",
         gap: 8,
         zIndex: 1100,
@@ -79,7 +88,11 @@ export function ToastViewport() {
       {entries.map((e) => (
         <div
           key={e.id}
-          role="status"
+          // R40: error toasts upgrade to role="alert" (assertive) so
+          // screen readers interrupt current speech. Info toasts stay
+          // role="status" (polite) — non-urgent feedback shouldn't talk
+          // over the user.
+          role={e.variant === "error" ? "alert" : "status"}
           style={{
             padding: "10px 14px",
             borderRadius: 8,

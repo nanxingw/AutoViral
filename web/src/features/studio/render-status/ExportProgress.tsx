@@ -88,6 +88,14 @@ export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps)
       >
         <div
           id="export-progress-title"
+          // R40 a11y: render title transitions (queued → running → done /
+          // failed / cancelled) audibly. Without aria-live the screen
+          // reader announces the title only once at dialog open via
+          // aria-labelledby, then goes silent for the remainder of a
+          // 5-min render. Polite is correct — progress updates shouldn't
+          // interrupt the user's other actions.
+          aria-live="polite"
+          aria-atomic="true"
           style={{
             fontFamily: "var(--font-editorial)",
             fontSize: 22,
