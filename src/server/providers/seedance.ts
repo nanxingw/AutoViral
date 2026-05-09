@@ -63,6 +63,18 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
       }
 
       // 1) Enqueue
+      // R44 — image-to-video. When firstFrameImage / lastFrameImage are
+      // present, OpenRouter Seedance accepts a `frame_images` array under
+      // `input` with entries like { frame_type: "first" | "last", image }.
+      // Without these the call falls back to pure text-to-video, which is
+      // the original Phase-2 behaviour — preserved untouched.
+      const frameImages: Array<{ frame_type: "first" | "last"; image: string }> = [];
+      if (req.firstFrameImage) {
+        frameImages.push({ frame_type: "first", image: req.firstFrameImage });
+      }
+      if (req.lastFrameImage) {
+        frameImages.push({ frame_type: "last", image: req.lastFrameImage });
+      }
       const enqueueRes = await fetch(`${baseUrl}/videos`, {
         method: "POST",
         headers: {
@@ -75,6 +87,10 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
           input: {
             duration: req.durationSec,
             aspect_ratio: req.aspectRatio,
+            // Only include frame_images when at least one anchor is set —
+            // sending an empty array could be interpreted as "no frames"
+            // and 400 the request on stricter API versions.
+            ...(frameImages.length > 0 ? { frame_images: frameImages } : {}),
           },
         }),
       });

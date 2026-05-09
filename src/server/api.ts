@@ -2433,6 +2433,11 @@ apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
     prompt: string;
     durationSec: number;
     aspectRatio: string;
+    /** R44 — image-to-video first-frame anchor. URL or data URI. Adapters
+     *  that don't support i2v ignore this field and fall back to t2v. */
+    firstFrameImage?: string;
+    /** R44 — optional last-frame anchor for morph effects. */
+    lastFrameImage?: string;
   }>();
   const provider = getVideoProvider(providerId);
   if (!provider) return c.json({ error: "unknown provider" }, 404);
@@ -2450,6 +2455,11 @@ apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
     durationSec: body.durationSec ?? 4,
     aspectRatio: body.aspectRatio ?? "9:16",
     outputAbsoluteDir: seedanceDirAbs,
+    // R44 — i2v anchors. When provided, Seedance switches from text-only
+    // to first-frame-driven generation, which is the only way to do
+    // "一镜到底 + 参考人物" workflows.
+    ...(body.firstFrameImage ? { firstFrameImage: body.firstFrameImage } : {}),
+    ...(body.lastFrameImage ? { lastFrameImage: body.lastFrameImage } : {}),
   });
   // Convert absolute write path back to work-relative for the asset entry.
   const relativeAssetUri = result.assetUri.startsWith(wDirAbs + "/")

@@ -139,6 +139,137 @@ describe("seedanceProvider", () => {
     await settled;
   });
 
+  it("R44: forwards firstFrameImage as frame_images array (image-to-video)", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: "i2v-1",
+        polling_url: "https://openrouter.ai/api/v1/videos/i2v-1",
+        status: "pending",
+      }),
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: "i2v-1",
+        status: "completed",
+        unsigned_urls: ["https://cdn.openrouter.ai/seedance/i2v-1.mp4"],
+        usage: { cost: 0.76 },
+      }),
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(512),
+    });
+
+    const provider = createSeedanceProvider();
+    const promise = provider.generateVideo({
+      prompt: "the woman turns slowly to face the camera",
+      durationSec: 5,
+      aspectRatio: "9:16",
+      firstFrameImage: "https://cdn.example.com/anchor.jpg",
+    });
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    const result = await promise;
+    expect(result.stub).toBe(false);
+
+    const enqueueBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(enqueueBody.input.frame_images).toEqual([
+      { frame_type: "first", image: "https://cdn.example.com/anchor.jpg" },
+    ]);
+    // Pure t2v fields still present, untouched.
+    expect(enqueueBody.input.duration).toBe(5);
+    expect(enqueueBody.input.aspect_ratio).toBe("9:16");
+  });
+
+  it("R44: omits frame_images entirely when no anchors provided (pure t2v unchanged)", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: "t2v-1",
+        polling_url: "https://openrouter.ai/api/v1/videos/t2v-1",
+        status: "pending",
+      }),
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: "t2v-1",
+        status: "completed",
+        unsigned_urls: ["https://cdn.openrouter.ai/seedance/t2v-1.mp4"],
+        usage: { cost: 0.76 },
+      }),
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(512),
+    });
+
+    const provider = createSeedanceProvider();
+    const promise = provider.generateVideo({
+      prompt: "panda eating bamboo",
+      durationSec: 3,
+      aspectRatio: "9:16",
+    });
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    await promise;
+
+    const enqueueBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(enqueueBody.input.frame_images).toBeUndefined();
+    expect("frame_images" in enqueueBody.input).toBe(false);
+  });
+
+  it("R44: forwards both firstFrameImage and lastFrameImage when provided", async () => {
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: "morph-1",
+        polling_url: "https://openrouter.ai/api/v1/videos/morph-1",
+        status: "pending",
+      }),
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        id: "morph-1",
+        status: "completed",
+        unsigned_urls: ["https://cdn.openrouter.ai/seedance/morph-1.mp4"],
+        usage: { cost: 0.76 },
+      }),
+    });
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      arrayBuffer: async () => new ArrayBuffer(512),
+    });
+
+    const provider = createSeedanceProvider();
+    const promise = provider.generateVideo({
+      prompt: "morph A to B",
+      durationSec: 3,
+      aspectRatio: "9:16",
+      firstFrameImage: "https://cdn.example.com/a.jpg",
+      lastFrameImage: "https://cdn.example.com/b.jpg",
+    });
+    await vi.advanceTimersByTimeAsync(POLL_INTERVAL_MS);
+    await promise;
+
+    const enqueueBody = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(enqueueBody.input.frame_images).toEqual([
+      { frame_type: "first", image: "https://cdn.example.com/a.jpg" },
+      { frame_type: "last", image: "https://cdn.example.com/b.jpg" },
+    ]);
+  });
+
   it("throws when polling exceeds MAX_POLL_ATTEMPTS", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "test-key");
     const fetchMock = vi.fn();
