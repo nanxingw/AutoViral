@@ -80,8 +80,19 @@ export function TopBar({
         {t("editor.topbar.backToWorks")}
       </Button>
       <strong
-        style={{ fontFamily: "var(--font-editorial)", fontSize: 18 }}
-        title={car?.id && car.id !== workId ? `carousel: ${car.id}` : undefined}
+        // R38: cap workId display so unusually long ids (paths, agent-
+        // generated UUIDs with prefix) don't push the save indicator off
+        // the right edge. maxWidth keeps the title compact, full id is
+        // still in the title tooltip for inspection.
+        style={{
+          fontFamily: "var(--font-editorial)",
+          fontSize: 18,
+          maxWidth: 360,
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+        }}
+        title={car?.id && car.id !== workId ? `carousel: ${car.id} · workId: ${workId}` : workId}
       >
         {workId}
       </strong>

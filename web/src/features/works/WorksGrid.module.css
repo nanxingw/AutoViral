@@ -23,7 +23,23 @@ img.thumb, video.thumb { object-fit: cover; }
   background: linear-gradient(180deg, transparent, rgba(10,11,15,0.9));
   color: white;
 }
-.meta h3 { margin: 0 0 4px; font-size: 14px; font-weight: 500; letter-spacing: -0.01em; }
+/* R38: cap titles at 2 lines with ellipsis. Without this, a 200+ char
+   title (legitimate user input or agent-generated) wraps unbounded,
+   pushes the date subline out of the .meta strip, and overlaps badges
+   along the top edge. word-break catches unbreakable URL-like strings. */
+.meta h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+}
 .subline { font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.06em; color: rgba(255,255,255,0.6); display: flex; gap: 8px; }
 .badge {
   position: absolute; top: 12px; left: 12px;

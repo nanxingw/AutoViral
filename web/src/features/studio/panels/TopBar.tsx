@@ -112,13 +112,19 @@ export function TopBar({
         </span>
         <div style={{ width: 1, height: 14, background: "var(--divider)", margin: "0 8px", flexShrink: 0 }} />
         <span
+          // R38: ellipsis was already declared but missing whiteSpace
+          // nowrap + maxWidth — text just wrapped to 2+ lines instead of
+          // truncating. Add both so long ids stay on one line.
+          title={comp?.id ?? workId}
           style={{
             fontSize: 14,
             fontWeight: 500,
             color: "var(--text)",
             letterSpacing: "-0.015em",
+            maxWidth: 320,
             overflow: "hidden",
             textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
         >
           {comp?.id ?? workId}
