@@ -1455,7 +1455,11 @@ print(json.dumps({"segments": segs}))
       if (parsed.error) {
         return c.json({
           success: false,
-          error: `${parsed.error}. Run \`pip install stable-whisper\` to enable ASR.`,
+          // R45 — package name on PyPI is `stable-ts` (the import alias is
+          // `stable_whisper` for legacy reasons). The original `pip install
+          // stable-whisper` hint is wrong: that package doesn't exist on
+          // PyPI and pip 404s. Burned ~5 minutes 2026-05-09 chasing this.
+          error: `${parsed.error}. Run \`pip install stable-ts\` to enable ASR (the import is named stable_whisper but the PyPI package is stable-ts).`,
           code: "PYTHON_DEP_MISSING",
         }, 503);
       }
