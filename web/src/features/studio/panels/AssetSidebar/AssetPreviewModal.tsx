@@ -153,10 +153,19 @@ export function AssetPreviewModal({ asset, onClose }: Props) {
               style={{
                 flex: 1,
                 minHeight: 0,
-                overflow: "auto",
+                // R47 — must be `hidden`, not `auto`. Combined with the
+                // `display: grid + placeItems: center` we used here
+                // before, portrait 1080×1920 images blew past the modal's
+                // 706-px content height because CSS grid resolves
+                // `max-height: 100%` against an auto-sized track (which
+                // sizes to image natural height). flex avoids that
+                // because the flex container's content box is the
+                // resolution target, not the auto track.
+                overflow: "hidden",
                 background: "var(--surface-0)",
-                display: "grid",
-                placeItems: "center",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
                 padding: asset.kind === "audio" ? 32 : 0,
               }}
             >
@@ -167,6 +176,8 @@ export function AssetPreviewModal({ asset, onClose }: Props) {
                   style={{
                     maxWidth: "100%",
                     maxHeight: "100%",
+                    width: "auto",
+                    height: "auto",
                     objectFit: "contain",
                     display: "block",
                   }}
