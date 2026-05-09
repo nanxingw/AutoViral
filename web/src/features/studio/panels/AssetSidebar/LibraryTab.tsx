@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useWorkAssets, type AssetItem } from "@/queries/assets";
 import { GenerationDialog } from "@/features/studio/generation/GenerationDialog";
 import { SearchBox } from "./SearchBox";
+import { AssetPreviewModal } from "./AssetPreviewModal";
 
 interface Props {
   workId: string;
@@ -17,6 +18,8 @@ export function LibraryTab({ workId }: Props) {
   const { data: groups = [], isLoading } = useWorkAssets(workId);
   const [active, setActive] = useState<string | null>(null);
   const [genOpen, setGenOpen] = useState(false);
+  // R43 — click any AssetTile to open large preview. null = closed.
+  const [preview, setPreview] = useState<AssetItem | null>(null);
 
   const currentGroup = useMemo(() => {
     if (!groups.length) return null;
@@ -139,7 +142,12 @@ export function LibraryTab({ workId }: Props) {
         {currentGroup && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {currentGroup.items.map((item, i) => (
-              <AssetTile key={item.path} item={item} index={i} />
+              <AssetTile
+                key={item.path}
+                item={item}
+                index={i}
+                onOpen={() => setPreview(item)}
+              />
             ))}
           </div>
         )}
@@ -150,11 +158,20 @@ export function LibraryTab({ workId }: Props) {
         open={genOpen}
         onOpenChange={setGenOpen}
       />
+      <AssetPreviewModal asset={preview} onClose={() => setPreview(null)} />
     </div>
   );
 }
 
-function AssetTile({ item, index }: { item: AssetItem; index: number }) {
+function AssetTile({
+  item,
+  index,
+  onOpen,
+}: {
+  item: AssetItem;
+  index: number;
+  onOpen: () => void;
+}) {
   const hue = hueFromString(item.path);
   const fallbackBg = `linear-gradient(145deg, hsl(${hue}, 40%, 25%), hsl(${(hue + 30) % 360}, 30%, 12%))`;
   // Video tiles mount their <video> only on hover, then UNMOUNT on leave.
@@ -172,6 +189,20 @@ function AssetTile({ item, index }: { item: AssetItem; index: number }) {
   const [mediaFailed, setMediaFailed] = useState(false);
   return (
     <div
+      // R43 — tile is now an interactive control. role+tabIndex make it
+      // keyboard-focusable; click + Enter both open the preview modal.
+      // Pre-fix the tile had no onClick, so the only "preview" was hover-
+      // autoplay (video) or nothing (image / audio).
+      role="button"
+      tabIndex={0}
+      aria-label={`Preview ${item.name}`}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
       style={{
         position: "relative",
         aspectRatio: "9/16",
