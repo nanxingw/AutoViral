@@ -56,7 +56,13 @@ function HighlightedCode({
 
 /** Render an `<img>` from agent markdown. If the src ends in a known video
  *  extension, swap to a muted/looping `<video>` so the user can watch
- *  generated clips inline without leaving the chat. */
+ *  generated clips inline without leaving the chat.
+ *
+ *  R35: agent-generated URLs can drift between message timestamp and now
+ *  (asset GC, regenerated yaml, server restart). Without onError the
+ *  user sees a broken icon with no clue what happened. Track failed
+ *  state and render an inline alert with the URL so the user can copy
+ *  it or click through. */
 export function ChatInlineMedia({
   src,
   alt,
@@ -64,7 +70,33 @@ export function ChatInlineMedia({
   src: string | undefined;
   alt: string | undefined;
 }) {
+  const [failed, setFailed] = useState(false);
   if (!src) return null;
+  if (failed) {
+    return (
+      <a
+        href={src}
+        target="_blank"
+        rel="noreferrer"
+        style={{
+          display: "block",
+          margin: "6px 0",
+          padding: "8px 10px",
+          border: "1px dashed var(--status-error, #d4756c)",
+          background: "rgba(212, 117, 108, 0.06)",
+          borderRadius: 8,
+          color: "var(--status-error, #d4756c)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          lineHeight: 1.5,
+          textDecoration: "none",
+          wordBreak: "break-all",
+        }}
+      >
+        ⚠ {alt || src}
+      </a>
+    );
+  }
   const isVideo = /\.(mp4|mov|webm)(?:[?#]|$)/i.test(src);
   if (isVideo) {
     return (
@@ -75,6 +107,7 @@ export function ChatInlineMedia({
         playsInline
         controls
         preload="metadata"
+        onError={() => setFailed(true)}
         style={{
           maxWidth: "100%",
           maxHeight: 360,
@@ -90,6 +123,7 @@ export function ChatInlineMedia({
       src={src}
       alt={alt ?? ""}
       loading="lazy"
+      onError={() => setFailed(true)}
       style={{
         maxWidth: "100%",
         maxHeight: 360,
