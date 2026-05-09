@@ -21,9 +21,29 @@ export function buildSafeOutputFilename(
   return `${safe}-${stamp}.mp4`;
 }
 
+/**
+ * R46 #2.5 — Remotion's renderMedia exposes a per-frame onProgress
+ * callback we were ignoring. Without it, the surrounding pipeline saw
+ * render as a binary 0-or-done stage even though weighted progress
+ * budget allocates 75% of the bar to it. Result: bar would sit at 0%
+ * for the whole render then snap to 75%. Wiring this through closes
+ * the "stuck at 0%" gap surfaced in the 2026-05-09 e2e test.
+ *
+ * The callback shape is `({ renderedFrames, encodedFrames, ... })` —
+ * we use renderedFrames since that's what advances during the slow
+ * Chromium screenshot loop. encodedFrames lags by ~10 frames because
+ * Remotion encodes in batches; for a smooth UI bar we want the leading
+ * edge.
+ */
+export interface RenderToMp4Options {
+  /** 0..1 fraction of frames rendered. Called every ~250ms by Remotion. */
+  onProgress?: (fraction: number) => void;
+}
+
 export async function renderCompositionToMp4(
   comp: { duration: number; fps: number; width: number; height: number; title?: string; [k: string]: unknown },
   outDir: string,
+  opts: RenderToMp4Options = {},
 ): Promise<string> {
   const bundleLocation = await bundle({
     entryPoint: join(
@@ -56,18 +76,31 @@ export async function renderCompositionToMp4(
   // <Composition> root only declares defaults (1080x1920 30fps); without the
   // override here, 1:1 / 16:9 / 4:5 / 60fps exports came out with wrong
   // dimensions/fps. (Codex review 2026-04-27)
+  const totalFrames = Math.max(1, Math.round(comp.duration * comp.fps));
   await renderMedia({
     composition: {
       ...composition,
       width: comp.width,
       height: comp.height,
       fps: comp.fps,
-      durationInFrames: Math.max(1, Math.round(comp.duration * comp.fps)),
+      durationInFrames: totalFrames,
     },
     serveUrl: bundleLocation,
     codec: "h264",
     outputLocation: outFile,
     inputProps: { comp },
+    // R46 #2.5 — surface per-frame progress so the pipeline progress
+    // budget (worker.ts STAGE_BUDGET.render = 0.75) advances smoothly
+    // through the long render stage instead of hanging at 0% for the
+    // whole duration. Remotion calls this every ~250ms.
+    onProgress: opts.onProgress
+      ? ({ renderedFrames }) => {
+          // Clamp + guard against div-by-zero (composition could be 1
+          // frame in pathological cases).
+          const fraction = Math.max(0, Math.min(1, renderedFrames / totalFrames));
+          opts.onProgress!(fraction);
+        }
+      : undefined,
   });
   return outFile;
 }

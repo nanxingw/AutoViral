@@ -284,6 +284,9 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   // Stage 1: Remotion render
   // TODO(phase-7): renderCompositionToMp4 does not yet accept an AbortSignal;
   // we check between stages so cancellation takes effect at the next boundary.
+  // R46 #2.5: pass through Remotion's per-frame onProgress so the worker's
+  // weighted budget (render = 75% of the bar) actually advances smoothly
+  // instead of binary 0/1.
   checkAbort();
   onP("render", 0);
   const compForRender = rewriteClipSrcsToAbsolute(
@@ -292,6 +295,15 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   let workingPath = await renderCompositionToMp4(
     compForRender,
     opts.outDir,
+    {
+      onProgress: (fraction) => {
+        if (opts.signal?.aborted) return;
+        // Cap at 0.99 so the explicit onP("render", 1) below remains the
+        // canonical "render done" signal — protects against floating-point
+        // edge where renderedFrames === totalFrames triggers prematurely.
+        onP("render", Math.min(0.99, fraction));
+      },
+    },
   );
   onP("render", 1);
   checkAbort();
