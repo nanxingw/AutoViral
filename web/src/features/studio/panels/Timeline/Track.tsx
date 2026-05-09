@@ -42,7 +42,11 @@ const KIND_ICON: Record<string, ReactElement> = {
 
 export function Track({ track, pxPerSecond, totalWidth, color, label }: Props) {
   const compact = track.kind === "text";
-  const height = compact ? 36 : 56;
+  // R47-fix4: text track was 36px → clip body 16px after padding, but the
+  // rendered content (duration sub-label + actual text) needs ~30px and
+  // overflow:hidden cropped the second line. 44px gives the clip a 24px
+  // body which fits the dropped-duration-sublabel layout from Clip.tsx.
+  const height = compact ? 44 : 56;
   return (
     <div
       data-kind={track.kind}

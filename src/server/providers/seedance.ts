@@ -1,6 +1,59 @@
 import type { VideoProvider, VideoGenerateOptions, VideoGenerateResult } from "./types.js";
-import { writeFile, mkdir } from "node:fs/promises";
+import { writeFile, mkdir, rename, unlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
+import { spawn } from "node:child_process";
+
+/**
+ * Re-encode an mp4 to be browser-friendly for the studio player.
+ *
+ * Two reasons this matters:
+ *
+ *   - Seedance 2.0 ships videos as a SINGLE GOP (one keyframe at t=0,
+ *     then nothing). Browser h264 decoder LRU caches ~3s of decoded
+ *     frames; once playback advances past that, the decoder evicts and
+ *     has to re-decode from frame 0. The user sees a periodic ~3s
+ *     stutter / "rewind". Forcing keyint=fps (≈1s GOP) gives the
+ *     decoder anchor points to seek to without re-decoding everything.
+ *
+ *   - Seedance also ships moov atom AT THE END of the file, so the
+ *     browser can't determine duration / index ranges without a HEAD-of-
+ *     range fetch. -movflags +faststart relocates moov to the front so
+ *     progressive playback starts immediately.
+ *
+ * Re-encode is fast (libx264 veryfast on 5s 720p ≈ 1-2s on Apple Silicon)
+ * and crf 18 is visually transparent to the source quality. If the
+ * re-encode fails for any reason (ffmpeg not installed, source corrupt)
+ * we keep the original file rather than fail the whole job.
+ */
+async function normalizeVideoForBrowser(filePath: string, fps: number): Promise<void> {
+  const tmpPath = `${filePath}.tmp.mp4`;
+  await new Promise<void>((resolve, reject) => {
+    const ff = spawn(
+      "ffmpeg",
+      [
+        "-y", "-loglevel", "error",
+        "-i", filePath,
+        // Force keyframe every fps frames (~1s GOP)
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "18",
+        "-g", String(fps), "-keyint_min", String(fps),
+        // Pass audio through if present
+        "-c:a", "copy",
+        // Move moov atom to start
+        "-movflags", "+faststart",
+        tmpPath,
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let stderr = "";
+    ff.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
+    ff.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg normalize exit ${code}\n${stderr}`));
+    });
+    ff.on("error", reject);
+  });
+  await rename(tmpPath, filePath);
+}
 
 const POLL_INTERVAL_MS = 5_000;
 const MAX_POLL_ATTEMPTS = 60; // ~5min total
@@ -145,6 +198,22 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
       if (targetDir) {
         await mkdir(targetDir, { recursive: true });
         await writeFile(assetUri, buf);
+        // Normalize: short GOP + faststart. Seedance ships single-GOP
+        // mp4s that stutter every ~3s in the studio player as the
+        // browser decoder evicts. Best-effort — preserve the raw file
+        // on any failure.
+        try {
+          // Seedance output is a fixed 24fps stream regardless of input
+          // params; using 24 here matches and gives a 1s keyframe
+          // interval (24 frames per GOP).
+          await normalizeVideoForBrowser(assetUri, 24);
+        } catch (err) {
+          console.warn(
+            `[seedance] mp4 normalize failed (keeping raw): ${(err as Error).message}`,
+          );
+          // Clean up any orphaned temp file from a partial ffmpeg run.
+          try { await unlink(`${assetUri}.tmp.mp4`); } catch { /* ignore */ }
+        }
       }
       return {
         assetUri,

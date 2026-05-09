@@ -181,21 +181,29 @@ export function Clip({
       }}
       onPointerDown={onPointerDown}
     >
-      <div
-        style={{
-          fontSize: 9,
-          fontFamily: "var(--font-mono)",
-          color: fgDim,
-          letterSpacing: "0.06em",
-          // Bug 2 follow-up: video clips no longer have an opaque background
-          // (the filmstrip is shown beneath), so labels need a soft shadow to
-          // stay legible over thumbnails.
-          textShadow:
-            trackKind === "video" ? "0 1px 2px rgba(0,0,0,0.6)" : undefined,
-        }}
-      >
-        {dur.toFixed(1)}s
-      </div>
+      {/* R47-fix4: text clips skip the duration sub-label. Text track is
+          a compact 44px row, and showing both "2.3s" + the actual subtitle
+          forced overflow that cropped the text mid-line. Duration is
+          already visible in the timeline header bar; for text the
+          subtitle content is what matters. Video / audio still show it
+          since the underlying media isn't readable from thumbnails. */}
+      {trackKind !== "text" && (
+        <div
+          style={{
+            fontSize: 9,
+            fontFamily: "var(--font-mono)",
+            color: fgDim,
+            letterSpacing: "0.06em",
+            // Bug 2 follow-up: video clips no longer have an opaque background
+            // (the filmstrip is shown beneath), so labels need a soft shadow to
+            // stay legible over thumbnails.
+            textShadow:
+              trackKind === "video" ? "0 1px 2px rgba(0,0,0,0.6)" : undefined,
+          }}
+        >
+          {dur.toFixed(1)}s
+        </div>
+      )}
       <div
         style={{
           fontSize: 10,
