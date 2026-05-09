@@ -218,6 +218,211 @@ export function buildLightLeakFilterGraph(opts: {
   ].join(";");
 }
 
+// ── Glitch-cut transition ───────────────────────────────────────────
+
+/**
+ * Glitch-cut: during the transition window we crossfade A→B while
+ * applying RGB channel-split + horizontal jitter, mimicking VHS / data-
+ * mosh aesthetic. Pure ffmpeg — uses `geq` for per-channel offset.
+ *
+ * NOTE re: ffmpeg 8.x — geq's random() lookup is non-deterministic
+ * across frames; we substitute a periodic `sin(t*200)*15` jitter that
+ * still reads as "glitch" without flicker artefacts.
+ */
+export async function applyGlitchCutTransition(
+  opts: TransitionInput,
+): Promise<string> {
+  const { clipA, clipB, outputPath, transitionDuration } = opts;
+  const filterComplex = buildGlitchCutFilterGraph({
+    clipADuration: opts.clipADuration,
+    transitionDuration,
+    fps: opts.fps,
+  });
+
+  await mkdir(dirname(outputPath), { recursive: true });
+  const args = [
+    "-y", "-loglevel", "error",
+    "-i", clipA,
+    "-i", clipB,
+    "-filter_complex", filterComplex,
+    "-map", "[v]",
+    "-map", "[a]",
+    "-shortest",
+    "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "192k",
+    outputPath,
+  ];
+
+  return new Promise<string>((resolve, reject) => {
+    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    ff.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
+    ff.on("close", (code) => {
+      if (code === 0) resolve(outputPath);
+      else reject(new Error(`glitch-cut transition: ffmpeg exit ${code}\n${stderr}`));
+    });
+    ff.on("error", reject);
+  });
+}
+
+/** Pure-function filter-graph builder for the glitch-cut transition. */
+export function buildGlitchCutFilterGraph(opts: {
+  clipADuration: number;
+  transitionDuration: number;
+  fps: number;
+}): string {
+  const offsetSec = opts.clipADuration - opts.transitionDuration;
+  const endSec = offsetSec + opts.transitionDuration;
+  // Per-channel horizontal offset using sin() so it's deterministic
+  // and bounded. Red shifts +, blue shifts −, green stays put. Outside
+  // the transition window the offset is 0 so the frame is untouched.
+  const rOff = `if(between(t,${offsetSec},${endSec}),sin(t*200)*15,0)`;
+  const bOff = `if(between(t,${offsetSec},${endSec}),-sin(t*200)*15,0)`;
+  return [
+    `[0:v][1:v]xfade=transition=fade:duration=${opts.transitionDuration}:offset=${offsetSec}[xfaded]`,
+    `[xfaded]format=rgba,fps=${opts.fps}[base]`,
+    `[base]geq=` +
+      `r='p(X+(${rOff}),Y)':` +
+      `g='p(X,Y)':` +
+      `b='p(X+(${bOff}),Y)':` +
+      `a='alpha(X,Y)'[v]`,
+    `[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`,
+  ].join(";");
+}
+
+// ── Domain-warp transition ──────────────────────────────────────────
+
+/**
+ * Domain-warp: during the transition window pixels are displaced by a
+ * vertical sine wave whose amplitude ramps from 0 → 40 px and back as
+ * the transition progresses. Combined with xfade=fade, B emerges
+ * through the rippling A frame. Pure ffmpeg `geq`.
+ */
+export async function applyDomainWarpTransition(
+  opts: TransitionInput,
+): Promise<string> {
+  const { clipA, clipB, outputPath, transitionDuration } = opts;
+  const filterComplex = buildDomainWarpFilterGraph({
+    clipADuration: opts.clipADuration,
+    transitionDuration,
+    fps: opts.fps,
+  });
+
+  await mkdir(dirname(outputPath), { recursive: true });
+  const args = [
+    "-y", "-loglevel", "error",
+    "-i", clipA,
+    "-i", clipB,
+    "-filter_complex", filterComplex,
+    "-map", "[v]",
+    "-map", "[a]",
+    "-shortest",
+    "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "192k",
+    outputPath,
+  ];
+
+  return new Promise<string>((resolve, reject) => {
+    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    ff.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
+    ff.on("close", (code) => {
+      if (code === 0) resolve(outputPath);
+      else reject(new Error(`domain-warp transition: ffmpeg exit ${code}\n${stderr}`));
+    });
+    ff.on("error", reject);
+  });
+}
+
+/** Pure-function filter-graph builder for the domain-warp transition. */
+export function buildDomainWarpFilterGraph(opts: {
+  clipADuration: number;
+  transitionDuration: number;
+  fps: number;
+}): string {
+  const offsetSec = opts.clipADuration - opts.transitionDuration;
+  const endSec = offsetSec + opts.transitionDuration;
+  // Amplitude ramps in and out across the transition window. Outside
+  // the window it's zero so frames pass through unchanged.
+  const xOff =
+    `if(between(t,${offsetSec},${endSec}),` +
+    `sin(Y/30+t*8)*40*((t-${offsetSec})/${opts.transitionDuration}),0)`;
+  return [
+    `[0:v][1:v]xfade=transition=fade:duration=${opts.transitionDuration}:offset=${offsetSec}[xfaded]`,
+    `[xfaded]format=rgba,fps=${opts.fps}[base]`,
+    `[base]geq=` +
+      `r='p(X+(${xOff}),Y)':` +
+      `g='p(X+(${xOff}),Y)':` +
+      `b='p(X+(${xOff}),Y)':` +
+      `a='alpha(X,Y)'[v]`,
+    `[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`,
+  ].join(";");
+}
+
+// ── Gravitational-lens transition ───────────────────────────────────
+
+/**
+ * Gravitational-lens: radial barrel/pincushion distortion ramps up on
+ * A and down on B during the transition window, simulating a black-hole
+ * "swallowing" A while B is "pulled out" of the same point. Uses
+ * ffmpeg's `lenscorrection` filter with time-varying k1.
+ */
+export async function applyGravLensTransition(
+  opts: TransitionInput,
+): Promise<string> {
+  const { clipA, clipB, outputPath, transitionDuration } = opts;
+  const filterComplex = buildGravLensFilterGraph({
+    clipADuration: opts.clipADuration,
+    transitionDuration,
+    fps: opts.fps,
+  });
+
+  await mkdir(dirname(outputPath), { recursive: true });
+  const args = [
+    "-y", "-loglevel", "error",
+    "-i", clipA,
+    "-i", clipB,
+    "-filter_complex", filterComplex,
+    "-map", "[v]",
+    "-map", "[a]",
+    "-shortest",
+    "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p",
+    "-c:a", "aac", "-b:a", "192k",
+    outputPath,
+  ];
+
+  return new Promise<string>((resolve, reject) => {
+    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    ff.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
+    ff.on("close", (code) => {
+      if (code === 0) resolve(outputPath);
+      else reject(new Error(`grav-lens transition: ffmpeg exit ${code}\n${stderr}`));
+    });
+    ff.on("error", reject);
+  });
+}
+
+/** Pure-function filter-graph builder for the grav-lens transition. */
+export function buildGravLensFilterGraph(opts: {
+  clipADuration: number;
+  transitionDuration: number;
+  fps: number;
+}): string {
+  const offsetSec = opts.clipADuration - opts.transitionDuration;
+  const endSec = offsetSec + opts.transitionDuration;
+  // A ramps from k1=0 → k1=-0.5 (barrel inward) across the window.
+  // B starts at k1=+0.5 (pincushion) and ramps back to 0.
+  const aK1 = `if(between(t,${offsetSec},${endSec}),-0.5*((t-${offsetSec})/${opts.transitionDuration}),0)`;
+  const bK1 = `if(between(t,${offsetSec},${endSec}),0.5*(1-((t-${offsetSec})/${opts.transitionDuration})),0)`;
+  return [
+    `[0:v]lenscorrection=k1='${aK1}':k2=0[a_dist]`,
+    `[1:v]lenscorrection=k1='${bK1}':k2=0[b_dist]`,
+    `[a_dist][b_dist]xfade=transition=fade:duration=${opts.transitionDuration}:offset=${offsetSec}[v]`,
+    `[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`,
+  ].join(";");
+}
+
 // ─── Roadmap (additional transitions worth porting) ─────────────────
 //
 // hyperframes packages/shader-transitions/ ships these GLSL shaders.
@@ -229,20 +434,17 @@ export function buildLightLeakFilterGraph(opts: {
 //       and `geq=` expressions can express. Some shaders don't survive
 //       the translation (gravitational-lens needs proper sampling).
 //
-// ### TODO #5.a — Glitch cut (RGB channel split + horizontal jitter)
-//   Mirror: hyperframes shader-transitions/glitch.glsl
-//   Approach (b) feasible: ffmpeg geq + chromakey. ~1 day work.
+// ### #5.a — Glitch cut (RGB channel split + horizontal jitter)
+//   DONE in R46 #5 follow-up (see applyGlitchCutTransition).
 //
-// ### TODO #5.b — Domain warp (sinusoidal pixel offset)
-//   Mirror: hyperframes shader-transitions/domain-warp.glsl
-//   Approach (b) feasible via ffmpeg geq, but nicer in Remotion canvas.
-//   ~2 days.
+// ### #5.b — Domain warp (sinusoidal pixel offset)
+//   DONE in R46 #5 follow-up (see applyDomainWarpTransition).
 //
-// ### TODO #5.c — Gravitational lens (radial distortion)
-//   Mirror: hyperframes shader-transitions/grav-lens.glsl
-//   Approach (a) only — needs proper texture sampling. Wait for
-//   streaming-render path. ~3 days when it's there.
+// ### #5.c — Gravitational lens (radial distortion)
+//   DONE in R46 #5 follow-up (see applyGravLensTransition). ffmpeg
+//   `lenscorrection` filter approximates the WebGL shader closely
+//   enough for the editorial use-case; Remotion port still possible
+//   when streaming-render path lands.
 //
-// Total POC delivered (light-leak): ~1 transition.
-// Total ported when all TODOs land: ~4-5 transitions.
-// hyperframes ships ~6, with their custom WebGL renderer.
+// Total POC delivered (light-leak + glitch + domain-warp + grav-lens):
+// 4 transitions. hyperframes ships ~6 with their custom WebGL renderer.

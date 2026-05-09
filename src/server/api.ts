@@ -811,10 +811,9 @@ apiRoutes.post("/api/render/reveal", async (c) => {
   }
 });
 
-// POST /api/transitions/light-leak — R46 #5. Cinematic cross-fade
-// transition between two clips with a procedural orange light-streak
-// sweep. Pure ffmpeg (no GLSL); agent invokes when assembly module
-// wants a film-burn-style cut between scenes.
+// POST /api/transitions/* — R46 #5. Cinematic cross-fade transitions
+// between two clips. Pure ffmpeg (no GLSL); agent invokes when the
+// assembly module wants editorial-style cuts between scenes.
 //
 // Body: {
 //   workId, clipARelative, clipBRelative, outputFilename,
@@ -822,7 +821,19 @@ apiRoutes.post("/api/render/reveal", async (c) => {
 // }
 // All paths are work-relative (e.g. "assets/clips/intro.mp4"); resolved
 // safely via resolveAssetPath. Output writes to <workDir>/output/<file>.
-apiRoutes.post("/api/transitions/light-leak", async (c) => {
+
+type TransitionApplyFn = (opts: {
+  clipA: string;
+  clipB: string;
+  outputPath: string;
+  clipADuration: number;
+  transitionDuration: number;
+  width: number;
+  height: number;
+  fps: number;
+}) => Promise<string>;
+
+async function runTransitionEndpoint(c: any, applyFn: TransitionApplyFn) {
   const body = await c.req.json().catch(() => ({}));
   const workId = String(body.workId ?? "");
   const clipARel = String(body.clipARelative ?? "");
@@ -891,10 +902,7 @@ apiRoutes.post("/api/transitions/light-leak", async (c) => {
     throw err;
   }
 
-  // Probe clipA dimensions so we can size the overlay correctly. The
-  // transitions module caches the overlay PNG per (width, height), so
-  // mismatched sizes between calls are fine.
-  const { applyLightLeakTransition } = await import("./render/transitions.js");
+  // Probe clipA dimensions so we can size overlays / passes correctly.
   const { execFile } = await import("node:child_process");
   const { promisify: p } = await import("node:util");
   const ef = p(execFile);
@@ -920,12 +928,12 @@ apiRoutes.post("/api/transitions/light-leak", async (c) => {
       }
     }
   } catch {
-    // ffprobe failure means clipA is unreadable; let applyLightLeak fail
+    // ffprobe failure means clipA is unreadable; let the apply fn fail
     // with the actual ffmpeg error rather than guessing.
   }
 
   try {
-    const result = await applyLightLeakTransition({
+    const result = await applyFn({
       clipA,
       clipB,
       outputPath: outPath,
@@ -946,6 +954,26 @@ apiRoutes.post("/api/transitions/light-leak", async (c) => {
       500,
     );
   }
+}
+
+apiRoutes.post("/api/transitions/light-leak", async (c) => {
+  const { applyLightLeakTransition } = await import("./render/transitions.js");
+  return runTransitionEndpoint(c, applyLightLeakTransition);
+});
+
+apiRoutes.post("/api/transitions/glitch", async (c) => {
+  const { applyGlitchCutTransition } = await import("./render/transitions.js");
+  return runTransitionEndpoint(c, applyGlitchCutTransition);
+});
+
+apiRoutes.post("/api/transitions/domain-warp", async (c) => {
+  const { applyDomainWarpTransition } = await import("./render/transitions.js");
+  return runTransitionEndpoint(c, applyDomainWarpTransition);
+});
+
+apiRoutes.post("/api/transitions/grav-lens", async (c) => {
+  const { applyGravLensTransition } = await import("./render/transitions.js");
+  return runTransitionEndpoint(c, applyGravLensTransition);
 });
 
 // GET /api/works/:id/assets
