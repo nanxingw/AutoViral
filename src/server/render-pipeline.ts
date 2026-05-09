@@ -1,6 +1,7 @@
 // src/server/render-pipeline.ts
 
 import { renderCompositionToMp4 } from "./remotion-renderer.js";
+import { renderViaStreamingBridge } from "./render/remotion-bridge.js";
 import { applySpeedRampPrePass } from "./speed-ramp-ffmpeg.js";
 import { pickEncoder } from "./render/gpu-encoder.js";
 import {
@@ -292,19 +293,46 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   const compForRender = rewriteClipSrcsToAbsolute(
     { ...comp, title: opts.outputTitle } as Composition,
   );
-  let workingPath = await renderCompositionToMp4(
-    compForRender,
-    opts.outDir,
-    {
-      onProgress: (fraction) => {
-        if (opts.signal?.aborted) return;
-        // Cap at 0.99 so the explicit onP("render", 1) below remains the
-        // canonical "render done" signal — protects against floating-point
-        // edge where renderedFrames === totalFrames triggers prematurely.
-        onP("render", Math.min(0.99, fraction));
-      },
-    },
-  );
+  // R46 #3.d — opt-in streaming renderer. Either an env flag or a
+  // per-composition experimentalFlags hint flips the path. We always
+  // fall back to the canonical Remotion path on bridge failure so a
+  // bad flag day doesn't block users mid-render.
+  const useStreaming =
+    process.env.AUTOVIRAL_USE_STREAMING_RENDERER === "1" ||
+    Boolean(
+      (compForRender as { experimentalFlags?: { streamingRenderer?: boolean } })
+        .experimentalFlags?.streamingRenderer,
+    );
+  const renderProgress = (fraction: number) => {
+    if (opts.signal?.aborted) return;
+    // Cap at 0.99 so the explicit onP("render", 1) below remains the
+    // canonical "render done" signal — protects against floating-point
+    // edge where renderedFrames === totalFrames triggers prematurely.
+    onP("render", Math.min(0.99, fraction));
+  };
+  let workingPath: string;
+  try {
+    workingPath = useStreaming
+      ? await renderViaStreamingBridge(compForRender, opts.outDir, {
+          onProgress: renderProgress,
+        })
+      : await renderCompositionToMp4(compForRender, opts.outDir, {
+          onProgress: renderProgress,
+        });
+  } catch (err) {
+    if (useStreaming) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        "[render] streaming bridge failed, falling back to Remotion:",
+        err,
+      );
+      workingPath = await renderCompositionToMp4(compForRender, opts.outDir, {
+        onProgress: renderProgress,
+      });
+    } else {
+      throw err;
+    }
+  }
   onP("render", 1);
   checkAbort();
 

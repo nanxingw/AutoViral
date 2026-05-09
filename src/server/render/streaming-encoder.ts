@@ -1,23 +1,21 @@
-// R46 — streaming encode skeleton. Status: PRIMITIVE COMPLETE,
-// INTEGRATION PENDING. See "Roadmap" section at bottom.
+// R46 — streaming encode. Status: TODOs #3.a / #3.b / #3.d DONE
+// (via the Remotion bridge in `remotion-bridge.ts`). #3.c (HTML
+// serialization replacement) INTENTIONALLY SKIPPED — see rationale at
+// the bottom of this file.
 //
-// ## Why this file exists (even as a skeleton)
+// ## Why this file exists
 //
 // hyperframes' biggest render-speed win comes from piping JPEG frames
 // directly from Chrome screenshots into ffmpeg's image2pipe stdin —
 // eliminating PNG-to-disk-to-read-to-encode round trips. With our
-// FrameReorderBuffer primitive in place (R46), the remaining work is
-// "just" wiring the producers and the ffmpeg consumer.
+// FrameReorderBuffer primitive in place (R46), this file glues the
+// producer side (Remotion's `renderFrames` via `remotion-bridge.ts`,
+// or any future Puppeteer worker pool) to the ffmpeg consumer.
 //
-// We ship this file as a skeleton because the primitive + skeleton
-// together form a coherent stake-in-the-ground: anyone can read
-// frame-reorder-buffer.ts → streaming-encoder.ts and understand the
-// full architecture, even though the actual @remotion/renderer
-// replacement is gated behind a feature flag.
-//
-// The TODOs at the bottom are real engineering tasks, not vapor —
-// each is sized to about a day's focused work and references the
-// hyperframes source they should mirror.
+// The Remotion bridge feeds frames as JPEG (default `inputCodec`),
+// matching `image2pipe -vcodec mjpeg`. Future producers that emit PNG
+// (e.g. when JPEG quality is unacceptable for archival output) can
+// pass `inputCodec: "png"` and ffmpeg will auto-decode the stream.
 
 import { spawn } from "node:child_process";
 import { FrameReorderBuffer } from "./frame-reorder-buffer.js";
@@ -46,6 +44,15 @@ export interface StreamingEncodeOptions {
   audioBitrateKbps?: number;
   /** AbortSignal to kill the ffmpeg process mid-stream. */
   signal?: AbortSignal;
+  /**
+   * Wire format of the per-frame buffers produced by `producer`. ffmpeg
+   * decodes with the matching `-vcodec`. Default "mjpeg" (zero-cost
+   * decode, what Chrome screenshot + Remotion's `imageFormat: "jpeg"`
+   * already emit). Switch to "png" if the producer can only emit PNG
+   * (e.g. lossless archival path); ffmpeg will pay an extra zlib decode
+   * per frame but the streaming arch is otherwise identical.
+   */
+  inputCodec?: "mjpeg" | "png";
 }
 
 export interface StreamingEncodeProducer {
@@ -92,7 +99,7 @@ export async function streamingEncode(
     // flag is a guard rail; if Chrome screenshot dimensions drift,
     // ffmpeg complains rather than silently letterboxing.
     "-f", "image2pipe",
-    "-vcodec", "mjpeg",
+    "-vcodec", opts.inputCodec ?? "mjpeg",
     "-r", String(fps),
     "-s", `${width}x${height}`,
     "-i", "-",
@@ -166,13 +173,36 @@ export async function streamingEncode(
   });
 }
 
-// ─── Roadmap (TODOs to fully replace Stage 1 Remotion render) ──────────
+// ─── Roadmap status ────────────────────────────────────────────────────
 //
 // The pieces above are production-ready as a sequential streaming
-// encoder. Turning this into the parallel Chromium-screenshot pipeline
-// that beats Remotion 3-5× requires three more files:
+// encoder. Stage 1 integration via the Remotion bridge is wired:
 //
-// ### TODO #3.a — Headless Chromium wrapper
+//   #3.a Headless Chromium wrapper        — DONE (delegated to
+//        @remotion/renderer's `renderFrames`, which already manages a
+//        Puppeteer pool with the correct chromium flags).
+//   #3.b Parallel coordinator             — DONE (renderFrames'
+//        `concurrency` option drives the worker pool; we map its
+//        `onFrameBuffer` callback onto FrameReorderBuffer-coordinated
+//        producer.produceFrame in `remotion-bridge.ts`).
+//   #3.c Composition serialization        — INTENTIONALLY SKIPPED.
+//        Rationale: re-implementing React tree → self-contained HTML is
+//        ~2k LOC of compatibility surface (Sequence, Audio, Img,
+//        offthread <Video>, useCurrentFrame, etc.). We get the same
+//        streaming-encode perf win by keeping @remotion/bundler for
+//        serialization and only replacing the *renderer* half. If a
+//        future fork wants to drop the @remotion runtime entirely,
+//        pick this up — but the perf delta vs the bridge approach is
+//        small (Remotion's bundler is fast; the Chromium screenshot
+//        loop is the bottleneck, not the HTML emit).
+//   #3.d Feature flag + opt-in routing    — DONE (see render-pipeline.ts
+//        `AUTOVIRAL_USE_STREAMING_RENDERER` env var + per-composition
+//        `experimentalFlags.streamingRenderer`).
+//
+// The historical hyperframes-mirror notes are kept below for posterity
+// in case anyone revisits #3.c.
+//
+// ### #3.a — Headless Chromium wrapper
 //   File: src/server/render/headless-chrome.ts
 //   Mirror: hyperframes packages/engine/src/services/browserManager.ts
 //           (~300 LOC)
@@ -186,7 +216,7 @@ export async function streamingEncode(
 //     --disable-features=BackForwardCache,IntensiveWakeUpThrottling
 //     --force-gpu-mem-available-mb=4096
 //
-// ### TODO #3.b — Parallel coordinator
+// ### #3.b — Parallel coordinator
 //   File: src/server/render/parallel-coordinator.ts
 //   Mirror: hyperframes packages/engine/src/services/parallelCoordinator.ts
 //           lines 71-130 (~330 LOC)
@@ -197,7 +227,7 @@ export async function streamingEncode(
 //   Default worker count formula:
 //     min(cpu - 2, totalMem * 0.5 / 256MB, frames / 30) capped at 6
 //
-// ### TODO #3.c — Composition serialization
+// ### #3.c — Composition serialization (SKIPPED, see status above)
 //   File: src/server/render/composition-to-html.ts
 //   Mirror: piece together from hyperframes producer/renderOrchestrator
 //           (the 4184-line file we didn't fully audit; the relevant
@@ -211,7 +241,7 @@ export async function streamingEncode(
 //   Img). React state hooks → not supported, must be expressed via
 //   data-time-line attributes a la hyperframes' GSAP timeline pattern.
 //
-// ### TODO #3.d — Feature flag + opt-in routing
+// ### #3.d — Feature flag + opt-in routing (DONE)
 //   File: src/server/render-pipeline.ts (existing)
 //   Job: Read AUTOVIRAL_USE_STREAMING_RENDERER env var (or
 //        composition.experimentalFlags.streamingRenderer). When set,
