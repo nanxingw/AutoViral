@@ -1,7 +1,51 @@
 import { Player, type PlayerRef } from "@remotion/player";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Composition } from "../types";
 import { useComposition } from "../store";
 import { Scene } from "../composition/Scene";
+
+// R47-fix5 (Codex pick 1) — Hoisted to module scope so the Player props
+// keep referential equality across PreviewPanel re-renders. PreviewPanel
+// re-renders every frame (it subscribes to currentFrame for the
+// scrubber + timecode), and the prior inline `style={{...}}` literal
+// allocated a new object each commit — Player's internal memo barrier
+// then walked the whole stage subtree, hogging the main thread and
+// letting <video> drift ahead of Remotion's RAF clock. Once drift
+// crossed the threshold (~3s of accumulated jitter) Remotion fired a
+// hard seek backward, which is the periodic "rewind" the user sees.
+const PLAYER_STYLE: React.CSSProperties = { width: "100%", height: "100%" };
+
+interface MemoPlayerStageProps {
+  playerRef: React.RefObject<PlayerRef | null>;
+  comp: Composition;
+  durationInFrames: number;
+  fps: number;
+}
+
+const MemoPlayerStage = memo(function MemoPlayerStage({
+  playerRef,
+  comp,
+  durationInFrames,
+  fps,
+}: MemoPlayerStageProps) {
+  // useMemo on the inputProps so the comp wrapper object only changes
+  // when comp itself changes — not on every PreviewPanel re-render.
+  const inputProps = useMemo(() => ({ comp }), [comp]);
+  return (
+    <Player
+      ref={playerRef}
+      component={Scene as any}
+      inputProps={inputProps}
+      durationInFrames={durationInFrames}
+      fps={fps}
+      compositionWidth={comp.width}
+      compositionHeight={comp.height}
+      style={PLAYER_STYLE}
+      // No `controls` — we render our own transport bar below.
+      clickToPlay
+    />
+  );
+});
 
 function formatTime(s: number): string {
   const m = Math.floor(s / 60);
@@ -176,17 +220,11 @@ export function PreviewPanel() {
             background: "#000",
           }}
         >
-          <Player
-            ref={playerRef}
-            component={Scene as any}
-            inputProps={{ comp }}
+          <MemoPlayerStage
+            playerRef={playerRef}
+            comp={comp}
             durationInFrames={durationInFrames}
             fps={fps}
-            compositionWidth={comp.width}
-            compositionHeight={comp.height}
-            style={{ width: "100%", height: "100%" }}
-            // No `controls` — we render our own transport bar below.
-            clickToPlay
           />
           {/* Safe-zone overlay */}
           <div

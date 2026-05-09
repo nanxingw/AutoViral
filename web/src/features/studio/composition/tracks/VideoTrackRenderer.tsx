@@ -57,6 +57,15 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
       startFrom={Math.round(clip.in * fps)}
       endAt={Math.round(clip.out * fps)}
       playbackRate={speed}
+      // R47-fix5 (Codex pick 2) — widen Remotion's hard-seek drift
+      // tolerance from the default 0.45s. Below the threshold Remotion
+      // just nudges currentTime; above it does a discrete seek (which
+      // the user perceives as a "rewind"). The default trips on every
+      // long main-thread commit / decoder hiccup; 1.2s lets normal
+      // drift settle on its own. Pairs with `pauseWhenBuffering` so
+      // we don't seek during load events either.
+      acceptableTimeShiftInSeconds={1.2}
+      pauseWhenBuffering
       style={{
         width: "100%",
         height: "100%",
