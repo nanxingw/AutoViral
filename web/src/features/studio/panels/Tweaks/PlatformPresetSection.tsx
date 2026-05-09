@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useComposition } from "../../store";
 import { ReframeConfirmDialog, type ReframeClipSummary } from "./ReframeConfirmDialog";
 import type { ExportPreset } from "../../types";
@@ -151,6 +151,19 @@ export function PlatformPresetSection({ workId }: Props) {
 
   const [candidate, setCandidate] = useState<ExportPreset | null>(null);
   const [busy, setBusy] = useState(false);
+  // R37: alive flag for unmount-safe state updates after the long
+  // parallel reframe loop. User can close Tweaks panel mid-reframe;
+  // setBusy/setCandidate after that throws React warnings. Store
+  // mutations (addAsset/addProvenance/rebindClip) are id-keyed so
+  // they're naturally safe across work switches, but local component
+  // state is not.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   const videoClips: ReframeClipSummary[] = useMemo(() => {
     if (!comp) return [];
@@ -210,6 +223,7 @@ export function PlatformPresetSection({ workId }: Props) {
         // will own progress + error surfacing for these jobs.
       }
     });
+    if (!aliveRef.current) return;
     setBusy(false);
     setCandidate(null);
   };

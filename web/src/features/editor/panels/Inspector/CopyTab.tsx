@@ -1,6 +1,6 @@
 import { useEditor } from "../../store";
 import { apiFetch } from "@/lib/api";
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import type { TextLayer } from "../../types";
 import { useT } from "@/i18n/useT";
 
@@ -12,6 +12,18 @@ export function CopyTab({ workId }: { workId: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const t = useT();
+  // R37: same unmount-safety pattern as R36 AITab. /text-rewrite is a
+  // single round-trip (1-5s) so the window is shorter than AITab's 60s
+  // poll, but setError/setBusy on unmounted CopyTab still throws React
+  // warnings + the in-flight updateLayer could land on a different
+  // work's store after a workId switch.
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
 
   const slide = car?.slides.find((s) => s.id === currentSlideId);
   const candidate = slide?.layers.find((l) => l.id === selectionLayerId);
@@ -33,6 +45,7 @@ export function CopyTab({ workId }: { workId: string }) {
           body: { current: selected.text, intent: "rewrite-copy" },
         },
       );
+      if (!aliveRef.current) return;
       const next = res?.text;
       if (typeof next === "string" && next.length > 0) {
         updateLayer(selected.id, { text: next });
@@ -40,9 +53,11 @@ export function CopyTab({ workId }: { workId: string }) {
         setError(t("editor.copyTab.emptyResponse"));
       }
     } catch (err) {
+      if (!aliveRef.current) return;
       setError(err instanceof Error ? err.message : t("editor.copyTab.rewriteFailed"));
     } finally {
-      setBusy(false);
+      // setBusy is in finally — guard with alive check too.
+      if (aliveRef.current) setBusy(false);
     }
   };
 
