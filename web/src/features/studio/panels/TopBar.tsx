@@ -291,6 +291,7 @@ export function TopBar({
       {activeJobId ? (
         <ExportProgress
           jobId={activeJobId}
+          workId={workId}
           onClose={() => setActiveJobId(null)}
           onRetry={() => void startExport(lastOpts)}
         />

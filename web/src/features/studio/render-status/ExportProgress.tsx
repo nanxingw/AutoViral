@@ -11,6 +11,10 @@ const TERMINAL: ReadonlyArray<RenderJobView["status"]> = ["done", "failed", "can
 
 export interface ExportProgressProps {
   jobId: string | null;
+  /** R43 — needed to construct the served URL for outputPath. The
+   *  pipeline writes to /Users/.../works/<id>/output/<file>; the
+   *  browser can fetch it via /api/works/<id>/assets/output/<file>. */
+  workId?: string;
   onClose: () => void;
   onRetry: () => void;
 }
@@ -27,7 +31,22 @@ export interface ExportProgressProps {
  * a11y mirrors Phase 5.C / 6.D pattern: portal to document.body,
  * role="dialog", aria-modal="true", aria-labelledby on title id.
  */
-export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps) {
+/**
+ * R43 — derive a browser-fetchable URL from the absolute disk path the
+ * worker writes. Server exposes /api/works/<id>/assets/output/<file>
+ * (api.ts:1245); we extract the basename and join under workId. Returns
+ * null if the path doesn't look like a work output (defensive — link is
+ * just hidden in that case rather than 404'ing).
+ */
+function toOutputUrl(absolutePath: string, workId: string | undefined): string | null {
+  if (!workId) return null;
+  const parts = absolutePath.split("/");
+  const filename = parts[parts.length - 1];
+  if (!filename) return null;
+  return `/api/works/${workId}/assets/output/${encodeURIComponent(filename)}`;
+}
+
+export function ExportProgress({ jobId, workId, onClose, onRetry }: ExportProgressProps) {
   const { job, cancel, cancelError } = useRenderJob(jobId);
   const t = useT();
   // R41: focus management. Without this, opening Export modal during a
@@ -37,10 +56,12 @@ export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps)
 
   useEffect(() => {
     if (!job) return;
-    if (job.status === "done") {
-      const tid = setTimeout(onClose, 1500);
-      return () => clearTimeout(tid);
-    }
+    // R43 — done no longer auto-closes. The previous 1500ms auto-close
+    // meant users saw "Export complete" briefly, then the modal vanished
+    // with no link / button to open the produced file. Now the modal
+    // stays put on done with an "open output" affordance the user
+    // dismisses manually. Cancelled still auto-closes (no useful follow-
+    // up state to show).
     if (job.status === "cancelled") {
       onClose();
     }
@@ -247,6 +268,59 @@ export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps)
           </details>
         ) : null}
 
+        {/* R43 — done state surfaces the produced file. Pre-fix, the
+            modal closed 1500ms after done with no link to the output, so
+            users saw "走完所有流程后没有任何结果". Now we show the path
+            (truncated) with an "open" link that targets the served URL. */}
+        {status === "done" && job?.outputPath && toOutputUrl(job.outputPath, workId) ? (
+          <div
+            data-testid="export-output-row"
+            style={{
+              marginTop: 16,
+              padding: "10px 12px",
+              background: "var(--surface-0)",
+              border: "1px solid var(--accent-lo, var(--glass-border))",
+              borderRadius: 8,
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              color: "var(--text-dim)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 12,
+            }}
+          >
+            <span
+              title={job.outputPath}
+              style={{
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                flex: 1,
+                minWidth: 0,
+              }}
+            >
+              {job.outputPath.split("/").slice(-2).join("/")}
+            </span>
+            <a
+              href={toOutputUrl(job.outputPath, workId) ?? "#"}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{
+                color: "var(--accent-hi)",
+                textDecoration: "none",
+                fontWeight: 500,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                fontSize: 10,
+                whiteSpace: "nowrap",
+              }}
+            >
+              {t("studio.exportProgress.btnOpen")}
+            </a>
+          </div>
+        ) : null}
+
         <div
           style={{
             display: "flex",
@@ -255,10 +329,12 @@ export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps)
             marginTop: 18,
           }}
         >
+          {/* Cancel turns into Close after a terminal status — same slot,
+              different verb, so users always have a way out without
+              having to find an X corner glyph. */}
           <button
             type="button"
-            onClick={() => void cancel()}
-            disabled={isTerminal}
+            onClick={() => (isTerminal ? onClose() : void cancel())}
             style={{
               padding: "8px 14px",
               fontSize: 12,
@@ -266,13 +342,14 @@ export function ExportProgress({ jobId, onClose, onRetry }: ExportProgressProps)
               letterSpacing: "0.06em",
               border: "1px solid var(--glass-border)",
               background: "transparent",
-              color: isTerminal ? "var(--text-dimmer)" : "var(--text-dim)",
+              color: "var(--text-dim)",
               borderRadius: 6,
-              cursor: isTerminal ? "not-allowed" : "pointer",
-              opacity: isTerminal ? 0.5 : 1,
+              cursor: "pointer",
             }}
           >
-            {t("studio.exportProgress.btnCancel")}
+            {isTerminal
+              ? t("studio.exportProgress.btnClose")
+              : t("studio.exportProgress.btnCancel")}
           </button>
           {status === "failed" ? (
             <button

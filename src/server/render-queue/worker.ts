@@ -5,12 +5,34 @@ import type { RenderQueueStore } from "./store.js";
 import type { RenderJob, RenderStage } from "./job.js";
 import { isTerminalStatus } from "./job.js";
 
+// R43 — pipeline stage order, matching render-pipeline.ts onP() calls.
+// Each stage owns 1/N of the visible progress bar so users see a
+// monotonically advancing 0..1, not a per-stage 0/1 reset cycle.
+const STAGE_ORDER: readonly RenderStage[] = [
+  "render",
+  "duck",
+  "loudnorm",
+  "burn",
+  "encode",
+];
+
+export function aggregateProgress(stage: RenderStage, pct: number): number {
+  const idx = STAGE_ORDER.indexOf(stage);
+  if (idx < 0) return Math.max(0, Math.min(1, pct));
+  const slice = 1 / STAGE_ORDER.length;
+  const clamped = Math.max(0, Math.min(1, pct));
+  return idx * slice + clamped * slice;
+}
+
 export interface WorkerProgressEvent {
   at: string;
   status: RenderJob["status"];
   progress: number;
   stage?: RenderStage;
   log?: { at: string; level: "info" | "warn" | "error"; msg: string };
+  /** R43 — emitted on the terminal "done" event so the client modal
+   *  can show "open output" without polling the REST endpoint. */
+  outputPath?: string;
 }
 
 export interface RunRenderPipelineLike {
@@ -159,8 +181,20 @@ export class RenderQueueWorker {
         signal: ac.signal,
         onProgress: (stage, pct) => {
           if (this.stopped) return;
-          this.deps.store.update(jobId, { stage, progress: pct });
-          this.emit(jobId, { status: "running", progress: pct, stage });
+          // R43 — aggregate progress across the 5 pipeline stages so the
+          // bar advances monotonically instead of resetting to 0 between
+          // stages. Pre-fix, each stage emitted onP(stage, 0) on entry,
+          // which clobbered the just-completed stage's onP(prev, 1) and
+          // pulled the visible progress back to 0. Users saw "stages
+          // tick by while progress bar stays at 0%" — exactly the bug
+          // reported on 2026-05-09.
+          //
+          // Mapping mirrors the order in render-pipeline.ts: render →
+          // duck → loudnorm → burn → encode. Each stage owns 0.2 of the
+          // total, and intra-stage pct linearly maps into that slice.
+          const aggregated = aggregateProgress(stage, pct);
+          this.deps.store.update(jobId, { stage, progress: aggregated });
+          this.emit(jobId, { status: "running", progress: aggregated, stage });
         },
       });
       if (this.stopped) return;
@@ -174,7 +208,12 @@ export class RenderQueueWorker {
           progress: 1,
           outputPath: out,
         });
-        this.emit(jobId, { status: "done", progress: 1 });
+        // R43 — include outputPath in the terminal event so the
+        // ExportProgress modal can render an "open output" affordance
+        // without an extra round-trip. Pre-fix, only the snapshot frame
+        // (sent on socket open) carried outputPath; if the user's modal
+        // was already open during the run, it never received the path.
+        this.emit(jobId, { status: "done", progress: 1, outputPath: out });
       }
     } catch (err: any) {
       if (this.stopped) return;

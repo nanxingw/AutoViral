@@ -63,6 +63,10 @@ export class RenderWsRouter {
 
     // First frame is a snapshot of the current row so the client can render
     // immediately even if no progress event has fired since enqueue.
+    // R43 — include outputPath + error so reconnecting to an already-
+    // terminal job restores the full UI state (otherwise reconnect lands
+    // on "done" without knowing where the file is, and the user sees no
+    // affordance to open it).
     try {
       ws.send(
         JSON.stringify({
@@ -70,6 +74,8 @@ export class RenderWsRouter {
           status: cur.status,
           progress: cur.progress,
           stage: cur.stage,
+          outputPath: cur.outputPath,
+          error: cur.error,
         }),
       );
     } catch {

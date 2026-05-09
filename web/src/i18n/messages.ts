@@ -158,6 +158,11 @@ export const en = {
       tabLibrary: "Library",
       tabInspector: "Inspector",
     },
+    assetPreview: {
+      btnClose: "Close preview",
+      noInlinePreview: "No inline preview for this format.",
+      openInTab: "Open in new tab",
+    },
     timeline: {
       crashTitle: "Timeline hit a render error",
       crashBody: "Preview, Inspector, and Chat are still usable. Click reset to retry; if it persists, check composition.yaml for malformed clips or NaN keyframe values.",
@@ -219,6 +224,8 @@ export const en = {
       logSummary: "Log ({count})",
       btnCancel: "Cancel",
       btnRetry: "Retry",
+      btnClose: "Close",
+      btnOpen: "Open",
       cancelFailed: "Cancel failed: {msg}",
     },
     generationDialog: {
@@ -511,6 +518,11 @@ export const zh: DeepShape<Messages> = {
       tabLibrary: "素材库",
       tabInspector: "检视",
     },
+    assetPreview: {
+      btnClose: "关闭预览",
+      noInlinePreview: "此格式无法内嵌预览。",
+      openInTab: "在新标签页打开",
+    },
     timeline: {
       crashTitle: "时间轴渲染出错",
       crashBody: "预览、检视、聊天仍可用。点击重置可重试；若反复出现，请检查 composition.yaml 是否有畸形 clip 或 NaN 关键帧值。",
@@ -572,6 +584,8 @@ export const zh: DeepShape<Messages> = {
       logSummary: "日志 ({count})",
       btnCancel: "取消",
       btnRetry: "重试",
+      btnClose: "关闭",
+      btnOpen: "打开",
       cancelFailed: "取消失败：{msg}",
     },
     generationDialog: {

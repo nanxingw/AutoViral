@@ -80,9 +80,11 @@ describe("RenderQueueWorker — lifecycle", () => {
     expect(store.get(job.id)?.status).toBe("running");
 
     runner.emit("render", 0.5);
+    // R43: progress is now stage-aggregated (5 stages × 0.2 slice). render
+    // is stage 0, so raw 0.5 → 0 + 0.5 * 0.2 = 0.1 on the visible bar.
     await vi.waitFor(() =>
       expect(
-        events.some((e) => e.stage === "render" && e.progress === 0.5),
+        events.some((e) => e.stage === "render" && e.progress === 0.1),
       ).toBe(true),
     );
 
