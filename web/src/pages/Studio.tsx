@@ -1,5 +1,5 @@
 import { useParams } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useComposition } from "@/features/studio/store";
 import { makeEmptyComposition } from "@/features/studio/types";
@@ -75,6 +75,38 @@ export default function Studio() {
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   useShortcuts(workId ?? null);
+
+  // R43 — pull-on-turn refetch. Agent's Write/Edit tools write
+  // composition.yaml directly to disk, bypassing the client autosave
+  // channel. Without a refetch on turn_complete, the in-memory comp
+  // stays stale (showing old aspect / empty tracks) until the user hard-
+  // refreshes — exactly the bug reported on 2026-05-09.
+  // Use a ref for the latest workId so the callback identity never
+  // changes — otherwise ChatPanel's useChatSocket would resubscribe on
+  // every Studio re-render.
+  const workIdRef = useRef<string | undefined>(workId);
+  useEffect(() => {
+    workIdRef.current = workId;
+  }, [workId]);
+  const refetchOnTurnComplete = useCallback(() => {
+    const currentId = workIdRef.current;
+    if (!currentId) return;
+    // Best-effort refetch; on failure we keep the existing in-memory
+    // comp so the UI doesn't flash empty just because the network
+    // hiccupped at turn boundary. Errors during the initial-load path
+    // already have their own surface via setLoadError.
+    void loadComposition(currentId)
+      .then((found) => {
+        if (!found) return;
+        // Guard against route hop during the await: if user navigated
+        // to a different work, drop this stale result.
+        if (workIdRef.current !== currentId) return;
+        loadComp(found);
+      })
+      .catch(() => {
+        /* swallow — autosave / next-turn refetch will heal */
+      });
+  }, [loadComp]);
 
   const [loadError, setLoadError] = useState<string | null>(null);
   // Mirror of Editor.tsx Round 16 typo guard — defer makeEmptyComposition
@@ -212,6 +244,7 @@ export default function Studio() {
             >
               <ChatPanel
                 workId={workId}
+                onTurnComplete={refetchOnTurnComplete}
                 getViewerContext={() => {
                   const s = useComposition.getState();
                   return buildStudioViewerContext(

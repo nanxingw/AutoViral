@@ -213,6 +213,10 @@ export interface ChatPanelProps {
    *  page should react by selecting / seeking / focusing as the action
    *  describes. Mirrors pneuma's actionRequest. */
   dispatchAction?: (action: import("@/features/chat/types").ViewerAction) => void;
+  /** R43 — fires once per agent turn_complete. Studio uses it to
+   *  refetch composition.yaml after the agent may have written to disk
+   *  via Write/Edit tools (out-of-band of client autosave). */
+  onTurnComplete?: () => void;
 }
 
 // CLI aliases → current 4.x family member. The backend stores a short alias
@@ -232,8 +236,14 @@ export function ChatPanel({
   onJumpToLocator = jumpToStudioComposition,
   getViewerContext,
   dispatchAction,
+  onTurnComplete,
 }: ChatPanelProps) {
-  const { send, state: wsState } = useChatSocket(workId, getViewerContext, dispatchAction);
+  const { send, state: wsState } = useChatSocket(
+    workId,
+    getViewerContext,
+    dispatchAction,
+    onTurnComplete,
+  );
   // Pull the work's checkpoint list so each assistant text block can render
   // a "rollback to this turn" chip when its turn produced a snapshot. We
   // keep this enabled at all times — the route is cheap and the dropdown

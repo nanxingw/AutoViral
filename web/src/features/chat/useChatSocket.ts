@@ -42,12 +42,26 @@ export function useChatSocket(
   workId: string | null,
   getViewerContext?: GetViewerContext,
   dispatchAction?: DispatchViewerAction,
+  /**
+   * R43 — fired once per `turn_complete` after streaming is marked idle.
+   * Studio uses this to refetch composition.yaml when the agent has
+   * (potentially) written to disk via the Write tool, which bypasses the
+   * client's autosave channel. Without this, users had to hard-refresh
+   * to see new clips/aspect/duration the agent just produced.
+   */
+  onTurnComplete?: () => void,
 ) {
   const ref = useRef<ReconnectingWS | null>(null);
   const push = useChatStore((s) => s.push);
   const setBlocks = useChatStore((s) => s.setBlocks);
   const setStreaming = useChatStore((s) => s.setStreaming);
   const attachUsage = useChatStore((s) => s.attachLastTurnUsage);
+  // Keep latest callback in a ref so the WS effect doesn't re-subscribe
+  // every time the parent re-renders with a new arrow-function reference.
+  const onTurnCompleteRef = useRef(onTurnComplete);
+  useEffect(() => {
+    onTurnCompleteRef.current = onTurnComplete;
+  }, [onTurnComplete]);
   // Connection state surfaced to the chat UI so users see when the bridge
   // is reconnecting instead of silently losing messages into the void.
   const [wsState, setWsState] = useState<WSState>("connecting");
@@ -154,6 +168,14 @@ export function useChatSocket(
                 cacheCreationTokens: usage.cache_creation_input_tokens,
                 cacheReadTokens: usage.cache_read_input_tokens,
               });
+            }
+            // R43 — pull-on-turn refetch hook. Agent may have written
+            // composition.yaml via Write tool (out-of-band of client
+            // autosave); fire callback so the page can re-sync.
+            try {
+              onTurnCompleteRef.current?.();
+            } catch {
+              /* swallow handler errors so chat stream doesn't break */
             }
             break;
           }
