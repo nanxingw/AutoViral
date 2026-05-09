@@ -82,6 +82,25 @@ button { font: inherit; }
   border-color: var(--glass-hi);
 }
 
+/* R42 a11y — focus-visible ring for keyboard users.
+   Many buttons use data-bare or inline `outline: none` to opt out of
+   pill chrome, but that strips the default browser focus outline too.
+   Without a replacement, keyboard users tab through the UI seeing no
+   indication of where focus is — worse than no focus at all (the user
+   thinks they're lost).
+   :focus-visible only triggers on keyboard (Tab) focus, not mouse
+   click, so we don't get an "annoying" outline on click. !important
+   beats inline `outline: "none"` declared on the element's own style
+   attribute (which would otherwise win specificity). */
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible,
+[tabindex="0"]:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+  border-radius: 6px;
+}
+
 /* Accent colour swatches — proper visible discs */
 button[data-accent-swatch="violet"] { background: #c084fc !important; }
 button[data-accent-swatch="cyan"]   { background: #7dd3fc !important; }
