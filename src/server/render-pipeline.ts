@@ -326,10 +326,19 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
     checkAbort();
   }
 
+  // R46 #4 — overlay-strategy captions baked into Stage 1 by Remotion.
+  // When the composition opts in via captionStrategy="overlay", the
+  // CaptionsLayer React component already rendered captions on top of
+  // the video frames during Stage 1. Skipping libass burn here avoids
+  // double-rendering captions (and also the libass crash when no text
+  // track exists, since overlay captions don't populate text tracks).
+  const skipBurnForOverlay =
+    comp.captionStrategy === "overlay" && comp.captions != null;
+
   // Stage 3: subtitle burn (optional). Explicit opt-in must not silently no-op:
   // a missing text track when burnSubtitles=true is a programming error, not
   // graceful degradation. Callers can pre-check via compositionTextTrackToJson.
-  if (opts.burnSubtitles) {
+  if (opts.burnSubtitles && !skipBurnForOverlay) {
     const hasTextTrack = compositionTextTrackToJson(comp).length > 0;
     if (!hasTextTrack) {
       throw new Error(

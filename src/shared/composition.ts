@@ -343,6 +343,85 @@ export const ExportPresetSchema = z.object({
 });
 export type ExportPreset = z.infer<typeof ExportPresetSchema>;
 
+// ─── R46 #4 — CaptionModel (overlay strategy) ───────────────────────────
+// Per-word ASR output (segments) decoupled from visual line/block grouping
+// (groups). Lets us regroup captions for different platforms / iterations
+// without re-running Whisper. Companion to web/src/.../captions/types.ts —
+// keep both files in sync if the shape changes.
+export const CaptionSegmentSchema = z.object({
+  segmentId: z.string(),
+  start: z.number().min(0),
+  end: z.number().min(0),
+  text: z.string(),
+});
+export type CaptionSegment = z.infer<typeof CaptionSegmentSchema>;
+
+export const CaptionGroupStyleSchema = z.object({
+  fontFamily: z.string().optional(),
+  fontSize: z.union([z.number(), z.string()]),
+  fontWeight: z.union([z.number(), z.string()]).optional(),
+  color: z.string().optional(),
+  background: z.string().optional(),
+  padding: z.string().optional(),
+  borderRadius: z.union([z.number(), z.string()]).optional(),
+  textAlign: z.enum(["left", "center", "right"]).optional(),
+  bottomOffsetPx: z.number().optional(),
+  maxWidthFraction: z.number().min(0).max(1).optional(),
+  textStroke: z
+    .object({ widthPx: z.number(), color: z.string() })
+    .optional(),
+});
+export type CaptionGroupStyle = z.infer<typeof CaptionGroupStyleSchema>;
+
+export const CaptionAnimationSetSchema = z.object({
+  entrance: z
+    .object({
+      duration: z.number().min(0),
+      ease: z.string().optional(),
+      type: z.enum(["slide-up", "scale-pop", "fade"]),
+      staggerMs: z.number().optional(),
+    })
+    .optional(),
+  highlight: z
+    .object({
+      activeColor: z.string(),
+      dimColor: z.string(),
+      activeScale: z.number().optional(),
+    })
+    .optional(),
+  exit: z
+    .object({
+      duration: z.number().min(0),
+      ease: z.string().optional(),
+      type: z.enum(["slide-down", "fade", "scale-out"]),
+    })
+    .optional(),
+});
+export type CaptionAnimationSet = z.infer<typeof CaptionAnimationSetSchema>;
+
+export const CaptionGroupSchema = z.object({
+  groupId: z.string(),
+  start: z.number().min(0),
+  end: z.number().min(0),
+  segmentIds: z.array(z.string()),
+  style: CaptionGroupStyleSchema,
+  animation: CaptionAnimationSetSchema.optional(),
+});
+export type CaptionGroup = z.infer<typeof CaptionGroupSchema>;
+
+export const CaptionModelSchema = z.object({
+  modelId: z.string(),
+  audioTrackId: z.string().nullable().optional(),
+  segments: z.array(CaptionSegmentSchema),
+  groups: z.array(CaptionGroupSchema),
+  defaultAnim: CaptionAnimationSetSchema.optional(),
+  language: z.string().optional(),
+});
+export type CaptionModel = z.infer<typeof CaptionModelSchema>;
+
+export const CaptionStrategySchema = z.enum(["burn", "overlay"]);
+export type CaptionStrategy = z.infer<typeof CaptionStrategySchema>;
+
 export const CompositionSchema = z.object({
   id: z.string(),
   workId: z.string(),
@@ -359,6 +438,13 @@ export const CompositionSchema = z.object({
   scenes: z.array(SceneSchema).optional(),
   captionStyle: CaptionStyleSchema.optional(),
   exportPresets: z.array(ExportPresetSchema).default([]),
+  // ─── R46 #4 — overlay-strategy captions ─────────────────────────────────
+  // Optional, default behaviour unchanged. Set captionStrategy="overlay"
+  // and provide `captions` to render captions via the Remotion
+  // <CaptionsLayer> component instead of libass hard-burn (Stage 3).
+  // captionStrategy="burn" or absent = legacy libass path.
+  captions: CaptionModelSchema.optional(),
+  captionStrategy: CaptionStrategySchema.optional(),
 });
 export type Composition = z.infer<typeof CompositionSchema>;
 

@@ -2,6 +2,12 @@
 // packages/studio/src/captions/types.ts:46-145 with simplifications for
 // our Remotion-based Stage.
 //
+// R46 #4 wire-in (2026-05-09): the canonical Zod schema + types now live
+// in src/shared/composition.ts so both server (Composition validation)
+// and web (Scene.tsx + CaptionsLayer) share one source of truth. This
+// file keeps the helper functions + the HYPE_DEFAULT_ANIM preset; the
+// types are re-exported from shared.
+//
 // ## Why this exists alongside subtitle_burn.py
 //
 // Today our subtitle pipeline is:
@@ -28,125 +34,25 @@
 // can be regrouped (more lines / fewer / different splits) without
 // re-running Whisper. We adopt the same shape.
 
-/**
- * One ASR segment — typically a single word, sometimes a short phrase
- * (whisper occasionally groups 2-3 small words like "you know"). Times
- * are in seconds from start of the audio track.
- */
-export interface CaptionSegment {
-  /** Stable ID across regroupings; opaque string. */
-  segmentId: string;
-  /** Start time in seconds. */
-  start: number;
-  /** End time in seconds. start < end always. */
-  end: number;
-  /** The literal text. Punctuation is part of this string. */
-  text: string;
-}
+// Re-export the canonical types from the shared schema. Keeps the
+// public surface compatible with code that imports from this file
+// while consolidating definitions.
+export type {
+  CaptionSegment,
+  CaptionGroup,
+  CaptionGroupStyle,
+  CaptionAnimationSet,
+  CaptionModel,
+  CaptionStrategy,
+} from "@shared/composition";
 
-/**
- * Animation parameters for a caption group's lifecycle:
- * entrance (when it appears) → highlight (per-word karaoke as audio
- * plays it) → exit (when it disappears).
- *
- * R46 ships only the *data shape*. Actual GSAP/CSS implementation
- * lives in CaptionsLayer.tsx — this is the prop contract.
- */
-export interface CaptionAnimationSet {
-  entrance?: {
-    /** ms duration. 0 = no animation. */
-    duration: number;
-    /** GSAP-compatible ease name, e.g. "power2.out". */
-    ease?: string;
-    /** From which axis: y (slide up), scale (pop), opacity (fade). */
-    type: "slide-up" | "scale-pop" | "fade";
-    /** Stagger between words in ms (only for type "slide-up"). */
-    staggerMs?: number;
-  };
-  /** Per-word highlight color while it's the "active" segment. */
-  highlight?: {
-    /** Color when a word is being spoken. */
-    activeColor: string;
-    /** Color when a word is upcoming or already passed. */
-    dimColor: string;
-    /** Optional scale bump on active word for emphasis. 1.0 = none. */
-    activeScale?: number;
-  };
-  exit?: {
-    duration: number;
-    ease?: string;
-    type: "slide-down" | "fade" | "scale-out";
-  };
-}
-
-/**
- * A visual group of segments rendered as one caption block. Typically
- * 1-3 words for hype-style captions, 5-10 for editorial. The group's
- * `start` and `end` define the wall-clock window when it's visible
- * (entrance starts at start, exit ends at end).
- */
-export interface CaptionGroup {
-  groupId: string;
-  /** Visible window — overlay is mounted from start to end. */
-  start: number;
-  end: number;
-  /** segmentIds (referencing CaptionSegment.segmentId) that this group
-   *  composes, in render order. */
-  segmentIds: string[];
-  /** Style for this group. Per-group so different lines can have
-   *  different fonts / colors / sizes (e.g. emphasis line). */
-  style: CaptionGroupStyle;
-  /** Optional animation override; falls back to CaptionModel.defaultAnim. */
-  animation?: CaptionAnimationSet;
-}
-
-export interface CaptionGroupStyle {
-  /** CSS font-family. */
-  fontFamily?: string;
-  /** Pixel value or CSS string. */
-  fontSize: number | string;
-  /** font-weight 100..900 or "bold". */
-  fontWeight?: number | string;
-  /** Default text color (used by dimColor when highlight is off). */
-  color?: string;
-  /** Background fill behind text — useful for hype-style cards. */
-  background?: string;
-  /** padding shorthand string e.g. "8px 14px". */
-  padding?: string;
-  /** Border-radius pixels or CSS string. */
-  borderRadius?: number | string;
-  /** text-align. */
-  textAlign?: "left" | "center" | "right";
-  /** Pixel offset from bottom of stage. Common values: 80 (TikTok),
-   *  120 (IG Reels), 200 (Shorts where action layer is at bottom). */
-  bottomOffsetPx?: number;
-  /** Max line width as fraction of stage width (0..1). 0.85 = 85% wide. */
-  maxWidthFraction?: number;
-  /** Stroke / outline for legibility on busy backgrounds. */
-  textStroke?: { widthPx: number; color: string };
-}
-
-/**
- * Top-level caption model attached to a Composition. One model per
- * audio track typically; multiple models supported for multi-track
- * projects with separate captions per voice.
- */
-export interface CaptionModel {
-  /** Stable ID; lets multiple caption tracks coexist. */
-  modelId: string;
-  /** Which audio track this model captions. References Composition
-   *  audio track id. Null = derived from main video audio. */
-  audioTrackId?: string | null;
-  /** Source ASR output. Independent of grouping. */
-  segments: CaptionSegment[];
-  /** Visual rendering. Multiple groups can share segments (e.g. for a
-   *  "highlight word" cross-fade); typically 1:N segment→group. */
-  groups: CaptionGroup[];
-  /** Default animation when group.animation is unset. */
-  defaultAnim?: CaptionAnimationSet;
-  /** Source language code (zh / en / etc) — for font picks. */
-  language?: string;
-}
+import type {
+  CaptionGroup,
+  CaptionGroupStyle,
+  CaptionModel,
+  CaptionSegment,
+  CaptionAnimationSet,
+} from "@shared/composition";
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
