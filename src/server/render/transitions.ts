@@ -141,19 +141,41 @@ export async function ensureLightLeakOverlay(width: number, height: number): Pro
     return cachedOverlay.path;
   }
   const tmp = join(tmpdir(), `autoviral-light-leak-${width}x${height}.png`);
-  // ffmpeg's gradient filter: source=gradient, c0=orange, c1=transparent.
-  // We use 1px source then scale, since gradient resolves better that way.
-  // The streak is built from a `radialgradient` source (added in ffmpeg 5+)
-  // — for compatibility we instead synthesize via two-color gradient + crop.
+  // R46 #5 — use `color` (solid black source) + `geq` (per-pixel
+  // expression) to synthesize the orange streak with smooth alpha
+  // falloff. The `gradient` filter doesn't exist in ffmpeg 8.x; geq is
+  // universally available since ffmpeg 4.0.
+  //
+  // Streak shape (in normalized X coordinates 0..1):
+  //   - Centered around X=0.5
+  //   - Peak alpha ~180 (out of 255) at center
+  //   - Quadratic falloff to 0 alpha at X=0.35 and X=0.65
+  //   - Outside [0.35, 0.65]: fully transparent
+  //
+  // Color is hex 0xff8c1a (warm orange / sunset). Pre-multiplied with
+  // alpha so the screen-blend looks bright but not posterized.
+  const streakLeft = 0.35;
+  const streakRight = 0.65;
+  const peakAlpha = 180;
   const args = [
     "-y", "-loglevel", "error",
     "-f", "lavfi",
-    // Source: 1xH vertical gradient (light orange in the middle, transparent edges).
-    "-i",
-    `gradient=size=${Math.round(width * 0.4)}x${height}:c0=0xff8c1a:c1=0x00000000:duration=1:rate=1`,
-    // Scale with smooth alpha to full width, transparent everywhere except the streak.
+    "-i", `color=c=black@0:size=${width}x${height}:duration=1:rate=1`,
     "-vf",
-    `pad=width=${width}:height=${height}:x=(${width}-iw)/2:y=0:color=0x00000000,format=rgba`,
+    [
+      "format=rgba",
+      // geq runs per-pixel. X/W is the normalized horizontal position.
+      // The alpha expression evaluates to 0 outside the streak window
+      // and to peakAlpha * (1 - (2*offsetFromCenter / streakWidth)^2)
+      // inside it — a smooth bump centered at W/2.
+      `geq=` +
+        `r='255':` +
+        `g='140':` +
+        `b='26':` +
+        `a='if(between(X/W,${streakLeft},${streakRight}),` +
+        `${peakAlpha}*(1-pow(2*(X/W-0.5)/${streakRight - streakLeft},2)),` +
+        `0)'`,
+    ].join(","),
     "-frames:v", "1",
     tmp,
   ];

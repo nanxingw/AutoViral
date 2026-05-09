@@ -811,6 +811,143 @@ apiRoutes.post("/api/render/reveal", async (c) => {
   }
 });
 
+// POST /api/transitions/light-leak — R46 #5. Cinematic cross-fade
+// transition between two clips with a procedural orange light-streak
+// sweep. Pure ffmpeg (no GLSL); agent invokes when assembly module
+// wants a film-burn-style cut between scenes.
+//
+// Body: {
+//   workId, clipARelative, clipBRelative, outputFilename,
+//   clipADuration: seconds, transitionDuration?: seconds (default 0.8)
+// }
+// All paths are work-relative (e.g. "assets/clips/intro.mp4"); resolved
+// safely via resolveAssetPath. Output writes to <workDir>/output/<file>.
+apiRoutes.post("/api/transitions/light-leak", async (c) => {
+  const body = await c.req.json().catch(() => ({}));
+  const workId = String(body.workId ?? "");
+  const clipARel = String(body.clipARelative ?? "");
+  const clipBRel = String(body.clipBRelative ?? "");
+  const outputFilename = String(body.outputFilename ?? "");
+  const clipADuration = Number(body.clipADuration);
+  const transitionDuration = Number(body.transitionDuration ?? 0.8);
+
+  if (!SAFE_ID.test(workId)) {
+    return c.json({ error: "Invalid workId", errorCode: "invalid_work_id" }, 400);
+  }
+  if (!clipARel || !clipBRel || !outputFilename) {
+    return c.json(
+      { error: "Missing clipARelative/clipBRelative/outputFilename", errorCode: "invalid_params" },
+      400,
+    );
+  }
+  if (!Number.isFinite(clipADuration) || clipADuration <= 0) {
+    return c.json(
+      { error: "clipADuration must be a positive number (seconds)", errorCode: "invalid_params" },
+      400,
+    );
+  }
+  if (transitionDuration <= 0 || transitionDuration >= clipADuration) {
+    return c.json(
+      {
+        error: "transitionDuration must be > 0 and < clipADuration",
+        errorCode: "invalid_params",
+      },
+      400,
+    );
+  }
+  // Path-traversal defence — same pattern as reveal endpoint.
+  if (
+    outputFilename.includes("/") ||
+    outputFilename.includes("\\") ||
+    outputFilename.startsWith(".")
+  ) {
+    return c.json(
+      { error: "Invalid outputFilename", errorCode: "invalid_filename" },
+      400,
+    );
+  }
+
+  let clipA: string;
+  let clipB: string;
+  let outPath: string;
+  try {
+    const resolvePath = (rel: string) => {
+      const cleaned = rel.replace(/^\/+/, "");
+      const root = cleaned.startsWith("output/") ? "output" : "assets";
+      const rest = cleaned.startsWith("output/")
+        ? cleaned.slice(7)
+        : cleaned.startsWith("assets/")
+          ? cleaned.slice(7)
+          : cleaned;
+      return resolveAssetPath(workId, root, rest);
+    };
+    clipA = resolvePath(clipARel);
+    clipB = resolvePath(clipBRel);
+    outPath = resolveAssetPath(workId, "output", outputFilename);
+  } catch (err) {
+    if (err instanceof UnsafePathError) {
+      return c.json({ error: err.message, errorCode: "invalid_path" }, 400);
+    }
+    throw err;
+  }
+
+  // Probe clipA dimensions so we can size the overlay correctly. The
+  // transitions module caches the overlay PNG per (width, height), so
+  // mismatched sizes between calls are fine.
+  const { applyLightLeakTransition } = await import("./render/transitions.js");
+  const { execFile } = await import("node:child_process");
+  const { promisify: p } = await import("node:util");
+  const ef = p(execFile);
+  let width = 1080;
+  let height = 1920;
+  let fps = 30;
+  try {
+    const { stdout } = await ef("ffprobe", [
+      "-v", "error",
+      "-select_streams", "v:0",
+      "-show_entries", "stream=width,height,r_frame_rate",
+      "-of", "default=noprint_wrappers=1",
+      clipA,
+    ]);
+    for (const line of stdout.split("\n")) {
+      const [k, v] = line.split("=");
+      if (k === "width") width = parseInt(v ?? "1080", 10) || 1080;
+      else if (k === "height") height = parseInt(v ?? "1920", 10) || 1920;
+      else if (k === "r_frame_rate") {
+        // r_frame_rate is "num/den" e.g. "30/1"; eval it.
+        const [n, d] = (v ?? "30/1").split("/").map(Number);
+        if (n && d) fps = Math.round(n / d);
+      }
+    }
+  } catch {
+    // ffprobe failure means clipA is unreadable; let applyLightLeak fail
+    // with the actual ffmpeg error rather than guessing.
+  }
+
+  try {
+    const result = await applyLightLeakTransition({
+      clipA,
+      clipB,
+      outputPath: outPath,
+      clipADuration,
+      transitionDuration,
+      width,
+      height,
+      fps,
+    });
+    return c.json({
+      ok: true,
+      outputPath: result,
+      previewUrl: `/api/works/${workId}/assets/output/${encodeURIComponent(outputFilename)}`,
+    });
+  } catch (err: any) {
+    return c.json(
+      { error: err?.message ?? String(err), errorCode: "transition_failed" },
+      500,
+    );
+  }
+});
+
 // GET /api/works/:id/assets
 apiRoutes.get("/api/works/:id/assets", async (c) => {
   const id = c.req.param("id");

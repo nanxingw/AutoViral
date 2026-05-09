@@ -115,6 +115,7 @@ Skill('autoviral')
   - **配音 (TTS)** — \`POST /api/audio/tts\` { text, voice, output_path }。Edge TTS 内置免费，支持 zh-CN-XiaoxiaoNeural / zh-CN-YunxiNeural 等 8+ 中文音色。**短视频默认应该有人声**——纯音乐铺底+全屏文字的形式只在特定调性（editorial slow-paced）下成立，绝大多数 viral 短视频靠 narration 推进节奏。**做完 brief 后主动 propose**："我来给这段加个 narration，用 zh-CN-XiaoxiaoNeural（warm conversational）" 然后跑 TTS。
   - **字幕生成 (ASR)** — \`POST /api/audio/captions\` { workId, assetPath, language }。stable-whisper 自动转写音频（人声 / TTS / 视频音轨），返回 word-level 时间戳。**任何带音频的视频都应自动跑 ASR + 烧字幕**——抖音 70% 用户静音浏览，没字幕等于零完播。如果端点返回 errorCode=PYTHON_DEP_MISSING，告诉用户 \`pip install stable-ts\` (注意：不是 stable-whisper)。
   - **字幕烧录** — \`subtitle_burn.py\`（assembly module/scripts）：karaoke-style ASS 字幕，支持 douyin-highlight / xhs-soft 等平台预设。**禁止手写 ffmpeg drawtext**。
+  - **过场转场** — \`POST /api/transitions/light-leak\` { workId, clipARelative, clipBRelative, outputFilename, clipADuration, transitionDuration? }。在两段 clip 之间叠一道 cinematic 橙色光斑扫光 + cross-fade，做出胶片烧片质感。**适合**：editorial / 文艺向短片场景切换、蒙太奇序列。**不适合**：快剪情节驱动（用直接 cut）、口播单镜（用 fade）。transitionDuration 默认 0.8s（典型 viral 节奏）；如果你想更慢的 editorial 感，传 1.2-1.5。**绝对不要**用 ffmpeg drawtext / 手写 xfade filter——已封装。
 
 任意能力都可以**直接调用**，没有前置依赖、没有顺序约束、没有评审门禁。
 
