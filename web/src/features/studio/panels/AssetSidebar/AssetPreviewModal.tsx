@@ -203,8 +203,18 @@ export function AssetPreviewModal({ asset, onClose }: Props) {
                   // NOT muted — this is the explicit "preview" view; user
                   // wants to hear the audio. Sidebar tile remains muted.
                   style={{
-                    maxWidth: "100%",
-                    maxHeight: "100%",
+                    // Same fix as the <img> branch above (R47-fix2): the
+                    // modal box has only max-height (no explicit height),
+                    // so max-height: 100% on a flex child resolved to the
+                    // video's natural height and overflow:hidden cropped
+                    // it (controls bar got clipped off the bottom).
+                    // Viewport units bypass the flex resolution chain.
+                    maxWidth: "min(88vw, 1100px)",
+                    maxHeight: "min(82vh, 700px)",
+                    width: "auto",
+                    height: "auto",
+                    objectFit: "contain",
+                    display: "block",
                     background: "black",
                   }}
                 />
