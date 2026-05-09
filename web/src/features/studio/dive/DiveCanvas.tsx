@@ -13,6 +13,7 @@ import "@xyflow/react/dist/style.css";
 import { useComposition } from "../store";
 import type { AssetEntry, Clip } from "../types";
 import { findAssetByUri } from "./walkProvenance";
+import { resolveAssetUrl } from "../composition/resolveAssetUrl";
 import { computeTreeLayout } from "./useTreeLayout";
 import { NODE_WIDTH, NODE_HEIGHT } from "./nodes/NodeShell";
 import { VisualNode } from "./nodes/VisualNode";
@@ -69,7 +70,11 @@ export function DiveCanvas({ open, onClose }: Props) {
       type: kindToNodeType(asset),
       position: positions.get(asset.id)!,
       data: {
-        asset,
+        // Override asset.uri with the http-served URL so VisualNode's
+        // <img> tag can actually load. Workspace-relative + shared-asset
+        // paths get translated to /api/works/:id/assets/* and
+        // /api/shared-assets/* respectively. (resolveAssetUrl)
+        asset: { ...asset, uri: resolveAssetUrl(asset.uri, comp.workId) },
         isCurrent: asset.id === currentAssetId,
         onUse: () => {
           if (selection) rebindClip(selection, asset.id);

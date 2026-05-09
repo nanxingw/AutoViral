@@ -1,29 +1,49 @@
 import type { Composition } from "../types";
 
 const SCHEME = /^[a-z][a-z0-9+.\-]*:/i;
+// Match shared-asset filesystem paths, anywhere in the string. Matches
+// both ~/.autoviral/shared-assets/<cat>/<file> and any custom data dir
+// that ends in shared-assets/<cat>/<file>.
+const SHARED_ASSETS_RE = /\/shared-assets\/([^/]+)\/(.+)$/;
 
 /**
- * composition.yaml stores `clip.src` as workspace-relative paths
- * ("assets/videos/test.mp4") so files are portable. Any browser-side
- * media element trying to load that string resolves it relative to
- * the page origin (vite dev server) and 404s. Map relative paths to
- * the local server's `/api/works/:id/assets/...` route, which is
- * already wired through vite's proxy. URLs with a scheme
- * (http://, https://, data:, blob:) pass through unchanged.
+ * composition.yaml stores `clip.src` / `asset.uri` in three flavours:
+ *   1. Workspace-relative path:  "assets/videos/test.mp4"
+ *   2. Absolute shared-asset:    "/Users/.../shared-assets/characters/x.png"
+ *   3. Already-served URL:       "http://...", "data:...", "blob:...",
+ *                                "/api/works/<id>/assets/..." (server-rewritten)
+ *
+ * Browser-side media elements can only load (3). This helper translates
+ * (1) → /api/works/:id/assets/* and (2) → /api/shared-assets/* so dive
+ * graph thumbnails, Scene.tsx clip rendering, and any future consumer
+ * stay on a single resolver.
  *
  * Mirrors `rewriteClipSrcsToAbsolute` in src/server/render-pipeline.ts —
  * server side rewrites to an absolute URL with localhost:<port>; browser
  * side uses a relative URL so vite/the page origin handles it.
  */
 export function resolveAssetUrl(src: string, workId: string): string {
-  // Short-circuit: empty / scheme-prefixed / page-absolute paths are already
-  // valid. The `/`-prefixed branch is the load-bearing one — server-side
-  // render pipelines have historically rewritten clip.src to
-  // "/api/works/<id>/assets/..." and persisted that into composition.yaml.
-  // Without this guard we'd double-wrap into
-  // "/api/works/<id>/assets//api/works/<id>/assets/..." and the video
-  // element silently 404s while throwing MediaPlaybackError. (2026-05-08)
-  if (!src || SCHEME.test(src) || src.startsWith("/")) return src;
+  if (!src) return src;
+  // Scheme-prefixed (http, https, data, blob) → already loadable.
+  if (SCHEME.test(src)) return src;
+
+  // Page-absolute paths can be one of two things:
+  //   a. Already-rewritten "/api/works/<id>/assets/…" — pass through to
+  //      avoid double-wrapping ("/api/works/<id>/assets//api/works/…")
+  //      which silently 404s in the video element. (2026-05-08)
+  //   b. Filesystem-absolute shared-asset path — needs translation to
+  //      /api/shared-assets/<category>/<file>.
+  if (src.startsWith("/")) {
+    const sharedMatch = src.match(SHARED_ASSETS_RE);
+    if (sharedMatch) {
+      const [, category, file] = sharedMatch;
+      return `/api/shared-assets/${encodeURIComponent(category)}/${encodeURIComponent(file)}`;
+    }
+    // Not shared-assets → already a routable URL (the page-absolute
+    // contract above). Pass through.
+    return src;
+  }
+
   const trimmed = src.startsWith("assets/") ? src.slice("assets/".length) : src;
   const segments = trimmed.split("/").map(encodeURIComponent).join("/");
   return `/api/works/${workId}/assets/${segments}`;

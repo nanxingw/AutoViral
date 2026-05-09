@@ -60,6 +60,28 @@ describe("resolveAssetUrl", () => {
   it("passes any /-prefixed absolute path through unchanged", () => {
     expect(resolveAssetUrl("/static/foo.mp4", "w_1")).toBe("/static/foo.mp4");
   });
+
+  // R47-fix3: dive graph thumbnails were broken because shared-asset
+  // entries in composition.yaml carry an absolute filesystem path
+  // (~/.autoviral/shared-assets/<cat>/<file>). Translate those to the
+  // /api/shared-assets endpoint so <img src> can actually fetch them.
+  it("translates absolute shared-asset filesystem paths to /api/shared-assets/*", () => {
+    expect(
+      resolveAssetUrl("/Users/me/.autoviral/shared-assets/characters/model-ref.png", "w_1"),
+    ).toBe("/api/shared-assets/characters/model-ref.png");
+  });
+
+  it("matches shared-assets even with a custom data dir", () => {
+    expect(
+      resolveAssetUrl("/var/data/autoviral/shared-assets/scenes/sunset.png", "w_1"),
+    ).toBe("/api/shared-assets/scenes/sunset.png");
+  });
+
+  it("encodes shared-asset category and filename", () => {
+    expect(
+      resolveAssetUrl("/Users/me/.autoviral/shared-assets/characters/Korean girl.png", "w_1"),
+    ).toBe(`/api/shared-assets/characters/${encodeURIComponent("Korean girl.png")}`);
+  });
 });
 
 describe("resolveCompositionAssets", () => {
