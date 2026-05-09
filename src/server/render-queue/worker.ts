@@ -5,9 +5,19 @@ import type { RenderQueueStore } from "./store.js";
 import type { RenderJob, RenderStage } from "./job.js";
 import { isTerminalStatus } from "./job.js";
 
-// R43 — pipeline stage order, matching render-pipeline.ts onP() calls.
-// Each stage owns 1/N of the visible progress bar so users see a
-// monotonically advancing 0..1, not a per-stage 0/1 reset cycle.
+// R43 / R46 — pipeline stage order matching render-pipeline.ts onP() calls.
+// R43 split progress into equal 1/N slices to fix the "stage transitions
+// reset progress to 0" bug. R46 replaces the equal split with weighted
+// budgets so the bar reflects actual wall-clock time per stage:
+//
+// Equal split lied to the user: render is 5-10 min and the other 4
+// stages combined are <30s. Visible progress would race 0→20%, then
+// hang at 20% for the entire render, then race 80→100% in <30s.
+//
+// Weighted budget mirrors heygen-com/hyperframes producer/
+// renderOrchestrator.ts stage layout — the bar advances at roughly the
+// same wall-clock rate per percent across the whole pipeline. Budget
+// sum = 1.0 by construction (asserted at module init).
 const STAGE_ORDER: readonly RenderStage[] = [
   "render",
   "duck",
@@ -16,12 +26,42 @@ const STAGE_ORDER: readonly RenderStage[] = [
   "encode",
 ];
 
+const STAGE_BUDGET: Record<RenderStage, number> = {
+  // Render dominates — Chromium screenshots + frame compose. ~75% of
+  // wall-clock on full-quality export.
+  render: 0.75,
+  // Sidechain duck — single ffmpeg pass over the audio mix. ~5%.
+  duck: 0.05,
+  // Loudnorm two-pass — analyse + apply, audio-only, fast. ~5%.
+  loudnorm: 0.05,
+  // Burn subtitles — single ffmpeg pass with libass overlay. ~5%.
+  burn: 0.05,
+  // Final encode — with R46 GPU encoder active this is fast; without
+  // it (libx264 software) it can rival render. ~10% midpoint.
+  encode: 0.1,
+};
+
+// Sanity at module init — if a future edit drops a stage from the
+// budget the imbalance becomes a runtime invariant violation, not a
+// silent UI regression.
+{
+  const sum = Object.values(STAGE_BUDGET).reduce((a, b) => a + b, 0);
+  if (Math.abs(sum - 1) > 1e-6) {
+    throw new Error(`STAGE_BUDGET sum must be 1.0, got ${sum.toFixed(6)}`);
+  }
+}
+
 export function aggregateProgress(stage: RenderStage, pct: number): number {
   const idx = STAGE_ORDER.indexOf(stage);
   if (idx < 0) return Math.max(0, Math.min(1, pct));
-  const slice = 1 / STAGE_ORDER.length;
+  // Sum of all stages BEFORE this one (their full budget is "done").
+  let cumulative = 0;
+  for (let i = 0; i < idx; i++) {
+    cumulative += STAGE_BUDGET[STAGE_ORDER[i]!];
+  }
+  const slice = STAGE_BUDGET[stage];
   const clamped = Math.max(0, Math.min(1, pct));
-  return idx * slice + clamped * slice;
+  return cumulative + clamped * slice;
 }
 
 export interface WorkerProgressEvent {

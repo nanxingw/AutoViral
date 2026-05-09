@@ -80,11 +80,16 @@ describe("RenderQueueWorker — lifecycle", () => {
     expect(store.get(job.id)?.status).toBe("running");
 
     runner.emit("render", 0.5);
-    // R43: progress is now stage-aggregated (5 stages × 0.2 slice). render
-    // is stage 0, so raw 0.5 → 0 + 0.5 * 0.2 = 0.1 on the visible bar.
+    // R43→R46: progress is stage-aggregated with weighted budgets.
+    // render owns 75% of the bar (it's the slow Chromium stage), so
+    // raw 0.5 inside render → 0 + 0.5 * 0.75 = 0.375 visible.
     await vi.waitFor(() =>
       expect(
-        events.some((e) => e.stage === "render" && e.progress === 0.1),
+        events.some(
+          (e) =>
+            e.stage === "render" &&
+            Math.abs(e.progress - 0.375) < 1e-6,
+        ),
       ).toBe(true),
     );
 
