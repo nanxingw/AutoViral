@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import clsx from "clsx";
-import type { WorkSummary } from "@/queries/works";
+import { useDeleteWork, type WorkSummary } from "@/queries/works";
 import styles from "./WorksGrid.module.css";
 import { useT, type MessageKey } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
+import { WorkCardMenu } from "./WorkCardMenu";
+import { DeleteWorkConfirm } from "./DeleteWorkConfirm";
 
 interface Props {
   works: WorkSummary[];
@@ -40,36 +42,67 @@ export function WorksGrid({ works, filter }: Props) {
   });
   const visible = filter === "all" ? works : works.filter((w) => w.status === filter);
   const STATUSES = new Set(["draft", "creating", "ready", "failed", "published", "archived"]);
+
+  // Delete flow state — `pendingDelete` doubles as both the "is dialog open"
+  // flag (truthy → open) and the work payload the dialog needs for its title +
+  // creating-state warning. Setting null both closes and clears.
+  const [pendingDelete, setPendingDelete] = useState<WorkSummary | null>(null);
+  const deleteMut = useDeleteWork();
+
   return (
-    <div className={styles.grid}>
-      {visible.map((w) => {
-        const typeLabel = t(
-          (w.type === "short-video" ? "works.type.video" : "works.type.image") as MessageKey,
-        );
-        const statusLabel = t(
-          (`works.status.${STATUSES.has(w.status) ? w.status : "draft"}`) as MessageKey,
-        );
-        return (
-          <Link
-            key={w.id}
-            to={w.type === "short-video" ? `/studio/${w.id}` : `/editor/${w.id}`}
-            className={styles.card}
-          >
-            <WorkCover work={w} />
-            <div className={clsx(styles.badge, w.status === "draft" && styles.badgeDraft)}>
-              {typeLabel} · {statusLabel}
+    <>
+      <div className={styles.grid}>
+        {visible.map((w) => {
+          const typeLabel = t(
+            (w.type === "short-video" ? "works.type.video" : "works.type.image") as MessageKey,
+          );
+          const statusLabel = t(
+            (`works.status.${STATUSES.has(w.status) ? w.status : "draft"}`) as MessageKey,
+          );
+          return (
+            // Wrapper div is positioning anchor for the absolutely-positioned
+            // WorkCardMenu. Menu trigger button is a SIBLING of <Link>, never
+            // nested inside it — <button> inside <a> is invalid HTML5 (Safari
+            // tab-order glitches; a11y tools flag it).
+            //
+            // `cardHover` is a plain class (NOT CSS-module-scoped) so
+            // WorkCardMenu.module.css's `:global(.cardHover):hover .trigger`
+            // selector can reach across module boundaries.
+            <div key={w.id} className={clsx(styles.card, "cardHover")}>
+              <WorkCardMenu onDelete={() => setPendingDelete(w)} />
+              <Link
+                to={w.type === "short-video" ? `/studio/${w.id}` : `/editor/${w.id}`}
+                className={styles.cardInner}
+              >
+                <WorkCover work={w} />
+                <div className={clsx(styles.badge, w.status === "draft" && styles.badgeDraft)}>
+                  {typeLabel} · {statusLabel}
+                </div>
+                <div className={styles.typeTag}>{statusLabel}</div>
+                <div className={styles.meta}>
+                  <h3>{w.title}</h3>
+                  <div className={styles.subline}>
+                    <span>{dateFmt.format(new Date(w.updatedAt))}</span>
+                  </div>
+                </div>
+              </Link>
             </div>
-            <div className={styles.typeTag}>{statusLabel}</div>
-            <div className={styles.meta}>
-              <h3>{w.title}</h3>
-              <div className={styles.subline}>
-                <span>{dateFmt.format(new Date(w.updatedAt))}</span>
-              </div>
-            </div>
-          </Link>
-        );
-      })}
-    </div>
+          );
+        })}
+      </div>
+      <DeleteWorkConfirm
+        open={!!pendingDelete}
+        work={pendingDelete}
+        pending={deleteMut.isPending}
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={() => {
+          if (!pendingDelete) return;
+          deleteMut.mutate(pendingDelete.id, {
+            onSuccess: () => setPendingDelete(null),
+          });
+        }}
+      />
+    </>
   );
 }
 
