@@ -217,3 +217,21 @@ describe("SettingsPanel — Douyin section", () => {
     }, { timeout: 3000 });
   });
 });
+
+describe("SettingsPanel — Model section", () => {
+  beforeEach(() => {
+    useSettingsPanelStore.setState({ open: true, focusSection: null });
+  });
+
+  it("renders model select with loaded value", async () => {
+    mswServer.use(http.get("/api/config", () =>
+      HttpResponse.json({
+        jimengAccessKey: "", jimengSecretKey: "", openrouterKey: "",
+        douyinUrl: "", researchEnabled: false, researchCron: "", model: "opus",
+      })
+    ));
+    renderPanel();
+    const select = (await screen.findByLabelText(/default model|默认模型/i)) as HTMLSelectElement;
+    expect(select.value).toBe("opus");
+  });
+});

@@ -188,7 +188,23 @@ export function SettingsPanel() {
                 </div>
               </section>
 
-              {/* Task 9 will append Default model section here */}
+              <section data-section="model">
+                <h3 className={styles.sectionLabel}>{t("settings.section.model")}</h3>
+                <div className={styles.field}>
+                  <label htmlFor="default-model" className={styles.fieldLabel}>{t("settings.section.model")}</label>
+                  <select
+                    id="default-model"
+                    className={styles.input}
+                    value={draft.model}
+                    onChange={(e) => patch("model", e.target.value)}
+                    aria-label={t("settings.section.model")}
+                  >
+                    <option value="opus">Claude Opus</option>
+                    <option value="sonnet">Claude Sonnet</option>
+                    <option value="haiku">Claude Haiku</option>
+                  </select>
+                </div>
+              </section>
             </>
           ) : (
             <div>{t("common.loading")}</div>
