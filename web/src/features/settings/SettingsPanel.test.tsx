@@ -181,4 +181,39 @@ describe("SettingsPanel — Douyin section", () => {
     const refreshBtn = await screen.findByRole("button", { name: /refresh now|立即同步/i });
     expect(refreshBtn).toBeDisabled();
   });
+
+  it("updates Last collected timestamp after successful refresh", async () => {
+    let configCallCount = 0;
+    mswServer.use(
+      http.get("/api/config", () => {
+        configCallCount++;
+        return HttpResponse.json({
+          jimengAccessKey: "", jimengSecretKey: "", openrouterKey: "",
+          douyinUrl: "https://www.douyin.com/user/abc",
+          researchEnabled: false, researchCron: "", model: "sonnet",
+          analyticsLastCollectedAt: configCallCount === 1
+            ? "2026-05-09T09:00:00.000Z"
+            : "2026-05-11T08:00:00.000Z",
+        });
+      }),
+      http.post("/api/analytics/refresh", async () => {
+        await delay(20);
+        return HttpResponse.json({ collectedAt: "2026-05-11T08:00:00.000Z", worksCount: 42 });
+      }),
+    );
+    renderPanel();
+
+    // Wait for initial render with first timestamp
+    const initialPattern = new RegExp(new Date("2026-05-09T09:00:00.000Z").toLocaleString().replace(/[/.,]/g, "\\$&"));
+    await screen.findByText(initialPattern);
+
+    // Click refresh
+    fireEvent.click(screen.getByRole("button", { name: /refresh now|立即同步/i }));
+
+    // Wait for updated timestamp to appear (after refresh + config re-fetch)
+    const updatedPattern = new RegExp(new Date("2026-05-11T08:00:00.000Z").toLocaleString().replace(/[/.,]/g, "\\$&"));
+    await waitFor(() => {
+      expect(screen.getByText(updatedPattern)).toBeInTheDocument();
+    }, { timeout: 3000 });
+  });
 });

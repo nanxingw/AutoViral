@@ -180,9 +180,9 @@ export function SettingsPanel() {
                   >
                     {refreshMut.isPending ? t("settings.refreshing") : t("settings.refresh")}
                   </button>
-                  {draft.analyticsLastCollectedAt && (
+                  {config?.analyticsLastCollectedAt && (
                     <span className={styles.lastCollected}>
-                      {t("settings.lastCollected")}: {new Date(draft.analyticsLastCollectedAt).toLocaleString()}
+                      {t("settings.lastCollected")}: {new Date(config.analyticsLastCollectedAt).toLocaleString()}
                     </span>
                   )}
                 </div>
