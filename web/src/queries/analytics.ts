@@ -1,6 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 
+export const CREATOR_ANALYTICS_QUERY_KEY = ["analytics", "creator"] as const;
+
 // Backend `/api/analytics/creator` shape (real):
 //   { configured, data: { platform, account, works, summary, ... }, delta }
 // We re-shape to a flat object the page already expects so older components
@@ -61,7 +63,7 @@ function adapt(raw: BackendAnalytics): CreatorAnalytics | null {
 
 export function useCreatorAnalytics() {
   return useQuery({
-    queryKey: ["analytics", "creator"],
+    queryKey: CREATOR_ANALYTICS_QUERY_KEY,
     queryFn: async () => {
       const raw = await apiFetch<BackendAnalytics>("/api/analytics/creator");
       return adapt(raw);

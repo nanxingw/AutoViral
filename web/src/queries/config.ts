@@ -1,5 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
+import { CREATOR_ANALYTICS_QUERY_KEY } from "./analytics";
+
+type RawConfigResponse = {
+  jimengAccessKey?: string;
+  jimengSecretKey?: string;
+  openrouterKey?: string;
+  douyinUrl?: string;
+  researchEnabled?: boolean;
+  researchCron?: string;
+  model?: string;
+  analyticsLastCollectedAt?: string | null;
+  research?: { enabled?: boolean; schedule?: string }; // legacy nested shape from older server
+};
 
 export interface AppConfig {
   jimengAccessKey: string;
@@ -21,16 +34,16 @@ export function useConfig() {
   return useQuery({
     queryKey: CONFIG_QUERY_KEY,
     queryFn: async () => {
-      const raw = await apiFetch<Record<string, unknown>>("/api/config");
+      const raw = await apiFetch<RawConfigResponse>("/api/config");
       return {
-        jimengAccessKey: (raw.jimengAccessKey as string) ?? "",
-        jimengSecretKey: (raw.jimengSecretKey as string) ?? "",
-        openrouterKey: (raw.openrouterKey as string) ?? "",
-        douyinUrl: (raw.douyinUrl as string) ?? "",
-        researchEnabled: Boolean(raw.researchEnabled ?? (raw as any).research?.enabled ?? false),
-        researchCron: (raw.researchCron as string) ?? ((raw as any).research?.schedule as string) ?? "0 9 * * *",
-        model: (raw.model as string) ?? "sonnet",
-        analyticsLastCollectedAt: (raw.analyticsLastCollectedAt as string) ?? null,
+        jimengAccessKey: raw.jimengAccessKey ?? "",
+        jimengSecretKey: raw.jimengSecretKey ?? "",
+        openrouterKey: raw.openrouterKey ?? "",
+        douyinUrl: raw.douyinUrl ?? "",
+        researchEnabled: Boolean(raw.researchEnabled ?? raw.research?.enabled ?? false),
+        researchCron: raw.researchCron ?? raw.research?.schedule ?? "0 9 * * *",
+        model: raw.model ?? "sonnet",
+        analyticsLastCollectedAt: raw.analyticsLastCollectedAt ?? null,
       } satisfies AppConfig;
     },
     staleTime: 60_000,
@@ -60,7 +73,7 @@ export function useRefreshAnalytics() {
       apiFetch<RefreshResult>("/api/analytics/refresh", { method: "POST" }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: CONFIG_QUERY_KEY });
-      qc.invalidateQueries({ queryKey: ["creator-analytics"] });
+      qc.invalidateQueries({ queryKey: CREATOR_ANALYTICS_QUERY_KEY });
     },
   });
 }
