@@ -21,7 +21,7 @@ import {
   listProviders as listVideoProviders,
 } from "./providers/registry.js";
 import { listSharedAssetsWithMeta, getSharedAssetPath, validateCategory, sanitizeFilename, saveSharedAsset, deleteSharedAsset, moveSharedAsset } from "../shared-assets.js";
-import { getLatestCreatorData, getCreatorHistory } from "../analytics-collector.js";
+import { getLatestCreatorData, getCreatorHistory, collectData } from "../analytics-collector.js";
 import { log, readLogs } from "../logger.js";
 import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } from "../test-runner.js";
 import { evaluateWork } from "../test-evaluator.js";
@@ -1192,6 +1192,36 @@ apiRoutes.get("/api/analytics/creator/history", async (c) => {
   const history = await getCreatorHistory(30)
   return c.json({ history })
 })
+
+// POST /api/analytics/refresh — manually trigger a Douyin data collection
+apiRoutes.post("/api/analytics/refresh", async (c) => {
+  const config = await loadConfig();
+  const douyinUrl = config.analytics?.douyinUrl ?? "";
+  if (!douyinUrl) {
+    return c.json(
+      { error: "Douyin URL not configured", errorCode: "douyin_url_missing" },
+      400
+    );
+  }
+  try {
+    const data = await collectData(douyinUrl);
+    if (!data) {
+      return c.json(
+        { error: "Collection returned no data", errorCode: "collect_failed" },
+        500
+      );
+    }
+    return c.json({
+      collectedAt: data.collected_at,
+      worksCount: data.works.length,
+    });
+  } catch (err) {
+    return c.json(
+      { error: String(err), errorCode: "collect_failed" },
+      500
+    );
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Generate API (Provider-based image/video generation)
