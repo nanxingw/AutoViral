@@ -61,6 +61,7 @@ export const en = {
     localeToggleZh: "中",
     localeToggleEn: "EN",
     themeToggleTitle: "Toggle theme",
+    settings: "Settings",
   },
   editor: {
     loadError: {
@@ -366,6 +367,35 @@ export const en = {
       },
     },
   },
+  settings: {
+    title: "Settings",
+    close: "Close settings",
+    section: {
+      jimeng: "Jimeng API",
+      openrouter: "OpenRouter API",
+      research: "Research",
+      douyin: "Douyin channel",
+      model: "Default model",
+    },
+    field: {
+      accessKey: "AccessKey",
+      secretKey: "SecretKey",
+      apiKey: "API Key",
+      douyinUrl: "Profile URL",
+      cron: "Cron schedule",
+      autoResearch: "Enable scheduled research",
+    },
+    show: "Show",
+    hide: "Hide",
+    save: "Save changes",
+    cancel: "Cancel",
+    refresh: "Refresh now",
+    refreshing: "Refreshing… (~30s)",
+    lastCollected: "Last collected",
+    unsavedTitle: "Discard unsaved changes?",
+    unsavedBody: "Your changes will be lost.",
+    unsavedConfirm: "Discard",
+  },
 } as const;
 
 export type Messages = typeof en;
@@ -425,6 +455,7 @@ export const zh: DeepShape<Messages> = {
     localeToggleZh: "中",
     localeToggleEn: "EN",
     themeToggleTitle: "切换主题",
+    settings: "设置",
   },
   editor: {
     loadError: {
@@ -729,6 +760,35 @@ export const zh: DeepShape<Messages> = {
         generateCaptions: "+ 字幕",
       },
     },
+  },
+  settings: {
+    title: "设置",
+    close: "关闭设置",
+    section: {
+      jimeng: "即梦 API",
+      openrouter: "OpenRouter API",
+      research: "调研设置",
+      douyin: "抖音号绑定",
+      model: "默认模型",
+    },
+    field: {
+      accessKey: "AccessKey",
+      secretKey: "SecretKey",
+      apiKey: "API Key",
+      douyinUrl: "主页 URL",
+      cron: "Cron 表达式",
+      autoResearch: "启用自动调研",
+    },
+    show: "显示",
+    hide: "隐藏",
+    save: "保存",
+    cancel: "取消",
+    refresh: "立即抓取",
+    refreshing: "抓取中… (~30s)",
+    lastCollected: "上次抓取",
+    unsavedTitle: "放弃未保存修改？",
+    unsavedBody: "你的修改将会丢失。",
+    unsavedConfirm: "放弃",
   },
 };
 
