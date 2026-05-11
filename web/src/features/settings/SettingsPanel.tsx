@@ -5,6 +5,16 @@ import { useT } from "@/i18n/useT";
 import { useConfig, useRefreshAnalytics, useSaveConfig, type AppConfig } from "@/queries/config";
 import styles from "./SettingsPanel.module.css";
 
+const EDITABLE_KEYS = [
+  "jimengAccessKey",
+  "jimengSecretKey",
+  "openrouterKey",
+  "douyinUrl",
+  "researchEnabled",
+  "researchCron",
+  "model",
+] as const satisfies readonly (keyof AppConfig)[];
+
 interface SecretFieldProps {
   label: string;
   value: string;
@@ -66,15 +76,7 @@ export function SettingsPanel() {
     setDraft({ ...draft, [k]: v });
   };
 
-  const isDirty = !!config && !!draft && (
-    draft.jimengAccessKey !== config.jimengAccessKey ||
-    draft.jimengSecretKey !== config.jimengSecretKey ||
-    draft.openrouterKey !== config.openrouterKey ||
-    draft.douyinUrl !== config.douyinUrl ||
-    draft.researchEnabled !== config.researchEnabled ||
-    draft.researchCron !== config.researchCron ||
-    draft.model !== config.model
-  );
+  const isDirty = !!config && !!draft && EDITABLE_KEYS.some((k) => draft[k] !== config[k]);
 
   const requestClose = () => {
     if (isDirty) setShowUnsaved(true);
@@ -245,15 +247,7 @@ export function SettingsPanel() {
             onClick={() => {
               if (!draft) return;
               saveMut.mutate(
-                {
-                  jimengAccessKey: draft.jimengAccessKey,
-                  jimengSecretKey: draft.jimengSecretKey,
-                  openrouterKey: draft.openrouterKey,
-                  douyinUrl: draft.douyinUrl,
-                  researchEnabled: draft.researchEnabled,
-                  researchCron: draft.researchCron,
-                  model: draft.model,
-                },
+                Object.fromEntries(EDITABLE_KEYS.map((k) => [k, draft[k]])) as Parameters<typeof saveMut.mutate>[0],
                 { onSuccess: () => closePanel() },
               );
             }}
