@@ -8,11 +8,12 @@ interface DeleteWorkConfirmProps {
   open: boolean;
   work: WorkSummary | null;
   pending: boolean;
+  errored: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }
 
-export function DeleteWorkConfirm({ open, work, pending, onCancel, onConfirm }: DeleteWorkConfirmProps) {
+export function DeleteWorkConfirm({ open, work, pending, errored, onCancel, onConfirm }: DeleteWorkConfirmProps) {
   const t = useT();
   const boxRef = useRef<HTMLDivElement | null>(null);
   const cancelBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -59,6 +60,9 @@ export function DeleteWorkConfirm({ open, work, pending, onCancel, onConfirm }: 
           <p>{t("works.delete.body2")}</p>
           {isCreating && (
             <p className={styles.warning}>{t("works.delete.creatingWarning")}</p>
+          )}
+          {errored && !pending && (
+            <p className={styles.error} role="alert">{t("works.delete.failed")}</p>
           )}
         </div>
         <div className={styles.actions}>

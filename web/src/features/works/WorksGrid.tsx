@@ -94,7 +94,11 @@ export function WorksGrid({ works, filter }: Props) {
         open={!!pendingDelete}
         work={pendingDelete}
         pending={deleteMut.isPending}
-        onCancel={() => setPendingDelete(null)}
+        errored={deleteMut.isError}
+        onCancel={() => {
+          deleteMut.reset();
+          setPendingDelete(null);
+        }}
         onConfirm={() => {
           if (!pendingDelete) return;
           deleteMut.mutate(pendingDelete.id, {
