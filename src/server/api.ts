@@ -130,6 +130,8 @@ apiRoutes.get("/api/config", async (c) => {
     openrouterKey: config.openrouter?.apiKey ?? "",
     douyinUrl: config.analytics?.douyinUrl ?? "",
     memorySyncEnabled: config.memory?.syncEnabled ?? false,
+    researchEnabled: config.research?.enabled ?? false,
+    researchCron: config.research?.schedule ?? "0 9 * * *",
     analyticsLastCollectedAt,
   });
 });
@@ -161,6 +163,14 @@ apiRoutes.put("/api/config", async (c) => {
   if (body.memorySyncEnabled !== undefined) {
     if (!config.memory) config.memory = { apiKey: "", userId: "autoviral-user", syncEnabled: false };
     config.memory.syncEnabled = body.memorySyncEnabled as boolean;
+  }
+  if (body.researchEnabled !== undefined) {
+    if (!config.research) config.research = { enabled: true, schedule: "0 9 * * *", platforms: ["douyin", "xiaohongshu"] };
+    config.research.enabled = body.researchEnabled as boolean;
+  }
+  if (body.researchCron !== undefined) {
+    if (!config.research) config.research = { enabled: true, schedule: "0 9 * * *", platforms: ["douyin", "xiaohongshu"] };
+    config.research.schedule = body.researchCron as string;
   }
 
   await saveConfig(config);
