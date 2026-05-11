@@ -274,10 +274,17 @@ apiRoutes.put("/api/works/:id", async (c) => {
   }
 });
 
-// DELETE /api/works/:id
+// DELETE /api/works/:id — cascades: kills active CLI session (if creating), then rm -rf work dir.
+// Order matters: killSession first prevents the CLI subprocess from writing
+// chat.jsonl into the work directory while storeDeleteWork is rm -rf'ing it.
 apiRoutes.delete("/api/works/:id", async (c) => {
   const id = c.req.param("id");
   try {
+    const work = await getWork(id);
+    if (!work) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
+    if (work.cliSessionId && wsBridge) {
+      wsBridge.killSession(id);
+    }
     const deleted = await storeDeleteWork(id);
     if (!deleted) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
     return c.json({ deleted: true });

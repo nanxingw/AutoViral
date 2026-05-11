@@ -5,7 +5,9 @@ export interface WorkSummary {
   id: string;
   title: string;
   type: "short-video" | "image-text";
-  status: "draft" | "published" | "archived";
+  // Backend statuses (src/work-store.ts WorkStatus) + frontend filter-only statuses
+  // ("published" / "archived" are UI groupings that don't yet exist server-side).
+  status: "draft" | "creating" | "ready" | "failed" | "published" | "archived";
   thumbnail: string | null;
   /** Backend-attached preview asset URL (image or video). May be undefined for empty works. */
   coverImage?: string | null;
@@ -52,5 +54,16 @@ export function useUpdateWork() {
     mutationFn: ({ id, ...patch }: Partial<WorkSummary> & { id: string }) =>
       apiFetch<WorkSummary>(`/api/works/${id}`, { method: "PUT", body: patch }),
     onSuccess: () => qc.invalidateQueries({ queryKey: worksKey }),
+  });
+}
+
+export function useDeleteWork() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ deleted: true }>(`/api/works/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: worksKey });
+    },
   });
 }

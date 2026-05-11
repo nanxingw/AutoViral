@@ -283,6 +283,19 @@ export const en = {
     insightsRibbonNote: "Static placeholder cards — the analytics agent isn't producing per-user insights yet.",
     untitledWork: "Untitled",
     createFailed: "Couldn't create work: {msg}",
+    menu: {
+      openMenu: "Open menu",
+      delete: "Delete",
+    },
+    delete: {
+      title: 'Delete "{title}"?',
+      body1: "This will permanently remove the chat history, generated assets, and rendered output.",
+      body2: "Shared assets and render-queue history are not affected.",
+      creatingWarning: "This work is currently being created. Deleting will stop the active session.",
+      confirm: "Delete",
+      cancel: "Cancel",
+      failed: "Couldn't delete. Try again.",
+    },
   },
   checkpoints: {
     button: "History",
@@ -678,6 +691,19 @@ export const zh: DeepShape<Messages> = {
     insightsRibbonNote: "静态占位卡——数据分析 agent 尚未为你生成专属洞察。",
     untitledWork: "未命名",
     createFailed: "创建作品失败：{msg}",
+    menu: {
+      openMenu: "打开菜单",
+      delete: "删除",
+    },
+    delete: {
+      title: "删除“{title}”？",
+      body1: "这会永久删除聊天记录、生成素材和导出成品。",
+      body2: "共享素材库和渲染队列历史不受影响。",
+      creatingWarning: "这个作品正在创作中，删除会停止当前会话。",
+      confirm: "删除",
+      cancel: "取消",
+      failed: "删除失败，请重试。",
+    },
   },
   checkpoints: {
     button: "历史",

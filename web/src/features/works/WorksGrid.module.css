@@ -1,4 +1,10 @@
 .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 56px; }
+/* The card wrapper is the positioning anchor for the absolutely-positioned
+   WorkCardMenu and the inner Link. We keep visual styles (border, radius,
+   overflow, aspect-ratio, hover) on this wrapper so the card outline +
+   shadow still wrap the menu trigger.
+   `<button>` inside `<a>` is invalid HTML5 — so the menu is a sibling of
+   the Link (cardInner), not a child of it. */
 .card {
   position: relative;
   aspect-ratio: 16/11;
@@ -7,10 +13,18 @@
   border: 1px solid var(--glass-border);
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
-  text-decoration: none;
-  display: block;
 }
 .card:hover { transform: translateY(-2px); box-shadow: 0 16px 40px rgba(0,0,0,0.25), 0 0 0 1px var(--accent); }
+/* Inner Link covers the card surface. Position:absolute+inset:0 so .thumb
+   (also absolute) still has a positioned ancestor and the click target
+   covers the entire card (except where the menu trigger sits on top). */
+.cardInner {
+  position: absolute;
+  inset: 0;
+  display: block;
+  text-decoration: none;
+  color: inherit;
+}
 .thumb {
   position: absolute; inset: 0;
   width: 100%; height: 100%;
