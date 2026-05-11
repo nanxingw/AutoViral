@@ -45,7 +45,7 @@ export interface CreatorData {
   }
 }
 
-async function collectData(douyinUrl: string): Promise<CreatorData | null> {
+export async function collectData(douyinUrl: string): Promise<CreatorData | null> {
   const scriptPath = join(homedir(), ".claude", "skills", "autoviral", "modules", "research", "scripts", "creator-analytics", "collect.py")
   try {
     await mkdir(ANALYTICS_DIR, { recursive: true })

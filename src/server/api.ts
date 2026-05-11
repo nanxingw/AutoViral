@@ -21,7 +21,7 @@ import {
   listProviders as listVideoProviders,
 } from "./providers/registry.js";
 import { listSharedAssetsWithMeta, getSharedAssetPath, validateCategory, sanitizeFilename, saveSharedAsset, deleteSharedAsset, moveSharedAsset } from "../shared-assets.js";
-import { getLatestCreatorData, getCreatorHistory } from "../analytics-collector.js";
+import { getLatestCreatorData, getCreatorHistory, collectData } from "../analytics-collector.js";
 import { log, readLogs } from "../logger.js";
 import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } from "../test-runner.js";
 import { evaluateWork } from "../test-evaluator.js";
@@ -116,6 +116,13 @@ apiRoutes.get("/api/status", async (c) => {
 // GET /api/config
 apiRoutes.get("/api/config", async (c) => {
   const config = await loadConfig();
+  let analyticsLastCollectedAt: string | null = null;
+  try {
+    const latestPath = join(homedir(), ".autoviral", "analytics", "douyin", "latest.json");
+    const raw = await readFile(latestPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    analyticsLastCollectedAt = parsed.collected_at ?? null;
+  } catch { /* file may not exist; ok */ }
   return c.json({
     ...config,
     jimengAccessKey: config.jimeng?.accessKey ?? "",
@@ -123,6 +130,9 @@ apiRoutes.get("/api/config", async (c) => {
     openrouterKey: config.openrouter?.apiKey ?? "",
     douyinUrl: config.analytics?.douyinUrl ?? "",
     memorySyncEnabled: config.memory?.syncEnabled ?? false,
+    researchEnabled: config.research?.enabled ?? false,
+    researchCron: config.research?.schedule ?? "0 9 * * *",
+    analyticsLastCollectedAt,
   });
 });
 
@@ -153,6 +163,14 @@ apiRoutes.put("/api/config", async (c) => {
   if (body.memorySyncEnabled !== undefined) {
     if (!config.memory) config.memory = { apiKey: "", userId: "autoviral-user", syncEnabled: false };
     config.memory.syncEnabled = body.memorySyncEnabled as boolean;
+  }
+  if (body.researchEnabled !== undefined) {
+    if (!config.research) config.research = { enabled: true, schedule: "0 9 * * *", platforms: ["douyin", "xiaohongshu"] };
+    config.research.enabled = body.researchEnabled as boolean;
+  }
+  if (body.researchCron !== undefined) {
+    if (!config.research) config.research = { enabled: true, schedule: "0 9 * * *", platforms: ["douyin", "xiaohongshu"] };
+    config.research.schedule = body.researchCron as string;
   }
 
   await saveConfig(config);
@@ -1192,6 +1210,36 @@ apiRoutes.get("/api/analytics/creator/history", async (c) => {
   const history = await getCreatorHistory(30)
   return c.json({ history })
 })
+
+// POST /api/analytics/refresh — manually trigger a Douyin data collection
+apiRoutes.post("/api/analytics/refresh", async (c) => {
+  const config = await loadConfig();
+  const douyinUrl = config.analytics?.douyinUrl ?? "";
+  if (!douyinUrl) {
+    return c.json(
+      { error: "Douyin URL not configured", errorCode: "douyin_url_missing" },
+      400
+    );
+  }
+  try {
+    const data = await collectData(douyinUrl);
+    if (!data) {
+      return c.json(
+        { error: "Collection returned no data", errorCode: "collect_failed" },
+        500
+      );
+    }
+    return c.json({
+      collectedAt: data.collected_at,
+      worksCount: data.works.length,
+    });
+  } catch (err) {
+    return c.json(
+      { error: String(err), errorCode: "collect_failed" },
+      500
+    );
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Generate API (Provider-based image/video generation)

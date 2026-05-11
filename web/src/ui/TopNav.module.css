@@ -71,3 +71,21 @@
 }
 .tab:hover { color: var(--text); }
 .right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+.gearBtn {
+  background: transparent;
+  border: 0;
+  padding: 6px 8px;
+  cursor: pointer;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+}
+.gearBtn:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+.gearBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

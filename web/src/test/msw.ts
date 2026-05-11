@@ -54,6 +54,18 @@ export const handlers = [
   http.get("/api/memory/profile", () =>
     HttpResponse.json({ tags: ["High-aesthetic sports blogger", "Data-driven storytelling", "Fast-paced editing"] }),
   ),
+  http.get("/api/config", () =>
+    HttpResponse.json({
+      jimengAccessKey: "",
+      jimengSecretKey: "",
+      openrouterKey: "",
+      douyinUrl: "",
+      researchEnabled: false,
+      researchCron: "0 9 * * *",
+      model: "sonnet",
+      analyticsLastCollectedAt: null,
+    }),
+  ),
 ];
 
 export const mswServer = setupServer(...handlers);
