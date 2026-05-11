@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useSettingsPanelStore } from "@/stores/settings";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useT } from "@/i18n/useT";
@@ -14,7 +14,8 @@ interface SecretFieldProps {
 }
 function SecretField({ label, value, onChange, showLabel, hideLabel }: SecretFieldProps) {
   const [shown, setShown] = useState(false);
-  const id = `secret-${label.replace(/\s+/g, "-")}`;
+  const reactId = useId();
+  const id = `secret-${reactId}`;
   return (
     <div className={styles.field}>
       <label htmlFor={id} className={styles.fieldLabel}>{label}</label>

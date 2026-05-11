@@ -98,3 +98,11 @@
   color: var(--text-dim);
   cursor: pointer;
 }
+.toggleBtn:hover {
+  color: var(--text);
+  border-color: var(--accent-lo);
+}
+.toggleBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

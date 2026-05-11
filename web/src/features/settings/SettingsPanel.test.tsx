@@ -1,8 +1,10 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
+import { http, HttpResponse } from "msw";
 import { SettingsPanel } from "./SettingsPanel";
 import { useSettingsPanelStore } from "@/stores/settings";
+import { mswServer } from "@/test/msw";
 
 function renderPanel() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -58,9 +60,9 @@ describe("SettingsPanel — Jimeng + OpenRouter sections", () => {
   });
 
   it("loads and renders config fields", async () => {
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-      if (url.includes("/api/config")) {
-        return new Response(JSON.stringify({
+    mswServer.use(
+      http.get("/api/config", () =>
+        HttpResponse.json({
           jimengAccessKey: "AK123",
           jimengSecretKey: "SK456",
           openrouterKey: "OR789",
@@ -68,10 +70,9 @@ describe("SettingsPanel — Jimeng + OpenRouter sections", () => {
           researchEnabled: false,
           researchCron: "0 9 * * *",
           model: "sonnet",
-        }), { headers: { "content-type": "application/json" } });
-      }
-      return new Response("{}", { headers: { "content-type": "application/json" } });
-    }));
+        }),
+      ),
+    );
 
     renderPanel();
     expect(await screen.findByDisplayValue("AK123")).toBeInTheDocument();
@@ -80,10 +81,19 @@ describe("SettingsPanel — Jimeng + OpenRouter sections", () => {
   });
 
   it("toggles password visibility", async () => {
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
-      jimengAccessKey: "AK123", jimengSecretKey: "", openrouterKey: "",
-      douyinUrl: "", researchEnabled: false, researchCron: "", model: "sonnet",
-    }), { headers: { "content-type": "application/json" } })));
+    mswServer.use(
+      http.get("/api/config", () =>
+        HttpResponse.json({
+          jimengAccessKey: "AK123",
+          jimengSecretKey: "",
+          openrouterKey: "",
+          douyinUrl: "",
+          researchEnabled: false,
+          researchCron: "",
+          model: "sonnet",
+        }),
+      ),
+    );
     renderPanel();
     const ak = await screen.findByDisplayValue("AK123") as HTMLInputElement;
     expect(ak.type).toBe("password");
