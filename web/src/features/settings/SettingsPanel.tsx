@@ -52,6 +52,7 @@ function SecretField({ label, value, onChange, showLabel, hideLabel }: SecretFie
 export function SettingsPanel() {
   const open = useSettingsPanelStore((s) => s.open);
   const closePanel = useSettingsPanelStore((s) => s.closePanel);
+  const focusSection = useSettingsPanelStore((s) => s.focusSection);
   const t = useT();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const { data: config } = useConfig();
@@ -70,6 +71,13 @@ export function SettingsPanel() {
       setShowUnsaved(false);
     }
   }, [open, config, draft]);
+
+  // Scroll to requested section when panel opens with focusSection (Analytics §2 deep-link)
+  useEffect(() => {
+    if (!open || !focusSection || !draft) return;
+    const el = panelRef.current?.querySelector(`[data-section="${focusSection}"]`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [open, focusSection, draft]);
 
   const patch = <K extends keyof AppConfig>(k: K, v: AppConfig[K]) => {
     if (!draft) return;
@@ -255,6 +263,11 @@ export function SettingsPanel() {
             {saveMut.isPending ? "…" : t("settings.save")}
           </button>
         </footer>
+        {saveMut.isError && (
+          <div className={styles.saveError} role="alert">
+            {t("settings.saveError")}
+          </div>
+        )}
       </div>
     </div>
     {showUnsaved && (

@@ -395,6 +395,7 @@ export const en = {
     unsavedTitle: "Discard unsaved changes?",
     unsavedBody: "Your changes will be lost.",
     unsavedConfirm: "Discard",
+    saveError: "Save failed. Your changes are still here — try again.",
   },
 } as const;
 
@@ -789,6 +790,7 @@ export const zh: DeepShape<Messages> = {
     unsavedTitle: "放弃未保存修改？",
     unsavedBody: "你的修改将会丢失。",
     unsavedConfirm: "放弃",
+    saveError: "保存失败。修改还在 — 重试一次。",
   },
 };
 
