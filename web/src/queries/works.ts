@@ -54,3 +54,14 @@ export function useUpdateWork() {
     onSuccess: () => qc.invalidateQueries({ queryKey: worksKey }),
   });
 }
+
+export function useDeleteWork() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<{ deleted: true }>(`/api/works/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: worksKey });
+    },
+  });
+}
