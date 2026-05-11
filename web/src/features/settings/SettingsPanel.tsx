@@ -131,19 +131,20 @@ export function SettingsPanel() {
 
               <section data-section="research">
                 <h3 className={styles.sectionLabel}>{t("settings.section.research")}</h3>
-                <label className={styles.toggleRow}>
-                  <span>{t("settings.field.autoResearch")}</span>
+                <div className={styles.toggleRow}>
+                  <span id="research-auto-label">{t("settings.field.autoResearch")}</span>
                   <button
                     type="button"
                     role="switch"
                     aria-checked={draft.researchEnabled}
+                    aria-labelledby="research-auto-label"
                     className={styles.toggle}
                     data-on={draft.researchEnabled}
                     onClick={() => patch("researchEnabled", !draft.researchEnabled)}
                   >
                     <span className={styles.toggleThumb} />
                   </button>
-                </label>
+                </div>
                 {draft.researchEnabled && (
                   <div className={styles.field}>
                     <label htmlFor="research-cron" className={styles.fieldLabel}>{t("settings.field.cron")}</label>
