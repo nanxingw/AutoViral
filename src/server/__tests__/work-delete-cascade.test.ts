@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Hono } from "hono";
 
 // Hoisted mocks — only mock what we need to intercept. api.ts has many
@@ -36,6 +36,13 @@ describe("DELETE /api/works/:id — in-flight protection", () => {
       sendMessage: vi.fn(),
     } as any);
     app = new Hono().route("/", apiRoutes);
+  });
+
+  afterEach(async () => {
+    // Reset module-level wsBridge so other tests in the same worker
+    // don't inherit our mock (vitest reuses workers with maxForks=2).
+    const { setWsBridge } = await import("../api.js");
+    setWsBridge(null as any);
   });
 
   it("kills active CLI session before deleting a creating work", async () => {
