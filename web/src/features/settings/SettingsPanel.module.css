@@ -139,3 +139,28 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+.refreshRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+}
+.refreshBtn {
+  background: var(--accent);
+  color: var(--bg);
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.refreshBtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.refreshBtn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.lastCollected {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+}

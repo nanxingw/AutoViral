@@ -116,6 +116,13 @@ apiRoutes.get("/api/status", async (c) => {
 // GET /api/config
 apiRoutes.get("/api/config", async (c) => {
   const config = await loadConfig();
+  let analyticsLastCollectedAt: string | null = null;
+  try {
+    const latestPath = join(homedir(), ".autoviral", "analytics", "douyin", "latest.json");
+    const raw = await readFile(latestPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    analyticsLastCollectedAt = parsed.collected_at ?? null;
+  } catch { /* file may not exist; ok */ }
   return c.json({
     ...config,
     jimengAccessKey: config.jimeng?.accessKey ?? "",
@@ -123,6 +130,7 @@ apiRoutes.get("/api/config", async (c) => {
     openrouterKey: config.openrouter?.apiKey ?? "",
     douyinUrl: config.analytics?.douyinUrl ?? "",
     memorySyncEnabled: config.memory?.syncEnabled ?? false,
+    analyticsLastCollectedAt,
   });
 });
 

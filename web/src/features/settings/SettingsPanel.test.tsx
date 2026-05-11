@@ -1,7 +1,7 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, beforeEach } from "vitest";
-import { http, HttpResponse } from "msw";
+import { http, HttpResponse, delay } from "msw";
 import { SettingsPanel } from "./SettingsPanel";
 import { useSettingsPanelStore } from "@/stores/settings";
 import { mswServer } from "@/test/msw";
@@ -118,5 +118,67 @@ describe("SettingsPanel — Research section", () => {
     renderPanel();
     expect(await screen.findByRole("switch")).toBeChecked();
     expect(screen.getByDisplayValue("0 9 * * *")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPanel — Douyin section", () => {
+  beforeEach(() => {
+    useSettingsPanelStore.setState({ open: true, focusSection: null });
+  });
+
+  it("triggers refresh on Refresh now click", async () => {
+    let refreshCalled = false;
+    mswServer.use(
+      http.get("/api/config", () =>
+        HttpResponse.json({
+          jimengAccessKey: "", jimengSecretKey: "", openrouterKey: "",
+          douyinUrl: "https://www.douyin.com/user/abc",
+          researchEnabled: false, researchCron: "", model: "sonnet",
+          analyticsLastCollectedAt: "2026-05-09T09:00:00Z",
+        })
+      ),
+      http.post("/api/analytics/refresh", async () => {
+        refreshCalled = true;
+        // Small delay so the React Query pending state is observable
+        // before the mutation resolves (otherwise auto-batching can coalesce
+        // pending+success into a single render).
+        await delay(20);
+        return HttpResponse.json({ collectedAt: "2026-05-11T08:00:00Z", worksCount: 42 });
+      }),
+    );
+    renderPanel();
+
+    const refreshBtn = await screen.findByRole("button", { name: /refresh now|立即同步/i });
+    expect(refreshBtn).not.toBeDisabled();
+    fireEvent.click(refreshBtn);
+
+    await screen.findByText(/refreshing|同步中/i);
+    await waitFor(() => expect(refreshCalled).toBe(true));
+  });
+
+  it("shows last collected timestamp when present", async () => {
+    mswServer.use(http.get("/api/config", () =>
+      HttpResponse.json({
+        jimengAccessKey: "", jimengSecretKey: "", openrouterKey: "",
+        douyinUrl: "https://www.douyin.com/user/abc",
+        researchEnabled: false, researchCron: "", model: "sonnet",
+        analyticsLastCollectedAt: "2026-05-09T09:00:00Z",
+      })
+    ));
+    renderPanel();
+    expect(await screen.findByText(/last collected|上次同步/i)).toBeInTheDocument();
+  });
+
+  it("disables Refresh now when douyinUrl is empty", async () => {
+    mswServer.use(http.get("/api/config", () =>
+      HttpResponse.json({
+        jimengAccessKey: "", jimengSecretKey: "", openrouterKey: "",
+        douyinUrl: "",
+        researchEnabled: false, researchCron: "", model: "sonnet",
+      })
+    ));
+    renderPanel();
+    const refreshBtn = await screen.findByRole("button", { name: /refresh now|立即同步/i });
+    expect(refreshBtn).toBeDisabled();
   });
 });

@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useSettingsPanelStore } from "@/stores/settings";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useT } from "@/i18n/useT";
-import { useConfig, type AppConfig } from "@/queries/config";
+import { useConfig, useRefreshAnalytics, type AppConfig } from "@/queries/config";
 import styles from "./SettingsPanel.module.css";
 
 interface SecretFieldProps {
@@ -45,6 +45,7 @@ export function SettingsPanel() {
   const t = useT();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const { data: config } = useConfig();
+  const refreshMut = useRefreshAnalytics();
   const [draft, setDraft] = useState<AppConfig | null>(null);
 
   useModalFocus(open, panelRef);
@@ -158,7 +159,36 @@ export function SettingsPanel() {
                 )}
               </section>
 
-              {/* Tasks 8-9 will append Douyin / Model sections here */}
+              <section data-section="douyin" id="douyin-binding">
+                <h3 className={styles.sectionLabel}>{t("settings.section.douyin")}</h3>
+                <div className={styles.field}>
+                  <label htmlFor="douyin-url" className={styles.fieldLabel}>{t("settings.field.douyinUrl")}</label>
+                  <input
+                    id="douyin-url"
+                    className={styles.input}
+                    value={draft.douyinUrl}
+                    onChange={(e) => patch("douyinUrl", e.target.value)}
+                    placeholder="https://www.douyin.com/user/..."
+                  />
+                </div>
+                <div className={styles.refreshRow}>
+                  <button
+                    type="button"
+                    className={styles.refreshBtn}
+                    disabled={!draft.douyinUrl || refreshMut.isPending}
+                    onClick={() => refreshMut.mutate()}
+                  >
+                    {refreshMut.isPending ? t("settings.refreshing") : t("settings.refresh")}
+                  </button>
+                  {draft.analyticsLastCollectedAt && (
+                    <span className={styles.lastCollected}>
+                      {t("settings.lastCollected")}: {new Date(draft.analyticsLastCollectedAt).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              </section>
+
+              {/* Task 9 will append Default model section here */}
             </>
           ) : (
             <div>{t("common.loading")}</div>
