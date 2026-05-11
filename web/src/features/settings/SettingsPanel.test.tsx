@@ -43,4 +43,11 @@ describe("SettingsPanel — skeleton", () => {
     fireEvent.click(backdrop);
     expect(useSettingsPanelStore.getState().open).toBe(false);
   });
+
+  it("closes on close button click", () => {
+    useSettingsPanelStore.setState({ open: true, focusSection: null });
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /close settings|关闭设置/i }));
+    expect(useSettingsPanelStore.getState().open).toBe(false);
+  });
 });
