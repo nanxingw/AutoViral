@@ -5,7 +5,9 @@ export interface WorkSummary {
   id: string;
   title: string;
   type: "short-video" | "image-text";
-  status: "draft" | "published" | "archived";
+  // Backend statuses (src/work-store.ts WorkStatus) + frontend filter-only statuses
+  // ("published" / "archived" are UI groupings that don't yet exist server-side).
+  status: "draft" | "creating" | "ready" | "failed" | "published" | "archived";
   thumbnail: string | null;
   /** Backend-attached preview asset URL (image or video). May be undefined for empty works. */
   coverImage?: string | null;

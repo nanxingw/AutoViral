@@ -33,7 +33,7 @@ describe("DeleteWorkConfirm", () => {
   it("shows creating warning only when work.status === 'creating'", () => {
     const { rerender } = render(<DeleteWorkConfirm open work={baseWork} onCancel={() => {}} onConfirm={() => {}} pending={false} />);
     expect(screen.queryByText(/currently being created|正在创作中/i)).not.toBeInTheDocument();
-    rerender(<DeleteWorkConfirm open work={{ ...baseWork, status: "creating" as unknown as "draft" }} onCancel={() => {}} onConfirm={() => {}} pending={false} />);
+    rerender(<DeleteWorkConfirm open work={{ ...baseWork, status: "creating" }} onCancel={() => {}} onConfirm={() => {}} pending={false} />);
     expect(screen.getByText(/currently being created|正在创作中/i)).toBeInTheDocument();
   });
 

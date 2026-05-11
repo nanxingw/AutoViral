@@ -38,11 +38,13 @@ export function DeleteWorkConfirm({ open, work, pending, onCancel, onConfirm }: 
 
   if (!open || !work) return null;
 
-  const isCreating = (work.status as string) === "creating";
+  const isCreating = work.status === "creating";
   const title = t("works.delete.title").replace("{title}", work.title);
 
+  // role="alertdialog" requires explicit user choice (WAI-ARIA APG) — no backdrop dismiss.
+  // Esc + Cancel button are the only dismissal paths.
   return (
-    <div className={styles.backdrop} data-testid="delete-confirm-backdrop" onClick={onCancel}>
+    <div className={styles.backdrop} data-testid="delete-confirm-backdrop">
       <div
         ref={boxRef}
         className={styles.box}
@@ -50,7 +52,6 @@ export function DeleteWorkConfirm({ open, work, pending, onCancel, onConfirm }: 
         aria-modal="true"
         aria-labelledby="delete-confirm-title"
         aria-describedby="delete-confirm-body"
-        onClick={(e) => e.stopPropagation()}
       >
         <h3 id="delete-confirm-title" className={styles.title}>{title}</h3>
         <div id="delete-confirm-body" className={styles.body}>
