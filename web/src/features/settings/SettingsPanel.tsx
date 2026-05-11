@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useSettingsPanelStore } from "@/stores/settings";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useT } from "@/i18n/useT";
-import { useConfig, useRefreshAnalytics, type AppConfig } from "@/queries/config";
+import { useConfig, useRefreshAnalytics, useSaveConfig, type AppConfig } from "@/queries/config";
 import styles from "./SettingsPanel.module.css";
 
 interface SecretFieldProps {
@@ -46,38 +46,62 @@ export function SettingsPanel() {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const { data: config } = useConfig();
   const refreshMut = useRefreshAnalytics();
+  const saveMut = useSaveConfig();
   const [draft, setDraft] = useState<AppConfig | null>(null);
+  const [showUnsaved, setShowUnsaved] = useState(false);
 
   useModalFocus(open, panelRef);
 
   // Seed draft when config loads / panel opens; reset on close
   useEffect(() => {
     if (open && config && !draft) setDraft({ ...config });
-    if (!open) setDraft(null);
+    if (!open) {
+      setDraft(null);
+      setShowUnsaved(false);
+    }
   }, [open, config, draft]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closePanel();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, closePanel]);
-
-  if (!open) return null;
 
   const patch = <K extends keyof AppConfig>(k: K, v: AppConfig[K]) => {
     if (!draft) return;
     setDraft({ ...draft, [k]: v });
   };
 
+  const isDirty = !!config && !!draft && (
+    draft.jimengAccessKey !== config.jimengAccessKey ||
+    draft.jimengSecretKey !== config.jimengSecretKey ||
+    draft.openrouterKey !== config.openrouterKey ||
+    draft.douyinUrl !== config.douyinUrl ||
+    draft.researchEnabled !== config.researchEnabled ||
+    draft.researchCron !== config.researchCron ||
+    draft.model !== config.model
+  );
+
+  const requestClose = () => {
+    if (isDirty) setShowUnsaved(true);
+    else closePanel();
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (isDirty) setShowUnsaved(true);
+        else closePanel();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, closePanel, isDirty]);
+
+  if (!open) return null;
+
   return (
+    <>
     <div
       className={styles.backdrop}
       data-testid="settings-backdrop"
       onClick={(e) => {
-        if (e.target === e.currentTarget) closePanel();
+        if (e.target === e.currentTarget) requestClose();
       }}
     >
       <div
@@ -93,7 +117,7 @@ export function SettingsPanel() {
             type="button"
             className={styles.closeBtn}
             aria-label={t("settings.close")}
-            onClick={closePanel}
+            onClick={requestClose}
           >
             ×
           </button>
@@ -210,7 +234,67 @@ export function SettingsPanel() {
             <div>{t("common.loading")}</div>
           )}
         </div>
+        <footer className={styles.footer}>
+          <button type="button" className={styles.btnGhost} onClick={requestClose}>
+            {t("settings.cancel")}
+          </button>
+          <button
+            type="button"
+            className={styles.btnPrimary}
+            disabled={!isDirty || saveMut.isPending}
+            onClick={() => {
+              if (!draft) return;
+              saveMut.mutate(
+                {
+                  jimengAccessKey: draft.jimengAccessKey,
+                  jimengSecretKey: draft.jimengSecretKey,
+                  openrouterKey: draft.openrouterKey,
+                  douyinUrl: draft.douyinUrl,
+                  researchEnabled: draft.researchEnabled,
+                  researchCron: draft.researchCron,
+                  model: draft.model,
+                },
+                { onSuccess: () => closePanel() },
+              );
+            }}
+          >
+            {saveMut.isPending ? "…" : t("settings.save")}
+          </button>
+        </footer>
       </div>
     </div>
+    {showUnsaved && (
+      <div className={styles.confirmBackdrop} onClick={() => setShowUnsaved(false)}>
+        <div
+          className={styles.confirmBox}
+          role="alertdialog"
+          aria-labelledby="unsaved-title"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 id="unsaved-title">{t("settings.unsavedTitle")}</h3>
+          <p>{t("settings.unsavedBody")}</p>
+          <div className={styles.confirmActions}>
+            <button
+              type="button"
+              className={styles.btnGhost}
+              onClick={() => setShowUnsaved(false)}
+            >
+              {t("settings.cancel")}
+            </button>
+            <button
+              type="button"
+              className={styles.btnDanger}
+              onClick={() => {
+                setShowUnsaved(false);
+                closePanel();
+              }}
+            >
+              {t("settings.unsavedConfirm")}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

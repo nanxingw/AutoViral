@@ -235,3 +235,100 @@ describe("SettingsPanel — Model section", () => {
     expect(select.value).toBe("opus");
   });
 });
+
+describe("SettingsPanel — Save / Cancel / Dirty", () => {
+  beforeEach(() => {
+    useSettingsPanelStore.setState({ open: true, focusSection: null });
+  });
+
+  it("saves config and closes panel on Save click", async () => {
+    let savedBody: any = null;
+    mswServer.use(
+      http.get("/api/config", () =>
+        HttpResponse.json({
+          jimengAccessKey: "old", jimengSecretKey: "", openrouterKey: "",
+          douyinUrl: "", researchEnabled: false, researchCron: "", model: "sonnet",
+        })
+      ),
+      http.put("/api/config", async ({ request }) => {
+        savedBody = await request.json();
+        return HttpResponse.json({ ok: true });
+      }),
+    );
+    renderPanel();
+
+    const ak = await screen.findByDisplayValue("old") as HTMLInputElement;
+    fireEvent.change(ak, { target: { value: "new" } });
+
+    const saveBtn = screen.getByRole("button", { name: /save changes|保存/i });
+    expect(saveBtn).not.toBeDisabled();
+    fireEvent.click(saveBtn);
+
+    await waitFor(() => expect(savedBody).not.toBeNull());
+    expect(savedBody.jimengAccessKey).toBe("new");
+    await waitFor(() => expect(useSettingsPanelStore.getState().open).toBe(false));
+  });
+
+  it("save button disabled when no changes", async () => {
+    mswServer.use(http.get("/api/config", () =>
+      HttpResponse.json({
+        jimengAccessKey: "ak", jimengSecretKey: "", openrouterKey: "",
+        douyinUrl: "", researchEnabled: false, researchCron: "", model: "sonnet",
+      })
+    ));
+    renderPanel();
+    await screen.findByDisplayValue("ak");
+    expect(screen.getByRole("button", { name: /save changes|保存/i })).toBeDisabled();
+  });
+
+  it("warns on Escape with dirty changes", async () => {
+    mswServer.use(http.get("/api/config", () =>
+      HttpResponse.json({
+        jimengAccessKey: "old", jimengSecretKey: "", openrouterKey: "",
+        douyinUrl: "", researchEnabled: false, researchCron: "", model: "sonnet",
+      })
+    ));
+    renderPanel();
+
+    const ak = await screen.findByDisplayValue("old") as HTMLInputElement;
+    fireEvent.change(ak, { target: { value: "new" } });
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    // Panel stays open until user confirms discard
+    expect(useSettingsPanelStore.getState().open).toBe(true);
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument();
+    expect(screen.getByText(/discard unsaved|放弃未保存/i)).toBeInTheDocument();
+  });
+
+  it("Discard in unsaved confirm closes panel without saving", async () => {
+    mswServer.use(http.get("/api/config", () =>
+      HttpResponse.json({
+        jimengAccessKey: "old", jimengSecretKey: "", openrouterKey: "",
+        douyinUrl: "", researchEnabled: false, researchCron: "", model: "sonnet",
+      })
+    ));
+    renderPanel();
+    const ak = await screen.findByDisplayValue("old") as HTMLInputElement;
+    fireEvent.change(ak, { target: { value: "new" } });
+    fireEvent.keyDown(document, { key: "Escape" });
+
+    // Click the destructive Discard button inside the confirm dialog
+    const discardBtn = screen.getByRole("button", { name: /^discard$|^放弃$/i });
+    fireEvent.click(discardBtn);
+
+    expect(useSettingsPanelStore.getState().open).toBe(false);
+  });
+
+  it("Escape with no changes closes immediately (no confirm)", async () => {
+    mswServer.use(http.get("/api/config", () =>
+      HttpResponse.json({
+        jimengAccessKey: "ak", jimengSecretKey: "", openrouterKey: "",
+        douyinUrl: "", researchEnabled: false, researchCron: "", model: "sonnet",
+      })
+    ));
+    renderPanel();
+    await screen.findByDisplayValue("ak");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(useSettingsPanelStore.getState().open).toBe(false);
+  });
+});
