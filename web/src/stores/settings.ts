@@ -7,7 +7,6 @@ interface SettingsPanelState {
   focusSection: SettingsFocusSection;
   openPanel: (focusSection?: SettingsFocusSection) => void;
   closePanel: () => void;
-  clearFocus: () => void;
 }
 
 export const useSettingsPanelStore = create<SettingsPanelState>((set) => ({
@@ -15,5 +14,4 @@ export const useSettingsPanelStore = create<SettingsPanelState>((set) => ({
   focusSection: null,
   openPanel: (focusSection = null) => set({ open: true, focusSection }),
   closePanel: () => set({ open: false, focusSection: null }),
-  clearFocus: () => set({ focusSection: null }),
 }));
