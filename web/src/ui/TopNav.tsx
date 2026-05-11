@@ -1,8 +1,11 @@
+import { useEffect } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { Glass } from "./Glass";
 import { ThemeToggle } from "./ThemeToggle";
 import { LocaleToggle } from "./LocaleToggle";
 import { useT, type MessageKey } from "@/i18n/useT";
+import { useSettingsPanelStore } from "@/stores/settings";
+import { SettingsPanel } from "@/features/settings/SettingsPanel";
 import styles from "./TopNav.module.css";
 
 const TABS: Array<{ to: string; key: MessageKey }> = [
@@ -22,34 +25,66 @@ export function TopNav() {
       ? pathname === "/" || pathname === "/works"
       : pathname.startsWith(to);
   const t = useT();
+  const openPanel = useSettingsPanelStore((s) => s.openPanel);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
+        e.preventDefault();
+        openPanel();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [openPanel]);
 
   return (
-    <header className={styles.outer}>
-      <Glass className={styles.inner}>
-        <Link to="/" className={styles.brand}>
-          <div className={styles.logo}>A</div>
-          <div className={styles.brandLines}>
-            <span className={styles.brandTitle}>Autoviral</span>
-            <span className={styles.brandTag}>{t("topnav.versionTag")}</span>
-          </div>
-        </Link>
-        <nav className={styles.tabs}>
-          {TABS.map((tab) => (
-            <Link
-              key={tab.to}
-              to={tab.to}
-              className={styles.tab}
-              aria-current={active(tab.to) ? "page" : undefined}
+    <>
+      <header className={styles.outer}>
+        <Glass className={styles.inner}>
+          <Link to="/" className={styles.brand}>
+            <div className={styles.logo}>A</div>
+            <div className={styles.brandLines}>
+              <span className={styles.brandTitle}>Autoviral</span>
+              <span className={styles.brandTag}>{t("topnav.versionTag")}</span>
+            </div>
+          </Link>
+          <nav className={styles.tabs}>
+            {TABS.map((tab) => (
+              <Link
+                key={tab.to}
+                to={tab.to}
+                className={styles.tab}
+                aria-current={active(tab.to) ? "page" : undefined}
+              >
+                {t(tab.key)}
+              </Link>
+            ))}
+          </nav>
+          <div className={styles.right}>
+            <LocaleToggle />
+            <ThemeToggle />
+            <button
+              type="button"
+              className={styles.gearBtn}
+              aria-label={t("topnav.settings")}
+              onClick={() => openPanel()}
             >
-              {t(tab.key)}
-            </Link>
-          ))}
-        </nav>
-        <div className={styles.right}>
-          <LocaleToggle />
-          <ThemeToggle />
-        </div>
-      </Glass>
-    </header>
+              <GearIcon />
+            </button>
+          </div>
+        </Glass>
+      </header>
+      <SettingsPanel />
+    </>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+    </svg>
   );
 }
