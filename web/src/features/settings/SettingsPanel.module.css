@@ -106,3 +106,36 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+.toggleRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 13px;
+  margin-bottom: 12px;
+}
+.toggle {
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-2);
+  position: relative;
+  cursor: pointer;
+  transition: background 200ms;
+}
+.toggle[data-on="true"] { background: var(--accent); }
+.toggleThumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform 200ms;
+}
+.toggle[data-on="true"] .toggleThumb { transform: translateX(16px); }
+.toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

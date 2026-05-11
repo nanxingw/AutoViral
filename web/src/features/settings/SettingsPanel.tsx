@@ -129,7 +129,35 @@ export function SettingsPanel() {
                 />
               </section>
 
-              {/* Tasks 7-9 will append Research / Douyin / Model sections here */}
+              <section data-section="research">
+                <h3 className={styles.sectionLabel}>{t("settings.section.research")}</h3>
+                <label className={styles.toggleRow}>
+                  <span>{t("settings.field.autoResearch")}</span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={draft.researchEnabled}
+                    className={styles.toggle}
+                    data-on={draft.researchEnabled}
+                    onClick={() => patch("researchEnabled", !draft.researchEnabled)}
+                  >
+                    <span className={styles.toggleThumb} />
+                  </button>
+                </label>
+                {draft.researchEnabled && (
+                  <div className={styles.field}>
+                    <label htmlFor="research-cron" className={styles.fieldLabel}>{t("settings.field.cron")}</label>
+                    <input
+                      id="research-cron"
+                      className={styles.input}
+                      value={draft.researchCron}
+                      onChange={(e) => patch("researchCron", e.target.value)}
+                    />
+                  </div>
+                )}
+              </section>
+
+              {/* Tasks 8-9 will append Douyin / Model sections here */}
             </>
           ) : (
             <div>{t("common.loading")}</div>

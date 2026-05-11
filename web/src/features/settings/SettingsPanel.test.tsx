@@ -102,3 +102,21 @@ describe("SettingsPanel — Jimeng + OpenRouter sections", () => {
     expect(ak.type).toBe("text");
   });
 });
+
+describe("SettingsPanel — Research section", () => {
+  beforeEach(() => {
+    useSettingsPanelStore.setState({ open: true, focusSection: null });
+  });
+
+  it("renders research toggle + cron input when enabled", async () => {
+    mswServer.use(http.get("/api/config", () =>
+      HttpResponse.json({
+        jimengAccessKey: "", jimengSecretKey: "", openrouterKey: "",
+        douyinUrl: "", researchEnabled: true, researchCron: "0 9 * * *", model: "sonnet",
+      })
+    ));
+    renderPanel();
+    expect(await screen.findByRole("switch")).toBeChecked();
+    expect(screen.getByDisplayValue("0 9 * * *")).toBeInTheDocument();
+  });
+});
