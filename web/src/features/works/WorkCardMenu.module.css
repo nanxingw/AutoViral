@@ -1,0 +1,58 @@
+.root {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+}
+.trigger {
+  background: rgba(10, 11, 15, 0.45);
+  backdrop-filter: blur(8px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  padding: 4px 6px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 150ms;
+  display: inline-flex;
+  align-items: center;
+}
+.root:focus-within .trigger,
+:global(.cardHover):hover .trigger,
+.trigger:hover,
+.trigger[aria-expanded="true"] {
+  opacity: 1;
+}
+.trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 120px;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.dangerItem {
+  background: transparent;
+  border: 0;
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  font: inherit;
+  color: var(--danger, #c44a4a);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.dangerItem:hover {
+  background: rgba(196, 74, 74, 0.08);
+}
+.dangerItem:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
