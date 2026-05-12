@@ -95,7 +95,11 @@ const TTS_VOICES: { value: string; label: string }[] = [
 
 const IMAGE_ASPECTS = ["1:1", "9:16", "16:9", "4:5"] as const;
 const VIDEO_ASPECTS = ["9:16", "16:9", "1:1"] as const;
-const VIDEO_DURATIONS = ["4", "6", "8", "10"] as const;
+// F155: Seedance 2.0 i2v API enforces durationSec ∈ {3, 5, 10}. The prior
+// values {4, 6, 8, 10} were a UI-only fabrication that would round-trip
+// to silent API rejection (see memory:reference_seedance_i2v_durations).
+// Locking the select to the real enum so the contract holds at submit.
+const VIDEO_DURATIONS = ["3", "5", "10"] as const;
 const VIDEO_RESOLUTIONS = ["720p", "1080p"] as const;
 
 export const INITIAL_FORM_STATE: FormState = {
@@ -105,7 +109,7 @@ export const INITIAL_FORM_STATE: FormState = {
   width: undefined,
   height: undefined,
   style: undefined,
-  duration: "4",
+  duration: "5",
   resolution: "720p",
   imageUrl: undefined,
   audioSubKind: "bgm",
@@ -171,7 +175,7 @@ export function formStateToRequest(
           prompt,
           changeDirection:
             mode === "variant" ? state.changeDirection : undefined,
-          duration: state.duration || "4",
+          duration: state.duration || "5",
           aspectRatio,
           resolution: state.resolution,
           imageUrl: state.imageUrl,
@@ -309,7 +313,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
   async function dispatchProviderGenerate(): Promise<void> {
     if (!selectedProviderId) return;
     const aspectRatio = (form.aspectRatio ?? "9:16") as string;
-    const durationSec = Number(form.duration) || 4;
+    const durationSec = Number(form.duration) || 5;
     const res = await fetch(
       `/api/providers/${selectedProviderId}/generate-video`,
       {

@@ -75,6 +75,23 @@ button { font: inherit; }
   background: var(--surface-2);
   color: var(--text);
 }
+/* F157: precondition-gated quick-actions need a clean disabled state so
+   users understand they're not interactive yet. Browser default is muted
+   text only; we also kill hover affordance to avoid false promise. */
+.editor-shell .quick-action:disabled,
+.studio-shell .quick-action:disabled,
+.editor-shell .quick-action[aria-disabled="true"],
+.studio-shell .quick-action[aria-disabled="true"] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.editor-shell .quick-action:disabled:hover,
+.studio-shell .quick-action:disabled:hover,
+.editor-shell .quick-action[aria-disabled="true"]:hover,
+.studio-shell .quick-action[aria-disabled="true"]:hover {
+  background: var(--surface-0);
+  color: var(--text-dim);
+}
 .studio-shell button.active:not([data-accent-swatch]),
 .tweaks-pill.active {
   background: var(--surface-2);

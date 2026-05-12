@@ -444,6 +444,7 @@ export const en = {
         generateCaptions: "Auto-caption",
         narrationLangHint: "Generate a 30–60 s Chinese voiceover and add it to the audio track",
         captionsLangHint: "Auto-transcribe speech and add word-level captions to the timeline",
+        needVideoHint: "Add a video clip first to use this action",
         regenClipHint: "Regenerate this clip with a fresh take",
         adjustRhythmHint: "Re-pace the cuts around this clip",
         swapBgmHint: "Suggest three BGM candidates in different styles",
@@ -941,6 +942,7 @@ export const zh: DeepShape<Messages> = {
         // Editor 调性参考用，此处给功能性描述。
         narrationLangHint: "为视频生成 30–60 秒中文旁白并加到音频轨",
         captionsLangHint: "自动识别语音并按词级时间戳加到时间轴",
+        needVideoHint: "先添加视频片段再使用此功能",
         regenClipHint: "换一种角度重新生成这段片段",
         adjustRhythmHint: "重新调整这段片段前后的剪辑节奏",
         swapBgmHint: "给出三个不同风格的 BGM 候选",
