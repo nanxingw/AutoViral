@@ -242,3 +242,29 @@ input[type="number"]:not([data-bare]),
   white-space: nowrap;
   border-width: 0;
 }
+
+/* ── Motion opt-out global (R115 F524) ──
+   AutoViral's Aesthetic Direction explicitly lists 4 ongoing animation
+   families: shimmer, pulse-dot, slide-up, spin. Without a global motion
+   gate, users with vestibular disorders, migraine triggers, PTSD, or
+   the autism spectrum have no opt-out — WCAG 2.3.3 (Animation from
+   Interactions) + 2.2.2 (Pause/Stop/Hide) double violation.
+
+   The four declarations below collapse all CSS animations + transitions
+   + scroll-snap behavior to effectively-zero when the user has set
+   `prefers-reduced-motion: reduce` at the OS level (macOS Reduce Motion,
+   Windows Show animations off, iOS Settings → Accessibility → Motion).
+   Net effect: shimmer becomes a static color, pulse-dot stops blinking,
+   slide-up snaps in place, scroll-into-view jumps instead of smoothing.
+   Per-surface overrides are still possible by writing animations inside
+   their own `@media (prefers-reduced-motion: no-preference)` block. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
