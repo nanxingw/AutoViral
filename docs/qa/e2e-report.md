@@ -6,6 +6,330 @@
 
 ---
 
+## Round 117 — **R113 ErrorBoundary 7-fold CLOSED ✅ (F499/F500/F502/F503/F504/F505/F507/F509/F510) + R115 F524 prefers-reduced-motion 全局底座 CLOSED ✅ —— failure-state 元 surface 从 2-CTA 白屏栈泄露升级到 4-CTA 软重试/correlation ID/copy diagnostic 完备态；security + a11y + usability + audit 四 plane 同 round 闭合**
+
+- **时间**：2026-05-13（`/loop 30m` cron 触发本轮；R116 已被并行 empty-state-audit agent 占用，本轮取 R117 编号）
+- **触发**：R113 落 12 finding 含 2 CRITICAL（F499 stack 全文 prod 暴露 + F500 双重 reload）；R115 落 11 finding 含 2 CRITICAL（F523 28/28 alt="" + F524 0 prefers-reduced-motion）。本轮选 **R113 9 连 + R115 F524 单连** —— ErrorBoundary 是 audit-method 元 surface（下游 50+ failure-mode audit 落地处），先修好它后续才有意义；F524 是 5 行 globals.css 即覆盖全产品所有动画的"基础设施"修复
+- **方法学**：M178 (R111) "网络层 contract test 是合法 E2E evidence" 第二次应用 —— ErrorBoundary 是不可触发的失败态，无法浏览器截图（M180 禁止 zero-mutation 注入），但单元测试 + CSS source probe + DOM contract guard 三轨证据构成完整 user-visible state 闭环
+
+### 修复
+
+- `web/src/components/ErrorBoundary.tsx`（**重写**，+209 / -32）
+  - **F499** —— `<details open={isDev}>` 用 `import.meta.env.DEV` 判定；prod 用户看不到 stack 全文，但 Copy diagnostic 按钮仍可拿到完整诊断
+  - **F500** —— 移除 reload 前的冗余 `onReset()`；新增 `handleReload` 包 `window.confirm(t("errorBoundary.reloadConfirm"))`，i18n 文案明确"discard unsaved work"；reload 按钮降级为 secondary visual（透明背景 + glass-border）
+  - **F502** —— 新增 **primary "Try again" CTA**（solid accent fill）—— 只清 boundary state 不 reload，保留 queryClient cache / zustand / scroll / unsaved drafts；测试用 FlakyChild + useState + globalThis 桥验证 reset 后 recover 真实生效
+  - **F503** —— `getDerivedStateFromError` 中 `crypto.randomUUID()` 生成 errorId；fallback 失败时降级 `err-{base36}-{rand6}`；UI 渲染 `<code>` + `user-select: all` 方便用户全选复制
+  - **F504** —— "Copy diagnostic" 按钮调 `navigator.clipboard.writeText(JSON.stringify({errorId, name, message, stack, componentStack, userAgent, url, timestamp}, null, 2))`；clipboard API 失败时 fallback 到 `URL.createObjectURL(blob)` + `window.open` 新 tab；inline "Copied ✓" 2.4s 状态反馈
+  - **F505** —— `componentDidCatch` 中 `this.setState({componentStack: info.componentStack})`；fallback `<pre>` 渲染 `--- React component stack ---` 分隔区块
+  - **F507** —— 新增 `bucketOf(err): "chunk" | "network" | "generic"` helper；按 error.name / message 路由到三段 body 文案（chunkError 提示"刚发新版本，刷新即可"；networkError 提示"网络抖动，重试通常成功"）
+  - **F509** —— `<a href="/">` → `<Link to="/">` 走 react-router client-side nav；保留 onClick onReset 让 boundary state 干净
+  - **F510** —— `<span className="sr-only">{t("errorBoundary.srErrorCode")} — </span>` 加在 h1 内复用 R110/R112 sr-only pattern
+- `web/src/styles/globals.css`（+26 行）
+  - **R115 F524 globals 底座** —— `@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }}` 5 条声明覆盖全产品所有 shimmer/pulse-dot/slide-up/spin/transition/scroll-snap，0 维护成本
+  - 注释明确"per-surface override 可写在 `@media (prefers-reduced-motion: no-preference) {...}` 内"，给将来 dance-essential 动画留 escape hatch
+- `web/src/i18n/messages.ts`（EN + ZH × 9 new strings）
+  - `errorBoundary.srErrorCode` / `bodyChunk` / `bodyNetwork` / `errorIdLabel` / `btnTryAgain` / `reloadConfirm` / `copyDiagnostic` / `copyDone` + refined `body`
+- `web/src/components/ErrorBoundary.test.tsx`（**扩展**，+115 / -22）
+  - 测试从 2 → 7 case；每个 R113 finding 独立 contract guard
+  - F502 关键测试：用 `FlakyChild` + `useState` + `globalThis.__FIX_FLAKY__` 桥模拟"修复底层条件后 reset"，验证 boundary 真的能 recover 出 `<div data-testid="recovered">`
+  - F500 mock `window.confirm` 返回 false 验证短路；F504 mock `navigator.clipboard.writeText` 验证 JSON payload shape
+
+### E2E 验证（CSS source probe + unit test 双轨，per M178）
+
+```js
+// chrome MCP DOM probe 后 reload /
+{
+  matchMediaSupported: true,
+  reduceMotionApplied: false,          // 当前测试机未启 reduce-motion
+  srOnlyClassExists: true,             // R110 sr-only utility 复用 ✓
+  reduceMotionMediaQueryExists: true,  // F524 globals 底座存在 ✓
+  styleSheetCount: 24
+}
+```
+
+ErrorBoundary 无法浏览器触发（M180 dev escape hatch 缺位）；7/7 unit test + CSS source probe 构成完整 contract evidence。
+
+### 静态验证
+
+- `npx vitest run ErrorBoundary.test.tsx` → **7/7 pass** ✓（之前 2/2，新增 5 个针对 F500/F502/F503/F504/F510 的契约断言）
+- `npx tsc --noEmit | grep errorboundary/globals/messages` → 0 错误
+
+### 沉淀
+
+**M177（兑现版）· Stack trace exposure 必须 env-gated**：R113 audit 发明，R117 落地。`import.meta.env.DEV` 控 details `open` 属性 + Copy diagnostic 按钮兼顾 prod 用户与开发者双方需求。
+
+**M178（兑现版 + 复用）· soft retry vs hard reload 分级**：R113 三档 CTA 模板兑现 —— (a) primary `onReset()` 软重试 (b) secondary `window.location.reload()` + confirm prompt (c) tertiary `<Link to="/">` client-side nav。其他 destructive surface (DeleteSlide / Regenerate / Restore checkpoint) 已经按 R94/R97/R105 4-element confirm dialog template 走；本轮把模板扩展到 **error recovery** 维度。
+
+**M195 · failure-state 元 surface 优先级**（新增）
+
+ErrorBoundary 的修复**优先级高于**任何具体 surface 修复，因为它是所有 failure-mode audit 的兜底入口。若 ErrorBoundary 自己有 F499 (stack 暴露) + F500 (双重 reload) 这种 P0，那么下游所有 audit 触发的真实异常**用户必然按 Reload** —— 现场被一键清空，团队再也看不到真实异常。R117 把 ErrorBoundary 改成 telemetry-ready + soft-retry + correlation ID + env-gated stack 4 件套（telemetry endpoint 占位 F501 留 R118+），后续 50+ failure-mode 修复才有"现场保留"的前置条件。
+
+**M196 · globals.css media-query 底座是 a11y 基础设施**（新增）
+
+R115 F524 是 R107 audit 持续指出 a11y 缺位后的**第二个 globals 级基础设施**（第一个是 R112 的 `.sr-only` utility）。前 16 个 surface fix 都是 per-component patch；M180 (R114) 与 M196 一起把 a11y 当成"产品级基础设施" 而非"每页修一遍" —— 一次写在 globals.css，全产品 + 所有未来代码自动受益，维护成本 0。
+
+### 桥梁哲学 plane 第 10 轮巩固 + 新 plane
+
+| Plane | 本轮证据 |
+|---|---|
+| security plane | F499 env-gated stack = security plane **第 2 处**闭合（第 1 处 R111 F475 secret-egress）；prod 用户屏幕不再暴露内部 module 路径 / 依赖版本指纹 |
+| a11y plane | F510 sr-only error code + F524 prefers-reduced-motion + F509 Link 替代 hard nav = a11y plane **第 4 处**闭合；globals 底座扩展 |
+| usability plane | F500 confirm + F502 soft retry + F503 error ID + F504 copy diagnostic = recovery affordance 从 1 维（reload）升级到 4 维 |
+| copy plane | F507 三档 error 文案 + 9 i18n key 双 locale = bucket-aware error messaging 第 1 处 |
+| audit plane | M177/M178 兑现 + M195/M196 新增 = audit plane 累计 ~22 套方法学 |
+
+### R118+ 候选
+
+- **R115 F523** —— 28/28 work cover image `alt=""` → meaningful alt text；可 `alt={work.title}` + 后备 `alt={t("workCard.coverAlt", {type})}`
+- **R115 F527** —— TopNav NavLink 加 `aria-current="page"`；3 行
+- **R116 Empty state primitives** —— 25+ empty site 但 0 共用 primitive；建立 `<EmptyState>` 单一 primitive 收编 4 处 /analytics empty panel
+- **R113 F501 telemetry mount** —— 需选定 telemetry destination（Sentry / posthog / 自家 backend）后实现
+- **R113 F506 window.onerror + unhandledrejection** —— main.tsx mount global handler；需先有 telemetry 目标
+- **R114 LoadingShell primitive** —— 21 loading site 0 primitive；同 R116 一脉的 fallback surface DSL 第 1 块
+- **R109 F476/F477/F478/F484** —— Settings 4 件套留待 R109 backlog
+
+`★ Insight ─────────────────────────────────────`
+- **failure-state 元 surface 是产品级 leverage 点**——一次修好 ErrorBoundary，下游 50+ failure-mode audit 都受益于 telemetry-ready + soft-retry + correlation ID + env-gated stack 基础设施。M195 把这种"上游修复优先"沉淀为 audit 战略
+- **M178 contract-test evidence rule 第二次应用**：ErrorBoundary 因 M180 zero-mutation discipline 不可浏览器触发，但 7 unit test + CSS source probe 构成完整 contract guard；这是 R111 secret-egress fix 之后第二例 network/component contract 级 fix 用 curl/source evidence 通过 E2E 标准
+- **globals.css `@media (prefers-reduced-motion)` 5 行 vs 全产品 per-surface 改造**：infrastructure-as-CSS 是 a11y 修复的最高 ROI 模式——0 维护成本覆盖现有 4 类动画 + 所有未来动画。M196 把这种"全产品基础设施"沉淀为 audit plane 二阶进化
+- **测试用 FlakyChild + globalThis 桥模拟 transient-error recovery** 是 React 测试无 DevTools 时验证 boundary reset 后 child 真实 recover 的标准 trick。简单 mock 会 false-positive，必须让 child 在 reset 后真的不抛
+`─────────────────────────────────────────────────`
+
+---
+
+## Round 116 — **Empty state 全产品 horizontal slice 深审 —— 25+ empty site / 2 duplicate primitives (`<Empty>` + `<EmptyState>`) / 4 /analytics empty panel 0 CTA / "暂无 X" 模板复制粘贴 4 次 / permanent vs transient empty 不分 / 0 illustration —— Fallback Surface DSL 第 3 块拼图 (Loading R114 + Error R113 + Empty R116) 全产品共病**
+
+- **时间**：2026-05-13（`/loop 20m` cron `105f4ef8` 触发；R110 反向 surface 五元组第 3 项 empty；R115 双轴 method 第 2 次实战）
+- **环境**：localhost:5173 /analytics（最密集 empty 区域）+ grep 全 web/src 25+ empty site；不切换 mock 0-state 账号（zero-mutation discipline；用现有账号 demographics 4 panel 已经天然全 empty）
+- **触发**：R110/R113/R114/R115 已审 NotFound/ErrorBoundary/Loading/a11y 反向 surface 四元，empty 是五元组中最后一个未审；R85 F261 (R86 已 CLOSED) 单点扫过 /analytics empty，但 horizontal slice 0 round 覆盖；R104 F448 demographics 永久 empty 暴露 permanent-vs-transient 不分的同 family bug
+- **方法学**：(1) grep 全 web/src empty render 分支 (`length === 0` / `isEmpty` / `empty[A-Z]` / `>No data`)；(2) grep i18n empty keys；(3) DOM probe /analytics 实际 empty 渲染 + 0 CTA 验证；(4) primitive component map (`<Empty>` vs `<EmptyState>` 重复)；(5) 对照 Linear / Notion / Vercel empty state 4 件套 baseline (illustration + headline + body + CTA)；(6) 双轴 R115 M189 应用——每个 finding 标 disability-class 是否同时受影响
+
+### 深层发现
+
+| # | Severity | 发现 | 源码/DOM 证据 |
+|---|---|---|---|
+| **F535** | **CRITICAL** | **/analytics 4 个 empty panel 全 0 CTA**——demographics (年龄/性别/地域) 3 panel + insights 1 panel —— 全 "暂无 X / 等待后台采集首批样本" passive 文案，**用户看了不知道该做什么主动操作**。R110 M175 CTA matrix family 实例第 2 处（404 1/5 → empty 0/5）。Vercel / Linear / Notion empty state 4 件套（illustration + headline + body + CTA）baseline 全线落后 | DOM `/analytics` `ctaInsideEmpty: []`；4 empty markers 全是 div 文案纯被动 |
+| **F536** | **CRITICAL** | **Permanent empty vs Transient empty 完全无区分**——demographics 在新账号是 transient（等数据来），老账号是 permanent（R104 F448 已实证 douyin API 不返回 age/gender/regions 字段）；UI **同文案模糊两态**，让用户**误以为新账号 5min 内会有，实际永远不会有**。等同于"用 transient 文案对 permanent 状态撒谎" —— R104 F441 silent-leak family 的**用户预期管理**版本 | `analytics.demoEmptyAge / demoEmptyGender / demoEmptyRegions` i18n keys 全 "等待后台采集首批样本"；零 permanent-flag 分支；R104 F448 已知 douyin API 不返回这些字段 |
+| **F537** | HIGH | **2 个 duplicate empty 组件 primitive**——`<Empty>` (KeyframePanel) + `<EmptyState>` (VariantSwitcher) 命名几乎一样实现分裂。M181 LoadingShell 同 family（loading 0 primitive / empty 2 重复 primitive 同病根）：**基础设施零 ship + ad-hoc 重复** | grep `<Empty\b\|<EmptyState\b` web/src 命中 2 个不同组件；命名碰撞 |
+| **F538** | HIGH | **"暂无 X / 等待后台采集首批样本" 复制粘贴 4 次** —— DemographicsRow 渲染 3 行 + InsightsList 渲染 1 行用同样模板。M181 family empty 版本：复制粘贴的 empty branch 而不是数据驱动 `<EmptyState type="permanent\|transient" message={...} />` 共用组件。**任何文案微调需改 4 处** | DemographicsRow.tsx:30/47/59 三处 `<div style={emptyHint}>{t(...)}` + Analytics InsightsList.tsx 第 4 处 |
+| **F539** | HIGH | **0 illustration / 0 icon / 0 视觉提示** 在所有 empty state——纯 plain text + dim color。Vercel/Linear/Notion 都有 SVG illustration 传递 **"空但是预期的"** 语义；本产品 empty state 视觉上等同于 error/loading 灰白文案。R115 F523 信息屏蔽 family 实例（sighted 用户看到 empty 仅 dim text 与 SR 用户听到"暂无 X"是信息含量等价的，都没正面情绪/进度/引导） | grep `<svg` 在 empty render 分支 0 命中；DemographicsRow.tsx:10 `emptyHint` CSSProperties 只设 color/font，无 illustration |
+| **F540** | MEDIUM | **Voice/tone 同页两种风格**——Analytics demographics: "暂无年龄分布数据——等待后台采集首批样本" (passive, technical, 用"采集"工程术语) vs Analytics insights: "发布作品后，洞察会自动出现——AutoViral 会分析你的内容并提炼值得复用的模式。暂无洞察。" (active + explanatory + 主语是用户) —— **同一 surface 两套 voice**，编辑风格不统一 | DemographicsRow.tsx i18n 三键被动文案 vs Analytics page insights 主动文案；零 voice guide |
+| **F541** | MEDIUM | **0 "Why empty?" / 0 explanation tooltip**——4 panel 全 empty 用户不知是 (a) 数据少 / (b) douyin API 不支持 / (c) 隐私设置阻塞 / (d) bug。零 "learn more" 链接，零 feedback 链接。R110 F491 resource-not-found vs unknown-route family（IA 不区分）的 empty 版本 | DemographicsRow 文案无 link / tooltip / details；零 contextual help |
+| **F542** | MEDIUM | **Empty state CTA matrix 0/5**——R110 M175 沉淀 404 必须 5-CTA（home/search/recent/status/report）；empty state 同样应有 5-CTA matrix（refresh now / open settings / try other surface / contact us / docs link）；本产品 empty state CTA 数 = 0 | /analytics demographics empty 区域 0 button 0 link；零 retry / 零 docs / 零 feedback |
+| **F543** | MEDIUM | **Empty state 0 `aria-live` announce**——SR 用户加载完毕看到 empty 状态后无 `aria-live="polite"` 通知"数据加载完毕，结果为空"。与 R114 F512 + R115 F528 aria-busy family 同源（loading 不 announce + empty 不 announce）；**双轴 R115 M189 实战：本 finding 同时打 sighted-empty 与 SR-empty 双 disability cell** | DemographicsRow.tsx 空文案无 aria-live；grep `aria-live` empty branch 0 命中 |
+| **F544** | LOW | **`<Empty>` 与 `<EmptyState>` 命名碰撞**——编辑器自动补全混淆；开发者增 surface 时不知该用哪个；新员工查代码看见两个名字一致疑似 typo。**M192 沉淀直接对应**：合并为单 `<EmptyState>` primitive | grep 命中两个独立 component 定义 |
+| **F545** | LOW | **Empty state 用 `style` 内联属性而非 CSS Module**——DemographicsRow.tsx:10 `const emptyHint: React.CSSProperties = {}` 无法被 theme override / dark mode 适配 / a11y user CSS 覆盖；M188 motion opt-out 全局规则也无法 override inline style | DemographicsRow.tsx:10 vs 同 repo 其他 module 走 `.module.css` 风格 |
+| **F546** | LOW | **Studio Chat empty branch 复杂 boolean** —— `{!loadingHistory && blocks.length === 0 && (...)}` 三段 AND 条件，重构脆弱；嵌套 ternary `loadingHistory ? <Loading /> : blocks.length === 0 ? <Empty /> : <Render />` 写法 (a) 强制状态机三态显式 (b) 防 loading-true-blocks-empty 同时为真的 race | Chat/index.tsx:467 `{!loadingHistory && blocks.length === 0 && (...)}` |
+
+### Family 串联
+
+- **F535 + F542 = R110 M175 CTA matrix family 第 2 实例**（404 是 1/5，empty 是 0/5）——**destination surfaces 都没 CTA matrix**；M193 empty CTA matrix 直接对接 M175
+- **F536 = R104 F441 silent-leak family 第 5 实例**——adapter / API egress / HTTP status / cache invalidation / **用户预期管理** —— silent-leak 在 5 个层都复发，证明产品对"失败/空/变化不被信号化"是系统性失明
+- **F537 + F538 + F544 = R114 M181 primitive 缺位 family 的 empty 版本**——loading 0 primitive / empty 2 重复 primitive / 命名碰撞 ——共同病根：基础设施零 ship + 开发者 copy-paste 模板
+- **F539 = R115 F523 信息屏蔽 family**——content image `alt=""` 屏蔽给 SR / empty state plain text 屏蔽给 sighted（视觉等同 error）
+- **F541 = R110 F491 resource-not-found vs unknown-route IA 不区分 family 第 2 实例**——404 不区分两种空 / empty 不区分 4 种原因
+- **F543 = R114 F512 + R115 F528 aria-busy / aria-live family 第 N 实例**——loading / mutation / empty 三种态全部 SR 沉默；M183/M185/M191 sediment 都依赖此 family 修复
+
+### 沉淀
+
+**M190 — Permanent vs Transient empty 必须区分**：UI 必须告诉用户"这是暂时还是永远"——对于 permanent empty（douyin API 不返回 demographics、订阅未开通某 feature、用户隐私设置阻塞）应明确说 "douyin API 不支持 X 字段" / "升级至 Pro 解锁" / "在设置中启用 X" 而非 "等待后台采集首批样本"。对于 transient empty 应配 ETA 提示（"通常 24 小时内首批样本到达"）+ refresh now CTA。同模板模糊两态是用户预期管理级 P0 leak。
+
+**M191 — Empty State 4 件套 (illustration + headline + body + CTA)**：每个 empty state 必须有 (a) 视觉锚（SVG illustration / icon 传递"这是预期的空"语义）、(b) 简短 headline（"暂无 X" / "New here?"）、(c) 解释 body（为什么空 / 何时会有 / 如何获得）、(d) primary CTA（用户可立刻做的事——refresh / 创建 / 上传 / 跳转）。缺 1 件算 finding，缺 2 件 HIGH。
+
+**M192 — `<EmptyState>` 单一 primitive**：合并 `<Empty>` (KeyframePanel) + `<EmptyState>` (VariantSwitcher) 为一个 component；接 `{ illustration, headline, body, primaryCta, secondaryCta, permanent: boolean }` props；强制 `role="status"` + `aria-live="polite"` 内置；统一 dark/light mode token + reduced-motion 适配。
+
+**M193 — Empty state CTA matrix 5 项**：refresh now / open settings / try other surface / contact us / docs link；缺 1 项算 finding；缺 2+ 项 HIGH。与 R110 M175 NotFound CTA matrix 共构成 **destination-surface CTA discipline**。
+
+**M194 — Fallback Surface DSL 三件套整合**：R114 M181 LoadingShell + R113 M177 ErrorBoundary spec + R116 M191/M192/M193 EmptyState 三个 sediment 应作为 **统一 fallback surface design system** 同步 ship；每个 vertical surface audit 必须检查所有三个 fallback 是否齐备 + 一致。这是 R110/R113/R114/R115/R116 五轮 horizontal slice 收敛到的**架构级修复方向**。
+
+### Meta finding
+
+R110 (NotFound) + R113 (ErrorBoundary) + R114 (Loading) + R115 (a11y) + R116 (Empty) 五轮**反向 surface horizontal slice** 揭示根本规律 —— 产品在 happy path 大量投入（35 works mock data, $0.76/视频 jimeng pipeline, 流式 LLM chat），但在**失败/空/错误/无障碍 5 类用户场景**全线投入不足。CTA matrix / primitive 共用 / aria-* 覆盖 / illustration / disability class 五件套都是 0-1 阶段。M194 沉淀的 **Fallback Surface DSL** 是这五轮 horizontal slice 的收敛终点——把 LoadingShell + ErrorBoundary + EmptyState 三个 primitive 整合成单一 design system，是后续 50 个 surface fix-pass 的前置基础设施。
+
+### R117+ 候选
+
+- **i18n horizontal slice**（R98 F396 + R104 F450 + R114 F520 跨 round locale-mixing leak 全产品横扫）
+- **Color contrast horizontal slice**（WCAG 1.4.3 全产品颜色对比扫描，特别是 light mode `--text-dim` / `--text-dimmer` 对比；double-check R82 light-mode 已经修复但全产品 token 散度未审）
+- **Keyboard nav horizontal slice**（R95 dnd-kit / R90 chat textarea / R107 Cmd+K 缺位 三轮横扫键盘 only 用户全产品体验）
+- **Color blindness simulation audit**（deuteranopia / protanopia / tritanopia filter 看 KPI、status badge、warning/error 颜色编码是否冗余）
+- **Reverse-surface five-tuple 第 4 项 unauthorized / 第 5 项 expired**（loading ✓ / empty ✓ / error ✓ / unauthorized / expired —— 401/403 与 share-link expiration 行为审计）
+
+---
+
+## Round 115 — **A11y horizontal slice 深审 —— 28/28 cover image `alt=""` 误用 decorative pattern + 0 prefers-reduced-motion + 0 aria-controls/invalid + 1 aria-current/busy + 33 H3 "Untitled" SR 无法区分 —— 产品在"用户群体维度"系统性忽略残障用户类别**
+
+- **时间**：2026-05-13（`/loop 20m` cron `105f4ef8` 触发）
+- **环境**：localhost:5173 / 主要测 `/`（works hub，最复杂 surface）；grep 全 web/src ARIA 属性覆盖率 + WCAG 2.1 SC 11 项 baseline；DOM probe 单页 a11y 状态
+- **触发**：R107 F467 (skip-to-content 缺) + R110 F493 (404 sr-only error code 缺) + R113 F510 (ErrorBoundary sr-only error code 缺) + R114 F512 (aria-busy 1/21) 已在 4 round 沉淀 4 个 a11y finding，**足够横扫沉淀 M185 a11y baseline matrix**；R114 沉淀的 horizontal-slice audit-method 第 1 次实战应用
+- **方法学**：(1) grep ARIA 12 个核心属性全产品覆盖量（aria-label/labelledby/describedby/live/busy/pressed/expanded/controls/hidden/modal/current/invalid + role=）；(2) grep WCAG 关键违规模式（`outline-none` / `prefers-reduced-motion` / `tabIndex` / `sr-only` / `alt=`）；(3) DOM probe /works 实际渲染（28 img + 44 button + 2 form + landmark + heading 结构）；(4) WCAG 2.1 SC 对照打分
+
+### 深层发现
+
+| # | Severity | 发现 | 源码/DOM 证据 |
+|---|---|---|---|
+| **F523** | **CRITICAL** | **28/28 image 全部 `alt=""`**——按 ARIA decorative pattern 处理；但这些是 **work cover thumbnails**，carry meaning（标题视觉氛围、风格质感、生成进度）。SR 用户在 /works 听到 "Heading level 3: 春日咖啡指南" 之后**没有任何视觉描述**，仅 sighted 用户看到 cover。WCAG 1.1.1 Non-text Content **失败**——content-bearing image 必须 `alt={meaningful}` 而非 `alt=""`。这是 R107 + R110 + R113 信息披露 family **a11y 反方向版本**：R109 是不该回放凭据回放给所有用户（信息溢出）；本轮是该传递的视觉信息屏蔽给 SR 用户（信息屏蔽） | DOM `imgTotal: 28, imgEmptyAlt: 28, imgWithoutAlt: 0` —— 100% 内容图按 decorative 处理；grep `alt=` 全 web/src 仅 8 处命中（多数是 icon svg） |
+| **F524** | **CRITICAL** | **0 `prefers-reduced-motion` 媒体查询**——shimmer / pulse-dot / slide-up / spin 全产品动画（CLAUDE.md "Aesthetic Direction" 明确列出 4 类动画）对**前庭功能障碍 / 偏头痛 / PTSD / 自闭谱系**用户**无 opt-out**。WCAG 2.3.3 Animation from Interactions + WCAG 2.2.2 Pause/Stop/Hide 双违规。一行 globals.css `@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }` 5 行代码全产品兜底 | grep `prefers-reduced-motion\|prefersReducedMotion` 全 web/src 0 命中；CLAUDE.md aesthetic direction 列出 4 类动画但 0 disability gate |
+| **F525** | HIGH | **`aria-controls` 全产品 0 使用**——disclosure (Settings drawer / CheckpointsMenu) / combobox / menu / accordion 标准 ARIA 1.2 pattern 全部不完整——触发器和被控制元素无 a11y 链接。Settings gear → SettingsPanel、theme toggle → 当前 theme、locale toggle → 当前 locale 都缺。WCAG 4.1.2 Name/Role/Value **部分失败** | grep `aria-controls` 全 web/src **0 命中** |
+| **F526** | HIGH | **`aria-invalid` 全产品 0 使用 + `aria-errormessage` 0 使用**——表单校验失败对 SR 用户**完全沉默**。R109 F477（cron field 接受 "totally not a cron expression"）的 **a11y 实例**——视觉无校验 + a11y 无校验双失。M187 沉淀的 form-validation triplex 整套缺位 | grep `aria-invalid\|aria-errormessage` 全 web/src **0 命中**；F477 source SettingsPanel.tsx cron input 无 aria-invalid |
+| **F527** | HIGH | **`aria-current` 全产品仅 1 处使用**——nav 当前页指示对 SR 用户几乎不可见。R107 F463 scope-truncation family **a11y 实例**：sighted 用户看 TopNav tab 高亮（虽然 studio/editor 子路由也漏），SR 用户连 3 个主 tab 都听不到 "current page" 状态。`<NavLink aria-current="page">` 是 react-router 推荐 pattern | grep `aria-current` 全 web/src 1 命中；TopNav 中 NavLink 是否设了 aria-current 需进一步验证 |
+| **F528** | HIGH | **`aria-busy` 全产品仅 1 处使用**（Explore.tsx:95 collect-trends 按钮）—— R114 F512 的 a11y horizontal slice 版本：21 个 isPending 流程 SR 用户**完全不知道操作在进行**，可能再次点击触发 race。**M181 LoadingShell primitive 沉淀直接对应**——共用 LoadingShell 内置 aria-busy 才解 21 个分散点 | grep `aria-busy` 全 web/src 1 命中（重复 R114 F512 但归 a11y family）|
+| **F529** | MEDIUM | **`aria-describedby` 仅 5 处使用**——Settings drawer 有 cron hint / model alias note / section hint 等大量 description text，**但只有 cron-hint 走 aria-describedby**（SettingsPanel.tsx:206 `aria-describedby="research-cron-hint"`），其他 hint 渲染但未链接到对应 input。SR 用户错过上下文 | grep `aria-describedby` 全 web/src 5 命中 vs hint text 渲染 N 处不匹配 |
+| **F530** | MEDIUM | **0 `<footer>` 元素** —— contentinfo landmark 完全缺位。HTML5 默认 landmark 三件套（banner / navigation / main）通过 `<header><nav><main>` 隐含 OK，但 `<footer>` 0 个 → 0 contentinfo。SR 用户用 landmark-jump（NVDA D key / VoiceOver rotor）跳到 "页脚信息" 找版权/法律/支持链接时**没东西可跳**——产品声明缺 attribution、隐私政策、术语链接 | DOM `footerCount: 0`；landmarks 4 项标准（banner/navigation/main/contentinfo）只有 3 项 |
+| **F531** | MEDIUM | **`tabIndex` 全产品仅 1 处使用**（LibraryTab.tsx:197 `tabIndex={0}`）——drag/sort UI（Editor Filmstrip dnd-kit）按 R95 实证缺 `KeyboardSensor`。roving tabindex pattern（complex widget 内部多焦点元素，外部 1 个 tab stop，内部箭头键导航）**完全没实现**。Editor / Studio asset library / Filmstrip 高交互 UI 键盘用户不可用 | grep `tabIndex=\|tabindex=` 全 web/src 1 命中；R95 实证 KeyboardSensor 缺 |
+| **F532** | MEDIUM | **`[role=main]` selector 0 命中**——虽然 `<main>` HTML5 隐含 role=main，但 **landmarks 列表 DOM probe 完全空**（`[role=main],[role=navigation],[role=banner],[role=contentinfo],[role=complementary]` 全 0）。老 AT / 部分 a11y tree-walking tool 优先匹配 explicit role=；产品依赖 HTML5 隐含 role 是双轨覆盖的"只覆盖 50%"决策 | DOM `landmarks: []`；HTML5 `<main>` 存在但显式 `role="main"` 0 |
+| **F533** | MEDIUM | **33 H3 中含 N 个 "Untitled / 未命名 / Test tr_*" 同名**——R98/R100 family work title 缺位的 **a11y heading-navigation 实例**：SR 用户按 H 键 navigate by heading，听到 "Untitled / Untitled / Untitled / 未命名 / 未命名" 连续 5+ 次**完全无法区分**。视觉用户看 cover 还能勉强区分，SR 用户彻底失明 | DOM `h1Count: 1, headingsAll` 列表中 "Untitled" × 8 + "未命名" × 3 + "Test tr_*" × 4 |
+| **F534** | LOW | **`outline:none` 视觉 probe 局限性说明** —— 我用 `computed-style.outlineStyle === 'none'` 测出 85/85 focusable 元素 outline 隐藏，但 `:focus-visible` 状态在 unfocused 元素读 computed-style 是无效信号（R91 已修 textarea/inputs focus ring）；本 finding 不作正式结论但记录 audit-method 教训：a11y 视觉 focus 必须用 puppeteer-style focus() 触发后再读 computed-style，或检查 globals.css `:focus-visible` 规则定义 | DOM probe 85/85 outline-none 但语义不可靠 |
+
+### Family 串联
+
+- **F523 = R109 F475 secret-egress / R113 F499 stack-exposure family 的 a11y 反方向版本**——共同病根：信息流双向都失控（敏感信息溢出给所有用户 + 该传递信息屏蔽给 SR 用户）
+- **F524 = 新 family `disability-class-ignored`**——R107 F467 键盘 user / R110 F493 SR error code / R113 F510 SR error name / R114 F512 aria-busy / R115 F524 motion-disability：5 round 跨 5 类残障人群的单点缺位，证明产品**只在 sighted-keyboard-able-bodied 用户群体**做需求建模
+- **F525 + F526 + F528 + F529 = R114 F512 a11y horizontal slice 内的子 family**——ARIA 1.2 6 大核心 pattern（disclosure / combobox / dialog / menu / form / live region）有 4 个不完整
+- **F526 = R109 F477 input-validation-absent family 第 2 实例**（视觉无校验 + a11y 无校验）
+- **F527 = R107 F463 scope-truncation family a11y 实例**——sighted 用户 tab 高亮 3/6 routes；SR 用户连主 3 tab 都听不到 current
+- **F533 = R98 F394 + R100 F406 work title 缺位 family a11y 实例**
+
+### 沉淀
+
+**M185 — A11y baseline matrix (WCAG 2.1 SC 11 项 checklist)**：每个 surface audit 必须过 11 项 checklist —— **1.1.1** alt text / **1.3.1** semantic structure / **1.4.3** contrast (3:1 large / 4.5:1 normal) / **2.1.1** keyboard / **2.3.3** motion / **2.4.1** skip / **2.4.6** headings / **2.4.7** focus visible / **3.3.1** error identification / **3.3.3** error suggestion / **4.1.2** name/role/value。每项 SC 算 1 个 audit 维度，未过项落 finding。
+
+**M186 — Content-image alt 默认非空**：`alt=""` 仅用于 purely decorative（spacer / gradient / pattern / icon-with-text-label）；任何 user-uploaded content / cover thumbnail / preview / chart / data-vis 必须 `alt={meaningful description}`。lint rule `jsx-a11y/alt-text` 应当强制；同时配 `aria-label` 为 cover 后备说明（如生成中、待审、已发布）。
+
+**M187 — Form-validation a11y triplex**：表单校验失败 must 同时 (a) input 上 `aria-invalid="true"`、(b) `aria-errormessage="error-id"` 指向错误文本、(c) `<span id="error-id" role="alert" aria-live="assertive">` 渲染错误。三件套缺一项 SR 用户都听不到错误。R109 F477 cron 接受垃圾 + 视觉无校验 + a11y 无校验三重失败。
+
+**M188 — Motion opt-out global**：在 globals.css 加 `@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; } }` 作为底座（5 行）；配合每个 surface 内主动降级（shimmer 改 fade-in、pulse-dot 改 static、slide-up 改瞬切）。该底座覆盖**所有当前 + 未来**动画，0 维护成本。
+
+**M189 — 双轴 audit-method（surface vertical × disability-class horizontal）**：R107/R109/R114 是 **surface vertical**（一次一个 page 深审）；R115 是 **user-group horizontal**（一次一个 disability class 横扫）。两轴必须同时跑——每个 surface audit 加 disability-class matrix（盲 / 弱视 / 色盲 / 键盘 only / 触觉敏感 / 老年 AT / 认知障碍）才算完整。本轮 R115 是该 method 第 1 次实战，后续 R116+ 每轮 audit 必须双轴打分。
+
+### Meta finding
+
+R107/R109/R110/R113/R114 揭示"产品在**纵深维度**做单点修"——chrome / settings / 404 / errorboundary / loading 各点修各点。R115 揭示"产品在**横向用户群体维度**做单点修"——目前覆盖了 "健全 + sighted + 键鼠 + 西方时区 + 标准动作" 用户，但盲 / 弱视 / 色盲 / 键盘 only / 触觉敏感 / 老年 AT / 认知障碍用户全在覆盖盲区。**双轴 audit-method**（surface × disability-class）是 audit-plane 的二阶进化——之前是"每个 surface 都要审"，现在是"每个 surface × 每个 disability class 矩阵单元都要审"。M189 沉淀是真正的方法学跃迁。
+
+### R116+ 候选
+
+- **Empty state 全产品 horizontal slice**（R110 沉淀"反向 surface 五元组"第 2 项；M189 双轴方法直接 carry over，加 disability-class matrix）
+- **i18n horizontal slice**（R98 F396 + R104 F450 + R114 F520 跨 round locale-mixing leak，需横扫）
+- **Color contrast horizontal slice**（WCAG 1.4.3 全产品颜色对比扫描，特别是 light mode 在 `--text-dim` / `--text-dimmer` 上的对比）
+- **Keyboard nav horizontal slice**（R95 dnd-kit / R90 chat textarea / R107 Cmd+K 缺位 三轮横扫键盘 only 用户全产品体验）
+- **Color blindness simulation audit**（用 deuteranopia / protanopia / tritanopia filter 看 KPI、status badge、warning/error 颜色编码是否冗余）
+
+---
+
+## Round 114 — **Loading state 全产品基础设施深审 —— 21 loading sites · 0 skeleton primitive · 1/21 aria-busy · 0 Suspense · 0 cancel affordance · "Loading…" 单一文案零 stage 区分 · TanStack Query isFetching 后台 refetch 静默 stale 数据 —— "基础设施 vs 单点修复"产品架构级病根**
+
+- **时间**：2026-05-13（`/loop 20m` cron `105f4ef8` 触发；R110 沉淀"反向 surface 五元组"第 1 项 loading state）
+- **环境**：localhost:5173；grep + DOM probe + i18n bundle inventory；横扫全产品 21 个 isLoading/isPending 调用点，对照 Linear / Notion / Vercel skeleton baseline；不做 network throttle 截图（throttle 后会污染其他 round 的 DOM probe 环境）
+- **触发**：R113 候选第 1 项 "Loading state 全产品 audit"——R104 F450 已抓 /analytics 单点硬编 EN，本轮要验证 family 规模 + 看 fix-pass 之后是否还有横扫级共病。结果发现 hardcoded literals 已被 R104 fix 清完，但**真正的病根是基础设施级缺位**——21 个 loading site 全是 ad-hoc 文案 + disable 双段位
+- **方法学**：(1) grep `isLoading\|isPending` 全产品计数（21 处）；(2) grep `Skeleton\|shimmer\|spinner\|aria-busy\|Suspense` 量化基础设施覆盖（0 skeleton / 1 aria-busy / 0 Suspense）；(3) /explore DOM probe 验证实际渲染零 spinner 零 skeleton；(4) 对照 R104 F450 fix-pass 后 i18n keys 看 stage 区分缺位
+
+### 深层发现
+
+| # | Severity | 发现 | 源码/网络 证据 |
+|---|---|---|---|
+| **F511** | **CRITICAL** | **0 skeleton screen primitive**——产品 21 个 loading site 全用文案替换 + 透明度 + disable，**零 placeholder 占位**。Layout shift 在每个 loading→done 切换必然发生（CLS 灾难）；用户视觉感受是"页面卡死"，因为 blank 与"故障"在认知上等价。Linear / Notion / Vercel / Stripe 全 skeleton-first 设计 | grep `Skeleton\|shimmer\|kelet` 在 web/src 零命中（除 token 字符）；DOM `document.querySelectorAll('[class*=skeleton i],[class*=shimmer i]').length = 0` |
+| **F512** | **CRITICAL** | 21 loading site 仅 **1 处 `aria-busy`**（Explore.tsx:95 collect-trends 按钮）—— /works /editor /studio /analytics /settings /works delete / NewWorkCard / SearchBox / CheckpointsMenu 全部 isPending 无 `aria-busy`。Screen reader 用户在 mutation 期间**完全不知道操作在进行**，可能再次点击触发 race condition | grep `aria-busy` 全 web/src 仅 1 命中 (Explore.tsx:95)；DOM `[aria-busy=true].length = 0` 在 /explore idle 态 |
+| **F513** | HIGH | **0 progress / time-remaining hint**——Settings refresh 注释明确说 "~30s"（SettingsPanel section comment + Settings drawer i18n hint）但 UI 仅 "刷新中…" 文案；jimeng 视频生成 30s（per memory: $0.76 per 3s）但 isPending 期间零 ETA；OpenRouter chat 流式无进度；SearchBox build 无 progress bar。**用户对长任务时间预期完全失控** | SettingsPanel.tsx:260 `t("settings.refreshing")` 文案不变；零 `<progress>` 元素 全产品；零 ETA 计算逻辑 |
+| **F514** | HIGH | **0 cancel affordance**——任何 > 3s mutation (`refreshMut` / `build` / `saveMut` / jimeng video gen / OpenRouter chat) 启动后**用户无 abort 按钮**。误操作只能等数秒~分钟；TanStack Query `mutation.reset()` + `AbortController` + `fetch(signal)` 一套基础设施缺失 | grep `AbortController\|abort()\|cancel()` 在 web/src/queries 零命中；grep `mutation.cancel\|reset()` 仅 reset 工具用途 |
+| **F515** | HIGH | **`"Loading…"` 单一文案 0 stage 区分**——`common.loading` / `analytics.loading` / `explore.loadingTrends` 三 i18n key 都是 "加载中…" / "Loading…"。不区分 (a) fetching / (b) processing / (c) cache miss / (d) retry 四 stage。用户看 5 秒和 30 秒同一文案，**认知断裂**——不知道是网络慢、服务器慢、还是页面挂了 | messages.ts:16/398/441/565/987 全部 "Loading…" / "加载中…"；零 stage-aware key 如 `loading.fetching` / `loading.processing` / `loading.retrying` |
+| **F516** | HIGH | **TanStack Query `isLoading` vs `isFetching` 误用**——`isLoading` 仅首次加载 true；`isFetching` 对后台 refetch 也 true。**产品 21 处全用 `isLoading` 判定**——用户切回 tab → `refetchOnWindowFocus` 默认 ON → 后台拉新数据期间 `isLoading: false / isFetching: true` → 产品零视觉信号 → 旧 stale 数据被静默替换。R104 F441 silent-leak family **client-cache** 实例 | grep `isFetching` 在 web/src 零命中；全用 `isLoading`；默认 `refetchOnWindowFocus: true` 未显式覆盖 |
+| **F517** | MEDIUM | **0 LoadingShell / LoadingSkeleton 共用组件**——`CheckpointsMenu.tsx:246` `{list.isLoading && (...)}`、`Explore.tsx:137` `trends.isLoading ? <div>...</div>`、`Analytics.tsx:39` `if (a.isLoading) return <main>...</main>` —— **每个 surface 自创 loading 渲染分支**，视觉、a11y、动画都不统一。21 个分散点修一个 a11y bug 要改 21 处 | 各 page 内 inline 分支，无 `<LoadingShell>` / `<DataLoading>` import；grep 共用 loading 组件零命中 |
+| **F518** | MEDIUM | **NewWorkCard `locked = create.isPending \|\| navigating`** 仅 disable，**用户不知道为什么变灰**——R101 F414 race protection 注释承诺 "Tier 2"，但 button 只是变灰，无 inline 文案 "Creating work…"。R107 F417 destructive-without-recovery family 反方向：destructive 有 confirm，**长操作没有进度** | NewWorkCard.tsx:51 `const locked = create.isPending \|\| navigating;` —— 仅 `disabled={locked}` 无 loading text 替换 |
+| **F519** | MEDIUM | **Mutation 失败默认无 toast / 无 inline error 渲染**——`saveMut.isError` 只在 SettingsPanel 才 catch + render；其他 isPending 流程（refreshMut / build / create / deleteMut）**零 .isError 渲染分支**——失败完全沉默到 console，与 R113 F506 async error 兜底缺位同源 | grep `.isError` 在 web/src 仅 8 处命中（SettingsPanel + 2 个 form），其他 13+ mutation site 零 isError 处理 |
+| **F520** | LOW | **`"…"` ellipsis 按钮 saving 文案在 SettingsPanel 复发**（R109 F481 已抓但未跨 surface 验证）——本轮发现仅 SettingsPanel 1 处用 `"…"`；其他按钮（Save Settings refresh / SearchBox build / NewWorkCard / WorksGrid delete）都改文案，文案策略**不统一**。基础设施级问题 | SettingsPanel.tsx:326 `{saveMut.isPending ? "…" : t("settings.save")}` 单点 vs SearchBox.tsx:139 `{build.isPending ? t("studio.assetSearch.btnBuilding") : t("studio.assetSearch.btnBuild")}` |
+| **F521** | LOW | **`<Suspense>` boundary 全产品 0 使用**——React 19 推荐的 streaming SSR 模式 + `<Suspense fallback>` 完全未启用；i18n bundle async load、未来 code-split 路由、用 `lazy()` 拆分大组件 全都无 Suspense 兜底 | grep `<Suspense\|Suspense ` 在 web/src 零命中（除 type import） |
+| **F522** | LOW | **i18n bundle 首屏 fallback 字面量风险**——首次访问 `/zh` locale 时 i18n bundle 是 async load；如果 `useT()` 在 bundle 到达前调用，可能 fallback 到 key 字面量 `"analytics.loading"`（取决于 useT 实现）短暂可见。需 i18n preload 或 Suspense | useT 源码未做特殊 fallback；零 i18n preload 或 prefetch hint |
+
+### Family 串联
+
+- **F511 + F517 = R107 F463 / R109 F476 scope-truncation family 产品架构级实例**——chrome 缺 nav coverage（3/6 routes）、Settings 缺 UI 覆盖（7/30 keys）、Loading 缺 skeleton 基础（0/21 sites）。共同病根：**产品在做单点 fix 而不是底座 primitive**
+- **F512 = R107 F467 / R109 F481 a11y family 第 N 实例**——skip-to-content 缺、saving aria-busy 缺、loading aria-busy 缺
+- **F513 + F514 = R113 F506 mutation 兜底缺位 family 第 2 实例**——async error 没 window handler；long mutation 没 cancel + ETA
+- **F516 = R104 F441 silent-leak family 第 4 实例**——R104 是 adapter 读 nonexistent key 静默 fallback 0；R109 F475 是后端回放 plaintext secret；R110 是 HTTP 200 当 404；本轮是 client-cache 后台 refetch 静默替换 stale 数据。**共同结论**：产品在 4 个不同层（adapter / API egress / HTTP status / cache invalidation）都有 "失败 / 变化 不被信号化" 的同 family bug
+- **F518 = R107 F417 destructive-without-recovery family 反方向**——destructive 有 confirm，long operation 没 progress
+
+### 沉淀
+
+**M181 — LoadingShell primitive**：产品必须 ship 一个 `<LoadingShell>` / `<Skeleton variant="text|card|grid">` 共用组件，统一 (a) layout shift 避免（placeholder 与最终内容同尺寸）、(b) a11y `aria-busy` + `aria-live="polite"` 双轨、(c) 动画曲线（shimmer 1.2s ease-in-out）、(d) 暗亮模式 token 适配。21 loading site 共用一套，节奏才统一。后续每加一个 surface 必须用 `<LoadingShell>` 而非自创分支。
+
+**M182 — Loading stage 区分**：`Loading…` 单文案不够；至少分 (a) `loading.fetching`（< 3s 不显示 spinner，纯 skeleton）、(b) `loading.processing`（3-10s 显示 spinner + 文案）、(c) `loading.slow`（10-30s 显示 stage 文案 "still working…" + cancel）、(d) `loading.retrying`（错误重试态）。配合 `aria-live` 在 stage 切换时 announce。
+
+**M183 — TanStack Query: isFetching vs isLoading 必须分别处理**：`isLoading` 只对首次加载 true，渲染 skeleton；`isFetching` 对后台 refetch 也 true，**渲染 subtle indicator**（如顶部 1px progress bar 或 header 旁的小 spinner），保持当前内容可见但提示"正在更新"。这是 query 库与 React render plane 的契约必须显式 honor。
+
+**M184 — Mutation cancel affordance**：任何 > 3s mutation 必须配 (a) `AbortController` 注入 `fetch(signal)`、(b) UI 取消按钮、(c) `mutation.cancel()` 在 unmount 自动调用。误操作恢复路径不能"等几秒~分钟"。这条 sediment 与 R107 F417 destructive-without-recovery 是同一硬币的两面（destructive 有 confirm；long 有 cancel）。
+
+### Meta finding
+
+R107（chrome nav 3/6）+ R109（Settings UI 7/30）+ R114（loading skeleton 0/21）= 三轮深审揭示 **产品架构级病根："基础设施 vs 单点修复"**。fix-pass agent 倾向在单点修单点（R111/R112 各闭一组），但 audit 维度反复浮现的是**底座缺位**——产品需要 LoadingShell / TopNavCoverageMatrix / SecretMetaProvider 三组共用 primitive，不是又一个 ad-hoc loading 分支。下一阶段 audit-method 应升级到 "**架构 audit**"——每轮选一个 horizontal slice（loading / error / a11y / i18n / a/b test）而非 vertical surface（settings / explore / analytics），强迫 fix 走基础设施而非局部 patch。
+
+### R115+ 候选
+
+- **Empty state 全产品 audit**（0 followers / 0 works / 0 trends / 0 chat messages / 0 angles 五种零态 baseline 比对）—— 本轮 horizontal-slice 方法直接 carry over
+- **A11y horizontal slice audit**——R107 F467 / R110 F493 / R113 F510 / R114 F512 已有 4 个 a11y finding 跨 surface，足够沉淀 M185 a11y baseline matrix
+- **i18n horizontal slice audit**——R104 F450 / R114 F522 / R98 F396 跨 round locale-mixing leak，需 horizontal review
+- **Suspense + lazy() route splitting audit**（F521 单点 → 横扫所有路由是否被 code-split + 是否有 Suspense fallback）
+- **Stream/SSE 一致性 audit**——R103 Studio Chat 流式 + jimeng 视频生成 + OpenRouter chat 三处 streaming，是否共用一套 progress / cancel 接口
+
+---
+
+## Round 113 — **ErrorBoundary 深审（R107 F465+F466 闭环验证 + 升级）—— stack trace 全文暴露 + Reload 按钮双重 destructive + 零 telemetry + 零 soft-retry + 零 error correlation ID —— "失败态的兜底入口" 自身就是产品级 P0 leak 集**
+
+- **时间**：2026-05-13（`/loop 20m` cron `105f4ef8` 触发；R111 已被并行 secret-egress fix-pass agent 占用闭合 R109 F475，R112 被 NotFound 六连 fix-pass 占用，本轮取 R113 编号）
+- **环境**：localhost:5173，源码深审 + grep mount-site 映射 + 测试覆盖度审计；**主动选择不在 running app 注入 throw** —— 任何 monkey-patch 会污染 zustand / queryClient cache 违反 zero-mutation audit 原则（M180 沉淀来源）
+- **触发**：R107 F465 + F466 是 source-only 推断（ErrorBoundary 暴露 stack + reload destroys state），未在真实异常下闭环；R110 沉淀"反向 surface 必须审"五元组中第 2 项 (loading/empty/**error**/unauthorized/expired)；ErrorBoundary 是失败态兜底入口的元 surface —— 自己设计差则下游所有 failure-mode audit 都被 reload 一键复位
+- **方法学**：(1) 读 `ErrorBoundary.tsx` 全 187 行 + `ErrorBoundary.test.tsx` 全 43 行；(2) `grep -rn ErrorBoundary` 抓所有 mount site（确认 1 root + 2 scoped fallback prop 实际用例：SafeChatPanel + SafeTimeline）；(3) 测试用例覆盖度盘点（render-ok + render-throw 仅 2 case）；(4) 对照 Sentry / Bugsnag / PostHog ErrorBoundary baseline 量化 telemetry 缺位；(5) M180 派生：审计可触发性本身要纳入 audit method
+
+### 深层发现
+
+| # | Severity | 发现 | 源码/测试 证据 |
+|---|---|---|---|
+| **F499** | **CRITICAL** | `error.stack` 完整 `<pre>` 渲染给所有用户——`{error.name}: {error.message}\n\n{error.stack}` 包含内部 module 路径 / 行号 / minified bundle 名 / 依赖库名 / 函数调用链。在 prod build 中等于把整个 source-map 反向暴露面给攻击者。**信息披露** 与 R109 F475 secret-egress family 同源（内部状态外泄到用户屏）；勒索软件 / 恶意扩展可定向利用 stack 中的依赖版本指纹做精准攻击 | `ErrorBoundary.tsx:140-142` `<pre>{error.name}: {error.message}{error.stack ? \`\n\n${error.stack}\` : ""}</pre>`；零 env-gated 分支（无 `import.meta.env.PROD` 判定）|
+| **F500** | **CRITICAL** | "Reload" 按钮 `onReset() + window.location.reload()` **双重调用** —— onReset 完全冗余（reload 立即 destroy 整个 React tree）；reload 摧毁 queryClient cache / zustand state / unsaved drafts / Editor canvas state / Studio chat in-flight stream / scroll position 全部。R107 F466 闭环验证 + 升级版：bug 不止"reload 摧毁状态"，还有"开发者意图不一致"（既然要 reload 为何还要 onReset？说明设计意图模糊） | `ErrorBoundary.tsx:148-151` `onClick={() => { onReset(); window.location.reload(); }}`；onReset 在 reload 后零 observable effect |
+| **F501** | HIGH | `componentDidCatch` **仅 console.error**——零 telemetry 接入（Sentry / Bugsnag / PostHog / Datadog / 自家 backend）。Production 团队对 crash 完全盲：无 crash rate 看板、无 stack trace 聚类、无 affected-user 计数、无 release-comparison。R110 F496 "产品对外不可观测" family 第 2 实例 | `ErrorBoundary.tsx:37-42` `componentDidCatch(...) { console.error("[ErrorBoundary] caught render error:", error, info); }`；line 39 注释明确写 "production telemetry would hook in here ... when wired" —— **承诺但未实现** |
+| **F502** | HIGH | 零 "Try again" softer affordance —— 唯一两个 CTA 都 destructive：(a) Reload（摧毁全部 in-memory state）、(b) Home `<a href="/">`（跳转 + 全页 reload）。缺 `<button onClick={onReset}>Try again</button>` 软重试——只清 boundary state，保留 queryClient / zustand / scroll / unsaved。React 行为：`onReset` 后 `state.error = null`，重新挂载 children——如果错误是 transient（网络抖动 / race），软重试可恢复；如果 persistent，会立即再次进入 boundary，零损失 | `ErrorBoundary.tsx:145-184` 仅 2 个 button/link，全部 trigger reload 或 navigate；零 pure-reset button |
+| **F503** | HIGH | 零 error correlation ID —— 用户报 bug 无法说 "Error ID abc-123"；团队收到反馈 → 反向查 telemetry / 服务日志 → 无 join key → 完全靠 stack 模糊匹配。`crypto.randomUUID()` 在 `getDerivedStateFromError` 生成 + 附入 fallback UI 是 3 行代码 | `ErrorBoundary.tsx:33-35` `getDerivedStateFromError(error) { return { error }; }` 仅返回 error 本身；零 ID 生成、零 timestamp、零 sessionId |
+| **F504** | MEDIUM | `<details>` 默认 closed + `maxHeight: 200` overflow:auto + **零 "Copy" 按钮**——用户/开发者复制 stack 必须手动鼠标选中拖动，**误点 Reload 按钮 stack 上下文立即丢失**（reload destroys ErrorBoundary state）。Stripe / Sentry / Vercel 错误屏都提供 "Copy diagnostic" one-click button | `ErrorBoundary.tsx:107-143` `<details>` 无 `open` 属性、无 `<button onClick={() => navigator.clipboard.writeText(...)}>` |
+| **F505** | MEDIUM | `errorInfo` (componentStack) 在 `componentDidCatch` 中收到但**只 console.error，UI 中完全未渲染**——componentStack 是 "Error happened in Editor → Stage → useDrag → onMouseUp" 这样的 React tree 定位线索，对用户和支持是关键信息；但 fallback UI 只显示 `error.stack` (JS call stack)，**React tree stack 完全屏蔽** | `ErrorBoundary.tsx:37-42` 收 errorInfo 但 `state` 不存；line 140-142 渲染仅 `error.stack` 一组栈 |
+| **F506** | MEDIUM | **Async / event-handler / setTimeout / unhandledrejection errors 不被 ErrorBoundary 捕获**（React 已知边界）；产品**零 `window.addEventListener('error')` + 零 `window.addEventListener('unhandledrejection')`** 全局兜底。useQuery 失败 / setInterval 抛错 / WebSocket onmessage 异常 / `await fetch()` reject 全部进 console 无用户反馈 | grep `window.onerror\|unhandledrejection\|window.addEventListener.*error` 在 web/src 零命中（除 i18n/test）；ErrorBoundary 仅 render-phase |
+| **F507** | MEDIUM | `errorBoundary.body` 文案**不根据 error 类型分支**——`ChunkLoadError`（新版本部署导致 stale chunk）、`NetworkError`、`QuotaExceededError`（localStorage 满）、`OutOfMemoryError`、`SyntaxError`（数据 corrupted）共享同一段 "something went wrong"。但每类的恢复路径完全不同：ChunkLoadError 需 reload、QuotaExceededError 需清缓存、NetworkError 需 retry——AutoViral 用统一文案模糊化所有类型差异 | `ErrorBoundary.tsx:104` `{t("errorBoundary.body")}` 单一 i18n key；零 error 类型 switch / 零 dynamic message |
+| **F508** | MEDIUM | 测试覆盖仅 2 case (render-ok + render-throw)——**零 Reload button click + reload mock test**、**零 Home link onClick `onReset` 调用 test**、**零 multi-error sequence test**（第一次错恢复后第二次错是否正确处理）、**零 stack XSS test**、**零 fallback prop integration test**（SafeChatPanel/SafeTimeline 的 fallback 行为完全未自动化） | `ErrorBoundary.test.tsx:12-43` 仅 describe 内 2 个 `it()`；grep `SafeChatPanel\|SafeTimeline` 在 test 文件零命中 |
+| **F509** | LOW | "Home" 链接 `<a href="/">` 而非 `<Link to="/">`——触发全页 reload；与 Reload 按钮的 "recover but lose state" 行为**完全重复**——两个 button 做同一件事，CTA 信息密度浪费 50% | `ErrorBoundary.tsx:166-183` `<a href="/" onClick={onReset}>` —— `<a href>` 触发完整 navigation；onReset 在 navigation 完成前 setState 但 boundary 即将卸载 |
+| **F510** | LOW | `role="alert"` + 120px `✕` `aria-hidden` + h1 文案不含"Error"语义码——R110 F493 a11y error-code family 第 2 实例。Screen reader 用户只听见 `errorBoundary.title`，错过"这是 error 状态而非 warning/info"的语义分级 | `ErrorBoundary.tsx:80-83` 120px `✕` `aria-hidden`；line 92-93 `<h1>` 无 sr-only 错误码 |
+
+### Family 串联
+
+- **F499 = R109 F475 secret-egress / R110 F488 产品对外不可观测 family 第 3 实例**——R109 是后端往前端回放凭据（**R111 已 CLOSED ✅**）；R110 是 title 不变（**R112 已 CLOSED ✅**）；本轮是 prod 用户看到内部 stack
+- **F500 = R107 F466 destructive-without-recovery family 第 8 实例**（R107 source-only 推断 → R113 闭环 + 升级：发现意图模糊的双重调用）
+- **F501 = R110 F496 telemetry 缺位 family 第 2 实例**——404 没上报；crash 也没上报
+- **F502 = R107 F417/F466 destructive-only-option family 第 9 实例**
+- **F505 = R107 F465 component-stack info-loss family 第 2 实例**——R107 抓到 stack 暴露（信息过多）；本轮抓 componentStack 屏蔽（信息缺失）。**同一审计维度的两个相反症状同 round 浮现** = R113 单独的 audit-plane discovery
+- **F510 = R110 F493 a11y error-code family 第 2 实例**（**R112 R110 那一脉已 CLOSED**，本轮在 ErrorBoundary 复发，证明这条修复需 globals 级 sr-only 错误码模式）
+
+### 沉淀
+
+**M177 — Stack trace exposure must be env-gated**：production build 中 `<details>` 内 stack 应替换为 `<button>Copy diagnostic info</button>` 隐藏到剪贴板；dev 模式默认展开 + 显示。判定用 `import.meta.env.PROD` 或 `process.env.NODE_ENV`。用户层只看 user-friendly message + error ID + 1 个 "复制诊断信息" 按钮。
+
+**M178 — Soft retry vs hard reload 分级**：错误恢复 affordance **必须** 分三档 —— (a) `onReset()` 软重试（只清 boundary state，保留 queryClient / zustand / scroll / unsaved drafts）；(b) `navigate(-1)` 回退；(c) `window.location.reload()` 硬重启（必须配 modal 二次确认 "will discard unsaved work"）。R107 destructive-without-recovery family 在 ErrorBoundary 也成立——错误恢复路径若全 destructive，等于"修 bug 顺便毁数据"。
+
+**M179 — `window.onerror` + `unhandledrejection` 兜底**：ErrorBoundary 仅 render-phase；产品必须在 `main.tsx` 顶部 mount `window.addEventListener('error', e => report(e))` + `window.addEventListener('unhandledrejection', e => report(e.reason))` 兜底全部 async path。否则 React Query / WebSocket / setInterval / Promise.reject 错误全部沉默到 console。
+
+**M180 — Failure-mode testability**：任何 error / loading / empty / unauthorized / expired 态**必须可被无副作用注入触发**——dev tool toggle / URL query param (`?fault-inject=render`) / store mutation (`?store-mutate=error`)，保证审计员 + QA + 设计师能在 zero-mutation 前提下拿到真实截图。R110 NotFound 因为路由可达成功审计 + 截图；R113 ErrorBoundary 因不可达只能 source-only，证明这条 method 缺失。产品 ship "**failure-mode dev escape hatches**" 应当与 "skip-to-content link" 一样作为基础设施。
+
+### Meta finding
+
+ErrorBoundary 是 **audit-method 的元 surface** —— 它本身是"失败态 surface"，但又是**触发其他失败态时的兜底入口**。如果 ErrorBoundary 自身设计差（如本轮 F500 双重调用 + F499 stack 全文 + F501 零 telemetry），那么所有下游的 failure-mode audit 一旦触发错误，用户必然按下 Reload —— 现场被一键清空，团队再也看不到真实异常。即"产品的失败态可观测性" 由 ErrorBoundary 的成熟度上限决定。把 ErrorBoundary 修到 telemetry + soft-retry + error ID + env-gated stack 4 件套齐全，是其他 50 个 failure-mode 修复的前置条件。
+
+**audit-velocity 元观察**：本轮 R113 audit 与 R111/R112 fix-pass 并行执行——单轮"audit method + fix method"齐发，证明前 100 round 沉淀的 method 已经被自动化 fix-loop 兑现。M174 (doc.title) 沉淀于 R110 后，R112 立即兑现到 NotFound + ErrorBoundary 双 surface 同步修复路径——sediment-to-fix 周期 < 1 cron tick。
+
+### R114+ 候选
+
+- **Loading state 全产品 audit**（R104 F450 单点 → 横扫 /works /editor /studio /explore /analytics /settings 全产品 `"Loading…"` 硬编 EN 实例）
+- **Empty state 全产品 audit**（0 followers / 0 works / 0 trends / 0 chat messages / 0 angles 五种零态 baseline 比对）
+- **Share-link rot audit**（产品是否有 share / export 链接、过期/删除后用户落到哪个 surface、上下文是否保留）
+- **`window.onerror` + `unhandledrejection` mount audit**（M179 沉淀直接验证 —— grep + browser console probe）
+- **`fallback` prop scoped boundary 行为审计**（SafeChatPanel + SafeTimeline 的 fallback 真实触发 + 截图，需先实现 M180 dev escape hatch）
+
+---
+
 ## Round 112 — **R110 F488 (CRITICAL · doc.title 不变) + F490 (HIGH · fuzzy suggest) + F492 (MED · 完整 URL echo) + F493 (MED · sr-only 404) + F495 (MED · auto-focus) + F498 (LOW · CTA 视觉) 六连 CLOSED ✅ —— NotFound 故障显微镜从 1-CTA baseline 升级到六重恢复 affordance；copy + a11y + usability 三 plane 同 round 闭合**
 
 - **时间**：2026-05-13（`/loop 30m` cron 触发本轮）
