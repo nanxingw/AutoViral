@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
+import { useT } from "@/i18n/useT";
+import { localizeApiError } from "@/i18n/serverError";
 
 export interface Checkpoint {
   file: string;
@@ -18,13 +20,30 @@ export interface Checkpoint {
  *
  * `enabled` controls the underlying useQuery — pass false until the
  * consumer actually needs the list (e.g. dropdown not yet open).
+ *
+ * R101 F422 — manual snapshot. The CheckpointsMenu header comment
+ * promised this since day one, but the trigger button only toggled the
+ * dropdown — `createManual` plugs that gap by calling the server-side
+ * `POST /api/works/:id/checkpoints` endpoint (existed all along).
+ *
+ * R101 F426 — restore failures used to leak raw `e.message` strings
+ * straight to the user. Now they pass through `localizeApiError` to
+ * pick up locale + server-error-code i18n routing.
  */
 export function useCheckpoints(workId: string, enabled = true) {
+  const t = useT();
   const [restoring, setRestoring] = useState<string | null>(null);
   // R22: previously restore failures only console.error'd — user saw the
   // spinner clear and nothing else, no clue why the rollback didn't take.
   // Surface as state so the dropdown can render an inline error.
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [creatingSnapshot, setCreatingSnapshot] = useState(false);
+  const [snapshotError, setSnapshotError] = useState<string | null>(null);
+  // R101 F422 — `null` means no recent action; "created" / "unchanged"
+  // drives the inline status hint after a manual snapshot.
+  const [snapshotResult, setSnapshotResult] = useState<
+    "created" | "unchanged" | null
+  >(null);
   const qc = useQueryClient();
   const list = useQuery({
     queryKey: ["checkpoints", workId],
@@ -47,9 +66,33 @@ export function useCheckpoints(workId: string, enabled = true) {
       setTimeout(() => location.reload(), 80);
     } catch (e) {
       console.error("[checkpoints] restore failed", e);
-      setRestoreError(e instanceof Error ? e.message : String(e));
+      // R101 F426 — route through localizeApiError so server errorCodes
+      // resolve to i18n keys; falls back to err.message for unmapped.
+      setRestoreError(localizeApiError(e, t));
     } finally {
       setRestoring(null);
+    }
+  };
+
+  const createManual = async () => {
+    setCreatingSnapshot(true);
+    setSnapshotError(null);
+    setSnapshotResult(null);
+    try {
+      const out = await apiFetch<{ written: string[] }>(
+        `/api/works/${workId}/checkpoints`,
+        { method: "POST", body: {} },
+      );
+      const created = Array.isArray(out.written) && out.written.length > 0;
+      setSnapshotResult(created ? "created" : "unchanged");
+      if (created) {
+        qc.invalidateQueries({ queryKey: ["checkpoints", workId] });
+      }
+    } catch (e) {
+      console.error("[checkpoints] manual snapshot failed", e);
+      setSnapshotError(localizeApiError(e, t));
+    } finally {
+      setCreatingSnapshot(false);
     }
   };
 
@@ -60,6 +103,14 @@ export function useCheckpoints(workId: string, enabled = true) {
     restoring,
     restoreError,
     clearRestoreError: () => setRestoreError(null),
+    createManual,
+    creatingSnapshot,
+    snapshotError,
+    snapshotResult,
+    clearSnapshotStatus: () => {
+      setSnapshotError(null);
+      setSnapshotResult(null);
+    },
   };
 }
 

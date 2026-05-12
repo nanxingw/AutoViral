@@ -362,6 +362,23 @@ export const en = {
     secondsAgo: "{n}s ago",
     minutesAgo: "{n}m ago",
     hoursAgo: "{n}h ago",
+    // R101 F422 — manual snapshot trigger surface
+    takeSnapshot: "Save snapshot now",
+    snapshotInProgress: "Saving…",
+    snapshotCreated: "Snapshot saved · history updated",
+    snapshotUnchanged: "Already up to date · nothing changed since last snapshot",
+    snapshotFailed: "Snapshot failed: {msg}",
+    // R101 F417 — restore confirm dialog
+    restoreConfirm: {
+      title: "Restore the version from {age}?",
+      body: "All edits made since this snapshot will be lost. Take a fresh snapshot first if you want to keep them.",
+      metaSha: "Snapshot",
+      metaAge: "Saved",
+      metaSize: "Size",
+      warning: "This action reloads the editor. Unsaved scratch state (chat draft, panel widths) will reset.",
+      btnCancel: "Cancel",
+      btnConfirm: "Restore this version",
+    },
   },
   explore: {
     collectTrends: "Refresh trends now",
@@ -884,6 +901,23 @@ export const zh: DeepShape<Messages> = {
     secondsAgo: "{n} 秒前",
     minutesAgo: "{n} 分钟前",
     hoursAgo: "{n} 小时前",
+    // R101 F422 — 手动快照入口
+    takeSnapshot: "立即保存快照",
+    snapshotInProgress: "保存中…",
+    snapshotCreated: "快照已保存 · 历史已更新",
+    snapshotUnchanged: "已是最新版 · 自上次快照后无改动",
+    snapshotFailed: "快照失败：{msg}",
+    // R101 F417 — 恢复确认弹窗
+    restoreConfirm: {
+      title: "恢复到 {age} 的版本？",
+      body: "从那次快照之后的所有改动都会丢失。如果还想保留当前进度，先按上方的「立即保存快照」。",
+      metaSha: "快照",
+      metaAge: "时间",
+      metaSize: "大小",
+      warning: "此操作会重新加载编辑器，未保存的临时状态（对话草稿、面板宽度等）会重置。",
+      btnCancel: "取消",
+      btnConfirm: "恢复此版本",
+    },
   },
   explore: {
     collectTrends: "立即采集热门趋势",
