@@ -12,7 +12,12 @@ const PLACEHOLDER_INSIGHTS: Insight[] = [
   { tag: "STYLE RECOMMENDATION", body: "Warm color grading correlates with +18% retention across last 47 posts.", date: "—", cta: "Apply Preset →" },
 ];
 
-type WorkFilter = "all" | "draft" | "published" | "archived";
+type WorkFilter = "all" | "draft" | "processing" | "published" | "archived";
+
+// "processing" is a UI bucket that covers the three transient backend statuses
+// users never see as a dedicated chip otherwise (creating / ready / failed).
+// Mirrored in WorksGrid.tsx — change both together. See e2e-report F10.
+const PROCESSING_STATUSES = new Set(["creating", "ready", "failed"]);
 
 export default function Works() {
   const works = useWorks();
@@ -27,13 +32,32 @@ export default function Works() {
     unfinished: list.filter((w) => w.status === "draft" && w.type === "short-video").length,
   }), [list]);
 
+  // e2e-report F192 (real cause, vs the R77 misread): "已发布"/"已归档" are
+  // frontend-only enum buckets that the backend doesn't emit yet (see comment
+  // in queries/works.ts). Clicking those pills always yields 0 cards but with
+  // no surface signal, leaving the user staring at a blank grid wondering if
+  // they're seeing it wrong. The fix is M111: surface per-bucket count on the
+  // pill *before* the click, so users know "0 已发布" means "none yet" not
+  // "filter broken". Same memo also feeds the empty-filter branch below.
+  const filterCounts = useMemo(() => ({
+    all: list.length,
+    draft: list.filter((w) => w.status === "draft").length,
+    processing: list.filter((w) => PROCESSING_STATUSES.has(w.status)).length,
+    published: list.filter((w) => w.status === "published").length,
+    archived: list.filter((w) => w.status === "archived").length,
+  }), [list]);
+
   // Search is a substring match on title; status filter is layered on top.
   // Both happen client-side because the works index is small (~tens) and
   // already sits in memory.
   const filteredList = useMemo(() => {
     const q = query.trim().toLowerCase();
     return list.filter((w) => {
-      if (filter !== "all" && w.status !== filter) return false;
+      if (filter === "processing") {
+        if (!PROCESSING_STATUSES.has(w.status)) return false;
+      } else if (filter !== "all" && w.status !== filter) {
+        return false;
+      }
       if (!q) return true;
       return w.title.toLowerCase().includes(q);
     });
@@ -100,22 +124,32 @@ export default function Works() {
             />
           </div>
           <div style={{ display: "flex", gap: 4 }}>
-            {(["all", "draft", "published", "archived"] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                data-active={filter === f}
-                style={{
-                  padding: "5px 12px", fontSize: 11, borderRadius: 7,
-                  border: "1px solid var(--glass-border)",
-                  background: filter === f ? "var(--surface-2)" : "transparent",
-                  color: filter === f ? "var(--text)" : "var(--text-dim)",
-                  cursor: "pointer", fontFamily: "inherit",
-                }}
-              >
-                {t(`works.filter.${f}` as MessageKey)}
-              </button>
-            ))}
+            {(["all", "draft", "processing", "published", "archived"] as const).map((f) => {
+              const n = filterCounts[f];
+              const isEmpty = n === 0;
+              const isActive = filter === f;
+              return (
+                <button
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  data-active={isActive}
+                  aria-pressed={isActive}
+                  style={{
+                    padding: "5px 12px", fontSize: 11, borderRadius: 7,
+                    border: "1px solid var(--glass-border)",
+                    background: isActive ? "var(--surface-2)" : "transparent",
+                    color: isActive ? "var(--text)" : isEmpty ? "var(--text-dimmer)" : "var(--text-dim)",
+                    cursor: "pointer", fontFamily: "inherit",
+                    opacity: isEmpty && !isActive ? 0.55 : 1,
+                  }}
+                >
+                  {t(`works.filter.${f}` as MessageKey)}
+                  <span style={{ marginLeft: 6, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-dimmer)" }}>
+                    {n}
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -134,6 +168,45 @@ export default function Works() {
           }}
         >
           {t("works.emptySearch", { query: `"${query.trim()}"` })}
+        </div>
+      ) : filteredList.length === 0 && filter !== "all" ? (
+        // F192 real cause (not the R77 count-render misread): when a filter
+        // pill yields 0 the grid otherwise renders blank, with no signal to
+        // the user that the filter is the reason. Tell them what was filtered
+        // and give a one-click escape back to "all".
+        <div
+          style={{
+            padding: "24px 0",
+            display: "flex",
+            alignItems: "baseline",
+            gap: 14,
+            flexWrap: "wrap",
+            color: "var(--text-dim)",
+            fontFamily: "var(--font-mono)",
+            fontSize: 12,
+          }}
+        >
+          <span>
+            {t("works.emptyFilter", {
+              label: t(`works.filter.${filter}` as MessageKey),
+            })}
+          </span>
+          <button
+            type="button"
+            onClick={() => setFilter("all")}
+            style={{
+              padding: "4px 10px",
+              fontSize: 11,
+              borderRadius: 6,
+              border: "1px solid var(--glass-border)",
+              background: "transparent",
+              color: "var(--text)",
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            {t("works.clearFilter")}
+          </button>
         </div>
       ) : list.length === 0 ? (
         // First-run empty: NewWorkCard is already visible above, but the
