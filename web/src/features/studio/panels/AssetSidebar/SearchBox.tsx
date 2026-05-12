@@ -33,13 +33,30 @@ export function SearchBox({ workId, debounceMs = 300 }: Props) {
   const search = useClipSearch(workId, debounced);
   const build = useBuildClipIndex(workId);
 
-  // Stub from either status (no index yet) or search itself (Python-side stub).
+  // F129 root cause (closed 2026-05-12): we used to aggregate stubs from
+  // only `status` + `search`, missing the **mutation result itself**. When
+  // the user clicked the build button and the Python script reported
+  // `{stub:true, reason:"open_clip_torch not installed"}`, the diagnostic
+  // never reached the UI — looked like a silent-failure for 8 e2e rounds.
+  // buildStub is checked last so it doesn't fight an already-built index.
   const statusStub = status.data && status.data.stub === true ? status.data : null;
   const searchStub = search.data && search.data.stub === true ? search.data : null;
-  const stub = statusStub ?? searchStub;
+  const buildStub = build.data && build.data.stub === true ? build.data : null;
+  // Priority: buildStub > statusStub > searchStub. The most recent mutation
+  // result is the most authoritative diagnostic — status only knows "no
+  // index" but the build attempt knows *why* (e.g. "open_clip_torch not
+  // installed"). Without this priority, the actionable install hint is
+  // shadowed by status's generic no_index message.
+  const stub = buildStub ?? statusStub ?? searchStub;
 
   const isInstallStub = stub?.reason?.includes("open_clip");
   const isNoIndex = stub?.reason === "no_index" || stub?.reason === "no_indexable_assets";
+
+  // Surface a one-line success when the build returns a non-stub result —
+  // otherwise the button just disappears and the user has no confirmation
+  // that anything happened. status.data refresh closes the affordance gap
+  // but takes a tick; this is the immediate post-click signal.
+  const buildOk = build.data && build.data.stub === false ? build.data : null;
 
   const inputDisabled = !!isInstallStub;
 
@@ -140,6 +157,24 @@ export function SearchBox({ workId, debounceMs = 300 }: Props) {
                   build.error instanceof Error
                     ? build.error.message
                     : String(build.error),
+              })}
+            </div>
+          )}
+          {buildOk && (
+            <div
+              role="status"
+              style={{
+                fontSize: 10,
+                fontFamily: "var(--font-mono)",
+                color: "var(--accent-hi)",
+                padding: "4px 0",
+                lineHeight: 1.5,
+                letterSpacing: "0.04em",
+              }}
+            >
+              {t("studio.assetSearch.buildOk", {
+                count: String(buildOk.assetCount),
+                ms: String(buildOk.durationMs),
               })}
             </div>
           )}

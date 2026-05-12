@@ -165,6 +165,7 @@ export const en = {
       btnBuild: "Build index",
       btnBuilding: "Building…",
       buildFailed: "Index build failed: {msg}",
+      buildOk: "✓ Indexed {count} clips in {ms} ms",
     },
     assetSidebar: {
       tabLibrary: "Library",
@@ -657,6 +658,7 @@ export const zh: DeepShape<Messages> = {
       btnBuild: "构建索引",
       btnBuilding: "构建中…",
       buildFailed: "构建索引失败：{msg}",
+      buildOk: "✓ 已索引 {count} 个素材 · 用时 {ms} ms",
     },
     assetSidebar: {
       tabLibrary: "素材库",
