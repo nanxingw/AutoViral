@@ -131,7 +131,7 @@ apiRoutes.get("/api/config", async (c) => {
     douyinUrl: config.analytics?.douyinUrl ?? "",
     memorySyncEnabled: config.memory?.syncEnabled ?? false,
     researchEnabled: config.research?.enabled ?? false,
-    researchCron: config.research?.schedule ?? "0 9 * * *",
+    researchCron: config.research?.schedule ?? "7 9,21 * * *",
     analyticsLastCollectedAt,
   });
 });
@@ -165,11 +165,11 @@ apiRoutes.put("/api/config", async (c) => {
     config.memory.syncEnabled = body.memorySyncEnabled as boolean;
   }
   if (body.researchEnabled !== undefined) {
-    if (!config.research) config.research = { enabled: true, schedule: "0 9 * * *", platforms: ["douyin", "xiaohongshu"] };
+    if (!config.research) config.research = { enabled: true, schedule: "7 9,21 * * *", platforms: ["douyin", "xiaohongshu"] };
     config.research.enabled = body.researchEnabled as boolean;
   }
   if (body.researchCron !== undefined) {
-    if (!config.research) config.research = { enabled: true, schedule: "0 9 * * *", platforms: ["douyin", "xiaohongshu"] };
+    if (!config.research) config.research = { enabled: true, schedule: "7 9,21 * * *", platforms: ["douyin", "xiaohongshu"] };
     config.research.schedule = body.researchCron as string;
   }
 
@@ -709,11 +709,15 @@ apiRoutes.post("/api/works/:id/render", async (c) => {
   if (!w) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
   // Cheap fail-fast: composition.yaml must exist on disk before we enqueue.
   // The worker re-loads + validates it via loadComposition; this just gives
-  // the user a synchronous 400 instead of a queued-then-failed job.
+  // the user a synchronous 409 instead of a queued-then-failed job.
+  // e2e-report F128: status code is 409 Conflict (state precondition not met:
+  // not-yet-saved composition vs. ready-to-render), NOT 400 Bad Request.
+  // The request itself is well-formed — the *state* is incompatible with the
+  // action. Misclassifying as 400 misled triage into "user sent bad data".
   try {
     await readFile(join(dataDir, "works", id, "composition.yaml"), "utf-8");
   } catch {
-    return c.json({ error: "Composition missing — save first", errorCode: "composition_missing" }, 400);
+    return c.json({ error: "Composition missing — save first", errorCode: "composition_missing" }, 409);
   }
   const body = await c.req.json().catch(() => ({}));
   const type: "full" | "proxy" = body.type === "proxy" ? "proxy" : "full";
@@ -1993,6 +1997,24 @@ apiRoutes.get("/api/trends/:platform/report", async (c) => {
     return c.text(report);
   } catch {
     return c.text("", 404);
+  }
+});
+
+// GET /api/trends/:platform/covers/:id — serve cached cover jpg.
+// e2e-report follow-up: real cover images replace the 9:16 placeholder.
+apiRoutes.get("/api/trends/:platform/covers/:id", async (c) => {
+  const platform = c.req.param("platform");
+  const rawId = c.req.param("id");
+  const safeId = rawId.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (!safeId) return c.body(null, 400);
+  const path = join(homedir(), ".autoviral", "trends", platform, "covers", `${safeId}.jpg`);
+  try {
+    const buf = await readFile(path);
+    c.header("content-type", "image/jpeg");
+    c.header("cache-control", "public, max-age=86400");
+    return c.body(buf);
+  } catch {
+    return c.body(null, 404);
   }
 });
 
