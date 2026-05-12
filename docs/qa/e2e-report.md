@@ -6,6 +6,253 @@
 
 ---
 
+## Round 94 — **R93 F355 CLOSED ✅ Regenerate-all destructive 单击补 `<RegenerateConfirmDialog>` 拦截 + 双 locale 实证 + 桥梁 data plane 强化**
+
+- **时间**：2026-05-12（`/loop 30m` cron 触发 R94；上轮 R91 后并行 audit agent 写 R92 (canvas direct-manipulation 深审) + R93 (Inspector 右栏深审)，本轮使用 R94 编号）
+- **触发**：R93 F355 = "AI tab `REGENERATE ALL 6 SLIDES` CTA 单击直接 POST destructive `/invoke {module: assets, regenerateAll: true}` 异步 job 覆盖 6 张图 + carousel.yaml + History 体系不打 snapshot"，**桥梁哲学 data plane 最严重 leak**：用户 promise 是 "Editor 安全可逆"，实际是"单击销毁 + 无 undo + 无 cost 提示"。R93 候选清单标 #1 (TOP · CRITICAL)。
+- **方法学**：M114 DOM-before-claim + M138 cross-locale verify（新组合：跨 EN/ZH locale 切换实证 dialog 文案）+ **新 fetch-hook 计数 verify** (运行时拦截 `window.fetch`，对 `/invoke` request 计数，跨 Cancel/ESC/Reopen/Confirm 4 路径分别校 0 / 0 / 0 / 1)
+- **修复**：
+  - `web/src/i18n/messages.ts` 双 locale 各 +7 string (`aiTab.regenConfirm.{title,body,costHint,promptLabel,promptEmpty,btnCancel,btnConfirm}`)；title/btnConfirm 用 `{count}` 动态插槽
+  - **新建** `web/src/features/editor/panels/Inspector/RegenerateConfirmDialog.tsx` (177 行)：mirror `ReframeConfirmDialog` 模式 — `createPortal(document.body)` + `motion.div` 0.18s ease + `useModalFocus` (R41 hook) + ESC keydown handler + backdrop click → cancel + dialog content 三段 (title editorial italic / body / cost-hint mono panel) + style-prompt 回显区
+  - `web/src/features/editor/panels/Inspector/AITab.tsx` (+13 行)：增 `confirmOpen` state；CTA `onClick` 从 `runAssets(...)` 改为 `setConfirmOpen(true)`；render `<RegenerateConfirmDialog>` with `onConfirm` 才真触发 `runAssets({regenerateAll: true, stylePrompt: prompt}, "regen")`
+
+### 浏览器实证 (M114 + 新 fetch-hook 计数)
+
+**EN locale 完整 verify**：
+
+```js
+// 初始化 invoke 计数器
+window.__invokeCount = 0;
+const orig = window.fetch;
+window.fetch = (...a) => { if(typeof a[0]==='string' && a[0].includes('/invoke')) window.__invokeCount++; return orig(...a); };
+```
+
+| 路径 | dialog state | invokeCount | 焦点 |
+|---|---|---|---|
+| 初始（AI tab） | absent | 0 | (无) |
+| Click `REGENERATE ALL 6 SLIDES` | **present** (title `"Regenerate all 6 slides?"`) | 0 | **`BUTTON:Cancel`** (默认 focus less-destructive choice) |
+| Click `Cancel` button | exit-animating | **0** ✓ | `BUTTON:Regenerate all 6 slides` (focus 还原 trigger) |
+| Re-click CTA | reopened | 0 | Cancel 重获 focus |
+| Press `ESC` key | exit-animating | **0** ✓ | (trigger) |
+| Re-click CTA | reopened（opacity 0.86 mid-anim） | 0 | Cancel |
+| Click `Regenerate 6` confirm | dialog 关 + invoke 真发 | **1** ✓ | (trigger) |
+
+**ZH locale verify** (切 `[中]`，重打开 dialog)：
+
+| Field | DOM textContent (`getElementById('regen-confirm-title')` 等) |
+|---|---|
+| title | `"重新生成全部 6 页？"` ✓ |
+| body | `"本组图文的每一页都会被替换为新图。当前版本将被覆盖，此操作没有内置撤销。"` ✓ |
+| cost hint | `"整个流程约需 60 秒，每一页都会重新调用图像模型。"` ✓ |
+| buttons | `["取消", "重新生成 6 页"]` ✓ |
+
+**桥梁 data plane 强化结论**：destructive `/invoke` request 严格 gate 在 explicit `Regenerate 6` button click 后才发；Cancel/ESC/backdrop click 三种 dismiss 路径全部 0 invoke；count interpolation `{count}` 双 locale 都正确替换 6。
+
+### 沉淀
+
+**M141 · 运行时 fetch-hook destructive-call counter（新增方法学）**
+
+R94 第一次在 audit 流程使用 `window.fetch` 包装作为 invoke 计数：
+
+```js
+window.__invokeCount = 0;
+const orig = window.fetch;
+window.fetch = (...args) => {
+  if (typeof args[0] === 'string' && args[0].includes('/invoke')) {
+    window.__invokeCount++;
+  }
+  return orig.apply(this, args);
+};
+```
+
+**Why**：M114 (DOM-before-claim) 验 UI 节点存在性是必要但不充分 —— destructive flow 还需验证"backdrop click / ESC / Cancel 都不发 API 请求"。视觉判断"dialog 关了"≠ "请求没发"。fetch-hook 是唯一 ground truth：counter 在 0 / 0 / 0 / 1 跨四路径走出来才证明 dialog 真的是关卡而非装饰。
+
+**How to apply**：所有 destructive flow (regenerate / delete / publish / purchase) audit 必须包 fetch-hook：(1) intercept fetch → counter (2) 走 Cancel / ESC / backdrop click 三条 dismiss 路径 → 验 0 (3) 走 Confirm 路径 → 验 +1。
+
+**M142 · 双 locale dialog parity check（新增）**
+
+R94 揭示 ReframeConfirmDialog 早期没 ZH 翻译被 R12 修过 — 但新 dialog 容易再犯。**新规则**：任何新建 portal modal 必须在 PR 落地前跑：
+
+```
+For every <ConfirmDialog>:
+1. 切到 EN locale → 打开 → DOM 提取所有 string element → 验全 EN
+2. 切到 ZH locale → 打开 → DOM 提取所有 string element → 验全 ZH
+3. 验 {count} / {preset} 等动态插槽双 locale 都正确替换
+4. 截图存档双 locale (Manfred Schmid + 王二 etc. 自然示例)
+```
+
+如有任意一项 fail，dialog 不能 merge —— 因为单 locale 通过 = 国际化漏 ≈ 产品级失败（R85 F261 / R86 / R89 家族同根）。
+
+**M143 · destructive flow 4 路径 dismiss audit（升级 M140 Tier 3）**
+
+R93 M140 定义 4 tier recoverability。R94 落实 Tier 3 (destructive) 具体 audit checklist：
+
+- **Path 1 — Cancel button click**: invokeCount 增量 = 0 + focus 还原到 trigger
+- **Path 2 — Backdrop click** (modal 外灰幕): invokeCount = 0 + dialog 关
+- **Path 3 — Escape key**: invokeCount = 0 + dialog 关
+- **Path 4 — Confirm button click**: invokeCount = +1 + dialog 关
+
+四条路径全跑通才能算 Tier 3 (destructive) 完成。**仅完成 Path 1 + 4 不算合规**（用户键盘习惯 ESC 关 dialog；Figma/Photoshop/macOS 全 baseline）。
+
+### 桥梁哲学 5 plane 第二轮巩固
+
+| Plane | 历史代表性 finding | 本轮变化 |
+|---|---|---|
+| data plane | R76 (audit 数据一致性) | **R94 ✓ destructive prevention 通过 fetch-hook 计数实证** |
+| control plane | R83 (filter count distribution) | 未变 |
+| audit plane | R86 (audit-the-audit M114) | 未变 |
+| copy plane | R78 / R86 / R89 (vendor leak 清扫) | 未变 |
+| a11y plane | R91 (WCAG 2.4.7 focus-visible) | dialog ESC + 初始 Cancel focus 进一步加固 |
+
+**R94 沉淀新观点**：data plane 不只是 "audit 数据一致" (R76)，**也包含 "API call 数据起点的 gate 一致性"** —— 用户每次"开 dialog"都是一次潜在 API call 触发器；fetch-hook 实证是 data plane gate 的硬证据。
+
+### R95 候选（按 R92/R93 未关 finding 倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP · CRITICAL · 数据保护) | **F337 + M135 联动** — Editor shell 加 keydown trap `Delete/Backspace/Cmd+ArrowLeft/Cmd+ArrowRight` 在 canvas focus 时 `preventDefault()` | R92 F337 "press Delete → /works" navigation hijack | 单 round 可完成 + 浏览器 navigation 实证；R92 candidate #1，data plane 同根 |
+| 2 (CRITICAL · 跨 tab 数据丢失) | F353 + M138 — Inspector AI/Copy textarea state lifted to Zustand store | R93 F353 tab switch loses typing | 本轮 ZH locale 切换又意外捕获同根 bug |
+| 3 (CRITICAL · 国际化分裂) | F341 + M139 — QUICK_STYLES chip 改为 `{enPrompt, zhPrompt}` 双 prompt | R93 F341 chip ZH label + EN prompt 锁 | 需先与 R84 F244 反向锁一起定产品级国际化政策 |
+| 4 (CRITICAL · regen snapshot) | F355 follow-up — invoke 前自动 `POST /api/works/.../snapshot` 入 History | R93 F355 即便有 confirm 也无 undo path | 与本轮 dialog 配套；non-destructive 模式 |
+| 5 (HIGH · 死页) | F342 + F344 — CopyTab empty 改 actionable | R93 F342 Copy tab 死页 | 与 F334 layer-editor 实改联动 |
+| 6 (HIGH · 盲盒选择) | F357 + F358 — chips 加 tooltip + sliders qualitative scale | R93 F357 / F358 | 行业 baseline 升级 |
+| 7 (METHOD) | M141/M142/M143 写入 `.claude/rules/e2e-testing.md` | 累计 7 verify gate | 沉淀持续扩展 |
+
+---
+
+## Round 93 — **Editor Inspector 右栏深审：Copy tab 对所有现有 carousel 都是永久死页 + tab 切换销毁 textarea state + Regenerate-all 在 History 体系外（无 undo / 无确认 / 无 cost 提示）+ Quick-styles chips zh 标签是 i18n 假象（API 实发硬编 EN prompt）+ effects sliders 无 reset / 无 perceptual preview**
+
+- **时间**：2026-05-12（`/loop 20m` cron 触发 R93）
+- **环境**：dev (`localhost:5173/editor/w_20260319_1815_5bb`)，6 slides 已 loaded；交替 en/zh + light theme；DOM-extraction (M131) 优先于 viewport 视觉判断
+- **触发**：R92 揭示 canvas 没 direct-manipulation，所以"真正的编辑"必然发生在 Inspector tabs (Design/Copy/AI) —— 但 Inspector 的能力边界、tab-state 持久性、destructive action 的可恢复性、prompt 国际化一致性从未深审。审计基于源码阅读 (`Inspector/index.tsx` + `DesignTab.tsx` + `CopyTab.tsx` + `AITab.tsx`) + 浏览器交互实测 + DOM source-of-truth 提取
+- **方法学**：M131 DOM textContent 取代视觉 + M120 viewport zoom + 新增 **M138 tab-state persistence verify**（typing 后跨 tab 切换再回检查 value 是否保留）
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F341 | **CRITICAL · prompt-locale leak 升级（API 行为与 UI 语言分裂）** | AITab `QUICK_STYLES` 6 个 chip 硬编 EN prompts (`minimal editorial / soft pastel / neon cyberpunk / earthy zine / high-contrast noir / sun-bleached film`)，源码 inline 注释明确写"Keep the prompt itself English even when the UI is Chinese — the upstream image model takes an English style cue more reliably"；但 chip label 通过 i18n 翻译为 `极简编辑 / 柔和粉彩 / 霓虹赛博 / 大地杂志 / 高反差黑色 / 晒褪色胶片`。DOM 实测 zh locale 下 chips 文本全是中文，**而 onClick 实际 POST `/api/works/.../invoke` 的 `stylePrompt` 是英文**。同时 textarea (`Style prompt`) 是 pass-through —— 用户输入"敦煌唐三彩釉色"就发"敦煌唐三彩釉色"，与 chip 行为不对称。 | (1) 用户期待"我看到中文 → 系统也用中文"心智模型崩塌；(2) zh 用户点"极简编辑" → 模型收到 `minimal editorial` → 生成结果可能不符合中文审美期待（小红书 vs Pinterest 极简风格存在差异）；(3) 与 R84 F244 (ChatQuickActions 反向 — chip EN 但 prompt 硬 ZH) 配对 = "Inspector 的 prompt 是 EN 锁，Chat 的 prompt 是 ZH 锁"，**整个产品 prompt 国际化策略自相矛盾**；(4) 一旦切换底层模型（Volcengine 换 OpenAI / DALL·E），EN prompt 的优势假设不一定成立，但代码 hardcode 了。**修复**：(a) chip 携带 `{ enPrompt, zhPrompt }` 双 prompt，根据 locale 选；(b) 或全 EN/全 ZH 由产品决策统一，并在 UI 标"prompts sent to model in English"提示用户。 | R84 F244 反向 instance —— 由"Chat ZH prompt + EN label"扩成"Inspector EN prompt + ZH label"，产品级国际化分裂家族 |
+| F342 | **CRITICAL · Copy tab 对所有现有 carousel 都是永久死页** | DOM 实测 Copy tab innerText 完整内容：`"Select a text layer to edit its copy."` —— 没有 button、没有 link、没有"如何创建 text layer"指引。配合 R92 F334 (6 slides 全是 background image 无 user-editable layer)，**截至本轮所有 35 个 carousel 都没有可被 CopyTab 操作的对象**。CopyTab.tsx L64 `if (!selected) return <empty msg>` 是 dead-code path —— 因为 selected 永远不可能 set（canvas 没 layer click handler，filmstrip 只切 slide 不选 layer）。 | (1) 新用户点 Copy tab → 看到死字符串 → 不知道该回去哪里把 layer 造出来 → 产品认知崩塌 ("AI 创作工具但不能写文字？")；(2) 即使老用户也不知道 Copy tab 何时才能用 (R92 揭示 carousel 数据模型本身无 text layer 支持);(3) 死页 = 产品声称 capability 但实际无路径触达 = false-advertising；(4) 与 F334 形成"capability vs UI surface 完整分裂"：F334 说"Editor 不是真 editor"，F342 说"Copy 是不可触达的死 tab"。**修复**：(a) 短期 — empty state 改为 actionable card "Carousel 暂无文字层 · [+ Add text layer]" 直接添加 layer 入 store；(b) 长期 — 与 F334 联动重写 Editor capability，让 carousel 真支持 text layer。 | F334 直系下游；R83 F239 chat panel empty 同根 (empty state 不 actionable) |
+| F353 | **CRITICAL · tab 切换销毁 textarea state（用户输入丢失，无 warning）** | DOM 实测：(a) zh locale + AI tab 输入"test prompt typed in EN locale" → textarea.value 确认保留；(b) 切换到 Design tab → 切回 AI tab → **textarea.value === ""**，**完全清空**。源码 `<TabContent>` 在非 active 状态时 unmount 子树，本地 `useState(prompt)` 随之销毁。无 dialog 提示、无 autosave 草稿、无"return to AI tab"路径恢复。 | (1) 用户在 AI tab 写完 200 字 prompt → 切到 Design 想 cross-check palette → 回 AI → 输入消失，**强制重写**；(2) 与 F345/F355 联动尤危：用户输入复杂 prompt 准备 Regenerate，中途想看一眼 Design tab 校验 layout → prompt 丢光；(3) 与 Mac 原生 app text field 跨 tab 持久行为不符（macOS / VS Code / Figma 全部 persist）；(4) **修复**：(a) 短期 — AI/Copy tab 的 textarea 用 Zustand store 持久化（不 unmount-bound）；(b) 中期 — `<TabContent unmountOnHide={false}>` API 让用户配置；(c) 加 `beforeunload` 警告草稿丢失。 | 新 family — "uncontrolled component unmount data loss"；R74 后第一个被发现的 stateful-tab 数据丢失 bug |
+| F355 | **CRITICAL · Regenerate-all destructive 单击执行（无确认 / 无 cost 提示 / History 体系外无 undo）** | AI tab 顶部主 CTA `REGENERATE ALL 6 SLIDES` (zh: `重新生成全部 6 页`) —— DOM disabled=false 单击立即触发 `POST /invoke {module: 'assets', input: {regenerateAll: true}}` 启动异步 job 重写 carousel.yaml + 6 张图。**实测点击 TopBar History 弹窗显示"暂无快照—agent 每完成一次对话会自动保存一份"**——意味着 History 只在 agent 对话后打 snapshot，**Regenerate-all 走 invoke 路径并不打 snapshot**，所以即便 History 体系存在，对 regen 也没保护。**真彻底的"单击毁掉 6 张图，没有撤销"。** | (1) 单击 destroy 6 张 = Volcengine API spend (~$3-5)（用户无 cost 估算 UI）；(2) 60s 异步流程，用户看不到进度，期间无法取消（源码无 abort controller）；(3) **没有任何 undo**: 原图 yaml 被覆盖 + assets/ 下原 PNG 被覆盖；(4) 即便 textarea prompt 写错 typo 也无机会校验；(5) 对比业界 baseline：Midjourney 的 vary/upscale 是 additive（不 destroy 原图）, Figma 的 "Regenerate" AI plugin 都跳 confirm dialog 列出"这会替换当前 X 个 frame"；(6) **修复**：(a) 短期 — 加 `<ConfirmDialog>` 强制 type carousel id 或显示 "This will replace 6 generated images. Continue?"；(b) 中期 — regen 触发自动 snapshot 写入 History (`POST /api/works/.../snapshot` before invoke)；(c) 长期 — non-destructive regen，新图作为 "Variation 2/3" 并存，老图保留作 fallback。 | F345 (= R88 F314 destructive action without confirmation 家族)；与 R74 F195 silent-failure 同根 (异步状态不透明) |
+| F344 | **HIGH · empty state 不 actionable + 无"如何选中 layer"的发现路径** | CopyTab empty 状态字符串 `"Select a text layer to edit its copy."` (zh `"选择一个文字层来编辑文案"`) —— 文字本身正确，但**用户不知道"text layer"是什么 / 在哪里 / 怎么 select**。R92 已确认 canvas 没 layer 可点 + filmstrip 只切 slide 不选 layer。entire navigation graph 里都没有"layer" affordance。 | (1) 概念词 "text layer" 对非设计师用户是黑话；(2) 即使设计师用户也找不到入口；(3) **修复**：empty state 改为引导句 "This carousel has no text layers yet. [+ Add headline] [+ Add body] [+ Add caption]"，按钮直接添 default text layer 入 store。 | F342 直系；R87 F303 empty-state 不 actionable 家族 |
+| F356 | **HIGH · effects sliders 无 reset / 无 default 标识 / 无 undo** | DOM 实测 3 sliders: `grain (0.03, default? 未知) / gradient (0.5, default? 未知) / sharpen (0.0, default? 未知)`。**无 reset button、无 double-click to default、无 Cmd+Z**。也没 visual marker (例如 `0.03 ▲` ticker tape 显示 "default here") 让用户知道哪个值是出厂值。源码 default 在 `store.ts` 初始化但 UI 不暴露。 | (1) 用户拖 grain 到 0.85 → 想恢复 → 必须凭记忆精确滑回 0.03，sliders step=0.01 难以手动命中；(2) 与图像编辑器 baseline 严重不符 (Photoshop 滑块右键 → Reset；Lightroom 双击 → 默认值)；(3) **修复**：(a) slider 右侧加 `↺` reset icon (`cursor: pointer`, hover hint "Reset to default 0.03")；(b) 拖动 detent 设在 default 值附近 (snap-to-default within ±0.02)；(c) Cmd+Z reverts last slider drag。 | 新 family — "destructive-without-recovery in continuous input controls"；F348 (sliders) → F355 (regen) → F353 (textarea) 共同体现 "无 undo 文化" |
+| F357 | **HIGH · QUICK STYLES chips 无 tooltip 无 preview thumbnail（点击如开盲盒）** | DOM 实测 6 chips 全部 `title=null + aria-label=null`，hover 无 tooltip 弹出 (overlayCount=0)。用户点 "neon cyberpunk" 时**没有任何视觉线索**预判风格 —— 没有缩略图、没有色卡、没有 sample-output 拼贴。配合 F355 (regen 是 destructive)，这是"看到陌生词 → 单击赌博 → 6 张图被替换" 的反 UX 模式。 | (1) "neon cyberpunk" vs "sun-bleached film" 对非设计师是抽象词；即使设计师对它们的视觉边界各家工具理解也不同；(2) 高 cognitive load 选择 = 用户默认每次都全套点一遍试错 = 平均 6 次重生成 = 30 分钟 + 30 美元 spend；(3) **修复**：(a) 短期 — 每个 chip 加 `title` (zh/en 双语描述 "高饱和霓虹 · 暗背景 · 字体未来感")；(b) 中期 — chip hover 弹出 sample 缩略图卡片 (Pinterest 风格)；(c) 长期 — chip 旁加 sample-output 拼贴预览（这是 Midjourney/Krea 行业标准）。 | F341 直系；R85 F267 audience-status label 无 tooltip 同根 (decision input 缺 evidence) |
+| F354 | **MEDIUM · Design tab 全是 global params（违背 "Inspector 改选中元素属性" 心智模型）** | Design tab 4 个 Field (Headline Font / Palette / Layout / Effects) **全部针对整个 carousel**：`updateGlobals` / `applyLayout` / `applyHeadlineFont` / `applyPalette` 4 个 store action 都是 carousel-level。但 Inspector 在 Figma/Sketch/Photoshop 通用心智里是 "改当前选中元素的属性"。AutoViral 把 global toolbar 塞进 Inspector slot = mental model 错位。 | (1) 用户期待"我选了 slide 3 → 改 palette → 只改这一张"，实际是改全部 6 张；(2) 没 per-slide override 机制 — 即使产品决定 globals-only 也该明示 "These settings apply to all slides"；(3) 与 F334 同根 — Editor 整个产品定位混乱：canvas 无 direct-manipulation + Inspector 是全局 toolbar = 实际产品是"carousel 全局调参器"而非 "Editor"；(4) **修复**：(a) 短期 — Design tab top 加 banner "Global settings · applies to all 6 slides"；(b) 长期 — palette 等 per-slide overridable，Design tab 增 toggle "Apply to: This slide / All slides"。 | F334 直系；R88 F314 dev-config vs user-settings 错位家族 |
+| F358 | **MEDIUM · effects 数值 0.00-1.00 无 perceptual meaning（用户无法预测调到 0.5 是什么效果）** | sliders 显示 `grain 0.03 / gradient 0.50 / sharpen 0.00` 三个浮点数 —— **用户无法预判 0.5 vs 0.85 视觉差异**。无 numeric tick mark、无 "low / mid / high" 文字标签、无 live preview thumbnail（虽然 canvas 实时变但缺 before/after 对照）。 | (1) 数值不可读 = 用户瞎拖；(2) 与 Lightroom 等 baseline 不符（曝光 +1.5 vs +2.0 用户知道大致差异，因 unit 是 stops）；(3) **修复**：(a) 短期 — slider label 后加 qualitative scale (`grain 0.03 · subtle / 0.50 · grunge / 0.85 · heavy`)；(b) 中期 — slider 上方加 small live preview thumbnail (40×60px) 实时渲染当前 slide；(c) 长期 — split-view 模式 (`A | B` 同 slide 不同 grain 值并排)。 | F357 同根 — decision-input 缺 evidence |
+| F359 | **MEDIUM · tabs 无键盘快捷键 + Tab 键序不合理** | DOM 实测：3 tabs 全是 `<button role="tab">`，无 `Cmd+1/2/3`、无 `Cmd+]` / `Cmd+[` 切换、无 `g d / g c / g a` keymap。用户必须鼠标点击。Tab 键 (浏览器原生焦点遍历) 经实测会先过 chat panel 全部 button 再到 Inspector tabs，需要 50+ 次 Tab 按下。 | (1) Power user / accessibility user 无键盘路径；(2) 与 R84 F255 (Editor 缺 shortcut surface) 直接联动；(3) **修复**：(a) editor shell 注册 `Cmd+Shift+1/2/3` switch tab；(b) 加 `?` 弹出 shortcut cheatsheet；(c) Tab 顺序按 visual reading order (canvas → inspector → filmstrip) reorder。 | R84 F255 / F338 / F337 keyboard event ownership 大家族 |
+
+### 沉淀
+
+**M138 · tab-state persistence verify 方法学（新增）**
+
+R74-R92 历轮都漏了"跨 tab 切换 state 是否保留"的检查。今轮在 AI tab textarea 输入 → 切 Design tab → 切回 AI tab → DOM 提取 textarea.value 为 `""` 暴露 F353 critical bug。**新加 audit step**：
+
+> 任何 Tabs/Accordion/Modal 组件审计必须执行：(1) interact (type/select/check) inside tab A → (2) switch to tab B → (3) switch back to tab A → (4) DOM verify state preserved。若 unmount-on-hide 是设计选择，UI 必须有"草稿将丢失"warning 或 autosave indicator。
+
+**M139 · prompt-locale 完整 audit 矩阵（升级 R84 M119）**
+
+R84 M119 揭示 chat 侧 prompt-locale leak (chip EN label + ZH prompt)。R93 揭示 Inspector AI 侧 **反向**: chip ZH label + EN prompt。说明 prompt 国际化是**产品级**问题不是局部 leak。新 audit matrix：
+
+```
+For every prompt-bearing action:
+| surface       | label-locale source | prompt-locale source | mismatch? |
+|---------------|---------------------|----------------------|-----------|
+| ChatQuick     | i18n key            | hardcode ZH          | YES       |
+| AITab Quick   | i18n key            | hardcode EN          | YES       |
+| AITab text    | user-typed          | user-typed           | NO        |
+| CopyTab       | (death-only path)   | -                    | -         |
+```
+
+每个 mismatch 都必须文档化 trade-off + 暴露给用户。**未来新增 prompt-bearing UI 必须填这张表才能 merge。**
+
+**M140 · destructive-without-recovery 三层 audit（新增）**
+
+R93 同时暴露 3 处 destructive-without-recovery：F355 (regen-all) / F353 (tab unmount drop typing) / F356 (slider 无 reset)。这不是孤立 bug 而是**全产品缺乏 undo 文化**。新建 audit checklist：
+
+```
+For every state-mutating action, verify recoverability tier:
+- Tier 1 (single-input nudge: slider / chip):        Cmd+Z within 5s
+- Tier 2 (multi-property: palette / layout swap):    Cmd+Z OR snapshot
+- Tier 3 (destructive: regenerate / delete / clear): explicit confirm + snapshot + undo path
+- Tier 4 (irreversible: publish / export):          confirm + clear warning + 1s grace window
+```
+
+R93 揭示 AutoViral 4 个 tier 全部缺位。**修复优先级**：Tier 3 优先（F355 / F345 destructive 是最大损失），Tier 1 次之 (F356 sliders)。
+
+### R94 候选（按严重度倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP · CRITICAL) | F355 + M140 联动 — Regenerate-all 加 `<ConfirmDialog>` + 自动 snapshot | F355 / 用户每次 destructive 损失 6 张图 + 30s+API spend | 必须先于任何 layer-editor 功能补 |
+| 2 (CRITICAL) | F353 + M138 联动 — Inspector AI/Copy tab textarea state 持久化到 Zustand store | F353 / 用户跨 tab 切换丢 prompt | M138 沉淀作为 audit baseline |
+| 3 (CRITICAL · 国际化) | F341 + M139 联动 — chip 改成 `{enPrompt, zhPrompt}` 双 prompt | F341 / 产品级 prompt-locale 分裂 | 需先与 R84 F244 一起做产品级国际化决策 |
+| 4 (HIGH · 死页) | F342 + F344 联动 — CopyTab empty 改 actionable + add-text-layer 入口 | F342 / 死页 = false-advertising | 与 F334 (R92) 真做 layer editor 联动 |
+| 5 (HIGH · 盲盒选择) | F357 + F358 联动 — chips 加 tooltip + preview + sliders 加 qualitative scale | F357 / 用户瞎拖瞎点 | 行业 baseline 升级 |
+
+---
+
+## Round 92 — **Editor 画布 (Stage) direct-manipulation 深审：Delete 键 hijack 把用户踢回 /works + 6 slide 全无 user-editable 层（Editor 名实不符）+ 无 right-click menu / 无 cursor 状态 / 无 add-layer toolbar 全套 direct-manipulation affordance 缺失**
+
+- **时间**：2026-05-12（`/loop 20m` cron 触发 R92；R91 被并行 fix-pass agent 占用 F331 WCAG 修复，本轮使用 R92 编号）
+- **环境**：dev (`localhost:5173/editor/w_20260319_1815_5bb`)，6 slides 已 loaded；en + light theme；通过 `computer.left_click / right_click / hover / key (Arrow/Delete) / scroll (cmd modifier)` 真实键鼠模拟 + DOM-extraction (M131)
+- **触发**：R84 chat panel + R90 chat input 都深审过 chat 侧；canvas 侧 direct manipulation UX 从未碰过。Stage 是图像编辑器最核心交互模型（Figma/Photoshop/Canva 全部以此为主轴），R92 严肃测试 click / drag / right-click / keyboard / hover / scroll 全套
+- **方法学**：M120 zoom + M131 DOM extraction 联用；keyboard 事件直接发送到画布观察行为；交互前后截图对比验证状态变化
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F337 | **CRITICAL · keyboard event hijack 把用户踢出 Editor** | 实测：focus canvas → 按 `Delete` 键 → 页面**立刻 navigate 回 /works**。Canvas 没有 `preventDefault()` 拦截 `Delete` 键 keydown 事件，浏览器/IME 把它当成"Back navigation" trigger（Backspace 同样高危）。所有 editor-context 键盘事件未 trap。 | (1) 用户合理操作"按 Delete 删除选中层"在 AutoViral 上是 "loss-of-context disaster"；(2) 即使有 autosave，用户从画布上瞬间被踢回 /works 列表 = 重大破坏；(3) Backspace 同模式（很多平台 Backspace 也触发 back nav）；(4) Cmd+W 关闭 tab、Cmd+Left/Right 浏览器历史等所有 OS-level shortcut 在 canvas 上下文都需 case-by-case 决定 trap or not。**修复**：editor shell 用 `event.preventDefault()` + `event.stopPropagation()` 拦截在 canvas 区域时所有 navigation-trigger 键；同时对 `Delete/Backspace` 改 callsite 为"删除选中层"或"无操作"。 | 新 family — "keyboard event ownership / context-bound shortcut trap"，与 R88 F312 dev config 同根（产品没界定 user-context vs browser-context） |
+| F334 | **CRITICAL · 产品名实不符 — "Editor" 不是 layer editor** | 测试 work `w_20260319_1815_5bb` 6 slides 全部都是**纯 background image** —— 没有 text overlay、sticker、shape、frame 等任何 user-editable layer。Click canvas 中心无反应（因为没东西可选）；Inspector 显示的 `grain 0.03 / gradient 0.50 / sharpen 0.00` 是**全局滤镜参数**而非 layer-level 属性；filmstrip 在 zh "拖动可排序 / DRAG TO REORDER" 含义也仅是排序，非 layer 操作。 | 产品定位 vs 实现错位：(1) "Editor" 名字暗示 layer editor（Figma/Photoshop/Canva mental model）；(2) 实际是 "carousel slide picker + global filter adjuster"；(3) 用户期待"添加文字标注"（小红书 carousel 必备）但 UI 完全没入口；(4) 与 R88 F312 "dev config vs user settings 定位错误" 同根 —— 这次是 capability vs naming 错位。**修复**：(a) 真做 layer editor — 添加 add-text / add-sticker tooling；(b) 重命名为 "Tuner" / "调参" 切实表达调整滤镜的能力。 | R88 F312 / R87 F303 产品定位错误家族最严重 instance |
+| F335 | **HIGH · empty canvas 无任何 add-layer affordance** | 空选中状态下 canvas 没有 toolbar、没有右键 "+ Add Text"、没有 hover hint、没有 placeholder "Click here to add text"。整个 540×675 canvas 只有 background image 渲染，**用户没有任何视觉线索能加东西**。对比：Canva 在 empty canvas 显示 ghost text "Click anywhere to add text"；Figma 用 toolbar tool selection；Photoshop 用左侧 tool palette。 | (1) 新用户第一次进 Editor 不知道这里能做什么；(2) 即使是老用户，每次也得通过 Inspector 切换 tab 才能"间接"操作 —— direct manipulation 通道完全空白；(3) **修复**：(a) 短期 — canvas 上方加 floating toolbar 显示 "T 文字 / 🏷️ 标签 / 📐 形状"；(b) 长期 — 实现 click-to-place 模型（click 空白区放置 text node）。 | 与 R87 F303 Library/Chat empty-state 不对称同根 |
+| F332 | **HIGH · 无 right-click context menu** | 右键点击 canvas（实测点击 (742, 355)）：**完全无反应**，无自定义 context menu，无操作选项。 | (1) Power user 期待 right-click → Copy / Cut / Duplicate / Bring to front / Send to back / Delete / Lock；(2) 仅靠 chat prompt 修改 carousel 是 chat-only mental model，违背 direct-manipulation tool 范式；(3) **修复**：用 `<ContextMenu>` 组件，layer 选中时 right-click 显示 layer-level 菜单；canvas 空白处 right-click 显示 add-layer / paste / select-all。 | 新 family — "context menu missing"，与 F335 add-layer affordance 同根 |
+| F336 | **HIGH · cursor 永远 `auto` 不变化** | 实测 hover 在 canvas 中心：`getComputedStyle(canvas).cursor === "auto"`。无论 hover 在 image / 边角 / 空白处，cursor 始终是默认箭头。 | (1) cursor 是用户预测 affordance 的核心信号 — Photoshop 在 move tool 下显示 `move`，在 text tool 下显示 `text`，在 hand tool 下显示 `grab`；(2) AutoViral cursor 不变 = 用户不知道 hover 区域可不可以点击/拖拽/选中；(3) **修复**：layer 可选区域 `cursor: pointer`，可拖拽区域 `cursor: move`，hover 在 transform handle `cursor: nw-resize` 等 8 个方向 handles。 | F335 同根 — direct-manipulation affordance 全套缺失 |
+| F338 | **MEDIUM · 键盘 Arrow 键无任何 effect** | 实测 focus canvas 后按 `ArrowRight × 3`：(a) 没有 nudge selected layer（因为无选中）；(b) 没有 slide nav（Right Arrow 在 Photoshop/Canva 切下一 slide）；(c) 没有 scroll viewport。完全无响应。 | (1) 浪费天然的快捷键空间 — Arrow 应该 slide nav（→ 下一张，← 上一张），Shift+Arrow 应该 nudge（如有选中），Cmd+Arrow 应该 jump first/last slide；(2) 同 Figma：方向键 nudge 1px、Shift+方向键 nudge 10px；(3) **修复**：(a) editor 接管 ArrowLeft/Right → filmstrip-prev/next slide；(b) Shift+方向键 → 选中层 nudge；(c) Up/Down → 切换 inspector tab 或忽略；(d) Tab → 循环选中 layer。 | R84 F255 无 keyboard shortcut surface 同根；F337 keyboard event ownership 直系 |
+| F333 | **MEDIUM · slide swap 瞬间硬切无 transition / 选中状态丢失警告** | filmstrip 点击 slide 2 → canvas image 瞬间替换；无 fade、无 slide animation、无 loading state；从 zh translates "DRAG TO REORDER" 看是 reorder-only 概念。同时如果用户在 slide 1 有 selection（未来支持 layer 后），切到 slide 2 会**静默丢失选区**无 confirmation。 | (1) 瞬间硬切让用户失去"现在我在哪张"的空间感（虽然 filmstrip 高亮变了但中心 canvas 没动画线索）；(2) 静默选区丢失 = 用户误点 filmstrip 然后回 slide 1 发现选区没了；(3) **修复**：(a) slide swap 加 150-200ms cross-fade；(b) 切 slide 时若当前有 unsaved layer edit / selection 给 toast 提示。 | 与 R82 F229 toggle hit-target / R85 F271 interaction-time CLS 同根 — "状态过渡缺反馈" |
+| F339 | **MEDIUM · Cmd+scroll zoom 无效** | 实测 Cmd+scroll up 在 canvas 中心：viewport 没有 zoom 变化（既无 canvas zoom，也无 page zoom 因为浏览器层 zoom 通常是 Cmd+Plus）。 | (1) 图像编辑器 baseline：Cmd+scroll 或 pinch gesture 缩放画布；Figma/Photoshop/Canva 全实现；(2) 当前 6 slide 是 1080×1350 但 canvas 渲染只有 540×675 —— 用户想看细节没有任何 zoom 入口；(3) **修复**：canvas 上加 `wheel` listener，Cmd 修饰键时 `event.preventDefault()` + 调用 `stage.scale({x: newScale, y: newScale})`。 | F337 keyboard event ownership 同根 — direct-manipulation 该有的全没有 |
+| F340 | **LOW · canvas 缺 viewport indicator** | canvas 区域无 zoom-level indicator (`100%`)，无 viewport coords indicator (`x: 200, y: 300`)，无 rulers，无 grid。 | (1) 创作者要精准对齐时无参照；(2) 与 CLAUDE.md "editorial · 克制 · 现代质感" 调性不冲突 — 可以做成左下角 mono micro-text `100% · 200,300` 不破坏视觉；(3) **修复**：左下角 floating mono panel 显示 `{zoom}% · {x},{y}`。 | 新 family — "professional tool measurement primitives" |
+
+### 沉淀
+
+- **M135 [新方法学]**：**Keyboard event ownership audit**。F337 揭示 canvas-context 没有 trap `Delete` 键导致 navigation hijack。**沉淀规则**：任何 modal-ish surface（editor canvas / chat input / drawer / overlay）必须显式声明对哪些 keyboard event 拥有 ownership：
+  - **必须 trap**：`Delete / Backspace / Cmd+W / Cmd+Left / Cmd+Right / Esc` — 这些有 OS-level / browser-level 默认行为
+  - **可选 trap**：`Arrow keys / Tab / Cmd+Z / Cmd+S / Cmd+E` — 应用如果有自定义实现则 trap
+  - **不要 trap**：`Cmd+T 新 tab / Cmd+R 刷新 / Cmd+Q 退出 / Cmd+Shift+T` 等 OS 级
+  - **审计方法**：每个 modal surface 列一张 keyboard ownership matrix；任何 default browser action 与 user-context expected action 冲突的键必须 trap。
+  - **Why**：F337 这类 hijack 是产品稳定性"幽灵 bug"——用户偶发遇到一次损失工作就会永久 churn。
+  - **How to apply**：所有 editor / canvas / modal 类 surface 审计时跑 `Delete + Backspace + Cmd+Left + Cmd+Right + Esc` keyboard suite，截图前后页面状态。
+
+- **M136 [新方法学]**：**Direct-manipulation affordance audit**。F332/F335/F336/F338/F339/F340 六个 finding 同根：AutoViral Editor 名字暗示 direct-manipulation tool（Figma/Photoshop/Canva mental model）但实际是 chat-driven indirect-manipulation 工具。**沉淀规则**：任何 "Editor" / "Designer" / "Canvas" 命名的 surface 必须满足 direct-manipulation 7 项 baseline：
+  1. **Cursor state**：hover 不同区域 cursor 变化（pointer/move/text/resize）
+  2. **Selection feedback**：click 对象立刻显示 bounding box + transform handles
+  3. **Right-click context menu**：操作选项
+  4. **Keyboard ownership**：方向键 nudge、Delete 删除、Ctrl+D duplicate、Esc 取消选中
+  5. **Add-thing affordance**：empty canvas 显示 add-layer toolbar / floating CTA
+  6. **Zoom**：Cmd+scroll / pinch / fit-to-view button
+  7. **Measurement**：zoom-level indicator + coord readout
+  - **判定**：满足 < 4 项 → 不是 direct-manipulation editor，应改名为 "Configurator" / "Tuner" / "Viewer"；满足 ≥ 4 项 → 补齐另外 ≤ 3 项升级到完整 baseline。
+  - **Why**：F334 揭示 AutoViral Editor 当前 7/7 baseline 全空 — 与命名严重错位。
+  - **How to apply**：所有 editor-shaped surface 跑 7 项 baseline checklist。
+
+- **M137 [新方法学]**：**State transition transparency**。F333 slide swap 瞬间硬切 + 选区静默丢失同根：状态变化没有 reveal-itself 信号。**沉淀规则**：所有破坏性状态变化（slide swap / locale switch / theme toggle / undo / delete）必须满足三项：(a) **过渡动画** 100-200ms（不闪烁但显示发生了变化）；(b) **状态丢失警告**（如有 unsaved edit）；(c) **可撤销窗口** 3-5s undo banner。
+  - **Why**：与 R85 F271 interaction-time CLS + R90 F329 send 无 undo 缓冲家族同根 — "用户对系统行为的可预测性"。
+  - **How to apply**：每个状态变化 trigger audit 时 checklist 三项。
+
+### R93 候选
+
+| # | 优先级 | 候选 | Why |
+|---|---|---|---|
+| 1 | **TOP · CRITICAL · 数据保护** | F337 + M135 联动 — Editor shell 加 keydown listener trap `Delete/Backspace/Cmd+ArrowLeft/Cmd+ArrowRight/Esc`；当前 surface 是 canvas 时全部 preventDefault | navigation hijack 是 production blocker；用户损失工作 = 永久 churn |
+| 2 | **CRITICAL · 命名 vs 实现** | F334 + M136 联动 — 两选一战略决策：(a) **真做 layer editor** — 添加 add-text / sticker / shape 工具 + 7 项 baseline；(b) **改名为 Tuner / 调参** — 把 carousel slide picker + filter adjuster 命名准确化 | 产品定位错位 7 个 finding 同根；不能再单点修补 |
+| 3 | HIGH | F335 + F332 联动 — canvas 上方加 floating toolbar 显示 add-layer actions；canvas 空白处 right-click 显示 add-paste-select menu | direct-manipulation 入口建立 |
+| 4 | HIGH | F336 + F338 + F339 联动 — cursor state CSS class 切换 + Arrow keys 接管 (slide prev/next) + Cmd+scroll zoom | direct-manipulation 7 项 baseline 一次性补 5 项 |
+| 5 | MEDIUM | F333 + M137 联动 — slide swap 加 150ms cross-fade + selection-lost toast | 状态过渡 transparency 一次升级 |
+| 6 | MEDIUM | F340 - canvas 左下角 floating mono `100% · 0,0` indicator | 专业工具测量 baseline |
+| 7 | METHOD | M135/M136/M137 写入 `.claude/rules/e2e-testing.md` — 现累计 4 verify gate + 12 audit checklist | 方法学体系持续扩展 |
+
+---
+
 ## Round 91 — **R90 F331 CLOSED ✅ WCAG 2.4.7 全局 form control focus-visible 修复：chat textarea + drawer inputs + range sliders 全部获 accent outline ring**
 
 - **时间**：2026-05-12（`/loop 30m e2e-report fix` 第 8 轮触发）
