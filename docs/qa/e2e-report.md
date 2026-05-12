@@ -6,6 +6,142 @@
 
 ---
 
+## Round 76 — **F184 CLOSED ✅ /explore 假数据 leak 在数据平面根治：dev fixture 不再能冒充 production research**
+
+- **时间**：2026-05-12（用户 `/loop 30m e2e-report fix` 第 3 轮触发，:13 cron fire）
+- **环境**：dev (`localhost:5173/explore`)，浏览器截图为唯一通过证据
+- **触发**：R75 列出 6 条候选，挑 F184 placeholder leak（最具杠杆——根因在数据平面，不在 UI 文案）
+
+### 根因诊断
+
+`/explore 小红书 tab` 出现 6 条带 italic「Hook example 0/1/2/3/4/5」副标题、`xhs_demo*` ids、`xiaohongshu.com/explore/demoN` 假 URL 的卡片。R75 F184 把它判定为「placeholder leak 大扫除」，但代码侧深查发现真正的根因比 UI 字符串更深：
+
+- `scripts/sample-trend.cjs`（dev 时手动 run 的 fixture 脚本）把 demo 数据写到 `~/.autoviral/trends/xiaohongshu/${today}.yaml`
+- `src/server/api.ts` 的 `GET /api/trends/:platform` 用 **latest-yaml-by-name** 策略读取（`files.filter(f => f.endsWith(".yaml")).sort().reverse()[0]`）
+- 任何时候 sample 脚本运行过，今天的 fixture 就会**自然覆盖**真实 collector 写出来的同日 yaml（也叫 `${today}.yaml`）
+- 前端 adapter 直接读 `raw.items` —— 没有任何「这是 demo 数据」的标记可识别
+
+**这是 dev fixture 与 production data 共享文件命名空间** 的经典 leak 模式。修 UI 文案治标不治本，下次 sample 脚本一跑又会复现。
+
+### 修复
+
+**1. `scripts/sample-trend.cjs` —— 输出文件名改前缀**
+
+```diff
+- fs.writeFileSync(path.join(dir, `${today}.yaml`), ...)
++ const outName = `__sample-${today}.yaml`;
++ fs.writeFileSync(path.join(dir, outName), ...)
+```
+
+**2. `src/server/api.ts` —— GET endpoint 静态 filter**
+
+```diff
+- const yamlFiles = files.filter(f => f.endsWith(".yaml")).sort().reverse();
++ const yamlFiles = files
++   .filter(f => f.endsWith(".yaml") && !f.startsWith("_") && !f.startsWith("."))
++   .sort()
++   .reverse();
+```
+
+**3. 现有 leaked yaml 重命名为 `__sample-2026-05-12.yaml`** —— 让 API 立刻 fall back 到上一个真数据 yaml（`2026-05-11.yaml`），那个文件用旧 schema `topics:`，frontend adapter 只读 `items` 字段所以返回 `[]`，UI 进 honest empty state。
+
+### 浏览器实证
+
+| 平台 tab | 修复前 | 修复后 |
+|---|---|---|
+| 小红书 | 6 张 demo 卡片 `xhs_demo0..5` + "Hook example N" italic 副标题 | **"该平台尚未采集到趋势——点击顶部「立即采集」。" honest empty state** ✅ |
+| YouTube | "AI Business Ideas & Tools 2026" 真数据 | **无 regression**，4 条真 trends 全部正常渲染 ✅ |
+
+截图 ss_4876ozpyf (YouTube tab 真数据) / ss_49650qfit (小红书 tab honest empty state) 已存。
+
+### 桥梁哲学命中（M104 L4 层防御）
+
+R75 沉淀的 M104「silent failure 四级升级」里：
+- L1 dead button —— 用户立刻察觉
+- L2 silent swallow error —— 操作消失但用户可重试
+- L3 theater UI —— 假装在工作，用户被骗等待
+- **L4 broken data 0** —— **假装有结果，用户被骗决策**
+
+F184 的本质就是 L4：用户看到 6 条「真实」trending 卡片，会基于「这是平台热度信号」做内容选题决策。但这是假数据。修 UI 文案（比如加「演示」标签）只能降一级到 L3，**真正的根治是在数据层让假数据不可能上桌**。本轮的修复路径——dev fixture 改名 + API 静态 filter——是 L4→L0（数据平面就不存在 leak 通道）的彻底防御。
+
+与 R74 (F155/F157 输入边界 guard) 同模式：**所有可疑信号都要在能被 UI 渲染之前就被拦截**，不要 leak 到用户视觉里再去解释。
+
+### Sediment
+
+- **M107 — dev fixture 与 production data 必须强 namespace 分离**：共享文件名空间的代价是某一天某次 dev 操作就会冒充生产数据。最低成本的强 namespace 是**文件名前缀约定** + **API 层 static filter**（双层防御，光靠脚本约定不够——人会忘）。
+- **M108 — 「latest-by-name」选数据源策略必须配合 namespace gate**：`files.sort().reverse()[0]` 是 lazy 但脆弱的选最新策略；只要任何带相同后缀但更"晚"的文件混进目录就被选中。修复方式：要么改成「latest-by-mtime + source tag」，要么显式 filter 掉非 production 命名空间的文件（本轮选后者，最小改动）。
+
+### 候选 (R77)
+
+仍来自 R75 候选清单：
+
+- **R77 #1** F186 system honesty leak 同族病 ——「[SAMPLE] · 当前为静态推荐（算法尚未接入）· FIT 84 · 5.2M est. reach · 演示」属于产品自暴 mock，本轮没动；同族需要立产品级规则
+- **R77 #2** F181 hero "立即采集热门趋势" theater UI 实证 —— 本轮重启 API server 后没有重测 hero 按钮真正能不能跑通 `researchTrends`，要确认它不会陷入永久 pending
+- **R77 #3** F182 / F183 切角卡 / 列表项 CTA dead 状态 —— 「生成 →」当前 disabled 但视觉上和正常 button 区分不够明显
+- **R77 #4** F188 / F177 时间维度 picker family (R73 + R75 sediment) —— 跨页统一组件
+
+### 关联
+
+- closes **F184** (xiaohongshu placeholder leak)
+- 落 **M107 / M108** sediment (namespace 分离 + 数据源选取策略)
+- 防御 **M104-L4**（broken-data-0 fake-as-real）在数据平面
+
+commit: `4051120 fix(trends): F184 — dev fixture data can no longer leak into /explore`
+
+---
+
+## Round 75 — **/explore 灵感漏斗深查：editorial demo 与可信生产线断裂——3 个 CTA 全 dead/theater + placeholder leak + 平台数据成熟度极不对称**
+
+- **时间**：2026-05-12 19:00 本地（`/loop 20m` `105f4ef8` cron R75 fire）
+- **环境**：dev (`localhost:5173/explore`)，浏览器截图为唯一通过证据
+- **测试路径**：进入 /explore → 点 hero "立即采集热门趋势" → 点 "AutoViral 推荐你追的三个切角 #01 生成 →" → 点小红书 #01 "采集" 按钮 → 切到 YouTube tab → 再切回小红书。每步 console + network 双验证。
+
+### Deep finding (10 条, F181-F190)
+
+| F# | 严重度 | 核心 |
+|---|---|---|
+| **F181** | **CRITICAL · theater UI** | hero "立即采集热门趋势" 点击后切到 "采集中..." 永久 pending，**0 个 network 请求** —— 不是 silent error 是 theater UI（假装在工作的 dead button）。无 spinner / ETA / cancel / timeout fallback / error 状态。比 R72 F161 (export silent close) 更毒：用户被骗以为后台在跑。 |
+| **F182** | **CRITICAL · dead CTA** | 切角卡 3 个 "生成 →" 全 dead — click 无 navigation/toast/state/network。"生成" 是产品最核心动词，dead 等于核心断裂。 |
+| **F183** | HIGH · dead CTA | 小红书列表 1-4 条 "采集" 按钮全 dead — 0 network requests。Card 上的次级 CTA 也全死。 |
+| **F184** | HIGH · placeholder leak | 小红书列表 6 条全部带 italic "look example 0/1/2/3/4/5" 副标题 —— 开发期占位字符串直接 leak 到生产 UI。 |
+| **F185** | HIGH · 平台数据成熟度严重不对称 | YouTube tab 加载 24 条真标题（"The Boys S5E7 Trailer"/"aespa 'WDA' MV"/"CORTIS 'ACAI'"），小红书 tab 加载 6 条 "look example N" 假数据。切换平台时用户瞬间识破"产品宣称 4 平台，深度只在 1 个"。 |
+| **F186** | HIGH · 算法自暴 mock | "AutoViral 推荐你追的三个切角 [SAMPLE]" 副标题 "当前为静态推荐（算法尚未接入）" + 卡上 "FIT 84 · 5.2M est. reach · 演示" / "演示" / "演示" —— 产品自暴 mock。R72/R73 silent-honesty leak 同族病。 |
+| **F187** | HIGH · 状态徽章无规则 | Cards 状态徽章 5 种混杂："🔥 趋势" / "蓄势" / "红海" / "Agent 待定" / 无 —— "Agent 待定" 是内部排程术语。状态域需要 3 态：真实/placeholder/waiting，且不暴露 agent 调度词。 |
+| **F188** | MEDIUM · 时间窗口锁定 | "前 6 · 24H" / "前 24 · 24H" 硬编码 label，无 picker（vs YouTube Studio 标准 7d/28d/90d/365d）。与 R73 F177 (/analytics) 形成 sediment：**整产品时间维度 picker family 缺失**。 |
+| **F189** | MEDIUM · 数量级差无解释 | hero 副 row "聚合自 YouTube, TikTok, 小红书, 抖音"，但小红书 = 6 条 / YouTube = 24 条（4x 级差），TikTok/抖音 tab 未测。同样宣传"聚合"但容量不平等且无标注。 |
+| **F190** | MEDIUM · eyebrow 误导 affordance | "算池脉搏" caps eyebrow 像 dashboard 心跳指示，但纯静态文本无 status dot/timestamp/click。R73 M99 (affordance 必须 derived state) 跨页复现。 |
+
+### 沉淀 — M104 / M105 / M106
+
+- **M104** `silent failure 四级升级`：M88 三级 → 四级。新一级是 theater UI。从轻到重排序：
+  1. **L1 dead button** (R74 F183 小红书采集) —— click 无反应、用户立刻察觉
+  2. **L2 silent swallow error** (R72 F161 export modal silent close) —— 操作消失，用户疑惑但还可重试
+  3. **L3 theater UI** (R75 F181 hero "采集中...") —— **假装在工作，用户被骗等待**
+  4. **L4 broken data 0** (R73 F172 /analytics KPI "0") —— **假装有结果，用户被骗决策**
+  共同点：用户被给出错误确定性信号。L1 < L2 < L3 < L4 的本质是"骗的时长 × 行动错配深度"。
+
+- **M105** `灵感漏斗三段 trust 必须从首段建立`：发现→选择→行动。/explore 是首段（看），若首段就 placeholder + 算法未接入 + dead/theater CTA，用户对后续两段（选 / 行动）的相信归零。/explore 当前承担的是**反 trust 推力**。
+
+- **M106** `双平台数据成熟度不对称是比 dead CTA 更隐蔽的定位风险`：YouTube 接通 + 小红书全 mock 让 sophisticated 用户瞬间看穿。产品要么**全平台同步推进**，要么**显式 disable 未就绪平台 tab**（grey out + "即将上线"）。当前是最差选项：所有 tab 都打开但深度参差暴露给用户。
+
+### 检视 R75 vs 前 4 轮（R70/R71/R72/R73）
+
+- R70/R72 集中在 Studio dialog/export modal —— 操作层 silent failure
+- R73 集中在 /analytics —— 数据消费层 broken data
+- **R75 集中在 /explore —— 发现/入口层 theater UI** —— 这是产品 first-impression face
+- 三层联动：first-impression 反 trust（R75）→ 操作层不可信（R70/R72）→ 数据消费层骗信号（R73）。**用户路径 funnel 全程都有 trust leak**。
+
+### R76 候选
+
+- **#1 (TOP)** F181 + F182 + F183 一并改 dead/theater CTA：删 fake state OR 接真后端 OR 显式 "敬请期待"。/explore first-impression trust 必修。
+- **#2** F184 placeholder leak 大扫除 —— "look example N" 字符串 grep + 替换为真数据或 empty state。
+- **#3** F185 + F189 + M106 联动 —— 平台 tab 数据成熟度统一：disable + roadmap 标记。
+- **#4** F186 system honesty leak 同族病（R72/R73/R75 三 round 复现）—— 立产品级规则：内部 mock/algorithm/agent 状态不暴露给用户。
+- **#5** F188 时间维度 picker family（R73 + R75 sediment）—— 统一组件。
+- **#6** M104 silent failure 四级文档化，并加 lint rule 防新 theater UI 落地。
+
+---
+
 ## Round 74 — **F155 + F157 CLOSED ✅ agent 输入边界双 guard：Seedance duration enum 锁死 + 空 timeline quick-action 守卫**
 
 - **时间**：2026-05-12（用户给 `/loop 30m e2e-report fix` 第 2 轮，:43 cron fire）
