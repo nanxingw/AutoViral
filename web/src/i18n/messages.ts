@@ -70,8 +70,8 @@ export const en = {
     draftsLabel: "drafts",
     ideasLabel: "ideas in queue",
     payoffPrefix: "and",
-    payoffSuffixSingular: "unfinished payoff scene waiting for you.",
-    payoffSuffixPlural: "unfinished payoff scenes waiting for you.",
+    payoffSuffixSingular: "short-video draft still in the works.",
+    payoffSuffixPlural: "short-video drafts still in the works.",
     subtitle: "No autopilot, no schedule. You decide what to chase next.",
   },
   editor: {
@@ -587,8 +587,8 @@ export const zh: DeepShape<Messages> = {
     draftsLabel: "份草稿",
     ideasLabel: "个灵感待打磨",
     payoffPrefix: "还有",
-    payoffSuffixSingular: "个待完成的 payoff 场景。",
-    payoffSuffixPlural: "个待完成的 payoff 场景。",
+    payoffSuffixSingular: "段短视频草稿在路上。",
+    payoffSuffixPlural: "段短视频草稿在路上。",
     subtitle: "没有自动驾驶，没有时间表——下一步追什么由你决定。",
   },
   editor: {

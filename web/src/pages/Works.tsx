@@ -28,7 +28,9 @@ export default function Works() {
 
   const counts = useMemo(() => ({
     drafts: list.filter((w) => w.status === "draft").length,
-    ideas: 0,
+    // R98 F403 — ideas field was hardcoded 0; dead branch removed from
+    // WorksHero. If an ideas-queue stage is added later, re-introduce
+    // this with a real source.
     unfinished: list.filter((w) => w.status === "draft" && w.type === "short-video").length,
   }), [list]);
 
@@ -65,7 +67,7 @@ export default function Works() {
 
   return (
     <main className="page">
-      <WorksHero draftCount={counts.drafts} ideaCount={counts.ideas} unfinishedSceneCount={counts.unfinished} />
+      <WorksHero draftCount={counts.drafts} unfinishedSceneCount={counts.unfinished} />
 
       <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 18, gap: 16, flexWrap: "wrap" }}>
         <h2 style={{ fontSize: 22, margin: 0, fontWeight: 500, letterSpacing: "-0.02em" }}>
@@ -124,7 +126,14 @@ export default function Works() {
             />
           </div>
           <div style={{ display: "flex", gap: 4 }}>
-            {(["all", "draft", "processing", "published", "archived"] as const).map((f) => {
+            {/* R98 F395 — "published" / "archived" filter pills hidden until
+               the backend actually emits those statuses (see
+               queries/works.ts). Their counts are always 0, so they were
+               occupying prime nav real estate while deceiving users into
+               thinking publishing was a real feature. WorkFilter union
+               keeps both members so URL-param re-entry stays type-safe
+               if the feature comes back. */}
+            {(["all", "draft", "processing"] as const).map((f) => {
               const n = filterCounts[f];
               const isEmpty = n === 0;
               const isActive = filter === f;
@@ -154,7 +163,11 @@ export default function Works() {
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 56 }}>
+      {/* R98 F398 — grid was hardcoded `repeat(3, 1fr)`, which on a 2560px
+         viewport left two empty columns (only NewWorkCard renders here).
+         auto-fill + minmax matches WorksGrid below and lets the new-work
+         card sit alongside future starter cards as the surface grows. */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16, marginBottom: 56 }}>
         <NewWorkCard />
       </div>
 

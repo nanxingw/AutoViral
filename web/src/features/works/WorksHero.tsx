@@ -1,31 +1,29 @@
+import { useT } from "@/i18n/useT";
 import styles from "./WorksHero.module.css";
 
 interface Props {
   draftCount: number;
-  ideaCount: number;
   unfinishedSceneCount: number;
 }
 
-export function WorksHero({ draftCount, ideaCount, unfinishedSceneCount }: Props) {
+export function WorksHero({ draftCount, unfinishedSceneCount }: Props) {
+  const t = useT();
+  const payoffSuffix = unfinishedSceneCount === 1
+    ? t("worksHero.payoffSuffixSingular")
+    : t("worksHero.payoffSuffixPlural");
   return (
     <section className={styles.wrap}>
       <div className={styles.eyebrow}>
         <span className={styles.dot} />
-        <span className="eyebrow">PICK UP WHERE YOU LEFT OFF</span>
+        <span className="eyebrow">{t("worksHero.eyebrow")}</span>
       </div>
       <h1 className={styles.h1}>
-        <span className={styles.num}>{draftCount}</span> drafts
-        {ideaCount > 0 && (
-          <>
-            ,{" "}<em>{ideaCount} ideas</em> in queue
-          </>
-        )}
+        <span className={styles.num}>{draftCount}</span> {t("worksHero.draftsLabel")}
         ,<br />
-        and <em>{unfinishedSceneCount}</em> unfinished payoff{" "}
-        {unfinishedSceneCount === 1 ? "scene" : "scenes"} waiting for you.
+        {t("worksHero.payoffPrefix")} <em>{unfinishedSceneCount}</em> {payoffSuffix}
       </h1>
       <div className={styles.sub}>
-        <span>No autopilot, no schedule. You decide what to chase next.</span>
+        <span>{t("worksHero.subtitle")}</span>
       </div>
     </section>
   );

@@ -1,4 +1,4 @@
-.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 56px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin-bottom: 56px; }
 /* The card wrapper is the positioning anchor for the absolutely-positioned
    WorkCardMenu and the inner Link. We keep visual styles (border, radius,
    overflow, aspect-ratio, hover) on this wrapper so the card outline +
@@ -68,15 +68,3 @@ img.thumb, video.thumb { object-fit: cover; }
   backdrop-filter: blur(8px);
 }
 .badgeDraft { color: var(--accent); border-color: var(--accent); }
-.typeTag {
-  position: absolute; top: 12px; right: 12px;
-  padding: 3px 7px;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  border-radius: 5px;
-  background: rgba(10,11,15,0.55);
-  color: rgba(255,255,255,0.85);
-  border: 1px solid rgba(255,255,255,0.12);
-  backdrop-filter: blur(8px);
-}
