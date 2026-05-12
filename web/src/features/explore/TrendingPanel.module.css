@@ -25,12 +25,19 @@
 }
 .thumb[data-aspect="16:9"] { width: 80px; height: 45px; }
 .thumb[data-aspect="1:1"]  { width: 60px; height: 60px; }
-/* Broken-image state: stripped src + accent-glow gradient placeholder.
-   font-size 0 hides the alt-text leak that browsers show inside the img
-   bounding box when the cover URL is unreachable (proxy / hotlink). */
+/* Broken-image state: img src is swapped to a transparent 1×1 by the
+   onError handler (suppresses Chrome's broken-glyph), then this background
+   shows through. The accent diagonal stripe pattern stays visible in both
+   dark and paper themes — single-tone gradients with --accent-glow looked
+   blank in paper. */
 .thumb[data-broken="true"] {
-  background: linear-gradient(135deg, var(--accent-glow), var(--surface-2));
-  font-size: 0;
+  background:
+    repeating-linear-gradient(
+      135deg,
+      var(--accent-lo) 0 6px,
+      var(--surface-2) 6px 12px
+    );
+  border: 1px dashed var(--accent-lo);
 }
 .sourceBadge {
   font-family: var(--font-mono);

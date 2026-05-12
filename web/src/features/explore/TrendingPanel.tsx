@@ -44,13 +44,17 @@ export function TrendingPanel({ platform, items }: { platform: Platform; items: 
             alt={item.title}
             loading="lazy"
             data-aspect={item.cover.aspect}
-            // Hide alt-text leak when the remote CDN is unreachable (proxy /
-            // hotlink blocks). Show a clean accent-tinted placeholder via the
-            // empty src triggering the .thumb gradient background.
+            // Swap to a valid-but-transparent 1×1 SVG data URI when the remote
+            // cover is unreachable (CDN proxy/hotlink block). `removeAttribute`
+            // or empty-string src still triggers Chrome's broken-image glyph
+            // *on top of* our CSS gradient — a valid transparent src suppresses
+            // that glyph so .thumb[data-broken] shows cleanly.
             onError={(e) => {
               const img = e.currentTarget;
-              img.removeAttribute("src");
+              if (img.dataset.broken === "true") return;
+              img.src = "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%2F%3E";
               img.setAttribute("data-broken", "true");
+              img.removeAttribute("alt");
             }}
           />
           <div>
