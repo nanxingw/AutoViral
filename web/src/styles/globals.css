@@ -118,6 +118,19 @@ a:focus-visible,
   border-radius: 6px;
 }
 
+/* R90 F331 (WCAG 2.4.7 Level AA) — form controls also need a visible
+   focus indicator. Kept as a separate block so we don't overwrite the
+   element's own border-radius (inputs/textareas typically set their
+   own; buttons above use 6px as a fallback). The chat composer
+   textarea declared `outline: none` inline, which without this rule
+   left keyboard users with zero focus feedback. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+
 /* Accent colour swatches — proper visible discs */
 button[data-accent-swatch="violet"] { background: #c084fc !important; }
 button[data-accent-swatch="cyan"]   { background: #7dd3fc !important; }
