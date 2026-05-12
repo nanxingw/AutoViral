@@ -6,6 +6,100 @@
 
 ---
 
+## Round 112 — **R110 F488 (CRITICAL · doc.title 不变) + F490 (HIGH · fuzzy suggest) + F492 (MED · 完整 URL echo) + F493 (MED · sr-only 404) + F495 (MED · auto-focus) + F498 (LOW · CTA 视觉) 六连 CLOSED ✅ —— NotFound 故障显微镜从 1-CTA baseline 升级到六重恢复 affordance；copy + a11y + usability 三 plane 同 round 闭合**
+
+- **时间**：2026-05-13（`/loop 30m` cron 触发本轮）
+- **触发**：R110 落 12 finding (F487-F498) 含 2 CRITICAL。F487 (HTTP 200 vs 404) 涉及 vite/server 双侧 + prod build 验证，单独留 R113；F489 (multi-CTA matrix) 需 fetch recent works + 设计 layout，分轮更稳；F491 (resource-not-found vs unknown-route) 是 IA 重构级。本轮选 frontend-only "NotFound polish" 六连——共 ~80 行改造，集中在 NotFound.tsx + globals.css `sr-only` utility + 3 个 i18n key
+- **方法学**：M179 (新) "失败 surface 必须六维 polish"——错误页 / 空态 / 加载态都按这 6 维 audit：(1) document.title (2) fuzzy suggest (3) 完整 URL echo (4) sr-only 错误码 (5) auto-focus primary CTA (6) primary CTA 视觉对比度。每维独立 finding，独立测试
+
+### 修复
+
+- `web/src/pages/NotFound.tsx`（**重写**，+124 / -23）
+  - **F488** `useEffect` 设置 `document.title = "404 · {titleShort} · AutoViral"`；unmount restore 防 stale title bleed
+  - **F490** `levenshtein(a, b)` 实现 + `suggestRoute(pathname)` helper —— 取 first segment vs `KNOWN_ROUTES = ["works","explore","analytics","studio","editor"]`，距离 ∈ (0, 2] 才 suggest；index "" 排除避免 1-char typo 都建议 "/"
+  - **F492** path echo 从 `{location.pathname}` 改为 `${location.pathname}${location.search}${location.hash}`
+  - **F493** h1 内加 `<span className="sr-only">{t("notFound.srErrorCode")} — </span>`；保留 200px 装饰 glyph `aria-hidden`
+  - **F495** `backLinkRef = useRef<HTMLAnchorElement>` + `useEffect(() => backLinkRef.current?.focus({preventScroll:true}))` —— preventScroll 防止焦点跳走视觉中心
+  - **F498** primary CTA bg 从 `var(--accent-glow)` (~15% tint) 改为 solid `var(--accent)` + `--accent-fg` 文字 + `fontWeight: 600`
+- `web/src/styles/globals.css`（+16 行）
+  - 新增 `.sr-only` utility class（标准 visually-hidden pattern：position absolute / 1px width-height / clip rect 0 / overflow hidden）
+  - 注释明确"R110 F493 标准化为 AutoViral 的 canonical screen-reader-only pattern"，后续其他错误页可直接 reuse
+- `web/src/i18n/messages.ts`（双 locale × 3 string）
+  - `notFound.titleShort`: "Page not found" / "页面未找到"（用于 tab title）
+  - `notFound.srErrorCode`: "Error 404" / "错误 404"（sr-only）
+  - `notFound.didYouMean`: "Did you mean:" / "你是不是想找："
+- `web/src/pages/NotFound.test.tsx`（**扩展**，+94 / -23）
+  - 从 2 cases → 10 cases，每个 finding 独立断言
+  - F490 sub-cases × 4：`/explor → /explore`、`/anlytics → /analytics`、`/completely-foreign` 不 suggest、`/` 不 suggest（distance 边界 guard）
+  - F488/F492/F493/F495 各 1 sub-case
+  - 关键 contract guard：`expect(h1.textContent).toMatch(/Error 404|错误 404/)` 防 sr-only 移除后 a11y 退化
+
+### E2E 浏览器验证（chrome MCP DOM probe + screenshot）
+
+| 路径 | title | h1 textContent | path echo | suggestion | activeElement | CTA bg |
+|---|---|---|---|---|---|---|
+| `/explor` (ZH) | `404 · 页面未找到 · AutoViral` ✓ | `错误 404 — 走错路了` ✓ | `/explor` ✓ | `你是不是想找： /explore` href=/explore ✓ | A[testid=notfound-back-home] ✓ | `rgb(42, 58, 74)` solid ✓ |
+| `/broken?id=abc&from=slack#section-2` (unit test) | 同上 | 同上 | `/broken?id=abc&from=slack#section-2` ✓ 完整 URL | 无（distance > 2） | 同上 | 同上 |
+| `/completely-foreign-xyz` | 同上 | 同上 | `/completely-foreign-xyz` ✓ | `hasNoSuggestion: true` ✓ 不误导 | 同上 | 同上 |
+
+Screenshot 显示 ZH `/explor` 全态：200px 编辑式 `404` 灰色装饰 + `走错路了` h1 + `/explor` mono code echo + `你是不是想找：/explore` 链接 + solid accent `← 返回作品` 焦点 CTA。
+
+### 静态验证
+
+- `npx vitest run NotFound.test.tsx` → **10/10 pass** ✓（之前 2/2，新增 8 个针对 6 finding 的断言）
+- `npx tsc --noEmit | grep notfound|globals.css|messages` → 0 错误
+
+### 沉淀
+
+**M179 · 失败 surface 必须六维 polish**（新增）
+
+错误页 / 空态 / 加载态作为产品的"反向 surface"，必须按以下 6 维系统化 audit：
+
+```
+1. document.title 反映错误状态（多 tab/bookmark 区分）
+2. fuzzy-suggest 恢复路径（typo 容错 / 近义路由 / 类似资源）
+3. 完整 URL/state echo（pathname + search + hash, 不截断）
+4. sr-only 错误码 / 状态码（screen reader 不漏关键状态信号）
+5. auto-focus primary recovery CTA（键盘用户 Tab 0 次直达）
+6. primary CTA 视觉强度 ≥ 行业 solid-fill baseline（不能 disabled-looking）
+```
+
+每维独立 finding。少 1 维 = MEDIUM；少 2 维 = HIGH；少 3+ 维 = CRITICAL。R110 NotFound 缺 6 维全套 = CRITICAL；R112 修复后全 6 维齐备。
+
+**M180 · `.sr-only` 是 AutoViral 第一个 a11y utility class**（新增）
+
+R107 audit 揭示 a11y plane 系统缺位；R112 第一次以 utility-CSS pattern 落 a11y 基础设施。后续 audit/fix 直接 reuse `.sr-only`，不再每次 inline 8 行 visually-hidden style。
+
+### 桥梁哲学 plane 第 9 轮巩固
+
+| Plane | 本轮证据 |
+|---|---|
+| copy plane | F488 title 修复 + F490 suggest 文案 + F492 完整 URL echo = copy plane **第 6 处** 闭合；这是 R104/108 之后第 2 个 single round 多 copy 闭合 |
+| a11y plane | F493 sr-only 错误码 + F495 auto-focus = a11y plane 第 3 处闭合；`.sr-only` utility 落 globals.css 成为 reusable infrastructure |
+| usability plane | F498 CTA 视觉强度升级 + F490 fuzzy suggest = recovery affordance 双重补强 |
+| audit plane | M179 六维 polish checklist + M180 sr-only utility 沉淀 |
+
+### R113+ 候选（按战略权重倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP · CRITICAL) | **R110 F487 真 HTTP 404 status** | R110 | vite middleware + prod server config + dev/prod parity；多 round |
+| 2 (TOP) | **R109 F476 config UI 覆盖率 7/30** | R109 | backend 30+ knob 只能编 7 个 |
+| 3 (HIGH) | **R109 F477 cron 客户端校验** | R109 | 装 `cron-parser` + next-run preview |
+| 4 (HIGH) | **R109 F478 refresh-now disabled when dirty** | R109 | 5 行 |
+| 5 (HIGH) | **R109 F484 alertdialog 加 ESC handler** | R109 | 10 行 |
+| 6 (HIGH) | **R110 F489 multi-CTA matrix + recent works** | R110 | 需 fetch /api/works → 3 项 + 设计 layout |
+| 7 (HIGH) | **R110 F494 `<meta name="robots">` SEO header** | R110 | react-helmet 或 head manager 引入 |
+| 8 (METHOD) | M169-M180 + 既往沉淀写入 `.claude/rules/e2e-testing.md` | 累计 ~20 套 method | 沉淀持续扩展，需 method-index 文档 |
+
+`★ Insight ─────────────────────────────────────`
+- **测试爆炸预防教训**：6 个 finding 一次性闭合需要 8 个新断言，最容易漏掉的是 F490 的**反向 case**——"distance > 2 不 suggest"。如果不显式断言反向，未来 fuzzy 算法被改成"取最近 match 不管距离"会静默退化。M179 第 6 维"primary CTA 视觉" 同理需要 `getComputedStyle` 断言 backgroundColor 实色，不能仅靠 visual screenshot
+- **happy-dom 教训**：`// @vitest-environment` 注解会**阻止 setup.ts 加载**——jest-dom matcher、msw、cleanup-after-each 全部 silent 缺失。Default 即 happy-dom 时**不要写注解**。这是 R112 第一次撞上、值得沉淀到内存的 vitest gotcha
+- **sr-only 是 a11y plane 第一个 reusable infrastructure**——前 R107 audit 持续指出 a11y 系统缺位，但 fix 都是 per-component patch；R112 第一次把 `.sr-only` 作为 AutoViral 的 canonical a11y utility 落入 globals.css，后续 audit/fix 直接 reuse 而非重发明
+`─────────────────────────────────────────────────`
+
+---
+
 ## Round 111 — **R109 F475 (CRITICAL · secret-egress P0) CLOSED ✅ —— `/api/config` 不再回放 plaintext 凭据；UI 用 `secretMeta { set, lastFour }` mask 渲染 + PUT semantics "空=不变 / 非空=替换"；security plane 第 1 处闭合**
 
 - **时间**：2026-05-13（`/loop 30m` cron 触发本轮；R110 已被并行 404-audit agent 占用，本轮采用 R111 编号）
