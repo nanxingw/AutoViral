@@ -14,41 +14,59 @@ function wrap() {
 }
 
 describe("usePlatformTrends platform normalisers", () => {
-  it("parses xiaohongshu videos[] with 万 suffix into a numeric views field", async () => {
+  it("returns xiaohongshu items with correct metrics", async () => {
     mswServer.use(
       http.get("/api/trends/xiaohongshu", () =>
         HttpResponse.json({
           platform: "xiaohongshu",
-          videos: [
-            { title: "Video A", views: "12.3万", likes: "4567", comments: "100" },
-          ],
-          refreshedAt: "2026-04-25T12:00:00Z",
+          items: [{
+            id: "xhs_a", platform: "xiaohongshu", title: "T",
+            sourceUrl: "https://x/", source: "scraper",
+            scrapedAt: "2026-05-12T10:00:00.000Z",
+            cover: { url: "https://x/c.jpg", aspect: "9:16" },
+            metrics: { views: 100, likes: 50, comments: 5, shares: null, fetchedAt: "2026-05-12T10:00:00.000Z" },
+            analysis: { heat: 4, competition: "中", opportunity: "金矿",
+              description: "D".repeat(30), tags: ["a","b","c"], contentAngles: ["x","y"],
+              exampleHook: "Hook.", category: "tech" },
+          }],
+          collectedAt: "2026-05-12T10:00:00.000Z",
+          pipelineStatus: "ok",
         }),
       ),
     );
     const { result } = renderHook(() => usePlatformTrends("xiaohongshu"), { wrapper: wrap() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data!.items).toHaveLength(1);
-    expect(result.current.data!.items[0].views).toBe(123_000);
-    expect(result.current.data!.items[0].likes).toBe(4567);
-    expect(result.current.data!.items[0].rank).toBe(1);
-    expect(result.current.data!.items[0].thumbAspect).toBe("9:16");
+    expect(result.current.data!.items[0].metrics?.views).toBe(100);
+    expect(result.current.data!.items[0].metrics?.likes).toBe(50);
+    expect(result.current.data!.items[0].platform).toBe("xiaohongshu");
+    expect(result.current.data!.items[0].cover.aspect).toBe("9:16");
   });
 
-  it("converts douyin topics[] heat to likes (heat * 1000)", async () => {
+  it("returns douyin items with correct analysis heat", async () => {
     mswServer.use(
       http.get("/api/trends/douyin", () =>
         HttpResponse.json({
           platform: "douyin",
-          topics: [{ rank: 3, title: "Topic A", heat: 42, competition: "low" }],
-          refreshedAt: "2026-04-25T12:00:00Z",
+          items: [{
+            id: "dy_b", platform: "douyin", title: "Topic A",
+            sourceUrl: "https://dy/", source: "scraper",
+            scrapedAt: "2026-05-12T10:00:00.000Z",
+            cover: { url: "https://dy/c.jpg", aspect: "9:16" },
+            metrics: { views: null, likes: null, comments: null, shares: null, fetchedAt: "2026-05-12T10:00:00.000Z" },
+            analysis: { heat: 3, competition: "低", opportunity: "蓝海",
+              description: "D".repeat(30), tags: ["a","b"], contentAngles: ["x"],
+              exampleHook: "Hook.", category: "entertainment" },
+          }],
+          collectedAt: "2026-05-12T10:00:00.000Z",
+          pipelineStatus: "ok",
         }),
       ),
     );
     const { result } = renderHook(() => usePlatformTrends("douyin"), { wrapper: wrap() });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(result.current.data!.items[0].rank).toBe(3);
-    expect(result.current.data!.items[0].likes).toBe(42_000);
+    expect(result.current.data!.items[0].title).toBe("Topic A");
+    expect(result.current.data!.items[0].analysis.heat).toBe(3);
   });
 
   it("returns empty items when backend 404s (no data yet)", async () => {
