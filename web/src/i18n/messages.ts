@@ -40,7 +40,10 @@ export const en = {
   notFound: {
     code: "404",
     title: "This page took a wrong turn",
+    titleShort: "Page not found",
+    srErrorCode: "Error 404",
     body: "The URL you followed doesn't match anything in AutoViral.",
+    didYouMean: "Did you mean:",
     backHome: "← Back to Works",
   },
   toast: {
@@ -583,7 +586,10 @@ export const zh: DeepShape<Messages> = {
   notFound: {
     code: "404",
     title: "走错路了",
+    titleShort: "页面未找到",
+    srErrorCode: "错误 404",
     body: "你访问的 URL 在 AutoViral 中找不到对应的页面。",
+    didYouMean: "你是不是想找：",
     backHome: "← 返回作品",
   },
   toast: {

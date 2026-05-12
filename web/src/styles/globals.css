@@ -226,3 +226,19 @@ input[type="number"]:not([data-bare]),
 .chat-hl .hl-cmd { color: var(--accent); font-weight: 600; }
 .chat-hl .hl-flag { color: #8a7a9a; }
 .chat-hl .hl-punct { color: var(--text-dimmer); }
+
+/* ── Screen-reader-only utility (R110 F493) ──
+   Visually hides text but keeps it readable for assistive tech. Used
+   anywhere we want to convey state to AT (e.g. "Error 404 — ") without
+   visually duplicating decorative glyphs. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
