@@ -6,6 +6,331 @@
 
 ---
 
+## Round 102 — **R100 F406 (CRITICAL · 无 title input) + F408 (CRITICAL · subtitle locale-mixing) + F414 (MEDIUM · race condition) 三连 CLOSED ✅ NewWorkCard 创建漏斗第 1 步加固**
+
+- **时间**：2026-05-13（`/loop 30m` cron 触发 R102；上轮 R101 被并行 audit agent 占用做 CheckpointsMenu 深审，本轮使用 R102 编号）
+- **触发**：R100 audit 落 11 finding (F406-F416) 暴露 NewWorkCard 创建漏斗"zero-input single-click"极端 anti-pattern。本轮选择"高 ROI 单 round 三连"：F406 (title input 缺位) + F408 (subtitle EN-in-ZH leak) + F414 (rapid-double-click race)。F407 (platforms multi-select) + F410/F411 (template wizard) 是产品战略级需要 multi-round design，本轮保留为 R103+ candidates
+- **方法学**：M141 (fetch-hook destructive counter) + M150 (hub-primitives DOM diff) + 新增 **M153 mock-delayed-fetch race window amplification**（mock 500ms delay 让原本 19ms ~ 1ms 的真实生产 race window 放大，使 React-state-stale-snapshot race 在测试中可重现）
+
+### 修复
+- `web/src/i18n/messages.ts` 双 locale 各 +5 string：
+  - `works.type.videoSub` / `works.type.imageSub` (替换原 `<div>SHORT VIDEO · 9:16</div>` 硬编 EN 字面量)
+  - `works.newWorkTitlePlaceholder` (italic placeholder "Name this work — or leave blank" / "给作品起个名字 · 可留空")
+  - `works.newWorkTitleAria` (aria-label "Title for the new work" / "新作品标题")
+  - `works.creatingLabel` (locked-state UI "Creating…" / "创建中…")
+- `web/src/features/works/NewWorkCard.tsx` (+30 行 / -10 行)：
+  - **F406** 修复：增 `pendingTitle` useState；在 mode button 上方插 inline `<input type="text" placeholder=...>`；`pick()` 用 `pendingTitle.trim() || t("works.untitledWork")` 作为 title（保持原"直接点击"零输入路径仍可用）
+  - **F408** 修复：subtitle `{t("works.type.videoSub")}` / `{t("works.type.imageSub")}` 替代硬编 `"SHORT VIDEO · 9:16"` / `"CAROUSEL · 4:5"`
+  - **F414** 修复 (Tier 2)：增 `lockRef = useRef(false)` + `navigating = useState(false)` 双轨。lockRef 做**真正**同步 race gate (`if (lockRef.current) return; lockRef.current = true;`)；navigating 驱动 UI 视觉。原方案 `create.isPending` 是 hook 异步值，back-to-back .click() 间读到 stale `false`，**实测 3 click → 3 POST 全部 leak**；新方案 lockRef 同步写入 + 立即对后续 click 生效，实测 **3 click → 1 POST**
+  - 同时增 locked-state UI: `{locked && <div aria-live="polite">Creating…</div>}` 告诉用户系统已在工作
+- `web/src/features/works/NewWorkCard.module.css` (+19 行)：
+  - `.card` grid-template-rows 从 `auto 1fr` → `auto auto 1fr` (容纳新 title input row)
+  - 新 `.titleInput` 样式: 无 border + dashed bottom-border + italic dim placeholder + focus 时 border 变 accent
+
+### 浏览器实证 (M141 + M150 + 新增 M153)
+
+**F408 locale-mixing leak verify (DOM textContent)**:
+
+```js
+{
+  newWorkCardSubsZH: ["+ 新建作品", "视频", "短视频 · 9:16 竖屏", "图文", "图文轮播 · 4:5 竖屏"],
+  hasHardcodedEN: false,    // ✓
+  hasLocalizedZH: true      // ✓
+}
+```
+
+**F406 title input verify (DOM query + 实际 POST body)**:
+
+```js
+// DOM
+{
+  titleInputFound: true,
+  titleInputAriaLabel: "新作品标题",
+  titleInputPlaceholder: "给作品起个名字 · 可留空",
+  className: "_titleInput_mbv6l_14"
+}
+// API probe — 输入 title 后 mock fetch 拦截 POST 内容
+{
+  createPostCount: 1,
+  lastCreateBodyTitle: "R101 race test title",  // ✓ 用户输入真送达 API
+  lastCreateBodyType: "image-text"
+}
+```
+
+**F414 race-protection verify (M153 mock-delayed-fetch 放大法)**:
+
+| 测试场景 | 修复前 (useState only) | 修复后 (useRef lock) |
+|---|---|---|
+| 单击 image-text 1 次 | 1 POST | 1 POST |
+| 连续 .click() × 3（type 顺序: image-text, image-text, video） | **3 POST** (race fully leak: createPostCount=3) | **1 POST** ✓ (createPostCount=1, type=image-text 第一 click 胜出) |
+| 测试方法 | mock fetch 500ms delay 放大 race window | 同上 |
+
+修复前 navigated to `/editor/w_test_dummy_3` (第 3 个孤儿 work)。修复后 navigated to `/editor/w_test_dummy_1` (唯一真 work)。**3 个 orphan work 减少到 0**。
+
+### 沉淀
+
+**M153 · React stale-state race window 测试方法学（新增）**
+
+R102 F414 揭示 React hooks 的根本陷阱: `const [pending, setPending] = useState(false)` 在 `setPending(true)` 后，**下一行同步代码读 `pending` 仍是 false** —— 必须 await re-render 才更新。同理 `react-query` 的 `mutation.isPending` 是 hook value，同步 .click() 之间不会刷新。
+
+**新审计 pattern**：
+
+```
+For every async-mutation button with race-prevention guard:
+1. Mock the target fetch with 500ms+ delay (gives time window for racing)
+2. Programmatically fire 3 .click() back-to-back (same event loop tick)
+3. Count POST requests via window.fetch hook
+4. Expected: 1 POST
+5. If > 1 POST: guard is broken — likely uses useState/hook value
+6. Fix: replace state-based guard with useRef<boolean> for sync writes
+
+`navigating useState` 仍可保留（用于 UI 视觉的 disabled 渲染），但 race gate 必须用 useRef。
+```
+
+R102 F414 后 createPostCount 从 3 → 1 是 M153 的第一个 ground-truth 实证。
+
+**M154 · 双轨 lock 设计模式（升级 M152 Tier 2）**
+
+R100 M152 提出 Tier 1/2/3 race protection。R102 落实 Tier 2 时发现**必须双轨**：
+
+```
+useRef<boolean>(false) — 真正 gate（同步、不依赖 render、防 race）
+useState<boolean>(false) — UI 视觉反馈（异步、必须 render 才生效）
+```
+
+任何 multi-button creation funnel 修 Tier 2 都必须实现 lockRef + navigatingState 双轨。**单用其一都是漏洞**：
+- 单 useRef: race 防住了但 UI 不变化用户不知"正在创建"
+- 单 useState: UI 显示 disabled 但 race window 仍有 leak
+
+### 桥梁哲学 5 plane 第五轮巩固
+
+| Plane | 本轮证据 |
+|---|---|
+| data plane | R94 + R97 + **R102 F414** = data plane 第 3 处 destructive race window 闭合（regen → delete → create-orphan） |
+| control plane | R99 hide forever-dead pills 第 1 处闭合；本轮无变 |
+| audit plane | M141 + M147 + M150 + **M153 + M154** 累计 5 套元方法学 |
+| copy plane | R86 / R89 / R99 / **R102 F408** locale-mixing leak 第 N 处闭合（创作漏斗入口） |
+| a11y plane | R91 + R97 部分修复；本轮 title input + `aria-live="polite"` "Creating…" 提供小幅 a11y 增益 |
+
+R102 是首次单 round 同时触达 **data + copy 两 plane 闭合**（之前 R99 是 control+copy）。
+
+### R103 候选（按战略权重倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP · CheckpointsMenu) | R101 finding 集合 — CheckpointsMenu/History reload 无 preview/diff + chat-turn-only snapshot 战略 | R101 并行 audit | 与 R97 P0 战略 (Cmd+Z + UndoToast) 同根 |
+| 2 (TOP · 国际化 + 锁死) | F407 + F409 联动 — NewWorkCard 加 platforms multi-select chip + aspect-ratio chooser | F407 / F409 | 中型 1-2 天；与 R96 F389 export preset 联动设计 |
+| 3 (HIGH · 视觉锚) | F412 — 新 work 自动 placeholder thumbnail（用 title + accent gradient 渲染）| F412 / F413 derivative | 半天 |
+| 4 (HIGH · locale leak) | R98 F400 — InsightRibbon body 走 i18n key | R98 F400 | 单 round 可做 |
+| 5 (HIGH · a11y) | R95 F373 + M142 — Filmstrip KeyboardSensor + arrow-key reorder | R95 WCAG 2.1.1 | 单 round 可做 |
+| 6 (HIGH · 触屏) | R95 F374 完整 — `@media (hover: none)` overlay buttons | R95 iPad/iPhone | 单 round 可做 |
+| 7 (METHOD) | M153/M154 写入 `.claude/rules/e2e-testing.md` | 累计 13 verify gate | 沉淀持续扩展 |
+
+---
+
+## Round 101 — **CheckpointsMenu / History 版本系统深审：`location.reload()` 80ms 后强制 reload 无 preview/无 confirm/无 diff（R88 F314 + R95 F372 family 完成升级版）+ checkpoint 仅 chat-turn 触发（实证多轮 destructive audit 后仍只 1 个 snapshot —— 所有手动 inspector/canvas/filmstrip 操作完全无保护）+ item 仅 sha+relative-time+size 三字段无"what's inside"+ deliverable 只覆盖 yaml 不覆盖 assets/（restore 后 stale image reference 危险）+ Notion Page History / Figma Version History 5 baseline 全缺（preview/diff/label/branch/search）**
+
+- **时间**：2026-05-13（`/loop 20m` cron 触发 R101）
+- **环境**：dev (`localhost:5173/editor/w_20260319_1815_5bb`)，6 slides 状态（R95 后销毁 s_legacy_0 + 添加 s_mp2rhs9m_1，R97 又部分修复 dialog）；ZH locale + light theme + 2560 viewport；GET `/api/works/{id}/checkpoints` direct probe + DOM-extraction (M131) 检测 menu 真实结构
+- **触发**：R88 F314 (Settings drawer nav 无 confirm) → R93 F355 (Regen-all destructive) → R93 F353 (tab unmount 销毁 textarea) → R95 F372 (delete slide 无 undo) → R96 F382 (export filename silent overwrite) 五处独立"destructive-without-recovery"违规全部 derive 自一个核心 surface 缺失 = **CheckpointsMenu / History 版本系统**没真承载产品的"安全感"基底。R96 audit 偶遇 History 弹窗"暂无快照"但当时没深审，本轮专项深审
+- **方法学**：API direct probe (GET checkpoints) 拿真实 schema + JS `btn.click()` 触发 menu + DOM 5 baseline feature 测试 (`hasDiffPreview / hasFilterSearch / hasConfirmFirst / hasLabel / hasBranch`) 不轻信 viewport screenshot
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F417 | **CRITICAL · `location.reload()` 80ms 后强制 reload —— 无 preview / 无 confirm / 无 diff，destructive 太快**（R88 F314 + R95 F372 family 终极升级版） | useCheckpoints.ts L47 `setTimeout(() => location.reload(), 80);` —— 用户单击 checkpoint item 后 server POST `/checkpoints/restore` resolve → React invalidate query → **80ms 后 `location.reload()` 强制整页刷新**。**用户没机会**：(a) preview "这是 5 分钟前的版本对比当前差异是什么"；(b) confirm "你将丢失从这个 checkpoint 到现在的所有 edit，是否继续"；(c) annotate "保留当前状态为分支再 restore"。整页 reload 销毁所有 unsaved scratch state (chat 输入框 / 滚动位置 / panel sizes / TabContent state per R93 F353)。 | (1) **用户最高频误操作**: 想 quick-glance 历史 → 不小心点了 item → 80ms 后无法回头 = R88 F314 (nav 无 confirm) + R95 F372 (delete 无 undo) 的"惊吓"模式 100% 复发；(2) 与 Figma Version History 反例对比：Figma 单击 version 进 **preview mode**（read-only 浏览那个版本），二次点击 "Restore" 才真切 + 仍保留当前为新版本；(3) **Notion** 单击 page version 同样进 preview，restore 不丢当前作为新 revision；(4) **修复**：(a) 短期 — 单击 item → 弹 `<RestoreConfirmDialog>` 显示 "Restore to caed64b3? Your current edits since 1 小时前 will be lost. [Preview] [Restore] [Cancel]"；(b) 中期 — 单击 → 进 preview mode (read-only canvas 显示该 checkpoint，TopBar 显示 "Previewing snapshot from X ago")；(c) 长期 — restore 自动把"当前状态"保存为新 checkpoint 再 restore，永不丢数据。 | R88 F314 + R95 F372 + R93 F355 + R96 F382 五处 family 终极复发；R93 M140 Tier 3 第 5 处违规 |
+| F418 | **CRITICAL · checkpoint 仅 chat-turn 触发 —— 所有手动 inspector / canvas / filmstrip / slider edit 完全无保护** | 源码 CheckpointsMenu.tsx L15 注释 `"The list is taken automatically by the backend on every agent turn complete"`。API probe 实证 `w_20260319_1815_5bb` 全历史**只有 1 个 checkpoint** (caed64b3, ts 2026-05-12T14:54:27Z, 1078 bytes) —— 但该 carousel 经过 R92/R93/R95/R96/R98/R99 多轮 audit + 我手动 deleted `s_legacy_0` + 添加了 `s_mp2rhs9m_1` 空白 slide + reorder slide 1→3 + 拖动 effects sliders + 切换 palette/layout/font 几十次 + ... **全部没打 snapshot**。当前 carousel state 与唯一 checkpoint 状态**严重 diverged** 但 history 完全失保护。 | (1) "我刚才手动调 30 次 grain 滑块，restore 前 25 次" → 没办法；(2) "刚才拖动 slide 1→3 排错位，撤销" → 没办法；(3) "delete slide 误删，重新加" → 没办法 (R95 F372 揭示了)；(4) auto-snapshot 唯一 trigger 是 agent chat turn complete → 不 chat 时**0 protection**；(5) Figma/Notion baseline：每 30s autosave + 每次 commit 都 snapshot；Google Docs 持续 revision tracking；(6) **修复**：(a) 立即 — Zustand store 加 history middleware (即 R95 M143 P0 战略)，每次 mutation push undo stack；(b) 中期 — autosave debounce 850ms 触发后**自动 create checkpoint**（与 yaml 写入同事务）；(c) 长期 — fine-grained per-operation checkpoint + UI 显示 undo timeline (Figma-style)。 | R95 M143 P0 战略 — "undo culture 缺位"直接根因；R88 F314 + R95 F372 + R96 F382 + R93 F353 + R93 F355 全部受害 |
+| F419 | **CRITICAL · item 仅 sha + relative-time + size 三字段 → 用户 zero idea 恢复后失去什么** | DOM 实测唯一 item `raw_lines: ["caed64b3", "1 小时前 · carousel", "1.1KB"]`。3 字段都是 **metadata**（"这个 file 多老多大"）没有任何 **content semantic**（"这个版本里有什么 slide / 哪段 chat 产生的 / 改了什么"）。用户对比当前 state（6 slides + s_mp2rhs9m_1 空白 slide）和 caed64b3 那 1078 bytes 的内容**完全靠想象**。 | (1) 用户单击前没有 "你将恢复到 4 slides 的版本（当前 6 slides，会丢失 slide 5 + 6）" 提示；(2) 没有 chat-message 关联 "这是你 1 小时前问 'rewrite slide 2 hook' 那一轮触发的 checkpoint"；(3) Notion baseline：page history 显示 "Sarah Chen edited 5 blocks (3 added · 1 deleted · 1 modified)" 等 fine-grained 描述；Figma 显示 "Renamed Frame 3, Updated 12 layers, Added 2 components" 等动作摘要；(4) **修复**：(a) 短期 — checkpoint metadata 加 `{slideCount, layerCount, lastChatTurn?.summary}` 字段，UI item 显示 `"6 slides · 2 chat turns · 1.1KB"`；(b) 中期 — 关联 chat-history 显示触发该 checkpoint 的 user message preview；(c) 长期 — fine-grained diff stats "+ 3 layers · - 1 image · changed: 2 slides"。 | R92 F340 (canvas 缺 viewport indicator) / R93 F358 (effects 数值无 perceptual meaning) 共同 family "decision input 缺 evidence" |
+| F420 | **HIGH · deliverable 只覆盖 `carousel.yaml + composition.yaml`，不覆盖 assets/ image 引用 → restore 后 stale reference 危险** | useCheckpoints.ts L7 `deliverable: "carousel.yaml" | "composition.yaml"`。**checkpoint 不快照 assets/ 目录下的真实图片文件**。**场景**：用户 1 小时前生成 carousel A (assets/img-1.png-img-5.png) → 触发 checkpoint caed64b3 → 后续 regenerate-all (R93 F355 流程) 覆盖了 assets/img-*.png → 现在用户单击 restore caed64b3 → yaml `slide[0].bg.value: "/assets/img-1.png"` 仍指向 file system 现在的 img-1.png（**已不是 1 小时前的图**）。 | (1) restore 后**画布显示混乱**：slide 顺序回到 1 小时前但每张图实际是 1 小时前后的新图 → 用户预期失败；(2) 更险：若用户中途 deleteSlide 删了 img-3.png 文件，restore 后 yaml 引用 img-3.png 但 fs 已无 → 渲染 broken；(3) 与 R95 F372 (delete 无 undo) 联动 = 完整 carousel content 永久损失；(4) **修复**：(a) checkpoint 改为 **transactional** ：yaml + assets/ 一起 snapshot；(b) 中期 — assets 文件做内容 hash + content-addressable storage（同 hash 文件去重）；(c) 长期 — git-like 内容寻址 storage 让 restore 永远幂等。 | R95 F372 / R93 F355 destructive 家族；新 family "non-transactional restore" |
+| F421 | **HIGH · sha hash `caed64b3` 是 UI noise（用户无 mental model 关联到 content change）** | DOM 实测 item 显示 `caed64b3` (8 字符 git-style hash) 作 sha 列。用户**完全无法判断**这 8 字符代表什么 content（不像 git commit 关联到 commit message）。占用 item 视觉权重 ~25% 但 zero 信息密度。 | (1) hash 字符串对非工程师用户是**密码学噪音**；(2) 即使工程师用户也需要在 head 心算 "caed64b3 是 1 小时前那次 / 还是上上次的"；(3) 与 R88 F312 (settings drawer 暴露 dev config) / R98 F396 (hero "payoff 场景" jargon) 共同 family "技术语言泄露给 user"；(4) **修复**：(a) 立即 — 替换 sha 为**人类可读 label** ("v3 · slide rewrite" / "v2 · palette test")；(b) 自动生成 label 用 LLM 总结 chat turn content；(c) hash 移到 tooltip "Internal ID: caed64b3"。 | R88 F312 + R98 F396 + R98 F400 dev/jargon leak family |
+| F422 | **HIGH · 无 manual checkpoint button "before this big change, snapshot now"** | DOM 实测 menu 内**没有**"Take snapshot now" / "Create checkpoint" 按钮。源码注释 L17 写"Users can also press the button when closed to take a manual snapshot before a risky chat" —— 但**实际 button 行为 = 只 toggle dropdown 开关**，并不触发 manual snapshot (`onClick={() => setOpen((v) => !v)}` L78)。**与代码注释矛盾**：注释承诺有 manual snapshot 功能，实现根本没接。 | (1) 用户**主动求保护**的能力被剥夺 — "我要做大改动前主动 snapshot" 唯一办法是 chat 一句空话触发 agent-turn-complete；(2) server 端 API 已支持 `POST /api/works/:id/checkpoints` 创建 manual checkpoint（src/server/api.ts L2915-2920 实证），但**前端没调用**；(3) **修复**：(a) 立即 — menu 顶部加 "📷 Take snapshot now" button 调用 POST endpoint；(b) Cmd+Shift+S 全局 shortcut；(c) 长期 — 检测 risky action (regen / delete-many) 前自动 prompt "Snapshot before continuing?"。 | R93 M140 Tier 3 sub-family "manual safety net 缺位"；与代码注释 vs 实现矛盾 = R96 F383 "stale KNOWN-ISSUE" 家族变种 |
+| F423 | **HIGH · button label "↻ 历史" 无 count badge + 无键盘 shortcut（Cmd+Y / Cmd+Shift+H baseline 缺位）** | DOM 实测 `triggerText: "↻ 历史"` + `triggerLabel_hasCountBadge: false`。用户必须 click open 才知道有多少 version。Notion 显示 "Page History (15)"，Figma 显示版本计数 badge。也无键盘 shortcut（与 R96 F388 / R95 F373 / R93 F359 / R92 F337 全产品键盘战略缺位家族一致）。 | (1) Power user 无法快速判断历史深度；(2) Editor TopBar 已经狭窄，添加 count 不会破坏 layout；(3) **修复**：(a) "↻ 历史 (15)" 显示当前 count；(b) Cmd+Y 切 Cmd+Shift+H open menu (与 macOS Time Machine 一致)；(c) 加 `<kbd>` 视觉提示在 menu item 内。 | 全产品键盘战略缺位家族 |
+| F424 | **MEDIUM · 无 label / annotation —— 用户不能标记 "v1 final / v2 试验"** | DOM 实测 `hasLabel: false`，源码无 mutation 路径让用户改 checkpoint label。每个 checkpoint 是 sha + ts 自动生成 metadata，**永远 immutable**。Figma Version History 允许用户 "Rename this version" 起意义化名字。 | (1) 长 user 60+ checkpoint 时**完全无法导航**（全是 sha 字符 + 相对时间），快速找"上周那个 final 版"无路；(2) **修复**：(a) checkpoint API 加 `label` 可写字段；(b) UI 加 inline rename (双击 sha 改为 contenteditable input)；(c) 自动 AI 生成 default label。 | R98 F405 "无 pin / favorite / tag" hub navigation 战略缺位家族 |
+| F425 | **MEDIUM · 无 branching / fork —— 从 old checkpoint restore 直接丢失当前进度** | DOM 实测 `hasBranch: false`，源码 restoreCheckpoint 是 destructive overwrite。**场景**：用户当前 carousel 是 v10，想看 v5 那个 palette 但不想丢 v10 → 单击 v5 → location.reload → v10 永久消失。Figma 单击旧 version 进 preview，"Restore as new version" 创建 v11 = v5 内容，v10 仍在 history。 | (1) **fear-of-loss** 让用户**永远不敢点 history** = 整个版本系统 dead；(2) **修复**：(a) 立即 — restore 之前自动 createCheckpoint 当前状态作 "v11"；(b) 中期 — UI "Restore as new version" vs "Restore and overwrite" 二选；(c) 长期 — branching tree visualization (Git-style log)。 | F417 + F418 family "restore 太 destructive"；M153 升级核心 |
+| F426 | **MEDIUM · restore 错误 = raw `e.message`未本地化（"Checkpoint not found or invalid name" 直接给用户看）** | useCheckpoints.ts L50 `e instanceof Error ? e.message : String(e)`。server 错误 (e.g. `"Checkpoint not found or invalid name"` from api.ts L2908) 直接显示给用户 EN 字符串，不经 i18n。 | (1) ZH 用户看 EN 技术 message 体验差；(2) 与 R98 F402 (empty state 不解释 0) / R96 F384 (export 失败 console.warn) 共同 family "error message 战略缺位"；(3) **修复**：(a) 走 `localizeApiError(err, t)` 路径 (R93 已有这个工具)；(b) server 返回 errorCode 让 client 路由到 i18n key。 | "error surface 战略" family |
+| F427 | **MEDIUM · 无 retention policy visible —— 长用户可能堆 100+ checkpoint 占满 disk** | API + 源码无显式 retention 字段。理论上每次 agent turn complete 都打 snapshot → 用户 chat 100 次 → 100 snapshot。dropdown `maxHeight: 360px` + 每行 ~36px = **仅 10 行可见**，超过需 scroll，无 pagination。每 snapshot 1KB 累计 100KB ok，但若 yaml 大到 100KB → 100 snapshot = 10MB / work × 100 works = 1GB local disk 占用无 retention。 | (1) 长用户 disk 慢慢占满；(2) menu 内 50+ checkpoint 时 scroll-only 找不到 v5；(3) **修复**：(a) UI 加 search input filter (M153)；(b) server retention "keep last 20 + every 1h for last day + every 1d for last week"；(c) UI 加 pagination 或 group-by-day。 | F428 同根 |
+| F428 | **LOW · dropdown maxHeight:360px 无 sticky header / 无 pagination —— 50+ items 时定位崩** | 源码 `maxHeight: 360, overflowY: "auto"`。无 sticky header 显示当前 group ("Today / Yesterday / Last week")。无 "Load more" 按钮。 | (1) Power user 长历史时 UX 崩；(2) **修复**：sticky `<header>` 显示 group + virtual scroll。 | F427 同根 |
+| F429 | **LOW · `location.reload()` 销毁 React state + autosave scratch + panel sizes + chat 输入** | useCheckpoints.ts L47 `location.reload()` 是核武器级 reset：所有 useState / useRef / Zustand store / TabContent state / chat draft / panel resize 全销毁。用户 restore 后必须重新调 panel 宽度 / 重新登入 chat sessions。 | (1) UX 粗糙；(2) **修复**：调用 React Query invalidate + Zustand store reset，不要 location.reload。 | F417 family |
+
+### 沉淀
+
+**M153 · 版本系统 baseline 7-feature audit checklist（新增）**
+
+R101 揭示 CheckpointsMenu 缺失 Notion/Figma/Linear 版本系统 7 大 baseline。新建 audit checklist：
+
+```
+For every version/history system surface, verify support for:
+
+(1) Preview-before-restore  : single-click → preview, second-click → restore
+(2) Diff visualization      : "what changed" stats per version
+(3) Label / annotation      : user-editable per-version description
+(4) Branching / forking     : restore-as-new-version vs overwrite
+(5) Search / filter         : by date / label / chat-turn / content keyword
+(6) Snapshot triggers       : auto (every turn) + manual button + 
+                              autosave-debounce + risky-action pre-snapshot
+(7) Retention policy        : explicit "keep last N + every X for last Y" 
+                              visible to user + UI grouping
+
+Tier comparison:
+- Notion / Figma / Linear baseline = (preview, diff, label, branch, search, multi-trigger, retention)
+- AutoViral current = (no, no, no, no, no, agent-turn-only, none-visible)
+
+Every miss = single-feature finding (F417-F429 累计 13 个 family instance)
+```
+
+R101 落地的 13 个 finding 全部 derive from 这表 7 行 × failures。**新增 version surface 必须填表才能 merge。**
+
+**M154 · destructive-without-recovery 升级 5-level audit model（R93 M140 4-tier → 5-level）**
+
+R93 M140 提出 4-tier。R101 揭示 Tier 5：**auto-trigger granularity** — 即"什么 action 自动 trigger 安全机制"。每个 destructive surface 必须考虑：
+
+```
+Recovery Tier:
+T1 (single-input):   Cmd+Z within 5s + autosave scratch
+T2 (multi-property): Cmd+Z OR snapshot before mutation
+T3 (destructive):    explicit confirm + snapshot + undo toast (5s)
+T4 (irreversible):   confirm + clear warning + 1s grace
+T5 (auto-trigger):   该 action 是否自动 snapshot? (R101 F418 揭示 manual edit 全失保护)
+```
+
+R101 F417/F418 是 T3 + T5 双重违规。**M154 强制 audit 每个 destructive action 同时填 T1-T5。**
+
+**M155 · sha/hash UI noise audit（新增）**
+
+R101 F421 揭示 `caed64b3` sha 给用户看 = noise。归纳"dev artifact leak to UI" 一般规则：
+
+```
+Forbidden in user-facing UI (without {tooltip / advanced-mode toggle}):
+- Git-style sha hash (8/40 chars)
+- UUID v4 (8-4-4-4-12 pattern)
+- Internal id (e.g. "u_xxx" / "w_xxx" / "s_xxx")
+- ISO datetime (e.g. "2026-05-12T14:54:27.203Z")
+- Filename internals ("__caed64b3__carousel.yaml")
+- Stack trace / errno code
+- Internal enum value (e.g. "creating" "ready" "failed" without label)
+
+Acceptable when:
+- 在 advanced mode / dev tools UI 内
+- 在 tooltip / collapsed section 内
+- 有 human-readable label 并列同行 ("v3 final" + tooltip "caed64b3")
+```
+
+R88 F312 (dev-config leak) / R98 F396 (jargon) / R101 F421 (sha) 全部 derive 自这个家族。
+
+### R102 候选（按战略权重倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP · P0 战略) | F417 + F418 + F425 联动 — `<RestoreConfirmDialog>` + 自动 snapshot current state 前置 + manual checkpoint button + Zustand undo middleware | F417/F418/F425/R95 M143 | 大动作 1-2 周；产品安全感基底 |
+| 2 (TOP · 国际化) | F421 + F424 + M155 — sha 替换为 AI-generated human label + 加 inline rename | F421/F424 | 1-2 天；与 F419 联动设计 |
+| 3 (HIGH · 内容感知) | F419 + F420 — checkpoint metadata 加 slideCount/layerCount/chatTurnSummary + asset transactional snapshot | F419/F420 | 1 周；server + frontend 协调 |
+| 4 (HIGH · onboarding) | F422 + F423 + M154 T5 — manual checkpoint button + Cmd+Shift+S shortcut + autosave-debounce auto-snapshot | F422/F423 | 半天 |
+| 5 (MEDIUM) | F426 + F427 + F428 — error i18n + retention + dropdown search/pagination | F426/F427/F428 | 1 天 |
+
+---
+
+## Round 100 — **NewWorkCard 2-mode 新建漏斗深审：无 title input 强制"未命名作品"(35 works 全同名 + R98 F394 deep search 缺位双 leak 直接爆炸) + platforms 硬编 douyin/xiaohongshu 用户从无选择 + subtitle "SHORT VIDEO · 9:16" / "CAROUSEL · 4:5" 硬编 EN 在 ZH 页面（locale-mixing 第 N 处实证）+ 单 click 直 navigate 无 template/preset chooser（Canva baseline 完全缺位）+ 新 work coverImage:null 进 grid 随机 gradient 无视觉锚 + platforms 字段是 dead data path（创建时 schema 填 → 下游从未读）+ rapid double-click race 可能创建孤儿 work**
+
+- **时间**：2026-05-13（`/loop 20m` cron 触发 R100；R99 被并行 fix-pass agent 占用打包关闭 R98 F395+F396+F398+F403 四连快速 win，本轮跳到 R100 编号）
+- **环境**：dev (`localhost:5173/works`)，35 works 状态；ZH locale + light theme + 2560 viewport；DOM-extraction (M131) + **API 直接 probe** (POST /api/works + 立即 DELETE) 避免创建漏斗污染 hub 数据（吸取 R95 F372 销毁 s_legacy_0 的教训）
+- **触发**：R98 审了 /works list-level 行为，但 **NewWorkCard 自身**——这个用户每次访问 hub 都看到、决定是否进入创作 pipeline 的转换漏斗起点——从未深审。Canva / Notion / Figma 都把"新建"按钮做成产品最深抛光部分（template gallery + pre-filled examples + aspect-ratio preset + platform chooser），AutoViral 当前仅"视频 / 图文" 2 个 button + 单 click 直 navigate，深度差一个时代。**这是直接影响 activation rate 的核心 surface**
+- **方法学**：M131 DOM 字段验证 + 新增 **M150 API direct probe + immediate cleanup** —— 用 `fetch('/api/works', {method:'POST'})` 模拟 NewWorkCard 真实 mutation 拿到 server response 8 字段，然后立刻 `DELETE` 清理。比 click → navigate → audit Editor 更快 + 不污染数据 + 直接观察 schema 真相
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F406 | **CRITICAL · 无 title input → 强制 "未命名作品" + R98 F394 deep search 缺位双 leak = 用户永远找不到任何 work** | NewWorkCard.tsx L21 `create.mutateAsync({ title: t("works.untitledWork"), type })`，title 是 hardcoded i18n key 值（zh: "未命名作品" / en: "Untitled Work"）。**用户从未被询问 title**。配合 R98 F394 (search 仅 title substring 不索引 slide/chat/brief 内容)，**两个 finding 形成完美双 leak**：(1) 35 works 假设 30 个是"未命名作品" → title search 无效；(2) 没有 deep content search 可救 → 用户找不到任何 work。 | (1) 用户花 2 小时做了 1 个 carousel 一周后想编辑 → 进 /works → 35 张 "未命名作品" 卡 → **完全无法定位**；(2) 当前测试数据有 4 张真 title ("春日咖啡指南" 等) + 7+ "Test tr_*" + 24+ "未命名作品" → 真实生产环境**默认会全 "未命名作品"**；(3) F407 platforms 硬编 + F406 title 硬编 = NewWorkCard 是 **zero-input creation** —— 这种设计违反所有 v0/Figma/Canva onboarding 原则；(4) **修复**：(a) 短期 — NewWorkCard 加 inline title input "What's this work about?"；(b) 中期 — pick mode 后弹小 modal "Give it a name (optional)"；(c) 长期 — AI 自动生成 placeholder title from first chat message after 60s ("基于你聊的内容，建议命名为 X")。 | R98 F394 search 战略缺位直接耦合；R97/R98 多次"用户错觉性损失"家族 (用户以为有但其实无) |
+| F407 | **CRITICAL · platforms 硬编 `["douyin","xiaohongshu"]` 用户从未被给选择 + 与产品名"AutoViral"全球化定位矛盾** | works.ts L27 `DEFAULT_PLATFORMS = ["douyin", "xiaohongshu"]` + L45 `body: { ...input, platforms: input.platforms ?? DEFAULT_PLATFORMS }` —— NewWorkCard 调用 mutateAsync 时**没传 platforms** → 服务端永远默认中国双平台。API probe response 确认创建的 work 自带 `platforms: ["douyin", "xiaohongshu"]`。**用户从没机会选 Instagram / Pinterest / TikTok / Twitter / Weibo / 小红书国际版**。等用户走到 R96 F389 export 流程时才意识到产品锁死中国双平台，但那时已经花了 60s+ AI spend 编辑完成。 | (1) 产品名 "AutoViral" 暗示**全球化 viral content tool**，实现却只跑中国双平台 = 产品身份精神分裂；(2) 国际用户进入产品创建第一个 work 后才发现 = 即时退订；(3) 与 R96 F389 (export 无平台 preset) 同根 family，但 F407 在更早的入口阶段就锁死 → 上游 R96 修复无意义；(4) **修复**：(a) 短期 — NewWorkCard 加 platforms multi-select chip group (10+ platforms)；(b) 中期 — onboarding 时让用户配置"我主要为哪些平台创作"作为账户偏好，每个 work 默认继承但可覆盖；(c) 长期 — platforms 与 aspect-ratio / safe-zone / character-limit 联动 (e.g. Twitter limits caption 280 chars → editor 实时显示 char counter)。 | 新 family — "创作漏斗入口锁死单一 channel"；与 R96 F389 export 锁死同根但更早 |
+| F408 | **CRITICAL · NewWorkCard 两个 mode subtitle "SHORT VIDEO · 9:16" / "CAROUSEL · 4:5" 硬编 EN 在 ZH 页面（locale-mixing 新实证）** | DOM 实测 ZH locale 下 button innerText：`"视频\nSHORT VIDEO · 9:16"` + `"图文\nCAROUSEL · 4:5"` —— **ZH label + EN subtitle**。源码 NewWorkCard.tsx L50/L69 `<div className={styles.sub}>SHORT VIDEO · 9:16</div>` 硬编字面量没走 i18n key。**这是 R98 F400 InsightRibbon EN-in-ZH 同 family 的第 2 处实证**，且位置更核心（首屏视觉权重前 20%）。 | (1) ZH 用户看到 ZH 标题 + EN 副文 = 视觉不一致；(2) "CAROUSEL" 概念 ZH 用户多数不知道是"图文轮播"（小红书称"图文 / 笔记"）；(3) "9:16 / 4:5" 比例数字虽国际通用，但**没有 visual preview** 帮 user 理解；(4) **修复**：(a) 立即 — subtitle 走 i18n key：zh "短视频 · 9:16 竖屏" / en "Short video · 9:16 portrait"；(b) 中期 — subtitle 替换为 mini-thumbnail (9:16 框 / 4:5 框) 实物示意；(c) 长期 — hover 弹出"输出示例"小预览。 | R98 F400 (InsightRibbon EN-in-ZH) / R93 F341 (prompt-locale leak) / R98 M149 locale-mixing 矩阵 — 第 N 处实证 |
+| F409 | **HIGH · aspect-ratio 锁死 2 ratio（9:16 + 4:5）— 与 R96 F389 export 锁死同根但更早出 leak** | NewWorkCard subtitle 硬编 "9:16" / "4:5" + 源码 L50/L69 字面量。用户**无法在创建阶段选 1:1 (IG post) / 2:3 (Pinterest) / 16:9 (Twitter) / 3:4 (xhs note 实际比例)**。此问题在 R96 F389 export 阶段才被外显（无平台 preset），但根因在 NewWorkCard 入口就锁死了。一旦用户进入 /editor/{id} 后 aspect 已固定，**unable to switch mid-edit**。 | (1) 与 F407 platforms 锁死 + R96 F389 export 锁死共同形成"创作管道全程锁死"三连击；(2) 用户走到 export 才发现 aspect 不能改 → 已 sunk cost；(3) **修复**：(a) NewWorkCard mode 选择后弹 aspect-ratio chooser sub-step "9:16 / 4:5 / 1:1 / 16:9 / 2:3"；(b) 中期 — editor TopBar 允许 mid-edit 切 aspect (画布 + layer 自适应 reflow)；(c) 长期 — 单 master design auto-generate 5 aspect 版本 (Canva Resize Magic)。 | F407 / R96 F389 锁死家族 |
+| F410 | **HIGH · 无 template / preset chooser — Canva 600+ template gallery baseline 完全缺位** | NewWorkCard 仅 2 个 mode button + 单击即创建。无 template gallery / 无 starter examples / 无"用过的最近 5 个 carousel 作为模板"快捷重用。Canva / Notion / Figma + 按钮一定展开 template chooser modal。 | (1) zero-template = high cognitive load = 高放弃率（用户面对空 carousel 不知从何开始）；(2) 老用户也不能快速 fork-and-tweak 已有 carousel；(3) **修复**：(a) 短期 — mode 选完后展开 "Start blank / Duplicate from existing / Pick template" 三选；(b) 中期 — 内置 20-30 个 viral content template；(c) 长期 — AI-driven 模板生成 (基于用户 chat history / past works style)。 | 新 family — "creation onboarding starter cognitive load"；与 R93 F354 globals 设计模型缺位 same family |
+| F411 | **HIGH · 单 click 直接 navigate /editor/{id} —— 无 onboarding gate / 无 "What's this for?" preset step** | NewWorkCard.tsx L21-22 `const w = await create.mutateAsync(...) → navigate(...)`。**用户单击 "图文" 立刻被丢到 empty Editor**，没机会取消、没机会 fill in name、没机会确认 aspect。对比 Canva 必须先选 template → 进入"What's this for?"询问 (Instagram post / Pinterest pin / Web blog post) → 才进 editor。 | (1) 用户单击就被锁定 path → friction increase；(2) 创建漏斗自身**没有任何 step 让用户调整 mind**；(3) **修复**：(a) 中期 — 改为 multi-step wizard "Mode → Aspect → Template → Title → Platforms → Create"；(b) 兼容性 — 保留"Skip and go to editor"快速通道给 power user。 | F406 / F407 / F409 共同体现"漏斗无 step"战略缺位 |
+| F412 | **HIGH · 新 work coverImage=null 进 /works grid 立刻显示 random gradient（无视觉锚点）** | API probe 确认 created work response 8 keys = `["id","title","type","status","platforms","createdAt","updatedAt"]` —— **没有 coverImage 字段**。WorksGrid.tsx L132 `if (!cover || failed) { return <div style={{ background: fallbackGradient(work.id) }} />; }` —— 新 work 进 grid 立刻显示 deterministic-but-random 渐变色块。**与现有 4 张真 thumbnail (春日咖啡指南 / 性感自拍日记 etc.) 视觉对比**：35 张 grid 里有的是照片、有的是色块、有的是 test 占位文字，**视觉密度极其混乱**。 | (1) 新 work 缺乏 visual anchor → 用户难以分辨"我刚才创建的那张" vs 其他 5 张 fallback gradient work；(2) 与 F406 "未命名作品" 同名 + F412 gradient 同色 = 用户**完全靠 updatedAt 时间戳辨识**；(3) **修复**：(a) 短期 — 新 work 第一张 slide 自动生成 placeholder thumbnail (从 carousel.yaml.title 渲染"未命名作品" mono text on accent background)；(b) 中期 — fallback gradient 改为基于 work.id hash 但**带文字 overlay** "未命名作品 #{N}"；(c) 长期 — AI 在创建 chat 时实时生成 cover thumbnail 替换 gradient。 | F406 same family — 用户辨识工具缺失 |
+| F413 | **MEDIUM · 35 works 中 N 个"未命名作品"同名 — WorksGrid 完全靠 updatedAt 区分** | F406 + F412 联合后果：35 works 中假设 24 个是"未命名作品"，全部显示 fallbackGradient（24 种 deterministic 渐变 8 种循环 → 平均 3 张同色）。**实际识别只能靠 hover updatedAt timestamp**。用户点击 work 进编辑器前完全是猜测。 | (1) **silent ambiguity** —— 用户经常打开错 work；(2) 误点击后退出再进 = 创建漏斗 friction；(3) **修复**：F406 修了"未命名作品"问题 + F412 修了 thumbnail 问题就缓解，本 finding 是 derivative；(4) 补充修复 — WorkCard 加 hover 大 tooltip 显示完整 metadata (createdAt / kind / aspect / platforms / 最近 chat 消息片段)。 | F406 / F412 derivative |
+| F414 | **MEDIUM · rapid double-click race — React-level 防护不完整，仍可创建孤儿 work** | NewWorkCard.tsx L18 `if (create.isPending) return` 防止 re-fire mutation。但**漏洞**：mutation resolve 后 (~24ms) → setState 触发 navigate → 此期间若用户已经准备点第二个 mode button（"视频"），可能在 await/setState/navigate 三个 microtask 之间 fire 第二次 mutation。**API probe 实测**：2 个 sequentially-fired 19ms-apart POST 创建出 2 个不同 id work (`w_20260513_0002_105` + `w_20260513_0002_f11`)，**server 没有 idempotency-key 保护**。 | (1) 真用户场景：双击触屏 / 快速二次点 → 2 个 work；(2) 一个 user-visible (navigate 到第一个) + 一个 silent 孤儿；(3) 孤儿 work 在 /works grid 多一张 "未命名作品" 增加 F413 ambiguity；(4) **修复**：(a) 短期 — `disabled={create.isPending || isNavigating}`，加 isNavigating state 在 mutation success → navigate 之间；(b) 中期 — POST `/api/works` 加 `Idempotency-Key` header (UUID v4 from client，duplicate key 返回原 work)；(c) 长期 — 整个 mutation pipeline 用 React Suspense 包裹 disable 整 NewWorkCard 组件。 | M143 (R95 P0 战略 — undo culture) 旁支；R96 F392 多次操作 race 同根 family |
+| F415 | **MEDIUM · platforms 字段是 dead data path（schema 填 → UI 从未读 / 改）** | API probe response 含 `platforms: ["douyin","xiaohongshu"]` 字段，但**遍历 codebase**：WorksGrid 不显示 platforms、Editor TopBar 不显示、Inspector tabs 不显示、Studio chat 不显示、Export dropdown (R96) 不读取 platforms 来决定 mimeType/aspect。**该字段从创建那一刻就死了**。F407 修复 (用户选 platforms) 必须配合 F415 dead-path 修复 (UI 读取并 surface) 才有意义。 | (1) 死字段维护成本：所有 work-related code 都要处理 `platforms` 但永远没人读 → tech debt 累积；(2) future 集成 (R96 export preset / publish flow) 误以为 "platforms 已存在所以可以用" → 而实际数据是 placeholder 没真 selection logic；(3) **修复**：(a) 即时 — WorkCard 加 platforms tag bar "douyin · xhs"；(b) F407 联动 — 用户改 platforms 时调 useUpdateWork mutation 写回。 | R98 M148 "dead UI element" 升级为 **dead data path** 子家族 |
+| F416 | **LOW · 仅 2 mode (短视频 / 图文)，无 mixed-format / album / blog / podcast / story etc.** | NewWorkCard 仅 2 个 button。但 viral content 实际 channel 更多：(a) 长图文 (Substack / Notion 公开页) ；(b) 播客 audio ；(c) Instagram Stories (24h ephemeral)；(d) Reels / TikTok video；(e) Twitter / X thread；(f) LinkedIn carousel；(g) 多 image album (Twitter media + xhs photo album)。AutoViral 当前仅承接 "短视频 + 图文" 两类，**覆盖面 < 30% viral channel**。 | (1) viral 创作者通常**多 channel 并行运营**，AutoViral 强迫他们其它 channel 用别的工具；(2) 与 F407 platforms 锁死 china-only 同根 family — "我们做这个 channel 不做那个" 的产品定位狭隘；(3) **修复**：长期 roadmap — 3-5 个新 mode (story / podcast / thread / long-form-article)。 | F407 / F410 战略覆盖面缺位 family |
+
+### 沉淀
+
+**M150 · 创建漏斗 onboarding step audit checklist（新增）**
+
+R100 揭示 NewWorkCard 是 "zero-input single-click creation" 极端 anti-pattern。新建 audit checklist：
+
+```
+For every "+ Create New X" entry point, verify the funnel exposes:
+
+(1) Title input            : [none | required | optional with AI placeholder]
+(2) Type/mode chooser      : [hidden | binary | gallery 5+]
+(3) Aspect-ratio chooser   : [locked | 2-3 preset | 5+ preset]
+(4) Platforms multi-select : [locked | chip multi-select 5+]
+(5) Template chooser       : [none | 5+ starter | AI-suggested]
+(6) Preview / cancellation : [direct navigate | confirm modal | back-button-friendly]
+(7) Loading state          : [opacity | spinner | text "Creating..." | progress]
+(8) Error surface          : [console only | inline alert | retry button]
+(9) Idempotency protection : [none | client mutex | server idempotency-key]
+
+Tier comparison:
+- Canva / Notion / Figma baseline = (optional+AI, gallery 500+, 5+ preset, multi-select, 100+ template, multi-step wizard, spinner+text, inline+retry, idempotency-key)
+- AutoViral current = (none, binary, locked, locked, none, direct navigate, opacity, inline alert, client mutex partial)
+```
+
+R100 落地的 finding 矩阵每条都映射到这表 1 行。**新增 creation entry point 必须填表才能 merge。**
+
+**M151 · dead data path 检测（升级 R98 M148）**
+
+R98 M148 揭示 "dead UI element" (forever-empty filter / always-0 count / placeholder data)。R100 F415 揭示**更深一层**：dead data path —— 数据在 schema 中存在、被创建时填值，但**UI 全程从未读取 / 修改**。归纳：
+
+```
+Dead data path = schema/API 暴露字段 + 创建时填默认值 + UI 从未 read/write/surface
+
+检测方法：
+1. POST 响应 dump 所有字段
+2. grep codebase: 字段名 → 仅出现在 mutation body 不出现在 read path
+3. 字段 default value 是 hardcoded 常量从未来自用户输入
+
+Examples in AutoViral:
+- platforms (R100 F415) — POST 自动 ["douyin","xhs"]，全 codebase 无 read
+- ideaCount (R98 F403) — Works.tsx 0 常量，WorksHero 读但显示永远 0  
+- canvas effects threshold (R93 F358) — store 有 default 但 UI 不暴露
+
+修复策略：
+A. Delete field 完全 (推荐：减小 surface area)
+B. Wire UI read path + 让字段变 live  
+C. Server-side derive 不要求 client 传
+```
+
+**M152 · dual-button race condition protection 三层模型（新增）**
+
+R100 F414 暴露 NewWorkCard React `isPending` 保护不完整（mutation resolve → navigate 之间用户可点第二 button）。归纳：
+
+```
+Race protection tier:
+Tier 1 (client mutex):     React isPending guard — 防止 mutation 在 in-flight 时 re-fire
+Tier 2 (UI lock):          isNavigating state + disable 整个 panel 直到 unmount
+Tier 3 (server idempotency): Idempotency-Key header (UUID v4) — server 端 dedup
+
+Single-button entries 用 Tier 1 足够 (e.g. SaveButton)
+Multi-button creation funnels 必须 Tier 2 (e.g. NewWorkCard 2 mode)
+Critical destructive (e.g. publish/delete) 必须 Tier 3
+```
+
+R100 F414 修复 = Tier 1 → Tier 2 升级。
+
+### R101 候选（按战略权重倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP · 漏斗根因) | F406 + F412 联动 — NewWorkCard 加 title input + 新 work auto-thumbnail | F406 / F412 / F413 derivative | 中型 — 1 天；R98 F394 search 战略后置 |
+| 2 (TOP · 国际化) | F407 + F408 + F409 联动 — NewWorkCard 加 platforms multi-select + aspect-ratio chooser + i18n subtitle | F407 / F408 / F409 / R96 F389 | 中型 — 2 天；与 R96 F389 export preset 联动设计 |
+| 3 (HIGH · onboarding) | F410 + F411 联动 — mode chooser 改 multi-step wizard + template gallery | F410 / F411 | 大动作 — 1 周；与 product roadmap 联动 |
+| 4 (MEDIUM · race) | F414 + M152 联动 — Tier 2 isNavigating guard + Tier 3 idempotency-key | F414 | 半天 |
+| 5 (MEDIUM · cleanup) | F415 + M151 联动 — platforms 字段二选一（接通 F407 用户输入 vs 删除字段） | F415 / dead data path | 配合 F407 决策 |
+
+---
+
 ## Round 99 — **R98 F395 (视觉欺骗) + F396 (jargon 灾难) + F398 (大屏浪费 46%) + F403 (死字段) 四连 CLOSED ✅ /works hub 页快速 win 组合拳**
 
 - **时间**：2026-05-12（`/loop 30m` cron 触发 R99）
