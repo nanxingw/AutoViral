@@ -2,10 +2,30 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
 import { CREATOR_ANALYTICS_QUERY_KEY } from "./analytics";
 
+/**
+ * R109 F475 — `/api/config` GET no longer round-trips secret plaintext.
+ * `secretMeta[k]` ships `{ set: boolean; lastFour: string }` so the UI can
+ * show "Currently stored ····AKLT" affordance without ever holding the
+ * real value in browser memory. The plaintext `jimengAccessKey` etc.
+ * fields stay in the response shape (always `""`) so older clients don't
+ * crash on `undefined`.
+ */
+export interface SecretMetaEntry {
+  set: boolean;
+  lastFour: string;
+}
+
+export type SecretMeta = {
+  jimengAccessKey: SecretMetaEntry;
+  jimengSecretKey: SecretMetaEntry;
+  openrouterKey: SecretMetaEntry;
+};
+
 type RawConfigResponse = {
   jimengAccessKey?: string;
   jimengSecretKey?: string;
   openrouterKey?: string;
+  secretMeta?: Partial<SecretMeta>;
   douyinUrl?: string;
   researchEnabled?: boolean;
   researchCron?: string;
@@ -18,6 +38,12 @@ export interface AppConfig {
   jimengAccessKey: string;
   jimengSecretKey: string;
   openrouterKey: string;
+  /**
+   * R109 F475 — non-null when server responds with redaction-aware
+   * payload; legacy server (or msw fixture missing the field) falls back
+   * to a "no metadata, treat as unset" entry so UI degrades gracefully.
+   */
+  secretMeta: SecretMeta;
   douyinUrl: string;
   researchEnabled: boolean;
   researchCron: string;
@@ -26,7 +52,9 @@ export interface AppConfig {
   analyticsLastCollectedAt?: string | null;
 }
 
-export type ConfigPatch = Partial<Omit<AppConfig, "analyticsLastCollectedAt">>;
+const UNSET_META: SecretMetaEntry = { set: false, lastFour: "" };
+
+export type ConfigPatch = Partial<Omit<AppConfig, "analyticsLastCollectedAt" | "secretMeta">>;
 
 const CONFIG_QUERY_KEY = ["config"] as const;
 
@@ -39,6 +67,11 @@ export function useConfig() {
         jimengAccessKey: raw.jimengAccessKey ?? "",
         jimengSecretKey: raw.jimengSecretKey ?? "",
         openrouterKey: raw.openrouterKey ?? "",
+        secretMeta: {
+          jimengAccessKey: raw.secretMeta?.jimengAccessKey ?? UNSET_META,
+          jimengSecretKey: raw.secretMeta?.jimengSecretKey ?? UNSET_META,
+          openrouterKey: raw.secretMeta?.openrouterKey ?? UNSET_META,
+        },
         douyinUrl: raw.douyinUrl ?? "",
         researchEnabled: Boolean(raw.researchEnabled ?? raw.research?.enabled ?? false),
         researchCron: raw.researchCron ?? raw.research?.schedule ?? "7 9,21 * * *",

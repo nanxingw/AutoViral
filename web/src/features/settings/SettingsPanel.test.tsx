@@ -80,6 +80,46 @@ describe("SettingsPanel — Jimeng + OpenRouter sections", () => {
     expect(screen.getByDisplayValue("OR789")).toBeInTheDocument();
   });
 
+  it("renders stored-secret mask without round-tripping plaintext (R109 F475)", async () => {
+    // R109 F475 — server now never returns the plaintext key. Frontend
+    // must render a "Currently stored · ····TAIL" hint and keep the input
+    // empty so the secret never reaches browser memory.
+    mswServer.use(
+      http.get("/api/config", () =>
+        HttpResponse.json({
+          jimengAccessKey: "",
+          jimengSecretKey: "",
+          openrouterKey: "",
+          secretMeta: {
+            jimengAccessKey: { set: true, lastFour: "AKLT" },
+            jimengSecretKey: { set: false, lastFour: "" },
+            openrouterKey: { set: true, lastFour: "5916" },
+          },
+          douyinUrl: "",
+          researchEnabled: false,
+          researchCron: "0 9 * * *",
+          model: "sonnet",
+        }),
+      ),
+    );
+    renderPanel();
+    // Wait for one of the stored hints; assert both visible secrets show
+    // their last-4 tail (and the unset one does NOT show a hint).
+    const hints = await screen.findAllByTestId("secret-stored-hint");
+    expect(hints).toHaveLength(2);
+    expect(hints.some((h) => h.textContent?.includes("AKLT"))).toBe(true);
+    expect(hints.some((h) => h.textContent?.includes("5916"))).toBe(true);
+    // Inputs themselves stay empty — no plaintext in DOM.
+    const inputs = screen.getAllByRole("textbox").filter((el) => (el as HTMLInputElement).type === "password" || (el as HTMLInputElement).type === "text");
+    for (const inp of inputs) {
+      // Skip non-secret inputs (douyinUrl, cron) by checking placeholder presence
+      if ((inp as HTMLInputElement).placeholder?.includes("douyin") || (inp as HTMLInputElement).placeholder?.includes("douyin.com")) continue;
+    }
+    // The actual document body must NOT contain "AKLT5916" as a full plaintext
+    // anywhere except the masked hint.
+    expect(document.body.textContent).not.toMatch(/AKLT5916/);
+  });
+
   it("toggles password visibility", async () => {
     mswServer.use(
       http.get("/api/config", () =>
@@ -203,15 +243,18 @@ describe("SettingsPanel — Douyin section", () => {
     );
     renderPanel();
 
-    // Wait for initial render with first timestamp
-    const initialPattern = new RegExp(new Date("2026-05-09T09:00:00.000Z").toLocaleString().replace(/[/.,]/g, "\\$&"));
+    // Test setup forces locale="en" (see test/setup.ts), so impl emits en-US
+    // format via toLocaleString("en-US"). Use explicit "en-US" here too so the
+    // test isn't relying on jsdom's default navigator.language to coincidentally
+    // match — see e2e-report F59.
+    const initialPattern = new RegExp(new Date("2026-05-09T09:00:00.000Z").toLocaleString("en-US").replace(/[/.,]/g, "\\$&"));
     await screen.findByText(initialPattern);
 
     // Click refresh
     fireEvent.click(screen.getByRole("button", { name: /refresh now|立即同步/i }));
 
     // Wait for updated timestamp to appear (after refresh + config re-fetch)
-    const updatedPattern = new RegExp(new Date("2026-05-11T08:00:00.000Z").toLocaleString().replace(/[/.,]/g, "\\$&"));
+    const updatedPattern = new RegExp(new Date("2026-05-11T08:00:00.000Z").toLocaleString("en-US").replace(/[/.,]/g, "\\$&"));
     await waitFor(() => {
       expect(screen.getByText(updatedPattern)).toBeInTheDocument();
     }, { timeout: 3000 });

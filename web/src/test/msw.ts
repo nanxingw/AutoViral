@@ -70,9 +70,16 @@ export const handlers = [
   ),
   http.get("/api/config", () =>
     HttpResponse.json({
+      // R109 F475 — server-side redaction. Plaintext secrets are NEVER
+      // returned; secretMeta carries set-flag + last-4 for UI rendering.
       jimengAccessKey: "",
       jimengSecretKey: "",
       openrouterKey: "",
+      secretMeta: {
+        jimengAccessKey: { set: false, lastFour: "" },
+        jimengSecretKey: { set: false, lastFour: "" },
+        openrouterKey: { set: false, lastFour: "" },
+      },
       douyinUrl: "",
       researchEnabled: false,
       researchCron: "0 9 * * *",

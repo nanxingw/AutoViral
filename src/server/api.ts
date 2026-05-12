@@ -113,6 +113,34 @@ apiRoutes.get("/api/status", async (c) => {
   });
 });
 
+// R109 F475 — server-side secret redaction. Previously this endpoint
+// round-tripped jimeng / openrouter credentials in plaintext, so any
+// browser extension or third-party script could call `fetch('/api/config')`
+// and walk away with the keys. UI mask + Show/Hide was theater because
+// the secret was already in browser memory.
+//
+// Contract now:
+//   GET  /api/config         → secret fields are always "" in the response;
+//                              `secretMeta[k] = { set, lastFour }` lets the
+//                              UI prove a value exists and show a mask
+//                              without ever transmitting plaintext back.
+//   PUT  /api/config         → for secret-keyed fields, empty-string body
+//                              means "leave the stored value alone"; only
+//                              non-empty submissions overwrite. Existing
+//                              "Save" flow continues to work because the
+//                              draft starts with "" and stays "" unless the
+//                              user types a new value.
+//
+// Keep the secret list in sync with `SECRET_FIELDS` below if you add new
+// credentials.
+const SECRET_FIELDS = ["jimengAccessKey", "jimengSecretKey", "openrouterKey"] as const;
+
+function maskTail(s: string): string {
+  if (!s) return "";
+  if (s.length <= 4) return "•".repeat(s.length);
+  return s.slice(-4);
+}
+
 // GET /api/config
 apiRoutes.get("/api/config", async (c) => {
   const config = await loadConfig();
@@ -123,11 +151,26 @@ apiRoutes.get("/api/config", async (c) => {
     const parsed = JSON.parse(raw);
     analyticsLastCollectedAt = parsed.collected_at ?? null;
   } catch { /* file may not exist; ok */ }
+  const jimengAccessKey = config.jimeng?.accessKey ?? "";
+  const jimengSecretKey = config.jimeng?.secretKey ?? "";
+  const openrouterKey = config.openrouter?.apiKey ?? "";
+  // Strip nested plaintext from the spreadable config so we don't accidentally
+  // leak it via ...config below (jimeng/openrouter live under their own keys).
+  const { jimeng: _j, openrouter: _o, ...configRest } = config as unknown as Record<string, unknown> & {
+    jimeng?: { accessKey?: string; secretKey?: string };
+    openrouter?: { apiKey?: string };
+  };
   return c.json({
-    ...config,
-    jimengAccessKey: config.jimeng?.accessKey ?? "",
-    jimengSecretKey: config.jimeng?.secretKey ?? "",
-    openrouterKey: config.openrouter?.apiKey ?? "",
+    ...configRest,
+    // Secret fields: never returned in plaintext.
+    jimengAccessKey: "",
+    jimengSecretKey: "",
+    openrouterKey: "",
+    secretMeta: {
+      jimengAccessKey: { set: !!jimengAccessKey, lastFour: maskTail(jimengAccessKey) },
+      jimengSecretKey: { set: !!jimengSecretKey, lastFour: maskTail(jimengSecretKey) },
+      openrouterKey: { set: !!openrouterKey, lastFour: maskTail(openrouterKey) },
+    },
     douyinUrl: config.analytics?.douyinUrl ?? "",
     memorySyncEnabled: config.memory?.syncEnabled ?? false,
     researchEnabled: config.research?.enabled ?? false,
@@ -141,16 +184,23 @@ apiRoutes.put("/api/config", async (c) => {
   const body = await c.req.json<Record<string, unknown>>();
   const config = await loadConfig();
 
+  // R109 F475 — for SECRET fields, empty string in the body means "I did
+  // not type a new value, leave the stored secret alone." This pairs with
+  // the GET handler that returns "" for secrets — the draft stays "" until
+  // the user types a replacement, and only then does it overwrite.
+  const isSecretBlank = (k: (typeof SECRET_FIELDS)[number]) =>
+    typeof body[k] === "string" && (body[k] as string) === "";
+
   // Map flat frontend fields to nested config structure
-  if (body.jimengAccessKey !== undefined) {
+  if (body.jimengAccessKey !== undefined && !isSecretBlank("jimengAccessKey")) {
     if (!config.jimeng) config.jimeng = { accessKey: "", secretKey: "" };
     config.jimeng.accessKey = body.jimengAccessKey as string;
   }
-  if (body.jimengSecretKey !== undefined) {
+  if (body.jimengSecretKey !== undefined && !isSecretBlank("jimengSecretKey")) {
     if (!config.jimeng) config.jimeng = { accessKey: "", secretKey: "" };
     config.jimeng.secretKey = body.jimengSecretKey as string;
   }
-  if (body.openrouterKey !== undefined) {
+  if (body.openrouterKey !== undefined && !isSecretBlank("openrouterKey")) {
     config.openrouter = { apiKey: body.openrouterKey as string };
   }
   if (body.model !== undefined) {

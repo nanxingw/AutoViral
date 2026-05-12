@@ -2,7 +2,8 @@ import { useEffect, useId, useRef, useState } from "react";
 import { useSettingsPanelStore } from "@/stores/settings";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useT } from "@/i18n/useT";
-import { useConfig, useRefreshAnalytics, useSaveConfig, type AppConfig } from "@/queries/config";
+import { useLocaleStore } from "@/i18n/store";
+import { useConfig, useRefreshAnalytics, useSaveConfig, type AppConfig, type SecretMetaEntry } from "@/queries/config";
 import styles from "./SettingsPanel.module.css";
 
 const EDITABLE_KEYS = [
@@ -21,11 +22,24 @@ interface SecretFieldProps {
   onChange: (v: string) => void;
   showLabel: string;
   hideLabel: string;
+  /**
+   * R109 F475 — server never returns the plaintext secret; instead it
+   * reports whether one is stored and the last-4 chars for visual
+   * confirmation. When meta.set is true and the draft value is still
+   * empty, we render "Currently stored ····AKLT" hint plus a placeholder
+   * prompting "leave blank to keep · type to replace."
+   */
+  meta?: SecretMetaEntry;
+  storedHintTemplate: string; // e.g. "Currently stored · ····{tail}"
+  keepBlankPlaceholder: string; // e.g. "Leave blank to keep · type to replace"
 }
-function SecretField({ label, value, onChange, showLabel, hideLabel }: SecretFieldProps) {
+function SecretField({ label, value, onChange, showLabel, hideLabel, meta, storedHintTemplate, keepBlankPlaceholder }: SecretFieldProps) {
   const [shown, setShown] = useState(false);
   const reactId = useId();
   const id = `secret-${reactId}`;
+  const hasStored = !!meta?.set;
+  const tail = meta?.lastFour ?? "";
+  const storedHint = hasStored ? storedHintTemplate.replace("{tail}", tail) : "";
   return (
     <div className={styles.field}>
       <label htmlFor={id} className={styles.fieldLabel}>{label}</label>
@@ -35,6 +49,7 @@ function SecretField({ label, value, onChange, showLabel, hideLabel }: SecretFie
           type={shown ? "text" : "password"}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          placeholder={hasStored ? keepBlankPlaceholder : undefined}
           className={styles.input}
         />
         <button
@@ -45,6 +60,11 @@ function SecretField({ label, value, onChange, showLabel, hideLabel }: SecretFie
           {shown ? hideLabel : showLabel}
         </button>
       </div>
+      {storedHint && (
+        <p className={styles.sectionHint} style={{ marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 11 }} data-testid="secret-stored-hint">
+          {storedHint}
+        </p>
+      )}
     </div>
   );
 }
@@ -54,6 +74,9 @@ export function SettingsPanel() {
   const closePanel = useSettingsPanelStore((s) => s.closePanel);
   const focusSection = useSettingsPanelStore((s) => s.focusSection);
   const t = useT();
+  // e2e-report F56: tie toLocaleString to app locale so EN users in a zh-CN
+  // system see en-US date format and vice versa.
+  const locale = useLocaleStore((s) => s.locale);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const { data: config } = useConfig();
   const refreshMut = useRefreshAnalytics();
@@ -137,12 +160,16 @@ export function SettingsPanel() {
             <>
               <section data-section="jimeng">
                 <h3 className={styles.sectionLabel}>{t("settings.section.jimeng")}</h3>
+                <p className={styles.sectionHint}>{t("settings.sectionHint.jimeng")}</p>
                 <SecretField
                   label={t("settings.field.accessKey")}
                   value={draft.jimengAccessKey}
                   onChange={(v) => patch("jimengAccessKey", v)}
                   showLabel={t("settings.show")}
                   hideLabel={t("settings.hide")}
+                  meta={draft.secretMeta.jimengAccessKey}
+                  storedHintTemplate={t("settings.field.secretStoredHint")}
+                  keepBlankPlaceholder={t("settings.field.secretKeepBlank")}
                 />
                 <SecretField
                   label={t("settings.field.secretKey")}
@@ -150,22 +177,30 @@ export function SettingsPanel() {
                   onChange={(v) => patch("jimengSecretKey", v)}
                   showLabel={t("settings.show")}
                   hideLabel={t("settings.hide")}
+                  meta={draft.secretMeta.jimengSecretKey}
+                  storedHintTemplate={t("settings.field.secretStoredHint")}
+                  keepBlankPlaceholder={t("settings.field.secretKeepBlank")}
                 />
               </section>
 
               <section data-section="openrouter">
                 <h3 className={styles.sectionLabel}>{t("settings.section.openrouter")}</h3>
+                <p className={styles.sectionHint}>{t("settings.sectionHint.openrouter")}</p>
                 <SecretField
                   label={t("settings.field.apiKey")}
                   value={draft.openrouterKey}
                   onChange={(v) => patch("openrouterKey", v)}
                   showLabel={t("settings.show")}
                   hideLabel={t("settings.hide")}
+                  meta={draft.secretMeta.openrouterKey}
+                  storedHintTemplate={t("settings.field.secretStoredHint")}
+                  keepBlankPlaceholder={t("settings.field.secretKeepBlank")}
                 />
               </section>
 
               <section data-section="research">
                 <h3 className={styles.sectionLabel}>{t("settings.section.research")}</h3>
+                <p className={styles.sectionHint}>{t("settings.sectionHint.research")}</p>
                 <div className={styles.toggleRow}>
                   <span id="research-auto-label">{t("settings.field.autoResearch")}</span>
                   <button
@@ -187,14 +222,24 @@ export function SettingsPanel() {
                       id="research-cron"
                       className={styles.input}
                       value={draft.researchCron}
+                      placeholder={t("settings.field.cronPlaceholder")}
+                      aria-describedby="research-cron-hint"
                       onChange={(e) => patch("researchCron", e.target.value)}
                     />
+                    {/* e2e-report F139: surface why the :07 minute offset matters
+                        so users who inherited a :00 schedule from older configs
+                        understand the migration rationale. sectionHint reuse keeps
+                        typography consistent across the drawer. */}
+                    <p id="research-cron-hint" className={styles.sectionHint} style={{ marginTop: 4 }}>
+                      {t("settings.field.cronHint")}
+                    </p>
                   </div>
                 )}
               </section>
 
               <section data-section="douyin" id="douyin-binding">
                 <h3 className={styles.sectionLabel}>{t("settings.section.douyin")}</h3>
+                <p className={styles.sectionHint}>{t("settings.sectionHint.douyin")}</p>
                 <div className={styles.field}>
                   <label htmlFor="douyin-url" className={styles.fieldLabel}>{t("settings.field.douyinUrl")}</label>
                   <input
@@ -216,7 +261,7 @@ export function SettingsPanel() {
                   </button>
                   {config?.analyticsLastCollectedAt && (
                     <span className={styles.lastCollected}>
-                      {t("settings.lastCollected")}: {new Date(config.analyticsLastCollectedAt).toLocaleString()}
+                      {t("settings.lastCollected")}: {new Date(config.analyticsLastCollectedAt).toLocaleString(locale === "zh" ? "zh-CN" : "en-US")}
                     </span>
                   )}
                 </div>
@@ -224,6 +269,7 @@ export function SettingsPanel() {
 
               <section data-section="model">
                 <h3 className={styles.sectionLabel}>{t("settings.section.model")}</h3>
+                <p className={styles.sectionHint}>{t("settings.sectionHint.model")}</p>
                 <div className={styles.field}>
                   <label htmlFor="default-model" className={styles.fieldLabel}>{t("settings.section.model")}</label>
                   <select
@@ -232,11 +278,19 @@ export function SettingsPanel() {
                     value={draft.model}
                     onChange={(e) => patch("model", e.target.value)}
                     aria-label={t("settings.section.model")}
+                    aria-describedby="default-model-note"
                   >
-                    <option value="opus">Claude Opus</option>
-                    <option value="sonnet">Claude Sonnet</option>
-                    <option value="haiku">Claude Haiku</option>
+                    {/* e2e-report F143: surface concrete version after alias so
+                        users know which Claude tier maps to which model line.
+                        Versions kept inline (not hover-tooltip) because native
+                        <option> title is unreliable across Safari/Chrome. */}
+                    <option value="opus">{t("settings.field.modelOptionOpus")}</option>
+                    <option value="sonnet">{t("settings.field.modelOptionSonnet")}</option>
+                    <option value="haiku">{t("settings.field.modelOptionHaiku")}</option>
                   </select>
+                  <p id="default-model-note" className={styles.sectionHint} style={{ marginTop: 4 }}>
+                    {t("settings.field.modelAliasNote")}
+                  </p>
                 </div>
               </section>
             </>
@@ -248,6 +302,15 @@ export function SettingsPanel() {
           <button type="button" className={styles.btnGhost} onClick={requestClose}>
             {t("settings.cancel")}
           </button>
+          {/* e2e-report F142: visible dirty indicator. Old UX relied on a 0.5→1
+              opacity flick when the Save button enabled — too subtle to notice.
+              Pulse dot + UNSAVED label makes the state machine unmistakable. */}
+          {isDirty && !saveMut.isPending && (
+            <span className={styles.dirtyIndicator} data-testid="settings-dirty" aria-live="polite">
+              <span className={styles.dirtyDot} aria-hidden />
+              {t("settings.dirtyIndicator")}
+            </span>
+          )}
           <button
             type="button"
             className={styles.btnPrimary}
