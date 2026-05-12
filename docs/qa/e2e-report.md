@@ -6,6 +6,586 @@
 
 ---
 
+## Round 74 — **F155 + F157 CLOSED ✅ agent 输入边界双 guard：Seedance duration enum 锁死 + 空 timeline quick-action 守卫**
+
+- **时间**：2026-05-12（用户给 `/loop 30m e2e-report fix` 第 2 轮，:43 cron fire）
+- **环境**：dev (`localhost:5173`)，新工程 `w_20260512_1822_07d`（空 timeline）
+- **触发**：R70 finding 中两条 HIGH guard 缺失，桥梁哲学命中
+
+### 修复
+
+**F155 — Seedance duration enum 漂移**
+
+`web/src/features/studio/generation/GenerationDialog.tsx`：
+- `VIDEO_DURATIONS: ["4", "6", "8", "10"]` → **`["3", "5", "10"]`**（与 Seedance 2.0 i2v API 真实 enum 对齐，见 `memory:reference_seedance_i2v_durations`）
+- INITIAL_FORM_STATE.duration: `"4"` → `"5"`
+- `durationSec || 4` → `|| 5`（fallback 兜底）
+
+**F157 — 空 timeline 的 quick-action 守卫**
+
+`web/src/features/studio/panels/Chat/QuickActions.tsx`：
+- 新增 precondition：`hasVideoClip = comp?.tracks.some(t => t.clips.some(c => c.kind === "video"))`
+- 「+ 配音」「+ 字幕」action 加 `disabled: !hasVideoClip`，title 在 disabled 时切到 `chat.quickActions.studio.needVideoHint`
+- prompt 重写为系统口吻（参考 F158）：「为当前视频生成一段 30-60 秒中文配音…」/「为当前视频识别语音并生成词级时间戳字幕」—— 不再用第一人称"我"假冒用户
+- button 元素加 `disabled` + `aria-disabled` 属性
+
+`web/src/i18n/messages.ts`：添 `needVideoHint`（EN: "Add a video clip first to use this action" · ZH: "先添加视频片段再使用此功能"）
+
+`web/src/styles/globals.css`：添 `.quick-action:disabled` / `[aria-disabled="true"]` 状态：opacity 0.45 + cursor not-allowed + hover 不变色
+
+### 浏览器实证
+
+| 修复 | 修复前 | 修复后 |
+|---|---|---|
+| Duration select options | `["4","6","8","10"]`, default "4" | **`["3","5","10"]`, default "5"** ✅ |
+| 空 timeline 上「+ 配音」 | enabled，可点 → 注入"这段视频"prompt → 思考中…浪费 billing | **disabled, opacity 0.45, title "先添加视频片段再使用此功能"** ✅ |
+| 空 timeline 上「+ 字幕」 | 同上 | **同上 disabled** ✅ |
+
+### 桥梁哲学命中
+
+两个修复都直接守在 **agent ↔ 内容交付桥梁** 的输入端：
+- F155 阻止「UI 提供给用户的合法值 ≠ 后端 API 实际接受的合法值」类型的 silent failure，**让 contract 在 UI 边界就被尊重**
+- F157 阻止「无效任务被注入 agent → agent 跑空 / 编造结果 / 浪费 billing」，**让 agent 只收到有意义的请求**
+
+与 R71 (F129 stub aggregation) 同模式 —— UI 是 agent 的"前台"，任何错误信号、错误参数、错误前提都必须在 UI 层就被拦截 / surface，**不能 leak 到 agent 内部去黑箱失败**。
+
+### Sediment
+
+- **M100 — UI enum 必须以 backend contract 为 single source of truth**：F155 是典型反例 —— `VIDEO_DURATIONS` 在前端是 free decision，与 Seedance API 真实 enum **从未对账**。下次添 select/dropdown 时，所有 options 必须 import 自 `web/src/queries/<provider>.ts` 的 `export const X_VALID_X = [...] as const`，**不允许 inline 写常量**。
+- **M101 — precondition-gated action 应该是 derived state 而非常开**：F157 是"按钮永远可点 → 用户撞墙 → silent failure"的微观模式。**affordance 的可点性必须 derive 自 precondition state**，disabled 是最低成本的实现（M93 sediment 升级）。
+
+### 候选
+
+- R75 **F156 (AUDIO tab 服务方 dropdown 仍显示 Seedance 但 Seedance 不产音频)** —— 同 M100 的应用：AUDIO tab options 应独立于 VIDEO/IMAGE
+- R75 **F153 (dialog 7 个技术词泄漏 + dev placeholder 残留)** —— 文案体系级清理，应用 M89 朗读 test
+- R75 **F154 (生成按钮无 billing pre-display)** —— Seedance 3s i2v ≈ $0.76，按钮 label 改成「生成 · 约 ¥5.5」
+- R75 **F151 (本地文件上传入口缺失) 第一步**：dialog 加「上传」tab 作为第 4 个并列选项（最小路径）
+
+### 关联
+
+- closes **F155** + **F157**
+- 落 M100 / M101 sediment（双源契约 + derived-state affordance）
+
+commit: `8d6b49b fix(studio): F155 + F157 — guard agent inputs at the dialog/chat boundary`
+
+---
+
+## Round 73 — **/analytics 创作者数据页深查 vs 抖音创作者中心 / TikTok Studio / YouTube Studio：editorial 取舍牺牲 actionable + 整页空态 "未连接 = 真 0" 混淆**
+
+- **时间**：2026-05-12 18:22 本地
+- **测试者**：Claude Opus 4.7 via `/loop 20m`，第 3 round
+- **环境**：dev (`localhost:5173`)，账号 `Mirodream` · 5 粉丝 · 9 已发布作品 · 抖音绑定
+- **路径**：navigate → `/analytics`（顶部 nav「数据」）→ 全屏渲染整页 → 点「近 7 天」eyebrow 试图切换时间范围 → 点 Channel pill「▶ 5」试图 drill-down
+- **测评主题**：**创作者数据页是巨头深耕领域**——抖音创作者中心、TikTok Studio、YouTube Studio、Instagram Insights 全是 official studio 级别基线。R73 要求每条 finding 都对照这些产品的 baseline 找 gap，不停留在表层。R64 触及 hero / F83 / F38 / F4，本轮深查整页 6 widgets。
+- **覆盖功能**：hero (eyebrow + headline + subtitle + 3 KPI)、hint row + 「打开设置 →」CTA、Channel pill (Mirodream + ▶ 5)、3 demographic widgets (年龄/性别/地域)、最新调研洞察 section、时间范围切换尝试、channel drill-down 尝试
+- **没覆盖**：实际有数据状态（账号需要互动样本）、抖音 cookie 重新采集后行为、EN locale 下文案 leak 程度、insights row 真实内容长什么样
+
+### 结果
+
+| Checkpoint | Status | Evidence |
+|---|---|---|
+| /analytics 全屏渲染 6 widget | ✅ | ss_76907j7kx |
+| Hero "你的受众 还在沉睡" + italic 'still cold' | ✅ | ss_76907j7kx (F38 audienceStatusLabel 5-bucket fired) |
+| 3 KPI 显示 0 / 0 / 0.0% with delta | ✅ | ss_76907j7kx |
+| Hint row leak "Python 依赖 browser_cookie3" | ❌ **极端 leak** | ss_76907j7kx |
+| 「近 7 天」可点切换时间范围 | ❌ | ss_4801cjqmq (click 无反应) |
+| Channel pill「▶ 5」可点 drill-down | ❌ | ss_59586gpuk (click 无反应) |
+| Demographic widget 数据/skeleton/illustration | ❌ | 3 widget 纯空白文本，3 段一模一样 |
+| 最新调研洞察 leaks "由 Sonnet 整理" | ❌ | model 名直接暴露 |
+| subtitle "9 件已发布作品" vs 洞察空态 "完成 1 件后" | ❌ **状态自相矛盾** | ss_76907j7kx |
+
+### Findings（每条都是深查 + 对照 baseline 后结论）
+
+#### F172 [**CRITICAL · silent failure 混淆**] hero KPI "0 / 0 / 0.0% with -0% delta" 把"未连接"和"真 0"混为一谈
+
+**现象**: hero 右上显示「今日点赞 0 · - 0% · 今日评论 0 · - 0% · 互动率 0.0% · - 0%」，**全 0 + 全 -0% delta**。
+
+**问题在哪**:
+- 用户**有 9 件已发布作品** (subtitle confirms) + **5 粉丝**——按抖音规律，9 件作品 7 天 0 互动几乎不可能除非账号是死号或采集失败
+- hint row 同时写「请检查 Python 依赖 browser_cookie3 是否安装」——说明产品自己**怀疑是采集失败**
+- 但 KPI 区**依然显示 0 而不是「未连接 / 数据采集失败 / -」**
+- 这与 R67 F145 (silent 500) / R72 F161 (silent close) 同属 **M88 silent failure 三级分级**，本次发生在**数据消费的核心入口**
+
+**为什么 CRITICAL**: 创作者打开 /analytics 第一眼看 KPI 是 0 → 大脑直觉解读"我的内容没人看"→ 自我怀疑/动力损伤。**实际上可能只是 backend 没 cookie**。这是产品向用户传递的**最有毒的 false signal**：当不确定时，**绝不能把"未知"渲染成"真 0"**。
+
+**对比基线**:
+- **YouTube Studio**: 数据采集中断时显示 "Data refresh in progress" + 上次有效数据时间戳
+- **抖音创作者中心**: cookie 失效会强制弹"重新登录"全屏遮罩，**绝不显示 0**
+- **TikTok Studio**: 显示 "—" 而不是 "0" 来标识 unknown
+
+**修复方向**:
+1. **立刻**: KPI 区检测「last-successful-collection-at」age，超过阈值（如 6h）或采集 status 为 error → 显示 "—" 而非 "0"，hover 提示 "数据采集失败 · [打开设置 →]"
+2. **进阶**: hero headline 不要只读 engagement——还要读采集状态。"你的受众 还在沉睡" 是 engagement 0 的诠释，**但当采集失败时 headline 应该是 "数据连接中断"**
+3. **顶级**: M88 + M100 family 升级——所有依赖外部 fetch 的 widget，必须用三态 `loaded | empty | broken`，不能用 boolean `loaded`
+
+#### F173 [**HIGH · 朗读 test 极端失败**] hint row「请检查主机上的 Python 依赖（browser_cookie3）是否安装」—— 5 个系统词裸露在数据消费页面
+
+**现象**: 主页面 hint row 完整文案：
+> 「ⓘ 数据由后台任务每小时采集一次。若长期为空，请检查主机上的 Python 依赖 (browser_cookie3) 是否安装。」
+
+清点失败：
+1. **"后台任务"** —— 后端架构词；用户不需要知道是 cron / 一次性 / on-demand
+2. **"每小时采集一次"** —— 还算可接受，但应该用「自动同步」
+3. **"主机"** —— sysadmin 词；普通用户的 "主机" 是云服务器还是自己的电脑？没人知道
+4. **"Python 依赖"** —— 直接 leak 后端语言栈
+5. **"(browser_cookie3)"** —— Python package 名 verbatim，等价于把 `pip install` 命令写在 onboarding 文案里
+
+**深层判断**: 这是 R70 F153 / R72 F162 朗读 test 失败谱系的又一次复现，且是**最致命的位置**——/analytics 是创作者每日打开的页面，**不是 dev settings 弹窗**。把 Python package 名写在 hero 下面，等于告诉创作者「这个产品是给开发者用的，我不属于这里」。
+
+**修复方向**:
+- 整行重写：「ⓘ 数据每小时自动同步。若长时间无数据，[打开设置 →] 检查抖音绑定。」
+- "Python 依赖 browser_cookie3" → 后台日志 / debug overlay，不进 user-facing copy
+- "主机" 删掉
+- "后台任务" → "自动同步"
+
+#### F174 [HIGH · 信息架构错位] subtitle 说"9 件已发布作品"，洞察 section 空态说"完成 1 个发布作品后首批洞察会出现" —— 两处数据源打架，用户直觉是 "产品坏了"
+
+**现象**:
+- Hero subtitle: `Mirodream · 5 粉丝 · 9 件已发布作品`
+- 洞察 empty state: `暂无调研洞察—Sonnet 还没分析过你最近的作品。完成 1 个发布作品后，首批洞察会自动出现在这里。`
+
+**两者矛盾**:
+- 已经有 9 件作品 → 洞察文案的前提"完成 1 件后才会出现"已被打破
+- 用户看到这个**直接判断产品逻辑混乱**
+
+**根因猜测**: 洞察 empty state 文案是 hard-coded copy（"完成 1 件"），没有 derived state；subtitle 是从 account.aweme_count 读的。两边数据源不同。
+
+**修复方向**:
+- 洞察 empty state 文案 = derived state；当 aweme_count > 0 时，文案变成 "已发现 N 个作品 · Sonnet 正在分析（每 24h 一次）" 或类似
+- 当真的等待 Sonnet 时，加 spinner / ETA / 上次分析时间
+- 当 Sonnet 分析过但是 "no insight worth surfacing" 时，文案变 "本轮分析未发现显著趋势 · 下次分析: HH:MM"
+
+#### F175 [HIGH · model name leak] 「最新调研 洞察 · 由 **Sonnet** 整理 · 按与你频道的相关度排序」—— 直接暴露 Claude Sonnet 模型名给创作者
+
+**现象**: 洞察 section header copy 写明 "由 Sonnet 整理"。这与 R70 F153 「Seedance 2.0 (via OpenRouter)」是同样的 brand leak —— 让用户面对 model 选型决策。
+
+**对比基线**:
+- **CapCut "AI 文案助手"** —— 隐藏背后 LLM
+- **抖音 "DataInsight"** —— 隐藏背后模型
+- **Notion AI** —— 隐藏 OpenAI/Claude
+- **Cursor** —— 必要时暴露但 model 选型在 Settings，不在用户工作流
+
+**为什么是 HIGH**: 创作者**不关心是谁的模型** —— Sonnet / GPT / Gemini 对创作者是 noise。AutoViral 露这个是 dev pride。如果将来切到 Opus / 自研模型 / 第三方，前端 copy 还得跟着改——耦合脆弱。
+
+**修复方向**:
+- "由 Sonnet 整理" → "AI 整理" 或者 "AutoViral 整理"（self-brand）
+- 模型选型放到 Settings 下"高级 / 实验"，不在主线 copy
+
+#### F176 [HIGH · 巨大功能缺失 vs baseline] 整页**没有时间序列图表 / 没有 top performing posts / 没有 follower growth chart** —— 三大 widget 是创作者 studio 标配，AutoViral 全缺
+
+**清点 missing widgets**:
+
+1. **Follower growth chart (折线图)**
+   - YouTube Studio 首屏：subscribers over 28 days
+   - 抖音创作者中心首屏: 粉丝增长曲线
+   - TikTok Studio: Follower growth
+   - **AutoViral: 无**
+
+2. **Top performing posts (ranking)**
+   - YouTube Studio: "Top videos" with views / CTR / 时长
+   - 抖音创作者中心: "热门作品" list
+   - **AutoViral: 无** —— 即使有 9 件作品也没有 ranking
+
+3. **Engagement time-series (柱状/折线)**
+   - YouTube Studio: Watch time by day
+   - 抖音: 日点赞、日评论、日分享 趋势
+   - **AutoViral: 仅有今日单值 KPI，无趋势**
+
+4. **CTR / impressions funnel**
+   - YouTube Studio: Impressions → CTR → Avg view duration
+   - **AutoViral: 无**
+
+5. **Audience retention curve**
+   - YouTube Studio: Average view duration
+   - **AutoViral: 无**
+
+**深层判断**: AutoViral 用 editorial brand 的 hero italic "你的受众 还在沉睡" 替代了所有 actionable 信号。这是个 brand-driven 决策**牺牲了创作者最关心的可执行洞察**——hero italic 文案讲故事，但 actionable advice 哪里？创作者打开 studio 是要决定 "下一条做什么"，不是听故事。
+
+**对比哲学**: 
+- 抖音/YouTube studio: data-first, story 是 nice-to-have
+- AutoViral: editorial-first, data 是 garnish
+- **不冲突，但 actionable 维度严重缺失**
+
+**修复方向（最小不破坏 brand 路径）**:
+1. 保留 editorial hero —— 这是 brand identity
+2. **加** 第二屏（scroll 后）"作品表现" section：作品 ranking + 7-day engagement trend bar
+3. **加** "粉丝活动" 折线图（即使只是 30-day 折线，也能让创作者 spot 趋势）
+4. **加** 「今日 vs 上周同期」对比卡——这是 hero KPI 应该有的 delta 数字（当前 "-0%" 不知道是什么意思）
+
+#### F177 [MEDIUM · 硬编码时间范围] "近 7 天" eyebrow 不可点 —— 创作者 studio 标配的时间范围 picker 完全缺失
+
+**现象**: hero eyebrow 显示「跟踪频道 · 近 7 天」，"近 7 天" 试 click 无反应（ss_4801cjqmq）。说明这是死的 label，没有 dropdown。
+
+**对比基线**:
+- **YouTube Studio**: 全屏顶部 time-range picker (7天/28天/90天/12月/全部/自定义)
+- **抖音创作者中心**: 顶部 7天/30天/90天 toggle
+- **TikTok Studio**: 7天/28天/60天 dropdown
+- **AutoViral**: 只有死的 "近 7 天"
+
+**为什么是 MEDIUM 而不是 HIGH**: 因为现在数据本身就 0，picker 没数据可切；但**有数据后这是必须**。提前修可避免 F176 实施后立刻发现需要 picker。
+
+**修复方向**:
+- "近 7 天" 改为 `<button>` 或 `<select>`，options: 7/28/90 天 + 全部
+- URL 同步 `?range=7d`，refresh 保留
+- F176 widget 实施时绑同一 range state
+
+#### F178 [MEDIUM · 多 widget 空态文案重复 3 次] 年龄 / 性别 / 地域 三个 widget 用一模一样的空态文案 "暂无 X 数据—等待后台采集首批样本"
+
+**现象**: 三个 demographic widget 空态:
+- 年龄: 「暂无年龄分布数据—等待后台采集首批样本。」
+- 性别: 「暂无性别分布数据—等待后台采集首批样本。」
+- 地域: 「暂无地域分布数据—等待后台采集首批样本。」
+
+**深层判断**: 三 widget empty state 用同一句模板字符串，唯一差异是变量名。这是 lazy empty state design—— 等价于错误页面写"出了点问题"而非具体 actionable hint。
+
+**对比基线**:
+- **Notion** empty state: 每个 widget 都讲该 widget 的 use case + sample CTA
+- **Linear**: 项目空态画了 ghost issue card
+- **AutoViral**: 纯文本，3 段一样
+
+**修复方向**:
+- 各 widget 加 ghost chart skeleton（grey bar/donut/map 形状）让用户**预期看到什么图**
+- empty copy 各自不同 + 提供 actionable hint：
+  - 年龄: "首批样本需 ~10 互动用户。当前 0/10。"
+  - 地域: "需要至少 1 个评论用户暴露地域。"
+- ghost chart 是更高 ROI——视觉占位 + 信息密度 + 期待管理
+
+#### F179 [MEDIUM · F38 旧 finding 未修] Channel pill `▶ 5` 仍然用 ▶ 播放图标 + 5（实际是粉丝数）
+
+**现象**: Mirodream channel card 下方 pill 仍显示「▶ 5」。这是 **R0 F38 已经标定**的图标语义错位（▶ 播放图标 + 粉丝数）—— 跨多轮未修，又一个 sediment 应用窗口失效。
+
+**修复方向**: 已在 F38 写过 —— 换 👥 / · followers 文字 / 或换成 aweme_count。本轮重新升级到 R74 候选。
+
+#### F180 [MEDIUM · KPI delta 渲染] "- 0%" 的破折号是什么 —— delta 信号丢失
+
+**现象**: 3 个 KPI 都显示「数字 + 一 0%」格式。"一" 在 hero 区视觉上长得既像 minus sign 又像 horizontal divider。如果是 delta -0%，那为何 0 = 没变化 仍然显示 minus？如果是 separator，那 separator 写在 % 前面不合习惯。
+
+**深层判断**: 字体渲染 + delta 语义两个问题叠加：
+- delta = 0% 时，应显示 `·` 或 `—`（"持平"）而不是 `- 0%`
+- 真正下跌时（-3%）应红色，上涨（+5%）应绿色
+- 当前是黑色 + 字符 - 0%，无颜色编码，且 0% delta 不应有 minus
+
+**对比基线**: 抖音 / YouTube studio delta 都是 `+/- N% · 7d` 形式 + 颜色编码
+
+**修复方向**:
+- delta 0 时不显示 minus
+- 用 KaTeX-style `−` (U+2212) 替代 ASCII `-` 让字符可识别
+- 加颜色编码: 上涨绿 / 下跌红 / 持平灰
+
+### Sediment（M102 - M103）
+
+#### M102 [NEW] **任何依赖外部 fetch 的数据 widget 必须用三态 `loaded · empty · broken`**——不能把 "broken" 渲染成 "0" 或 "empty"
+
+**原则**: data widget 的状态机至少包含：
+1. `loading`: skeleton
+2. `loaded · has_data`: 真实数据
+3. `loaded · empty (legitimate 0)`: 显式 "暂无数据" + 是否预期/可行动
+4. `broken (collection failed)`: 显示 "—" 或 "数据采集失败"，与 legitimate 0 区分
+
+**禁止**: 不可把 `loaded` flag 当作 boolean 用，导致 fetch error 静默 fallback 到 "0"。
+
+**应用时机**: 所有 react-query / SWR / fetch 的 `data` 字段读取处都要 grep 检查—— `if (data) renderZero` 是反模式；必须 `if (data?.collectedAt && isStale(...)) renderBroken`。
+
+**关联**: F172 (KPI 0 vs broken 混淆) / M88 silent failure 三级分级 / M100 modal 三态收尾 —— 三者构成 silent-failure 治理三件套
+
+#### M103 [NEW] **创作者 studio 三大基线 widget**：follower growth chart / top performing posts / engagement trend —— 缺一项就 vs 主流产品有显著差距
+
+**原则**: 任何创作者数据产品的"必备 widget 清单"：
+1. 粉丝增长曲线（折线，7/28/90 天可切）
+2. 作品 ranking（按 engagement 排序，点开看详情）
+3. Engagement trend（柱/折线，按日聚合）
+4. demographic（年龄/性别/地域）—— ✅ AutoViral 有空态
+5. Engagement metrics delta（今日 vs 上周同期）
+
+**应用时机**: 任何新增 /analytics widget 的设计提案，先与三大主流 studio 截图侧侧侧叠对照，缺哪几项要明示原因。
+
+**关联**: F176 三大 widget missing / F177 时间范围 picker missing —— 一起评估"产品 maturity vs studio 基线"
+
+### R73 闭包 / 升级
+
+- **F38** (Channel pill ▶ + 粉丝数) 升级 R74 候选 #2 —— 多轮未修，又一个 sediment 应用窗口失效证据。建议 sediment 跨 3+ round 未修自动升 P1
+- F172 与 R67 F145 / R72 F161 / R72 F170 同属 **M88 silent failure 谱系**，本次是 silent failure 在**数据消费入口**的复现，severity 升至最高（vs R72 F161 是出口）
+- F173 与 R70 F153 / R72 F162 同属 **M98 朗读 test 失败谱系**，本次是**入口主路径上**的失败（vs R70/R72 是子 dialog/modal），影响面更大
+
+### 下一轮候选
+
+- **R74 候选 #1 (TOP)**: F172 + F173 实施 —— hint row 文案大扫除 + KPI 三态（broken 显示 "—" 而非 0）。是 /analytics 首屏 trust 必修
+- R74 候选 #2: F38 + F179 联动 —— Channel pill 图标 / 数据语义修正
+- R74 候选 #3: F176 三大基线 widget 设计 —— follower growth / top posts / engagement trend。先 design 后 code，最大 product gap
+- R74 候选 #4: F174 洞察 empty state derived from aweme_count，消除 subtitle vs empty state 自相矛盾
+- R74 候选 #5: F177 时间范围 picker + URL `?range=` 同步
+- R74 候选 #6: F180 delta 渲染（颜色 / 0 时不显示 minus / U+2212 字符）
+- 历史债延续: R72 F161 (export silent close) / R70 F151 (上传入口) / R72 F170 (chat redact filter)
+
+### 截图归档
+
+ss_76907j7kx (/analytics 全屏空态) / ss_4801cjqmq (近 7 天 eyebrow 不可点 verify) / ss_59586gpuk (Channel pill ▶ 5 不可点 verify) —— 均在 browser 上下文，未落盘。
+
+---
+
+## Round 72 — **Studio Export / 历史 / chat 历史 三连测：modal silent close + audio engineering 术语裸露 + 旧 chat leak 不可治理**
+
+- **时间**：2026-05-12 18:02-18:05 本地
+- **测试者**：Claude Opus 4.7 via `/loop 20m`，第 2 round
+- **环境**：dev (`localhost:5173`)，**真实非空工程** `w_20260326_1208_813`（咖啡短视频，2 video clips · 15 raw clips · 5 images · 6 audio · BGM 103.4 BPM · `output/final.mp4` 已生成 · 14.72s · 1080×1920）
+- **路径**：(R70 后用户切到旧 work) → 点击「历史」→ 观察 popover → 点击导出 split-button arrow → 出现 dropdown「快速代理导出」单项 → 点击该项 → 出现「正在渲染…」modal → 5 秒后 modal silent close
+- **测评主题**：**最后一公里：导出 + 历史回滚 + chat 历史治理**。R70 覆盖入口（new asset），本轮覆盖出口（export）。继续按 "first-time user 心态 vs CapCut/Descript" 对比。
+- **覆盖功能**：history popover 显示与点击行为、export split button dropdown、render modal 5-stage 进度 UI、modal silent close 后的产物反馈、chat 历史 153 条中 R70 F149 verbatim 活化石、QuickActions.tsx 实时 HMR 改写但旧 chat 不刷新
+- **没覆盖**：export 是 silent success 还是 silent fail（缺 network panel 不能确证）、history entry 点击后的真实回滚行为、检视 tab、actual cancel button 行为。
+
+### 结果
+
+| Checkpoint | Status | Evidence |
+|---|---|---|
+| 「历史」按钮 → popover 列出 entry | ✅ | ss_3568yx3f5 (1 entry: `5e51d840 · 2026/5/8 · composition · 2.5KB`) |
+| 「导出」split-button arrow → dropdown | ✅ | ss_2058ms101 (单项「快速代理导出」) |
+| 「快速代理导出」→ 渲染 modal 弹出 | ✅ | ss_545666xzd (`JOB_5654C23F · 0%` + 5 stage list) |
+| 5 stage 任一变 active / 进度 > 0% | ❌ | ss_5382vfy19 (5 秒后 modal 已消失，stage 全程 0%) |
+| Modal 完成 / 失败 / 取消反馈 | ❌ **完全无反馈** | header "已保存 · 18:05" 唯一变化，无 success toast / 无 error toast / 无"打开文件"按钮 |
+| Escape 关闭历史 popover | ❌ | ss_2058ms101 (两个 popover 同时叠开) |
+| 导出后用户能找到产物 mp4 | ❌ | UI 无 file path / 无下载链接 / 无"打开文件位置" |
+
+### Findings（每条都是深查后结论）
+
+#### F161 [**CRITICAL · trust 杀手**] 导出 render modal 在 5 秒内 silent close，无 success/fail/cancel 反馈—— 创作工具最致命的信任崩溃
+
+**现象**:
+1. 点「快速代理导出」→ 出现 modal「正在渲染… JOB_5654C23F · 0%」+ 5 个空圆圈 stage list + 「取消」按钮
+2. 5 秒后再 screenshot → **modal 完全消失**
+3. header 显示「已保存 · 18:05」（之前 18:02）
+4. **无 toast、无完成 banner、无 "打开导出文件" 按钮、无文件下载链接**
+5. 用户被迫凭空猜测：完成了？失败了？被自动 cancel 了？
+
+**为什么这是 CRITICAL trust 杀手**:
+- 导出 = 创作工具的**最后一公里**——这一步失败/失联=整个工作流的产出归零感
+- **CapCut**: 进度条 + done 后转 "Saved to gallery · [Share] [Open folder]" 三连选项
+- **Descript**: 进度 + done banner + 自动打开 Finder 到导出目录
+- **Final Cut Pro**: 进度 + completion sound + "Show in Finder" button
+- **AutoViral**: modal 闪过 → 什么都没了 → **没有任何方法验证产出**
+
+**深层判断**：这与 R67 F145 (silent 500) / R67 F146 (timestamp 倒退) 同属 M88 sediment "silent failure 三级分级"，但严重度**最高级**——因为发生在创作旅程的**出口处**。Silent failure 在 sync 时让用户怀疑数据；在 export 时让用户怀疑**整个工作流的产出能力**。
+
+**可能根因（推测）**:
+- modal 是 controlled component，render-job 完成事件触发 `setOpen(false)`，**但没人在 close 之前 dispatch toast**
+- 或者完全没监听 progress event，只是定时 polling → 一旦后端 say done 就 close
+- 或者前端 close 是出于 UI 简洁，**故意不显示完成**——这就更糟
+
+**修复方向**:
+1. **立刻**: modal close 之前 dispatch 一个 `toast.success("已导出 · output/final.mp4 · 5.5MB · [打开文件位置]")` —— 至少要有 confirmation
+2. **进阶**: modal 不 close，进度跑完转「已完成」态 + 3 个 CTA（打开文件 / 分享 / 再导一份）
+3. **顶级 (CapCut/Descript pattern)**: 把渲染 job 当一等公民，左下角持续显示 dock-style "Export queue: 1 in progress · 2 done"，独立于 modal
+
+#### F162 [HIGH · 朗读 test 失败 · 极端 case] 5-stage 进度列表全大写英文音频工程术语：`RENDER · DUCK · LOUDNORM · BURN · ENCODE`
+
+**现象**: render modal 内列出 5 个 stage，全是 ALL-CAPS 英文：
+```
+〇 RENDER
+〇 DUCK
+〇 LOUDNORM
+〇 BURN
+〇 ENCODE
+```
+
+**为什么这是失控 leak**:
+- **RENDER** / **ENCODE** —— 视频术语，有相当中文世界共识，但仍应是「渲染」/「编码」
+- **BURN** —— 字幕烧录术语（subtitle burn-in），普通用户 100% 看不懂为何是"烧"
+- **DUCK** —— 这是 audio sidechain ducking（人声进来时自动 duck 背景音乐），**连英文母语非音频工程师都不懂这个词为什么是"鸭子"**。这是音频圈的内部 jargon
+- **LOUDNORM** —— FFmpeg 的 `loudnorm` filter 名（EBU R128 loudness normalization），**这是 FFmpeg CLI flag 直接命名**，相当于把 `--threads=4` 显示给用户
+
+**深层判断**: M89/M98 朗读 test 在 R70 已经标定（user-natural test），但 F162 是**最极端复现**——因为这些词不仅是技术词、还是**纯 CLI flag 名直接 leak 到 UI**。这是 backend pipeline 设计直接投射到 frontend 文案的失败 pattern。
+
+**修复方向**:
+- RENDER → 「视频渲染」
+- DUCK → 「人声闪避」（普通用户能猜出"BGM 让位给人声"）；或者干脆隐藏这个 stage，合并到「混音」总进度
+- LOUDNORM → 「音量标准化」
+- BURN → 「合成字幕」
+- ENCODE → 「编码 MP4」
+- **整体**: 5 个 stage 是 backend pipeline 关心的事，**用户只关心"做完没"**。考虑只显示一个总进度条 + 最多 2-3 个用户能 grok 的 phase（如「合成 → 编码 → 打包」）
+
+#### F163 [HIGH · 不可触达产物] 导出完成后 UI 无任何方式让用户找到 mp4 文件 —— 「导出」语义破产
+
+**现象**: chat 历史里能看到 backend 已生成 `output/final.mp4` (5.5MB, 14.72s)，但 UI 上：
+- modal 消失后无 "Show in Finder" 按钮
+- 没有 download link
+- 没有 file path 可复制
+- 「导出」按钮没有变成 「重新导出 / 下载」
+- header 也没有"已导出" badge
+
+**为什么是 HIGH**: 「导出」这个词的语义是「产物送到用户手里」。如果产物只存在于 `~/.autoviral/works/<id>/output/final.mp4`，用户**永远不会去文件系统翻**，这等于「导出」语义未完成。
+
+**对比基线**:
+- **CapCut**: 导出完成 → 弹"已保存到相册" + Share sheet
+- **Descript**: 导出完成 → 自动打开 Finder 到该目录
+- **Final Cut**: 导出完成 → toast + "Show in Finder" button
+- **Premiere**: 导出完成 → notification
+
+**修复方向**:
+1. **立刻**: modal 内（或 close 前的 toast）显示文件路径 + 「打开文件位置」按钮（macOS: `open ~/.../output/`）+ 「复制路径」
+2. **进阶**: 导出文件落到 `~/Downloads/<work-name>.mp4` 或用户可配置目录，而不是埋在 backend internal 目录
+3. **顶级**: 直接弹 native share sheet（剪映模式）；浏览器 dev 环境降级为 download blob
+
+#### F164 [MEDIUM · split-button 反模式 · F18 旧 sediment 未修] 导出 dropdown **仅一项**「快速代理导出」—— 下拉箭头是装饰
+
+**现象**: ss_2058ms101 显示导出 split-button arrow 点开后 dropdown 只有**一个**菜单项「快速代理导出」。**单项 dropdown 是 anti-pattern**——arrow 暗示"多选"但实际无选可选。
+
+**为什么仍是 sediment 反例**: F18 (在 R64 sediment) 已经标定 Studio Export dropdown 单项问题。**R72 复现 = sediment 应用窗口失效**——M83 之前说 "sediment 应用窗口 ≤2 round"，F18 远超 2 round 没修。这一次必须 escalate 为 implementation 优先级。
+
+**修复方向**:
+1. 干掉 split-button arrow，「导出」是 plain button，click 直接走快速代理导出
+2. **或者** 扩到 ≥2 项才保留 split—— 加「自定义参数导出」/「导出当前帧 PNG」/「导出 SRT 字幕文件」等。CapCut 的导出菜单是 5 档清晰度 + 字幕/水印/格式等子选项
+
+#### F165 [MEDIUM · 内部 ID 暴露] `JOB JOB_5654C23F` + `5e51d840` 共两处用户根本不需要的内部 ID 摆在 UI 上
+
+**现象**:
+- export modal: `JOB JOB_5654C23F · 0%` —— 任务 ID
+- history popover: `5e51d840 · 2026/5/8 · composition · 2.5KB` —— git commit SHA 前缀 + 后端文件名 + 字节数
+
+**为什么是 leak**:
+- Job ID 用户唯一可能用途是 bug report——产品应该让用户右键「复制诊断信息」自动 copy job id，**不需要默认显示**
+- commit SHA 是 backend Git 实现细节，等价于"露出数据库 row ID"。普通用户根本不理解什么是 commit hash
+- "composition · 2.5KB" 把 backend yaml 文件名 + 字节大小当 user-facing metadata，几乎没有信息量
+
+**修复方向**:
+1. JOB ID → 隐藏；保留在 dev console / debug overlay / 右键诊断菜单
+2. history entry → 时间 + 用户编辑摘要（"加了 BGM" / "调整 clip 4 时长"）。**不要让用户面对 commit hash**
+3. "composition · 2.5KB" → 隐藏；或换 "保存版本 1 · 2 天前"
+
+#### F166 [MEDIUM · 进度可见性] 5 stage list 没有 active/done/pending 三态视觉，0% 时与 100% 时**视觉无差异**
+
+**现象**: render modal 的 5 个 stage 都用 `〇` 空心圆圈，没有：
+- active stage 高亮（spinner / 实心圆 / 横向 highlight bar）
+- done stage 打勾 (`✓` / 实心圆 / 灰化文字)
+- 总进度条 / 各 stage 子进度
+
+**深层判断**: 5 秒过程中，**用户唯一能看的信号是顶部 "JOB X · 0%"**。如果数字一直 0%（短渲染可能根本没机会更新到中间值），用户会怀疑 stuck。各 stage 视觉静止 + 整体一个百分比 = 没有 staged feedback 价值。
+
+**修复方向**:
+- 当前 active stage 加 spinner
+- done stage 加 `✓` 并灰化
+- pending stage 保留 `〇` 但调淡 color
+- 加局部进度条（"RENDER: 80%"）
+
+#### F167 [MEDIUM · 嵌套 popover 焦点失控] 历史 popover 与导出 dropdown 同时打开，Escape 无法关闭历史
+
+**现象**: ss_2058ms101 显示两个 popover 并排叠开——历史 popover 仍然显示 `5e51d840 · 2026/5/8 · composition · 2.5KB`，同时导出 dropdown 也显示「快速代理导出」。**焦点管理失败**：Escape 应至少关闭最上层 popover、最好关闭所有 popover；当前看起来 Escape 完全无效。
+
+**深层判断**: 这是 M99 sediment（按钮可点性 = derived state）的兄弟问题——**popover 可见性应该是 mutually exclusive**。多 popover 同时打开会让 keyboard nav 混乱、阴影叠加变脏。
+
+**修复方向**:
+1. 全局 popover registry：打开任一 popover 自动关其他
+2. Escape 关闭最上层 popover 而不是所有
+3. 点击外部区域统一关闭 popover（看起来当前也没此行为）
+
+#### F168 [MEDIUM · 历史粒度过粗] 153 条 chat agent 工作但只有 1 个 history entry —— 无法回滚到 agent 中间态
+
+**现象**: 历史 popover 只列出 1 个 entry (`5e51d840 · 2026/5/8`)，但工程经历了：
+- research → plan → assets → assembly 四阶段
+- 5 个 scene + BGM 拍分析
+- 多次「rollback to 5e51d848」
+- 字幕 burn 多轮调整
+
+**深层判断**: 创作工具的 history 应该至少是「每次 user 主动确认的 checkpoint + 每次 agent 完成的 milestone」。当前看起来只在某个粒度自动 commit，导致用户**无法回滚到 "BGM 加之前"** 这种中间态。如果用户后悔加 BGM 想试别的，**没有 affordance 让他回到那一刻**。
+
+**对比基线**:
+- **Figma**: 持续 autosave 版本，可以回滚到任一时刻
+- **Descript**: 时间线左侧有 version history with named milestones
+- **CapCut**: 每次 export 自动 snapshot
+
+**修复方向**:
+1. **立刻**: 在 chat 内每次 agent task 完成时自动创建 history entry，名称 = agent task 名（如「调 BGM 节拍」）
+2. **进阶**: 用户主动「保存里程碑」+ 标签（"加 BGM 前的版本"）
+3. **顶级**: 自动 commit 每个 reversible state change，rollback UI 显示时间线
+
+#### F169 [HIGH · history entry 命名] `5e51d840 · 2026/5/8 · composition · 2.5KB` —— 三段全部是系统语言
+
+**现象**: 唯一的 history entry 显示为：`5e51d840 · 2026/5/8 · composition · 2.5KB`。三段拆开:
+- `5e51d840`: git SHA 前缀（同 F165）
+- `2026/5/8`: 日期—— OK
+- `composition · 2.5KB`: backend filename + 字节数
+
+**深层判断**: 用户看历史是为了找"我想回到那时候"——他记得的是「加 BGM 之前」/「字幕烧之前」，**绝不是 5e51d840**。这是 history entry naming 的**信息架构错误**：用了存储层的 metadata，没用产品层的 semantic。
+
+**修复方向**:
+- 时间用相对时间：「2 天前 · 14:32」
+- 名称用 semantic：「research / plan / assembly 后」/「BGM 加入后」/「字幕烧入后」（自动从 chat task 推导）
+- 大小信息隐藏；hover 显示
+- 完整 SHA 隐藏；右键诊断菜单可见
+
+#### F170 [**HIGH · 治理结构性盲区**] F149 fix 通过 HMR 落地（console: `[vite] hot updated: QuickActions.tsx`），但旧 chat 历史**不会回溯渲染**—— 老 leak 永远可见
+
+**现象**:
+- Console 记录 `10:18:43 [vite] hot updated: /src/features/studio/panels/Chat/QuickActions.tsx` —— 说明并行 agent 实时改了 QuickActions（应该在修 R68 F149）
+- 但当前 chat 历史里的第 150+ 条 prompt 仍然是**修复前的版本**：
+  > 「给当前 timeline 上的视频/音频自动转写出字幕，调 `/api/audio/captions` 拿 word-level 时间戳，然后调 `subtitle_burn.py` 生成 douyin-highlight 风格的 ASS 字幕，加到 text 轨。如果遇到 `PYTHON_DEP_MISSING`，告诉用户跑 `pip install stable-ts`。」
+
+- 这是 **F149 verbatim 的活化石**。F148/F149 prompt 文案已经在 source code 改了，但因为 chat 历史是**追加日志、不可变**，**老 leak 永远嵌在数据里**。
+
+**为什么这是结构性盲区**:
+- prompt-engineering bug 的修复**只能向前**
+- 老用户的 chat scroll 历史**永远包含 leak**
+- 新用户清进度（新工程）才能享受 fix
+- **etymology test**: 我们靠 source-code review 检测 leak，**但 user-visible state 不是 source code，而是 chat 历史**
+
+**深层判断**: 这要求引入一种 chat 历史治理机制。可能选项：
+1. **过滤渲染**: 显示 chat 时检测 hard-coded forbidden strings (`/api/`, `pip install`, `PYTHON_DEP_MISSING`, `composition.yaml`...) 折叠/重写
+2. **migration**: 一次性后端脚本把旧 chat 历史里的 system-style prompt 重写为 user-style
+3. **chat 历史 versioning**: 每条 user message 有 "raw" vs "displayed" 两个字段，前端 display 字段可后期更新
+
+**修复方向**:
+1. **立刻**: chat panel render layer 加一个 redact filter，匹配 `/^(/api/|pip install|PYTHON_DEP_MISSING|composition\.yaml|JOB_)/` 替换或折叠
+2. **进阶**: chat message schema 区分 `system_internal_prompt` (注入用，发给 agent) 和 `user_facing_label` (显示用，可后期重写)
+3. **顶级 M101 sediment** (见下)
+
+#### F171 [MEDIUM · 词汇不一致] chat 内说「**text 轨**」，timeline UI 说「**字幕**」轨
+
+**现象**: chat history "F149 活化石" 里说「加到 **text** 轨」，但 timeline 视觉上 4 条轨名是「视频 / BGM / 字幕 / 覆盖」（截图 ss_71817tb5f）。同一概念 `track.kind = text` / `字幕轨` / 用户可能想的「caption / subtitle 轨」，三个词跨上下文打架。
+
+**深层判断**: 这是命名层 source-of-truth 缺失——前端 i18n 字典、agent prompt template、backend schema 之间没共享 vocabulary。用户切换不同 surface 时被迫做 mental translation。
+
+**修复方向**:
+- 选一个 user-facing canonical 词（建议「字幕」）
+- agent prompt template 引用 i18n key 而不是 hard-code `text 轨`
+- 把 i18n vocabulary 抽成 `vocabulary.ts` shared module，前端 + agent prompt 共享
+
+### Sediment（M100 - M101）
+
+#### M100 [NEW] **任何长任务 modal 必须三态收尾**：成功 toast / 失败 toast / 取消 toast —— 不可 silent close
+
+**原则**: render / export / sync / publish / generate 这类背景任务的 progress modal，**绝不允许 silent close 后由用户自己猜结果**。三种结束态都必须有 explicit user-visible feedback。
+
+**应用时机**: code review 检查所有 `setOpen(false)` / `dialog.close()` 调用——必须配套一个 toast / banner / inline confirmation；无配套的标记为 trust-bug。
+
+**关联**: F161 (export silent close) / R67 F145 (silent 500) / R67 F146 (timestamp 倒退) / M88 三级分级——本条是**最严重一级在出口处复现**
+
+#### M101 [NEW] **chat 历史是不可变的 user-visible 数据，fix prompt 文案不能只改 source code，必须有 forward-only 治理 / display-time redact / migration 三条路之一**
+
+**原则**: prompt-engineering bug 的修复必须考虑「老用户老 chat 历史还在显示」的事实。修 source code 不够。
+
+**应用时机**: 任何修 `QuickActions.tsx` / agent prompt template / system-injection text 的 PR，必须同时设计**displayed-history 治理路径**（redact filter / migration / display-time rewrite）三选一。
+
+**关联**: F170 (F149 fix 落地但旧 chat 仍 leak) / M89/M98 朗读 test —— 本条是 enforcement 的结构性手段
+
+### R72 闭包 / 重新归类
+
+- **F18 sediment** (Studio Export dropdown 单项) 升级为 R73 候选 #1 —— 已多轮未修
+- **F148 / F149** Editor 已修但 Studio side 还有 stale UI / 历史 leak，本轮 F170 把它们 graduate 为「fix 已落地但治理路径未完成」
+- 并行 R71 entry (codex) 关闭了 F129 (stub aggregation 漏聚 mutation result)；本轮 F161 (export silent close) 是 silent-failure 谱系的下一站，不要与 F129 root cause 混淆
+
+### 下一轮候选
+
+- **R73 候选 #1 (TOP)**: F161 实施 —— export modal close 前 dispatch `toast.success("已导出 · output/final.mp4 · 5.5MB · [打开文件位置]")`，最小 effort 最大 trust 修复
+- R73 候选 #2: F162 + F165 + F169 联动 —— ID 与术语 leak 大扫除（job id 隐藏 / DUCK LOUDNORM 翻译 / commit SHA 替换 semantic naming）
+- R73 候选 #3: F170 实施 —— chat panel render layer 加 redact filter，正则匹配 `/api/` `pip install` `PYTHON_DEP_MISSING` `composition.yaml` `JOB_` 替换或折叠
+- R73 候选 #4: F164 实施 —— 干掉导出 split-button arrow 或扩 dropdown ≥2 项
+- R73 候选 #5: F167 popover registry —— 多 popover 互斥 + Escape 关最上层
+- 历史债延续: F151 (R70 TOP, 上传入口) / F155 (duration enum bind) / F157 (quick-action 前置守卫)
+
+### 截图归档
+
+ss_71817tb5f (Studio 真实非空状态 + F149 活化石) / ss_3568yx3f5 (history popover 单 entry) / ss_2058ms101 (双 popover 叠开 + 单项 dropdown) / ss_545666xzd (render modal 0% + 5 stage list) / ss_5382vfy19 (5 秒后 modal silent close) —— 均在 browser 上下文，未落盘。
+
+---
+
 ## Round 71 — **F129 CLOSED ✅ 跨 8 轮 silent-failure 真 root cause 揭示：stub aggregation 漏聚 mutation result**
 
 - **时间**：2026-05-12（用户给 `/loop 30m e2e-report fix` 第 1 轮）
