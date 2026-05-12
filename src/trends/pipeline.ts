@@ -34,7 +34,9 @@ export async function collectPlatform(
   });
   if (enriched.pipelineStatus !== "ok") return enriched;
 
-  // Download covers; mutate cachedPath in-place.
+  // Download covers; mutate cachedPath in-place. Safe because items are
+  // freshly allocated by enrichWithAnalysis on each call — never cached or
+  // shared. If enrichment ever starts memoizing return values, revisit.
   const dir = deps.coversDir(platform);
   await Promise.all(enriched.items.map(async (item) => {
     if (!item.cover.url) return;
