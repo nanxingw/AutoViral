@@ -6,6 +6,245 @@
 
 ---
 
+## Round 108 — **R104 F441 (CRITICAL · KPI 100% fallback 0 silent leak) + F442 (HIGH · per-KPI delta 永远 — 0% placeholder) + F443 (HIGH · hero "近 7 天" 文案谎言) + F450 (LOW · Loading/Empty 硬编 EN) 四连 CLOSED ✅ —— /analytics 第一次真正显示真实账号 KPI；M161 time-window honesty 第一次实际应用；data + copy + a11y 三 plane 同 round 闭合**
+
+- **时间**：2026-05-13（`/loop 30m` cron 触发本轮；R107 已被并行 chrome-audit agent 占用，本轮采用 R108 编号）
+- **触发**：R104 落 11 个 finding (F440-F450)，F441 是产品级 P0 silent leak（任何 user 打开 /analytics 看到的 KPI 都是 fallback 0，因为 adapter 读后端不存在的 key）。本轮选 R104 中最高 ROI 的"single-round 多连闭合"组合 F441+F442+F443+F450 —— 数据通路 + 文案谎言 + i18n leak 三件 P0~P3 一次解决。F440 (works[] 9 件作品 dead-data) + F445 (零 chart) + F446 (零 export) + F447 (单平台) + F448 (demographics 永久 empty) 是产品定位级 multi-round 战略改造，留作 R109+ 候选
+- **方法学**：复用 R104 M159 (contract drift detection) + M161 (time-window honesty) 两套审计沉淀直接驱动 fix —— audit round 发明 method，fix round 兑现 method。第一次走通"audit-method → fix-method"闭环
+
+### 修复
+
+- `web/src/queries/analytics.ts`（**重写 adapter**，+75 行 / -22 行）
+  - **F441 修复** —— `BackendAnalyticsSummary` 接口对齐 `src/analytics-collector.ts:38-46` 真实 schema：`total_works_collected / avg_play / avg_digg / avg_comment / avg_share / avg_collect / engagement_rate`（全部 snake_case）
+  - `CreatorAnalytics.summary` 改名为 truthful 字段：`avgLikes / avgComments / avgPlay / engagementRate / totalWorks`（取代之前不存在的 `todayLikes / todayComments / *Delta`）
+  - adapter 映射：`s.avg_digg ?? 0 → avgLikes` `s.avg_comment ?? 0 → avgComments` `s.engagement_rate ?? 0 → engagementRate` `s.avg_play ?? 0 → avgPlay` `s.total_works_collected ?? 0 → totalWorks`
+  - **F442 准备** —— `delta` 改作顶层字段 `{ followers: number; favorited: number } | null`（之前 adapter 把 `delta` 接进 `summary.*Delta` 全部读 nonexistent key 永远 fallback 0），现接 backend `api.ts:1208-1213` 真实 delta 计算输出
+  - JSDoc 顶部加 R104 F441/F442/F443 三段说明，记录"adapter 之前读的所有 key 都不存在于 backend payload"这个反面教训
+- `web/src/features/analytics/KPIBar.tsx`（**简化**，+25 行 / -16 行）
+  - **F442 修复** —— props 从 `{ todayLikes, likesDelta, todayComments, commentsDelta, engagement, engagementDelta }` 简化为 `{ avgLikes, avgComments, engagement }`（移除全部 *Delta props）
+  - 删除每个 KPI 卡片的 `.delta` 行渲染—— `fmtDelta(0)` = "— 0%" placeholder 不再出现
+  - 注释说明 "Until backend ships day-over-day or time-windowed summaries, this bar shows truthful averages with **no delta affordance** at all"
+- `web/src/features/analytics/KPIBar.module.css`（-2 行）
+  - 移除 unused `.delta` / `.deltaDown` CSS class
+- `web/src/pages/Analytics.tsx`（适配新接口 +5 行 / -8 行）
+  - **F450 修复** —— `<main className="page">Loading…</main>` → `<main className="page">{t("analytics.loading")}</main>`；`No analytics data.` 同理
+  - audienceStatusLabel 调用参数从 `summary.todayLikes / todayComments` 改 `summary.avgLikes / avgComments`
+  - isEmpty 检查同步改 `summary.avgLikes === 0 && summary.avgComments === 0 && ...`
+  - KPIBar prop 透传简化为 `{avgLikes, avgComments, engagement}`
+- `web/src/i18n/messages.ts`（双 locale 修改 + 新增）
+  - **F443 修复** —— EN `heroEyebrow: "CHANNEL HEALTH · last 7 days"` → `"CHANNEL HEALTH · LIFETIME"`；ZH `"频道脉象 · 近 7 天"` → `"频道脉象 · 自有记录以来"`
+  - **F441 文案对齐** —— `kpiTodayLikes` → `kpiAvgLikes`（EN "Avg likes / post" · ZH "平均点赞 / 篇"）；`kpiTodayComments` → `kpiAvgComments`（EN "Avg comments / post" · ZH "平均评论 / 篇"）；`kpiEngagement` 文案从 "Engagement" → "Engagement rate"（ZH 已是"互动率"不动）
+  - **F450 新增** —— `analytics.loading`（EN "Loading channel data…" · ZH "频道数据加载中…"）+ `analytics.empty`（EN "No analytics data yet." · ZH "暂无频道数据。"）
+- `web/src/test/msw.ts`（mock fixture 重写为 backend 真实 shape）
+  - `summary: { todayLikes: 2847, todayComments: 436, engagementRate: 0.087, ...Delta: ... }` → `summary: { total_works_collected: 23, avg_play: 12_400, avg_digg: 2_847, avg_comment: 436, avg_share: 88, avg_collect: 124, engagement_rate: 0.087 }`
+  - 注释明确"The previous fixture hid the adapter mismatch bug; this one matches production shape"——把"测试 mock 应当忠实于 production payload"作为 contract 写下
+- `web/src/features/analytics/Analytics.test.tsx`（hero assertion 调整）
+  - `/CHANNEL HEALTH/i` → `/LIFETIME|自有记录以来/i` 适应 F443 文案改造
+  - 保留 `2\.8K` 断言——证明 `avg_digg=2847 → compactNumber → "2.8K"` adapter 链路通畅
+
+### E2E 浏览器证据（M141 fetch-hook + DOM probe + screenshot 三重）
+
+| Locale | Eyebrow | Audience line | KPI labels | KPI nums | deltaPresent |
+|---|---|---|---|---|---|
+| **ZH** | 频道脉象 · **自有记录以来** | 你的受众 **稳定有声**。 | 平均点赞 / 篇 · 平均评论 / 篇 · 互动率 | **16** · 0 · **2.6%** | **false** |
+| **EN** | CHANNEL HEALTH · **LIFETIME** | Your audience is **alive and well**. | AVG LIKES / POST · AVG COMMENTS / POST · ENGAGEMENT RATE | **16** · 0 · **2.6%** | **false** |
+
+DOM probe 补充验证：`bodyTextHasNgaiQiTian: false`（"近 7 天" 字串已彻底消失）+ `bodyTextHasLifetime: true`。账号 Mirodream（5 粉丝 · 9 件已发布作品）engagement rate 2.6% 落入 1-5% bucket → audienceStatusLabel 返回 "alive and well" / "稳定有声"——这是 R104 之前永远 fallback 0 的同一账号，**第一次看见自己真实的频道脉象**。
+
+### 静态验证
+
+```
+npx tsc --noEmit | grep analytics      → 0 errors（pre-existing baseline 错误均与 analytics 无关）
+npx vitest run analytics audienceStatus → 2 files / 7 tests passed
+```
+
+### 沉淀
+
+**M169 · audit-method → fix-method 闭环兑现**
+
+R104 发明 M159 (contract drift detection) + M160 (dead-data audit) + M161 (time-window honesty)，本轮 R108 第一次完整闭环——
+
+- M159 应用 F441：审计找到 adapter 读 6 个 nonexistent key → 重写 adapter 兑现 schema parity
+- M161 应用 F443：审计找到 hero 谎称 "近 7 天" → 改文案 "自有记录以来" 兑现时间维度诚实
+
+**意义**：audit round 不只是落 finding，发明的 method 必须可被 fix round 机械化使用。R104 的 M159/M161 在 R108 各被使用了 1 次——证明这类沉淀是 actionable 而非纯学术。
+
+**M170 · 测试 mock 必须忠实于 production payload**（升级）
+
+R108 暴露的反面教材：`web/src/test/msw.ts` mock `summary: { todayLikes: 2847 }` 让所有 Analytics 单元测试都通过，但 production payload 根本不含 `todayLikes` key——测试用 mock 偏离 backend reality **掩盖了** F441 silent leak 一直没被捕获到。
+
+**新规则**：
+1. 任何 mock fixture（msw / vitest mock / playwright fixture）改写时必须先 `curl` 一次真实 endpoint 确认 key set
+2. mock 应当复制 backend response shape 而非 frontend-期望 shape
+3. CI 加 `tsc` 检查防止 fixture 字段名漂出 backend 接口契约
+
+`★ 第一原理` —— mock 是 backend 的影子，不是 frontend 的玩具。
+
+### 桥梁哲学 5 plane 第 7 轮巩固
+
+| Plane | 本轮证据 |
+|---|---|
+| data plane | **F441 修复** = data plane **第 5 处** silent leak 闭合（adapter 6 个 nonexistent key → 0/0/0% 永久谎言）。这是当前最严重的产品级 silent P0，因为它直接让 /analytics 主功能 0 显示对的数字 |
+| copy plane | **F443 修复** = "时间窗口诚实" 第 1 处兑现；既往 R86/89/99/102/105 修复全是 error/empty-state 文案，F443 是 **页头宣言级** 文案诚实 |
+| a11y plane | **F450 修复** = i18n leak 第 7 处闭合；ZH user 加载页不再看到 EN "Loading…" |
+| control plane | 不动；F442 移除 delta placeholder 是"减少误导"而非"赋能" |
+| audit plane | M159/M160/M161 (R104) 第一次被实际使用 → **M169 audit→fix 闭环兑现** 沉淀 |
+
+### R109 候选（按战略权重倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP · 产品定位) | **F440 dead-data 9 works 上 UI** | R104 audit | 后端已经吃力抓取 9 件作品全套指标，前端却选择性失明；mainstream Buffer/Later 都把 per-post 表格作为第一屏 |
+| 2 (TOP · 信任修复) | **F444 manual refresh + lastUpdated** | R104 audit | 用户绑定账号后无从知道何时下次抓取；半天就能加完 |
+| 3 (HIGH · undo 文化) | R97 M143 P0 Zustand history + Cmd+Z | R95 F372 | 多 round 战略，重大产品差距 |
+| 4 (HIGH · M156 grep) | 全 codebase comment-vs-impl audit | R101 F422 | M156 第一次系统化应用 |
+| 5 (METHOD) | M169/M170 + 既有 M141-M168 写入 `.claude/rules/e2e-testing.md` | 累计 ~15 套 method | 沉淀持续扩展，需要 method-index |
+
+`★ Insight ─────────────────────────────────────`
+- R104 F441 是 AutoViral 历史上第一个 **被 audit round 准确捕获 + 被同周 fix round 完整闭合** 的产品级 P0。从 R104 audit 落文 → R108 fix commit 间隔 < 1 小时，证明"audit-fix"双轮模式可以在自动化 cron 内运转
+- adapter `?? 0` 是产品最隐蔽的反模式——backend 200 OK，frontend 200 OK，渲染层 0 errors，唯一异常是数字永远 0。需要 zod runtime schema validation 在 adapter 入口强制 parse，drift 即 throw 而非 silent。建议作为 R109+ "M159 升级版" 战略落地
+- F443 + F450 修复都很小（i18n 字面量）但 战略意义远大于代码量——它们都属于"用户对产品诚信度的微观判断"。"近 7 天" 谎言 + EN 字面量混入 ZH locale 都是用户**会注意到但不会反馈**的细节；信任就在这里慢慢漏掉
+`─────────────────────────────────────────────────`
+
+---
+
+## Round 107 — **全局 chrome 深审：TopNav / ErrorBoundary / 快捷键体系 / 身份与无障碍 — F463-F474（12 finding，含 2 CRITICAL · 4 HIGH · 4 MEDIUM · 2 LOW）+ M165/M166/M167/M168 沉淀**
+
+- **时间**：2026-05-13（`/loop 20m` cron `105f4ef8` 触发 R107）
+- **环境**：browser MCP 扩展持续掉线 → 全程 source-code + grep 审计路径。审计 surface = 每个 page 都挂载的 `App.tsx` shell + `TopNav.tsx` (81 行) + `ThemeToggle` (38) + `LocaleToggle` (66) + `ErrorBoundary` (188) + `useShortcuts` (172)
+- **触发**：前 14 轮（R93..R106）全部聚焦 surface-内部，从未审过 **chrome 层**——但 chrome 是用户**在每页都看到**的固定元素，任何 bug 影响 ×N 页面。Mainstream tools (Linear/Notion/Cursor/Raycast) 在 Cmd+K command palette、theme 三档、skip-to-content、breadcrumb、notification、user-identity 上极成熟；AutoViral 全 0 → 是产品**桌面级 vs 玩具级**的核心差距
+- **方法学**：复用 M162 schema parity 思路但应用到 route → tab 覆盖矩阵；新增 **M167 全局键盘可达性 checklist**——把 WCAG 2.1 SC 2.1.1/2.4.1/2.4.7 三个条款转成可机扫的代码检查
+- **零 mutation**：源代码 + grep，无任何 state-change
+
+### 深层发现
+
+| ID | 严重度 | 标题 | 三层证据 | 深层根因 |
+|---|---|---|---|---|
+| **F463** | **CRITICAL** | Studio/Editor 子路由 (`/studio/:workId` `/editor/:workId`) **不高亮任何 tab**——用户在编辑器内完全失去 "where am I" 信号 | source `TopNav.tsx:11-15` `TABS = [{to:"/"}, {to:"/explore"}, {to:"/analytics"}]` 仅 3 项；`active(to)` (line 23-26) 用 `pathname.startsWith(to)`——`/studio/w_2026...` 不 startsWith 任何 TAB 路径 → 全部返 false → `aria-current=undefined` 视觉上 0 tab 高亮 | 编辑器是用户**停留时间最长**的 surface，却完全不知道自己"属于哪个 nav 段"。这破坏 IA (information architecture) 第一原则。即使 product 决定"编辑器不属于 root 概念"，也应至少在 nav 上标"⟵ 离开此作品"——目前完全 silence |
+| **F464** | **CRITICAL** | 无全局 **Cmd+K command palette / quick switcher**——0 跨 surface 快捷指令 | source 全 repo grep `cmd+k\|CommandPalette` → 0 hit；TopNav.tsx:30-39 唯一全局快捷键是 `Cmd+,` 开 Settings；`useShortcuts.ts` 全部 7 个键 (Space/J/L/Cmd+S/Cmd+Shift+G/Cmd+B/B/Shift+Backspace) 都是 **studio-internal**——加载在 `<Studio>` 组件内 (`window.addEventListener` line 168)，离开 studio 失效 | 用户**无法快速跳 work**（必须点 Works tab → click NewWorkCard 或某个 work 卡）、**无法搜 trends**、**无法切平台 tab**。Linear/Notion/Cursor/Raycast 100% Cmd+K 是行业标准。这是"桌面级 vs 玩具级"产品最显眼差距 |
+| **F465** | HIGH | ErrorBoundary fallback UI 默认渲染**完整 stack trace** (含 file paths + sourcemap-decoded 内部函数名) 给生产用户 | source `ErrorBoundary.tsx:107-143` `<details>` 内 `<pre>` 输出 `${error.name}: ${error.message}${error.stack ? '\n\n${error.stack}' : ''}`——details 虽默认 collapse 但用户一展开看到全 stack；无 `if (import.meta.env.DEV)` gating | 信息泄露：file paths 暴露目录结构 (e.g. `/web/src/features/editor/...`)、minified 函数名暴露代码结构。普通用户看到一长串 `at Object.<anonymous>` 触发恐慌——而开发者其实只需要 `error.id` 上报到 Sentry；UI 用户视角应该只看"出错了，点重试"。M166 沉淀：错误 UI 信息披露必须 dev-mode-only |
+| **F466** | HIGH | ErrorBoundary "重试" 按钮调用 `window.location.reload()` → **丢失所有未保存编辑状态** | source `ErrorBoundary.tsx:148-151` `onClick={() => { onReset(); window.location.reload(); }}`；Editor / Studio / Filmstrip 大量 in-memory state 未 persistent（如 carousel local edits 800ms autosave debounce 内、Konva selection、ChatPanel 消息池） | "render-error 触发→点重试→数据全没了" 是用户**最不可接受**的错误处理方式。`onReset()` 已经把 boundary state 清零（subtree 会重 mount），`reload()` 是 over-kill。正确路径：仅 `onReset()`，让 React 重 render；reload 应该是 last-resort "硬重置" 第二按钮 |
+| **F467** | HIGH | 整个 app **无 skip-to-content link**——WCAG 2.4.1 (Bypass Blocks) 违反 | source App.tsx 全文 + TopNav.tsx 全文 grep `skip-link\|skipNav\|sr-only.*skip` → 0 hit；TopNav 内有 6 个可 tab 元素（brand link, 3 tabs, LocaleToggle 2 segs, ThemeToggle, gear btn）= 9 个 tab stop；SR / 键盘用户每次刷新页面必须 tab 过 9 个 chrome 元素才到内容 | 行业 mainstream (GitHub/Vercel/Linear/Figma) 100% 配 "跳到主要内容" link——首个 tab 即 visible。AutoViral 0。这是 a11y 入门门槛违反，不需要任何重构，只需在 App.tsx 顶部加 `<a className="skip-link" href="#main">跳到主要内容</a>` 即可。**audit-able 单行 fix** |
+| **F468** | HIGH | TopNav **0 用户/账号 identity 显示**——创作者工具核心 chrome 缺失 | source `TopNav.tsx:64-75` 右侧仅 3 个 control: LocaleToggle / ThemeToggle / Gear-btn-for-Settings；无 avatar / 无 nickname / 无 workspace switcher / 无 logged-as label；Analytics 数据里有 `account.nickname` "Mirodream" 但 chrome 不显示 | 用户不知道"我现在以谁的身份在创作"、"绑定了哪个 douyin 账号"、"是否需要重新登录"——所有 mainstream creator tools (Buffer / Hootsuite / Later / Canva / Figma) 右上角 100% 都有 avatar dropdown。AutoViral chrome 设计上视用户为 "single-user single-account local tool"，但产品定位 "创作 + 发布" 已经超出该范围 |
+| **F469** | MEDIUM | Studio/Editor 子路由**无 breadcrumb / secondary nav**——`/studio/w_2026...` 中无 "← 回到 Works" 路径 | TopNav 是 fixed top + 仅 3 root tabs；source 全 repo grep `breadcrumb\|Breadcrumb` → 0 hit；App.tsx Outlet 直接渲染 route component 无 sub-nav 包裹层 | 用户在 `/editor/w_2026..` 内想回 Works 必须 (a) 点 brand logo 或 (b) 点 Works tab——两者都不携带"当前作品名"上下文，且 brand-logo 通常不携 nav 语义；Notion / Linear / Figma 标配 `Works / "我的视频草稿" / Editor` 三级 breadcrumb |
+| **F470** | MEDIUM | TopNav **0 notification / announcement / changelog 入口**——失败任务、新 trends collected、产品更新全部 silent | source TopNav.tsx 右侧 3 个 control 仅 Locale/Theme/Settings；grep `Bell\|notification\|announcement` 在 TopNav 相关 → 0 hit；R106 F456 collectTrends 30-60s 完成后 ✓ badge 在切页面丢失就是因为没有全局 notification 容器 | Vercel/GitHub/Linear/Notion 右上角 100% 配 Bell icon + 未读 dot + dropdown。AutoViral 0 → 任何"后台异步事件"（trends collected / publish 失败 / agent 完成思考）只能在所在 surface 本地暴露，跨页即失忆 |
+| **F471** | MEDIUM | brand 链接 `/` 与 Works tab `/` **重复**——视觉双 affordance 同 destination | source `TopNav.tsx:45 <Link to="/" className={styles.brand}>` + `TABS[0] = { to: "/", key: "topnav.works" }`——两个不同的视觉 element 都指向 `/`；用户难以判断"两者有何不同" | 行业惯例：brand "/" 是 marketing-style "回 home"，tabs[0] 应是"功能性 dashboard" 例如 `/dashboard` 而非 `/`；或 brand 不可点击只展示。AutoViral 这里是导航语义重复 |
+| **F472** | MEDIUM | `useShortcuts` input/textarea/contentEditable 守卫**不覆盖 Konva canvas**——canvas 内按 Cmd+S 会**触发 saveComposition 而非 saveCarousel**（不同 store） | source `useShortcuts.ts:48-58` 只 check `tag === "INPUT" \|\| "TEXTAREA" \|\| "SELECT" \|\| isContentEditable`；Konva Stage 是 `<canvas>` element，tagName === "CANVAS" 不在守卫列表；但 useShortcuts 仅在 Studio (composition) 挂载——Editor (carousel) 内还有自己的 Editor.tsx 不依赖 useShortcuts 这套；问题：跨编辑器类型时**store 是哪个**取决于挂载顺序 | 用户在 Studio 内 click 选 Konva 物体后按 Cmd+S → useShortcuts.ts:102 调 saveComposition——但如果 Studio 同时挂了 carousel-shape 数据呢？这是潜在的跨编辑器 store 数据错位风险 |
+| **F473** | LOW | ThemeToggle **无 "system / 跟随系统" 选项**——只支持 dark/light 二档 | source `ThemeToggle.tsx:5-37` 仅渲染 sun/moon 二态切换；stores/theme.ts 推断 (未读但根据 `useTheme` interface) 只有 `theme: "dark" \| "light"` | Mainstream 100% 三档 dark/light/system (Notion/Linear/GitHub/Slack/VSCode)。AutoViral 二档强制用户每次系统主题切换都要重新调一次 app theme |
+| **F474** | LOW | LocaleToggle **全用 inline `style={{}}` 而非 CSS module**——与 ThemeToggle 用 `module.css` 不一致 | source `LocaleToggle.tsx` 17 行起 11 处 inline style；ThemeToggle 同位置走 `styles.btn`；F471/F468 等其他 chrome 元素也走 module css | 不一致的 styling 策略——chrome 这种**最稳定**的组件应该是 design-system 一致性最严格的地方；inline 让 media query / theme-variable / focus-visible 等无法统一管理 |
+
+### 沉淀
+
+- **M165 nav highlight coverage matrix**（新）：任何注册到 router 的 path 必须能高亮某个 chrome nav 元素。Audit 自动化方法——
+  1. 枚举 `main.tsx <Route path>` 全部 routes
+  2. 对每个 path 检查 TopNav `active(path)` 是否返 true
+  3. 0 高亮的 route → 必须配 (a) 加入 TABS，或 (b) 提供 secondary nav (breadcrumb)，或 (c) 显式 chrome state "无对应 nav 段"
+  4. F463 案例：`/studio/:workId` / `/editor/:workId` 两条路由 0 高亮 → 违反
+- **M166 ErrorBoundary information disclosure**（新）：fallback UI 必须 dev-mode-only 暴露内部信息——
+  1. stack trace、file paths、minified 函数名、内部 state dump 全部 gate 在 `import.meta.env.DEV`
+  2. 生产 fallback 仅暴露 (a) error.message 一句话, (b) error id (用于上报), (c) retry/home 两按钮
+  3. retry 路径优先 `boundary.reset()` 而非 `window.location.reload()`——后者损毁未保存编辑
+  4. F465/F466 双违反——本质是一组反模式
+- **M167 全局键盘可达性 checklist**（新）：每次 chrome 改动必跑以下检查——
+  - WCAG 2.4.1 (Bypass Blocks): skip-to-content link 是否存在且 first-tab visible
+  - WCAG 2.1.1 (Keyboard): 所有 onClick 元素是否也响应 Enter/Space
+  - WCAG 2.4.7 (Focus Visible): 所有 button/link 是否有 focus-visible 样式
+  - 行业 mainstream: Cmd+K command palette / quick switcher
+  - 行业 mainstream: notification bell + unread dot
+  - 行业 mainstream: avatar dropdown + workspace switcher
+  - 自有惯例: theme/locale toggle 提供 system follow 选项
+- **M168 chrome-level identity affordance**（新）：所有 multi-account / multi-platform 创作工具的 chrome 必须包含——
+  1. 用户身份 (avatar / nickname) 始终可见
+  2. workspace / 账号切换 entry
+  3. 当前登录状态 (登录中 / token 过期 / logout)
+  4. F468 案例：AutoViral 三件套全缺，是产品**桌面级 → 玩具级**核心拉开
+- 与既往 family 串联：
+  - F463/F469 与 R98 F398 (works grid hardcoded 3 col) 同 family——产品**全局 IA 设计**层面缺少"路由 → chrome 反馈"的系统化
+  - F464 (无 Cmd+K) 与 R103 F435 (无 jump-to-bottom)、R104 F444 (无 manual refresh) 同 family——产品**全局缺少快捷指令 culture**
+  - F465 与 R103 F434 (thinking 第三人称暴露给用户) 同 family——产品**用户视角与开发者视角混淆**
+  - F466 与 R101 F417 (1-click destructive restore)、R95 F372 (filmstrip delete no undo) 同 family——**destructive-without-recovery 第 6 实例**
+  - F467/F472 与 R93 F341/R98 F400/R100 F408 同 family——**可见 a11y / locale / 跨编辑器一致性** 全部缺少 audit checklist
+
+### R108+ 候选
+- Settings drawer (gear-btn 打开) 内部深审——R104 F444 已指向 Settings 作为 "refresh now" 入口，需深审 Settings 是否真有该能力
+- 全局 ToastViewport（App.tsx 提到的 R32 global toast layer）行为审计 + dismissal / persistence
+- 404 NotFound 页面 UX (helpful suggestions / popular routes / search)
+- 多 workspace / 账号切换流（如未来上）
+- mobile / responsive layout (chrome 在 < 768px viewport 行为？)
+
+`★ Insight ─────────────────────────────────────`
+- **F463 是 IA 设计层 silent leak**：路由表与 nav 表是两份独立维护的 array，任何新增 root route 都需要手动同步——这种"两份事实源"模型必然漂移。M165 沉淀建议把 routes/tabs 合一并 codegen
+- **F464 0 Cmd+K** 是产品**桌面级 vs 玩具级**最大鸿沟：Cmd+K 不只是快捷键，是**搜索 + 跳转 + 命令**三合一中枢——所有 mainstream 都把它当"第二种 nav"。AutoViral 当前所有 nav 必须鼠标 + 多 click 才能到达任何深度页面
+- **F465+F466 双重 ErrorBoundary 反模式**：暴露 stack trace 是开发者视角，reload 摧毁未保存编辑是 over-aggressive recovery——两者结合是"开发者写错误处理，没站在用户视角"的经典反例
+`─────────────────────────────────────────────────`
+
+---
+
+## Round 106 — **/explore 灵感面板深审：跨平台 API schema 分裂（xiaohongshu `topics[]` vs douyin `items[]`）导致小红书真实数据 100% 丢弃 + douyin id 重复 + 全 placeholder cover + metrics 全 null + STARTER 卡片仍是 hand-curated 假数据 — F451-F462（12 finding，含 2 CRITICAL · 4 HIGH · 4 MEDIUM · 2 LOW）+ M162/M163/M164 沉淀**
+
+- **时间**：2026-05-13（`/loop 20m` cron `105f4ef8` 触发；R105 被并行 fix-pass agent 占用 CheckpointsMenu 三连 close，本轮使用 R106 编号）
+- **环境**：browser MCP 扩展掉线（mid-round failure），切换为 **source-code + 直接 curl backend API** 审计路径。仍守 e2e-rules：UI 假设全部通过 API contract probe 反推
+- **触发**：前 13 轮（R93/R95/R96/R98/R100/R101/R103/R104 等）从未覆盖 `/explore`。Explore 是 mainstream creator tools (Buffer Inspiration / Tubular / VidIQ / Creator Insider) 的核心 trend-research 板块。AutoViral 此面板源代码 146 行 + AnglesCard 90 行 + TrendingPanel 71 行，看似简洁，深 audit 暴露**架构层 silent leak**
+- **方法学**：M159 (R104 新沉淀) contract drift detection 反向应用到 `/explore` —— 这次不查 frontend→backend mismatch，而是 **跨平台 backend 自身 schema parity**。直接 curl `/api/trends/xiaohongshu` / `/douyin` / `/youtube` / `/tiktok` 看四个平台是否同 shape。零 mutation 审计
+- **零 mutation**：所有 probe 都是 GET，未触发 collect button 避免污染。`collectTrends` POST 是 30-60s 同步阻塞，本轮**主动不点击**避免阻塞后续审计 + 写入 yaml 改变状态
+
+### 深层发现
+
+| ID | 严重度 | 标题 | 三层证据 | 深层根因 |
+|---|---|---|---|---|
+| **F451** | **CRITICAL** | **跨平台 backend schema 分裂**：xiaohongshu 返回 `{topics: [...]}`，douyin/youtube/tiktok 返回 `{items: [...]}`——`usePlatformTrends` 只读 `raw.items` → 小红书**真实 trending data 100% 丢弃** | curl `/api/trends/xiaohongshu` 返 `{"topics":[{"title":"独居生活 × 真实放飞","heat":5,"competition":"高","opportunity":"红海","description":"独居话题近90天浏览量2亿+...","contentAngles":[...],"exampleHook":"我终于承认了..."}]}`，无 `items` 字段；curl `/api/trends/douyin` 返 `{"platform":"douyin","items":[{id, title, source, scrapedAt, cover, metrics, analysis:{heat, ...}}]}`；source `queries/trends.ts:68` 只读 `Array.isArray(raw?.items) ? raw.items : []` → 小红书 fallback `[]`。这意味着小红书 5 个**高质量 hand-crafted trends**（独居/5分钟运动/运动穿搭/观鸟/人类丰容）在 UI 上**永远不显示**，用户切到 xhs tab 只看到 "no trends collected for this platform yet" |
+| **F452** | **CRITICAL** | douyin items[] 含**重复 id**：同 `douyin_b86498e7` 出现在"知识类短视频爆火"和"真人短剧内容创新"两条上，且**analysis 块完全相同**（都挂 美食探店 描述） | curl `/api/trends/douyin` 数据：`items[0].id = "douyin_b86498e7" + title "知识类短视频爆火" + analysis.category "美食生活"`；`items[1].id = "douyin_b86498e7" + title "真人短剧内容创新" + analysis.description "美食探店内容持续热门..."` —— id 重复 + analysis 块被复制粘贴。React `key={item.id}` reconcile 会把第二条当第一条 update → UI 渲染 buggy；analysis 错配让"短剧"展示"美食"描述 = 产品 trust 破坏 | 后端 trends generator 有**两个独立 bug**：(1) id 生成不 unique，(2) analysis cache 跨 item 复用——是 source-of-truth 数据品质 catastrophic failure |
+| **F453** | HIGH | 所有 cover 都是 `placehold.co/360x640/0a0b0f/a8c5d6?text=...` **placeholder**，backend 从未真正抓取平台缩略图 | curl 数据：每条 item 的 `cover.url` 全部以 `https://placehold.co/360x640/0a0b0f/a8c5d6?text=` 开头 + URL-encoded 标题；`cachedPath` 指向本地 `~/.autoviral/trends/{platform}/covers/*.jpg` 但生成的是占位图本身被存下来；source `queries/trends.ts:52-58 coverUrlFor` 优先 `cachedPath` → 实际仍是占位图 | 用户看到"trending"卡片以为是真实平台截图，实则全部是产品自生成的灰底彩字占位图。系统**视觉欺骗**：mainstream Buffer Inspiration / Tubular 是真实平台 thumbnail；AutoViral 全 fake。文案 `trendingSampleNote: "Thumbnails are placeholders until the platform image fetcher lands"` 在 messages.ts 里存在但**没有任何 surface 把它渲染到 UI** |
+| **F454** | HIGH | 所有 trend item 的 **`metrics: null`**，TrendingPanel.tsx:57-60 的 views/likes/comments 行**完全不渲染** | curl 数据：每条 item 的 `metrics: null`；source `TrendingPanel.tsx:58` `{item.metrics?.views != null && ...}` 全 falsy → 0 输出。`TrendsResponse.pipelineStatus` 字段定义在 schema 但 UI 0 引用 | 用户看到"trending"分类但**看不到任何热度数字**（views/likes/comments）。一个"trend explorer"不给数字 = 只剩文字描述，与博客阅读体验无区别。Tubular / VidIQ 的 trending 核心就是 view-count 排序 |
+| **F455** | HIGH | AnglesCard 顶部 3 张 **STARTER 灵感卡片仍是 hand-curated demo**——评论自承"R75/F186 flagged this as system-honesty leak" 后只改了"FIT 94 · 5.2K est. reach"这种**假精度数字**，但卡片本身依旧是 i18n message 硬编 (`explore.sampleAngle1Body`)，**generate 按钮被 disabled 装作占位** | source `Explore.tsx:17-21 SAMPLE_ANGLE_META = [{num:'01',scoreKey:'explore.starterScore1',bodyKey:'explore.sampleAngle1Body'},...]` 3 个硬编占位；`AnglesCard.tsx:74-82` `disabled={isDemo}` + tooltip "explore.angleGenerateDisabled"；`Explore.tsx:35` `STATIC_ANGLES` 名字字面承认是 static | 用户进入 `/explore` 第一眼看到的"灵感"三卡 5 个月过去**仍未接通真实 AI**。"STARTER 起手"chip 标示是好的，但卡片占据整个第二屏 + 12 个月不上线真实数据 = 产品 claim "AI-driven inspiration" 是空头支票。R75/F186 沉淀 5 个月后**未被实际推进**——是 audit-without-fix family 第 N 例 |
+| **F456** | HIGH | `collectTrends` POST **同步阻塞 30-60s**，前端只能 spinner 等待——无进度、无 ETA、无 per-platform 增量结果、无 abort | source `Explore.tsx:48-76 collectTrends` `await apiFetch(...)` 一次性等 4 个平台 sync research；UI 只有 `disabled={collecting}` + 按钮文案 "collecting..."；按钮变 disabled 后用户没有任何 progress 信号 | 行业标准是 async-job + SSE/WebSocket 流进度（OpenAI 长任务 / Replicate / Anthropic batch API 全是 async-job 模式）。AutoViral 这里是 2018 年同步 REST 水平。30s 等待中用户必然以为"卡死了"刷新页面 → 中断 → 半完成状态 (collected.length>0 + errors>0 mixed state) |
+| **F457** | HIGH | `collectStatus` 是 React local state，**刷新页面即丢失**——用户点完 collect 切到 /works 再回来，"✓ done" badge 消失，无法判断刚才到底有没有成功 | source `Explore.tsx:45 useState("idle")` 仅本地；无 sessionStorage / no react-query 持久化；无 last-refreshed-at badge from backend | 与 R104 F444 (no lastUpdated) 同 family——产品**全局缺少"上次操作结果可恢复"机制**。用户做了关键操作后切页面就丢上下文 |
+| **F458** | MEDIUM | `youtube` / `tiktok` 返回数据全部 `source: "agent_websearch"`——是 **LLM 推断的猜测**而非真实平台抓取，但 UI 没有 surface 区分"真抓取"vs"LLM 猜的" | curl `/api/trends/youtube` 返 `source: "agent_websearch"`；source `trends.ts:6 ItemSource = "scraper" | "rss" | "agent_websearch" | "proxy"` 4 种来源；TrendingPanel.tsx:62 有 `sourceBadge` 但样式 small + 在 stats 行末尾 + 无解释性 tooltip | 用户读 "▶ YouTube Trending" 卡片以为是真实 YouTube 数据，实则是 LLM 在 Web 上搜的猜测。与 F455 同 family——产品**信号源诚实度**不够。需要清晰的视觉分级：scraper 实抓 ≠ agent_websearch 推测 |
+| **F459** | MEDIUM | 平台 default `xiaohongshu` (中文)——但 F451 让小红书 0 数据；EN locale 用户首屏看到中文平台名 + "no trends" empty state | source `Explore.tsx:31 useState<Platform>("xiaohongshu")` 强 default；comment 自承"don't have a server-side collector"是历史误判，新 SUPPORTED_REFRESH_PLATFORMS 已含 4 平台但 default 没改 | EN locale + xhs default + F451 schema mismatch → 海外用户首屏体验 = 中文标题 + 空 panel。三连击 onboarding fail |
+| **F460** | MEDIUM | trend item 卡片只能 "外链跳源站" → 无 "save to draft" / "send to editor" / "use as angle" 任何创作向 affordance | source `TrendingPanel.tsx:51-53` `<a href={item.sourceUrl} target="_blank">` 唯一行动；无 button 把 trend → /works 或 /editor | Explore 与 Works 完全断链——用户找到一个 trend **没有任何路径**把它变成作品。Buffer Inspiration 的"add to queue"是核心 conversion——AutoViral 0 |
+| **F461** | LOW | `TrendsResponse.pipelineStatus` 字段定义在 schema 但 **UI 0 引用** | source `queries/trends.ts:49 pipelineStatus: "ok" | "partial" | "failed"`; grep 整个 `web/src` 无对此字段的 read | M160 dead-data family (R104 沉淀) 第 2 实例——后端报告了 pipeline 健康度但前端选择性失明 |
+| **F462** | LOW | `scrapedAt` 字段每条 item 都有 timestamp (`"2026-05-12T10:45:37.364Z"`)，但 UI **从不显示**数据多老 | curl 数据 + source `TrendingPanel.tsx` 不渲染 `item.scrapedAt`；用户不知道这条 trending 是今天 vs 上周的 | M161 time-window honesty (R104 沉淀) 直接违反——data-age 不可见 |
+
+### 沉淀
+
+- **M162 cross-platform schema parity audit**（新）：当 backend 有"按 platform/segment 分发"的 endpoint family 时，**必须 contract-test 每个变体返回同 shape**。具体执行——
+  1. 为每个 segment 写 fixture：`/api/trends/{xiaohongshu, douyin, youtube, tiktok}`
+  2. 对每个 fixture 跑 `Object.keys(payload)` diff
+  3. F451 案例：xhs `[topics, ...]` ≠ douyin `[platform, items, ...]` → schema drift → 必须修后端 adapter 统一 OR 修前端 reader 兼容两种 shape
+  4. 升级建议：openapi spec + jsonschema validation in api layer
+- **M163 sample-data labeling discipline**（新）：当 UI 不得不展示 placeholder / sample / demo data 时——
+  1. 视觉层：必须有 **NO MISTAKE** 级标识（chip + 灰背景 + italic + opacity-0.5 不够强；建议 striped pattern + 顶部全宽 banner "示例数据"）
+  2. 行为层：所有 CTA 必须 disabled + tooltip 解释
+  3. 时间层：sample 必须有 **过期日期**——超过 90 天还在的 sample = 产品方违约。F455 案例：starter cards 自 R75/F186 起 5 个月未上线真实数据 = sample-decay violation
+  4. 升级建议：所有 sample-fixture 文件加 `expiresAt` 字段，CI 红 expired sample
+- **M164 long-running POST progress contract**（新）：任何前端发起的 sync POST endpoint 若服务端 wall-clock > 5s——
+  1. backend 必须返 `jobId` 立即；不能同步等
+  2. frontend 必须开 SSE/WebSocket/polling 拿增量进度
+  3. UI 必须有 (a) percent progress, (b) per-step status, (c) abort button
+  4. F456 案例：`/api/trends/refresh` 同步等 30-60s 是反模式
+  5. 升级建议：所有 > 5s endpoint 走 `/jobs/{id}` async pattern
+- 与既往 family 串联：
+  - F451 (跨平台 schema 分裂) 是 R88 silent-leak family 第 9 实例 + R104 M159 contract drift 跨平台扩展
+  - F452 (id 重复 + analysis 复用) 是 **新 family: data-quality smoke test 缺失**——产品对后端生成数据从不做"id unique check" / "字段 cross-row distinct check"
+  - F455 (STARTER 仍占位) 是 **audit-without-fix family**——前 N 轮 audit 落了 finding 但 5 个月未推进 = audit→action loop 断裂
+  - F457/F462 是 R104 F444 (no lastUpdated) family——产品全局缺少 operation-state-persistence
+  - F458 (来源诚实度) 是 R103 F434 (thinking persona break) 的同 family——agent inference vs real scrape 的**信号源诚实**
+
+### R107+ 候选
+- Settings drawer / 抓取频率 / 平台绑定 deep dive
+- `/explore` 与 `/works` / `/editor` 跨页面 conversion path（save-to-draft）
+- TopNav 全局 chrome + locale switcher + theme toggle 一致性
+- 404 NotFound + ErrorBoundary 异常态
+- Library / BUILD INDEX flow（如有路由）
+
+`★ Insight ─────────────────────────────────────`
+- **F451 是结构性 backend bug**：小红书 yaml 历史就是 `{topics: [...]}` schema (从 R39 沉淀可推断早期实现)，douyin / youtube / tiktok 后期统一成 `{items: [...]}`，但 xhs 没跟上 migration。这是后端**版本演进时漏改一处**的经典反例，纯 syntax 层面前端没保护
+- **F452 是 prompt-engineering 数据品质泄漏**：LLM 生成 trends 时 analysis 字段被无脑复用——后端 generator 缺 `assert items.every(i => uniqueIdAndAnalysis(i))` 这种最基本数据 sanity check
+- **F455 audit-without-fix** 是这个 e2e-report 自身的元 finding——report 写下来若 5 个月不闭环，audit 价值衰减。建议建立"finding 半衰期 30 天"机制，到期未 close 升级严重度
+`─────────────────────────────────────────────────`
+
+---
+
 ## Round 105 — **R101 F417 (CRITICAL · 1-click destructive restore) + F422 (HIGH · 注释承诺 vs 实现矛盾 manual snapshot) + F426 (MEDIUM · raw `e.message` 未本地化) 三连 CLOSED ✅ —— CheckpointsMenu 走完 R94→R97→R102→R105 第 4 次 destructive-gate hardening；data plane 闭合数升至 4，audit plane M156 注释承诺 vs 实现真相沉淀**
 
 - **时间**：2026-05-13（`/loop 30m` cron 触发本轮；上轮 R104 被并行 audit agent 占用做 /analytics 深审，本轮使用 R105 编号）
