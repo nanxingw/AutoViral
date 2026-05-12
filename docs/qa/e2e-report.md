@@ -6,6 +6,245 @@
 
 ---
 
+## Round 89 — **R88 F309 (法务) + F313 (产品自相矛盾) + F310 + F307 CLOSED ✅ Settings drawer copy 层四发清扫 + frontend fallback cron 与产品推荐对齐**
+
+- **时间**：2026-05-12（`/loop 30m e2e-report fix` 第 7 轮触发；R86 fix-pass 已闭合，本轮接续 R88 候选清单）
+- **环境**：dev (`localhost:5173/works` + Settings drawer 打开)，ZH + EN locale 双 verify；JS DOM-extraction (M131) 主 verify 手段
+- **触发**：R88 候选 #1（drawer 整体重设计）是 P0 多轮工程，**本轮**只啃 #2 法务 + #3 数学矛盾 + 相关 copy 清理，作为 drawer 重设计的前置清扫——把所有"立刻可下线 / 1 行即可的 leak"全清，给将来的 dev-config 折叠区改造留干净基线
+
+### 修复 — R88 候选 #2 / #3 + 相关 copy 清理
+
+按 R88 优先级，本轮选定 4 个 high-density single-round-feasible 改动：
+
+| 候选 | R88 finding | 类别 | 改动 |
+|---|---|---|---|
+| **#2** | F309 anti-bot 警告 = 商业策略 disclosure | **法务** | `cronHint` (EN+ZH) 删除 anti-bot 字面 |
+| **#3** | F313 默认 cron 反对产品自家推荐 | **产品自相矛盾** | `queries/config.ts:44` frontend fallback `"0 9 * * *"` → `"7 9,21 * * *"` |
+| 衍生 | F310 "较慢/(slow)" dev voice | 产品调性 | `sectionHint.douyin` (EN+ZH) 改成具体时长 "30 seconds / 约 30 秒" |
+| 衍生 | F307 "LLM 网关 / agent" 内部 terminology | M121 | `sectionHint.openrouter` (EN+ZH) + `sectionHint.research` (ZH) 抽象成产品语言 |
+
+#### Copy 改写（R78 + R86 沉淀的「事实-路线图 / outcome-framed」结构延续）
+
+**法务 — `cronHint` (F309)**
+
+| Locale | 修改前 | 修改后 |
+|---|---|---|
+| EN | "Recommended: 7 9,21 * * * (twice daily at 09:07 + 21:07). Offset minute avoids the :00 sync that **anti-bot heuristics flag**." | "Recommended: 7 9,21 * * * — twice daily at 09:07 and 21:07. Off-the-hour timing keeps sync windows steady." |
+| ZH | "推荐：7 9,21 * * * （每天 09:07 与 21:07）。偏移分钟避开 :00 同步，**降低小红书/抖音 anti-bot 风险**。" | "推荐：7 9,21 * * * （每天 09:07 与 21:07）。避开整点同步可让节奏更稳。" |
+
+删除：①「anti-bot heuristics flag」/「降低小红书/抖音 anti-bot 风险」字面声明，避免给平台法务团队公开陈述爬虫规避策略；②「Offset minute / 偏移分钟」内部 ops 词汇。改写后留下中性的"分散同步 → 节奏更稳"事实陈述。
+
+**产品调性 — `sectionHint.douyin` (F310)**
+
+| Locale | 修改前 | 修改后 |
+|---|---|---|
+| EN | "...«Refresh now» triggers a **real backend fetch (slow)**." | "...«Refresh now» fetches fresh data — **takes about 30 seconds**." |
+| ZH | "...「立即同步」会触发**真实后台拉取（较慢）**。" | "...「立即同步」会重新拉取一次数据，**约需 30 秒**。" |
+
+删除：「real backend fetch」/「真实后台拉取」(暗示有"假/缓存"path 的 dev 视角自嘲) + 「(slow) / 较慢」(apologetic dev voice)。改成创作者可决策的具体时长。
+
+**产品语言 — `sectionHint.openrouter` (F307)**
+
+| Locale | 修改前 | 修改后 |
+|---|---|---|
+| EN | "**LLM gateway for all agents** (Editor chat, Studio chat, trends research). One key, multiple models." | "**Powers every AutoViral AI helper** — chat, regeneration, research. One key, multiple capabilities." |
+| ZH | "**LLM 网关 —— 所有 agent**（Editor chat / Studio chat / trends 调研）共用此 Key。" | "**AutoViral 的 AI 助手共用此 Key** —— 包括对话、素材重生成、热点调研。一个 Key 覆盖多种能力。" |
+
+删除：「LLM gateway / 网关」(gateway 模式是开发圈词汇) + 「agents」(内部架构概念) + 「Editor chat / Studio chat / trends research」(内部模块名)。改写后用产品视角（"AutoViral AI helper / AI 助手"）+ 用户感知的能力（chat / regeneration / research）。
+
+**产品语言 — `sectionHint.research` (ZH only)**
+
+| Locale | 修改前 | 修改后 |
+|---|---|---|
+| ZH | "按此 **Cron** 自动从小红书 / 抖音拉 trends 进 Explore。不影响 Analytics 同步频率（**hourly 硬编码**）。" | "按此**节奏**自动从小红书与抖音拉取热门角度进入 Explore。Analytics 受众数据每小时单独同步，不受此影响。" |
+
+删除：「Cron」(技术词暴露给非技术用户) + 「hourly 硬编码」(implementation leak)。改写后用户语言"按此节奏 / 每小时单独同步"。
+
+#### 默认值修复（F313）
+
+`web/src/queries/config.ts:44`：
+
+```ts
+// before
+researchCron: raw.researchCron ?? raw.research?.schedule ?? "0 9 * * *",
+// after
+researchCron: raw.researchCron ?? raw.research?.schedule ?? "7 9,21 * * *",
+```
+
+server `src/config.ts:47` 真实 default 一直是 `"7 9,21 * * *"`（注释解释 minute :07 是为多 CLI tenant 避免 wall-clock 同步），但 frontend fallback `"0 9 * * *"` 不一致——新用户在 server response 缺字段时落到 `:00` 高危默认。本轮把 frontend fallback 与 server default + cronHint 推荐三者**对齐**。
+
+注：现有用户的 `~/.autoviral/config.yaml` 可能仍持久存 `0 9 * * *`，那是历史 state，不在本轮 scope；F313 真正修的是「产品自相矛盾」——新用户从 0 开始时默认值不应反对推荐。
+
+### 浏览器实证 (ss_9596zj24o + ss_96557wnm1)
+
+ZH `/works → settings drawer`：DOM `body.innerText` 扫描
+
+| 关键词 | 结果 |
+|---|---|
+| `anti-bot` / `反爬` | **0 命中** ✓ |
+| `硬编码` / `hardcoded hourly` | **0 命中** ✓ |
+| `LLM 网关` / `LLM gateway` | **0 命中** ✓ |
+| `较慢` / `(slow)` | **0 命中** ✓ |
+| `agent（Editor chat` / `all agents (Editor` | **0 命中** ✓ |
+| 4 个新文案 | **全部 ✓ 落地** |
+
+EN `/works → settings drawer`：DOM 扫描
+
+| 关键词 | 结果 |
+|---|---|
+| `anti-bot` / `hardcoded hourly` / `LLM gateway` / `(slow)` / `all agents (Editor` | **5/5 都 0 命中** ✓ |
+| 4 个新文案（`Powers every AutoViral AI helper` / `Analytics syncs separately, every hour` / `takes about 30 seconds` / `Off-the-hour timing keeps sync windows steady`） | **全部 ✓ 落地** |
+
+screenshot 复确认 drawer 中文 + 英文版排版正常、CTA `[取消 / 保存 / Cancel / Save changes]` 仍工作。
+
+### 桥梁哲学补充
+
+R86 沉淀的 audit-plane 三层防御（data + control + audit）+ 本轮**copy 平面**子防御：
+
+- R78 / R86 / R89 三轮 copy fix 累计建立的「事实-路线图」结构现已涵盖：
+  - R78 `/explore` AnglesCard（promise-then-retract → fact-then-roadmap）
+  - R86 `/analytics` empty-state（implementation leak → outcome）
+  - R89 settings drawer hint（vendor + dev voice + 法务 → product language）
+
+「桥梁」的 copy 层在 user ↔ agent 接缝处的承担：**用户读到的每一个字都不应该让用户去做开发者该做的判断**（Python deps / LLM gateway / cron syntax / anti-bot ops）。
+
+### 沉淀 — M132
+
+- **M132 — "law-risk copy" 必须在最高优先级处理**
+  - **Why**：F309 把"降低小红书/抖音 anti-bot 风险"写进产品 UI = 给平台法务团队的公开陈述，是法务而非 UX 问题。任何 e2e-report 找到的"产品自承认在做对平台的规避"类 copy 都应**优先于** UX/brand/typography 任何 finding。
+  - **How to apply**：每轮 audit 时先 grep `anti-bot / 反爬 / scrape / 绕过 / bypass / circumvent / workaround / regulation / TOS / ToS`，任何命中即标为法务级 finding；fix-loop 看到这类 finding 必须**当 round 处理**，不能堆积到下一轮（堆积期间风险持续存在）。
+  - **Where**：与 M115（i18n source lint）联动；codemod 候选 = 词汇黑名单中 `anti-bot / 反爬 / Python deps / browser_cookie3 / hardcoded / LLM gateway / claude-cli` 一并 enforce
+
+### 关联
+
+- closes **R88 F309**（anti-bot 字面 disclosure）双 locale 0 命中
+- closes **R88 F313** 一半（frontend fallback 对齐；server side 早已对齐；用户 persisted config 不在 scope）
+- closes **R88 F310**（dev voice "较慢/(slow)"）双 locale 0 命中
+- closes **R88 F307**（LLM gateway / agent 内部 terminology）双 locale 0 命中
+- closes **R88 F306** 部分（vendor name 已在 R86 的 Sonnet → AutoViral 框架下进一步弱化，但 section title `JIMENG API / OPENROUTER API` 仍存在——留 R89 候选 #1 drawer 重设计时一并处理）
+- 落 **M132** sediment（law-risk copy 优先级规则）
+- 与 R86 audit plane + R78 copy plane 形成跨 round trust-funnel 防御
+
+### R90 候选
+
+- **R90 #1 (P0 · 产品定位)** R88 #1 — Settings drawer 整体重设计（M129）：第一层 user-language tab `AI 服务 / 数据同步 / 账号` + "高级" 折叠区收纳 raw API keys / cron syntax / model dropdown。这是 R74-R88 累积 6 次 vendor-leak 的根因修复，需要 ~3 round 完成
+- **R90 #2** R88 F308 — cron text input → dropdown time picker（预设 "每天上午 / 每天上午+晚上 / 每 4 小时 / 自定义高级"）；自定义档才显示 cron syntax
+- **R90 #3** R88 F314 + F315 — secret reveal 加 5 秒 auto-remask + 红色 warning background；每个 API key 字段加 "测试连接" 按钮
+- **R90 #4** R87 Studio dark-mode preview frame 不可见（视觉 + DOM 双 verify 前置 — 防止又一次视觉误读）
+- **R90 #5** R88 F311 — Editor chat header `CLAUDE·OPUS·4.7` → `AutoViral Creative Agent`；与 R90 #1 抽象化同源
+- **R90 #6** R88 R89 候选 #7 — M129 / M130 / M131 / M132 写入 `.claude/rules/e2e-testing.md`
+
+---
+
+## Round 88 — **Settings drawer 完整内容深审：把 dev config 当 user settings 设计 — Volcengine/OpenRouter/claude-cli 运行栈完整暴露 + 创作者面前直接列出 Claude Opus 4.7/Sonnet 4.6/Haiku 4.5 + 反爬虫策略书面声明 + 默认 cron 值与产品自家推荐相违**
+
+- **时间**：2026-05-12（`/loop 20m` cron 触发 R88；cron `105f4ef8` 持续运行）
+- **环境**：dev (`localhost:5173/works` + Settings drawer 打开)，zh-CN + light theme；通过 JS extraction 提取完整 innerText（DOM 已读，不依赖单纯截图）
+- **触发**：R79 仅碰过 douyin secret rotation 单 section；Settings drawer 整体 surface 6 个 section × 多个字段从未完整审过；预感这是 R74-R87 累积 6 次 vendor-leak 的**根源 surface**
+- **方法学**：cross-locale (M113) 预期 EN 视觉等同（vendor 名不随 locale 变；JS extraction 已实证全部 vendor / version 字符串）+ DOM-extraction 替代视觉 verify（M120 zoom-first 第 3 个例外：当文本完整可从 DOM 取出时，DOM 是 source of truth）
+- **重大发现**：本轮揭示 R74-R87 累积的所有 vendor-leak finding 不是单点 bug，而是**产品定位错误**的下游表现 — Settings drawer 完整把运行栈当成 user-facing 配置项；M112 family 应升级为 P0 产品定位问题
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F311 | **CRITICAL · vendor leak 核弹级** | "默认模型" dropdown 直接列出 `Claude Opus · 4.7 / Claude Sonnet · 4.6 / Claude Haiku · 4.5` 三档 + 引用 **`claude-cli`** 运行时 + 文案 "版本号由 claude-cli 运行时解析，alias 自动跟随每档最新稳定模型。"。section description "所有 agent 的默认模型。作品级 override 会覆盖此默认值。" 即承认 AutoViral 全部 agent 都建立在 Claude 之上。 | (1) R84 F243 Editor chat header `CLAUDE·OPUS·4.7` + R85 F266 Analytics `Sonnet` + 现在 Settings 直接出选择题 — vendor 暴露程度逐轮深化，**Settings 是源头**；(2) `claude-cli` tooling name 进一步把开发工具链暴露给用户；(3) "作品级 override" 暗示作品里也能改模型 → 又一个未审的 UI surface；(4) 用户读完 → "原来 AutoViral 只是 Claude 套壳" 信任 erode + 转走风险（直接用 Claude/OpenRouter）。 | M112 vendor-leak family 6 次 instance 全部解释：Settings 是源头，其它都是下游 surface 透出 |
+| F309 | **CRITICAL · 商业策略 disclosure** | "调研设置" section description: "按此 Cron 自动从小红书 / 抖音拉 trends 进 Explore。不影响 Analytics 同步频率（hourly 硬编码）。" + 推荐文案: "推荐：7 9,21 * * * （每天 09:07 与 21:07）。偏移分钟避开 :00 同步，**降低小红书/抖音 anti-bot 风险**。" | 用户读完获得 4 项内部情报：(a) AutoViral 通过爬虫从 RED/抖音抓数据；(b) **存在被反爬检测的风险**；(c) 偏移分钟是规避策略；(d) Analytics 同步频率是后端 hard-coded（不可变）。这是**对竞品与平台合规团队的公开声明**。同时让用户产生焦虑："如果哪天小红书改了反爬，我的 AutoViral 是不是就废了？" 商业模式可持续性被自暴。 | R85 F261 `browser_cookie3` Python deps leak 的根因解释 —— 不是单点描述失误，而是商业模式被直接揭示 |
+| F308 | **CRITICAL · UX 错位 — 让创作者输 cron** | "Cron 表达式" 字段是 plain text input，值 `0 9 * * *`，placeholder `7 9,21 * * *`，footer 推荐 `7 9,21 * * *`。期待用户读懂 5-field cron syntax `M H DoM Mon DoW`。 | (1) 创作者（产品目标用户）大概率不知道 cron syntax — `*/15 * * * *` 是什么意思？(2) 即使知道，输错时无 validation feedback（系统能 silently 接受 `999 9 * * *`）；(3) 推荐和默认值都用 cron syntax 而非"每天 09:07 与 21:07"自然语言。**修复**：把 input 改 dropdown / time picker — 预设 "每天上午 / 每天上午+晚上 / 每 4 小时 / 自定义 (高级)"；自定义档才显示 cron。 | 新 family — "dev affordance 出现在 user UI" |
+| F313 | **CRITICAL · 默认值反对产品自家推荐** | Cron 表达式当前值 = `0 9 * * *`（每天 09:00 整点），但同字段 footer 推荐 = `7 9,21 * * *`（每天 09:07 + 21:07，"偏移分钟避开 :00 同步，降低小红书/抖音 anti-bot 风险"）。**默认值刚好落在产品自己警告的 anti-bot 高危时刻 :00**。 | 任何不读 footer 推荐的用户（绝大多数）保留默认值 = 自动选择**最高反爬风险**配置。系统设计者知道 :00 是危险时刻，仍把默认值放 :00；矛盾。要么自动随机化（产品端 jitter），要么默认就用推荐值 `7 9,21 * * *`。 | 新 family — "default value contradicts product guidance" |
+| F312 | **HIGH · Settings 整体是 dev config 而非 user settings** | 6 个 section 内容：(1) 即梦 API（AccessKey + SecretKey 字段 + console.volcengine.com 注册引导）；(2) OPENROUTER API（"LLM 网关 —— 所有 agent 共用此 Key"）；(3) 调研设置（cron + anti-bot 提醒）；(4) 抖音号绑定（"主页 URL 决定 Analytics 受众画像 + 数据洞察来源"）；(5) 默认模型（Claude 三档 dropdown）。每个 section 描述都是 dev 视角而非用户视角。 | 假设用户是技术人员：知道 Volcengine 是什么、要去 console.volcengine.com 申请、知道 OpenRouter 是 LLM 网关、知道 LLM agent / API Key 的关系。**但 AutoViral 目标用户是创作者**（首页 hero 文案 "32 份草稿，还有 15 个待完成的 payoff 场景" 显示）。**修复**：把 Settings 重新设计为"AI 服务"/"数据同步"/"账号" tab 结构，dev config 隐藏到"高级"折叠区。前台只显示"AI 服务 ✓ 已连接"状态。 | M121 leak-taxonomy 升级为 **product positioning error**；R74-R87 vendor-leak 全是这条根因的表现 |
+| F314 | **HIGH · 显示密钥按钮无 screen-share 警告** | AccessKey / SecretKey / API Key 三个 password 字段旁边均有 "显示" / "Show" 按钮，点击直接 toggle masked → plain text。 | 用户在 Zoom/腾讯会议 share screen 时点击"显示"会直接把 secret 公开在视频流里 — 没有任何"你正在共享屏幕，确认要显示？"二次确认。即使无 share-detection API，至少应该：(a) 限时显示 5s 后自动 mask 回去；(b) 显示时整个字段背景变红 + 加 "🚨 SECRET VISIBLE" overlay。 | 与 R74 silent-failure family 反向：这是 silent-success（secret 被 plaintext rendered 没人告知）|
+| F315 | **HIGH · 无 connection test** | 5 个 API/URL 字段（即梦 AccessKey/SecretKey、OpenRouter API Key、抖音主页 URL）均无 "测试连接 / Test Connection" 按钮。"抖音号绑定" 倒是有 "立即同步" 按钮，但是异步流程不是即时连接测试。 | 用户保存 Settings 后，下一次实际使用（Editor 重生成图 / Analytics 同步）失败时才知道 key 配错。无即时反馈循环。**修复**：每个 key 字段右侧加 "测试" 按钮，点击后调 backend `/api/_test/{service}` 路由验证 API 可用性；显示 "✓ 已连接 · 配额还有 N 次" 或 "✗ 401 Unauthorized"。 | 与 R84 F249 savedAt 三态家族同根 — "user-visible 状态反馈循环" |
+| F306 | **MEDIUM · vendor 在 section name 直白** | section header "即梦 API" / "OPENROUTER API" 把厂商名当成 section 标题（vs 抽象成 "图像 / 视频生成 API" / "LLM 网关"）。 | 同 F311 — vendor 名露在最显眼位置。对比 Notion / Linear Settings 命名："Integrations" 主标题下分 Slack / Google / ... 这样把产品级 abstraction 放第一层、厂商放第二层。AutoViral 这里第一层就是厂商。 | M112 family；可用 F311 同方案一次性收口 |
+| F307 | **MEDIUM · 内部 terminology "LLM 网关"** | OpenRouter section description: "LLM 网关 —— 所有 agent（Editor chat / Studio chat / trends 调研）共用此 Key。" | "LLM 网关" 是开发圈词汇（gateway 模式），非创作者用语。同时 "Editor chat / Studio chat / trends 调研" 三个内部模块名暴露 — 普通用户不分这些；他们感知的是"创作助手"。 | M121 internal-terminology vector，配合 R85 F250 内部 pipeline 词汇家族 |
+| F310 | **MEDIUM · 抗辩式开发者腔** | 抖音号绑定 section 文案: "主页 URL 决定 Analytics 受众画像 + 数据洞察来源。「立即同步」会触发**真实后台拉取（较慢）**。" | "较慢" 是开发者的诚实自嘲（"我们的爬虫慢"），不是产品文案。**应改成**："同步约需 30 秒，您可以继续其它操作"。专业产品没有"较慢"这种 apologetic 描述 — 要么给具体时长，要么默不做声后台跑。 | 新 family — "developer voice 出现在 product copy" |
+| F316 | **MEDIUM · drawer 单列长滚动无 section nav** | Settings drawer 内部是 vertical scroll，6 个 section 顺序列出，无 tab nav / 锚点 / 折叠。当前 viewport 只能同时看到约 2 个 section（即梦 + OpenRouter）；要看默认模型必须滚动。 | (1) 用户找特定设置（"我想换模型"）需要逐个滚找；(2) 长滚动 drawer 容易在某 section 内编辑后向下滚 → 失去 context；(3) 无锚点 = 无法分享 deep link "请改这个设置"。**修复**：drawer 顶部加 sticky tab nav `AI 服务 / 数据同步 / 账号`；切换 tab 时只显示对应 section。 | 与 R74 chat-history navigation family (R84 F252 "98 MSG" unactionable) 同根 — surface 缺导航 |
+| F317 | **LOW · 字段无 dirty state 反馈** | drawer 底部有 `取消 / 保存` 双按钮。但用户改动任何字段后，没有 "未保存的更改" 提示 / 按钮颜色变化 / 关闭 drawer 前确认。 | (1) 用户改了字段然后点 × 关闭 drawer = 静默丢弃改动（没确认）；(2) 用户保存后没视觉 confirm = 不知道是否真的存了；(3) "保存" 按钮 always-enabled 还是 disabled-until-dirty？需 zoom 验证（次轮）。**修复**：detect form dirty → drawer 顶部加红点 + 关闭前 confirm dialog；保存成功 toast `已保存 · {time}` 与 Editor savedAt 复用 component。 | R84 F249 savedAt family 在 drawer 场景的延伸 |
+
+### 沉淀
+
+- **M129 [新方法学 + 产品定位提案]**：**Dev config vs User settings 区分原则**。R88 揭示 R74-R87 累积的 6 次 vendor-leak 不是 6 个独立 bug 而是一个产品定位错误的下游表现 — Settings drawer 把 dev config（API keys、cron syntax、model versions、internal module names）当成 user settings 设计。**沉淀规则**：所有 user-facing settings 必须经过两层映射：
+  1. **第一层（用户语言）**："我的 AI 服务 ✓ 已连接" / "调研：每天 09:07 + 21:07 自动同步" / "默认风格：优质"
+  2. **第二层（高级 / 折叠）**：dev 模式下才显示原始 vendor 名 / cron syntax / model dropdown
+  - **判定 dev config** 信号：(a) 字段名包含厂商名 / 库名 / 协议名；(b) 字段值是 syntax-encoded (cron / regex / URL)；(c) section description 引用内部模块名；(d) field 假设用户懂某个技术域。**任一满足 → 应折叠到"高级"区**。
+  - **Why**：M112 (R74-R87) 单点修补累计已 6 次，每次单点修 → 下次再泄漏 → 必须从产品定位层修。
+  - **How to apply**：R89 候选 #1 不再是单字段 i18n key 替换，而是 Settings drawer 整体重设计；R88 沉淀给设计师作为 brief。
+
+- **M130 [新方法学]**：**Default-value-must-align-with-stated-best-practice**。F313 揭示默认 cron `0 9 * * *` 落在产品自己警告的 anti-bot 高危时刻 :00，而 footer 推荐 `7 9,21 * * *`。**沉淀规则**：任何 field 的 (a) 默认值 + (b) 推荐文案 + (c) 实际行为 三者必须语义一致。若推荐值是 `X` 而默认值不是 `X`，要么默认值就用 `X`，要么删除推荐文案。
+  - **Why**：F313 是"产品自相矛盾"的标志性案例。读 footer 的用户少（推荐 footer 是次级 UI），所以默认值才是 effective behavior — 用 effective behavior 反对自己。
+  - **How to apply**：每个 audit round 单独 audit "default value vs recommendation 是否一致"。
+
+- **M131 [新方法学]**：**DOM-extraction-as-source-of-truth**。本轮通过 `querySelector('select option')` + `querySelector('input').value` 直接从 DOM 取出所有 vendor / version / cron 字符串，比反复截图 + zoom 高效 10x。**沉淀规则**：当 finding 是关于**文本内容**（vendor 名、version、cron syntax、错误消息），DOM extraction 是 source of truth，无需 zoom；当 finding 是关于**视觉**（对比度、布局、对齐、icon 可见性），仍需 zoom。两种 verify 互补，按 finding 类型选择。
+  - **Why**：M120 zoom-first 是为视觉 finding；F311/F309/F308 等都是文本内容 finding，zoom 反而模糊（mono 字体 + 长串小字）。
+  - **How to apply**：先判定 finding 类型，再选 verify 方法；M120 / M131 二选一。
+
+### R89 候选
+
+| # | 优先级 | 候选 | Why |
+|---|---|---|---|
+| 1 | **TOP · CRITICAL · 产品定位** | F311 + F312 + F306 + F307 + M129 联动 — Settings drawer 整体重设计：第一层只露 "AI 服务 / 数据同步 / 账号" 三个 tab，每 tab 内 user-language 描述 + "已连接 ✓" status；"高级（dev mode）" 折叠区里才显示 raw API keys / cron syntax / model dropdown | R74-R87 累积 6 次 vendor-leak 一次性收口；同时升级 brand 定位（"创作者 AI 工具" 而非 "AI agent 配置面板"）|
+| 2 | **CRITICAL · 合规风险** | F309 — 删除 "降低小红书/抖音 anti-bot 风险" 字面警告；改成中性 "推荐分散同步时间以保持稳定" | 商业策略 disclosure 必须立即下线；不是 UX 而是法务问题 |
+| 3 | **CRITICAL · 数学** | F313 + M130 联动 — Cron 默认值改 `7 9,21 * * *` 与产品自家推荐对齐；或者删除推荐文案改默认随机 jitter | 产品自相矛盾必须消除 |
+| 4 | HIGH | F308 - Cron 文本输入改 dropdown 时段选择器（每天上午 / 每天上午+晚上 / 每 4 小时 / 自定义高级）；自定义档下才显示 cron syntax | UX 错位修复，向创作者用户言语回归 |
+| 5 | HIGH | F314 + F315 联动 — "显示" 按钮加 5 秒后 auto-remask + 红色 background warning；每个 API key 字段加 "测试连接" 按钮 | 安全 + 反馈循环双修复 |
+| 6 | MEDIUM | F316 + F317 联动 — drawer 顶部 sticky tab nav + dirty-state 红点 + 关闭前 confirm dialog | drawer 整体可用性升级 |
+| 7 | METHOD | M129/M130/M131 写入 `.claude/rules/e2e-testing.md` — 三个新方法学固化；现累计 4 verify gate + 6 audit checklist | 方法学体系持续扩展 |
+
+---
+
+## Round 87 — **Studio (/studio/:workId) 视频创作 surface 深审：dark 模式 preview frame 与背景同色完全不可见 + 英文 timeline 标签整片不翻译 + `BGM/覆盖` zh 翻译误用 + `Autoviral STUDIO · V4.0` 版本号挂顶第 6 次 + Library/Chat empty-state 设计哲学不对称**
+
+- **时间**：2026-05-12（`/loop 20m` cron 触发；R86 被并行 fix-pass agent 占用 F261+F266 清除轮，本轮使用 R87 编号）
+- **环境**：dev (`localhost:5173/studio/w_20260512_2137_518`)，新建视频作品 0 clips 0 assets；en-dark → zh-dark → zh-light 三态各 zoom 4 个关键区域；source-code 暂未读 `Studio.tsx` 但 chrome 行为可直接观察
+- **触发**：Studio 是与 Editor 平行的另一条创作链 — chat 驱动的视频编排，复用 `SafeChatPanel` 但 shell 完全独立 (`studio-shell` class)；R74-R86 完全没碰过此 surface，是 AutoViral 创作链 50% 的盲区
+- **方法学**：cross-locale (M113) × cross-theme (M117) × zoom-first (M120) × interaction-time CLS (M123) 四 verify gate 全应用
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F300 | **CRITICAL · dark-mode preview frame 不可见** | 9:16 video preview canvas (主编辑 surface) 在 dark theme 下是 **`#000` 黑画布 + dark editor 背景 (CLAUDE.md `#0a0b0f`)** 两者视觉对比近 0；只剩极弱的 1px 外框 + 微弱 vignette。cross-theme verify confirmed：light 下有清晰 paper-white 背景 + 黑画布的高对比 + radial vignette 强烈引导，dark 下完全消失。 | 用户进入 Studio 第一眼看不到"这里就是 video preview" — 主编辑区视觉不存在，引导失败。任何添加 clips 之前的 onboarding 都被破坏。**修复**：dark mode 下给 preview frame 加 `box-shadow: 0 0 0 1px var(--accent), 0 0 80px var(--accent-glow)` 形成可见 frame；或者在 0-clips 状态给 canvas 一个 `--surface-2` 浅灰色 placeholder 而非纯黑。 | R82 F230 (Settings drawer dark-mode 仍亮色) brand 违规家族 — 本次反向：dark 下应该高对比的关键编辑区却消失 |
+| F288 | **HIGH · cross-locale timeline meta 整片不翻译** | preview 上方 meta `FRAME 00:00.00 / 00:00.00` / `0 CLIPS · 9:16` / `△ EST. 0.00s` 与下方 `TIMELINE 0.00s` 在 zh-CN locale 全部保留英文 ALL-CAPS mono；EN locale 视觉相同。 | "FRAME / CLIPS / EST." 是有语义的功能标签（不是技术单位），zh 用户需要理解。EN-only chrome 中混入 zh 4-track 标签 (`视频/BGM/字幕/覆盖`) 形成视觉断层。**修复**：i18n keys 补齐 — `帧 / 片段 · 9:16 / 预估 0.00 秒 / 时间线`；保留 `9:16` 和数字 ASCII。 | R85 F273 KPI label casing 同根；R85 F261 / F265 / R84 F245 cross-locale 半翻译家族集中爆发 |
+| F291 | **HIGH · zh chrome 术语误用** | 4 timeline tracks 在 zh: `视频 / BGM / 字幕 / 覆盖`。**问题 1**：`BGM` 是日系网络俚语缩写（背景音乐），与同列 `视频/字幕` 全词中文不对称，product chrome 应用 `音乐` 或 `配乐`。**问题 2**：`覆盖` 对应 EN `FX` —— `FX` 是 "Effects" 的行业缩写（特效），译 `覆盖` (overlay) 是**字面误译**：FX track 装的是色彩 LUT、转场、闪光、震动等 effects，不是 overlay 层。 | (1) BGM 缩写对非二次元圈用户陌生；(2) `覆盖` 误导用户以为这条 track 是给"叠加图层"用，导致 mental model 错位。**修复**：`视频 / 音乐 / 字幕 / 特效` —— 同字符宽度 + 准确语义。 | 新 family — "chrome terminology authenticity"，与 M114 cross-locale double mismatch + R85 F265 "background collector" 同根 |
+| F292 | **HIGH · build-flavor 版本号挂顶 (vendor leak 第 6 次)** | 全局 topbar 显示 `Autoviral / v3 · 设计版` (zh) 或 `Autoviral / v3 · DESIGN` (EN)。Studio 局部 topbar 又显示 `Autoviral / STUDIO · V4.0`。**两个 version metadata 在同一页同时暴露**。 | "设计版 / DESIGN" 用户读 → "是否有非设计版？我是不是在 beta 通道？我会少看到什么功能？" 焦虑。STUDIO V4.0 vs 全局 v3 —— "为什么 Studio 版本号比 app 还高？" 不一致内疚。**修复**：(a) 完全移除 build-flavor 标识（生产构建不显示）；(b) Studio 的 V4.0 子标识本质是 component versioning leak，撤掉只留 Autoviral 主品牌。 | M112 vendor leak 第 6 个 instance（R74 douyin / R77 skill names / R82 color tokens / R84 model version / R85 Sonnet / R87 build flavor）—— **product-wide codebase lint M125 优先级再升一档** |
+| F303 | **HIGH · empty-state design 哲学不对称** | 同一 Studio 视图内 chat panel 与 library panel empty-state 设计质量天差地别：(a) **chat 区** —— "PICK A STARTING POINT / 挑一个起点" eyebrow + 3 个具象 action card (`💡 Outline the story / 🎨 Pick a visual direction / 🌐 Check what's trending`) + "or just type below" 兜底入口 —— 引导细致、emoji 装饰、动词起点；(b) **library 区** —— 只有 `NO ASSETS` 大写 mono + `BUILD INDEX` 单独按钮 + 搜索框（搜空 library 没意义）—— 完全没有"为什么我需要 build index / build 完会怎样 / 我也可以拖文件进来吗"任何说明。 | 用户在 chat 区被认真招待，转到 library 区被冷遇 — 同产品的 empty-state UX 不存在 system-level 一致性。**修复**：定义 empty-state design system（"why this is empty + what to do + 1 primary action + 1 escape hatch"），所有 empty 区按模板填。 | R85 F265 (Demographics 三连重复 empty card) 反面 — F265 是"重复但 lazy"，F303 是"内部不平衡" |
+| F299 | **HIGH · `c_w_` 编码 workId 更深泄漏** | Studio 创建的新 work id 是 `c_w_20260512_2137_518`，比 Editor 的 `w_20260319_1815_5bb` 多出 `c_` 前缀 + 编码更多内部 type 信息（`c` 可能是 carousel/clip/creative 任一）。R84 F242/F247 已记录 workId 时间编码泄漏；本次进一步暴露**类型前缀编码**。 | (1) 用户分享 ID 给他人 = 同时泄漏作品类型 + 创建时刻；(2) 内部代码看到 `c_w_` 知道是 Studio 创建的；外部用户莫名其妙；(3) **修复**：用 nanoid 统一格式 `w_8k3xqp`，type 信息留在 DB 字段不进 ID 字符串。 | R84 F242/F247 直系升级 — ID 编码泄漏家族 |
+| F280 | **MEDIUM · codec 名直曝** | preview top eyebrow `1080 × 1920 · 30FPS · H.264` 把 codec (`H.264`) 当成 product spec 暴露。 | 普通创作者不需要知道 codec 是 H.264 还是 H.265 — 他们关心 "TikTok 能上传吗"。**修复**：保留 `1080×1920 · 30FPS`，去掉 `· H.264`；或者把 codec 移到 export-options dropdown（H.264 / H.265 / ProRes 选择题）。 | R84 F250 内部 pipeline 词汇 / R85 F261 Python deps 家族 —— 技术栈名 product UI 暴露 |
+| F282 | **MEDIUM · "BUILD INDEX" 词汇陌生** | library panel 主 CTA "构建索引 / BUILD INDEX"。index 是什么？为什么需要构建？构建后会发生什么？无任何 hint。 | 用户第一次看到这个词不知道是 "indexer 后端" / "asset 缩略图生成" / "AI 嵌入向量" 哪种。**修复**：改成 "扫描素材文件夹 / Scan media folder" + tooltip "AutoViral 会扫描你的硬盘媒体，自动建立可搜索的素材库"。同时如果用户没设过媒体路径，按钮应禁用 + 提示先去 Settings 配置。 | M121 leak-taxonomy (internal vocabulary) — 沿 R85 F250 / R87 F291 |
+| F286 | **MEDIUM · 空间意图混淆 — narration/caption 按钮位置错** | `+ 配音 / + 字幕` (zh) 或 `Add narration / Auto-caption` (EN) 是两个 mini-action 按钮，**位置放在 chat input 上方**（看起来像 chat-quickaction suggestion chip），但它们的功能是**直接修改 timeline 添加 narration/subtitle track** —— 不经过 chat。 | spatial-intent 错位：用户预期点击 chat 区附近的 chip 会触发 agent 对话；实际触发 timeline 编辑操作。功能错位 → 误点击 → 困惑。**修复**：把这俩按钮移到 timeline 4-track 上方（"+ 配音 / + 字幕"作为 add-track 入口），与 chat 在视觉上区隔。 | 新 family — "spatial-intent grouping" |
+| F305 | **MEDIUM · `UNSAVED` 状态没有进度反馈** | topbar 显示 `未保存 / UNSAVED` 红色（或灰色？）mono 文字，是 binary 状态：要么 unsaved 要么 saved；没有中间 `Saving...` 状态。Editor 同样问题 R84 F249 已记录。 | 用户编辑一会儿 — 不知道 autosave 是否在跑 — 关掉 tab 是否会丢 — 焦虑。**修复**：与 R84 F249 同方案：编辑触发后立刻显示 `正在保存…` 200ms pulse → 成功 `已保存 · {time}` → 失败 `保存失败`。 | R84 F249 直系（Studio 与 Editor 应共享 savedAt 三态 component）|
+| F301 | **LOW · 4-track 仅 4 行无 add-track** | timeline 4 lanes (视频/BGM/字幕/覆盖) 是 hard-pinned，无添加新 track 的入口（如多重 BGM、画中画 video2 等）。 | 高阶创作者会要 multi-track（video1 + video2 + BGM + duck BGM + voiceover + sfx）；当前 fixed 4 lanes 限制创作上限。**修复**：lane 列表底部加 "+ 添加轨道" affordance。 | 新 family — "creative ceiling" |
+| F284 | **LOW · 无 aspect ratio 选择** | preview 锁定 9:16 (`1080 × 1920`)，无 dropdown / preset 切换 1:1 / 16:9 / 4:5。 | TikTok/Reels/Shorts 是 9:16 但 YouTube Long / Twitter / Bilibili 横屏需要 16:9；feed 视频常 1:1；用户被 9:16 锁死。**修复**：preview 顶部 eyebrow 改成可点击 dropdown — 切换 aspect 自动调整 export config + crop guide。 | R85 F269 (Analytics 无 timeframe) 同根 — 核心控件缺失 |
+| F296 | **WITHDRAWN (M120 拯救)** | 原假定 timecode `00:00:00 / 00:00.00` 左右格式不一致；zoom 后真实显示两个时码都是 `00:00.00` (MM:SS.ms) **一致格式**。 | — | M120 zoom-first verify gate 第二次防止伪 bug 落锤（第一次是 R83 filmstrip "S5 重复" → 实际 01-06 整齐） |
+
+### 沉淀
+
+- **M126 [新方法学]**：**Empty-state design system audit**。F303 揭示同一 view 内不同 panel 的 empty-state 质量差 6-8 倍（chat 有 3-card + emoji + fallback；library 仅 1 button）。**沉淀规则**：每个 empty-state 必须包含 4 元素：(a) **为什么是空的**（数据未来 / 未配置 / 故障）；(b) **该做什么**（primary action）；(c) **可选的兜底**（"or contact support" / "or skip"）；(d) **视觉强度匹配 view 重要性**（main canvas 的 empty-state 比 sidebar 强 4x）。审计方法：截图所有 empty 状态 + 对比同 view 内 panel 之间的 element count。
+  - **Why**：empty-state 是新用户 onboarding 的核心 surface — 一个产品对待 empty 状态的态度反映对待新用户的态度。chat 区 vs library 区的差距说明设计师投入不均。
+  - **How to apply**：每轮 audit 一个 surface 时，单列一行 "empty-state design score (1-4 元素全)"；累计统计 panel-level 一致性。
+
+- **M127 [新方法学]**：**Build-flavor / version 标识 product-wide 清理**。R87 F292 揭示 `v3 · 设计版` + `STUDIO · V4.0` 两个版本号同时挂顶。**沉淀**：所有 build-flavor / sub-version 标识 (`DESIGN`, `BETA`, `V4.0`, `dev`, `staging`) 在生产构建必须由环境变量过滤；只有内部 dev / staging 构建才显示。M125 (vendor-leak grep) 扩展 regex 加 `(BETA|DESIGN|STAGING|RC\d|V\d+\.\d+|v\d+\.\d+)` 匹配项。
+  - **Why**：M112 vendor-leak 家族第 6 个 instance；不再单点修，要 codebase-level lint。
+  - **How to apply**：R88 候选 #1 联动 R85 M125。
+
+- **M128 [新方法学]**：**Cross-track terminology authenticity**。F291 揭示 zh chrome 词汇有时不是漏翻而是**误译**（覆盖 vs 特效）或**风格不一**（BGM 缩写 vs 字幕全词）。**沉淀**：每个 user-facing 词汇审计时三问：(1) **是否翻译了**（M113 cross-locale）；(2) **翻译是否准确**（语义对齐）；(3) **风格是否一致**（同列表内同字符宽度同 case 同正式度）。
+  - **Why**：M113 cross-locale verify 之前只 catch "未翻译" 案例；F291 显示"翻译了但错了"是更隐蔽的 leak。
+  - **How to apply**：每个 zh chrome string audit 三问 checklist。
+
+### R88 候选
+
+| # | 优先级 | 候选 | Why |
+|---|---|---|---|
+| 1 | **TOP · CRITICAL · brand** | F300 - dark mode preview frame 不可见 — 添加 `box-shadow: 0 0 0 1px var(--accent), 0 0 80px var(--accent-glow)` 或 0-clips placeholder 浅灰底；同时 cross-theme verify dark 下任何 `#000` 主 surface | 主编辑区不可见是 brand 违规 + onboarding 破坏 |
+| 2 | **CRITICAL · M125 升级** | M125 + M127 联动 — 写 `web/scripts/check-vendor-and-version-leaks.ts` —— regex 同时 catch (a) 模型名 (Claude/Sonnet/Opus/...)、(b) 第三方库 (browser_cookie3/Python/...)、(c) build-flavor (DESIGN/BETA/V4.0/...)、(d) 内部 vocab (pipeline/assembly/index/...) | R74-R87 共 6 次 vendor-leak instance，单点修补已无收益；一次全产品 codemod 收口 |
+| 3 | HIGH | F291 + F288 + M128 联动 — i18n message 文件全审 zh 词汇：`BGM → 音乐`、`覆盖 → 特效`、`FRAME/CLIPS/EST./TIMELINE` 补齐 zh 翻译；定义 "chrome terminology authenticity" checklist | M113 cross-locale 误译这个新 vector 收口 |
+| 4 | HIGH | F303 + M126 联动 — Studio Library + Editor Inspector + Analytics Demographics 三个 empty-state 用统一 4-element template 重做 | empty-state design system 一次性建立 |
+| 5 | HIGH | F286 - Studio chat 上方 "+ 配音 / + 字幕" 按钮移到 timeline 4-track 列上方，与 chat 区视觉分离 | spatial-intent 修复，防误点 |
+| 6 | MEDIUM | F305 + R84 F249 联动 — 共享 `<SaveIndicator>` component；三态 saving/saved/error；Studio + Editor 同时升级 | savedAt family 集中升级 |
+| 7 | METHOD | M126/M127/M128 写入 `.claude/rules/e2e-testing.md` — 三个新方法学固化为 audit checklist | verify-gate matrix 持续扩展（现在 4 gate + 3 audit checklist）|
+
+---
+
 ## Round 86 — **R85 F261 + F266 CLOSED ✅ /analytics empty-state vendor/implementation leak 双 locale 清除 + R80 F217 / R82 F230 / R82 F234 三连误报纠错 + M114 audit-plane 沉淀**
 
 - **时间**：2026-05-12（`/loop 30m e2e-report fix` 第 6 轮触发；R83 fix-pass cron 与 R84/R85 audit cron 并行运行）
