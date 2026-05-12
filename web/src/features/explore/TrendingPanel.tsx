@@ -13,6 +13,17 @@ const PLATFORM_LABEL: Record<Platform, string> = {
   douyin: "抖音",
 };
 
+// Editorial monogram drawn in the thumb when no cover loads. Each platform
+// gets a distinct glyph so the column stops looking like 8 repeating grey
+// rectangles. The mark sits *behind* the <img>; if a real cover ever loads
+// (e.g. server-side proxy fetches it), the image covers the mark naturally.
+const PLATFORM_MARK: Record<Platform, string> = {
+  youtube: "▶",
+  tiktok: "♪",
+  xiaohongshu: "红",
+  douyin: "抖",
+};
+
 export function TrendingPanel({ platform, items }: { platform: Platform; items: TrendItem[] }) {
   const t = useT();
   const list = items ?? [];
@@ -38,29 +49,42 @@ export function TrendingPanel({ platform, items }: { platform: Platform; items: 
       {list.map((item, idx) => (
         <div key={item.id} className={styles.row}>
           <div className={styles.rank}>{String(idx + 1).padStart(2, "0")}</div>
-          <img
-            className={styles.thumb}
-            src={coverUrlFor(platform, item)}
-            alt={item.title}
-            loading="lazy"
-            data-aspect={item.cover.aspect}
-            // Swap to a valid-but-transparent 1×1 SVG data URI when the remote
-            // cover is unreachable (CDN proxy/hotlink block). `removeAttribute`
-            // or empty-string src still triggers Chrome's broken-image glyph
-            // *on top of* our CSS gradient — a valid transparent src suppresses
-            // that glyph so .thumb[data-broken] shows cleanly.
-            onError={(e) => {
-              const img = e.currentTarget;
-              if (img.dataset.broken === "true") return;
-              img.src = "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%2F%3E";
-              img.setAttribute("data-broken", "true");
-              img.removeAttribute("alt");
-            }}
-          />
+          <div className={styles.thumb} data-aspect={item.cover.aspect}>
+            <span className={styles.platformMark} aria-hidden="true">
+              {PLATFORM_MARK[platform]}
+            </span>
+            {/* img stays in DOM so a future server-cached cover renders on
+                top of the mark; transparent-SVG fallback on error keeps the
+                broken-image glyph from showing through. */}
+            <img
+              className={styles.thumbImg}
+              src={coverUrlFor(platform, item)}
+              alt=""
+              loading="lazy"
+              onError={(e) => {
+                const img = e.currentTarget;
+                if (img.dataset.broken === "true") return;
+                img.src = "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%2F%3E";
+                img.dataset.broken = "true";
+              }}
+            />
+          </div>
           <div>
+            {item.analysis && (
+              <div className={styles.eyebrow}>
+                <span>{item.analysis.category}</span>
+                <span className={styles.eyebrowDot}>·</span>
+                <span className={styles.opp} data-opp={item.analysis.opportunity}>
+                  {item.analysis.opportunity}
+                </span>
+              </div>
+            )}
             <h3 className={styles.title3}>
               <a href={item.sourceUrl} target="_blank" rel="noopener noreferrer">{item.title}</a>
             </h3>
+            {item.analysis?.exampleHook && (
+              <p className={styles.hook}>{item.analysis.exampleHook}</p>
+            )}
             <div className={styles.stats}>
               {item.metrics?.views != null && <span>▶ {compactNumber(item.metrics.views)}</span>}
               {item.metrics?.likes != null && <span>♥ {compactNumber(item.metrics.likes)}</span>}

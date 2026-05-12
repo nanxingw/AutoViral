@@ -15,30 +15,87 @@
    Round 06 F13). Drop the hover background so the rows don't look
    interactive. Reintroduce once each row links to a work-create flow. */
 .rank { font-family: "Instrument Serif", serif; font-style: italic; font-size: 22px; color: var(--text-dimmer); line-height: 1; text-align: center; }
+/* .thumb is now a positioning container, not the img itself. A platform
+   monogram sits underneath; the real <img> overlays on top. When the img
+   fails to load it gets swapped to a transparent 1×1 SVG, letting the
+   monogram show through — editorial cover, not "broken image". */
 .thumb {
+  position: relative;
   width: 60px;
   height: 80px;
-  object-fit: cover;
   border-radius: var(--radius-sm, 6px);
-  background: var(--surface-2);
+  background: linear-gradient(155deg, var(--surface-2) 0%, var(--surface-1) 100%);
+  border: 1px solid var(--glass-border);
+  overflow: hidden;
   flex-shrink: 0;
 }
 .thumb[data-aspect="16:9"] { width: 80px; height: 45px; }
 .thumb[data-aspect="1:1"]  { width: 60px; height: 60px; }
-/* Broken-image state: img src is swapped to a transparent 1×1 by the
-   onError handler (suppresses Chrome's broken-glyph), then this background
-   shows through. The accent diagonal stripe pattern stays visible in both
-   dark and paper themes — single-tone gradients with --accent-glow looked
-   blank in paper. */
-.thumb[data-broken="true"] {
-  background:
-    repeating-linear-gradient(
-      135deg,
-      var(--accent-lo) 0 6px,
-      var(--surface-2) 6px 12px
-    );
-  border: 1px dashed var(--accent-lo);
+.platformMark {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Instrument Serif", serif;
+  font-style: italic;
+  font-size: 38px;
+  line-height: 1;
+  color: var(--accent);
+  opacity: 0.32;
+  letter-spacing: -0.02em;
+  user-select: none;
+  pointer-events: none;
 }
+.thumb[data-aspect="16:9"] .platformMark { font-size: 24px; }
+.thumb[data-aspect="1:1"] .platformMark { font-size: 30px; }
+.thumbImg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: transparent;
+}
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dimmer);
+  margin: 0 0 4px;
+}
+.eyebrowDot { opacity: 0.5; }
+.opp {
+  padding: 1px 6px;
+  border-radius: 2px;
+  font-weight: 500;
+}
+.opp[data-opp="金矿"] { color: rgba(255, 196, 0, 0.95); background: rgba(255, 196, 0, 0.10); }
+.opp[data-opp="蓝海"] { color: var(--accent-hi); background: var(--accent-glow); }
+.opp[data-opp="红海"] { color: var(--status-error); background: rgba(249, 112, 102, 0.12); }
+/* Quoted hook line — editorial italic, single-line clamp. Real curly
+   quotes added via ::before/::after so the JSON string itself stays clean
+   for copy-paste. */
+.hook {
+  font-family: "Instrument Serif", serif;
+  font-style: italic;
+  font-size: 13px;
+  line-height: 1.35;
+  color: var(--text-dim);
+  margin: 4px 0 6px;
+  letter-spacing: -0.005em;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.hook::before { content: "\201C"; margin-right: 2px; }
+.hook::after  { content: "\201D"; margin-left: 2px; }
 .sourceBadge {
   font-family: var(--font-mono);
   font-size: 9px;
