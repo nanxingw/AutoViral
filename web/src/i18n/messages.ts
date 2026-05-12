@@ -325,6 +325,8 @@ export const en = {
       videoSub: "Short video · 9:16 portrait",
       imageSub: "Image carousel · 4:5 portrait",
     },
+    coverAltVideo: "{title} — short-video cover",
+    coverAltImage: "{title} — image-text cover",
     status: {
       draft: "DRAFT",
       creating: "CREATING",
@@ -879,6 +881,8 @@ export const zh: DeepShape<Messages> = {
       videoSub: "短视频 · 9:16 竖屏",
       imageSub: "图文轮播 · 4:5 竖屏",
     },
+    coverAltVideo: "{title} · 短视频封面",
+    coverAltImage: "{title} · 图文封面",
     status: {
       draft: "草稿",
       creating: "生成中",

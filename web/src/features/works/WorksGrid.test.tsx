@@ -39,6 +39,52 @@ describe("WorksGrid cover priority", () => {
     expect(img!.getAttribute("src")).toContain("cover.png");
   });
 
+  // R115 F523 — content-bearing covers must surface a meaningful alt to
+  // SR users (title + work type), not the empty decorative "".
+  it("uses a meaningful alt that combines title + type (F523)", () => {
+    const { container } = renderGrid([
+      {
+        id: "w1",
+        title: "春日咖啡指南",
+        type: "image-text",
+        status: "published",
+        thumbnail: null,
+        updatedAt: "2026-01-01T00:00:00Z",
+        coverImage: "/api/works/w1/assets/cover.png",
+        coverIsVideo: false,
+      },
+    ]);
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    const alt = img!.getAttribute("alt") ?? "";
+    expect(alt).not.toBe("");
+    expect(alt).toContain("春日咖啡指南");
+    // EN locale is default in tests; assert against the EN cover-alt template.
+    expect(alt).toMatch(/image-text cover|图文封面/);
+  });
+
+  // R115 F523 — when title is blank, fall back to localized "Untitled" so
+  // SR users still hear *something* descriptive instead of an empty alt.
+  it("falls back to localized Untitled in alt when title is blank (F523)", () => {
+    const { container } = renderGrid([
+      {
+        id: "w-empty-title",
+        title: "",
+        type: "short-video",
+        status: "draft",
+        thumbnail: null,
+        updatedAt: "2026-01-01T00:00:00Z",
+        coverImage: "/api/works/w-empty-title/assets/cover.png",
+        coverIsVideo: false,
+      },
+    ]);
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    const alt = img!.getAttribute("alt") ?? "";
+    expect(alt).not.toBe("");
+    expect(alt).toMatch(/Untitled|未命名/);
+  });
+
   it("renders a <video> element when coverImage is a video", () => {
     const { container } = renderGrid([
       {
@@ -54,6 +100,28 @@ describe("WorksGrid cover priority", () => {
     ]);
     expect(container.querySelector("video")).not.toBeNull();
     expect(container.querySelector("img")).toBeNull();
+  });
+
+  // R115 F523 — video covers also carry meaning; we surface alt via
+  // aria-label since <video> doesn't accept the alt attribute.
+  it("video cover gets aria-label with title + short-video type (F523)", () => {
+    const { container } = renderGrid([
+      {
+        id: "w2",
+        title: "海风咖啡馆",
+        type: "short-video",
+        status: "ready",
+        thumbnail: null,
+        updatedAt: "2026-01-01T00:00:00Z",
+        coverImage: "/api/works/w2/assets/clip.mp4",
+        coverIsVideo: true,
+      },
+    ]);
+    const video = container.querySelector("video");
+    expect(video).not.toBeNull();
+    const label = video!.getAttribute("aria-label") ?? "";
+    expect(label).toContain("海风咖啡馆");
+    expect(label).toMatch(/short-video cover|短视频封面/);
   });
 
   it("falls back to a deterministic gradient div when no cover is supplied", () => {

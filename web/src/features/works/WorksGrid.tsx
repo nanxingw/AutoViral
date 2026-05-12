@@ -10,8 +10,11 @@ import { DeleteWorkConfirm } from "./DeleteWorkConfirm";
 
 interface Props {
   works: WorkSummary[];
-  filter: "all" | "draft" | "published" | "archived";
+  filter: "all" | "draft" | "processing" | "published" | "archived";
 }
+
+// Keep in sync with Works.tsx PROCESSING_STATUSES — see e2e-report F10.
+const PROCESSING_STATUSES = new Set(["creating", "ready", "failed"]);
 
 // Deterministic palette per work id — keeps fallback covers visually distinct
 // instead of every card getting the same blue/gold gradient.
@@ -40,7 +43,12 @@ export function WorksGrid({ works, filter }: Props) {
     month: "short",
     day: "numeric",
   });
-  const visible = filter === "all" ? works : works.filter((w) => w.status === filter);
+  const visible =
+    filter === "all"
+      ? works
+      : filter === "processing"
+        ? works.filter((w) => PROCESSING_STATUSES.has(w.status))
+        : works.filter((w) => w.status === filter);
   const STATUSES = new Set(["draft", "creating", "ready", "failed", "published", "archived"]);
 
   // Delete flow state — `pendingDelete` doubles as both the "is dialog open"
@@ -78,7 +86,6 @@ export function WorksGrid({ works, filter }: Props) {
                 <div className={clsx(styles.badge, w.status === "draft" && styles.badgeDraft)}>
                   {typeLabel} · {statusLabel}
                 </div>
-                <div className={styles.typeTag}>{statusLabel}</div>
                 <div className={styles.meta}>
                   <h3>{w.title}</h3>
                   <div className={styles.subline}>
@@ -121,7 +128,17 @@ export function WorksGrid({ works, filter }: Props) {
  */
 function WorkCover({ work }: { work: WorkSummary }) {
   const cover = work.coverImage ?? null;
+  const t = useT();
   const [failed, setFailed] = useState(false);
+  // R115 F523 — cover thumbnails carry meaning (title + type + visual
+  // mood), so SR users need a real alt instead of decorative "". We
+  // build it from the localized type label + the work's title, falling
+  // back to "Untitled" when the title is blank so the string stays
+  // readable. WCAG 1.1.1 — content-bearing images must describe content.
+  const titleForAlt = work.title || t("works.untitledWork");
+  const altKey: MessageKey =
+    work.type === "short-video" ? "works.coverAltVideo" : "works.coverAltImage";
+  const coverAlt = t(altKey, { title: titleForAlt });
   if (!cover || failed) {
     return <div className={styles.thumb} style={{ background: fallbackGradient(work.id) }} />;
   }
@@ -140,6 +157,7 @@ function WorkCover({ work }: { work: WorkSummary }) {
           e.currentTarget.currentTime = 0;
         }}
         onError={() => setFailed(true)}
+        aria-label={coverAlt}
         style={{ objectFit: "cover" }}
       />
     );
@@ -148,7 +166,7 @@ function WorkCover({ work }: { work: WorkSummary }) {
     <img
       className={styles.thumb}
       src={cover}
-      alt=""
+      alt={coverAlt}
       // `loading="lazy"` was preventing thumbnails from ever
       // initiating a fetch — every <img> stayed at complete:false,
       // naturalW:0 even though the card was visible in viewport
