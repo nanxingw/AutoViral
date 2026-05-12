@@ -65,9 +65,15 @@ export const en = {
     copyDone: "Copied to clipboard ✓",
   },
   topnav: {
-    works: "Works · 作品",
-    explore: "Explore · 灵感",
-    analytics: "Analytics · 数据",
+    // R119 F560 — was "Works · 作品" / "Explore · 灵感" / "Analytics · 数据".
+    // Bilingual stripes were a product-launch transition artifact from before
+    // the i18n catalog existed; once the EN catalog is complete, the suffix
+    // becomes "44% Chinese chars in the EN-locale render" — a CRITICAL
+    // i18n-honesty leak. SR engines pronouncing CN chars with EN engine + visual
+    // doubling everywhere. Pure-EN nav labels are correct now.
+    works: "Works",
+    explore: "Explore",
+    analytics: "Analytics",
     versionTag: "v3 · DESIGN",
     localeToggleZh: "中",
     localeToggleEn: "EN",

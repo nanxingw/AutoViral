@@ -16,6 +16,15 @@
         var t = localStorage.getItem("av-theme");
         if (!t) t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
         document.documentElement.setAttribute("data-theme", t);
+        // R119 F559 — sync <html lang> before first paint to avoid the
+        // mismatch where SR engines (NVDA/VoiceOver) latch onto the static
+        // index.html "zh-CN" while the user is on EN locale. Mirrors the
+        // store.ts initial-detection order (localStorage → navigator.language).
+        var l = localStorage.getItem("autoviral.locale");
+        if (l !== "en" && l !== "zh") {
+          l = /^zh/i.test(navigator.language || "") ? "zh" : "en";
+        }
+        document.documentElement.setAttribute("lang", l === "zh" ? "zh-CN" : "en-US");
       })();
     </script>
   </head>

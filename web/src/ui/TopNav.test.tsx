@@ -57,4 +57,23 @@ describe("<TopNav />", () => {
     fireEvent.keyDown(document, { key: ",", metaKey: true });
     expect(useSettingsPanelStore.getState().open).toBe(true);
   });
+
+  // R119 F560 — EN locale must render pure-EN nav labels, not the legacy
+  // "Works · 作品" bilingual stripes (which silently rendered 44% Chinese
+  // chars to EN-locale users). Tests default to EN locale via the global
+  // __AUTOVIRAL_LOCALE__ override, so this assertion lands on the EN catalog.
+  it("EN locale renders pure-English nav labels with no Chinese suffix (F560)", () => {
+    renderAt("/");
+    const works = screen.getByRole("link", { name: /works/i });
+    const explore = screen.getByRole("link", { name: /explore/i });
+    const analytics = screen.getByRole("link", { name: /analytics/i });
+    // Exact text — no " · 作品" / " · 灵感" / " · 数据" suffix.
+    expect(works.textContent).toBe("Works");
+    expect(explore.textContent).toBe("Explore");
+    expect(analytics.textContent).toBe("Analytics");
+    // Triple-check no CJK chars leaked into the EN block.
+    for (const el of [works, explore, analytics]) {
+      expect(el.textContent ?? "").not.toMatch(/[一-鿿]/);
+    }
+  });
 });
