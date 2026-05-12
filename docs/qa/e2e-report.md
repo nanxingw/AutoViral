@@ -6,6 +6,314 @@
 
 ---
 
+## Round 71 — **F129 CLOSED ✅ 跨 8 轮 silent-failure 真 root cause 揭示：stub aggregation 漏聚 mutation result**
+
+- **时间**：2026-05-12（用户给 `/loop 30m e2e-report fix` 第 1 轮）
+- **环境**：dev (`localhost:5173`)，studio work `w_20260326_1208_813`
+- **触发**：bridge-philosophy 框架下，F129 直击 "agent ↔ 内容交付桥梁"（clip-index 是 agent 看 user 上传素材的唯一感知通道）
+
+### F129 真 root cause（覆盖 Round 60-69 所有假设）
+
+**所有过往 round 都假设**：「`useMutation` wiring 缺失」「isPending UI 没接」「onSuccess invalidate 漏了」。**全部不成立** —— commit `03186ff fix(silent-failure): SearchBox build` 已早期落地三件套。
+
+**真 root cause**：`SearchBox.tsx:36-39` 的 stub aggregation **只读 status + search.data 的 stub，从未读 build.data 的 stub**：
+
+```tsx
+// 修复前
+const stub = statusStub ?? searchStub;  // 漏掉 build.data
+```
+
+后果：Backend POST 诚实回 `{stub: true, reason: "open_clip_torch not installed"}`，但这个**最关键的、actionable 的诊断**永远到不了 UI。Status 反复返回笼统的 `no_index`，按钮无变化、用户毫不知所云。8 round silent-failure 的 mystery 终于揭示 —— 不是 React Query 问题，不是 backend 问题，是 **mutation result 的 stub 没并入 UI 状态聚合**。
+
+### 修复
+
+`web/src/features/studio/panels/AssetSidebar/SearchBox.tsx`：
+1. 添 `buildStub`：`build.data && build.data.stub === true ? build.data : null`
+2. 改聚合顺序为 `buildStub ?? statusStub ?? searchStub` —— 最近一次 mutation 携带最新诊断，**优先级最高**
+3. 添 `buildOk` 分支：`build.data.stub === false` 时显示 `✓ 已索引 {count} 个素材 · 用时 {ms} ms`（弥补 status invalidate 间隙）
+
+`web/src/i18n/messages.ts`：添 `buildOk` key（EN + ZH）
+
+### 浏览器实证（Studio w_20260326_1208_813）
+
+| 维度 | 修复前 | 修复后 |
+|---|---|---|
+| 「构建索引」按钮 | 点击后 0 变化 | **消失** ✅ |
+| input placeholder | 「搜索素材…」（误导，input 看似 ok） | **「语义搜索不可用」** ✅ |
+| input disabled | false | **true** ✅ |
+| Install banner | 不出现 | **「语义搜索不可用 / `pip install -r skills/autoviral/modules/research/scripts/clip_index/requirements.txt`」** ✅ |
+
+POST `/api/clip-index/build` 仍诚实返回 `{stub:true, reason:"open_clip_torch not installed"}`，但**这次 reason 终于呈现给了用户**。
+
+### Sediment
+
+- **M97 — silent-failure debugging 必须 trace 完整状态链**：F129 8 round 都看 useMutation hook 的 isPending/isError，但 bug 在**状态聚合层**而非 hook 层。教训：silent-failure 调查不能只看"信号源是否触发"，必须 trace **信号源 → 聚合点 → render**。中间任何一环 drop 数据都会造成 silent。
+- **M98 — mutation result 是诊断信号的最高优先级**：用户主动 trigger 的 action 携带最新 server state；status query 只能告诉"上次见到的快照"。聚合优先级应当是 `mutation.data > query.data`，与 React Query 默认 "stale-while-revalidate" 相反但与 user-causality 一致。
+- **M99 — "8 round 不修" 是 prior pattern-matching 失败的红旗**：每 round 都用同一个 "useMutation pattern" 假设猜测 root cause，但 8 次都没 grep 实际代码。F129 的 fix 在最后一次 actual code-read（不是 pattern matching）里 10 分钟解决。**下次 silent-failure 跨 3+ rounds 仍 open，必须强制 code-read 而非继续猜测**。
+
+### 候选
+
+- R72 **F145 / F146 fix**：analytics `/api/analytics/refresh` silent 500 + timestamp regression（同样可能是 stub aggregation 类似问题 — server 500 path 写默认 timestamp）
+- R72 **F150 polish**：Studio 字幕 track label 改 "字幕（待生成）"
+- R72 **Round 70 finding deep-dive**：「+ 素材」AI-only 单线 vs CapCut 本地导入入口的产品定位差距
+
+### 关联
+
+- closes **F129** (跨 R60-R70 共 11 round，CRITICAL)
+- 验证 **M84** ("早期 surface" 假说) 失败 — F129 不是 surface 早晚问题，是 aggregation logic 缺陷
+- 新落 sediment M97 / M98 / M99 是 silent-failure debugging 工具集
+
+commit: `458fb51 fix(studio): F129 closed — surface build mutation stub reason`
+
+---
+
+## Round 70 — **Studio 新建视频 first-time user journey vs CapCut / Descript：「+ 素材」是 AI-only 单线，无本地导入入口（产品定位裂缝）**
+
+- **时间**：2026-05-12 17:56 本地
+- **测试者**：Claude Opus 4.7 via `/loop 20m`，第 1 round（loop 重启后）
+- **环境**：dev (`localhost:5173`)，全空 cookie + 全空 IndexedDB（模拟首次用户）
+- **路径**：`/`（首页）→ 点击「视频」CTA 卡 → 进入新建 `/studio/w_20260512_1756_05a` → 点击素材库 `+` → 切换 IMAGE / VIDEO / AUDIO tab → 关闭对话框 → 点击底部「+ 配音」「+ 字幕」quick-action 按钮
+- **测评方法**：放下"按钮能不能点"的浅层目标，**改用 first-time user 心态走完前 5 分钟旅程**，每个 touchpoint 对照 CapCut / Descript / Sora 的同类设计，找**产品定位级**与**信息架构级**的鸿沟。本轮不点「生成」实际触发任何 Seedance/TTS billing（M86 教训），仅做 surface 审计。
+- **覆盖功能**：新建视频流程入口、Studio 首次加载呈现、Assets 「+」创建素材弹窗（3 tab）、配音/字幕 quick-action 按钮、agent 入口 chat input、素材库空态
+- **没覆盖**：实际 video 上传/拖拽（因为入口缺失就是 finding 本身）、Seedance 生成成功路径、export、history popover、setting drawer。
+
+### 结果
+
+| Checkpoint | Status | Evidence |
+|---|---|---|
+| 首页「视频」CTA → 创建并跳 Studio | ✅ | ss_2686gpnx6 (`/studio/w_20260512_...`) |
+| Studio 4 tracks (视频/BGM/字幕/覆盖) 渲染 | ✅ | ss_2686gpnx6 |
+| 「+」素材 → 弹「新建素材」对话框 | ✅ | ss_89062vmur |
+| IMAGE / VIDEO / AUDIO 三 tab 渲染 | ✅ | ss_89062vmur / ss_9165eyemv / ss_038010d3i |
+| 底部「+ 配音」点击 → chat 注入中文 prompt + 进入"思考中…" | ✅ | ss_5709cpla9 |
+| 底部「+ 字幕」点击 → chat 第二条 prompt + 累积"思考中…" | ✅ | ss_6902222ok |
+| **本地视频/图片/音频文件上传入口** | ❌ **完全缺失** | — |
+| **空 timeline 上 quick-action 前置守卫** | ❌ **0 守卫** | ss_5709cpla9 |
+
+### Findings（每条都是"深入研究后"的结论，不是表层观察）
+
+#### F151 [**CRITICAL · 产品定位裂缝**] Studio 「+ 素材」=「AI 生成」单线绑死，**没有任何上传/拖拽本地媒体入口** — 这不是 UX 优化，这是定位风险
+
+**现象**：在 Studio 内，「Assets」面板右上「+」按钮唯一的弹窗是「新建素材」=「Compose a generation request — the agent will run the script and update composition.yaml」三 tab（IMAGE / VIDEO / AUDIO），**全部强制走 AI 生成路径**（Seedance / TTS）。
+- 没有「上传文件」按钮
+- 没有「从本地拖拽」drop-zone
+- 没有「从素材库导入」选项
+- timeline 4 条空轨也不接受拖拽
+- 「素材库」搜索框只搜本工程已有素材（NO ASSETS）
+
+**为什么这是产品级问题**（不是 cosmetic）：
+- **CapCut 桌面端**: 第一屏是「Import」按钮 + drop-zone，AI 是次要标签
+- **Descript**: 项目第一步就是「Drag video here」全屏 drop-zone
+- **Adobe Premiere/Final Cut**: media bin = 双击 import
+- **Sora / Pika**: 纯 AI 生成产品，但这两家定位明确是「prompt-to-video 工具」
+- AutoViral 自称**短视频全能工具**（首页"还有 13 个待完成的 payoff 场景，没有自动驾驶"），但**素材入口架构等同于 Sora**——这把"我有现成素材想剪辑"的最大用户群整体挡在门外
+
+**根因猜测**（未读 backend）：composition.yaml 的 schema 强假设 `asset.source.kind = generation`，缺 `kind = upload` 分支。前端 dialog 是 schema 投影。
+
+**修复方向**（按 effort 排序）：
+1. **必做**: dialog 顶部加 4 个等权 tab「上传 / IMAGE 生成 / VIDEO 生成 / AUDIO 生成」，"上传" tab 是 native `<input type="file">` + drop-zone，落盘到 `~/.autoviral/works/<id>/assets/uploads/`，写入 composition.yaml 的 `source: { kind: 'upload', path: '...' }`
+2. **进阶**: timeline 4 条空轨各自接受拖拽（HTML5 dragover），跳过 dialog
+3. **顶级**: 全屏 drop-zone 覆盖整个 Studio (CapCut 模式)，松手后自动分轨：video → 视频轨、audio → BGM 轨、image → 视频轨（作为 still）
+
+**判断**：F151 比 F129 (8 轮 CRITICAL) 优先级更高 —— F129 是 spam 噪音问题、F151 是**入口不存在**的定位问题。**Studio audit top-1（M91 sediment 应升级）**。
+
+#### F152 [CRITICAL · 状态不一致] 新建素材 dialog 三处比例 state 互相打架（宽高比下拉 vs W/H 数值 vs 工程 canvas）
+
+**现象**（IMAGE/VIDEO tab）:
+- 宽高比下拉**默认显示 "1:1"**
+- W/H 输入框默认 **1080 × 1920**（= 9:16，不是 1:1）
+- 工程 canvas 头部硬编码 **1088 × 1920 · 30FPS · H.264**（9:16）
+
+**三个 state 之间没有任何 sync**——用户改下拉不更新 W/H，反之亦然。**实际生成时拿哪个？** 用户根本无法预测。**默认值是自相矛盾的初始状态**，违反"UI shouldn't lie"原则。
+
+**对比基线**: Sora / Runway / Pika 的 ratio picker 是 single-source-of-truth：选 9:16 自动 fill 1080×1920；选 1:1 自动 fill 1080×1080。AutoViral 把两个独立可编辑字段并排放、又不同步，是新人设计师常见错误。
+
+**根因**: 三 state 都是独立 `useState`/uncontrolled inputs，缺 derived state binding。
+
+**修复方向**: `ratio` 作为单一 source-of-truth，W/H 是 derived（read-only or computed）。如果要保留 W/H 自由输入（advanced 路径），加 hint「自定义 W/H 会忽略宽高比下拉」。
+
+#### F153 [HIGH · 用户语义泄露] 「新建素材」dialog 系统级裸露 7 个技术词给非技术用户
+
+清点 dialog 内对普通用户**完全无意义**的词：
+1. **"Compose a generation request — the agent will run the script and update composition.yaml"** （helper sub）——`composition.yaml` 是 AutoViral 内部 artifact 名，**永远不该 leak 给用户**
+2. **"服务方 / Seedance 2.0 (via OpenRouter)"** dropdown — 普通用户不知道 Seedance（火山引擎模型）、不知道 OpenRouter（聚合 API gateway）。等价于让客户选「Triton / Kubernetes」
+3. **"用于视频生成的服务方"** helper — 用了"服务方"这种 SaaS 行业内部词
+4. **"editorial cool glass"** 作为 STYLE 默认值 — 是 AutoViral 自己的 brand vocab，不是大众化 mood 词（应该是"Cinematic / Documentary / Anime style"等）
+5. **`/api/works/.../assets/images/foo.png`** 作为 SOURCE IMAGE URL placeholder — 把后端 REST path 当 placeholder，让用户以为要手填 API path
+6. **"Routes via image-to-video"** helper — image-to-video 是技术 pipeline 名，应该是"以一张图为起点合成视频"
+7. **"panda eating bamboo, editorial color grade" / "warm cinematic ambient pad, 80 BPM, sparse"** — 是 dev placeholder debug 残留，不是 example chips；用户不知道是 hint 还是已填值，三击全选清空才能开始填
+
+**深层判断**：这是 M89 sediment（user-natural prompt test）的**第二次大规模复现**——F148/F149 在 quick-action 是单点，**F153 是整个 dialog 文案体系级失守**。建议把"以非技术用户能朗读不卡壳"作为 dialog/copy 提交闸门（PR 模板检查项）。
+
+**修复方向**: 
+- composition.yaml → "工程"
+- 服务方 / Seedance 2.0 → 隐藏（用户不该选服务商；产品决定）
+- editorial cool glass → 视觉风格下拉，提供 6 个自然语言选项 + 「自定义」
+- SOURCE IMAGE URL → 「以一张图为起点（可选）」+ 文件选择器（顺便修 F151）
+- placeholder → 切到真正的 placeholder（灰色 hint），失焦清空，不是预填
+
+#### F154 [HIGH · billing safety] 「生成」按钮**无任何成本/时长预提示**，用户无法预测一次点击的钱包动作
+
+**现象**: dialog 唯一的 primary action 「生成」按钮**右下角孤零零放着**——没有：
+- 预估成本（M86 内存：Seedance 3s i2v ~$0.76）
+- 预估等待时间
+- 余额/quota 显示
+- 二次确认「即将消耗 ~$0.76」
+
+**对比基线**:
+- **Sora**: button 上明写「Generate · 30 credits」
+- **Runway / Pika**: 顶部 credit bar + button hover tooltip「You have 240 credits」
+- **Midjourney**: bot reply 显示 "fast hours remaining"
+- **OpenRouter dashboard 自己**: 调 API 前能看 model 单价
+
+**深层判断**: 这与 F151 叠加是**双重定位风险**——产品架构假设用户**已经知道 Seedance 多少钱**，否则按钮就是个赌博按钮。**新用户每按一次都是 ~$1 的盲打**。
+
+**修复方向**:
+1. Button label 改成「生成 · 约 ¥5.5」（按当前 OpenRouter 单价 + 用户当前选的 duration 算）
+2. dialog 头部加 quota/余额 inline 显示
+3. 第一次点 → 弹「这将消耗 ¥X，是否继续？」一次性 onboarding 提示（24h 内不再提示）
+
+#### F155 [HIGH · 参数 enum 漂移 · 几乎确定 silent failure] VIDEO duration 默认 "4s"，Seedance API 实际只接 {3, 5, 10}（M86 sediment）
+
+**现象**: VIDEO tab DURATION 字段默认显示 **"4s"**（看 ss_9165eyemv），结合 M86 sediment（Seedance i2v API 的 durationSec 是 enum {3,5,10}），**用户按默认值「生成」会撞 API 拒绝**。
+
+**为什么是 silent**: dialog 没有 enum validation hint（"仅支持 3 / 5 / 10 秒"），无 client-side validator。提交后 OpenRouter 后端报错，但 Studio 上方 chat 显示的是 agent 状态消息——这个错误大概率被吞掉，UI 不见任何 error toast（R67 F145 同样模式）。
+
+**深层判断**: M83 sediment「枚举字段前端没绑后端常量」的复现：前端 input 给了一个 free range，后端却是 strict enum，**API contract 被前端单方面破坏**。F155 应该是一个 `<select>` 而不是 `<input type="number">`/text。
+
+**修复方向**:
+1. **立刻**: duration 改为 `<select>` 三档（3s / 5s / 10s），干掉 free text
+2. **进阶**: schema source-of-truth—— `web/src/queries/seedance.ts` export `SEEDANCE_DURATIONS = [3,5,10] as const`，dialog 引用
+3. **顶级**: 把所有"模型 X 的合法参数"做成 model-driven manifest（duration / aspect / resolution / max_prompt_len），dialog 按 manifest 渲染（多 provider 时尤其重要）
+
+#### F156 [HIGH · 信息架构错位] AUDIO tab 服务方仍显示 "Seedance 2.0 (via OpenRouter)" — Seedance 是视频模型，不生成音频
+
+**现象**: AUDIO tab（BGM/TTS）服务方下拉**与 VIDEO/IMAGE tab 完全相同**：`Seedance 2.0 (via OpenRouter)`。Seedance 是字节火山引擎的 **video-only** 模型，根本不产音频。
+
+**两种可能根因（都很糟）**:
+- **可能 A · UI bug**: dropdown 数据源没切，渲染了错误 options。提交后后端会 reject 或 silent-ignore service field、走默认 audio provider —— **UI 撒谎**。
+- **可能 B · backend silent reroute**: 后端识别 audio-intent 后忽略 service 字段、强制走 TTS provider —— **input 是装饰**。
+
+无论哪种，对用户都是**UI 状态 ≠ 实际行为**的可信度危机。
+
+**修复方向**:
+1. AUDIO tab 切自己的 provider 列表（如 "Edge TTS" / "ElevenLabs" / "OpenAI TTS"）
+2. 如确实只支持一家 audio provider，**干掉这个 dropdown**——单一选项的 dropdown 是反模式
+3. BGM/TTS 子 tab 切换时，service dropdown 也跟着切（BGM = music model, TTS = voice model）
+
+#### F157 [HIGH · 前置守卫缺失] 「+ 配音」「+ 字幕」quick-action 在 timeline 完全空时**仍可点击**，会把含"这段视频"主语的 prompt 注入 chat，agent 进入"思考中…"
+
+**现象**（ss_5709cpla9 / ss_6902222ok）:
+- 空 timeline（0 个 video clip）
+- 点「+ 配音」→ chat 出现:「帮我给这段视频加一段中文旁白。先按视频的情感基调写一段 30-60 秒的口播脚本（口语、有节奏、有钩子），然后用温暖自然的女声合成出来加到音频轨。」
+- 立刻显示 "思考中…"
+- 再点「+ 字幕」→ 第二条 prompt 累积：「请帮我给视频自动生成字幕。识别画面里的语音内容，按词级时间戳精确同步，做成抖音爆款那种节奏明快的样式，加到时间轴的字幕轨。」
+
+**为什么这是 high-severity**:
+- prompt 包含「**这段视频**」主语 → agent 收到 ill-formed contract → 大概率 silent-fail / 或者瞎编一段假 narration（浪费 TTS billing → F154 叠加风险）
+- "思考中…" 让用户**误以为系统在干活**，实际上 nothing 可干
+- 这是 **F129 跨 8 轮 CRITICAL spam** 的**根因之一**——agent 收到无效 task 后输出错误日志/无效响应，进而触发 CRITICAL 监控
+
+**深层判断**: M93 sediment（应新建）「**用户动作的 affordance must be conditioned on the precondition state**」——按钮可点性应该是 derived state，不是常开。
+
+**修复方向**:
+1. `+ 配音` / `+ 字幕` 按钮的 `disabled` 绑定 `car.tracks.video.clips.length > 0`
+2. disabled 时 hover 提示「先添加视频再生成配音 / 字幕」
+3. 进阶：disabled 也是糟糕的，不如把 button 替换成 inline「先添加视频 →」（更 actionable）
+4. **顶级**: 干脆把这两个 button 移到「视频 clip 右键菜单」内——按钮只在有 clip 时存在（CapCut 模式）
+
+#### F158 [MEDIUM · prompt 视角] 「+ 配音」prompt 用「**帮我**给这段视频加一段中文旁白」—— "我" 应该是发起方（用户），不是 agent 自称
+
+**现象**: quick-action 注入的 prompt 第一人称是 "我"，"我"指 user。但**实际触发点击的不是用户在 chat 里手打这句话**——是按钮自动注入。所以这个 "我" 是**模拟用户口吻**——产品在替用户说话。
+
+**为什么是问题**:
+- 用户看 chat 历史会困惑「我什么时候说过这句」
+- agent 收到这个 prompt 会按"用户主动请求"逻辑响应，而不是"系统派发任务"
+- F148/F149 在 Editor 已修（用 mandarinHint tooltip + 调整 prompt 主语）—— **Studio 这边没修**，是 F148/F149 的 **Studio 侧 regression**
+
+**深层判断**: M89 sediment 升级——除了"user-natural 朗读 test"，还要加「**第一人称归属 test**」：所有自动注入的 prompt 里 "我/I" 都必须是发起方（user），如果产品在替用户说话，必须改成系统口吻（"为这段视频生成配音 / Generate narration for the selected video"）。
+
+**修复方向**:
+- 「+ 配音」prompt → 系统口吻：「为当前视频生成一段 30-60 秒中文配音，温暖自然的女声。」
+- 「+ 字幕」prompt → 系统口吻 + 去掉「抖音爆款」假设：「为当前视频识别语音并生成词级时间戳字幕。」
+- 走 Editor F79 fix 同款 `mandarinHint` tooltip pattern（grep `mandarinHint` 在 Studio panels 没 hit —— **fix 没扩散过来，cp ChatQuickActions pattern**）
+
+#### F159 [MEDIUM · 平台默认假设泄漏] 「+ 字幕」prompt 写死「做成**抖音爆款**那种节奏明快的样式」—— 不管工程目标是哪个平台
+
+**现象**: 字幕 quick-action prompt 文字内嵌"抖音爆款"+ "节奏明快"。但 9:16 工程**可能是**：
+- TikTok / 抖音（OK）
+- 小红书 video
+- Instagram Reels
+- YouTube Shorts
+- 微信视频号
+
+**为什么是问题**: 产品在替用户做平台选择，且**没暴露选择给用户**。一个做 YouTube Shorts edu 内容的创作者，字幕就不该是"抖音爆款节奏明快"。
+
+**深层判断**: 这是 M75 sediment（PlatformTabs 在 Explore 上是显式概念）的**反向证据**——平台是显式概念，但 quick-action prompt 把平台**硬编码假设为抖音**。**两条产品逻辑之间缺一致性**。
+
+**修复方向**:
+1. quick-action prompt 不带平台风格，让 agent 按当前工程的 `platform` 字段（如果有）决定，没有就走 generic
+2. 工程 metadata 加 `platform: tiktok | xiaohongshu | reels | shorts | wechat`，新建对话框就让用户选
+3. quick-action 文字改成「为视频生成同步字幕」，把"风格"作为 agent 的 follow-up 决策
+
+#### F160 [MEDIUM · 不可中断] agent "思考中…" 期间**没有任何 cancel / abort 通道**
+
+**现象**: 一旦点了 quick-action，chat 立刻进入「思考中…」，UI 上找不到 Stop / Cancel / Abort 按钮。F157 描述了这甚至发生在无意义场景（空 timeline），那么用户**必须等 agent 自己超时**。
+
+**对比基线**: ChatGPT / Claude.ai / CapCut AI 都有 "Stop generating" button。
+
+**深层判断**: 与 F157 联动——按钮没前置守卫导致进入无效状态、又没有 escape hatch 让用户脱身、加上 F154 没 billing pre-display，**这是 trap-style UI 三件套**。
+
+**修复方向**:
+1. chat panel "思考中…" 行内/旁边加 ✕ Stop 按钮
+2. WebSocket 发 `chat.abort` 消息到后端，后端中止 agent run
+3. 取消后 chat 历史保留刚才的 user prompt 但标记 "(已取消)"，避免误以为没发出
+
+### Sediment（M97 - M99）
+
+#### M97 [NEW] **「+ 创建素材」入口必须是多模态：上传 + 生成并列**，AI-only 入口是产品定位裂缝
+
+**原则**: 任何短视频/编辑工具，第一性原理是"有素材→剪辑产出"。把"获取素材"绑死在 AI 生成是 Sora 类纯生成产品定位，不是编辑工具定位。
+
+**应用时机**: 任何新功能添加「+ XX」入口时，必须先列三种素材来源「上传/生成/已有库」，至少前两种要有 UI 入口；只覆盖一种是定位收窄事故。
+
+**关联**: F151 / F156 / R64 sediment M78 反思（默认入口决定用户认知）
+
+#### M98 [NEW] **dialog/copy 提交前必须做"非技术用户朗读 test"**：能朗读不卡壳才能 merge
+
+**原则**: 任何放进 user-facing dialog 的 string，找 5 个 9-5 工作非技术行业的人朗读：碰到 "API / yaml / OpenRouter / image-to-video / Seedance / composition / source.url" 等词 → fail → 必须改。
+
+**应用时机**: PR 模板加 checkbox「dialog 内 string 通过 user-natural test」。已有的 F79 (Editor) + F148/F149 (Studio quick-action) + F153 (Studio dialog) 都是这个 test 不过关。
+
+**关联**: M89 (Editor 朗读 test) 升级到 dialog 全文案级
+
+#### M99 [NEW] **UI affordance must be conditioned on precondition state** —— 按钮可点性是 derived state，不是常开
+
+**原则**: 任何按钮的 `disabled` 必须显式绑定到能让按钮 action 成功的前置状态。常开按钮 = 把"找不到上下文"这个 error 推给 agent / 后端 / 用户错觉。
+
+**应用时机**: code review 时 grep `<button` 看哪些缺 `disabled={...}` 或 `disabled` 写死 `false`；优先级最高的是 **写后端 / 调 API / 触发 billing** 的按钮。
+
+**关联**: F157 (空 timeline 配音可点) / F155 (默认 duration 4s 提交即 fail) / F129 8 轮 CRITICAL 根因之一
+
+### F129 sediment 重新归类
+
+R68 把 F129 标为"跨 8 轮 CRITICAL，下轮按 M84 pattern cp `_refreshBtn` fix"。**R70 重新审视**：F129 的根因不是单一 className 漂移，而是 **F157 + F155 + F154 联动 → agent 进入 ill-formed task / API contract violation → 错误日志 spam**。先修 F157（前置守卫）+ F155（enum bind）应该能让 CRITICAL 频率掉一半以上。
+
+### 下一轮候选
+
+- **R71 候选 #1 (TOP)**: F151 实施 —— Assets dialog 加「上传」tab，本地 file `<input>` + drop-zone，落盘到 `~/.autoviral/works/<id>/assets/uploads/`，写 `composition.yaml` `source.kind = upload`。**这是用户体验最高 ROI 的一刀**
+- R71 候选 #2: F155 + F157 联动 fix —— duration 改 select + quick-action 前置 disabled 守卫，搭配测 F129 CRITICAL 是否下降
+- R71 候选 #3: F156 AUDIO tab provider 错位 —— 干掉 Seedance 选项、或换 audio-only provider list
+- R71 候选 #4: F154 billing pre-display —— button label 拼 cost；可以借 OpenRouter API 单价 endpoint
+- R71 候选 #5: F153 文案大扫除 —— composition.yaml / OpenRouter / Seedance / SOURCE IMAGE URL 全 string 改成用户语言
+- 历史债延续: F145 (silent 500) / F146 (timestamp 倒退) / F148 / F149 (Editor 已修但 Studio 未扩散)
+
+### 截图归档
+
+ss_2686gpnx6 (Studio empty 首屏) / ss_89062vmur (IMAGE tab) / ss_9165eyemv (VIDEO tab w/ 4s duration) / ss_038010d3i (AUDIO tab w/ Seedance) / ss_5709cpla9 (配音 prompt 注入空 timeline) / ss_6902222ok (字幕 prompt 累积) —— 均在 browser 上下文，未落盘。需要归档时下轮 `save_to_disk: true`。
+
+---
+
 ## Round 69 — **Trends 4-platform refactor 落地：zod schema + provenance source + cover cache + 真 metrics**
 
 - **时间**：2026-05-12（plan-driven 20-task subagent-execution，从 R68 候选#1 → 完整重构落地）
