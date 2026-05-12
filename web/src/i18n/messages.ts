@@ -139,6 +139,15 @@ export const en = {
       msgQueued: "queued — watching for carousel update…",
       msgUpdated: "updated",
       msgQueuedTimeout: "queued (no update detected within 60s)",
+      regenConfirm: {
+        title: "Regenerate all {count} slides?",
+        body: "Every slide in this carousel will be replaced with a new image. The current set is overwritten — there's no built-in undo for this step.",
+        costHint: "Takes ~60 seconds and runs against the image model for each slide.",
+        promptLabel: "Style prompt",
+        promptEmpty: "(no extra prompt — using current carousel style)",
+        btnCancel: "Cancel",
+        btnConfirm: "Regenerate {count}",
+      },
     },
     filmstrip: {
       dragToReorder: "Drag to reorder",
@@ -639,6 +648,15 @@ export const zh: DeepShape<Messages> = {
       msgQueued: "已排队 · 正在等待画布更新…",
       msgUpdated: "已更新",
       msgQueuedTimeout: "已排队（60 秒内未检测到更新）",
+      regenConfirm: {
+        title: "重新生成全部 {count} 页？",
+        body: "本组图文的每一页都会被替换为新图。当前版本将被覆盖，此操作没有内置撤销。",
+        costHint: "整个流程约需 60 秒，每一页都会重新调用图像模型。",
+        promptLabel: "风格描述",
+        promptEmpty: "（未填风格 · 使用当前 carousel 自带风格）",
+        btnCancel: "取消",
+        btnConfirm: "重新生成 {count} 页",
+      },
     },
     filmstrip: {
       dragToReorder: "拖动可排序",

@@ -3,6 +3,7 @@ import { apiFetch } from "@/lib/api";
 import { useEditor } from "../../store";
 import { loadCarousel } from "../../services/carousel";
 import { useT, type MessageKey } from "@/i18n/useT";
+import { RegenerateConfirmDialog } from "./RegenerateConfirmDialog";
 
 // QUICK_STYLES carries (en prompt sent to the agent, i18n key for the chip
 // label). Keep the prompt itself English even when the UI is Chinese — the
@@ -23,6 +24,7 @@ export function AITab({ workId }: { workId: string }) {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState<null | "regen" | "quick">(null);
   const [msg, setMsg] = useState<string | null>(null);
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const slideCount = car?.slides.length ?? 0;
   const t = useT();
   // R36: cancellation flag for in-flight polls. The poll loop is
@@ -181,15 +183,24 @@ export function AITab({ workId }: { workId: string }) {
       <button
         type="button"
         disabled={busy !== null || slideCount === 0}
-        onClick={() =>
-          runAssets({ regenerateAll: true, stylePrompt: prompt }, "regen")
-        }
+        onClick={() => setConfirmOpen(true)}
         style={primaryBtn}
       >
         {busy === "regen"
           ? t("editor.copyTab.busy")
           : t("editor.aiTab.regenerateAll", { count: slideCount })}
       </button>
+
+      <RegenerateConfirmDialog
+        open={confirmOpen}
+        slideCount={slideCount}
+        stylePrompt={prompt}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          void runAssets({ regenerateAll: true, stylePrompt: prompt }, "regen");
+        }}
+      />
 
       {msg && (
         <div
