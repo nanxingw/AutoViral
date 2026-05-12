@@ -21,9 +21,17 @@
   object-fit: cover;
   border-radius: var(--radius-sm, 6px);
   background: var(--surface-2);
+  flex-shrink: 0;
 }
 .thumb[data-aspect="16:9"] { width: 80px; height: 45px; }
 .thumb[data-aspect="1:1"]  { width: 60px; height: 60px; }
+/* Broken-image state: stripped src + accent-glow gradient placeholder.
+   font-size 0 hides the alt-text leak that browsers show inside the img
+   bounding box when the cover URL is unreachable (proxy / hotlink). */
+.thumb[data-broken="true"] {
+  background: linear-gradient(135deg, var(--accent-glow), var(--surface-2));
+  font-size: 0;
+}
 .sourceBadge {
   font-family: var(--font-mono);
   font-size: 9px;

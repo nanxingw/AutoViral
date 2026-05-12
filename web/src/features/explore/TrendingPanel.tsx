@@ -44,6 +44,14 @@ export function TrendingPanel({ platform, items }: { platform: Platform; items: 
             alt={item.title}
             loading="lazy"
             data-aspect={item.cover.aspect}
+            // Hide alt-text leak when the remote CDN is unreachable (proxy /
+            // hotlink blocks). Show a clean accent-tinted placeholder via the
+            // empty src triggering the .thumb gradient background.
+            onError={(e) => {
+              const img = e.currentTarget;
+              img.removeAttribute("src");
+              img.setAttribute("data-broken", "true");
+            }}
           />
           <div>
             <h3 className={styles.title3}>
