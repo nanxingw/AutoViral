@@ -381,7 +381,7 @@ export const en = {
     },
   },
   analytics: {
-    collectionNote: "Data is collected by a background job hourly. If empty for long, check Python deps (browser_cookie3) on the host.",
+    collectionNote: "Channel stats refresh automatically every hour. If they stay empty, your channel may not be connected — check it in Settings.",
     openSettingsCta: "Open settings",
     heroEyebrow: "CHANNEL HEALTH · last 7 days",
     audiencePrefix: "Your audience is",
@@ -409,8 +409,8 @@ export const en = {
     demoEmptyRegions: "No regions data yet — waiting for first samples from the background collector.",
     insightsTitle: "Latest research",
     insightsTitleEm: "insights",
-    insightsSub: "Curated by Sonnet · ranked by relevance to your channel",
-    insightsEmpty: "No research insights yet — Sonnet hasn't analyzed your recent works. After 1 published work, the first insights will appear here.",
+    insightsSub: "Curated by AutoViral · ranked by relevance to your channel",
+    insightsEmpty: "Insights appear after you publish a work — AutoViral analyzes your output to spot patterns worth repeating. Nothing yet.",
   },
   chat: {
     agentName: "Creative Agent",
@@ -881,7 +881,7 @@ export const zh: DeepShape<Messages> = {
     },
   },
   analytics: {
-    collectionNote: "数据由后台任务每小时采集一次。若长期为空，请检查主机上的 Python 依赖（browser_cookie3）是否安装。",
+    collectionNote: "频道数据每小时自动刷新。如果长期为空，可能是频道未连接——请到设置中检查。",
     openSettingsCta: "打开设置",
     heroEyebrow: "频道脉象 · 近 7 天",
     audiencePrefix: "你的受众",
@@ -909,8 +909,8 @@ export const zh: DeepShape<Messages> = {
     demoEmptyRegions: "暂无地域分布数据——等待后台采集首批样本。",
     insightsTitle: "最新调研",
     insightsTitleEm: "洞察",
-    insightsSub: "由 Sonnet 整理 · 按与你频道的相关度排序",
-    insightsEmpty: "暂无调研洞察——Sonnet 还没分析过你最近的作品。完成 1 个发布作品后，首批洞察会自动出现在这里。",
+    insightsSub: "由 AutoViral 整理 · 按与你频道的相关度排序",
+    insightsEmpty: "发布作品后，洞察会自动出现——AutoViral 会分析你的内容并提炼值得复用的模式。暂无洞察。",
   },
   chat: {
     agentName: "创作代理",
