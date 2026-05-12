@@ -311,6 +311,8 @@ export const en = {
     type: {
       video: "VIDEO",
       image: "IMAGE",
+      videoSub: "Short video · 9:16 portrait",
+      imageSub: "Image carousel · 4:5 portrait",
     },
     status: {
       draft: "DRAFT",
@@ -322,6 +324,9 @@ export const en = {
     },
     searchPlaceholder: "Search works…",
     newWork: "Create work",
+    newWorkTitlePlaceholder: "Name this work — or leave blank",
+    newWorkTitleAria: "Title for the new work",
+    creatingLabel: "Creating…",
     emptySearch: "No works match {query}",
     h2WorksLead: "My",
     h2WorksEm: "Works",
@@ -828,6 +833,8 @@ export const zh: DeepShape<Messages> = {
     type: {
       video: "视频",
       image: "图文",
+      videoSub: "短视频 · 9:16 竖屏",
+      imageSub: "图文轮播 · 4:5 竖屏",
     },
     status: {
       draft: "草稿",
@@ -839,6 +846,9 @@ export const zh: DeepShape<Messages> = {
     },
     searchPlaceholder: "搜索作品…",
     newWork: "新建作品",
+    newWorkTitlePlaceholder: "给作品起个名字 · 可留空",
+    newWorkTitleAria: "新作品标题",
+    creatingLabel: "创建中…",
     emptySearch: "没有作品匹配 {query}",
     h2WorksLead: "我的",
     h2WorksEm: "作品",

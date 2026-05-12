@@ -4,8 +4,30 @@
   border: 1px dashed var(--glass-hi);
   background: var(--surface-0);
   display: grid;
-  grid-template-rows: auto 1fr;
+  grid-template-rows: auto auto 1fr;
   overflow: hidden;
+}
+/* R101 F406 — inline title input ahead of the mode buttons. Kept
+   visually quiet (no border, dim placeholder) so the card still
+   reads as a creation surface, not a form. The dashed bottom rule
+   echoes the card's dashed border so the input feels integrated. */
+.titleInput {
+  width: 100%;
+  padding: 8px 16px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--text);
+  background: transparent;
+  border: none;
+  border-bottom: 1px dashed var(--glass-border);
+  outline: none;
+}
+.titleInput::placeholder {
+  color: var(--text-dimmer);
+  font-style: italic;
+}
+.titleInput:focus {
+  border-bottom-color: var(--accent);
 }
 .title {
   padding: 10px 16px 8px;
