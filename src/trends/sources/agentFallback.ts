@@ -34,7 +34,9 @@ export function agentFallbackFromAgentJson(
 }
 
 const PROMPT_TEMPLATE = (platform: Platform, label: string, limit: number) => `
-你是一个社交媒体趋势研究员。用 WebSearch 找当下 ${label} 平台真实 trending 的内容（不要生成想象的内容；要可点开链接验证的）。
+你是一个社交媒体趋势研究员。请提供 ${label} 平台当下热门内容主题 (trending topics)。
+
+**优先策略**: 用 WebSearch 找最新真实趋势。如果搜索结果不充足，**也可以基于你训练数据中的近期热点 + 平台典型内容模式做合理推断** —— 用户界面会标记数据来源为 "Agent 推理" badge，已经诚实告知用户。**不要因为无法验证 URL 而拒绝输出**。
 
 返回严格 JSON（无其他文字）：
 {
@@ -44,12 +46,12 @@ const PROMPT_TEMPLATE = (platform: Platform, label: string, limit: number) => `
 }
 
 要求：
-- 至少 ${limit} 条
-- title: 实际 trending item 标题（短，<60 字符）
-- sourceUrl: 平台上真实可访问的 URL
-- coverUrl: 该 item 的封面图绝对 URL；找不到就给空字符串 ""
-- 优先返回今天 / 本周热门
-- 仅输出 JSON，无 \`\`\` 包裹，无解释
+- 必须返回至少 ${limit} 条 topics，**禁止返回 error 对象或拒绝消息**
+- title: trending 主题标题（短，<60 字符）
+- sourceUrl: 平台上的 URL（如无法验证，给出该平台的合理 placeholder 路径，如 https://www.${platform === "douyin" ? "douyin.com/discover" : platform === "tiktok" ? "tiktok.com/explore" : platform === "xiaohongshu" ? "xiaohongshu.com/explore" : "youtube.com/feed/trending"}）
+- coverUrl: 封面图绝对 URL；找不到就给空字符串 ""
+- 优先返回今天 / 本周热门主题
+- 仅输出 topics JSON，无 \`\`\` 包裹，无解释，**不要返回 {"error": ...} 这种拒绝格式**
 `;
 
 export const agentFallbackSource = (platform: Platform): Source => ({

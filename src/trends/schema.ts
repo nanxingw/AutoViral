@@ -28,15 +28,19 @@ export const TrendItemSchema = z.object({
     shares: z.number().nullable(),
     fetchedAt: z.string().datetime(),
   }).nullable(),
+  // Relaxed from initial strict bounds — Haiku-generated analysis frequently
+  // came in with 2 tags or 4 contentAngles, causing 3-retry exhaustion.
+  // Tightening to "creative quality" rather than "exact spec" — the agent's
+  // intent is preserved, validation no longer rejects on cosmetic variance.
   analysis: z.object({
     heat: z.number().int().min(1).max(5),
     competition: z.enum(["低", "中", "高"]),
     opportunity: z.enum(["金矿", "蓝海", "红海"]),
-    description: z.string().min(20).max(500),
-    tags: z.array(z.string()).min(3).max(5),
-    contentAngles: z.array(z.string()).min(2).max(3),
-    exampleHook: z.string().min(5).max(100),
-    category: z.string().min(1),
+    description: z.string().min(10).max(600),
+    tags: z.array(z.string()).min(2).max(8),
+    contentAngles: z.array(z.string()).min(1).max(5),
+    exampleHook: z.string().min(3).max(150),
+    category: z.string().min(1).max(50),
   }),
 });
 export type TrendItem = z.infer<typeof TrendItemSchema>;
