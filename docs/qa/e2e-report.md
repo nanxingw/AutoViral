@@ -6,6 +6,197 @@
 
 ---
 
+## Round 99 — **R98 F395 (视觉欺骗) + F396 (jargon 灾难) + F398 (大屏浪费 46%) + F403 (死字段) 四连 CLOSED ✅ /works hub 页快速 win 组合拳**
+
+- **时间**：2026-05-12（`/loop 30m` cron 触发 R99）
+- **触发**：R98 audit 落 12 finding (F394-F405) 暴露 /works hub 全面落后业界 baseline，但 TOP 5 候选中 F394 + F399 (全文索引 + view mode + batch op) 是"1-2 周战略性"工程，无法单 round 完成。改为打包 4 个"5-30 分钟单文件 fix"：F395 + F396 + F398 + F403。这 4 项**累计 user-facing 视觉权重 ≈ /works 首屏 60%**（hero 文案 + filter pills + 第一行 grid），单 round 闭合后 hub view trust 显著回收
+- **方法学**：M131 DOM + M147 (slide-count-style before/after) 升级为 **M150 hub-primitives DOM diff**（filter pill 数量、hero textContent 用词、`getComputedStyle(.grid).gridTemplateColumns` 列数三件套）
+
+### 修复
+- `web/src/pages/Works.tsx` (+12 行注释 / -3 行 dead code)：
+  - **F395**：`(["all", "draft", "processing", "published", "archived"] as const)` → `(["all", "draft", "processing"] as const)`。WorkFilter type union 保留 `published/archived` 让 URL-param 重入仍 type-safe（feature 重启容易）
+  - **F398**：NewWorkCard 容器 `gridTemplateColumns: "repeat(3, 1fr)"` → `repeat(auto-fill, minmax(280px, 1fr))`
+  - **F403**：删 `ideas: 0` 字段；`<WorksHero>` 调用去 `ideaCount` prop
+- `web/src/features/works/WorksGrid.module.css`：`.grid { grid-template-columns: repeat(3, 1fr); }` → `repeat(auto-fill, minmax(280px, 1fr))`。两个 grid 容器（NewWorkCard 顶部 + WorksGrid 主体）现在统一响应式 baseline
+- `web/src/features/works/WorksHero.tsx` (-7 行)：
+  - Props interface 去 `ideaCount: number`
+  - Render 去 dead branch `{ideaCount > 0 && (<>, <em>{ideaCount}</em> {t("worksHero.ideasLabel")}</>)}`
+- `web/src/i18n/messages.ts` 双 locale 各改 2 string：
+  - **EN**：`payoffSuffixSingular/Plural`: "unfinished payoff scene(s) waiting for you." → "short-video draft(s) still in the works."
+  - **ZH**：`payoffSuffixSingular/Plural`: "个待完成的 payoff 场景。" → "段短视频草稿在路上。"
+  - `ideasLabel` i18n key 暂保留（向后兼容；未来 ideas 队列真做时直接复用）
+
+### 浏览器实证 (M150 hub-primitives DOM diff)
+
+ZH locale + light theme，1568px viewport：
+
+| Primitive | Before (R98 audit 实测) | After (R99 实测) |
+|---|---|---|
+| filter pill count | 5 (含 "已发布 0" / "已归档 0" forever-dead) | **3** ✓ `["全部 35", "草稿 33", "处理中 2"]` |
+| `hasPublishedPill` | true | **false** ✓ |
+| `hasArchivedPill` | true | **false** ✓ |
+| hero textContent | `"33 份草稿, 还有 16 个待完成的 payoff 场景。"` | **`"33 份草稿,还有 16 段短视频草稿在路上。"`** ✓ |
+| `heroHasPayoffJargon` | true | **false** ✓ |
+| `heroSimpleCopy` | false | **true** ✓ |
+| newWorkGrid computed cols | 3 hardcoded (`"533.33px 533.33px 533.33px"` on 1600px) | **4 fluid** (`"296px 296px 296px 296px"` on 1568px) ✓ +33% density |
+| WorksGrid main computed cols | 3 hardcoded | **4 fluid** ✓ (统一响应) |
+| ideaCount dead branch | rendered `<em>0</em>` (hidden by `ideaCount > 0` guard but still imported) | 字段 + branch 全删 ✓ |
+
+**视觉 layout snapshot**：截图显示 hero 净化为 "33 份草稿, 还有 16 段短视频草稿在路上。"；filter bar 收缩到 3 pills；NewWorkCard 与 4 张 work card 在第一行并排（之前是单独占整行）；底部 WorksGrid 也 4 cols 同步。
+
+### 沉淀
+
+**M150 · hub-primitives DOM diff audit（升级 M147）**
+
+R97 M147 引入 slide-count diff 作为 frontend-state ground truth。R99 推广到 hub-level UI primitives：
+
+```
+For every "hub page" audit (works / library / explore / etc.), capture before/after diff:
+
+1. Filter pill DOM textContent set
+2. Hero textContent — verify no jargon / no code-switching
+3. Grid `getComputedStyle(.grid-root).gridTemplateColumns` — verify responsive
+4. Dead-field detection: grep src for `: 0,` / `: ""` / `if (X > 0)` pattern
+5. Empty-state textContent — verify educational / actionable
+```
+
+5 primitives 在 audit 报告中"先量化 before / 修复 / 再量化 after"才算 round-closed。
+
+**M151 · domain-jargon mismatch checklist（升级 M139 / M149）**
+
+R93 M139 + R98 M149 (locale-mixing) 之上新加一类 leak —— **"domain jargon mismatch"**（产品在 hero copy 中借用领域专业词但目标 user 不在该领域）：
+
+```
+For every hero / marquee / eyebrow copy, ask:
+1. 这个词在目标 user 群体（小红书 carousel 创作者 / 抖音视频博主 / 普通图文用户）日常语境中是否常见？
+   - "payoff" — 编剧 / video screenwriting domain → ❌ 创作者 mismatch
+   - "Hero / Eyebrow / Card / Tile" — design system internal → ❌ 用户不知道
+2. 替换为目标 user 母语中等同概念的词
+3. 若必须保留专业词，必须加 inline 释义或 tooltip
+```
+
+R99 F396 闭合是 M151 第一个实证 fix。
+
+### 桥梁哲学 5 plane 第四轮巩固
+
+| Plane | 本轮证据 |
+|---|---|
+| data plane | R94 + R97 destructive prevention 已闭合 2 处；本轮无变 |
+| control plane | **R99 F395 hide forever-dead filter pills = control plane 第 1 处" 视觉权重不分配给 dead feature" 闭合** |
+| audit plane | M141 + M147 + M150 三层方法学 |
+| copy plane | **R99 F396 hero jargon 净化 = copy plane 第 4 类 leak 修复（vendor leak / dev-language leak / law-risk copy / domain-jargon mismatch）** |
+| a11y plane | R91 + R97 部分修复；本轮无变 |
+
+R99 是首次单 round 同时触达 **control + copy 两层 plane**。M151 (domain-jargon checklist) 将让未来文案 review 提前一步抓 jargon mismatch。
+
+### R100 候选（按战略权重倒序）
+
+| 优先级 | 候选 | 触发 | 备注 |
+|---|---|---|---|
+| 1 (TOP · 战略) | F394 + F399 + M147 hub view 5 primitive 战略升级 | R98 hub view 大缺口 | 1-2 周；与 backend 协调全文索引 |
+| 2 (HIGH · a11y) | F373 + M142 — KeyboardSensor for Filmstrip | R95 WCAG 2.1.1 violation | 单 round 可做 |
+| 3 (HIGH · 触屏) | F374 完整 — `@media (hover: none)` overlay buttons | R95 iPad/iPhone permanently unable to delete | 单 round 可做 |
+| 4 (HIGH · Export 数据损失) | R96 F382/F384 (Export 同名覆盖 + 失败静默) | R96 audit | 中等耗时 |
+| 5 (HIGH · locale-mixing leak) | R98 F400 — InsightRibbon body 走 i18n key + ZH/EN 双版 | R98 F400 / M149 | 单 round 可做 |
+| 6 (MEDIUM · test 垃圾) | R98 F397 — `kind: production/test` + "Hide test works" toggle | R98 35 work 已开始混杂 | 半天 |
+| 7 (METHOD) | M150/M151 写入 `.claude/rules/e2e-testing.md` | 累计 12 verify gate | 沉淀持续扩展 |
+
+---
+
+## Round 98 — **`/works` 列表 hub 页深审：search 仅 title substring 不索引 slide 内容 / 2 个 forever-dead filter pills（已发布/已归档 backend 永远 0）/ Hero "payoff 场景" CN-EN code-switching jargon / Test 垃圾与真内容 35 张混杂无区隔 / 2560 viewport 浪费 46% real estate / 无 sort 无 view-mode 无 batch op（Notion/Linear/Figma hub baseline 全面落后）/ InsightRibbon body 是 ZH 页面里的 hardcoded EN 字面量（mixed-locale leak）**
+
+- **时间**：2026-05-12（`/loop 20m` cron 触发 R98；R97 被并行 fix-pass agent 占用 R95 F372 DeleteSlideConfirmDialog 闭环，本轮跳到 R98 编号）
+- **环境**：dev (`localhost:5173/works`)，35 works (33 草稿 + 2 处理中 + 0 已发布 + 0 已归档)；ZH locale + light theme；2560×CSS viewport 实测 (screenshot 1568×773 = 0.6125 scale)；DOM-extraction (M131) + filter-pill 实点击 + InsightRibbon 滚动到位
+- **触发**：R92 / R93 / R95 审了 Editor (canvas / Inspector / Filmstrip)，R96 审了 Export 最后一公里，但 **`/works` hub 这个用户每日入口、navigation 中枢的 list-level 行为完全没审过**。R02-R05 只点了 WorkCardMenu delete 路径，从未审 search / filter / sort / view-mode / batch / 信息层级 / loading 行为。35+ works 体量已经在考验产品 hub view，对照 Notion (search 是 P0 + view-mode toggle) / Linear (board/list/kanban + bulk action) / Figma (project search) 全面落后
+- **方法学**：M131 DOM + 实点击 forever-dead "已发布 0" filter pill 验证 educational copy 是否给出原因 + 滚动 InsightRibbon 检测 placeholder content locale 一致性
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F394 | **CRITICAL · search 仅 title substring 匹配 — 不索引 slide 内容 / chat 历史 / hashtag / caption** | 源码 Works.tsx L62 `return w.title.toLowerCase().includes(q)`。**全局唯一搜索 surface**，且只 match `WorkSummary.title` 字段。**实测推演**：用户记得"我做过一个樱花咖啡馆 carousel"，但其 work title 实际是 "Untitled-12" 或 auto-generated "test_carousel_001" → search "樱花" / "咖啡" 全返回 0 结果。**深一层**：carousel.yaml 里每张 slide 都有 description / brief.md 里有 hashtag / chat history 有完整 prompt 上下文 + AI 生成 brief —— 全部不可被搜索。 | (1) 35 works 体量时已经"找不到我那个 X"的概率 30%+，100 works 时崩塌；(2) 与 Notion (full-content fuzzy search) / Figma (project + page search) / Linear (issue body + comments search) baseline 差一个时代；(3) **修复**：(a) 短期 — title search 扩展到 search `title + tags + lastChatMessage` 三字段；(b) 中期 — server-side 全文索引 carousel.yaml + brief.md（用 sqlite FTS5 或 in-memory tantivy）；(c) 长期 — semantic search via embedding（用户可以"找一个关于秋季氛围的 carousel"自然语言查）。 | 新 family — "search depth 战略缺位"；R85 / R88 / R93 / R96 都未触及全局 navigation 战略 |
+| F395 | **CRITICAL · 2 个 forever-dead filter pills（"已发布 0" / "已归档 0"）—— 视觉欺骗 + 用户无知 backend 未实现** | DOM 实测 filter pills: `全部 35 / 草稿 33 / 处理中 2 / 已发布 0 / 已归档 0`。源码 Works.tsx L39-41 注释自承 `"'已发布'/'已归档' are frontend-only enum buckets that the backend doesn't emit yet"`。**实点击 "已发布 0"** → page shows "暂无已发布作品。[显示全部 ↺]" —— 是有 clear-filter 按钮（F192 fix），但**不解释为什么 0**。用户无法分辨"是因为我真没发布过 vs 这个 feature backend 没做完"。 | (1) 用户尝试点 "已发布" → 0 → 反复疑惑 → 投诉"为什么我发布的全没了"；(2) 占用 prime nav real estate（5 个 filter pills 中 2 个永远死） = 视觉污染 + decision distraction；(3) 与 R88 F312 (Settings drawer surfaces dev config) 同根 = **prerelease feature 未做 user-facing gate**；(4) **修复**：(a) 立即 — backend 实现前直接**藏起来** "已发布 / 已归档" 两个 pill（feature flag）；(b) 中期 — 显式 disabled state + tooltip "Coming soon · 发布功能尚未上线"；(c) 长期 — 真做 publish/archive 流程让 count 流动起来。 | 新 family — "forever-dead filter / always-0 count UI"；R88 F312 dev-config leak 同根 |
+| F396 | **CRITICAL · WorksHero copy "16 个待完成的 payoff 场景" 是 CN-EN code-switching jargon —— 普通用户完全不知所云** | 实测 hero 文案："33 份草稿, 还有 **16 个待完成的 payoff 场景**。没有自动驾驶，没有时间表——下一步追什么由你决定。" 这里 "payoff 场景" 是从 video screenwriting 借词（"payoff" = punchline / climax / value-delivery moment）。**普通小红书 / 抖音创作者**绝大多数不是编剧背景，对 "payoff" 一词无概念。源码 Works.tsx L34: `unfinished: list.filter(w => w.status === "draft" && w.type === "short-video").length` → 实际语义只是"短视频草稿数量"。 | (1) 第一屏 50% 视觉权重的 hero copy → 用户读不懂 = 第一印象崩塌（特别是新用户）；(2) CN-EN code-switching 对 i18n 团队是 nightmare（无法纯 ZH 翻 / 无法纯 EN 翻）；(3) 高端编剧 jargon 与 CLAUDE.md "editorial · 克制" 调性不矛盾，但**目标用户 mismatch** —— 小红书创作者不是 Sundance 编剧；(4) **修复**：(a) 立即 — "16 个待完成的 payoff 场景" → "16 段短视频草稿"；(b) 中期 — 重新设计 hero copy 与目标用户对齐（用"15 篇正在打磨的内容"或"16 个未完成的故事"）；(c) 长期 — hero copy A/B test：jargon vs plain language 用户停留时长。 | 新 family — "domain jargon mismatch with target user"；R88 F312 dev-language leak 同根 |
+| F397 | **HIGH · Test 垃圾与真内容 35 张混杂无视觉区隔 / 无 prefix 过滤** | DOM 实测 first 8 work titles: `["春日咖啡指南", "性感自拍日记", "春日咖啡角布置灵感", "氛围感满满的居家自拍日记", **"Test tr_20260320_1600_7f0", "Test tr_20260320_1653_ff6", "Test tr_20260320_1718_e2a", "Test tr_20260320_1739_339"**]` —— 前 4 个是 R94/R95/R96 audit 期间的真生产数据，紧跟着 4 个 cryptic "Test tr_*" 测试 id。35 works 中估计 7-10 个是测试垃圾。**无 prefix 过滤、无"hide test works" toggle、无 tag 系统**。 | (1) 用户每天打开 /works 第一眼就被 test trash 干扰 → 信号噪声比降低；(2) 35 时还能忍，**100 works 时 navigation 不可用**；(3) **修复**：(a) 立即 — 加 `kind` field 区分 `production / test`，filter pill 加 "Hide test works (8)" 按钮；(b) 中期 — autoviral CLI 加 `--prune-tests` 命令 + works.json `archivedTests: [...]`；(c) 长期 — folder / tag 系统 (Notion-style 数据库) 让用户组织 100+ works。 | 与 F394 search 战略缺位 same root：navigation primitive 全面缺位 |
+| F398 | **HIGH · gridColumns 硬编 `repeat(3, 1fr)` → 2560 viewport 下 1168px 横向 real estate 浪费（46%）** | DOM 实测 `gridColumns: "400px 400px 400px"` (实际计算值 — CSS module style 限制了 max-width)，3 列 × 400px + 16px gap × 2 = 1232px 实占，2560 viewport 余下 1328px 分两侧 margin → 每侧 664px 空白。**大屏 desktop 用户的浏览效率被腰斩**。对比 Notion gallery view：1600px+ 自适应 5 列，>2200px 6 列；Figma：每行 6-8 cards；Linear board：每列 4-5 cards。 | (1) 35 works 在 3 列下 12 行 → 用户必须滚 5-6 屏才能扫完；(2) 4 列时 9 行，5 列时 7 行 → 体验质变；(3) 与 CLAUDE.md "信息密度按需切换" 调性矛盾（默认就低密度）；(4) **修复**：(a) 立即 — `gridTemplateColumns: repeat(auto-fill, minmax(280px, 1fr))` 让 grid 自然响应；(b) 中期 — 加 view mode toggle "Compact / Cozy / Spacious"；(c) 关键 — 用 CSS Container Queries 让 grid 跟随 page padding 响应。 | R93 F354 Inspector globals 同根 (硬编 layout 不响应)；与 CLAUDE.md design philosophy 直接冲突 |
+| F399 | **HIGH · 完全无 sort / 无 view mode toggle / 无 batch op（Notion/Linear/Figma hub baseline 三件套全缺）** | DOM 实测 `hasSort: false / hasViewToggle: false`，源码确认无 batch-select state。35 works 默认排序 (backend 给的顺序，疑似 createdAt desc) 用户无法改变。无 list view / table view / board view。无 multi-select + bulk delete / archive。 | (1) **无 sort**：用户想"按 updatedAt 排序找最近编辑的"无路；(2) **无 view mode**：35 work scroll-heavy，table view 列出标题 + 状态 + 日期 比 thumbnail grid 快 5×；(3) **无 batch op**：清理 20 个 test 草稿要 20× click delete × 20× confirm dialog；(4) **修复**：(a) sort dropdown "Updated / Created / Title / Status"；(b) view mode segmented control "Grid / List / Board"；(c) 长按 cmd 多选 + 顶部 floating actions bar "Delete (5 selected) · Archive · Tag"。 | 与 R88 / R93 / R95 / R96 共同体现 "hub view 战略缺位"——产品只能 single-action / single-work，跨 work 操作 0；新 family |
+| F400 | **HIGH · InsightRibbon body 是 hardcoded EN 字面量在 ZH 页面 — locale-mixing leak** | 实测 InsightRibbon 滚动可见：顶部"SAMPLE" 标签 + ZH disclaimer "脱离占位卡—数据分析 agent 尚未为你生成专属洞察。"，但 **3 张卡 body 是 hardcoded EN**: `"Tutorial content under-served in your niche — 3 of 5 top creators have abandoned it."` / `"Your audience peak shifted to 8 PM weekdays — 2.3× engagement vs morning posts."` / `"Warm color grading correlates with +18% retention across last 47 posts."` 源码 Works.tsx L9-13 是 EN 字面量数组没走 i18n key。 | (1) ZH 用户看见 ZH 标签 + EN body = 视觉违和；(2) 数据是 fake (`"3 of 5 top creators" / "+18% retention across last 47 posts"`)，但若用户信任并 action（"我要 schedule 8 PM"）= 被产品**误导**；(3) "SAMPLE" 标签救了一部分 trust，但 affordance 不强（小字、灰色）；(4) **修复**：(a) 立即 — placeholder body 走 i18n key + 提供 ZH/EN 双版；(b) 中期 — 弱化视觉权重（更明显的 "SAMPLE" badge + 透明度降低）；(c) 长期 — 真接 analytics agent 让 insights live (但 R85 揭示 analytics 也是 placeholder)。 | R85 F267 (analytics placeholder) / R93 F341 (prompt-locale leak) 共同 family "i18n hybrid bugs"；R88 F312 dev-config leak family |
+| F401 | **MEDIUM · NewWorkCard 单卡占 grid 整行（3 列 × 1 row 仅 1 个 card）** | 截图实测 grid 第一行：左侧是 NewWorkCard (短视频 / 图文 2 mode 选择)，**右侧 2 个 grid cell 完全 empty**。源码 Works.tsx L157-159 `<div style={{ gridTemplateColumns: "repeat(3, 1fr)" }}><NewWorkCard /></div>` —— grid 设了 3 列但只塞 1 个 card。 | (1) 视觉浪费；(2) NewWorkCard 仅占 1 列 (400px) 而其右 800px 空白 → 用户视觉重心被强行往左拉；(3) **修复**：(a) NewWorkCard 改为 hero-style full-width card "+ 新建作品" 占整行 (或) 放回 grid 流让它和 work cards 并列；(b) 或填入 2 个"灵感"推荐 work template 卡片做 "starter" 引导。 | F398 grid 响应缺位同根 |
+| F402 | **MEDIUM · "暂无已发布作品" empty state 不解释 0 的原因（用户无法分辨"我没发布 vs 这个 feature 没做"）** | 实点击 "已发布 0" 后 empty state 文案 "暂无已发布作品。[显示全部 ↺]"。**没解释**：(a) 是用户自己确实没发布过？还是 (b) 发布功能 backend 还没做？源码注释 L39 自承是 (b)。**两种原因下用户的 next action 截然不同**：(a) 应当去引导用户走发布流程；(b) 应当告诉用户"Coming soon"。 | (1) 信息缺失 → 用户 silent 困惑 → 流失；(2) 与 F395 forever-dead filter 同根；(3) **修复**：empty state 改 conditional copy "发布功能即将上线 · 当前还不能 publish"。 | F395 同根 |
+| F403 | **MEDIUM · WorksHero `ideaCount: 0` 硬编 — "还有 N 个 ideas" 永远死位** | 源码 Works.tsx L31 `ideas: 0` 硬编。Hero 调用 `<WorksHero ideaCount={counts.ideas} .../>` → 总是 0。**WorksHero 内 ideas 相关文案永远显示 0** (虽截图 hero 没显式 surface 这个数字，但 component 内部存在 dead branch)。 | (1) 死字段维护成本：所有读 ideas 的代码都要保留但永远 0；(2) future PR 若加 ideas count 计算逻辑 → 容易 silent merge 数据进死字段；(3) **修复**：(a) 删除 ideaCount prop + WorksHero 中相关 branch；(b) 或真做 ideas pipeline (idea queue stage)。 | F395 forever-dead UI 同 family |
+| F404 | **LOW · 无键盘快捷键 "/" focus search + 无 arrow-key card grid navigation** | DOM 实测：搜索框无 `kbd hint`，Works.tsx 无 keydown listener registration。Notion / Linear / Figma 都把 `/` 或 `Cmd+K` 当 P0 search 入口。AutoViral 必须 mouse 点击。 | (1) Power user / 大量 works 用户日常 navigation friction；(2) 与 R92 F337 / R93 F359 / R95 F373 / R96 F388 共同体现产品**完全无键盘战略**；(3) **修复**：global keydown `/` (when no input focused) → search.focus()。 | 全产品键盘战略缺位家族 |
+| F405 | **LOW · 无 pin / favorite / tag / folder 机制（100 works 时 navigation 不可用）** | DOM 实测 work card 无 pin / favorite affordance，无 tag 系统。Notion 有 ★ favorite，Linear 有 sidebar favorite，Figma 有 starred files。35 works 还能忍但**100+ works 时混乱不可承受**。 | (1) 用户长期 retention 后 hub view 崩塌；(2) **修复**：work card 加 pin icon (右上角 ☆)，pinned works 排前；中期加 tag 系统。 | F394 / F399 hub view 战略缺位家族 |
+
+### 沉淀
+
+**M147 · hub view 信息层级 audit checklist（新增）**
+
+R98 揭示 `/works` 缺失 hub view 5 大 primitive 全套。新建 audit checklist，每个 hub page 必查：
+
+```
+For every "list of N items" page (works hub, library, archive, etc.), verify:
+
+(1) Search depth:    title-only | title+tags | full-content | semantic
+(2) Sort control:    none | dropdown (4+ axes)
+(3) Filter:          1-tier | 2-tier (AND/OR composition)
+(4) View mode:       grid-only | grid+list | grid+list+board+kanban
+(5) Batch operation: none | multi-select | shift-range select
+(6) Pin/favorite:    none | star | folder/tag
+(7) Empty state:     blank | actionable+CTA | educational (why empty?)
+
+Target tier:
+- Notion / Linear / Figma baseline = (3+, 3+, 2-tier, 3+, multi-select, star, educational)
+- AutoViral current = (1, 0, 1-tier, 1, 0, 0, partially-actionable)
+```
+
+R98 落地的 finding 矩阵每条都映射到这表 1 行。**新增 hub view 必须填表才能 merge**。
+
+**M148 · "dead UI element" 检测家族（新增）**
+
+R98 揭示 2 处 forever-dead UI element：F395 "已发布 / 已归档" filter pills + F403 ideaCount=0。归纳"dead UI" 模式：
+
+```
+Dead UI = UI affordance 占用视觉权重但被 hardcoded / backend-未实现 / 死分支永远不可填充
+
+检测方法：
+1. 渲染时直接 0 / null / "" 的状态字段
+2. 源码注释自承 "not yet supported by backend"
+3. count 永远等于 const 值（0/empty array）
+4. enum bucket 占用 UI 但 emit 端不存在
+
+修复策略 (按优先级)：
+A. Feature flag 完全隐藏 (推荐)
+B. Disabled state + "Coming soon" tooltip
+C. 真做 feature 让 count 流动起来
+```
+
+R98 候选清单 #2 直接 derive from M148。
+
+**M149 · locale-mixing leak audit（升级 R93 M139）**
+
+R93 M139 揭示 prompt-locale mismatch (chip-label vs API-prompt 双向反转)。R98 F400 揭示**新角度** — ZH 页面里 hardcoded EN 字面量 (InsightRibbon body)。归纳：
+
+| Mismatch 类型 | 例子 | 检测 |
+|---|---|---|
+| chip-label EN + API-prompt ZH | R84 F244 ChatQuickActions | 源码 hardcode `prompt: '请用...'` |
+| chip-label ZH + API-prompt EN | R93 F341 AITab Quick Styles | 源码 hardcode `prompt: "minimal editorial"` |
+| 页面 locale ZH + content EN | R98 F400 InsightRibbon body | 源码 i18n 跳过 component body |
+| 概念词 jargon code-switching | R98 F396 "payoff 场景" | hero copy CN+EN 混 |
+
+M149 audit pass 强制每个含字面量 string 的 component 必须走 i18n key OR 显式 mark `<EN>` / `<ZH>`。
+
+### R99 候选（按战略权重倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP · 视觉欺骗) | F395 — feature flag 隐藏 "已发布 / 已归档" filter pills | F395 / 用户被欺骗 + 反复点击死 filter | 一行 code + flag；5 分钟可关闭 |
+| 2 (TOP · 文案灾难) | F396 — Hero "payoff 场景" → "短视频草稿" + F403 删除死字段 ideaCount | F396 / 用户读不懂 hero copy | i18n 更新；30 分钟 |
+| 3 (HIGH · 战略) | F394 + F399 + M147 — hub view primitive 五件套（search depth + sort + view mode + batch op + pin） | F394 / 35 works 已开始崩 | 大动作，需 1-2 周 + 与 backend 协调全文索引 |
+| 4 (HIGH · 响应) | F398 — `repeat(auto-fill, minmax(280px, 1fr))` 让 grid 大屏自适应 | F398 / 2560px viewport 浪费 46% | 一行 CSS；10 分钟 |
+| 5 (MEDIUM) | F397 — 加 "Hide test works" toggle 或 production/test kind 字段 | F397 / test trash 干扰 | 小型；半天 |
+
+---
+
 ## Round 97 — **R95 F372 (CRITICAL · Tier 3 第 4 处违规) CLOSED ✅ Filmstrip × 按钮加 `<DeleteSlideConfirmDialog>` + F374 部分修复 keyboard focus reveal**
 
 - **时间**：2026-05-12（`/loop 30m` cron 触发 R97；上轮 R96 被并行 audit agent 占用做 Export 深审，本轮使用 R97 编号）
