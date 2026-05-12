@@ -27,12 +27,18 @@ describe("agentFallbackFromAgentJson", () => {
     expect(items[0].id).toBe("tiktok_3a7d3670");
   });
 
-  it("falls back to placeholder cover when agent gives empty cover", () => {
+  it("falls back to placehold.co URL when agent gives empty cover", () => {
+    // Schema requires cover.url be a valid URL — null isn't allowed.
+    // We synthesize a placehold.co URL with the title rendered in so the
+    // frontend has a visual element. The <img onError> handler swaps in a
+    // CSS gradient if even this URL fails (e.g. proxy block).
     const items = agentFallbackFromAgentJson("douyin", {
       topics: [
         { title: "Topic A", sourceUrl: "https://www.douyin.com/x", coverUrl: "" },
       ],
     });
-    expect(items[0].cover).toBeNull();
+    expect(items[0].cover).not.toBeNull();
+    expect(items[0].cover?.url).toMatch(/^https:\/\/placehold\.co\//);
+    expect(items[0].cover?.aspect).toBe("9:16");
   });
 });
