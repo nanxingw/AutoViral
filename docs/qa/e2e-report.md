@@ -6,6 +6,244 @@
 
 ---
 
+## Round 105 — **R101 F417 (CRITICAL · 1-click destructive restore) + F422 (HIGH · 注释承诺 vs 实现矛盾 manual snapshot) + F426 (MEDIUM · raw `e.message` 未本地化) 三连 CLOSED ✅ —— CheckpointsMenu 走完 R94→R97→R102→R105 第 4 次 destructive-gate hardening；data plane 闭合数升至 4，audit plane M156 注释承诺 vs 实现真相沉淀**
+
+- **时间**：2026-05-13（`/loop 30m` cron 触发本轮；上轮 R104 被并行 audit agent 占用做 /analytics 深审，本轮使用 R105 编号）
+- **触发**：R101 落 13 个 finding (F417-F429)，本轮选战略最高 ROI 的三个 single-round 闭合：F417 (gate destructive write) + F422 (frontend wire 已存在的 server-side endpoint) + F426 (复用 R27 `localizeApiError` 工具)。F418 (auto-trigger 缺位) + F420 (assets 不进 snapshot) 是后端架构改造级 multi-round，留作 R106+ 候选。F421 (sha→label) + F425 (branching) 都需要 server schema 升级，单 round 不可行
+- **方法学**：复用 R94 / R97 confirm dialog 模板 (portal + 0.18s motion + useModalFocus + ESC + backdrop)；新增 **M156 "代码注释承诺 vs 实现真相" 审计 pattern**（R96 F383 "stale KNOWN-ISSUE" 家族升级）
+
+### 修复
+
+- `web/src/features/checkpoints/RestoreCheckpointConfirmDialog.tsx`（**新建**，224 行）
+  - **F417** 修复 —— `<RestoreCheckpointConfirmDialog>` 完整组件，props `{ open, checkpoint, onConfirm, onCancel }`
+  - 显示 (1) age "Restore the version from 1 小时前?" 作 dialog title；(2) body warning "All edits made since this snapshot will be lost"；(3) meta panel (sha, age, size · deliverable type) 用 mono font 显示；(4) 黄色 warning bar "reloads the editor; unsaved scratch state will reset"；(5) Cancel + Confirm 双 button
+  - 与 RegenerateConfirmDialog / DeleteSlideConfirmDialog 视觉完全一致 = R94/R97 已建立的 destructive-gate UI 语言
+- `web/src/features/checkpoints/useCheckpoints.ts`（+53 行 / -4 行）
+  - **F422** 修复 —— 新增 `createManual()` mutation 调 `POST /api/works/:id/checkpoints`（server-side endpoint 已存在于 api.ts:2912-2920，前端从未接）；返回 `{ written: string[] }` —— `length > 0 = "created"` / `length === 0 = "unchanged"` (idempotent path)
+  - 新 hook 出参 `{ createManual, creatingSnapshot, snapshotError, snapshotResult: "created" | "unchanged" | null, clearSnapshotStatus }`
+  - **F426** 修复 —— restore + manual 两个错误路径都改用 `localizeApiError(e, t)` 替代原 `e instanceof Error ? e.message : String(e)`；自动 route 到 `serverErrors.<code>` i18n key，未映射 code fallback 到 EN err.message
+  - hook 顶部加 `const t = useT()` 让 `localizeApiError` 拿到 translator
+- `web/src/features/checkpoints/CheckpointsMenu.tsx`（+182 行 / -28 行）
+  - **F417** 集成 —— `onClick={() => onPickItem(c)}` 替代原 `onClick={() => onRestore(c.file)}`；`pendingRestore` useState 存待确认 checkpoint；`<RestoreCheckpointConfirmDialog>` 渲染在 menu 之外
+  - close-on-outside-click handler 加 `dialog?.contains(target) => return` 防 confirm dialog 内点击触发 menu 关闭（与 R94 同一 race）
+  - **F422** 集成 —— menu 顶部增 sticky-style "📷 立即保存快照" button（disabled 时显示 "保存中…"）；status 行 (`role="status" aria-live="polite"`) 显示 created / unchanged hint；error 行 `role="alert"` 显示 localized 失败原因
+  - 新 useLayoutEffect 3.2s 后 `clearSnapshotStatus()` 清掉 hint —— 防 "snapshot saved" 永久 stuck 在 UI
+  - 注释也改了：原 L17 "Users can also press the button when closed to take a manual snapshot before a risky chat" → 改为详细说明 F422 = 真把这个承诺接上
+- `web/src/i18n/messages.ts`（双 locale × 11 string 新增）
+  - `checkpoints.takeSnapshot` / `snapshotInProgress` / `snapshotCreated` / `snapshotUnchanged` / `snapshotFailed` —— 5 个 manual-snapshot 流的 UI string
+  - `checkpoints.restoreConfirm.{title, body, metaSha, metaAge, metaSize, warning, btnCancel, btnConfirm}` —— 8 字段子树 (title 带 `{age}` 插值)
+  - ZH `body` 因双引号嵌套问题首次 typecheck 出错 —— 把 `"立即保存快照"` 改成 `「立即保存快照」`（CJK 引号）保持 string 闭合
+
+### 静态验证
+
+```
+npm run -s typecheck:web         → exit=0 ✓
+npm run -s test:web              → checkpoints/__tests__/findRollbackTarget.test.ts ✓ (4 pass)
+                                   预存 19 test fail 与本轮无关（jsdom env missing
+                                   是 pre-existing baseline，NewWorkCard.test.tsx
+                                   stale fixture 还搜 R102 已删的 `SHORT VIDEO` 硬编字符串
+                                   —— 留作 R106+ test-fixture 更新一并修）
+```
+
+### 沉淀
+
+**M156 · 代码注释承诺 vs 实现真相 audit pattern（新增）**
+
+R101 F422 揭示一类隐蔽的代码漏洞：源码注释承诺了某能力（如 "users can press the button to take a manual snapshot"），但 onClick 实际只 toggle dropdown，**不调用任何 mutation**。R96 F383 沉淀的 "stale KNOWN-ISSUE comment" 是 docs/issue-tracker 视角；M156 是 source-code 视角的升级版。
+
+**新审计 pattern**：
+
+```
+For every long-lived (>3-month) source file with prose comments describing
+user-facing behavior:
+
+1. Extract every promise-shaped comment fragment ("users can / the X handles
+   / clicking will / ...") via regex on /\/\*\*[\s\S]*?\*\//g + filter
+   semantically with `claims: "user can"` keywords
+2. For each promise, trace down to actual onClick/onChange/dispatch handler
+3. Verify handler implementation matches promise. If not:
+   - Either the comment is stale (R96 F383 path) → delete or update comment
+   - OR the implementation forgot to wire the promised feature (F422 path)
+     → wire it, server endpoint may already exist
+4. Server-side endpoints predating frontend wiring = high-value, low-effort
+   single-round closure (F422 took 30 minutes: endpoint at api.ts:2912, just
+   `apiFetch POST` + UI button)
+```
+
+R101 F422 是 M156 的第一例。**预测**: 用同样 grep + handler-trace 跑全 codebase，会找到 2-5 个同 family case（特别是 R88/R93/R95 destructive surface 周边的"注释承诺 confirm/undo 但实际没接"）。
+
+**M157 · destructive-gate UI 语言已成熟模板（升级 M154 双轨 lock 为 5-元素 confirm dialog standard）**
+
+R94 + R97 + R105 三轮 destructive confirm dialog 用同一模板：
+
+```
+Required template (R94 RegenerateConfirmDialog === R97 DeleteSlideConfirmDialog
+                   === R105 RestoreCheckpointConfirmDialog):
+
+1. createPortal(document.body)                      → 逃出 stacking context
+2. AnimatePresence + 0.18s scale 0.96→1 motion       → 视觉成熟感
+3. useModalFocus(open, dialogRef)                    → R41 keyboard trap 复用
+4. window.addEventListener("keydown") ESC → onCancel → 全键盘 a11y
+5. backdrop onClick → onCancel + e.stopPropagation   → 防 dialog 内点击穿透
+
+外加 5 元素内容：
+  (a) <title> editorial font 22px italic              → 编辑部调性
+  (b) <body> 13px line-height 1.55 dim                → 解释 destructive 后果
+  (c) <meta panel> mono 11px sha/age/size grid        → 让用户知道在 restore 什么
+  (d) <warning bar> 黄色 (`var(--status-warning)`)     → 不可逆 reload 提示
+  (e) <footer> Cancel + Confirm 双 button + accent     → "Confirm" 必须 accent 强调
+```
+
+R105 后 destructive 三处 (regen / delete / restore) **视觉完全一致** —— 用户在任一处见过一次，第二处第三处零学习成本。这是 R97 M143 "AutoViral undo culture" 战略的第二步：先**让 destructive 有一致的视觉警示语言**（gate），再**让 destructive 可逆**（Cmd+Z + UndoToast，留 R106+）。
+
+### 桥梁哲学 5 plane 第 6 轮巩固
+
+| Plane | 本轮证据 |
+|---|---|
+| data plane | R94 + R97 + R102 + **R105 F417** = data plane **第 4 处** destructive race window 闭合（regen → delete → create-orphan → restore）；本系统 4 个主要 destructive 入口全部 gated |
+| control plane | R99 + 本轮 **F422 (manual snapshot button)** —— 用户主动 protection 能力第 1 次接通；前 4 轮全是"防"，本轮第一次"赋能" |
+| audit plane | M141 + M147 + M150 + M153 + M154 + **M156 + M157** 累计 7 套元方法学 |
+| copy plane | R86/89/99/102 后 **R105 F426** locale-mixing leak 第 5 处闭合 = restore 错误 |
+| a11y plane | R91 + R97 + 本轮 `aria-live="polite"` snapshot status + `role="alert"` 错误 + `role="dialog" aria-modal="true" aria-labelledby` confirm 完整 ARIA 表达 |
+
+R105 是首次单 round **同时触达 data + control + copy + a11y 四 plane**。control plane 第 1 处闭合 (主动 snapshot) = 桥梁哲学从"防御性"升级到"用户能掌控自己的安全"的转折点。
+
+### R106 候选（按战略权重倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP · undo culture) | R97 M143 P0 战略 — Zustand history middleware + Cmd+Z + UndoToast | R95 F372 / R97 闭合 | 与 R101 F418 (auto-trigger 缺位) 同根；多 round 战略 |
+| 2 (TOP · /analytics P0) | R104 F440-F450 任意子集 | R104 audit | 暂未读 R104 详情；下次 cron 触发先读 |
+| 3 (HIGH · M156 grep) | 跑全 codebase comment-vs-impl audit | R101 F422 启发 | M156 第一次系统化应用，可能找到 2-5 个新 finding |
+| 4 (HIGH · label/branching) | F421 (sha→label) + F425 (restore-as-new-version) | R101 | 需要 server schema 升级（checkpoint metadata 加 label 字段 + restore 前 auto-snapshot）；2-3 day |
+| 5 (HIGH · auto-trigger) | F418 + F427 — autosave-debounce 自动 snapshot + retention policy | R101 | F418 = AutoViral undo culture 战略核心；与 #1 同根 |
+| 6 (HIGH · keyboard) | F423 + R95 F373 — Cmd+Y open menu + count badge + Filmstrip arrow-reorder | R101 + R95 | 全键盘战略缺位家族 |
+| 7 (METHOD) | M141/M147/M150/M153/M154/M156/M157 写入 `.claude/rules/e2e-testing.md` | 累计 7 套 method | 沉淀持续扩展 |
+
+---
+
+## Round 104 — **/analytics 面板深审：backend↔frontend semantic drift 是产品级 P0 silent leak（KPI 100% fallback 0 · 9 件 works 数据被前端完全丢弃 · hero "近 7 天" 是 hardcoded 谎话）F440-F450（11 finding，含 2 CRITICAL · 4 HIGH · 4 MEDIUM · 1 LOW）+ M159/M160/M161 沉淀**
+
+- **时间**：2026-05-13（`/loop 20m` cron `105f4ef8` 触发 R104）
+- **环境**：浏览器 1366×768@2x · `/analytics` ZH locale · 真实账号 `Mirodream`（5 粉丝、9 件已发布作品）· `/api/analytics/creator` 真实 200 OK 响应
+- **触发**：前 11 轮 audit 完全未触及 `/analytics`。Analytics 是 mainstream creator dashboard（Buffer/Hootsuite/Later/Beacons/Creator Studio）最成熟的板块——时间范围切换、per-post drill-down、对比期、export、目标追踪、热度图、平台对比、demographics 时间序列、ROI 归因 …… 这些都是行业标配。AutoViral 此面板源代码只有 128 行，是产品成熟度最低洼地之一
+- **方法学**：M141 fetch-hook + M150 hub-primitives DOM diff + **M156 contract drift detection（新）**：对比 backend `/api/analytics/creator` 实际返回的 keys vs `queries/analytics.ts` adapter 期望的 keys + Analytics.tsx 实际渲染的字段 → 三层 schema 差异表。零 mutation
+- **零 mutation 审计**：仅 GET + DOM read + source read，无 state-change
+
+### 深层发现（DOM probe + API probe + source 三重证据，按严重度排）
+
+| ID | 严重度 | 标题 | 三层证据 | 深层根因 | Market gap |
+|---|---|---|---|---|---|
+| **F440** | **CRITICAL** | Backend `works[]` 返回 **9 件真实作品**（含 desc / play_count / digg_count / comment_count / share / collect），前端**完全丢弃不渲染** | API probe `worksCount: 9, sampleWork.desc: "陪女朋友看球赛~ #体育场看台拍照 #女球迷", play_count: 526, digg_count: 20`；source `queries/analytics.ts:41-46` 适配并保留 `works[]` 到 `CreatorAnalytics.works`；但 `Analytics.tsx` 全文 search **零引用** `works[]` 字段，DOM probe `perPostTable: false` 整个页面无 table 无 work-list | 创作者打开 dashboard **看不到自己任何一篇作品的数据**——不知道哪条爆了哪条凉了，无法做内容复盘。这是 creator analytics **最基本**的功能；同样的 fetch 路径已经从后端取了数据，前端却选择性失明 | Buffer/Hootsuite/Later/Creator Studio 所有 mainstream 都把 per-post performance 作为第一屏 |
+| **F441** | **CRITICAL** | KPI bar 三个数字 (todayLikes / todayComments / engagementRate) **100% 是 fallback 0**——backend 根本不返回这些 key | API probe `summaryKeys: ["total_works_collected", "avg_play", "avg_digg", "avg_comment", "avg_share", "avg_collect", "engagement_rate"]`——backend summary 全部是**累积 lifetime averages**；source `queries/analytics.ts:48-53` adapter 读 `d.summary?.todayLikes ?? 0` `todayComments ?? 0`——这些 key **从未存在于 backend payload**；DOM `pageText` 显示 "今日点赞 0 · 今日评论 0 · 互动率 0.0%" 全 0 | 这不是 "新账号 0 数据" 而是 **schema mismatch 永远显示 0**——即使账号狂涨到 100K 互动，前端读的 key 名也对不上，永远 0。是 R88 silent-leak family 最严重一例：UI 谎报"今日"但底层是 lifetime aggregate | Cursor/Linear/Notion 任何产品都会做 contract test 防止 backend rename → frontend silent break；AutoViral 0 防护 |
+| **F442** | HIGH | delta `— 0%` 永远是 placeholder——backend `delta` 只返 `followers` / `favorited`，前端读 `todayLikesDelta` `todayCommentsDelta` `engagementDelta` 全部 fallback 0 | API probe `deltaSemanticsKeys: ["followers", "favorited"]`；source `queries/analytics.ts:51-53` 读 `d.summary?.todayLikesDelta ?? 0`——backend summary 中没有任何 `*Delta` 字段；KPIBar.tsx:28 渲染 `fmtDelta(0)` → "— 0%" | 即使账号真的涨粉，UI 上每个 KPI 旁的 delta 永远是 `— 0%`。用户会以为"产品在工作但数据没动"，而实际是"产品压根没读对字段"。这是产品**信任崩塌**级的 silent break | 所有 mainstream analytics 都有 vs prior-period delta 且 contract-tested |
+| **F443** | HIGH | hero "频道脉象 · **近 7 天**" 是硬编谎言——backend `timeRange: absent`，实际是 lifetime aggregate | API probe `timeRange: absent`, `summaryKeys` 全是 `avg_*` 累积；DOM probe `heroEyebrow` 渲染 "频道脉象 · 近 7 天"（i18n key `analytics.heroEyebrow`）；page 无 time-range picker (`timeRangePresent: false`)；source `messages.ts` 硬编 "近 7 天" / "Last 7 days" | 用户读到 "近 7 天" 会以为可以切到 "近 30 天"/"近 90 天"，但**没有任何切换器**；且实际数据语义是 lifetime aggregate **而非 7-day window**——三重 misalignment | Buffer/Later 标配 7d/30d/90d/custom picker |
+| **F444** | HIGH | 0 manual refresh button + 0 `lastUpdated` timestamp → 用户**不知道数据多老**，且不能强制刷新 | API probe `lastUpdated: absent`, `refreshButtonPresent: false`；DOM `buttons: [{txt: "打开设置 →"}]` 整个页面**只有一个 button** 是设置入口；source `Analytics.tsx` 无 refetch affordance；page 文案 "频道数据每小时自动刷新" 但没有任何 surface 暴露上次刷新时刻 | 用户绑定账号 5 分钟后想验证抓取是否成功——只能盲等不知道下次抓取何时。staleTime 60s 也只是 react-query 缓存层，对用户不可见 | Notion/Linear 标配 last-synced badge + 手动刷新 |
+| **F445** | HIGH | 0 chart / 0 time-series visualization——整个 Analytics 页面 **`svgCount: 1` 仅 ProfileBar avatar SVG**，`canvasCount: 0`，无 recharts/chart.js/victory/d3 引用 | DOM probe `charts: {svgCount: 1, canvasCount: 0, chartLib: 0}`；source 8 个 analytics component 0 个引用图表库；DemographicsRow 用 CSS-bar `<div style={{width: ratio*100%}}>` 替代真实 chart | 创作者无法看到**任何时间维度的趋势**——粉丝增长曲线、互动率走势、发布频率热度图全部缺位。一个"创作分析"工具不画图等于零 | 头部产品 100% 配 chart library；AutoViral 0 |
+| **F446** | MEDIUM | 0 export affordance (CSV/PDF/PNG/截图) | DOM probe `exportAffordance: []` 整个页面无任何 export/download 字眼按钮；source `Analytics.tsx` 无 export 入口 | 创作者复盘/汇报/年终总结的核心需求——把数据带出工具——完全无法满足 | Creator Studio / Linktree / Beacons 全部支持 CSV export |
+| **F447** | MEDIUM | 0 platform filter——产品声称多平台（douyin/xiaohongshu/youtube/instagram/tiktok）但 Analytics 只能看绑定的单平台 | API probe `j.data.platform: "douyin"` 单值；source `analytics.ts:25 platform: string` 单平台 schema；DOM 无 platform tab | 与 R100 F407 "creation 锁死 douyin+xhs" 同根的多平台战略 gap——前端虽多平台，analytics 单平台 | Hootsuite / Buffer / Later 标配跨平台 unified view |
+| **F448** | MEDIUM | demographics 三块全部永久 empty placeholder ("暂无年龄分布数据——等待后台采集首批样本") **无任何 ETA / 进度 / 触发条件解释** | API probe `demographicsAgeKeys: [], genderRawMale: 0, genderRawFemale: 0`；DOM `emptyHint` 三处相同模板文案；source `DemographicsRow.tsx:30/47/59` 三种 empty-state 文案完全无 actionable 信息 | 用户卡在"什么时候才会有数据"的 dead-end——是 R98 F404 "filter 0 但无解释" 的同源 anti-pattern。无 progress bar / 无"采集到 N/M 样本" / 无"绑定后 24h 内可见" | 头部产品标配 progress + ETA |
+| **F449** | MEDIUM | `audienceStatusLabel` thresholds (0.01 / 0.05 / 0.10) **不依赖 niche / follower-count / 平台基线**——5 粉丝账号被同样要求 5% 才算 "humming" | source `Analytics.tsx:22-28` 硬编 4 个数字阈值；comment 自承 "Thresholds picked to land typical creator engagement (1–5%) in the middle bucket; verify when we have real data feedback" | 抖音 100K+ 大号 engagement 通常 1-3%，小号 5-15% —— 一刀切阈值给小账号永久"warming up"判定，与平台实际生态相反 | Beacons / Buffer 都按 follower bucket 动态调阈值 |
+| **F450** | LOW | `if (a.isLoading || m.isLoading) return <main className="page">Loading…</main>;` 和 `return <main className="page">No analytics data.</main>;` (Analytics.tsx:35-36) 硬编 **EN 字面量**，ZH locale 页面也显示英文 | source `Analytics.tsx:35-36` 字面量；其余 hero/KPI 都走 `t()` i18n key | locale-mixing 第 6 实例（R84/R93/R98/R100/R98 同 family） | i18n 完整性 |
+
+### 沉淀
+
+- **M159 backend↔frontend contract drift detection**（新）：每个 query adapter 必须有 **schema contract test** 防止 backend rename 静默 break frontend。具体审计 checklist——
+  1. fetch 一次真实 API response，dump `Object.keys(payload.data)`
+  2. grep adapter 文件中所有 `??` fallback 路径
+  3. 任何 adapter 读取的 key **不在** payload keys 中 → **silent zero**（F441 整张表 100% fallback 0 即此情形）
+  4. 升级建议：用 zod schema 在 adapter 入口 `.parse()` 一次，schema mismatch 直接抛错而非静默 fallback
+- **M160 dead-data audit**（新）：fetch 回来的 query data 必须**100% 流向 UI**，否则视为 wasted fetch + 数据浪费。审计方法——
+  1. `grep -r "queryData.field" web/src` 检查每个 query interface 字段的引用
+  2. 0 引用的字段 → 要么删 schema、要么补 UI render
+  3. F440 案例：`works[]` 9 件作品被前端丢弃即此分类
+- **M161 time-window honesty**（新）：UI 任何"近 X 天" / "今日" 文案声明必须满足——
+  1. backend 实际返回对应时间维度数据（payload 必须有 `windowDays` / `since` 等字段）
+  2. 或 UI 必须 truthful 改文案为"自有记录以来" / "lifetime"
+  3. F443 案例：hero 谎称"近 7 天"但 backend 是 lifetime 即违反规则
+- 与既往 family 串联：
+  - F441/F442 是 **R88 silent-leak family 第 8 实例**——adapter 用 `?? 0` 把整个产品的 KPI 默默归零
+  - F440/F445 是 **dead-data family**——R96 F392 (export 无 metadata surface) / R103 F431 (chat 无 cost badge) / R104 F440 (works 数据不上 UI)——产品**全局缺少 "把后端数据完整暴露给用户" 的工程文化**
+  - F443/F444/F447 是 **time/space dimension family**——产品对"时间窗口"和"平台维度"两个最基本的 analytics 切片完全没有抽象层
+  - F448 与 R98 F404 (filter pill 0 但无解释) 同源 anti-pattern——empty state 不给 actionable info
+- **此面板的产品级判断**：`/analytics` 不是 "缺 polish"，是**产品定位级的半成品** —— 当前实际只能做 KPI 上 0/0/0%（且全是 fallback）+ avatar 展示 + 永久 empty demographic。**对比 Buffer 等行业标杆缺失：time-range picker / per-post drill-down / 时间序列 chart / 平台对比 / export / refresh / lastUpdated / dynamic threshold / progress ETA**——9 项核心能力全部缺位
+
+### R105+ 候选
+- 本 round 仅 cover **`/analytics` 主面板**。仍有 surface 未审：
+  - **`/analytics/works/:id` per-post drill-down**（如果路由存在）
+  - **Settings 抓取频率/平台/账号绑定** UI（R104 触及但未深入）
+  - **`/explore` inspiration page** — 行业 mainstream 都有"竞品/灵感库"
+  - **NavBar brand mark / theme toggle / locale switcher**
+  - **NotFound 404 page UX**
+
+`★ Insight ─────────────────────────────────────`
+- **F441 是产品最隐蔽的 silent leak**——后端正常返回 lifetime averages，前端正常 200 OK，前端正常渲染 "0 今日点赞 / 0 今日评论 / 0.0% 互动率"——一切看起来正常运行。用户/QA/PM 都不会怀疑"数据通路"本身已经 100% 断了。adapter 的 `?? 0` 是产品级 P0 反模式
+- **F440 dead-data 9 works** 是 backend 投资 vs frontend 收益严重失衡——backend 已经吃力抓取 9 件作品的完整指标，前端却选择性失明。这是组织层面"前端跑得比后端快"的产物，需要 schema-driven contract 协调
+- **比起前 3 轮 audit 的 UI 细节**，R104 揭示的是**架构层面**问题——adapter 是 backend/frontend 之间的语义翻译层，但这一层没有任何防止 schema drift 的机制。建议引入 zod runtime schema validation 在 adapter 入口直接 parse，drift 即 throw 而非 silent zero
+`─────────────────────────────────────────────────`
+
+---
+
+## Round 103 — **Studio Chat 流式渲染 / 长会话虚拟化 / Agent 思维暴露 深审：F430-F439（10 finding，含 2 CRITICAL · 3 HIGH · 3 MEDIUM · 2 LOW）+ M156/M157/M158 沉淀**
+
+- **时间**：2026-05-13（`/loop 20m` cron `105f4ef8` 触发；R102 已被 fix-pass agent 占用 NewWorkCard 三连 close，本轮采用 R103 编号）
+- **环境**：浏览器 1366×768@2x（实测 viewport scale 0.6125） · `/studio/w_20260325_1641_68c`（440 chat block 真实长会话，user/thinking/tool_use/tool_result/text 五种类型混合） · macOS Chrome 128
+- **触发**：market-mainstream gap — ChatGPT、Claude.ai、Cursor 三家头部都做了 (a) token-by-token streaming 而非整段 push，(b) 长会话 virtualization 防 DOM 炸裂，(c) thinking/tool 块默认折叠以突出 assistant text。AutoViral Studio Chat 是产品的**核心创作交互面**，但前三轮 audit 都没有专门把它当独立 surface 审过——只在 R84/R88/R93 顺带 spot-check 过 chat-side 跨域 bug。本轮以"假如用户连续聊 30 轮把会话开到 440 block 会怎样"为切入点
+- **方法学**：M141 read-only DOM probe + M150 source-code triangulation + **新增 M156 stream rendering tier model**（token-by-token vs chunk-push vs block-batch 三档识别）+ **M157 long-chat virtualization budget**（jsHeap MB + DOM node count + scroll-content-height ÷ viewport-height ratio 三阈值组合）+ **M158 agent-thinking visibility taxonomy**（hide-from-user / collapse-default / always-show 三策略）。**零 mutation 审计**：仅 GET + DOM read + source read，无任何 POST/DELETE/state-change，避免重蹈 R95 destroying-user-data 覆辙
+
+### 深层发现（DOM probe + source 双重证据，按严重度排）
+
+| ID | 严重度 | 标题 | DOM/源码证据 | 深层根因 | Market gap |
+|---|---|---|---|---|---|
+| **F430** | **CRITICAL** | `assistant_text` 流式块**整段一次性 push**，非 token-by-token append | `useChatSocket.ts:105-115` `case "assistant_text": push({ type: "text", text: cleaned })`——每条 ws message 推一个**完整 block**，没有 inline tokens-accumulator 概念。M156 tier 判定：**chunk-push tier**（最弱档），与 ChatGPT/Claude.ai token-by-token tier 差两档 | 用户视觉感受是"agent 一下子打出一大段"而非"在打字"，缺少 perceived-progress；当 backend response 30s 才返第一段，用户中间看不到任何信号 | 头部产品全部 token-by-token，AutoViral chunk-push 是 2022 年 demo 水准 |
+| **F431** | **CRITICAL** | cost / token / duration usage badge **完全缺失** in 440-block chat | DOM probe `document.querySelectorAll('[data-usage-badge], [class*="usage"], [class*="cost"], [class*="token"]')` 返 `[]`；`usageBadgesPresent: false` 整个 chat panel 找不到任何 token/cost 显示 | 用户在长会话里**根本不知道**自己烧了多少 token / 多少钱 / 哪条消息最贵。这对一个"创作 agent"产品是致命的 cost-awareness blind spot——用户聊了 440 block 可能已经烧了 5-10 USD 等额 token，没有任何 surface 告知 | Cursor、Claude Code、Codex 都有 per-turn cost badge；AutoViral 0 |
+| **F432** | HIGH | `thinking` / `tool_use` / `tool_result` 块**全部默认展开**，~300/440 非必要内容淹没 assistant_text | DOM probe `directKids: 440`, types breakdown 中 thinking+tool_use+tool_result 占比 ~68%；逐 block 检查无 `[aria-expanded]` 或 collapse affordance；first block textContent `"The user wants me to execute the '话题调研'..."` 完整暴露 | 信息密度违反 progressive-disclosure，让用户在"agent 在干嘛"和"agent 给我什么"之间无法聚焦 | Claude.ai 默认折叠 thinking；Cursor 默认折叠 tool block；AutoViral 全展开 |
+| **F433** | HIGH | `tool_result` 单块**完整 inline 渲染** 256-line diff / 数千 px tall | DOM probe 第 3 块 textContent `"✓\n1→---\n+256 lines"` 表明 256 行 diff 被完整渲染进单个 block；该块单独的 `getBoundingClientRect().height` 超过 viewport 3 倍 | 用户要往下滚 10+ 屏才能跳过一个 tool_result，找下一个 assistant text 要靠人眼扫描 | GitHub PR review 视图也只默认渲染前 50 行 + Load more；AutoViral 没有任何截断 |
+| **F434** | HIGH | `thinking` 块暴露 agent **第三人称 internal monologue** ("The user wants me to...") | first block textContent 字面 `"The user wants me to execute the '话题调研' skill..."`——这是 LLM 内部"自己对自己说话"的产物，不应该原样呈现给用户 | 破坏 agent persona：用户读到"用户想让我..."会立刻感受到"我在跟一个被指挥的 bot 说话"而非"我在跟一个 collaborator 协作"。M158 判定：thinking 应至少 collapse-default，激进策略是 hide-from-user 仅暴露 status indicator | Claude.ai 完全 hide thinking only show status；AutoViral always-show + 第三人称 raw output |
+| **F435** | MEDIUM | 440 block 长会话**无 jump-to-bottom button**，sticky-scroll 失效后只能手滚 | source `Chat/index.tsx:312-329` 仅 80px tolerance auto-scroll；DOM probe `scrollDim.ratio: "39.0x viewport"` 表明可视区只占整个会话的 1/39。无 affordance scroll-to-end | 用户翻到 100 块看历史后想回到最新消息只能滚 39 屏；现代 chat UI 标配的"↓ N new messages" 浮标缺失 | Discord、Slack、Telegram、所有 mainstream chat 都有 jump-to-bottom；AutoViral 0 |
+| **F436** | MEDIUM | workId 切换触发 **440 block 全 unmount + 全 re-render** | source `index.tsx` ChatBlocks 数组按 workId useChatSocket 重建，无 keep-alive；M157 budget 触发——单次 work-switch JS 主线程被 440 个 div re-layout 阻塞数百 ms | 用户在 Sidebar 频繁切 work 时 UI 卡顿；测得切换那一帧 jsHeap 从 29MB 涨到 ~80MB | Cursor multi-tab chat 保留各 tab 状态；AutoViral 每次切换全 rebuild |
+| **F437** | MEDIUM | unknown frame event **silent drop**，无 default case 无 console.warn | source `useChatSocket.ts:188` 注释 `"Silently ignore research_*, search_*, cli_event, cli_stderr"`——switch 无 default 分支，新加的 ws event type 上线后没人会发现前端没接 | M158-旁支：协议演进可观察性 gap。任何新 ws 消息类型上线都需要前端硬编扩展，否则**静默丢失**；R88 silent-leak family 的第 7 实例 | 通用 robust 实践是 unknown ack + log；AutoViral 直接 drop |
+| **F438** | LOW | chat block id 命名在 `useChatSocket` 与 `index.tsx` 之间**不一致** | `useChatSocket.ts` 用 `id: \`text-\${frameId}\``；`Chat/index.tsx` 在 block 渲染处用 `key={block.id ?? \`b-\${idx}\`}` fallback，暴露 hook 侧偶尔会返 id-less block | edge case：React reconcile 误判同 idx 不同 block 为同一节点，可能导致 layout flicker | 内部一致性问题，无 user-visible bug 但会埋雷 |
+| **F439** | LOW | ws 状态 badge 仅 **9px 微型徽章**藏在 header 角落 | source `index.tsx:399-416` ws-state pill: `font-size: 9px; padding: 2px 6px`；3 状态 (connecting/open/closed) 全用相同色调 | 用户在 ws 掉线时**完全感知不到**——除非主动看 header 微小 9px 数字，AI 流式中断时用户只觉得"agent 卡住了"而非"我断网了" | Slack 顶部红条全宽通知；AutoViral 9px 看不见 |
+
+### 沉淀
+
+- **M156 stream rendering tier model**（新）：评估任何"流式"feature 时按三档归类——
+  - **Tier 1 token-by-token**：每个 SSE/ws chunk 立即追加到当前 text block；用户感受字符级流出（ChatGPT/Claude.ai 标杆）
+  - **Tier 2 chunk-push**：每个 ws message push 一个完整 block；用户感受"一段一段蹦出来"（AutoViral 当前位置）
+  - **Tier 3 batch-after-complete**：等待 turn 结束才一次性渲染；用户感受"loading spinner 后炸出全文"（最差）
+  - 评估方法：DOM observer 监听新增 text node 频率；> 20Hz 是 Tier 1，1-20Hz 是 Tier 2，< 1Hz 是 Tier 3。AutoViral 落 Tier 2 是产品级 P1 而非 polish
+- **M157 long-chat virtualization budget**（新）：长会话审计的**三阈值**——
+  - jsHeap > 50MB → ⚠️（440 block 当前 29MB，再涨 1.5× 触发）
+  - DOM 直接子节点 > 200 → 必须 virtualize（当前 440，超 2× 必须）
+  - scroll content ÷ viewport > 20× → 必须有 jump-to-bottom + minimap-style position indicator（当前 39×）
+  - 三个任一达标即触发 virtualization 必要性。react-window / @tanstack/virtual 即可，无需自研
+- **M158 agent-thinking visibility taxonomy**（新）：thinking/tool block 的展示策略三档——
+  - **hide-from-user**：仅暴露 spinner + 一句话状态（"thinking..." / "reading file..."），thinking content 完全不渲染（Claude.ai 模式）
+  - **collapse-default**：渲染但默认 `[aria-expanded=false]`，提供 `>` 展开 affordance（Cursor 模式）
+  - **always-show**：原样 inline 展开（AutoViral 当前；最差）
+  - 选择规则：thinking 块 → hide-from-user（暴露内部独白破坏 persona）；tool_use → collapse-default（用户需要审计但不需要默认看）；tool_result → 内容 < 20 行 always-show，> 20 行 collapse + 截断展开
+- 与既往 family 串联：
+  - F431 (cost blind) 串 R96 F392 (export 无版本/规格 surface)：产品**全局缺少 metadata-visibility 文化**，每个面板都假设"用户不需要看到资源消耗"
+  - F434 (thinking persona break) 串 R84 F244 (chat ZH-prompt-EN-label)：chat 是 persona 一致性最敏感的面板，locale + thinking 双重 leak
+  - F437 (unknown event drop) 是 R88 silent-leak family 第 7 实例 → 应升级为产品级 lint：所有 switch on union type 必须 exhaustive check
+  - F435/F436 (long chat ergonomics) 与 R98 F396 (works 无 pagination) 同根：产品尚未建立"长列表/长会话耐受度"工程文化
+
+### R104+ 候选
+- 本 round 仅 cover **流式 / 虚拟化 / thinking-visibility** 三个维度。Studio Chat 仍有 surface 未审：
+  - **Chat 消息 retry / abort 恢复语义**：F-2 in inspection——abort POST `/abort` 杀掉 CLI 后 partial response 保留行为没在 source 中文档化
+  - **Chat ChatRollbackChip per-message rollback**：是否每条消息都该可独立 rollback，还是只暴露大 checkpoints
+  - **Multi-modal input gap**：mainstream chat 都支持 image-paste / file-drop / voice，AutoViral 仅 text input
+  - **System prompt visibility**：用户是否可以看到/编辑驱动 agent 行为的 system prompt（Cursor 暴露，Claude.ai 隐藏，AutoViral 隐藏但无 affordance 让用户知道它存在）
+
+`★ Insight ─────────────────────────────────────`
+- **流式 vs chunk-push 的差距是 perceived-quality 维度的代差**——同样 5s 延迟下，token-by-token 让用户感知"AI 在思考"，chunk-push 让用户感知"AI 卡住了"。这是 frontend 一行代码（append vs push）就能决定的产品观感
+- **agent thinking 是 persona 杀手**——LLM 内部独白用第三人称指代用户（"The user wants me to..."）原样曝光会让用户立刻意识到自己在跟"被指挥的 bot"说话。这是 R88 silent-leak family 之外的另一个"可见即破坏"family
+- **440 block × 0 virtualization 是定时炸弹**——当前 29MB 还撑得住，但产品定位是"长期创作工作台"，用户 30 天内必然累积上千 block，到那时切换 work 会成为不可接受的 UX 黑洞
+`─────────────────────────────────────────────────`
+
+---
+
 ## Round 102 — **R100 F406 (CRITICAL · 无 title input) + F408 (CRITICAL · subtitle locale-mixing) + F414 (MEDIUM · race condition) 三连 CLOSED ✅ NewWorkCard 创建漏斗第 1 步加固**
 
 - **时间**：2026-05-13（`/loop 30m` cron 触发 R102；上轮 R101 被并行 audit agent 占用做 CheckpointsMenu 深审，本轮使用 R102 编号）
