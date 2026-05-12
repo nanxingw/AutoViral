@@ -3,60 +3,28 @@
 .title { margin: 0; font-size: 16px; font-weight: 500; letter-spacing: -0.01em; }
 .title em { font-family: "Instrument Serif", serif; font-style: italic; }
 .meta { font-family: "JetBrains Mono", monospace; font-size: 10px; color: var(--text-dimmer); letter-spacing: 0.06em; }
+/* Two-column row — rank acts as the editorial anchor (no cover thumb).
+   Hairline divider between rows keeps the list rhythmic without the box. */
 .row {
   display: grid;
-  grid-template-columns: 28px 64px 1fr auto;
-  gap: 14px;
-  align-items: center;
-  padding: 10px 6px;
-  border-radius: 8px;
+  grid-template-columns: 48px 1fr;
+  gap: 16px;
+  align-items: baseline;
+  padding: 14px 6px;
+  border-bottom: 1px solid var(--glass-border);
 }
-/* Rows are not yet clickable (no onClick / link to Editor — see e2e-report
-   Round 06 F13). Drop the hover background so the rows don't look
-   interactive. Reintroduce once each row links to a work-create flow. */
-.rank { font-family: "Instrument Serif", serif; font-style: italic; font-size: 22px; color: var(--text-dimmer); line-height: 1; text-align: center; }
-/* .thumb is now a positioning container, not the img itself. A platform
-   monogram sits underneath; the real <img> overlays on top. When the img
-   fails to load it gets swapped to a transparent 1×1 SVG, letting the
-   monogram show through — editorial cover, not "broken image". */
-.thumb {
-  position: relative;
-  width: 60px;
-  height: 80px;
-  border-radius: var(--radius-sm, 6px);
-  background: linear-gradient(155deg, var(--surface-2) 0%, var(--surface-1) 100%);
-  border: 1px solid var(--glass-border);
-  overflow: hidden;
-  flex-shrink: 0;
-}
-.thumb[data-aspect="16:9"] { width: 80px; height: 45px; }
-.thumb[data-aspect="1:1"]  { width: 60px; height: 60px; }
-.platformMark {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.row:last-child { border-bottom: 0; }
+.rank {
   font-family: "Instrument Serif", serif;
   font-style: italic;
-  font-size: 38px;
+  font-size: 32px;
+  color: var(--text-dim);
   line-height: 1;
-  color: var(--accent);
-  opacity: 0.32;
-  letter-spacing: -0.02em;
-  user-select: none;
-  pointer-events: none;
+  letter-spacing: -0.03em;
+  text-align: left;
+  padding-top: 2px;
 }
-.thumb[data-aspect="16:9"] .platformMark { font-size: 24px; }
-.thumb[data-aspect="1:1"] .platformMark { font-size: 30px; }
-.thumbImg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  background: transparent;
-}
+.body { min-width: 0; }
 .eyebrow {
   display: flex;
   align-items: center;
@@ -66,7 +34,7 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-dimmer);
-  margin: 0 0 4px;
+  margin: 0 0 6px;
 }
 .eyebrowDot { opacity: 0.5; }
 .opp {
@@ -77,9 +45,25 @@
 .opp[data-opp="金矿"] { color: rgba(255, 196, 0, 0.95); background: rgba(255, 196, 0, 0.10); }
 .opp[data-opp="蓝海"] { color: var(--accent-hi); background: var(--accent-glow); }
 .opp[data-opp="红海"] { color: var(--status-error); background: rgba(249, 112, 102, 0.12); }
-/* Quoted hook line — editorial italic, single-line clamp. Real curly
-   quotes added via ::before/::after so the JSON string itself stays clean
-   for copy-paste. */
+/* R39: clamp trending row title to 2 lines so a long agent-inferred
+   title doesn't bloom the row out of rhythm with siblings. */
+.title3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+}
+/* Quoted hook line — editorial italic, single-line clamp. Curly quotes
+   added via ::before/::after so the JSON string itself stays clean for
+   copy-paste. */
 .hook {
   font-family: "Instrument Serif", serif;
   font-style: italic;
@@ -113,23 +97,6 @@
 .src_agent_websearch {
   background: rgba(255, 196, 0, 0.10);
   color: rgba(255, 196, 0, 0.95);
-}
-/* R39: clamp trending row title to 2 lines. Row uses
-   grid-template-columns: 28px 64px 1fr auto — a long title in the 1fr
-   cell would wrap to many lines and stretch the row, knocking the
-   thumb/rank/arrow out of vertical alignment with sibling rows. */
-.title3 {
-  margin: 0 0 4px;
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.3;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  word-break: break-word;
 }
 .stats { display: flex; gap: 12px; font-family: "JetBrains Mono", monospace; font-size: 10px; color: var(--text-dimmer); }
 .up { background: rgba(134,239,172,0.12); color: var(--status-done); }

@@ -1,6 +1,6 @@
 import clsx from "clsx";
 import {
-  type TrendItem, type Platform, SUPPORTED_REFRESH_PLATFORMS, coverUrlFor,
+  type TrendItem, type Platform, SUPPORTED_REFRESH_PLATFORMS,
 } from "@/queries/trends";
 import { compactNumber } from "@/lib/format";
 import { useT } from "@/i18n/useT";
@@ -11,17 +11,6 @@ const PLATFORM_LABEL: Record<Platform, string> = {
   tiktok: "♪ TikTok",
   xiaohongshu: "小红书",
   douyin: "抖音",
-};
-
-// Editorial monogram drawn in the thumb when no cover loads. Each platform
-// gets a distinct glyph so the column stops looking like 8 repeating grey
-// rectangles. The mark sits *behind* the <img>; if a real cover ever loads
-// (e.g. server-side proxy fetches it), the image covers the mark naturally.
-const PLATFORM_MARK: Record<Platform, string> = {
-  youtube: "▶",
-  tiktok: "♪",
-  xiaohongshu: "红",
-  douyin: "抖",
 };
 
 export function TrendingPanel({ platform, items }: { platform: Platform; items: TrendItem[] }) {
@@ -49,27 +38,7 @@ export function TrendingPanel({ platform, items }: { platform: Platform; items: 
       {list.map((item, idx) => (
         <div key={item.id} className={styles.row}>
           <div className={styles.rank}>{String(idx + 1).padStart(2, "0")}</div>
-          <div className={styles.thumb} data-aspect={item.cover.aspect}>
-            <span className={styles.platformMark} aria-hidden="true">
-              {PLATFORM_MARK[platform]}
-            </span>
-            {/* img stays in DOM so a future server-cached cover renders on
-                top of the mark; transparent-SVG fallback on error keeps the
-                broken-image glyph from showing through. */}
-            <img
-              className={styles.thumbImg}
-              src={coverUrlFor(platform, item)}
-              alt=""
-              loading="lazy"
-              onError={(e) => {
-                const img = e.currentTarget;
-                if (img.dataset.broken === "true") return;
-                img.src = "data:image/svg+xml;utf8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%221%22%20height%3D%221%22%2F%3E";
-                img.dataset.broken = "true";
-              }}
-            />
-          </div>
-          <div>
+          <div className={styles.body}>
             {item.analysis && (
               <div className={styles.eyebrow}>
                 <span>{item.analysis.category}</span>
