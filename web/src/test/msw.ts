@@ -25,9 +25,20 @@ export const handlers = [
     HttpResponse.json({
       platform: params.platform,
       items: [
-        { rank: 1, title: "POV: cat is chef", views: 45_000_000, likes: 4_200_000, comments: 89_000, change: 24, thumbAspect: "9:16" },
+        {
+          id: "t1",
+          platform: params.platform,
+          title: "POV: cat is chef",
+          sourceUrl: "https://example.com/video/1",
+          source: "scraper",
+          scrapedAt: "2026-04-25T12:00:00Z",
+          cover: { url: "https://example.com/thumb/1.jpg", aspect: "9:16" },
+          metrics: { views: 45_000_000, likes: 4_200_000, comments: 89_000, shares: null, fetchedAt: "2026-04-25T12:00:00Z" },
+          analysis: { heat: 5, competition: "高", opportunity: "红海", description: "Viral cat cooking content", tags: [], contentAngles: [], exampleHook: "", category: "entertainment" },
+        },
       ],
-      refreshedAt: "2026-04-25T12:00:00Z",
+      collectedAt: "2026-04-25T12:00:00Z",
+      pipelineStatus: "ok",
     }),
   ),
   http.get("/api/analytics/creator", () =>

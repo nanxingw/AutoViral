@@ -11,19 +11,36 @@
   padding: 10px 6px;
   border-radius: 8px;
 }
-.row:hover { background: var(--surface-0); }
+/* Rows are not yet clickable (no onClick / link to Editor — see e2e-report
+   Round 06 F13). Drop the hover background so the rows don't look
+   interactive. Reintroduce once each row links to a work-create flow. */
 .rank { font-family: "Instrument Serif", serif; font-style: italic; font-size: 22px; color: var(--text-dimmer); line-height: 1; text-align: center; }
 .thumb {
-  width: 64px;
-  aspect-ratio: 9/16;
-  border-radius: 5px;
+  width: 60px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: var(--radius-sm, 6px);
   background: var(--surface-2);
-  display: grid;
-  place-items: center;
-  color: var(--text-dimmer);
+}
+.thumb[data-aspect="16:9"] { width: 80px; height: 45px; }
+.thumb[data-aspect="1:1"]  { width: 60px; height: 60px; }
+.sourceBadge {
+  font-family: var(--font-mono);
   font-size: 9px;
-  font-family: "JetBrains Mono", monospace;
   letter-spacing: 0.06em;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm, 4px);
+  background: var(--surface-2);
+  color: var(--text-dimmer);
+  margin-left: 8px;
+}
+.src_rss, .src_scraper {
+  background: var(--accent-glow);
+  color: var(--accent-hi);
+}
+.src_agent_websearch {
+  background: rgba(255, 196, 0, 0.10);
+  color: rgba(255, 196, 0, 0.95);
 }
 /* R39: clamp trending row title to 2 lines. Row uses
    grid-template-columns: 28px 64px 1fr auto — a long title in the 1fr
