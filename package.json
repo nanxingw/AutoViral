@@ -67,6 +67,7 @@
     "date-fns": "^4.1.0",
     "dompurify": "^3.3.3",
     "dotenv": "^16.4.0",
+    "fast-xml-parser": "^5.8.0",
     "highlight.js": "^11.11.1",
     "hono": "^4.0.0",
     "immer": "^10.1.1",
