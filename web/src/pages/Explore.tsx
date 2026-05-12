@@ -9,39 +9,55 @@ import { useT } from "@/i18n/useT";
 
 // Static recommendations — note marker rendered in AnglesCard so user knows
 // these aren't algorithm output yet. Replace once a "generate angles" agent
-// hook lands.
-const STATIC_ANGLES: Angle[] = [
-  { num: "01", body: "Why nobody is teaching X anymore — competitor gap detected, 3 of 5 top creators abandoned tutorial content.", score: "FIT 94 · 5.2K est. reach" },
-  { num: "02", body: "An 18s carousel: \"The first 1.5 seconds of every viral short, ranked\". Hot retention pattern in your niche.", score: "FIT 87 · 3.8K est. reach" },
-  { num: "03", body: "Hijack the #fyp · cooking · keyboards mash-up — niche cross-pollination spiking.", score: "FIT 79 · risky" },
-];
+// hook lands. Bodies pulled from i18n so demo content swaps with locale
+// (FIT/est. reach kept as brand-term data labels — see e2e-report F41).
+const SAMPLE_ANGLE_META = [
+  { num: "01", score: "FIT 94 · 5.2K est. reach", bodyKey: "explore.sampleAngle1Body" },
+  { num: "02", score: "FIT 87 · 3.8K est. reach", bodyKey: "explore.sampleAngle2Body" },
+  { num: "03", score: "FIT 79 · risky", bodyKey: "explore.sampleAngle3Body" },
+] as const;
 
 export default function Explore() {
-  const [platform, setPlatform] = useState<Platform>("youtube");
+  // e2e-report F134: default to 小红书 (a SUPPORTED_REFRESH_PLATFORMS member)
+  // so first-load shows real collected trend data instead of empty state.
+  // YouTube/TikTok don't have a server-side collector yet (see F132); landing
+  // on either of them gives users a "no data — click 立即采集" misdirection
+  // because the refresh endpoint hardcodes ["xiaohongshu","douyin"] anyway.
+  // Pick xiaohongshu over douyin: its YAML schema has views/likes/comments
+  // (douyin is heat-based topics, less visually grounded for first paint).
+  const [platform, setPlatform] = useState<Platform>("xiaohongshu");
   const trends = usePlatformTrends(platform);
   const qc = useQueryClient();
   const t = useT();
+  const STATIC_ANGLES: Angle[] = SAMPLE_ANGLE_META.map((a) => ({
+    num: a.num,
+    score: a.score,
+    body: t(a.bodyKey),
+  }));
   const [collecting, setCollecting] = useState(false);
-  const [collectMsg, setCollectMsg] = useState<string | null>(null);
+  // e2e-report F87: collectStatus splits the old single `collectMsg` into a
+  // tagged union so the queued case can render as two-channel UI (done badge
+  // + scheduled hint) instead of cramming three semantics ("done + pending +
+  // 30s schedule") into one sentence.
+  const [collectStatus, setCollectStatus] = useState<"idle" | "queued" | "failed">("idle");
+  const [collectError, setCollectError] = useState<string | null>(null);
 
   const collectTrends = async () => {
     setCollecting(true);
-    setCollectMsg(null);
+    setCollectStatus("idle");
+    setCollectError(null);
     try {
       // The /api/trends/refresh endpoint runs sync research on the supported
       // platforms and returns when the new yaml lands; we then nudge react-query.
       await apiFetch(`/api/trends/refresh`, {
         method: "POST",
-        body: { platforms: ["xiaohongshu", "douyin"] },
+        body: { platforms: ["youtube", "tiktok", "xiaohongshu", "douyin"] },
       });
-      setCollectMsg(t("explore.collectQueued"));
+      setCollectStatus("queued");
       qc.invalidateQueries({ queryKey: ["trends"] });
     } catch (e) {
-      setCollectMsg(
-        t("explore.collectFailed", {
-          reason: e instanceof Error ? e.message : String(e),
-        }),
-      );
+      setCollectStatus("failed");
+      setCollectError(e instanceof Error ? e.message : String(e));
     } finally {
       setCollecting(false);
     }
@@ -64,6 +80,7 @@ export default function Explore() {
             type="button"
             onClick={collectTrends}
             disabled={collecting}
+            aria-busy={collecting}
             style={{
               padding: "5px 12px",
               fontSize: 11,
@@ -78,9 +95,19 @@ export default function Explore() {
           >
             {collecting ? t("explore.collectInProgress") : `↻ ${t("explore.collectTrends")}`}
           </button>
-          {collectMsg && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--text-soft)" }}>
-              {collectMsg}
+          {collectStatus === "queued" && (
+            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 8, fontFamily: "var(--font-mono)", fontSize: 11 }}>
+              <strong style={{ color: "var(--status-done)", fontWeight: 600 }}>
+                ✓ {t("explore.collectQueuedDone")}
+              </strong>
+              <span style={{ color: "var(--text-dimmer)" }}>
+                {t("explore.collectQueuedHint")}
+              </span>
+            </span>
+          )}
+          {collectStatus === "failed" && collectError && (
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--status-error)" }}>
+              {t("explore.collectFailed", { reason: collectError })}
             </span>
           )}
         </div>
