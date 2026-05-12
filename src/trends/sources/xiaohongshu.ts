@@ -33,8 +33,10 @@ export function xiaohongshuSourceFromDom(feed: DomFeedItem[]): RawTrendItem[] {
 
 async function scrapeExplore(limit: number, signal?: AbortSignal): Promise<DomFeedItem[]> {
   let browser: Browser | null = null;
+  const abortHandler = () => { browser?.close().catch(() => {}); };
   try {
     browser = await chromium.launch({ headless: true });
+    signal?.addEventListener("abort", abortHandler);
     const ctx = await browser.newContext({
       userAgent:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
@@ -43,7 +45,9 @@ async function scrapeExplore(limit: number, signal?: AbortSignal): Promise<DomFe
     const page = await ctx.newPage();
     if (signal?.aborted) throw new Error("aborted");
     await page.goto("https://www.xiaohongshu.com/explore", { waitUntil: "domcontentloaded", timeout: 30_000 });
-    await page.waitForSelector('section[class*="note-item"], a[href*="/explore/"]', { timeout: 10_000 }).catch(() => {});
+    await page.waitForSelector('section[class*="note-item"], a[href*="/explore/"]', { timeout: 10_000 }).catch((e) => {
+      console.warn(`[xiaohongshu] waitForSelector failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
     const feed = await page.evaluate((max: number): DomFeedItem[] => {
       const anchors = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href*="/explore/"]'));
       const seen = new Set<string>();
@@ -72,7 +76,8 @@ async function scrapeExplore(limit: number, signal?: AbortSignal): Promise<DomFe
     }, limit);
     return feed;
   } finally {
-    await browser?.close();
+    signal?.removeEventListener("abort", abortHandler);
+    await browser?.close().catch(() => {});
   }
 }
 
