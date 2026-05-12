@@ -58,11 +58,7 @@ export const TrendsCollectionResultSchema = z.object({
 });
 export type TrendsCollectionResult = z.infer<typeof TrendsCollectionResultSchema>;
 
-export interface ValidationIssue {
-  path: string;
-  message: string;
-  itemId?: string;
-}
+export type ValidationIssue = TrendsCollectionResult["validation"]["issues"][number];
 
 export interface ValidationOutcome {
   passed: boolean;
@@ -76,6 +72,9 @@ export function validateCollection(input: unknown): ValidationOutcome {
   return {
     passed: false,
     result: null,
+    // itemId is not populated at this layer; the zod path carries `items.N`
+    // (array index), not the item's own `id`. Callers that need per-item
+    // attribution should look the id up from the input array using the path.
     issues: parsed.error.issues.map((i) => ({
       path: i.path.join("."),
       message: i.message,
