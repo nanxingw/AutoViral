@@ -6,6 +6,201 @@
 
 ---
 
+## Round 91 — **R90 F331 CLOSED ✅ WCAG 2.4.7 全局 form control focus-visible 修复：chat textarea + drawer inputs + range sliders 全部获 accent outline ring**
+
+- **时间**：2026-05-12（`/loop 30m e2e-report fix` 第 8 轮触发）
+- **环境**：dev (`localhost:5173/editor/...` + `/works → settings drawer`)，dark + light theme × ZH + EN locale 矩阵 verify
+- **触发**：R90 候选 #1 (F331 a11y) 列 TOP CRITICAL，且 R89 沉淀的 M132 把法律级 finding 提到最高优先级——WCAG 2.4.7 Level AA 是法定 a11y 标准，与法务级 copy 同级。本轮先做 F331（单 CSS rule + codebase sweep，可单 round 完成），把 R90 #2 (F319 容器尺寸) 留下一轮做（需 JS auto-grow 逻辑）
+
+### 修复 — F331 WCAG 2.4.7 全局 form control focus-visible
+
+按 R90 M133 沉淀（focus indicator CSS extraction audit），本轮做 codebase-wide form control focus-visible sweep：
+
+#### 根因定位
+
+`web/src/styles/globals.css:112-119` 早已存在 `:focus-visible` 规则（R42 a11y commit），但只覆盖 `button / a / [role="button"] / [tabindex="0"]`——**遗漏 `input / textarea / select`**。同时：
+
+- `web/src/styles/globals.css:175 (now 188)` 给 `input[type="text" | "search" | "number"]:not([data-bare])` + `.editor-shell input` + `.studio-shell input` 设 `outline: none`，:focus 状态只有 1px `border-color` 变化作为 indicator（不达 WCAG 2.4.7 contrast 要求）
+- `web/src/features/studio/panels/Chat/index.tsx:611` chat textarea inline `outline: "none"` 完全擦除焦点指示器，无 :focus 变体
+
+R90 F331 实证：chat textarea focused 时 `getComputedStyle(el).outlineStyle = "none"`，键盘用户 Tab 进入后**无任何视觉反馈**。
+
+#### 修复方案
+
+`web/src/styles/globals.css` 在原有 `button:focus-visible` 规则下新增 form control 块：
+
+```css
+/* R90 F331 (WCAG 2.4.7 Level AA) — form controls also need a visible
+   focus indicator. Kept as a separate block so we don't overwrite the
+   element's own border-radius (inputs/textareas typically set their
+   own; buttons above use 6px as a fallback). The chat composer
+   textarea declared `outline: none` inline, which without this rule
+   left keyboard users with zero focus feedback. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent) !important;
+  outline-offset: 2px !important;
+}
+```
+
+#### 设计抉择
+
+- **不动 border-radius**：与 button block 不同，input/textarea 通常自定 border-radius（line 172 设 7px，drawer 内 input 设 6px 等）。不在新规则里强加 6px，避免 :focus 时 border-radius 突变引起视觉 reflow。
+- **`!important` 必要**：要压过 `web/src/features/studio/panels/Chat/index.tsx:611` 的 inline `outline: "none"`（inline style 比 selector specificity 高）。
+- **`:focus-visible` not `:focus`**：只在键盘 Tab 进入时显示，鼠标点击不显示 outline。这是 WCAG 2.4.7 推荐的现代模式——既满足 a11y，又不破坏鼠标用户的 editorial 视觉。
+- **`var(--accent)`**：dark mode `#a8c5d6` cool-steel，light mode `#2a3a4a` deep-ink，跨 theme 自动适配，对比度均满足 WCAG AA 3:1 non-text contrast。
+
+### 浏览器实证 (ss_5290fxn1f + ss_97771ta8m + ss_46570u6vb)
+
+#### Light mode `/editor/...` chat textarea
+
+```
+{outlineStyle: "solid", outlineWidth: "2px", outlineColor: "rgb(42, 58, 74)", outlineOffset: "2px"}
+```
+
+rgb(42, 58, 74) = light theme `--accent: #2a3a4a` ✓。截图清晰可见 chat textarea 周围 deep-ink outline ring。
+
+#### Dark mode `/editor/...` chat textarea
+
+```
+{outlineStyle: "solid", outlineWidth: "2px", outlineColor: "rgb(168, 197, 214)", outlineOffset: "2px"}
+```
+
+rgb(168, 197, 214) = dark theme `--accent: #a8c5d6` ✓。截图显示 chat textarea 周围 cool-steel outline ring，对比 page #0a0b0f 视觉明显。
+
+#### `/editor/...` Inspector range sliders（3 个 effect sliders）
+
+```
+{allWithOutline: true, sample: [{tag: 'INPUT', type: 'range', hasOutline: true, ...} × 3]}
+```
+
+`grain / gradient / sharpen` 三个 effect range slider 全获焦点 ring，附带 a11y 副益。
+
+#### `/works → settings drawer` 6 个 form control
+
+```
+{drawerOpen: true, totalInputs: 6, allHaveOutline: true, cronOutline: "solid 2px rgb(42, 58, 74)"}
+```
+
+AccessKey / SecretKey / OPENROUTER API Key / Cron schedule / Profile URL / Default model select **6/6 全获焦点 ring**。截图显示 Cron input focused 时周围 2px accent outline ring。
+
+#### Codebase audit final state
+
+`grep "outline:\s*none\|outline:none\|outline: 0\b"` 命中：
+
+- 2 处 comment（已有的解释文字，非 CSS）
+- 1 处 `.editor-shell input` 实际 `outline: none`（line 188），被新 `:focus-visible` 规则 `!important` 压过
+
+剩 1 处 CSS 是 default state（非 :focus），符合 R42 的 editorial reset 意图——只在 :focus-visible 状态触发 outline ring。
+
+### 桥梁哲学补充 — a11y plane
+
+R86 完成 data + control + audit 三平面后，本轮升级 **a11y plane**：
+
+```
+                fix-loop ←─── audit plane (M114 DOM-before-claim)
+                   │
+                   ▼
+            keyboard user ←─── a11y plane (R91 WCAG 2.4.7)
+                   │
+                   ▼
+              user ←─── control plane (M111 surface count)
+                   │
+                   ▼
+            ground truth ←─── data plane (M104 intercept fakes)
+                   │
+                   ▼
+         (audit + copy + a11y 四 sub-plane 都覆盖)
+```
+
+a11y 不只是"为视障用户"——它是**任何键盘 user 的产品 trust**。AutoViral chat input 是 product 核心接口，如果键盘 user 看不到焦点位置 = 不知道自己 typing 到哪个组件 = 与 agent 之间的 bridge 断在第一步。
+
+### 沉淀 — M135
+
+- **M135 — Form control :focus-visible audit 走 computed style + recursive querySelector**
+  - **Why**：R90 M133 提出 form control focus audit，本轮验证 codebase 已有 a11y 半成品（button/link 已覆盖）但 form control 漏写。这是「半成品 a11y 工程」的典型——比完全没做更危险（review 团队看到 button focus 有 ring 就以为全产品 OK，但 input/textarea 实际无 ring）
+  - **How to apply**：
+    1. `grep "outline:\s*none\|outline:none"` 找所有声明位置
+    2. 对每个位置确认是否有 :focus / :focus-visible 替代
+    3. 浏览器 `document.querySelectorAll('input, textarea, select, button, [tabindex="0"]').forEach(el => { el.focus(); ... })` 矩阵 verify
+    4. cross-theme verify（accent 颜色在 light/dark mode 都达 WCAG AA 3:1 contrast）
+  - **Where**：写入 `.claude/rules/e2e-testing.md` 与 M133 合并成"form control a11y sweep checklist"
+
+### 关联
+
+- closes **R90 F331**（chat textarea + 全 form control WCAG 2.4.7 focus-visible）
+- 半 closes **R42** 的 a11y 工作（旧 commit 仅覆盖 button/link，本轮补完 form control）
+- 附带 a11y 改进：3 个 effect range sliders + 6 个 drawer form control + 多个 Inspector textarea / input
+- 落 **M135** sediment（form control :focus-visible audit 方法学）
+- 与 M132（法务 copy 优先级）形成"法务/法规级 finding 必须当 round 处理"双例
+- 桥梁哲学增加 **a11y plane**：keyboard user trust 不可降级
+
+### R92 候选
+
+- **R92 #1 (TOP · 容量 + 行业 baseline)** R90 F319 + M134 联动 — chat textarea `min-rows=3 max-rows=10` auto-grow，超 10 行才出 scrollbar；同时显示 `(N lines · ~M tokens)` micro-counter。这是 "Creative Agent" 容器尺寸与定位对齐的核心修复
+- **R92 #2** R90 F318 — send shortcut 默认改 Enter sends / Shift+Enter newline（chat baseline）；Settings drawer 新增"快捷键风格"偏好选项以保留 IDE-style 作为可选
+- **R92 #3** R90 F321 — chat input 加 attach 按钮 + 支持图片粘贴 (Ctrl+V) + drag-drop；视觉 agent 视觉输入必填
+- **R92 #4** R88 R89 候选 #1 — Settings drawer 整体重设计（M129 dev-config vs user-settings 第一层抽象），多 round 工程
+- **R92 #5** R90 F327 + F328 联动 — `/` slash command + `@` mention 引用 slides/assets
+- **R92 #6** R87 Studio dark-mode preview frame 不可见（视觉 + DOM 双 verify 前置）
+- **R92 #7** METHOD — M132/M133/M134/M135 写入 `.claude/rules/e2e-testing.md` 统一 a11y/copy sweep checklist
+
+---
+
+## Round 90 — **Chat input UX 深审：textarea hard-pinned 2-rows + 内部滚动条 5 行 prompt 隐藏前 3 行 + `outline:none` 焦点指示器消失 (WCAG 2.4.7 违规) + `Cmd+Enter` send 与 chat 行业 baseline 相违 + 无 attach/paste/slash/mention 全套创作 agent 必要功能**
+
+- **时间**：2026-05-12（`/loop 20m` cron 触发；R89 被并行 fix-pass agent 占用 F309/F313/F310/F307 清扫，本轮使用 R90 编号）
+- **环境**：dev (`localhost:5173/editor/w_20260319_1815_5bb`)，已 loaded 6 slides + 98 条 chat 历史；en + light theme；通过 `computer.type` 与 `computer.key shift+Enter` 模拟真实键盘输入 + DOM-extraction (M131) 取 input state + computed style
+- **触发**：R84/R87 都只观察 chat **历史**布局，从未深审 input 本身。chat input 是 AutoViral "AI 创作 agent" 的核心交互入口；R88 揭示 vendor leak 是产品定位问题，本轮看 chat input 是否也存在同级定位错误 — "Creative Agent" 的输入框 vs 实际 textarea 容量是否匹配
+- **方法学**：DOM-extraction (M131) 取得 `scrollHeight/clientHeight/rows/maxLength/aria-label/computedStyle outline`；M120 zoom-first 验证 `⌘↵ SEND` mono hint；交互测试时使用真实 keyboard 模拟（不触发 send → 不浪费 agent compute）
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F319 | **CRITICAL · 容器尺寸不匹配 user output** | textarea `rows=2` hard-pinned，**内部出现 scrollbar 而非外部 auto-grow**。实测：输入 5 行（`hi / line2 / line3 ×20 重复 / line4 / line5`）共 140 字符后，`scrollHeight=121px` 但 `clientHeight=43px` —— 用户只能看到末尾 1.5 行；前 3 行被滚动隐藏。对比 ChatGPT / Claude.ai / Gemini / Cursor — 全部 auto-grow 到 ~10 行才出现 scrollbar。 | (1) "Creative Agent" 工具的 prompt 天然长（用户写 "为 slide 3 用更鲜艳的暖色调重新生成图，参考小红书春日博主的视觉风格，保留构图但加大景深" 这种已 60+ 字符）；(2) 用户写到第 4 行后**看不到第 1 行**，无法核对完整 prompt；(3) 2-row 默认尺寸对潜意识 anchor：用户会下意识"压缩 prompt" 而非充分表达。这是**容器尺寸定义了用户行为**的反面案例。**修复**：min-rows=3, max-rows=10, auto-grow with overflow scroll only above 10 rows；同时 typing 时显示 `(line N)` micro-counter。 | 新 family — "container size shapes user behavior"，与 R85 F263 KPI sterile 同根（"信息密度低估用户期望"）|
+| F331 | **CRITICAL · WCAG 2.4.7 Focus Visible 违规** | chat textarea 在 focus 状态 CSS extraction：`outline-style: none / outline-width: 3px / outline-color: rgb(15, 24, 34) / box-shadow: none / border-color: rgb(15, 24, 34)`。**outline-width 申报 3px 但 outline-style: none 完全擦除可见性**；boxShadow 无 :focus 变体；border-color 也无 :focus 变体。键盘用户 Tab 进入 input 后**没有任何 visual focus 反馈**。 | (1) WCAG 2.1 SC 2.4.7 Level AA 明确要求 keyboard-focusable elements have visible focus indicator；(2) AutoViral 核心交互是 chat input，无 focus = 无障碍用户 unable to use product；(3) 设计师可能为了 editorial 美感 reset outline，但没补 alt 焦点指示器。**修复**：`textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }` 单条 CSS 即可。 | 新 family — "a11y · WCAG 2.4.7 focus-visible audit"，需要 codebase-level lint 扫所有 :focus 缺指示器的 form control |
+| F318 | **HIGH · Send shortcut 与 chat 行业 baseline 相违** | input 下方 hint `⌘↵ SEND` 显示 send shortcut 是 `Cmd+Enter`。对比行业标准：ChatGPT / Claude.ai / Gemini / Cursor / Perplexity / Slack / Discord 全部 `Enter sends, Shift+Enter newline`；唯有 IDE 评论框 (Linear/GitHub) 用 `Cmd+Enter`。 | (1) chat-shaped UI 内做 IDE-style shortcut = 用户 muscle memory 全面破坏，每次想发送都要先想；(2) 此 product 同时定位 "AI Creative Agent"（chat UX）和 "Editor"（IDE UX）—— 当前选择倾向 IDE，破坏 chat 体感；(3) 在多换行 prompt 场景下 `Cmd+Enter` 安全（避免误发）；但在 "ask anything..." 简单 prompt 场景下增加摩擦。**修复**：默认 `Enter sends, Shift+Enter newline`（chat baseline）；Settings 增"快捷键风格"选项可切到 IDE 风格。 | 与 R88 F312 "dev config vs user settings 定位错误" 同根 — chat UI 用 IDE shortcut 是定位错误 |
+| F321 | **HIGH · 无 attach / paste / file drop — 视觉 agent 缺视觉输入** | chat input 区域 (a) 无 attach 按钮（左侧或右侧无 📎 图标）；(b) DOM 无 `[type="file"]` input；(c) 无 dropzone 区域；(d) 没有 paste-image hint。 | AutoViral 定位 "Creative Agent for 小红书图文 / Reels / TikTok"，但用户**无法贴入参考图、品牌色板截图、竞品作品截图**告诉 agent "学这种风格"。所有"生成图"操作都靠 agent 内部 inference + 用户文字描述 —— 视觉输入完全缺失。对比：ChatGPT/Claude/Gemini 全支持图片粘贴；Cursor 支持 file drop。"Creative Agent" 不支持视觉输入 = 与定位严重不匹配。 | 新 family — "input modality vs product positioning mismatch"；与 R85 F263 KPI sterile / R87 F303 empty-state asymmetry 同根 — "产品定位与具体实现不一致" |
+| F320 | **MEDIUM · 无 char counter / token estimate** | textarea `maxLength=-1`（无限制），无 char counter，无 token-budget hint。 | (1) 用户写一个 800 字 prompt 后才发现"agent 不理解我"，可能是 prompt 超模型上下文（虽然 Claude 200K 不容易超，但 system prompt + history 已占用）；(2) 没有反馈循环帮助用户写更短/更聚焦的 prompt。**修复**：input 右下角加 mono 小字 `123 chars` 或 `~50 tokens · 0.4% of budget`；超阈值变色提示。 | 与 R84 F250 "信息密度低估" 同根 |
+| F322 | **MEDIUM · Send 按钮 icon-only 无可见 text** | send 按钮 `aria-label="Send"`（无障碍 OK）但 visible 仅 `↑` arrow icon。新用户首次使用不会立刻识别"↑ 是发送"。 | (1) `↑` 作 send icon 是 ChatGPT 推广后才形成的次级 convention；(2) AutoViral 的 mono 风格 editorial UI 里 `↑` 与其他 chrome 视觉重量差太多 — 易被忽略；(3) **修复**：`↑` 旁配 mono "Send / 发送" 或在 hover 出现 tooltip。 | 新 family — "icon-only without text label" — 与 R79 F215 gear icon 24x24 hit-target 同根（视觉 affordance 不足）|
+| F323 | **LOW · `⌘↵` shortcut hint Mac-only** | hint 文字 `⌘↵ SEND` 直接使用 Mac 平台符号 `⌘`。Windows / Linux 用户没有 `⌘` 键。 | Windows/Linux 用户读到 `⌘↵` 不知映射到 `Ctrl+Enter`。AutoViral 目前定位是 Mac dev 工具但终端用户是创作者跨平台 — 不应假设 Mac-only。**修复**：JS 检测 `navigator.platform`，Mac 显示 `⌘↵`，其它显示 `Ctrl+↵`。 | F271 (locale-switch CLS) 反面 — 此处是 "platform-conditional rendering 缺失" |
+| F327 | **HIGH · 无 / slash command palette** | typing `/` 没有任何 autocomplete / command palette 出现。 | 行业 chat-tool 标准：`/image` `/web` `/code` `/imagine` 等 slash command 让用户精准指挥 agent 走哪条 capability。ChatGPT 有 Custom GPTs，Claude.ai 有 commands，Cursor 有 `/` 命令，Notion AI 有 `/ai`。AutoViral 既然内部明确分了 `research / planning / assets / assembly` 4 个 capability（CLAUDE.md skill 结构），完美场景就是 `/research 春日穿搭` `/assets 重生成 slide 3`。当前不支持 = capability 分层完全没暴露给用户。 | 新 family — "internal capability layer not surfaced as user command"，与 R85 F250 内部 pipeline 词汇家族成对（一边暴露了不该暴露的，一边没暴露该暴露的）|
+| F328 | **HIGH · 无 @ mention 引用 slide / asset** | 当前 prompt 引用特定 slide 只能写 "slide 3"（ChatQuickActions 源码 R84 已读，就是字符串模板）。用户无法 `@slide-3` `@image-cherry-blossom.png` 显式引用。 | (1) Editor 有 6 slides，选中状态 mental model 与 prompt 语义不挂钩 —— 用户怎么知道 agent 知道 "this slide"？(2) 文件、品牌色、reference 都没法 @；(3) 修复：input 输入 `@` 弹自动完成下拉，列出当前 work 所有 slides + assets + presets，选中后插入 `@slide-3` 标记，prompt 提交时由前端转化为 structured payload。 | 与 F321 (无 attach) 同根 — input modality 缺失；与 R84 F251 (选中 slide 在 quick-action 旁不可见) 同根 |
+| F329 | **MEDIUM · 无 undo 缓冲 / send confirmation** | 一旦 `Cmd+Enter`，message 立刻 send 到 agent，无 5 秒 undo banner，无 confirm dialog。 | (1) 用户误发 typo prompt → agent 立刻消耗 compute → 用户无救济通道；(2) 长 prompt 写完读一遍发现错字按 send 后悔；(3) 修复：send 后 5s 内显示 `Sent · Undo` mini-banner，5s 内点击取消并恢复 input 内容；类似 Gmail "Undo Send"。 | 与 R74 silent-failure family 反面 — 此处是 silent-success 反思（成功也应该可撤销）|
+| F330 | **MEDIUM · draft persistence 未知 / 失** | typing 后切换 tab / route，textarea 内容是否保留？JS extraction 时未 explicit 验证；但鉴于 Editor.tsx 源码 `useChatSocket(workId)` 直接 useState 未 localStorage，**预期内容会丢**。 | 用户写 80 字 prompt 中途要查看其它 slide / Inspector 设置 / Settings drawer，回来 prompt 全消失 = 重写 80 字。**修复**：textarea value 双向绑定到 store + localStorage（debounce 500ms），navigation 不丢；类似 Twitter compose box 行为。 | 与 R84 F242 "主体身份缺失" 同根 — 用户在 surface 之间的状态连续性 |
+| F324 | **LOW · 同视图 quick-action chip casing 不一致** | input 上方 quick-action `Rewrite copy / Regenerate this image / Swap palette` 用 **Title Case sans-serif**；filmstrip 上方 micro-label `DRAG TO REORDER` 用 **ALL-CAPS mono**；Inspector tabs `Design / Copy / AI` 又是 Title Case；Inspector 下 sub-headers `PALETTE / LAYOUT / EFFECTS` 又是 ALL-CAPS。**同 viewport 4 种 case 混用**。 | R84 F253 + R85 F273 已记录此 family；R90 在 chat input 周边再次 confirm，证明这是 codebase-wide 缺统一 type system 而非单页问题。 | R84 F253 / R85 F273 直系，证明全产品 type 规范缺失 |
+
+### 沉淀
+
+- **M132 [新方法学]**：**Chat-shaped UI must follow chat conventions**。F318 + F319 + F321 + F327 + F328 五个 finding 同根：**当 UI 表现为 chat（textarea + send button + history timeline + agent persona）时，必须遵循 chat 行业 baseline**：(a) Enter sends + Shift+Enter newline；(b) input auto-grow min/max 行；(c) attach / paste-image 入口；(d) slash command 自动完成；(e) @ mention 引用。AutoViral 同时定位 "Creative Agent" + "Editor"，但 chat input 设计偏 IDE-style 是定位错位。**沉淀规则**：任何 chat-shaped surface 审计先跑这 5 项 chat baseline checklist。
+  - **Why**：用户对 chat UI 的 prior expectation 由头部产品（ChatGPT/Claude.ai/Gemini）定义；偏离 = muscle memory 摩擦。
+  - **How to apply**：所有 audit 见 chat-shaped UI 自动应用此 checklist。
+
+- **M133 [新方法学]**：**Focus indicator CSS extraction audit**。F331 揭示 `outline: none` + boxShadow 无 :focus 变体可由 CSS extraction 立即发现，无需视觉对比。**沉淀规则**：所有 form control（input/textarea/button/select）audit 时跑 `getComputedStyle(el)` 检查 `outline-style + box-shadow + border-color` 是否在 :focus state 有差异；任何 form control :focus state 与 default state CSS 完全相同 = WCAG 2.4.7 违规。
+  - **Why**：focus indicator 一旦缺失是 critical a11y 问题，但视觉审计容易漏（focus state 需要触发后才可见）。
+  - **How to apply**：每轮 audit form control 时执行 `document.querySelectorAll('input,textarea,button,select').forEach(el => { el.focus(); console.log(el, getComputedStyle(el).outlineStyle, getComputedStyle(el).boxShadow); })`。
+
+- **M134 [新方法学]**：**Container size shapes user behavior**。F319 揭示 textarea rows=2 hard-pinned 不仅是 styling 选择，而是**容器尺寸定义了用户行为**：用户不会写超过容器视觉容量的 prompt，因为压抑感。**沉淀规则**：input / textarea / chat history / KPI label / empty-state CTA 尺寸必须**预设最长合理用户输入**而非 baseline 显示。对 "Creative Agent" prompt 来说，最长合理 = 10 行（150-200 字）。对短回复 chat (Slack/iMessage) 来说，2 行合理。Container size 与 expected user output length 必须对齐。
+  - **Why**：F319 + R85 F263 (KPI sterile) + R87 F303 (Library empty-state lazy) 三个 finding 共有根因 — UI 容器大小 / 信息密度低于用户期望与 product positioning。
+  - **How to apply**：每个 user-input surface 审计时单列 "expected user output length" 评估行。
+
+### R91 候选
+
+| # | 优先级 | 候选 | Why |
+|---|---|---|---|
+| 1 | **TOP · CRITICAL · a11y** | F331 — chat textarea + 所有 form control 加 `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }`；同时 codebase scan 所有 `outline: none` 出现位置补 alt 焦点指示器 | WCAG 2.4.7 违规是 production blocker；不是 polish |
+| 2 | **CRITICAL · 容量** | F319 + M134 联动 — chat textarea 改 `min-rows=3 max-rows=10` auto-grow；超过 10 rows 才出 scrollbar；typing 时显示 `(lines N · ~M tokens)` micro-counter | "Creative Agent" 容器尺寸与定位回归对齐 |
+| 3 | **HIGH · 行业 baseline** | F318 - send shortcut 默认改 Enter sends / Shift+Enter newline；Settings 增 "Send with: Enter / Cmd+Enter" 偏好选项 | chat UI muscle-memory 回归 |
+| 4 | **HIGH · 视觉输入** | F321 - 添加 attach 按钮支持图片粘贴 (Ctrl+V) + file drop + 拖拽到 input 区域；attach 后显示 thumbnail chip | "Creative Agent" 视觉输入空白填补 |
+| 5 | HIGH | F327 + F328 联动 — 实现 `/` slash command palette (列 `/research /planning /assets /assembly /improve`) + `@` mention 自动完成 (slides + assets + presets) | 内部 capability 分层暴露 + slide/asset 引用入口 |
+| 6 | MEDIUM | F329 - send 后 5 秒 Undo banner | 误发救济通道 |
+| 7 | MEDIUM | F330 - textarea value 双向绑定 localStorage + workId 维度持久化 | navigation 不丢 draft |
+| 8 | METHOD | M132/M133/M134 写入 `.claude/rules/e2e-testing.md` — 现累计 4 verify gate + 9 audit checklist | 方法学体系持续扩展 |
+
+---
+
 ## Round 89 — **R88 F309 (法务) + F313 (产品自相矛盾) + F310 + F307 CLOSED ✅ Settings drawer copy 层四发清扫 + frontend fallback cron 与产品推荐对齐**
 
 - **时间**：2026-05-12（`/loop 30m e2e-report fix` 第 7 轮触发；R86 fix-pass 已闭合，本轮接续 R88 候选清单）
