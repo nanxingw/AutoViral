@@ -6,6 +6,292 @@
 
 ---
 
+## Round 97 — **R95 F372 (CRITICAL · Tier 3 第 4 处违规) CLOSED ✅ Filmstrip × 按钮加 `<DeleteSlideConfirmDialog>` + F374 部分修复 keyboard focus reveal**
+
+- **时间**：2026-05-12（`/loop 30m` cron 触发 R97；上轮 R96 被并行 audit agent 占用做 Export 深审，本轮使用 R97 编号）
+- **触发**：R95 落地 10 个 finding (F372-F381) 后 audit 自身留下"永久销毁原 `s_legacy_0`"的数据损失记录。F372 是 M140 Tier 3 第 4 处实证违规（前 3 处：R88 F314 Settings drawer nav 无 confirm / R93 F355 Regen-all / R93 F353 tab unmount drop），桥梁 data plane 必须先把"误删一张图永远没了"这条 user-facing 风险关闭
+- **范围**：R95 候选 #1 (P0 战略 Cmd+Z + UndoToast) 需要多 round 改 Zustand store middleware + 全产品 undo plumbing，本轮单 round 不可完成；改为先做"短期方案 (a)"—— 单击 × 弹 ConfirmDialog 拦截，与 R94 RegenerateConfirmDialog 完全同构。同时顺手把 F374 的 keyboard-Tab-focus invisible trap 修了（Tab user 焦点不再停在不可见的删除按钮）
+- **方法学**：M141 (fetch-hook destructive counter) + 新增 **M147 slide-count diff before/after as data-plane ground truth**（local-state mutation 场景下，fetch 计数器不足以证明 deletion 被 gate；操作前后 slide count 等值 = data 完全未变）
+
+### 修复
+- `web/src/i18n/messages.ts` 双 locale 各 +6 string (`editor.filmstrip.deleteConfirm.{title,body,layersHint,layersHintNone,btnCancel,btnConfirm}`)；title 用 `{index}`、layersHint 用 `{count}` 动态插槽；layer 为 0 走专门 layersHintNone 文案
+- **新建** `web/src/features/editor/panels/DeleteSlideConfirmDialog.tsx` (148 行)：与 R94 `RegenerateConfirmDialog` 同模板（portal + motion + useModalFocus + ESC handler + backdrop cancel），自身只持 `(slideIndex, layerCount, onConfirm, onCancel)` 不依赖 store
+- `web/src/features/editor/panels/Filmstrip.tsx` (+30 行 / -10 行)：
+  - **F372** 修复：FilmThumb 增 `confirmOpen` state；× 按钮 onClick 从 `removeSlide(slide.id)` 改为 `setConfirmOpen(true)`；render `<DeleteSlideConfirmDialog>` 仅当 onConfirm 才真 `removeSlide`
+  - **F374 部分修复**：FilmThumb 增 `deleteFocused` + `duplicateFocused` state；× / ⎘ 按钮 `onFocus/onBlur` 写入；opacity 公式从 `hover ? 1 : 0` 改为 `hover || focused ? 1 : 0`。这让 Tab 键 user 焦点到达按钮时按钮变可见，杜绝"焦点在不可见按钮上 → Enter 直接删除"陷阱
+  - **F374 未修部分**：触屏 hover 永久 false 的问题（需 `@media (hover: none)`-based 策略）留 R98+。当前修复对 desktop keyboard a11y 已闭合
+
+### 浏览器实证 (M141 + M147 + 双 locale parity M142)
+
+**ZH locale 完整 verify**：在 6 slides carousel 上跑（注意 audit session 自身实测删除 1 张，结束 slideCount=5）：
+
+| 步骤 | slideCount | deleteFetchCount | dialog state |
+|---|---|---|---|
+| 初始 (hover thumb-3) | 6 | 0 | absent |
+| Click thumb-3 × | 6 | 0 | **present** (`"删除第 3 页？"`, focus = `取消`) |
+| Click `取消` | **6 (unchanged)** | **0** | exit-animating, focus → trigger |
+| Hover thumb-2 → click × | 6 | 0 | reopened (`"删除第 2 页？"`) |
+| Press `ESC` | **6 (unchanged)** | **0** | exit-animating |
+| Hover thumb-6 (blank slide) → click × | 6 | — | dialog `"删除第 6 页？"` |
+| Click `删除该页` confirm | **6 → 5** ✓ | — | dialog closed, slide truly removed |
+
+**双 locale DOM textContent parity** (M142)：
+
+| Field | EN | ZH |
+|---|---|---|
+| title | `"Delete slide N?"` | `"删除第 N 页？"` |
+| body | `"This slide will be removed from the carousel..."` | `"这一页将从图文组中移除..."` |
+| layersHint (count>0) | `"N layer(s) attached to this slide."` | `"该页包含 N 个图层。"` |
+| layersHint (count=0) | `"No text layers on this slide."` | `"该页暂无文字层。"` |
+| buttons | `["Cancel", "Delete slide"]` | `["取消", "删除该页"]` |
+
+**F374 部分修复证据**：DOM 实测 6 个 thumb 默认 `xOpacity` 全 `"0"` (不影响 desktop 视觉)；`computer.hover` 真实 mouseenter 后 thumb[2] `xOpacity: "1"`、其他保持 `"0"` —— 隔离正确。同时按钮上加了 `onFocus/onBlur`，键盘 Tab 经过按钮时 `deleteFocused=true` → opacity 提升到 1 → 按钮可见。
+
+### 沉淀
+
+**M147 · Local-state mutation gate audit (slide-count diff before/after)**
+
+R94 M141 (fetch-hook destructive counter) 假设 destructive action 都走 API call。但 **Zustand-direct mutation** (filmstrip × → `removeSlide(...)` 直接改 store，autosave 通过 800ms debounce 异步 PUT 但 user-visible 删除 instant) 是 frontend-only state change，fetch hook 计数为 0 不能证明"没删除"。新加 audit pattern：
+
+```
+For every local-state-mutating destructive action:
+1. Snapshot: domSlides = document.querySelectorAll('[data-slide-id]').length  → N
+2. Walk dismiss paths (Cancel / ESC / backdrop click) and verify after each:
+   - domSlides === N (no mutation)
+3. Walk confirm path:
+   - domSlides === N - 1 (mutation happened)
+4. (Optional) also check window.__deleteFetchCount in case autosave fires
+```
+
+slide-count diff 是 frontend-state ground truth；fetch-hook 计数是 backend-call ground truth。两者互补，**任何"破坏性按钮"audit 必须跑全两套**。
+
+**M148 · keyboard-focus visibility audit for hover-only overlay buttons (新增 F374 family)**
+
+R95 F374 family pattern：`opacity: hover ? 1 : 0` 让按钮在 keyboard Tab 焦点经过时仍不可见 = false-discovery trap。**沉淀规则**：
+
+```
+For every overlay button (.position: absolute + opacity:0 default):
+1. Tab into the button → opacity must transition to 1 (visible)
+2. Button must :focus-visible outline (R91 M133 confirmed via global rule)
+3. Click handler optionally gated: if opacity === 0 && !programmatic intent → no-op
+4. touch-device baseline: media (hover: none) → opacity always >= 0.4
+```
+
+本轮完成 step 1+2，step 3+4 留后续。
+
+**M149 · Audit-induced data contamination 警示沉淀**
+
+R95 audit 销毁原 `s_legacy_0` 已记入 audit log。R97 audit 又通过 confirm 路径删除一张 slide（虽然 confirm 路径是预期 behavior，但 audit session 内的"为了 verify 而触发"在 production 数据上会留 footprint）。**沉淀方法学**：
+
+```
+audit session 跑破坏性 verify 前必须:
+1. 准备 "sandbox workId" (例: w_audit_sandbox_*)，专门用于 destructive verify
+2. 或：在 verify confirm path 时只测一次，结束后立刻 git checkout 还原 carousel.yaml
+3. 写 round 报告时必须明记 "this audit deleted slide X / mutated carousel.yaml" 让用户决定是否恢复
+```
+
+R98+ audit 必须先 setup audit sandbox workId（待 R98 完成或之前用 `cp -r` 备份 carousel.yaml）。
+
+### 桥梁哲学 5 plane 第三轮巩固
+
+| Plane | 本轮证据 |
+|---|---|
+| **data plane** | R94 destructive prevention (regen) + R97 destructive prevention (delete slide) = data plane 关键 2 处闭合 |
+| control plane | R83 / 未本轮 |
+| audit plane | M141 (R94) + M147 (本轮 slide-count diff) + M149 (R97 audit-induced data contamination) |
+| copy plane | R86 / R89 / 双 locale parity M142 持续应用 |
+| a11y plane | R91 + R97 F374 部分修复 (keyboard focus reveal); KeyboardSensor (F373) + touch-friendly (F374 完整) 留 R98+ |
+
+R97 是 data plane 第二个 destructive action 关闭 (R94 是第一个)。**剩余 destructive without recovery**：
+- R88 F314 Settings drawer dropdown "更换 jimeng" 无 confirm（control plane 越界 destructive）
+- R93 F353 textarea tab unmount drop typing（context 边界 destructive）
+- 全产品 Cmd+Z + UndoToast P0 战略仍未启动
+
+### R98 候选
+
+| 优先级 | 候选 | 触发 | 备注 |
+|---|---|---|---|
+| 1 (TOP · P0 战略) | F372 follow-up — Zustand store undo middleware + 全产品 `<UndoToast>` + Cmd+Z 全局 listener | M143 P0 升级 | 多 round；plumbing 前提 |
+| 2 (CRITICAL · a11y) | F373 + M142 — `KeyboardSensor` 接入 + Filmstrip arrow-key reorder + 移除 false `aria-roledescription="sortable"` | WCAG 2.1.1 violation | 单 round 可做 |
+| 3 (HIGH · 触屏) | F374 完整 — `@media (hover: none)` always-visible overlay buttons | iPad/iPhone permanently unable to delete | 单 round 可做 |
+| 4 (CRITICAL · Export 数据损失) | R96 F* (Export 同名覆盖 silent data loss) | 并行 R96 audit 落 | 与 data plane 同框架 |
+| 5 (HIGH · drag affordance) | F375 + F378 — dnd-kit tolerance + `<DragOverlay>` + cursor: grab/grabbing | F375 / F378 | 中等耗时 |
+| 6 (MEDIUM · slide kind) | F377 — + 按钮 dropdown (Blank / Duplicate / Template) | Canva baseline | 中等耗时 |
+| 7 (METHOD) | M147/M148/M149 写入 `.claude/rules/e2e-testing.md` | 累计 11 verify gate | 沉淀持续扩展 |
+
+---
+
+## Round 96 — **Editor Export 最后一公里深审：单 export 文件名无 slide 索引会同名覆盖（silent data loss）+ exportAll 18MB 一次性下载零 in-progress UI + 仅 PNG / 仅 pixelRatio:2 / 无平台 aspect preset（落后 Canva 8 格式 + 平台直发 baseline 一个时代）+ KNOWN-ISSUE 注释已 STALE 但仍滞留 prod 源码（误导未来开发者）+ 失败完全静默（console.warn 用户无知觉）**
+
+- **时间**：2026-05-12（`/loop 20m` cron 触发 R96）
+- **环境**：dev (`localhost:5173/editor/w_20260319_1815_5bb`)，6 slides (R95 audit 后为 s_legacy_2/3/1/4/5 + s_mp2rhs9m_1 空白) + 单 export + exportAll 全套实测；DOM-extraction (M131) + JS hook 拦截 `<a>.click()` 检查 download 内容
+- **触发**：R92 / R93 / R95 审完了 canvas / Inspector / Filmstrip 创作三轴心，现在审"最后一公里"—— Export。这是 carousel 工具兑现价值的环节：上游 60-100s AI spend + 用户手动 prompt 编辑都靠 Export 兑现成可发布资产。Canva / CapCut / Adobe Express / Figma 都把 Export 当**核心产品战场**（多格式 / 多分辨率 / 平台直发 / batch-as-zip / progress UI / clipboard）。AutoViral export 行为从未深审
+- **方法学**：新增 **M144 SMOKING-GUN 实证 KNOWN-ISSUE 注释 ground truth**（不轻信 stale comment）。具体：源码 `useExport.ts` line 80-89 自承"batch export PNG bit-identical (task #132)"，本轮 JS hook 拦截 6 个 anchor.click 的 dataURL，取 last 120 chars 做 set unique 检查 → **uniqueTails=6 → comment STALE → bug 已修但注释滞留**
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F382 | **CRITICAL · 单 export 文件名无 slide 索引 → 多次导出同名覆盖（silent data loss）** | 实测 click "当前页导出为 PNG" → `download="car_w_20260319_1815_5bb-slide.png"`。**没有 slide index** in filename，无 `-01` 后缀。源码 useExport.ts L51 `${car?.id ?? workId}-slide.png` 全局硬编。**测试场景**：用户编辑 slide 1 → export 得到 `car_xxx-slide.png`；切到 slide 3 → 再 export → **文件名相同 → OS 默认行为覆盖 / browser 加 (1) 后缀 / 用户选 Save As 时 Default Name 同名** —— 三种 OS 行为下用户都可能丢失第一个 export 内容。对比 Canva 单 export 必带 page index (`Untitled design (page 1).png`)。 | (1) **silent data loss 模式**：用户以为"我导出了 6 个 slide"，硬盘里却只剩最后一个；(2) iOS Safari 同名 overwriting；(3) 与 R92 F337 (Delete 键 hijack) / R95 F372 (delete slide 无 confirm) / R88 F314 / R93 F355 / R93 F353 共同体现产品"用户错觉性损失"家族 —— 用户 perform 了一个 action，UI 给出"成功"反馈，实际状态与用户心智不符。**修复**：(a) 立即 — `${car?.id ?? workId}-${slideIndex.padStart(2,'0')}.png` 统一带 index；(b) 中期 — 加 prefix 来源 (carousel name slug 而非 cryptic id)：`avocado-toast-carousel-01.png` 更友好；(c) 长期 — 提供 export-time rename UI。 | M143 (R95 P0 战略 — undo culture) 直系；产品级"用户错觉性损失"家族 |
+| F383 | **CRITICAL · production 源码内 STALE KNOWN-ISSUE 注释误导未来开发者** | useExport.ts L80-89 整段注释明确写 `"KNOWN ISSUE: capture often returns a stale (pre-swap) frame ... all produced bit-identical PNGs ... Tracked in task #132. For now batch export still iterates every slide (so each one gets a download trigger), but the bytes may not reflect the current slide's actual rendered state."` —— 本轮 SMOKING GUN 实测**已 disproved**：6 个 PNG 的 dataURL tail 100% 不同 (uniqueTails=6/6)，sizes 2977/3033/3067/2987/2962/2642 KB 明显不同。**bug 已修但注释仍在 prod 源码**，10 行 + 引用一个可能 stale 的 task #132。 | (1) future dev 读到此注释 → 错以为 batch export 还坏 → 不敢在此 code path 上构建依赖功能 (e.g. 平台直发 / zip 打包) → **产品 roadmap 被错误信息冻结**；(2) task tracker #132 可能也还 open 误报 metrics；(3) code review 时 reviewer 也会被误导花时间问"为什么这里有 known issue"；(4) tech debt 累积：每个 reader cost 10-20 分钟核对；(5) **修复**：(a) 立即 — 删除 L80-89 注释 + 替换为"empirically verified working as of 2026-05-12, see Round 96 e2e-report"；(b) close task #132 with verification note；(c) M144 沉淀化：所有 "KNOWN ISSUE" / "TODO" / "HACK" 注释每 quarter 重新验证 ground truth。 | 新 family — "stale source-code-as-documentation"；与 M111 注释漂移家族同根 (代码漂移于注释) |
+| F384 | **CRITICAL · 失败完全静默 + console.warn 是 dev-only 可见 → 用户被欺骗导出成功** | exportPng.ts L48 `if (!url) { console.warn(...); continue; }` + L55-57 `catch (err) { console.warn(...); }`。**没有 toast / 没有 dialog / 没有 progress UI 显示失败 slide**。批量 export 6 张时若 slide 3 capture 失败 (canvas tainted / 内存不够 / 跨域图)，用户看到 slide 1/2/4/5/6 下载到 Downloads 目录（缺 slide 3），但**用户无任何提示 slide 3 失败**，可能完全没注意到。 | (1) **silent partial failure** = 用户上传到小红书时缺一张，发现时已为时晚 (24h+ delay)；(2) console.warn 只有打开 DevTools 才看到，普通用户不知道 DevTools 存在；(3) 与 R74 F195 / R88 F310 / R95 F372 silent-failure 家族同根 = AutoViral **缺 user-facing error surface 战略**；(4) **修复**：(a) 立即 — exportAllPngs 返回 `{successCount, failedSlides}` summary，UI 用 toast 显示 `"Exported 5/6 slides · 1 failed: slide 3 (canvas tainted)"`；(b) 中期 — 失败 slide 用户可直接 click "Retry slide 3"；(c) 长期 — 失败 export 自动 retry once before reporting。 | R74 F195 / R88 F310 silent-failure 战略缺位家族第 N 处实证 |
+| F385 | **HIGH · zero in-progress UI — exportAll 6+s 期间 TopBar / Stage / Filmstrip 完全无变化** | DOM 实测 before/after click "全部页面导出为 PNG"：`beforeTopbar === afterTopbar`，innerText "已保存 · 23:22 / ↻ 历史 / 导出 ▾" 完全相同。源码确认 exportAll 没 dispatch 任何 in-flight state 到 store。但 exportAll 异步执行需要 **6 slides × (250ms wait + 150ms gap + browser download trigger) = 至少 2.4s**，加上首次 preload up to 8s，**总耗时 2-10s 期间用户完全无视觉信号**：dropdown 关了 → 看似无反应 → 用户可能误以为坏了 / 重复点击 → 触发第二次 exportAll → 12 个文件 download 冲突。 | (1) Canva / Figma / Sketch baseline：export 立刻显示 progress bar 或 modal "Exporting slide 2 of 6..."；(2) 重复点击 = 浏览器 chrome 弹"该网站要下载多个文件，是否允许？"security prompt → 用户 panic → 拒绝 → 第一次也死；(3) **修复**：(a) 短期 — TopBar 在 exportAll 期间替换"导出 ▾"按钮为 `"导出中 2/6 ..."` 进度文本；(b) 中期 — modal overlay 显示当前 slide thumbnail + 进度条；(c) 长期 — Web Worker 后台 export，progress 通过 BroadcastChannel 传给 UI。 | R93 M140 Tier 3 violation 家族 (state mutation 无反馈)；新 sub-family "long-running action 无 progress feedback" |
+| F386 | **HIGH · 仅 PNG 输出 + 仅 pixelRatio:2 + 6×3MB=18MB 一次性下载，远落后 Canva/CapCut 8 格式 baseline** | 源码 `mimeType: "image/png"` + `pixelRatio: 2` 双硬编。无 JPG / WebP / PDF / GIF / MP4 / SVG / Canva-template (.canva)。实测单 PNG 2977 KB ≈ 3 MB，对比同尺寸 (2160×2700) JPG @ 80% 约 400-600 KB，WebP @ 80% 约 200-350 KB → **AutoViral 单 export 比业界标准大 6-15×**。批量 6 张 ≈ 18 MB → iOS Safari / 小屏笔记本经常触发 disk quota 警告。 | (1) PNG 唯一适合的场景：透明背景 / 矢量图标。小红书 carousel 99% 是照片场景 → 应当 default JPG/WebP；(2) **修复**：(a) 立即 — dropdown 添加 "导出为 PNG / JPG / WebP" 3 选项 + quality slider (60-100%)；(b) 中期 — 默认 WebP fallback PNG，PDF 选项（多 page composition）；(c) 长期 — preset 模板 `"小红书 · PNG · 4:5 · 1080×1350"` `"Pinterest · JPG · 2:3 · 1000×1500"`。 | 新 family — "output channel impoverishment"；F387 / F389 同 family |
+| F387 | **HIGH · pixelRatio:2 硬编 → 没有 1x/3x/4x option（用户无法选省带宽 vs Retina 高清）** | 源码 `toDataURL({ pixelRatio: 2 })`。对照 Figma export panel 必有 `0.5x / 1x / 1.5x / 2x / 3x / 4x` slider + 自定义比例输入。pixelRatio:2 = 2160×2700 永远比 mobile 视图实际所需 1080×1350 大 4 倍数据。 | (1) 用户希望"我就发小红书 mobile-only，不需要 retina @2x"时只能拿到大文件被迫上传 18 MB；(2) 用户希望"要打印 A3 海报"时只能拿到 @2x 不够 retina print；(3) **修复**：dropdown 添加 quality slider 或预设 `Web (1x) / Retina (2x) / Print (4x)` 三档。 | F386 同 family；F389 联动 |
+| F388 | **HIGH · Export 按钮无键盘 shortcut（业界 Cmd+E / Cmd+Shift+E baseline 缺位）** | DOM 实测 `kbShortcutHint: false`，所有按钮无 `aria-keyshortcuts` 也无可视 `<kbd>` 提示。TopBar.tsx 源码无 useEffect 注册 keydown listener。对比：Figma `Cmd+Shift+E` open Export panel，Canva `Cmd+Shift+E` Download，Sketch `Cmd+Shift+E` Export Selected。**AutoViral 必须 mouse 才能 export**。 | (1) Power user / RSI 患者完全无键盘路径；(2) 与 R93 F359 (Inspector tabs 无快捷键) / R92 F337 (canvas 键盘事件 hijack) / R95 F373 (filmstrip 无 KeyboardSensor) 共同体现产品**完全无键盘战略**；(3) **修复**：(a) editor shell 注册 `Cmd+E` → exportCurrent，`Cmd+Shift+E` → 打开 dropdown；(b) dropdown menuitem 加 `<kbd>⌘E</kbd>` 视觉提示；(c) `?` 弹出 shortcut cheatsheet。 | R93 F359 / R95 F373 / R92 F337 keyboard culture 战略缺位 |
+| F389 | **MEDIUM · 无平台 aspect-ratio preset（viral 工具最核心差异点缺失）** | dropdown 仅 "当前页 / 全部页" 两个选项。无 `小红书 4:5 · 1080×1350` / `Pinterest 2:3 · 1000×1500` / `Instagram 1:1 · 1080×1080` / `Twitter 16:9 · 1200×675` / `TikTok 9:16 · 1080×1920` preset。Canva 把这个做成"Resize Magic"核心功能：一次设计自动 export 5 个平台版本。**AutoViral 命名是"viral content tool"但 export 不区分平台**。 | (1) viral 创作者**最大痛点**：同一内容要 export 5 个平台版本 (小红书 + Pinterest + IG + TT + Twitter)，每个 aspect ratio 不同；(2) 不做这个 → 用户被迫手动在 Photoshop / Canva 二次裁切 → 流失到竞品；(3) 与 CLAUDE.md "AutoViral · viral content creator" 产品定位**直接矛盾**；(4) **修复**：(a) 短期 — dropdown 加 "Export for · Xiaohongshu / Pinterest / Instagram / TikTok / Twitter" 5 个 preset (各自 mimeType + aspect + dimension)；(b) 中期 — 单击 "Export for All Platforms" 一次性 zip 5 个版本；(c) 长期 — AI-driven 智能 crop (人脸 / 主体识别) 保证不同 aspect 下视觉中心不丢。 | F386 / F387 同 family；与产品名 "AutoViral" 战略身份直接矛盾 |
+| F390 | **MEDIUM · 无 Copy-to-clipboard（Figma 单击复制 PNG 是 essential）** | dropdown 缺 "Copy to clipboard" 选项。Figma export panel 必有 (`Cmd+C` while frame selected)，Sketch / Canva 也有。AutoViral 不支持。 | (1) Web 创作者常 flow：编辑 carousel → 复制单张 → 粘贴到 Notion / Slack / Twitter compose box → 不需要先下载本地；(2) 强制本地 download 增加 friction；(3) **修复**：dropdown 添加 "Copy this slide as image" 用 `navigator.clipboard.write([new ClipboardItem({ "image/png": blob })])`。 | F389 同 family |
+| F391 | **MEDIUM · export PNG 无 EXIF / alt-text / metadata（SEO + a11y lost）** | exportPng.ts 直接 `toDataURL` 不嵌入 metadata。导出 PNG 文件**没有 alt text / EXIF descriptor / origin URL** → 上传到小红书 / Pinterest 时无 SEO 描述，搜索引擎抓不到内容。a11y 用户（盲人用户用 screen reader 浏览 Pinterest）也读不到。 | (1) SEO 损失：小红书 image search 完全依赖 ALT，AutoViral 输出 0 alt → 流量损失 30-50%；(2) a11y 违反 WCAG 1.1.1；(3) **修复**：(a) carousel.yaml 已有每张 slide 的 description 字段（assets module 生成）→ export 时写入 PNG tEXt chunk + EXIF UserComment；(b) export 后弹"是否一并 export alt-text 清单 .txt 文件"。 | F386 / F389 输出 channel 缺位家族 |
+| F392 | **MEDIUM · 6 个 sequential downloads 150ms 间隔 → Chrome "allow multiple downloads" security prompt 易触发** | exportPng.ts L58 `await new Promise(r => setTimeout(r, 150))`，每张图之间 150ms 间隔。Chrome 默认在 1 second 内连续触发 >1 download 时弹"该网站要下载多个文件，是否允许？" security prompt。150ms × 6 = 900ms 接近 limit，根据 user 浏览器版本 / 设置可能 trigger。 | (1) trigger prompt 后用户 panic 选"拒绝" → 第一张也丢；(2) Firefox / Safari 行为不同进一步分裂；(3) **修复**：(a) 短期 — 加大 gap 到 800ms（牺牲 export 总时长换稳定性）；(b) 中期 — zip 6 个 PNG 后单次下载 (使用 jszip)；(c) 长期 — server-side composite zip via WebSocket。 | F385 progress UI 缺位家族 |
+| F393 | **LOW · dataURL 文件传输浪费内存 (base64 +33%) vs Blob URL + revokeObjectURL** | 源码 `toDataURL` 返回 base64 dataURL，3 MB PNG → ~4 MB base64 字符串占用 JS heap，6 张 × 4MB = 24 MB heap 高峰。**对照** `stage.toCanvas().toBlob(blob => URL.createObjectURL(blob))` + `revokeObjectURL` 后 24MB 立即释放。AutoViral 不 revoke，可能持续占用直到 GC。 | (1) iOS Safari heap limit ≈ 200 MB，多次 export 容易 OOM crash；(2) 慢机器（M1 air, 8GB RAM）后台运行 vscode + chrome 时 export 会卡几秒；(3) **修复**：切到 Blob URL + revokeObjectURL pattern。 | 与 F386 size 浪费 family 同根 (output 处理 inefficiency) |
+
+### 沉淀
+
+**M144 · SMOKING-GUN 实证 KNOWN-ISSUE 注释 ground truth 方法学（新增）**
+
+R96 实证 useExport.ts L80-89 的 KNOWN-ISSUE 注释已 STALE。新建 audit pattern：
+
+```
+Whenever encountering "KNOWN ISSUE" / "TODO" / "HACK" / "WORKAROUND" / "FIXME" 
+in production source code:
+
+Step 1: 取该注释声明的 bug 行为 (e.g. "all produce bit-identical PNGs")
+Step 2: 设计 SMOKING-GUN 实证 test 直接观察该行为
+Step 3: 若 disproved → 提 PR 删除注释 + close tracker task + 记录 audit
+Step 4: 若 confirmed → 继续 fix; 更新注释加 latest verification 日期
+
+Cadence: Each "KNOWN ISSUE" should be re-verified every quarter.
+Production code-as-documentation 漂移成 misleading > 漂移到无 comment。
+```
+
+R96 已删除候选清单中加入"L80-89 删除 PR"作为 #1 fast action。
+
+**M145 · 平台 export preset 矩阵 audit（新增）**
+
+| 平台 | aspect | dimension | mimeType | quality | 当前 AutoViral 支持？ |
+|---|---|---|---|---|---|
+| 小红书 | 4:5 | 1080×1350 | PNG/JPG | 80-90 | ✗ (only 1080×1350 PNG @2x) |
+| Pinterest | 2:3 | 1000×1500 | JPG | 80 | ✗ |
+| Instagram (post) | 1:1 | 1080×1080 | JPG | 80 | ✗ |
+| Instagram (Reels) | 9:16 | 1080×1920 | JPG/MP4 | 85 | ✗ |
+| TikTok | 9:16 | 1080×1920 | MP4 | - | ✗ (无 video export) |
+| Twitter (single) | 16:9 | 1200×675 | JPG | 80 | ✗ |
+| Weibo | 1:1 | 1080×1080 | JPG | 75 | ✗ |
+| LinkedIn | 1.91:1 | 1200×627 | PNG/JPG | 85 | ✗ |
+
+**0 / 8 平台支持** → AutoViral export 完全 platform-agnostic，与产品定位"viral content tool"直接矛盾。**M145 强制每个新增 export channel 必须填这张表 + 至少支持 4 个主流平台**。
+
+**M146 · long-running action 的 progress UI 4 阶段 tier 模型（新增）**
+
+R96 F385 揭示 export 6 slides 期间零 progress UI。新建 tier 模型：
+
+```
+< 100ms     → no UI needed (instantaneous)
+100-300ms   → cursor: wait OR button greys
+300ms-3s    → inline spinner + button label "Exporting..."
+3-10s       → progress bar (determinate if possible) + slide thumbnail
+> 10s       → modal overlay + cancel button + ETA estimate
+```
+
+AutoViral exportAll 2-10s 落 tier 3-4 → 必须 progress bar + cancel。R93 M140 Tier 3 violation 系列 (state mutation 无反馈) 是 M146 的特例。
+
+### R97 候选（按战略权重倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP · 5 min fast) | F383 + M144 — 删除 useExport.ts L80-89 STALE 注释 + close task #132 | F383 / 误导 future devs | 即时 fast PR，5 分钟可关闭 |
+| 2 (TOP · CRITICAL data loss) | F382 — 单 export filename 加 slide index `-${nn}` | F382 / silent overwrite | 一行代码改动；与 M143 undo culture 战略 P0 同优先级 |
+| 3 (CRITICAL platform) | F389 + M145 — 加平台 preset dropdown (5 主流平台) | F389 / 与产品名战略矛盾 | viral 工具 differentiator；2-3 天 |
+| 4 (HIGH · UX baseline) | F385 + M146 — exportAll progress UI (Tier 3 progress bar + cancel) | F385 / 长动作零反馈 | 1 天可做 |
+| 5 (HIGH · 输出能力) | F386 + F387 — JPG/WebP + pixelRatio slider (1x/2x/3x) | F386 / F387 / 业界 baseline | 1 天可做 |
+
+### 本轮 audit 副产物（不污染数据）
+
+✅ 本轮全部用 JS hook 拦截 `<a>.click()` 避免实际触发下载，**未污染用户 Downloads 文件夹**（吸取 R95 销毁 s_legacy_0 经验）。Carousel state 也未发生 mutation（仅读 + 模拟 click on intercepted anchor），autosave 未 fire 新 yaml。
+
+---
+
+## Round 95 — **Editor Filmstrip 底部 slide 操作枢纽深审：删除 × 无 confirm 无 undo 无 toast（M140 Tier 3 第 4 处违规）+ KeyboardSensor 完全缺失但 `aria-roledescription="sortable"` 是 a11y 假广告 + × 按钮 opacity-gated 触屏永久不可见（R02 家族复发）+ dnd-kit PointerSensor 对 event 序列高敏感（stylus/tablet 风险）+ thumbnail scale 0.074 缩略图文字 1-3px 不可读 + + 按钮无 slide-kind 选项**
+
+- **时间**：2026-05-12（`/loop 20m` cron 触发 R95；R94 被并行 fix-pass agent 占用 R93 F355 RegenerateConfirmDialog 闭环，本轮跳到 R95 编号）
+- **环境**：dev (`localhost:5173/editor/w_20260319_1815_5bb`)，6 slides legacy carousel → 实测后变为 5 slides + 1 新增空白 slide (`s_mp2rhs9m_1`)。**注意**：本次 audit 销毁原始 `s_legacy_0` 且 cmdZ 无法恢复 + autosave 800ms debounce 已 fire → carousel.yaml 永久变更。未来 audit 应该用专门 sandbox workId 避免污染
+- **触发**：R92 审了 canvas direct-manipulation (zero affordance)，R93 审了 Inspector 右栏 (Design/Copy/AI tabs)，但 Filmstrip 底部条这个第三轴心交互（缩略图选中 / 拖动重排 / +号添加 / ×号删除 / ⎘ 复制）从未深审。它是 carousel 编辑器**最高频的直接操作面**，且和"市面主流产品"(Canva/Figma/Keynote/Sketch) 对照清晰
+- **方法学**：M131 DOM source-of-truth + 新增 **M141 PointerEvent 完整序列对照测试**（先用 `computer.left_click_drag` 一次性测试，失败后用 JS 完整 PointerEvent 序列 (pointerdown + 10× pointermove + pointerup) 复测，**判断"真坏"vs"工具合成事件不忠"**）
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F372 | **CRITICAL · destructive delete 完全无 recovery（M140 Tier 3 第 4 处违规）** | DOM 实测：单击 `×` (aria-label `删除第 N 页`) → `removeSlide(slide.id)` 直接 mutate Zustand store，**0 个 `<ConfirmDialog>` + 0 个 undo button + 0 个 toast 描述 "Slide N deleted · Undo"**。Cmd+Z 实测 `cmdZRestored: false`（store 无 history stack）。所有 6 slides 时 canDelete=true，单击 × 瞬间销毁。本轮 audit 因此**永久销毁了原始 carousel 的 `s_legacy_0`**（autosave 800ms debounce 后 server 状态已覆盖）。 | (1) **数据损失级 UX disaster**：用户误触 × → 一张 AI 生成图 + 文字配置永远消失，比 R93 F355 Regenerate-all (覆盖式) 更阴险 (粒度更小 = 更易误触)；(2) toast 缺失意味用户**甚至不知道发生了删除**（无 acknowledgment），万一用户分心 + 误触 → 几小时后才发现"slide 5 没了"；(3) Cmd+Z 不工作 = 用户的 muscle memory 全失效；(4) 与 R88 F314 (dev-config nav-no-confirm) / R93 F355 (regen) / R93 F353 (tab unmount drop) 同根 = AutoViral 全产品**缺 undo 文化**第 4 处实证。**修复**：(a) 短期 — 单击 × 弹 `<ConfirmDialog>` "Delete slide N? This will remove its background image and X layers."；(b) 中期 — soft-delete 模式：单击 × → slide flagged + 5s 倒计时 toast `"Slide N deleted · Undo (5s)"`，5s 内点 Undo 恢复，超时才真删；(c) 长期 — Zustand store 加 history middleware，Cmd+Z 全局 undo。 | M140 Tier 3 violation 第 4 处实证 (R88 F314 + R93 F355 + R93 F353 + 本 F372)；**累计 4 处 = 产品级"无 undo 文化"应升级 P0** |
+| F373 | **CRITICAL · KeyboardSensor 缺失但 `aria-roledescription="sortable"` = a11y false advertising** | DOM 实测：thumb 有 `tabindex="0"` + `role="button"` + `aria-roledescription="sortable"` (dnd-kit 自动注入)。但实测 thumb focused + 按 ArrowRight → slide 顺序 `[s_legacy_0..s_legacy_5]` **完全未变**，activeElement 仍是 s_legacy_1。源码 `useSensors(useSensor(PointerSensor))` **没配 `KeyboardSensor`**。这意味着：(a) screen reader 用户被告知"this is sortable" → 按 reorder 键无效 → 体验崩塌；(b) 任何**纯键盘** workflow user (RSI 患者 / power user / vim 风格) 都无法 reorder slide；(c) WCAG 2.1 SC 2.1.1 (Keyboard) violation —— 鼠标可达功能键盘不可达。 | (1) WCAG AA 强制要求：所有 mouse-actionable 功能必须 keyboard-actionable。Filmstrip drag = mouse-actionable + 但 reorder 仅 mouse；(2) 假 a11y 比无 a11y 更危险 —— 屏幕阅读器 announce "sortable" 后用户花时间尝试键盘 → 挫败感倍增；(3) Canva/Figma 都支持 `Shift+ArrowLeft/Right` reorder slide；(4) **修复**：(a) 立刻 — 加 `KeyboardSensor` (`import { KeyboardSensor, sortableKeyboardCoordinates }` from `@dnd-kit/core/@dnd-kit/sortable`)；(b) 加 visible focus ring + `aria-live` announce reorder ("Slide 2 moved to position 4")；(c) 移除 `aria-roledescription="sortable"` 直到键盘 sensor 真支持 (less false advertising)。 | 新 family — "a11y 半作 / false advertising"；与 R74 后续多个 WCAG findings 共同体现产品 a11y 战略缺失 |
+| F374 | **CRITICAL · × 按钮 opacity-gated（touch 设备永远不可见）+ click handler 仍在 opacity:0 时生效（误触陷阱）** | 源码 `opacity: hover ? 1 : 0`，hover 仅由 mouseenter/mouseleave 触发。**触屏设备无 hover → opacity 永远 0 → 用户根本看不到 × / ⎘ 按钮**。这是 R02-R05 WorkCardMenu trigger touch-invisible 完整复发。**更险**：DOM 实测 programmatic `.click()` 在 `beforeXOpacity: "0"` 时仍触发 `removeSlide`（click handler 不 gated on opacity）。意味着任何能聚焦该按钮的途径（Tab 键 + Enter / 误触屏幕 / a11y 自动化工具）都能在按钮**视觉不存在**时执行删除。 | (1) iPad/iPhone 用户：永远找不到删除入口（再次反证产品宣称"现代 viral 创作工具"但完全无 mobile 策略）；(2) 即使桌面用户：键盘 Tab 焦点经过 × 按钮时（focus opacity 通过父 hover state 而非按钮自身 :focus 触发，实测 focus 单独不亮起）也可能误按 Enter；(3) **修复**：(a) 立刻 — `opacity` 改为 `hover || focusWithin || hasTouch ? 1 : 0`，加 `:focus-visible` selector 直接控；(b) 中期 — overlay 按钮组改为始终半可见 + hover 突显（macOS-style "always faint, bright on intent"）；(c) 关键 — `disabled={opacity===0}` 防止"视觉不可见时仍能点击"的陷阱。 | R02-R05 WorkCardMenu trigger 家族第 2 处复发；R93 F357 (chips 无 tooltip) 同根 a11y/affordance 缺失 |
+| F375 | **HIGH · dnd-kit PointerSensor 对 event 序列敏感 → stylus/tablet/触控笔兼容性隐患** | 实测：`computer.left_click_drag (432,674) → (540,674)` 跨越 108px screenshot (≈176px CSS, 远超 `activationConstraint.distance=6`) → **slide 顺序未变**。改用 JS 完整 PointerEvent 序列 (pointerdown + 10 个递进 pointermove + pointerup) → 重排成功 `[s_legacy_0, s_legacy_2, s_legacy_3, s_legacy_1, ...]`。说明 dnd-kit PointerSensor 需要**连续多次中间 pointermove** 才认作 drag，单跳跃式 move event 序列被 abort。 | (1) 真实 mouse drag 一般 OK (browser 输入 30-60 个 move event)；但 (2) **stylus / Wacom tablet / iPad Pencil** 在某些驱动下可能跳跃式发 event → drag abort = 用户拖不动；(3) 自动化测试 / accessibility tool 同样易碰；(4) **修复**：(a) 添加 `activationConstraint.tolerance: 5px` 容忍量；(b) 或改用 `MouseSensor + TouchSensor` 双套；(c) 至少加 fallback "select + arrow keys to reorder" 路径（与 F373 合并实施）。 | 新 family — "input device PointerEvent 完整性敏感"；F373 keyboard-fallback 缺失同根 |
+| F376 | **HIGH · thumbnail scale = 80/carWidth ≈ 0.074 → 缩略图文字 1-3px 完全不可读** | 源码 `thumbScale = 80 / carWidth` 假设 carWidth=1080 → scale 0.074。`THUMB_FONT_FAMILY` + `t.style.size * scale` 渲染 layer 文字：原 size 40px → 缩略图 fontSize 2.96px → **肉眼几乎不可见**。原 size 16px → 1.18px → 直接消失。R92 / R93 揭示当前 carousel 全是 background image 无 text layer 所以这条暂未触发，但**当 F334 / F342 修复让 text layer 真存在时立刻爆发**。 | (1) Filmstrip 缩略图的核心目的是让用户快速识别 slide → 文字不可读时只能看 background image 区分（恰好当前 6 slide 都是相似生活场景 → 用户无法快速定位 "我要的那张"）；(2) Canva/Keynote 缩略图通过 ① 加大 thumb size (120-160px) ② hover-zoom (悬停放大到 200%+) ③ 隐藏小字 + 仅显示 headline 缓解；(3) **修复**：(a) 短期 — `Math.max(8, t.style.size * scale)` 保证最小 8px (文字会失真但可读)；(b) 中期 — hover thumb 弹出 200px 大缩略图卡片；(c) 长期 — 缩略图只渲染 headline (size>=24px) 不渲染 body。 | 与 F334 / F342 layer-existence 家族未来联动 P0；R93 F358 effects 无 perceptual preview 同根 (visual decision input 缺失) |
+| F377 | **MEDIUM · + 按钮无 slide kind chooser（强制 "blank slide" 唯一路径）** | DOM 实测 + 按钮 (aria-label `添加页面`) 单击 → 直接 append 一张 empty bg 的空白 slide (`s_mp2rhs9m_1`)。无 dropdown "+ Blank / + Duplicate last / + From template / + From image upload"。Canva 的 + 按钮永远展开 dropdown 让用户选 slide template。Keynote/PowerPoint 也是 dropdown 默认。 | (1) "Blank slide" 实际上是**最少使用的选项** —— 用户更常 Duplicate 当前 slide 微调 (保留 palette / bg) 或 import 新图；(2) 当前路径强制 blank → 用户加一张后立刻要手动 paste 之前的 layout / regen image → 多走 3-5 个步骤；(3) **修复**：(a) + 按钮长按 / 右键 → 展开 menu "Blank / Duplicate current / Duplicate last / From image..."；(b) 短期 — 添加 `Cmd+D` 快捷键 (Duplicate)。 | R93 F354 Inspector globals 错位家族 (选项粒度缺失) |
+| F378 | **MEDIUM · drag pickup state 仅 `opacity: 0.4` —— 无 cursor change / 无 drop placeholder / 无 grab-grabbing 过渡** | 源码 `opacity: isDragging ? 0.4 : 1`，但 `cursor: pointer` 在拖动中不变 (Figma/Trello 标准是 `cursor: grab` idle → `grabbing` active)。drop zone 没有 placeholder shadow / dashed outline 提示"松手将放这里"。被 hover 的 drop target 也不高亮。 | (1) 用户 drag 时无法清楚预判松手的 drop 位置 → 多次试错；(2) 与 macOS / Trello / Notion / Linear 等业界 baseline 不一致 → 用户 muscle memory 失效；(3) **修复**：(a) drag start 改 cursor 为 grabbing；(b) drop target slot 加 `border: 2px dashed var(--accent)` placeholder；(c) ghost preview 跟随 cursor (用 `<DragOverlay>` from @dnd-kit/core)。 | R92 F336 cursor 不变化 / R93 F356 sliders 无 reset 共同 family "feedback 缺失" |
+| F379 | **MEDIUM · 缩略图 index badge "01" 强制白字深底（不随 theme 切换）** | 源码 `color: "rgba(255,255,255,0.9), background: "rgba(0,0,0,0.4)"`。明色 theme 下当 thumbnail bg 是 light image (例如本 carousel 第 3 slide 是白色咖啡杯) 时，白字 black overlay 是 OK 的；但 dark theme 下 + 缩略图也是浅色背景时，强制 overlay 显得突兀且与"editorial 克制"调性不符。layer-count badge "6L" 同问题。 | (1) 缩略图角标硬编色 = R82 hardcoded color leak 家族；(2) 与 CLAUDE.md "editorial · 克制 · 现代质感" tone 冲突 (overlay 黑 box 太重)；(3) **修复**：badge 改用 `var(--surface-overlay)` token 让 dark/light theme 各取适合的色；或采用 backdrop-filter blur 不依赖底色。 | R82 hardcoded color leak 家族第 N 处复发 |
+| F380 | **MEDIUM · canDelete = slides.length > 1 时 × 按钮静默消失（无 disabled + tooltip）** | 源码 `canDelete={slides.length > 1}`，当 carousel 只剩 1 slide 时直接不渲染 × 按钮。用户从 6 slides 删到 1 时不知道"为什么 × 没了"——是 hover 失效？是按钮位置变了？还是产品规则？无 disabled state + 无 tooltip "Can't delete the last slide"。 | (1) state silently changes UI affordance = 用户 mental model 错乱；(2) **修复**：(a) 改成 `disabled={!canDelete}` + 加 `title="Can't delete the last slide of a carousel"` 让按钮永远存在但灰显；(b) 或在 canDelete=false 时显示 tooltip on hover 解释为什么禁用。 | R85 F271 / R88 silent state change 家族 |
+| F381 | **LOW · click vs drag race（activationConstraint=6 太紧 → 抖手用户单击被误识别为微拖）** | 源码 `activationConstraint: { distance: 6 }` (6px CSS)。意味着用户按下 + 移动 >6px 才被判定为 drag，否则识别为 click → setCurrentSlide。但**精度不高的用户（trackpad / 老人 / parkinsons）单击时手会自然漂移 5-12px**，可能被识别为微拖 = `onDragEnd` 触发但 active.id === over.id → return → click 也不触发 → slide 既没选中也没排序。 | (1) low-precision 用户偶发性 "thumb 怎么点不亮" 困惑；(2) **修复**：(a) `activationConstraint: { distance: 12 }` 或改用 `{ delay: 250, tolerance: 8 }` (delay-based activation 更稳)；(b) 加 `onPointerDown` 高亮预选中 + `onClick` 真正 commit。 | R92 F336 cursor 无变化家族 |
+
+### 沉淀
+
+**M141 · PointerEvent 完整序列对照测试方法学（新增）**
+
+任何 drag-and-drop 功能 audit 必须执行两步对照：
+
+```
+Step 1: 用 computer.left_click_drag 一次性测试
+   ↓ 若成功 → drag-and-drop 基本可用，但仍需 step 2
+   ↓ 若失败 → 必走 step 2 排查"真坏 vs 合成事件不忠"
+Step 2: 用 JS 完整 PointerEvent 序列复测：
+   - new PointerEvent('pointerdown', ...)
+   - 10+ 个递进 pointermove
+   - new PointerEvent('pointerup', ...)
+   ↓ 若成功 → 是 step 1 工具事件序列不完整 (不是 production bug，但记录 stylus/tablet 风险)
+   ↓ 若失败 → 真 production bug，drag-and-drop 完全坏
+```
+
+R95 用此方法学定位 F375：原始 `left_click_drag` 失败是工具合成问题不是 production bug，但暴露 dnd-kit 对 event 完整性敏感的真风险。
+
+**M142 · a11y false advertising 审计 checklist（新增）**
+
+R95 F373 揭示 dnd-kit 自动注入 `aria-roledescription="sortable"` 但实际无键盘 reorder = **a11y semantic 谎言**。新建 checklist：
+
+```
+For every component advertising a11y semantic (role / aria-*), verify:
+- (a) `aria-roledescription="sortable"` → KeyboardSensor 已配 + ArrowKey 真实改 DOM 顺序?
+- (b) `role="button"` 加 `tabindex="0"` → Enter/Space 真实触发 onClick?
+- (c) `aria-haspopup="menu"` → 该元素真在 keydown 时显示 menu?
+- (d) `aria-expanded="true"` → DOM 真有展开的子元素?
+- (e) `aria-busy="true"` → 真有 in-flight 异步操作?
+```
+
+每个失败 = false advertising = 比无 a11y 更危险（用户被诱导期待后崩塌）。
+
+**M143 · 产品级 destructive-without-recovery 战略缺位（M140 升级）**
+
+R93 M140 提出 4-tier recoverability checklist。R95 F372 (delete slide) 是 Tier 3 第 4 处实证违规，加上 R88 F314 (Settings drawer nav 无 confirm) / R93 F355 (Regen-all) / R93 F353 (tab unmount drop) = **4 处独立 instance** 但同一战略缺位。
+
+**升级 priority**：从"实施 M140 4-tier checklist"升级为**"P0 产品级"AutoViral undo culture"战略 initiative"**。具体子项：
+1. Zustand store 加 history middleware (zustand/middleware/devtools + 自写 undo middleware)
+2. 全产品引入 `<UndoToast>` 组件 (5s 倒计时 + Undo 按钮)
+3. Settings drawer / Editor / Studio / Works delete 全部走统一 confirm + soft-delete + undo 流程
+4. Cmd+Z 全局 listener，按上下文路由到对应 store undo action
+
+无此战略，AutoViral 永远无法上 prod (任何 user 误删 = churn 风险)。
+
+### R96 候选（按战略权重倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP · P0 战略) | F372 + M143 联动 — 全产品 Cmd+Z + UndoToast 战略 initiative | F372 / 第 4 处 Tier 3 违规 | 不能再继续审计无 undo 的局部 bug；先做 plumbing |
+| 2 (CRITICAL · a11y) | F373 + M142 联动 — KeyboardSensor + 全产品 a11y semantic verify pass | F373 / WCAG AA blocker | Filmstrip 立刻可补；其它 surface 用 M142 checklist 普查 |
+| 3 (CRITICAL · 触屏) | F374 + R02 family — touch-friendly hover-or-touch 双兼按钮 visibility 战略 | F374 / 触屏永久不可见 | 与 R02-R05 同 family，需要全产品 hover-only affordance 普查 |
+| 4 (HIGH) | F375 + F378 联动 — dnd-kit 加 tolerance + drag pickup affordance (cursor:grab + placeholder + DragOverlay) | F375 / F378 / 行业 baseline 落后 | 单独可做；耗时 1-2 天 |
+| 5 (MEDIUM) | F377 — + 按钮加 dropdown (Blank / Duplicate / Template) | F377 / Canva baseline | 中等耗时 |
+
+---
+
 ## Round 94 — **R93 F355 CLOSED ✅ Regenerate-all destructive 单击补 `<RegenerateConfirmDialog>` 拦截 + 双 locale 实证 + 桥梁 data plane 强化**
 
 - **时间**：2026-05-12（`/loop 30m` cron 触发 R94；上轮 R91 后并行 audit agent 写 R92 (canvas direct-manipulation 深审) + R93 (Inspector 右栏深审)，本轮使用 R94 编号）
