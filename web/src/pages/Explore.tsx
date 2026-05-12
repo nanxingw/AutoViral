@@ -49,11 +49,20 @@ export default function Explore() {
     try {
       // The /api/trends/refresh endpoint runs sync research on the supported
       // platforms and returns when the new yaml lands; we then nudge react-query.
-      await apiFetch(`/api/trends/refresh`, {
+      const result = await apiFetch<{ collected: string[]; errors: string[] }>(`/api/trends/refresh`, {
         method: "POST",
         body: { platforms: ["youtube", "tiktok", "xiaohongshu", "douyin"] },
       });
-      setCollectStatus("queued");
+      if (result.collected.length > 0 && result.errors.length === 0) {
+        setCollectStatus("queued"); // full success
+        setCollectError(null);
+      } else if (result.collected.length > 0) {
+        setCollectStatus("queued"); // partial — show error detail alongside ✓
+        setCollectError(`${result.collected.length} ok, ${result.errors.length} failed: ${result.errors.join("; ")}`);
+      } else {
+        setCollectStatus("failed");
+        setCollectError(result.errors.join("; ") || "all platforms failed");
+      }
       qc.invalidateQueries({ queryKey: ["trends"] });
     } catch (e) {
       setCollectStatus("failed");
@@ -96,13 +105,18 @@ export default function Explore() {
             {collecting ? t("explore.collectInProgress") : `↻ ${t("explore.collectTrends")}`}
           </button>
           {collectStatus === "queued" && (
-            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 8, fontFamily: "var(--font-mono)", fontSize: 11 }}>
+            <span style={{ display: "inline-flex", alignItems: "baseline", gap: 8, fontFamily: "var(--font-mono)", fontSize: 11, flexWrap: "wrap" }}>
               <strong style={{ color: "var(--status-done)", fontWeight: 600 }}>
                 ✓ {t("explore.collectQueuedDone")}
               </strong>
               <span style={{ color: "var(--text-dimmer)" }}>
                 {t("explore.collectQueuedHint")}
               </span>
+              {collectError && (
+                <span style={{ color: "var(--status-warn, var(--text-dim))", fontWeight: 400 }}>
+                  · {collectError}
+                </span>
+              )}
             </span>
           )}
           {collectStatus === "failed" && collectError && (

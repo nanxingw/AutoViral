@@ -1,5 +1,7 @@
 // src/trends/sources/index.ts
-import { youtubeSource } from "./youtube.js";
+// Keep youtubeSource exported so future re-wiring (real RSS / YouTube Data
+// API v3) can opt back in without touching imports here.
+export { youtubeSource } from "./youtube.js";
 import { xiaohongshuSource } from "./xiaohongshu.js";
 import { agentFallbackSource } from "./agentFallback.js";
 import type { Source } from "./types.js";
