@@ -2,7 +2,7 @@ import { validateCollection } from "./schema.js";
 import type { TrendsCollectionResult, ValidationIssue, Platform } from "./schema.js";
 import type { RawTrendItem } from "./sources/types.js";
 
-interface EnrichDeps {
+export interface EnrichDeps {
   runCli: (prompt: string) => Promise<string>;
   maxRetries?: number;
 }
@@ -88,6 +88,9 @@ export async function enrichWithAnalysis(
     lastIssues = outcome.issues;
   }
 
+  // pipelineStatus "partial" signals callers (Task 13 pipeline) to skip strict
+  // schema processing. items intentionally empty rather than partially valid
+  // — avoids leaking unvalidated analysis fields into downstream consumers.
   return {
     platform,
     items: [] as any,
