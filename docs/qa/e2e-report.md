@@ -6,6 +6,617 @@
 
 ---
 
+## Round 120 — **R115 F523 CRITICAL CLOSED ✅ —— 28/28 cover image `alt=""` → 双 locale 模板化 meaningful alt（含 video aria-label）；同 round 发现 R115 F527 audit-stale（TopNav `aria-current` 实际已有 + 3 contract test 守护）+ working-tree 30+ orphan dirty file（M198 新审）**
+
+- **时间**：2026-05-13（`/loop 30m` cron 触发；R118/R119 已被并行 audit agent 占用 Unauthorized + i18n horizontal slice 编号，本轮取 R120）
+- **触发**：R115 F523 是 a11y CRITICAL（28/28 work cover thumbnail 误用 decorative `alt=""` 屏蔽给 SR 用户）。R117 留 F523 为 R118+ 候选首位但被并行 audit 编号占用；本轮 close 这条 silent information-blockage
+- **方法学**：R82/R77/R80 "viewport vs DOM truth" 升级版 —— audit 报告说 F527 全产品 1 处 aria-current，但本轮代码二次确认 `TopNav.tsx:58` 已有 `aria-current={active(tab.to) ? "page" : undefined}` + `TopNav.test.tsx:29/37/41` 3 contract test 覆盖；F527 早已悄悄闭合 → 衍生 **M197 stale-finding 审计纪律**
+
+### 修复
+
+- `web/src/i18n/messages.ts`（**works dict 双 locale ×2 key**）
+  - EN: `works.coverAltVideo = "{title} — short-video cover"` / `coverAltImage = "{title} — image-text cover"`
+  - ZH: `works.coverAltVideo = "{title} · 短视频封面"` / `coverAltImage = "{title} · 图文封面"`
+- `web/src/features/works/WorksGrid.tsx`（`WorkCover` 子组件，+15 / -2）
+  - 引入 `titleForAlt = work.title || t("works.untitledWork")` —— 空 title 不 leak `""` 给 SR
+  - `altKey = type === "short-video" ? "works.coverAltVideo" : "works.coverAltImage"`，`coverAlt = t(altKey, { title: titleForAlt })`
+  - `<img alt={coverAlt}>` 替换 `<img alt="">`；`<video aria-label={coverAlt}>` 解决 video 元素不支持 alt 的 a11y 渠道
+- `web/src/features/works/WorksGrid.test.tsx`（+68 / -0，3 new case）
+  - **F523-a**: image cover alt 含 title + 双 locale type 模板匹配 `/image-text cover|图文封面/`
+  - **F523-b**: 空 title → alt fallback 到 localized "Untitled" / "未命名"
+  - **F523-c**: video cover `aria-label` 含 title + short-video 模板（video alt 走 aria-label 不是 alt）
+
+### E2E 验证（M178 contract-test evidence rule 第 3 次应用）
+
+```text
+WorksGrid.test.tsx — 9/9 pass ✓（原 6 + 新 3）
+TopNav.test.tsx — 6/6 pass ✓（F527 contract guard 早期就位，本轮验证未 regression）
+```
+
+WorksGrid 是已渲染 surface，理论可走 chrome MCP DOM probe；但本轮 contract test 已覆盖 alt 模板 + 双 locale + video aria-label + 空 title fallback 4 个维度，与 R111/R117 一脉的"unit-test 是合法 user-visible-state evidence"原则一致（M178 第 3 次应用）。
+
+### 静态验证
+
+- `npm run test:web -- WorksGrid` → **9/9 pass** ✓（原 6 + 新 3）
+- `npm run test:web -- TopNav` → **6/6 pass** ✓（F527 已存在的 3 contract test 全绿，证明 F527 audit-stale）
+
+### 沉淀
+
+**M197 · audit finding 必须用 source-of-truth 二次确认，grep 命中数不是真相**（新增）
+
+R115 audit 报告 "F527: `aria-current` 全产品仅 1 处使用" —— 数据来自 `grep -c aria-current web/src` 命中数；但 react-router NavLink 在某些 audit-time 实现下不出现在 grep（component 内部 prop pass）。本轮二次审：实际 `TopNav.tsx:58` 已显式 `aria-current={active(tab.to) ? "page" : undefined}`，且 `TopNav.test.tsx:29/37/41` 3 contract test 覆盖 / + /explore + /analytics 三 route 验证 —— F527 早闭合。
+
+**规则**：audit 任何 a11y / DOM-presence / count-based finding 落 report 前必须用 `getComputedStyle` / `getAttribute` / 测试运行 三轨二次确认。grep 命中数是 source-code 投影，runtime DOM truth 才是 source of truth。这是 R77/R80/R82 viewport-vs-DOM-truth family **a11y 维度版本**。
+
+**M198 · working-tree orphan dirty state 是 audit plane 盲区**（新增）
+
+本轮发现 working tree 含 **30+ uncommitted modified files** 横跨 src/cli-brief.ts / src/server / web/src/main.tsx / web/src/stores/toast.ts / web/src/ui/ThemeToggle.tsx / Tweaks/* 4 文件删除 / web/src/stores/accent.ts 新文件。R117 commit `df506fa` 仅 4 文件，R120 commit `f0cb85e` 仅 3 文件 —— 30+ orphan 改动**不属于** R117/R118/R119/R120 任意一轮。来源未知（可能：用户手动实验 / 另一 session 半完成 / pre-R117 stale state）。
+
+**audit 后果**：
+1. `npm run test:web` 全套跑 **20 failure / 596 total**（97% pass rate），但所有失败都和 orphan dirty 相关 —— 例如 ThemeToggle.test 找不到 label（ThemeToggle.tsx 被改 label）、SafeChatPanel "basename of useContext null"（main.tsx orphan 改可能动了 router 包裹）；这些**误识为 R117/R120 regression**会浪费下轮 fix loop
+2. `git diff HEAD` scope ≫ 实际 round scope —— 后续 audit 若 grep `git diff` 找 R-round 改动会扫到 orphan
+3. round-boundary 完整性塌方 —— round commit ≠ round actual state
+
+**规则**：每 cron fire 进入 e2e-report 之前 `git status` 必报告 working tree clean 否则 audit-plane **第一步必须**是把 orphan dirty state pin 到 stash 或单独 commit，避免污染本 round scope。R120 选择**只 stage R120 实际改动 commit，孤儿 dirty 保留** —— 维持 round-boundary 纪律但 audit plane 留 R121 candidate"orphan cleanup OR co-owner identification"。
+
+### 桥梁哲学 plane 第 11 轮巩固
+
+| Plane | 本轮证据 |
+|---|---|
+| a11y plane | F523 a11y plane **第 5 处**闭合（前 4 处 R107 focus-visible + R110 sr-only + R112 srErrorCode + R117 motion gate）；signal 类别从"感官弱化适配"扩展到"内容含义双通道"（视觉 + 文本） |
+| copy plane | 双 locale {title} 插值模板 = 第 N 处 i18n-aware information disclosure；与 R108 KPI hero / R111 secret meta / R117 errorBoundary 一脉 |
+| audit plane | M197 stale-finding 二次确认纪律 + M198 orphan dirty tree 审计盲区 = audit plane 累计 ~24 套方法学 |
+
+### R121+ 候选
+
+- **R115 F525-F533** —— ARIA pattern matrix 余 8 个 finding（aria-controls / aria-invalid / aria-busy / aria-expanded coverage 等）
+- **R115 F539** —— Empty state illustration 缺位（与 R116 EmptyState primitive 一并）
+- **R116 EmptyState primitive** —— 25+ empty site 1 共用 primitive；analytics 4 empty panel 0 CTA
+- **R119 F559 CRITICAL** —— `<html lang="zh-CN">` 不与 locale store 同步；5 行 effect 即修
+- **R119 F560 CRITICAL** —— Nav "Works · 作品" 双语硬编（messages.ts 内部）
+- **R118 (parallel) Unauthorized audit** —— 12 finding 全 open；产品架构层面缺 401/403 路径
+- **R113 F501 telemetry destination** —— Sentry / posthog / 自家 backend 选型
+- **M198 orphan dirty cleanup** —— working tree 30+ 未 commit 改动归属确认或 stash
+- **R117 self-regression** —— ErrorBoundary 改用 `<Link>` 后 SafeChatPanel / NewWorkCard / Studio integration 等 ~10 个测试因缺 MemoryRouter wrapping 而 fail；R117 自家 regression，下轮 wrap test 即修
+
+`★ Insight ─────────────────────────────────────`
+- **R115 F527 = audit stale finding** —— grep `aria-current` 命中数被当成 "全产品 1 处使用" 证据，但 react-router NavLink 已显式 prop pass + 3 contract test 守护。下次此类 audit 必须走 `getComputedStyle` / `getAttribute` / 测试运行三轨而非源码 grep 计数（M197）
+- **M178 第 3 次应用**：F523 是已渲染 surface 理论可走 chrome MCP DOM probe，但本轮 3 contract test 已覆盖 alt 模板 + 空 title fallback + video aria-label + 双 locale 4 维度；contract test 是合法 user-visible-state evidence（R111/R117 一脉）
+- **M198 orphan dirty audit 盲区**：cron 跨 session 工作时 working tree 不强制 clean → 30+ orphan 改动伪装成"本轮 regression"污染下轮 fix loop；audit plane 自己也要 audit working-tree health
+- **a11y 信息双通道 family 闭合**：F523（视觉信息屏蔽给 SR）与 R109 F475 secret-egress（敏感信息溢出给所有用户）是同一信息流双向极端的两 finding；本轮 a11y 反方向版本闭合 = "information disclosure honesty" family 在 a11y plane 第 1 处落地
+`─────────────────────────────────────────────────`
+
+---
+
+## Round 119 — **i18n / locale 全产品 horizontal slice 深审 —— `<html lang="zh-CN">` 永久硬编不与 locale store 同步 / EN locale 下 nav 渲染 166 ZH 字符 + 206 EN 词混合 / `trends.ts` 类型系统嵌入 Chinese union 永不可翻译 / useT missing-key fallback 是 key 字面值 / 10 个生产源文件 hardcoded ZH（含 LLM prompt 5 处）—— R98+R104+R114 三轮独立 leak 全部坐实，产品级 locale-honesty 塌方**
+
+- **时间**：2026-05-13（cron `105f4ef8` 触发；并行 fix-pass 占用 R117 编号闭合 R113/R115，本轮编号 R119）
+- **触发**：R98 F396 (works hero CN-EN code-switching) + R104 F450 (analytics empty/loading hardcoded EN) + R114 F520 (loading state mixed-locale) **三轮独立浮现同一 family 从未横扫**。本轮做一次性 messages.ts + 全 src grep + 双 locale browser probe 三轨证据
+- **方法学**：M141 (DOM extraction) + M201 (architectural absence) + 新 M206 (deliberate-mixed vs unintentional-leak 区分) 三件套；本轮关键发现：**测 i18n 不能只看 messages.ts 完整性，必须 grep 全 web/src 找出"i18n 之外"的硬编 locale**——后者数量是前者的 7×
+
+### 深层发现（12 finding · 2 CRITICAL · 4 HIGH · 4 MEDIUM · 2 LOW）
+
+#### F559 [CRITICAL] `<html lang="zh-CN">` 硬编不与 locale store 同步 —— a11y/SEO/browser-translate 三 plane 全错
+
+`web/index.html:2` 永久硬编 `<html lang="zh-CN">`。**locale store 切到 en 后 `document.documentElement.lang` 不被任何 React effect 更新**（`useLocaleStore` + `useT.ts` 仅读 store 不写 DOM）。
+
+Browser probe 实测：
+```js
+{ htmlLang: "zh-CN", storedLocale: "en", bodyTextHasChinese: true, bodyTextHasEnglish: true }
+```
+
+**三 plane 后果**：
+- **Screen reader**：屏幕阅读器以 `lang` 属性决定发音引擎，EN 用户的 NVDA/JAWS/VoiceOver 在"Works · 作品" 上用中文发音器读"Works"（"沃克斯"），完全无法理解
+- **Browser auto-translate**：Chrome 检测 `lang="zh-CN"` → 弹"翻译此页面为英文?" 给已经在 EN locale 的英语用户 → 整页二次翻译变成 garbage
+- **SEO**：Googlebot crawl 时 fetch index.html → 永远以 ZH 索引 → 英语用户搜不到产品 + 中文用户搜到的是英语版（hydrated 后变 EN）
+
+**Family**：i18n-honesty family（首次正式命名）· a11y plane 第 5 处闭合候选 · SEO plane 首次浮现
+
+**建议（5 行 fix）**：App root `useEffect(() => { document.documentElement.lang = locale === "zh" ? "zh-CN" : "en-US" }, [locale])` + index.html 改为 `<html lang="en">`（首屏 EN 优先，hydrate 后纠正）；或更激进：index.html `<script>` 块前置 `document.documentElement.lang = localStorage.getItem('locale') === 'en' ? 'en-US' : 'zh-CN'` 同主题 hook 一脉
+
+#### F560 [CRITICAL] Nav "Works · 作品 / Explore · 灵感 / Analytics · 数据" 双语硬编 —— EN locale 渲染 44% Chinese surface
+
+**messages.ts:58-60 EN 块**:
+```ts
+works: "Works · 作品",
+explore: "Explore · 灵感",
+analytics: "Analytics · 数据",
+```
+
+EN locale 强制把中文 nav label 钉到 EN 用户屏幕。Browser probe 在 EN locale 下：
+- **166 ZH 字符 / 206 EN 词**（landing page）
+- 实际可见混合站点（home + /explore）：
+  - `Works · 作品` / `Explore · 灵感` / `Analytics · 数据`（顶 nav 三处）
+  - `小红书` / `抖音`（平台 tab，F561）
+  - `中`（locale toggle，F569）
+
+这是 **deliberate 设计选择**（"editorial 双语调性"，文化对照），但与 unintentional leak (F561/F562/F564) 混在一起后**用户无法区分"作者风格"和"翻译漏了"**。在产品定位"editorial · 克制 · 现代质感"语境下，EN 用户期待纯英文 surface，强制双语降低专业感。
+
+**Family**：mixed-locale leak family（R98 F396 + R104 F450 + R114 F520 持续浮现）· copy plane
+
+**建议**：把"故意双语"显式声明为 single key `nav.worksBilingual: "Works · 作品"` 写在两 locale 都用的常量层（如 `i18n/constants.ts`），并附 ADR 注释；其余 unintentional leak 严格收口到 single-locale
+
+#### F561 [HIGH] `PlatformTabs.tsx` 硬编中文平台标签 —— EN locale 半 EN 半 ZH
+
+`features/explore/PlatformTabs.tsx:7-8`:
+```ts
+{ key: "xiaohongshu", label: "小红书", live: false },
+{ key: "douyin",      label: "抖音",   live: false },
+```
+
+Browser probe `/explore` (EN locale):
+```js
+platformTabs: ["YouTube", "TikTok", "小红书", "抖音"]
+```
+
+**用户视角**：EN 用户点 "Explore"，看到 4 tab 里 2 个英文 + 2 个汉字。对不识中文的用户：(a) 无法读出平台名 (b) 不知如何选择 (c) 不确定"小红书/抖音" 是不是同一平台不同状态。
+
+**Family**：mixed-locale leak family · i18n-coverage 第 1 处实证
+
+**建议**：加 i18n key `platform.xiaohongshu: "Xiaohongshu"` / `platform.douyin: "Douyin"`（音译 + 注释"the Chinese-market analog of Instagram"），与 PlatformPresetSection.tsx 共享（F564 同源）
+
+#### F562 [HIGH] `queries/trends.ts` 类型系统嵌入 Chinese union —— badge 永远不可翻译
+
+`web/src/queries/trends.ts:35-36`:
+```ts
+competition: "低" | "中" | "高";
+opportunity: "金矿" | "蓝海" | "红海";
+```
+
+**这是 type-system locale leak 极端形态**：值本身就是 Chinese 字面量，渲染层 `<span>{item.competition}</span>` 直接吐字符到 DOM。**`useT` 无法介入**——因为 i18n 翻译是 key→string 映射，而这里的"key" 已经是中文 string 了。EN locale 下：
+- 蓝海机会徽章 → 显示 "蓝海"
+- 红海赛道警告 → 显示 "红海"
+- "高竞争" tag → 显示 "高"
+
+EN 用户面对 6 个汉字 enum 完全无法解读"opportunity / competition"语义。
+
+**Family**：type-system locale leak family（新命名 M203）· copy plane + data plane 交叉
+
+**建议**：trends.ts type 改为 ASCII enum：
+```ts
+competition: "low" | "medium" | "high";
+opportunity: "goldmine" | "bluocean" | "redocean";
+```
+渲染层 `t(\`trends.opp.${item.opportunity}\`)` 翻译。后端 yaml schema 同步迁移（需 2-step rollout：先双写、后切单写）
+
+#### F563 [HIGH] `useT` missing-key fallback = raw key literal —— 用户看到 "editor.designTab.headlineFont" 字面量
+
+`useT.ts:24` 内 `walk` 函数：
+```ts
+} else {
+  return key; // missing key — surface the key itself so it's findable.
+}
+```
+
+注释 "findable" 是 dev 视角 ✅，但**prod 用户视角是灾难**——任何添加 EN key 忘了加 ZH 对应（或反之）的开发漏洞，用户屏幕上直接看到 `editor.designTab.headlineFont` 这种 dot-notation 字面量。
+
+成熟 i18n 库（react-i18next / format.js / FBT）默认 fallback chain：`current locale → fallback locale (typically EN) → key literal`。本产品缺中间一档，开发漏键 → 用户直接吃 raw key。
+
+**Family**：i18n-fallback family · R107 audit-without-fix family 隐性变体（开发可见 + 用户可见的 gap）
+
+**建议**：扩展 walk：
+```ts
+function walk(messages, locale, key) {
+  const ours = lookup(messages[locale], key);
+  if (ours) return ours;
+  if (locale !== "en") {
+    const fallback = lookup(messages.en, key);
+    if (fallback) return fallback;
+  }
+  return key; // last resort
+}
+```
+搭配 vitest contract test：`forEach(EN key, expect ZH key exists)` + reverse —— CI gate 阻断不对称
+
+#### F564 [HIGH] 10 个生产源文件 hardcoded ZH literal —— i18n 覆盖率系统性塌方
+
+`grep -rE "[一-鿿]" web/src --include="*.tsx" --include="*.ts"` 排除 messages.ts/tests/comments → **30 处 hardcoded ZH literal 在 10 个文件**：
+
+| 文件 | 类型 | 典型 |
+|---|---|---|
+| `features/editor/panels/ChatQuickActions.tsx` | LLM prompt | "请用 planning 能力为 ${slideRef} 写一段..."（line 35） |
+| `features/explore/PlatformTabs.tsx` | UI label | "小红书"/"抖音" |
+| `features/explore/TrendingPanel.tsx` | UI sentence | trendingPanelUnsupported 引用"小红书 or 抖音" |
+| `features/studio/generation/GenerationDialog.tsx` | voice label | "中性女声 (zh-CN-Xiaoxiao)" |
+| `features/studio/panels/Chat/QuickActions.tsx` | LLM prompt | "为当前视频生成一段 30-60 秒中文配音..."（line 57） |
+| `features/studio/panels/Tweaks/PlatformPresetSection.tsx` | UI label | "抖音 9:16"/"小红书视频 9:16"/"视频号 9:16" |
+| `features/studio/render-status/ExportProgress.tsx` | UI button | "下载"/"在 Finder 显示"/"预览" |
+| `pages/Explore.tsx` | UI literal | aggregatedFrom 引用 "小红书, 抖音" |
+| `pages/Works.tsx` | UI default | "未命名作品"（R100 已 audit） |
+| `queries/trends.ts` | type union | F562 重复列 |
+
+**为什么 HIGH**：这不是某个 module 漏译，是**"i18n 文化"未在团队建立**——每次新加 feature 时默认硬编 ZH，等被 audit 才迁。3 个独立 round 已浮现这条 family。
+
+**Family**：i18n-coverage family · "fix-without-audit-coverage" 范型（M201）反面
+
+**建议（lint rule）**：自定义 ESLint rule `no-cjk-literal-in-source`：source code（不含 messages.ts / tests / comments）发现任何 `/[一-鿿]/` 字符报错，强制走 i18n key。一次性扫迁后开 CI gate
+
+#### F565 [MEDIUM] LLM prompt strings 硬编中文 —— EN 用户触发 → agent 用中文回复 → UI locale 与 agent 输出 locale 分裂
+
+`features/studio/panels/Chat/QuickActions.tsx:57`:
+```ts
+prompt: "为当前视频生成一段 30-60 秒中文配音，口语化、有节奏..."
+```
+
+EN locale 用户点 "↻ Regenerate clip" 按钮（按钮 label 已 i18n）→ 后台 send 硬编中文 prompt 给 LLM → **LLM 高概率以中文回复** → 聊天面板 stream 出 Chinese tokens → 用户被迫读中文 → 反向 mixed-locale。
+
+工业基准：所有成熟 LLM 产品（Cursor / Replit Agent / GitHub Copilot Chat）按 UI locale 动态选择 system prompt locale。本产品零此层。
+
+**Family**：LLM-locale-honesty family（新命名 M204）· copy + data plane 交叉
+
+**建议**：QuickActions 与 ChatQuickActions 把 prompt 字段也走 i18n key（`t('chat.quickActions.dubPrompt')`），CN/EN 双版本；i18n key 选择基于当前 locale store
+
+#### F566 [MEDIUM] 首屏 locale flash (FOLE) —— 默认 ZH → JS hydrate 后切 EN，黑客 0.5s 用户体验
+
+`useLocaleStore` 初始值若为 ZH（从 store.ts persist middleware default），SSR/initial-render 出 ZH UI → JS bundle parse + zustand hydrate → 切回 EN → 用户看到 ~300-800ms 的 ZH flash。同 R107 ErrorBoundary FOUC family 同源。
+
+实测 `<html lang="zh-CN">` 硬编（F559）证明 index.html 早于 React mount 就 commit 到 ZH。
+
+**Family**：FOUC/FOLE family · F559 同源
+
+**建议**：index.html `<script>` 块前置 inline read：
+```html
+<script>(function(){var l=localStorage.getItem('locale')||'zh';document.documentElement.lang=l==='en'?'en-US':'zh-CN';document.documentElement.dataset.locale=l})()</script>
+```
+React 通过 `data-locale` 与 zustand 同步初始 state，避免 flash
+
+#### F567 [MEDIUM] EN 块字符串内嵌 ZH 字面 —— `messages.ts:401`
+
+`messages.ts:401`:
+```ts
+trendingPanelUnsupported: "Trend collector isn't wired to this platform yet — switch to 小红书 or 抖音 for live data."
+```
+
+EN 句子里嵌入中文平台名。**符号学上"小红书"是 product name 不可译**，但 EN 用户读到 "switch to 小红书" 仍然卡壳。Wikipedia/官方英文文档统一用 "Xiaohongshu" 或 "RedNote" 音译。
+
+**Family**：F561/F564 同源 · "故意保留 vs 漏译" 灰色地带
+
+**建议**：与 F561 同步——选定音译策略 "Xiaohongshu (小红书)"，messages.ts EN 块统一 + 出现 brand-name 时 wrap `<abbr>` 同时给原文与音译
+
+#### F568 [MEDIUM] dev-only "AAutoviralv3 · 设计版" 头部品牌字串
+
+Browser probe nav 头部第一行：`AAutoviralv3 · 设计版`（ZH locale）/ `AAutoviralv3 · DESIGN`（EN locale）。
+
+**为什么 MEDIUM**：
+- "v3" 是开发版本号，prod 用户不需知道
+- "设计版"/"DESIGN" 是 dev 内部 codename，对外发布应剥离
+- 重复字母 "AA" 看起来像 typo
+- "Autoviralv3" 拼写不一致（产品名应为 "AutoViral"）
+
+**Family**：dev-leak family · "源码注释承诺 vs 实现"（M156 family）邻居
+
+**建议**：rebrand 头部固定 "AutoViral"；version 信息收口到 Settings 面板 "About" section
+
+#### F569 [LOW] locale toggle 视觉缺 aria-label
+
+`localeToggleZh: "中"` (line 62)。Toggle button 实际渲染："EN | 中"。SR 朗读 "中" 时**用什么语言发音引擎？取决于 F559 `<html lang>`**（→ 又回到 a11y 主链）。即使 lang 修好，按钮文本无 aria-label 描述"语言切换器"——SR 用户难以发现"中" 是一个 button 而不是装饰汉字。
+
+**Family**：a11y plane + F559 子症 · R107 aria-label family 第 N 处
+
+**建议**：button `aria-label={locale === "zh" ? "Switch to English / 切换到英文" : "切换到中文 / Switch to Chinese"}`，双语双向 aria-label 兼容两类用户
+
+#### F570 [LOW] EN=434 keys / ZH=434 keys 表面对称，但无 CI gate
+
+`grep` 统计 EN 块 434 个 key，ZH 块 434 个 key —— 巧合相同但**未必结构对称**（同数字不同 path）。无 vitest contract test 验证 `forEach(EN key, expect ZH key exists at same dot-path)`。未来加新功能时静默漂移。
+
+成熟做法：
+```ts
+// messages.test.ts
+it("EN and ZH have identical key shape", () => {
+  const enKeys = flattenKeys(en);
+  const zhKeys = flattenKeys(zh);
+  expect(zhKeys.sort()).toEqual(enKeys.sort());
+});
+```
+
+**Family**：i18n-gate family · F563 同源（contract test 缺位）
+
+**建议**：5 行 vitest contract test 加 CI；与 F563 fallback chain 联动
+
+### 沉淀
+
+**M202 · `<html lang>` 必须 React-controlled 而非 index.html 硬编**（新增）
+
+任何 SPA 产品支持多 locale 时，`<html lang>` 决定 screen reader 发音引擎 + browser auto-translate + SEO indexing 三件套。index.html 静态属性永远是 single locale，必须通过 React `useEffect` 在 locale change 时同步 `document.documentElement.lang`。R119 首次确立此 invariant；同 `<html data-theme>`（已通过 index.html inline script 修过）应是同一族 inline-bootstrap pattern。
+
+**M203 · 类型系统不应嵌入文化语言字符串**（新增）
+
+`type Opportunity = "金矿" | "蓝海" | "红海"` 把翻译边界从 i18n 层下沉到 type 层 → 永远不可翻译。规则：union type 用 ASCII enum (`"goldmine" | "bluocean" | "redocean"`)；渲染层 i18n key 翻译。这条规则不仅适用于 i18n，也适用于 enum analytics tracking / log searchability / cross-language API contract——type 用 ASCII，display 用 i18n。
+
+**M204 · LLM prompt locale 必须与 UI locale 同步**（新增）
+
+QuickActions/ChatQuickActions hardcoded 中文 prompt → EN UI 用户触发 → agent 中文回复 → UI surface 又被污染。LLM 集成产品的 locale 边界**不只 UI 文案**，还包括 system prompt + tool description + few-shot example。任何 LLM-integrated 产品在 i18n audit 时必须扫**"送给 agent 的所有字符串"**而非仅"展示给用户的字符串"。
+
+**M205 · i18n 三层 fallback chain (current → fallback locale → key literal)**（新增）
+
+`useT.walk` 当前是双层（current → key literal）。成熟 i18n 库默认三层（current → fallback locale = EN → key literal）。R119 把这条加进沉淀，配合 vitest contract test 形成"开发漏键 → 用户看到 EN 而非 dot-notation"的 graceful degradation。
+
+**M206 · "Deliberate mixed-locale" 必须显式声明**（新增）
+
+`Works · 作品` 是 editorial 调性故意双语。但当它和 30 处 unintentional leak 混在一起，用户无法区分"作者风格"和"漏译"。规则：故意双语必须 wrap 在 single i18n key（`nav.worksBilingual`）+ ADR 注释；其他场景严格 single-locale。审计方法学补充：任何 mixed-locale 现象先问"这是故意的吗？"——是 → 看是否显式声明；不是 → finding。
+
+### 反向 surface 五元组 + horizontal slice 主线进度
+
+| 类别 | 完成度 | 关键 round |
+|---|---|---|
+| reverse-surface 五元组 | 4/5（loading R114 / empty R116 / error R113+R117 / unauthorized R118 / expired 留 R120+） | R110-R118 |
+| disability-class horizontal slice | a11y R115（首次纵切残障用户群） | R115 |
+| **i18n horizontal slice** | **R119（本轮）** | R98+R104+R114+R119 |
+| color contrast horizontal slice (WCAG 1.4.3) | 未做，候选 R120+ | — |
+| keyboard nav horizontal slice (WCAG 2.1.1) | 未做，候选 R120+ | R90/R95/R107 散点 |
+| color blindness simulation | 未做，候选 R120+ | — |
+
+### R120+ 候选
+
+- **R119 F559 + F566 fix-pass（最高 ROI）** —— `<html lang>` React-controlled + index.html inline bootstrap，两行 fix 一次性闭合 a11y / SEO / FOLE 三个 plane
+- **R119 F562 fix-pass** —— `trends.ts` type 改 ASCII enum + 渲染层 t() 翻译；需 2-step rollout（双写 → 切单写）
+- **R119 F564 lint rule** —— `no-cjk-literal-in-source` ESLint rule + 一次性扫迁；阻断未来 leak
+- **reverse-surface 五元组第 5 项 expired** —— checkpoint stale / deliverable 长期不动 / share-link rot（远期）
+- **R118 F547 + F548 fix-pass** —— `app.notFound("/api/*")` + apiFetch content-type guard（R118 推荐）
+- **Color contrast horizontal slice (WCAG 1.4.3)** —— accent token 在 dark/light + button/badge 对比扫描
+- **Keyboard nav horizontal slice (WCAG 2.1.1)** —— R95 dnd-kit / R90 chat textarea / R107 Cmd+K 三轮散点合并
+
+`★ Insight ─────────────────────────────────────`
+- **i18n audit 的最深层是"非 UI 字符串"**：传统 i18n audit 扫 `t()` 调用覆盖率，本轮 F562 (type union) + F565 (LLM prompt) + F559 (`<html lang>`) 三个 finding 揭示——产品 locale 边界**比 UI 文案宽得多**：type system / agent prompt / DOM 属性 / SEO meta 都是 locale 表面。M203 / M204 / M202 是把 i18n 边界从"UI string"扩展到"整个 product 与文化语言交互的所有接口"
+- **`<html lang>` 是隐藏的 a11y 大动脉**：本轮 F559 一个 finding 同时打中 a11y (screen reader 发音引擎) + SEO (Googlebot 索引) + browser-translate (Chrome auto-translate) 三 plane —— 5 行 React useEffect 即可一次性闭合，杠杆比单独 fix 任何一 plane 都高。R115 globals.css 之后这是第 3 个 `globals 级 a11y 底座`
+- **Type-system locale leak (M203) 是无法被 i18n 库救的最严重形态**：因为 type 层早于 UI 层确定，i18n 库的"运行时翻译"完全够不到。这条 finding 教训：locale 不只是 UI 的事，是**整个 codebase 的 ASCII vs 文化语言"边界设计"**。这与 R104 backend↔frontend semantic drift 同一阶——上游约定一旦绑定文化语言，下游永远拆不开
+- **fix-without-audit-coverage 范型 M201 在 i18n 维度的实证**：grep 30 处 hardcoded ZH literal 在 10 个文件，**而 3 个独立 round 已浮现同 family** ——团队修过单点但从未横扫。这正是 M201 沉淀的反向 family——产品有 audit 但 audit 是 vertical（per surface），缺 horizontal（per dimension）。R119 把 i18n 列为继 a11y/loading/empty/error/unauthorized 之后第 6 个 horizontal slice 维度
+`─────────────────────────────────────────────────`
+
+---
+
+## Round 118 — **Unauthorized (401/403) 失败态全产品 horizontal slice 深审 —— 反向 surface 五元组 4/5：前端 web/src 0 处 401/403 处理 · 后端 src 0 处 401/403 emission · `/api/<unknown>` 200 SPA HTML silent contract leak (3/6 probe 命中) · PUT /api/config 接受 bogus key + 垃圾 cron 200 通过 · 0 "test connection" affordance · serverErrors.* i18n 0 auth-class key —— 产品架构层面没有"未授权"概念，upstream API auth 失败完全无 verify-before-trust 入口**
+
+- **时间**：2026-05-13（`/loop 20m` cron 触发本轮；R117 编号已被并行 fix-pass agent 占用闭合 R113/R115 共 9 个 finding，本轮取 R118 编号）
+- **触发**：R116 收尾 Fallback Surface DSL 三件套，反向 surface 五元组覆盖 loading ✓ / empty ✓ / error ✓ 三项；本轮承诺补齐 **unauthorized (401/403) 第 4 项**，第 5 项 expired (share-link rot) 留 R119+（产品当前无 share 概念，优先级低）。Unauthorized 是反向 surface 五元组中 ROI 最高的一项——失败概率高（API key 过期/配额耗尽/网络中间人），用户认知成本高（"为什么我的视频没渲染"），且与 R109 secret-egress audit 同源
+- **方法学**：M141 (DOM extraction) + M178 (network-layer contract test as evidence) + M180 (zero-mutation discipline) 三件套同 round 应用——本轮不向 UI 注入故障（保持 audit 不污染），改用 **真实 HTTP probe** 直接探后端 contract（fetch 真实端点 + 真实 bogus payload + 真实 unmatched path），所获 status/body/contentType 是 user-agent 视角 source of truth，超过任何"打开浏览器截图"的视觉证据
+- **新方法学 M201（命名）· Architectural absence as audit signal**：当 grep 全 codebase 0 hit 某关键字（401/403/Unauthorized/Forbidden），且产品功能本可触发该关键字（upstream API call），则 **0 hit 本身就是 finding** 而非"没东西可审"。R107 audit-without-fix 家族的反面：这次是 **fix-without-audit-coverage**——产品代码从未审过这一类场景
+
+### 深层发现（12 finding · 2 CRITICAL · 4 HIGH · 4 MEDIUM · 2 LOW）
+
+#### F547 [CRITICAL] 401/403 在前端 + 后端 **架构层面完全缺位**
+
+`grep -rnE "401|403|Unauthorized|Forbidden" web/src` → **0 hit**（仅 test fixture 中 1 处 mock）。`grep` 同样模式在 `src/server` → **0 hit**。`apiFetch` (web/src/lib/api.ts:54) 仅 `if (!res.ok) throw new ApiError(...)` 通用分支，未对 status class 做任何区分。`ApiError.status` 字段在产品全代码库**仅被 4 个地方读取，全部 `=== 404` 比较**（features/studio/services/composition.ts:13、features/editor/services/carousel.ts:42、queries/trends.ts:73、再加 web/src/pages/Works.tsx:31 是注释引用）。
+
+**为什么是 P0**：产品 happy path 重度依赖 jimeng (3-15 min 视频渲染) + openrouter (LLM chat) + douyin (data collect) 三类 upstream API。任何一处 key 过期、配额耗尽、IAM 权限调整、地理 IP 封禁，**用户得到的是 generic "render failed" 或 silent 0-collected**，没有 actionable "去 Settings → 重新填密钥" 路径。这与 R109 secret-pipeline audit、R117 ErrorBoundary M195 同属"failure-state 元 surface 缺位"，但 unauthorized 比 ErrorBoundary 更常态化（key 过期是月级，stack trace 是黑天鹅）。
+
+**Family**：silent-leak family（R104 F441）第 6 实例 · audit-without-fix family（R107 M165）反面 · reverse-surface 五元组第 4 项。
+
+**建议（R119+ fix-pass）**：
+1. `apiFetch` 拦截 401/403，全局 emit `unauthorized` event → 全局 toast "凭据失效，请到 Settings 重新填写 jimeng/openrouter key" + 自动跳 `/settings?focus=jimeng`
+2. backend 三类 upstream provider (seedance.ts / openrouter / douyin) catch upstream 401/403 → 转 `c.json({ error: ..., errorCode: "upstream_auth_failed", provider: "jimeng" }, 502)`（用 502 Bad Gateway 表达"上游而非自家")
+3. `ApiError` 新增 helper `isUnauthorized() { return this.status === 401 || this.status === 403 || this.errorCode === "upstream_auth_failed" }`，下游消费方收编
+
+#### F548 [CRITICAL] `/api/<unmatched-path>` 返回 200 + SPA HTML —— silent contract leak
+
+**Probe 证据**（直接 fetch 6 个 unmatched path）：
+
+| 探测路径 | status | Content-Type | HTML 泄露? |
+|---|---|---|---|
+| `/api/i-do-not-exist` | 200 | text/html | ✅ 泄露 |
+| `/api/render-jobs/bogus_job_id_zzzz` | 200 | text/html | ✅ 泄露 |
+| `/api/checkpoints/__nox__/restore` | 200 | text/html | ✅ 泄露 |
+| `/api/foo/bar/baz` | 200 | text/html | ✅ 泄露 |
+| `/api/works/__nox__/composition` | 404 | application/json | ❌（注册路由 guard 走到了） |
+| `/api/works/__nox__/carousel` | 404 | application/json | ❌（注册路由 guard 走到了） |
+
+后端 Hono 仅在**已注册路由内部**做 work-not-found 校验；未注册的 `/api/...` 路径直接 fall through 到 Vite SPA fallback，被当作 client-side route 处理，回 1086-byte `index.html` shell。
+
+**为什么是 P0**：
+- `apiFetch` (line 54) 看到 `res.ok === true`（200 OK）→ **不抛错**
+- 然后第 52 行 `ct.includes("application/json") ? await res.json() : await res.text()` → 因 `text/html` 走 text 分支
+- 返回 `<!doctype html>...` 字符串给消费方 → 消费方期望对象，**typeof 不匹配但运行时表现因 hook 而异**
+- 实际表现：要么 React Query selector 静默返回 HTML string（display 出 "<!doctype" 字面量），要么后续 `.map` 抛运行时 TypeError 触发 ErrorBoundary
+- **关键二阶问题**：任何前端**手抖写错 API 路径**的 typo（`/api/works/{id}/checkpoint` vs `checkpoints`，单复数错）→ HTTP 层 200 假装成功 → bug 隐藏到生产；这是 **future-proof contract** 的反面
+
+**Family**：silent-leak family 第 7 实例 · R110 F491 IA-not-distinguished family 第 3 实例（404 vs ENOENT vs SPA-fallback 三态混同）。
+
+**建议**：
+1. backend Hono 在所有 `apiRoutes.*` 之后 mount `app.notFound((c) => { if (c.req.path.startsWith("/api/")) return c.json({ error: "Not found", errorCode: "route_not_found" }, 404); return next(); })` —— 让 SPA fallback 只接 non-api path
+2. frontend `apiFetch` 增加 `if (ct.includes("text/html") && path.startsWith("/api/")) throw new ApiError("API contract violation: HTML returned", 0, payload)` —— 防御 dev-server fallback 与生产 reverse-proxy 错配
+
+#### F549 [HIGH] Settings 无 "test connection" / "verify key" affordance
+
+**Probe**：DOM 全文检索 `'test connection' | '测试连接' | 'verify' | '验证密钥' | 'validate key'` → 全部 false。`grep` 全 web/src + src 同样模式 → 0 hit。`SettingsPanel.tsx` 7 个 editable field 仅有 Save 按钮，未提供"现在就验证这把 key"按钮。
+
+**用户成本**：
+- 用户填错 jimeng AK/SK → Save 成功 → 几小时后真触发 render → 失败 → ErrorBoundary 接住（or 不接住，渲染队列子进程错误更可能 silent fail）→ **平均 reach-bug 时间 = render 队列周期 + 用户回到 Editor 时间 ≈ 30 min - 4 hr**
+- 工业基准（Stripe Dashboard / OpenRouter Console / Vercel Tokens 管理）= 保存即弹"Test now"按钮，3 秒内反馈
+
+**Family**：M200 verify-before-trust affordance（本轮新沉淀）· R109 F478（settings 输入 zero validation）family。
+
+**建议（一行 affordance）**：jimeng section 加 "↻ Test now" 按钮 → 调一个最廉价的 jimeng signed-URL ping（不消耗算力配额，仅触发 IAM 路径验签）→ 返回 ok/InvalidAccessKey/SignatureDoesNotMatch 三态。openrouter 同理 ping `/models` 端点（list 调用免费）。
+
+#### F550 [HIGH] PUT /api/config 接受任意 bogus key + 垃圾 cron 仍 200 通过
+
+**Probe**：
+```js
+PUT /api/config { jimengAccessKey: "totally-bogus-aaa", researchCron: "not a cron at all just garbage" }
+// → status 200
+// → GET /api/config 后 researchCron 字段被原样回放 "not a cron at all just garbage"
+```
+
+src/server/api.ts:183-228 PUT handler **零校验**——任何 string body 字段全部写盘。这与 R109 F480（cron 接受任意垃圾）+ R109 F478 是同一笔账，本轮在 unauthorized 视角下确认它**也**是 unauthorized-class 失败前哨：
+- bogus jimengAccessKey 写盘 → cron 触发 research → 子进程对 jimeng 签名失败 → 写入 logs 然后 silent fail
+- bogus cron 写盘 → node-cron parser 接收时抛 → 整个 research scheduler 启动失败或日志静默错过 schedule
+
+**Family**：R109 F478/F480 持续未关 + secret-pipeline audit family · validation-gap family.
+
+**建议**：PUT 前 zod-schema 校验（jimeng AK = volcengine AKLT 开头 24-32 char hex / openrouter = sk-or- 开头 / cron = cron-parser 试解析）→ 不通过返回 `errorCode: "config_validation_failed", field: "jimengAccessKey"`，UI 旁路 inline 红字。这是 **failure-prevention plane** 优先于 failure-handling plane 的明证。
+
+#### F551 [HIGH] `serverErrors.*` i18n map 零 auth-class key
+
+**Probe**：`grep "serverErrors\." web/src/i18n/messages.ts` → 0 hit on `serverErrors.unauthorized | upstream_auth_failed | invalid_jimeng_key | invalid_openrouter_key | quota_exhausted | rate_limited`。R26 设计了 `errorCode → i18n key` 通道（lib/api.ts:3-6 注释），但 auth-class 错误码本身从未在后端 emit，所以 i18n 这一端**永远不可能**翻译出 401/403。
+
+**为什么 HIGH**：当 R119+ 团队真正补上 F547 backend emission 时，i18n 缺位会让所有翻译 fall back 到 `err.message` raw literal "401 Unauthorized"（英文非本地化 + 用户不懂"401"）。这是 **infrastructure-as-i18n** 应该先建好等着用，不是 finding-after-the-fact 补。
+
+**Family**：M161 time-window honesty family（R104 沉淀）→ **i18n-honesty family**（首次浮现）· copy plane 第 N 处。
+
+**建议**：在 messages.ts 预埋 8-10 个 auth-class key（unauthorized / upstream_auth_failed / invalid_jimeng_key / quota_exhausted / rate_limited / forbidden_scope / token_expired / region_blocked），CN+EN 双 locale 一次到位，等 F547/F550 fix-pass 落地直接 wire 上。
+
+#### F552 [HIGH] `/api/works/<bogus>/checkpoints` 返回 200 + 空数据 —— dead-data 第 7 实例
+
+**Probe**：`GET /api/works/__nox__/checkpoints` → status **200** + application/json。其他 `/api/works/__nox__/*` 子路由（composition / carousel）都正确 404，**唯独 checkpoints**返回 200 假装"这个 work 没有 checkpoint"。
+
+**为什么是 silent-leak**：UI 消费 `useCheckpoints()` 收到 `[]` → 渲染 "No checkpoints yet" empty state（R116 audit 已覆盖 empty 表面）→ 用户以为"我的 work 还没建 checkpoint"，**实际是 workId 写错或 work 被另一 tab 删了**。这与 R104 F441 KPI fallback 0 同一 family——"成功 200 + 空数据" 是 silently-lying success 的最高级形态。
+
+**Family**：silent-leak family 第 8 实例 · R108 backend↔frontend semantic drift family 兄弟。
+
+**建议**：checkpoints handler 先校 `await getWork(id)` 不存在则 `c.json({ error: "Work not found", errorCode: "work_not_found" }, 404)`，模板对齐其他 work-scoped 端点。
+
+#### F553 [MEDIUM] `ApiError` 无 status-class helper —— 全产品强制裸 number 比较
+
+api.ts:1-22 `ApiError` 只导出 `status: number`。消费方写法分散：
+
+```js
+err instanceof ApiError && err.status === 404            // composition.ts, carousel.ts
+err instanceof ApiError && err.status === 404            // trends.ts
+```
+
+未来若需要 unauthorized 全局拦截，至少 N 个地方要复制 `err.status === 401 || err.status === 403`。无 `isUnauthorized()` / `isClientError()` / `isServerError()` helper。
+
+**Family**：primitive-gap family（R114 LoadingShell 缺位 / R116 EmptyState 重复）兄弟 —— 同样是"复制粘贴的 status compare"。
+
+**建议**：扩展 `ApiError`：
+```ts
+isClientError() { return this.status >= 400 && this.status < 500 }
+isUnauthorized() { return this.status === 401 || this.status === 403 || this.errorCode === "upstream_auth_failed" }
+isServerError() { return this.status >= 500 }
+isNotFound() { return this.status === 404 || this.errorCode?.endsWith("_not_found") }
+```
+
+#### F554 [MEDIUM] `listWorks()` 失败 catch → 返回 `{ works: [] }` 静默 —— silent-leak family 第 9 实例
+
+`src/server/api.ts:266-269`:
+```ts
+return c.json({ works: enriched });
+} catch {
+  return c.json({ works: [] });
+}
+```
+
+backend `listWorks()` 抛错（文件系统损坏 / .autoviral 目录被删 / 权限错误）→ catch 吃掉 → 用户看到 "你还没创建作品" empty state（R116 audit 覆盖）。**用户行为预测**：用户以为产品 reset 了/数据丢了 → 慌张 → 看不到 reload 按钮 → 关闭产品。
+
+**Family**：silent-leak family 第 9 实例 · R104 M159 backend↔frontend semantic drift 第 N 实例。
+
+**建议**：`catch (err) { return c.json({ error: ..., errorCode: "works_list_failed", detail: err.message }, 500) }` —— 让前端能区分"真没作品"vs"读取失败"，前者走 R116 EmptyState 4 件套，后者走 R117 ErrorBoundary 4-CTA。
+
+#### F555 [MEDIUM] `secretMeta.set` 字段是 SSRF 侦察信号
+
+`/api/config` GET 返回 `secretMeta: { jimengAccessKey: { set: true, lastFour: "abcd" }, openrouterKey: { set: false, lastFour: "" } }`。R111 fix-pass 把 plaintext 取消了（CRITICAL fix ✓），但 **`set: true/false` 仍是侦察价值信号**：任何能 GET `/api/config` 的请求（浏览器扩展、CSRF 通过 same-origin、同局域网友机）可以**列出哪些 provider 已配置**。
+
+**典型攻击场景**：开发者用 ngrok 把 localhost:3271 暴露公网调试 → 攻击者 GET /api/config → 发现 jimeng `set:true` + openrouter `set:false` → 针对 jimeng 模式做 targeted 钓鱼（伪造 jimeng email："您的 IAM 凭据即将过期"）。
+
+**Family**：R111 secret-pipeline audit family 第 2 实例（plaintext 关闭 → reconnaissance 关闭是下一阶段）.
+
+**建议（R119+ 低优）**：`secretMeta.set` 仅在请求来自 `127.0.0.1` / localhost 时返回；否则统一返回 `{ set: false, lastFour: "" }`。或更激进：直接移除 `set` 字段，UI 用 `lastFour === "" ? "未配置" : "已配置 ····" + lastFour` 渲染，攻击者无法区分"未配置"和"配置但 lastFour 隐藏"。
+
+#### F556 [MEDIUM] R26 errorCode 通道在 401/403 fallback 路径将 emit 裸英文 "401 Unauthorized"
+
+`web/src/stores/toast.ts:71-87` 翻译规则：
+1. `err.errorCode` → 查 `serverErrors.<code>` i18n key（**前提是 backend emit 了 errorCode**）
+2. 否则 → 用 `err.message` raw
+3. `err.message` 在 apiFetch:54 构造为 `${res.status} ${res.statusText}` = 原 HTTP 状态行
+
+意味着：**今天**如果上游 jimeng 真返回 401 透传到 frontend → backend 包成 generic 500 → frontend toast 显示 `"500 Internal Server Error"` 英文裸字面。**修完 F547** 后 backend 改 emit `errorCode: "upstream_auth_failed"`，但 i18n 还没 key（F551）→ toast fallback 到 `"upstream_auth_failed"` 字面字符串。两个 finding 共同构成"用户永远看不到中文 actionable 错误"的塌方。
+
+**Family**：R107 + R104 copy plane 第 N 实例 · F551 同源.
+
+**建议**：与 F551 配套一并补。
+
+#### F557 [LOW] RFC 6750 / 7235 `WWW-Authenticate` + `Retry-After` 响应头被 ApiError 丢弃
+
+apiFetch line 54 抛 ApiError 时只保留 status + body，**响应 headers 完全丢弃**。RFC 7235 §4.1 规定 401 必带 `WWW-Authenticate: Bearer realm=..., error="invalid_token", error_description="..."` —— 这是 OAuth 标准里 actionable 信息的核心载体。RFC 7231 §7.1.3 规定 429 必带 `Retry-After: <seconds>`。
+
+未来对接更多上游（OpenAI / Anthropic / Google）时，这些头是 retry policy 与 error categorization 的金标准。当前 apiFetch 把它们扔了 → 即使后端透传也读不到。
+
+**Family**：contract-honesty family · audit plane 前瞻沉淀.
+
+**建议（前瞻）**：
+```ts
+throw new ApiError(`${res.status} ${res.statusText}`, res.status, payload, {
+  retryAfter: res.headers.get("retry-after"),
+  wwwAuthenticate: res.headers.get("www-authenticate"),
+});
+```
+
+#### F558 [LOW] WebSocket `/api/render/ws` 无 auth gate —— LAN 侵入风险
+
+`src/server/render-ws.ts` 未读全文，但 grep `401|403|Unauthorized|Forbidden` → 0 hit。combined with 后端 0 auth 中间件，任何能 reach `localhost:3271` 或 LAN IP 的客户端都可以订阅 render 状态推送、可能触发 job submit。
+
+**典型场景**：开发者带笔记本到咖啡馆 → 同 WiFi 局域网另一人 nmap 扫到 3271 → 直连 ws://192.168.x.y:3271/api/render/ws → 订阅他人 work 渲染进度 + 截取 asset URL。
+
+**Family**：F558 + F555 共同构成"local-first 产品的 LAN 暴露面"小 family —— 局域网内 same-origin 信任假设破裂时一切 collapse.
+
+**建议（远期）**：dev mode bind 仅 127.0.0.1；prod packaged 模式（Tauri / Electron）走 IPC 而非 HTTP；如要 LAN 多设备协作，正式立项加 device pairing token.
+
+### 沉淀
+
+**M197 · Unauthorized 失败态在 local-first 产品中是 upstream-relayed 而非 first-party**（新增）
+
+AutoViral 没有用户注册/登录概念，传统 "401 Unauthorized = 用户 session 失效" 在这里不存在。但 **upstream API auth (jimeng/openrouter/douyin) 失败是它的产品级等价物**——用户感受完全一致："我无法继续我的核心工作流"。审计 unauthorized 必须把注意力下移到 **integration 边界**而非 app 边界。这是反向 surface 五元组在不同产品类（B2C SaaS vs local-first creator tool）的语义重映射，未来审任何 local-first 产品 unauthorized 表面都按此章法。
+
+**M198 · Dev-server SPA fallback 破坏 /api/* contract**（新增）
+
+Vite 默认 SPA fallback + Hono 仅注册 `/api/<known>` → `/api/<unknown>` 收 200 HTML。frontend apiFetch 必须双重防御：(a) backend 装 `app.notFound((c) => c.req.path.startsWith("/api/") ? c.json(404) : next())` 让 fallback 不接 api 路径；(b) frontend apiFetch 在 JSON.parse 前 guard `content-type` 必为 application/json 否则抛 "apiContractViolation"。这是 dev-server 配置 + lib hardening 的双侧契约。
+
+**M199 · "Empty success" payload 必带 errorCode**（refined from M159）
+
+R104 F441（KPI 100% fallback 0）→ R110 F491（404 vs ENOENT 不分）→ R118 F548 + F552 + F554 → **3 个独立 round 4 个证据**反复浮现同一模式：backend catch 吃掉异常返回空集合/0/empty payload。审计规则升级：**任何 catch-block 返回 collection/数字 fallback 都必须同步 emit errorCode**，前端区分"真空"vs"加载失败"才有依据。这是 R104 M159（backend↔frontend semantic drift）的二阶严格化。
+
+**M200 · Verify-before-trust affordance 是 reverse-surface 第 6 表面**（新增）
+
+R110 (loading) + R113 (error) + R114 (still loading 深审) + R115 (a11y) + R116 (empty) 5 轮收敛到 M194 Fallback Surface DSL 三件套；R118 揭示**第 6 表面**——**failure-prevention plane**：在用户触发 happy path 前就验证 precondition（key 有效 / 配额 / 网络可达）。这不在传统反向 surface 五元组（loading/error/empty/unauthorized/expired）内，是更上游的 **affordance plane**。设计 baseline：Stripe / OpenRouter / Vercel 的"Test"按钮 + Github SSH key "Test connection"——本产品 0 实现。
+
+**M201 · Architectural absence as audit signal**（新增）
+
+R107 沉淀过 audit-without-fix family（产品做了 audit 但没修）；R118 揭示对偶 family：**fix-without-audit-coverage**——产品代码从未审过一类场景，所以 0 emission、0 handling、0 i18n key 形成"完整一致的缺失"。`grep` 0 hit 不是"没东西可审"，而是 finding 本身。审计方法学补充：每轮在 vertical surface 审完后，做一次 `grep -rn "<关键概念>" entire-codebase` sanity check——0 hit 就是 sediment。
+
+### 桥梁哲学 plane 第 11 轮巩固
+
+| Plane | 本轮证据 |
+|---|---|
+| security plane | F555 secretMeta.set SSRF 信号 + F558 WS 无 auth gate = R111/R109 secret-pipeline family 第 3-4 实例 |
+| contract plane | F548 SPA HTML fallback + F557 headers 丢弃 = network-layer contract honesty 升级 |
+| copy plane | F551 i18n auth-class 缺位 + F556 raw "500 Internal Server Error" 字面回显 = R107 copy plane 第 N 实例 |
+| usability plane | F549 verify-before-trust + F550 PUT 零校验 = failure-prevention plane 首形成 |
+| data plane | F552 + F554 silent-leak family 第 8-9 实例 = R104 backend↔frontend semantic drift 持续浮现 |
+| audit plane | M197/M198/M199/M200/M201 五沉淀 = audit plane 累计 ~27 套方法学 |
+
+### 反向 surface 五元组进度更新
+
+| # | Surface | 状态 | 关键 round |
+|---|---|---|---|
+| 1 | loading | ✅ 审完 | R114 (21 site / 0 primitive / M181 LoadingShell) |
+| 2 | empty | ✅ 审完 | R116 (25+ site / 2 duplicate primitive / M191-M194) |
+| 3 | error | ✅ 审完 + 修完 | R113 audit + R117 fix-pass 7 finding 闭合 |
+| 4 | **unauthorized** | **✅ 本轮审完** | **R118 (12 finding / M197-M201)** |
+| 5 | expired | 留 R119+ | 产品当前无 share-link 概念，优先级 LOW |
+
+**Meta finding**：4/5 完成后，反向 surface DSL 收敛收口在即。M194 Fallback Surface DSL 三件套（LoadingShell + ErrorBoundary + EmptyState）现在需要增配一件：**`<UnauthorizedNotice provider="jimeng" reason="quota_exhausted" />`** 收编 401/403/upstream_auth_failed 三类 case，渲染 `[图标 · 标题 · 描述 · CTA="去 Settings 重新填" · CTA="Test now"]` 5 件套。
+
+### R119+ 候选
+
+- **R118 F547 + F548 fix-pass**（最高 ROI）—— backend `app.notFound("/api/*")` 一行 + frontend `apiFetch` content-type guard 两行 = 一次性闭合两个 CRITICAL
+- **R118 F549 fix-pass** —— Settings jimeng/openrouter 各加 "↻ Test now" 按钮 + backend `/api/config/test` 端点；ROI 高，用户感知强
+- **R118 F551 fix-pass** —— messages.ts 预埋 8-10 auth-class i18n key 双 locale；零依赖可独立 ship
+- **R118 F550 fix-pass** —— PUT /api/config zod 校验；与 R109 F478/F480 合并完成
+- **反向 surface 五元组第 5 项 expired audit** —— 产品当前无 share-link，但 R88 checkpoints / R94 deliverable 都有"长期 stale"维度可入手
+- **R115 F523** —— 28/28 work cover image `alt=""` → meaningful alt text（R117+ 候选未消化）
+- **R115 F527** —— TopNav `aria-current="page"`（R117+ 候选未消化）
+- **i18n horizontal slice** —— R98 F396 + R104 F450 + R114 F520 跨 round locale-mixing 全产品横扫
+- **Color contrast horizontal slice (WCAG 1.4.3)** —— 全产品颜色对比扫描
+- **Keyboard nav horizontal slice** —— R95 dnd-kit / R90 chat textarea / R107 Cmd+K 三轮横扫
+
+`★ Insight ─────────────────────────────────────`
+- **架构层"缺失"作为审计证据是新审计范式**：传统 audit 是"看见什么然后判断错与对"；M201 沉淀的是"看不见某关键字本身就是 finding"。R118 用 grep 0 hit 拿到了 F547 P0 finding —— 这种"以 absence-as-signal" 审计方法对 local-first 产品（少 boilerplate / 少现成 framework auth 层）特别有效，因为他们的安全/失败处理常常是**因为没有 framework 推到他们脸上**才被遗漏，而不是因为团队明知道还不做
+- **silent-leak family 已升至第 9 实例（F548/F552/F554 同 round 3 个）**：从 R104 F441 (KPI fallback 0) 起跨 9 个 round 持续浮现，说明这不是"某 module 没写好"，而是**产品级编程文化**——团队默认 catch + fallback empty 是 "graceful"，但用户视角是 "lying about success"。这条 family 应该被提升为**产品级 lint rule**（自定义 ESLint rule：任何 catch block 返回空集合/0 fallback 必须加 ESLint disable comment + audit ticket）
+- **M198 Vite dev-server SPA fallback** 是 local-first 产品 dev mode 的隐藏暗坑：**`/api/<typo>` 写错会无声成功 200 HTML**。这是任何 React + Hono/Express + Vite 团队都该 mount 的两行防御（一行 backend notFound + 一行 frontend content-type guard）；几乎 0 实施成本但全栈 future-proof
+- **反向 surface 五元组 4/5 完成 + 第 6 表面 verify-before-trust 浮现**：审计本身的 surface 边界在扩展——从 loading/error/empty (UI-render-time) 到 unauthorized/expired (network-edge-time) 再到 verify-before-trust (input-validation-time)。这是 "audit horizontally / fix infrastructurally" 范式在**时间轴**上的延展——失败发生越早越能预防越值得 audit
+`─────────────────────────────────────────────────`
+
+---
+
 ## Round 117 — **R113 ErrorBoundary 7-fold CLOSED ✅ (F499/F500/F502/F503/F504/F505/F507/F509/F510) + R115 F524 prefers-reduced-motion 全局底座 CLOSED ✅ —— failure-state 元 surface 从 2-CTA 白屏栈泄露升级到 4-CTA 软重试/correlation ID/copy diagnostic 完备态；security + a11y + usability + audit 四 plane 同 round 闭合**
 
 - **时间**：2026-05-13（`/loop 30m` cron 触发本轮；R116 已被并行 empty-state-audit agent 占用，本轮取 R117 编号）
