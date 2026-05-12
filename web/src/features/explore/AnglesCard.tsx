@@ -35,9 +35,9 @@ export function AnglesCard({ angles, note, onRegenerate }: Props) {
                 borderRadius: 4,
                 verticalAlign: "middle",
               }}
-              aria-label="Sample data, not algorithm output"
+              aria-label={t("explore.anglesNote")}
             >
-              Sample
+              {t("explore.starterChip")}
             </span>
           )}
         </h2>
@@ -60,18 +60,26 @@ export function AnglesCard({ angles, note, onRegenerate }: Props) {
       ) : null}
       <div className={styles.list}>
         {angles.map((a, i) => (
-          <div key={i} className={styles.angle}>
+          <div key={i} className={`${styles.angle}${isDemo ? ` ${styles.angleDemo}` : ""}`}>
             <div className={styles.num}>{a.num}</div>
             <div className={styles.body}>{a.body}</div>
             <div className={styles.foot}>
               <span
                 className={styles.score}
                 style={isDemo ? { opacity: 0.5, fontStyle: "italic" } : undefined}
-                title={isDemo ? "Sample score — not yet from an algorithm" : undefined}
+                title={isDemo ? t("explore.sampleScoreTitle") : undefined}
               >
-                {a.score}{isDemo ? " · sample" : ""}
+                {a.score}{isDemo ? t("explore.sampleSuffix") : ""}
               </span>
-              <span className={styles.go}>Generate →</span>
+              <button
+                type="button"
+                disabled={isDemo}
+                className={`${styles.go}${isDemo ? ` ${styles.goDisabled}` : ""}`}
+                title={isDemo ? t("explore.angleGenerateDisabled") : undefined}
+                aria-label={isDemo ? t("explore.angleGenerateDisabled") : undefined}
+              >
+                {t("explore.angleGenerateCta")}
+              </button>
             </div>
           </div>
         ))}

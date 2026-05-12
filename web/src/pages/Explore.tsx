@@ -7,14 +7,17 @@ import { usePlatformTrends, type Platform } from "@/queries/trends";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/i18n/useT";
 
-// Static recommendations — note marker rendered in AnglesCard so user knows
-// these aren't algorithm output yet. Replace once a "generate angles" agent
-// hook lands. Bodies pulled from i18n so demo content swaps with locale
-// (FIT/est. reach kept as brand-term data labels — see e2e-report F41).
+// e2e-report F186: previous score strings were `FIT 94 · 5.2K est. reach`,
+// `FIT 87 · 3.8K est. reach`, `FIT 79 · risky` — fake-precision numbers that
+// imply algorithmic personalization while the algorithm isn't wired yet.
+// R75/F186 flagged this as system-honesty leak. Reframed as direction tags
+// (category labels) so users see what TYPE of angle each card is, without
+// being misled by invented magnitudes. The "STARTER/起手" chip + non-clickable
+// "生成 →" still mark these as hand-curated examples, not personalized output.
 const SAMPLE_ANGLE_META = [
-  { num: "01", score: "FIT 94 · 5.2K est. reach", bodyKey: "explore.sampleAngle1Body" },
-  { num: "02", score: "FIT 87 · 3.8K est. reach", bodyKey: "explore.sampleAngle2Body" },
-  { num: "03", score: "FIT 79 · risky", bodyKey: "explore.sampleAngle3Body" },
+  { num: "01", scoreKey: "explore.starterScore1", bodyKey: "explore.sampleAngle1Body" },
+  { num: "02", scoreKey: "explore.starterScore2", bodyKey: "explore.sampleAngle2Body" },
+  { num: "03", scoreKey: "explore.starterScore3", bodyKey: "explore.sampleAngle3Body" },
 ] as const;
 
 export default function Explore() {
@@ -31,7 +34,7 @@ export default function Explore() {
   const t = useT();
   const STATIC_ANGLES: Angle[] = SAMPLE_ANGLE_META.map((a) => ({
     num: a.num,
-    score: a.score,
+    score: t(a.scoreKey),
     body: t(a.bodyKey),
   }));
   const [collecting, setCollecting] = useState(false);
