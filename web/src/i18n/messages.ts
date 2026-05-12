@@ -154,6 +154,14 @@ export const en = {
       deleteSlide: "Delete slide {index}",
       duplicateSlide: "Duplicate slide {index}",
       addSlide: "Add slide",
+      deleteConfirm: {
+        title: "Delete slide {index}?",
+        body: "This slide will be removed from the carousel. The background image and any text layers go with it — this can't be undone from here.",
+        layersHint: "{count} layer(s) attached to this slide.",
+        layersHintNone: "No text layers on this slide.",
+        btnCancel: "Cancel",
+        btnConfirm: "Delete slide",
+      },
     },
   },
   studio: {
@@ -663,6 +671,14 @@ export const zh: DeepShape<Messages> = {
       deleteSlide: "删除第 {index} 页",
       duplicateSlide: "复制第 {index} 页",
       addSlide: "添加页面",
+      deleteConfirm: {
+        title: "删除第 {index} 页？",
+        body: "这一页将从图文组中移除。背景图片以及上面的文字层会一同删除，此操作不可在这里撤销。",
+        layersHint: "该页包含 {count} 个图层。",
+        layersHintNone: "该页暂无文字层。",
+        btnCancel: "取消",
+        btnConfirm: "删除该页",
+      },
     },
   },
   studio: {

@@ -17,6 +17,7 @@ import { useEditor } from "../store";
 import { PALETTES } from "../palettes";
 import type { Slide, Layer, TextLayer, ImageLayer } from "../types";
 import { useT } from "@/i18n/useT";
+import { DeleteSlideConfirmDialog } from "./DeleteSlideConfirmDialog";
 
 // Mirror TextLayerNode's font + palette resolution so thumbs and the main
 // canvas read the same — when the user swaps headlineFont or palette, both
@@ -120,6 +121,16 @@ function FilmThumb({
   const palette = carPalette ? PALETTES[carPalette] : undefined;
   const thumbScale = 80 / carWidth;
   const [hover, setHover] = useState(false);
+  // R96 F374 — track keyboard focus separately so Tab → button becomes
+  // visible (otherwise opacity=0 leaves the keyboard user staring at a
+  // hidden delete trigger that still fires on Enter).
+  const [deleteFocused, setDeleteFocused] = useState(false);
+  const [duplicateFocused, setDuplicateFocused] = useState(false);
+  // R96 F372 — explicit confirm gate; mirrors RegenerateConfirmDialog (R94).
+  // Without this, a single click here permanently destroyed the slide
+  // and the autosave debounce committed the loss to disk before the
+  // user could realise what happened.
+  const [confirmOpen, setConfirmOpen] = useState(false);
   const t = useT();
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: slide.id });
@@ -211,11 +222,13 @@ function FilmThumb({
           aria-label={t("editor.filmstrip.deleteSlide", { index: index + 1 })}
           onClick={(e) => {
             e.stopPropagation();
-            removeSlide(slide.id);
+            setConfirmOpen(true);
           }}
           // Block the sortable's drag listeners on this button so click
           // selects-then-deletes instead of being absorbed as a drag start.
           onPointerDown={(e) => e.stopPropagation()}
+          onFocus={() => setDeleteFocused(true)}
+          onBlur={() => setDeleteFocused(false)}
           style={{
             position: "absolute",
             top: 4,
@@ -232,7 +245,7 @@ function FilmThumb({
             fontSize: 11,
             lineHeight: 1,
             padding: 0,
-            opacity: hover ? 1 : 0,
+            opacity: hover || deleteFocused ? 1 : 0,
             transition: "opacity 0.12s",
           }}
         >
@@ -247,6 +260,8 @@ function FilmThumb({
           duplicateSlide(slide.id);
         }}
         onPointerDown={(e) => e.stopPropagation()}
+        onFocus={() => setDuplicateFocused(true)}
+        onBlur={() => setDuplicateFocused(false)}
         style={{
           position: "absolute",
           top: 4,
@@ -263,12 +278,22 @@ function FilmThumb({
           fontSize: 10,
           lineHeight: 1,
           padding: 0,
-          opacity: hover ? 1 : 0,
+          opacity: hover || duplicateFocused ? 1 : 0,
           transition: "opacity 0.12s",
         }}
       >
         ⎘
       </button>
+      <DeleteSlideConfirmDialog
+        open={confirmOpen}
+        slideIndex={index + 1}
+        layerCount={slide.layers.length}
+        onCancel={() => setConfirmOpen(false)}
+        onConfirm={() => {
+          setConfirmOpen(false);
+          removeSlide(slide.id);
+        }}
+      />
     </div>
   );
 }
