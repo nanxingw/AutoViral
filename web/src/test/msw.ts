@@ -48,7 +48,10 @@ export const handlers = [
         platform: "douyin",
         account: { nickname: "@alex_creates", follower_count: 342_000, total_favorited: 2_847, aweme_count: 23 },
         works: [],
-        summary: { todayLikes: 2847, todayComments: 436, engagementRate: 0.087, todayLikesDelta: 0.123, todayCommentsDelta: 0.041, engagementDelta: -0.004 },
+        // R104 F441 — backend keys are snake_case lifetime averages, not
+        // todayLikes/todayComments + per-KPI deltas. The previous fixture
+        // hid the adapter mismatch bug; this one matches production shape.
+        summary: { total_works_collected: 23, avg_play: 12_400, avg_digg: 2_847, avg_comment: 436, avg_share: 88, avg_collect: 124, engagement_rate: 0.087 },
         demographics: {
           age: { "13-17": 0.08, "18-24": 0.35, "25-34": 0.32, "35-44": 0.15, "45+": 0.10 },
           gender: { male: 0.62, female: 0.38 },

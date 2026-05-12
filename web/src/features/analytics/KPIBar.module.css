@@ -2,5 +2,3 @@
 .kpi { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
 .num { font-family: "Instrument Serif", serif; font-style: italic; font-size: 38px; line-height: 1; color: var(--text); }
 .lbl { font-family: "JetBrains Mono", monospace; font-size: 10px; letter-spacing: 0.1em; color: var(--text-dimmer); text-transform: uppercase; }
-.delta { font-family: "JetBrains Mono", monospace; font-size: 11px; color: var(--status-done); }
-.deltaDown { color: var(--status-error); }
