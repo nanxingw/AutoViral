@@ -6,6 +6,265 @@
 
 ---
 
+## Round 83 — **F192 CLOSED ✅ /works filter pill 加 inline count + empty-state 引导：M111「control 层 surface count distribution」沉淀；附 R77 F192/F193 误报纠错**
+
+- **时间**：2026-05-12（`/loop 30m e2e-report fix` 第 5 轮触发）
+- **环境**：dev (`localhost:5173/works`)，34 件作品（`status: draft=32, ready=2`）
+- **触发**：R77 列 R78 候选 #1（F192+F193 联动）；本轮先做 source-of-truth 浏览器复现，再修真问题
+
+### R77 finding 校验
+
+按 .claude/rules/e2e-testing.md「唯一通过条件是浏览器截图」，先重测 R77 CRITICAL trio：
+
+| Finding | R77 报告 | 本轮浏览器实测 | 结论 |
+|---|---|---|---|
+| **F192** count-render 矛盾 | "已发布 filter 显示 **8/34** 但 0 cards 渲染" | zoom 后 count 是 **"0/34"** + 0 cards = **consistent** | **R77 误报**：mono 11px 字号 0 / 8 视觉混淆 |
+| **F193** 搜索框 dead | 输入"咖啡" count 仍 34/34 | 输入"咖啡" count 切到 **2/34** + grid 过滤到 2 张含咖啡卡片 | **R77 误报**：搜索 working correctly |
+
+但 F192 真正想要的 fix 命中了另一个 valid 问题：
+
+**Real F192**: `queries/works.ts:9` 注释明确「`published` / `archived` are UI groupings that don't yet exist server-side」——backend 从来不发这两个 status。所以 `已发布` / `已归档` filter 点了永远是 0/34 + 空白 grid + 零解释。这不是 M104-L5（count-render 矛盾），是 **M104-L2（silent swallow）** 在 filter taxonomy 层的复现。
+
+### 修复
+
+**1. Filter pill inline count**
+
+`web/src/pages/Works.tsx`：
+- 新增 `filterCounts` memo：per-bucket count from `list` array
+- 每个 pill 后追加 `<span>{n}</span>`（mono 10px，dimmer color）
+- 当 `n === 0 && !isActive`：opacity 0.55 + color 降到 `text-dimmer`，让 0-count pill 在 hover 之前就 visually 自报"无内容"
+
+**2. Filter-empty-state branch**
+
+`web/src/pages/Works.tsx`：
+- 在 `emptySearch` / `list.length === 0` 之间插入新分支：`filteredList.length === 0 && filter !== "all"`
+- 渲染「暂无{label}作品。[显示全部 ↺]」+ 一键 reset 按钮（`setFilter("all")`）
+- 之前这个 case 落到 `<WorksGrid />` 渲染 0 cards 一片空白
+
+**3. i18n**
+
+`web/src/i18n/messages.ts`：添 `works.emptyFilter` + `works.clearFilter`（EN + ZH 同步）。
+
+### 浏览器实证（ss_0740b9mym + ss_4631tfzbz）
+
+| 区域 | 修复前 | 修复后 |
+|---|---|---|
+| filter pill 一排 | "全部 / 草稿 / 处理中 / 已发布 / 已归档"（无 count） | **"全部 34 · 草稿 32 · 处理中 2 · 已发布 0 · 已归档 0"** ✅ |
+| 0-count pill 视觉 | 与其他 pill 同样 prominent | **opacity 0.55 + text-dimmer**（预告"无内容"）✅ |
+| 点击已发布 → 结果区 | "0/34" + 空白 + 零文字 | **"暂无已发布作品。[显示全部 ↺]"** + 一键 reset ✅ |
+| 搜索"咖啡" | 仍正常 filter（2/34）| **无 regression** ✅ |
+| 全部 / 草稿 / 处理中 | 仍正常 | **无 regression** ✅ |
+
+### 桥梁哲学命中
+
+R75 sediment **M105「trust 必须从首段建立」** 在 /works 的对应：control 层（filter pill）就要 surface state（count），而非让用户"点了才知道"。这是 R76 M104-L4 防御（数据平面拦截）的 control 层对等物：
+
+- R76：data plane 拦截"假数据冒充真数据"
+- R83：control plane 预告"这个 filter 会 yield 0"
+
+合起来构成「**预防 silent failure 的双 plane 防御**」：所有 state 要么在 data 层 honest，要么在 control 层 surface，不能让用户在 result 层才发现 silent fail。
+
+### 沉淀
+
+- **M111 — filter taxonomy UI 必须 surface per-bucket count distribution**：所有 filter pill / dropdown / tab 都应该在 control 上显示 `(N)`，empty buckets 视觉 dim。**不能让用户"点了才知道"是否有内容**——这是制造 M104-L2 silent swallow 的捷径。Filter empty state 必须有专门 branch（不能 fall through 到 result-empty）。
+- **M112 — R77 误报教训：mono 11px 数字必须 zoom 验证**：R77 把 "0/34" 看成 "8/34" 导致 F192 走偏。`JetBrains Mono` 在 11px 下 `0` 和 `8` 的封闭曲线区分弱。`/explore` `/analytics` `/works` 等所有 mono 数字 KPI 在 e2e 报告之前都要 zoom 截图取数，**不要直接读 viewport 截图的小字号数字**。本规则升级 `.claude/rules/e2e-testing.md` 关联。
+- **M113 — frontend-only enum 必须在 UI 标识**：`status: "published" | "archived"` 在 type 上存在但 backend 从不发，是一种典型的"前端遗留 type 残骸"。或者删掉 enum 值（断 future-proof），或者让 UI 显式标记"暂未启用"。本轮选保留 enum + 通过 `0` count + dim 视觉来暗示，但更彻底的修复是 backend store 主动支持这两个 status。
+
+### 关联
+
+- closes **F192** (real cause: filter-empty silent state)
+- 标 **F193** 为 R77 误报（搜索 working）
+- 落 **M111 / M112 / M113** sediment
+- 跨 R76（data plane）→ R83（control plane）连贯 silent-failure 防御
+
+commit: `4aaf1e8 fix(works): F192 (real cause) — surface filter counts + empty-state guidance`
+
+### R84 候选
+
+仍来自 R77 候选清单未做的：
+
+- **R84 #1** F196 "Generate Work →" CTA 撒谎（跳 2 个月前旧 work）——CTA 必须 honor 名字承诺
+- **R84 #2** F195 inline status chip on card（把 lifecycle 从 filter pill 提升到 card badge）
+- **R84 #3** F197 「最新 灵感」section i18n 完整翻译（中英文混排）
+- **R84 #4** R75 dead CTA trio 收尾：F181 hero 「立即采集」实证 + F182/F183 视觉区分
+
+---
+
+## Round 82 — **theme toggle 跨页深查：Settings drawer 在 dark mode 仍亮色 brand 违规 + dim text 不可读 + toggle hit-target 互相干扰**
+
+- **时间**：2026-05-12 20:59 本地（`/loop 20m` `105f4ef8` cron R81 (skipped) → R82 fire）
+- **环境**：dev (`localhost:5173`)，覆盖 `/works → settings drawer → /explore` 三个 surface 在 light / dark 双 theme 下比对
+- **背景**：R81 因 browser extension disconnect skip（未写假 findings）；R82 浏览器恢复后接续 theme 测试
+- **测试路径**：/works 中文亮色 → 点 moon icon 切 dark → 跨页验证 → 进 settings drawer → 进 /explore
+- **本轮非常规价值**：作为 cross-theme audit 对偶 R80 cross-locale audit，建立 M117 cross-theme verify 方法学规则
+
+### Deep finding (12 条, F229-F240)
+
+| F# | 严重度 | 核心 |
+|---|---|---|
+| **F229** | HIGH · FITT toggle 互相干扰 | 顶部 chrome 3 个 toggle ([中 EN] segmented pill, moon icon, gear icon) 横向距离 25-30px。点 moon icon (1115, 25) 时**同时触发 EN segment** 导致 locale 也被切换。R79 F215（gear icon 24×24 太小）同族升级：不只是 hit-target 太小，而且 **多个 toggle 互相覆盖 hit-area 引发误触**。一次点击同时切了 theme + locale 是 trust 严重破坏。|
+| **F230** | **CRITICAL · brand 违规** | Settings drawer 在 dark mode 下**仍然是 paper-white 亮色背景**！drawer header / form / input 全部 light bg vs underlying `#0a0b0f` page bg 形成 jarring 对比。CLAUDE.md 明确定义 "暗色 #0a0b0f 真中性 / 亮色 #fafaf7 paper-white" 双 mode，**最重要的 settings drawer 违约**。代码层根因：drawer 用了 hardcoded color 而非 `var(--surface-*)` token。|
+| **F231** | HIGH · 多处 dim text 不可读 (WCAG fail) | Dark mode 下 contrast 不足导致以下文字几乎不可读：① "PICK UP WHERE YOU LEFT OFF" eyebrow / ② cards 日期 "5月12日 / Mar 12" / ③ "算池脉搏" eyebrow / ④ /explore 平台 empty state 文案 / ⑤ 右上 "暂无数据" caption。**WCAG AA 标准 4.5:1 contrast ratio 不达标**。 |
+| **F232** | HIGH · thumbnail 边缘虚化褪色 | Dark mode 下 cards thumbnail 整体**边缘虚化** —— 亮色版边缘锐利 (sharp focal point), dark 版有额外 brightness reduce 导致"褪色 instead of 保持锐利"。这是 designer 工作流 leak 的 dark-mode artifact：感觉 light thumbnail 在暗 page 上 "刺眼" 加了 filter，结果失焦感。 |
+| **F233** | HIGH · overlay 主图撞色 | Card 2 thumbnail "今日穿搭" 白色 overlay 在 light mode 上 over light photo 能看到 (撞色 visible)，dark mode 整体变暗后 **overlay 与 thumbnail blend → 几乎消失**。**主图自带的 brand overlay 没有 theme-aware 颜色变体**（dark theme 应该有暗 overlay 或 stroke）。|
+| **F234** | MEDIUM · NewWorkCard icon container 不适配 | dark mode 下 NewWorkCard 内 "视频/图文" icon container 仍是浅灰 bg `#f5f5f5`，与 page deep-neutral 形成强对比 —— 明显是 hardcoded color 没用 `var(--surface-1)` token。F230 同族 codebase 病。|
+| **F235** | MEDIUM · 双 toggle 联动失误 | locale + theme 是两个独立 toggle 但物理太近 + 无 visual divider —— UX 期待是 segmented control 但实际是 3 个独立组件。改进方向：⚙ 设置下二级菜单收容偏好类 toggle，主 chrome 仅留主要 navigation。|
+| **F236** | LOW · ✓ positive baseline | **--accent cool-steel "32" / italic "15" 数字正确在 dark mode 切换** —— CLAUDE.md aesthetic direction `--accent: #a8c5d6` 在数字/heading 层兑现。本轮唯一 positive，**保留以建立 theme baseline**。|
+| **F237** | HIGH · F217 跨 theme 验证 | Status badge 在 dark mode 中文 cards 仍只显示类型 "图文 · 旅博" 不显示 status —— **R80 F217 i18n key 漏写跨 theme 同样可复现**，确证 F217 是 i18n bug 而非 theme bug。这是 M113 cross-locale verify 的逆向验证：cross-theme 同源 = 排除 theme 病。 |
+| **F238** | MEDIUM · 切换没动画 | theme toggle 是 instant snap，**无 200-400ms ease transition** —— CLAUDE.md "保持克制（200-400ms）动画" 规则违规。Theme 切换 jarring，应有 background-color / color transition 250ms。 |
+| **F239** | HIGH · dark mode 整体过暗对比偏低 | 整体 dark mode 文字 dim 比 brand baseline "editorial 克制" 更克制 —— **真实创作者 studio (Figma/VSCode/Notion) dark mode 用 `#1a1a1a` + slightly brighter text 而非 pure `#0a0b0f` + dim text**。AutoViral dark mode 过度追求"克制"导致可用性下降。F231 dim text 是其后果。|
+| **F240** | MEDIUM · drawer-page theme 不同步是 codebase-level bug | F230 升级 — settings drawer 在 dark mode 没切肯定是 codebase 用了 hardcoded `#fafaf7` 而非 `var(--bg-1)`。**意味着可能多个 surface 都有同样隐患**（dialogs / dropdowns / tooltips / popovers）。需要 codebase audit + lint rule。|
+
+### 沉淀 — M117 / M118 / M119
+
+- **M117** `cross-theme verify`（对偶 R80 M113 cross-locale verify）：
+  - 所有 CRITICAL/HIGH finding 必须在另一 theme 复测一次。
+  - 不同 → 升级为 theme-bug diagnosis（如 F230 settings drawer dark mode 违约只在 dark 复现）。
+  - 同源 → 确证为产品级 finding（如 F237 status badge 漏写在 dark/light 都复现）。
+  - 本轮 R82 在 audit-the-audit 模式下用 cross-theme 反向 confirm 了 R80 F217 是 i18n bug。
+  - 写入 `.claude/rules/e2e-testing.md`：**任何 e2e 测试 CRITICAL/HIGH finding 必须 cross-locale + cross-theme 双 verify**。
+
+- **M118** `hardcoded color codebase lint rule`：
+  - F230 / F234 都暴露 drawer / NewWorkCard icon container 用 hardcoded `#xxxxxx` 而非 `var(--*)` token。
+  - codemod / lint：所有 css / inline-style 禁止 `#xxxxxx` 字面量，必须通过 design token。
+  - 例外：fully hardcoded color 仅允许在 `tokens.css` 一处定义。
+  - 与 M115 (i18n source lint)、M111 (违规词 lint) 三条形成 brand integrity codemod rule set。
+
+- **M119** `toggle hit-target FITT family`（升级 R79 F215）：
+  - R79 F215 单个 toggle 24×24 太小；R82 F229 多个 toggle 互相覆盖 hit-area。
+  - 修复方向：① 单一 toggle ≥44×44 满足 WCAG 2.5.5 + Apple HIG；② 多个 toggle 之间至少 8-16px gap 防误触；③ 物理相关 toggle 用 segmented control (中/EN, 🌙/☀) 而非独立 buttons。
+  - 当前 AutoViral chrome 同时违反 ① 和 ②。
+
+### R83 候选
+
+- **#1 (TOP · brand)** F230 + M118 联动 —— Settings drawer dark-mode color token 改造。**这是 brand violation，且 codemod 后所有 hardcoded color leak 都 catch**。
+- **#2** F237 F217 retroactive fix —— 中文 cards status badge i18n key 补齐（R80 R82 二度 verify）。
+- **#3** F231 + F239 联动 —— dark mode contrast WCAG AA 全审。
+- **#4** F229 + M119 —— toggle row 整体重构 (segmented control + 44×44 hit target + visual divider)。
+- **#5** F232 + F233 thumbnail / overlay theme-aware（消除 dark-mode brightness reduce artifact + overlay 暗色变体）。
+- **#6** M117 写入 `.claude/rules/e2e-testing.md` —— cross-theme verify 方法学固化。
+
+### R81 备注
+
+- R81 因 browser extension disconnect skip。**未向 e2e-report 写入伪造 findings**——按 e2e-rule "唯一通过条件是浏览器截图"，infrastructure 故障不应产出 false-positive findings。这本身是 R80 M113 方法学（不能伪造跨 locale）的衍生坚持。
+
+---
+
+## Round 80 — **locale 切换跨页深查：中文版 status badge 因 i18n key 漏写消失 + system-honesty leak 100% 跨 locale 同源 + nav 强制 bilingual**
+
+- **时间**：2026-05-12 19:46 本地（`/loop 20m` `105f4ef8` cron R79 fire；本轮 locale 跨页测试）
+- **环境**：dev (`localhost:5173`)，覆盖 `/works → settings drawer → /explore → /analytics` 四个 surface 在中 / EN 双 locale 下比对
+- **测试路径**：进入 /works 中 → 点 EN segment (1087, 22) 切换 → 验证所有 surface i18n quality → 比对 R73/R75/R77/R79 findings 跨 locale 是否同源
+- **本轮非常规价值**：作为一个 audit-the-audit round，验证前 5 轮深查的 finding 真假
+
+### Deep finding (12 条, F217-F228)
+
+| F# | 严重度 | 核心 |
+|---|---|---|
+| **F217** | **CRITICAL · 误诊修正** | EN /works cards 显示 status badge `"IMAGE · READY"` / `"IMAGE · DRAFT"`，中文 cards 只显示类型 `"图文 · 旅博"` —— **R77 F195 误诊为 baseline 缺失**，实际功能已 implement，中文 locale 因 i18n key 漏写导致 status 字段渲染缺失。修复 = 补 i18n key（~1h），不是 ground-up status badge 设计。本 finding 不仅是 fix 一个 bug，更重要是**揭示 e2e-report 方法学风险** —— 单 locale 测试可能把 "翻译缺失" 误判为 "功能缺失"。|
+| **F218** | **CRITICAL · 跨 locale 同源 leak** | F173 `browser_cookie3` / F207 `agents` / F208 `claude-cli` / F209 `hardcoded hourly` / F175 `Sonnet hasn't analyzed` 全部在 EN 与中 locale 100% 同源出现。**这意味着 leak 在 i18n source string 一级而非翻译过程**——翻译工作流忠实复制了 source 的违规词到所有 locale。R79 M111 lint rule 必须在 i18n source 阶段 enforce，等到 translation 工作流再 catch 已经太晚。 |
+| **F219** | HIGH · nav bilingual 强制混合 | EN locale 下 nav 强制并显 `"Works · 作品"` / `"Explore · 灵感"` / `"Analytics · 数据"`。EN 用户被迫读中文 —— **这是 dev/design-mode affordance 泄漏到 production**（设计师看双语对照本是开发便利，user 不需要）。同样不可避免地 reversed：中文用户也被迫读 EN。|
+| **F220** | HIGH · 平台名跨 locale 不翻译 | /explore subtitle `"Aggregated from YouTube, TikTok, 小红书, 抖音"` + 平台 pill 4 个 + section header `"小红书 Trending"` —— EN locale 下小红书/抖音简体字硬 leak。**vs CapCut/抖音国际 (TikTok) 标准**：本地化产品要 transliterate（`Xiaohongshu` / `Douyin`）或 brand 名（`RED` / `TikTok`），不能 raw 中文。|
+| **F221** | HIGH · EN 翻译加剧 implementation leak | EN /analytics 空态 `"waiting for first samples from the **background collector**"` / `"**Sonnet hasn't analyzed** your recent works"` —— EN 翻译过程把中文 "尚未为衍生成专属洞察" 等较抽象表达**直译为 implementation 术语**。**dev-driven translation 反模式**：翻译者偏 ground-truth 不偏 user-friendly 表达，反而暴露更多。 |
+| **F222** | HIGH · EN/CN 长度差缺 layout buffer | EN `"Save changes"` vs 中 `"保存"` 长度 4×；AnglesCard subtitle `"Hand-picked starters — your channel-specific picks land once AutoViral learns your work."` 比中文长 ~2x。**未见 narrow column 长 EN 文字 wrap 测试**——overflow / typography break 风险。 |
+| **F223** | HIGH · 日期格式 US-only | "Last collected: **5/12/2026, 7:08:03 PM**" 美式 MM/DD/YYYY + 12h AM/PM。**EN ≠ US locale**——欧洲/英联邦 EN 用户期待 DD/MM/YYYY + 24h；中文 ISO `2026/5/12 19:08:03` 更国际化。**i18n locale 与 region locale 区分缺失**。 |
+| **F224** | HIGH · `payoff scenes` 跨 locale 都是 jargon | EN `"15 unfinished payoff scenes waiting for you"` + 中 `"15 个待完成的 payoff 场景"`。"payoff" 是内部 brief/planning 模块术语，**两 locale 都没解释**——R77 F194 跨 locale 验证证实这是产品 lexicon 不是 translation artifact，但用户视角仍是 jargon。|
+| **F225** | HIGH · empty state typography 跨 locale 不一致 | /explore EN 空态 caption `"NO DATA"` 全大写 mono caps vs 中 `"暂无数据"` 普通中文 —— **同位置 typography rule 不一致**。中文应用 letterspacing + Instrument Serif italic 对齐 brand 才匹配 EN editorial caps 处理。 |
+| **F226** | MEDIUM · vendor leak 跨 locale 双重错位 | EN settings: `"JIMENG API"`（拼音 transliteration）+ `"Get keys from console.volcengine.com"`。**两边都错**：中文用品牌名（懂用户立即知道）+ EN 用拼音（国际用户不懂 "Jimeng" 是什么）+ 都不 abstract 到 "AI image generation"。统一抽象命名才是 M112 fix。|
+| **F227** | MEDIUM · locale 持久化 + URL 不透明 | 切到 EN → 跨页 navigation 后 EN 保持（localStorage 持久 ✓）。**但 share URL 时 locale 信息缺失**：URL 是 `/works`，不是 `/works?lang=en`。EN 用户分享给中文同事时对方看到中文，无法预判 locale 来源；同 SEO/i18n SSR 不友好。 |
+| **F228** | LOW · positive | locale 切换 instant、无 flicker、无 page reload —— **R80 唯一 positive 发现**，保留以建立 i18n baseline。|
+
+### 沉淀 — M113 / M114 / M115 / M116
+
+- **M113** `e2e-report 方法学校正 — 强制跨 locale verify`：
+  - R77 F195 误诊为 baseline 缺失，R80 测 EN 才发现是 i18n key 漏写。
+  - **方法学风险**：单 locale 测试无法区分 "功能缺失" vs "翻译缺失"。
+  - 新规则：所有 CRITICAL/HIGH finding 必须在另一 locale 复测一次，发现不同则升级到 i18n diagnosis；同源才 confirm 为产品级 finding。
+  - 本轮 R80 在 audit-the-audit 模式下 retroactively 修正了 R77 F195 的 diagnosis。
+
+- **M114** `vendor name 跨 locale 双重错位（升级 M112）`：
+  - 中文用品牌名（如 "即梦 API"）+ EN 用拼音（"JIMENG API"）+ 都不抽象到功能描述（"AI image generation"）。
+  - 极差路径：中文用户秒懂供应商 + EN 用户读不懂拼音 + 国际用户无法预判 + AutoViral 工程价值被埋没。
+  - 修复唯一正解：**统一抽象命名**，跨 locale 都用 "AI Image Generation" / "AI Language Model" / "Data Collection"。
+
+- **M115** `i18n source string lint rule（升级 M111）`：
+  - M111 是 user-facing 违规词清单。M115 升级到 i18n source 工作流前置。
+  - 检查时机：在 i18n source string commit 时 lint，禁止入库 `agents/claude-cli/browser_cookie3/Sonnet/hardcoded/Python deps/cron/anti-bot/...` 等词。
+  - 否则翻译工作流只会忠实复制 leak 到所有 locale（F218 验证）。
+
+- **M116** `EN ≠ US locale`：
+  - Date format / number format / currency / measurement units 全要 region-aware，不能用 "selecting EN" 当 "selecting US English" 默认。
+  - 实现：`navigator.language` 区分 `en-US` / `en-GB` / `en-AU`，或加 region picker。
+  - 当前 AutoViral 把 EN 硬绑定到 US format（F223），对欧洲/英联邦/亚太 EN 用户造成错误格式。
+
+### R81 候选
+
+- **#1 (TOP)** F217 中文 cards status badge i18n key 补齐 —— **小修但纠正 R77 F195 错误诊断**，1h 内可上线。
+- **#2** F218 + M115 联动 —— i18n source lint rule 立 codemod，阻止违规词流向所有 locale。
+- **#3** F219 nav bilingual 移除 —— **design-mode dev affordance** 隔离 production。
+- **#4** F220 平台名 transliterate（小红书 → Xiaohongshu / Douyin → Douyin）。
+- **#5** F223 + M116 联动 —— region-aware date format（navigator.language 或 region picker）。
+- **#6** M113 方法学固化 —— e2e-report 跨 locale verify 写入 `.claude/rules/e2e-testing.md`。
+
+---
+
+## Round 79 — **Settings drawer 深度审计：明文 secret 暴露 + vendor leak 全栈 + cron 编辑器逼用户当 sysadmin**
+
+- **时间**：2026-05-12 19:25 本地（`/loop 20m` `105f4ef8` cron R78 fire；本轮设置抽屉首次深查）
+- **环境**：dev (`localhost:5173/works`)，点右上 ⚙ 打开 SettingsPanel drawer
+- **测试路径**：点 gear icon (1147,25) → drawer 开 → zoom AccessKey row → 点 "显示" 按钮 (1535,125) → token 明文出现 → 再点切回隐藏 → Esc 关闭 drawer。中途观察 5 个 section（即梦 API / OPENROUTER / 调研设置 / 抖音号绑定 / 默认模型）
+
+### Deep finding (14 条, F203-F216)
+
+| F# | 严重度 | 核心 |
+|---|---|---|
+| **F203** | **CRITICAL · 安全漏洞** | 3 个 API Key 全部以可读 input field 形式挂在生产 UI 中：AccessKey / SecretKey / OPENROUTER API Key —— 旁边一个 `显示` 按钮。**vs Vercel / Anthropic console / Github / Stripe 标准**：API key 创建后**仅一次性可见**，之后只显示 `····last4`，不可再次查看，丢失只能 rotate。当前 AutoViral 模型违反 secret hygiene 最基本原则：长期可查看的 plaintext secret。截图共享 / 屏幕录制 / 远程协助 / 旁人偷看 = 一键 token 泄漏。 |
+| **F204** | **CRITICAL · UX 错配** | "Cron 表达式 [0 9 * * *]" 直接给用户编辑 + 推荐 "7 9,21 * * *" + 中文解释 "（每天 09:07 与 21:07）, 错移分钟避开 :00 同步, **降低小红书/抖音 anti-bot 风险**"。创作者 ≠ 系统管理员！让用户写 cron 表达式 + 暴露 anti-bot ops 知识 = 双重错位。**正确做法**：visual time picker（"每天 09:07 / 21:07" 选时间）→ 内部转 cron → 显示 "智能错移防止被检测"（隐藏 cron 字符串本身）。 |
+| **F205** | HIGH · vendor leak | "字节火山的图片/视频生成 API, Editor 重图生成都走这里, Key 在 console.volcengine.com 申请。" —— 把火山引擎品牌名直接写成 section subtitle + 暴露申请 URL。即使产品有多 provider 切换需求，硬绑定 vendor 名 = 用户知道你用什么 + 把竞品意识带入。**主流标准**：consumer AI 产品用 "AI 图像生成" 抽象描述，不暴露具体 provider。 |
+| **F206** | HIGH · vendor leak | "OPENROUTER API" 作为 section 大写英文 header —— LLM 路由 provider 名直接做 section 标题。比 F205 更敏感：用户看到 OpenRouter 立即知道你**不是直连 Anthropic/OpenAI**，会对延迟 / 隐私 / cost 有疑虑。 |
+| **F207** | HIGH · 术语 leak | "LLM 网关 — 所有 **agent**（Editor chat / Studio chat / trends 调研）共用此 Key" + "所有 **agent** 的默认模型, 作品级 override 会重置此默认值" —— "agent" 是内部组件名，user 视角应是 "AI 助手"。**R75/R77 system-honesty leak 第 6 次复现**。 |
+| **F208** | HIGH · model 版本 leak | "默认模型 [Claude Opus · 4.7]" dropdown + "版本号由 **claude-cli 运行时解析**, alias 自动跟随每日最新稳定模型。" 三层 leak：① 让非 ML 用户选具体模型 ② "claude-cli" 内部工具名 ③ alias / 版本解析机制 ops 内幕。 主流 consumer AI 产品（ChatGPT / Claude.ai）只让用户选 "快速 vs 高质量" 模式而非具体模型号。 |
+| **F209** | HIGH · 系统诚实度 leak | "调研设置 ... 不影响 Analytics 同步频率 **(hourly 硬编码)**" —— **括号里直接写"硬编码"三字**。这是 dev inline comment 风格的 user-facing 文案。R72/R73/R75/R77/R79 五 round system-honesty leak 同源病，本轮最赤裸——把"该值不可改"这个 implementation detail 写在 user 视野内。 |
+| **F210** | **CRITICAL · 安全确认** | 点 "显示" → AccessKey **明文完整暴露**（截图捕获 `AKLT…ODBiNzgyN…` 形式 token，约 60+ 字符全文）。无 confirm dialog "你确定查看？"、无 30s timeout 自动隐藏、无 clipboard copy 限制、无 audit log、无 throttle（多次 click 显示/隐藏）。F203 升级：不仅是长期可见，还是**任何时候 1-click 立即明文**。 |
+| **F211** | MEDIUM · 缺 connection status visual | 抖音号绑定 section 只有 "主页 URL [...]" + [立即同步] + "上次同步: 2026/5/12 19:08:03"。**没有 visual health indicator**：绿色 dot "已连接 · 健康" / 黄色 "上次同步失败" / 红色 "未绑定"。R73 F172 (/analytics KPI 0 vs broken confusion) **部分根因就在这里**——/analytics empty state 不知道 channel 是健康还是空，settings 也不告诉，整产品 channel-health 状态消失。 |
+| **F212** | MEDIUM · drawer scrollability 不清 | drawer 高度铺满 viewport 但 5+ section 全部可见 → 用户看不出 "drawer 是否还有更多内容可滚下面"。无 scrollbar 视觉、无底部 fade indicator。 |
+| **F213** | MEDIUM · 保存 button 永久 disabled 但无 affordance | 底部 [保存] 文字明显比 [取消] dim/灰，但**没有 tooltip "无变更"** 解释为什么。dev panel 标准做法：disabled + tooltip "请先修改任何字段" or "已是最新值"。 |
+| **F214** | LOW · positive a11y | Esc 键关闭 drawer 工作 ✓ —— 这是 R78 唯一 positive 发现，保留以建立 a11y baseline。 |
+| **F215** | MEDIUM · click target 太小 | Gear icon ~24×24px（zoom 测量），低于 WCAG 2.5.5 / Apple HIG 44×44 最小标准。我两次 click：(1147, 25) miss，(1142, 25) 命中——差 5 px 触发 miss。Touch 设备会更糟。 |
+| **F216** | MEDIUM · drawer click event 漏到下层 | 点 drawer 右上角 X (1532, 13) 时， event 没被 drawer 拦截，bubble 到下层 nav header "灵感" link，导致 drawer 关闭 + 同时 navigate 到 /explore。正确做法：drawer overlay 应该 `event.stopPropagation()` 阻止 click leak。 |
+
+### 沉淀 — M110 / M111 / M112
+
+- **M110** `secret-leak 在生产 UI 不可接受（任何环境，含 dev）`：
+  - 反模式：长期可读 + 1-click reveal = secret 默认假定泄漏
+  - 正确模式（仿 Vercel / Anthropic console / AWS Secrets Manager）：
+    1. 创建时**仅一次性**显示完整 secret，要求用户立即复制到密码管理器
+    2. 之后只显示 `····last4`，不可再次查看
+    3. 丢失只能 **rotate**（生成新 key，旧 key 立即失效）
+    4. 可选 audit log：记录 reveal/rotate 事件
+  - 这是 R75 M104 silent-failure 的反向 trust 破坏：用户看到 mask 假定"被加密"，实际 1-click 明文 = **trust illusion**
+
+- **M111** `system-honesty leak 升级为产品级 lint rule`（R72/R73/R75/R77/R79 五 round 复现）：
+  - 出现位置：dialog/modal/drawer 的 hint row + section subtitle + dropdown 解释文 + empty-state copy
+  - 一律违规词清单（建议加 codemod / lint）：`agent` / `cron` / `LLM` / `OpenRouter` / `claude-cli` / `Python 依赖` / `browser_cookie3` / `硬编码` / `Sonnet` / `Opus` / `alias` / `anti-bot` / `演示` / `SAMPLE` / `Mock` / `placeholder`
+  - 替换原则：implementation detail → outcome description（"agent" → "AI 助手"；"hourly 硬编码" → 删；"Cron 表达式" → "运行时间"；"OpenRouter API" → "AI 服务"）
+
+- **M112** `vendor-name leak family`（F205/F206/F208 同族）：
+  - 把第三方供应商名做 section 标题/标签 = 产品把自己的供应链暴露给用户
+  - 后果：① 用户对供应商质量产生疑虑 ② 竞品研究门槛降低 ③ 用户被引导去 console.volcengine.com 申请 = 转化损耗 ④ 把 AutoViral 自身做的工程价值（路由/重试/抽象）藏起来了
+  - 修复方式：所有 vendor 名一律抽象化（"AI 图像生成" / "AI 语言模型" / "数据采集"）；申请 URL 只在 onboarding flow 中以 inline help "如何获取" 出现，不暴露在 settings 主面
+
+### R80 候选
+
+- **#1 (TOP-SEC)** F203 + F210 联动 —— **secret 一次性 reveal + rotate-only 模型**。这是 P0 安全修复，应该今天就开 issue。
+- **#2** F204 cron → time picker —— UX 错配最严重单点修。
+- **#3** F207 + F208 + F209 联动 —— agent / model / "硬编码" 三个 leak 一并文案大扫除，附 M111 lint rule。
+- **#4** F211 douyin connection status visual —— 与 R73 F172 KPI 0 vs broken 联动修。
+- **#5** F215 + F216 —— gear icon hit-target 扩大到 44px + drawer event isolation（`stopPropagation()` 在 overlay click handler）。
+- **#6** M110 → 产品级 secret hygiene policy 文档化。
+
+---
+
 ## Round 78 — **F186 CLOSED ✅ /explore AnglesCard 系统诚实度 leak 在文案层根治：从"承诺-撤回"改写为"事实-路线图"**
 
 - **时间**：2026-05-12（`/loop 30m e2e-report fix` 第 4 轮触发，:13 cron fire）
