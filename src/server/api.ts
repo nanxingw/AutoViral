@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { readFile, writeFile, appendFile, mkdir, readdir, rename, copyFile } from "node:fs/promises";
-import { spawn, execFile } from "node:child_process";
+import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, extname } from "node:path";
 import { homedir } from "node:os";
@@ -1843,124 +1843,39 @@ apiRoutes.put("/api/interests", async (c) => {
 // Trend Research via Claude CLI
 // ---------------------------------------------------------------------------
 
-/** Run claude CLI with a prompt and return the text result. */
-function runCliBrief(prompt: string, timeoutMs = 60000): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const args = [
-      "-p", prompt,
-      "--output-format", "json",
-      "--dangerously-skip-permissions",
-      "--model", "haiku",
-    ];
-
-    const proc = spawn("claude", args, {
-      cwd: homedir(),
-      stdio: ["ignore", "pipe", "pipe"],
-      env: { ...process.env, CLAUDE_CODE_ENTRYPOINT: "cli" },
-    });
-
-    let stdout = "";
-    proc.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
-    proc.on("exit", (code) => {
-      if (code !== 0 && !stdout) {
-        reject(new Error(`CLI exited with code ${code}`));
-        return;
-      }
-      try {
-        const envelope = JSON.parse(stdout);
-        resolve(envelope.result ?? "");
-      } catch {
-        resolve(stdout);
-      }
-    });
-    proc.on("error", reject);
-    setTimeout(() => { try { proc.kill(); } catch {} reject(new Error("Timeout")); }, timeoutMs);
-  });
-}
 
 async function researchTrends(platforms: string[]): Promise<{ collected: string[]; errors: string[] }> {
+  const { collectPlatform, defaultPipelineDeps } = await import("../trends/pipeline.js");
+  const { writeValidatedTrendsYaml } = await import("../trends/write.js");
+  const { gcOldCovers, coversDir } = await import("../trends/covers.js");
+  const { runCliBrief } = await import("../cli-brief.js");
   const collected: string[] = [];
   const errors: string[] = [];
-
-  // Load user interests once for all platforms
-  const config = await loadConfig();
-  const interests = config.interests ?? [];
-  const interestClause = interests.length > 0
-    ? `\n用户特别关注以下领域：${interests.join("、")}。请优先覆盖这些领域的趋势，同时也包含其他热门方向。\n`
-    : '';
-
+  const deps = defaultPipelineDeps(runCliBrief);
   for (const platform of platforms) {
-    const platformLabel = platform === "xiaohongshu" ? "小红书" : platform === "douyin" ? "抖音" : platform;
-
-    // Run script for real-time data
-    const scriptData = await runTrendScript(platform);
-    const dataClause = scriptData
-      ? `\n以下是通过 API 获取的 ${platformLabel} 实时热搜数据，请以此为基础进行分析：\n\`\`\`json\n${scriptData.slice(0, 4000)}\n\`\`\`\n`
-      : `\n无法通过 API 获取实时数据，请使用 WebSearch 搜索最新热搜信息。\n`;
-
-    const prompt = [
-      `你是一个专业的社交媒体趋势研究员。请分析 ${platformLabel} 平台当前最热门的内容趋势。`,
-      dataClause,
-      interestClause,
-      `如果上面的 API 数据不够充分，请使用 WebSearch 补充搜索：`,
-      `- "${platformLabel} 爆款内容 趋势 2026"`,
-      `- "${platformLabel} 热门话题 最新"`,
-      ``,
-      `根据所有信息，输出以下 JSON 格式（只输出 JSON，不要其他文字）：`,
-      `{"topics":[{`,
-      `  "title":"话题标题",`,
-      `  "heat":4,`,
-      `  "competition":"中",`,
-      `  "opportunity":"金矿",`,
-      `  "description":"趋势描述和为什么值得做",`,
-      `  "tags":["推荐标签1","推荐标签2","推荐标签3"],`,
-      `  "contentAngles":["切入角度1","切入角度2"],`,
-      `  "exampleHook":"爆款开头示例，如：你绝对想不到...",`,
-      `  "category":"所属领域"`,
-      `}]}`,
-      ``,
-      `要求：`,
-      `- topics 至少 10 个`,
-      `- heat 为 1-5 整数`,
-      `- competition 为 "低"/"中"/"高"`,
-      `- opportunity 为 "金矿"(高热低竞)/"蓝海"(低热低竞)/"红海"(高热高竞)`,
-      `- tags 3-5 个平台推荐标签`,
-      `- contentAngles 2-3 个具体的内容切入角度`,
-      `- exampleHook 一句话的爆款开头示例`,
-      `- category 为话题所属领域（如 美食/科技/穿搭/生活/情感/职场/健身/旅行/宠物/教育）`,
-    ].join("\n");
-
+    if (!["youtube", "tiktok", "xiaohongshu", "douyin"].includes(platform)) {
+      errors.push(`${platform} (unsupported)`);
+      continue;
+    }
     try {
-      const result = await runCliBrief(prompt);
-      const stripped = result.replace(/```json?\s*/gi, "").replace(/```/g, "").trim();
-      const firstBrace = stripped.indexOf("{");
-      const lastBrace = stripped.lastIndexOf("}");
-      if (firstBrace < 0 || lastBrace <= firstBrace) {
-        errors.push(platform);
+      const result = await collectPlatform(platform as any, deps);
+      if (result.pipelineStatus !== "ok") {
+        errors.push(`${platform} (${result.errors.join("; ")})`);
         continue;
       }
-
-      const data = JSON.parse(stripped.slice(firstBrace, lastBrace + 1));
-      if (!data.topics || !Array.isArray(data.topics)) {
-        errors.push(platform);
-        continue;
-      }
-
       const trendsDir = join(homedir(), ".autoviral", "trends", platform);
-      await mkdir(trendsDir, { recursive: true });
       const dateStr = new Date().toISOString().slice(0, 10);
-      await writeFile(
-        join(trendsDir, `${dateStr}.yaml`),
-        yaml.dump(data, { lineWidth: -1 }),
-        "utf-8"
-      );
-
+      const w = await writeValidatedTrendsYaml(trendsDir, dateStr, result);
+      if (!w.written) {
+        errors.push(`${platform} (write-failed: ${w.issues.map(i => i.path).join(",")})`);
+        continue;
+      }
+      await gcOldCovers(coversDir(platform), 80);
       collected.push(platform);
-    } catch {
-      errors.push(platform);
+    } catch (e) {
+      errors.push(`${platform} (${e instanceof Error ? e.message : String(e)})`);
     }
   }
-
   return { collected, errors };
 }
 
@@ -2022,7 +1937,7 @@ apiRoutes.get("/api/trends/:platform/covers/:id", async (c) => {
 apiRoutes.post("/api/trends/refresh", async (c) => {
   try {
     const body = await c.req.json<{ platforms?: string[] }>().catch(() => ({}));
-    const platforms = (body as any).platforms ?? ["xiaohongshu", "douyin"];
+    const platforms = (body as any).platforms ?? ["youtube", "tiktok", "xiaohongshu", "douyin"];
     const result = await researchTrends(platforms);
     return c.json({ triggered: true, type: "research", ...result });
   } catch (err) {
