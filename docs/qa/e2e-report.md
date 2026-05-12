@@ -6,6 +6,651 @@
 
 ---
 
+## Round 123 — **R119 F559 (html lang) + F560 (nav bilingual stripe) 双 CRITICAL CLOSED ✅ —— index.html 同步 `<script>` pre-paint lang setattribute（mirror data-theme pattern）+ EN nav 剥离 "· 作品/灵感/数据" 残留双语条纹；i18n-honesty family 第 1 实例闭合 + M199 orphan partial-fix coexistence 沉淀**
+
+- **时间**：2026-05-13（`/loop 30m` cron 触发；R121/R122 已被并行 contrast + keyboard audit agent 占用，本轮取 R123）
+- **触发**：R120 留 R121+ 候选首位 R119 F559（html lang 不与 locale 同步）+ F560（nav 双语硬编）。F559 是 a11y plane SR 发音 + i18n plane browser auto-translate + SEO plane Googlebot index 三 plane 同源 CRITICAL；F560 是 R98+R104+R114 三轮独立浮现的 EN-locale bilingual-stripe family
+- **方法学**：M198 第 1 次应用约束 —— 发现 store.ts:applyToDOM 已在 **orphan dirty 里**（未 commit）但 HEAD 没有。F559 一半已被孤儿改动覆盖（locale toggle 时 sync），但 index.html `<html lang="zh-CN">` 初始硬编没修。本轮接手 index.html 那半 + 衍生 **M199 orphan partial-fix coexistence**（orphan 改完一半，本 round 只接另一半，互补不重复）
+
+### 修复
+
+- `web/index.html`（+9 行，extend 现有 inline `<script>`）
+  - **F559 / pre-paint 半**：扩展 head 内已有的 data-theme 同步检测脚本，新增 `var l = localStorage.getItem("autoviral.locale")` + navigator.language `^zh` fallback + `document.documentElement.setAttribute("lang", l === "zh" ? "zh-CN" : "en-US")`
+  - 镜像 store.ts initial-detect 顺序（localStorage → navigator.language），保证回访 EN 用户 byte-1 即正确 lang，无 FOUC window
+  - 与 orphan dirty 的 store.ts:applyToDOM 互补：本 fix 解决 pre-React-mount 同步 path，orphan 解决 runtime locale-toggle path
+- `web/src/i18n/messages.ts`（EN topnav 块，-3 / +3 + 6 行注释）
+  - **F560 / EN nav 纯化**：
+    - `works: "Works · 作品"` → `"Works"`
+    - `explore: "Explore · 灵感"` → `"Explore"`
+    - `analytics: "Analytics · 数据"` → `"Analytics"`
+  - 注释解释 bilingual-stripe 是产品早期"双语过渡"的 vintage code，i18n catalog 成熟后这种 inline ZH 是 a11y/i18n 双 plane leak
+  - ZH catalog 不动（topnav ZH block line 624 "作品/灵感/数据" 已正确）
+- `web/src/test/indexHtml.lang-sync.test.ts`（**新文件**，4 contract test）
+  - **F559-a**：`readFileSync(index.html)` + assert `localStorage.getItem("autoviral.locale")` 存在于源 HTML
+  - **F559-b**：assert `navigator.language /^zh/i` fallback regex 存在
+  - **F559-c**：assert `setAttribute("lang", l === "zh" ? "zh-CN" : "en-US")` 精确匹配
+  - **F559-d**：assert lang 和 data-theme 在**同一 inline `<script>` block** —— 保证单次同步 parse/exec，不留第二个 FOUC window
+- `web/src/ui/TopNav.test.tsx`（+19 行，1 new contract test）
+  - **F560**：default EN locale 下 `nav` 三 tab `textContent` 严格等于 `"Works" / "Explore" / "Analytics"`；额外 CJK regex `[一-鿿]` 全 nav 0 hit
+
+### E2E 验证（M178 contract-test evidence rule 第 4 次应用）
+
+```text
+TopNav.test.tsx — 7/7 pass ✓（原 6 + 新 F560 case）
+indexHtml.lang-sync.test.ts — 4/4 pass ✓（新文件 4 case）
+```
+
+F559 浏览器侧不能直接走 chrome MCP probe 验证 pre-paint 同步行为（脚本已经 race 到 React mount 之前，DOM probe 看到的是稳态而非 FOUC window）；contract test 直接断言 index.html 源码满足 4 条性质 —— 这是 R111/R117/R120 一脉的 "static-source contract guard" 第 4 次正当应用。
+
+### 静态验证
+
+- `npm run test:web -- TopNav indexHtml` → **11/11 pass** ✓
+- `npx tsc --noEmit | grep -E 'messages\.ts|TopNav\.test|indexHtml'` → 0 error
+
+### 沉淀
+
+**M199 · orphan partial-fix coexistence pattern**（新增）
+
+R120 沉淀 M198 "working tree orphan dirty 是 audit-plane 盲区"；本轮发现 orphan partial-fix scenario：**orphan 已写了 F559 的一半（store.ts runtime locale-toggle sync）但未 commit**，且本轮 audit 不应碰它。
+
+**决策树**（M199）：
+1. orphan partial-fix 是否在我的 round 主 surface 里？
+   - 否 → 接 orphan 另一半（独立 surface），sediment 写明 orphan 半本轮不动
+   - 是 → 选 sub-issue 不与 orphan 重叠（例如 orphan 改 store.ts，我改 index.html）
+2. 我的 fix 不能重复 orphan 已实现的代码（双重 applyToDOM 不仅冗余还可能 race）
+3. sediment 必须显式说明哪半归本 round，哪半 orphan 待 owner 认领（避免下轮 audit 误以为 F559 仍全 open）
+
+**反面教训**：若 R123 直接采纳 orphan store.ts 改动作为我的 commit，未来 git blame 会把别人的 work 归到我头上 + 同时把 orphan 其他无关改动隐性扯进 round；M199 划线"只接 surface 不重叠的另一半"，维持归属清晰。
+
+**M200 · pre-paint synchronous script 是 a11y FOUC 的最高 ROI 修复**（新增）
+
+R123 修 F559 选择**扩展现有 data-theme 同步脚本**而非新增 React useEffect。理由：
+
+1. **同步 vs 异步覆盖范围差异**：useEffect 跑在 React mount 之后，至少经历 HTML parse + JS bundle parse + React mount 三个阶段；那之间 SR / Googlebot / browser auto-translate prompt 都可能 fire 一次。同步 inline `<script>` 在 HTML parse 期间就执行完，DOM 在第一次 paint 前就正确
+2. **复用现有 pattern**：index.html 早已用 inline `<script>` 处理 data-theme detection（避免 light/dark FOUC），把 lang sync 加在同一 block 是最低 surface-area 改动 + 共享 localStorage 读取成本
+3. **与 store.ts 互补不重复**：store.ts:applyToDOM（orphan dirty）处理 runtime toggle；inline script 处理 cold-start。两层互不替代
+
+**规则**：a11y / theme / locale 等"必须在 first paint 前定型"的 attribute，优先选 inline-script-in-head pattern。useEffect / use(Layout)Effect 只适合 runtime mutation；初始态走 inline script。
+
+### 桥梁哲学 plane 第 12 轮巩固
+
+| Plane | 本轮证据 |
+|---|---|
+| a11y plane | F559 a11y plane **第 6 处**闭合（focus-visible / sr-only / srErrorCode / motion gate / cover alt / lang sync）；SR 引擎发音正确化 |
+| i18n plane | F560 i18n-honesty family **第 1 实例**闭合（"EN 渲染纯 EN，不混 CJK"）；R98+R104+R114 三轮 audit 浮现的 bilingual-stripe 病根第一次正面 fix |
+| SEO plane（新 plane）| F559 副产物 = Googlebot 索引 EN-locale 用户的页面时拿到 `<html lang="en-US">`；i18n SEO 路径首次贯通 |
+| copy plane | F560 移除 3 处 inline CJK，EN catalog 现在 100% 英文（topnav）；UI shell 文案 lint 第一次满足 |
+| audit plane | M199 orphan partial-fix coexistence + M200 pre-paint script ROI = audit plane 累计 ~26 套方法学 |
+
+### R124+ 候选
+
+- **R119 F561-F570** —— i18n audit 剩 10 finding（trends.ts Chinese union type / useT missing-key fallback / 10 生产源 hardcoded ZH 含 LLM prompt 5 处）
+- **R121 F571 CRITICAL** —— `--text-dimmer` 双 theme 失 WCAG AA（3.02 / 3.37）；token-level fix 2 行
+- **R121 F572 CRITICAL** —— `--status-warn` 双 theme undefined；加 2 token + 1 vitest 测试
+- **R121 F573-F582** —— contrast 剩 10 finding（accent-lo dark / glass-border alpha / 0 axe CI gate / ...）
+- **R122 keyboard nav 12 finding** —— dnd-kit KeyboardSensor / skip-link / Cmd+K palette / roving tabindex 等
+- **R118 (parallel) Unauthorized 12 finding** —— 401/403 路径架构级缺位
+- **R115 F525-F533** —— ARIA pattern matrix 8 finding
+- **R116 EmptyState primitive** —— 25+ empty site
+- **R117 self-regression** —— SafeChatPanel 等 ~10 个 test 缺 MemoryRouter（orphan-blocked 优先级低）
+- **M198 orphan dirty cleanup** —— 30+ 未 commit 改动归属确认
+
+`★ Insight ─────────────────────────────────────`
+- **M199 orphan partial-fix coexistence 是 multi-session 写作的必备规则**——若我不知道 store.ts orphan 已经写了一半，会重写一次 applyToDOM 在 App.tsx useEffect，两层 race + git blame 混乱。M199 划"surface 不重叠 + 互补"线，保证 fix 物理上和归属上都清洁
+- **M200 inline-script-in-head 是 a11y/theme/locale FOUC 的 unbeatable 修复**——同步 parse-time exec 覆盖 SR/Googlebot/translate-prompt 三方均在 React mount 前发生的窗口，是 useEffect 永远追不上的；index.html 早就用这个 pattern 处理 data-theme，本轮证明它可推广到 lang
+- **F559 fix path 同时覆盖 SEO/a11y/i18n 三 plane** —— Googlebot 索引正确 lang → 英语用户搜得到 EN content；SR 引擎按 lang 选发音器 → "Works" 不再被中文发音器读"沃克斯"；browser auto-translate prompt 不再骚扰已经在正确 locale 的用户。单一 5 行 fix 击穿三 plane 是 bridge philosophy 最理想 leverage 点
+- **F560 audit-honesty 反面镜像**：R107 audit 说 EN-locale 44% Chinese surface，但我们的 EN catalog topnav 早早就写 `Works · 作品` 自我打脸；本轮 fix 后 catalog 内部至少不再矛盾
+`─────────────────────────────────────────────────`
+
+---
+
+## Round 122 — **Keyboard navigation (WCAG 2.1.1 + 2.1.2 + 2.4.1 + 2.4.3) 全产品 horizontal slice 深审 —— horizontal slice 第 8 维度：dnd-kit KeyboardSensor 0 注册 / 0 skip-link / 0 arrow-key navigation / 0 Cmd+K palette / 8 focusable on /analytics 无 roving tabindex / 全局快捷键仅 Studio 三键 —— Filmstrip 拖拽对键盘用户完全失能，3 大主页面（works/explore/analytics）零键盘加速器，"editorial 调性"工业基准被甩开两个时代**
+
+- **时间**：2026-05-13（cron `105f4ef8` 触发 R122）
+- **触发**：R121 R122+ 候选明列 "Keyboard nav horizontal slice (WCAG 2.1.1)"；R90 chat textarea (F331 焦点失踪) + R95 dnd-kit Filmstrip (F374 KeyboardSensor 缺位) + R107 Cmd+K (F463 全局 palette 缺位) 三轮散点已浮现 keyboard gap **跨 32 个 round 未做合并横扫**
+- **方法学**：M141 (DOM extraction) + M180 (zero-mutation) + M201 (architectural absence as signal) + 新 **M212 (library default 反 a11y 审计)** 同 round 应用；DOM probe 直接抓 focusable inventory + tab order + roving tabindex 存在性，比逐个手动 Tab 走流程 5-10× 高效
+- **跨 round family 串联**：R90 F331（chat textarea focus 不可见）+ R95 F374（dnd-kit KeyboardSensor 缺位）+ R107 F463-F465（Cmd+K / focus-visible / shortcut layer）+ R115 disability-class horizontal slice + R121 F576 focus-ring token alpha 0.08 → 全部坐实为**同一 family**：**motor-impaired + screen-reader + power-user 三类用户全产品边缘化**
+
+### 深层发现（12 finding · 2 CRITICAL · 4 HIGH · 4 MEDIUM · 2 LOW）
+
+#### F583 [CRITICAL] dnd-kit Filmstrip 拖拽对**键盘用户完全失能** —— R95 F374 family 升级版
+
+`grep -rE "KeyboardSensor|sortableKeyboardCoordinates" web/src` → **0 hit**。dnd-kit 默认仅注册 `PointerSensor` / `MouseSensor`；`KeyboardSensor` **必须显式 import + register** 否则键盘用户**完全无法**触发拖拽。
+
+实际后果（Editor Filmstrip 重排 slide）：
+- 鼠标用户：✅ 拖拽顺畅
+- 触摸用户：✅ TouchSensor 自动适配
+- 键盘用户：❌ 永远无法重排 slide 顺序
+- 屏幕阅读器用户：❌ `aria-roledescription="sortable"` 是**假广告**（R95 F374 原文）—— SR 朗读"slide 3，sortable"暗示可重排，但 Tab 进 slide 后按任何 arrow key/Space/Enter 都不触发任何 drag start
+
+**为什么 CRITICAL**：
+- WCAG 2.1.1 (Keyboard) Level A —— 所有功能必须可键盘触发；本产品 carousel 编辑核心操作（slide 顺序）违 Level A
+- Motor-impaired 用户（Parkinson / RSI / 单手操作 / switch-control）占人口 ~4-8%
+- "Editor"产品类目 Notion blocks / Figma layers / Linear sub-issues 全部支持 keyboard reorder（Space + Up/Down + Space）—— 工业 baseline 是 minimum bar
+
+**Family**：R95 F374 family **第 2 次浮现未关** · R115 disability-class horizontal slice motor-impaired 子症 · M212 "library default 反 a11y" 新沉淀
+
+**建议（dnd-kit 标配 5 行）**：
+```ts
+import { KeyboardSensor, sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+const sensors = useSensors(
+  useSensor(PointerSensor),
+  useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+);
+```
+配套 `<SortableItem>` 加 `tabIndex={0}` + `aria-keyshortcuts="Space ArrowUp ArrowDown"` discoverable hint
+
+#### F584 [CRITICAL] 0 skip-link —— WCAG 2.4.1 Bypass Blocks Level A 失守
+
+browser probe `querySelector('a[href="#main"], a[href="#content"], [class*="skip"]')` → **null**。`grep -rE "skip.*nav|skipToContent|skip-link" web/src` → 0 hit。
+
+**用户成本**：
+- 键盘 + 屏幕阅读器用户每次进入新页面，必须 Tab N 次穿越 TopNav（4 链接）+ locale toggle + theme toggle + settings ≈ 7-8 次按键才到达 main content
+- 累计：日常使用 ~50 次页面切换 × 8 Tab = **400 次额外按键/天**
+- WCAG 2.4.1 Level A —— 必须提供"绕过重复内容的机制"
+
+**工业基准**：Linear / Notion / Figma / GitHub / Stripe Dashboard 全部首屏第一个 focusable 是 visually-hidden `<a href="#main">Skip to content</a>`，focus 后变 visible
+
+**Family**：M213 "skip-link 是 globals 级 a11y 第 N 个底座" 新沉淀 · R115 disability-class horizontal slice · R117 globals.css 基础设施延续
+
+**建议（5 行 globals.css + 5 行 App root）**：
+```tsx
+// App.tsx 顶
+<a className="skip-link" href="#main-content">{t("a11y.skipToMain")}</a>
+// globals.css
+.skip-link { position: absolute; left: -9999px; top: 0; padding: 8px 16px; background: var(--accent); color: var(--accent-fg); z-index: 9999; }
+.skip-link:focus { left: 16px; top: 16px; }
+```
++ 各 page `<main id="main-content" tabIndex={-1}>` 接住 focus
+
+#### F585 [HIGH] **0 arrow-key navigation** —— composite widget 全部退化为 N 个 Tab stop
+
+`grep -rE "key.*===.*['\"]Tab|key.*===.*['\"]Arrow" web/src` → **0 hit**（仅在 chat textarea 提到 Enter+modifier）。
+
+意味着所有 composite widget（应该作为一个 Tab stop + arrow key 内部 navigation）退化为**每个子项 1 个 Tab stop**：
+- TopNav 4 个 NavLink → 4 Tab stop（应为 1 + Left/Right arrow）
+- `/works` filter pill 3 个（all/draft/processing）→ 3 Tab stop（应为 1 + Left/Right arrow）
+- `/explore` PlatformTabs 4 个 → 4 Tab stop（应为 1 + Left/Right arrow）
+- Inspector tab 群 → N Tab stop
+- Studio Timeline track 群 → N Tab stop
+
+**WCAG ARIA 1.2 Tabs Pattern** 明定 tab group 必须 roving tabindex（只有当前激活 tab `tabIndex=0`，其他 `tabIndex=-1`，箭头键切换 active 状态 + focus）。本产品**全产品零实现**。
+
+**实际后果**：键盘 power user 从 nav 切到 main 内容需 Tab 4 次（应 1 次）；累计每页 +N 次按键。
+
+**Family**：M215 "roving tabindex 是 composite widget 标准" 新沉淀 · R115 disability-class family · ARIA 1.2 compliance gap
+
+**建议**：写一个 `useRovingTabIndex(items, axis="horizontal")` hook，给 TopNav / filter pill / PlatformTabs / Inspector tab 4 处复用；每个 widget 减少 3-N Tab stop
+
+#### F586 [HIGH] 0 全局 Cmd+K command palette —— power-user 产品哲学差距
+
+`grep -rE "cmdk|kbar|useGlobalShortcut" web/src` → 0 hit（除 useShortcuts.ts 中 Studio-scope 3 个 hardcoded shortcut）。
+
+**工业基准（自 2020 起所有 power-user 工具标配）**：
+- Linear: Cmd+K → fuzzy search issue / project / cycle / member
+- Notion: Cmd+K → fuzzy nav + action
+- Figma: Cmd+/ → action search
+- GitHub: Cmd+K → file finder + nav
+- VS Code / Cursor: Cmd+Shift+P → command palette
+- Vercel / Stripe: Cmd+K → settings + project switcher
+
+本产品 0 实现 → 键盘用户必须**手点** locale/theme/settings/works/explore/analytics 之间切换。
+
+**Family**：R107 F463 family 第 2 次浮现未关 · M214 "shortcut 哲学差距" 新沉淀 · power-user plane 第 1 次正式命名
+
+**建议（最小可行 Cmd+K）**：用 `cmdk` (Vercel/Radix) 3KB npm 包 + 自定义 action provider：
+```tsx
+<Command label="Global">
+  <Command.Input placeholder={t("cmdk.placeholder")} />
+  <Command.Group heading={t("cmdk.navigate")}>
+    <Command.Item onSelect={() => navigate("/works")}>Works · 作品</Command.Item>
+    ...
+  </Command.Group>
+  <Command.Group heading={t("cmdk.actions")}>
+    <Command.Item onSelect={() => settingsStore.open()}>Open Settings</Command.Item>
+    <Command.Item onSelect={() => themeStore.toggle()}>Toggle theme</Command.Item>
+  </Command.Group>
+</Command>
+```
+
+#### F587 [HIGH] 模态对话框零 focus trap —— Tab 可逃出 modal
+
+browser probe + grep 验证：12 个 Escape handler 站点 ✅ 模态 Escape 关闭好；但 **0 个**实现 `focus-trap` 或 `inert` 属性把 Tab 限制在 modal 内：
+- `SettingsPanel.tsx:120` 只接 Escape
+- `RestoreCheckpointConfirmDialog.tsx:40` 只接 Escape
+- `DeleteWorkConfirm.tsx:29` 只接 Escape
+- `RegenerateConfirmDialog.tsx:28` 只接 Escape
+- 其他 8 处类似
+
+**用户行为**：modal 打开后按 Tab → focus 跳到 modal 内最后一个 button → 再按 Tab → focus **跳出 modal 到 background TopNav**（按 Tab 三次后再回 modal 第一个 element）。键盘用户被迫"猜"哪些元素在 modal 内。
+
+**WCAG 2.4.3 (Focus Order) + ARIA Dialog Pattern**：modal `<dialog>` 或 `<div role="dialog" aria-modal="true">` 必须做 focus trap。
+
+**Family**：R107 F465 / R115 a11y horizontal slice · ARIA Dialog Pattern compliance
+
+**建议**：用 `focus-trap-react` (~3KB) 或 native `<dialog>` HTML element 自带 trap；包一个 `<ModalShell>` primitive 在 12 处 modal 复用（与 R117 ErrorBoundary、R116 EmptyState 合成 Fallback Surface DSL 第 4 块）
+
+#### F588 [HIGH] focus-visible **完全依赖浏览器默认 outline** —— 自定义 token 失效
+
+browser probe 抓 `firstButtonFocusBoxShadow: "none"` + `firstButtonFocusOutline: "solid"`。意味着 button focus 时**只有浏览器默认 outline (通常 2px solid blue)** 生效，自定义 `--accent-glow` box-shadow 完全没渲染。
+
+**根因（与 R121 F576 token-level 双重坐实）**：
+- 设计意图：`box-shadow: 0 0 0 3px var(--accent-glow)` —— alpha 0.08 light / 0.3 dark
+- 实际：CSS rule 是否存在不明（probe 显示 box-shadow "none"），或 alpha 0.08 渲染等于透明 → 视觉上 = 没有
+- 兜底：browser default outline 救场（这是 R91 fix 全局 form control focus-visible 时**意外保留**的 default）
+
+**意味着**：R91 表层 fix 看似闭合，但 token 没生效 → 浏览器默认 outline 是产品所有 focus 视觉来源 → 与 editorial 调性冲突 + 不同浏览器 outline 表现不一（Safari outline 2px CSS color "Highlight" vs Chrome 1px solid 蓝）
+
+**Family**：R121 F576 family · R91 R107 F465 family · M209 "alpha-based 不稳定" 第 N 实例
+
+**建议**：与 R121 F576 同步 fix —— `--accent-glow` 改 8-bit hex `#2a3a4a40` light / `#a8c5d6cc` dark + 在 `globals.css` 全局 `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }` 保底
+
+#### F589 [MEDIUM] 0 快捷键 discoverability —— Cmd+/ shortcut overlay 缺位
+
+Studio useShortcuts 注册了 Cmd+S/B/Shift+G 三个 shortcut，但 **0 处 UI 告诉用户**这些 shortcut 存在。没有 `Cmd+/` overlay，没有"Help → Shortcuts"菜单，没有 tooltip 在 button 上显示 shortcut。
+
+工业基准：Notion Cmd+/ 弹完整 shortcut 列表；VSCode Cmd+K Cmd+S 显示 keymap；Linear "?" 弹 shortcut cheat sheet。
+
+**为什么 MEDIUM 不 HIGH**：基础 keyboard support 仍可用（即使没发现 shortcut，用户仍可点 button）；MEDIUM 是因为**已有的 shortcut 投资被埋没**。
+
+**Family**：M214 "power-user shortcut" family · documentation gap
+
+**建议**：注册一个全局 `?` 或 `Cmd+/` shortcut，打开 `<ShortcutOverlay>` —— 从 useShortcuts.ts 元数据自动生成展示
+
+#### F590 [MEDIUM] Studio shortcut 体系 vs 主入口三页面 0 shortcut 不对称
+
+Studio (`/studio/:id`) 注册 3 个 shortcut（保存/分割/收口）；`/works`、`/explore`、`/analytics` **三大主入口页面 0 shortcut**。
+
+具体应有的 shortcut（业界 baseline）：
+- `/works`: `N` = new work，`/` = focus search，`Cmd+K` = 全局
+- `/explore`: `R` = refresh trends，`1-4` = switch platform tab
+- `/analytics`: `T` = toggle time range（今天/7天/30天）
+
+**为什么 MEDIUM**：与 F586 同源（缺 Cmd+K），但 F590 强调**已有 shortcut 实现能力**没复用到其他页面 → 团队**知道怎么写 shortcut**（useShortcuts.ts 已存在）但只投在 Studio。
+
+**Family**：M216 "a11y debt 不对称分布" 新沉淀 · audit-without-coverage family 第 N 实例
+
+**建议**：把 `useShortcuts` 重构为可注册 hook (per-page shortcut scope)，三大页面各注册 3-5 个
+
+#### F591 [MEDIUM] 模态打开后 0 个实现 "auto-focus primary CTA"
+
+R117 ErrorBoundary 修复时已加 Try Again primary CTA。但**所有 12 个 modal 站点 modal 打开后没有任何元素自动获 focus** → 键盘用户必须 Tab 进入 modal（且因 F587 focus trap 缺位，可能"Tab 进 modal" 失败）。
+
+ARIA Dialog Pattern: modal 打开必须 `autoFocus` 在某个元素（通常 close button 或 primary CTA）；关闭后 restore focus 到触发元素。
+
+**Family**：F587 同源 · R110 F495 family（R112 F495 已修 404 auto-focus）
+
+**建议**：`<ModalShell>` primitive 提供 `autoFocus="primary" | "close" | "none"` prop，默认 primary
+
+#### F592 [MEDIUM] LibraryTab.tsx 是**唯一**实现 `Enter || Space` 的自定义 interactive
+
+`grep` 全 web/src 仅 `LibraryTab.tsx:201` 处理 Enter/Space。其他**所有**自定义 interactive widget（custom card / non-button click target）**只接 onClick 不接 onKeyDown** → 键盘用户无法激活。
+
+举例（grep 验证）：
+- WorkCard.tsx onClick 但 div 不是 button
+- Inspector tab 自定义 styled div
+- Filmstrip slide thumbnail
+
+ARIA: 任何 `role="button"` 必须接 `Enter || Space`；R107 已浮现 1 处。
+
+**Family**：F583 同 family · R115 disability-class
+
+**建议**：把所有 onClick interactive 改成 `<button>` 或 `<a>`；保留 styled div 必须加 `onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && onClick()}`
+
+#### F593 [LOW] 0 `aria-keyshortcuts` 属性
+
+`grep -rE "aria-keyshortcuts" web/src` → 0 hit。WAI-ARIA 1.2 引入 `aria-keyshortcuts="Meta+S"` 让 SR 朗读"按 Cmd+S 保存"。Studio Cmd+S/B 投资没暴露给 SR 用户。
+
+**Family**：M188 sr-only family 邻居 · ARIA 1.2 compliance gap
+
+**建议**：Studio save button + Filmstrip drag handle 各加 `aria-keyshortcuts`，3 行改动
+
+#### F594 [LOW] Works 搜索框无 `/` 键聚焦快捷键 —— 工业基准缺位
+
+GitHub / Notion / Linear / Twitter 全部 `/` = focus search。本产品 `/works` 搜索框只能手点。
+
+**为什么 LOW**：搜索框 visible 易找到；MEDIUM 也合理。
+
+**Family**：F590 同源 · M214 power-user plane
+
+**建议**：useShortcuts hook 注册 `/` key（仅当非 input focus 时）→ focus search input
+
+### 沉淀
+
+**M212 · Library default 反 a11y 是隐藏 trap**（新增）
+
+dnd-kit 默认仅 PointerSensor / MouseSensor，KeyboardSensor 必须显式注册。React Aria / Radix UI 等成熟 library 默认 keyboard-friendly；但许多"声称 a11y-friendly" 的 lib 实际**默认配置不 a11y**——开发者复制 quickstart code 即得到 keyboard-inaccessible widget。审计规则：所有第三方 interactive library 必须 check"键盘 sensor / handler 是否默认注册" —— 是 → 安全；否 → finding。
+
+**M213 · skip-link 是 globals 级 a11y 第 4 个底座**（新增）
+
+继 R112 `.sr-only` utility + R117 `prefers-reduced-motion` globals + R120 R115 F523 cover alt + 本轮 skip-link，globals 级 a11y 基础设施累计 4 块。规则：5 行 HTML+CSS 全产品受益的 a11y fix 优先级 > 单 surface fix。R122 把 skip-link 列入第 4 个 globals 级基础设施。
+
+**M214 · Power-user enablement plane**（新增）
+
+Cmd+K palette / 全局 shortcut / shortcut overlay / aria-keyshortcuts 是同一 plane —— "power user 加速器"。工业自 2020 起全标配，本产品仅 Studio 3 个 shortcut → 产品哲学层 plane 缺位。R122 把 power-user plane 列为 audit plane 维度（与 security / a11y / usability / copy / data / contract 并列）。
+
+**M215 · Roving tabindex + arrow key 是 composite widget 标准**（新增）
+
+ARIA 1.2 明定 tab group / menu / radio group / tree 等 composite widget 必须 roving tabindex（仅 1 个 tabIndex=0 + 内部 arrow 切换）。本产品 0 实现 → 所有 tab 群体都是 N 个 Tab stop。规则：任何有≥3 个语义同类 interactive 子项的容器都应用 roving 模式。
+
+**M216 · A11y debt 不对称分布 family**（新增）
+
+Studio (`/studio/:id`) 投入 3 个 shortcut + Cmd+S round-trip，其他页面 0；同理 R109 settings 7/30 editable coverage / R115 28/28 cover image alt 缺位 —— a11y 投入**集中在团队认为复杂的页面**，简单页面被认为"不需要" → 实际简单页面是用户入口（works/explore/analytics）反而 a11y 最薄。规则：a11y audit 必须按 page-traffic 加权而非按 page-complexity，入口页 a11y 优先于深层页。
+
+### 反向 surface 五元组 + horizontal slice 主线进度（R122 后）
+
+| # | 类别 | 状态 | 关键 round |
+|---|---|---|---|
+| 1 | reverse-surface 五元组 | 4/5（expired 留 R123+） | R110-R118 |
+| 2 | a11y (general WCAG) | R115 + R120 fix | R115/R120 |
+| 3 | i18n / locale | R119 | R98+R104+R114+R119 |
+| 4 | color contrast (1.4.3) | R121 | R121 |
+| 5 | **keyboard nav (2.1.1/2.1.2/2.4.1/2.4.3)** | **R122（本轮）** | R122 |
+| 6 | color blindness simulation | F577 触及，未深审 | R121 提议 |
+| 7 | reduced motion (vestibular) | R115 F524 + R117 修 | R115/R117 |
+| 8 | screen reader (sr-only / aria) | R112 + R115 + R120 修 | R112/R115/R120 |
+| 9 | power-user shortcut (M214) | R122 新建 plane | R122 |
+
+### R123+ 候选
+
+- **R122 F583 + F587 fix-pass（最高 ROI）** —— dnd-kit KeyboardSensor 5 行 + ModalShell focus-trap primitive，一次性闭合 motor-impaired CRITICAL
+- **R122 F584 fix-pass** —— skip-link 10 行 globals.css + App root，全产品 a11y plane globals 级基础设施第 4 块
+- **R122 F585 + F586 fix-pass** —— useRovingTabIndex hook + cmdk 3KB Cmd+K palette
+- **R121 F571/F572/F573 fix-pass** —— design token 4 处调整 + CI gate
+- **R119 F559 + F566 fix-pass** —— `<html lang>` React-controlled
+- **R118 F547 + F548 fix-pass** —— `app.notFound("/api/*")` + apiFetch content-type guard
+- **Color blindness simulation audit** —— deuteranopia/protanopia/tritanopia filter 应用
+- **reverse-surface 五元组第 5 项 expired** —— checkpoint stale / deliverable 长期不动 / share-link rot
+
+`★ Insight ─────────────────────────────────────`
+- **dnd-kit KeyboardSensor 默认 OFF 是 library-default-反-a11y 经典 trap (M212)**：开发者复制 quickstart 即得到 keyboard-inaccessible widget；这条 family 与 R104 F441 (adapter `?? 0` fallback) / R118 F548 (Vite SPA fallback) 同根——**第三方默认行为静默生效成 user-visible bug**。每个 library 集成都应在 PR review checklist 加"keyboard sensor / event handler 默认注册否?"
+- **Power-user enablement plane (M214) 是产品哲学差距**：Linear/Notion/Figma/Cursor 全部 Cmd+K palette；本产品仅 Studio 3 个 hardcoded shortcut。这不是 a11y bug 而是**产品定位"editorial 调性 + 创作者工作台"与"power-user 加速"理念冲突的体现**——audit 哲学层 plane 比 surface bug 更深。R122 把 power-user plane 列为继 a11y/security/data plane 之后第 7 个 plane
+- **M215 roving tabindex 0 实现的复合代价**：8 个 focusable on /analytics × 平均 3-4 个 tab group → 每页 +N 个不必要 Tab stop → 累积每用户每天 +400 次按键。这是"a11y 看着仅影响残障"误解的反证：power-user keyboard 操作受同等影响。Roving tabindex 同时优化 a11y + keyboard speed，**双赢 fix**
+- **M216 a11y debt 不对称分布 family 揭示 audit 策略偏差**：团队投入集中在"复杂页面"（Studio），简单页面（works/explore/analytics）反而 a11y 最薄——但用户流量 90% 在简单页面。R115/R120/R122 三轮 horizontal slice 共同确认：a11y 应按 **page-traffic × failure-impact** 加权，而非按 page-complexity
+`─────────────────────────────────────────────────`
+
+---
+
+## Round 121 — **Color contrast (WCAG 1.4.3) 全产品 horizontal slice 深审 —— horizontal slice 第 7 维度：`--text-dimmer` 双 theme 都失 AA（light 3.02 / dark 3.37）/ `--status-warn` 双 theme undefined / `--glass-border` 1px alpha 0.07-0.08 UI 对比 ~1.04 失 3.0 / `--accent-lo` dark 4.31 失 AA / 0 CI gate · 0 contrast test —— design-token 系统在 a11y plane 系统性失守**
+
+- **时间**：2026-05-13（cron `105f4ef8` 触发 R121；R120 已被并行 fix-pass agent 占用闭合 R115 F523）
+- **触发**：R119 R120+ 候选首位 "Color contrast horizontal slice (WCAG 1.4.3)"；R114 F518 + R107 F471（dim contrast 散点抱怨）从未做过双 theme + token-level + rendered-level 全产品横扫
+- **方法学**：M141 (DOM extraction) + M196 (globals 级 a11y 基础设施) + 新 **M207 (token-level + rendered-level 双层 contrast audit)** —— 任何 audit 单看 token (palette) 漏 rgba 透叠 stacking-context drift；单看 rendered (computed-style) 漏 token 设计缺陷。两层都要查
+- **新方法学 M201 持续应用**：grep 全 web/src `axe|@axe-core|contrast.*test|wcag` → 0 hit → architectural absence as audit signal 第 2 次应用——CI 完全没有 contrast 防线
+
+### Token-level WCAG ratio 测算（browser computed + manual luminance 计算双轨）
+
+**Light theme（`#fafaf7` background）**:
+
+| Token | Hex/RGBA | Ratio vs bg | AA 4.5 (normal) | AA 3.0 (large/UI) | 用途采样 |
+|---|---|---|---|---|---|
+| `--text` | #0f1822 | 16.37 | ✅ AAA | ✅ | body |
+| `--text-dim` | #545c66 | 6.12 | ✅ AA | ✅ | hint/footnote |
+| **`--text-dimmer`** | **#8c929a** | **3.02** | ❌ **FAIL** | ✅ | filter count / metric label / eyebrow |
+| `--accent` | #2a3a4a | 10.80 | ✅ AAA | ✅ | link / eyebrow |
+| `--accent-lo` | #5a6a7c | 5.34 | ✅ AA | ✅ | placeholder |
+| `--status-done` | #15803d | ~4.55 | ✅ AA（紧贴） | ✅ | ✓ done badge |
+| **`--status-error`** | **#dc2626** | **~4.72** | borderline | ✅ | error msg |
+| **`--status-warn`** | **empty** | undefined | undefined | undefined | warn msg（F87 Explore） |
+| **`--glass-border`** | **rgba(15,24,34,0.08)** | **~1.04** | n/a | ❌ **FAIL** | button/input/card border |
+
+**Dark theme（`#0a0b0f` background）**:
+
+| Token | Hex/RGBA | Ratio vs bg | AA 4.5 (normal) | AA 3.0 (large/UI) |
+|---|---|---|---|---|
+| `--text` | #ecedf0 | 16.80 | ✅ AAA | ✅ |
+| `--text-dim` | #9a9ea6 | 7.32 | ✅ AAA | ✅ |
+| **`--text-dimmer`** | **#62656c** | **3.37** | ❌ **FAIL** | ✅ |
+| `--accent` | #a8c5d6 | 10.89 | ✅ AAA | ✅ |
+| **`--accent-lo`** | **#5a7a8c** | **4.31** | ❌ **FAIL（-0.19）** | ✅ |
+| `--status-done` | #86efac | 14.00 | ✅ AAA | ✅ |
+| `--status-error` | #f97066 | 7.06 | ✅ AAA | ✅ |
+| **`--status-warn`** | **empty** | undefined | undefined | undefined |
+| **`--glass-border`** | **rgba(255,255,255,0.07)** | **~1.05** | n/a | ❌ **FAIL** |
+
+### 深层发现（12 finding · 2 CRITICAL · 4 HIGH · 4 MEDIUM · 2 LOW）
+
+#### F571 [CRITICAL] `--text-dimmer` 双 theme 都失 WCAG AA normal text —— 高覆盖率字号失明
+
+`--text-dimmer #8c929a (light) / #62656c (dark)` 在双 theme 下 ratio 分别 **3.02 / 3.37**，**均低于 WCAG 2.1 SC 1.4.3 AA 标准 4.5**（normal text）。
+
+**实际使用站点**（grep `text-dimmer` 全 web/src）覆盖产品**最高使用频率**的辅助信息层：
+- `/works` filter pill count（例如 `0 已发布`）— Works.tsx:156
+- `/explore` STARTER chip + sample suffix
+- `/analytics` time-range label / metric subtitle
+- TopNav version "AAutovralv3 · 设计版" 副标
+- Settings drawer hint text
+- Editor inspector small labels
+
+字号样本：JetBrains Mono 11-12px，恰是 WCAG normal text bin —— 100% 触发 normal text 4.5 标准 fail。
+
+**为什么 CRITICAL**：
+- 工业 a11y 测试基准 axe-core / WAVE 默认报"contrast 3.02 → AA fail" 是 CRITICAL（不是 minor warning）
+- 视力 20/40 用户（占成人人口 5-7%）几乎读不到这层信息 → 看不到 "0 已发布" 的 0 → 误以为"加载中" → 困惑点击 → R98 F192 family 复发
+- "三档 dimmer" (text / text-dim / text-dimmer) 设计本身是 anti-pattern：最低档必失 AA
+
+**Family**：a11y plane 第 6 处 · R115 a11y horizontal slice family 第 2 实例 · M210 "two-tone gray anti-pattern"（新沉淀）
+
+**建议（design-token 重构）**：
+1. 直接调整 `--text-dimmer` 到 light `#6a7079`（ratio ≈ 4.6）/ dark `#7a7e85`（ratio ≈ 4.7）—— 略微暗化 light / 略微亮化 dark，刚好越过 4.5
+2. 长期：放弃三档 dimmer，改 two-tone（`--text` + `--text-secondary`）。所有"装饰小字"用 `--text-secondary` (current `--text-dim`)；删 `--text-dimmer`
+
+#### F572 [CRITICAL] `--status-warn` token 双 theme 都 undefined —— "warn" 语义在 design token 系统完全缺位
+
+browser probe `getPropertyValue('--status-warn')` 返回 **空字符串**（双 theme 一致）。意味着任何引用 `var(--status-warn)` 的 CSS 都 fallback 到 `inherit` 或 `transparent` —— 整条 "warn" 视觉通道在产品级不存在。
+
+**实际使用证据**：`features/explore/Explore.tsx:119` 使用 `var(--status-warn, var(--text-dim))` —— **依赖 CSS 变量 fallback 第二档兜底**（编辑器作者意识到 token 没定义，写了内联 fallback）。但这是 **per-call-site fallback**，30+ 其他可能用到 warn 的位置不一定都写了 fallback：
+- F87 Explore "采集 partial success" warn UI（实际已用 fallback）
+- 任何未来 "API 调用超时但 retry 可能恢复" warn 状态
+- "key 即将过期" warn（与 R118 F549 verify-before-trust 联动）
+
+**Family**：design-token 系统完整性 · M208 "undefined token 是 silent leak family" 第 N 实例
+
+**建议**：在 `tokens.css` 双 theme 块各加：
+- light: `--status-warn: #b45309;` (amber-700, ratio ≈ 4.95 ✅)
+- dark:  `--status-warn: #fbbf24;` (amber-400, ratio ≈ 10.50 ✅)
+
+并加 vitest 单元 test：`assert(getPropertyValue('--status-warn') !== '')` 双 theme 都跑
+
+#### F573 [HIGH] `--glass-border` alpha 0.07-0.08 → UI 对比 ~1.04-1.05 远低于 WCAG 3.0
+
+`--glass-border rgba(15,24,34,0.08)` light / `rgba(255,255,255,0.07)` dark。1px border 1:1 透叠到 surface-1 / surface-2 / bg → 实际渲染色：
+- light: ≈ rgb(247,247,242) on bg rgb(250,250,247) → contrast ≈ 1.04
+- dark: ≈ rgb(20,22,28) on bg rgb(10,11,15) → contrast ≈ 1.05
+
+**WCAG 2.1 SC 1.4.11 Non-text Contrast** 要求"essential UI component" border ≥ 3.0：button / input / form control 的可视边界、focus indicator、interactive element 的视觉分隔。本产品 button、input、card、 filter pill 全部用 `--glass-border` → 几乎不可见。
+
+**实际后果**：
+- 视力下降用户（白内障/老花）看不出 input 在哪 → 不知道哪里能 click/type
+- 高亮屏（户外/Sun-lit notebook）边框被环境光淹没
+- 与 R107 F465 "focus visible 缺位" 同源——视觉分层全靠超低对比 stacking
+
+**Family**：a11y plane WCAG 1.4.11 · F571 同源 · M209 "alpha-based border 是不稳定" 新沉淀
+
+**建议**：
+- light: `--glass-border: rgba(15, 24, 34, 0.24);` (alpha 0.08→0.24，contrast ≈ 3.1 just passes UI)
+- dark:  `--glass-border: rgba(255, 255, 255, 0.20);` (alpha 0.07→0.20，contrast ≈ 3.2)
+- 设计语言上保留"glass" 调性但越过 a11y 阈值；保留 `--glass-border-subtle` (current value) 给纯装饰 divider（非 UI 控件）
+
+#### F574 [HIGH] `--accent-lo` dark theme 4.31 — 失 AA normal text 0.19
+
+dark `#5a7a8c` on `#0a0b0f` = 4.31。差 4.5 仅 0.19，但**任何用 `--accent-lo` 渲染 input placeholder / "tap to expand" hint / inactive tab label** 的位置都 fail。
+
+grep `accent-lo` 找到的使用：
+- Editor inspector secondary helper text
+- Explore STARTER chip "explore.starterChip" 颜色 fallback
+- ChatQuickActions disabled state
+
+**为什么 HIGH 不 CRITICAL**：light theme 5.34 通过 AA；只 dark 单 theme fail；且 placeholder 文本 WCAG 1.4.11 实际有"placeholder 例外条款"宽松。但 inactive tab label / disabled button text 不在例外内。
+
+**Family**：F571 同 family（gray-scale 设计失守）· dark theme 失明独立子症
+
+**建议**：dark `--accent-lo` 调到 `#6a8a9c`（ratio ≈ 5.0）即跨过 4.5
+
+#### F575 [HIGH] 全代码库 0 contrast / axe / WCAG 测试 —— a11y CI gate 完全缺位
+
+`grep -rE "axe|@axe-core|wcag|contrast.*test|getContrast" web/src` → **0 hit**。`package.json` deps → 无 `@axe-core/*` / `pa11y` / `vitest-axe`。
+
+**意味着**：F571/F572/F573/F574 这类 token-level a11y bug 永远不会被 CI 捕获——只在用户屏幕上、或在事后 audit (本 round) 发现。R115 已经把 a11y 列为 horizontal slice，R117 修了 globals.css prefers-reduced-motion 但**测试侧零防线**。
+
+**Family**：fix-without-audit-coverage family（M201 R118 沉淀）第 2 实例 · audit-without-fix family (M165) 反向
+
+**建议（最小可行 CI gate）**：
+```ts
+// web/src/styles/__tests__/contrast.test.ts
+import { contrast } from "wcag-contrast"; // 3kb pure-js
+import { lightTokens, darkTokens } from "../tokens";
+describe("WCAG AA contrast", () => {
+  it("text-on-bg >= 4.5 in both themes", () => {
+    expect(contrast(lightTokens.text, lightTokens.bg)).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(darkTokens.text, darkTokens.bg)).toBeGreaterThanOrEqual(4.5);
+  });
+});
+```
+
+#### F576 [MEDIUM] focus ring (`--accent-glow` alpha 0.08-0.3) 在 stacking context 漂移 → 不稳定
+
+focus visible 实现：`box-shadow: 0 0 0 3px var(--accent-glow)`，`--accent-glow: rgba(42,58,74,0.08)` light / `rgba(168,197,214,0.3)` dark。
+
+**问题**：
+1. **light alpha 0.08 在彩色背景上几乎不可见**——focus 在 surface-2 `rgba(246,246,242,0.88)` 上 → 0.08 × 0.88 = effective 0.07 alpha → contrast 与背景 < 1.5（WCAG 1.4.11 focus indicator 要求 ≥ 3.0）
+2. **dark alpha 0.3 在某些 stacking context 反过来太强**——overlay 触发感太"霓虹"，与 editorial 调性冲突
+3. R91 globally fix 了 form control focus-visible，但 underlying token 不稳定
+
+**Family**：R107 F465+F466 family · R117 ErrorBoundary fix 同期遗留 · M209 alpha-based 不稳定
+
+**建议**：`--accent-glow` 不用 alpha → light `#2a3a4a40` (8-bit alpha hex 25% = ratio ~3.2)；dark `#a8c5d640` —— 仍用 alpha 但显式 25% 起步保证 contrast 不滑
+
+#### F577 [MEDIUM] 状态颜色 (`status-done` 绿 / `status-error` 红 / `status-warn` 黄) 是**唯一**状态通道 → 色盲用户失明
+
+WCAG 2.1 SC 1.4.1 Use of Color：状态信息不能仅靠颜色。本产品：
+- `✓` 绿色 = done
+- `✕` 红色 = error  
+- 黄色（如果 F572 修了）= warn
+
+**deuteranopia (~5% 男性)** 红绿不分 → "✓ 绿" 与 "✕ 红" 看起来同色（褐黄）。`✓` 与 `✕` 图标本身是 differentiator（够），但许多渲染只有 background-color tint 无图标（如 status pill）。
+
+**实际样本**：F87 Explore "collect status pill" 仅 `color: var(--status-done) | var(--status-warn) | var(--status-error)`，无图标。
+
+**Family**：M211 color-blindness audit family（新命名）· R115 disability-class horizontal slice 第 2 子症
+
+**建议**：所有 status pill 强制加 prefix 图标（✓/⚠/✕）+ 色彩 + 文本三通道 redundancy。或参考 GitHub："Approved" 绿 ✓ / "Failed" 红 ✕ / "Pending" 黄 ⏱
+
+#### F578 [MEDIUM] 三档 gray-scale (`text / text-dim / text-dimmer`) 是 a11y anti-pattern
+
+Material 3 / Tailwind / Apple HIG 共识：**最深档纯文本 + 一档 secondary**（已 4.5）即够；"third level dim" 必然滑出 4.5 → a11y 必失。
+
+本产品语义：
+- `--text` (16.x) ratio → primary content
+- `--text-dim` (6-7) ratio → secondary / hint  
+- `--text-dimmer` (3.0-3.4) ratio → tertiary "decorative"
+
+但 grep 实际使用：`--text-dimmer` 渲染的多数是**功能性数据**（filter count / metric label / timestamp），不是装饰——开发者图视觉层级用最低档，**未察觉 a11y impact**。
+
+**Family**：F571 同 family · design system 哲学层 finding
+
+**建议**：删 `--text-dimmer`；保留 `--text-decorative` 仅用于 `pointer-events: none` 装饰元素（divider 注释、watermark 等用户不需要 read 的）；所有功能性数据强制 `--text-dim`+
+
+#### F579 [MEDIUM] dark theme 半透明 surface (rgba 0.55/0.7/0.78) 实际渲染对比依赖 stacking-context
+
+`--surface-0/1/2: rgba(20,22,28,0.55/0.7/0.78)` dark theme。**token 看着是恒定**，但实际渲染色由 **下层堆叠 + backdrop-filter blur(24px)** 决定。
+
+举例：模态 dialog 用 surface-2 → 下层是 page bg → final = mix(rgb(36,38,46) × 0.78, page_bg × 0.22) ≈ rgb(31,33,40)。但如果 dialog 下层是图片或视频 thumbnail → mix 结果偏差大 → 文本 on surface-2 的实际对比可能从计算值 14.0 → 跌到 8.0 → 仍合规但**审计无法证明**任何位置 ≥ 4.5（缺乏 worst-case bound）。
+
+**Family**：M207 "token-level + rendered-level 双层 audit" 新沉淀 · 与 R109 secret-pipeline mask theater 同种"看着安全实则不可证明" family
+
+**建议**：高 contrast 文本（h1/h2 / 主要 CTA）禁用 `surface-*` 透明 token；用 fully-opaque `--surface-solid: #14161c` dark / `#fefefd` light。仅装饰区块允许 rgba。
+
+#### F580 [MEDIUM] 设计 doc / token 注释零"WCAG / AA / contrast" 注解
+
+`grep -rE "wcag|contrast|aa|a11y|accessibility" web/src/styles/*.css` → 0 hit。`tokens.css` / `globals.css` 注释只说"editorial · cool · glass"风格意图，未说明 "must pass WCAG 2.1 SC 1.4.3"。
+
+**为什么 MEDIUM**：未来开发者改 token 时**没有任何提示**说"调暗 `--text-dim` 会破 AA"。R109 secret-pipeline 修了之后，PR template 也没"contrast checklist"。
+
+**Family**：design-system documentation gap · audit plane
+
+**建议**：tokens.css 在文件顶 + 每组 token 注释：
+```css
+/* WCAG 2.1 SC 1.4.3 AA contract:
+   --text on --bg must be ≥ 16.0 (AAA)
+   --text-dim on --bg must be ≥ 4.5 (AA)
+   See web/src/styles/__tests__/contrast.test.ts for CI gate.
+*/
+```
+
+#### F581 [LOW] light theme `--status-error #dc2626` 4.72 紧贴 AA 4.5
+
+差距仅 0.22。任何后续微调"红色提亮"（设计感诉求）→ 直接跌破 AA。light theme 状态色无 safety margin。
+
+**Family**：F571 同 family · margin 缺位 · "edge of compliance" anti-pattern
+
+**建议**：light error 改 `#b91c1c` (red-700) → ratio ≈ 6.06 ✅ AAA。提供 1.5-2× margin
+
+#### F582 [LOW] `--text-dim` 双 theme 都达 AA 但单一 token 承担"功能性 secondary" + "装饰性 footnote" 双语义
+
+`--text-dim` light 6.12 / dark 7.32 都过 AA ✅。但代码同时用它渲染"WorksGrid 副标题"（功能必读）与"editorial footer notes"（装饰可漏）。无区分 → 任何后续语义漂移触发 a11y 风险。
+
+**Family**：semantic-overload family · design system 哲学
+
+**建议**：拆 `--text-secondary` (功能必读 ≥ 5.0) + `--text-tertiary` (装饰可漏 ≥ 3.0)。前者替换大部分 `text-dim` 用法
+
+### 沉淀
+
+**M207 · Contrast audit 必须 token-level + rendered-level 双层**（新增）
+
+- **token-level** (palette + ratio calc) 抓 design system 缺陷（F571 dimmer / F572 undefined warn / F574 accent-lo dark）
+- **rendered-level** (`getComputedStyle` on actual DOM) 抓 stacking-context drift（F579 半透明 surface 实际渲染色取决于下层）
+
+两层都要做；单看任一会漏 50%。R121 是 audit plane M207 首次实证。
+
+**M208 · 设计 token undefined 是 silent leak family**（新增）
+
+`--status-warn` 在 tokens.css 完全缺定义 → CSS 变量 fallback 链 → 用户屏幕上"warn" 视觉通道不存在。这不是单点 bug，是**design token 系统完整性 family**（与 R104 silent-leak family / R118 silent contract leak family 同根——"undefined / empty / null" 默默生效成兜底值）。规则：所有 design token 必须有 CI gate 验证 ≠ empty string。
+
+**M209 · Alpha-based 边界/焦点 ring 不稳定**（新增）
+
+alpha < 0.15 的 border/focus shadow 在透叠到 rgba surface 时 effective contrast 落到 < 1.5。规则：UI 关键 indicator（border / focus / divider 等承担 affordance 语义的）必须用 8-bit hex 显式 alpha ≥ 25% 或 solid color。这是 R107 F465 focus visible 修复后的 token-level 兜底。
+
+**M210 · Two-tone gray anti-pattern**（新增）
+
+`text / text-dim / text-dimmer` 三档 dimmer 设计**最低档必失 AA**——这是 contrast 数学决定的，与具体配色无关。任何"4 档及以上 dim 灰度阶"都先天违 a11y。规则：design system gray-scale 最多两档（primary / secondary），第三档只能给装饰性 `pointer-events: none` 元素。
+
+**M211 · Color-only status indicator family**（新增）
+
+WCAG 1.4.1：状态信息不能仅靠颜色 → 必须 icon + color + text 三通道 redundancy（GitHub PR status / Linear / Notion 都做了）。本产品 status pill 多数缺图标 → deuteranopia (~5% 男性) 不可读。这是 disability-class horizontal slice (R115) 的色觉子症，与 prefers-reduced-motion (vestibular) / sr-only (blind) 并列。
+
+### 反向 surface 五元组 + horizontal slice 主线进度
+
+| # | 类别 | 完成度 | 关键 round |
+|---|---|---|---|
+| 1 | reverse-surface 五元组 | 4/5（expired 留 R122+） | R110-R118 |
+| 2 | a11y (general WCAG) | R115 + R120 fix | R115/R120 |
+| 3 | i18n / locale | R119 | R98+R104+R114+R119 |
+| 4 | **color contrast (WCAG 1.4.3)** | **R121（本轮）** | R121 |
+| 5 | keyboard nav (WCAG 2.1.1) | 未做，R122+ 候选 | R90/R95/R107 散点 |
+| 6 | color blindness simulation | F577 触及，未深审 | R121 提议 |
+| 7 | reduced motion (vestibular) | R115 F524 + R117 修 | R115/R117 |
+| 8 | screen reader (sr-only / aria) | R112 + R115 + R120 修 F523 | R112/R115/R120 |
+
+### R122+ 候选
+
+- **R121 F571 + F572 + F573 fix-pass（最高 ROI）** —— 4 个 token 调整 + 1 个 missing token 补 + CI gate 加 = 一次性闭合 3 个 CRITICAL/HIGH
+- **R121 F575 CI gate 实施** —— `wcag-contrast` npm package + vitest contract test，~30 行代码永久防线
+- **R121 F577 color-blindness audit 深入** —— deuteranopia/protanopia/tritanopia 模拟 filter 应用到产品截图
+- **R119 F559 + F566 fix-pass** —— `<html lang>` React-controlled + index.html inline bootstrap
+- **R118 F547 + F548 fix-pass** —— `app.notFound("/api/*")` + apiFetch content-type guard
+- **Keyboard nav horizontal slice (WCAG 2.1.1)** —— R90/R95/R107 三轮散点合并
+- **reverse-surface 五元组第 5 项 expired** —— checkpoint stale / deliverable 长期不动
+
+`★ Insight ─────────────────────────────────────`
+- **`--text-dimmer` 双 theme 都失 AA 是 design system 数学层的必然，不是配色失误**：M210 沉淀的根因——任何"三档及以上 gray-scale"设计先天违 a11y，因为 normal text 4.5 contrast bound 在 #fafa-#0a0b 范围内只能塞 2 个非装饰档。Tailwind/Apple HIG/Material 3 共识都是 two-tone。本产品三档 dimmer 是 editorial 调性追求"视觉层级"时**意外把功能性数据塞进了装饰层**——这是 design 与 a11y 哲学冲突的经典案例
+- **`--status-warn` undefined 是 silent token leak (M208)**：跟 R118 F548 (silent contract leak) / R104 F441 (silent KPI leak) 同根 family——产品在 "undefined / empty / null" 边界**默契不报错**，把 fallback 当 graceful。本轮把这条 family 从"数据/合约层"扩展到"design token 层"，证明它是**产品级编程文化**而非某层 bug。CI gate 必须把"empty string token" 列为构建错误
+- **alpha-based border + focus 是 R107 focus-visible fix 之后的"二次塌方"**：表层 R91 修了 focus visible UX，但底层 `--accent-glow` 仍是 alpha 0.08-0.3 → 在 stacking context 漂移 → 与 R107 F465 原始 bug 同 family。这印证 audit 必须 token-level 闭合，否则 surface-level fix 看似闭合实则底层仍漏（M177 R117 已沉淀过 fix 必须 root-cause 才是真闭合）
+- **M207 双层 audit (token + rendered) 是 contrast 这类"数学可证明"finding 的标准方法学**：token-level 抓 palette 缺陷；rendered-level 抓 stacking-context drift。两者结合 + WCAG 公式得出的 ratio 是**比浏览器截图肉眼判断更可靠的 source of truth**（参考 R82 教训：肉眼读颜色失误率高，computed-style 是真相）
+`─────────────────────────────────────────────────`
+
+---
+
 ## Round 120 — **R115 F523 CRITICAL CLOSED ✅ —— 28/28 cover image `alt=""` → 双 locale 模板化 meaningful alt（含 video aria-label）；同 round 发现 R115 F527 audit-stale（TopNav `aria-current` 实际已有 + 3 contract test 守护）+ working-tree 30+ orphan dirty file（M198 新审）**
 
 - **时间**：2026-05-13（`/loop 30m` cron 触发；R118/R119 已被并行 audit agent 占用 Unauthorized + i18n horizontal slice 编号，本轮取 R120）
