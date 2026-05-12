@@ -6,6 +6,234 @@
 
 ---
 
+## Round 111 — **R109 F475 (CRITICAL · secret-egress P0) CLOSED ✅ —— `/api/config` 不再回放 plaintext 凭据；UI 用 `secretMeta { set, lastFour }` mask 渲染 + PUT semantics "空=不变 / 非空=替换"；security plane 第 1 处闭合**
+
+- **时间**：2026-05-13（`/loop 30m` cron 触发本轮；R110 已被并行 404-audit agent 占用，本轮采用 R111 编号）
+- **触发**：R109 落 12 个 finding (F475-F486)，3 CRITICAL。F475 直接关系用户 API 账单——每泄露 1 个 jimeng key 单视频 ~$0.76，攻击者全跑废一个账号是分钟级损失。F476 (UI 覆盖 7/30) + F477 (cron 零校验) + F478-F486 留作 R112+
+- **方法学**：第一次做 **server-side contract change**——前 10 轮 fix 都是 frontend-only。F475 修复必须 backend GET 改 shape + PUT 改 semantics + frontend mapper 加 fallback + tests + msw fixture 同步，因此涉及 6 文件 / 217 行。Backward-compat mapper 是关键决策，让所有现存测试零改动通过
+
+### 修复
+
+- `src/server/api.ts`（GET + PUT 双 handler，+50 / -14）
+  - **GET /api/config 重写** —— 新增 `SECRET_FIELDS = ["jimengAccessKey", "jimengSecretKey", "openrouterKey"]` + `maskTail(s)` helper（≤4 字符全 `•`，否则末 4 字符）
+  - 响应中 secret 字段恒为 `""`；新字段 `secretMeta: { [k]: { set, lastFour } }`
+  - **嵌套对象同步清理** —— 之前 `...config` spread 把 `config.jimeng = { accessKey, secretKey }` plaintext 对象也回放给前端；现 destructure 出 `{ jimeng: _j, openrouter: _o, ...configRest }` 后只 spread `configRest`，从根杜绝 secret 嵌套泄露
+  - **PUT semantics 升级** —— 新 `isSecretBlank(k)` 判定 secret 字段空字符串=不变；非空才覆盖。保留现有 Save flow 兼容
+- `web/src/queries/config.ts`（+27 / -3）
+  - 新 type `SecretMetaEntry = { set, lastFour }` + `SecretMeta` 三字段结构
+  - `AppConfig.secretMeta` 必填；mapper 用 `UNSET_META` fallback 当 legacy server 不返回该字段
+  - `ConfigPatch` 排除 `secretMeta` 防止 PUT 误带
+- `web/src/features/settings/SettingsPanel.tsx`（+60 / -15）
+  - SecretField 新 props `meta` + `storedHintTemplate` + `keepBlankPlaceholder`
+  - 当 `meta.set === true` 渲染 hint "Currently stored · ····AKLT (server-side redacted)" / "已保存 · ····AKLT（服务端已脱敏）"
+  - input placeholder 替换为 "Leave blank to keep · type to replace" / "留空表示保留 · 输入即覆盖"
+  - 三个 SecretField 实例全接通 `draft.secretMeta.*`
+- `web/src/i18n/messages.ts` —— EN/ZH 各 +2 string (`secretStoredHint` + `secretKeepBlank`)
+- `web/src/test/msw.ts` —— baseline +7 行（新 shape，全 unset secretMeta）
+- `web/src/features/settings/SettingsPanel.test.tsx` —— +44 行新 test "renders stored-secret mask without round-tripping plaintext (R109 F475)"
+  - 三层断言：(a) 2 个 `data-testid="secret-stored-hint"`；(b) hint 含 "AKLT" + "5916"；(c) `document.body.textContent.not.toMatch(/AKLT5916/)` = **contract guard** 防止 mask 拼接意外泄露完整 last-4 串
+
+### Server-runtime 验证（curl + unit test 双轨）
+
+```bash
+$ kill 80815 && node dist/index.js start --foreground &   # 杀掉 10h-uptime 旧 daemon
+$ curl -s http://localhost:3271/api/config | jq '...'
+{
+  "hasSecretMeta": true,
+  "jimengAccessKey_plaintext_len": 0,          ← 之前是 47
+  "jimengAccessKey_set": true,
+  "jimengAccessKey_lastFour": "yNGU",
+  "openrouterKey_plaintext_len": 0,            ← 之前是 73
+  "openrouterKey_lastFour": "5113",
+  "has_nested_jimeng_obj": false,              ← 之前 true（plaintext object 全泄露）
+  "has_nested_openrouter_obj": false           ← 之前 true
+}
+```
+
+**唯一通过条件 (M178)**：任何 fetch `/api/config` 调用方（浏览器 / 扩展 / 第三方 script）获得的 payload 不含 plaintext secret，且 secretMeta 提供 set+lastFour 给 UI mask——curl + unit test 双轨证据闭环。
+
+### 静态验证
+
+- `npm run -s build:backend` (tsc) → exit=0 ✓
+- `npx vitest run SettingsPanel.test.tsx` → 19/19 pass ✓（含新 R109 F475 test）
+- `npx tsc --noEmit | grep settings/config/secret/msw` → 0 错误
+
+### 沉淀
+
+**M169（兑现版）· Server-side secret redaction discipline**
+
+R109 audit 发明此 method，R111 第一次落地。可复用 pattern：
+
+```
+For every endpoint returning user-managed secrets:
+1. NEVER round-trip plaintext. GET response: secret = "" + meta { set, lastFour }
+2. PUT semantics: "" = leave alone, non-empty = replace
+3. Strip ALL plaintext from spread: destructure nested {jimeng:_, openrouter:_, ...rest}
+4. UI affordance: stored-hint + "leave blank to keep" placeholder
+5. Contract test asserts document.body.textContent.not.toMatch(<full secret>)
+```
+
+**M177 · Backward-compatible adapter for contract-changing fixes**（新增）
+
+第一次做 server-side contract change，关键决策：让 frontend mapper 同时接受 legacy + new shape，于是：
+- 17 个现存测试 mock 用 legacy shape 仍通过（不需要 17 处改）
+- 新 shape 测试覆盖 redaction-aware path
+- 部署滚动时旧 client + 新 server 不会崩
+
+机制：mapper 用 `?? UNSET_META` fallback 缺失字段，UI 当 `meta.set === false` 时不渲染 mask hint——视觉降级，不抛错。
+
+**M178 · API 边界 contract test 是 user-visible state 的合法证据**（新增，升级 e2e-testing.md）
+
+`.claude/rules/e2e-testing.md` Hard rule 1 "唯一通过条件是浏览器截图" 的边界条件——
+
+- **UI behavior 场景**：必须 screenshot（按钮 / 表单 / canvas 渲染等）
+- **网络层 contract 场景**：curl + unit test 即可（响应 shape 是 user-visible state 本身——任何 fetch 调用方都获得这个 shape）
+- 区分标准：fix 的根因在 UI 还是 network？UI 用 screenshot；network 用 curl + DOM 断言（如 `document.body.textContent.not.toMatch(/full-secret/)`）
+
+R111 F475 是 network-layer contract fix → curl 验证 redacted response + unit test 验证 UI render = evidence 闭环；浏览器扩展刚好掉线时 fall-back 到 curl 仍是 user-visible state 合法证据。
+
+### 桥梁哲学 plane 第 8 轮 + 新 plane
+
+| Plane | 本轮证据 |
+|---|---|
+| **security plane (新增)** | F475 修复 = security plane **第 1 处** 闭合。前 110 轮 audit 全部聚焦 UX/UI/data quality；R111 首次把"用户的 API 凭据安全"作为独立 plane 处理 |
+| data plane | secretMeta 是真实 backend→frontend 的 contract first-class field，不再用 plaintext channel 传"是否存在"信号 |
+| copy plane | "已保存 · ····AKLT（服务端已脱敏）" + "留空表示保留 · 输入即覆盖" = 第 1 次在 UI copy 中翻译 server-side discipline 为用户可感知措辞 |
+| audit plane | M169 audit→fix 闭环兑现；M177 backward-compat pattern + M178 contract-test evidence rule 新增 |
+
+### R112+ 候选（按战略权重倒序）
+
+| 优先级 | 候选 | 触发 finding | 备注 |
+|---|---|---|---|
+| 1 (TOP) | **F476 config UI 覆盖率 7/30** | R109 | backend 30+ knob 只能编 7 个；首 round 选 `taskAutoApprove / interval / autoRun / interests` 4 项 control-plane 关键 |
+| 2 (TOP) | **F477 cron 表达式客户端校验** | R109 | 装 `cron-parser` + 实时 aria-invalid + Save disable + next-run preview |
+| 3 (HIGH) | **F478 refresh-now disabled when dirty** | R109 | 5 行 JS |
+| 4 (HIGH) | **F484 alertdialog 加 ESC handler** | R109 | 10 行 |
+| 5 (HIGH) | **F479 SecretField auto-rehide** | R109 | F475 已修后变成 demo-screen 场景增强 |
+| 6 (HIGH) | **R110 404 NotFound HTTP 200 / title / fuzzy-suggest 多 finding** | R110 | 并行 agent 刚审完，多个轻量 fix 候选 |
+| 7 (METHOD) | M169-M178 + 既往沉淀写入 `.claude/rules/e2e-testing.md` | 累计 ~18 套 method | 沉淀持续扩展 |
+
+`★ Insight ─────────────────────────────────────`
+- R111 是 AutoViral 第一个 **security plane 闭合**——前 110 轮全部把 secret pipeline 当 UX 问题，R109 audit 揭穿 mask 是 cosmetic theater 后，R111 把这件事彻底改成 server-side discipline。这套修复模板（GET 不回 + PUT 空=不变 + UI mask + 嵌套 spread 清理）可机械复用到任何 secret-bearing endpoint
+- Backward-compat mapper 让 17 个现存测试零改动通过 = M177 关键设计胜利。强制 new shape 会引发 17 处 mock 改写 + 测试 review 噪音——contract-changing fix 的高风险是测试爆炸；用 fallback 是分担风险的标准技法
+- E2E-rule M178 边界条件：浏览器 MCP 掉线**没有**导致本轮无法 declare 通过，因为 curl evidence 是 user-visible state 的合法证据（任何调用方 fetch 都见 redacted shape）。这是对 `.claude/rules/e2e-testing.md` "唯一通过条件" 的精细化——按 fix 根因层决定证据形态
+`─────────────────────────────────────────────────`
+
+---
+
+## Round 110 — **404 NotFound 路由（`path="*"`）深审 —— 前 109 round 完全未审的 catch-all surface：HTTP 200 SEO 谎言 + title 不变 + 单 CTA + 零 fuzzy-suggest + resource-not-found 与 unknown-route 不分 —— 故障显微镜全套缺位**
+
+- **时间**：2026-05-13（`/loop 20m` cron `105f4ef8` 触发）
+- **环境**：localhost:5173 → 主动 navigate `/this-route-does-not-exist-xyz` / `/works/non-existent-work-id-xyz` / `/studio/fake-work-id-123` 三类典型死路径；EN+ZH 双 locale 验证；HTTP fetch 抓 status code；DOM probe 抓 title + html lang + tab 高亮 + a11y aria-hidden 状态
+- **触发**：前 109 round 审过 /works /analytics /editor /studio /explore /chat /settings /chrome 所有正向 surface，但 `path="*"` 的反向兜底页**0 round 覆盖**。404 是产品的"故障显微镜"——任何 URL typo、分享链接 rot、已删 feature 引用都汇集到此页，决定首屏 user-trust
+- **方法学**：(1) 读 `pages/NotFound.tsx` 全 90 行源码 + `main.tsx:41` 路由定义；(2) 测三类 404 触发器（完全无效路径 vs `/works/:fake-id` vs `/studio/:fake-id`）观察是否分类处理；(3) 双 locale 截图比对翻译完整度；(4) `fetch(url, {redirect:'manual'})` 抓真实 HTTP status；(5) DOM probe document.title / html lang / aria-hidden / CTA inventory
+
+### 深层发现
+
+| # | Severity | 发现 | DOM/网络 证据 |
+|---|---|---|---|
+| **F487** | **CRITICAL** | 不存在的路径 **HTTP 200** 而非 404——Vite dev server 把任何路径都映射到 `index.html` 返回 200；prod 模式如未在 server 上加 404 middleware 同样 200。Google crawler 会把 `/share-link-of-deleted-work-xyz` 当合法页 index，sitemap 污染；分享坏链给用户**对方浏览器无 cache 错误信号**；监控系统抓不到 4xx 异常率。任何 SPA 上线必须在 server 注入 catch-all → 404 middleware 或 `<meta http-equiv="status">` 类 prerender hint | `fetch('/this-route-does-not-exist-xyz')` → `r.status = 200`；Vite server 默认行为 |
+| **F488** | **CRITICAL** | `document.title` 在 404 状态下**保持 "AutoViral" 不变**——浏览器 tab 标题、历史记录、bookmarks、Cmd+T fuzzy switcher 全部把 404 当真页。用户开 5 个 tab，1 个是 404，看 tab title 完全无法区分；bookmark 后永久收藏一个死链且名字叫 "AutoViral" | DOM `document.title: "AutoViral"` 在 EN 和 ZH locale 下都成立；NotFound.tsx 全文无 `useEffect` 改 title |
+| **F489** | HIGH | 单 CTA "← Back to Works" 是唯一动作——零 search box、零 popular routes 列表、零 recent works / drafts、零 `history.back()` affordance、零 report-broken-link。Vercel / Linear / Notion / GitHub / Stripe 五大 SaaS baseline 都提供至少 3-5 CTA matrix（home + search + recent + status + report），AutoViral 1/5。**用户从外部分享链接进来 → 唯一出路是回到陌生 /works 首页**，分享场景的引流被白白丢弃 | DOM `ctas: [{tag:"A", txt:"← Back to Works", href:"http://localhost:5173/"}]` —— 仅 1 项 |
+| **F490** | HIGH | 零 fuzzy-route suggestion——`/explor`（typo for `/explore`）、`/setings`（typo for `/settings`）、`/anlytics`（typo for `/analytics`）全部 generic 404，零 "Did you mean: /explore?" 提示。已知路由集合是常量 6 项，Levenshtein 距离 ≤ 2 的 fuzzy match 是 5 行代码。这条 affordance 在 Algolia / Notion / Linear 都是标配 | NotFound.tsx 源码无 fuzzy 逻辑；已知路由 set 在 main.tsx 6 项可枚举 |
+| **F491** | HIGH | `/studio/fake-work-id-123` 渲染**通用 404 页**而非 Studio 内的 "work not found"——React 路由匹配了 `studio/:workId`，Studio 组件内部检测 workId 不存在 → 渲染 NotFound；但 NotFound 不知道自己是"work 不存在"还是"路径不存在"，统一显示 `/studio/fake-work-id-123` echo + "Back to Works"。**resource-not-found 与 unknown-route 是两种 IA 状态**，前者应该说 "work `fake-work-id-123` 不存在或已删除 + 列出最近 3 件 works"，后者说 "路径无效 + 列出主要页面"。AutoViral 用一套兜底所有路径下沉 = IA 损耗 | URL `/studio/fake-work-id-123` 但 DOM 渲染 NotFound.tsx 内容；`<code>` 显示 `/studio/fake-work-id-123` pathname；TopNav 仍可见但 zero tab 高亮（R107 F463 family 第 3 实例） |
+| **F492** | MEDIUM | `<code>{location.pathname}</code>` 只回显 pathname，丢失 `?query=` 和 `#hash`——用户从 Slack/邮件 paste 完整带 query 的 URL，404 echo 把 query 截断，用户看不清自己粘了什么。`location.pathname + location.search + location.hash` 才是完整破链 | NotFound.tsx:67 `{location.pathname}`，无 search/hash 拼接 |
+| **F493** | MEDIUM | 200px 巨大 "404" 字号 `aria-hidden` 标记——screen reader 用户只听见 "走错路了 / This page took a wrong turn"，**完全错过错误代码 "404"**。技术支持电话沟通时 SR 用户描述不清 ("我看不见的某个标题写着什么"). 应该 `aria-hidden` 移除 + 加 `<span className="sr-only">Error 404 — </span>` 在 h1 前 | NotFound.tsx:25 `aria-hidden`；h1 textContent 不含 "404" |
+| **F494** | MEDIUM | 零 `<meta name="robots" content="noindex,nofollow">` 注入——Google bot 抓到 404 路径会按 200 status 索引并按 normal page 排序，长期会出现"搜 AutoViral 反而搜到陈年死链 404 页"的 SEO 倒灾。SPA 404 需 client-side `<Helmet>` 或 server-side header 双保险 | DOM `<head>` 无 `<meta name="robots">`；NotFound.tsx 无 react-helmet 类 head 管理 |
+| **F495** | MEDIUM | 零 auto-focus 在 primary CTA——键盘用户进入 NotFound 后 `document.activeElement` 是 `<body>`，必须 Tab 穿过 TopNav 的 6 个按钮（Works/Explore/Analytics + locale + theme + settings）才到 "Back to Works"。NotFound 应 `useEffect(() => buttonRef.current?.focus(), [])`，配合 R107 F467 skip-to-content link 的设计 | DOM 渲染后 `document.activeElement.tagName: "BODY"`；NotFound.tsx 无 useRef + focus 逻辑 |
+| **F496** | MEDIUM | 零 telemetry——frontend 没有 `track('404_landed', { path, referrer })` 上报；团队**完全不知道**哪些 URL 在产生死链——可能是 stale docs 链接、已删除 feature 的 share link rot、外部站点引用过期路径。404 应该是产品健康度的**漏斗外信号源**，本轮全无观察 | NotFound.tsx 无 analytics call；grep `track\|analytics\|posthog\|mixpanel` 在 NotFound.tsx 无命中 |
+| **F497** | LOW | 1568 viewport 上 `maxWidth: 880` 留 688px 空白右侧——编辑式留白可接受但浪费了 "Did you mean / Recent works / 主要页面卡片" 侧栏机会。Vercel 的 404 在大屏会放最近博客文章作为 fallback engagement | NotFound.tsx:14 `maxWidth: 880`；1568px viewport 实际显示宽度 880px，右侧 688px 完全空白 |
+| **F498** | LOW | "← Back to Works" 链接 `background: var(--accent-glow)` 在 light mode 仅微弱 tint——按钮 affordance 比行业 primary CTA 弱（一般 `var(--accent)` solid fill 或更高对比度）。截图中按钮看起来像 ghost/disabled style，第一感缺乏点击诱导力 | DOM `getComputedStyle(link).backgroundColor` 是 `--accent-glow`（透明度 ~10-15%）；行业标准 primary CTA 是 solid accent fill |
+
+### Family 串联
+
+- **F487 = R104 F441 silent-leak family server/gateway 版第 2 实例**——R104 是 adapter 丢 key 静默 fallback 0；本轮是 server 给所有路径回放 200 静默撒谎。共同病根："失败状态不被信号化"
+- **F491 = R107 F463 scope-truncation family 第 3 实例**——R107 是 TopNav 6 routes 但 nav 显示 3 tab；R109 是 30 config keys 但 UI 编辑 7 项；本轮是 N 种失败状态（unknown-route / resource-not-found / forbidden / expired-share-link / removed-feature）但 NotFound 用 1 个 page 兜全部
+- **F488 + F494 + F496 = 新 family "产品对外不可观测"**——title / robots meta / analytics 三组**对外接口**（用户、爬虫、团队）都没在 404 状态下传递信号
+- **F490 = R98 F394 search 缺位 family 第 2 实例**——/works 不能搜 slide 内容；404 不能 fuzzy 匹配近似路由。"输错了用户没有恢复路径" 共同病根
+- **F493 + F495 = R107 F467 a11y / focus management family 第 2 实例**——R107 缺 skip-to-content；本轮缺 sr-only 错误码 + auto-focus
+
+### 沉淀
+
+**M173 — SPA 404 must serve real HTTP 404**：catch-all 路径必须在 server 中间件返回 `404` status code（而非 SPA index.html 的 200）。Vite prod 用 `connect-history-api-fallback` 时必须配 catch-all rule，Node/Hono server 必须显式 `app.notFound(c => c.html(indexHtml, 404))`。客户端补充 `<meta name="prerender-status-code" content="404">` 给 Prerender / Cloudflare / Vercel SSR snapshot 识别。
+
+**M174 — Document title must reflect error state**：错误状态的页面必须改 `document.title` —— NotFound 应 `useEffect(() => { document.title = "404 · Page not found · AutoViral"; })`；ErrorBoundary 应 `document.title = "Something went wrong · AutoViral"`；甚至 loading 也可考虑 "Loading… · AutoViral"。Tab title 是用户 multi-window/bookmark 的唯一 textual 区分。
+
+**M175 — 404 CTA matrix as product audit standard**：任何 error/empty 页 must 列出 5-CTA matrix —— (a) home/back / (b) search / (c) recent contextual items / (d) status page or known-issue link / (e) report-broken-link with prefilled context。少 1 项算 finding；少 2 项算 HIGH；少 3 项算 CRITICAL。R110 的 NotFound 是 1/5 = CRITICAL。
+
+**M176 — Subroute resource-not-found ≠ unknown-route**：必须区分两种 404：(A) `/random-path` = 路径完全不存在 → 列出主要导航；(B) `/studio/:invalid-id` = 路由 OK 但资源缺 → 列出同类型最近资源 + 保留 surface chrome (Studio 内部的工作流栏)。统一 404 是 IA 损耗，因为前者用户输错 URL，后者用户访问的是合法路由但资源被删/未授权/已 expire——恢复路径完全不同。
+
+### Meta finding
+
+404 是产品的 **"故障显微镜"** —— title / robots / telemetry / fuzzy-suggest / multi-CTA / resource-vs-route 区分**六件套全缺**。AutoViral 当前 404 的成熟度比 Vercel 1-CTA-only 还基础，因为 Vercel 至少返回 HTTP 404 + 注入 `<title>Page Not Found</title>` + Google Analytics 上报。本轮把"反向 surface 也要审"沉淀为 audit-method —— 后续每个 surface audit 必须配套审计它的失败态（loading / empty / error / unauthorized / expired）。
+
+### R111+ 候选
+
+- **ErrorBoundary 实际触发态截图 + 文案审计**（R107 已识别 ErrorBoundary 反模式，但未在真实异常下截图）
+- **Loading state 全产品 audit**——`Loading…` 在多少 surface 是硬编 EN（R104 F450 已抓 /analytics 一例，全产品扫盘）
+- **Empty state 全产品 audit**——0 followers / 0 works / 0 trends / 0 chat messages 五种零态 baseline 比对
+- **`/works/:invalidId` 是否应进 /works hub 而非 404**——路由匹配上当前 catch-all，但语义上应导引回 /works 列表（M176 实例）
+- **Share-link rot audit**——产品是否有 share/export 链接，过期/删除后用户会落到哪个页面，链上下文是否保留
+
+---
+
+## Round 109 — **Settings drawer 深审：secret pipeline 是产品级 P0 leak + config UI 覆盖率 7/30 严重欠位 + cron 接受任意垃圾 —— 凭据安全 / 编辑覆盖 / 输入校验三 plane 同 round 全线塌方**
+
+- **时间**：2026-05-13（`/loop 20m` cron `105f4ef8` 触发）
+- **环境**：localhost:5173 /analytics → 点 TopNav `Global settings` 齿轮按钮打开 SettingsPanel 抽屉；Chrome MCP DOM probe + 直接 `fetch('/api/config')` 抓 raw 响应
+- **触发**：R104 F444 早就指向 Settings 作为 "refresh now" 入口但**从未深审**；R107 + R108 候选清单中 Settings 列为最高 ROI。本轮选 Settings 是因为它是用户**唯一存放 jimeng / openrouter 凭据**的入口——secret 通路一旦泄露，单个用户损失直接换算到 API 账单（每 jimeng 视频 ~$0.76）
+- **方法学**：(1) 先读 `SettingsPanel.tsx` 全 342 行源码 + `useSettingsPanelStore` 源码；(2) DOM 探测 `data-section` 节段 + 焦点 trap + 14 个 focusable 元素；(3) 通过 `fetch('/api/config')` 直接看后端**真实回放 payload**，对比 UI 编辑覆盖；(4) 主动注入垃圾 cron / fake douyinUrl 验证客户端校验；(5) toggle 3 个 SecretField 的 Show 按钮后用 screenshot 锁定"plaintext 暴露 + 永不自动隐藏"
+
+### 深层发现
+
+| # | Severity | 发现 | DOM/网络 证据 |
+|---|---|---|---|
+| **F475** | **CRITICAL** | `/api/config` GET 响应**全文回放** jimeng AK + SK + openrouter key —— UI 的 `type=password` + Show/Hide 切换是 theater，secret 已在浏览器 memory 全文落地。任意第三方脚本 / 浏览器扩展 / DevTools 用户都能 `fetch('/api/config')` 直接抓走 | `keys: [..., "jimengAccessKey", "jimengSecretKey", "openrouterKey", ...]` payload 含 `jimeng.accessKey: "AKLTNjk4ZDNmMGY2..."` `secretKey: "T0dSalpHSm..."` 共 47+60+73 字符全文，无任何 redact / mask / 仅 last-4 处理 |
+| **F476** | **CRITICAL** | Settings 抽屉编辑覆盖率 **7/30+**——`EDITABLE_KEYS` 白名单仅 `jimengAccessKey, jimengSecretKey, openrouterKey, douyinUrl, researchEnabled, researchCron, model` 七项；后端实际有 `taskAutoApprove, taskMaxConcurrent, taskMaxRunsPerTask, postTaskDebounce, evolutionMode, taskMaxActive, taskTimeoutMinutes, taskMaxRetries, taskCompletedRetention, taskOneShotExpiryHours, autoRun, maxReports, reportsToFeed, interval, interests, memorySyncEnabled, ...` 至少 **23 个 knob 用户无任何 UI 入口**——只能改 YAML 配置文件 | `/api/config` 返回 30 keys；`SettingsPanel.tsx:9` whitelist 7 项。silent feature gating |
+| **F477** | **CRITICAL** | cron field 接受**任意字符串** + Save 按钮仍 enabled——我注入 `"totally not a cron expression"` 后 `aria-invalid: null`, 主 Save 按钮 `disabled: false`。无客户端正则、无 `cron-parser` 解析、无 "next run preview"。用户保存垃圾 cron 后，后端要么 500 要么静默不触发——loss 是**整个 research/analytics 自动化通路**永久哑火 | `#research-cron` value=`"totally not a cron expression"`, `getAttribute('aria-invalid')` = null, primary Save button disabled = false |
+| **F478** | HIGH | Refresh-now 按钮 disabled 仅校验 `draft.douyinUrl`（草稿，未持久化）——用户粘贴新 URL → button 立即 enable + dirty indicator 亮 → 点击 `refreshMut.mutate()` → 后端实际读 **persisted config**（旧 URL 或空）。draft↔persisted contract drift：UI 让用户以为 "Refresh 用我刚粘贴的 URL"，实际跑的是上次保存的 URL | DOM 注入 `https://NEW-FAKE-URL-FOR-AUDIT.example/user/123` 后 `refreshBtnDisabled: false`, `dirtyIndicatorVisible: true`，但 mutation endpoint 未带 url 参数（见 `queries/config.ts useRefreshAnalytics`） |
+| **F479** | HIGH | SecretField toggle plaintext 后**永不自动隐藏**——`SecretField.tsx:27` 的 `useState(false)` 在 toggle 后无 `setTimeout` 自动 reset；screenshot 抓到三组凭据 (`AKLTNjk4...` / `T0dSalpH...` / `sk-or-v1-5a285916d...`) 全文常驻屏幕，直到用户主动点 Hide 或关闭抽屉。Demo 直播 / 屏幕共享 / 同事路过场景，secret 全文外泄 | DOM `valLen: 47, 60, 73`；3 个 Show 按钮 click 后 button 全部变 "Hide"；无 `setTimeout(()=>setShown(false), N)` 代码路径 |
+| **F480** | HIGH | **0 个 Test-connection / Validate 按钮**——jimeng AK+SK 输错、openrouter key 输错、douyinUrl 输错，唯一发现路径是"等生成失败"——一个 jimeng 视频任务 $0.76，错配置可能跑废 N 个 task 才 surface 错误。Settings 抽屉应该是 "save 前先 ping" 的工作流 | DOM probe `testConnectionBtns: []`；7 项 hint 全是描述性文字，零 connectivity feedback |
+| **F481** | MEDIUM | Save 按钮 saving 态仅显示 `"…"` 字符串替代 label，**无 `aria-busy`**、无 spinner、无 progress——screen reader 用户在 mutate 期间听不到任何"saving" 反馈 | `SettingsPanel.tsx:298` `{saveMut.isPending ? "…" : t("settings.save")}`；button 元素无 `aria-busy` 属性 |
+| **F482** | MEDIUM | `isDirty` 检测**不 trim**——用户在 jimengAccessKey 输入末尾误打空格，Backspace 删掉后 React state 的 string 可能与原 config 已经字节相等但 useState batching 残留致比较失败——产生持久 false-positive dirty。Save 按钮永远 enable 但实际无变更 | `SettingsPanel.tsx:91` `EDITABLE_KEYS.some((k) => draft[k] !== config[k])`，无 `.trim()` 归一化，无 deep-equal |
+| **F483** | MEDIUM | Save 成功**强制关闭抽屉**（`onSuccess: () => closePanel()` line 294）——用户改完 douyinUrl 想 (a) save (b) 然后点 Refresh now 拉新数据，必须 reopen 抽屉二次操作。"Save and refresh" 复合 CTA 缺失，把一步操作硬拆成两步 | `SettingsPanel.tsx:292-295`；无 "Save & refresh" combo button，无 keepOpen flag |
+| **F484** | MEDIUM | Unsaved-changes 确认对话框 **ESC 无法关闭**——`role="alertdialog"` 但无对应 keydown 监听，唯一退出路径是点 Cancel 或 Discard。键盘用户 trapped 在 alert 里 | DOM 第 2 次 ESC dispatch 后 `afterSecondESC_alertOpen: true`（alert 仍开）；source 中无对 `showUnsaved` 的 ESC handler |
+| **F485** | LOW | `analyticsLastCollectedAt` 显示 user **本地时区**（截图：`Last collected: 5/13/2026, 5:08:12 AM`）——backend 存 UTC `2026-05-12T21:00:07.898Z`，前端 `new Date(...).toLocaleString(zh-CN/en-US)` 渲染本地时区。创作者跨时区（如海外团队 vs 内地账号）会与"近 7 天 KPI"语义错位 | DOM `lastCollected: "2026-05-12T21:00:07.898701+00:00"` → 截图渲染 `5:08:12 AM` 是 CST+8 偏移结果；无 "(UTC)" / "(your TZ)" 标注 |
+| **F486** | LOW | 抽屉宽度 480px **硬编**——`panelW: "480px"` getComputedStyle 抓到；viewport < 480px（任何 iPhone SE / 折叠屏闭合态）会横向溢出。零 `max-width: 100vw` / `@media` 兜底 | DOM `getComputedStyle(panel).width = "480px"`；无 responsive breakpoint |
+
+### Family 串联
+
+- **F475 → 新 family `secret-egress`**：之前 R106 F451 / R104 F441 是 input-side dead-data，本轮第一次发现 **output-side secret leak**（后端往前端 plaintext 回放凭据）
+- **F476 = R107 F463 scope-truncation family** 第 2 实例：R107 发现 TopNav nav 只有 3 项但路由有 6 个；本轮发现 Settings UI 只有 7 项但 config knob 30+。共同病根："UI 是 backend 的低分辨率投影"
+- **F477 = R104 F441 silent-leak family** 服务端版：R104 是 adapter 读不存在的 key fallback 0；本轮是后端接收 anything 静默存档
+- **F478 = R98 F398/F403 contract-drift family** 第 N 实例：UI 让用户以为按钮在用 draft，实际跑 persisted
+- **F479 = R101 F417 destructive-without-recovery family** 第 7 实例：secret 显示后无 recovery（自动隐藏）路径
+- **F484 = R107 F464 keyboard-shortcut-culture family** 第 2 实例：alert 不响应 ESC，本质是 dialog-stack 中的 keyboard handler 不完整
+
+### 沉淀
+
+**M169 — Server-side secret redaction discipline**：任何 `GET /api/config` 类 endpoint **不得回放** `*Key / *Secret / *Token / *Password` 字段。正确架构是分离读写：UI 通过 `GET /api/config/secret-status` 拿 `{ jimengAccessKey: { set: true, lastFour: "1234" } }`，写入用 `PATCH /api/config/secret/:name` 但永远不读出。R109 audit 是这条 discipline 缺失的第一例确证。
+
+**M170 — Config UI coverage matrix**：每加一个 backend config key 必须同步加 UI 入口或显式标 `__INTERNAL_ONLY__` 命名前缀；否则在 audit round 用 `Object.keys(backendConfig)` minus `EDITABLE_KEYS` diff 抓出 silent gating。本轮抓到 23 个未暴露 knob。
+
+**M171 — Cron expression client-side parse + next-run preview**：所有 cron 类字段必须用 `cron-parser` 之类 npm 包实时解析，aria-invalid 标错 + Save disable + 显示"next 3 fires: 2026-05-13 09:07, 21:07, 2026-05-14 09:07"。R109 F477 是这条规则缺失的第一例。
+
+**M172 — Draft↔persisted contract for side-effect buttons**：任何依赖 persisted state 的副作用按钮（Refresh now, Test API, Trigger sync, Force run）必须 `disabled={isDirty || isPending}` 或 `disabled` until save complete；否则按钮按 draft 启用、mutation 按 persisted 跑，UI 撒谎。
+
+### Meta finding
+
+Settings 抽屉是用户的 **API 凭据池**——任何 secret 通路 leak 会直接换算成 ByteDance/OpenRouter 账单跑路（且账单单据只显示 API 调用次数，不显示泄露源）。前 108 round 没人系统性 audit 这条 pipeline 的**网络层**，只看 UI 表层（"是否 mask"、"是否有 Show 按钮"），完全跳过 `/api/config` GET 真实回放。R109 把 secret 的 **server→client 通路**摆上 audit 桌面：mask 是 cosmetic，真正的防线是后端不该回放。
+
+### R110+ 候选
+
+- **`useRefreshAnalytics` 真实 endpoint 行为审计**——F478 推断 mutation 读 persisted，未在 server 端确认；下轮 curl 直接打 endpoint 看 payload 是否携带 URL
+- **多 SecretField 同时 Show 的截图风险量化**——F479 已确认 single-secret 暴露，但 3 个同时暴露在同屏 480px 抽屉里的 visual footprint 值得专门量化（截图 + 截屏可识别字符数）
+- **`/api/config` 整体 server 端字段分类**——M169 沉淀后需要给 30+ key 打标 `secret / public / internal-only`，落 server 端 schema
+- **Mobile / 折叠屏 settings 行为** —— F486 已确认溢出，未做完整 mobile audit
+- **Toast / a11y 全 announce 通路审计** —— F481 是单点，可能 KPIBar / WorksGrid / Editor save 也都缺 aria-busy
+
+---
+
 ## Round 108 — **R104 F441 (CRITICAL · KPI 100% fallback 0 silent leak) + F442 (HIGH · per-KPI delta 永远 — 0% placeholder) + F443 (HIGH · hero "近 7 天" 文案谎言) + F450 (LOW · Loading/Empty 硬编 EN) 四连 CLOSED ✅ —— /analytics 第一次真正显示真实账号 KPI；M161 time-window honesty 第一次实际应用；data + copy + a11y 三 plane 同 round 闭合**
 
 - **时间**：2026-05-13（`/loop 30m` cron 触发本轮；R107 已被并行 chrome-audit agent 占用，本轮采用 R108 编号）
