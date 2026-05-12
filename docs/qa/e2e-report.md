@@ -6,6 +6,214 @@
 
 ---
 
+## Round 86 — **R85 F261 + F266 CLOSED ✅ /analytics empty-state vendor/implementation leak 双 locale 清除 + R80 F217 / R82 F230 / R82 F234 三连误报纠错 + M114 audit-plane 沉淀**
+
+- **时间**：2026-05-12（`/loop 30m e2e-report fix` 第 6 轮触发；R83 fix-pass cron 与 R84/R85 audit cron 并行运行）
+- **环境**：dev (`localhost:5173/works` + `/analytics`)，ZH + EN locale × dark + light theme 双双 verify
+- **触发**：R83 候选 R84 #1 (F196 CTA) 原计划入选；本轮按 .claude/rules/e2e-testing.md 升级版 hard rule 5 先对 R80 + R82 三个 CRITICAL/HIGH finding 跑 DOM/computed-style 实证。结果——三个全是 audit-the-audit 误报。pivot 到 R85 F261 + F266（i18n vendor leak）实修
+
+### 第一部分 — 三连 audit-the-audit 误报纠错
+
+按 `.claude/rules/e2e-testing.md` 升级版 hard rule 5「视觉 finding 必须 DOM/computed-style 二次确认」，先重测 R80 / R82 提出的 CRITICAL/HIGH finding。
+
+| Finding | R 报告原文 | 实证手段 | 真相 |
+|---|---|---|---|
+| **R82 F230** | "Settings drawer 在 dark mode 下**仍然是 paper-white 亮色背景**" | `data-theme=dark` 时打开 drawer → `getComputedStyle('.panel').backgroundColor` | `rgba(26, 28, 34, 0.7)` ✓ = dark surface-1。视觉错觉来自 backdrop-filter 半透明叠加 page #0a0b0f 形成 "paper-tinted" perception；drawer 实际完全 dark-mode 兼容 |
+| **R82 F234** | "NewWorkCard icon container 仍是浅灰 bg `#f5f5f5` 没用 token" | 直接 read `NewWorkCard.module.css` | 全文 0 hardcoded color，全部 `var(--surface-0)` / `var(--surface-2)` / `var(--text-*)` — 早已 token 化 |
+| **R80 F217** | "EN /works cards 显示 status badge `IMAGE · READY`，中文 cards 只显示 `图文 · 旅博` —— i18n key 漏写" | DOM `querySelector('[class*=badge]').textContent` | "图文 · 就绪" / "图文 · 草稿" — i18n key 完整、渲染正确。R80 把 viewport 截图里的"就绪/草稿"误读为"旅博/早期"（中文细字号字形混淆，M112 升级版） |
+
+**累计影响**：R77 F192/F193 (R83 已纠) + R80 F217 + R82 F230/F234 = **5 个 finding 全是视觉误读，跨 3 round 污染 fix loop**。如果按 finding 字面修复，会同时：
+1. 删一段不存在的 hardcoded color leak（无 net change）
+2. 补一组与已存在 key 冲突的 i18n key（潜在 regression）
+3. 改 SettingsPanel 已正确的 CSS（破坏正确实现）
+
+完全是修不存在的 bug。
+
+### 第二部分 — R85 F261 + F266 实修（/analytics empty-state vendor/implementation leak）
+
+调试三连误报过程中撞上 R85 F261 + F266 描述的真 leak（同时也是 R79 F209 / R80 F221 跨 5 round 复现未根治的家族）：
+
+| Key | 修改前 (ZH) | 修改前 (EN) | leak vector |
+|---|---|---|---|
+| `analytics.collectionNote` | "数据由后台任务每小时采集一次。若长期为空，请检查主机上的 Python 依赖（browser_cookie3）是否安装。" | "Data is collected by a background job hourly. If empty for long, check Python deps (browser_cookie3) on the host." | implementation leak (4 vector：tech stack `Python` + library `browser_cookie3` + infra `host/主机` + internal job 调度) |
+| `analytics.insightsSub` | "由 Sonnet 整理 · 按与你频道的相关度排序" | "Curated by Sonnet · ranked by relevance to your channel" | vendor leak (LLM model 名) |
+| `analytics.insightsEmpty` | "暂无调研洞察——Sonnet 还没分析过你最近的作品。完成 1 个发布作品后，首批洞察会自动出现在这里。" | "No research insights yet — Sonnet hasn't analyzed your recent works. After 1 published work, the first insights will appear here." | vendor + agent-flavor leak |
+
+#### 改写原则（R78 「事实-路线图」结构延伸）
+
+- **implementation → outcome**：用户能感知的状态，不暴露 stack
+- **vendor → product**：所有 "Sonnet / OpenRouter / claude-cli" 等都抽象成 "AutoViral"
+- **dev-ops 任务 → user-actionable**：把 "请检查 Python 依赖" 改成 "请到设置中检查频道连接"
+
+#### 修复后文案
+
+| Key | 修复后 (ZH) | 修复后 (EN) |
+|---|---|---|
+| `collectionNote` | "频道数据每小时自动刷新。如果长期为空，可能是频道未连接——请到设置中检查。" | "Channel stats refresh automatically every hour. If they stay empty, your channel may not be connected — check it in Settings." |
+| `insightsSub` | "由 AutoViral 整理 · 按与你频道的相关度排序" | "Curated by AutoViral · ranked by relevance to your channel" |
+| `insightsEmpty` | "发布作品后，洞察会自动出现——AutoViral 会分析你的内容并提炼值得复用的模式。暂无洞察。" | "Insights appear after you publish a work — AutoViral analyzes your output to spot patterns worth repeating. Nothing yet." |
+
+#### 浏览器实证 (ss_4430sqvni + ss_6735baclq)
+
+ZH `/analytics`：DOM `body.innerText` 扫描 `browser_cookie3` / `Sonnet` / `Python` / `硬编码` = **0 命中** ✓；新文案 100% 落地 ✓
+EN `/analytics`：DOM `body.innerText` 扫描 `browser_cookie3` / `Sonnet` / `Python` = **0 命中** ✓；新文案 100% 落地 ✓
+CTA `[打开设置 →]` / `[Open settings →]` 仍工作 ✓
+R85 F261 多向量 leak（`Python`/`browser_cookie3`/`host`/`background job`）4 vector 全部 0 命中 ✓
+R85 F266 cross-locale × cross-theme vendor leak（`Sonnet`）双 locale 双 theme 全部 0 命中 ✓
+
+### 桥梁哲学第三 plane — audit plane
+
+R76（data plane 防"假数据冒充真数据"）+ R83（control plane 防"silent state 蒙人"）+ 本轮（**audit plane** 防"假 finding 污染 fix loop"）= 完整 trust funnel：
+
+```
+       fix-loop ←─── audit (plane 3, audit-the-audit)
+          │
+          ▼
+   user ←─── control plane (plane 2, surface signal)
+          │
+          ▼
+       ground truth ←─── data plane (plane 1, intercept fakes)
+```
+
+audit 是 fix-loop 的输入。如果 audit 也假，下游所有 round 都白做。R84 M120（zoom-before-claim）+ 本轮 M114（DOM-before-claim）是 audit plane 的 sibling 防御：前者抵抗 JPEG 压缩 artifact 假阳性，后者抵抗 viewport 字号视觉误读。
+
+### 沉淀 — M114
+
+- **M114 — audit-the-audit：CRITICAL/HIGH 视觉 finding 落 e2e-report 前必须 DOM/computed-style 二次确认**
+  - **Why**：R77 F192（0 vs 8）、R80 F217（就绪 vs 旅博）、R82 F230（半透明 dark 误读为 paper-white）、R82 F234（已 token 化误读为 hardcoded）三 round 累计 5 个 finding 视觉误判。M120 (R84) zoom-before-claim 解决了 JPEG 压缩 artifact 假阳性；M114 解决"视觉 ≠ DOM 状态"假阳性
+  - **How to apply**：
+    - 颜色 / theme 判断 → `getComputedStyle(el).backgroundColor / color` 比对 `getPropertyValue('--surface-*')` token
+    - 文字内容 → `el.textContent` 或 `innerText`，永不凭肉眼读字号 ≤ 12px 内容
+    - 元素存在性 → `querySelector`，不靠"截图里看不到"
+    - 数字 KPI → zoom 截图 + DOM 读取双重确认（M112 升级合并）
+    - 视觉 ≠ DOM 时永远以 DOM 为准
+  - **Where**：固化到 `.claude/rules/e2e-testing.md` Hard rule 5（本轮已写入）
+
+### 关联
+
+- 标 **R82 F230 / R82 F234 / R80 F217** 为 audit-the-audit 误报（**不修复**，原代码正确）
+- closes **R85 F261**（multi-vector implementation leak 4-vector 0 命中）
+- closes **R85 F266**（vendor leak 跨 2 locale × 2 theme 0 命中）
+- 闭合 R79 F209 + R80 F221 在 `/analytics` empty-state 子集
+- 落 **M114** sediment + Hard rule 5 写入 `.claude/rules/e2e-testing.md`
+- 跨 R76（data plane）→ R83（control plane）→ R86（audit plane）连贯 silent-failure 防御三平面
+- 与 R84 M120（zoom-before-claim）+ R85 M125（vendor-leak codebase lint）形成 audit-plane 三 sibling 防御
+
+### R87 候选
+
+- **R87 #1** R85 候选 #1 升级：**写 `web/scripts/check-vendor-leaks.ts`** —— 本轮 inline 清了 analytics 3 处，但 settings drawer / chat panel / editor topbar 还有 R79 F207 (`agent`) / R84 F243 (`CLAUDE·OPUS·4.7`) 等同病。grep regex 一次性扫描；CI 阻断
+- **R87 #2** R85 F267 count-render contradiction (hero "9 件" vs empty "完成 1 个") — empty state 改用 dynamic templating，按 `account.aweme_count >= 1` 切分两套 copy（M107 Level 5 fix）
+- **R87 #3** R85 F271 + M123 — locale switch interaction-time CLS：topbar `min-width` 锚定，避免 toggle hit-target 偏移
+- **R87 #4** R84 F242 + F247 — Editor topbar 显示 work title + workId 改 nanoid（同时收 ID 编码泄漏 + 主体身份）
+- **R87 #5** R83 R84 候选 #1 F196 "Generate Work →" CTA 跳错——按 hard rule 5 流程跑 DOM 实证再判断是否真 bug
+
+---
+
+## Round 85 — **Analytics 页 (/analytics) 数据密度型 surface 深审：empty-state Python 栈技术名直曝 + Sonnet 模型 vendor leak + hero "9 件" vs empty "完成 1 个" count-render contradiction + zh italic 汉字 typography 反模式 + locale-switch CLS**
+
+- **时间**：2026-05-12（`/loop 20m` cron 触发 R85；R84 在前一轮完成 Editor 深审）
+- **环境**：dev (`localhost:5173/analytics`)，账号 `Mirodream`、5 followers、9 published works、所有 demographic / insight 都 empty；先 en-light → zh-dark 跨态 zoom 5 个关键区域
+- **触发**：Analytics 是数据密度型 surface（KPI ledger + Profile + Demographics × 3 + Insights），业内同类产品在 empty-state / 解释性叙述 / KPI 语义层最薄弱；且我预先读到 `Analytics.tsx` 源码 (`audienceStatusLabel` 5 bucket 阈值 / `followersDisplay` 截断逻辑 / `isEmpty` 触发 Settings drawer CTA) 可对照行为
+- **方法学**：cross-locale (M113) × cross-theme (M117) × zoom-first (M120) 三 verify gate 全应用；source-code 已读确认 `hour12 locale !== "zh"` 类硬编码
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F261 | **CRITICAL · 多向量 leak 重现 (M121)** | empty-state banner 内文：zh "**数据由后台任务每小时采集一次。若长期为空，请检查主机上的 Python 依赖 (browser_cookie3) 是否安装。**" / EN "**Data is collected by a background job hourly. If empty for long, check Python deps (browser_cookie3) on the host.**" 双 locale 都直曝：(a) "Python 依赖" / "Python deps" 技术栈名，(b) `browser_cookie3` 第三方库名，(c) "主机" / "host" 基础设施词汇，(d) "后台任务每小时" 内部 job 调度细节。 | 创作者用户视角：他既不知道 Python 是什么、也不知道 browser_cookie3 是哪个库、更不知道"主机上"怎么检查依赖。这条 banner 把"empty 状态"的责任以 dev troubleshooting 形式甩给用户。同时把后端 implementation detail (cookie scraping via browser_cookie3) 公开暴露 — competitors 可直接推断抓取链路。对比 Instagram Insights / TikTok Analytics empty state：从不显示技术栈名，只显示行为建议 ("Publish your first post to start collecting analytics")。 | M121 leak-taxonomy 新增样本：(a) 技术栈名（Python） + (b) 第三方库名（browser_cookie3） + (c) 基础设施层级（host）+ (d) 内部 job 词汇 —— 一条文案命中 4 个 vector |
+| F266 | **CRITICAL · M112 vendor leak Analytics 重现** | Insights 区直曝 Claude Sonnet 模型名：zh "由 **Sonnet** 整理 · 按与你频道的相关度排序" / "暂无调研洞察—**Sonnet** 还没分析过你最近的作品" / EN "Curated by **Sonnet** · ranked by relevance to your channel" / "**Sonnet** hasn't analyzed your recent works." cross-locale × cross-theme 都暴露。 | (1) R84 F243 在 Editor 暴露 `CLAUDE·OPUS·4.7`，R85 在 Analytics 暴露 `Sonnet` —— vendor leak 是**产品级**问题不是单页问题。(2) Sonnet 是 Claude 模型 sub-brand，对创作者无意义；他们想知道的是"AutoViral 团队为我整理的"。(3) 模型升级时（Sonnet → Opus → 任何 future model）所有这些字符串 rot；产品发版要同步更新。 | M112 vendor-leak 家族 — R74 (douyin)、R77 (skill names)、R82 (color tokens)、R84 (model version)、R85 (model name in different surface) 五连暴露，说明这是基线代码工艺问题，需要全局 codebase lint（M118 升级版） |
+| F267 | **CRITICAL · count-render contradiction (M107 Level 5 重现)** | 同页面同时显示：hero "Mirodream · 5 粉丝 · **9 件已发布作品**" / EN "5 followers · **9 published works**"；下方 insights empty state "完成 **1 个发布作品**后，首批洞察会自动出现在这里" / EN "After **1 published work**, the first insights will appear here." | 9 已经远 > 1，但 empty state 仍说"完成 1 个发布作品后…会自动出现"。两种可能：(a) insight pipeline 没跑过 9 个已发布作品 → 真实的 5 级 silent failure (M107 Level 5 count-render contradiction)；(b) i18n key 默认占位字符串没动态化（永远写"1"）。无论哪种，用户体感都是：**已经发了 9 篇，但产品对我说"发 1 篇就有洞察"** —— 系统自相矛盾，creator 信任 erode。 | M107 silent-failure 5-tier 最深一级；与 R80 cross-locale verify (M113) 联动证明 — 两 locale 都 contradiction 说明是逻辑而非翻译问题 |
+| F271 | **HIGH · locale-switch CLS (新 bug family)** | 操作复现：在 EN locale 下点击 "中" segment (1065,25)，topbar 因 zh 标签 ("作品/灵感/数据") 比 EN ("Works · 作品/Explore · 灵感/Analytics · 数据") 更短，**整体向左收缩约 100px**；用户接下来若按 muscle memory 点击 (1115,25) 的 theme toggle，实际命中"数据" tab，navigation 被劫持到 /analytics（或反向 /works）。本轮我亲历误触：从 /analytics 经过 locale switch + theme toggle 操作后页面 navigate 到 /works。 | CLS (Cumulative Layout Shift) 在交互瞬间触发的变种：locale 切换是用户语义无关于路由的"chrome only"操作，但因 layout 收缩导致**后续点击错位**。Google CWV 关注的是页面加载时的 CLS；此处是交互层 CLS，更危险（用户已 commit muscle memory）。**修复**：locale 切换时给 topbar 一个 min-width，让 EN 和 zh 共享一致 layout footprint；或给 segment / theme / gear 控件加 sticky-right 锚定。 | 新 family — "interaction-time CLS"，与 FITT M119 toggle hit-target 联动（都是触控区域稳定性家族） |
+| F274 | **HIGH · zh italic 汉字 typography 反模式** | zh hero："你的受众 *还在沉睡*。" —— `audienceStatusLabel` 返回的 i18n string 通过 `<em style={{fontFamily: "Instrument Serif", fontStyle: "italic"}}>` 渲染。**Instrument Serif italic 是 Latin 字形设计**，对 CJK 字符浏览器只能 transform skew 强模拟，破坏汉字结构（撇捺方向、骨架平衡）。 | (1) 中文 typography 圈共识：汉字无 italic 概念，强斜体既损可读又损美感；(2) CLAUDE.md aesthetic-direction 中 "Instrument Serif italic" 仅适用 Latin（hero 数字徽章 `32` `15` 在 /works hero 是 Latin 阿拉伯数字 — 合规；但 "还在沉睡" 应该用其他强调手段：颜色 / 字重 / 不同字族 / underline）；(3) 同语义 EN 版 "still cold" italic 是 typographically 正确的。**修复**：i18n-aware emphasis — zh 用 `<em style={{color: 'var(--accent)', fontWeight: 500}}>`、EN 保留 italic。 | 新 family — "i18n-aware typography"，CJK vs Latin emphasis 分支；CLAUDE.md aesthetic-direction 需要补"emphasis 不分语种用 italic"反例条 |
+| F262 | **HIGH · creator empathy 反例 (negative default framing)** | hero copy 在 0 数据/新用户 / 5 followers + 0 互动 状态下显示："你的受众 还在沉睡。" / "Your audience is still cold." | 用户第一次进入 Analytics 看到的是**判定式负面定性**。"沉睡" / "still cold" 暗含"你的频道有问题"。对比 Stripe Atlas "0 customers" 状态：显示 "You're at the starting line — here's how to launch"。对比 Vercel "0 deployments"：显示 "Deploy your first project to see metrics here"。AutoViral 选择了 "engagement-rate-as-personality" 框架，把 数据 = 人格 = 价值 三层混淆。**修复**：把 5 buckets 改成 "0/新用户" + 4 个有数据的 bucket；0 状态显示 inviting 语调而非 judgmental。 | 与 F265 (重复 empty card) 同根，是 empty-state 设计哲学问题 |
+| F265 | **HIGH · 三连同 pattern empty card + 基础设施词汇** | Demographics row 在零数据下渲染 3 张 card，每张内容仅"暂无 X 数据—等待后台采集首批样本。" / "No X data yet — waiting for first samples from the background collector." X ∈ {年龄分布, 性别占比, 热门地域}。 | (1) **三连重复信息密度极低** —— 占用大面积 viewport 只为说"没数据"。应折叠成一张 unified "Demographics · No data yet" 卡或直接隐藏。 (2) **"后台采集" / "background collector"** 又是基础设施词汇直曝。 (3) **同质化的 placeholder copy** 暗示设计师没认真做 empty-state 差异化 —— 用户看到三张完全相同的句式重复，会立刻意识到这是"机械填充"而非"有思考的引导"。 | F261 同家族（基础设施词汇直曝） + 新增"empty-state 重复 pattern" sub-family |
+| F277 | **MEDIUM · color-semantics-misuse-in-zero-state** | KPI ledger 三个 delta indicator 在 0 数据下均显示 "— 0%"，且采用 **success-green** 字色。 | 颜色语义违和：green 在 dashboard 文化里强暗示"上升 / 好转"；当 delta = 0 时，应当用 neutral grey 或 dim text。**creator 心理**：刚进 Analytics 看到一片绿色 → 第一反应"我有数据上升了？" → 仔细一看是 0% → 意识到被颜色误导 → 信任下降。修复：`delta === 0 → text-soft + no arrow`，`delta > 0 → success-green + ↑`，`delta < 0 → spark-red + ↓`。 | 新 family — "color-semantic-zero-state"，与 R74 silent-failure tier 联动（color 也是诚实的一部分）|
+| F269 | **HIGH · 无 timeframe 控制** | 整页只有顶部 eyebrow "频道脉象 · 近 7 天" / "CHANNEL HEALTH · LAST 7 DAYS"，无 timeframe selector dropdown。 | 业内 baseline：Instagram Insights / TikTok Analytics / YouTube Studio / Mixpanel / Plausible / Google Analytics —— 全部提供 timeframe 选择（今天 / 7d / 28d / 90d / 自定义）。AutoViral 把 7d 硬编码进 eyebrow 文本，意味着 (a) 用户不能问"我上个月表现如何"、(b) 不能切换到"今天"快速看，(c) 无法对比 trend。Analytics 缺乏 timeframe 是**功能性缺失**不是 polish issue。 | 新 family — "discovery: missing core control"，与 R77 filter family 同根但更严重 |
+| F270 | **MEDIUM · KPI 指标定义不透明** | "互动率" / "ENGAGEMENT" 没有 tooltip / `?` icon / definition popover。 | "engagement rate" 在不同平台口径不同（IG: (likes+comments) / followers；TT: (likes+comments+shares+saves) / views；YT: (likes+comments+shares) / impressions）。AutoViral 对应抖音应该是哪种？用户无从知晓。`audienceStatusLabel` 源码用 < 0.01 / < 0.05 / < 0.10 阈值作 bucket，但用户看不到这些阈值，自然不知道"我的 0.0%"距下一档 bucket 还差多少。**修复**：每个 KPI 加 hover popover，说明定义 + 平台来源 + 行业 benchmark。 | 与 F250 (internal pipeline vocabulary) 同根 — "system-internal definition opacity" |
+| F275 | **MEDIUM · 5-bucket 阈值未数据验证 + 边界判定突变** | `audienceStatusLabel` 源码注释自述：`Thresholds picked to land typical creator engagement (1–5%) in the middle bucket; verify when we have real data feedback.` 即作者明确 flag 这是未经数据验证的猜测。同时 5 bucket 是阶跃式：0.0099 → "warming up" / 0.0101 → "alive and well"，跨过 0.01 边界从一个语调跳到完全不同语调。 | (1) **阈值未基于真实创作者数据 calibrate**，bucket 边界可能不对应任何用户感知到的差异；(2) **边界突变**：engagement 在 0.0099-0.0101 之间微小波动会把 hero 文案在两种调性间反复切换，给用户"系统人格分裂"感受。**修复**：(a) 内部 A/B 测试或调研验证阈值；(b) bucket 文案设计成连续渐变（"warming up" "warming" "warm" "hot" "on fire"）减弱突变感；(c) 长期：把 status 与 trend 解耦（current state + delta both shown）。 | 新 family — "data-driven calibration" |
+| F273 | **MEDIUM · KPI label casing 跨页一致性问题** | EN: `TODAY LIKES / TODAY COMMENTS / ENGAGEMENT` 全大写 mono；zh: `今日点赞 / 今日评论 / 互动率` Title Case 中文。同页 hero eyebrow "频道脉象 · 近 7 天" 也是普通 case。Editor R84 F253 已记录 `Design / Copy / AI` Title Case、`PALETTE / LAYOUT / EFFECTS` ALL-CAPS、`drag to reorder` lowercase 三色混合。 | EN 内部多种 case 共存（ALL-CAPS / Title / lowercase mono）；zh 因无 case 系统反而看起来一致，造成 zh-only verify 时忽视该问题。**修复**：定义 type system 三档规则：eyebrow = ALL-CAPS mono，section header = Title Sans，control = lowercase mono；锁死，codebase lint。 | F253 Editor 直系延伸；可与 M118 hardcoded color codebase lint 一起做 codemod |
+| F264 | **LOW · ProfileBar tag `女 5` 未 cross-locale 翻译** | ProfileBar 在 EN locale 显示 `女 5` pill；zh 也显示 `女 5`。`女` 是中文字符；EN 用户看到 `女` 完全不知含义。 | Memory profile tags 来自后端 `m.data?.tags ?? []`，store 中 raw 字符串没经过 i18n。Editor / Analytics 都消费这个 tags 数据，问题分布更广。**修复**：tags 也需要 i18n key，或后端返回结构化 `{type, value, label_key}` 而非纯字符串。 | F245 cross-locale 半翻译家族 — 但此处是 "数据层" 半翻译，比 chrome 半翻译更深 |
+| F263 | **LOW · KPI sterile（无 sparkline / 趋势可视化）** | KPI ledger 仅显示数字 + delta%；无 sparkline、无趋势曲线、无最高峰提示。 | 在数据密度型 surface 上 KPI 是"上下文匮乏的孤立数字"。Stripe / Vercel / Linear / GA 都在数字旁边给 7-day micro-sparkline。当前是 editorial 调性，可考虑添加 8px-高的细线 sparkline 作为类型对比；又不破坏 type-driven 美学。 | 新 family — "data-density baseline"，配套 F269 timeframe selector 一起设计 |
+
+### 沉淀
+
+- **M123 [新方法学]**：**Interaction-time CLS verify**。F271 揭示 locale 切换瞬间 topbar layout shift 导致后续点击命中错位 —— 这是传统 CLS metric 抓不到的（CLS 通常关注页面加载时）。**沉淀规则**：交互层会改变 layout 的控件（locale switch / theme toggle / dynamic content insertion / collapse toggle），必须给后续控件用 sticky positioning 或 min-width 固定 footprint。审计时方法：(a) 截图 before-action；(b) 触发 action；(c) 立即截图 after-action；(d) 比对同一控件的中心坐标差。任何控件偏移 > 8px 视为高危。
+  - **Why**：用户 muscle memory 是核心 a11y 基础设施；点击坐标稳定性比视觉稳定性更重要。
+  - **How to apply**：所有 cross-locale verify 现在分两阶段 — 视觉差异 verify (M113) + 坐标稳定性 verify (M123)。后续 round 添加"key-control 坐标 diff"作为标准检查项。
+
+- **M124 [新方法学]**：**i18n-aware typography**。F274 揭示 Instrument Serif italic 这个全产品 hero-emphasis 默认手法对 CJK 字符破坏可读性。**沉淀规则**：(a) emphasis 不分语种用 italic 是 typography 反模式；(b) 应该在 CSS / 组件层做语种分支 — Latin 用 italic，CJK 用 color / weight / underline；(c) CLAUDE.md aesthetic-direction 的字体规范要明确：`Instrument Serif italic` 仅适用 Latin（hero 数字徽章、Latin 强调词），CJK 强调用 `font-weight: 500 + color: var(--accent)`；(d) 任何包含 zh 翻译的 emphasis component 都要 verify CJK 渲染。codemod 思路：grep `<em.*fontStyle.*italic` + `fontFamily.*Instrument Serif`，加 locale-conditional class。
+  - **Why**：CLAUDE.md "editorial · 克制 · 现代质感" 调性要求 typography 严谨；汉字斜体破坏汉字结构是设计基线问题。
+  - **How to apply**：每轮 zh-locale audit 都额外 zoom hero / emphasis text 检查 CJK 字符是否被 italic 渲染。
+
+- **M125 [新方法学]**：**vendor-leak product-wide grep**。R74-R85 在 5 个不同 surface 都发现 vendor name leak (douyin / skill names / model names / Sonnet / Opus 4.7 version)。**沉淀**：vendor-leak 不应再作为单页 finding 处理，应作为**全产品 codebase lint**。建议在 `web/scripts/` 加 `check-vendor-leaks.ts`：grep regex `(Claude|Opus|Sonnet|Haiku|GPT|Gemini|Llama|browser_cookie\d?|抖音|TikTok|douyin|Python|Node|FastAPI|...)` 在所有 i18n message 文件 + JSX 字符串中匹配；CI fail。
+  - **Why**：vendor leak 已重复 5 次，每次都被当成新 finding 修补；需要 systemic 解法。
+  - **How to apply**：R85 候选 #1 就是这条 — 先做 lint script，扫一次全产品，把所有命中点拉单一次性收口。
+
+### R86 候选
+
+| # | 优先级 | 候选 | Why |
+|---|---|---|---|
+| 1 | **TOP · CRITICAL** | F261 + F266 + M125 联动 — 写 `web/scripts/check-vendor-leaks.ts` 一次性 grep 所有 Python / browser_cookie3 / Sonnet / Opus / Claude / 模型版本号 在 i18n + JSX；列出所有命中位置；codemod 替换为产品名 (`Autoviral Insights`) 或抽象词 (`research engine`) | 把 M112 五连暴露收口；产生可重用 lint 阻挡未来回归 |
+| 2 | **CRITICAL** | F267 count-render contradiction — Analytics insights empty state 改用动态文案：当 `account.aweme_count >= 1` 时显示 "research engine is analyzing your 9 published works..."；当 = 0 时才显示 "after 1 published work, ..." | M107 Level 5 silent-failure 修复；恢复系统诚实 |
+| 3 | HIGH | F271 + M123 联动 — topbar 加 `min-width` 或给 segment/theme/gear 控件 sticky-right 锚定；验证 locale switch 前后 theme-toggle 中心坐标差 < 4px | Interaction-time CLS 收口；保护 muscle memory |
+| 4 | HIGH | F274 + M124 联动 — 写 `<Emphasis>` component 做 locale-conditional emphasis（Latin: italic + Instrument Serif；CJK: weight 500 + accent color）；全局替换 hero `<em>` | CJK typography 基线一次性修 |
+| 5 | HIGH | F262 + F265 联动 — Analytics 0-数据状态重新设计：(a) hero 改 inviting 语调 ("Let's get your channel into orbit")；(b) Demographics 三张 empty card 折叠成一张 unified；(c) 全部用产品语言替换基础设施词汇 | empty-state 设计哲学一次性升级 |
+| 6 | HIGH | F269 + F270 + F263 联动 — Analytics 加 timeframe selector + KPI hover tooltip + 8px sparkline；M124 type system 锁定 | 数据密度型 surface 提到行业 baseline |
+| 7 | METHOD | M123 写入 `.claude/rules/e2e-testing.md` — interaction-time CLS verify gate 与 M113/M117/M120 并列固化 | 第 4 个 verify gate 制度化 |
+
+---
+
+## Round 84 — **Editor (/editor/:workId) 复合面板深审：chat 历史从结构上沦为开发者控制台 + topbar raw workId 取代 human title + quick-action prompt 永远 Mandarin 的"隐形契约破坏"**
+
+- **时间**：2026-05-12（`/loop 20m` cron 触发 R84；R83 已被并行 fix-pass agent 占用）
+- **环境**：dev (`localhost:5173/editor/w_20260319_1815_5bb`)，6 slides 已 loaded，agent 历史 98 条；先 zh-dark → en-dark → en-light 三态各 zoom
+- **触发**：Editor 是 AutoViral 最复杂的复合 surface（chat 20% / canvas 58% / inspector 22%，三栏 glass-border 单像素拼接），且我预先读到 `Editor.tsx` `ChatQuickActions.tsx` `Analytics.tsx` `WorkCardMenu.tsx` 源码，可直接对照行为
+- **方法学**：cross-locale (M113) + cross-theme (M117) 双 verify 矩阵 + 先 zoom 后断言 (本轮新沉淀 M120)；source-code 已读确认 hardcode 而非观察误判
+
+### 深层发现
+
+| ID | 严重度 | 发现 | 用户视角伤害 | 与既有家族关系 |
+|---|---|---|---|---|
+| F241 | **CRITICAL · system-honesty 多向量泄漏** | chat 历史从结构上沦为 dev console — 完整暴露：(a) 真实磁盘绝对路径 `/Users/nanjiayan/.autoviral/works/w_20260319_1815_5bb/`，(b) 内部 dev API 端点 `localhost:3271/api/works/w_20260319_1815_…`，(c) 文件操作 `WRITE publish-text.md` / `File created successfully at: /Users/nanj…`，(d) pipeline 状态字符串 `research → done / plan → done / assets → done / assembly → done`。每条都是单独的 tool-call timeline item，不是折叠的"思考中"占位。 | 一次性泄漏：OS 用户名（`nanjiayan`）、内部架构（dev port 3271、REST 契约形状）、文件系统布局（`.autoviral/works/...`）、内部 pipeline 词汇。任何用户截图分享给朋友看 = 公开"我的电脑用户名 + 项目结构"。对比：Cursor / Copilot Chat **从不**显示 raw tool call；Claude Desktop 显示但在明确 inspector-styled 折叠框 + permission gate；AutoViral 把这些当成正常 timeline 内容渲染。 | M112 vendor-leak / M114 cross-locale double mismatch / M118 hardcoded color codebase lint —— 都是"内部状态泄漏到 user UI"家族，F241 是迄今最严重的多向量样本 |
+| F242 | **CRITICAL · 主体身份缺失** | topbar 主标题直接显示 raw workId `w_20260319_1815_5bb`；/works 卡片上的人类可读标题 "春日咖啡角布置灵感" 在 Editor 完全消失。无 title field，无 slug，无 breadcrumb。 | 用户失去主体锚点：浏览器 tab 标题、bookmark、分享链接、Cmd+F 搜索全部基于 workId 而不是作品名。打开 5 个 tab 编辑 5 个作品时，标签栏全是 `w_xxx_xxx_xxx` 形状，分不开哪个是哪个。对比：Figma 顶部显示文件名，Notion 显示 page title，Adobe 显示项目名 —— 全行业基线。 | F243 同源（"raw 实现 ID 取代用户语义"），但 F242 是核心导航问题，影响每一次打开 |
+| F243 | **HIGH · vendor leak（M112 加深版）** | chat header 副标题直接展示 `CLAUDE·OPUS·4.7`（mono-cased，与 "Creative Agent" 主名分行）。zh / en 两 locale 都不抽象。模型版本号挂在产品 UI 上。 | 三重伤害：(1) 模型升级时这个字符串 rot，需要重新发布；(2) 用户怪 AutoViral 文案差时，看到 "CLAUDE OPUS 4.7" 直接把责任甩给 Anthropic；(3) 暴露技术栈给竞品。R77/R80/R82 的 vendor-name family 在此再次重现，且这次是带版本号的最坏形态。 | M112 直系 —— 此前最严重案例（vendor 中英文混合 + 拼音 + 不抽象）的进一步升级（再加版本号） |
+| F244 | **HIGH · 隐形契约破坏（cross-locale + a11y 复合）** | `ChatQuickActions.tsx` 源码确认：prompt 字符串 hardcoded Mandarin —— `请用 planning 能力为 ${slideRef} 写一段 30 字以内的引导文案，符合小红书调性`。EN locale 用户点击 "Rewrite copy"/"Regenerate this image"/"Swap palette" 会**静默地**触发 Mandarin prompt，agent 回中文。唯一信号是 `title={mandarinHint}` —— 触摸设备无 hover、screen reader 对 title 解析不一致、不悬停用户完全感知不到。 | 这是 system-honesty 破坏的另一面：按钮承诺一种行为，agent 偷偷换一种语言。EN 用户发 Mandarin prompt = "我在跟一个不懂我的 agent 说话"的体感。修复 F79 时用 tooltip 的方案在生产语境下不充分。 | F241/F243 同属 system-honesty 家族，但 F244 不是泄漏而是"虚假契约"（promised vs actual behavior 不一致）|
+| F245 | **HIGH · cross-locale 半翻译** | EN locale 切换后：UI chrome 全部翻译 ("Creative Agent", "Rewrite copy", "Swap palette", "DRAG TO REORDER", "Saved · 09:19 PM", "Works", "Design / Copy / AI", "PALETTE / LAYOUT / EFFECTS")，**但** chat 历史中 (a) 用户输入 Mandarin 保留，(b) assistant 中文回复保留，(c) 工具状态字符串 `BASH ls`/`WRITE` 保留原文，(d) `流水线已推进到 assembly（图文排版）阶段` 这条本身就是中英文 hybrid。 | EN 用户打开历史会话 = 看到半英文 UI + 中文 conversation + Mandarin shell command + 中英 hybrid 状态字符串 —— 上下文碎片化。没有 "translate this conversation" 入口，也没有过滤 dev tool output 的开关。 | M113 cross-locale verify 范围扩展：不只验证 chrome，还要验证"动态生成的状态消息"的 locale-fluency |
+| F246 | **HIGH · `hour12` hardcode** | `Editor.tsx` line 30-36 `fmtSavedAt`：`hour12: locale !== "zh"`，硬规则中文=24h（`21:18`）、英文=12h（`09:19 PM`）。 | 把 locale 当作时间格式偏好的代理变量 —— 实际上不成立：中国 iOS 用户大量用 12h；英文圈技术从业者偏好 24h（这个产品的目标 audience）；台湾繁体华人偏好 12h。应该从 `Intl.DateTimeFormat().resolvedOptions().hour12` 取系统设定，或加用户偏好。 | R80 M113 "locale ≠ user preference" 警告的具体案例，可作为该规则的 canonical example 写进 reference |
+| F247 | **HIGH · workId 时间编码泄漏** | workId 格式 `w_20260319_1815_5bb` 把创建日期 (`20260319`) + 创建时刻 (`1815`) + 随机 suffix (`5bb`) 全 baked 进去。F242 暴露的同时，把作品创建时间也暴露了。 | 用户在 error message / URL / 截图里把 workId 给到他人 = 同时泄漏自己的工作时间分布。安全 + 隐私问题。生产级 ID 应该是 random short token (`w_8k3xqp`)，时间信息留在 DB 字段。 | 与 F242 一起代表 ID/URL 设计基线问题（hashids/nanoid 早已是行业实践）|
+| F248 | **MEDIUM · savedAt 缺日期上下文** | `Saved · 09:19 PM`（EN）/`已保存 · 21:18`（zh）只有 HH:MM。 | 用户 3 天前保存的草稿今天打开看到 "Saved · 09:19 PM" —— 是今天的 9:19 还是昨天的？没线索。应该用相对时间 (`saved 2m ago` / `saved yesterday`) 或日期感知格式 (`Today 21:18` / `Mar 19 21:18`)。 | F70/F81 savedAt 家族延伸（之前修了 "stale-on-load"，现在升级到 "date-context-missing"）|
+| F249 | **MEDIUM · debounce 窗口里 savedAt 不更新** | `Editor.tsx` line 157-167：编辑→ 800ms debounce → save 网络往返。这段时间 savedAt 仍显示上次成功 save 的时间戳。 | 用户键入 → 视觉无变化 → 800ms 后才更新。键入时不知道"是否正在保存"。Figma / Notion / Google Docs 都在编辑后立刻显示 "Saving..." pulse；800ms 是用户视觉感知边界（>200ms 就要给反馈）。应在 `useEffect` set timeout 之前 setState `'saving'`，then `'saved'`，then `'error'`。 | F73 savedAt 家族（"swallowed error" 之后下一个 silent-failure 升级）|
+| F250 | **MEDIUM · 内部 pipeline 词汇** | 用户面 chat 里 hard-pinned 词汇：`research → done / plan → done / assets → done / assembly → done`、`Now advance pipeline to complete assembly`、`流水线已推进到 assembly（图文排版）阶段`。 | 用户不知道 "research / plan / assets / assembly" 是产品里什么。"流水线" 是开发管道术语。应该映射到用户目标语言（`收集参考资料 → 规划文案 → 生成素材 → 排版完成`），或者干脆隐藏，用单条 "已完成所有步骤，可发布" 替代。 | M114 cross-locale double mismatch + M118 codebase lint 家族 —— 这次是"内部架构词汇"作为新泄漏 vector |
+| F251 | **MEDIUM · 选中-slide 未在 quick-action 旁可见** | `ChatQuickActions.tsx` 用 `useEditor(s => s.currentSlideId)` 读当前选中 slide，prompt 注入 `${slideRef}` 形成 "slide 3" 等字符串。但 UI 上 quick-action 按钮 ("Rewrite copy", "Regenerate this image"...) 没有显示**针对哪张 slide**。 | 用户点 Filmstrip 第 3 张 → 滚到 chat 区域 → 点 "Regenerate this image" → agent 重新生成 slide 3 的图。**但用户视角**：他只看到一个 "Regenerate this image" 按钮，不知道是当前 slide 还是 first slide 还是 all slides。误操作风险。应该在按钮上方加 micro-eyebrow `On slide 3` 或 button label 改成 `Regen image · slide 3`。 | 与 R74 / Editor 选区可见性家族联动 |
+| F252 | **MEDIUM · "98 MSG" 不可点击** | chat header 右侧显示 `98 MSG` 计数器；既无 click target（跳到首条/最近）也无 filter affordance（"只看 user 消息" / "只看 errors"）。 | 长对话历史里，用户想找某个特定状态（"agent 上次说要生成图是什么时候？"）只能滚轮翻 98 条。`98 MSG` 应该是 dropdown trigger（"Jump to first / Jump to errors / Filter by user / Filter by tool calls"）或至少给 keyboard 快捷键。 | 与 R77 chat panel UX 家族联动 |
+| F253 | **LOW · "DRAG TO REORDER" 大写 mono 与编辑器其它 chrome 不一致** | filmstrip 上方 micro-label 全大写 mono；其它 inspector 标签 `Design / Copy / AI` 是 sentence-case；`PALETTE / LAYOUT / EFFECTS` 又是 ALL-CAPS。三种 casing 共存。 | 视觉一致性弱。CLAUDE.md aesthetic direction 明确 "克制 · 现代质感" —— 当前 ALL-CAPS / Title Case / lowercase 三色混合违反"编辑部内部工具"调性 baseline。应定义类型对比规则：eyebrow 用 ALL-CAPS mono 0.06em letterspacing，section header 用 Title Case Sans 14px，control label 用 lowercase mono — 三档不能乱用。 | 与 CLAUDE.md aesthetic-direction (Inter / Instrument Serif / JetBrains Mono 三字族) 配套需要更明确 type system |
+| F254 | **LOW · `中 EN` segment mixed-script** | locale 切换 segment 控件展示 `中 EN` —— 一个汉字一个拉丁缩写并列。 | 视觉混合脚本字号/字重/重心不对齐。应统一为 `ZH EN` 或 `中文 English` 两种全平衡方案，不能一个字符 vs 两个字符并列。 | M114 cross-locale 视觉 family |
+| F255 | **LOW · 无 keyboard shortcut surface** | topbar 没有任何快捷键 hint：⌘+S (save)、⌘+E (export)、⌘+1..6 (slide nav)、⌘+/ (focus chat input) 都没有 menu listing 或 `?` overlay。 | Editor 是 power-user surface（专业创作），但 chrome 把它当 entry-level 工具教 —— 把可发现的快捷键（在 menu / tooltip / `?` overlay）藏起来违反 power-user 工具的认知契约。Photoshop / Figma / VS Code 都有 keyboard shortcut overlay；AutoViral 一条也没有。 | 新 family - "power-user discoverability" |
+
+### 沉淀
+
+- **M120 [新方法学]**：**Zoom 验证后再断言**。本轮最初未 zoom 的 filmstrip 缩略图（图片缩到 ~80px 高、JPEG 压缩）看起来号是 `S5 / S1 / S4 / S5 / S5 / S6`（重复），疑似严重 bug；zoom 到 ~150px 高后真实标号是干净的 `01-06`。**规则**：任何"看起来像视觉 bug 的发现"（重复、错位、缺失字符），在落进 e2e-report 前必须 `computer.zoom` 那块区域 + 比对源码（如适用）。否则 e2e-report 会堆积"基于压缩 artifact 的伪 bug"。配合 M113/M117 的双 verify 矩阵，这是第 3 个 verify gate：cross-locale × cross-theme × zoom-first。
+  - **Why**：R83 之前 R77 F195（"中文 cards 缺 status badge"）就是因为没有 zoom + 没 cross-locale verify，事实上是 i18n bug 不是 baseline 缺失；R83 这次又遇到 filmstrip 假阳性。两次都不是真 bug 但都消耗了诊断带宽。
+  - **How to apply**：截图发现"视觉异常"→ 立刻 `computer.zoom region=[最小包围矩形]` → 比对 zoom 结果 → 仍异常才查源码 → 仍异常才写 finding。
+
+- **M121 [新方法学]**：**多向量泄漏 taxonomy**。F241 是迄今最严重的 system-honesty 案例，跨多个泄漏 vector：(a) 模型版本号（M112）、(b) 内部架构词汇（"pipeline/assembly/research"）、(c) 真实磁盘路径、(d) 内部 API 端点 + 端口号、(e) OS 用户名、(f) ID 时间编码（F247）。**沉淀**：在 `references/leak-taxonomy.md` 写一张 vector 表，每次 audit 时按 vector 逐项 grep 代码 / DOM。leak 修复要分 layer，不能只改一处：UI string (M112 vendor)、internal terminology in templates、tool-call rendering、ID generation —— 4 个层都要审。
+  - **How to apply**：每轮 audit 在 finding 表之后再加一栏 "leak vectors hit"，累计统计哪几个 vector 出现频率最高，guide 后续 codebase lint 优先级。
+
+- **M122 [新方法学]**：**Chat history 当成 debug console 是 architecture smell**。F241 的根因不是 "忘了过滤"，而是产品在架构上让"用户聊天"和"agent 调试输出"共用一个 timeline component。对比 Cursor：chat 区域只显示 agent 文本；tool call 折叠成可点开的 inspector 行（默认 collapsed，并标 "Click to view tool execution"）；BASH/WRITE 等 dev surface 在生产构建里完全隐藏，只在 dev mode 显示。**沉淀**：proposal —— 在 `<ChatPanel>` 之上加 `displayMode: 'user' | 'developer'`，生产构建强制 `user`，所有 tool-call rendering 被 collapse 成 `<button>显示 N 个开发者事件</button>`。这是 R83 候选 #1 的实施级别 spec。
+
+### R85 候选
+
+| # | 优先级 | 候选 | Why |
+|---|---|---|---|
+| 1 | **TOP · CRITICAL** | F241 联动 M122 — `ChatPanel.tsx` 加 `displayMode` 折叠所有 BASH/WRITE/curl tool-call 到 collapsed inspector 行；生产默认 collapse；rendering 移除真实磁盘路径（regex 替换为 `~/.../works/…`），移除 `localhost:3271` 端口，pipeline 词汇映射到用户语言 | 一次性切断多向量 system-honesty 泄漏；影响所有当前与未来作品 |
+| 2 | HIGH | F242 + F247 联动 — Editor topbar 显示 work title 而非 raw workId；workId 改用 nanoid 不 bake 时间；workId 仅在 URL 出现，UI chrome 全用 title | 主体身份回归 + ID 编码泄漏一并修 |
+| 3 | HIGH | F243 + M112 重审 — chat header `CLAUDE·OPUS·4.7` 替换为 `Autoviral Creative Agent`；任何模型版本号从用户 UI 移除 | M112 vendor-leak 家族最严重 instance 一次性收口 |
+| 4 | HIGH | F244 + F245 联动 — ChatQuickActions prompts 按 locale 动态切换；或在 button 旁边显示 "Agent replies in 中文" tag（visible, 不靠 tooltip）；EN locale 增 "translate this conversation" 入口 | 隐形契约破坏 + cross-locale 半翻译一起修 |
+| 5 | MEDIUM | F248 + F249 联动 — savedAt 改成 relative time + 增加 `'saving'` 中间状态 | savedAt family 集中升级 |
+| 6 | METHOD | M120 写入 `.claude/rules/e2e-testing.md` — "zoom-before-claim" 第 3 个 verify gate 与 M113/M117 并列固化 | 防止后续 round 再产生压缩 artifact 假阳性 |
+
+---
+
 ## Round 83 — **F192 CLOSED ✅ /works filter pill 加 inline count + empty-state 引导：M111「control 层 surface count distribution」沉淀；附 R77 F192/F193 误报纠错**
 
 - **时间**：2026-05-12（`/loop 30m e2e-report fix` 第 5 轮触发）
