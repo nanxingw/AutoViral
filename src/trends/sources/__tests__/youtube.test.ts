@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { readFile } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,10 @@ describe("youtubeSource.collect", () => {
       ok: true,
       text: async () => (await readFile(FIXTURE_PATH, "utf-8")),
     })));
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("parses RSS entries into RawTrendItem[]", async () => {
