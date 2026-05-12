@@ -6,6 +6,145 @@
 
 ---
 
+## Round 78 — **F186 CLOSED ✅ /explore AnglesCard 系统诚实度 leak 在文案层根治：从"承诺-撤回"改写为"事实-路线图"**
+
+- **时间**：2026-05-12（`/loop 30m e2e-report fix` 第 4 轮触发，:13 cron fire）
+- **环境**：dev (`localhost:5173/explore`)，浏览器截图 ss_4799rapum + zoom 区域
+- **触发**：R76 闭合时列下一轮 #1 候选为 F186（system honesty leak 同族病）；continuing /explore trust-funnel repair（R75 trio → R76 数据层 → R78 文案层）。本轮与 parallel agent R77（/works 深查）独立。
+
+### 根因诊断
+
+R75 F186 把 AnglesCard 的「[SAMPLE] · 当前为静态推荐（算法尚未接入）· FIT 84 · 5.2M est. reach · 演示」诊断为"产品自暴 mock"。深查后真相分三层：
+
+**Layer 1: 文案是「承诺-撤回」结构**
+- header: `AutoViral 推荐你追的三个切角` —— 产品承诺「AutoViral 在为你推荐」
+- note (紧接着): `当前为静态推荐（算法尚未接入）` —— 立刻自爆"承诺不成立"
+- 这种组合比单纯说真话更伤信任，读者直觉解读：**"产品在 over-promise，连自己都不相信"**
+
+**Layer 2: fake-precision 数字假装权威**
+- `FIT 94 · 5.2K est. reach` 是 hard-coded 字符串（`SAMPLE_ANGLE_META` in `Explore.tsx`）
+- 但 UI 渲染时和 trending YouTube cards 的真实 metrics 在同一视觉层级
+- 用户脑里 cache 的是"产品认为我能 reach 5.2K 人"——**实际是装饰性精度，零信号**
+- "FIT 94" 看上去像分数，看上去像 score——但什么 FIT？什么算法？没人说
+
+**Layer 3: 系统词裸露**
+- `Sample` chip（hard-coded，没走 i18n）
+- `演示` suffix
+- `演示评分——尚未来自算法` tooltip
+- `占位推荐——智能体接入后才能一键生成作品`（"智能体接入"是 dev 词）
+
+### 修复方向：reframe "starter library"
+
+将整个 AnglesCard 重新框架——它不是「算法推荐」，是「**手工挑选的起手灵感**」。这个 reframe 让所有 system-status leak 自然消失：
+
+| 字段 | 旧（leak） | 新（honest） |
+|---|---|---|
+| `anglesH2` (header) | "AutoViral 推荐你追的三个切角" | **"起手切角灵感"** |
+| `anglesNote` | "当前为静态推荐（算法尚未接入）" | **"手工挑选的起手灵感——AutoViral 了解你的频道后会替换成个性化推荐。"** |
+| `Sample` chip | "Sample" hard-coded | **"起手 / STARTER"** via `t("explore.starterChip")` |
+| `score` per card | "FIT 94 · 5.2K est. reach" hard-coded | **direction tag from i18n: "竞品空档" / "高留存" / "跨界混搭"** |
+| `sampleSuffix` | " · 演示" | **""**（chip + opacity 已足够） |
+| `sampleScoreTitle` (tooltip) | "演示评分——尚未来自算法" | **"方向标签"** |
+| `angleGenerateDisabled` (tooltip) | "占位推荐——智能体接入后才能一键生成作品。" | **"敬请期待：从任意切角一键起草。"** |
+
+### 修改文件
+
+- `web/src/i18n/messages.ts`：5 keys 改 honest framing + 4 new keys（`starterChip`, `starterScore1/2/3`），EN + ZH 同步
+- `web/src/pages/Explore.tsx`：`SAMPLE_ANGLE_META` 三条目从 hard-coded `score: "FIT X · YK..."` 改为 `scoreKey: "explore.starterScore1"`，i18n key 化
+- `web/src/features/explore/AnglesCard.tsx`：chip text 从 hard-coded "Sample" 改为 `t("explore.starterChip")`，aria-label 引用 i18n note
+
+### 浏览器实证（ss_4799rapum + zoom）
+
+| 区域 | 修复前 | 修复后 |
+|---|---|---|
+| header | "AutoViral 推荐你追的三个切角 [SAMPLE]" | **"起手切角灵感 [起手]"** ✅ |
+| note | "* 当前为静态推荐（算法尚未接入）" | **"* 手工挑选的起手灵感——AutoViral 了解你的频道后会替换成个性化推荐。"** ✅ |
+| card 01 score | "FIT 94 · 5.2K est. reach · 演示" | **"竞品空档"** ✅ |
+| card 02 score | "FIT 87 · 3.8K est. reach · 演示" | **"高留存"** ✅ |
+| card 03 score | "FIT 79 · risky · 演示" | **"跨界混搭"** ✅ |
+| 生成 → button | 仍 disabled（visually softer），tooltip 改 | **"敬请期待：从任意切角一键起草"** ✅ |
+
+### 桥梁哲学命中
+
+R75 sediment **M105「灵感漏斗三段 trust 必须从首段建立」**：发现→选择→行动。/explore 的 AnglesCard 是"选择"段——用户看到 3 张卡，决定是否进入 /studio 行动。
+
+- 旧文案 = 选择段的 trust 杀手：产品承诺 + 自爆 + 假数字
+- 新文案 = 选择段的 trust 建立者：实事求是 (起手) + 路线图 (会替换为个性化) + 真实方向 tag
+
+跨 R76（数据层 placeholder leak）→ R78（文案层 algorithm leak）形成 **/explore trust-funnel 两层防御**：
+- R76 在数据平面拦截假数据（dev fixture 不能冒充 production）
+- R78 在文案平面拦截假承诺（不假装个性化）
+
+剩 R79 候选可推进 R75 的 dead CTA trio（F181/F182/F183）和 F186 同族剩余 leak（如 /analytics 的 "由 Sonnet 整理"）。
+
+### Sediment
+
+- **M109 — copy 不要写「承诺-撤回」结构**：「AutoViral 推荐」+「算法尚未接入」组合比 silent admission 更伤 trust，因为前句已经把读者 trust 拉高，后句立刻拉低形成 whiplash。修复方式：要么 reframe header 不做承诺（"起手灵感"），要么 commit 到承诺并真的接入算法。**不要在同屏既承诺又否认**。
+- **M110 — 装饰性精度数字是 covert dishonesty**：`FIT 94 · 5.2K est. reach` 表面上是"评分 + 预估"，实际是 hard-coded 字符串。装饰性精度比明确说"sample"更危险——因为它**默认让用户相信 magnitude**，但实际上 magnitude 是编造的。修复方式：在算法没接入前，所有 quantitative-looking 字段都要换成 categorical labels（"高留存" / "蓝海"），不要伪造数字。
+
+### 关联
+
+- closes **F186** (AnglesCard system honesty leak)
+- 落 **M109 / M110** sediment (copy structure + decorative precision)
+- 跨 R76 → R78 连贯 /explore trust-funnel 修复
+
+commit: `bcaabce fix(explore): F186 — strip algorithm-honesty leak from AnglesCard`
+
+---
+
+## Round 77 — **/works 创作者 home 深查：editorial hero 与 task-list mental model 错配 + count-render 矛盾 + Generate Work CTA 撒谎**
+
+- **时间**：2026-05-12 19:05 本地（`/loop 20m` `105f4ef8` cron R76 fire）
+- **环境**：dev (`localhost:5173/works`)，34 件作品，浏览器截图为唯一通过证据
+- **测试路径**：进入 /works → 4 个 filter pill 全部切换 → 搜索 "咖啡" → 点击 "最新 灵感" CTA "Generate Work →" → 回退 → 点击第 1 张 card → 验证 navigation 行为
+
+### Deep finding (12 条, F191-F202)
+
+| F# | 严重度 | 核心 |
+|---|---|---|
+| **F191** | **CRITICAL · 数据 inconsistency** | hero "**32** 份草稿" vs subtitle "我的 作品 **34**/34" —— 同首屏两个 prominent 数字不一致。32 = 草稿数（filter 验证），34 = 总数（草稿 32 + 处理中 2）。Hero 只说"草稿"未表达"另有 2 件已处理中"，subtle but breaks first-impression coherence。新用户瞬间困惑：到底 32 还是 34？|
+| **F192** | **CRITICAL · count-render 矛盾（M104 第五级）** | "已发布" filter 显示 "**8/34**" 但 grid **零 cards 渲染**。"已归档" 同样 "8/34" + 0 cards。UI 自己内部不一致：filter 说"有 8 件"，但实际看不到。比 R73 F172 broken-data 0 更毒：那只是说"0"，这是说"有 8 件"然后空着——用户会怀疑自己删过 / 系统丢了数据。|
+| **F193** | **CRITICAL · 搜索框 dead** | "搜索作品..." input 接受 typing 但**完全不过滤**——输入 "咖啡" 后 count 仍 34/34、cards 顺序未变、placeholder 仍可见。比 dead button 更毒：filter pill 立刻反应（用户期待响应模型），搜索框延迟不反应（用户怀疑是 debounce 而继续等）。|
+| **F194** | HIGH · 术语 leak | hero "32 份草稿，还有 **15 个待完成的 payoff 场景**" —— "payoff 场景" 是内部 brief/planning 模块术语（assets/planning lifecycle）。Filter taxonomy 是 "草稿/处理中/已发布/已归档"——**没有任何 filter 能让用户找到那 "15 个 payoff 场景"** 在哪。Hero promise 在 task list 层根本兑现不了。R72/R73/R75 system-honesty leak 同族第 5 次复现。|
+| **F195** | HIGH · 状态不在 card 上可见 | Card badge 只显示 "类型 · 类别"（如 "图文 · 旅博"），**不显示 lifecycle 状态**（草稿/处理中/已发布/已归档）。用户要知道某件作品在哪个阶段必须 cycle 4 个 filter pill。**vs CapCut / Descript / YouTube Studio / 抖音创作者中心**：所有主流 studio 都在卡上 inline 一个 status chip（"草稿"/"已发布 · 5/12"），让用户一眼看 30+ 件作品 lifecycle 分布。这是 task-list 信息架构最基础的要求。|
+| **F196** | HIGH · CTA 文案撒谎 | 「最新 灵感」3 张 card CTA: "**Generate Work →**" / "Adjust Schedule →" / "Apply Preset →"。实际点击 "Generate Work →" 跳到 `/editor/w_20260318_1407_47b`——**一个 2 个月前的旧 work**（3 月 18 日，今天 5 月 12 日）。"Generate" 应 = "create new work"，实际 = "open existing 2-month-old work"。文案撒谎比 dead CTA 更严重：dead 是没动作，撒谎是把用户带到错地方。|
+| **F197** | HIGH · i18n locale mix | 整页中文，「最新 灵感」section 内部全英文（label "COMPETITOR GAP / AUDIENCE SIGNAL / STYLE RECOMMENDATION" + body "Tutorial content under-served in your niche — 3 of 5 top creators have abandoned it" + CTA "Generate Work →" / "Adjust Schedule →" / "Apply Preset →"）。中文用户瞬间感觉"这是 demo / 没翻译完"。|
+| **F198** | HIGH · 算法自暴 mock | 「最新 灵感」section 顶部 [SAMPLE] + "静态合位卡—算谱分析 agent 尚未为衍生成专属洞察"。**R72/R73/R75/R77 四 round 同源 system-honesty leak**，已升至产品最严重 cross-page sediment 之一。|
+| **F199** | MEDIUM · 缩略图 z-index | 第 2 张 card "性感自拍日记" 的 thumbnail 上"今日穿搭"白色水印与卡片标题（"性感自拍日记"）和 type badge 文字重叠——主图自带文字 + 系统 overlay 文字打架。Visual hygiene。|
+| **F200** | MEDIUM · 创作入口 unbalanced (跨页 sediment) | NewWorkCard 只有 "视频 9:16" + "图文 4:5" 二选一，**无 import / upload / blank 起步入口**。R70 F151 (Studio dialog AI-only) 跨页第 2 次复现 + /works 是 home 永久 enforce。**当 R75 已证明 AI 通路 dead/theater，AI-only 入口就从 brand 升级为定位风险**：核心承诺无法兑现 + 退路被砍掉。|
+| **F201** | MEDIUM · search 无 visual feedback | 搜索框 typing 后**完全无 spinner / "搜索中..." / debounce 指示器**——即便 future 接入真搜索，已经埋下 R75 F181 theater UI 同源风险（用户不知道是 dead 还是 pending）。|
+| **F202** | LOW · hero 反 actionable | hero subtitle "没有自动驾驶，没有时间表——下一步追什么由你决定。" editorial 漂亮但反 actionable。/works 是创作者**每天回访**的页面，**应该指引"下一步做什么"**（CapCut "继续编辑 3 项" / 抖音 "你有 2 条草稿 7 天未发"），而不是说"由你决定"——用户已经决定打开页面，何须再说？|
+
+### 沉淀 — M107 / M108 / M109
+
+- **M107** `silent failure 五级升级（接 R75 M104）`：dead → swallow → theater → broken-data 0 → **count-render 矛盾**。
+  - L5 = "UI 明确告诉你有 N 件资源，但实际看不到任何一个"。
+  - 严重性：比 L4 broken-data 0（"显示 0 但应该有数据"）更毒。L4 让用户怀疑系统数据，L5 让用户怀疑**自己**（"是我删了？是我看错 filter？"），把怀疑指向用户自身是最大 trust 破坏。
+  - 检测规则：所有 filter / search 返回的 count 必须与 grid 渲染数量等值，count > 0 而 render = 0 应立即抛 console.warn 或 Sentry。
+
+- **M108** `AI-only 创作入口的双重定位风险（跨页 sediment）`：
+  - 表现：R70 F151 (Studio 新建素材 AI tabs) + R77 F200 (/works NewWorkCard 仅 AI) + 全产品无 import/upload 入口。
+  - 当 AI agent 通路稳健时：AI-only 是定位特征。
+  - **当 AI agent 通路 dead/theater (R75)**：AI-only 升级为定位风险。"AI 给你做" + "AI 不做" = 用户被困。
+  - 解法：要么 fix AI 通路（R75 候选），要么开 import 入口（R77 F200）。**不能两个都不做**。
+
+- **M109** `/works 是 user home，但 hero 取向是 magazine 而非 task list`：
+  - 用户来 /works 的 mental model 是 **task list**（"我接下来该做什么 / 我有哪些作品在 pipeline"）。
+  - 产品给的是 **magazine**（editorial italic hero + 反 actionable subtitle + payoff 场景术语 + [SAMPLE] mock 洞察）。
+  - 错配代价：F195 (状态不在 card 可见) + F202 (反 actionable subtitle) + F194 (payoff 场景无法 filter) 三个都是 magazine 取向导致 task-list 功能缺失。
+  - 主流对照：YouTube Studio / 抖音创作者中心 home page 第一屏是 "草稿 3 · 处理中 2 · 已发布 8 · 待审核 1" 加 actionable CTA "继续 X"。AutoViral hero 是诗。
+
+### R78 候选
+
+- **#1 (TOP)** F192 + F193 联动 —— `/works` count-render 矛盾 + 搜索 dead。home 首屏 trust 修。
+- **#2** F195 inline status chip on card —— 把 lifecycle 状态从 filter pill 提升到 card badge。
+- **#3** F196 "Generate Work →" CTA fix —— 跳新 work creation 而非 open 旧 work。考虑改文案 + 改 action 双向。
+- **#4** F197 i18n leak —— 「最新 灵感」section 全部翻译。
+- **#5** F194 + F202 联动 —— 把 hero 改成 task-list 取向（保留 editorial brand 但加 actionable CTA）。
+- **#6** M107 count-render lint rule —— 全产品 codemod：filter 返回 count 必须 ≥ render array length，否则 console.warn。
+
+---
+
 ## Round 76 — **F184 CLOSED ✅ /explore 假数据 leak 在数据平面根治：dev fixture 不再能冒充 production research**
 
 - **时间**：2026-05-12（用户 `/loop 30m e2e-report fix` 第 3 轮触发，:13 cron fire）
