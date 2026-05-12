@@ -19,7 +19,12 @@ export function runCliBrief(prompt: string, timeoutMs = 60000): Promise<string> 
 
     let stdout = "";
     proc.stdout?.on("data", (d: Buffer) => { stdout += d.toString(); });
+    const timer = setTimeout(() => {
+      try { proc.kill(); } catch {}
+      reject(new Error("Timeout"));
+    }, timeoutMs);
     proc.on("exit", (code) => {
+      clearTimeout(timer);
       if (code !== 0 && !stdout) {
         reject(new Error(`CLI exited with code ${code}`));
         return;
@@ -31,7 +36,9 @@ export function runCliBrief(prompt: string, timeoutMs = 60000): Promise<string> 
         resolve(stdout);
       }
     });
-    proc.on("error", reject);
-    setTimeout(() => { try { proc.kill(); } catch {} reject(new Error("Timeout")); }, timeoutMs);
+    proc.on("error", (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
   });
 }

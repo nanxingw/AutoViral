@@ -65,7 +65,11 @@ export const agentFallbackSource = (platform: Platform): Source => ({
     const firstBrace = stripped.indexOf("{");
     const lastBrace = stripped.lastIndexOf("}");
     if (firstBrace < 0 || lastBrace <= firstBrace) return [];
-    const parsed = JSON.parse(stripped.slice(firstBrace, lastBrace + 1));
-    return agentFallbackFromAgentJson(platform, parsed);
+    try {
+      const parsed = JSON.parse(stripped.slice(firstBrace, lastBrace + 1));
+      return agentFallbackFromAgentJson(platform, parsed);
+    } catch {
+      return [];
+    }
   },
 });
