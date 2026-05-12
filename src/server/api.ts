@@ -1890,10 +1890,18 @@ apiRoutes.get("/api/trends/:platform", async (c) => {
     return c.json(JSON.parse(raw));
   } catch { /* fall through */ }
 
-  // Fall back to dated YAML files
+  // Fall back to dated YAML files. e2e-report F184: skip underscore-prefixed
+  // names (`__sample-*.yaml`, `__fixture-*.yaml`) so dev fixtures from
+  // scripts/sample-trend.cjs can't shadow real collected research data.
+  // Demo data leaking into /explore as if it were real was the entire R75
+  // trust-collapse story; an honest 404 → empty state is far safer than fake
+  // "Hook example N" content masquerading as scraper output.
   try {
     const files = await readdir(trendsDir);
-    const yamlFiles = files.filter(f => f.endsWith(".yaml")).sort().reverse();
+    const yamlFiles = files
+      .filter(f => f.endsWith(".yaml") && !f.startsWith("_") && !f.startsWith("."))
+      .sort()
+      .reverse();
     if (yamlFiles.length === 0) return c.json({ error: "No trend data available" }, 404);
     const raw = await readFile(join(trendsDir, yamlFiles[0]), "utf-8");
     const data = yaml.load(raw);

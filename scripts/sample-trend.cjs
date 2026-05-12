@@ -38,10 +38,16 @@ const collection = {
   validation: { passed: true, issues: [] },
 };
 
+// e2e-report F184: this script's output used to land at `${today}.yaml` and
+// shadow real research output (latest-yaml-wins in GET /api/trends/:platform).
+// "Hook example N" and "xhs_demo*" ids leaked into /explore as if they were
+// real research. Underscore prefix signals "fixture, not collected output";
+// the API endpoint skips `_*` files so this can't leak again.
 const dir = path.join(os.homedir(), '.autoviral', 'trends', 'xiaohongshu');
 fs.mkdirSync(dir, { recursive: true });
-fs.writeFileSync(path.join(dir, `${today}.yaml`), yaml.dump(collection, { lineWidth: -1 }), 'utf-8');
-console.log('wrote', path.join(dir, `${today}.yaml`));
+const outName = `__sample-${today}.yaml`;
+fs.writeFileSync(path.join(dir, outName), yaml.dump(collection, { lineWidth: -1 }), 'utf-8');
+console.log('wrote', path.join(dir, outName));
 
 // also write a sample cover jpg for one item
 const coversDir = path.join(dir, 'covers');
