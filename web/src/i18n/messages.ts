@@ -470,9 +470,9 @@ export const en = {
     },
     sectionHint: {
       jimeng: "ByteDance image / video generation. Powers Editor regenerate + Studio asset generation. Get keys from console.volcengine.com.",
-      openrouter: "LLM gateway for all agents (Editor chat, Studio chat, trends research). One key, multiple models.",
-      research: "Pulls trending angles from Xiaohongshu / Douyin into Explore on this cron. Doesn't affect Analytics sync frequency (hardcoded hourly).",
-      douyin: "Profile URL drives Analytics demographics + audience insights. “Refresh now” triggers a real backend fetch (slow).",
+      openrouter: "Powers every AutoViral AI helper — chat, regeneration, research. One key, multiple capabilities.",
+      research: "Pulls trending angles from Xiaohongshu and Douyin into Explore on this schedule. Analytics syncs separately, every hour.",
+      douyin: "Profile URL powers your Analytics demographics and audience insights. “Refresh now” fetches fresh data — takes about 30 seconds.",
       model: "Default model for every agent. Work-level overrides still win when set.",
     },
     field: {
@@ -482,7 +482,7 @@ export const en = {
       douyinUrl: "Profile URL",
       cron: "Cron schedule",
       cronPlaceholder: "7 9,21 * * *",
-      cronHint: "Recommended: 7 9,21 * * * (twice daily at 09:07 + 21:07). Offset minute avoids the :00 sync that anti-bot heuristics flag.",
+      cronHint: "Recommended: 7 9,21 * * * — twice daily at 09:07 and 21:07. Off-the-hour timing keeps sync windows steady.",
       autoResearch: "Enable scheduled research",
       modelOptionOpus: "Claude Opus · 4.7",
       modelOptionSonnet: "Claude Sonnet · 4.6",
@@ -974,9 +974,9 @@ export const zh: DeepShape<Messages> = {
     },
     sectionHint: {
       jimeng: "字节火山的图片 / 视频生成 API。Editor 重生成图、Studio 素材生成都走这里。Key 在 console.volcengine.com 申请。",
-      openrouter: "LLM 网关 —— 所有 agent（Editor chat / Studio chat / trends 调研）共用此 Key。",
-      research: "按此 Cron 自动从小红书 / 抖音拉 trends 进 Explore。不影响 Analytics 同步频率（hourly 硬编码）。",
-      douyin: "主页 URL 决定 Analytics 受众画像 + 数据洞察来源。「立即同步」会触发真实后台拉取（较慢）。",
+      openrouter: "AutoViral 的 AI 助手共用此 Key —— 包括对话、素材重生成、热点调研。一个 Key 覆盖多种能力。",
+      research: "按此节奏自动从小红书与抖音拉取热门角度进入 Explore。Analytics 受众数据每小时单独同步，不受此影响。",
+      douyin: "主页 URL 决定 Analytics 受众画像与数据洞察来源。「立即同步」会重新拉取一次数据，约需 30 秒。",
       model: "所有 agent 的默认模型。作品级 override 会覆盖此默认值。",
     },
     field: {
@@ -986,7 +986,7 @@ export const zh: DeepShape<Messages> = {
       douyinUrl: "主页 URL",
       cron: "Cron 表达式",
       cronPlaceholder: "7 9,21 * * *",
-      cronHint: "推荐：7 9,21 * * * （每天 09:07 与 21:07）。偏移分钟避开 :00 同步，降低小红书/抖音 anti-bot 风险。",
+      cronHint: "推荐：7 9,21 * * * （每天 09:07 与 21:07）。避开整点同步可让节奏更稳。",
       autoResearch: "启用自动调研",
       modelOptionOpus: "Claude Opus · 4.7",
       modelOptionSonnet: "Claude Sonnet · 4.6",

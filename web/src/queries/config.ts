@@ -41,7 +41,7 @@ export function useConfig() {
         openrouterKey: raw.openrouterKey ?? "",
         douyinUrl: raw.douyinUrl ?? "",
         researchEnabled: Boolean(raw.researchEnabled ?? raw.research?.enabled ?? false),
-        researchCron: raw.researchCron ?? raw.research?.schedule ?? "0 9 * * *",
+        researchCron: raw.researchCron ?? raw.research?.schedule ?? "7 9,21 * * *",
         model: raw.model ?? "sonnet",
         analyticsLastCollectedAt: raw.analyticsLastCollectedAt ?? null,
       } satisfies AppConfig;
