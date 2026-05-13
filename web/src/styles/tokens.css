@@ -26,11 +26,18 @@
      Lifted to #7a7e85 (ratio ≈ 4.9 vs --bg) so filter pill counts / metric labels /
      eyebrow text in dark theme satisfy WCAG 2.1 SC 1.4.3 AA for normal-size text. */
   --text-dimmer: #7a7e85;
-  --text-muted: #42454b;
+  /* R127 F624 — was #42454b (ratio 2.11 vs --bg #0a0b0f, double-FAIL AA). Used for
+     disabled placeholder + archived-meta surfaces; the old value was below even AA
+     Large (3.0). Lifted to #82868d (ratio ≈ 5.2) — comfortably above AA normal text
+     while staying visually less prominent than --text-dim / --text-dimmer tiers. */
+  --text-muted: #82868d;
 
   --status-running: #7dd3fc;
   --status-done: #86efac;
-  --status-pending: #6b6e76;
+  /* R127 F622 — was #6b6e76 (ratio 3.81 vs --bg #0a0b0f, FAIL AA normal text 4.5).
+     Lifted to #9094a0 (ratio ≈ 6.0) so "pending" / "等待中" status labels are
+     legible without straining low-vision users. */
+  --status-pending: #9094a0;
   --status-error: #f97066;
   /* R121 F572 — was completely undefined in both themes; any `var(--status-warn)`
      consumer silently fell back to the inline second-arg fallback or browser default.
@@ -80,11 +87,20 @@
      Lowered to #6a7079 (ratio ≈ 4.8 vs --bg) for filter pill counts / metric labels /
      eyebrow text in light theme to satisfy WCAG 2.1 SC 1.4.3 AA. */
   --text-dimmer: #6a7079;
-  --text-muted: #b8bcc2;
+  /* R127 F624 — was #b8bcc2 (ratio 1.75 vs --bg #fafaf7, double-FAIL AA + AA Large).
+     This token surfaces disabled placeholder + archived-meta text; at 1.75 it was
+     illegible to low-vision users. Darkened to #5d636c (ratio ≈ 6.3) — comfortably
+     above AA normal text and slightly more prominent than --text-dimmer for
+     deliberate visual separation. */
+  --text-muted: #5d636c;
 
   --status-running: #0369a1;
   --status-done: #15803d;
-  --status-pending: #9ca3af;
+  /* R127 F622 — was #9ca3af (ratio 2.27 vs --bg #fafaf7, FAIL AA + AA Large).
+     Lifted to #5d636c (ratio ≈ 6.3) so "pending" / "等待中" status labels are
+     legible in light theme; same hex as --text-muted (neutral mute is the visual
+     intent for "waiting" state). */
+  --status-pending: #5d636c;
   --status-error: #dc2626;
   /* R121 F572 — was undefined in light theme. Amber-700 ratio ≈ 4.95 vs --bg #fafaf7
      (AA normal text), matches the dark-theme counterpart semantically. */

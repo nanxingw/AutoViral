@@ -69,7 +69,7 @@ function extractBlock(selector: string): Record<string, string> {
 const dark = extractBlock(":root");
 const light = extractBlock('[data-theme="light"]');
 
-describe("tokens.css contrast (R121 F571 / F572 / F575 seed)", () => {
+describe("tokens.css contrast (R121 F571/F572 + R127 F622/F624 — full text+status token sweep)", () => {
   // R121 F571 — --text-dimmer was 3.02 (light) / 3.37 (dark), now lifted past AA.
   it("dark --text-dimmer ≥ AA 4.5 vs --bg (F571)", () => {
     const ratio = contrast(dark["--text-dimmer"], dark["--bg"]);
@@ -97,6 +97,30 @@ describe("tokens.css contrast (R121 F571 / F572 / F575 seed)", () => {
     expect(ratio).toBeGreaterThanOrEqual(4.5);
   });
 
+  // R127 F622 — --status-pending was 3.81 (dark) / 2.27 (light), double-FAIL AA.
+  // R121 modeling left this token unaudited — M230 "point fix ≠ table sweep"
+  // closure starts here. Lifted in both themes past AA.
+  it("dark --status-pending ≥ AA 4.5 vs --bg (R127 F622)", () => {
+    const ratio = contrast(dark["--status-pending"], dark["--bg"]);
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+  it("light --status-pending ≥ AA 4.5 vs --bg (R127 F622)", () => {
+    const ratio = contrast(light["--status-pending"], light["--bg"]);
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+
+  // R127 F624 — --text-muted was 2.11 (dark) / 1.75 (light), catastrophic FAIL
+  // even against AA Large (3.0). Surfaces disabled placeholder + archived-meta;
+  // was completely illegible to low-vision users.
+  it("dark --text-muted ≥ AA 4.5 vs --bg (R127 F624)", () => {
+    const ratio = contrast(dark["--text-muted"], dark["--bg"]);
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+  it("light --text-muted ≥ AA 4.5 vs --bg (R127 F624)", () => {
+    const ratio = contrast(light["--text-muted"], light["--bg"]);
+    expect(ratio).toBeGreaterThanOrEqual(4.5);
+  });
+
   // Regression net for the other text-tier tokens that already passed at R121
   // audit time — keeps them from being silently darkened/lightened away.
   it("dark --text & --text-dim still meet AA vs --bg", () => {
@@ -107,4 +131,29 @@ describe("tokens.css contrast (R121 F571 / F572 / F575 seed)", () => {
     expect(contrast(light["--text"], light["--bg"])).toBeGreaterThanOrEqual(4.5);
     expect(contrast(light["--text-dim"], light["--bg"])).toBeGreaterThanOrEqual(4.5);
   });
+
+  // R127 M230 — full-table sweep guard. Once R121 contrast plane is "closed",
+  // every text + status token that surfaces user-visible labels must clear AA.
+  // This loop is the structural enforcement: if a future PR adds a new
+  // --text-* or --status-* hex token, it falls into this matrix automatically.
+  // Excluded: --status-running / --status-done / --status-error (saturated
+  // accent colors with intentional brand hue — they're audited as a separate
+  // tier for ratio ≥ 3.0 + non-text use; promoting to 4.5 would break the
+  // editorial palette).
+  const TEXT_TOKENS_REQUIRING_AA = [
+    "--text",
+    "--text-dim",
+    "--text-dimmer",
+    "--text-muted",
+    "--status-pending",
+    "--status-warn",
+  ] as const;
+  for (const tok of TEXT_TOKENS_REQUIRING_AA) {
+    it(`dark ${tok} clears AA matrix gate (full-sweep guard, M230)`, () => {
+      expect(contrast(dark[tok], dark["--bg"])).toBeGreaterThanOrEqual(4.5);
+    });
+    it(`light ${tok} clears AA matrix gate (full-sweep guard, M230)`, () => {
+      expect(contrast(light[tok], light["--bg"])).toBeGreaterThanOrEqual(4.5);
+    });
+  }
 });
