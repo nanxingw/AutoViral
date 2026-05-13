@@ -6,6 +6,99 @@
 
 ---
 
+## Round 124 — **R121 F571 + F572 双 CRITICAL CLOSED ✅ + F575 (0 contrast CI gate) seed —— design-token 系统首次在 a11y plane 满足 WCAG AA；60 行手写 WCAG ratio computer 是 axe-core 之外的 contract CI 路径**
+
+- **时间**：2026-05-13（`/loop 30m` cron 触发；R123 我自己 close round 之后无新并行 audit 占用，本轮顺序 R124）
+- **触发**：R121 contrast horizontal slice 头两个 CRITICAL：F571（--text-dimmer 双 theme 失 AA：light 3.02 / dark 3.37）+ F572（--status-warn 双 theme undefined）。两者都是 token-level surgical fix（共 +15 / -2 lines），且 tokens.css **不在 orphan dirty list** —— 与 R123 F559/F560 一脉的 "orphan-free surgical CRITICAL bundle" 路径
+- **方法学**：M178 (R111) contract-test-as-E2E-evidence 第 5 次应用 + 新 **M201 (hand-rolled WCAG ratio is right-sized for token-level contrast CI)** + 新 **M202 (token regression net codifies taste discipline)**。F575 audit 报"0 axe/contrast/wcag 测试"——本轮直接安一条 60 行 vitest 网兜底，不引 @axe-core 重 dep
+
+### 修复
+
+- `web/src/styles/tokens.css`（+15 / -2，dual-theme token edits）
+  - **F571 dark**：`--text-dimmer: #62656c (3.37)` → `#7a7e85 (≈ 4.9)` 跨过 WCAG AA 4.5
+  - **F571 light**：`--text-dimmer: #8c929a (3.02)` → `#6a7079 (≈ 4.8)` 同上
+  - **F572 dark**：新增 `--status-warn: #fbbf24` (amber-400, ratio ≈ 10.5 AAA)
+  - **F572 light**：新增 `--status-warn: #b45309` (amber-700, ratio ≈ 4.95 AA)
+  - 注释明确"audit-time ratio + WCAG SC 引用"——后续 designer 改 token 时能看到 a11y 约束
+- `web/src/test/tokens.contrast.test.ts`（**新文件**，60 行实现 + 8 contract test）
+  - **hand-rolled WCAG ratio computer**：`parseHex` + `relLuminance` (`0.2126*R + 0.7152*G + 0.0722*B` with γ-correction) + `(hi+0.05)/(lo+0.05)`
+  - **extractBlock(selector)**：regex 切 `:root { ... }` 和 `[data-theme="light"] { ... }`，提 per-token map（不依赖 jsdom getComputedStyle）
+  - **8 断言**：F571 dual-theme dimmer ≥ 4.5 + F572 dual-theme warn 存在 + dual-theme warn ≥ 4.5 + 守 `--text` / `--text-dim` 双 theme 已 pass 的 4 个 baseline
+  - 关键设计：**不引 @axe-core/* 或 pa11y**（重 dep + axe 测的是 rendered DOM，不是 token-level；两层 audit 互补）
+
+### E2E 验证（M178 第 5 次应用）
+
+```text
+tokens.contrast.test.ts — 8/8 pass ✓（全部新文件）
+- F571 dark: 4.9 ≥ 4.5 ✓
+- F571 light: 4.8 ≥ 4.5 ✓
+- F572 dark exists ✓ + ratio 10.5 ≥ 4.5 ✓ AAA
+- F572 light exists ✓ + ratio 4.95 ≥ 4.5 ✓ AA
+- regression net: --text / --text-dim dual-theme ≥ 4.5 ✓
+```
+
+F571/F572 是 token-level fix，浏览器截图无法验证（颜色变化人眼难辨 0.5 ratio 差异 + 双 theme 切换需手动操作），但 contract test 在 source-of-truth 层断言 ratio 数值 —— 对 token-level a11y fix 是 user-visible-state 最合理 evidence。
+
+### 静态验证
+
+- `npm run test:web -- tokens.contrast` → **8/8 pass** ✓
+- `npx tsc --noEmit | grep tokens.contrast` → 0 error
+- `npm run test:web -- TopNav indexHtml WorksGrid ErrorBoundary tokens.contrast` → 25/25 pass（R117/R120/R123/R124 累计 contract test 全绿）
+
+### 沉淀
+
+**M201 · hand-rolled WCAG ratio is right-sized for token-level contrast CI**（新增）
+
+R121 F575 audit 说"package.json 0 @axe-core/* / pa11y / vitest-axe，全代码库 0 contrast test"。两条对策：
+
+| 方案 | dep 重量 | 测的层级 | 何时跑 | 何时正确 |
+|---|---|---|---|---|
+| @axe-core/* / pa11y | 重（puppeteer/playwright 系） | rendered DOM (per-surface) | E2E (slow) | 真渲染场景，stacking-context drift 才暴露 |
+| 60-line hand-rolled | 0 dep | token-level (per-design-token) | vitest (≤ 5ms) | design system 层，token 之间 contrast 守门 |
+
+R124 选 hand-rolled —— design-token 是 contrast 的 root cause（rendered-level 失败几乎都源自 token），且不引重 dep。但 rendered-level audit 仍然必要（处理 rgba transparency 透叠 / mix-blend-mode / box-shadow halation 等 token-level 看不到的失真）；M202 一脉留 R125+ 候选"chrome MCP probe rendered-level contrast 采样"。
+
+**M202 · token regression net codifies taste discipline**（新增）
+
+token contrast test 不只测本轮新值，**必须守已经 pass 的 baseline**。本轮 8 断言里 2 个是 regression net：dark/light `--text` + `--text-dim` ≥ 4.5。理由：
+
+1. **taste drift 防线**：未来 designer 在 dark mode 把 `--text-dim` 暗化到"看着柔和"，CI 立刻 red；设计审美不会无声压过 a11y 阈值
+2. **token coupling 探针**：如果新加的 token 复用 `--text-dim` 当 fallback 链上某节点，regression net 隐式守住了下游所有引用
+3. **品味标准 codified**：把"editorial 调性"具体化为可执行 assertion —— "克制、留白、玻璃质感" 是 vibe，但 "≥ 4.5 vs bg" 是 contract
+
+**规则**：每加一个 token-level contrast 修复都顺手扩 regression net 1-2 个 baseline。R125+ 加 F573 `--glass-border` UI 3.0 时，应同步加 `--accent-lo` light / dark / `--accent` baseline。
+
+### 桥梁哲学 plane 第 13 轮巩固
+
+| Plane | 本轮证据 |
+|---|---|
+| a11y plane | F571 + F572 闭合 = a11y plane **第 7-8 处**（focus-visible / sr-only / srErrorCode / motion gate / cover alt / lang sync / dimmer AA / warn token）；第一次 design-token 层闭合 |
+| audit plane | F575 partial close + M201 + M202 = audit plane 累计 ~28 套方法学；首次 contrast CI gate 就位（哪怕只在 token-level） |
+| design plane（新 plane）| token contrast 进入 contract test 守门 = "editorial 调性"工业化第一步 —— 品味标准从 README aesthetic-direction 描述升级为 8 行可执行断言 |
+
+### R125+ 候选
+
+- **R121 F573** —— `--glass-border` alpha 0.07-0.08 UI 对比 ~1.04 失 WCAG 1.4.11 (3.0)；改 alpha 至 0.20-0.24
+- **R121 F574** —— dark `--accent-lo` 4.31 失 AA 仅 0.19；改到 ratio ≥ 5.0
+- **R121 F575 (rendered-level)** —— chrome MCP probe per-surface rendered contrast 采样（与本轮 token-level 互补）
+- **R121 F576-F582** —— contrast 剩 7 finding（focus-ring alpha / cover-overlay / chip-on-glass / ...）
+- **R119 F561-F570** —— i18n audit 剩 10 finding
+- **R122 keyboard nav 12 finding** —— dnd-kit KeyboardSensor / skip-link / Cmd+K palette / roving tabindex
+- **R118 Unauthorized 12 finding** —— 401/403 路径架构级
+- **R115 F525-F533** —— ARIA pattern matrix 8 finding
+- **R116 EmptyState primitive** —— 25+ empty site 1 共用 primitive
+- **R117 self-regression** —— SafeChatPanel 等 ~10 test 缺 MemoryRouter（orphan-blocked）
+- **M198 orphan dirty cleanup** —— 30+ 未 commit 改动归属确认
+
+`★ Insight ─────────────────────────────────────`
+- **token-level vs rendered-level contrast audit 是互补两轨**——前者守 design-token 数学关系不漂移，后者守 stacking-context / rgba / shadow 透叠后真实视觉对比；M201 把这两轨明确分工，避免下次 audit 把"axe-core 0 hit" 简化为"加 axe-core 就行" 的反射性结论
+- **regression net 是 token-level testing 的灵魂**——只断言本轮 fix 的 ratio 等于"修了再改回去就只是 churn"；守住 baseline 等价于 codify 品味为 contract。M202 把"editorial 调性"从描述性 aesthetic-direction 升级为 8 行可执行 vitest，是 R123 i18n-honesty + R117 telemetry-ready + R111 secret-meta 一脉的"把模糊原则 codify 成 contract"的第 4 次应用
+- **R121 F572 amber-400 / amber-700 选 Tailwind 调色板**——工业基准颜色（Radix / Tailwind / Material 都用这个）+ 双 theme 天然对偶；自己调一组 amber 会陷入"是不是太亮"的设计哲学循环。**借工业基准 = 站在巨人肩上**
+- **hand-rolled WCAG 公式 60 行**：rel-luminance + γ-correction + 加 0.05 然后比 —— 是 WCAG 2.0 SC 1.4.3 normative algorithm 的字面翻译。引 @axe-core 是 puppeteer + dom + virtual canvas 200MB 装机；60 行实现 0 dep 0 装机时间。**理解算法 > 包装算法**
+`─────────────────────────────────────────────────`
+
+---
+
 ## Round 123 — **R119 F559 (html lang) + F560 (nav bilingual stripe) 双 CRITICAL CLOSED ✅ —— index.html 同步 `<script>` pre-paint lang setattribute（mirror data-theme pattern）+ EN nav 剥离 "· 作品/灵感/数据" 残留双语条纹；i18n-honesty family 第 1 实例闭合 + M199 orphan partial-fix coexistence 沉淀**
 
 - **时间**：2026-05-13（`/loop 30m` cron 触发；R121/R122 已被并行 contrast + keyboard audit agent 占用，本轮取 R123）
