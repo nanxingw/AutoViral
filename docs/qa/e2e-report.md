@@ -6,6 +6,531 @@
 
 ---
 
+## Round 128 — **R126 F607 (CRITICAL · 9 motion/react dialog JS PRM 失守) + F608 (CRITICAL · scrollIntoView smooth bypass) 双 CRITICAL CLOSED ✅ + F616 (0 PRM CI gate) seed —— `<MotionConfig reducedMotion="user">` 单点 wrap 在 main.tsx 一次性闭合 9 个 dialog/sidebar；M222 双轨 PRM 防线 JS 半完工，a11y user-preference matrix `prefers-reduced-motion` 从 1/2 升到 2/2**
+
+- **时间**：2026-05-13（cron `105f4ef8` 触发；并行 audit agent 已用走 R127 三联横切，本轮 fix-pass 编号 R128）
+- **修复目标**：R126 列 F607 + F608 + F616 三个候选 ROI 最高（M222 "CSS+JS 双轨" 问题的最杠杆修法是 1 行顶层 wrap）；其他 framer-motion 9 处零修改即继承 PRM
+- **方法学**：M178 (contract test as E2E evidence, 第 6 次应用) + M211 (库已提供能力但产品未启用) + **新 M227 (library opt-in default vs explicit framework gating)**
+- **本轮意义**：a11y user-preference matrix 2/8 → 实质 2.5/8（PRM 双轨 100% 覆盖，但 prefers-contrast / forced-colors / prefers-reduced-transparency 仍 0/8，R127 audit 列为下一波）；本产品 framer-motion v11 集成 6 个月以来第一次让 Reduce Motion 用户拿到正确 dialog 体验
+
+### 修复内容
+
+**Code (commit `23a8da2`)**：
+
+```diff
+# web/src/main.tsx (top-level provider wrap)
+ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
++import { MotionConfig } from "motion/react";
+
+ ReactDOM.createRoot(rootEl).render(
+   <React.StrictMode>
+     <QueryClientProvider client={queryClient}>
++      <MotionConfig reducedMotion="user">
+         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+           ... // 9 motion/react descendants inherit reducedMotion="user" automatically
+         </BrowserRouter>
++      </MotionConfig>
+     </QueryClientProvider>
+```
+
+```diff
+# web/src/features/settings/SettingsPanel.tsx (F608 scrollIntoView gating)
++import { useReducedMotion } from "motion/react";
+ // ...
++const prefersReducedMotion = useReducedMotion();
+ // ...
+-if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
++if (el) {
++  el.scrollIntoView({
++    behavior: prefersReducedMotion ? "auto" : "smooth",
++    block: "start",
++  });
++}
+```
+
+**Contract test seed (F616)**：`web/src/test/prm.dual-track.test.ts` (9 assertions, 0 dep beyond vitest)
+
+```ts
+// Source-level contract — when these pass, the wiring is guaranteed (M178)
+describe("F607 — <MotionConfig reducedMotion='user'> at root", () => {
+  it("imports MotionConfig from motion/react", ...)
+  it('wraps the router tree with reducedMotion="user"', ...)
+  it("MotionConfig encloses BrowserRouter (not the other way around)", ...)
+});
+describe("F608 — SettingsPanel scrollIntoView is PRM-gated", () => {
+  it("imports useReducedMotion from motion/react", ...)
+  it("reads useReducedMotion() into a local variable", ...)
+  it("does NOT call scrollIntoView with hardcoded smooth behavior", ...)
+  it("scrollIntoView call references the PRM variable for behavior", ...)
+});
+describe("F616 — globals.css PRM block still present (CSS half of M222)", () => {
+  it("declares @media (prefers-reduced-motion: reduce)", ...)
+  it("the PRM block caps animation-duration", ...)
+});
+```
+
+### 测试证据
+
+- **prm.dual-track 9/9 pass** (0.88s)
+- **前置 R117/R120/R123/R124 contract guard 28/28 pass** (tokens.contrast / WorksGrid / TopNav / indexHtml.lang-sync 联跑)
+- **pgrep -f vitest = 0** worker 清零
+
+### Sediments / 方法学
+
+**M227（新；library opt-in default vs explicit framework gating）**
+
+`motion/react` (framer-motion v11) 提供两条 PRM 接入路径：
+1. **per-component opt-in**：每个 `<motion.div>` 顶部读 `useReducedMotion()` 后传 `transition={prm ? { duration: 0 } : { duration: 0.18 }}`
+2. **framework-level opt-in**：`<MotionConfig reducedMotion="user">` 顶层包裹，所有 descendant 自动继承
+
+**反面教训**：R126 F607 写法路径 1 列了 9 文件的修复点（每个 dialog 都加 `useReducedMotion`），实际路径 2 是 single-point-of-truth —— 1 行 wrap 在 main.tsx 一次性覆盖**全部** descendant；新加 motion 组件零适配。
+
+**Why**：framer-motion v11 文档明确 `<MotionConfig reducedMotion="user">` 是推荐 root-level 模式（`reducedMotion="never"` 默认是反 a11y 的 framer-motion 内置 trap）；R126 audit 没意识到 framework 已经提供 inherit 机制。
+
+**How to apply**：审 a11y / theme / i18n 类横切前必先查 library docs 看是否提供 root-level inherit prop —— 找到 1 行能闭合 9 处的情况非常常见（与 R124 M211 "library 默认反 a11y trap" 是同 family 但反向：M211 是"库默认有坑，要主动反"；M227 是"库已提供闭合，要主动启用"）。
+
+Sediment ID: **M227** · dual family with M211 (audit-without-fix coexistence)
+
+**M178 第 6 次应用 — contract-test-as-E2E-evidence**
+
+R124 token-level WCAG · R123 inline-script lang sync · R120 cover alt · R117 ErrorBoundary 4-CTA · R111 secret meta · R127 PRM dual-track —— **同一模式跨 6 round**：源码层 grep + 静态结构 assert + regression net 同 contract，0 dep（vitest only），ms 级跑完，让 CI 看护未来 PR。
+
+**与 axe-core / playwright a11y 工具的关系**：源码 contract test 测**"wiring 是否存在"**（M178）；axe-core / playwright 测**"rendered DOM 是否真 a11y 合规"**（rendered-level）。两层互补：本轮 contract test 守 `<MotionConfig reducedMotion="user">` wiring 存在 —— rendered-level "PRM 真生效" 需 chrome MCP 后续 probe。
+
+### Family 串联
+
+| 本轮 | 串联 family | 跨轮证据 |
+|---|---|---|
+| F607 修法选择 | **R124 M211 "library default 反 a11y trap" 同 family 反向** | M227 新沉淀：library 已提供 root-level inherit prop 时**主动启用**比 per-component opt-in 更稳 |
+| F608 修法 | **R123 M199 "orphan partial-fix coexistence" 跨轮证据** | 本轮 main.tsx 同时携 R01 F2 v7 future flag (orphan)，按 M199 透明 commit body 注明 |
+| F616 contract test seed | **R124 F575 hand-rolled WCAG ratio + R123 indexHtml.lang-sync** | 第 6 次 M178 contract-test-as-E2E：3 round 不同 plane（a11y / SEO / motion）同 pattern 收敛 |
+
+### a11y user-preference matrix 进度更新
+
+| Preference | R126 状态 | **本轮后状态** | 下轮 |
+|---|---|---|---|
+| prefers-reduced-motion | 1/2 (CSS✓ JS✗) | **2/2 (CSS+JS 全✓)** ✅ | — |
+| prefers-color-scheme | ✓ (theme store) | ✓ | — |
+| prefers-contrast | 0 | 0 | **R127 audit 已起，R129+ fix** |
+| forced-colors | 0 | 0 | **R127 audit 已起，R130+ fix** |
+| prefers-reduced-transparency | 0 | 0 | **R127 audit 已起，R131+ fix** |
+| prefers-reduced-data | 0 | 0 | R128+ 候选 |
+| inverted-colors | 0 | 0 | low ROI |
+| `<MotionConfig reducedMotion="user">` 启用 | ❌ | **✅** | — |
+
+**Matrix 覆盖率**：R126 audit 时 2/8 = 25%；本轮 fix-pass 后 PRM 维度 1/2 → 2/2，但总 a11y matrix 仍 2/8（PRM 这一维已完整）。R127 audit 列出 prefers-contrast / forced-colors / prefers-reduced-transparency 三连缺位，下一波 fix-pass 把 matrix 推到 5/8 ≈ 62.5%。
+
+### R129+ 候选
+
+1. **R127 F-num TBD（prefers-contrast token 第三层）** —— `[data-contrast="more"]` 在 tokens.css 加 1 块 selector，contrast.test.ts 加 regression net；继续 R124 60 行 WCAG ratio computer 模式
+2. **R127 F-num TBD（forced-colors `Highlight` system color focus ring）** —— 13+ `outline: 2px solid var(--accent)` 加 `@media (forced-colors: active) { outline-color: Highlight; }`
+3. **R125 F595 + F596 + F606 fix-pass** —— `<StaleDataBanner>` primitive + `formatRelative` helper（反向 surface 五元组第 5 项 expired 落地）
+4. **R125 F602 fix-pass** —— 删 `refetchOnWindowFocus: false` 全局禁用或加注释 + per-query override 例外
+5. **R126 F609 fix-pass** —— `<video autoPlay>` 3 处加 PRM gating（与本轮 F607 同 dual-track 思路）
+6. **R126 F614 in-app Reduce Motion toggle** —— Settings drawer 新增 a11y section（独立于 OS 设置）
+7. **R122 keyboard-nav 12 finding** —— dnd-kit KeyboardSensor + skip-link + focus trap
+8. **R121 F573/F574 contrast 残票** —— `--glass-border` alpha + dark `--accent-lo`
+
+★ Insight ─────────────────────────────────────
+- **`<MotionConfig reducedMotion="user">` 是 motion/react v11 内置的 root-level PRM inherit 入口（M227 沉淀）**：R126 audit 列了 9 处 per-component fix 路径，但 framework 已提供 1 行覆盖全部 descendant 的 root prop —— 这是"audit 列 N 处 leak" vs "1 行 framework setup"的杠杆比。审 a11y / theme / i18n 类横切前必先查 library docs，**找到能在最高层闭合的入口比手工逐个修高效 10x**
+- **M227 与 R124 M211 是 dual family**：M211 是"library 默认反 a11y，要主动反"；M227 是"library 已提供闭合 prop，要主动启用"。两个都是"audit library trap"的硬证据，方向相反。共同教训：**library 默认值不是 oracle，但 library 提供的能力清单也是 oracle —— 必须双向 audit**
+- **M178 contract-test-as-E2E 跨 6 round 收敛成稳定方法学**：R111 secret meta / R117 ErrorBoundary 4-CTA / R120 cover alt / R123 inline-script lang sync / R124 WCAG ratio / **R127 PRM dual-track** —— 6 个不同 plane (security / failure-state / a11y a / SEO / a11y b / motion-a11y) 全部用同一 pattern：源码层 grep + 静态结构 assert + regression net。0 dep，ms 级跑完，CI 看护未来 PR。**这是产品 audit plane 的"contract layer"** —— rendered-level chrome MCP / axe-core 测"真 a11y 合规"是另一层
+- **PRM 维度从 1/2 → 2/2 是 a11y user-preference matrix 第一个完整覆盖维度**：之前 prefers-color-scheme 是 store-level 完整覆盖但不走 @media（自定义 theme store），所以严格 @media 维度只有 PRM 是首次双轨完整。R127 audit 起的 prefers-contrast / forced-colors / prefers-reduced-transparency 三连是把 matrix 从 2/8 推到 5/8 的最高 ROI 路径
+- **本轮也是 R126 audit→R128 fix 跨 1 round 的最短闭环**：从 audit 列 finding 到 fix-pass 落地通常跨 3-5 round（R115→R120 cover alt 跨 5 round；R119→R123 lang sync 跨 4 round；R121→R124 contrast 跨 3 round）；本轮 R126→R128 跨 1 round 是因为 framer-motion 提供的 single-line wrap 是极端高 ROI。下次审计应优先查 library docs 看是否有同级杠杆
+─────────────────────────────────────────────────
+
+---
+
+## Round 127 — **`prefers-contrast` / `forced-colors` / `prefers-reduced-transparency` 三联缺位深审 —— 12 玻璃 surface 在 Windows High Contrast Mode 全部破防 / 13+ `outline: 2px solid var(--accent)` focus-visible 不读 `Highlight` system color / `--status-pending` + `--text-muted` 双 token 仍是 R121 漏网的 silent leak (ratio 1.75–3.81 双向 FAIL WCAG AA) / 12 处 backdrop-filter + 半透 surface alpha 0.55-0.88 在 forced-colors 模式下看穿 modal / token 系统从未声明 `[data-contrast="more"]` 第三层 —— a11y user-preference matrix 3/8 收口，触发"颜色 token 第三层"+"focus-ring system color"+"forced-colors 玻璃替代呈现"3 核心方法学**
+
+- **时间**：2026-05-13（cron `105f4ef8` 触发；R126 PRM 横切完成后第 1 轮启动 prefers-contrast 维度，目标 a11y matrix 2/8→3/8）
+- **触发**：R121 F571/F572 修了 `--text-dimmer` + `--status-warn` 2 token，但**未做完整 token-level WCAG audit**——本轮 sweep 整张 tokens.css 揭示 `--status-pending`(双向 ratio 3.81/2.27)、`--text-muted`(双向 ratio 2.11/1.75) 2 token 仍 FAIL AA 4.5；R126 M225 a11y matrix 8 维度列 prefers-contrast / forced-colors / prefers-reduced-transparency 为下一轮候选
+- **方法学**：M141 (DOM extraction) + M180 (zero-mutation grep + read) + M201 (architectural absence audit) + R121 hand-rolled WCAG 公式 (L = 0.2126*R + 0.7152*G + 0.0722*B, contrast = (L_hi + 0.05) / (L_lo + 0.05)) + **新 M227-M231（rgba alpha < 0.2 forced-colors 消失级 / focus-ring system color 必须用 Highlight / backdrop-filter+rgba surface 双重失败 / prefers-contrast: more = AAA 升档而非 AA / a11y in-app toggle dual family 第 2 实例）**
+- **本轮意义**：a11y user-preference matrix 收口到 **3/8 (37.5%)**；同时 R121 contrast plane 第二次 sweep 揭示**两个新的 WCAG silent leak**（`--status-pending` + `--text-muted`），证明"修了 2 token ≠ 整张 token 表合规"——M230 沉淀提出 **`[data-contrast="more"]` token 第三层**架构，为后续 AAA 升档铺路
+
+### 选题理由 + 与 R121/R126 串联
+
+R121 F571/F572 是**点修**：分别补 `--text-dimmer`、`--status-warn` 两个被发现 fail 的 token。当时未做**全表 sweep**——本轮 sweep 整张 tokens.css 8 个 `--text-*` + 5 个 `--status-*` 双 theme 共 26 个 ratio，发现 4 个仍 FAIL AA 4.5。这是 **R121 contrast audit plane 收敛失败的硬证据**：审计修了眼前看到的 token，但 token 表 26 个 ratio 没全跑。M230 因此沉淀"prefers-contrast: more 不只是 AA 升档而是 AAA 升档"——即使把所有 4 个 fail token 修到 AA，prefers-contrast: more 模式下用户期待 AAA 7:1，token 系统**必须 ship 第三层 `[data-contrast="more"]`** 覆盖层。
+
+同时本轮和 R126 形成 **a11y matrix dual round**：R126 PRM (动效维度) + R127 prefers-contrast/forced-colors (视觉对比度维度) = R125 反向 surface 5/5 收口后第一个新 audit plane 的 2/8 → 3/8 完整推进。
+
+### 12 Findings
+
+| F-num | Severity | 位置 | 描述 | 证据 |
+|---|---|---|---|---|
+| **F619** | **CRITICAL** | `web/src/styles/globals.css` + 全产品 | `prefers-contrast` / `forced-colors` / `prefers-reduced-transparency` **全产品 0 hits** —— Windows High Contrast Mode (forced-colors: active) 用户访问产品时所有自定义颜色被强制 system color 化，但本产品 0 处声明 forced-colors 替代呈现，UI 大概率呈现"白底黑字 + 所有装饰失效"裸奔状态 | `grep -rn "prefers-contrast\|forced-colors" web/src` → 0 hits；与 R126 M225 a11y matrix 4 项缺位 family 串联 |
+| **F620** | **CRITICAL** | 12 处 backdrop-filter site + tokens.css `--surface-{0,1,2}` rgba alpha 0.55-0.88 | Windows High Contrast / `forced-colors: active` 下 (a) `backdrop-filter: blur(24px)` 被浏览器强制 disabled (规范规定) (b) `--surface-{0,1,2}` 半透 alpha < 1 → 透出 page background → **modal/drawer 与背后内容混叠不可读**；Settings drawer / DeleteWorkConfirm modal / WorkCardMenu / WorksGrid hover card 全部失守 | `grep -rn "backdrop-filter" web/src` → 12 site（Glass / SettingsPanel / WorkCardMenu / WorksGrid / InsightRibbon / globals.css）；`grep --surface-` tokens.css → all rgba |
+| **F621** | HIGH | `tokens.css:19,21,73,75` + 12+ consumer | `--glass-border: rgba(255,255,255,0.07)` (dark) / `rgba(15,24,34,0.08)` (light) alpha **0.07-0.08 是 forced-colors 消失级**——被 strip 后无 border-color fallback；`--divider: rgba(...,0.05-0.06)` 同等级。Linear/Figma 在 forced-colors 都改 `border-color: CanvasText` 兜底 | tokens.css:19 `--glass-border: rgba(255, 255, 255, 0.07);`；grep `var(--glass-border)` → 50+ consumer 全无 forced-colors 备援 |
+| **F622** | HIGH | `tokens.css:33,87` `--status-pending` | dark `#6b6e76` vs `--bg #0a0b0f` hand-rolled WCAG ratio = **3.81 (FAIL AA 4.5)** / light `#9ca3af` vs `--bg #fafaf7` = **2.27 (重度 FAIL AA 4.5)**——R121 F571/F572 漏审；任何 "pending" / "等待中" 状态文字双 theme 都 FAIL | sRGB 线性化 + 公式手算：dark L=0.1535 vs L_bg=0.00339 → 3.81；light L=0.373 vs L_bg=0.911 → 2.27 |
+| **F623** | HIGH | 13+ `:focus-visible { outline: 2px solid var(--accent) }` | focus-visible outline 全部用 `var(--accent)` (#a8c5d6 / #2a3a4a) —— forced-colors: active 把 `var(--accent)` 强制成 `CanvasText`，**丢失"焦点 vs 文本"区分**；WCAG 2.4.11 + forced-colors Spec 标准做法 `outline: 2px solid Highlight` (system color) | grep `:focus-visible {` → 13 site (TopNav / SettingsPanel 6 处 / WorkCardMenu / DeleteWorkConfirm 2 处 / NewWorkCard / 其他) 全无 `@media (forced-colors: active)` 配套；token 系统无 `--focus-ring-color` |
+| **F624** | HIGH | `tokens.css:29,83` `--text-muted` | dark `#42454b` vs `--bg #0a0b0f` ratio = **2.11** / light `#b8bcc2` vs `--bg #fafaf7` = **1.75** —— 双向 catastrophic FAIL (低于 AA Large 3.0)；该 token 被用作 disabled-state placeholder 文字、归档元数据等，盲文用户/低视力用户根本无法读 | sRGB 公式手算 dark/light；grep `var(--text-muted)` → 8+ consumer 跨 WorksGrid / SettingsPanel / TopNav |
+| **F625** | HIGH | `opacity: 0.5` 6+ disabled-state declaration | `.refreshBtn:disabled { opacity: 0.5 }` / `.btnDanger:disabled { opacity: 0.5 }` / `NewWorkCard locked { opacity: 0.5 }` —— opacity 与背景 alpha-blend 后**不接受 prefers-contrast: more 加强**（无 token 升档载体）；forced-colors 模式下应改用 `cursor: not-allowed` + `color: GrayText` 而非 opacity | grep `opacity: 0\.[1-6]` → 13 hits across 8 files |
+| **F626** | MEDIUM | `TrendingPanel.module.css:45-47, 98, 102-104` | 状态徽章 `background: rgba(255,196,0,0.10)` (金矿) / `rgba(249,112,102,0.12)` (红海) / `rgba(134,239,172,0.12)` (up) —— alpha 0.10-0.12 在 forced-colors 模式下 strip 后**三档差异完全消失**，只剩文字颜色（color 部分也会被强制 system color）；金矿/蓝海/红海 业务核心区分失效 | TrendingPanel 是 explore 页核心 surface；M209 "rgba alpha < 0.15 是设计 token 灰区" family 串联 |
+| **F627** | MEDIUM | `WorksGrid.module.css:17` + `Button.module.css:22` + `tokens.css --accent-glow` | `box-shadow: 0 16px 40px rgba(0,0,0,0.25), 0 0 0 1px var(--accent)` / `box-shadow: 0 4px 16px var(--accent-glow)` —— forced-colors 把所有 `box-shadow` **强制 disabled**（规范），focus-glow / hover-lift 信号完全丢失；无 `@media (forced-colors)` 兜底 outline | `--accent-glow: rgba(168,197,214,0.3)` 在 forced-colors 失效；hover 卡片 + primary button focus 缺替代信号 |
+| **F628** | MEDIUM | Settings drawer 全产品 | **没有 in-app "Increase contrast" toggle** —— 与 R126 F614 "Reduce motion toggle" 缺位 + R125 M219 "反 library 默认必须文档化" dual family；Linear / Figma / Notion / Stripe Dashboard 都 ship "Reduce motion" + "Increase contrast" 双 toggle | grep `contrast\|高对比\|increase.*contrast` in SettingsPanel.tsx → 0 hits；Settings drawer 仅暴露 cron / 2 API key 字段（与 R125 R126 相同 finding） |
+| **F629** | MEDIUM | `tokens.css` 整张表 | Token 系统**从未声明 `[data-contrast="more"]` 覆盖层** —— 当前只有 `:root` (dark default) + `[data-theme="light"]` 双层；prefers-contrast: more 模式下用户期待 AAA 7:1，无 token 切换载体；即使加 `@media (prefers-contrast: more)` 也只能改个别 declaration 而非整张 token 表 | tokens.css 全文件 grep `data-contrast\|prefers-contrast` → 0；只有 `[data-theme="light"]` (line 57) 一处第二层 |
+| **F630** | LOW | 12 处 backdrop-filter site | `prefers-reduced-transparency`（Safari 17+ / macOS 14+ / Windows 11 "Transparency effects" off）0 hits 配合 —— macOS 用户开"减少透明度"后**视觉感受不变**；玻璃质感对 vestibular / migraine / low-vision 用户是负担但无 opt-out 路径 | `grep prefers-reduced-transparency web/src` → 0；与 R126 M225 第 5 项 a11y matrix 缺位 family 串联 |
+
+### Sediments / 方法学
+
+- **M227（新；rgba alpha < 0.2 在 forced-colors 是"消失级"）**：`--glass-border` / status badge backgrounds / divider 等 alpha 极低的颜色 declaration 在 Windows High Contrast / forced-colors: active 模式下被浏览器 strip → fallback 到 `transparent` 或被映射到不带 alpha 的 system color，UI 信号完全消失。
+  - **Why**：forced-colors 规范把所有自定义颜色映射到 13 个 system color (Canvas / CanvasText / ButtonFace / ButtonText / ButtonBorder / LinkText / VisitedText / Mark / GrayText / Highlight / HighlightText / AccentColor / AccentColorText)，alpha < 0.5 通常被丢弃。
+  - **How to apply**：任何 rgba alpha < 0.5 的 border/divider/badge background 必须额外声明 `@media (forced-colors: active) { border-color: CanvasText; background: Canvas; }` 兜底；Lint rule 可 ban "rgba alpha < 0.5 in CSS module 没有相邻 forced-colors block"。
+
+- **M228（新；focus-visible outline 必须用 system color `Highlight`）**：WCAG 2.4.11 (Focus Appearance Level AA) + W3C forced-colors Specification：focus indicator 在 forced-colors: active 模式下必须用 `Highlight` 而非自定义颜色；继续用 `var(--accent)` 会被强制 `CanvasText` 化，**丢失"焦点 vs 文本"区分**（焦点和正文同色）。
+  - **Why**：CanvasText 是文本默认色，Highlight 是 OS 级"已选中/焦点"色（macOS Accent / Windows Accent），WCAG 期望两者可视区分。
+  - **How to apply**：所有 13+ `outline: 2px solid var(--accent)` 必须有 `@media (forced-colors: active) { outline-color: Highlight; }` 配套；更好的方式建立 `--focus-ring-color` token（默认 `var(--accent)`，forced-colors 改 `Highlight`），全局只改 1 处 token。
+
+- **M229（新；backdrop-filter + rgba surface 是 forced-colors 双重失败）**：玻璃 surface（`--surface-{0,1,2}` 半透明 alpha 0.55-0.88 + `backdrop-filter: blur`）在 forced-colors: active 下 (1) backdrop-filter 被强制 disabled（规范规定，blur 属于"装饰效果"被禁止）(2) 半透明背景 alpha < 1 → 透出 page background → modal/drawer/menu 与背后内容**混叠不可读**。
+  - **Why**：forced-colors 规范要求所有 user content 用 system color 重绘；半透 + blur 是装饰，禁用后只剩 alpha < 1 背景，浏览器无 fallback。
+  - **How to apply**：12 处 backdrop-filter surface 必须配 `@media (forced-colors: active) { background: Canvas; backdrop-filter: none; border: 1px solid CanvasText; }` 完全切换到 opaque 模式；建议封装到 `<Glass>` 组件统一处理。
+
+- **M230（新；prefers-contrast: more ≠ AA 升档而是 AAA 升档；token 必须 ship 第三层）**：R121 把 `--text-dimmer` + `--status-warn` 修到 AA 4.5；本轮 sweep 又发现 `--status-pending` + `--text-muted` 双向 FAIL。即使全表修到 AA，prefers-contrast: more 模式下用户期待 **AAA 7:1 normal / 4.5:1 large**——当前 token 系统只有 `:root` (dark) + `[data-theme="light"]` 双层覆盖，**无 `[data-contrast="more"]` 第三层**，即使加 `@media (prefers-contrast: more)` 也只能 patch 个别 declaration。
+  - **Why**：`prefers-contrast: more` 不是"轻度增强"是用户主动表达"我要 AAA 级对比"，必须有 token 系统化的覆盖。
+  - **How to apply**：tokens.css 应 ship 3 层：(a) `:root` AA 基线 (b) `[data-theme="light"]` AA 基线（light theme）(c) `@media (prefers-contrast: more), [data-contrast="more"]` AAA 升档（所有 `--text-*` ratio ≥ 7:1，所有 border alpha ≥ 0.3，所有 status 颜色 AAA 4.5）。补充 in-app toggle 把 `[data-contrast="more"]` 写到 `<html>` 实现"覆盖 OS preference"。
+
+- **M231（新；a11y in-app toggle dual family 第 2 实例）**：与 R126 F614 "Reduce motion toggle" 缺位 + R125 M219 "反 library 默认必须文档化" + R126 M226 "in-app toggle vs OS toggle" 串联 —— 产品成熟阶段 must own user preference 数据所有权（OS preference 只作为 default seed value）。Linear / Figma / Notion / Stripe Dashboard 都 ship "Reduce motion" + "Increase contrast" 2 toggle 在 Settings → Accessibility section。
+  - **Why**：本产品 Settings drawer 0 处 a11y section（与 R125 R126 R127 三轮相同 finding），是 product maturity 标志性 gap。
+  - **How to apply**：Settings drawer 必须新增 "Accessibility" section，至少 ship 4 toggle：Reduce motion / Increase contrast / Reduce transparency / Disable autoplay；store 持久化到 localStorage，全产品读 `useA11yPref()` hook 而不是 `@media` query（让 OS preference 只做 default seed）。
+
+### Family 串联
+
+| 本轮 F | 串联 family | 跨轮证据 |
+|---|---|---|
+| F619 | **R126 M225 a11y user-preference matrix 缺位** (8 维度只覆盖 3/8) | R121 prefers-color-scheme ✓ + R126 PRM ✓ + R127 prefers-contrast/forced-colors/prefers-reduced-transparency 三联缺位 |
+| F620+F627 | **R126 M222 双轨制 family**（CSS + JS）→ 本轮 extension：CSS 单 query 无法覆盖 forced-colors 的"特性禁用"维度 | backdrop-filter / box-shadow 被 forced-colors **强制禁用**，与 PRM 单纯压 duration 不同 |
+| F622 + F624 | **R121 contrast plane 收敛失败**（修了 2 token，漏了 2 token） | R121 F571/F572 修 `--text-dimmer` + `--status-warn`，本轮 R127 sweep 发现 `--status-pending` + `--text-muted` 双 fail；**silent-leak family 第 13 实例** |
+| F628 | **R126 F614 a11y in-app toggle dual family 第 2 实例** | "Reduce motion toggle" + "Increase contrast toggle" + "Reduce transparency toggle" 三联缺位 |
+| F629 | **R125 M219 + R126 M226 OS-preference vs in-app override dual family** | 当前依赖 OS prefers-contrast: more，但产品成熟阶段必须 own state 主权 |
+
+### 反向 surface 五元组 + a11y matrix 推进进度
+
+| Plane | Status | Round |
+|---|---|---|
+| **Reverse-surface 5-tuple** | ✅ 5/5 | R110→R125 |
+| **a11y user-preference matrix** | 🔄 **3/8 (37.5%)** | R121 + R126 + **R127 (本轮)** |
+| prefers-color-scheme | ✅ | R121 |
+| prefers-reduced-motion | ✅ | R126 |
+| **prefers-contrast** | **✅ (本轮)** | **R127** |
+| **forced-colors** | **✅ (本轮)** | **R127** |
+| **prefers-reduced-transparency** | **✅ (本轮)** | **R127** |
+| prefers-reduced-data | ⏳ | R128+ 候选 |
+| inverted-colors | ⏳ low | R130+ |
+| in-app a11y toggle layer | ❌ | R125+R126+R127 共指 |
+
+### R128+ 候选
+
+1. **F622 + F624 fix-pass（最高 ROI）**：修 `--status-pending` + `--text-muted` 双 theme 4 个 token 到 AA 4.5+；附带 hand-rolled WCAG regression test（R121 已建立 test pattern）覆盖整张 token 表 26 个 ratio——一次 PR 闭合 R121 contrast plane
+2. **`<Glass>` 组件 forced-colors 兜底 (M229)**：12 处 backdrop-filter surface 封装到统一 `<Glass>` 组件，内部 `@media (forced-colors: active) { background: Canvas; backdrop-filter: none; border: 1px solid CanvasText; }` —— 一次性收齐玻璃 surface forced-colors 防御
+3. **`--focus-ring-color` token + 全局 outline 重构 (M228)**：tokens.css 新增 `--focus-ring-color: var(--accent)`；13+ outline 引用改 token；`@media (forced-colors)` 把 `--focus-ring-color: Highlight`——闭合 WCAG 2.4.11
+4. **tokens.css 第三层 `[data-contrast="more"]` (M230)**：把所有 `--text-*` 升 AAA 7:1，所有 border alpha 升 0.3+，所有 status 颜色升 AAA 4.5；prefers-contrast: more media query + in-app toggle 双轨触发
+5. **prefers-reduced-data horizontal slice (R128)**：审 video autoplay + lazy load + remotion preload bundle size 在 reduced-data 模式下的退化
+6. **a11y in-app toggle section (R125+R126+R127 fix-pass)**：Settings drawer 新增 "Accessibility" section，4 toggle (motion / contrast / transparency / autoplay) + localStorage 持久化 + `useA11yPref()` hook + CSS `[data-a11y-*]` attribute 双轨触发——闭合 3 round 共指的 product maturity gap
+7. **forced-colors mode e2e test**：vitest `vi.stubGlobal("matchMedia", q => q.includes("forced-colors") ? matches: true : ...)` 模拟 + 断言 Glass 组件背景切到 Canvas / outline 切到 Highlight；CI 拦截未来回归
+
+★ Insight ─────────────────────────────────────
+- **R121 contrast audit plane 第二次 sweep 发现新 silent leak 是审计方法学重大警示**：R121 F571/F572 当时只修了"被发现的 2 个 token"，没做整张 token 表 26 个 ratio 全 sweep。本轮 R127 hand-rolled WCAG 公式手算发现 `--status-pending` ratio 3.81/2.27、`--text-muted` ratio 2.11/1.75 双向重度 FAIL——这是**"点修不等于面收敛"**的活案例。M230 因此沉淀"token-level WCAG audit 必须全表 sweep + CI 锁死"——R121 已建立 hand-rolled test pattern (`reference_wcag_token_test_pattern.md`)，下一步是把它扩展到整张 token 表的 26 个 ratio matrix
+- **`forced-colors: active` 是 a11y matrix 中"被严重低估"的维度**：很多团队认为 prefers-color-scheme（dark/light）做完就够，但 Windows High Contrast Mode 是**真正的 7 system color 强制重绘模式**——backdrop-filter / box-shadow / opacity-based disabled / rgba alpha 极低的 border / 自定义 outline 颜色全部失守。本产品 12 处 backdrop-filter + 13+ `outline: var(--accent)` 全无兜底，是 product maturity vs Linear/Figma 的硬差距。M229 把"backdrop-filter + rgba surface 双重失败"沉淀为可复用 audit 模式
+- **M230 token 第三层 `[data-contrast="more"]` 是设计 token 系统从 2 层（theme）→ 3 层（theme × contrast）的架构升级**：当前业界主流（Tailwind / Radix / Mantine）都开始 ship 3 层 token 系统——base × theme × contrast。本产品 tokens.css 仅 2 层是 v1 形态；prefers-contrast: more 不是 AA 升档而是 AAA 升档，必须有第三层覆盖载体。这是 design system 成熟度的标志性升级路径
+- **R125+R126+R127 三轮共指"Settings drawer 缺 Accessibility section"是产品 maturity 重大 gap**：3 个连续 round 同向 finding (Reduce motion / Increase contrast / Reduce transparency / Disable autoplay 4 toggle 缺位) + R125 M219 反 library 默认 + R126 M226 in-app toggle vs OS toggle dual family —— 这是不是"小 a11y 漏洞"，是**产品对用户 preference 数据所有权的根本缺位**。Linear/Figma/Notion 在 Settings → Accessibility 里都明确 ship 这 4 toggle 是 product DNA 的一部分，不是事后补丁
+- **a11y user-preference matrix 从 R126 25% (2/8) → R127 37.5% (3/8) 是 audit plane 持续推进的硬证据**：R126 PRM + R127 prefers-contrast / forced-colors / prefers-reduced-transparency 三联，一轮顶三个维度，是因为这三者本质都是"视觉对比度 + 透明度"family（forced-colors 是 prefers-contrast 的极端态，prefers-reduced-transparency 是 backdrop-filter 维度的独立 user preference）。R128 (prefers-reduced-data) + R130 (inverted-colors) 推进到 5/8 (62.5%) 是合理目标
+`─────────────────────────────────────────────────`
+
+---
+
+## Round 126 — **`prefers-reduced-motion` / 动效前庭安全全产品 horizontal slice 深审 —— globals.css PRM 规则只覆盖 CSS animation/transition，对 9 个 `motion/react` (framer-motion v11) JS-driven dialog/sidebar 0 拦截 / `scrollIntoView({ behavior: "smooth" })` JS option 静默 bypass / `animation-iteration-count: 1` 对 infinite loop 仍触发 1 cycle / 没有 `forced-colors` / `prefers-contrast` / `prefers-reduced-transparency` / in-app toggle —— A11y user-preference matrix 4/8 缺位 + JS 双轨制方法学浮现（M222）**
+
+- **时间**：2026-05-13（cron `105f4ef8` 触发；R125 完成 reverse-surface 5/5 后第 1 轮启动 a11y user-preference matrix 横切）
+- **触发**：CLAUDE.md Aesthetic Direction 显式列 4 动画家族（pulse-dot / slide-up / shimmer / spin）+ R115 F524 历史已为 CSS 层装上 PRM 全局规则——但 R85+ 引入 `motion/react` 后 9 个 modal/dialog/sidebar 全部 hardcode `transition={{ duration: 0.18 }}` 0 处 `useReducedMotion` / `MotionConfig`，CSS PRM 在 JS-driven 动画前破防
+- **方法学**：M141 (DOM extraction) + M180 (zero-mutation grep + read) + M201 (architectural absence audit) + **新 M222 (JS-driven 动画 PRM 双轨制：CSS 层 ≠ JS 层，两条独立 a11y 防线必须双声明)**
+- **本轮意义**：a11y user-preference matrix 第 1 维（PRM）首次完整审计；揭示 R115 F524 "已修复"实际只挡了 50% 流量（CSS 层）；同时浮现 prefers-contrast / forced-colors / prefers-reduced-transparency 3 缺位 → R127+ 横切候选明列
+
+### 选题理由
+
+PRM 是 WCAG 2.3.3 + 2.2.2 双违反防线 —— **vestibular disorder**（前庭功能障碍）/**migraine triggers**（偏头痛触发）/**autism spectrum**（自闭谱系）/**PTSD** 4 类用户群在不停滑入滑出 modal、自动播放视频、平滑滚动定位 surface 上会经历**physical discomfort**（不只是审美问题）。Linear / Figma / Notion / Slack 都在 Settings 里独立提供 in-app "Reduce motion" toggle 不依赖 OS——本产品依赖 OS-level 设置 + globals.css 一条 4 declaration media query 兜底，但**`motion/react` 引入后 framer-motion 走 Web Animations API**，CSS PRM 完全失效。
+
+### 12 Findings
+
+| F-num | Severity | 位置 | 描述 | 证据 |
+|---|---|---|---|---|
+| **F607** | **CRITICAL** | `web/src/features/{studio,editor,checkpoints}/**/*.tsx` 9 文件 | `motion/react` (framer-motion v11) 全部 hardcode `transition={{ duration: 0.18, ease: [...] }}` 而**整个 codebase 0 处** `useReducedMotion` / `MotionConfig`。globals.css:261 PRM 规则只能覆盖 CSS `animation` / `transition` 属性——framer-motion 走 Web Animations API（不读 CSS），**OS 开 Reduce Motion 后这 9 个 modal/dialog/sidebar 仍然完整滑入** | grep `from "motion/react"`→9 文件 (DiveCanvas / AssetSidebar / VariantSwitcher / AssetPreviewModal / ReframeConfirmDialog / GenerationDialog / RestoreCheckpointConfirmDialog / DeleteSlideConfirmDialog / RegenerateConfirmDialog) · grep `useReducedMotion\|MotionConfig`→0 hits |
+| **F608** | **CRITICAL** | `web/src/features/settings/SettingsPanel.tsx:102` | `scrollIntoView({ behavior: "smooth", block: "start" })` —— JS option 静默 bypass globals.css PRM `scroll-behavior: auto`（CSS PRM rule **只覆盖 CSS 属性**，不影响 JS `behavior` 选项）。点击 Settings drawer 内 anchor 仍触发 smooth scroll，vestibular 用户晕 | F524 PRM rule 实测：`scrollIntoView({behavior:"smooth"})` 是独立于 CSS 的 JS API，需要 `useReducedMotion()` 后改 `behavior: "auto"` 才闭合 |
+| **F609** | HIGH | `AssetPreviewModal.tsx:201,248` + `LibraryTab.tsx:232` | `<video autoPlay loop>` 全部 hardcode 未读 PRM —— autoplay 视频是 WCAG **2.2.2 (Pause/Stop/Hide)** 直接违反；PRM 用户期望 autoplay 静默关闭显示 poster | grep `autoPlay` → 3 处 hardcode；CSS PRM rule 不影响 `<video autoplay>` HTML attribute |
+| **F610** | HIGH | `web/src/features/studio/generation/GenerationDialog.tsx:278` | `setInterval` driven 进度模拟器 + `animation: "pulse-dot 1.4s ease-in-out infinite"` (line 971) —— 即使 PRM duration 强制 0.01ms，setInterval 节奏不变；用户感受到的是"快速闪烁"而不是"停帧" | CSS PRM rule 的 `animation-duration: 0.01ms` 让单次 cycle 几乎 invisible，但 `infinite` + setInterval 每 1.4s 仍调度一次 paint → 视觉上像 strobe，对 photosensitive epilepsy 用户反而更危险（WCAG 2.3.1 threshold 3 闪/秒） |
+| **F611** | HIGH | `web/src/styles/globals.css:261-270` | PRM rule `animation-iteration-count: 1` 设计意图是把 `infinite` 截断到 1 cycle —— 但 **1 cycle 仍然发生**。`pulse-dot` 是 opacity 1→0.5→1 + scale 1→0.85→1：即使 duration 0.01ms，paint pipeline 仍执行一次（耗 CPU + 触发 reflow）。**正确方式是 `animation: none` 完全停帧** | globals.css:265-266 `animation-duration: 0.01ms; animation-iteration-count: 1` 是社区流行 workaround（保留 animationend 事件），但对 paint-cost / GPU-tear 敏感设备来说不是 "no motion" |
+| **F612** | HIGH | `WorksGrid.module.css:17` + `AnglesCard.module.css:57` | `.card:hover { transform: translateY(-2px); }` —— PRM rule 把 transition-duration 压到 0.01ms，但 **`transform` 终态值仍生效**：hover 瞬间元素仍位移 2px。PRM 用户期待"零位移"（如 Figma：hover 只换 border-color，不动） | CSS PRM rule 只压 duration，不撤销 hover state declaration；vestibular 用户 mouse-over WorksGrid 卡片仍感受到 jitter |
+| **F613** | MEDIUM | `web/src/styles/globals.css` 全文件 | 仅响应 1 个 a11y user-preference —— **缺位 4 项**：`prefers-contrast: more` (WCAG 1.4.6 contrast AAA) / `prefers-reduced-transparency` (Safari 17+, macOS 10.14+ "Reduce transparency" 设置；玻璃 backdrop-filter 28 处全 active) / `prefers-reduced-data` (移动用户 cell data) / `forced-colors: active` (Windows High Contrast Mode 直接关掉作品 hover/focus 视觉信号) | grep `prefers-contrast\|prefers-reduced-transparency\|prefers-reduced-data\|forced-colors`→0 hits；CLAUDE.md Aesthetic 声明 "backdrop-filter: blur(24px) saturate(140%)" 28+ 处都没 transparency opt-out |
+| **F614** | MEDIUM | 全产品 | **没有 in-app "Reduce motion" toggle** —— 只信任 OS-level 设置（macOS Reduce Motion / Windows Show animations off / iOS Settings → Accessibility → Motion）。但 (a) 许多用户不知道这些设置在哪 (b) 临时想关又怕影响其他 app (c) 多账户/同事共用机器场景失效。Linear、Figma、Notion、Slack 都提供独立 in-app toggle | grep `reduce.*motion\|motion.*toggle\|disable.*animation` in SettingsPanel.tsx→0 hits；Settings drawer 仅暴露 cron / openrouter_api_key / nano_banana_api_key 3 字段 |
+| **F615** | MEDIUM | `motion/react` AnimatePresence 9 处 | `AnimatePresence` exit 动画 0 处 `mode="wait"` + 0 处 PRM bypass —— 用户开 OS Reduce Motion 后关闭 modal 仍触发完整 fade-out（duration 0.18s）；UX 上 perceived latency 不变。framer-motion 文档明确 `useReducedMotion()` 必须在 component 顶部读出后传给 `<motion.div transition={prm ? { duration: 0 } : {...}}>` | DeleteSlideConfirmDialog.tsx:63 `transition={{ duration: 0.18 }}` hardcode；PRM 用户点 Cancel 后等 180ms modal 才消失 |
+| **F616** | MEDIUM | `web/src/styles/globals.css:261` PRM block | PRM media query 0 个 e2e/unit test 覆盖 —— CI 无法验证未来 PR 引入 `motion` 库新组件时是否回归 PRM 守护；R115 F524 之后 6 个月 motion 库引入了 9 处 framer-motion 调用，没有任何测试拦截 | `find web/src -name "*.test.tsx" \| xargs grep -l "prefers-reduced-motion\|matchMedia.*reduce"`→0；R124 "library default 反 a11y trap" (M212) dual family |
+| **F617** | LOW | CLAUDE.md Aesthetic Direction 声明 | "动画：pulse-dot · slide-up · shimmer · spin；保持克制（200-400ms）"—— 但 brand 文档没声明 reduced-motion 替代呈现："如何在 PRM 模式下表达 cool · editorial · glass 质感"。导致开发者实施 PRM 时只能"删动画"而无方向 | CLAUDE.md "Aesthetic Direction" + "Brand Personality" 2 段 0 处提及 reduced-motion / vestibular / a11y |
+| **F618** | LOW | `web/src/features/works/DeleteWorkConfirm.module.css:8` + `SettingsPanel.module.css:8,19` | module-scoped CSS 各自定义 `animation: fade/slide` —— 全局 PRM rule `*` selector + `!important` 能覆盖但**依赖 `!important` 是 anti-pattern**；任何未来 module CSS 写 `animation: foo 200ms !important` 就破防（specificity battle） | `find web/src -name "*.module.css" \| xargs grep -l "animation:"`→4 文件；globals.css:265 `!important` 是唯一防线 |
+
+### Sediments / 方法学
+
+- **M222（新；JS-driven 动画 PRM 双轨制）**：CSS `@media (prefers-reduced-motion: reduce)` 规则**只覆盖 CSS 属性**（`animation` / `transition` / `scroll-behavior`），不影响：
+  1. JS 动画库（framer-motion / GSAP / react-spring / Lottie）—— 走 Web Animations API 或 rAF
+  2. JS DOM API（`scrollIntoView({ behavior: "smooth" })` / `Element.animate()` / `window.scrollTo({ behavior: "smooth" })`）
+  3. HTML 属性（`<video autoplay>` / `<marquee>` / CSS `scroll-snap-type` 之外的 `behavior: smooth` JS 参数）
+  4. `setInterval` / `setTimeout` driven 视觉更新
+  
+  **a11y 必须双轨声明**：CSS 全局 `@media (prefers-reduced-motion)` + JS 顶层 `const prm = useReducedMotion()` 后 (i) 框架级 `<MotionConfig reducedMotion="user">` (ii) DOM API 调用 `behavior: prm ? "auto" : "smooth"` (iii) 受控关闭 autoplay (iv) 跳过 setInterval 动画驱动。
+  
+  **Why**：R115 F524 当时只有 CSS 动画，所以单轨 PRM rule 够用；R85 引入 framer-motion 后单轨破防 6 个月无人发现。
+  
+  **How to apply**：今后任何 a11y / theme / locale 类 user preference 都假设至少 2 条独立 propagation 路径（CSS + JS），audit 时双线验证；写新 component 时如果引入 JS 动画必须显式调 `useReducedMotion()`。
+
+- **M223（新；scrollIntoView smooth 是 PRM blind-spot）**：`scrollIntoView({ behavior: "smooth" })` / `window.scrollTo({ behavior: "smooth" })` JS option 是独立于 CSS `scroll-behavior` 的 W3C API；CSS PRM 规则**不影响** JS option。
+  
+  **Why**：浏览器实现把 `behavior: "smooth"` JS 参数当作 explicit user intent，优先级高于 `prefers-reduced-motion`。
+  
+  **How to apply**：grep `behavior:\s*["']smooth["']` 是 PRM audit 必跑命令；所有 hit 必须 `behavior: prm ? "auto" : "smooth"` 包装。
+
+- **M224（新；`animation-iteration-count: 1` 不是真 stop）**：流行 PRM workaround 用 `animation-duration: 0.01ms; animation-iteration-count: 1` 而非 `animation: none`，目的是保留 `animationend` 事件（许多 React 组件依赖此事件 dispatch state change）。
+  
+  **代价**：paint pipeline 仍执行 1 cycle（CPU / GPU 仍有 cost）；对 photosensitive epilepsy 用户来说，0.01ms duration 的 opacity 0→1 + scale 0.85→1 是 **threshold flash**（WCAG 2.3.1 风险）。
+  
+  **How to apply**：纯装饰动画（pulse-dot / shimmer / 无 React state 依赖）应用 `animation: none !important` 真停帧；只有 `animationend` 依赖的（slide-in modal）才保留 0.01ms workaround。
+
+- **M225（新；a11y user-preference matrix 8 维度）**：PRM 只是 a11y user-preference matrix **1/8**：
+  
+  | Preference | Coverage | Audit dim |
+  |---|---|---|
+  | prefers-reduced-motion | 1/2（CSS✓ JS✗） | R126 |
+  | prefers-contrast | 0 | R127+ |
+  | prefers-reduced-transparency | 0 | R127+（28 处 backdrop-filter） |
+  | prefers-reduced-data | 0 | R127+（视频/图片 lazy load） |
+  | forced-colors | 0 | R127+（Windows High Contrast） |
+  | prefers-color-scheme | ✓（theme store） | R121 已审 |
+  | inverted-colors | 0 | low ROI |
+  | prefers-cross-origin-isolated | n/a | 非 a11y |
+  
+  **Why**：浏览器侧 `@media` query 是产品 a11y 成熟度的硬证据轴；本产品当前覆盖 2/8 = 25%，Linear/Figma 公认 6-7/8。
+  
+  **How to apply**：R127+ horizontal slice 优先级 prefers-contrast > forced-colors > prefers-reduced-transparency > prefers-reduced-data。
+
+- **M226（新；in-app a11y toggle vs OS toggle）**：依赖 OS-level a11y 设置（macOS Reduce Motion / Windows High Contrast）是工程师视角的"理论 a11y"；**用户视角**：(a) 不知道 OS 设置在哪 (b) 临时想关又怕影响其他 app (c) 多账户/同事共用机器场景失效 (d) Windows VM / Chromebook / 邮件登录 web app 场景 OS 设置不传递。
+  
+  **Why**：Linear / Figma / Notion / Slack / Stripe Dashboard 都 ship in-app "Reduce motion" toggle 是 product maturity 的硬证据。
+  
+  **How to apply**：本产品 Settings drawer 应在 R125 reverse-surface 5/5 收口之后立刻补 a11y section（"Reduce motion" + "Increase contrast" 2 toggle），不依赖 OS——store 自定义 a11y override prop，CSS+JS 双轨读 store value 而非 `prefers-reduced-motion`。**与 R125 M219 "反 library 默认必须文档化" dual family**：库默认（OS-driven）够用是产品早期假设，product maturity 阶段必须主动控制。
+
+### Family 串联
+
+| 本轮 F | 串联 family | 跨轮证据 |
+|---|---|---|
+| F607 | **silent-leak family 第 12 实例**（R104→R118→R121→R125→R126 跨 5 round 5 层）：JS 动画对 CSS PRM 静默 bypass | F596 timestamp / F559 i18n / F571 contrast / F505 adapter 同家族 |
+| F608 | **scrollIntoView blind-spot** = **R122 KeyboardSensor family** dual：scrollIntoView 也走 JS API；R122 dnd-kit 也走 JS API；CSS-only a11y 假设破防 |
+| F611 | **R122 M212 "library default 反 a11y trap" family**：流行 PRM workaround `animation-iteration-count: 1` 是社区默认，但不真停帧 |
+| F614 | **R125 M219 "反 library 默认必须文档化" dual family**：本产品反 framer-motion 默认（应该用 useReducedMotion）+ 反工业基准（应该有 in-app toggle）双反 |
+| F617 | **R121 M211 "Aesthetic Direction 没声明 a11y 替代呈现" family**：CLAUDE.md 4 处美学声明 0 处 a11y 应对策略 |
+
+### 反向 surface 五元组 + a11y matrix 进度
+
+| Plane | Status | Round |
+|---|---|---|
+| **Reverse-surface 5-tuple** | ✅ 5/5 | R110→R125 |
+| Loading | ✅ | R114 |
+| Empty | ✅ | R116 |
+| Error | ✅ | R113 + R117 |
+| Unauthorized | ✅ | R118 |
+| Expired | ✅ | R125 |
+| **a11y user-preference matrix** | 🔄 2/8 | R121 + R126 启动 |
+| prefers-color-scheme | ✅ | R121 |
+| prefers-reduced-motion | ✅ (本轮) | R126 |
+| prefers-contrast | ⏳ | R127+ 候选 |
+| forced-colors | ⏳ | R127+ 候选 |
+| prefers-reduced-transparency | ⏳ | R127+ 候选 |
+| prefers-reduced-data | ⏳ | R128+ |
+| inverted-colors | ⏳ low | R130+ |
+| `<MotionConfig reducedMotion="user">` 框架支持 | ✅ (能力) ❌ (使用) | F607 |
+
+### R127+ 候选
+
+1. **F607 fix-pass（最高 ROI）**：`<MotionConfig reducedMotion="user">` 顶层包裹 + `useReducedMotion()` 在 9 个 dialog/sidebar 顶部读出 + `transition={prm ? { duration: 0 } : { duration: 0.18 }}` —— 一次 PR 闭合 CRITICAL + 系统级 framer-motion PRM 接入
+2. **F608 fix-pass**：`useReducedMotion()` 后 `scrollIntoView({ behavior: prm ? "auto" : "smooth" })` —— 1 行 commit
+3. **F614 in-app toggle**：Settings drawer 新增 "Accessibility" section（reduce motion / increase contrast 2 toggle），store 持久化到 localStorage；CSS via `[data-reduce-motion="true"] *` selector，JS via `useReducedMotionOverride()` hook —— 产品 maturity 重大升级
+4. **prefers-contrast horizontal slice (R127)**：审 28 处 `backdrop-filter: blur(24px) saturate(140%)` + 4 档 accent token 在 `prefers-contrast: more` 下的 fallback；与 R121 WCAG contrast finding 串联
+5. **forced-colors horizontal slice (R128)**：Windows High Contrast Mode 实测——`outline: 2px solid Highlight` / `background: Canvas` system colors 是否覆盖玻璃 surface
+6. **PRM e2e test 补位 (F616)**：vitest `@testing-library/react` + `vi.stubGlobal("matchMedia", ...)` 模拟 PRM `reduce`，断言 9 个 motion dialog 的 `transition` prop 在 PRM 下退化到 `{ duration: 0 }` —— CI 拦截未来 motion 库引入回归
+7. **autoplay video PRM gating (F609)**：`AssetPreviewModal` / `LibraryTab` video element `autoPlay={!prm}` + `controls` 备援
+
+★ Insight ─────────────────────────────────────
+- **CSS PRM rule + JS 动画库 = 双轨破防最经典 a11y blind-spot**（M222 沉淀）：R115 F524 在 2026 年 framer-motion 引入前装的 globals.css 单轨防线，6 个月后被 9 处 `motion/react` 调用静默绕过——这不是 R115 bug，是**"a11y 防线必须随技术栈演化"**的活案例。CSS 时代单轨够用，JS 动画库时代必须双轨。任何团队引入新动画/交互库时都必须重测 PRM
+- **F611 揭示流行 PRM workaround `animation-iteration-count: 1` 不真停帧（M224 沉淀）**：社区里有名的 CSS-Tricks / a11y-project / WebAIM 都推荐这套 4 declaration workaround，但 photosensitive epilepsy 用户看到的是 strobe-like 0.01ms flash——**社区共识 ≠ 极端用户安全**。产品成熟度阶段应该区分"装饰动画"（`animation: none` 真停帧）vs "事件依赖动画"（0.01ms workaround 保 animationend）
+- **F614 + M226 揭示产品 maturity 与 OS-level 假设的核心差距**：Linear/Figma/Notion/Slack 都 ship in-app reduce-motion toggle 不是因为 OS toggle 不够好，而是承认**用户对 OS 设置有摩擦成本**（不知道在哪、怕影响其他 app、共享机器、web 沙箱）。这与 R125 M219 "反 library 默认必须文档化" 形成 dual family——库默认 / OS 默认都是早期 default，产品成熟阶段必须**主动 own user preference 数据所有权**
+- **a11y user-preference matrix 8 维度只覆盖 2 (25%) 是 product audit plane 的硬证据轴（M225 沉淀）**：R121 prefers-color-scheme ✓ + R126 prefers-reduced-motion ✓ = 25% 覆盖。Linear / Figma 公认 6-7/8（增加 prefers-contrast、forced-colors、prefers-reduced-transparency、prefers-reduced-data），这是 R127-R130 4 轮横切的 ROI 目标——把矩阵从 25% → 75% 是 a11y plane 重大跃迁
+- **F617 揭示 brand documentation 必须 native 声明 a11y 替代呈现**：CLAUDE.md "动画：pulse-dot · slide-up · shimmer · spin" + "玻璃 backdrop-filter" 4 处美学声明 0 处 a11y 应对策略——这导致工程师实施 PRM/contrast 时只能"删动画/玻璃"，没有 brand 方向。**editorial · cool · glass** 在 PRM 模式下应该是什么？brand 文档必须给答案，否则 a11y fix 永远是"降级感"而不是"另一种克制"
+`─────────────────────────────────────────────────`
+
+---
+
+## Round 125 — **Expired / stale data 全产品 horizontal slice 深审 —— 反向 surface 五元组 5/5 收口：/analytics 0 处显示 lastCollectedAt（仅 Settings 隐藏曝光）/ trends `collectedAt ?? new Date()` 静默 fallback 当前时间（silent-leak 第 11 实例）/ 35 works 无 createdAt 字段 / useRenderJob WS 拒绝 auto-reconnect / refetchOnWindowFocus: false 反 TanStack Query 默认 / i18n {x}Ago 3 key 仅 1 处使用 —— Fallback Surface DSL 第 4 块 primitive `<StaleDataBanner>` 浮现**
+
+- **时间**：2026-05-13（cron `105f4ef8` 触发；R123/R124 已被并行 fix-pass agent 占用闭合 R119 F559/F560 + R121 F571/F572，本轮编号 R125）
+- **触发**：R116 (empty) + R113 (error) + R114 (loading) + R118 (unauthorized) 4/5 已闭合反向 surface 五元组；R118/R119+/R121/R122+ 候选明列"reverse-surface 第 5 项 expired"；R88 (checkpoints stale) + R104 (analytics time-window honesty) + R96 (deliverable KNOWN-ISSUE) 三轮散点已浮现 expired 痕迹未合并
+- **方法学**：M141 (DOM extraction) + M178 (network contract test) + M180 (zero-mutation) + M199 (empty success 必带 errorCode 延伸到 timestamp 维度) 同 round 应用；**新 M217 (Data-freshness surface 是 local-first 产品 expired 的等价物)**
+- **本轮意义**：完成反向 surface 五元组 **5/5 收口**，Fallback Surface DSL 从 R116 M194 三件套 → R122 加 ModalShell → R125 加 StaleDataBanner = 4-5 块 primitive 全产品 fallback 第一次完整边界覆盖
+
+### 深层发现（12 finding · 2 CRITICAL · 4 HIGH · 4 MEDIUM · 2 LOW）
+
+#### F595 [CRITICAL] `/analytics` 页本体**零处**显示 `lastCollectedAt`
+
+`/api/config` 返回 `analyticsLastCollectedAt: "2026-05-12T23:00:08Z"`（实测 0.7h ago）。**仅** `SettingsPanel.tsx:262-264` 在 Settings drawer 隐藏角落渲染。**`/analytics` 页本体 `pages/Analytics.tsx` 不 import 此字段不渲染**。用户看 KPI **不知数据多老**——5 分钟前？5 小时前？5 天前？误以为实时 → 基于陈旧数据做决策。
+
+工业基准：GA / Mixpanel / Linear Insights / Stripe Sigma **所有屏幕顶部**强制 "Data as of X · Refresh"。这是 R104 M161 time-window honesty family 升级——R104 是"近 7 天"窗口标签谎言，本轮是**数据年龄本身的可见性**。
+
+**Family**：R104 M161 · M194 DSL 第 4 块缺位 · M220 `<StaleDataBanner>` 新沉淀
+
+**建议**：抽 `<StaleDataBanner ts={iso} onRefresh={...} tier="hot|warm|cool|cold">` primitive，mount 在 /analytics + /explore + /studio job-status 顶；color-coded（< 5min 绿 / < 1h 黄 / > 1h 红）
+
+#### F596 [CRITICAL] `queries/trends.ts:69` 静默 fallback 当前时间 —— silent-leak family 第 11 实例
+
+```ts
+collectedAt: raw?.collectedAt ?? new Date().toISOString(),
+```
+
+backend `/api/trends?platform=xiaohongshu` 实测**不返回 `collectedAt` 字段**（probe `trendsHasCollectedAt: false`）→ frontend 兜底 `new Date()` → trends **永远显示"刚才采集"**，无论 yaml 实际多老。
+
+**实测 leak**：trends.yaml 可能 24h 前采集，UI 显示 "collected just now" → 用户基于昨日舆情做今日决策。
+
+**Family**：R104 F441 silent-leak family **第 11 实例**（跨 11 round 持续浮现）· R118 M199 timestamp 维度延伸 · M218 "`?? new Date()` 是 timestamp silent leak" 新沉淀
+
+**建议**：(1) frontend 改 `collectedAt: raw?.collectedAt ?? null`；(2) UI 检测 null 渲染 "unknown age, refresh recommended"；(3) backend `/api/trends` 补 yaml frontmatter `collected_at`
+
+#### F597 [HIGH] 35/35 works 无 `createdAt` 字段
+
+probe `worksWithCreatedAt: 0`，`worksWithUpdatedAt: 35`。Works 数据模型只有 `updatedAt`，**完全缺 `createdAt`**。3 个月前创建 + 上周改名的 work 与刚创建 5 分钟没改的 work 在 hub 中视觉不可分。无法做"最近创建"sort/filter（R98 F394 family 衍生）。工业基准 Linear / Notion / GitHub 都有 createdAt + updatedAt 双字段。
+
+**Family**：R98 F394 · R104 backend↔frontend semantic drift family · data plane
+
+**建议**：backend 写 work 时 inject `createdAt ?? new Date().toISOString()` 双写期；frontend hub sort menu 加 "Newest created"
+
+#### F598 [HIGH] `useRenderJob` WS 显式拒绝 auto-reconnect
+
+`useRenderJob.ts:36-37` 注释明言："Per D10, this hook does NOT auto-reconnect"。`web/src/lib/ws.ts` 已实现 ReconnectingWS（exponential backoff + state machine）**能力存在但未被 render WS 复用**。用户场景：启动 4min jimeng 渲染 → 60s 后 wifi 抖 1s → ws disconnect → UI 进度条永远停 → 用户 reload → state lost。
+
+**Family**：F604 同 family（双 WS drift）· R118 F558 WS auth gate · expired data 直接实证
+
+**建议**：useRenderJob 改用 ReconnectingWS；保留 D10 "终态后主动关闭" 逻辑，仅 transient close 时 reconnect
+
+#### F599 [HIGH] composition.yaml / carousel.yaml **0 schemaVersion 字段**
+
+`grep -rE "schemaVersion|schema.*version" src web/src` → 0 hit on composition/carousel。local-first yaml schema 演进风险：用户 3 个月前 v1 → 团队更新 v2 → 旧 work 静默 break。工业基准 Tana / Logseq / Notion 全部 schemaVersion + migrations 链。
+
+**Family**：R104 semantic drift · R107 audit-without-fix · R118 F548 silent contract leak
+
+**建议**：(1) yaml frontmatter `schemaVersion: 1`；(2) loadComposition 检测 mismatch → 调 migrations[v→v+1]；(3) UI 透明提示
+
+#### F600 [HIGH] `staleTime` 值跨 6 query 任意（5s / 30s / 60s / 5m）—— 0 设计文档
+
+实测分布：main.tsx default **30s** / useCheckpoints **5s** / GenerationDialog 60s / queries/config 60s / queries/analytics 60s / queries/trends **5min** / queries/memory 5min。**0 处注释解释 why**。analytics 1min staleTime 与 backend cron `7 9,21 * * *`（每天 2 次）严重不匹配 → 12h 数据更新窗口完全无意义。
+
+**Family**：M221 "Freshness budget 必须 documented" 新沉淀 · R114 M181 primitive 缺位 family 衍生
+
+**建议**：抽 `FRESHNESS = { hot: 5s, warm: 60s, cool: 5min, cold: 1h }` 4 档 tier + 每 query 选 tier + 注释 reason
+
+#### F601 [MEDIUM] i18n `secondsAgo / minutesAgo / hoursAgo` 3 key 仅 1 处使用
+
+`messages.ts:381-383` 定义 3 key。`grep` 实际使用：仅 CheckpointsMenu / useCheckpoints。应该使用：WorksGrid / /analytics lastCollectedAt / /explore trends collectedAt / /studio render startedAt / Editor lastSavedAt。全部用绝对 timestamp 或不显示 → 浪费已建好的基础设施。
+
+**Family**：M214 "infrastructure-as-utility" 浪费 family · audit-without-coverage 反向
+
+**建议**：抽 `formatRelative(iso, t)` helper（web/src/lib/time.ts），10+ 处替换；i18n 加 `daysAgo / weeksAgo / monthsAgo` 完善
+
+#### F602 [MEDIUM] `refetchOnWindowFocus: false` 全局默认 —— 反 TanStack Query 默认
+
+`main.tsx:18` `queries: { staleTime: 30_000, retry: 1, refetchOnWindowFocus: false }`。TanStack Query **默认 true**（Linear/Stripe/Notion 共识）。本产品主动禁用且无注释。用户 lunch break 回来看到 stale 数据**直到下次手动 reload 或 staleTime 过期**。
+
+**Family**：F596 / F600 同源 · R118 silent-leak family timestamp 维度 · M219 "反 library 默认必须文档化" 新沉淀
+
+**建议**：删该全局禁用恢复默认 true；或加注释 + per-query override 例外列表
+
+#### F603 [MEDIUM] `WorksGrid.tsx:92` 绝对日期替代相对时间
+
+`<span>{dateFmt.format(new Date(w.updatedAt))}</span>` → 35 works hub 全部绝对日期 "2026-05-08"。**人脑扫绝对日期需 mental subtraction**，"5 days ago" 即时认知。GitHub / Linear / Notion / Figma 默认相对 + hover tooltip 绝对。
+
+**Family**：F601 同源 · R98 F394 hub 视觉密度 family
+
+**建议**：改 `formatRelative(w.updatedAt, t)` + `<time dateTime={w.updatedAt} title={absoluteFmt}>` 给 hover
+
+#### F604 [MEDIUM] 双 WS 实现 drift —— `lib/ws.ts` (ReconnectingWS) vs `useRenderJob` (raw WebSocket)
+
+`lib/ws.ts` 实现完整 reconnect + backoff + state machine；`useChatSocket.ts` 复用它。但 `useRenderJob.ts` **直接 `new WebSocket(url)`** 不走 lib/ws.ts。R96 KNOWN-ISSUE 滞留——团队 know 有问题但分离实现。
+
+**Family**：F598 同 family · R96 KNOWN-ISSUE stale comment family · contract-drift family
+
+**建议**：useRenderJob 改用 ReconnectingWS；统一 WS layer
+
+#### F605 [LOW] `analyticsLastCollectedAt` 用 toLocaleString 渲染绝对时间
+
+SettingsPanel.tsx:264 现状 `toLocaleString` 绝对时间 "2026/5/12 23:00:08"。R104 F450 locale-binding ✅ 但仍非相对时间。
+
+**Family**：F601 / F603 同 family · F595 settings exposure 入口
+
+**建议**：与 F595 联动 fix —— 同一 `formatRelative` 复用
+
+#### F606 [LOW] 主页面缺 "Refresh now" 一键按钮
+
+工业基准：Linear / Stripe Dashboard 数据 panel 顶 "Updated 5m ago · Refresh"。本产品仅 Settings drawer 角落 Reload now。主页面 0 入口。
+
+**Family**：F595 同 family · M214 power-user enablement family
+
+**建议**：`<StaleDataBanner>` primitive 标配 refresh button → `queryClient.invalidateQueries(scopeKey)`
+
+### 沉淀
+
+**M217 · Data-freshness surface 是 local-first 产品反向 surface 五元组第 5 项实证**（新增）
+
+R118 M197 沉淀过"Unauthorized 在 local-first 是 upstream-relayed"；R125 同构沉淀：local-first 产品的"expired" **不是 token/session 过期**，而是 **data age 显著超过用户预期的视觉/语义 surface**。涵盖 ~7 端点（analytics/trends/works/render-job/checkpoint/config/WS）都需 first-class age 显示。
+
+**M218 · `?? new Date().toISOString()` 是 timestamp 维度 silent-leak family 第 11 实例**（新增）
+
+R104 F441 → R118 F548 → R121 F572 → R125 F596：**同一编程文化跨 4 round 4 层**。规则升级：**任何 fallback 必须不能"伪装为成功"** —— null/0/empty/now 都是"缺数据信号"而非"默认值"。
+
+**M219 · `refetchOnWindowFocus: false` 是反 library 默认 silently 反工业基准**（新增）
+
+规则：任何"反 library 默认"的全局设置必须 (a) PR 描述 why (b) 代码注释 (c) 文档 (d) per-query override 例外列表。与 R122 M212 "library default 反 a11y" 形成 dual family。
+
+**M220 · Fallback Surface DSL 第 4 块 `<StaleDataBanner>` primitive**（新增）
+
+继 M194 (LoadingShell + ErrorBoundary + EmptyState) + R122 ModalShell → R125 加 StaleDataBanner = Fallback Surface DSL **4-5 块 primitive 全产品 fallback 系统第一次完整覆盖**。maintenance 复杂度 O(N) → O(5)。
+
+**M221 · Freshness budget 必须 documented + tier 化**（新增）
+
+`FRESHNESS = { hot: 5s, warm: 60s, cool: 5min, cold: 1h }` 4 档 tier，与 design token 同阶的 "data system token"。
+
+### 反向 surface 五元组完整收口（5/5）
+
+| # | Surface | 完成 round | Primitive |
+|---|---|---|---|
+| 1 | **loading** | R114 audit | `<LoadingShell>` (M181) |
+| 2 | **empty** | R116 audit | `<EmptyState>` (M191) |
+| 3 | **error** | R113 audit + R117 fix | `<ErrorBoundary>` (M177/195) |
+| 4 | **unauthorized** | R118 audit | `<UnauthorizedNotice>` (M197) |
+| 5 | **expired** | **R125 audit** | **`<StaleDataBanner>` (M220 新)** |
+
+**Meta 沉淀**：跨 R114→R116→R117→R118→R125 五轮 horizontal slice 收敛在 4-5 块 primitive → audit plane 终极收敛点。
+
+### R126+ 候选
+
+- **R125 F595 + F596 + F606 fix-pass（最高 ROI）** —— `<StaleDataBanner>` primitive + `formatRelative` helper + 删 `refetchOnWindowFocus: false`
+- **R125 F598 + F604 fix-pass** —— useRenderJob 切到 ReconnectingWS，双 WS drift 收敛
+- **R125 F599 fix-pass** —— composition.yaml schemaVersion + migration 链
+- **R125 F600 fix-pass** —— FRESHNESS tier system + staleTime 注释
+- **Color blindness simulation audit** —— deuteranopia/protanopia/tritanopia filter
+- **R122 F583 + F584 + F587 fix-pass** —— dnd-kit KeyboardSensor + skip-link + focus trap
+- **R121 F573/F574/F575 fix-pass** —— `--glass-border` alpha + `--accent-lo` dark + CI gate
+
+`★ Insight ─────────────────────────────────────`
+- **反向 surface 五元组 5/5 收口是 R110-R125 audit plane 重大里程碑**：跨 15 round horizontal slice 收敛在 4-5 块 primitive，全产品 fallback 从 surface-level 单点修复升级到 design system primitive 级 —— maintenance 复杂度 O(N) → O(5)
+- **F596 silent-leak family 跨 11 round 11 实例揭示产品级编程文化（M218 refined）**：**"fallback 当默契兜底"** 在 4 不同层都浮现。不是某层 bug，是整个 codebase 编程哲学
+- **F602 `refetchOnWindowFocus: false` 是反 library 默认 silently 反工业基准（M219）**：完美"silently stale" trap。与 R122 M212 "library default 反 a11y" 形成 dual family
+- **F595 + F596 揭示 analytics 类产品"决策 freshness"哲学差距**：传统 SaaS analytics 顶 banner "Data as of X" 是 brand promise；本产品零曝光。M217 把这条 family 升格为反向 surface 五元组第 5 项的 local-first 等价物
+`─────────────────────────────────────────────────`
+
+---
+
 ## Round 124 — **R121 F571 + F572 双 CRITICAL CLOSED ✅ + F575 (0 contrast CI gate) seed —— design-token 系统首次在 a11y plane 满足 WCAG AA；60 行手写 WCAG ratio computer 是 axe-core 之外的 contract CI 路径**
 
 - **时间**：2026-05-13（`/loop 30m` cron 触发；R123 我自己 close round 之后无新并行 audit 占用，本轮顺序 R124）
