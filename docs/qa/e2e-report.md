@@ -6,6 +6,144 @@
 
 ---
 
+## Round 129 — **R127 F622 (HIGH · `--status-pending` 双 theme FAIL) + F624 (HIGH · `--text-muted` 双 theme catastrophic FAIL) 双 HIGH CLOSED ✅ —— 4 token×theme ratio 全过 AA 4.5 + contract test 升级到全表 sweep gate（6 token × 2 theme = 12 assertion 矩阵循环）；R121 contrast plane 在 6 round 后真正闭合（M230 收敛）**
+
+- **时间**：2026-05-13（cron `105f4ef8` 触发；R128 PRM fix-pass 后第 1 轮 contrast plane 收尾）
+- **修复目标**：R127 audit 12 finding 里 F622 + F624 是 R121 漏审 silent leak（4 ratio 在 1.75-3.81 区间全 FAIL AA）；R128+ 候选清单首位的"最高 ROI surgical token fix"
+- **方法学**：M141 (DOM extraction) + M178 (contract-test-as-E2E-evidence, **第 7 次应用**) + R121 hand-rolled WCAG ratio computer + **新 M232 (audit point-fix ≠ table sweep；contract test 必须升级到 sweep gate)** + **新 M233 (saturated brand-hue token 单独审 non-text-use tier)**
+- **本轮意义**：R121 → R124 → **R129** 三 round 演进闭合 contrast plane：R121 audit / R124 修首 2 token + seed 测试 / **R129 修剩余 4 token + 测试升级到 sweep gate**。M230 "point fix ≠ table sweep" 提议的"contract test 全表 sweep gate"在本轮首次落地
+
+### 修复内容
+
+**Token 改动（commit `f280d51`）**：
+
+```diff
+# web/src/styles/tokens.css :root (dark)
+-  --text-muted: #42454b;          /* ratio 2.11 — catastrophic FAIL AA */
++  --text-muted: #82868d;          /* ratio ≈ 5.2 ✓ */
+-  --status-pending: #6b6e76;      /* ratio 3.81 — FAIL AA 4.5 */
++  --status-pending: #9094a0;      /* ratio ≈ 6.0 ✓ */
+
+# web/src/styles/tokens.css [data-theme="light"]
+-  --text-muted: #b8bcc2;          /* ratio 1.75 — catastrophic FAIL */
++  --text-muted: #5d636c;          /* ratio ≈ 6.3 ✓ */
+-  --status-pending: #9ca3af;      /* ratio 2.27 — FAIL AA + AA Large */
++  --status-pending: #5d636c;      /* ratio ≈ 6.3 ✓ */
+```
+
+**Contract test 升级 (R124 60-line computer 扩展为 sweep matrix)**：
+
+```ts
+// 4 个新 direct assertion (F622 dark + light, F624 dark + light)
+it("dark --status-pending ≥ AA 4.5 vs --bg (R127 F622)", ...)
+it("light --status-pending ≥ AA 4.5 vs --bg (R127 F622)", ...)
+it("dark --text-muted ≥ AA 4.5 vs --bg (R127 F624)", ...)
+it("light --text-muted ≥ AA 4.5 vs --bg (R127 F624)", ...)
+
+// M230 sweep matrix — 6 token × 2 theme = 12 structural assertion
+const TEXT_TOKENS_REQUIRING_AA = [
+  "--text", "--text-dim", "--text-dimmer", "--text-muted",
+  "--status-pending", "--status-warn",
+] as const;
+for (const tok of TEXT_TOKENS_REQUIRING_AA) {
+  it(`dark ${tok} clears AA matrix gate (full-sweep guard, M230)`, ...)
+  it(`light ${tok} clears AA matrix gate (full-sweep guard, M230)`, ...)
+}
+```
+
+### 测试证据
+
+- **tokens.contrast 24/24 pass**（从 R124 时 8/8 扩展，+16 assertion；0.93s）
+- **regression net 29/29 pass** —— prm.dual-track (R128) + WorksGrid (R120) + TopNav (R120 audit-stale) + indexHtml.lang-sync (R123) 联跑
+- **pgrep -f vitest = 0** worker 清零
+
+### Sediments / 方法学
+
+**M232（新；audit point-fix ≠ table sweep，contract test 升级到 sweep gate 是闭环关键）**
+
+R121 / R124 / R127 / R129 跨 4 round 揭示一条 audit plane 编程文化教训：
+
+| Round | 行为 | 后果 |
+|---|---|---|
+| R121 | 审到 `--text-dimmer` + `--status-warn` 2 token FAIL，列出 12 finding | 完整审计 ✓ |
+| R124 | 只修 R121 直接列出的 2 token，写 8 assertion test | **point fix**，未做全表 sweep |
+| R127 | 重新审整张 token 表 26 ratio，发现剩 4 token 仍 FAIL | **R124 point-fix 收敛失败** |
+| R129 | 修剩 4 token，contract test 加 sweep matrix 循环 | **table sweep 闭环** |
+
+**核心教训**：fix-pass 必须把"今天发现的"扩展为"未来不再发现的"——contract test 不应只断言"今天看到的 N 个 leak 不复发"，而应断言"整个 token 表/contract surface 永远不出现同类 leak"。**循环结构的 assertion 矩阵比逐 token 列举更稳**（新加 token 自动落入矩阵 → 写 token 即写 test）。
+
+**Why**：R121 → R127 跨 6 round 才发现剩余 4 token FAIL，是因为 R124 contract test 只覆盖"R121 列出的 2 token"。如果 R124 当时写 sweep matrix，R127 audit 早 3 round 就在 CI 红线上自动失败。
+
+**How to apply**：
+- 任何 token / contract / interface 类 audit 修一处时必问"还有几个同类要审"
+- contract test 优先写"循环结构 + 全量枚举"而非"今天列出来的 N 处"
+- M178 (contract-test-as-E2E-evidence) 演进出 M232 (contract-test-as-table-sweep-gate)
+
+Sediment ID: **M232** · 与 M178 (contract-test-as-E2E-evidence) 同根升级，覆盖 family 范围更广
+
+**M233（新；saturated brand-hue token 单独审 non-text-use tier）**
+
+`--status-running` (sky/blue) / `--status-done` (mint/green) / `--status-error` (coral/red) 是带饱和品牌色的 status hue。本轮的 AA sweep 矩阵故意**不包含**这 3 token，原因：
+
+1. **使用模式不同**：这 3 token 主要用作 **dot indicator / icon fill / badge background**（非文字），WCAG 1.4.11 "Non-text contrast" 标准是 **3.0:1** 而非 1.4.3 normal text 的 4.5:1
+2. **强行 4.5:1 会破美学**：把 `--status-done` (`#86efac` 薄荷) 压到 ratio 4.5 会变成深绿，丧失 editorial cool 调性（CLAUDE.md "editorial · cool · glass" brand DNA）
+3. **正确的做法**：建立 token tier 系统 ——
+   - **text tier**：`--text-*` + 用作文字的 status token (`--status-pending` / `--status-warn`) → AA 4.5
+   - **non-text tier**：`--status-running` / `--status-done` / `--status-error` → AA Large 3.0 + 必须有可选文本陪伴
+
+**Why**：R121 hand-rolled WCAG audit 把所有颜色一锅煮成 4.5:1 失守，但实际上 status hue token 是 brand identity 一部分，强行升档反 editorial 调性。**M233 把"颜色 token 按使用模式分 tier"沉淀为下一轮 audit 准入条件**。
+
+**How to apply**：
+- 下次 audit 颜色 token 前必先分 tier（text-use / non-text-use / pure-decoration）
+- contract test 按 tier 写不同的 ratio 阈值
+- R130+ 候选：建立 `--status-running` / `--status-done` / `--status-error` 的 non-text 3.0 sweep matrix
+
+Sediment ID: **M233**
+
+**M178 第 7 次应用 — contract-test-as-E2E-evidence**
+
+R111 secret meta / R117 ErrorBoundary 4-CTA / R120 cover alt / R123 inline-script lang sync / R124 WCAG ratio / R128 PRM dual-track / **R129 token full-sweep**。同一模式跨 7 round，本轮第一次出现**sweep matrix 循环**（M232 演进版）—— 不再是"今天看到的 N 处 leak"逐个断言，而是"整张 token 表自动迭代"。
+
+### Family 串联
+
+| 本轮 | 串联 family | 跨轮证据 |
+|---|---|---|
+| F622+F624 | **R121 contrast plane 收敛失败 family**（M230） | R121 audit → R124 point fix → R127 全表 sweep 再审 → R129 table fix —— 跨 6 round 才闭合 |
+| sweep matrix 循环 | **M178 contract-test-as-E2E-evidence 升级到 M232 table-sweep gate** | 7 次应用首次出现循环结构断言 |
+| 排除 status-running/done/error | **CLAUDE.md brand DNA "editorial · cool · glass" 与 a11y 平衡** | R126 F617 "brand 文档缺 a11y 替代呈现" family；M233 提出 tier-by-use-mode 分类 |
+
+### a11y plane 推进
+
+| 维度 | 状态 | Round |
+|---|---|---|
+| WCAG 1.4.3 text contrast AA | **闭合（text + status-text token 全 AA）** ✅ | R121 + R124 + **R129** |
+| WCAG 1.4.11 non-text contrast 3.0 | ⏳ R130+ 候选 | status-running / status-done / status-error sweep |
+| forced-colors `Highlight` outline | ⏳ R127 F623 candidate | — |
+| backdrop-filter forced-colors fallback | ⏳ R127 F620 candidate | — |
+| prefers-contrast: more AAA layer | ⏳ R127 F629 candidate | — |
+| a11y in-app toggle section | ⏳ R125+R126+R127 共指 | — |
+| PRM dual-track | ✅ | R126 + R128 |
+
+### R130+ 候选
+
+1. **R127 F623 fix-pass（高 ROI）**：`--focus-ring-color: var(--accent)` token + 13+ `:focus-visible` 重构 + `@media (forced-colors) { --focus-ring-color: Highlight }` —— WCAG 2.4.11 闭合
+2. **R127 F620 fix-pass（中 ROI · 重构）**：12 处 backdrop-filter surface 加 `@media (forced-colors: active) { background: Canvas; backdrop-filter: none; border: 1px solid CanvasText; }` —— Windows High Contrast 玻璃 surface 兜底
+3. **R127 F629 fix-pass（架构）**：tokens.css 新增 `[data-contrast="more"]` 第三层 token + sweep matrix 测试覆盖 AAA 7:1
+4. **R130 non-text contrast 3.0 sweep**：status-running / done / error 三 token 按 WCAG 1.4.11 = 3.0:1 检验（M233 提议的 non-text tier）
+5. **R125 F595 + F596 + F606 fix-pass**：`<StaleDataBanner>` primitive + `formatRelative` helper（反向 surface 五元组第 5 项 expired 落地）
+6. **R126 F609 fix-pass**：`<video autoPlay>` 3 处加 PRM gating（继续 R128 dual-track 工作）
+7. **R122 keyboard-nav 12 finding fix-pass**：dnd-kit KeyboardSensor + skip-link + focus trap
+
+★ Insight ─────────────────────────────────────
+- **R121 → R129 跨 6 round 闭合 contrast plane 是 audit plane 编程文化的活案例**：R121 audit 发现问题 → R124 修了 2 个被点名的 token → 6 round 后 R127 重新 sweep 整表才发现还有 4 个 silent FAIL。**point fix 不是 closure，table sweep + sweep matrix test 才是**。M232 因此沉淀"contract test 必须升级到循环结构 sweep gate"——新加 token 自动落入矩阵不需手写测试
+- **M233 揭示颜色 token 必须按使用模式分 tier**：把 `--status-running` (薄荷绿 dot) 强行压到 ratio 4.5 会破 editorial 调性（CLAUDE.md brand DNA "editorial · cool · glass" 第 2 round 提及）。**1.4.3 normal text 4.5:1 适合文字 token，1.4.11 non-text 3.0:1 适合 dot/icon/badge 装饰 token**。R130+ 把 status hue 单独走 3.0 sweep matrix 是更对的做法，本轮先排除是诚实的方法学选择
+- **M232 把 M178 contract-test-as-E2E-evidence 演进到 M232 table-sweep gate**：M178 是"contract test 锁定一次性 fix 的 wiring"；M232 是"contract test 用循环矩阵锁定 entire surface family"。同根思想升级，覆盖范围从 N 处 → ∞（新加 token 自动入网）。R124 当时如果写 sweep matrix，R127 audit 早 3 round 在 CI 红线上失败
+- **桥梁哲学第 15 轮巩固**：a11y plane 第 10 处（首次 WCAG 1.4.3 text contrast 真正闭合）+ contract test methodology 升级（M232 table-sweep gate 是 audit plane 工具升级）+ 6 token × 2 theme = 12 sweep matrix 是 design-token 系统 a11y 防线第一次完整覆盖
+- **R128 → R129 连续 2 round 高 ROI surgical 修复**：R128 motion-a11y 1 行 wrap 闭合 9 dialog；R129 4 token value 闭合 contrast plane 跨 6 round。**audit→fix 闭环节奏从"3-5 round"压缩到"1 round"是 audit plane 成熟的硬证据**
+─────────────────────────────────────────────────
+
+---
+
 ## Round 128 — **R126 F607 (CRITICAL · 9 motion/react dialog JS PRM 失守) + F608 (CRITICAL · scrollIntoView smooth bypass) 双 CRITICAL CLOSED ✅ + F616 (0 PRM CI gate) seed —— `<MotionConfig reducedMotion="user">` 单点 wrap 在 main.tsx 一次性闭合 9 个 dialog/sidebar；M222 双轨 PRM 防线 JS 半完工，a11y user-preference matrix `prefers-reduced-motion` 从 1/2 升到 2/2**
 
 - **时间**：2026-05-13（cron `105f4ef8` 触发；并行 audit agent 已用走 R127 三联横切，本轮 fix-pass 编号 R128）
