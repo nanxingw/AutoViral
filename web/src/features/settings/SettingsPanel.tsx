@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { useReducedMotion } from "motion/react";
 import { useSettingsPanelStore } from "@/stores/settings";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useT } from "@/i18n/useT";
@@ -78,6 +79,12 @@ export function SettingsPanel() {
   // system see en-US date format and vice versa.
   const locale = useLocaleStore((s) => s.locale);
   const panelRef = useRef<HTMLDivElement | null>(null);
+  // R126 F608 — the JS scroll-behavior option is independent of the CSS
+  // `prefers-reduced-motion` @media rule (M223), so we read PRM at runtime
+  // and force the non-animated fallback when the user has asked for reduced
+  // motion. Vestibular-sensitive users opening the panel via the Analytics
+  // §2 deep-link would otherwise see a sudden smooth scroll.
+  const prefersReducedMotion = useReducedMotion();
   const { data: config } = useConfig();
   const refreshMut = useRefreshAnalytics();
   const saveMut = useSaveConfig();
@@ -99,8 +106,13 @@ export function SettingsPanel() {
   useEffect(() => {
     if (!open || !focusSection || !draft) return;
     const el = panelRef.current?.querySelector(`[data-section="${focusSection}"]`);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [open, focusSection, draft]);
+    if (el) {
+      el.scrollIntoView({
+        behavior: prefersReducedMotion ? "auto" : "smooth",
+        block: "start",
+      });
+    }
+  }, [open, focusSection, draft, prefersReducedMotion]);
 
   const patch = <K extends keyof AppConfig>(k: K, v: AppConfig[K]) => {
     if (!draft) return;
