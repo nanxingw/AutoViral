@@ -22,13 +22,20 @@
 
   --text: #ecedf0;
   --text-dim: #9a9ea6;
-  --text-dimmer: #62656c;
+  /* R121 F571 — was #62656c (ratio 3.37 vs --bg #0a0b0f, WCAG AA normal text 4.5 FAIL).
+     Lifted to #7a7e85 (ratio ≈ 4.9 vs --bg) so filter pill counts / metric labels /
+     eyebrow text in dark theme satisfy WCAG 2.1 SC 1.4.3 AA for normal-size text. */
+  --text-dimmer: #7a7e85;
   --text-muted: #42454b;
 
   --status-running: #7dd3fc;
   --status-done: #86efac;
   --status-pending: #6b6e76;
   --status-error: #f97066;
+  /* R121 F572 — was completely undefined in both themes; any `var(--status-warn)`
+     consumer silently fell back to the inline second-arg fallback or browser default.
+     Amber-400 in dark gives ratio ≈ 10.5 vs --bg #0a0b0f (AAA). */
+  --status-warn: #fbbf24;
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -69,13 +76,19 @@
 
   --text: #0f1822;
   --text-dim: #545c66;
-  --text-dimmer: #8c929a;
+  /* R121 F571 — was #8c929a (ratio 3.02 vs --bg #fafaf7, WCAG AA normal text 4.5 FAIL).
+     Lowered to #6a7079 (ratio ≈ 4.8 vs --bg) for filter pill counts / metric labels /
+     eyebrow text in light theme to satisfy WCAG 2.1 SC 1.4.3 AA. */
+  --text-dimmer: #6a7079;
   --text-muted: #b8bcc2;
 
   --status-running: #0369a1;
   --status-done: #15803d;
   --status-pending: #9ca3af;
   --status-error: #dc2626;
+  /* R121 F572 — was undefined in light theme. Amber-700 ratio ≈ 4.95 vs --bg #fafaf7
+     (AA normal text), matches the dark-theme counterpart semantically. */
+  --status-warn: #b45309;
 }
 
 /* Accent variants — opt-in via [data-accent] */
