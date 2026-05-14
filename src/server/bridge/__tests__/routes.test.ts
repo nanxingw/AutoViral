@@ -429,14 +429,14 @@ describe("bridge router — Phase 2 docs", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toMatch(/text\/plain/);
     const text = await res.text();
-    expect(text).toMatch(/autoviral CLI/);
+    expect(text).toMatch(/autoviral/i);
   });
 
-  it("GET /docs?topic=00-overview returns the named file", async () => {
-    const res = await app.request("/api/bridge/v1/docs?topic=00-overview");
+  it("GET /docs?topic=00-quickstart returns the named file", async () => {
+    const res = await app.request("/api/bridge/v1/docs?topic=00-quickstart");
     expect(res.status).toBe(200);
     const text = await res.text();
-    expect(text).toMatch(/overview/i);
+    expect(text).toMatch(/quickstart/i);
   });
 
   it("GET /docs?topic=does-not-exist → 404", async () => {
