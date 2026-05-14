@@ -1,7 +1,6 @@
 import { useEffect, useRef, useCallback } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
-import { WebglAddon } from "@xterm/addon-webgl";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import "@xterm/xterm/css/xterm.css";
 import { useTerminalSocket } from "./useTerminalSocket";
@@ -59,11 +58,44 @@ export function TerminalPanel({ workId }: Props) {
   const { send, resize } = useTerminalSocket(workId, handleData);
 
   useEffect(() => {
-    if (!mountRef.current) return;
+    if (!mountRef.current || termRef.current) return;
     let cancelled = false;
     let term: Terminal | null = null;
     let fit: FitAddon | null = null;
     let ro: ResizeObserver | null = null;
+    let fitFrame: number | null = null;
+    let lastFitWidth = 0;
+    let lastFitHeight = 0;
+    let zeroSizeFitRetries = 0;
+
+    const scheduleFit = () => {
+      if (fitFrame !== null) return;
+      fitFrame = requestAnimationFrame(() => {
+        fitFrame = null;
+        const mount = mountRef.current;
+        if (cancelled || !mount || !fit) return;
+
+        const rect = mount.getBoundingClientRect();
+        const dpr = window.devicePixelRatio || 1;
+        const physicalWidth = Math.round(rect.width * dpr);
+        const physicalHeight = Math.round(rect.height * dpr);
+
+        if (physicalWidth <= 0 || physicalHeight <= 0) {
+          if (zeroSizeFitRetries < 4) {
+            zeroSizeFitRetries += 1;
+            scheduleFit();
+          }
+          return;
+        }
+
+        zeroSizeFitRetries = 0;
+        if (physicalWidth === lastFitWidth && physicalHeight === lastFitHeight) return;
+
+        lastFitWidth = physicalWidth;
+        lastFitHeight = physicalHeight;
+        fit.fit();
+      });
+    };
 
     // Hint the browser to prioritize loading JetBrains Mono at the size we'll
     // render. Then wait for ALL fonts to settle before creating the Terminal
@@ -82,7 +114,7 @@ export function TerminalPanel({ workId }: Props) {
     };
 
     ensureFont().then(() => {
-      if (cancelled || !mountRef.current) return;
+      if (cancelled || !mountRef.current || termRef.current) return;
       term = new Terminal({
         fontFamily: TERMINAL_FONT_FAMILY,
         fontSize: 13,
@@ -96,27 +128,37 @@ export function TerminalPanel({ workId }: Props) {
       fit = new FitAddon();
       term.loadAddon(fit);
       term.loadAddon(new ClipboardAddon());
-      try { term.loadAddon(new WebglAddon()); } catch {
-        // WebGL not available — xterm.js falls back to the canvas/DOM renderer
-      }
+      // NOTE: WebglAddon removed. On macOS retina (DPR=2) the WebGL glyph
+      // atlas is built at logical resolution and upsampled with bilinear
+      // filtering when displayed, producing visible ghost halos around
+      // each character — the "重影" the user reported after the font fix
+      // landed. xterm.js's default canvas renderer is DPR-aware out of
+      // the box, and at our usage (chat-like terminal, low refresh rate)
+      // its perf is more than enough. If we ever need WebGL again,
+      // re-enable behind a feature flag with `preserveDrawingBuffer:
+      // false` and an explicit dpr override.
       term.open(mountRef.current);
-      fit.fit();
       termRef.current = term;
       fitRef.current = fit;
 
       term.onData((d) => send(d));
       term.onResize(({ cols, rows }) => resize(cols, rows));
 
-      ro = new ResizeObserver(() => {
-        fit?.fit();
-      });
+      ro = new ResizeObserver(scheduleFit);
       ro.observe(mountRef.current);
+      scheduleFit();
     });
 
     return () => {
       cancelled = true;
+      if (fitFrame !== null) {
+        cancelAnimationFrame(fitFrame);
+        fitFrame = null;
+      }
       ro?.disconnect();
       term?.dispose();
+      if (termRef.current === term) termRef.current = null;
+      if (fitRef.current === fit) fitRef.current = null;
     };
   }, [send, resize]);
 
