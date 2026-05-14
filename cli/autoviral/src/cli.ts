@@ -4,10 +4,12 @@
 // thin so Phase 3 just plugs more handlers in.
 
 import { whoamiCommand } from "./commands/whoami.js";
+import { compCommand } from "./commands/comp.js";
 
 const [, , subcommand, ...rest] = process.argv;
 const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   whoami: whoamiCommand,
+  comp: compCommand,
 };
 
 (async () => {
