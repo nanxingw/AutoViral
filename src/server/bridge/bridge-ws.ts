@@ -11,6 +11,7 @@ import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { uiEventBus, type UiEvent } from "./ui-events.js";
 import { answerAsk } from "./approval-gate.js";
+import { watchCompositionFor } from "./composition-watcher.js";
 
 export interface BridgeWsHandle {
   close: () => void;
@@ -54,6 +55,15 @@ export function attachBridgeWebSocket(
     const off = uiEventBus.subscribe(workId, (event: UiEvent) => {
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event));
     });
+
+    // Phase 3 Task 3.10 — kick off the composition file watcher (idempotent
+    // per workId). External `composition.yaml` edits → composition-changed
+    // events → Studio re-fetches via useBridgeEvents.
+    try {
+      watchCompositionFor(workId);
+    } catch {
+      /* watcher unavailable — events still flow over WS for in-app writes */
+    }
 
     // Inbound: Studio replies to ui-ask events with approval-response frames
     // ({ t: "approval-response", askId, answer }). We route them into the
