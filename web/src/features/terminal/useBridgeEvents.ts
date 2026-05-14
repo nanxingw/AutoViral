@@ -102,15 +102,15 @@ export function useBridgeEvents(workId: string | undefined): void {
           break;
         default:
           // ui-ask is handled by ApprovalPrompt (Task 3.9) on its own WS.
-          // ui-render-progress (Task 3.11) is also Phase-5 polish; treat as
-          // toast for now.
+          // ui-render-progress — Phase 5 Task 5.2 routes through a window
+          // CustomEvent so RenderProgressBar can subscribe without us
+          // owning render-state in the toast store. Render is a stream,
+          // not a model surface.
           if (ev.type === "ui-render-progress") {
             const p = ev.payload as { stage: string; pct?: number };
-            useToastStore.getState().push({
-              variant: "info",
-              message: `${p.stage}${p.pct != null ? ` ${Math.round(p.pct * 100)}%` : ""}`,
-              ttlMs: 1500,
-            });
+            window.dispatchEvent(
+              new CustomEvent("autoviral:ui-render-progress", { detail: p }),
+            );
           }
           break;
       }

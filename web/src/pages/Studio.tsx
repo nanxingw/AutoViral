@@ -12,6 +12,7 @@ import { SafeTimeline as Timeline } from "@/features/studio/panels/Timeline/Safe
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { useBridgeEvents } from "@/features/terminal/useBridgeEvents";
 import { ApprovalPrompt } from "@/features/terminal/ApprovalPrompt";
+import { RenderProgressBar } from "@/features/terminal/RenderProgressBar";
 import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { TopBar } from "@/features/studio/panels/TopBar";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
@@ -229,6 +230,12 @@ export default function Studio() {
           settingsOpen={settingsOpen}
         />
       </div>
+
+      {/* Phase 5 Task 5.2 — render progress strip. Subscribes to bridge
+          ui-render-progress events; renders only while a render is in
+          flight (auto-hides 2s after stage=encode pct=1). Self-mounted
+          so it stays out of TopBar layout / persistent state. */}
+      <RenderProgressBar />
 
       <div style={{ flex: "1 1 auto", minHeight: 0 }}>
         <PanelGroup

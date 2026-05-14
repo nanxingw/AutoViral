@@ -1,0 +1,97 @@
+/* Task 5.2 — render progress strip. Editorial cool-steel: thin glass
+   surface with accent gradient fill bar. Slides down from top when
+   active, auto-hides 2s after stage=encode pct=1.
+*/
+
+@keyframes progressSlideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 28px;
+  padding: 0 14px;
+  border-radius: var(--radius-md, 10px);
+  border: 1px solid var(--glass-border);
+  background: var(--surface-1);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  overflow: hidden;
+  animation: progressSlideDown 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.fill {
+  position: absolute;
+  inset: 0;
+  width: var(--pct, 0%);
+  background: linear-gradient(
+    90deg,
+    var(--accent-lo) 0%,
+    var(--accent) 60%,
+    var(--accent-hi) 100%
+  );
+  opacity: 0.18;
+  pointer-events: none;
+  transition: width 260ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.stage {
+  position: relative;
+  text-transform: uppercase;
+  color: var(--text);
+  font-weight: 500;
+}
+
+.dot {
+  position: relative;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+  animation: pulseDot 1400ms ease-in-out infinite;
+}
+
+@keyframes pulseDot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.55;
+    transform: scale(0.85);
+  }
+}
+
+.pct {
+  position: relative;
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bar {
+    animation: none;
+  }
+  .dot {
+    animation: none;
+  }
+  .fill {
+    transition: none;
+  }
+}
