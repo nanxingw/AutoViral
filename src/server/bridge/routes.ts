@@ -21,6 +21,7 @@ import { createAsk } from "./approval-gate.js";
 import { readCompositionFor, mutateCompositionFor } from "./composition-ops.js";
 import { uiEventBus } from "./ui-events.js";
 import { randomBytes } from "node:crypto";
+import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
 
 function manualDir(): string {
   return process.env.AUTOVIRAL_MANUAL_DIR ?? join(process.cwd(), "skills/autoviral/manual");
@@ -303,6 +304,42 @@ bridgeRouter.post("/ask", async (c) => {
     return c.json({ ok: false, error: "timeout", code: 124 }, 504);
   }
   return c.json({ ok: true, result: { answer } });
+});
+
+// POST /export — wrap runRenderPipeline, stream progress via ui-render-
+// progress events. Phase 5 hardens preset selection; Phase 3 just passes
+// `--proxy` through for fast review renders.
+bridgeRouter.post("/export", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    preset?: string;
+    proxy?: boolean;
+  };
+  try {
+    const comp = await readCompositionFor({ workId: g.workId });
+    const worksRoot =
+      process.env.AUTOVIRAL_WORKS_ROOT ??
+      join(homedir(), ".autoviral/works");
+    const outDir = join(worksRoot, g.workId, "output");
+    const finalPath = await runRenderPipeline({
+      comp,
+      outDir,
+      proxy: body.proxy ?? false,
+      onProgress: (stage: RenderStage, pct: number) => {
+        uiEventBus.publish(g.workId, {
+          type: "ui-render-progress",
+          workId: g.workId,
+          ts: Date.now(),
+          payload: { stage, pct },
+        });
+      },
+    });
+    return c.json({ ok: true, result: { path: finalPath } });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 500);
+  }
 });
 
 bridgeRouter.patch("/clip/:id", async (c) => {
