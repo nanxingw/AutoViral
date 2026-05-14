@@ -10,7 +10,6 @@ dotenv.config();
 export interface Config {
   port: number;
   model: string;
-  jimeng: { accessKey: string; secretKey: string };
   openrouter?: { apiKey: string };
   research: { enabled: boolean; schedule: string; platforms: string[] };
   interests?: string[];
@@ -38,8 +37,12 @@ export function getDefaultConfig(): Config {
   return {
     port: 3271,
     model: "opus",
-    jimeng: { accessKey: "", secretKey: "" },
-    research: { enabled: true, schedule: "0 9,21 * * *", platforms: ["douyin", "xiaohongshu"] },
+    // e2e-report F139: minute :07 not :00. Multi-tenant CLI installs all
+    // firing on the exact same wall-clock minute look like coordinated
+    // scraping to small-red-book / douyin anti-bot heuristics. Offsetting
+    // minute (07 chosen arbitrarily but stable, not random — easier debug)
+    // breaks the synchronisation without changing the twice-daily cadence.
+    research: { enabled: true, schedule: "7 9,21 * * *", platforms: ["douyin", "xiaohongshu"] },
     interests: [],
     analytics: { douyinUrl: "", collectInterval: 60, enabled: true },
   };
@@ -58,12 +61,6 @@ export async function loadConfig(): Promise<Config> {
     config.interests = config.interests ?? [];
 
     // .env overrides
-    if (process.env.JIMENG_ACCESS_KEY) {
-      config.jimeng.accessKey = process.env.JIMENG_ACCESS_KEY;
-    }
-    if (process.env.JIMENG_SECRET_KEY) {
-      config.jimeng.secretKey = process.env.JIMENG_SECRET_KEY;
-    }
     if (process.env.OPENROUTER_API_KEY) {
       config.openrouter = { apiKey: process.env.OPENROUTER_API_KEY };
     }

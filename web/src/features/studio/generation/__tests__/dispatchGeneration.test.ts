@@ -40,7 +40,7 @@ describe("buildGenerationNotification — variant video", () => {
     source: {
       id: "asset-panda-v1", name: "Panda v1",
       uri: "/api/works/w_x/assets/clips/panda-v1.mp4",
-      sourcePrompt: "panda drooping head", sourceModel: "dreamina/seedance-pro/text-to-video",
+      sourcePrompt: "panda drooping head", sourceModel: "bytedance/seedance-2.0",
       sourceWidth: 1080, sourceHeight: 1920, sourceAspectRatio: "9:16",
       sourceDuration: 4, sourceVoice: null,
     },
@@ -50,17 +50,31 @@ describe("buildGenerationNotification — variant video", () => {
   it("uses the autoviral:generate-variant tag", () => {
     expect(n.type).toBe("autoviral:generate-variant");
   });
-  it("auto-wires source.uri as --image-url for the from-image script", () => {
+  it("auto-wires source.uri as --image-url for the seedance script", () => {
     expect(n.message).toContain('"--image-url": "/api/works/w_x/assets/clips/panda-v1.mp4"');
-    expect(n.message).toContain('"script": "dreamina image2video"');
-    expect(n.message).toContain('"executable_kind": "shell"');
+    expect(n.message).toContain('"script": "modules/assets/scripts/seedance_generate.py"');
+    expect(n.message).toContain('"executable_kind": "python"');
   });
   it("operation_type=derive + from_asset_id=source.id", () => {
     expect(n.message).toContain('"operation_type": "derive"');
     expect(n.message).toContain('"from_asset_id": "asset-panda-v1"');
   });
-  it("provenance_hint.model is the dreamina image-to-video form", () => {
-    expect(n.message).toContain('"model": "dreamina/seedance-pro/image-to-video"');
+  it("provenance_hint.model is bytedance/seedance-2.0 (same id for t2v and i2v)", () => {
+    expect(n.message).toContain('"model": "bytedance/seedance-2.0"');
+  });
+  it("uses the same bytedance/seedance-2.0 id in pure t2v mode but omits --image-url", () => {
+    const t2v: GenerationRequest = {
+      mode: "create",
+      params: {
+        kind: "video", prompt: "panda eating bamboo, cinematic",
+        duration: "4", aspectRatio: "9:16",
+      },
+    };
+    const m = buildGenerationNotification(t2v);
+    expect(m.message).toContain('"model": "bytedance/seedance-2.0"');
+    expect(m.message).toContain('"script": "modules/assets/scripts/seedance_generate.py"');
+    // No source / no explicit imageUrl → no --image-url arg.
+    expect(m.message).not.toContain('"--image-url"');
   });
 });
 

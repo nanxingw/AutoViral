@@ -18,9 +18,13 @@
 // have the agent-facing handler spec. Don't duplicate that here.
 //
 // Ported from pandazki/pneuma-skills modes/clipcraft/viewer/generation
-// /dispatchGeneration.ts. Protocol shape preserved; provider mapping adapted
-// to AutoViral's stack (openrouter gpt-5.4-image-2 for image, dreamina/
-// seedance-pro for video, edge-tts for TTS, lyria-3-pro for BGM).
+// /dispatchGeneration.ts. Protocol shape preserved; provider mapping is now
+// OpenRouter-only:
+//   - image → openai/gpt-5.4-image-2 (NanoBanana)
+//   - video → bytedance/seedance-2.0 (Seedance 2.0)
+//   - TTS  → edge-tts/multilingual
+//   - BGM  → google/lyria-3-pro-preview
+// Jimeng / Dreamina CLI fallbacks removed 2026-05-14.
 
 export type AssetKind = "image" | "video" | "audio";
 export type RequestMode = "create" | "variant";
@@ -44,8 +48,8 @@ export interface VideoParams {
   kind: "video";
   prompt: string;
   changeDirection?: string;
-  /** Dreamina/seedance-pro accepts integer-second strings; veo-style "4s"
-   *  not supported. Use unit-less seconds: "4", "6", "8". */
+  /** Seedance 2.0 accepts unit-less seconds; spec restricts to {3, 5, 10}.
+   *  Caller passes a string like "3" / "5" / "10". */
   duration: string;
   aspectRatio?: "16:9" | "9:16" | "1:1" | "4:5" | "3:4" | "21:9" | "auto";
   resolution?: "720p" | "1080p";
@@ -259,9 +263,7 @@ function resolveScriptForRequest(req: GenerationRequest): Resolved {
       if (p.aspectRatio) args["--aspect-ratio"] = p.aspectRatio;
       if (p.resolution) args["--resolution"] = p.resolution;
       if (useFromImage) args["--image-url"] = resolvedImageUrl as string;
-      const modelId = useFromImage
-        ? "dreamina/seedance-pro/image-to-video"
-        : "dreamina/seedance-pro/text-to-video";
+      const modelId = "bytedance/seedance-2.0";
       return {
         params: {
           prompt: p.prompt,
@@ -270,10 +272,8 @@ function resolveScriptForRequest(req: GenerationRequest): Resolved {
           resolution: p.resolution ?? "720p",
           image_url: resolvedImageUrl ?? null,
         },
-        script: useFromImage
-          ? "dreamina image2video"
-          : "dreamina multimodal2video",
-        executableKind: "shell",
+        script: "modules/assets/scripts/seedance_generate.py",
+        executableKind: "python",
         scriptArgs: args,
         provenance: {
           operation_type: operationType,

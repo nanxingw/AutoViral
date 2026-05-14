@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type SettingsFocusSection = "jimeng" | "openrouter" | "research" | "douyin" | "model" | null;
+export type SettingsFocusSection = "openrouter" | "research" | "douyin" | "model" | null;
 
 interface SettingsPanelState {
   open: boolean;

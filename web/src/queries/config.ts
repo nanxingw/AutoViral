@@ -6,9 +6,9 @@ import { CREATOR_ANALYTICS_QUERY_KEY } from "./analytics";
  * R109 F475 — `/api/config` GET no longer round-trips secret plaintext.
  * `secretMeta[k]` ships `{ set: boolean; lastFour: string }` so the UI can
  * show "Currently stored ····AKLT" affordance without ever holding the
- * real value in browser memory. The plaintext `jimengAccessKey` etc.
- * fields stay in the response shape (always `""`) so older clients don't
- * crash on `undefined`.
+ * real value in browser memory. The plaintext `openrouterKey` field stays
+ * in the response shape (always `""`) so older clients don't crash on
+ * `undefined`.
  */
 export interface SecretMetaEntry {
   set: boolean;
@@ -16,14 +16,10 @@ export interface SecretMetaEntry {
 }
 
 export type SecretMeta = {
-  jimengAccessKey: SecretMetaEntry;
-  jimengSecretKey: SecretMetaEntry;
   openrouterKey: SecretMetaEntry;
 };
 
 type RawConfigResponse = {
-  jimengAccessKey?: string;
-  jimengSecretKey?: string;
   openrouterKey?: string;
   secretMeta?: Partial<SecretMeta>;
   douyinUrl?: string;
@@ -35,8 +31,6 @@ type RawConfigResponse = {
 };
 
 export interface AppConfig {
-  jimengAccessKey: string;
-  jimengSecretKey: string;
   openrouterKey: string;
   /**
    * R109 F475 — non-null when server responds with redaction-aware
@@ -64,12 +58,8 @@ export function useConfig() {
     queryFn: async () => {
       const raw = await apiFetch<RawConfigResponse>("/api/config");
       return {
-        jimengAccessKey: raw.jimengAccessKey ?? "",
-        jimengSecretKey: raw.jimengSecretKey ?? "",
         openrouterKey: raw.openrouterKey ?? "",
         secretMeta: {
-          jimengAccessKey: raw.secretMeta?.jimengAccessKey ?? UNSET_META,
-          jimengSecretKey: raw.secretMeta?.jimengSecretKey ?? UNSET_META,
           openrouterKey: raw.secretMeta?.openrouterKey ?? UNSET_META,
         },
         douyinUrl: raw.douyinUrl ?? "",

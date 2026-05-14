@@ -18,8 +18,8 @@ export interface VideoOpts {
   firstFrame?: string
   lastFrame?: string
   resolution?: string
-  duration?: number       // 4-15 seconds (Dreamina CLI)
-  modelVersion?: string   // e.g. 'seedance2.0', 'seedance2.0fast'
+  duration?: number       // seconds; provider-specific allowed values
+  modelVersion?: string   // e.g. 'bytedance/seedance-2.0'
   workId: string
   filename: string
 }

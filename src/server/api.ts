@@ -120,27 +120,13 @@ apiRoutes.get("/api/status", async (c) => {
   });
 });
 
-// R109 F475 — server-side secret redaction. Previously this endpoint
-// round-tripped jimeng / openrouter credentials in plaintext, so any
-// browser extension or third-party script could call `fetch('/api/config')`
-// and walk away with the keys. UI mask + Show/Hide was theater because
-// the secret was already in browser memory.
-//
-// Contract now:
-//   GET  /api/config         → secret fields are always "" in the response;
-//                              `secretMeta[k] = { set, lastFour }` lets the
-//                              UI prove a value exists and show a mask
-//                              without ever transmitting plaintext back.
-//   PUT  /api/config         → for secret-keyed fields, empty-string body
-//                              means "leave the stored value alone"; only
-//                              non-empty submissions overwrite. Existing
-//                              "Save" flow continues to work because the
-//                              draft starts with "" and stays "" unless the
-//                              user types a new value.
-//
-// Keep the secret list in sync with `SECRET_FIELDS` below if you add new
-// credentials.
-const SECRET_FIELDS = ["jimengAccessKey", "jimengSecretKey", "openrouterKey"] as const;
+// R109 F475 — server-side secret redaction. The GET endpoint never returns
+// plaintext credentials; `secretMeta[k] = { set, lastFour }` lets the UI
+// show a "currently stored ····XXXX" hint without holding the secret in
+// browser memory. PUT semantics: empty-string in body for a secret field
+// means "leave the stored value alone" (so the user can save other fields
+// without re-typing keys).
+const SECRET_FIELDS = ["openrouterKey"] as const;
 
 function maskTail(s: string): string {
   if (!s) return "";
@@ -158,24 +144,17 @@ apiRoutes.get("/api/config", async (c) => {
     const parsed = JSON.parse(raw);
     analyticsLastCollectedAt = parsed.collected_at ?? null;
   } catch { /* file may not exist; ok */ }
-  const jimengAccessKey = config.jimeng?.accessKey ?? "";
-  const jimengSecretKey = config.jimeng?.secretKey ?? "";
   const openrouterKey = config.openrouter?.apiKey ?? "";
   // Strip nested plaintext from the spreadable config so we don't accidentally
-  // leak it via ...config below (jimeng/openrouter live under their own keys).
-  const { jimeng: _j, openrouter: _o, ...configRest } = config as unknown as Record<string, unknown> & {
-    jimeng?: { accessKey?: string; secretKey?: string };
+  // leak it via ...config below (openrouter lives under its own key).
+  const { openrouter: _o, ...configRest } = config as unknown as Record<string, unknown> & {
     openrouter?: { apiKey?: string };
   };
   return c.json({
     ...configRest,
     // Secret fields: never returned in plaintext.
-    jimengAccessKey: "",
-    jimengSecretKey: "",
     openrouterKey: "",
     secretMeta: {
-      jimengAccessKey: { set: !!jimengAccessKey, lastFour: maskTail(jimengAccessKey) },
-      jimengSecretKey: { set: !!jimengSecretKey, lastFour: maskTail(jimengSecretKey) },
       openrouterKey: { set: !!openrouterKey, lastFour: maskTail(openrouterKey) },
     },
     douyinUrl: config.analytics?.douyinUrl ?? "",
@@ -199,14 +178,6 @@ apiRoutes.put("/api/config", async (c) => {
     typeof body[k] === "string" && (body[k] as string) === "";
 
   // Map flat frontend fields to nested config structure
-  if (body.jimengAccessKey !== undefined && !isSecretBlank("jimengAccessKey")) {
-    if (!config.jimeng) config.jimeng = { accessKey: "", secretKey: "" };
-    config.jimeng.accessKey = body.jimengAccessKey as string;
-  }
-  if (body.jimengSecretKey !== undefined && !isSecretBlank("jimengSecretKey")) {
-    if (!config.jimeng) config.jimeng = { accessKey: "", secretKey: "" };
-    config.jimeng.secretKey = body.jimengSecretKey as string;
-  }
   if (body.openrouterKey !== undefined && !isSecretBlank("openrouterKey")) {
     config.openrouter = { apiKey: body.openrouterKey as string };
   }

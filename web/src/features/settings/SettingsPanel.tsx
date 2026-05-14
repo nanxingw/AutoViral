@@ -8,8 +8,6 @@ import { useConfig, useRefreshAnalytics, useSaveConfig, type AppConfig, type Sec
 import styles from "./SettingsPanel.module.css";
 
 const EDITABLE_KEYS = [
-  "jimengAccessKey",
-  "jimengSecretKey",
   "openrouterKey",
   "douyinUrl",
   "researchEnabled",
@@ -170,31 +168,6 @@ export function SettingsPanel() {
         <div className={styles.body}>
           {draft ? (
             <>
-              <section data-section="jimeng">
-                <h3 className={styles.sectionLabel}>{t("settings.section.jimeng")}</h3>
-                <p className={styles.sectionHint}>{t("settings.sectionHint.jimeng")}</p>
-                <SecretField
-                  label={t("settings.field.accessKey")}
-                  value={draft.jimengAccessKey}
-                  onChange={(v) => patch("jimengAccessKey", v)}
-                  showLabel={t("settings.show")}
-                  hideLabel={t("settings.hide")}
-                  meta={draft.secretMeta.jimengAccessKey}
-                  storedHintTemplate={t("settings.field.secretStoredHint")}
-                  keepBlankPlaceholder={t("settings.field.secretKeepBlank")}
-                />
-                <SecretField
-                  label={t("settings.field.secretKey")}
-                  value={draft.jimengSecretKey}
-                  onChange={(v) => patch("jimengSecretKey", v)}
-                  showLabel={t("settings.show")}
-                  hideLabel={t("settings.hide")}
-                  meta={draft.secretMeta.jimengSecretKey}
-                  storedHintTemplate={t("settings.field.secretStoredHint")}
-                  keepBlankPlaceholder={t("settings.field.secretKeepBlank")}
-                />
-              </section>
-
               <section data-section="openrouter">
                 <h3 className={styles.sectionLabel}>{t("settings.section.openrouter")}</h3>
                 <p className={styles.sectionHint}>{t("settings.sectionHint.openrouter")}</p>

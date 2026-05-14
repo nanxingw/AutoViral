@@ -50,7 +50,7 @@ describe("formStateToRequest — video variant", () => {
     name: "Panda v1",
     uri: "/api/works/w_x/assets/clips/panda-v1.mp4",
     sourcePrompt: "panda drooping head",
-    sourceModel: "dreamina/seedance-pro/text-to-video",
+    sourceModel: "bytedance/seedance-2.0",
     sourceWidth: 1080,
     sourceHeight: 1920,
     sourceAspectRatio: "9:16",
