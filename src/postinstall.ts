@@ -1,4 +1,4 @@
-import { readdir, readFile, writeFile, mkdir, stat, rm } from "node:fs/promises";
+import { readdir, readFile, writeFile, mkdir, stat, rm, chmod } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -101,6 +101,29 @@ async function installSkillCreator(): Promise<void> {
   }
 }
 
+/**
+ * node-pty 1.1.x ships prebuilt `spawn-helper` binaries via tarballs that
+ * sometimes lose their executable bit when npm extracts them on macOS arm64.
+ * Symptom: `pty.spawn()` fails with `posix_spawnp failed` (ENOEXEC). Re-
+ * chmod +x on every postinstall so the fix is idempotent and survives
+ * dependency upgrades / `npm install` cycles.
+ */
+async function repairNodePtyPermissions(): Promise<void> {
+  const root = join(__dirname, "..", "node_modules", "node-pty", "prebuilds");
+  if (!(await exists(root))) return;
+  const platforms = await readdir(root);
+  for (const platform of platforms) {
+    const helper = join(root, platform, "spawn-helper");
+    if (await exists(helper)) {
+      try {
+        await chmod(helper, 0o755);
+      } catch (err) {
+        console.warn(`autocode: chmod ${helper}:`, err instanceof Error ? err.message : err);
+      }
+    }
+  }
+}
+
 async function main(): Promise<void> {
   try {
     if (!await exists(SOURCE_SKILLS)) {
@@ -114,6 +137,9 @@ async function main(): Promise<void> {
 
     // Install skill-creator from official repo if not present
     await installSkillCreator();
+
+    // Repair node-pty spawn-helper permissions (see fn docstring)
+    await repairNodePtyPermissions();
   } catch (err) {
     console.warn("autocode: postinstall warning:", err instanceof Error ? err.message : err);
     // Don't crash the install
