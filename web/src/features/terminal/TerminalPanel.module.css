@@ -33,6 +33,40 @@
   box-shadow: none;
 }
 
+.statusBadge {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--status-warn);
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--status-warn) 35%, var(--glass-border));
+  background: color-mix(in srgb, var(--status-warn) 8%, transparent);
+}
+
+.reconnectBtn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  cursor: pointer;
+  transition: background 160ms ease, color 160ms ease;
+}
+.reconnectBtn:hover {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.reconnectBtn:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .quickLaunch {
   display: flex;
   gap: 6px;

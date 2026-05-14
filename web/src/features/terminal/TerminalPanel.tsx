@@ -55,7 +55,7 @@ export function TerminalPanel({ workId }: Props) {
     termRef.current?.write(data);
   }, []);
 
-  const { send, resize } = useTerminalSocket(workId, handleData);
+  const { send, resize, status, reconnect } = useTerminalSocket(workId, handleData);
 
   useEffect(() => {
     if (!mountRef.current || termRef.current) return;
@@ -166,11 +166,35 @@ export function TerminalPanel({ workId }: Props) {
     send(cmd + "\r");
   };
 
+  const dotClass =
+    status === "open"
+      ? styles.dotIndicator
+      : `${styles.dotIndicator} ${styles.dotIndicatorDisconnected}`;
+
   return (
-    <div className={styles.shell} data-area="terminal">
+    <div className={styles.shell} data-area="terminal" data-status={status}>
       <div className={styles.header}>
-        <span className={styles.dotIndicator} aria-hidden />
+        <span className={dotClass} aria-hidden />
         <span>TERMINAL · {workId}</span>
+        {status === "reconnecting" && (
+          <span
+            className={styles.statusBadge}
+            data-status="reconnecting"
+            aria-live="polite"
+          >
+            reconnecting…
+          </span>
+        )}
+        {status === "gave-up" && (
+          <button
+            type="button"
+            className={styles.reconnectBtn}
+            onClick={() => reconnect()}
+            data-testid="terminal-reconnect"
+          >
+            reconnect
+          </button>
+        )}
         <div className={styles.quickLaunch}>
           <button type="button" className={styles.quickLaunchBtn} onClick={quickLaunch("claude")}>
             claude
