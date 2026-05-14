@@ -14,6 +14,7 @@ import { ensureSharedDirs } from "../shared-assets.js";
 import { apiRoutes, setWsBridge, setRenderQueue } from "./api.js";
 import { WsBridge } from "../ws-bridge.js";
 import { attachTerminalWebSocket } from "./terminal/terminal-ws.js";
+import { attachBridgeWebSocket } from "./bridge/bridge-ws.js";
 import { startAnalyticsCollector } from "../analytics-collector.js";
 import { RenderQueue, defaultDbPath } from "./render-queue/index.js";
 import { RenderWsRouter } from "./render-ws.js";
@@ -112,14 +113,19 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   // through the single upgrade handler below.
   const terminalWs = attachTerminalWebSocket(null, port);
 
+  // Bridge WS adapter (Phase 3) — subscribes Studio UI to UiEventBus and
+  // accepts approval-response frames from ApprovalPrompt.
+  const bridgeWs = attachBridgeWebSocket(null);
+
   // Route HTTP upgrade events.
   // Render-ws goes FIRST so it gets first dibs on /ws/render/jobs/:id; the
   // wsBridge handles /ws/browser/:workId; terminalWs handles /ws/terminal/:workId;
-  // everything else is rejected.
+  // bridgeWs handles /ws/bridge/:workId; everything else is rejected.
   httpServer.on("upgrade", (req, socket, head) => {
     if (renderWs.handleUpgrade(req, socket, head)) return;
     if (wsBridge.handleUpgrade(req, socket, head)) return;
     if (terminalWs.handleUpgrade(req, socket, head)) return;
+    if (bridgeWs.handleUpgrade(req, socket, head)) return;
     // Unknown upgrade — destroy socket
     socket.destroy();
   });
