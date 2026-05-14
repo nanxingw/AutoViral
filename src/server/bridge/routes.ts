@@ -8,8 +8,13 @@
 import { Hono } from "hono";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
 import type { WhoAmIResponse } from "./schemas.js";
 import { readCompositionFor } from "./composition-ops.js";
+
+function manualDir(): string {
+  return process.env.AUTOVIRAL_MANUAL_DIR ?? join(process.cwd(), "skills/autoviral/manual");
+}
 
 export const bridgeRouter = new Hono();
 
@@ -102,5 +107,27 @@ bridgeRouter.get("/assets", async (c) => {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+// Docs return raw markdown, NOT JSON-wrapped — `autoviral docs` pipes the
+// body straight to stdout for the agent to read. Topic omitted → all
+// manual files concatenated with thematic-break separators, sorted by
+// filename so 00-overview / 10-... ordering is the author's lever.
+bridgeRouter.get("/docs", async (c) => {
+  const topic = c.req.query("topic");
+  const dir = manualDir();
+  try {
+    if (topic) {
+      const file = join(dir, topic.endsWith(".md") ? topic : `${topic}.md`);
+      const md = await readFile(file, "utf8");
+      return c.text(md);
+    }
+    const files = (await readdir(dir)).filter((f) => f.endsWith(".md")).sort();
+    const chunks = await Promise.all(files.map((f) => readFile(join(dir, f), "utf8")));
+    return c.text(chunks.join("\n\n---\n\n"));
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 404);
   }
 });

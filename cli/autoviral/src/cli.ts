@@ -6,12 +6,14 @@
 import { whoamiCommand } from "./commands/whoami.js";
 import { compCommand } from "./commands/comp.js";
 import { listCommand } from "./commands/list.js";
+import { docsCommand } from "./commands/docs.js";
 
 const [, , subcommand, ...rest] = process.argv;
 const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   whoami: whoamiCommand,
   comp: compCommand,
   list: listCommand,
+  docs: docsCommand,
 };
 
 (async () => {

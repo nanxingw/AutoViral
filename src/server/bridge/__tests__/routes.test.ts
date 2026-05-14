@@ -137,3 +137,35 @@ describe("bridge router — Phase 2 read-only composition", () => {
     expect(body.result?.every((a) => a.kind === "video")).toBe(true);
   });
 });
+
+describe("bridge router — Phase 2 docs", () => {
+  const prevManualDir = process.env.AUTOVIRAL_MANUAL_DIR;
+  const MANUAL_DIR = join(__dirname, "../../../../skills/autoviral/manual");
+  beforeAll(() => {
+    process.env.AUTOVIRAL_MANUAL_DIR = MANUAL_DIR;
+  });
+  afterAll(() => {
+    if (prevManualDir === undefined) delete process.env.AUTOVIRAL_MANUAL_DIR;
+    else process.env.AUTOVIRAL_MANUAL_DIR = prevManualDir;
+  });
+
+  it("GET /docs returns concatenated markdown", async () => {
+    const res = await app.request("/api/bridge/v1/docs");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toMatch(/text\/plain/);
+    const text = await res.text();
+    expect(text).toMatch(/autoviral CLI/);
+  });
+
+  it("GET /docs?topic=00-overview returns the named file", async () => {
+    const res = await app.request("/api/bridge/v1/docs?topic=00-overview");
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toMatch(/overview/i);
+  });
+
+  it("GET /docs?topic=does-not-exist → 404", async () => {
+    const res = await app.request("/api/bridge/v1/docs?topic=does-not-exist");
+    expect(res.status).toBe(404);
+  });
+});
