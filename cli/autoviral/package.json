@@ -1,0 +1,27 @@
+{
+  "name": "@autoviral/cli",
+  "version": "0.1.0",
+  "description": "Agent-facing CLI that bridges any shell agent to the AutoViral Studio.",
+  "type": "module",
+  "bin": {
+    "autoviral": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsup src/cli.ts --format esm --target node20 --no-splitting --minify --out-dir dist",
+    "test": "vitest run",
+    "dev": "tsup src/cli.ts --format esm --target node20 --no-splitting --watch --out-dir dist"
+  },
+  "dependencies": {
+    "undici": "^7",
+    "yaml": "^2"
+  },
+  "devDependencies": {
+    "execa": "^9",
+    "tsup": "^8",
+    "typescript": "^5.6",
+    "vitest": "^3"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
