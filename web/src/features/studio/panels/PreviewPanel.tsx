@@ -88,6 +88,22 @@ export function PreviewPanel() {
     else p.play();
   }, []);
 
+  // Phase 3 Task 3.6 — respond to bridge ui-play / ui-pause window events.
+  // useBridgeEvents dispatches these CustomEvents whenever an agent fires
+  // `autoviral play` / `autoviral pause`; we drive the Remotion <Player>
+  // ref imperatively from here so the hook stays oblivious to player
+  // internals.
+  useEffect(() => {
+    const onPlay = () => playerRef.current?.play();
+    const onPause = () => playerRef.current?.pause();
+    window.addEventListener("autoviral:ui-play", onPlay);
+    window.addEventListener("autoviral:ui-pause", onPause);
+    return () => {
+      window.removeEventListener("autoviral:ui-play", onPlay);
+      window.removeEventListener("autoviral:ui-pause", onPause);
+    };
+  }, []);
+
   const seekTo = useCallback((seconds: number) => {
     const p = playerRef.current;
     const fps = comp?.fps ?? 30;
