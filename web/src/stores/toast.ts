@@ -1,7 +1,10 @@
 import { create } from "zustand";
 import { ApiError } from "@/lib/api";
 
-export type ToastVariant = "error" | "info";
+// Task 5.1 — toast variants align with bridge `ui-toast` kind set
+// (success / warn / error / info). The component renders a kind dot per
+// variant; the store stays presentation-agnostic.
+export type ToastVariant = "error" | "info" | "success" | "warn";
 
 export interface ToastEntry {
   id: string;
@@ -73,9 +76,17 @@ export function describeError(
       const localized = t(key);
       // walk() returns the key verbatim for missing entries
       if (localized !== key) {
-        return { message: localized, detail: `${err.status}` };
+        // e2e-report F120: don't leak HTTP status (e.g. "409") to end users
+        // when the localized message already explains the situation. Status
+        // codes are dev-only info — they show up in DevTools network panel
+        // for debugging but don't belong in user-visible toast detail.
+        return { message: localized };
       }
     }
+    // Fallback path (no localized message available): prefer errorCode
+    // identifier over raw HTTP status for the detail line. Status code is
+    // last resort — at least it's a dev/support handhold when nothing else
+    // resolves.
     return { message: err.message, detail: err.errorCode ?? `${err.status}` };
   }
   if (err instanceof Error) {

@@ -17,11 +17,14 @@ import { useToastStore } from "@/stores/toast";
 
 type UiEvent = { type: string; workId: string; ts: number; payload: any };
 
-// kind → toast variant mapping. The toast store only ships info / error;
-// success and warn collapse to info (visual difference is small and the
-// message text already conveys the affect).
-function variantFromKind(kind: string): "info" | "error" {
-  return kind === "error" ? "error" : "info";
+// kind → toast variant mapping. Phase 5 Task 5.1 — the toast store now
+// supports success/warn/error/info directly so the kind-indicator dot
+// reflects the bridge `ui-toast` kind verbatim.
+function variantFromKind(kind: string): "info" | "error" | "success" | "warn" {
+  if (kind === "error") return "error";
+  if (kind === "success") return "success";
+  if (kind === "warn" || kind === "warning") return "warn";
+  return "info";
 }
 
 export function useBridgeEvents(workId: string | undefined): void {

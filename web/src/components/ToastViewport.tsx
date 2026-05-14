@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { useToastStore, describeError } from "@/stores/toast";
 import { useT } from "@/i18n/useT";
 import type { MessageKey } from "@/i18n/useT";
+import styles from "./ToastViewport.module.css";
 
 /**
  * Round 32 — global toast layer. Renders the toast queue + listens on
@@ -9,10 +10,11 @@ import type { MessageKey } from "@/i18n/useT";
  * missing a try/catch, fire-and-forget side effects, etc.) becomes a
  * visible toast instead of a silent console.error.
  *
- * Mounted once at App.tsx level — cooperates with R20/R21/R22's inline
- * error UI: callers that handle their own errors don't generate
- * unhandledrejection events, so no toast fires there. The toast is a
- * **last-resort** safety net for paths the developer forgot.
+ * Task 5.1 — refactored to editorial cool-steel glass:
+ *  - css-module driven (no large inline style soup)
+ *  - kind-dot indicator on the left (success/warn/error/info)
+ *  - mono font for short status text + 24px blur saturate(140%) glass surface
+ *  - slide-up entrance with prefers-reduced-motion override
  */
 export function ToastViewport() {
   const entries = useToastStore((s) => s.entries);
@@ -66,6 +68,8 @@ export function ToastViewport() {
   // empty state render an empty container with no visible footprint.
   return (
     <div
+      className={styles.viewport}
+      data-empty={entries.length === 0 ? "true" : "false"}
       role="region"
       aria-label={t("toast.viewportAriaLabel" as MessageKey)}
       // role="region" does NOT imply aria-live (unlike role="status" /
@@ -74,81 +78,28 @@ export function ToastViewport() {
       // assertive for errors.
       aria-live="polite"
       aria-relevant="additions"
-      style={{
-        position: "fixed",
-        right: 16,
-        bottom: 16,
-        display: entries.length === 0 ? "none" : "flex",
-        flexDirection: "column",
-        gap: 8,
-        zIndex: 1100,
-        maxWidth: "min(420px, calc(100vw - 32px))",
-      }}
     >
       {entries.map((e) => (
         <div
           key={e.id}
+          className={styles.toast}
+          data-variant={e.variant}
           // R40: error toasts upgrade to role="alert" (assertive) so
-          // screen readers interrupt current speech. Info toasts stay
-          // role="status" (polite) — non-urgent feedback shouldn't talk
-          // over the user.
+          // screen readers interrupt current speech. Other variants stay
+          // role="status" (polite).
           role={e.variant === "error" ? "alert" : "status"}
-          style={{
-            padding: "10px 14px",
-            borderRadius: 8,
-            border:
-              e.variant === "error"
-                ? "1px solid var(--status-error, #d4756c)"
-                : "1px solid var(--glass-border)",
-            background:
-              e.variant === "error"
-                ? "rgba(212, 117, 108, 0.08)"
-                : "var(--surface-1)",
-            color:
-              e.variant === "error"
-                ? "var(--status-error, #d4756c)"
-                : "var(--text)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 12,
-            lineHeight: 1.5,
-            backdropFilter: "blur(12px)",
-            display: "flex",
-            gap: 10,
-            alignItems: "flex-start",
-          }}
         >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ wordBreak: "break-word" }}>{e.message}</div>
-            {e.detail && (
-              <div
-                style={{
-                  marginTop: 2,
-                  fontSize: 10,
-                  letterSpacing: "0.06em",
-                  textTransform: "uppercase",
-                  color: "var(--text-dimmer)",
-                }}
-              >
-                {e.detail}
-              </div>
-            )}
+          <span className={styles.dot} aria-hidden="true" />
+          <div className={styles.body}>
+            <div className={styles.message}>{e.message}</div>
+            {e.detail && <div className={styles.detail}>{e.detail}</div>}
           </div>
           <button
             type="button"
             aria-label="Dismiss"
             onClick={() => dismiss(e.id)}
             data-bare
-            style={{
-              flexShrink: 0,
-              border: "none",
-              background: "transparent",
-              cursor: "pointer",
-              color: "currentColor",
-              padding: 0,
-              fontSize: 14,
-              lineHeight: 1,
-              opacity: 0.6,
-            }}
+            className={styles.close}
           >
             ×
           </button>

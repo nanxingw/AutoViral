@@ -47,9 +47,10 @@ describe("describeError", () => {
     });
     const t = (key: string) =>
       key === "serverErrors.work_not_found" ? "作品不存在" : key;
+    // e2e-report F120 — when an i18n localized message resolves, the
+    // status code is intentionally omitted from `detail` (dev-only info).
     expect(describeError(err, t)).toEqual({
       message: "作品不存在",
-      detail: "404",
     });
   });
 
