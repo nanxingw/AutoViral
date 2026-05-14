@@ -19,7 +19,11 @@ export interface OpsContext {
 }
 
 function resolveRoot(ctx: OpsContext): string {
-  return ctx.worksRoot ?? join(homedir(), ".autoviral/works");
+  return (
+    ctx.worksRoot ??
+    process.env.AUTOVIRAL_WORKS_ROOT ??
+    join(homedir(), ".autoviral/works")
+  );
 }
 
 export function compositionPathFor(ctx: OpsContext): string {

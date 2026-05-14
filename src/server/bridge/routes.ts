@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { WhoAmIResponse } from "./schemas.js";
+import { readCompositionFor } from "./composition-ops.js";
 
 export const bridgeRouter = new Hono();
 
@@ -38,4 +39,21 @@ bridgeRouter.get("/whoami", (c) => {
     version: BRIDGE_VERSION,
   };
   return c.json({ ok: true, result: body });
+});
+
+// Phase 2 — read-only composition routes. All three (/comp, /clips, /assets)
+// load the same composition.yaml via composition-ops; we deliberately do NOT
+// keep a cache because the fixture/dev workflow re-reads on every command
+// and an agent that just wrote (Phase 3) must see fresh state immediately.
+
+bridgeRouter.get("/comp", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  try {
+    const comp = await readCompositionFor({ workId: g.workId });
+    return c.json({ ok: true, result: comp });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 500);
+  }
 });

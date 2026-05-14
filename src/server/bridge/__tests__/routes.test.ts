@@ -2,9 +2,15 @@
 // the surface grows in Phase 2-3 with corresponding tests. See
 // docs/superpowers/plans/2026-05-14-agentic-terminal-refactor.md.
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, beforeAll, afterAll } from "vitest";
 import { Hono } from "hono";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import { bridgeRouter } from "../routes.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const FIXTURE_WORKS_ROOT = join(__dirname, "../../../../tests/fixtures");
 
 const app = new Hono().route("/api/bridge/v1", bridgeRouter);
 
@@ -32,5 +38,45 @@ describe("bridge router — Phase 0", () => {
     expect(body.ok).toBe(false);
     expect(body.error).toMatch(/X-AutoViral-Work-Id/);
     expect(body.code).toBe(4);
+  });
+});
+
+describe("bridge router — Phase 2 read-only composition", () => {
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+  beforeAll(() => {
+    process.env.AUTOVIRAL_WORKS_ROOT = FIXTURE_WORKS_ROOT;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  it("GET /comp returns the parsed Composition for the workId header", async () => {
+    const res = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": "sample-work" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result?: { workId: string; tracks: Array<{ kind: string }> };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.result?.workId).toBe("sample-work");
+    expect(body.result?.tracks.some((t) => t.kind === "video")).toBe(true);
+  });
+
+  it("GET /comp without header → 400", async () => {
+    const res = await app.request("/api/bridge/v1/comp");
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /comp with unknown workId → 500 with file-not-found message", async () => {
+    const res = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": "no-such-work" },
+    });
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { ok: boolean; error: string };
+    expect(body.ok).toBe(false);
+    expect(body.error).toMatch(/ENOENT|no such file/i);
   });
 });
