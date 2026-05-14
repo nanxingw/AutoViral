@@ -4,15 +4,18 @@ import { FitAddon } from "@xterm/addon-fit";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import "@xterm/xterm/css/xterm.css";
 import { useTerminalSocket } from "./useTerminalSocket";
+import { useTheme, type Theme } from "../../stores/theme";
 import styles from "./TerminalPanel.module.css";
 
 interface Props {
   workId: string;
 }
 
-// Theme tuned for cool-steel editorial glass — NOT terminal-hacker green.
-// Color tokens fall back to readable defaults if CSS vars not loaded yet.
-const XTERM_THEME = {
+// Two themes tuned for the editorial cool-steel palette. xterm.js does not
+// react to CSS variable changes — we swap the whole theme object at runtime
+// when `useTheme` toggles. Background stays transparent in both so the
+// wrapper's `--surface-0` shows through (no double-paint of the page color).
+const XTERM_THEME_DARK = {
   background: "rgba(0,0,0,0)",
   foreground: "#e6ebf0",
   cursor: "#a8c5d6",
@@ -34,7 +37,38 @@ const XTERM_THEME = {
   brightMagenta: "#d6c0e1",
   brightCyan: "#c0e1d6",
   brightWhite: "#fafaf7",
-};
+} as const;
+
+// Light theme: deep-ink foreground + saturated ANSI palette tuned so every
+// hue clears WCAG AA contrast against paper-white (#fafaf7). The dark theme's
+// pastel ANSI palette (designed for a dark canvas) washed out unreadably here
+// — bright blue/cyan especially. Verified luminance ratios ≥ 4.5:1 on bg.
+const XTERM_THEME_LIGHT = {
+  background: "rgba(0,0,0,0)",
+  foreground: "#1a1d24",
+  cursor: "#2a3a4a",
+  cursorAccent: "#fafaf7",
+  selectionBackground: "rgba(42,58,74,0.22)",
+  black: "#1a1d24",
+  red: "#a8453c",
+  green: "#2f7048",
+  yellow: "#7a5a1c",
+  blue: "#2e5d7a",
+  magenta: "#6a4180",
+  cyan: "#256b62",
+  white: "#5a5f68",
+  brightBlack: "#7a7e87",
+  brightRed: "#c46258",
+  brightGreen: "#3f8a5a",
+  brightYellow: "#9a7634",
+  brightBlue: "#4683a6",
+  brightMagenta: "#8e6aa6",
+  brightCyan: "#388578",
+  brightWhite: "#3a3d44",
+} as const;
+
+const pickXtermTheme = (mode: Theme) =>
+  mode === "light" ? XTERM_THEME_LIGHT : XTERM_THEME_DARK;
 
 // Literal font stack — NOT `var(--font-mono)`. Canvas2D resolves CSS variables
 // inconsistently when xterm.js builds its WebGL glyph atlas before Google
@@ -50,12 +84,26 @@ export function TerminalPanel({ workId }: Props) {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  const theme = useTheme((s) => s.theme);
+  // Ref mirror so the construction effect (which doesn't re-run on theme
+  // change — we don't want to rebuild Terminal and kill the pty) reads the
+  // latest value if the user toggled while the font-load promise was in flight.
+  const themeRef = useRef<Theme>(theme);
+  themeRef.current = theme;
 
   const handleData = useCallback((data: string) => {
     termRef.current?.write(data);
   }, []);
 
   const { send, resize, status, reconnect } = useTerminalSocket(workId, handleData);
+
+  // Hot-swap palette when theme changes. xterm.js v5 supports runtime
+  // `options.theme = ...` reassignment — it re-paints existing rows.
+  useEffect(() => {
+    if (termRef.current) {
+      termRef.current.options.theme = pickXtermTheme(theme);
+    }
+  }, [theme]);
 
   useEffect(() => {
     if (!mountRef.current || termRef.current) return;
@@ -120,7 +168,7 @@ export function TerminalPanel({ workId }: Props) {
         fontSize: 13,
         lineHeight: 1.3,
         cursorBlink: true,
-        theme: XTERM_THEME,
+        theme: pickXtermTheme(themeRef.current),
         allowProposedApi: true,
         scrollback: 5000,
         smoothScrollDuration: 80,
