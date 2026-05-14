@@ -246,6 +246,125 @@ describe("bridge router — Phase 3 UI commands", () => {
   });
 });
 
+describe("bridge router — Phase 3 clip writes", () => {
+  // Use a real tmpdir so atomic renames + zod round-trips actually exercise.
+  // Seeded from the sample-work fixture each test for isolation.
+  let workRoot: string;
+  const workId = "w_clip";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-clip-route-"));
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(
+      join(workRoot, workId, "composition.yaml"),
+      fixture.replace(/workId: sample-work/, `workId: ${workId}`),
+      "utf8",
+    );
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  it("POST /clip appends a video clip and returns the new id", async () => {
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/sample-shot.mp4",
+        track: "video",
+        offset: 4.0,
+        duration: 3.0,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { id: string } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.id).toMatch(/^vc_/);
+
+    // Verify it shows up in GET /clips
+    const list = await app.request("/api/bridge/v1/clips", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const listBody = (await list.json()) as { result: Array<{ id: string }> };
+    expect(listBody.result.some((c) => c.id === body.result!.id)).toBe(true);
+  });
+
+  it("DELETE /clip/:id removes the clip", async () => {
+    const post = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/sample-shot.mp4",
+        track: "video",
+        offset: 8.0,
+        duration: 2.0,
+      }),
+    });
+    const id = ((await post.json()) as { result: { id: string } }).result.id;
+    const del = await app.request(`/api/bridge/v1/clip/${id}`, {
+      method: "DELETE",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    expect(del.status).toBe(200);
+    const list = await app.request("/api/bridge/v1/clips", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const listBody = (await list.json()) as { result: Array<{ id: string }> };
+    expect(listBody.result.some((c) => c.id === id)).toBe(false);
+  });
+
+  it("PATCH /clip/:id updates fields", async () => {
+    const post = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/sample-shot.mp4",
+        track: "video",
+        offset: 11.0,
+        duration: 2.0,
+      }),
+    });
+    const id = ((await post.json()) as { result: { id: string } }).result.id;
+    const patch = await app.request(`/api/bridge/v1/clip/${id}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ trackOffset: 15.5 }),
+    });
+    expect(patch.status).toBe(200);
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const body = (await comp.json()) as {
+      result: { tracks: Array<{ clips: Array<{ id: string; trackOffset: number }> }> };
+    };
+    const found = body.result.tracks
+      .flatMap((t) => t.clips)
+      .find((cl) => cl.id === id);
+    expect(found?.trackOffset).toBe(15.5);
+  });
+});
+
 describe("bridge router — Phase 2 docs", () => {
   const prevManualDir = process.env.AUTOVIRAL_MANUAL_DIR;
   const MANUAL_DIR = join(__dirname, "../../../../skills/autoviral/manual");

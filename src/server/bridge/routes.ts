@@ -16,8 +16,9 @@ import {
   ToastRequestSchema,
   ProgressRequestSchema,
 } from "./schemas.js";
-import { readCompositionFor } from "./composition-ops.js";
+import { readCompositionFor, mutateCompositionFor } from "./composition-ops.js";
 import { uiEventBus } from "./ui-events.js";
+import { randomBytes } from "node:crypto";
 
 function manualDir(): string {
   return process.env.AUTOVIRAL_MANUAL_DIR ?? join(process.cwd(), "skills/autoviral/manual");
@@ -175,6 +176,132 @@ bridgeRouter.post("/progress", async (c) => {
   if (!g.ok) return g.res;
   const body = ProgressRequestSchema.parse(await c.req.json());
   broadcast(g.workId, "ui-progress", body);
+  return c.json({ ok: true });
+});
+
+// ─── Phase 3 — composition write endpoints ──────────────────────────────────
+// All three (POST /clip, PATCH /clip/:id, DELETE /clip/:id) go through
+// mutateCompositionFor which read-modifies-writes atomically + validates
+// via zod. Disk state is left untouched on validation failure. The Phase 3
+// surface is intentionally minimal — agents that need richer mutations
+// (split clips, reframe, smart-crop) compose them client-side and POST
+// the resulting full composition; we add convenience verbs only for the
+// few mutations that recur often enough to justify the round-trip.
+
+function newClipId(track: "video" | "audio" | "overlay" | "text"): string {
+  const prefix =
+    track === "video" ? "vc"
+      : track === "audio" ? "ac"
+      : track === "text" ? "tc"
+      : "oc";
+  return `${prefix}_${randomBytes(3).toString("hex")}`;
+}
+
+bridgeRouter.post("/clip", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json()) as {
+    src?: string;
+    text?: string;
+    track: "video" | "audio" | "overlay" | "text";
+    offset?: number;
+    duration?: number;
+    in?: number;
+    out?: number;
+  };
+  if (!body.track) return c.json({ ok: false, error: "missing track" }, 400);
+  let newId = "";
+  try {
+    await mutateCompositionFor({ workId: g.workId }, (comp) => {
+      const track = comp.tracks.find((t) => t.kind === body.track);
+      if (!track) throw new Error(`No track of kind ${body.track}`);
+      const id = newClipId(body.track);
+      newId = id;
+      const offset = body.offset ?? 0;
+      if (body.track === "video") {
+        if (!body.src) throw new Error("video clip requires --src");
+        track.clips.push({
+          id,
+          kind: "video",
+          src: body.src,
+          in: body.in ?? 0,
+          out: body.out ?? (body.duration ?? 5),
+          trackOffset: offset,
+          transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+          filters: { brightness: 0, contrast: 0, saturation: 0 },
+        } as any);
+      } else if (body.track === "audio") {
+        if (!body.src) throw new Error("audio clip requires --src");
+        track.clips.push({
+          id,
+          kind: "audio",
+          src: body.src,
+          in: body.in ?? 0,
+          out: body.out ?? (body.duration ?? 5),
+          trackOffset: offset,
+          volume: 1,
+          fadeIn: 0,
+          fadeOut: 0,
+        } as any);
+      } else if (body.track === "text") {
+        if (!body.text) throw new Error("text clip requires --text");
+        track.clips.push({
+          id,
+          kind: "text",
+          text: body.text,
+          trackOffset: offset,
+          duration: body.duration ?? 3,
+        } as any);
+      } else {
+        throw new Error(`overlay track not yet supported in Phase 3`);
+      }
+      return comp;
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 400);
+  }
+  return c.json({ ok: true, result: { id: newId } });
+});
+
+bridgeRouter.delete("/clip/:id", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  try {
+    await mutateCompositionFor({ workId: g.workId }, (comp) => ({
+      ...comp,
+      tracks: comp.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.filter((cl: any) => cl.id !== id),
+      })),
+    }) as any);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 400);
+  }
+  return c.json({ ok: true });
+});
+
+bridgeRouter.patch("/clip/:id", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  const patch = (await c.req.json()) as Record<string, unknown>;
+  try {
+    await mutateCompositionFor({ workId: g.workId }, (comp) => ({
+      ...comp,
+      tracks: comp.tracks.map((t) => ({
+        ...t,
+        clips: t.clips.map((cl: any) =>
+          cl.id === id ? { ...cl, ...patch } : cl,
+        ),
+      })),
+    }) as any);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 400);
+  }
   return c.json({ ok: true });
 });
 
