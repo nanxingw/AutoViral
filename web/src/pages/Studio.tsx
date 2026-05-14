@@ -10,6 +10,7 @@ import {
 import { PreviewPanel } from "@/features/studio/panels/PreviewPanel";
 import { SafeTimeline as Timeline } from "@/features/studio/panels/Timeline/SafeTimeline";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
+import { useBridgeEvents } from "@/features/terminal/useBridgeEvents";
 import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { TopBar } from "@/features/studio/panels/TopBar";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
@@ -72,6 +73,10 @@ export default function Studio() {
   // instead of the stale time-stamp.
   const [saveError, setSaveError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  // Phase 3 — subscribe to bridge UI command events so `autoviral select/
+  // seek/play/pause/toast` mutate Studio state in real time.
+  useBridgeEvents(workId);
 
   // e2e-report F66: pipe Cmd+S save round-trip back into TopBar state so the
   // "UNSAVED" indicator actually flips after manual save.

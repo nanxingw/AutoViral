@@ -1,0 +1,117 @@
+// Phase 3 Task 3.5 — subscribe Studio to /ws/bridge/:workId.
+//
+// The hook owns a single WebSocket per workId and routes incoming
+// UiEvent frames into the appropriate store. It intentionally re-uses
+// the existing zustand stores (useComposition for select/seek,
+// useToastStore for toasts) rather than introducing a new "bridge
+// state" store — every bridge event is a *command*, not a piece of
+// shared state.
+//
+// play / pause are dispatched as window CustomEvents so PreviewPanel
+// (Task 3.6) can imperatively poke its <Player> ref without us
+// reaching into its internals.
+
+import { useEffect } from "react";
+import { useComposition } from "@/features/studio/store";
+import { useToastStore } from "@/stores/toast";
+
+type UiEvent = { type: string; workId: string; ts: number; payload: any };
+
+// kind → toast variant mapping. The toast store only ships info / error;
+// success and warn collapse to info (visual difference is small and the
+// message text already conveys the affect).
+function variantFromKind(kind: string): "info" | "error" {
+  return kind === "error" ? "error" : "info";
+}
+
+export function useBridgeEvents(workId: string | undefined): void {
+  useEffect(() => {
+    if (!workId) return;
+    const proto = window.location.protocol === "https:" ? "wss" : "ws";
+    const url = `${proto}://${window.location.host}/ws/bridge/${workId}`;
+    const ws = new WebSocket(url);
+
+    ws.onmessage = (e) => {
+      let ev: UiEvent;
+      try {
+        ev = JSON.parse(e.data);
+      } catch {
+        return;
+      }
+      const store = useComposition.getState();
+      switch (ev.type) {
+        case "ui-select": {
+          const target = ev.payload as { kind: string; id?: string };
+          if (target?.kind === "clip" && target.id) store.setSelection(target.id);
+          else if (target?.kind === "none") store.setSelection(null);
+          // track selection (highlight only, no store field for it yet) ignored
+          break;
+        }
+        case "ui-seek": {
+          const fps = store.comp?.fps ?? 30;
+          const seconds = (ev.payload as { seconds: number }).seconds ?? 0;
+          store.setFrame(Math.round(seconds * fps));
+          break;
+        }
+        case "ui-play":
+        case "ui-pause":
+          window.dispatchEvent(new CustomEvent(`autoviral:${ev.type}`));
+          break;
+        case "ui-toast": {
+          const p = ev.payload as { message: string; kind?: string; durationMs?: number };
+          useToastStore.getState().push({
+            variant: variantFromKind(p.kind ?? "info"),
+            message: p.message,
+            ttlMs: p.durationMs ?? 3000,
+          });
+          break;
+        }
+        case "ui-progress": {
+          const p = ev.payload as { phase: string; label?: string };
+          useToastStore.getState().push({
+            variant: "info",
+            message:
+              p.phase === "start"
+                ? `${p.label ?? "working"}…`
+                : p.phase === "done"
+                  ? "done"
+                  : `${p.label ?? "step"} ${(p as any).n ?? ""}`,
+            ttlMs: 2000,
+          });
+          break;
+        }
+        case "composition-changed":
+          // Phase 3 Task 3.10 — re-fetch from disk. Kept as dynamic import
+          // so this hook stays free of a hard dep on the composition
+          // service (which has its own test surface).
+          import("@/features/studio/services/composition")
+            .then(({ loadComposition }) =>
+              loadComposition(workId).then(
+                (found) => found && useComposition.getState().loadComposition(found),
+              ),
+            )
+            .catch(() => {
+              /* swallow — refetch failure is non-fatal */
+            });
+          break;
+        default:
+          // ui-ask is handled by ApprovalPrompt (Task 3.9) on its own WS.
+          // ui-render-progress (Task 3.11) is also Phase-5 polish; treat as
+          // toast for now.
+          if (ev.type === "ui-render-progress") {
+            const p = ev.payload as { stage: string; pct?: number };
+            useToastStore.getState().push({
+              variant: "info",
+              message: `${p.stage}${p.pct != null ? ` ${Math.round(p.pct * 100)}%` : ""}`,
+              ttlMs: 1500,
+            });
+          }
+          break;
+      }
+    };
+
+    return () => {
+      ws.close();
+    };
+  }, [workId]);
+}
