@@ -202,6 +202,30 @@ autoviral export --proxy               # faster preview render
 
 Alias for `autoviral export --proxy`. Use for quick review cycles.
 
+## Ingest
+
+### `autoviral ingest youtube <url> [--lang zh-CN] [--model <openrouter-id>]`
+
+Download a YouTube URL into the current work, transcribe with Whisper, translate to the target language via OpenRouter, then bootstrap `composition.yaml` with overlay captions.
+
+```bash
+autoviral ingest youtube "https://www.youtube.com/watch?v=XXX"
+autoviral ingest youtube "$URL" --lang zh-CN
+autoviral ingest youtube "$URL" --model anthropic/claude-haiku-4-5
+```
+
+Long-running — typical 5-minute clip takes 3–6 minutes wall time (Whisper dominates). Progress emits via `ui-progress` / `ui-toast` so the Studio shows status; CLI blocks on the final HTTP response.
+
+Prints on success:
+```
+assets/clips/source.mp4
+duration 312.50s · 47 segments · en → zh-CN
+```
+
+Failure surfaces the failing step (`download / probe / transcribe / translate / compose`) on stderr; exit 5xx-equivalent.
+
+See `recipes/ingest-youtube.md` for the full editorial loop after ingest lands.
+
 ## Exit codes
 
 | Code | Meaning |

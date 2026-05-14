@@ -33,6 +33,7 @@ See `recipes/`:
 - `generate-i2v-batch.md`
 - `apply-platform-preset.md`
 - `add-subtitle-overlay.md`
+- `ingest-youtube.md` — turn a YouTube URL into a 中文 short via the one-shot `autoviral ingest youtube` pipeline
 
 ## Contracts
 
