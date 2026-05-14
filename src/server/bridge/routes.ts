@@ -394,7 +394,7 @@ bridgeRouter.patch("/clip/:id", async (c) => {
 bridgeRouter.post("/ingest/youtube", async (c) => {
   const got = workIdOrError(c);
   if (!got.ok) return got.res;
-  type IngestBody = { url?: string; language?: string; model?: string };
+  type IngestBody = { url?: string; language?: string; model?: string; start?: number; end?: number };
   const body = (await c.req.json<IngestBody>().catch(() => ({} as IngestBody))) as IngestBody;
   if (!body.url || typeof body.url !== "string") {
     return c.json({ ok: false, error: "Body must include { url: string }" }, 400);
@@ -404,6 +404,8 @@ bridgeRouter.post("/ingest/youtube", async (c) => {
     url: body.url,
     targetLanguage: body.language ?? "zh-CN",
     translateModel: body.model,
+    startSec: typeof body.start === "number" ? body.start : undefined,
+    endSec: typeof body.end === "number" ? body.end : undefined,
   });
   if (!result.ok) {
     return c.json({ ok: false, step: result.step, error: result.error, code: (result as any).code }, 500);

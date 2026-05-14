@@ -25,7 +25,7 @@ export async function ingestCommand(args: string[]): Promise<void> {
 async function ingestYouTubeCommand(args: string[]): Promise<void> {
   const flags = parseFlags(args);
   if (!flags.url) {
-    process.stderr.write("autoviral: ingest youtube <url> [--lang zh-CN] [--model <openrouter-id>]\n");
+    process.stderr.write("autoviral: ingest youtube <url> [--lang zh-CN] [--model <openrouter-id>] [--start <s>] [--end <s>]\n");
     process.exit(4);
   }
   const ctx = readContext();
@@ -40,6 +40,8 @@ async function ingestYouTubeCommand(args: string[]): Promise<void> {
     url: flags.url,
     language: flags.lang ?? "zh-CN",
     model: flags.model,
+    start: flags.start,
+    end: flags.end,
   });
   process.stdout.write(
     `${result.sourceClipPath}\nduration ${result.durationSec.toFixed(2)}s · ${result.segmentCount} segments · ${result.language} → ${result.targetLanguage}\n`,
@@ -50,6 +52,8 @@ interface IngestFlags {
   url?: string;
   lang?: string;
   model?: string;
+  start?: number;
+  end?: number;
 }
 
 function parseFlags(args: string[]): IngestFlags {
@@ -60,6 +64,10 @@ function parseFlags(args: string[]): IngestFlags {
       flags.lang = args[++i];
     } else if (a === "--model") {
       flags.model = args[++i];
+    } else if (a === "--start") {
+      flags.start = Number(args[++i]);
+    } else if (a === "--end") {
+      flags.end = Number(args[++i]);
     } else if (a.startsWith("--")) {
       process.stderr.write(`autoviral: unknown flag ${a}\n`);
       process.exit(4);

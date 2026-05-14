@@ -23,7 +23,7 @@ import {
   writeCompositionFor,
 } from "./composition-ops.js";
 import { loadConfig } from "../../config.js";
-import type { Composition } from "../../shared/composition.js";
+import { type Composition, makeEmptyComposition } from "../../shared/composition.js";
 
 // Thin shim so call sites read like "emit X" — keeps the visual flow tight.
 function emit(event: UiEvent): void {
@@ -51,6 +51,11 @@ export interface IngestYouTubeOptions {
   targetLanguage?: string;
   /** Override OpenRouter chat model for translation. */
   translateModel?: string;
+  /** Optional source-time start (seconds). When combined with `endSec`,
+   *  yt-dlp downloads only this window via --download-sections. */
+  startSec?: number;
+  /** Optional source-time end (seconds). */
+  endSec?: number;
 }
 
 export interface IngestYouTubeResult {
@@ -112,25 +117,42 @@ export async function ingestYouTubeIntoWork(
     payload: { phase: "start", label: "YouTube ingest", steps: 5 },
   });
 
-  // ─── Step 1: yt-dlp download ─────────────────────────────────────────────
-  try {
+  // ─── Step 1: yt-dlp download (idempotent — skipped if source.mp4 exists) ─
+  const { stat } = await import("node:fs/promises");
+  const sourceExists = await stat(sourceClipAbs).then(() => true).catch(() => false);
+  if (sourceExists) {
     emit({ type: "ui-toast", workId, ts: Date.now(),
-      payload: { message: "Downloading from YouTube…", kind: "info", durationMs: 3000 } });
-    await execFileAsync(
-      "yt-dlp",
-      [
-        "-f", "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+      payload: { message: "Source already on disk — skipping download", kind: "info", durationMs: 3000 } });
+  } else {
+    try {
+      const sectionLabel = opts.startSec != null || opts.endSec != null
+        ? ` [${opts.startSec ?? 0}s–${opts.endSec ?? "end"}s]`
+        : "";
+      emit({ type: "ui-toast", workId, ts: Date.now(),
+        payload: { message: `Downloading from YouTube${sectionLabel}…`, kind: "info", durationMs: 3000 } });
+      // 720p cap — ingest is for short-form remix, not archival. Capping at
+      // 720p cuts download size by ~5–10× on 4K source videos. `worst` is
+      // the last-resort safety net so the download never escalates to a
+      // multi-GB master.
+      const ytArgs: string[] = [
+        "-f", "bv*[height<=720][ext=mp4]+ba[ext=m4a]/b[height<=720][ext=mp4]/bv*[height<=720]+ba/best[height<=720]/worst",
         "--merge-output-format", "mp4",
         "-o", sourceClipAbs,
         "--no-playlist",
-        "--no-progress",
         "--no-warnings",
-        url,
-      ],
-      { timeout: 600_000, maxBuffer: 32 * 1024 * 1024 },
-    );
-  } catch (err: any) {
-    return downloadError(workId, err);
+      ];
+      if (opts.startSec != null || opts.endSec != null) {
+        const start = opts.startSec ?? 0;
+        const end = opts.endSec ?? 999999;
+        // `--download-sections` requires ffmpeg post-processing; yt-dlp
+        // muxes the slice into the output file automatically.
+        ytArgs.push("--download-sections", `*${start}-${end}`);
+      }
+      ytArgs.push(url);
+      await execFileAsync("yt-dlp", ytArgs, { timeout: 900_000, maxBuffer: 32 * 1024 * 1024 });
+    } catch (err: any) {
+      return downloadError(workId, err);
+    }
   }
   emit({ type: "ui-progress", workId, ts: Date.now(), payload: { phase: "step", n: 1 } });
 
@@ -282,16 +304,23 @@ async function transcribeWithStableWhisper(audioPath: string): Promise<
   | { language: string; segments: SourceSegment[] }
   | { error: string; code: string }
 > {
-  // Use the stable-ts package (`import stable_whisper`) per
-  // reference_stable_whisper_pypi.md. Inline a tiny driver instead of
-  // depending on a separate scripts/ file — keeps the install surface
-  // smaller and matches the existing /api/audio/captions pattern.
+  // Whisper's `model.transcribe()` prints progress chatter ("Detected
+  // language: en", a progress bar, etc.) to stdout — we can't json-parse
+  // raw stdout. Write the result to a sidecar JSON file instead and
+  // read it back from disk. Stable-ts package (`import stable_whisper`)
+  // per reference_stable_whisper_pypi.md.
+  const { mkdtemp, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join: pathJoin } = await import("node:path");
+  const tmpDir = await mkdtemp(pathJoin(tmpdir(), "autoviral-whisper-"));
+  const outPath = pathJoin(tmpDir, "result.json");
   const py = `
 import json, sys
 try:
     import stable_whisper
 except Exception as e:
-    print(json.dumps({"error": "stable-whisper not installed: " + str(e)}))
+    with open(${JSON.stringify(outPath)}, "w", encoding="utf-8") as f:
+        json.dump({"error": "stable-whisper not installed: " + str(e)}, f)
     sys.exit(0)
 model = stable_whisper.load_model("base")
 result = model.transcribe(${JSON.stringify(audioPath)})
@@ -299,23 +328,29 @@ language = getattr(result, "language", "auto") or "auto"
 segs = []
 for s in result.segments:
     segs.append({"start": float(s.start), "end": float(s.end), "text": s.text.strip()})
-print(json.dumps({"language": language, "segments": segs}, ensure_ascii=False))
+with open(${JSON.stringify(outPath)}, "w", encoding="utf-8") as f:
+    json.dump({"language": language, "segments": segs}, f, ensure_ascii=False)
 `;
-  const { stdout } = await execFileAsync("python3", ["-c", py], {
-    timeout: 900_000,
-    maxBuffer: 32 * 1024 * 1024,
-  });
-  const parsed = JSON.parse(stdout);
-  if (parsed.error) {
+  try {
+    await execFileAsync("python3", ["-c", py], {
+      timeout: 900_000,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    const raw = await readFile(outPath, "utf-8");
+    const parsed = JSON.parse(raw);
+    if (parsed.error) {
+      return {
+        error: `${parsed.error}. Run \`pip install stable-ts\` to enable ASR (the PyPI package is stable-ts, the import alias is stable_whisper).`,
+        code: "PYTHON_DEP_MISSING",
+      };
+    }
     return {
-      error: `${parsed.error}. Run \`pip install stable-ts\` to enable ASR (the PyPI package is stable-ts, the import alias is stable_whisper).`,
-      code: "PYTHON_DEP_MISSING",
+      language: parsed.language ?? "auto",
+      segments: parsed.segments ?? [],
     };
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
-  return {
-    language: parsed.language ?? "auto",
-    segments: parsed.segments ?? [],
-  };
 }
 
 // ──────────────────────────────────────────────────────────────────────────
@@ -442,26 +477,17 @@ async function bootstrapComposition(opts: BootstrapOpts): Promise<void> {
   try {
     comp = await readCompositionFor({ workId });
   } catch {
-    // composition.yaml doesn't exist yet — write a fresh default skeleton.
-    comp = {
-      id: `comp_${workId}`,
-      workId,
-      fps: 30,
-      width: 1080,
-      height: 1920,
-      duration: durationSec,
-      aspect: "9:16",
-      tracks: [],
-      assets: [],
-      provenance: [],
-      exportPresets: [],
-    } as unknown as Composition;
+    // First-time write — use the canonical skeleton builder so we get
+    // schema-valid defaults (4 tracks, updatedAt, etc.) without having
+    // to track each new required field by hand.
+    comp = makeEmptyComposition({ workId, aspect: "9:16", duration: durationSec, fps: 30 });
   }
 
-  // Ensure video track exists.
+  // Ensure a video track exists (skeleton ships with one, but pre-existing
+  // compositions may have been trimmed by the user).
   let videoTrack = comp.tracks?.find((t) => t.kind === "video");
   if (!videoTrack) {
-    videoTrack = { id: "trk_video_main", kind: "video", label: "main", muted: false, hidden: false, clips: [] } as any;
+    videoTrack = { id: "video-0", kind: "video", label: "Video", muted: false, hidden: false, clips: [] } as any;
     comp.tracks = [...(comp.tracks ?? []), videoTrack!];
   }
 
@@ -478,14 +504,13 @@ async function bootstrapComposition(opts: BootstrapOpts): Promise<void> {
     trackOffset: 0,
   } as any);
 
-  // Update asset registry entry for the source.
-  comp.assets = (comp.assets ?? []).filter((a: any) => a.path !== sourceClipRel);
+  // Update asset registry. AssetEntry schema uses `uri`, not `path`.
+  comp.assets = (comp.assets ?? []).filter((a: any) => a.uri !== sourceClipRel);
   comp.assets.push({
     id: "a_source",
-    name: "source.mp4",
+    uri: sourceClipRel,
     kind: "video",
-    path: sourceClipRel,
-    sourceUrl: null,
+    name: "source.mp4",
     metadata: { durationMs: Math.round(durationSec * 1000) },
     status: "ready",
   } as any);
@@ -495,6 +520,7 @@ async function bootstrapComposition(opts: BootstrapOpts): Promise<void> {
   (comp as any).captions = buildCaptionModel(translatedSegments, targetLanguage);
 
   comp.duration = Math.max(comp.duration ?? 0, durationSec);
+  comp.updatedAt = new Date().toISOString();
 
   await writeCompositionFor({ workId }, comp);
 }
