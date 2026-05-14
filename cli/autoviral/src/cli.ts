@@ -1,34 +1,43 @@
 #!/usr/bin/env node
-// Entry. Phase 0 stub — real commands land in Phase 2.
-// The dispatcher pattern + exit-code conventions are intentionally
-// established here so Phase 2 just plugs handlers in.
+// Entry. Phase 2: read-only command surface (whoami / docs / comp / list).
+// The dispatcher pattern + exit-code conventions are intentionally kept
+// thin so Phase 3 just plugs more handlers in.
 
-const EXIT = {
-  OK: 0,
-  USER_NO: 1,
-  WRONG_STATE: 2,
-  PROTOCOL: 3,
-  VALIDATION: 4,
-  TIMEOUT: 124,
-  UNKNOWN_CMD: 127,
-} as const;
+import { whoamiCommand } from "./commands/whoami.js";
+
+const [, , subcommand, ...rest] = process.argv;
+const dispatch: Record<string, (args: string[]) => Promise<void>> = {
+  whoami: whoamiCommand,
+};
+
+(async () => {
+  if (!subcommand || subcommand === "--help" || subcommand === "-h") {
+    process.stdout.write(usage());
+    process.exit(0);
+  }
+  const handler = dispatch[subcommand];
+  if (!handler) {
+    process.stderr.write(`autoviral: unknown command "${subcommand}"\n`);
+    process.exit(127);
+  }
+  await handler(rest);
+})().catch((e) => {
+  process.stderr.write(`autoviral: ${e.message ?? String(e)}\n`);
+  process.exit(3);
+});
 
 function usage(): string {
   return [
     "autoviral — bridge between shell agents and the AutoViral Studio.",
     "",
-    "Phase 0 stub: command surface lands in Phase 2.",
-    "See docs/superpowers/plans/2026-05-14-agentic-terminal-refactor.md",
+    "Commands:",
+    "  whoami              Print current Studio context (workId, cwd, port)",
+    "  docs [topic]        Print operator manual",
+    "  comp show           Print composition.yaml",
+    "  list clips [...]    List video clips",
+    "  list assets [...]   List assets",
+    "",
+    "Run `autoviral docs` for the full manual.",
     "",
   ].join("\n");
 }
-
-const [, , subcommand, ..._rest] = process.argv;
-
-if (!subcommand || subcommand === "--help" || subcommand === "-h") {
-  process.stdout.write(usage());
-  process.exit(EXIT.OK);
-}
-
-process.stderr.write(`autoviral: unknown command "${subcommand}" (Phase 0 stub)\n`);
-process.exit(EXIT.UNKNOWN_CMD);
