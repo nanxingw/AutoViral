@@ -11,7 +11,10 @@ logs/
 docs/experience/
 # Sensitive keys
 docs/superpowers/specs/AccessKey.txt
-docs/superpowers/
+# Track plans / specs / notes in repo (refactor blueprints belong in git);
+# only ignore subdirs that hold transient agent state or large artifacts.
+docs/superpowers/cache/
+docs/superpowers/runs/
 .env
 ..bfg-report/
 .superpowers/
