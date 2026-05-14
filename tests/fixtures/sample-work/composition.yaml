@@ -1,0 +1,68 @@
+id: c_sample-work
+workId: sample-work
+fps: 30
+width: 1080
+height: 1920
+duration: 12.0
+aspect: "9:16"
+updatedAt: "2026-05-14T00:00:00.000Z"
+tracks:
+  - id: video-0
+    kind: video
+    label: Video
+    muted: false
+    hidden: false
+    clips:
+      - id: vc_s01
+        kind: video
+        src: assets/sample-shot.mp4
+        in: 0
+        out: 4.0
+        trackOffset: 0
+  - id: audio-0
+    kind: audio
+    label: BGM
+    muted: false
+    hidden: false
+    clips:
+      - id: ac_bgm01
+        kind: audio
+        src: assets/sample-bgm.mp3
+        in: 0
+        out: 12.0
+        trackOffset: 0
+        type: bgm
+  - id: text-0
+    kind: text
+    label: Subtitles
+    muted: false
+    hidden: false
+    clips:
+      - id: tc_hook01
+        kind: text
+        text: "Sample hook line"
+        trackOffset: 0
+        duration: 3.0
+assets:
+  - id: a_video_01
+    uri: assets/sample-shot.mp4
+    kind: video
+    name: sample-shot.mp4
+    metadata:
+      width: 1080
+      height: 1920
+      duration: 4.0
+      fps: 30
+      codec: h264
+    status: ready
+  - id: a_audio_01
+    uri: assets/sample-bgm.mp3
+    kind: audio
+    name: sample-bgm.mp3
+    metadata:
+      duration: 12.0
+      sampleRate: 44100
+      channels: 2
+    status: ready
+provenance: []
+exportPresets: []
