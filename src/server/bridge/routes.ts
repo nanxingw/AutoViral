@@ -26,6 +26,7 @@ import {
 import { uiEventBus } from "./ui-events.js";
 import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
+import { ingestYouTubeIntoWork } from "./ingest-youtube.js";
 
 function manualDir(): string {
   return process.env.AUTOVIRAL_MANUAL_DIR ?? join(process.cwd(), "skills/autoviral/manual");
@@ -383,6 +384,31 @@ bridgeRouter.patch("/clip/:id", async (c) => {
     return c.json({ ok: false, error: message }, 400);
   }
   return c.json({ ok: true });
+});
+
+// POST /ingest/youtube — download a YouTube URL into the current work,
+// transcribe with Whisper, translate to the target language via OpenRouter,
+// then bootstrap composition.yaml so the Studio can render the result.
+// Long-running (download + ASR + translation can take minutes); progress
+// is streamed over the bridge UI event bus, not via HTTP chunks.
+bridgeRouter.post("/ingest/youtube", async (c) => {
+  const got = workIdOrError(c);
+  if (!got.ok) return got.res;
+  type IngestBody = { url?: string; language?: string; model?: string };
+  const body = (await c.req.json<IngestBody>().catch(() => ({} as IngestBody))) as IngestBody;
+  if (!body.url || typeof body.url !== "string") {
+    return c.json({ ok: false, error: "Body must include { url: string }" }, 400);
+  }
+  const result = await ingestYouTubeIntoWork({
+    workId: got.workId,
+    url: body.url,
+    targetLanguage: body.language ?? "zh-CN",
+    translateModel: body.model,
+  });
+  if (!result.ok) {
+    return c.json({ ok: false, step: result.step, error: result.error, code: (result as any).code }, 500);
+  }
+  return c.json({ ok: true, result });
 });
 
 bridgeRouter.get("/docs", async (c) => {

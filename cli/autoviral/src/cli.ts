@@ -17,6 +17,7 @@ import { progressCommand } from "./commands/progress.js";
 import { clipCommand } from "./commands/clip.js";
 import { askCommand } from "./commands/ask.js";
 import { exportCommand, renderCommand } from "./commands/export.js";
+import { ingestCommand } from "./commands/ingest.js";
 
 const [, , subcommand, ...rest] = process.argv;
 const dispatch: Record<string, (args: string[]) => Promise<void>> = {
@@ -34,6 +35,7 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   ask: askCommand,
   export: exportCommand,
   render: renderCommand,
+  ingest: ingestCommand,
 };
 
 (async () => {
@@ -77,6 +79,11 @@ function usage(): string {
     "  ask <message> [--yes-no|--ok-cancel] [--timeout seconds]",
     "  export [--preset name] [--proxy]",
     "  render                        Alias for `export --proxy`",
+    "",
+    "Ingest:",
+    "  ingest youtube <url> [--lang zh-CN] [--model <openrouter-id>]",
+    "    Download YouTube → transcribe (Whisper) → translate via OpenRouter",
+    "    → bootstrap composition.yaml with overlay captions.",
     "",
     "Run `autoviral docs` for the full manual.",
     "",
