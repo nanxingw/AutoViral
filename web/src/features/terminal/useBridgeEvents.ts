@@ -27,6 +27,9 @@ function variantFromKind(kind: string): "info" | "error" {
 export function useBridgeEvents(workId: string | undefined): void {
   useEffect(() => {
     if (!workId) return;
+    // jsdom test envs don't ship WebSocket; bail cleanly so render tests
+    // that mount Studio don't crash. The real browser always has it.
+    if (typeof WebSocket === "undefined") return;
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const url = `${proto}://${window.location.host}/ws/bridge/${workId}`;
     const ws = new WebSocket(url);
