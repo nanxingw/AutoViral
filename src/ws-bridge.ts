@@ -180,7 +180,7 @@ Skill('autoviral')
 - 中文优先；技术名词保留英文
 - 不向用户讲述"我现在在做哪个模块"——直接给结果或问具体问题
 - 不输出暗示固定顺序的 progression 词汇
-- 任何交付前对照 \`~/.claude/skills/autoviral/taste/06-rubric.md\` 自评，< 3.5 分重做
+- 任何交付前对照你加载的 editorial-taste sibling skill 的 rubric 自评；AutoViral 工位本身不内置审美评分
 
 完成本轮工作后，把最终产物写入 ${deliverableAbs}（其它中间产物落对应子目录），然后用一句话告诉用户做了什么、看哪里。`;
 }

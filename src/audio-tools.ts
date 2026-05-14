@@ -506,66 +506,33 @@ export async function assertFontInstalled(
     const cause = e instanceof Error ? e.message : String(e);
     throw new Error(
       `Font not installed at ${fontPath} (${cause}). ` +
-        `Run: python3 skills/autoviral/modules/assets/scripts/font_manager.py install ` +
-        `(or set AUTOVIRAL_FONT_PATH to a TTF/OTF you have locally).`,
+        `Set AUTOVIRAL_FONT_PATH to a TTF/OTF you have locally, or download Noto Sans CJK SC from ` +
+        `https://github.com/notofonts/noto-cjk to ~/.autoviral/fonts/NotoSansCJKsc-Regular.otf`,
     );
   }
 }
 
 /**
- * Burn the composition's text track into a video by:
- *   1. Adapting comp's text-track clips to flat-list JSON
- *   2. Writing the JSON to a temp file
- *   3. Asserting the canonical font is installed
- *   4. Invoking subtitle_burn.py with the input video, JSON, output path
- *
- * Animations are lost (D2). Output codec is libx264+aac (subtitle_burn defaults).
+ * Removed in agentic-terminal refactor (2026-05-14). The libass-style burn-in
+ * path lived in skills/autoviral/modules/assembly/scripts/subtitle_burn.py
+ * (preserved in git tag pre-skill-rewrite-snapshot). It was workstation
+ * infrastructure mis-located in skills/; rather than relocate, we direct
+ * callers to the overlay strategy that ships with the workstation:
+ * set `composition.captionStrategy = "overlay"` + attach a `captions`
+ * model, and the CaptionsLayer React component renders captions in-line
+ * during the Remotion render — no Python, no MoviePy, no font-install dance.
  */
-export async function burnSubtitles(opts: {
+export async function burnSubtitles(_opts: {
   inputVideo: string;
   comp: Parameters<typeof compositionTextTrackToJson>[0];
   outputVideo: string;
   fontPath?: string;
   style?: "modern" | "cinematic" | "bold" | "minimal" | "karaoke";
 }): Promise<void> {
-  const segments = compositionTextTrackToJson(opts.comp);
-  if (segments.length === 0) {
-    throw new Error("burnSubtitles: composition has no text-track clips to burn");
-  }
-
-  const fontPath = await assertFontInstalled(
-    opts.fontPath ?? process.env.AUTOVIRAL_FONT_PATH ?? DEFAULT_FONT_PATH,
+  throw new Error(
+    "burnSubtitles: removed in agentic-terminal refactor. " +
+      'Use `composition.captionStrategy = "overlay"` + `composition.captions` ' +
+      "for in-render caption rendering via CaptionsLayer. The libass burn-in " +
+      "Python script is preserved in git tag pre-skill-rewrite-snapshot.",
   );
-
-  // Use os.tmpdir() so we don't depend on ~/.autoviral/ existing on a fresh
-  // dev machine. mkdtemp creates a unique sub-dir whose parent (the system
-  // temp dir) is guaranteed to exist.
-  const tmpDir = await mkdtemp(join(tmpdir(), "autoviral-burnsubs-"));
-  const segPath = join(tmpDir, "segments.json");
-  await writeFile(segPath, JSON.stringify(segments), "utf-8");
-
-  // Invoke subtitle_burn.py — flag names verified against the actual script:
-  //   --video, --subs, --output, --style, --font
-  await runCmd(
-    "python3",
-    [
-      "skills/autoviral/modules/assembly/scripts/subtitle_burn.py",
-      "--video", opts.inputVideo,
-      "--subs", segPath,
-      "--output", opts.outputVideo,
-      "--style", opts.style ?? "modern",
-      "--font", fontPath,
-    ],
-    300_000, // 5 minutes (subtitle burn is slow with moviepy)
-  );
-
-  // runCmd does not throw on non-zero exit, and moviepy can exit non-zero
-  // with a partial-or-missing output. Defensive stat matches the pattern
-  // used by mixAudioTracks / normalizeLufs.
-  const outStat = await stat(opts.outputVideo);
-  if (!outStat.isFile() || outStat.size === 0) {
-    throw new Error(
-      `burnSubtitles: subtitle_burn.py produced no output at ${opts.outputVideo}`,
-    );
-  }
 }

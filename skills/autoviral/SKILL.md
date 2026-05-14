@@ -56,3 +56,19 @@ The terminal panel injects three env vars; if any are missing, the CLI exits non
 | `AUTOVIRAL_CWD` | `~/.autoviral/works/${AUTOVIRAL_WORK_ID}` |
 
 The CLI exits with code 2 if `AUTOVIRAL_WORK_ID` is unset, so `autoviral whoami` is a safe smoke test from any prompt.
+
+## Where the old scripts went
+
+Before the 2026-05-14 agentic-terminal refactor, this skill carried both editorial taste content (rubrics, brand briefs) AND workstation-infrastructure scripts (subtitle burn-in, beat detection, smart crop, CLIP-based asset search, AI image generators). All of it was deleted from `skills/autoviral/` to keep this skill scoped to "operator manual" only.
+
+**Nothing is lost.** The full pre-refactor tree is preserved in the git tag `pre-skill-rewrite-snapshot`. To re-package any of it as a sibling skill:
+
+```bash
+git show pre-skill-rewrite-snapshot -- skills/autoviral/modules/<subpath>
+# or to materialise into a new skill:
+git checkout pre-skill-rewrite-snapshot -- skills/autoviral/modules
+mv skills/autoviral/modules skills/<new-sibling-skill>/scripts
+# then write a SKILL.md for the new sibling and unstage anything you don't want
+```
+
+Server endpoints that depended on those scripts (`/api/audio/beats`, `/api/works/:id/rubric/:module`, `burnSubtitles()`, `buildClipIndex`) now return **410 Gone** or stub `{ stub: true, reason: "..._removed_in_refactor" }` instead of crashing. They'll come back automatically if a sibling skill re-provides the scripts and you re-wire the server import paths.

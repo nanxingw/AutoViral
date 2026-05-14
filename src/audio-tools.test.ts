@@ -140,7 +140,7 @@ describe("assertFontInstalled", () => {
 
   it("throws a clear error when the font is missing", async () => {
     await expect(assertFontInstalled("/nonexistent/font.otf")).rejects.toThrow(
-      /font_manager\.py install/,
+      /AUTOVIRAL_FONT_PATH|NotoSansCJK/,
     );
   });
 });

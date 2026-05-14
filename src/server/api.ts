@@ -1612,80 +1612,18 @@ apiRoutes.post("/api/audio/mix", async (c) => {
   }
 });
 
-// POST /api/audio/beats — beat detection via skills/.../detect_beats.py
-// Studio's useBeatSnap hook calls this to populate the snap-target list.
-// Returns: { success, beats: number[], bpm: number } when librosa is installed,
-// 503 with a friendly install hint otherwise.
-apiRoutes.post("/api/audio/beats", async (c) => {
-  try {
-    const body = await c.req.json<{ workId?: string; assetPath?: string }>();
-    const { workId, assetPath } = body;
-    if (!workId || !assetPath) return c.json({ success: false, error: "Missing workId/assetPath" }, 400);
-    if (!SAFE_ID.test(workId)) return c.json({ success: false, error: "Invalid workId" }, 400);
-
-    let fullPath: string;
-    try {
-      const cleaned = String(assetPath).replace(/^\/+/, "");
-      const root = cleaned.startsWith("output/") ? "output" : "assets";
-      const rest = cleaned.startsWith("output/") ? cleaned.slice(7)
-                 : cleaned.startsWith("assets/") ? cleaned.slice(7)
-                 : cleaned;
-      fullPath = resolveAssetPath(workId, root, rest);
-    } catch (err) {
-      if (err instanceof UnsafePathError) return c.json({ success: false, error: err.message }, 400);
-      throw err;
-    }
-
-    const script = join(repoRoot, "skills/autoviral/modules/assembly/scripts/beat-sync/detect_beats.py");
-    // detect_beats.py emits structured JSON ({"error": "..."}) on stdout for both
-    // success and known failures (incl. ImportError on librosa), exiting 1 on
-    // failure. Parse stdout regardless of exit code, then look at stderr only as
-    // a fallback for crashes that didn't reach the script's own error handler.
-    // (Codex round 2 finding #2)
-    let stdout = "";
-    let stderr = "";
-    try {
-      const result = await execFileAsync("python3", [script, fullPath], { timeout: 60_000, maxBuffer: 4 * 1024 * 1024 });
-      stdout = result.stdout;
-      stderr = result.stderr;
-    } catch (err: any) {
-      stdout = err?.stdout ?? "";
-      stderr = err?.stderr ?? err?.message ?? "";
-    }
-    let parsed: any = null;
-    try { parsed = JSON.parse(stdout); } catch { /* not JSON */ }
-    if (parsed?.error) {
-      const errMsg = String(parsed.error);
-      if (/librosa/i.test(errMsg)) {
-        return c.json({
-          success: false,
-          error: "librosa not installed. Run `pip install librosa numpy` to enable beat detection.",
-          code: "PYTHON_DEP_MISSING",
-        }, 503);
-      }
-      return c.json({ success: false, error: errMsg, code: "API_ERROR" }, 500);
-    }
-    if (parsed && Array.isArray(parsed.beat_times)) {
-      return c.json({
-        success: true,
-        beats: parsed.beat_times,
-        strongBeats: Array.isArray(parsed.strong_beats) ? parsed.strong_beats : [],
-        bpm: typeof parsed.bpm === "number" ? parsed.bpm : null,
-      });
-    }
-    // Fallback: examine stderr for raw Python tracebacks
-    if (/ModuleNotFoundError.*librosa|No module named.*librosa/.test(stderr)) {
-      return c.json({
-        success: false,
-        error: "librosa not installed. Run `pip install librosa numpy` to enable beat detection.",
-        code: "PYTHON_DEP_MISSING",
-      }, 503);
-    }
-    return c.json({ success: false, error: stderr || "Beat detection produced no output", code: "API_ERROR" }, 500);
-  } catch (err: any) {
-    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
-  }
-});
+// POST /api/audio/beats — removed in agentic-terminal refactor (2026-05-14).
+// Beat detection (detect_beats.py) was workstation infrastructure mis-placed
+// in skills/. The script is preserved in git tag pre-skill-rewrite-snapshot;
+// if anyone wants beat-snapping back, package it as a sibling skill and
+// re-wire on a non-skills/ path.
+apiRoutes.all("/api/audio/beats", (c) =>
+  c.json({
+    success: false,
+    error: "Endpoint removed in agentic-terminal refactor. Beat detection script lives in git tag pre-skill-rewrite-snapshot.",
+    code: "beat_endpoint_removed",
+  }, 410),
+);
 
 // POST /api/audio/captions — ASR caption generation via caption_generate.py
 // Studio's caption import button calls this to populate the text track with
@@ -2245,25 +2183,16 @@ const RUBRIC_FILENAMES: Record<ModuleName, string> = {
   assembly: "assembly.md",
 };
 
-apiRoutes.get("/api/works/:id/rubric/:module", async (c) => {
-  const mod = c.req.param("module") as ModuleName;
-  if (!KNOWN_MODULES.includes(mod)) return c.json({ error: "Unknown module" }, 404);
-
-  const work = await getWork(c.req.param("id"));
-  if (!work) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
-
-  const generic = await readFile(
-    join(repoRoot, "skills/autoviral/taste/06-rubric.md"),
-    "utf-8",
-  ).catch(() => "");
-  const moduleSpecific = await readFile(
-    join(repoRoot, "skills/autoviral/taste/evaluator-criteria", RUBRIC_FILENAMES[mod]),
-    "utf-8",
-  ).catch(() => "");
-
-  const rubric = [generic.trim(), moduleSpecific.trim()].filter(Boolean).join("\n\n---\n\n");
-  return c.json({ module: mod, rubric });
-});
+// Removed in agentic-terminal refactor (2026-05-14). Editorial taste rubrics
+// are no longer part of AutoViral the workstation — they're commodity sibling-
+// skill content. The pre-skill-rewrite-snapshot git tag preserves the original
+// rubric markdown if anyone wants to package them as a separate skill.
+apiRoutes.all("/api/works/:id/rubric/:module", (c) =>
+  c.json({
+    error: "Endpoint removed in agentic-terminal refactor. Editorial taste rubrics moved out of AutoViral. See git tag pre-skill-rewrite-snapshot.",
+    errorCode: "rubric_endpoint_removed",
+  }, 410),
+);
 
 // ── Legacy stage-coupled routes — removed in D3 cleanup. Always 410 Gone. ──
 // Migration target: POST /api/works/:id/invoke {module, input}
