@@ -70,6 +70,7 @@ describe("applyLayoutToLayer", () => {
       kind: "image",
       box: { x: 100, y: 200, w: 300, h: 400, rotation: 0 },
       src: "x.png",
+      filters: { blur: 0, brightness: 1, opacity: 1 },
     };
     const out = applyLayoutToLayer(img, "centered", W, H);
     expect(out).toBe(img); // identity — no spread

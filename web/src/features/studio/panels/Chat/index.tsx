@@ -6,7 +6,7 @@ import { useComposition } from "@/features/studio/store";
 import { apiFetch } from "@/lib/api";
 import { useT, type MessageKey } from "@/i18n/useT";
 import { useEffect, useRef, useState, useMemo, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { resolveAssetUrl } from "@/features/studio/composition/resolveAssetUrl";
 import {
@@ -21,15 +21,11 @@ import { QuickActions } from "./QuickActions";
  *  Only fires for fenced code blocks (where react-markdown sets a className
  *  like `language-yaml`). Inline `code` falls through to the default
  *  rendering. */
-function HighlightedCode({
+const HighlightedCode: NonNullable<Components["code"]> = ({
   className,
   children,
   ...rest
-}: {
-  className?: string;
-  children?: React.ReactNode;
-  [k: string]: unknown;
-}) {
+}) => {
   const langMatch = /language-(\w+)/.exec(className ?? "");
   const isBlock = !!langMatch;
   if (!isBlock) {

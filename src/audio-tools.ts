@@ -398,13 +398,31 @@ export async function normalizeLufs(
     `print_format=summary`,
   ].join(":");
 
+  // Mux args branch by output container. The pipeline calls us with .mp4
+  // (loudnorm sits between Remotion render and the optional final encode);
+  // if no exportPreset is configured the loudnorm output IS the final
+  // artifact, so it must be web-playable. PCM_S16LE in an mp4 container
+  // plus moov-at-end made browsers / QuickTime stutter on playback because
+  // PCM-in-mp4 has no decoder fast-path and demux competes with video on
+  // the main thread. For audio-only outputs (.wav fixtures in tests) keep
+  // PCM since AAC can't be muxed into a WAV container.
+  const isVideoContainer = /\.(mp4|mov|m4v|mkv)$/i.test(outputPath);
+  const muxArgs = isVideoContainer
+    ? [
+        "-c:v", "copy",
+        "-c:a", "aac",
+        "-b:a", "192k",
+        "-ar", "48000",
+        "-movflags", "+faststart",
+      ]
+    : ["-c:a", "pcm_s16le", "-ar", "48000"];
+
   await runCmd(
     "ffmpeg",
     [
       "-i", inputPath,
       "-af", pass2Filter,
-      "-c:a", "pcm_s16le",
-      "-ar", "48000",
+      ...muxArgs,
       "-y",
       outputPath,
     ],

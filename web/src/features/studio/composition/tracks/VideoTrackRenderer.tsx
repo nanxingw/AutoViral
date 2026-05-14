@@ -35,6 +35,18 @@ export function computeVideoTransformForFrame(
   };
 }
 
+// Crossfade fix — read opacity keyframes from a video clip. Mirrors the
+// OverlayTrackRenderer behavior so neighbouring video clips that overlap by a
+// fade window get real CSS alpha-compositing instead of a hard cut. Default 1
+// (fully visible) when no opacity keyframe is defined.
+export function computeVideoOpacityForFrame(
+  clip: VideoClip,
+  localFrame: number,
+  fps: number,
+): number {
+  return interpolateProperty(clip.keyframes, "opacity", localFrame / fps) ?? 1;
+}
+
 function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   const { fps } = useVideoConfig();
   const frame = useCurrentFrame();
@@ -43,6 +55,7 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // Phase 8.3.C — read speed keyframes (D3 fallback 1.0, D4 clamp). Routed
   // through Remotion's playbackRate prop, NOT the CSS transform (D8).
   const speed = computeVideoSpeedForFrame(clip, frame, fps);
+  const opacity = computeVideoOpacityForFrame(clip, frame, fps);
   // Browser-side player uses <Video> (single <video> element backed by
   // browser native playback) instead of <OffthreadVideo>. OffthreadVideo
   // is more accurate for server-side rendering (FFmpeg + worker, used by
@@ -72,6 +85,7 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
         objectFit: "cover",
         filter: filter || undefined,
         transform: `translate(${x}px, ${y}px) rotate(${rotation}deg) scale(${scale})`,
+        opacity,
       }}
     />
   );

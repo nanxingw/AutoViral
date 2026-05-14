@@ -42,7 +42,6 @@ import {
   type CaptionModel,
   type CaptionGroup,
   type CaptionSegment,
-  type CaptionGroupStyle,
   type CaptionAnimationSet,
   isGroupActive,
   findSegment,
@@ -106,7 +105,6 @@ function CaptionGroupRenderer({ model, group, anim, timeSec, fps }: GroupRendere
     : 1;
 
   // Exit progress 0→1 over animSet.exit.duration ending at group.end.
-  const exitFrames = ((anim.exit?.duration ?? 200) / 1000) * fps;
   const exitStartTime = group.end - (anim.exit?.duration ?? 200) / 1000;
   const exitProgress = anim.exit
     ? interpolate(timeSec, [exitStartTime, group.end], [0, 1], {
