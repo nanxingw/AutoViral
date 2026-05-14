@@ -23,6 +23,15 @@ const NEVER_OVERWRITE_FILES = ["permitted_skills.md"];
 const SKILL_CREATOR_REPO = "https://github.com/anthropics/claude-plugins-official.git";
 const SKILL_CREATOR_PATH = "plugins/skill-creator/skills/skill-creator";
 
+// HeyGen's "Write HTML. Render video." skill bundle — 15 sibling skills
+// (hyperframes + gsap + lottie + three + …) that complement AutoViral's
+// "operate the workstation" skill. autoviral handles interactive display;
+// hyperframes handles HTML→video composition. Sentinel for idempotent
+// install: ~/.claude/skills/hyperframes/SKILL.md.
+const HYPERFRAMES_REPO = "https://github.com/heygen-com/hyperframes.git";
+const HYPERFRAMES_SKILLS_PATH = "skills";
+const HYPERFRAMES_SENTINEL = "hyperframes";
+
 async function exists(path: string): Promise<boolean> {
   try {
     await stat(path);
@@ -102,6 +111,67 @@ async function installSkillCreator(): Promise<void> {
 }
 
 /**
+ * Install hyperframes + sibling skills from HeyGen's public bundle.
+ *
+ * AutoViral's `autoviral` skill teaches an agent how to operate the
+ * Studio workstation; hyperframes teaches it how to actually author
+ * dynamic HTML video compositions. The two are complementary and ship
+ * together so a fresh `npm i @autoviral/cli` gives the user the full
+ * "operate + author" surface without manual skill plumbing.
+ *
+ * Pulls the upstream repo's `skills/` directory via sparse-checkout
+ * and copies each sub-skill into `~/.claude/skills/`. Idempotent.
+ */
+async function installHyperframes(): Promise<void> {
+  const sentinel = join(TARGET_SKILLS, HYPERFRAMES_SENTINEL, "SKILL.md");
+  if (await exists(sentinel)) {
+    console.log("autocode: hyperframes already installed, skipping");
+    return;
+  }
+
+  console.log("autocode: installing hyperframes skill bundle from heygen-com/hyperframes...");
+
+  const tmpDir = join(tmpdir(), `hyperframes-${Date.now()}`);
+  try {
+    await execFileAsync("git", [
+      "clone", "--depth", "1", "--filter=blob:none", "--sparse",
+      HYPERFRAMES_REPO, tmpDir,
+    ], { timeout: 60000 });
+
+    await execFileAsync("git", [
+      "-C", tmpDir,
+      "sparse-checkout", "set", HYPERFRAMES_SKILLS_PATH,
+    ], { timeout: 30000 });
+
+    const srcSkillsDir = join(tmpDir, HYPERFRAMES_SKILLS_PATH);
+    if (!(await exists(srcSkillsDir))) {
+      console.warn("autocode: hyperframes skills/ directory missing in clone — upstream layout changed?");
+      return;
+    }
+
+    const subSkills = await readdir(srcSkillsDir, { withFileTypes: true });
+    let installed = 0;
+    for (const entry of subSkills) {
+      if (!entry.isDirectory()) continue;
+      const src = join(srcSkillsDir, entry.name);
+      const dest = join(TARGET_SKILLS, entry.name);
+      // Don't trample autoviral's own skill if names ever collide
+      if (entry.name === "autoviral") continue;
+      await copyDir(src, dest);
+      installed += 1;
+    }
+    console.log(`autocode: hyperframes installed ${installed} sub-skill(s)`);
+  } catch (err) {
+    console.warn(
+      "autocode: could not install hyperframes (git may not be available, or upstream temporarily unreachable):",
+      err instanceof Error ? err.message : err
+    );
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
  * node-pty 1.1.x ships prebuilt `spawn-helper` binaries via tarballs that
  * sometimes lose their executable bit when npm extracts them on macOS arm64.
  * Symptom: `pty.spawn()` fails with `posix_spawnp failed` (ENOEXEC). Re-
@@ -137,6 +207,10 @@ async function main(): Promise<void> {
 
     // Install skill-creator from official repo if not present
     await installSkillCreator();
+
+    // Install HeyGen's hyperframes skill bundle (complements autoviral —
+    // autoviral = operate workstation, hyperframes = author HTML→video).
+    await installHyperframes();
 
     // Repair node-pty spawn-helper permissions (see fn docstring)
     await repairNodePtyPermissions();
