@@ -1,30 +1,33 @@
 # AutoViral
 
-## Skill 结构规范
+## Skill 结构规范 (refactor in progress — see refactor/agentic-terminal)
 
-整个创作能力封装成**一个** skill：`skills/autoviral/`。它不是强制顺序的流程，而是一组可从任意起点切入的正交能力。
+AutoViral 不再把"如何做好视频"作为 skill 内容 —— 那是 commodity（市面有 hyperframes / editorial-pro 等），让用户挂自己喜欢的 taste skill。**AutoViral 的 skill 是"如何操作这个工位"的操作手册**，agent-agnostic markdown，任何 CLI agent（claude / codex / kimi / aider）加载后都能在 Studio 里给用户一流体验。
 
 ```
 skills/autoviral/
-  SKILL.md            # 主入口
-  taste/              # 品味与判断（内化读物，7 份）
-  modules/            # 正交能力（4 个）
-    research/         # 事实与参考收集
-    planning/         # 情感意图 → 可执行 brief
-    assets/           # 图/视频/音乐/海报生成
-    assembly/         # 剪辑/字幕/混音/节拍对齐
-  references/         # 跨模块契约与索引
+  SKILL.md            # 入口：你在 AutoViral 工位里，能用这些工具
+  manual/             # 操作手册 (agent-agnostic markdown)
+    00-quickstart.md
+    01-workspace-layout.md
+    02-composition-schema.md
+    03-cli-reference.md   # 同时也是 `autoviral docs` 的内容源
+    04-ui-control.md
+    05-conventions.md
+  recipes/            # 常见任务的 step-by-step pattern
+  contracts/          # 错误码 / 事件流 schema
+  references/         # 给 power user 的 SDK 直调
 ```
 
 核心原则：
+- **Skill = 操作手册**，不教审美（审美交给 sibling skill）
+- **`autoviral` CLI 是协议层**（`cli/autoviral/`），skill 是知识层 —— skill 里教 agent 调 CLI
+- **零强制顺序**：agent 按需查文档，不强迫线性流程
+- **Single source of truth**：`autoviral docs` 命令输出 = `manual/*.md` 内容
 
-- **一个 skill，四个模块**——不再有 "research → plan → assets → assembly" 的强制顺序
-- **`taste/` 是灵魂**（内容质量 > 平台），`modules/` 是术（工具/脚本/API）
-- **任意起点**：用户可以从任何模块切入，缺上下文就反问具体问题（优先问情感意图）
-- **每个模块的 `capabilities/` 子目录**放扩展能力文档，`scripts/` 放脚本，`references/` 放平台技术规格
-- **平台创作建议不进 taste**——平台只作为技术约束（aspect ratio / duration / safe zone）存在
+转型实施中。当前进度看 `docs/superpowers/plans/2026-05-14-agentic-terminal-refactor.md`，协议看 `docs/superpowers/specs/2026-05-14-agentic-terminal-bridge-protocol.md`。已删除的 `taste/` 和 `modules/` 内容归档在 git tag `pre-skill-rewrite-snapshot`。
 
-详细规则见：[docs/skill-structure-guide.md](docs/skill-structure-guide.md)
+旧规则归档：[docs/skill-structure-guide.md](docs/skill-structure-guide.md)（已过时，仅供历史参考）
 
 
 <rules>
@@ -55,3 +58,6 @@ https://github.com/pandazki/pneuma-skills是你需要着重参考的项目地址
 
 ### Brand Personality
 **editorial · 克制 · 现代质感** — 一个有视觉自信的创作者工作台。像顶尖编辑部 + 创意工作室共用的内部工具：排版果断、留白果断、信息密度按需切换；不依赖高饱和情绪刺激，靠类型对比和玻璃质感建立张力。
+
+- **Evidence over agreement** —— 你是来**切实给用户解决问题**的，不是来提供情绪价值的。要主动对抗 RLHF 训练硬编码进你的基因惯性：过度附和、空洞肯定、把"准备做"说成"已经做完"、用承诺替代证据、对用户的错误前提绕着走而不是直说。任何"完成 / 修好 / 通过 / 没问题"的断言前，先跑可观测的验证（test / lint / grep / 端到端 build / 实际开浏览器点一次），把**证据**写进响应；面对设计冲突或用户的错误前提，客观、严谨地指出，**不要为了不冒犯就糊弄过去**；任何决策走可评估 / 可验证的机制，不靠"我觉得 / 应该没事 / 通常来说"。**实践是检验真理的唯一标准**——对 paragoge 适用，对你自己也适用。
+- **Boil the ocean** —— AI 时代完整解的边际成本接近零。**禁说"以后再做"**。能一次性永久解决就一次性永久解决：搜索代替建造、测试代替交付、整桩交付让 reviewer 真的 impressed。Time / fatigue / complexity 都不是借口。

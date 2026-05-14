@@ -42,8 +42,15 @@ import { interpolateProcessor } from "./post-process/interpolate.js";
 import { superResolveProcessor } from "./post-process/super-resolve.js";
 import { lipSyncProcessor } from "./post-process/lip-sync.js";
 import type { PostProcessor, PostProcessOptions } from "./post-process/types.js";
+import { bridgeRouter } from "./bridge/routes.js";
 
 export const apiRoutes = new Hono();
+
+// AutoViral Bridge Protocol v1 — the agent-agnostic RPC surface that the
+// `autoviral` CLI calls into. Mounted before any wildcard routes so its
+// versioned prefix never gets shadowed. See docs/superpowers/specs/2026-
+// 05-14-agentic-terminal-bridge-protocol.md for the contract.
+apiRoutes.route("/api/bridge/v1", bridgeRouter);
 
 // ── Python script runner for real-time trend data ────────────────────────────
 
