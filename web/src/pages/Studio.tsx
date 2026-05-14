@@ -11,6 +11,7 @@ import { PreviewPanel } from "@/features/studio/panels/PreviewPanel";
 import { SafeTimeline as Timeline } from "@/features/studio/panels/Timeline/SafeTimeline";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { useBridgeEvents } from "@/features/terminal/useBridgeEvents";
+import { ApprovalPrompt } from "@/features/terminal/ApprovalPrompt";
 import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { TopBar } from "@/features/studio/panels/TopBar";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
@@ -292,6 +293,9 @@ export default function Studio() {
         onClose={() => setSettingsOpen(false)}
         workId={workId}
       />
+
+      {/* Phase 3 — modal that replies to `autoviral ask` requests. */}
+      <ApprovalPrompt workId={workId} />
     </div>
   );
 }

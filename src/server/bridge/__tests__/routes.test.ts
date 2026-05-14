@@ -365,6 +365,54 @@ describe("bridge router — Phase 3 clip writes", () => {
   });
 });
 
+describe("bridge router — Phase 3 approval gate", () => {
+  it("POST /ask blocks until an approval-response is delivered (yes)", async () => {
+    // Capture the askId from the broadcast ui-ask event, then call
+    // answerAsk to simulate the Studio's ApprovalPrompt clicking YES.
+    const { answerAsk } = await import("../approval-gate.js");
+    let captured: { askId: string } | null = null;
+    const off = uiEventBus.subscribe("w_ask_1", (event) => {
+      if (event.type === "ui-ask") captured = event.payload as { askId: string };
+    });
+
+    const askPromise = app.request("/api/bridge/v1/ask", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_ask_1",
+      },
+      body: JSON.stringify({ message: "Run it?", kind: "yes-no", timeoutMs: 30_000 }),
+    });
+
+    // Wait a tick so the ui-ask broadcast fires before we try to answer.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(captured).not.toBeNull();
+    expect(answerAsk(captured!.askId, "yes")).toBe(true);
+
+    const res = await askPromise;
+    off();
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { answer: string } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.answer).toBe("yes");
+  });
+
+  it("POST /ask returns 504 + code 124 on timeout", async () => {
+    const res = await app.request("/api/bridge/v1/ask", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_ask_2",
+      },
+      body: JSON.stringify({ message: "no listener", kind: "yes-no", timeoutMs: 50 }),
+    });
+    expect(res.status).toBe(504);
+    const body = (await res.json()) as { ok: boolean; error: string; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(124);
+  });
+});
+
 describe("bridge router — Phase 2 docs", () => {
   const prevManualDir = process.env.AUTOVIRAL_MANUAL_DIR;
   const MANUAL_DIR = join(__dirname, "../../../../skills/autoviral/manual");

@@ -10,6 +10,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { uiEventBus, type UiEvent } from "./ui-events.js";
+import { answerAsk } from "./approval-gate.js";
 
 export interface BridgeWsHandle {
   close: () => void;
@@ -54,10 +55,26 @@ export function attachBridgeWebSocket(
       if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(event));
     });
 
-    // Inbound: parsed in Task 3.9 (approval gate) and Task 3.10
-    // (composition watcher). For Task 3.2 we just accept the connection.
-    ws.on("message", () => {
-      /* Phase 3 Task 3.9 wires approval-response handling here */
+    // Inbound: Studio replies to ui-ask events with approval-response frames
+    // ({ t: "approval-response", askId, answer }). We route them into the
+    // approval-gate so the corresponding /ask HTTP request unblocks.
+    ws.on("message", (raw) => {
+      try {
+        const msg = JSON.parse(raw.toString()) as {
+          t?: string;
+          askId?: string;
+          answer?: "yes" | "no" | "cancelled";
+        };
+        if (
+          msg.t === "approval-response" &&
+          typeof msg.askId === "string" &&
+          (msg.answer === "yes" || msg.answer === "no" || msg.answer === "cancelled")
+        ) {
+          answerAsk(msg.askId, msg.answer);
+        }
+      } catch {
+        /* ignore malformed frames */
+      }
     });
 
     ws.on("close", () => off());

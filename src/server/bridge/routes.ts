@@ -15,7 +15,9 @@ import {
   SeekRequestSchema,
   ToastRequestSchema,
   ProgressRequestSchema,
+  AskRequestSchema,
 } from "./schemas.js";
+import { createAsk } from "./approval-gate.js";
 import { readCompositionFor, mutateCompositionFor } from "./composition-ops.js";
 import { uiEventBus } from "./ui-events.js";
 import { randomBytes } from "node:crypto";
@@ -281,6 +283,26 @@ bridgeRouter.delete("/clip/:id", async (c) => {
     return c.json({ ok: false, error: message }, 400);
   }
   return c.json({ ok: true });
+});
+
+// POST /ask blocks the HTTP response until the Studio user clicks
+// YES/NO in the ApprovalPrompt modal — or until timeoutMs elapses.
+// CLI exit codes (per protocol §5): yes=0, no=1, cancelled=2, timeout=124.
+bridgeRouter.post("/ask", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = AskRequestSchema.parse(await c.req.json());
+  const { askId, promise } = createAsk(g.workId, body.timeoutMs);
+  broadcast(g.workId, "ui-ask", {
+    askId,
+    message: body.message,
+    kind: body.kind,
+  });
+  const answer = await promise;
+  if (answer === "timeout") {
+    return c.json({ ok: false, error: "timeout", code: 124 }, 504);
+  }
+  return c.json({ ok: true, result: { answer } });
 });
 
 bridgeRouter.patch("/clip/:id", async (c) => {
