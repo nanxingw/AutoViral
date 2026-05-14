@@ -1,0 +1,75 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--surface-0);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.header {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--divider);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.dotIndicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--status-ok, #6ec18f);
+  box-shadow: 0 0 6px var(--status-ok, #6ec18f);
+}
+
+.dotIndicatorDisconnected {
+  background: var(--text-dimmer);
+  box-shadow: none;
+}
+
+.quickLaunch {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.quickLaunchBtn {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-1);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.quickLaunchBtn:hover {
+  background: var(--accent-lo);
+  border-color: var(--accent);
+}
+
+.terminalMount {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 8px 0 8px 8px;
+  position: relative;
+}
+
+/* xterm.js wraps itself in .xterm; override defaults to match Brand. */
+.terminalMount :global(.xterm) {
+  height: 100% !important;
+  padding: 0;
+}
+
+.terminalMount :global(.xterm-viewport) {
+  background: transparent !important;
+}
