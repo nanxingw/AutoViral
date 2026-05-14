@@ -1,5 +1,5 @@
 import { useParams } from "react-router-dom";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useComposition } from "@/features/studio/store";
 import { makeEmptyComposition } from "@/features/studio/types";
@@ -9,8 +9,7 @@ import {
 } from "@/features/studio/services/composition";
 import { PreviewPanel } from "@/features/studio/panels/PreviewPanel";
 import { SafeTimeline as Timeline } from "@/features/studio/panels/Timeline/SafeTimeline";
-import { SafeChatPanel as ChatPanel } from "@/features/studio/panels/Chat/SafeChatPanel";
-import { buildStudioViewerContext } from "@/features/studio/services/viewerContext";
+import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { TopBar } from "@/features/studio/panels/TopBar";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
@@ -74,39 +73,22 @@ export default function Studio() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
-  useShortcuts(workId ?? null);
+  // e2e-report F66: pipe Cmd+S save round-trip back into TopBar state so the
+  // "UNSAVED" indicator actually flips after manual save.
+  useShortcuts(workId ?? null, {
+    onSaved: (d) => {
+      setSavedAt(fmtSavedAt(d, locale));
+      setSaveError(null);
+    },
+    onSaveError: (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      setSaveError(msg);
+    },
+  });
 
-  // R43 — pull-on-turn refetch. Agent's Write/Edit tools write
-  // composition.yaml directly to disk, bypassing the client autosave
-  // channel. Without a refetch on turn_complete, the in-memory comp
-  // stays stale (showing old aspect / empty tracks) until the user hard-
-  // refreshes — exactly the bug reported on 2026-05-09.
-  // Use a ref for the latest workId so the callback identity never
-  // changes — otherwise ChatPanel's useChatSocket would resubscribe on
-  // every Studio re-render.
-  const workIdRef = useRef<string | undefined>(workId);
-  useEffect(() => {
-    workIdRef.current = workId;
-  }, [workId]);
-  const refetchOnTurnComplete = useCallback(() => {
-    const currentId = workIdRef.current;
-    if (!currentId) return;
-    // Best-effort refetch; on failure we keep the existing in-memory
-    // comp so the UI doesn't flash empty just because the network
-    // hiccupped at turn boundary. Errors during the initial-load path
-    // already have their own surface via setLoadError.
-    void loadComposition(currentId)
-      .then((found) => {
-        if (!found) return;
-        // Guard against route hop during the await: if user navigated
-        // to a different work, drop this stale result.
-        if (workIdRef.current !== currentId) return;
-        loadComp(found);
-      })
-      .catch(() => {
-        /* swallow — autosave / next-turn refetch will heal */
-      });
-  }, [loadComp]);
+  // Phase 1 regression (per plan Task 1.8): editing composition.yaml outside
+  // the UI no longer auto-refetches. Phase 3 Task 3.13 restores it via a
+  // server-side file watcher → WebSocket → studio refetch.
 
   const [loadError, setLoadError] = useState<string | null>(null);
   // Mirror of Editor.tsx Round 16 typo guard — defer makeEmptyComposition
@@ -131,6 +113,11 @@ export default function Studio() {
         if (cancelled) return;
         if (found) {
           loadComp(found);
+          // e2e-report F67: backfill savedAt so previously-saved works don't
+          // misreport as "UNSAVED" on every load. We don't have a real disk
+          // mtime from the API, so use load time as a proxy — accurate enough
+          // for the user-facing semantic "this work IS persisted, not dirty".
+          setSavedAt(fmtSavedAt(new Date(), locale));
         } else {
           setLoadEmpty(true);
         }
@@ -171,11 +158,18 @@ export default function Studio() {
   // comp doesn't get saved into the new route's work id. Also skip when the
   // composition is empty (no clips on any track); persisting an empty comp
   // shadows the server-side legacy auto-build for unedited works.
+  //
+  // e2e-report F64: but if the user has already picked a platform preset
+  // (exportPresets[0] set via TweaksPanel), that's an explicit edit even
+  // on a clip-less timeline — persist it so reload doesn't revert the
+  // aspect / fps / codec back to 9:16 default.
   useEffect(() => {
     if (!comp || !workId) return;
     if (comp.workId !== workId) return;   // load-in-progress
     const isEmpty = comp.tracks.every((t) => t.clips.length === 0);
-    if (isEmpty) return;                  // don't persist a blank slate
+    const hasUserPreset = !!comp.exportPresets?.[0];
+    if (isEmpty && !hasUserPreset) return; // don't persist a blank slate
+                                          // unless user has set a preset
     const tid = setTimeout(() => {
       saveComposition(workId, comp)
         .then(() => {
@@ -242,29 +236,7 @@ export default function Studio() {
               className="glass"
               style={{ height: "100%", overflow: "hidden", minHeight: 0 }}
             >
-              <ChatPanel
-                workId={workId}
-                onTurnComplete={refetchOnTurnComplete}
-                getViewerContext={() => {
-                  const s = useComposition.getState();
-                  return buildStudioViewerContext(
-                    s.comp,
-                    s.selection,
-                    s.currentFrame,
-                  );
-                }}
-                dispatchAction={(action) => {
-                  const s = useComposition.getState();
-                  if (action.type === "select-clip") {
-                    const id = action.data.clipId ?? action.data.id;
-                    if (typeof id === "string") s.setSelection(id);
-                  } else if (action.type === "set-frame") {
-                    const f = action.data.frame;
-                    if (typeof f === "number") s.setFrame(f);
-                  }
-                  // studio ignores select-slide / select-layer
-                }}
-              />
+              {workId ? <TerminalPanel workId={workId} /> : null}
             </div>
           </Panel>
 
