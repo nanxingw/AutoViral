@@ -73,3 +73,26 @@
 .terminalMount :global(.xterm-viewport) {
   background: transparent !important;
 }
+
+/* CRITICAL: pin xterm wrapper + internal elements to monospace.
+ *
+ * xterm.js v5 accepts a `fontFamily` Terminal option that it threads into
+ * its char-measure DOM helper and the canvas/WebGL renderer. BUT when the
+ * canvas's parsed `font` shorthand can't resolve a family, Chrome's fallback
+ * is the canvas element's own *computed* `font-family` — which here cascades
+ * down from body (Inter, sans-serif). Result: xterm thinks it's drawing in
+ * JetBrains Mono, the canvas actually paints Inter, and we get "italic-looking"
+ * proportional glyphs jammed into a monospace grid (the bug user reported).
+ *
+ * Pinning font-family on the .xterm wrapper and its inner elements ends the
+ * fallback chain at a monospace stack, so both the DOM measurement path and
+ * the canvas tail-fallback path agree.
+ */
+.terminalMount :global(.xterm),
+.terminalMount :global(.xterm-screen),
+.terminalMount :global(.xterm-rows),
+.terminalMount :global(.xterm-helper-textarea),
+.terminalMount :global(.xterm-char-measure-element) {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace !important;
+  font-variant-ligatures: none;
+}
