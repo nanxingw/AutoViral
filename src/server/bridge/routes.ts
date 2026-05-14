@@ -57,3 +57,50 @@ bridgeRouter.get("/comp", async (c) => {
     return c.json({ ok: false, error: message }, 500);
   }
 });
+
+// /clips and /assets are convenience projections of /comp. We keep them
+// separate (rather than telling agents to "fetch /comp and filter in jq")
+// because the JSON envelope itself is large, and a list-of-summaries is
+// the natural shape an agent renders to a TUI table.
+
+bridgeRouter.get("/clips", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const trackFilter = c.req.query("track");
+  try {
+    const comp = await readCompositionFor({ workId: g.workId });
+    const clips = comp.tracks
+      .filter((t) => !trackFilter || t.kind === trackFilter)
+      .flatMap((t) =>
+        t.clips.map((clip) => ({
+          id: clip.id,
+          kind: clip.kind,
+          trackId: t.id,
+          trackKind: t.kind,
+          trackOffset: clip.trackOffset,
+          duration:
+            "out" in clip
+              ? clip.out - clip.in
+              : (clip as { duration: number }).duration,
+        })),
+      );
+    return c.json({ ok: true, result: clips });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+bridgeRouter.get("/assets", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const kindFilter = c.req.query("kind");
+  try {
+    const comp = await readCompositionFor({ workId: g.workId });
+    const assets = comp.assets.filter((a) => !kindFilter || a.kind === kindFilter);
+    return c.json({ ok: true, result: assets });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});

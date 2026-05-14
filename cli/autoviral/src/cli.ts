@@ -5,11 +5,13 @@
 
 import { whoamiCommand } from "./commands/whoami.js";
 import { compCommand } from "./commands/comp.js";
+import { listCommand } from "./commands/list.js";
 
 const [, , subcommand, ...rest] = process.argv;
 const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   whoami: whoamiCommand,
   comp: compCommand,
+  list: listCommand,
 };
 
 (async () => {

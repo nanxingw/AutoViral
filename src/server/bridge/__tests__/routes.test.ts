@@ -79,4 +79,61 @@ describe("bridge router — Phase 2 read-only composition", () => {
     expect(body.ok).toBe(false);
     expect(body.error).toMatch(/ENOENT|no such file/i);
   });
+
+  it("GET /clips returns flattened clip summaries across all tracks", async () => {
+    const res = await app.request("/api/bridge/v1/clips", {
+      headers: { "X-AutoViral-Work-Id": "sample-work" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result?: Array<{ id: string; kind: string; trackKind: string; duration: number }>;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.result?.length).toBeGreaterThanOrEqual(3);
+    const kinds = body.result?.map((c) => c.kind);
+    expect(kinds).toContain("video");
+    expect(kinds).toContain("audio");
+    expect(kinds).toContain("text");
+  });
+
+  it("GET /clips?track=video filters to the video track only", async () => {
+    const res = await app.request("/api/bridge/v1/clips?track=video", {
+      headers: { "X-AutoViral-Work-Id": "sample-work" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result?: Array<{ trackKind: string }>;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.result?.length).toBeGreaterThan(0);
+    expect(body.result?.every((c) => c.trackKind === "video")).toBe(true);
+  });
+
+  it("GET /assets returns the asset registry", async () => {
+    const res = await app.request("/api/bridge/v1/assets", {
+      headers: { "X-AutoViral-Work-Id": "sample-work" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result?: Array<{ id: string; kind: string }>;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.result?.length).toBeGreaterThan(0);
+  });
+
+  it("GET /assets?kind=video filters by asset kind", async () => {
+    const res = await app.request("/api/bridge/v1/assets?kind=video", {
+      headers: { "X-AutoViral-Work-Id": "sample-work" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result?: Array<{ kind: string }>;
+    };
+    expect(body.ok).toBe(true);
+    expect(body.result?.every((a) => a.kind === "video")).toBe(true);
+  });
 });
