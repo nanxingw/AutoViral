@@ -4,6 +4,7 @@ import type { Duplex } from "node:stream";
 import { PtyPool } from "./pty-pool.js";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { enforceLoopbackOrigin } from "../ws-origin.js";
 
 // Wire format (JSON frames):
 //   client → server: {"t":"data","d":"keystrokes"} | {"t":"resize","cols":80,"rows":24}
@@ -42,6 +43,10 @@ export function attachTerminalWebSocket(
   ): boolean {
     const url = req.url ?? "";
     if (!url.startsWith(path)) return false;
+    // Phase 5 Task 5.5 — reject non-loopback origins as defense-in-depth.
+    // Returning `true` here means "we handled this upgrade" — the socket
+    // is already destroyed.
+    if (!enforceLoopbackOrigin(req, socket, "terminal-ws")) return true;
     const workId = url.slice(path.length + 1).split("?")[0];
     if (!workId) {
       socket.destroy();

@@ -12,6 +12,7 @@ import type { Duplex } from "node:stream";
 import { uiEventBus, type UiEvent } from "./ui-events.js";
 import { answerAsk } from "./approval-gate.js";
 import { watchCompositionFor } from "./composition-watcher.js";
+import { enforceLoopbackOrigin } from "../ws-origin.js";
 
 export interface BridgeWsHandle {
   close: () => void;
@@ -35,6 +36,10 @@ export function attachBridgeWebSocket(
   ): boolean {
     const url = req.url ?? "";
     if (!url.startsWith(path)) return false;
+    // Phase 5 Task 5.5 — reject non-loopback origins as defense-in-depth.
+    // Returning `true` here means "we handled this upgrade" — the socket
+    // is already destroyed.
+    if (!enforceLoopbackOrigin(req, socket, "bridge-ws")) return true;
     const workId = url.slice(path.length + 1).split("?")[0];
     if (!workId) {
       socket.destroy();
