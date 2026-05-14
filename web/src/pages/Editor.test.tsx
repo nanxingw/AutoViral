@@ -30,6 +30,14 @@ vi.mock("@/features/editor/canvas/Stage", () => ({
   Stage: () => <div data-testid="stage-stub" />,
 }));
 
+// Stub TerminalPanel — its useEffect constructs `new WebSocket(...)` and
+// xterm.js Terminal which neither happy-dom nor jsdom provide.
+vi.mock("@/features/terminal/TerminalPanel", () => ({
+  TerminalPanel: ({ workId }: { workId: string }) => (
+    <div data-testid="terminal-panel-stub">TERMINAL · {workId}</div>
+  ),
+}));
+
 function mount() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -43,16 +51,12 @@ function mount() {
   );
 }
 
-// 2026-05-07: align with Studio layout. Left column is full-height
-// ChatPanel; SlidesNav has been removed (selection + reorder handled
-// by the bottom Filmstrip, which gained a hover × delete button).
-describe("Editor (post-A3 — Studio-aligned layout)", () => {
-  it("renders the ChatPanel header in the left column", () => {
+// 2026-05-14 (Phase 1 agentic-terminal): Editor's left column now mounts
+// TerminalPanel instead of ChatPanel — same agentic shell as Studio.
+describe("Editor (Phase 1 agentic-terminal layout)", () => {
+  it("renders the TerminalPanel in the left column", () => {
     mount();
-    // ChatPanel header shows a Claude-family eyebrow. The default alias
-    // resolves to opus, but assert on the family root so the test stays
-    // robust as version numbers move.
-    expect(screen.queryByText(/CLAUDE-(OPUS|SONNET|HAIKU)/i)).toBeTruthy();
+    expect(screen.queryByTestId("terminal-panel-stub")).toBeTruthy();
   });
 
   it("does NOT mount the legacy SlidesNav in the left column", () => {

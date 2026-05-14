@@ -26,6 +26,14 @@ vi.mock("@/features/chat/useChatSocket", () => ({
   useChatSocket: () => ({ send: vi.fn() }),
 }));
 
+// Stub TerminalPanel — its useEffect constructs `new WebSocket(...)` and
+// xterm.js Terminal which the test env (happy-dom) does not provide.
+vi.mock("@/features/terminal/TerminalPanel", () => ({
+  TerminalPanel: ({ workId }: { workId: string }) => (
+    <div data-testid="terminal-panel-stub">TERMINAL · {workId}</div>
+  ),
+}));
+
 vi.mock("@/lib/api", () => ({
   apiFetch: vi.fn(async (url: string) => {
     if (url.includes("/chat")) return { blocks: [] };

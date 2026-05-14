@@ -13,10 +13,7 @@ import { Inspector } from "@/features/editor/panels/Inspector";
 import { Filmstrip } from "@/features/editor/panels/Filmstrip";
 import { TopBar } from "@/features/editor/panels/TopBar";
 import { useExport } from "@/features/editor/hooks/useExport";
-import { SafeChatPanel as ChatPanel } from "@/features/studio/panels/Chat/SafeChatPanel";
-import { ChatQuickActions } from "@/features/editor/panels/ChatQuickActions";
-import type { LocatorData } from "@/features/chat/types";
-import { buildEditorViewerContext } from "@/features/editor/services/viewerContext";
+import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { useT } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
 import { localizeApiError } from "@/i18n/serverError";
@@ -98,6 +95,12 @@ export default function Editor() {
         if (cancelled) return;
         if (found) {
           loadCar(found);
+          // e2e-report F81 (Editor sister of F67): backfill savedAt so a
+          // previously-saved carousel doesn't misreport as "Unsaved" on every
+          // load. Use load time as a proxy for disk mtime (the GET response
+          // doesn't include it). Same trade-off as Studio.tsx — replace with
+          // real mtime if backend ever exposes it.
+          setSavedAt(fmtSavedAt(new Date(), locale));
         } else {
           setLoadEmpty(true);
         }
@@ -218,33 +221,7 @@ export default function Editor() {
               data-area="chat"
               style={{ height: "100%", overflow: "hidden", minHeight: 0, borderRight: "1px solid var(--glass-border)" }}
             >
-              <ChatPanel
-                workId={workId}
-                quickActions={<ChatQuickActions />}
-                onJumpToLocator={(data: LocatorData) => {
-                  const slideId = (data as { slideId?: string }).slideId;
-                  if (slideId) useEditor.getState().setCurrentSlide(slideId);
-                }}
-                getViewerContext={() => {
-                  const s = useEditor.getState();
-                  return buildEditorViewerContext(
-                    s.car,
-                    s.currentSlideId,
-                    s.selectionLayerId,
-                  );
-                }}
-                dispatchAction={(action) => {
-                  const s = useEditor.getState();
-                  if (action.type === "select-slide") {
-                    const id = action.data.id;
-                    if (typeof id === "string") s.setCurrentSlide(id);
-                  } else if (action.type === "select-layer") {
-                    const id = action.data.id;
-                    if (typeof id === "string") s.setSelectionLayer(id);
-                  }
-                  // editor ignores select-clip / set-frame
-                }}
-              />
+              {workId ? <TerminalPanel workId={workId} /> : null}
             </div>
           </Panel>
 
