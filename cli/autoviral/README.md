@@ -20,11 +20,17 @@ This builds and global-links `autoviral` on your PATH.
 
 ## Commands
 
-Phase 0 (current): stub — only `autoviral --help` works.
+Phase 2 (current): read-only.
 
-Phase 2 ships read-only: `whoami`, `docs`, `comp show`, `list clips`, `list assets`.
+```
+autoviral whoami                       # current Studio context
+autoviral docs [topic]                 # operator manual (raw markdown)
+autoviral comp show                    # full composition.yaml
+autoviral list clips [--track video]   # clip rows, optionally per-track
+autoviral list assets [--kind video]   # asset registry, optionally per-kind
+```
 
-Phase 3 ships writes + UI control: `clip add/set/remove`, `select`, `seek`,
+Phase 3 will ship writes + UI control: `clip add/set/remove`, `select`, `seek`,
 `play`/`pause`, `toast`, `progress`, `ask`, `export`, `render`.
 
 See [the plan](../../docs/superpowers/plans/2026-05-14-agentic-terminal-refactor.md)
