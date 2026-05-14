@@ -12,7 +12,15 @@
 // untouched — that's the only invariant agents can rely on when chaining
 // mutations.
 
-import { readFile, writeFile, rename, mkdtemp, mkdir } from "node:fs/promises";
+import {
+  readFile,
+  writeFile,
+  rename,
+  mkdtemp,
+  mkdir,
+  copyFile,
+  access,
+} from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import yaml from "js-yaml";
@@ -34,6 +42,19 @@ function resolveRoot(ctx: OpsContext): string {
 
 export function compositionPathFor(ctx: OpsContext): string {
   return join(resolveRoot(ctx), ctx.workId, "composition.yaml");
+}
+
+/**
+ * Phase 5 Task 5.4 — sibling file that holds the previous content of
+ * composition.yaml at the moment of the most recent write. Used by
+ * `autoviral comp diff` to surface unified diffs.
+ *
+ * Naming: NOT `.bak` — the legacy crossfade-fix tooling already uses
+ * `.bak` in user workspaces, so we'd stomp on real backup data.
+ * `.previous` is unambiguous and never used elsewhere in the project.
+ */
+export function compositionPreviousPathFor(ctx: OpsContext): string {
+  return join(resolveRoot(ctx), ctx.workId, "composition.yaml.previous");
 }
 
 export async function readCompositionFor(ctx: OpsContext): Promise<Composition> {
@@ -60,10 +81,146 @@ export async function writeCompositionFor(
   const validated = CompositionSchema.parse(comp);
   const target = compositionPathFor(ctx);
   await mkdir(dirname(target), { recursive: true });
+
+  // Phase 5 Task 5.4 — snapshot the current composition.yaml (if any)
+  // into composition.yaml.previous BEFORE the atomic write so
+  // `autoviral comp diff` has a baseline to compare against. We use
+  // copyFile (fs-level, no parsing) so an unparseable on-disk file
+  // still survives as a literal diff baseline.
+  try {
+    await copyFile(target, compositionPreviousPathFor(ctx));
+  } catch (err) {
+    // Most common cause: first write, no prior composition.yaml exists.
+    // Any other error (perm, IO) is non-fatal for the write itself; we
+    // intentionally don't surface diff-baseline IO failures as a write
+    // failure because the diff feature is auxiliary.
+    if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[composition-ops] failed to snapshot previous composition: ${
+          (err as Error).message
+        }`,
+      );
+    }
+  }
+
   const tmpDir = await mkdtemp(join(tmpdir(), "autoviral-comp-"));
   const tmpPath = join(tmpDir, "composition.yaml");
   await writeFile(tmpPath, yaml.dump(validated), "utf8");
   await rename(tmpPath, target);
+}
+
+/**
+ * Phase 5 Task 5.4 — unified diff between composition.yaml.previous and
+ * current composition.yaml. Returns:
+ *   - `{ diff: string, hasBaseline: true }` with a unified diff (may be
+ *     empty if files match)
+ *   - `{ diff: "", hasBaseline: false }` if no .previous snapshot exists
+ *     (first-write case, before any mutation)
+ *   - Throws if reading the current composition fails.
+ *
+ * We deliberately keep the implementation dependency-free — a small
+ * line-level unified diff is fine for human inspection at the CLI; we
+ * are not building a syntax-aware yaml diff.
+ */
+export async function diffCompositionFor(
+  ctx: OpsContext,
+): Promise<{ diff: string; hasBaseline: boolean }> {
+  const target = compositionPathFor(ctx);
+  const previous = compositionPreviousPathFor(ctx);
+  let current: string;
+  try {
+    current = await readFile(target, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return { diff: "", hasBaseline: false };
+    }
+    throw err;
+  }
+  let baseline: string;
+  try {
+    await access(previous);
+    baseline = await readFile(previous, "utf8");
+  } catch {
+    return { diff: "", hasBaseline: false };
+  }
+  return {
+    diff: unifiedDiff(baseline, current, "composition.yaml.previous", "composition.yaml"),
+    hasBaseline: true,
+  };
+}
+
+/**
+ * Minimal line-level unified diff. NOT a Myers diff — we walk both
+ * files looking for the longest common prefix, then the longest common
+ * suffix, and emit a single hunk for the middle. This is deterministic,
+ * dependency-free, and good enough for the human-facing `autoviral comp
+ * diff` output. The CLI never tries to *apply* this diff — it's display
+ * only.
+ */
+export function unifiedDiff(
+  before: string,
+  after: string,
+  beforeName: string,
+  afterName: string,
+): string {
+  if (before === after) return "";
+  const beforeLines = before.split("\n");
+  const afterLines = after.split("\n");
+
+  // Trim common prefix.
+  let head = 0;
+  while (
+    head < beforeLines.length &&
+    head < afterLines.length &&
+    beforeLines[head] === afterLines[head]
+  ) {
+    head += 1;
+  }
+
+  // Trim common suffix.
+  let tail = 0;
+  while (
+    tail < beforeLines.length - head &&
+    tail < afterLines.length - head &&
+    beforeLines[beforeLines.length - 1 - tail] ===
+      afterLines[afterLines.length - 1 - tail]
+  ) {
+    tail += 1;
+  }
+
+  const beforeChunk = beforeLines.slice(head, beforeLines.length - tail);
+  const afterChunk = afterLines.slice(head, afterLines.length - tail);
+
+  // Include up to 3 lines of context on each side for readability.
+  const ctx = 3;
+  const ctxStart = Math.max(0, head - ctx);
+  const ctxEndBefore = Math.min(beforeLines.length, beforeLines.length - tail + ctx);
+  const ctxEndAfter = Math.min(afterLines.length, afterLines.length - tail + ctx);
+
+  const preContext = beforeLines.slice(ctxStart, head);
+  const postContextBefore = beforeLines.slice(beforeLines.length - tail, ctxEndBefore);
+  const postContextAfter = afterLines.slice(afterLines.length - tail, ctxEndAfter);
+  // Use the before-file's post-context length to bound the after-file
+  // (they're identical past the suffix marker by definition).
+  const postContext = postContextBefore.length >= postContextAfter.length
+    ? postContextBefore
+    : postContextAfter;
+
+  const beforeStart = ctxStart + 1;
+  const beforeCount = preContext.length + beforeChunk.length + postContext.length;
+  const afterStart = ctxStart + 1;
+  const afterCount = preContext.length + afterChunk.length + postContext.length;
+
+  const lines: string[] = [];
+  lines.push(`--- ${beforeName}`);
+  lines.push(`+++ ${afterName}`);
+  lines.push(`@@ -${beforeStart},${beforeCount} +${afterStart},${afterCount} @@`);
+  for (const l of preContext) lines.push(` ${l}`);
+  for (const l of beforeChunk) lines.push(`-${l}`);
+  for (const l of afterChunk) lines.push(`+${l}`);
+  for (const l of postContext) lines.push(` ${l}`);
+  return lines.join("\n") + "\n";
 }
 
 // Read–modify–write helper. The mutator may return a new composition

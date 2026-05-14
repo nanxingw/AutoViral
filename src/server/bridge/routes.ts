@@ -18,7 +18,11 @@ import {
   AskRequestSchema,
 } from "./schemas.js";
 import { createAsk } from "./approval-gate.js";
-import { readCompositionFor, mutateCompositionFor } from "./composition-ops.js";
+import {
+  readCompositionFor,
+  mutateCompositionFor,
+  diffCompositionFor,
+} from "./composition-ops.js";
 import { uiEventBus } from "./ui-events.js";
 import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
@@ -68,6 +72,23 @@ bridgeRouter.get("/comp", async (c) => {
   try {
     const comp = await readCompositionFor({ workId: g.workId });
     return c.json({ ok: true, result: comp });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+// Phase 5 Task 5.4 — unified diff between composition.yaml.previous (the
+// snapshot taken just before the most recent write) and the current
+// composition.yaml. Returns `{ diff: string, hasBaseline: boolean }`.
+// When no baseline exists yet, `hasBaseline=false` and `diff=""` — the
+// CLI prints a friendly "no prior write to diff against" message.
+bridgeRouter.get("/comp/diff", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  try {
+    const result = await diffCompositionFor({ workId: g.workId });
+    return c.json({ ok: true, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message }, 500);

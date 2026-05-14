@@ -56,6 +56,19 @@ beforeAll(async () => {
         result: { workId: "w_e2e", fps: 30, tracks: [], assets: [], duration: 0, width: 1080, height: 1920, aspect: "9:16", id: "c_e2e", updatedAt: "2026-05-14T00:00:00.000Z" },
       });
     }
+    if (req.method === "GET" && url === "/api/bridge/v1/comp/diff") {
+      // Phase 5 Task 5.4 — single fixture (non-empty diff). The CLI's
+      // "no baseline" / "no changes" paths are exercised at the server
+      // unit-test level (composition-ops.test.ts).
+      return send(200, {
+        ok: true,
+        result: {
+          diff:
+            "--- composition.yaml.previous\n+++ composition.yaml\n@@ -1,3 +1,3 @@\n fps: 30\n-duration: 0\n+duration: 5\n tracks: []\n",
+          hasBaseline: true,
+        },
+      });
+    }
     if (req.method === "GET" && url.startsWith("/api/bridge/v1/clips")) {
       return send(200, { ok: true, result: clips });
     }
@@ -194,6 +207,15 @@ describe("autoviral CLI — end-to-end", () => {
     expect(r.stdout).toMatch(/seek/);
     expect(r.stdout).toMatch(/play/);
     expect(r.stdout).toMatch(/toast/);
+  });
+
+  it("comp diff → prints unified diff to stdout (exit 0)", async () => {
+    const r = await run(["comp", "diff"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toContain("--- composition.yaml.previous");
+    expect(r.stdout).toContain("+++ composition.yaml");
+    expect(r.stdout).toContain("-duration: 0");
+    expect(r.stdout).toContain("+duration: 5");
   });
 
   it("unknown command → exit 127", async () => {

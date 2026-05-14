@@ -12,7 +12,11 @@ import {
   readCompositionFor,
   writeCompositionFor,
   mutateCompositionFor,
+  diffCompositionFor,
+  unifiedDiff,
+  compositionPreviousPathFor,
 } from "../composition-ops.js";
+import { access } from "node:fs/promises";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -93,5 +97,87 @@ describe("writeCompositionFor — atomic + validated", () => {
     );
     const parsed = yaml.load(raw) as any;
     expect(parsed.duration).toBe(99);
+  });
+
+  // Phase 5 Task 5.4 — composition.yaml.previous + diffCompositionFor
+  it("writeCompositionFor snapshots composition.yaml.previous before each write", async () => {
+    // No baseline exists yet — first write must NOT fail (ENOENT swallowed).
+    const before = await readCompositionFor({ workId, worksRoot: workRoot });
+    await writeCompositionFor(
+      { workId, worksRoot: workRoot },
+      { ...before, duration: 42 },
+    );
+    // Now a baseline exists.
+    await access(compositionPreviousPathFor({ workId, worksRoot: workRoot }));
+    // Second write — baseline should reflect the FIRST write (duration:42),
+    // not the original fixture.
+    await writeCompositionFor(
+      { workId, worksRoot: workRoot },
+      { ...before, duration: 99 },
+    );
+    const baselineRaw = await readFile(
+      compositionPreviousPathFor({ workId, worksRoot: workRoot }),
+      "utf8",
+    );
+    expect(baselineRaw).toContain("duration: 42");
+  });
+
+  it("diffCompositionFor returns hasBaseline=false on first read", async () => {
+    // Fresh workspace — only the seeded composition.yaml, no .previous.
+    const { diff, hasBaseline } = await diffCompositionFor({
+      workId,
+      worksRoot: workRoot,
+    });
+    expect(hasBaseline).toBe(false);
+    expect(diff).toBe("");
+  });
+
+  it("diffCompositionFor returns a unified diff after a write", async () => {
+    const before = await readCompositionFor({ workId, worksRoot: workRoot });
+    await writeCompositionFor(
+      { workId, worksRoot: workRoot },
+      { ...before, duration: 42 },
+    );
+    const result = await diffCompositionFor({ workId, worksRoot: workRoot });
+    expect(result.hasBaseline).toBe(true);
+    // The diff is generated from raw YAML strings — the value of
+    // `duration` changes from 0 (fixture) to 42, so the unified diff
+    // must surface `+duration: 42` and a removal of the prior value.
+    expect(result.diff).toContain("--- composition.yaml.previous");
+    expect(result.diff).toContain("+++ composition.yaml");
+    expect(result.diff).toContain("+duration: 42");
+  });
+
+  it("diffCompositionFor returns empty diff when files match byte-for-byte", async () => {
+    // Write the exact current composition back to disk — content is
+    // serialized through yaml.dump so the .previous snapshot WILL match
+    // the new target.
+    const current = await readCompositionFor({ workId, worksRoot: workRoot });
+    // First write: produces .previous (fixture-original) + new target
+    // (yaml.dump round-trip). Snapshot may differ from the dumped target.
+    await writeCompositionFor({ workId, worksRoot: workRoot }, current);
+    // Second write of the exact same composition — now both files were
+    // produced by yaml.dump and are byte-identical.
+    await writeCompositionFor({ workId, worksRoot: workRoot }, current);
+    const result = await diffCompositionFor({ workId, worksRoot: workRoot });
+    expect(result.hasBaseline).toBe(true);
+    expect(result.diff).toBe("");
+  });
+});
+
+describe("unifiedDiff", () => {
+  it("returns empty string for identical inputs", () => {
+    expect(unifiedDiff("a\nb\nc", "a\nb\nc", "x", "y")).toBe("");
+  });
+
+  it("emits +/- lines for changed middle and surrounds with context", () => {
+    const before = ["a", "b", "old", "d", "e"].join("\n");
+    const after = ["a", "b", "new", "d", "e"].join("\n");
+    const out = unifiedDiff(before, after, "before", "after");
+    expect(out).toContain("--- before");
+    expect(out).toContain("+++ after");
+    expect(out).toContain("-old");
+    expect(out).toContain("+new");
+    expect(out).toMatch(/@@ -\d+,\d+ \+\d+,\d+ @@/);
   });
 });
