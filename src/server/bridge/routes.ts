@@ -5,12 +5,19 @@
 // (export/render). See docs/superpowers/specs/2026-05-14-agentic-terminal-
 // bridge-protocol.md for the full surface.
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { readdir, readFile } from "node:fs/promises";
 import type { WhoAmIResponse } from "./schemas.js";
+import {
+  SelectRequestSchema,
+  SeekRequestSchema,
+  ToastRequestSchema,
+  ProgressRequestSchema,
+} from "./schemas.js";
 import { readCompositionFor } from "./composition-ops.js";
+import { uiEventBus } from "./ui-events.js";
 
 function manualDir(): string {
   return process.env.AUTOVIRAL_MANUAL_DIR ?? join(process.cwd(), "skills/autoviral/manual");
@@ -20,7 +27,7 @@ export const bridgeRouter = new Hono();
 
 const BRIDGE_VERSION = "0.1.0";
 
-function workIdOrError(c: Parameters<Parameters<Hono["get"]>[1]>[0]):
+function workIdOrError(c: Context):
   | { ok: true; workId: string }
   | { ok: false; res: Response } {
   const workId = c.req.header("X-AutoViral-Work-Id");
@@ -114,6 +121,63 @@ bridgeRouter.get("/assets", async (c) => {
 // body straight to stdout for the agent to read. Topic omitted → all
 // manual files concatenated with thematic-break separators, sorted by
 // filename so 00-overview / 10-... ordering is the author's lever.
+// ─── Phase 3 — UI command routes ────────────────────────────────────────────
+// Each route validates the body with zod, then publishes a "ui-*" event on
+// UiEventBus. The /ws/bridge/:workId WebSocket forwards events to Studio.
+// HTTP returns ok immediately — the round-trip is fire-and-forget; the
+// agent does not block waiting for the UI to render. (The `/ask` route in
+// Task 3.9 is the exception; it blocks until the user replies.)
+
+function broadcast(workId: string, type: string, payload: unknown): void {
+  uiEventBus.publish(workId, { type, workId, ts: Date.now(), payload });
+}
+
+bridgeRouter.post("/select", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = SelectRequestSchema.parse(await c.req.json());
+  broadcast(g.workId, "ui-select", body.target);
+  return c.json({ ok: true, result: { selected: body.target } });
+});
+
+bridgeRouter.post("/seek", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = SeekRequestSchema.parse(await c.req.json());
+  broadcast(g.workId, "ui-seek", { seconds: body.seconds });
+  return c.json({ ok: true, result: { seekedTo: body.seconds } });
+});
+
+bridgeRouter.post("/play", (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  broadcast(g.workId, "ui-play", null);
+  return c.json({ ok: true });
+});
+
+bridgeRouter.post("/pause", (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  broadcast(g.workId, "ui-pause", null);
+  return c.json({ ok: true });
+});
+
+bridgeRouter.post("/toast", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = ToastRequestSchema.parse(await c.req.json());
+  broadcast(g.workId, "ui-toast", body);
+  return c.json({ ok: true });
+});
+
+bridgeRouter.post("/progress", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = ProgressRequestSchema.parse(await c.req.json());
+  broadcast(g.workId, "ui-progress", body);
+  return c.json({ ok: true });
+});
+
 bridgeRouter.get("/docs", async (c) => {
   const topic = c.req.query("topic");
   const dir = manualDir();

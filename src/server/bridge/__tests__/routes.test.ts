@@ -2,11 +2,12 @@
 // the surface grows in Phase 2-3 with corresponding tests. See
 // docs/superpowers/plans/2026-05-14-agentic-terminal-refactor.md.
 
-import { describe, expect, it, beforeAll, afterAll } from "vitest";
+import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { bridgeRouter } from "../routes.js";
+import { uiEventBus } from "../ui-events.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -135,6 +136,113 @@ describe("bridge router — Phase 2 read-only composition", () => {
     };
     expect(body.ok).toBe(true);
     expect(body.result?.every((a) => a.kind === "video")).toBe(true);
+  });
+});
+
+describe("bridge router — Phase 3 UI commands", () => {
+  // Each POST publishes a UiEvent; we subscribe and assert the type+payload.
+  function captureNext(workId: string): Promise<{ type: string; payload: unknown }> {
+    return new Promise((resolve) => {
+      const off = uiEventBus.subscribe(workId, (event) => {
+        off();
+        resolve({ type: event.type, payload: event.payload });
+      });
+    });
+  }
+
+  it("POST /select publishes ui-select with the target", async () => {
+    const got = captureNext("w_cmd_1");
+    const res = await app.request("/api/bridge/v1/select", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_cmd_1",
+      },
+      body: JSON.stringify({ target: { kind: "clip", id: "vc_s07" } }),
+    });
+    expect(res.status).toBe(200);
+    const ev = await got;
+    expect(ev.type).toBe("ui-select");
+    expect(ev.payload).toEqual({ kind: "clip", id: "vc_s07" });
+  });
+
+  it("POST /seek publishes ui-seek with seconds", async () => {
+    const got = captureNext("w_cmd_2");
+    const res = await app.request("/api/bridge/v1/seek", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_cmd_2",
+      },
+      body: JSON.stringify({ seconds: 12.5 }),
+    });
+    expect(res.status).toBe(200);
+    const ev = await got;
+    expect(ev.type).toBe("ui-seek");
+    expect(ev.payload).toEqual({ seconds: 12.5 });
+  });
+
+  it("POST /play publishes ui-play (null payload)", async () => {
+    const got = captureNext("w_cmd_3");
+    const res = await app.request("/api/bridge/v1/play", {
+      method: "POST",
+      headers: { "X-AutoViral-Work-Id": "w_cmd_3" },
+    });
+    expect(res.status).toBe(200);
+    const ev = await got;
+    expect(ev.type).toBe("ui-play");
+  });
+
+  it("POST /pause publishes ui-pause", async () => {
+    const got = captureNext("w_cmd_4");
+    const res = await app.request("/api/bridge/v1/pause", {
+      method: "POST",
+      headers: { "X-AutoViral-Work-Id": "w_cmd_4" },
+    });
+    expect(res.status).toBe(200);
+    const ev = await got;
+    expect(ev.type).toBe("ui-pause");
+  });
+
+  it("POST /toast publishes ui-toast with parsed defaults", async () => {
+    const got = captureNext("w_cmd_5");
+    const res = await app.request("/api/bridge/v1/toast", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_cmd_5",
+      },
+      body: JSON.stringify({ message: "hello" }),
+    });
+    expect(res.status).toBe(200);
+    const ev = await got;
+    expect(ev.type).toBe("ui-toast");
+    expect(ev.payload).toMatchObject({ message: "hello", kind: "info", durationMs: 3000 });
+  });
+
+  it("POST /progress passes through the discriminated phase", async () => {
+    const got = captureNext("w_cmd_6");
+    const res = await app.request("/api/bridge/v1/progress", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_cmd_6",
+      },
+      body: JSON.stringify({ phase: "start", label: "render", steps: 3 }),
+    });
+    expect(res.status).toBe(200);
+    const ev = await got;
+    expect(ev.type).toBe("ui-progress");
+    expect(ev.payload).toEqual({ phase: "start", label: "render", steps: 3 });
+  });
+
+  it("POST /select without workId header → 400", async () => {
+    const res = await app.request("/api/bridge/v1/select", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ target: { kind: "none" } }),
+    });
+    expect(res.status).toBe(400);
   });
 });
 
