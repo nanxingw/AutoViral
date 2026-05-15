@@ -24,3 +24,13 @@ playwright-report/
 playwright/.cache/
 .cache/
 autoviral design/
+# mattpocock skills bundle — installed via `npx skills add mattpocock/skills`,
+# symlinked into .claude/skills/. Not committed: each teammate runs `npx skills`
+# locally to get the current version they prefer.
+.agents/
+# npx skills installer also drops symlinks into ./skills/<name> pointing at
+# ../.agents/skills/<name>. Symlinks would be broken on any clone. Only the
+# AutoViral skill itself (skills/autoviral/) stays committed.
+skills/*
+!skills/autoviral
+skills-lock.json

@@ -1,5 +1,19 @@
 # AutoViral
 
+## Agent skills
+
+This repo uses three families of agent skill, configured in `docs/agents/`:
+
+1. **AutoViral itself** (`skills/autoviral/`) — operator manual for driving the AutoViral workstation. See "Skill 结构规范" section below.
+2. **Engineering / process** (`.agents/skills/` — `mattpocock/*`) — work decomposition + collaboration primitives: `to-prd`, `to-issues`, `triage`, `diagnose`, `tdd`, `prototype`, `zoom-out`, `handoff`, `caveman`, `grill-me`, `grill-with-docs`, `improve-codebase-architecture`, `write-a-skill`, `find-skills`. **This replaces `superpowers:*` in this project** — see [ADR-004](docs/adr/ADR-004-mattpocock-replaces-superpowers.md).
+3. **Taste / craft** (sibling skills, not bundled) — bring your own: `editorial-pro`, `viral-hooks-zh`, `lyric-video`, etc.
+
+Key project conventions for these skills:
+- **Issue tracker:** GitHub Issues at https://github.com/nanxingw/AutoViral (`gh` CLI). See [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+- **Triage labels:** `needs-triage` / `waiting-on-reporter` / `ready-for-agent` / `ready-for-human` / `wontfix`. See [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
+- **Domain docs:** [CONTEXT.md](CONTEXT.md) (domain glossary + invariants) + [docs/adr/](docs/adr/) (architecture decisions). See [docs/agents/domain.md](docs/agents/domain.md).
+- **Index:** [docs/agents/index.md](docs/agents/index.md).
+
 ## Skill 结构规范 (refactor in progress — see refactor/agentic-terminal)
 
 AutoViral 不再把"如何做好视频"作为 skill 内容 —— 那是 commodity（市面有 hyperframes / editorial-pro 等），让用户挂自己喜欢的 taste skill。**AutoViral 的 skill 是"如何操作这个工位"的操作手册**，agent-agnostic markdown，任何 CLI agent（claude / codex / kimi / aider）加载后都能在 Studio 里给用户一流体验。
