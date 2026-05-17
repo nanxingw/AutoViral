@@ -18,6 +18,7 @@ import { clipCommand } from "./commands/clip.js";
 import { askCommand } from "./commands/ask.js";
 import { exportCommand, renderCommand } from "./commands/export.js";
 import { ingestCommand } from "./commands/ingest.js";
+import { preprocessCommand } from "./commands/preprocess.js";
 
 const [, , subcommand, ...rest] = process.argv;
 const dispatch: Record<string, (args: string[]) => Promise<void>> = {
@@ -36,6 +37,7 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   export: exportCommand,
   render: renderCommand,
   ingest: ingestCommand,
+  preprocess: preprocessCommand,
 };
 
 (async () => {

@@ -29,6 +29,11 @@ import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
 import { ingestYouTubeIntoWork } from "./ingest-youtube.js";
 import { read as readFocus, write as writeFocus } from "../../focus/index.js";
 import { resolve as resolveVariables } from "../../composition/variables/index.js";
+import {
+  synthesize as synthesizeTts,
+  TTS_VOICES,
+  TTS_FORMATS,
+} from "../../providers/tts/index.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
@@ -245,6 +250,42 @@ bridgeRouter.post("/focus", async (c) => {
   const next = writeFocus(g.workId, body);
   broadcast(g.workId, "ui-focus", next);
   return c.json({ ok: true, result: next });
+});
+
+// ─── H4.1 — TTS preprocess ──────────────────────────────────────────────────
+// Synthesize narration audio via OpenAI's /v1/audio/speech endpoint.
+// Drops the resulting mp3 (or wav/opus/etc.) into the work's
+// assets/audio/ directory and broadcasts an asset-added event so the
+// Studio UI picks it up immediately.
+const TtsRequestSchema = z.object({
+  text: z.string().min(1),
+  voice: z.enum(TTS_VOICES).optional(),
+  format: z.enum(TTS_FORMATS).optional(),
+  model: z.string().optional(),
+  filenameStem: z.string().optional(),
+});
+
+bridgeRouter.post("/preprocess/tts", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  try {
+    const body = TtsRequestSchema.parse(await c.req.json());
+    const worksRoot =
+      process.env.AUTOVIRAL_WORKS_ROOT ??
+      join(homedir(), ".autoviral/works");
+    const workDir = join(worksRoot, g.workId);
+    const result = await synthesizeTts({ ...body, workDir });
+    broadcast(g.workId, "asset-added", {
+      kind: "audio",
+      uri: result.relativeUri,
+      bytes: result.bytes,
+      origin: "tts",
+    });
+    return c.json({ ok: true, result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 500);
+  }
 });
 
 // ─── Phase 3 — composition write endpoints ──────────────────────────────────
