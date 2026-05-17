@@ -181,21 +181,186 @@ interface CaptionWordProps {
 
 function CaptionWord({ seg, isActive, hilight, groupColor, isFirstInGroup }: CaptionWordProps) {
   const color = isActive ? hilight?.activeColor ?? groupColor : hilight?.dimColor ?? groupColor;
-  const scale = isActive ? hilight?.activeScale ?? 1 : 1;
+  const type = hilight?.type ?? "basic-color";
+
+  // H3 — type-specific scale / transform overrides take precedence over the
+  // generic activeScale legacy field when an extended type is set.
+  let scale = isActive ? hilight?.activeScale ?? 1 : 1;
+  if (isActive && type === "slam") {
+    // Slam: 1.4 → 1.0 bounce on activation; CSS bezier approximates spring.
+    scale = hilight?.slamScale ?? 1.4;
+  } else if (isActive && type === "elastic") {
+    // Elastic: scale oscillates +/- overshoot; we render the peak frame.
+    scale = 1 + (hilight?.elasticOvershoot ?? 0.2);
+  }
   const transform = scale !== 1 ? `scale(${scale})` : undefined;
+
+  // marker-sweep: yellow translucent bar sweeps L→R across active words.
+  const showMarkerSweep = isActive && type === "marker-sweep";
+  // scribble: SVG underline/circle/strike emerges under/around active word.
+  const showScribble = isActive && type === "scribble";
+  // burst: radial lines around active word (rendered via pseudo-elements).
+  const showBurst = isActive && type === "burst";
+  // clip-reveal: clip-path inset reveals L→R during activation window.
+  const clipPath =
+    isActive && type === "clip-reveal" ? "inset(0 0 0 0)" : undefined;
+
+  // Pre-paint transitions: base color/transform + clip-reveal animation
+  const transitions = [
+    "color 80ms linear",
+    type === "slam" || type === "elastic"
+      ? "transform 220ms cubic-bezier(0.34, 1.56, 0.64, 1)"
+      : "transform 120ms ease-out",
+    "clip-path 280ms ease-out",
+  ].join(", ");
+
   return (
     <span
       data-segment={seg.segmentId}
       data-active={isActive ? "true" : "false"}
+      data-highlight-type={type}
       style={{
+        position: "relative",
         color,
         transform,
+        clipPath,
         display: "inline-block",
-        transition: "color 80ms linear, transform 120ms ease-out",
+        transition: transitions,
         marginLeft: isFirstInGroup ? 0 : "0.18em",
       }}
     >
+      {showMarkerSweep && (
+        <span
+          aria-hidden
+          data-effect="marker-sweep"
+          style={{
+            position: "absolute",
+            inset: "-0.05em -0.1em",
+            background: hilight?.activeColor ?? "#ffd54f",
+            opacity: 0.32,
+            transform: "scaleX(1)",
+            transformOrigin: "left center",
+            transition: `transform ${(hilight?.sweepDuration ?? 0.3) * 1000}ms ease-out`,
+            mixBlendMode: "multiply",
+            borderRadius: 2,
+            zIndex: -1,
+          }}
+        />
+      )}
+      {showScribble && (
+        <Scribble
+          path={hilight?.scribblePath ?? "underline"}
+          color={hilight?.activeColor ?? "#a8c5d6"}
+        />
+      )}
+      {showBurst && (
+        <BurstLines
+          count={hilight?.burstLineCount ?? 6}
+          color={hilight?.activeColor ?? "#a8c5d6"}
+        />
+      )}
       {seg.text}
+    </span>
+  );
+}
+
+function Scribble({
+  path,
+  color,
+}: {
+  path: "underline" | "circle" | "strike";
+  color: string;
+}) {
+  // Hand-rolled SVG path-length animation. The path is positioned over the
+  // word via the parent span's relative layout; stroke-dasharray creates
+  // a "drawn-in" effect when the active state flips on.
+  const isCircle = path === "circle";
+  const isStrike = path === "strike";
+  return (
+    <svg
+      aria-hidden
+      data-effect={`scribble-${path}`}
+      viewBox="0 0 100 30"
+      preserveAspectRatio="none"
+      style={{
+        position: "absolute",
+        inset: isCircle ? "-20% -10%" : isStrike ? "0" : "60% 0 -15% 0",
+        width: isCircle ? "120%" : "100%",
+        height: isCircle ? "140%" : "100%",
+        pointerEvents: "none",
+        overflow: "visible",
+      }}
+    >
+      {isCircle ? (
+        <ellipse
+          cx="50"
+          cy="15"
+          rx="48"
+          ry="13"
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeDasharray="200"
+          strokeDashoffset="0"
+          style={{
+            transition: "stroke-dashoffset 320ms ease-out",
+          }}
+        />
+      ) : (
+        <path
+          d={isStrike ? "M 2 15 Q 50 12 98 15" : "M 2 22 Q 50 28 98 22"}
+          fill="none"
+          stroke={color}
+          strokeWidth="2.5"
+          strokeLinecap="round"
+          strokeDasharray="120"
+          strokeDashoffset="0"
+          style={{
+            transition: "stroke-dashoffset 280ms ease-out",
+          }}
+        />
+      )}
+    </svg>
+  );
+}
+
+function BurstLines({ count, color }: { count: number; color: string }) {
+  // Deterministic radial lines — angle = i * (360/count). No randomness so
+  // the rendering stays deterministic per the hyperframes-inspired
+  // capture-engine contract (frame-stable in Remotion).
+  const lines = Array.from({ length: count }, (_, i) => {
+    const angle = (i * 360) / count;
+    return (
+      <span
+        key={i}
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: "50%",
+          top: "50%",
+          width: 28,
+          height: 2.5,
+          background: color,
+          borderRadius: 1,
+          transform: `translate(0, -50%) rotate(${angle}deg) translateX(0.55em)`,
+          transformOrigin: "left center",
+          opacity: 0.85,
+        }}
+      />
+    );
+  });
+  return (
+    <span
+      aria-hidden
+      data-effect="burst"
+      style={{
+        position: "absolute",
+        inset: 0,
+        pointerEvents: "none",
+      }}
+    >
+      {lines}
     </span>
   );
 }

@@ -387,6 +387,29 @@ export const CaptionAnimationSetSchema = z.object({
       activeColor: z.string(),
       dimColor: z.string(),
       activeScale: z.number().optional(),
+      // H3 — extended type enum + type-specific parameters.
+      // basic-color is the legacy default (color swap only).
+      type: z
+        .enum([
+          "basic-color",
+          "marker-sweep",
+          "scribble",
+          "burst",
+          "slam",
+          "elastic",
+          "clip-reveal",
+        ])
+        .optional(),
+      // marker-sweep: highlight bar sweep duration in seconds (default 0.3)
+      sweepDuration: z.number().min(0).optional(),
+      // scribble: path style — underline / circle / strike
+      scribblePath: z.enum(["underline", "circle", "strike"]).optional(),
+      // burst: radial-line count emanating from the active word (default 6)
+      burstLineCount: z.number().int().min(1).max(24).optional(),
+      // slam: scale-from value at activation peak (default 1.4)
+      slamScale: z.number().min(1).max(3).optional(),
+      // elastic: scale-overshoot magnitude (default 0.2)
+      elasticOvershoot: z.number().min(0).max(1).optional(),
     })
     .optional(),
   exit: z
