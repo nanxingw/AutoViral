@@ -40,6 +40,9 @@ import {
 } from "../../providers/tts/index.js";
 import { getContext, getProfile, getTrends } from "../../context/index.js";
 import { lintComposition } from "../../composition/quality/lint.js";
+import { inspectComposition } from "../../composition/quality/inspect.js";
+import { validateComposition } from "../../composition/quality/validate.js";
+import { animationMap } from "../../composition/quality/animation-map.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
@@ -293,21 +296,87 @@ bridgeRouter.get("/profile", async (c) => {
   return c.json({ ok: true, result: profile });
 });
 
-// ─── H1.1 — autoviral lint (schema + semantic checks, no Puppeteer) ─────────
+// ─── H1.1-H1.4 — quality gate (static analysis; Puppeteer follow-up tbd) ────
+async function readCompForQuality(workId: string) {
+  const comp = await readCompositionFor({ workId });
+  const worksRoot =
+    process.env.AUTOVIRAL_WORKS_ROOT ??
+    join(homedir(), ".autoviral/works");
+  return { comp, workDir: join(worksRoot, workId) };
+}
+
 bridgeRouter.post("/quality/lint", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
   try {
-    const comp = await readCompositionFor({ workId: g.workId });
-    const worksRoot =
-      process.env.AUTOVIRAL_WORKS_ROOT ??
-      join(homedir(), ".autoviral/works");
-    const workDir = join(worksRoot, g.workId);
-    const report = lintComposition(comp, { workDir });
-    return c.json({ ok: true, result: report });
+    const { comp, workDir } = await readCompForQuality(g.workId);
+    return c.json({ ok: true, result: lintComposition(comp, { workDir }) });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return c.json({ ok: false, error: message }, 500);
+    return c.json({ ok: false, error: (err as Error).message }, 500);
+  }
+});
+
+bridgeRouter.post("/quality/inspect", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  try {
+    const { comp } = await readCompForQuality(g.workId);
+    return c.json({ ok: true, result: inspectComposition(comp) });
+  } catch (err) {
+    return c.json({ ok: false, error: (err as Error).message }, 500);
+  }
+});
+
+bridgeRouter.post("/quality/validate", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  try {
+    const { comp } = await readCompForQuality(g.workId);
+    return c.json({ ok: true, result: validateComposition(comp) });
+  } catch (err) {
+    return c.json({ ok: false, error: (err as Error).message }, 500);
+  }
+});
+
+bridgeRouter.post("/quality/animation-map", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  try {
+    const { comp } = await readCompForQuality(g.workId);
+    return c.json({ ok: true, result: animationMap(comp) });
+  } catch (err) {
+    return c.json({ ok: false, error: (err as Error).message }, 500);
+  }
+});
+
+bridgeRouter.post("/quality/check", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  try {
+    const { comp, workDir } = await readCompForQuality(g.workId);
+    const lint = lintComposition(comp, { workDir });
+    const inspect = inspectComposition(comp);
+    const validate = validateComposition(comp);
+    const anim = animationMap(comp);
+    const totalErrors = lint.counts.error + inspect.counts.error;
+    const totalWarnings =
+      lint.counts.warning + inspect.counts.warning + validate.counts.warning;
+    return c.json({
+      ok: true,
+      result: {
+        lint,
+        inspect,
+        validate,
+        animationMap: anim,
+        summary: {
+          totalErrors,
+          totalWarnings,
+          exitCode: totalErrors > 0 ? 6 : totalWarnings > 0 ? 5 : 0,
+        },
+      },
+    });
+  } catch (err) {
+    return c.json({ ok: false, error: (err as Error).message }, 500);
   }
 });
 

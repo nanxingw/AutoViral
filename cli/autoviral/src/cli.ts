@@ -21,7 +21,13 @@ import { ingestCommand } from "./commands/ingest.js";
 import { preprocessCommand } from "./commands/preprocess.js";
 import { contextCommand } from "./commands/context.js";
 import { trendsCommand, profileCommand } from "./commands/trends.js";
-import { lintCommand } from "./commands/check.js";
+import {
+  lintCommand,
+  inspectCommand,
+  validateCommand,
+  animationMapCommand,
+  checkCommand,
+} from "./commands/check.js";
 
 const [, , subcommand, ...rest] = process.argv;
 const dispatch: Record<string, (args: string[]) => Promise<void>> = {
@@ -45,6 +51,10 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   trends: trendsCommand,
   profile: profileCommand,
   lint: lintCommand,
+  inspect: inspectCommand,
+  validate: validateCommand,
+  "animation-map": animationMapCommand,
+  check: checkCommand,
 };
 
 (async () => {
