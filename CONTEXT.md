@@ -93,7 +93,7 @@ src/                        # Backend (Node + TypeScript)
 ├── providers/              # OpenRouter-backed image/video adapters
 ├── shared/                 # composition.ts (zod schema), shared types
 ├── trends/sources/         # Multi-platform trend scrapers
-└── postinstall.ts          # First-run setup (hyperframes auto-install — to be removed, see PRD)
+└── postinstall.ts          # First-run setup (copies skills/, installs skill-creator, repairs node-pty perms)
 
 web/                        # Frontend (React + Vite + CSS modules)
 ├── src/features/

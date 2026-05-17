@@ -22,7 +22,14 @@ When stuck, run `autoviral docs <topic>` to print any section.
 
 ## Aesthetic / taste decisions are NOT in this skill
 
-AutoViral has no opinion on what makes a video good. Bring your own taste skill — `hyperframes`, `editorial-pro`, your own — or ask the user. This manual only documents how to operate the tool; **what** to operate it toward is the agent's job (or the user's instruction).
+AutoViral has no opinion on what makes a video good. It stays small by deferring to two flavors of sibling skill — invoke them on demand from the terminal or chat:
+
+- **Taste / craft** — `editorial-pro`, `viral-hooks-zh`, `lyric-video`, etc. Tells the agent *what* to make: brand briefs, palette guidance, hook templates, platform-specific grammar.
+- **Engineering / process** — `mattpocock/*` (`to-prd`, `to-issues`, `triage`, `diagnose`, `tdd`, `handoff`, `caveman`, `prototype`, `zoom-out`, `grill-me`, `improve-codebase-architecture`, `write-a-skill`, `find-skills`). Tells the agent *how* to collaborate.
+
+This manual only documents how to operate the tool; **what** to operate it toward is the sibling skill's or the user's job.
+
+(Note: `hyperframes` is NOT bundled and is no longer auto-installed. Per [ADR-001](../../docs/adr/ADR-001-autoviral-owns-the-editing-layer.md), AutoViral now owns the editing layer itself and absorbs hyperframes' high-ROI techniques as native capability. Install hyperframes explicitly via `npx skills add heygen-com/hyperframes` if you want to use it directly.)
 
 ## Recipes for common tasks
 
