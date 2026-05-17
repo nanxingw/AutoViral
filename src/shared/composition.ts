@@ -422,6 +422,50 @@ export type CaptionModel = z.infer<typeof CaptionModelSchema>;
 export const CaptionStrategySchema = z.enum(["burn", "overlay"]);
 export type CaptionStrategy = z.infer<typeof CaptionStrategySchema>;
 
+// ─── H2 — Composition variables ─────────────────────────────────────────────
+// Declarative variables on the composition for ${id} interpolation across
+// any string field. Pattern adopted from hyperframes' data-composition-
+// variables; see ADR-001 (we absorb hyperframes techniques as native).
+//
+// At render time, src/composition/variables/resolve() walks the composition
+// tree replacing every "${id}" token in string values with the resolved
+// concrete value (declared default + composition-level override +
+// --variables CLI override). Type coercion happens at the substitution
+// site: numbers and booleans stringify; colors stay strings as hex; enums
+// substitute the chosen value.
+export const VariableTypeSchema = z.enum([
+  "string",
+  "number",
+  "color",
+  "boolean",
+  "enum",
+]);
+export type VariableType = z.infer<typeof VariableTypeSchema>;
+
+export const VariableEnumOptionSchema = z.object({
+  value: z.string(),
+  label: z.string(),
+});
+export type VariableEnumOption = z.infer<typeof VariableEnumOptionSchema>;
+
+export const VariableDeclarationSchema = z.object({
+  id: z
+    .string()
+    .min(1)
+    .regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/, {
+      message: "variable id must be a valid identifier",
+    }),
+  type: VariableTypeSchema,
+  label: z.string(),
+  // `default` carries the declared default. Type-correctness is checked at
+  // validateDeclarations() time, not by zod here — zod can't express
+  // "string when type is string, number when type is number, ..." cleanly,
+  // and the runtime validator catches it with a better error message.
+  default: z.union([z.string(), z.number(), z.boolean()]),
+  options: z.array(VariableEnumOptionSchema).optional(),
+});
+export type VariableDeclaration = z.infer<typeof VariableDeclarationSchema>;
+
 export const CompositionSchema = z.object({
   id: z.string(),
   workId: z.string(),
@@ -445,6 +489,10 @@ export const CompositionSchema = z.object({
   // captionStrategy="burn" or absent = legacy libass path.
   captions: CaptionModelSchema.optional(),
   captionStrategy: CaptionStrategySchema.optional(),
+  // H2 — optional list of declarative variables. Empty/absent means the
+  // composition is not parametrized; resolve() is a no-op. makeEmpty*
+  // does not produce a `variables` key so backward compat is preserved.
+  variables: z.array(VariableDeclarationSchema).optional(),
 });
 export type Composition = z.infer<typeof CompositionSchema>;
 
