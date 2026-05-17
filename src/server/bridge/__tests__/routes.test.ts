@@ -541,3 +541,62 @@ describe("bridge router — H0.1 focus channel", () => {
     expect(body.result.selectedClipId).toBeNull();
   });
 });
+
+describe("bridge router — H0.3 context channel", () => {
+  it("GET /context returns workId + focus + composition + inject flag", async () => {
+    const res = await app.request("/api/bridge/v1/context", {
+      headers: { "X-AutoViral-Work-Id": "w_ctx_get" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result: {
+        workId: string;
+        focus: { selectedClipId: string | null };
+        composition: unknown;
+        terminalInjectEnabled: boolean;
+      };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.result.workId).toBe("w_ctx_get");
+    expect(body.result.focus).toBeDefined();
+    expect(body.result.terminalInjectEnabled).toBe(true);
+  });
+
+  it("POST /context/inject flips the flag", async () => {
+    const off = await app.request("/api/bridge/v1/context/inject", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_inject",
+      },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(off.status).toBe(200);
+    const ctxRes = await app.request("/api/bridge/v1/context", {
+      headers: { "X-AutoViral-Work-Id": "w_inject" },
+    });
+    const ctx = (await ctxRes.json()) as {
+      result: { terminalInjectEnabled: boolean };
+    };
+    expect(ctx.result.terminalInjectEnabled).toBe(false);
+  });
+
+  it("POST /context/inject broadcasts ui-context-inject on the bus", async () => {
+    const events: unknown[] = [];
+    const unsub = uiEventBus.subscribe("w_inject_bus", (e) => {
+      events.push(e);
+    });
+    await app.request("/api/bridge/v1/context/inject", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_inject_bus",
+      },
+      body: JSON.stringify({ enabled: true }),
+    });
+    unsub();
+    expect(events).toHaveLength(1);
+    expect((events[0] as { type: string }).type).toBe("ui-context-inject");
+  });
+});

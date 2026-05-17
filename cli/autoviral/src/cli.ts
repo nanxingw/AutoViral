@@ -19,6 +19,7 @@ import { askCommand } from "./commands/ask.js";
 import { exportCommand, renderCommand } from "./commands/export.js";
 import { ingestCommand } from "./commands/ingest.js";
 import { preprocessCommand } from "./commands/preprocess.js";
+import { contextCommand } from "./commands/context.js";
 
 const [, , subcommand, ...rest] = process.argv;
 const dispatch: Record<string, (args: string[]) => Promise<void>> = {
@@ -38,6 +39,7 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   render: renderCommand,
   ingest: ingestCommand,
   preprocess: preprocessCommand,
+  context: contextCommand,
 };
 
 (async () => {

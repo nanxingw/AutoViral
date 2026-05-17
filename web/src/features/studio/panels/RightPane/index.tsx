@@ -15,7 +15,7 @@
  * `useActiveSurface.ts`.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChatPanel } from "@/features/studio/panels/Chat";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { useToastStore } from "@/stores/toast";
@@ -139,10 +139,31 @@ export function RightPane({ workId }: RightPaneProps) {
  * changes selection. Hidden entirely when focus is empty so the prefix
  * row doesn't steal pixels from xterm when there's nothing to show.
  */
+const TERMINAL_INJECT_KEY = "autoviral.terminal.injectEnabled";
+function readInjectEnabled(): boolean {
+  try {
+    return localStorage.getItem(TERMINAL_INJECT_KEY) !== "off";
+  } catch {
+    return true;
+  }
+}
+
 function TerminalFocusPrefix() {
   // Subscribe to focus changes — every selection write re-renders this.
   const focus = useFocusStore((s) => s.focus);
-  const prefix = focus.selectedClipId ? buildTerminalPrefix() : null;
+  // H0.3 — inject toggle. CLI `autoviral context --inject off` flips this
+  // via the ui-context-inject WS event (subscriber lives elsewhere); the
+  // local read is from localStorage for cross-reload persistence.
+  const [enabled, setEnabled] = useState<boolean>(() => readInjectEnabled());
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === TERMINAL_INJECT_KEY) setEnabled(readInjectEnabled());
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+  if (!enabled) return null;
+  const prefix = buildTerminalPrefix();
   if (!prefix) return null;
   return (
     <div

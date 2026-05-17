@@ -27,15 +27,31 @@ import { uiEventBus } from "./ui-events.js";
 import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
 import { ingestYouTubeIntoWork } from "./ingest-youtube.js";
-import { read as readFocus, write as writeFocus } from "../../focus/index.js";
+import {
+  read as readFocus,
+  write as writeFocus,
+  subscribe as subscribeFocus,
+} from "../../focus/index.js";
 import { resolve as resolveVariables } from "../../composition/variables/index.js";
 import {
   synthesize as synthesizeTts,
   TTS_VOICES,
   TTS_FORMATS,
 } from "../../providers/tts/index.js";
+import { getContext } from "../../context/index.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+
+// Per-workId boolean flag controlling whether the terminal prefix line
+// renders. Stored in-memory; frontend mirrors to localStorage for cross-
+// reload persistence. CLI flips it via `autoviral context --inject on|off`.
+const terminalInjectEnabled = new Map<string, boolean>();
+function readInject(workId: string): boolean {
+  return terminalInjectEnabled.get(workId) ?? true;
+}
+function writeInject(workId: string, enabled: boolean): void {
+  terminalInjectEnabled.set(workId, enabled);
+}
 
 function manualDir(): string {
   return process.env.AUTOVIRAL_MANUAL_DIR ?? join(process.cwd(), "skills/autoviral/manual");
@@ -250,6 +266,92 @@ bridgeRouter.post("/focus", async (c) => {
   const next = writeFocus(g.workId, body);
   broadcast(g.workId, "ui-focus", next);
   return c.json({ ok: true, result: next });
+});
+
+// ─── H0.3 — Context aggregator + SSE stream + inject toggle ─────────────────
+
+bridgeRouter.get("/context", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const ctx = await getContext(g.workId);
+  return c.json({
+    ok: true,
+    result: { ...ctx, terminalInjectEnabled: readInject(g.workId) },
+  });
+});
+
+// SSE stream — every focus-changed event flushes the latest context.
+// Native ReadableStream + text/event-stream for max portability across
+// Hono adapters (works on both `node` and `bun` and Vercel-style runners).
+bridgeRouter.get("/context/stream", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const workId = g.workId;
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const encoder = new TextEncoder();
+      const send = async () => {
+        try {
+          const ctx = await getContext(workId);
+          const payload = JSON.stringify({
+            ...ctx,
+            terminalInjectEnabled: readInject(workId),
+          });
+          controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
+        } catch {
+          // best-effort; do not tear down the stream on a transient read err
+        }
+      };
+      // Initial snapshot
+      void send();
+      // Subscribe — every focus write fans out a re-snapshot.
+      const unsub = subscribeFocus(workId, () => {
+        void send();
+      });
+      // Keep-alive heartbeat every 25s to prevent some proxies from
+      // closing idle SSE connections.
+      const heartbeat = setInterval(() => {
+        try {
+          controller.enqueue(encoder.encode(`: heartbeat\n\n`));
+        } catch {
+          /* closed */
+        }
+      }, 25_000);
+      // Client-disconnect cleanup via c.req.raw.signal (Hono).
+      const signal = c.req.raw.signal;
+      const onAbort = () => {
+        clearInterval(heartbeat);
+        unsub();
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
+      };
+      signal.addEventListener("abort", onAbort);
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+    },
+  });
+});
+
+const InjectToggleSchema = z.object({
+  enabled: z.boolean(),
+});
+bridgeRouter.post("/context/inject", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = InjectToggleSchema.parse(await c.req.json());
+  writeInject(g.workId, body.enabled);
+  broadcast(g.workId, "ui-context-inject", { enabled: body.enabled });
+  return c.json({ ok: true, result: { enabled: body.enabled } });
 });
 
 // ─── H4.1 — TTS preprocess ──────────────────────────────────────────────────
