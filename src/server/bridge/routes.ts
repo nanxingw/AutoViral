@@ -214,11 +214,20 @@ bridgeRouter.post("/progress", async (c) => {
 // renders it as a prefix line. The `ui-focus` event lets any third-party
 // surface subscribe via WS.
 //
-// H0.1 ships selectedClipId only; H0.2 expands the schema. Schema lives
-// inline because focus patches are simple enough not to warrant a separate
-// schemas.ts entry yet.
+// H0.2 expanded the schema to include playhead, segment, and panel focus.
+// All fields are optional in the patch so callers can update just what
+// changed (no need to round-trip the full snapshot).
+const ActivePanelSchema = z.enum([
+  "timeline",
+  "inspector",
+  "preview",
+  "sidebar",
+]);
 const FocusPatchSchema = z.object({
   selectedClipId: z.string().nullable().optional(),
+  playheadSec: z.number().min(0).optional(),
+  selectedSegmentId: z.string().nullable().optional(),
+  activePanel: ActivePanelSchema.nullable().optional(),
 });
 
 bridgeRouter.get("/focus", (c) => {
