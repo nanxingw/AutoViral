@@ -31,6 +31,15 @@ vi.mock("@/features/terminal/TerminalPanel", () => ({
   ),
 }));
 
+// Same reasoning for ChatPanel — added 2026-05-17 when RightPane (M.5)
+// began hosting both surfaces. ChatPanel pulls in useChatSocket / chat
+// store / checkpoints / markdown — all unrelated to the layout test.
+vi.mock("@/features/studio/panels/Chat", () => ({
+  ChatPanel: ({ workId }: { workId: string }) => (
+    <div data-testid="chat-panel-stub">CHAT · {workId}</div>
+  ),
+}));
+
 vi.mock("@/lib/api", () => ({
   apiFetch: vi.fn(async (url: string) => {
     if (url.includes("/chat")) return { blocks: [] };

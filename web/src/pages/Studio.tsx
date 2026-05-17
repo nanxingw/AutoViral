@@ -9,7 +9,7 @@ import {
 } from "@/features/studio/services/composition";
 import { PreviewPanel } from "@/features/studio/panels/PreviewPanel";
 import { SafeTimeline as Timeline } from "@/features/studio/panels/Timeline/SafeTimeline";
-import { TerminalPanel } from "@/features/terminal/TerminalPanel";
+import { RightPane } from "@/features/studio/panels/RightPane";
 import { useBridgeEvents } from "@/features/terminal/useBridgeEvents";
 import { ApprovalPrompt } from "@/features/terminal/ApprovalPrompt";
 import { RenderProgressBar } from "@/features/terminal/RenderProgressBar";
@@ -249,7 +249,7 @@ export default function Studio() {
               className="glass"
               style={{ height: "100%", overflow: "hidden", minHeight: 0 }}
             >
-              {workId ? <TerminalPanel workId={workId} /> : null}
+              {workId ? <RightPane workId={workId} /> : null}
             </div>
           </Panel>
 
