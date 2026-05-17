@@ -19,6 +19,11 @@ import { useEffect, useRef } from "react";
 import { ChatPanel } from "@/features/studio/panels/Chat";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { useToastStore } from "@/stores/toast";
+import {
+  useFocusStore,
+  buildViewerContext,
+  buildTerminalPrefix,
+} from "@/stores/focus";
 import { useActiveSurface, type Surface } from "./useActiveSurface";
 import styles from "./index.module.css";
 
@@ -107,7 +112,10 @@ export function RightPane({ workId }: RightPaneProps) {
           role="tabpanel"
           aria-hidden={active !== "chat"}
         >
-          <ChatPanel workId={workId} />
+          {/* The viewer-context envelope (pneuma-style) is automatically
+              prepended to every outgoing user message. ChatPanel calls
+              getViewerContext() right before sending. */}
+          <ChatPanel workId={workId} getViewerContext={buildViewerContext} />
         </div>
         <div
           data-surface="terminal"
@@ -115,9 +123,34 @@ export function RightPane({ workId }: RightPaneProps) {
           role="tabpanel"
           aria-hidden={active !== "terminal"}
         >
-          <TerminalPanel workId={workId} />
+          <TerminalFocusPrefix />
+          <div className={styles.terminalInner}>
+            <TerminalPanel workId={workId} />
+          </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Renders the dim `[ctx: clip=X]` prefix line above the terminal canvas
+ * when focus is set. The actual content updates reactively as the user
+ * changes selection. Hidden entirely when focus is empty so the prefix
+ * row doesn't steal pixels from xterm when there's nothing to show.
+ */
+function TerminalFocusPrefix() {
+  // Subscribe to focus changes — every selection write re-renders this.
+  const focus = useFocusStore((s) => s.focus);
+  const prefix = focus.selectedClipId ? buildTerminalPrefix() : null;
+  if (!prefix) return null;
+  return (
+    <div
+      className={styles.terminalCtxPrefix}
+      data-testid="terminal-ctx-prefix"
+      aria-label="Agent context (current focus)"
+    >
+      {prefix}
     </div>
   );
 }

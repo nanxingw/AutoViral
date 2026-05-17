@@ -17,6 +17,7 @@ import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { TopBar } from "@/features/studio/panels/TopBar";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
 import { useShortcuts } from "@/features/studio/hooks/useShortcuts";
+import { useFocusSync } from "@/stores/useFocusSync";
 import { useT } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
 import { localizeApiError } from "@/i18n/serverError";
@@ -79,6 +80,11 @@ export default function Studio() {
   // Phase 3 — subscribe to bridge UI command events so `autoviral select/
   // seek/play/pause/toast` mutate Studio state in real time.
   useBridgeEvents(workId);
+
+  // H0.1 — mirror useComposition.selection → focus store → bridge. Both
+  // the chat surface (via <viewer-context> envelope on outbound messages)
+  // and the terminal surface (via dim prefix line) read from focus.
+  useFocusSync({ workId: workId ?? null });
 
   // e2e-report F66: pipe Cmd+S save round-trip back into TopBar state so the
   // "UNSAVED" indicator actually flips after manual save.

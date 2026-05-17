@@ -78,4 +78,31 @@
 .surfaceContent {
   height: 100%;
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Terminal surface inner: prefix line (flex:0) + xterm canvas (flex:1) */
+.terminalInner {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Dim agent-context prefix line shown above the terminal canvas when
+ * focus is non-empty. Single line, monospace, low-contrast color so it
+ * never competes with the terminal output. Hidden via component when
+ * focus is empty. */
+.terminalCtxPrefix {
+  flex: 0 0 auto;
+  padding: 4px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  background: var(--surface-1);
+  border-bottom: 1px solid var(--glass-border);
+  user-select: none;
+  pointer-events: none;
+  letter-spacing: 0.02em;
 }

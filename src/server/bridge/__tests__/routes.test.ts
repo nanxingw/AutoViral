@@ -444,3 +444,100 @@ describe("bridge router — Phase 2 docs", () => {
     expect(res.status).toBe(404);
   });
 });
+
+describe("bridge router — H0.1 focus channel", () => {
+  it("GET /focus returns EMPTY_FOCUS for a fresh work", async () => {
+    const res = await app.request("/api/bridge/v1/focus", {
+      headers: { "X-AutoViral-Work-Id": "w_focus_fresh" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result?: { selectedClipId: string | null };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.result?.selectedClipId).toBeNull();
+  });
+
+  it("POST /focus persists the patch and the next GET reflects it", async () => {
+    const post = await app.request("/api/bridge/v1/focus", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_focus_post",
+      },
+      body: JSON.stringify({ selectedClipId: "vc_s07" }),
+    });
+    expect(post.status).toBe(200);
+
+    const get = await app.request("/api/bridge/v1/focus", {
+      headers: { "X-AutoViral-Work-Id": "w_focus_post" },
+    });
+    const getBody = (await get.json()) as {
+      result: { selectedClipId: string | null };
+    };
+    expect(getBody.result.selectedClipId).toBe("vc_s07");
+  });
+
+  it("POST /focus broadcasts ui-focus on uiEventBus", async () => {
+    const events: unknown[] = [];
+    const unsub = uiEventBus.subscribe("w_focus_bus", (e) => {
+      events.push(e);
+    });
+    await app.request("/api/bridge/v1/focus", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_focus_bus",
+      },
+      body: JSON.stringify({ selectedClipId: "vc_x" }),
+    });
+    unsub();
+    expect(events).toHaveLength(1);
+    expect((events[0] as { type: string }).type).toBe("ui-focus");
+  });
+
+  it("POST /focus silently strips unknown keys (forward-compat)", async () => {
+    // zod's default object() strips unknown keys rather than rejecting —
+    // intentional so the schema can grow in H0.2 (playheadSec, etc.)
+    // without breaking older clients sending only what they know.
+    const res = await app.request("/api/bridge/v1/focus", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_focus_extra",
+      },
+      body: JSON.stringify({ selectedClipId: "vc_x", futureField: "ignored" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result: Record<string, unknown>;
+    };
+    expect(body.result.selectedClipId).toBe("vc_x");
+    expect(body.result).not.toHaveProperty("futureField");
+  });
+
+  it("POST /focus accepts selectedClipId:null to clear", async () => {
+    await app.request("/api/bridge/v1/focus", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_focus_clear",
+      },
+      body: JSON.stringify({ selectedClipId: "vc_first" }),
+    });
+    await app.request("/api/bridge/v1/focus", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_focus_clear",
+      },
+      body: JSON.stringify({ selectedClipId: null }),
+    });
+    const res = await app.request("/api/bridge/v1/focus", {
+      headers: { "X-AutoViral-Work-Id": "w_focus_clear" },
+    });
+    const body = (await res.json()) as { result: { selectedClipId: string | null } };
+    expect(body.result.selectedClipId).toBeNull();
+  });
+});

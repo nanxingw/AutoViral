@@ -27,6 +27,8 @@ import { uiEventBus } from "./ui-events.js";
 import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
 import { ingestYouTubeIntoWork } from "./ingest-youtube.js";
+import { read as readFocus, write as writeFocus } from "../../focus/index.js";
+import { z } from "zod";
 
 function manualDir(): string {
   return process.env.AUTOVIRAL_MANUAL_DIR ?? join(process.cwd(), "skills/autoviral/manual");
@@ -202,6 +204,36 @@ bridgeRouter.post("/progress", async (c) => {
   const body = ProgressRequestSchema.parse(await c.req.json());
   broadcast(g.workId, "ui-progress", body);
   return c.json({ ok: true });
+});
+
+// ─── H0.1 — Focus channel ───────────────────────────────────────────────────
+// The frontend SSoT pushes UI-selection state here whenever the user clicks
+// a clip / scrubs the playhead / focuses a panel. Both the chat panel (via
+// <viewer-context> envelope) and the terminal panel (via dim [ctx:...] prefix)
+// consume the same snapshot — chat reads it on outbound messages, terminal
+// renders it as a prefix line. The `ui-focus` event lets any third-party
+// surface subscribe via WS.
+//
+// H0.1 ships selectedClipId only; H0.2 expands the schema. Schema lives
+// inline because focus patches are simple enough not to warrant a separate
+// schemas.ts entry yet.
+const FocusPatchSchema = z.object({
+  selectedClipId: z.string().nullable().optional(),
+});
+
+bridgeRouter.get("/focus", (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  return c.json({ ok: true, result: readFocus(g.workId) });
+});
+
+bridgeRouter.post("/focus", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = FocusPatchSchema.parse(await c.req.json());
+  const next = writeFocus(g.workId, body);
+  broadcast(g.workId, "ui-focus", next);
+  return c.json({ ok: true, result: next });
 });
 
 // ─── Phase 3 — composition write endpoints ──────────────────────────────────
