@@ -28,6 +28,8 @@ import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
 import { ingestYouTubeIntoWork } from "./ingest-youtube.js";
 import { read as readFocus, write as writeFocus } from "../../focus/index.js";
+import { resolve as resolveVariables } from "../../composition/variables/index.js";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 function manualDir(): string {
@@ -378,9 +380,28 @@ bridgeRouter.post("/export", async (c) => {
   const body = (await c.req.json().catch(() => ({}))) as {
     preset?: string;
     proxy?: boolean;
+    // H2.2 — caller-supplied variable overrides applied before render
+    variables?: Record<string, string | number | boolean>;
+    strictVariables?: boolean;
   };
   try {
-    const comp = await readCompositionFor({ workId: g.workId });
+    const raw = await readCompositionFor({ workId: g.workId });
+    // Resolve variables BEFORE render so the composition reaching Remotion
+    // contains concrete values. resolve() is a no-op when raw.variables
+    // is absent so existing works are unaffected.
+    const { composition: comp, resolvedValues, issues } = resolveVariables(raw, {
+      overrides: body.variables ?? {},
+      strict: body.strictVariables === true,
+    });
+    // Output filename gets a short hash of the override JSON so multiple
+    // variants don't clobber each other.
+    const overrideHash =
+      Object.keys(body.variables ?? {}).length > 0
+        ? createHash("sha1")
+            .update(JSON.stringify(resolvedValues))
+            .digest("hex")
+            .slice(0, 8)
+        : null;
     const worksRoot =
       process.env.AUTOVIRAL_WORKS_ROOT ??
       join(homedir(), ".autoviral/works");
@@ -389,6 +410,9 @@ bridgeRouter.post("/export", async (c) => {
       comp,
       outDir,
       proxy: body.proxy ?? false,
+      // outputTitle becomes the filename stem; appending the hash keeps
+      // variant outputs from clobbering each other.
+      outputTitle: overrideHash ? `autoviral-export_${overrideHash}` : undefined,
       onProgress: (stage: RenderStage, pct: number) => {
         uiEventBus.publish(g.workId, {
           type: "ui-render-progress",
@@ -398,7 +422,10 @@ bridgeRouter.post("/export", async (c) => {
         });
       },
     });
-    return c.json({ ok: true, result: { path: finalPath } });
+    return c.json({
+      ok: true,
+      result: { path: finalPath, resolvedValues, issues },
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message }, 500);
