@@ -39,6 +39,7 @@ import {
   TTS_FORMATS,
 } from "../../providers/tts/index.js";
 import { getContext, getProfile, getTrends } from "../../context/index.js";
+import { lintComposition } from "../../composition/quality/lint.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
@@ -290,6 +291,24 @@ bridgeRouter.get("/profile", async (c) => {
   if (!g.ok) return g.res;
   const profile = await getProfile();
   return c.json({ ok: true, result: profile });
+});
+
+// ─── H1.1 — autoviral lint (schema + semantic checks, no Puppeteer) ─────────
+bridgeRouter.post("/quality/lint", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  try {
+    const comp = await readCompositionFor({ workId: g.workId });
+    const worksRoot =
+      process.env.AUTOVIRAL_WORKS_ROOT ??
+      join(homedir(), ".autoviral/works");
+    const workDir = join(worksRoot, g.workId);
+    const report = lintComposition(comp, { workDir });
+    return c.json({ ok: true, result: report });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 500);
+  }
 });
 
 bridgeRouter.get("/trends", async (c) => {
