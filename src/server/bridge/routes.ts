@@ -38,7 +38,7 @@ import {
   TTS_VOICES,
   TTS_FORMATS,
 } from "../../providers/tts/index.js";
-import { getContext } from "../../context/index.js";
+import { getContext, getProfile, getTrends } from "../../context/index.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
@@ -273,11 +273,39 @@ bridgeRouter.post("/focus", async (c) => {
 bridgeRouter.get("/context", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
-  const ctx = await getContext(g.workId);
+  const q = c.req.query();
+  const ctx = await getContext(g.workId, {
+    includeProfile: q.profile !== "false",
+    includeTrends: q.trends === "true",
+  });
   return c.json({
     ok: true,
     result: { ...ctx, terminalInjectEnabled: readInject(g.workId) },
   });
+});
+
+// H0.4 — dedicated endpoints (lighter than the full /context call)
+bridgeRouter.get("/profile", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const profile = await getProfile();
+  return c.json({ ok: true, result: profile });
+});
+
+bridgeRouter.get("/trends", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const q = c.req.query();
+  const platforms = q.platform
+    ? (q.platform.split(",") as Array<
+        "douyin" | "bilibili" | "youtube" | "xiaohongshu"
+      >)
+    : undefined;
+  const trends = await getTrends({
+    platforms,
+    topic: q.topic,
+  });
+  return c.json({ ok: true, result: trends });
 });
 
 // SSE stream — every focus-changed event flushes the latest context.
