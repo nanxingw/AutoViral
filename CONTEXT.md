@@ -36,10 +36,12 @@ A creator workstation for short-form video / image / poster content. Single-user
 
 | Term | Meaning |
 |---|---|
-| **Studio** | The main editing view at `/studio/<workId>`. Three regions: left sidebar (works/assets/inspector), center preview (Remotion Player + timeline), right inspector (Tweaks panel) + terminal panel below. |
-| **Terminal panel** | xterm.js pane at the bottom of Studio that hosts a Claude / Codex / Kimi CLI agent. Injected env vars: `AUTOVIRAL_WORK_ID`, `AUTOVIRAL_PORT`, `AUTOVIRAL_CWD`. |
+| **Studio** | The main editing view at `/studio/<workId>`. Three regions: left sidebar (works/assets/inspector), center preview (Remotion Player + timeline), **right pane** (Tweaks above, agent surface below). |
+| **Right pane · agent surface** | After M lands: a horizontal-tabbed container hosting two agent entry points — **Chat** (default, low cognitive load, `claude -p` subprocess) and **Terminal** (xterm.js + any CLI agent). Tab state persists per-work via `localStorage`. Both surfaces stay mounted across switches so long sessions don't reset. *See [ADR-005](docs/adr/ADR-005-dual-chat-entry-layout.md).* |
+| **Chat panel** | The non-technical-user-facing agent surface. Streaming markdown chat (pneuma-inspired), `<viewer-context>` envelope auto-prepends user focus state, `<viewer-action/>` tag from agent drives Studio (seek/select/scroll), checkpoint rollback for safety. Backend: spawns `claude -p` subprocess per chat session. |
+| **Terminal panel** | The power-user-facing agent surface. xterm.js pane hosting an arbitrary CLI agent (Claude Code / Codex / Kimi / Gemini / Aider). Injected env vars: `AUTOVIRAL_WORK_ID`, `AUTOVIRAL_PORT`, `AUTOVIRAL_CWD`. Receives focus via dim `[ctx: ...]` prefix line above the input. |
 | **bridge** | The WS + HTTP protocol between Studio frontend and AutoViral backend. Used by both the React UI and the `autoviral` CLI. Surface: `/bridge/*` endpoints + WebSocket event bus. |
-| **focus** | After H0 lands: the union of UI selection state (selected clip, selected segment, playhead time, panel focus, hovered element) — a single source-of-truth state object that agents can read via `autoviral context`. |
+| **focus** | After H0 lands: the union of UI selection state (selected clip, selected segment, playhead time, panel focus, hovered element) — a single source-of-truth state object that agents can read via `autoviral context`. Both Chat and Terminal surfaces consume the same focus channel — Chat via `<viewer-context>` envelope, Terminal via prefix line. |
 | **context channel** | After H0 lands: agent-facing aggregator that emits work + focus + composition + trends + profile as a single JSON snapshot. CLI: `autoviral context [--watch]`. |
 
 ### Pipeline vocabulary
@@ -121,3 +123,4 @@ docs/                       # Long-form project docs
 - **2026-05-14** · agentic-terminal refactor — skill stripped of taste content. See `docs/superpowers/plans/2026-05-14-agentic-terminal-refactor.md`.
 - **2026-05-15** · PRD lock — AutoViral owns editing; sibling skills split into taste + engineering. See `docs/superpowers/plans/2026-05-15-autoviral-absorb-hyperframes-tech.md`.
 - **2026-05-15** · Adopted mattpocock skills (`to-prd` / `to-issues` / `triage` / `diagnose` / `tdd` / `handoff` / `caveman` / `prototype` / `zoom-out` / `grill-me` / `improve-codebase-architecture` / `write-a-skill` / `find-skills`) as the engineering-process skill family. Replaces superpowers:* in this project. See `memory/feedback_use_mattpocock_not_superpowers.md`.
+- **2026-05-17** · Right-pane dual-surface decision — Chat (`claude -p` subprocess) coexists with Terminal (xterm.js) as horizontal-tabbed siblings. Default surface: Chat. Both consume the same focus channel from H0. See [ADR-005](docs/adr/ADR-005-dual-chat-entry-layout.md). Resolves M.1 ([Issue #6](https://github.com/nanxingw/AutoViral/issues/6)).
