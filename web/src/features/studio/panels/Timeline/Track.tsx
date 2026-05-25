@@ -10,6 +10,10 @@ interface Props {
   totalWidth: number;
   color: string;
   label: string;
+  /** When true, skip the built-in sticky label cell — caller is rendering
+   *  its own header (e.g. TimelineTrackHeader from #33). Default false to
+   *  preserve the legacy single-component behaviour exercised by tests. */
+  hideLabel?: boolean;
 }
 
 const KIND_ICON: Record<string, ReactElement> = {
@@ -40,7 +44,7 @@ const KIND_ICON: Record<string, ReactElement> = {
   ),
 };
 
-export function Track({ track, pxPerSecond, totalWidth, color, label }: Props) {
+export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel = false }: Props) {
   const compact = track.kind === "text";
   // R47-fix4: text track was 36px → clip body 16px after padding, but the
   // rendered content (duration sub-label + actual text) needs ~30px and
@@ -56,29 +60,33 @@ export function Track({ track, pxPerSecond, totalWidth, color, label }: Props) {
         minHeight: height,
       }}
     >
-      {/* Label column (sticky-ish) */}
-      <div
-        style={{
-          width: 110,
-          flexShrink: 0,
-          padding: "8px 12px",
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          borderRight: "1px solid var(--divider)",
-          background: "var(--surface-0)",
-          position: "sticky",
-          left: 0,
-          zIndex: 3,
-        }}
-      >
-        <span style={{ color, display: "grid", placeItems: "center" }}>
-          {KIND_ICON[track.kind] ?? KIND_ICON.video}
-        </span>
-        <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-dim)" }}>
-          {label}
-        </span>
-      </div>
+      {/* Label column (sticky-ish). Skipped when TimelineTrackHeader is
+          rendering the label upstream (Phase F, issue #33) so the two don't
+          visually overlap — see Timeline/index.tsx wiring. */}
+      {!hideLabel && (
+        <div
+          style={{
+            width: 110,
+            flexShrink: 0,
+            padding: "8px 12px",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            borderRight: "1px solid var(--divider)",
+            background: "var(--surface-0)",
+            position: "sticky",
+            left: 0,
+            zIndex: 3,
+          }}
+        >
+          <span style={{ color, display: "grid", placeItems: "center" }}>
+            {KIND_ICON[track.kind] ?? KIND_ICON.video}
+          </span>
+          <span style={{ fontSize: 11, fontWeight: 500, color: "var(--text-dim)" }}>
+            {label}
+          </span>
+        </div>
+      )}
 
       {/* Clip lane */}
       <div

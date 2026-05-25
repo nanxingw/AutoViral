@@ -63,17 +63,24 @@
   margin: 0;
   cursor: pointer;
   color: var(--text-dimmer);
-  display: grid;
+  display: none;
   place-items: center;
   border-radius: 3px;
   transition: color 120ms, background 120ms;
-  opacity: 0.6;
 }
-.toggleBtn:hover { color: var(--accent); opacity: 1; }
+/* Hover-reveal: actions appear only when the row is hovered or a button is
+   focused or "active" (muted/hidden). 110px is tight; reserving permanent
+   layout for 3 icons squeezed the label to 0. */
+.root:hover .toggleBtn,
+.toggleBtn:focus,
+.toggleBtn:focus-visible,
+.toggleBtn[data-active="true"] {
+  display: grid;
+}
+.toggleBtn:hover { color: var(--accent); }
 .toggleBtn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
-  opacity: 1;
 }
 .toggleBtn[data-active="true"] {
   color: var(--accent-hi, var(--accent));
@@ -88,16 +95,18 @@
   cursor: pointer;
   color: var(--text-dimmer);
   border-radius: 3px;
-  display: grid;
+  display: none;
   place-items: center;
   transition: color 120ms, background 120ms;
-  opacity: 0;
 }
+/* Same hover-reveal pattern as .toggleBtn — hidden from layout entirely
+   when neither hovered, focused, nor in an "expanded" state, so the label
+   gets the full 110px column width to itself. */
 .root:hover .menuBtn,
 .menuBtn:focus,
 .menuBtn:focus-visible,
 .menuBtn[aria-expanded="true"] {
-  opacity: 1;
+  display: grid;
 }
 .menuBtn:hover { color: var(--accent); }
 .menuBtn:focus-visible {

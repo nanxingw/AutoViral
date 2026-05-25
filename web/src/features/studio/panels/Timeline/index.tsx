@@ -128,10 +128,9 @@ export function Timeline() {
                     <LaneGapAdd lowerTrackId={track.id} />
                   )}
                   <div style={{ position: "relative", display: "flex" }}>
-                    {/* The header cell shares the 110px sticky-left slot
-                        with Track's internal label cell but renders at a
-                        higher z-index, so the legacy label is visually
-                        replaced without us having to touch Track.tsx. */}
+                    {/* TimelineTrackHeader owns the 110px sticky-left label
+                        slot; Track is rendered with hideLabel=true so it
+                        skips its own label cell (no overlap). */}
                     <div
                       style={{
                         position: "sticky",
@@ -147,16 +146,14 @@ export function Timeline() {
                         height={height}
                       />
                     </div>
-                    <div style={{ flex: 1, marginLeft: -110 }}>
-                      {/* marginLeft -110 reclaims the width the sticky
-                          header reserved so Track's own label + clip lane
-                          still lay out from x=0 underneath. */}
+                    <div style={{ flex: 1 }}>
                       <Track
                         track={track}
                         pxPerSecond={pxPerSecond}
                         totalWidth={totalWidth}
                         color={TRACK_COLORS[track.kind] ?? "var(--accent)"}
                         label={fallback}
+                        hideLabel
                       />
                     </div>
                   </div>
