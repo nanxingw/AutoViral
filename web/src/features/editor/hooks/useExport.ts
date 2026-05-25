@@ -2,6 +2,7 @@ import { useCallback, useRef } from "react";
 import type Konva from "konva";
 import { useEditor } from "../store";
 import { exportSinglePng, exportAllPngs } from "../services/exportPng";
+import { captureWhenChanged } from "../services/captureWhenChanged";
 
 /**
  * Walk every slide and pre-fetch its referenced image URLs into the
@@ -70,27 +71,36 @@ export function useExport() {
       }
     }
     await preloadCarouselImages(urls);
+
+    // #47 — capture on a deterministic "frame changed" signal instead of a
+    // blind fixed wait. The on-screen Konva stage can take >2s to repaint a
+    // swapped slide, so the old setTimeout(250) captured the STALE pre-swap
+    // frame and every PNG came out bit-identical. Chain `baseline` on the last
+    // EMITTED frame so we poll toDataURL until the bytes actually differ from
+    // the previous slide — two consecutive emitted frames can't be identical
+    // unless the slides truly render the same pixels (then we time out and
+    // emit the correct frame anyway). Seed the baseline with the current
+    // on-screen frame; the slide already displayed needs no swap or wait.
+    const capture = () =>
+      stageRef.current?.toDataURL({ pixelRatio: 2, mimeType: "image/png" }) ?? "";
+    let baseline: string | null = capture() || null;
+    let baselineSlideId = previousId;
+
     await exportAllPngs(car.id, async (slideId) => {
+      if (slideId === baselineSlideId && baseline) {
+        // Already on screen and fully painted — its frame is captured.
+        return baseline;
+      }
       setCurrentSlide(slideId);
-      // Wait long enough for React to render the swapped slide AND for
-      // useImage's effect to flush an HTMLImageElement (already cached
-      // by preload) into the Konva Image node. 1500ms is generous to
-      // cover slow re-renders + double-RAF for Konva to actually paint;
-      // empirically 250ms left captures blank. The cost is +1s per slide
-      // during batch export — acceptable for a one-shot user action.
-      // KNOWN ISSUE: capture often returns a stale (pre-swap) frame even
-      // after setCurrentSlide + wait. Tried polling Konva node.image()
-      // (Round 11), preload via new Image() (Round 12a), 1500ms wait
-      // (Round 12b), and stage.batchDraw() + requestAnimationFrame
-      // (Round 13) — all produced bit-identical PNGs, suggesting
-      // toDataURL is reading a cached/stale source. Tracked in task #132.
-      // For now batch export still iterates every slide (so each one
-      // gets a download trigger), but the bytes may not reflect the
-      // current slide's actual rendered state.
-      await new Promise((r) => setTimeout(r, 250));
-      const stage = stageRef.current;
-      if (!stage) return "";
-      return stage.toDataURL({ pixelRatio: 2, mimeType: "image/png" });
+      const { dataUrl } = await captureWhenChanged(capture, baseline, {
+        timeoutMs: 3000,
+        pollMs: 100,
+      });
+      if (dataUrl) {
+        baseline = dataUrl;
+        baselineSlideId = slideId;
+      }
+      return dataUrl;
     });
     if (previousId) setCurrentSlide(previousId);
   }, [setCurrentSlide]);
