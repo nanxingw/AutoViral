@@ -38,8 +38,20 @@ interface LocaleState {
   setLocale: (l: LocaleId) => void;
 }
 
+/** Sync UI locale into <html lang> so screen readers + browsers (translate
+ *  prompt, font fallback heuristics) get the right cue. See e2e-report F36.
+ *  Both branches carry region (zh-CN / en-US) to match the codebase's other
+ *  Intl/toLocaleString call sites — e2e-report F60. */
+function applyToDOM(l: LocaleId) {
+  if (typeof document === "undefined") return;
+  document.documentElement.setAttribute("lang", l === "zh" ? "zh-CN" : "en-US");
+}
+
+const initial = detectInitial();
+applyToDOM(initial);
+
 export const useLocaleStore = create<LocaleState>((set) => ({
-  locale: detectInitial(),
+  locale: initial,
   setLocale: (l) => {
     if (typeof window !== "undefined") {
       try {
@@ -48,6 +60,7 @@ export const useLocaleStore = create<LocaleState>((set) => ({
         // ignore storage failures — in-memory locale still updates.
       }
     }
+    applyToDOM(l);
     set({ locale: l });
   },
 }));

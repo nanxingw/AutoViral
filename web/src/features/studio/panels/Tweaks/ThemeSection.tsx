@@ -1,35 +1,11 @@
 import { useTheme } from "@/stores/theme";
-import { useEffect, useState } from "react";
-
-const ACCENTS = ["violet", "cyan", "coral", "lime", "steel"] as const;
-type Accent = (typeof ACCENTS)[number];
-
-const STORAGE_KEY = "av-accent";
-
-function readAccent(): Accent {
-  if (typeof localStorage === "undefined") return "steel";
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (saved && (ACCENTS as readonly string[]).includes(saved))
-    return saved as Accent;
-  return "steel";
-}
-
-function applyAccent(a: Accent) {
-  if (typeof document !== "undefined") {
-    document.documentElement.setAttribute("data-accent", a);
-  }
-  if (typeof localStorage !== "undefined") {
-    localStorage.setItem(STORAGE_KEY, a);
-  }
-}
+import { ACCENTS, useAccent } from "@/stores/accent";
+import { useT } from "@/i18n/useT";
 
 export function ThemeSection() {
+  const t = useT();
   const { theme, setTheme } = useTheme();
-  const [accent, setAccent] = useState<Accent>(() => readAccent());
-
-  useEffect(() => {
-    applyAccent(accent);
-  }, [accent]);
+  const { accent, setAccent } = useAccent();
 
   return (
     <section style={{ padding: "12px 16px" }}>
@@ -42,7 +18,7 @@ export function ThemeSection() {
           margin: "0 0 8px",
         }}
       >
-        Theme
+        {t("studio.themeSection.heading")}
       </h4>
       <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
         <button
@@ -50,14 +26,14 @@ export function ThemeSection() {
           className={theme === "dark" ? "active" : ""}
           onClick={() => setTheme("dark")}
         >
-          Dark
+          {t("studio.themeSection.dark")}
         </button>
         <button
           data-testid="theme-toggle-light"
           className={theme === "light" ? "active" : ""}
           onClick={() => setTheme("light")}
         >
-          Light
+          {t("studio.themeSection.light")}
         </button>
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>

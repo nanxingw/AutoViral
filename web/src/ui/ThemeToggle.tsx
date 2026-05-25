@@ -7,13 +7,20 @@ export function ThemeToggle() {
   const toggle = useTheme((s) => s.toggle);
   const t = useT();
 
+  // Target-state-aware label so screen readers announce the action that will
+  // happen on click (not just "toggle theme" both before AND after — see
+  // e2e-report F31/F32). title and aria-label both follow the same pattern.
+  const targetLabel = theme === "dark"
+    ? t("topnav.themeToggleToLight")
+    : t("topnav.themeToggleToDark");
+
   return (
     <button
       type="button"
       className={styles.btn}
       onClick={toggle}
-      aria-label="toggle theme"
-      title={t("topnav.themeToggleTitle")}
+      aria-label={targetLabel}
+      title={targetLabel}
     >
       {theme === "dark" ? (
         <svg data-icon="sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">

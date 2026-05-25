@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect, useRef } from "react";
 import { useComposition } from "../../store";
 import { ReframeConfirmDialog, type ReframeClipSummary } from "./ReframeConfirmDialog";
 import type { ExportPreset } from "../../types";
+import { useT } from "@/i18n/useT";
 
 // Phase 6.D — frozen mirror of skills/autoviral/modules/assembly/references/
 // platform-specs.md. Update both files in the same commit if a spec changes.
@@ -143,6 +144,7 @@ interface Props {
  * doesn't OOM). Phase 7 will move this orchestration into the render queue.
  */
 export function PlatformPresetSection({ workId }: Props) {
+  const t = useT();
   const comp = useComposition((s) => s.comp);
   const applyPlatformPreset = useComposition((s) => s.applyPlatformPreset);
   const rebindClip = useComposition((s) => s.rebindClip);
@@ -249,19 +251,19 @@ export function PlatformPresetSection({ workId }: Props) {
           margin: "0 0 8px",
         }}
       >
-        Platform
+        {t("studio.platformPreset.heading")}
       </h4>
       <label style={{ display: "block", fontSize: 11, color: "var(--text-dim)" }}>
-        Platform preset
+        {t("studio.platformPreset.label")}
         <select
-          aria-label="Platform preset"
+          aria-label={t("studio.platformPreset.ariaLabel")}
           value=""
           onChange={(e) => onPick(e.target.value)}
           disabled={busy}
           style={{ display: "block", width: "100%", marginTop: 6 }}
         >
           <option value="" disabled>
-            Choose a platform…
+            {t("studio.platformPreset.chooseOption")}
           </option>
           {PRESETS.map((p) => (
             <option key={p.id} value={p.id}>
@@ -279,7 +281,7 @@ export function PlatformPresetSection({ workId }: Props) {
             color: "var(--text-dimmer)",
           }}
         >
-          Current · {comp.exportPresets[0].label}
+          {t("studio.platformPreset.currentPrefix")} {comp.exportPresets[0].label}
         </div>
       )}
       {busy && videoClips.length > 0 ? (
@@ -291,7 +293,9 @@ export function PlatformPresetSection({ workId }: Props) {
             color: "var(--text-dim)",
           }}
         >
-          Reframing {videoClips.length} clip{videoClips.length === 1 ? "" : "s"}…
+          {videoClips.length === 1
+            ? t("studio.platformPreset.reframingSingular")
+            : t("studio.platformPreset.reframingPlural", { n: videoClips.length })}
         </div>
       ) : null}
       <ReframeConfirmDialog
