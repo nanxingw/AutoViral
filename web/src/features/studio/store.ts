@@ -11,7 +11,7 @@ import type {
   Track,
 } from "./types";
 import { newTrackId } from "@shared/composition";
-import { addOrReplaceKeyframe } from "@shared/keyframes";
+import { addOrReplaceKeyframe, splitKeyframesAtLocal } from "@shared/keyframes";
 import {
   clipDuration,
   clipEnd,
@@ -385,6 +385,15 @@ export const useComposition = create<CompState>()(
           if (atSec >= end - OFFSET_EPSILON) return;
           const offsetIntoClip = atSec - start;
           const newId = crypto.randomUUID();
+          // #46 — partition + rebase keyframes at the clip-local split point so
+          // each half keeps only its own keyframes (rebased to clip-local 0 for
+          // child B). offsetIntoClip is already the clip-local split time for
+          // every kind (renderers measure keyframe time from trackOffset, not
+          // source `in`). undefined keyframes (text clips, D8) → empty halves.
+          const origKfs = (orig as { keyframes?: Keyframe[] }).keyframes;
+          const { a: kfA, b: kfB } = origKfs
+            ? splitKeyframesAtLocal(origKfs, offsetIntoClip)
+            : { a: undefined, b: undefined };
           if (orig.kind === "video" || orig.kind === "audio") {
             const childA = { ...orig, out: orig.in + offsetIntoClip };
             const childB = {
@@ -393,6 +402,10 @@ export const useComposition = create<CompState>()(
               in: orig.in + offsetIntoClip,
               trackOffset: atSec,
             };
+            if (origKfs) {
+              (childA as { keyframes?: Keyframe[] }).keyframes = kfA;
+              (childB as { keyframes?: Keyframe[] }).keyframes = kfB;
+            }
             (track.clips as Clip[]).splice(idx, 1, childA, childB);
           } else {
             // text / overlay — duration-based
@@ -403,6 +416,10 @@ export const useComposition = create<CompState>()(
               trackOffset: atSec,
               duration: dur - offsetIntoClip,
             };
+            if (origKfs) {
+              (childA as { keyframes?: Keyframe[] }).keyframes = kfA;
+              (childB as { keyframes?: Keyframe[] }).keyframes = kfB;
+            }
             (track.clips as Clip[]).splice(idx, 1, childA, childB);
           }
           s.comp.duration = Math.max(

@@ -423,6 +423,48 @@ describe("splitClip (Phase 4.G)", () => {
     // No change to total end (still 8) but pipeline must run
     expect(useComposition.getState().comp!.duration).toBeCloseTo(8);
   });
+
+  it("partitions + rebases keyframes across the split instead of copying the whole array (#46)", () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "kf-2" as `${string}-${string}-${string}-${string}-${string}`,
+    );
+    // Clip on timeline 2..8 (clip-local [0,6]). scale @ local 1 (1.2) and
+    // local 5 (1.5). Split at timeline 5 → clip-local offset 3.
+    useComposition.setState((s) => {
+      const a = s.comp!.tracks[0].clips[0] as any;
+      a.keyframes = [
+        { property: "scale", time: 1, value: 1.2, easing: "linear" },
+        { property: "scale", time: 5, value: 1.5, easing: "linear" },
+      ];
+    });
+    useComposition.getState().splitClip("a", 5);
+    const clips = useComposition.getState().comp!.tracks[0].clips as any[];
+    const [first, second] = clips
+      .slice()
+      .sort((x, y) => x.trackOffset - y.trackOffset);
+
+    // Before #46 BOTH halves carried [t=1, t=5] verbatim. Now:
+    // child A keeps t=1 + a boundary at the split (local 3); no t=5.
+    expect(first.keyframes.map((k: any) => k.time)).toEqual([1, 3]);
+    expect(first.keyframes.some((k: any) => k.time === 5)).toBe(false);
+    // child B: boundary at 0 + t=5 rebased to 5-3=2; no stray t=1.
+    expect(second.keyframes.map((k: any) => k.time)).toEqual([0, 2]);
+    expect(second.keyframes.some((k: any) => k.time === 1)).toBe(false);
+    vi.restoreAllMocks();
+  });
+
+  it("leaves text clips (no keyframes) untouched — no empty keyframes field added (#46)", () => {
+    const t = makeTextClip({ id: "t", trackOffset: 1, duration: 4 });
+    useComposition.setState({
+      comp: makeCompositionWithClips([t as any]),
+      selection: null,
+      dragState: null,
+    });
+    useComposition.getState().splitClip("t", 3);
+    const clips = useComposition.getState().comp!.tracks[0].clips as any[];
+    // text clips carry no keyframes (D8) — the split must not invent one.
+    expect(clips.every((c) => c.keyframes === undefined)).toBe(true);
+  });
 });
 
 describe("bladeMode flag (Phase 4.G)", () => {

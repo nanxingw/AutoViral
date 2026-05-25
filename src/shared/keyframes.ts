@@ -143,3 +143,74 @@ export function addOrReplaceKeyframe(
   );
   return arr;
 }
+
+/**
+ * Partition + rebase a clip's keyframes when the clip is split at clip-local
+ * time `localSplit` (#46).
+ *
+ * Keyframe `time` is clip-local seconds measured from the clip's timeline start
+ * (each renderer mounts the clip in a `<Sequence from={trackOffset}>` and reads
+ * `useCurrentFrame()`, which resets to 0). So splitting at timeline `atSec`
+ * means `localSplit = atSec - clip.trackOffset` for video / audio / overlay
+ * alike. The previous `{ ...orig }` shallow copy carried the WHOLE array into
+ * both halves unrebased, so child B fired child A's keyframes at the wrong
+ * clip-local times and never reached the late ones — every split of an animated
+ * clip corrupted both halves.
+ *
+ * For each property that has keyframes we:
+ *   - keep the keyframes strictly before the split in `a` and those strictly
+ *     after in `b` (rebased by `-localSplit` back to clip-local 0);
+ *   - insert a BOUNDARY keyframe at the split (value = the original curve's
+ *     interpolated value there) into both halves — `a` at `localSplit`, `b` at
+ *     `0`. This preserves C0 continuity (no jump at the cut) and pins each
+ *     half's held value instead of letting it fall back to the clip's static
+ *     transform. For the default `linear` easing the reconstruction is exact:
+ *     a line split into two sub-segments is still the same line. For a manually
+ *     eased segment the boundary keeps endpoints exact and the interior is a
+ *     close approximation (perfect easing subdivision would need De Casteljau).
+ *
+ * Boundary easing: child B's `time:0` keyframe inherits the easing of the
+ * segment the split fell inside (the easing of the last keyframe at/under the
+ * split), so the leading sub-segment keeps the original segment's character.
+ * Child A's boundary is terminal, so its easing is irrelevant (kept linear).
+ *
+ * Returns fresh arrays; never mutates the input. Empty/undefined input → empty
+ * halves (text clips carry no keyframes — D8 — so this is a harmless no-op).
+ */
+export function splitKeyframesAtLocal(
+  keyframes: readonly Keyframe[] | undefined,
+  localSplit: number,
+): { a: Keyframe[]; b: Keyframe[] } {
+  if (!keyframes || keyframes.length === 0) return { a: [], b: [] };
+  const a: Keyframe[] = [];
+  const b: Keyframe[] = [];
+  const properties = [...new Set(keyframes.map((k) => k.property))];
+  for (const property of properties) {
+    const sorted = keyframes
+      .filter((k) => k.property === property)
+      .slice()
+      .sort((x, y) => x.time - y.time);
+    // Value of the original curve at the split (clamps outside the kf range).
+    const vSplit = interpolateProperty(sorted, property, localSplit)!;
+    // Easing governing the segment that contains the split = the easing of the
+    // last keyframe at or before the split (the "outgoing" keyframe).
+    let segEasing: KeyframeEasing = "linear";
+    for (const k of sorted) {
+      if (k.time <= localSplit + KEYFRAME_TIME_EPSILON) segEasing = k.easing;
+    }
+    // child A: keyframes strictly before the split, then the boundary at split.
+    for (const k of sorted) {
+      if (k.time < localSplit - KEYFRAME_TIME_EPSILON) a.push({ ...k });
+    }
+    a.push({ property, time: localSplit, value: vSplit, easing: "linear" });
+    // child B: boundary at clip-local 0, then keyframes strictly after the
+    // split rebased back to 0.
+    b.push({ property, time: 0, value: vSplit, easing: segEasing });
+    for (const k of sorted) {
+      if (k.time > localSplit + KEYFRAME_TIME_EPSILON) {
+        b.push({ ...k, time: k.time - localSplit });
+      }
+    }
+  }
+  return { a, b };
+}
