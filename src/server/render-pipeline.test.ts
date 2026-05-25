@@ -84,6 +84,17 @@ describe("runRenderPipeline — minimal pipeline (no ducking, no burn)", () => {
     expect(burnSubtitles).not.toHaveBeenCalled();
     expect(out).toMatch(/\.mp4$/);
   });
+
+  it("forwards the AbortSignal into the render call so RENDER can be cancelled mid-flight (#44)", async () => {
+    // Before #44 the render stage ignored the signal — cancellation only took
+    // effect at the next stage boundary. The pipeline must now hand the signal
+    // to renderCompositionToMp4 (which bridges it onto Remotion's cancelSignal).
+    const ac = new AbortController();
+    await runRenderPipeline({ comp: baseComp, outDir: "/tmp/out", signal: ac.signal });
+    const renderMock = renderCompositionToMp4 as unknown as ReturnType<typeof vi.fn>;
+    const optsArg = renderMock.mock.calls[0]![2] as { signal?: AbortSignal };
+    expect(optsArg.signal).toBe(ac.signal);
+  });
 });
 
 describe("runRenderPipeline — with ducking", () => {

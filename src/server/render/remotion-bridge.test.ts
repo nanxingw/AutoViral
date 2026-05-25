@@ -37,12 +37,28 @@ const renderFramesHolder: { impl: (args: any) => Promise<unknown> } = {
 };
 const renderFramesMock = vi.fn((args: any) => renderFramesHolder.impl(args));
 
+// #44 — controllable makeCancelSignal: cancelSignal registers callbacks,
+// cancel() fires them all (mirrors how Remotion's renderFrames registers an
+// internal abort handler through cancelSignal). Lets tests assert the
+// AbortSignal → cancel() bridge without a real Chromium render.
+const cancelCallbacks: Array<() => void> = [];
+const cancelMock = vi.fn(() => {
+  for (const cb of cancelCallbacks) cb();
+});
+const makeCancelSignalMock = vi.fn(() => ({
+  cancelSignal: (cb: () => void) => {
+    cancelCallbacks.push(cb);
+  },
+  cancel: cancelMock,
+}));
+
 vi.mock("@remotion/bundler", () => ({
   bundle: (args: unknown) => bundleMock(args),
 }));
 vi.mock("@remotion/renderer", () => ({
   renderFrames: (args: unknown) => renderFramesMock(args),
   selectComposition: (args: unknown) => selectCompositionMock(args),
+  makeCancelSignal: () => makeCancelSignalMock(),
 }));
 
 // Mock streamingEncode so we don't spawn ffmpeg. The bridge's job is
@@ -74,6 +90,9 @@ beforeEach(() => {
   selectCompositionMock.mockClear();
   renderFramesMock.mockClear();
   streamingEncodeMock.mockClear();
+  makeCancelSignalMock.mockClear();
+  cancelMock.mockClear();
+  cancelCallbacks.length = 0;
   renderFramesHolder.impl = async () => ({ frameCount: 0 });
 });
 
@@ -146,5 +165,50 @@ describe("renderViaStreamingBridge", () => {
     await expect(
       renderViaStreamingBridge(fakeComp, "/tmp/out", {}),
     ).rejects.toThrow(/render boom/);
+  });
+
+  // ── #44 cancellation wiring ───────────────────────────────────────────
+
+  it("throws before bundling when the signal is already aborted (#44)", async () => {
+    const ac = new AbortController();
+    ac.abort();
+    await expect(
+      renderViaStreamingBridge(fakeComp, "/tmp/out", { signal: ac.signal }),
+    ).rejects.toThrow(/aborted before render/);
+    // No expensive work kicked off for an already-cancelled job.
+    expect(bundleMock).not.toHaveBeenCalled();
+    expect(renderFramesMock).not.toHaveBeenCalled();
+  });
+
+  it("aborting mid-render bridges AbortSignal → Remotion cancel() and rejects (#44)", async () => {
+    const ac = new AbortController();
+    // renderFrames hangs until Remotion's cancelSignal callback fires, then
+    // rejects exactly as the real renderFrames does on cancel.
+    renderFramesHolder.impl = (args: any) =>
+      new Promise((_res, rej) => {
+        expect(args.cancelSignal).toBeTypeOf("function"); // signal forwarded
+        args.cancelSignal(() => rej(new Error("Render was cancelled")));
+      });
+    // streamingEncode just waits on the (never-arriving) frames; resolve it so
+    // the bridge's outcome is decided by the render rejection.
+    streamingEncodeMock.mockImplementationOnce(
+      async (_p, opts: any) => opts.outputPath,
+    );
+
+    const promise = renderViaStreamingBridge(fakeComp, "/tmp/out", { signal: ac.signal });
+    // Abort on the next tick so renderFrames has registered its cancel cb.
+    setTimeout(() => ac.abort(), 0);
+
+    await expect(promise).rejects.toThrow(/cancelled/i);
+    expect(makeCancelSignalMock).toHaveBeenCalledTimes(1);
+    expect(cancelMock).toHaveBeenCalledTimes(1); // abort → cancel() fired
+  });
+
+  it("does NOT create a cancel signal when no AbortSignal is passed (#44)", async () => {
+    renderFramesHolder.impl = async () => ({ frameCount: 10 });
+    await renderViaStreamingBridge(fakeComp, "/tmp/out", {});
+    expect(makeCancelSignalMock).not.toHaveBeenCalled();
+    // cancelSignal forwarded to renderFrames is undefined (no bridge).
+    expect(renderFramesMock.mock.calls[0][0].cancelSignal).toBeUndefined();
   });
 });

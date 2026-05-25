@@ -430,8 +430,10 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
       : comp;
 
   // Stage 1: Remotion render
-  // TODO(phase-7): renderCompositionToMp4 does not yet accept an AbortSignal;
-  // we check between stages so cancellation takes effect at the next boundary.
+  // #44: renderCompositionToMp4 / renderViaStreamingBridge now accept the
+  // AbortSignal and bridge it onto Remotion's cancelSignal, so a Cancel during
+  // this (heaviest, ~75% of the bar) stage kills the render within ~1-2s
+  // instead of only taking effect at the next stage boundary.
   // R46 #2.5: pass through Remotion's per-frame onProgress so the worker's
   // weighted budget (render = 75% of the bar) actually advances smoothly
   // instead of binary 0/1.
@@ -462,11 +464,18 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
     workingPath = useStreaming
       ? await renderViaStreamingBridge(compForRender, opts.outDir, {
           onProgress: renderProgress,
+          signal: opts.signal,
         })
       : await renderCompositionToMp4(compForRender, opts.outDir, {
           onProgress: renderProgress,
+          signal: opts.signal,
         });
   } catch (err) {
+    // #44 — never fall back to a full Remotion re-render when the user
+    // cancelled: that would restart the very stage we were asked to abort and
+    // defeat the whole fix. Propagate so the worker flips the job to
+    // `cancelled` (it keys off ac.signal.aborted, not the error type).
+    if (opts.signal?.aborted) throw err;
     if (useStreaming) {
       // eslint-disable-next-line no-console
       console.warn(
@@ -475,6 +484,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
       );
       workingPath = await renderCompositionToMp4(compForRender, opts.outDir, {
         onProgress: renderProgress,
+        signal: opts.signal,
       });
     } else {
       throw err;

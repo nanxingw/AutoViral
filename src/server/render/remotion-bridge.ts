@@ -22,7 +22,7 @@
 // whenever it lands.
 
 import { bundle } from "@remotion/bundler";
-import { renderFrames, selectComposition } from "@remotion/renderer";
+import { renderFrames, selectComposition, makeCancelSignal } from "@remotion/renderer";
 import { join } from "node:path";
 import { streamingEncode, type StreamingEncodeProducer } from "./streaming-encoder.js";
 import { buildSafeOutputFilename } from "../remotion-renderer.js";
@@ -36,6 +36,13 @@ const SHARED_ALIAS_TARGET = join(process.cwd(), "src/shared");
 export interface RenderViaStreamingBridgeOptions {
   /** 0..1 fraction of frames rendered. Called as renderFrames advances. */
   onProgress?: (fraction: number) => void;
+  /**
+   * #44 — same AbortSignal → Remotion cancelSignal bridge as the canonical
+   * renderCompositionToMp4 path. Aborting kills the Chromium render-frame pool
+   * mid-flight (renderFrames rejects), so streamingEncode tears down ffmpeg
+   * instead of churning the full render before honoring the cancel.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -76,6 +83,16 @@ export async function renderViaStreamingBridge(
   outDir: string,
   opts: RenderViaStreamingBridgeOptions = {},
 ): Promise<string> {
+  // #44 — bail before the expensive bundle if already cancelled.
+  if (opts.signal?.aborted) {
+    throw new Error("renderViaStreamingBridge: aborted before render");
+  }
+  // Bridge AbortSignal → Remotion cancelSignal (cleaned up after both the
+  // render and encode promises settle, below).
+  const cancelBridge = opts.signal ? makeCancelSignal() : null;
+  const onAbort = () => cancelBridge?.cancel();
+  opts.signal?.addEventListener("abort", onAbort, { once: true });
+
   const bundleLocation = await bundle({
     entryPoint: join(
       process.cwd(),
@@ -147,6 +164,7 @@ export async function renderViaStreamingBridge(
     },
     serveUrl: bundleLocation,
     inputProps: { comp },
+    cancelSignal: cancelBridge?.cancelSignal,
     imageFormat: "jpeg",
     // outputDir: null means "don't write frames to disk" — we pull
     // them from onFrameBuffer instead. This is the whole point of the
@@ -190,6 +208,8 @@ export async function renderViaStreamingBridge(
     encodePromise,
     renderPromise,
   ]);
+  // Both promises have settled — safe to drop the abort listener.
+  opts.signal?.removeEventListener("abort", onAbort);
 
   if (encodeResult.status === "rejected") throw encodeResult.reason;
   if (renderResult.status === "rejected") throw renderResult.reason;
