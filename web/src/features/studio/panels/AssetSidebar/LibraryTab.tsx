@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useWorkAssets, type AssetItem } from "@/queries/assets";
 import { GenerationDialog } from "@/features/studio/generation/GenerationDialog";
+import { useGatedMediaSrc } from "@/features/studio/media/useGatedMediaSrc";
 import { SearchBox } from "./SearchBox";
 import { AssetPreviewModal } from "./AssetPreviewModal";
 
@@ -187,6 +188,16 @@ function AssetTile({
   // gradient indistinguishable from "loading" state — user has no clue
   // their asset is broken.
   const [mediaFailed, setMediaFailed] = useState(false);
+  // #37 — gate the poster <video> load behind the global media-load semaphore.
+  // ~25 video tiles all mounting `preload="metadata"` at once helped saturate
+  // Chrome's ~6/host connection pool and starve the preview. The gate defers
+  // each poster's src until a slot frees; onSettled releases it once the
+  // metadata frame is decoded so the next tile can load.
+  const posterEnabled = item.kind === "video" && !hovered && !mediaFailed;
+  const { src: posterSrc, onSettled: onPosterSettled } = useGatedMediaSrc(
+    item.url,
+    posterEnabled,
+  );
   return (
     <div
       // R43 — tile is now an interactive control. role+tabIndex make it
@@ -248,31 +259,42 @@ function AssetTile({
               first decoded frame WITHOUT holding a hardware decoder slot.
               Unlike autoPlay/loop which keep readyState=4 (decoder pinned),
               metadata-only + one-time seek lets the browser paint a single
-              frame and release the decode pipeline. Confirmed safe up to
-              ~30 simultaneous tiles in the 4-column grid. */}
-          <video
-            src={item.url}
-            muted
-            playsInline
-            preload="metadata"
-            onLoadedMetadata={(e) => {
-              const v = e.currentTarget;
-              try {
-                v.currentTime = Math.min(0.1, (v.duration || 1) * 0.05);
-              } catch {
-                /* some browsers throw if duration is unknown — ignore */
-              }
-            }}
-            onError={() => setMediaFailed(true)}
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-              pointerEvents: "none",
-            }}
-          />
+              frame and release the decode pipeline. #37 — the load is now
+              gated: posterSrc is undefined until the media-load semaphore
+              grants a slot, so the tiles load a few at a time instead of all
+              at once. Until then the ▶ glyph over the gradient is the
+              placeholder. */}
+          {posterSrc && (
+            <video
+              src={posterSrc}
+              muted
+              playsInline
+              preload="metadata"
+              onLoadedMetadata={(e) => {
+                const v = e.currentTarget;
+                try {
+                  v.currentTime = Math.min(0.1, (v.duration || 1) * 0.05);
+                } catch {
+                  /* some browsers throw if duration is unknown — ignore */
+                }
+                // Metadata frame is in hand — free the gate slot for the next
+                // queued tile (the frame stays painted; we don't unmount).
+                onPosterSettled();
+              }}
+              onError={() => {
+                setMediaFailed(true);
+                onPosterSettled();
+              }}
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+                pointerEvents: "none",
+              }}
+            />
+          )}
           {/* Centered ▶ glyph as visual hint that hover plays the clip */}
           <div
             aria-hidden

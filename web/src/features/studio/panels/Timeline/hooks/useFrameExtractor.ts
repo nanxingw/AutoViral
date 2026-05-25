@@ -18,6 +18,7 @@
 // same (src, t) share one extraction promise.
 
 import { useEffect, useRef, useState } from "react";
+import { acquireMediaSlot } from "../../../media/mediaLoadGate";
 
 const cache = new Map<string, Promise<string>>();
 
@@ -78,6 +79,13 @@ async function extractOne(src: string, t: number): Promise<string> {
   if (cached) return cached;
 
   const promise = (async (): Promise<string> => {
+    // #37 — gate the hidden-video load behind the global media-load semaphore.
+    // A heavy timeline fans out hundreds of extractOne() calls at once (every
+    // clip × every cached timestamp); ungated they saturate Chrome's ~6/host
+    // connection pool and deadlock the preview. The slot caps concurrency and
+    // is released in `finally` the instant this extraction frees its network.
+    const slot = acquireMediaSlot();
+    await slot.granted;
     const video = document.createElement("video");
     video.crossOrigin = "anonymous";
     video.preload = "auto";
@@ -111,6 +119,7 @@ async function extractOne(src: string, t: number): Promise<string> {
         // happy-dom may throw on src=""; we only care about freeing the node.
       }
       video.remove();
+      slot.release(); // free the gate slot for the next queued extraction
     }
   })();
 
