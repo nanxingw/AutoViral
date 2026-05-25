@@ -268,6 +268,14 @@ export const TrackSchema = z
     language: z.string().optional(),
     muted: z.boolean().default(false),
     hidden: z.boolean().default(false),
+    // Phase G (issue #34) — per-track mix gain in dB. 0 = unity (default).
+    // Semantically only consumed when `kind === "audio"` —
+    // `compositionToMixTracks` adds this on top of each clip's linear volume.
+    // We don't gate the field on the discriminator at the schema layer because
+    // `TrackSchema` is a single object (not a discriminated union over kind);
+    // a default of 0 on text/video/overlay tracks is a safe no-op. The store
+    // action `setTrackVolume` (issue #32) is the canonical writer.
+    volume: z.number().default(0),
     clips: z.array(
       z.discriminatedUnion("kind", [
         VideoClipObjectSchema,

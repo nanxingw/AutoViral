@@ -1,0 +1,93 @@
+# Phase G (issue #34) — multi-audio mix regression fixture.
+#
+# Three audio lanes (BGM / VO / SFX) with deliberately overlapping clips so
+# the renderer must mix N>2 sources at once. Each lane carries a per-track
+# `volume` (dB; 0 = unity) so the mix-track adapter must fold the lane gain
+# into each clip's linear volume before handing the result to ffmpeg.
+#
+# Lane gains (dB):
+#   BGM = -6   (background, ducked under VO)
+#   VO  =  0   (unity — drives sidechain trigger)
+#   SFX = -3   (sweetener, also ducked under VO)
+#
+# Clip layout (8 s total):
+#   BGM     |======= bgm full-length =======|   trackOffset 0, len 8
+#   VO          |---- vo ----|                  trackOffset 1, len 4 (overlaps BGM)
+#   SFX                  |- sfx -|              trackOffset 3, len 2 (overlaps both)
+#
+# Track ids use the Phase-D `trk_<uuid8>` convention (issue #31). uuids are
+# deterministic in the fixture so test snapshots stay stable across runs.
+id: c_multi_audio
+workId: w_multi_audio
+fps: 30
+width: 1080
+height: 1920
+duration: 8
+aspect: "9:16"
+updatedAt: "2026-05-25T00:00:00Z"
+tracks:
+  - id: trk_v0000001
+    kind: video
+    label: V1
+    displayOrder: 0
+    muted: false
+    hidden: false
+    volume: 0
+    clips: []
+  - id: trk_a0000001
+    kind: audio
+    label: A1 · BGM
+    displayOrder: 1
+    muted: false
+    hidden: false
+    volume: -6
+    clips:
+      - id: ac_bgm
+        kind: audio
+        src: /api/works/w_multi_audio/assets/music/bgm.mp3
+        in: 0
+        out: 8
+        trackOffset: 0
+        volume: 1
+        fadeIn: 0
+        fadeOut: 0
+        type: bgm
+  - id: trk_a0000002
+    kind: audio
+    label: A2 · VO
+    displayOrder: 2
+    muted: false
+    hidden: false
+    volume: 0
+    clips:
+      - id: ac_vo
+        kind: audio
+        src: /api/works/w_multi_audio/assets/music/vo.wav
+        in: 0
+        out: 4
+        trackOffset: 1
+        volume: 1
+        fadeIn: 0
+        fadeOut: 0
+        type: voiceover
+  - id: trk_a0000003
+    kind: audio
+    label: A3 · SFX
+    displayOrder: 3
+    muted: false
+    hidden: false
+    volume: -3
+    clips:
+      - id: ac_sfx
+        kind: audio
+        src: /api/works/w_multi_audio/assets/music/sfx.wav
+        in: 0
+        out: 2
+        trackOffset: 3
+        volume: 1
+        fadeIn: 0
+        fadeOut: 0
+        type: sfx
+assets: []
+provenance: []
+exportPresets: []

@@ -44,7 +44,11 @@ vi.mock("node:child_process", () => {
 });
 
 import { spawn } from "node:child_process";
-import { runRenderPipeline, runEncodeStage } from "./render-pipeline.js";
+import {
+  runRenderPipeline,
+  runEncodeStage,
+  __compositionToMixTracksForTest,
+} from "./render-pipeline.js";
 import { renderCompositionToMp4 } from "./remotion-renderer.js";
 import { mixAudioTracks, normalizeLufs, burnSubtitles } from "../audio-tools.js";
 import type { Composition, ExportPreset } from "../shared/composition.js";
@@ -423,6 +427,131 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
       expect.stringMatching(/Variable-speed export/i),
     );
     warnSpy.mockRestore();
+  });
+});
+
+// Phase G (issue #34) — per-track volume + mute fold into MixTrack adapter.
+// These tests exercise compositionToMixTracks in isolation (no ffmpeg, no
+// Remotion) so they're cheap and deterministic. The real-ffmpeg integration
+// lives in src/server/__tests__/render-pipeline.mix-integration.test.ts.
+describe("compositionToMixTracks — Phase G per-track volume + mute (issue #34)", () => {
+  function audioLane(opts: {
+    id: string;
+    label: string;
+    order: number;
+    volumeDb?: number;
+    muted?: boolean;
+    clips: Array<{
+      id: string;
+      src: string;
+      clipVolume?: number;
+      type?: "bgm" | "voiceover" | "sfx" | "original";
+      offset?: number;
+      duration?: number;
+      ducking?: { ratio: number; attack: number; release: number };
+    }>;
+  }) {
+    return {
+      id: opts.id,
+      kind: "audio" as const,
+      label: opts.label,
+      displayOrder: opts.order,
+      muted: opts.muted ?? false,
+      hidden: false,
+      volume: opts.volumeDb ?? 0,
+      clips: opts.clips.map((c) => ({
+        id: c.id,
+        kind: "audio" as const,
+        src: c.src,
+        in: 0,
+        out: c.duration ?? 4,
+        trackOffset: c.offset ?? 0,
+        volume: c.clipVolume ?? 1,
+        fadeIn: 0,
+        fadeOut: 0,
+        type: c.type ?? "bgm",
+        ducking: c.ducking,
+      })),
+    };
+  }
+
+  it("folds lane volume (dB) into each clip's linear volume — 0 dB = unity, -6 dB ≈ 0.501, -12 dB ≈ 0.251", () => {
+    const comp: Composition = {
+      ...baseComp,
+      tracks: [
+        audioLane({ id: "trk_bgm", label: "BGM", order: 0, volumeDb: -6,
+          clips: [{ id: "ac_bgm", src: "/bgm.mp3", clipVolume: 1, type: "bgm" }] }),
+        audioLane({ id: "trk_vo", label: "VO", order: 1, volumeDb: 0,
+          clips: [{ id: "ac_vo", src: "/vo.wav", clipVolume: 1, type: "voiceover" }] }),
+        audioLane({ id: "trk_sfx", label: "SFX", order: 2, volumeDb: -12,
+          clips: [{ id: "ac_sfx", src: "/sfx.wav", clipVolume: 0.8, type: "sfx" }] }),
+      ],
+    };
+    const mix = __compositionToMixTracksForTest(comp);
+    expect(mix).toHaveLength(3);
+    const bgm = mix.find((m) => m.type === "bgm")!;
+    const vo = mix.find((m) => m.type === "voiceover")!;
+    const sfx = mix.find((m) => m.type === "sfx")!;
+    // -6 dB → 10^(-6/20) ≈ 0.5012
+    expect(bgm.volume).toBeCloseTo(0.5012, 3);
+    // 0 dB → unity
+    expect(vo.volume).toBeCloseTo(1.0, 6);
+    // -12 dB × clipVolume 0.8 → 0.2512 × 0.8 ≈ 0.2009
+    expect(sfx.volume).toBeCloseTo(0.2009, 3);
+  });
+
+  it("track.muted=true collapses lane gain to ~0 regardless of lane volume or clip volume", () => {
+    const comp: Composition = {
+      ...baseComp,
+      tracks: [
+        audioLane({ id: "trk_bgm", label: "BGM", order: 0,
+          volumeDb: 0, muted: true,
+          clips: [{ id: "ac_bgm", src: "/bgm.mp3", clipVolume: 1.5, type: "bgm" }] }),
+      ],
+    };
+    const mix = __compositionToMixTracksForTest(comp);
+    // 1e-6 sentinel × 1.5 = 1.5e-6 — audibly silent (~ -116 dBFS)
+    expect(mix[0].volume).toBeLessThan(1e-5);
+    expect(mix[0].volume).toBeGreaterThan(0); // strictly positive — ffmpeg-safe
+  });
+
+  it("reordering audio lanes does NOT change the set of MixTracks (mix is commutative)", () => {
+    const a = audioLane({ id: "trk_bgm", label: "BGM", order: 0, volumeDb: -6,
+      clips: [{ id: "ac_bgm", src: "/bgm.mp3", clipVolume: 1, type: "bgm" }] });
+    const b = audioLane({ id: "trk_vo", label: "VO", order: 1, volumeDb: 0,
+      clips: [{ id: "ac_vo", src: "/vo.wav", clipVolume: 1, type: "voiceover" }] });
+    const c = audioLane({ id: "trk_sfx", label: "SFX", order: 2, volumeDb: -3,
+      clips: [{ id: "ac_sfx", src: "/sfx.wav", clipVolume: 1, type: "sfx" }] });
+    const forward: Composition = { ...baseComp, tracks: [a, b, c] };
+    const reverse: Composition = { ...baseComp, tracks: [c, b, a] };
+    const mixF = __compositionToMixTracksForTest(forward);
+    const mixR = __compositionToMixTracksForTest(reverse);
+    const key = (mt: { source: string; volume: number; type: string }) =>
+      `${mt.source}|${mt.type}|${mt.volume.toFixed(6)}`;
+    expect(mixF.map(key).sort()).toEqual(mixR.map(key).sort());
+  });
+
+  it("ducking routes by track type, not by lane index — works correctly with N=3 lanes", () => {
+    const comp: Composition = {
+      ...baseComp,
+      tracks: [
+        audioLane({ id: "trk_bgm", label: "BGM", order: 0, volumeDb: -6,
+          clips: [{ id: "ac_bgm", src: "/bgm.mp3", type: "bgm",
+            ducking: { ratio: 4, attack: 200, release: 1000 } }] }),
+        audioLane({ id: "trk_vo", label: "VO", order: 1, volumeDb: 0,
+          clips: [{ id: "ac_vo", src: "/vo.wav", type: "voiceover" }] }),
+        audioLane({ id: "trk_sfx", label: "SFX", order: 2, volumeDb: -3,
+          clips: [{ id: "ac_sfx", src: "/sfx.wav", type: "sfx",
+            ducking: { ratio: 6, attack: 100, release: 500 } }] }),
+      ],
+    };
+    const mix = __compositionToMixTracksForTest(comp);
+    const bgm = mix.find((m) => m.type === "bgm")!;
+    const sfx = mix.find((m) => m.type === "sfx")!;
+    const vo = mix.find((m) => m.type === "voiceover")!;
+    expect(bgm.ducking).toEqual({ trigger: "voiceover", ratio: 4 });
+    expect(sfx.ducking).toEqual({ trigger: "voiceover", ratio: 6 });
+    expect(vo.ducking).toBeUndefined(); // voiceover never ducks itself
   });
 });
 

@@ -157,20 +157,46 @@ function applyProxy(comp: Composition): Composition {
  * clips that have ducking configs duck to it. AudioClip.ducking has
  * extra fields (attack, release) that MixTrack doesn't model; only
  * ratio is forwarded. Phase 6 will widen this when MixTrack grows.
+ *
+ * Phase G (issue #34) — per-track volume + mute:
+ * Each emitted MixTrack's linear volume is
+ *   `clip.volume * dbToLinear(track.volume)`
+ * where `track.volume` is dB on the lane (default 0 dB = unity). When
+ * `track.muted === true`, the multiplier collapses to ~0 (we use 1e-6 to
+ * stay inside ffmpeg's `volume=` numeric domain and effectively silence
+ * the track without throwing). The composition's underlying clip.volume
+ * is never mutated — gain folds at the MixTrack adapter only.
  */
+const MUTED_LINEAR_GAIN = 1e-6; // ~ -120 dBFS, audibly silent
+function dbToLinear(db: number): number {
+  return Math.pow(10, db / 20);
+}
+
 function compositionToMixTracks(comp: Composition): MixTrack[] {
   const tracks: MixTrack[] = [];
-  const allAudioClips = comp.tracks
-    .filter((t) => t.kind === "audio")
-    .flatMap((t) => t.clips.filter((c) => c.kind === "audio") as any[]);
+  const audioLanes = comp.tracks.filter((t) => t.kind === "audio");
 
-  const hasVoiceover = allAudioClips.some((c) => c.type === "voiceover");
+  // Boil-the-ocean (Pitfall #1): never key off track.id for clip → lane lookup.
+  // We carry the (lane, clip) pair so we know which lane each clip lives on
+  // when applying lane-level gain + mute. Prior implementation flattened all
+  // audio clips into a single array, which silently dropped per-lane state.
+  type Pair = { lane: (typeof audioLanes)[number]; clip: any };
+  const pairs: Pair[] = audioLanes.flatMap((lane) =>
+    lane.clips
+      .filter((c) => c.kind === "audio")
+      .map((c) => ({ lane, clip: c as any })),
+  );
 
-  for (const clip of allAudioClips) {
+  const hasVoiceover = pairs.some(({ clip }) => clip.type === "voiceover");
+
+  for (const { lane, clip } of pairs) {
+    const laneGainLinear = lane.muted
+      ? MUTED_LINEAR_GAIN
+      : dbToLinear(lane.volume ?? 0);
     const mt: MixTrack = {
       source: clip.src,
       type: clip.type ?? "bgm",
-      volume: clip.volume ?? 1,
+      volume: (clip.volume ?? 1) * laneGainLinear,
       delay: clip.trackOffset,
       fadeIn: clip.fadeIn,
       fadeOut: clip.fadeOut,
@@ -185,6 +211,12 @@ function compositionToMixTracks(comp: Composition): MixTrack[] {
   }
   return tracks;
 }
+
+// Phase G (issue #34) — exported so the render test can independently
+// exercise the mix-track adapter without spinning up the full pipeline.
+// Lets us assert dB-to-linear math, mute semantics, and reorder-invariance
+// without touching ffmpeg.
+export { compositionToMixTracks as __compositionToMixTracksForTest };
 
 // R46 — software-codec fallbacks. Kept for backwards compat with any
 // caller that imports CODEC_MAP directly; the active path now goes
