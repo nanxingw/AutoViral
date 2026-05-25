@@ -2,7 +2,10 @@ import { spawn } from "node:child_process";
 import { homedir } from "node:os";
 
 /** Run claude CLI with a prompt and return the text result. */
-export function runCliBrief(prompt: string, timeoutMs = 60000): Promise<string> {
+// Default 180s — trends WebSearch + JSON synthesis routinely exceeds 60s
+// for cold-start agent calls. Callers that know their workload is faster
+// can pass a smaller timeoutMs.
+export function runCliBrief(prompt: string, timeoutMs = 180000): Promise<string> {
   return new Promise((resolve, reject) => {
     const args = [
       "-p", prompt,

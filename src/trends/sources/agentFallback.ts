@@ -25,9 +25,16 @@ export function agentFallbackFromAgentJson(
     sourceUrl: t.sourceUrl,
     source: "agent_websearch",
     scrapedAt: now,
-    cover: t.coverUrl
-      ? { url: t.coverUrl, aspect: "9:16" }
-      : null,
+    // Schema requires cover.url to be a valid URL. When agent has no real
+    // cover URL (common for douyin/tiktok where the agent can't verify
+    // hotlinkable images), use placehold.co with the title rendered in.
+    // The frontend's <img onError> falls back to gradient placeholder if
+    // even this URL fails (e.g. proxy block).
+    cover: {
+      url: t.coverUrl
+        || `https://placehold.co/360x640/0a0b0f/a8c5d6?text=${encodeURIComponent(t.title.slice(0, 30))}`,
+      aspect: "9:16",
+    },
     // No real numbers — fallback is honest about lack of metrics.
     metrics: null,
   }));

@@ -2,7 +2,7 @@
 //
 // Phase 7.B re-shaped the contract to {jobId} (enqueue), so success-path now
 // goes through RenderQueue. We keep the cheap guard cases (404 missing work,
-// 400 missing composition) here; success-shape coverage lives in
+// 409 missing composition) here; success-shape coverage lives in
 // src/server/api.render.test.ts with a FakeQueue.
 
 import { describe, it, expect, beforeEach } from "vitest";
@@ -40,7 +40,11 @@ describe("POST /api/works/:id/render — legacy guards", () => {
     // setRenderQueue stores a module-level singleton.
   });
 
-  it("returns 400 if composition missing", async () => {
+  it("returns 409 if composition missing (state precondition not met)", async () => {
+    // e2e-report F128: request is well-formed; missing composition.yaml is a
+    // STATE conflict (not-yet-saved vs ready-to-render), not bad input. The
+    // toast layer already shows the localized message via errorCode, so the
+    // status code is purely a semantic signal for triage / dev tooling.
     await withTempDataDir(async () => {
       const { apiRoutes, setRenderQueue } = await import("../api.js");
       const { createWork } = await import("../../work-store.js");
@@ -53,7 +57,9 @@ describe("POST /api/works/:id/render — legacy guards", () => {
       const res = await apiRoutes.fetch(
         jsonReq("POST", `/api/works/${w.id}/render`, {}),
       );
-      expect(res.status).toBe(400);
+      expect(res.status).toBe(409);
+      const body = await res.json();
+      expect(body.errorCode).toBe("composition_missing");
     });
   });
 

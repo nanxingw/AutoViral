@@ -403,7 +403,11 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   // its codec + bitrate. Otherwise (legacy compositions w/o presets), keep
   // the prior behaviour: rename + done.
   onP("encode", 0);
-  const finalPath = join(opts.outDir, `final-${Date.now()}.mp4`);
+  // e2e-report F68: distinguish proxy vs full export filenames so users can
+  // tell artifacts apart at-a-glance (timestamp alone is ambiguous when both
+  // types are rendered in quick succession).
+  const filePrefix = opts.proxy ? "proxy" : "final";
+  const finalPath = join(opts.outDir, `${filePrefix}-${Date.now()}.mp4`);
   const preset = comp.exportPresets?.[0];
   if (preset) {
     await runEncodeStage(workingPath, finalPath, preset, opts.signal);
