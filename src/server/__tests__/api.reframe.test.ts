@@ -12,6 +12,17 @@ vi.mock("../python-bridge.js", () => ({
   runPythonScript: vi.fn(),
 }));
 
+// #45 — the smart-crop scripts were deleted in the skill refactor, so the
+// endpoint's existsSync guard now short-circuits to 501 in production. The
+// orchestration tests below assume the scripts ARE present (a counterfactual
+// kept as a contract for if/when reframe is re-wired), so we mock existsSync to
+// true by default; the dedicated guard test flips it to false.
+const _existsSync = vi.fn(() => true);
+vi.mock("node:fs", async (orig) => ({
+  ...(await orig<typeof import("node:fs")>()),
+  existsSync: (...args: unknown[]) => _existsSync(...(args as [])),
+}));
+
 import { runPythonScript } from "../python-bridge.js";
 
 const _runPython = runPythonScript as unknown as ReturnType<typeof vi.fn>;
@@ -66,7 +77,43 @@ async function setupWorkWithVideo(dataDir: string, workId: string): Promise<void
 describe("POST /api/video/reframe", () => {
   beforeEach(() => {
     _runPython.mockReset();
+    _existsSync.mockReset();
+    _existsSync.mockReturnValue(true); // assume scripts present unless a test says otherwise
     vi.resetModules();
+  });
+
+  it("returns a structured 501 (not a bare 500) when the smart-crop script is missing (#45)", async () => {
+    await withTempDataDir(async (dataDir) => {
+      _existsSync.mockReturnValue(false); // scripts deleted in the refactor
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../work-store.js");
+      const w = await createWork({
+        title: "Demo",
+        type: "short-video",
+        platforms: ["douyin"],
+      });
+      await setupWorkWithVideo(dataDir, w.id);
+      const res = await apiRoutes.fetch(
+        jsonReq("POST", "/api/video/reframe", {
+          workId: w.id,
+          videoId: "vid1",
+          fromAspect: "16:9",
+          toAspect: "9:16",
+        }),
+      );
+      expect(res.status).toBe(501);
+      const json: any = await res.json();
+      expect(json.errorCode).toBe("reframe_script_missing");
+      // Python must never be spawned when the script is absent.
+      expect(_runPython).not.toHaveBeenCalled();
+      // Composition must be untouched — no asset / edge appended.
+      const { readFile } = await import("node:fs/promises");
+      const persisted = yaml.load(
+        await readFile(`${dataDir}/works/${w.id}/composition.yaml`, "utf-8"),
+      ) as Composition;
+      expect(persisted.assets).toHaveLength(1);
+      expect(persisted.provenance).toHaveLength(1);
+    });
   });
 
   it("happy path: runs saliency + crop, registers asset + reframe edge, persists composition", async () => {

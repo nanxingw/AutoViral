@@ -147,4 +147,46 @@ describe("PlatformPresetSection (Phase 6.D)", () => {
       expect(clip.src).toBe("/assets/r1.mp4");
     });
   });
+
+  it("reframe failure does NOT flip the aspect and surfaces an error (#45 — no silent corruption)", async () => {
+    // Backend returns 501 (deleted smart-crop scripts). Pre-fix this was
+    // swallowed AFTER the aspect had already been flipped + autosaved, leaving
+    // a corrupted mixed-aspect work. The transactional rewrite must leave the
+    // composition completely untouched and tell the user.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 501,
+        json: async () => ({ error: "missing", errorCode: "reframe_script_missing" }),
+      })),
+    );
+    const comp = makeCompositionWithClips([
+      makeVideoClip({ id: "v1", src: "/a.mp4" }),
+    ]);
+    comp.assets = [makeAssetEntry({ id: "v1", uri: "/a.mp4", kind: "video" })];
+    comp.aspect = "16:9";
+    comp.width = 1920;
+    comp.height = 1080;
+    useComposition.setState({ comp });
+    render(<PlatformPresetSection workId="w" />);
+    fireEvent.change(screen.getByLabelText(/platform preset/i), {
+      target: { value: "douyin-9-16" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /confirm/i }));
+    });
+    const next = useComposition.getState().comp!;
+    // aspect / dimensions / preset all UNCHANGED — no half-applied state.
+    expect(next.aspect).toBe("16:9");
+    expect(next.width).toBe(1920);
+    expect(next.height).toBe(1080);
+    expect(next.exportPresets).toHaveLength(0);
+    // clip NOT rebound to a (nonexistent) reframed asset.
+    expect((next.tracks[0].clips[0] as { src?: string }).src).toBe("/a.mp4");
+    // user is told it failed.
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toBeInTheDocument();
+    });
+  });
 });

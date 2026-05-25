@@ -2479,6 +2479,24 @@ apiRoutes.post("/api/video/reframe", async (c) => {
     "smart_crop",
     "saliency.py",
   );
+  // #45 — the smart-crop Python scripts were deleted in the skill refactor
+  // (commit 29b9e96, archived in tag pre-skill-rewrite-snapshot). Before this
+  // guard the handler spawned a missing file and returned a bare 500 leaking an
+  // absolute path; the frontend swallowed it and silently corrupted the work.
+  // Fail fast with a structured, honest error the client can branch on instead.
+  const { existsSync } = await import("node:fs");
+  if (!existsSync(saliencyScript)) {
+    return c.json(
+      {
+        error:
+          "Reframe is unavailable on this build: the smart-crop scripts " +
+          "(smart_crop/saliency.py, crop_9_16.py) were removed in the skill " +
+          "refactor and have not been re-wired. The composition was NOT modified.",
+        errorCode: "reframe_script_missing",
+      },
+      501,
+    );
+  }
   let saliencyResult: {
     strategy_used: string;
     strategy_requested: string;

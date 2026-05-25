@@ -153,6 +153,7 @@ export function PlatformPresetSection({ workId }: Props) {
 
   const [candidate, setCandidate] = useState<ExportPreset | null>(null);
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   // R37: alive flag for unmount-safe state updates after the long
   // parallel reframe loop. User can close Tweaks panel mid-reframe;
   // setBusy/setCandidate after that throws React warnings. Store
@@ -194,12 +195,27 @@ export function PlatformPresetSection({ workId }: Props) {
   const onConfirm = async () => {
     if (!candidate || !comp) return;
     setBusy(true);
+    setError(null);
     const fromAspect = comp.aspect;
     const toAspect = inferAspect(candidate);
-    // D5 atomic: applyPlatformPreset flips exportPresets+aspect+w+h+fps in
-    // one transaction before any reframe call goes out.
-    applyPlatformPreset(candidate);
+
+    // #45 — transactional reframe. Previously applyPlatformPreset flipped
+    // aspect/w/h/fps up front, then each reframe failure was silently
+    // swallowed (`if (!res.ok) return` + empty catch). When the backend 500'd
+    // (deleted smart-crop scripts), the canvas was left flipped + autosaved
+    // while the clips kept the old aspect — a silently corrupted mixed-aspect
+    // work. Now: reframe ALL clips first; only commit the preset + rebinds if
+    // every clip succeeds. Any failure aborts with NOTHING changed.
+    type ReframeOk = {
+      clipId: string;
+      asset: Parameters<typeof addAsset>[0];
+      edge: Parameters<typeof addProvenance>[0];
+    };
+    const results: ReframeOk[] = [];
+    let failure = false;
+
     await runWithConcurrency(2, videoClips, async (clip) => {
+      if (failure) return; // short-circuit once any clip has failed
       try {
         const res = await fetch("/api/video/reframe", {
           method: "POST",
@@ -212,20 +228,39 @@ export function PlatformPresetSection({ workId }: Props) {
             strategy: "auto",
           }),
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          failure = true;
+          return;
+        }
         const json = (await res.json()) as {
           asset: Parameters<typeof addAsset>[0];
           edge: Parameters<typeof addProvenance>[0];
         };
-        addAsset(json.asset);
-        addProvenance(json.edge);
-        rebindClip(clip.id, json.asset.id);
+        results.push({ clipId: clip.id, asset: json.asset, edge: json.edge });
       } catch {
-        // Phase 6 keeps errors silent in the panel; Phase 7's render queue
-        // will own progress + error surfacing for these jobs.
+        failure = true;
       }
     });
+
     if (!aliveRef.current) return;
+
+    if (failure) {
+      // Do NOT flip the aspect — leaving the canvas reframed while clips keep
+      // the old aspect is the silent-corruption bug this fix exists to kill.
+      setError(t("studio.platformPreset.reframeFailed"));
+      setBusy(false);
+      setCandidate(null);
+      return;
+    }
+
+    // Every clip reframed — commit atomically: flip the canvas, then register
+    // the new assets and rebind each clip to its reframed source.
+    applyPlatformPreset(candidate);
+    for (const r of results) {
+      addAsset(r.asset);
+      addProvenance(r.edge);
+      rebindClip(r.clipId, r.asset.id);
+    }
     setBusy(false);
     setCandidate(null);
   };
@@ -298,6 +333,20 @@ export function PlatformPresetSection({ workId }: Props) {
             : t("studio.platformPreset.reframingPlural", { n: videoClips.length })}
         </div>
       ) : null}
+      {error && (
+        <div
+          role="alert"
+          style={{
+            marginTop: 8,
+            fontSize: 11,
+            fontFamily: "var(--font-mono)",
+            lineHeight: 1.5,
+            color: "var(--text-warn, #c44a4a)",
+          }}
+        >
+          {error}
+        </div>
+      )}
       <ReframeConfirmDialog
         open={!!candidate}
         presetLabel={candidate?.label ?? ""}

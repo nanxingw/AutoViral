@@ -265,6 +265,7 @@ export const en = {
       currentPrefix: "Current ·",
       reframingSingular: "Reframing 1 clip…",
       reframingPlural: "Reframing {n} clips…",
+      reframeFailed: "Reframe failed — the preset was not applied and your composition is unchanged.",
     },
     themeSection: {
       heading: "Theme",
@@ -853,6 +854,7 @@ export const zh: DeepShape<Messages> = {
       currentPrefix: "当前 ·",
       reframingSingular: "正在重构 1 个片段…",
       reframingPlural: "正在重构 {n} 个片段…",
+      reframeFailed: "重构失败——预设未应用，画布未改动。",
     },
     themeSection: {
       heading: "主题",
