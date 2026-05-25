@@ -94,7 +94,19 @@ async function tryFetchPeaksJson(src: string): Promise<DecodedWaveform | null> {
 
 async function webAudioDecodeAndBucket(src: string): Promise<DecodedWaveform> {
   const res = await fetch(src);
-  if (!res.ok) throw new Error(`fetch ${src} failed`);
+  if (!res.ok) throw new Error(`fetch ${src} failed (HTTP ${res.status})`);
+  // SPA-fallback guard: if the URL doesn't match a server route, vite/the
+  // hono dist handler returns index.html with HTTP 200 + text/html.
+  // decodeAudioData on html bytes throws an opaque EncodingError that
+  // historically masqueraded as "still loading" — refuse it up-front
+  // with a useful message instead. See feedback memory
+  // `git-checkout-path-dot-silent-revert` for the original incident.
+  const ct = res.headers?.get?.("content-type") ?? "";
+  if (ct.includes("text/html")) {
+    throw new Error(
+      `${src} returned text/html (likely SPA fallback). Pass an asset URL routed by the server — e.g. /api/works/<id>/assets/<file>.`,
+    );
+  }
   const buf = await res.arrayBuffer();
   const ctx = new AudioContext();
   try {
@@ -139,7 +151,14 @@ async function decodeAndBucket(src: string): Promise<DecodedWaveform> {
     return webAudioDecodeAndBucket(src);
   })();
   cache.set(src, promise);
-  promise.catch(() => cache.delete(src));
+  promise.catch((err: unknown) => {
+    cache.delete(src);
+    // Surface every decode failure: a stuck-loading waveform must never
+    // again pass as "everything's fine" (the 2026-05-25 SPA-fallback
+    // silent leak). Keep this at warn — UI also renders ⚠.
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`[useWaveform] decode failed: ${msg}`);
+  });
   return promise;
 }
 
@@ -151,22 +170,29 @@ export interface UseWaveformResult {
    *  clip must compute indices as `clip.in / sourceDuration` and
    *  `clip.out / sourceDuration` — the peaks array spans the full source. */
   sourceDuration: number | null;
+  /** Non-null only after a fetch+decode attempt has permanently failed.
+   *  UI uses this to distinguish "still loading" (gradient placeholder)
+   *  from "permanently unavailable" (visible ⚠ — kdenlive convention). */
+  error: string | null;
 }
 
 export function useWaveform(src: string): UseWaveformResult {
   const [peaks, setPeaks] = useState<Float32Array | null>(null);
   const [sourceDuration, setSourceDuration] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!src) {
       setPeaks(null);
       setSourceDuration(null);
       setLoading(false);
+      setError(null);
       return;
     }
     let alive = true;
     setLoading(true);
+    setError(null);
     decodeAndBucket(src)
       .then(({ peaks: p, durationSec }) => {
         if (!alive) return;
@@ -174,18 +200,19 @@ export function useWaveform(src: string): UseWaveformResult {
         setSourceDuration(durationSec);
         setLoading(false);
       })
-      .catch(() => {
+      .catch((err: unknown) => {
         if (!alive) return;
         setPeaks(null);
         setSourceDuration(null);
         setLoading(false);
+        setError(err instanceof Error ? err.message : String(err));
       });
     return () => {
       alive = false;
     };
   }, [src]);
 
-  return { peaks, loading, sourceDuration };
+  return { peaks, loading, sourceDuration, error };
 }
 
 /** Test-only escape hatch for the module-scoped decode cache. */

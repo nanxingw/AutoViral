@@ -38,9 +38,39 @@ export function WaveformBars({ clip, pxPerSecond, height }: Props) {
   // audio + video tracks both pass through /api/works/:id/assets/*.
   const workId = useComposition((s) => s.comp?.workId ?? "");
   const resolvedSrc = workId ? resolveAssetUrl(clip.src, workId) : clip.src;
-  const { peaks, sourceDuration } = useWaveform(resolvedSrc);
+  const { peaks, sourceDuration, error } = useWaveform(resolvedSrc);
   const dur = Math.max(0, clip.out - clip.in);
   const width = dur * pxPerSecond;
+
+  // Failure state: fetch + both decode paths failed permanently. Render
+  // a visible ⚠ icon (kdenlive convention) with the error in `title` so
+  // hovering shows the underlying cause. Distinguishes "permanently
+  // broken asset" from "still loading" so silent leaks can't recur.
+  if (error && !peaks && width > 0) {
+    return (
+      <div
+        aria-label="waveform-unavailable"
+        title={`Waveform unavailable: ${error}`}
+        style={{
+          position: "absolute",
+          left: 0,
+          top: 0,
+          width,
+          height,
+          display: "flex",
+          alignItems: "center",
+          paddingLeft: 6,
+          color: "var(--warn, #d4a55a)",
+          fontSize: 12,
+          fontFamily: "var(--font-mono, ui-monospace)",
+          opacity: 0.75,
+          pointerEvents: "auto",
+        }}
+      >
+        ⚠
+      </div>
+    );
+  }
 
   if (
     !peaks ||
