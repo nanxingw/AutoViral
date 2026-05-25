@@ -28,7 +28,7 @@ describe("lintComposition (H1.1)", () => {
         id: "trk_v",
         kind: "video",
         label: "v",
-        order: 0,
+        displayOrder: 0,
         clips: [
           {
             id: "vc_a",
@@ -63,7 +63,7 @@ describe("lintComposition (H1.1)", () => {
         id: "trk_v",
         kind: "video",
         label: "v",
-        order: 0,
+        displayOrder: 0,
         clips: [
           { id: "a", kind: "video", src: "assets/a.mp4", in: 0, out: 5, trackOffset: 0 },
           { id: "b", kind: "video", src: "assets/b.mp4", in: 0, out: 5, trackOffset: 5 },
@@ -81,7 +81,7 @@ describe("lintComposition (H1.1)", () => {
         id: "trk_v",
         kind: "video",
         label: "v",
-        order: 0,
+        displayOrder: 0,
         clips: [
           {
             id: "vc_z",

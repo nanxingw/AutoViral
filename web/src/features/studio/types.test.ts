@@ -8,13 +8,21 @@ describe("Composition schema", () => {
     expect(parsed.fps).toBe(30);
     expect(parsed.width).toBe(1080);
     expect(parsed.height).toBe(1920);
+    // Phase D (issue #31) — 4 default lanes: V1 video / A1 BGM audio / A2 VO
+    // audio / CC1 text. All track ids are `trk_<uuid>`; displayOrder is 0..3.
     expect(parsed.tracks).toHaveLength(4);
     expect(parsed.tracks.map((t) => t.kind)).toEqual([
       "video",
       "audio",
+      "audio",
       "text",
-      "overlay",
     ]);
+    for (const t of parsed.tracks) {
+      expect(t.id).toMatch(/^trk_/);
+    }
+    expect(parsed.tracks.map((t) => t.displayOrder)).toEqual([0, 1, 2, 3]);
+    // CC1 carries language "zh" by default; everyone else leaves it unset.
+    expect(parsed.tracks[3].language).toBe("zh");
   });
 
   it("rejects negative duration", () => {

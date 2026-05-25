@@ -24,7 +24,11 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import yaml from "js-yaml";
-import { CompositionSchema, type Composition } from "../../shared/composition.js";
+import {
+  CompositionSchema,
+  migrateLegacyTrackIds,
+  type Composition,
+} from "../../shared/composition.js";
 
 export interface OpsContext {
   workId: string;
@@ -61,7 +65,12 @@ export async function readCompositionFor(ctx: OpsContext): Promise<Composition> 
   const path = compositionPathFor(ctx);
   const raw = await readFile(path, "utf8");
   const parsed = yaml.load(raw);
-  return CompositionSchema.parse(parsed);
+  // Phase D (issue #31) — read-time migration for pre-Phase-D yaml. Schema
+  // stays strict; the helper rewrites legacy `audio-0`/`video-0`/... ids to
+  // `trk_<uuid>` and back-fills `displayOrder` before zod sees them. Next
+  // write naturally persists the migrated shape.
+  const migrated = migrateLegacyTrackIds(parsed);
+  return CompositionSchema.parse(migrated);
 }
 
 // Atomic write: validate → tmpfile → rename. Rename on the same

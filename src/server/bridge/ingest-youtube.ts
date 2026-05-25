@@ -23,7 +23,11 @@ import {
   writeCompositionFor,
 } from "./composition-ops.js";
 import { loadConfig } from "../../config.js";
-import { type Composition, makeEmptyComposition } from "../../shared/composition.js";
+import {
+  type Composition,
+  makeEmptyComposition,
+  newTrackId,
+} from "../../shared/composition.js";
 
 // Thin shim so call sites read like "emit X" — keeps the visual flow tight.
 function emit(event: UiEvent): void {
@@ -487,8 +491,19 @@ async function bootstrapComposition(opts: BootstrapOpts): Promise<void> {
   // compositions may have been trimmed by the user).
   let videoTrack = comp.tracks?.find((t) => t.kind === "video");
   if (!videoTrack) {
-    videoTrack = { id: "video-0", kind: "video", label: "Video", muted: false, hidden: false, clips: [] } as any;
-    comp.tracks = [...(comp.tracks ?? []), videoTrack!];
+    // Phase D (issue #31) — minted track uses `trk_<uuid>` id; displayOrder
+    // pushed to the end of the existing tracks list so we don't collide.
+    const existing = comp.tracks ?? [];
+    videoTrack = {
+      id: newTrackId(),
+      kind: "video",
+      label: "V1",
+      displayOrder: existing.length,
+      muted: false,
+      hidden: false,
+      clips: [],
+    } as any;
+    comp.tracks = [...existing, videoTrack!];
   }
 
   // Replace any existing source clip; otherwise prepend.

@@ -1,0 +1,93 @@
+# Pre-Phase-D composition.yaml — track ids use the semantic
+# `kind-N` shape (video-0 / audio-0 / text-0 / overlay-0) and there is no
+# `displayOrder` field. `migrateLegacyTrackIds` is expected to rewrite each
+# id to `trk_<uuid>` and back-fill displayOrder from the array index BEFORE
+# `CompositionSchema.parse` sees the object.
+#
+# Clip ids, kinds, labels, language, and the clips array contents are
+# expected to round-trip byte-equal through the migration.
+id: c_w_legacy
+workId: w_legacy
+fps: 30
+width: 1080
+height: 1920
+duration: 8
+aspect: "9:16"
+updatedAt: "2026-05-25T00:00:00Z"
+tracks:
+  - id: video-0
+    kind: video
+    label: Video
+    muted: false
+    hidden: false
+    clips:
+      - id: vc_intro
+        kind: video
+        src: /api/works/w_legacy/assets/clips/intro.mp4
+        in: 0
+        out: 4
+        trackOffset: 0
+        transforms: { scale: 1, x: 0, y: 0, rotation: 0 }
+        filters: { brightness: 0, contrast: 0, saturation: 0 }
+      - id: vc_payoff
+        kind: video
+        src: /api/works/w_legacy/assets/clips/payoff.mp4
+        in: 0
+        out: 4
+        trackOffset: 4
+        transforms: { scale: 1, x: 0, y: 0, rotation: 0 }
+        filters: { brightness: 0, contrast: 0, saturation: 0 }
+  - id: audio-0
+    kind: audio
+    label: BGM
+    muted: false
+    hidden: false
+    clips:
+      - id: ac_bgm
+        kind: audio
+        src: /api/works/w_legacy/assets/music/bgm.mp3
+        in: 0
+        out: 8
+        trackOffset: 0
+        volume: 0.8
+        fadeIn: 0.5
+        fadeOut: 0.5
+        type: bgm
+  - id: text-0
+    kind: text
+    label: Subtitles
+    muted: false
+    hidden: false
+    clips:
+      - id: tc_hook
+        kind: text
+        text: "Hook line"
+        trackOffset: 0.5
+        duration: 2
+        style:
+          font: Inter
+          size: 64
+          weight: 700
+          italic: false
+          tracking: 0
+          color: "#ffffff"
+        position:
+          anchor: bottom
+          xPct: 50
+          yPct: 85
+  - id: overlay-0
+    kind: overlay
+    label: Overlay
+    muted: false
+    hidden: false
+    clips:
+      - id: oc_logo
+        kind: overlay
+        src: /api/works/w_legacy/assets/overlay/logo.png
+        trackOffset: 0
+        duration: 8
+        position: { xPct: 80, yPct: 5, wPct: 15, hPct: 8 }
+        opacity: 0.9
+assets: []
+provenance: []
+exportPresets: []

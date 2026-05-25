@@ -34,6 +34,8 @@ import {
   type AssetEntry,
   type ProvenanceEdge,
   CompositionSchema,
+  migrateLegacyTrackIds,
+  newTrackId,
 } from "../shared/composition.js";
 import { z } from "zod";
 import { tmpdir } from "node:os";
@@ -342,7 +344,11 @@ apiRoutes.get("/api/works/:id/composition", async (c) => {
       join(dataDir, "works", id, "composition.yaml"),
       "utf-8",
     );
-    const parsed = CompositionSchema.parse(yaml.load(raw));
+    // Phase D (issue #31) — migrate pre-Phase-D track ids (`video-0` etc.)
+    // to `trk_<uuid>` + displayOrder before zod sees them. Schema is strict
+    // post-Phase-D; the migration keeps legacy yaml round-trippable.
+    const migrated = migrateLegacyTrackIds(yaml.load(raw));
+    const parsed = CompositionSchema.parse(migrated);
     return c.json(synthesiseLegacyAssetsAndProvenance(parsed));
   } catch (err: any) {
     if (err?.code !== "ENOENT") {
@@ -440,10 +446,10 @@ async function synthesiseLegacyComposition(
     duration: Math.max(cursor, audioClips[0]?.out ?? 0),
     aspect: "9:16",
     tracks: [
-      { id: "video-0", kind: "video", label: "Video", muted: false, hidden: false, clips: videoClips },
-      { id: "audio-0", kind: "audio", label: "BGM", muted: false, hidden: false, clips: audioClips },
-      { id: "text-0", kind: "text", label: "Subtitles", muted: false, hidden: false, clips: [] },
-      { id: "overlay-0", kind: "overlay", label: "Overlay", muted: false, hidden: false, clips: [] },
+      { id: newTrackId(), kind: "video", label: "V1", displayOrder: 0, muted: false, hidden: false, clips: videoClips },
+      { id: newTrackId(), kind: "audio", label: "A1 · BGM", displayOrder: 1, muted: false, hidden: false, clips: audioClips },
+      { id: newTrackId(), kind: "text", label: "CC1", displayOrder: 2, language: "zh", muted: false, hidden: false, clips: [] },
+      { id: newTrackId(), kind: "overlay", label: "Overlay", displayOrder: 3, muted: false, hidden: false, clips: [] },
     ],
     updatedAt: new Date().toISOString(),
   };

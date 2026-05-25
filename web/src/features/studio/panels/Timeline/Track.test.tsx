@@ -44,7 +44,11 @@ beforeEach(() => {
     transforms: baseTransform,
     filters: baseFilters,
   };
-  c.tracks[0].clips.push(a, b, d);
+  // Phase D (issue #31) — resolve tracks by kind, not index. Default lanes
+  // are now V1/A1/A2/CC1, so `tracks[2]` is audio (A2), not text. Hardcoding
+  // the index here was a Pitfall-#1 hazard the migration is meant to dodge.
+  const videoLane = c.tracks.find((t) => t.kind === "video")!;
+  videoLane.clips.push(a, b, d);
 
   const audio: AudioClip = {
     id: "audio-1",
@@ -58,7 +62,8 @@ beforeEach(() => {
     fadeOut: 0,
     type: "bgm",
   };
-  c.tracks[1].clips.push(audio);
+  const audioLane = c.tracks.find((t) => t.kind === "audio")!;
+  audioLane.clips.push(audio);
 
   const text: TextClip = {
     id: "text-1",
@@ -76,7 +81,8 @@ beforeEach(() => {
     },
     position: { anchor: "bottom", xPct: 50, yPct: 85 },
   };
-  c.tracks[2].clips.push(text);
+  const textLane = c.tracks.find((t) => t.kind === "text")!;
+  textLane.clips.push(text);
 
   c.duration = 6;
   useComposition.setState({

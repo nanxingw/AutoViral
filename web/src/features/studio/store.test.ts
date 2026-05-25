@@ -28,7 +28,10 @@ describe("useComposition store", () => {
   it("addClip appends to the right track and grows duration", () => {
     const c = makeEmptyComposition({ workId: "w1" });
     useComposition.getState().loadComposition(c);
-    useComposition.getState().addClip("video-0", {
+    // Phase D (issue #31) — track ids are now `trk_<uuid>`. Resolve the
+    // video lane by kind+displayOrder instead of hardcoding "video-0".
+    const videoTrackId = c.tracks.find((t) => t.kind === "video")!.id;
+    useComposition.getState().addClip(videoTrackId, {
       id: "v1",
       kind: "video",
       src: "/x.mp4",
@@ -46,7 +49,8 @@ describe("useComposition store", () => {
   it("updateClip applies a partial patch", () => {
     const c = makeEmptyComposition({ workId: "w1" });
     useComposition.getState().loadComposition(c);
-    useComposition.getState().addClip("video-0", {
+    const videoTrackId = c.tracks.find((t) => t.kind === "video")!.id;
+    useComposition.getState().addClip(videoTrackId, {
       id: "v1",
       kind: "video",
       src: "/x.mp4",
@@ -64,7 +68,8 @@ describe("useComposition store", () => {
   it("removeClip drops the clip and recomputes duration", () => {
     const c = makeEmptyComposition({ workId: "w1" });
     useComposition.getState().loadComposition(c);
-    useComposition.getState().addClip("video-0", {
+    const videoTrackId = c.tracks.find((t) => t.kind === "video")!.id;
+    useComposition.getState().addClip(videoTrackId, {
       id: "v1",
       kind: "video",
       src: "/x.mp4",
@@ -135,7 +140,11 @@ function makeCompWithTextClip(
     position: { anchor: "bottom", xPct: 50, yPct: 85 },
     ...overrides,
   };
-  (c.tracks[2].clips as TextClip[]).push(clip);
+  // Phase D (issue #31) — default lanes are now V1/A1/A2/CC1, so the text
+  // track is at index 3 (it was index 2 pre-Phase-D when defaults were
+  // V/A/T/Overlay). Find by kind to stay decoupled from index ordering.
+  const textTrack = c.tracks.find((t) => t.kind === "text")!;
+  (textTrack.clips as TextClip[]).push(clip);
   c.duration = 2;
   return c;
 }

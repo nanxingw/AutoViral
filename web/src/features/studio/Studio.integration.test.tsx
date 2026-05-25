@@ -90,7 +90,12 @@ describe("Studio integration", () => {
       transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
       filters: { brightness: 0, contrast: 0, saturation: 0 },
     };
-    useComposition.getState().addClip("video-0", v);
+    // Phase D (issue #31) — resolve the video lane by kind, since track ids
+    // are now `trk_<uuid>` (no more hardcoded "video-0").
+    const videoTrackId = useComposition
+      .getState()
+      .comp!.tracks.find((t) => t.kind === "video")!.id;
+    useComposition.getState().addClip(videoTrackId, v);
     const tracks = useComposition.getState().comp!.tracks;
     expect(tracks[0].clips).toHaveLength(1);
   });

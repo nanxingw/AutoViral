@@ -248,11 +248,24 @@ export type Clip = VideoClip | AudioClip | TextClip | OverlayClip;
 // ZodEffects as union members). The speed-keyframe range constraint is
 // re-applied at the Track level via superRefine so a Composition.parse()
 // also rejects out-of-range speed keyframes (D10).
+// Phase D (issue #31) — TrackSchema id is now `trk_<uuid>`-prefixed; lane
+// reordering moves to a dedicated `displayOrder` field so renaming/reordering
+// a lane never shifts ids (Pitfall #1, multi-track-stacking PRD §Three pitfalls).
+// `language` is optional and intended for subtitle/caption lanes (`CC1 zh`,
+// `CC2 en`). Read-time migration of pre-Phase-D yaml is handled by
+// `migrateLegacyTrackIds` (NOT by this schema — schema stays strict so that
+// any new write must be in the canonical shape).
+export const TRACK_ID_PREFIX_REGEX = /^trk_/;
+
 export const TrackSchema = z
   .object({
-    id: z.string(),
+    id: z.string().regex(TRACK_ID_PREFIX_REGEX, {
+      message: "Track id must start with 'trk_' (Phase D — issue #31)",
+    }),
     kind: z.enum(["video", "audio", "text", "overlay"]),
     label: z.string(),
+    displayOrder: z.number().int().nonnegative(),
+    language: z.string().optional(),
     muted: z.boolean().default(false),
     hidden: z.boolean().default(false),
     clips: z.array(
@@ -526,6 +539,90 @@ const ASPECT_DIMS: Record<Aspect, [number, number]> = {
   "4:5": [1080, 1350],
 };
 
+/**
+ * Mint a fresh `trk_<uuid8>` id. Centralised so any track-creation site
+ * (defaults, migration, store actions) uses the same shape and the regex
+ * in {@link TrackSchema} stays in sync. We slice the uuid to 8 chars — that's
+ * 32 bits of entropy, more than enough to avoid collisions inside a single
+ * composition (no composition is going to hold 65k tracks) and short enough
+ * to fit on screen in dev tools.
+ */
+export function newTrackId(): string {
+  // `crypto.randomUUID()` is available in Node 19+ and all modern browsers;
+  // our minimum runtime is well past that. We slice the FIRST hex segment
+  // (8 chars) — the canonical uuid format starts with 8 hex digits.
+  const uuid = crypto.randomUUID().replace(/-/g, "");
+  return `trk_${uuid.slice(0, 8)}`;
+}
+
+/**
+ * Find a track by content (kind + displayOrder) instead of by raw id. This
+ * is the Pitfall-#1 dodge from the multi-track-stacking PRD: any code that
+ * used to hardcode "audio-0" should look up by kind+order so that adding /
+ * removing / renaming lanes doesn't break the reference.
+ *
+ * Returns `undefined` if no track matches; callers should treat that as
+ * "lane no longer exists" (e.g. user deleted it) and degrade gracefully.
+ */
+export function findTrack(
+  comp: { tracks: Track[] } | null | undefined,
+  kind: Track["kind"],
+  displayOrder: number,
+): Track | undefined {
+  if (!comp) return undefined;
+  return comp.tracks.find(
+    (t) => t.kind === kind && t.displayOrder === displayOrder,
+  );
+}
+
+/**
+ * Read-time migration for compositions written before Phase D (issue #31).
+ *
+ * Pre-Phase-D yaml uses semantic track ids (`video-0` / `audio-0` /
+ * `text-0` / `overlay-0`) and has no `displayOrder` field. Loading such a
+ * file straight into the post-Phase-D `CompositionSchema` would fail the
+ * `^trk_/` regex. This helper rewrites those ids transparently before
+ * `CompositionSchema.parse`, so old yaml round-trips without manual
+ * intervention. On the next write the new shape is persisted to disk.
+ *
+ * Design notes:
+ * - Returns a NEW object; never mutates `raw` in place. Important for tests
+ *   that snapshot the input.
+ * - Only touches track-level fields (`id`, `displayOrder`); clip ids, kinds,
+ *   labels, language, muted/hidden, and the `clips` array are byte-equal
+ *   preserved.
+ * - If `raw` is not the expected shape (not an object, no `tracks` array) we
+ *   return it unchanged — `CompositionSchema.parse` will produce the proper
+ *   structured error downstream.
+ * - Already-migrated tracks (`id` already `trk_…`) keep their id and have
+ *   `displayOrder` assigned from array index if missing. This means running
+ *   the migration twice is a no-op for the second pass.
+ */
+const LEGACY_TRACK_ID_REGEX = /^(video|audio|text|overlay)-\d+$/;
+
+export function migrateLegacyTrackIds(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const obj = raw as Record<string, unknown>;
+  const tracks = obj.tracks;
+  if (!Array.isArray(tracks)) return raw;
+
+  const migratedTracks = tracks.map((t, idx) => {
+    if (!t || typeof t !== "object") return t;
+    const track = t as Record<string, unknown>;
+    const currentId = typeof track.id === "string" ? track.id : "";
+    const needsIdRewrite = LEGACY_TRACK_ID_REGEX.test(currentId);
+    const hasDisplayOrder = typeof track.displayOrder === "number";
+    if (!needsIdRewrite && hasDisplayOrder) return track;
+    return {
+      ...track,
+      id: needsIdRewrite ? newTrackId() : track.id,
+      displayOrder: hasDisplayOrder ? track.displayOrder : idx,
+    };
+  });
+
+  return { ...obj, tracks: migratedTracks };
+}
+
 export function makeEmptyComposition(opts: {
   workId: string;
   aspect?: Aspect;
@@ -535,6 +632,9 @@ export function makeEmptyComposition(opts: {
   const aspect = opts.aspect ?? "9:16";
   const [w, h] = ASPECT_DIMS[aspect];
   const now = new Date().toISOString();
+  // Phase D (issue #31) — 4 default lanes matching the Resolve-inspired
+  // open-the-box layout (PRD §Track schema migration). Order is fixed:
+  // V1 video / A1 BGM / A2 VO / CC1 zh.
   return {
     id: `c_${opts.workId}`,
     workId: opts.workId,
@@ -545,33 +645,38 @@ export function makeEmptyComposition(opts: {
     aspect,
     tracks: [
       {
-        id: "video-0",
+        id: newTrackId(),
         kind: "video",
-        label: "Video",
+        label: "V1",
+        displayOrder: 0,
         muted: false,
         hidden: false,
         clips: [],
       },
       {
-        id: "audio-0",
+        id: newTrackId(),
         kind: "audio",
-        label: "BGM",
+        label: "A1 · BGM",
+        displayOrder: 1,
         muted: false,
         hidden: false,
         clips: [],
       },
       {
-        id: "text-0",
+        id: newTrackId(),
+        kind: "audio",
+        label: "A2 · VO",
+        displayOrder: 2,
+        muted: false,
+        hidden: false,
+        clips: [],
+      },
+      {
+        id: newTrackId(),
         kind: "text",
-        label: "Subtitles",
-        muted: false,
-        hidden: false,
-        clips: [],
-      },
-      {
-        id: "overlay-0",
-        kind: "overlay",
-        label: "Overlay",
+        label: "CC1",
+        displayOrder: 3,
+        language: "zh",
         muted: false,
         hidden: false,
         clips: [],
