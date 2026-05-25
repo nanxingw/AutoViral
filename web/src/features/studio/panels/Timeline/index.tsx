@@ -3,6 +3,7 @@ import { useComposition } from "../../store";
 import { Track } from "./Track";
 import { BladeTool } from "./BladeTool";
 import { Playhead } from "./Playhead";
+import { useT } from "@/i18n/useT";
 
 const TRACK_COLORS: Record<string, string> = {
   video: "var(--accent)",
@@ -11,14 +12,14 @@ const TRACK_COLORS: Record<string, string> = {
   overlay: "#7dd3fc",
 };
 
-const TRACK_LABELS: Record<string, string> = {
-  video: "视频 · Video",
-  audio: "BGM · Music",
-  text: "字幕 · Subs",
-  overlay: "覆盖 · FX",
-};
-
 export function Timeline() {
+  const t = useT();
+  const trackLabels: Record<string, string> = {
+    video: t("studio.timeline.trackLabelVideo"),
+    audio: t("studio.timeline.trackLabelAudio"),
+    text: t("studio.timeline.trackLabelText"),
+    overlay: t("studio.timeline.trackLabelOverlay"),
+  };
   const comp = useComposition((s) => s.comp);
   // 4.H — D10: snap-line overlay reads `dragState.snapTime` exposed by the
   // 4.B drag pipeline (store.ts:371-403). Renders only while a drag is active
@@ -110,7 +111,7 @@ export function Timeline() {
               pxPerSecond={pxPerSecond}
               totalWidth={totalWidth}
               color={TRACK_COLORS[t.kind] ?? "var(--accent)"}
-              label={TRACK_LABELS[t.kind] ?? t.kind.toUpperCase()}
+              label={trackLabels[t.kind] ?? t.kind.toUpperCase()}
             />
           ))}
           {/* Phase 4.G — click-to-split overlay; renders only while

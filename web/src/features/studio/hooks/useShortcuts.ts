@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useComposition } from "../store";
 import { saveComposition } from "../services/composition";
 import { clipEnd, OFFSET_EPSILON } from "@autoviral/timeline";
@@ -21,7 +21,25 @@ import type { Clip } from "../types";
  * The `S`-for-split key in pneuma is intentionally replaced by the
  * user's `B / Cmd+B` mapping per master-plan §4.2.J adaptation.
  */
-export function useShortcuts(workId: string | null) {
+interface SaveCallbacks {
+  /** Called with new saved-at date after a successful Cmd+S round-trip. See
+   *  e2e-report F66: the previous fire-and-forget call left the TopBar stuck
+   *  on "UNSAVED" even after a 200 OK. */
+  onSaved?: (savedAt: Date) => void;
+  onSaveError?: (err: unknown) => void;
+}
+
+export function useShortcuts(workId: string | null, cbs?: SaveCallbacks) {
+  // e2e-report F78: keydown listener is attached once per workId (see deps
+  // below), but cbs closure must stay fresh — otherwise onSaved fires with
+  // mount-time locale and TopBar shows stale time format after locale toggle.
+  // Mirror cbs into a ref so the handler always reads the latest callbacks
+  // without re-attaching the listener on every render.
+  const cbsRef = useRef(cbs);
+  useEffect(() => {
+    cbsRef.current = cbs;
+  });
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null;
@@ -75,10 +93,16 @@ export function useShortcuts(workId: string | null) {
         return;
       }
 
-      // Cmd+S — save (existing).
+      // Cmd+S — save (existing). e2e-report F66: chain the promise so the
+      // TopBar saved-at indicator updates after the 200 OK. fire-and-forget
+      // here used to leave the UI stuck on "UNSAVED" even on success.
       if (isMod && !e.shiftKey && (e.key === "s" || e.key === "S")) {
         e.preventDefault();
-        if (workId && state.comp) void saveComposition(workId, state.comp);
+        if (workId && state.comp) {
+          saveComposition(workId, state.comp)
+            .then(() => cbsRef.current?.onSaved?.(new Date()))
+            .catch((err) => cbsRef.current?.onSaveError?.(err));
+        }
         return;
       }
 

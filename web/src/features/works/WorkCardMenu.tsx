@@ -60,7 +60,6 @@ export function WorkCardMenu({ onDelete }: WorkCardMenuProps) {
             type="button"
             role="menuitem"
             className={styles.dangerItem}
-            aria-label={t("works.menu.delete")}
             title={t("works.menu.delete")}
             onClick={(e) => {
               e.preventDefault();
@@ -70,6 +69,12 @@ export function WorkCardMenu({ onDelete }: WorkCardMenuProps) {
             }}
           >
             <TrashIcon />
+            {/* e2e-report F82 / Round 05 F11: icon + visible text label so
+                color-blind / icon-unfamiliar users can identify the action
+                without depending on hover tooltip or aria-label. */}
+            <span className={styles.dangerItemLabel}>
+              {t("works.menu.delete")}
+            </span>
           </button>
         </div>
       )}

@@ -51,8 +51,15 @@
 @keyframes fade {
   from { opacity: 0; } to { opacity: 1; }
 }
+/* Drawer enters from 8% right of its final position with opacity fade-in.
+   Earlier translateX(100%) made the drawer fully off-screen during the first
+   ~280ms of animation, so any screenshot or perception window before
+   completion saw a blank panel (see e2e-report F27). With 8% start, the
+   drawer is always ≥ 90% visible at every frame, eliminating the "drawer
+   not appearing" race. */
 @keyframes slide {
-  from { transform: translateX(100%); } to { transform: translateX(0); }
+  from { transform: translateX(8%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
 .sectionLabel {
   font-family: "JetBrains Mono", monospace;
@@ -60,7 +67,16 @@
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--text-dim);
-  margin: 0 0 12px;
+  margin: 0 0 6px;
+}
+/* One-line muted hint under each section heading explaining what the
+   section affects (see e2e-report F23). Kept terse — long copy belongs
+   in docs, not a drawer. */
+.sectionHint {
+  font-size: 11px;
+  color: var(--text-dimmer);
+  margin: 0 0 14px;
+  line-height: 1.5;
 }
 .field {
   display: flex;
@@ -198,9 +214,48 @@
   padding: 8px 16px;
   cursor: pointer;
   font: inherit;
+  /* e2e-report F142: cubic-bezier easing makes the disabled→enabled
+     transition feel deliberate rather than abrupt-but-tiny opacity flick.
+     200ms matches studio button transition tokens. */
+  transition: opacity 200ms cubic-bezier(0.32, 0.72, 0, 1),
+              background 200ms cubic-bezier(0.32, 0.72, 0, 1);
 }
-.btnPrimary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btnPrimary:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  /* Slightly desaturate when disabled so users register "frozen" state visually.
+     Combined with the higher opacity drop (0.4 vs old 0.5) the transition reads
+     more clearly when the user starts editing. */
+  background: var(--surface-2);
+  color: var(--text-dimmer);
+}
 .btnPrimary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* e2e-report F142: dirty indicator — pulse dot + label that appears next to
+   the Save button when the form has unsaved changes. Mirrors the Studio
+   SAVED/UNSAVED badge pattern but with motion to grab attention. */
+.dirtyIndicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-hi);
+  margin-right: 12px;
+}
+.dirtyDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: dirty-pulse 1.8s ease-in-out infinite;
+}
+@keyframes dirty-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.8); }
+}
 .btnDanger {
   background: var(--danger, #c44a4a);
   color: white;

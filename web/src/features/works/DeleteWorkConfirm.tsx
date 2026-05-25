@@ -17,6 +17,9 @@ export function DeleteWorkConfirm({ open, work, pending, errored, onCancel, onCo
   const t = useT();
   const boxRef = useRef<HTMLDivElement | null>(null);
   const cancelBtnRef = useRef<HTMLButtonElement | null>(null);
+  // Track the opener so focus returns there when the dialog closes — WAI-ARIA
+  // Modal Dialog pattern, see e2e-report F47.
+  const openerRef = useRef<HTMLElement | null>(null);
 
   useModalFocus(open, boxRef);
 
@@ -29,11 +32,18 @@ export function DeleteWorkConfirm({ open, work, pending, errored, onCancel, onCo
     return () => document.removeEventListener("keydown", onKey);
   }, [open, onCancel]);
 
-  // Focus the safer (Cancel) button on open for destructive dialog default
+  // Focus the safer (Cancel) button on open for destructive dialog default.
+  // Also capture the opener (whatever had focus when the dialog opened) so we
+  // can restore focus when the dialog closes.
   useEffect(() => {
     if (open) {
+      const opener = document.activeElement;
+      if (opener instanceof HTMLElement) openerRef.current = opener;
       const id = setTimeout(() => cancelBtnRef.current?.focus(), 0);
       return () => clearTimeout(id);
+    } else if (openerRef.current) {
+      openerRef.current.focus();
+      openerRef.current = null;
     }
   }, [open]);
 

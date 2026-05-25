@@ -11,7 +11,10 @@
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-dim);
+  /* Inactive triggers sit one step above --text-dim so users don't read
+     them as "disabled" — see e2e-report F15. Active still wins via --text
+     + surface-2 pill, so we don't lose state contrast. */
+  color: color-mix(in srgb, var(--text) 65%, var(--text-dim));
   border: none;
   background: transparent;
   cursor: pointer;

@@ -17,6 +17,8 @@
 //   - Loading placeholder uses --accent-glow gradient to match the
 //     codebase's editorial-cool palette.
 import { useWaveform } from "../../hooks/useWaveform";
+import { resolveAssetUrl } from "../../composition/resolveAssetUrl";
+import { useComposition } from "../../store";
 import type { AudioClip } from "../../types";
 
 interface Props {
@@ -26,7 +28,17 @@ interface Props {
 }
 
 export function WaveformBars({ clip, pxPerSecond, height }: Props) {
-  const { peaks, sourceDuration } = useWaveform(clip.src);
+  // composition.yaml stores clip.src as a workspace-relative path
+  // ("assets/audio/bed.mp3"). Passing that raw to fetch() resolves
+  // against the current SPA route (/studio/<workId>/assets/...) and
+  // Vite's history-fallback returns index.html with content-type
+  // text/html — AudioContext.decodeAudioData then throws, peaks stays
+  // null, and the track is stuck rendering the gradient placeholder
+  // forever (the "no waveform" bug). Mirror Filmstrip's resolver so
+  // audio + video tracks both pass through /api/works/:id/assets/*.
+  const workId = useComposition((s) => s.comp?.workId ?? "");
+  const resolvedSrc = workId ? resolveAssetUrl(clip.src, workId) : clip.src;
+  const { peaks, sourceDuration } = useWaveform(resolvedSrc);
   const dur = Math.max(0, clip.out - clip.in);
   const width = dur * pxPerSecond;
 

@@ -25,7 +25,28 @@
 //     blowing up an all-zero stub.
 import { useEffect, useState } from "react";
 
-const BUCKETS = 128;
+// e2e-report (2026-05-12): bucket count is duration-scaled, not a fixed 128.
+//
+// Why: a fixed 128 fails for any clip much shorter than the source audio.
+// Example: 11.5s BGM clip from a 171s music bed → WaveformBars slices
+// peaks[0..ceil(11.5/171*128)] = peaks[0..9] = just 9 bars covering ~1.3s
+// each. The rendered waveform looked blocky and bore no resemblance to
+// what the user hears in that 11.5s. The fix is to compute peaks at a
+// fixed *temporal density* (32 buckets per second of source audio)
+// so any sub-window slice keeps perceptually meaningful resolution.
+//
+//   bucketCount = clamp(MIN_BUCKETS, MAX_BUCKETS, duration * BUCKETS_PER_SEC)
+//
+//   - BUCKETS_PER_SEC = 32  → ~31 ms per bucket, smooth at 80 px/sec zoom.
+//   - MIN_BUCKETS = 128     → floor for short clips (≤4s); also keeps the
+//                             existing test fixtures (mock returns 1s audio
+//                             → max(128, 32) = 128) passing unchanged.
+//   - MAX_BUCKETS = 8192    → caps memory at 32 KB per cached source.
+//                             A 5-min source → 9600 raw → clamped to 8192
+//                             (still ~36 ms granularity, perceptually fine).
+const BUCKETS_PER_SEC = 32;
+const MIN_BUCKETS = 128;
+const MAX_BUCKETS = 8192;
 
 interface DecodedWaveform {
   peaks: Float32Array;
@@ -45,9 +66,13 @@ async function decodeAndBucket(src: string): Promise<DecodedWaveform> {
     try {
       const audio = await ctx.decodeAudioData(buf);
       const channel = audio.getChannelData(0);
-      const samplesPerBar = Math.max(1, Math.floor(channel.length / BUCKETS));
-      const peaks = new Float32Array(BUCKETS);
-      for (let i = 0; i < BUCKETS; i++) {
+      const bucketCount = Math.min(
+        MAX_BUCKETS,
+        Math.max(MIN_BUCKETS, Math.ceil(audio.duration * BUCKETS_PER_SEC)),
+      );
+      const samplesPerBar = Math.max(1, Math.floor(channel.length / bucketCount));
+      const peaks = new Float32Array(bucketCount);
+      for (let i = 0; i < bucketCount; i++) {
         let max = 0;
         const start = i * samplesPerBar;
         const end = Math.min(channel.length, start + samplesPerBar);

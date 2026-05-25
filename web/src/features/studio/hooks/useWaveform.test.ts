@@ -48,7 +48,12 @@ afterEach(() => {
 });
 
 describe("useWaveform", () => {
-  it("returns null peaks initially, then a 128-element array after decode", async () => {
+  it("returns null peaks initially, then a duration-scaled array after decode", async () => {
+    // Bucket count = clamp(MIN=128, MAX=8192, ceil(durationSec * 32)). The
+    // dom-mocks AudioContext stub returns a 1-second AudioBuffer, so
+    // 1 * 32 = 32 → clamped to MIN=128. Real long sources land between
+    // floor and ceiling and exercise the temporal-density logic at runtime
+    // (covered by the waveform-correctness E2E zoom evidence in the report).
     const { result } = renderHook(() => useWaveform("/a.mp3"));
     expect(result.current.peaks).toBeNull();
     await waitFor(() => expect(result.current.peaks).not.toBeNull());

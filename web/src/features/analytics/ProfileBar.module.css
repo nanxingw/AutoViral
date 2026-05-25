@@ -13,8 +13,12 @@
   width: 64px;
   height: 64px;
   border-radius: 16px;
-  background: linear-gradient(135deg, hsl(40,40%,70%), hsl(20,40%,55%));
-  border: 1px solid var(--glass-border);
+  /* e2e-report F97: previously a hardcoded warm coral/peach gradient that
+     clashed with the cool editorial palette + ignored the accent-variant
+     picker. Mirror .pill's accent gradient so the avatar inherits whichever
+     variant (steel / violet / cyan / coral / lime) the user has chosen. */
+  background: linear-gradient(135deg, var(--accent-hi), var(--accent));
+  border: 1px solid var(--accent-hi);
 }
 .h2 { margin: 0 0 4px; font-size: 20px; font-weight: 500; letter-spacing: -0.015em; }
 .handleMeta { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }

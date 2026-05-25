@@ -22,7 +22,19 @@ export function VariantSwitcher() {
   const t = useT();
 
   if (!comp || !selection) {
-    return <EmptyState message={t("studio.variantSwitcher.emptyNoSelection")} />;
+    // e2e-report F107: distinguish "no selection but timeline has clips" (pick
+    // one) from "timeline is empty" (add clips first). Old copy assumed clips
+    // existed and dead-ended 0-CLIP users at Studio first-load.
+    const hasAnyClip = comp?.tracks.some((tr) => tr.clips.length > 0) ?? false;
+    return (
+      <EmptyState
+        message={
+          hasAnyClip
+            ? t("studio.variantSwitcher.emptyNoSelection")
+            : t("studio.variantSwitcher.emptyNoClipsYet")
+        }
+      />
+    );
   }
 
   // Find the selected clip across all tracks.

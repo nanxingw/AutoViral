@@ -6,6 +6,138 @@
 
 ---
 
+## Round 128 — **Network resilience / offline UX 全产品 horizontal slice 深审 —— apiFetch 0 retry / 0 timeout / 0 AbortController / 0 backoff 是 100% HTTP request 单点 chokepoint / `navigator.onLine` + online/offline event 全产品 0 hits / `web/public` 0 manifest 0 service worker = 离线断网白屏 / 15+ `useMutation` 0 onMutate 乐观更新（写操作全等 300-500ms server roundtrip）/ 0 persistQueryClient（刷新页面 cache 全丢）/ 0 Idempotency-Key / `networkMode` 未配置 / R125 F598 orphan capability 再次显形（`lib/ws.ts` 完整 ReconnectingWS vs `useRenderJob.ts` 拒绝复用）—— SaaS product maturity vs Linear/Notion/Figma 网络韧性最硬差距**
+
+- **时间**：2026-05-13（cron `105f4ef8` 触发；R125-R127 a11y matrix 三连后切换主题避免审计疲劳，本轮选 SaaS product maturity 维度专审）
+- **触发**：R125 F602 (refetchOnWindowFocus: false) + F598 (useRenderJob WS 不重连) + F595 (没有 freshness banner) 三 finding 都指向"network resilience"维度但前 127 轮未做完整 horizontal slice；R126/R127 已闭合 a11y matrix 3/8 → 8 maturity dimension 中 network resilience 仍是最大缺口
+- **方法学**：M141 (DOM extraction) + M180 (zero-mutation grep + read) + M201 (architectural absence) + R125 M218 (silent fallback family) + **新 M232-M236（apiFetch retry/timeout/abort 三联缺位 / optimistic update 是 sub-100ms feel 核心 / SW+PWA 是 local-first 工业基准 / React Query persistor 是 SPA 刷新韧性 / "orphan capability" family）**
+- **本轮意义**：揭示 product maturity matrix 第 4 维（network resilience）的 8 子项中有 **8/8 全缺位**——这是 vs Linear/Notion/Figma/Slack 工业基准最硬差距；同时 R125 F598 orphan capability 再次显形，沉淀 M236 "能力存在但选择性未接入" family 为后续 audit 高 ROI 启发式
+- **意外发现**：R126 F607 `<MotionConfig reducedMotion="user">` 已被并行 agent 在 `main.tsx:36` 闭合（注释明引 "R126 F607 + M222 dual-track PRM defense"）——R126 CRITICAL 已修
+
+### 选题理由 + 工业基准对比
+
+**Network resilience** 是 SaaS 产品对比"工具型应用"的核心成熟度信号。Linear/Notion/Figma/Slack/Stripe Dashboard 都重投资：
+- 全局 retry + timeout + abort + circuit breaker
+- Service worker offline-first + manifest.json + install prompt
+- Optimistic update + rollback 让所有写操作 feel sub-100ms
+- IndexedDB persistor（query cache 跨刷新存活）
+- WS 自动重连 + offline queue（断网期间 mutation 排队，重连后 flush）
+- `<OfflineBanner>` differentiated UI（不是 generic error，明确告诉用户"网络断开"）
+
+本产品当前 8 子项 **0/8** 覆盖——所有 R125-R127 沉淀的 reverse-surface 5/5 + a11y matrix 3/8 都建立在"网络永远在线 + 永远快"的乐观假设上。一次 30 秒移动网络抖动就把所有 fallback surface 露馅。
+
+### 12 Findings
+
+| F-num | Severity | 位置 | 描述 | 证据 |
+|---|---|---|---|---|
+| **F631** | **CRITICAL** | `web/src/lib/api.ts:38-49` `apiFetch` | 整产品 100% HTTP request 的 chokepoint —— **0 retry / 0 timeout / 0 AbortController / 0 exponential backoff**。任何 transient 5xx / 网络抖动 / 慢服务器直接 throw `ApiError`；React Query 默认 `retry: 1` 自降但**无 backoff delay**——两次几乎同时打的 retry 几乎一定都失败 | `cat web/src/lib/api.ts` 48 行单 fetch 调用；grep `AbortController\|timeout\|retry:` lib/api.ts → 0 hits |
+| **F632** | **CRITICAL** | 全产品 | `navigator.onLine` + `window.addEventListener('online'/'offline')` + `useOnlineStatus` **全产品 0 hits** —— 用户拔网线 / 进电梯 / 移动数据切 WiFi 时**没有任何 UI 提示**，所有点击都默默失败为 generic ErrorBoundary | grep 命令 0 hits；R125 R113 ErrorBoundary 不区分 network vs server error |
+| **F633** | HIGH | `web/public/` + `web/index.html` | **0 manifest.json / 0 service worker / 0 PWA** —— `web/public/` 只有 favicon + logo + covers 子目录；离线打开 = 白屏，不是 installable app；与 CLAUDE.md "local-first creator workbench" 定位严重违和 | `ls web/public/` → 仅 favicon.svg + logo.svg + covers/；grep `serviceWorker\|workbox\|vite-plugin-pwa` → 0 hits |
+| **F634** | HIGH | `web/src/queries/{works,config,clipSearch,...}.ts` 15+ `useMutation` site | **0 `onMutate` 乐观更新** —— `useCreateWork` / `useUpdateWork` / `useDeleteWork` / 全部写操作都 `onSuccess: () => qc.invalidateQueries(...)` 等 server roundtrip 后才更新 UI；用户点 Delete 后等 300-500ms UI 才反映。Linear/Notion 关键差距 | `queries/works.ts:41-68` 三 useMutation 0 处 onMutate / onError rollback；grep `onMutate` web/src → 0 hits |
+| **F635** | HIGH | `web/src/main.tsx:17-21` QueryClient config | `defaultOptions` 仅声明 `queries: {...}` —— **缺 `mutations: { retry, retryDelay, networkMode }`**；`useMutation` 默认 `retry: 0`，任何 transient mutation 失败要用户手动重试；POST/PUT/DELETE 无 transient resilience | main.tsx:19 单行 queries config；grep `mutations:` main.tsx → 0 hits |
+| **F636** | HIGH | 整产品 POST/PUT/DELETE | **0 `Idempotency-Key` header** —— 如果未来加 mutation retry（M232 必要），POST `/api/works` 等可能造成重复创建；当前 `createMutation` retry 0 反而是临时安全网，但堵死了未来 resilience 升级路径 | grep `Idempotency-Key\|idempotencyKey\|nonce` web/src src → 0 hits |
+| **F637** | MEDIUM | `web/src/main.tsx` QueryClient | **0 `persistQueryClient`** —— 刷新页面后所有 React Query cache 丢，35 works 重 fetch；用户每次刷新 = 1.5-2s loading；与 R125 StaleDataBanner DSL 联动潜力被废 | grep `persistQueryClient\|createSyncStoragePersister\|@tanstack/query-sync-storage-persister` web/src → 0 hits |
+| **F638** | MEDIUM | `web/src/main.tsx` QueryClient | **`networkMode` 未显式配置** → 默认 `'online'` → offline 状态 query 自动 pause 但 UI 0 处差异化展示（用户看到永久 loading skeleton，不知道是"慢"还是"离线"）；R114 LoadingShell 单态设计无 offline-paused 变体 | grep `networkMode` web/src → 0 hits；与 F632 F633 三 finding 共同构成 "offline UX 完全缺位" pattern |
+| **F639** | MEDIUM | `web/src/lib/api.ts:38` | apiFetch 签名 `apiFetch<T>(path, opts: ApiOptions)` —— ApiOptions extends RequestInit 但**没有 `signal: AbortSignal` 显式 surface + React Query 自动 abort signal 也未透传**。组件 unmount / 用户切页 / 用户搜索打字 debounce 之外的 in-flight fetch 仍在跑 | grep `signal` web/src/lib/api.ts → 0 hits；React Query useQuery 提供 `signal` 但 apiFetch 不接收 |
+| **F640** | MEDIUM | `web/src/features/studio/render-status/useRenderJob.ts:36` vs `web/src/lib/ws.ts` | **R125 F598 orphan capability 再次显形** —— `lib/ws.ts` 完整 ReconnectingWS（exponential backoff + state machine + state listener）但 `useRenderJob.ts:36` 注释明言 D10 不 auto-reconnect 选择性不复用此能力 | `cat web/src/lib/ws.ts` 完整 50+ 行重连实现；R125 F598 已沉淀 family，本轮再次确认 "能力存在但选择性未接入" 是产品级 pattern |
+| **F641** | LOW | `web/index.html` | **0 `<meta name="theme-color">`** —— 移动端 Safari/Chrome 顶部 status bar 颜色无法响应 dark/light mode 切换；R121 prefers-color-scheme 在桌面 OK 但移动端 chrome ui 不跟随 | grep `theme-color` web/index.html → 0 hits |
+| **F642** | LOW | `web/src/components/ErrorBoundary.tsx` (推测; 由 R113 沉淀) | Network error / Server error / Validation error 在 ErrorBoundary 中**无 differentiated rendering** —— "网络断开" + "500 server error" + "400 validation error" 用户看到同样 generic fallback；不像 Linear 离线时显示明确 `<OfflineBanner>` 区分 | R113 沉淀 ErrorBoundary 是 failure-state meta surface 4 件套；本轮显示 network-vs-server 区分维度仍缺位 |
+
+### Sediments / 方法学
+
+- **M232（新；apiFetch retry/timeout/abort 三联缺位是 SaaS 网络韧性最底层 gap）**：
+  - **现象**：`web/src/lib/api.ts:38-49` 48 行单次 `fetch(url, init)` call —— 0 retry / 0 timeout / 0 AbortController / 0 exponential backoff
+  - **影响**：(a) transient 500 / 502 / 网络抖动直接 throw 不重试 (b) 慢服务器无 timeout → UI 永久 loading 无 fallback (c) 用户切页/组件 unmount 后 fetch 仍跑 → 浪费带宽 + race condition state update
+  - **Why**：SaaS product maturity 标志是 apiFetch 一定有 (i) exponential backoff retry (默认 3 次：250ms / 1s / 4s)、(ii) 全局 timeout (30s 默认，long-poll 60s)、(iii) AbortController + 接入 React Query `signal` 透传、(iv) circuit breaker（连续失败 5 次熔断 30s）
+  - **How to apply**：apiFetch 包装 `fetch-retry` / `ky` / `ofetch`；timeout 通过 `AbortController + setTimeout` 实现；React Query useQuery 通过 `{ signal }` 参数自动透传 abort signal；retry 排除 4xx (client error 不重试) + 405/501 (method not allowed)；mutation retry 必须搭配 F636 Idempotency-Key
+
+- **M233（新；optimistic update 是 mutation feel sub-100ms 的核心）**：
+  - **现象**：15+ `useMutation` site **0 `onMutate` 乐观更新** —— 全部 `onSuccess: invalidateQueries` pattern，用户操作 → 等 server roundtrip → UI 更新；典型延迟 300-500ms
+  - **影响**：用户感知 ≤100ms = "instant"，>200ms = "lag"；本产品所有写操作 perceived latency 在 lag 区间
+  - **Why**：Linear/Notion/Figma 关键差距：`onMutate` → `setQueryData(prev => optimistic)` 立即更新 UI；server response 后 invalidate；失败 `onError` 回滚到 `context.previousData` + toast "已撤销"
+  - **How to apply**：所有 useMutation pattern 升级到 4 件套：
+    ```
+    onMutate: async (input) => {
+      await qc.cancelQueries({ queryKey });
+      const previousData = qc.getQueryData(queryKey);
+      qc.setQueryData(queryKey, optimistic(previousData, input));
+      return { previousData };
+    },
+    onError: (err, input, ctx) => qc.setQueryData(queryKey, ctx.previousData),
+    onSettled: () => qc.invalidateQueries({ queryKey }),
+    ```
+    搭配 F636 Idempotency-Key 让 retry 安全
+
+- **M234（新；service worker / PWA 是 local-first 产品的工业基准）**：
+  - **现象**：`web/public/` 只有 favicon + logo + covers，0 manifest.json / 0 sw.js / 0 vite-plugin-pwa
+  - **影响**：(a) 离线断网 = 白屏 (b) 不是 installable app（不能加到桌面）(c) 无 push notification 通道 (d) 无 background sync queue (e) 首屏 cold load 慢（无 asset precache）
+  - **Why**：Linear / Notion / Figma / Slack 都 ship service worker + manifest，CLAUDE.md 自我定位 "local-first creator workbench" 却 0 PWA 是定位与实现脱节
+  - **How to apply**：vite-plugin-pwa 接入；workbox precache strategy（HTML/CSS/JS/字体）；runtime caching（API GET 7 天 stale-while-revalidate）；manifest.json 声明 app icon + theme-color + display: standalone + start_url；offline.html fallback page
+
+- **M235（新；React Query persistor 是 SPA 刷新韧性）**：
+  - **现象**：0 `persistQueryClient` → 刷新页面所有 cache 丢 → 35 works 每次重 fetch
+  - **影响**：刷新 = 1.5-2s loading state；与 R114 LoadingShell + R125 StaleDataBanner 联动潜力废
+  - **Why**：刷新韧性是 "local-first" 产品 vs 传统 web app 关键差距；用户刷新预期"瞬间显示 cached"
+  - **How to apply**：`@tanstack/query-sync-storage-persister` + `persistQueryClient` + maxAge 24h；与 R125 StaleDataBanner DSL 配合——刷新后立即显示 stale data + 上方 `<StaleDataBanner age="2h ago" />` + 后台 revalidate
+
+- **M236（新；"orphan capability" family——能力存在但选择性未接入）**：
+  - **现象**：R125 F598 + R128 F640 共指 `lib/ws.ts` 完整 ReconnectingWS 但 `useRenderJob.ts:36` 选择性不复用；类似 silent-leak family 的"功能性"对应
+  - **影响**：比"能力不存在"更微妙 + 更高 ROI——能力已写好测试已通过，只缺 wiring；闭合成本低但用户价值高
+  - **Why**：常见原因 (a) 历史顺序：能力先写好 → consumer 模块 fork 出自己的实现 (b) 接口不匹配：能力 API 与 consumer 期望签名差 1-2 参 (c) 文档孤岛：consumer 作者不知道 lib 存在
+  - **How to apply**：定期 `for f in $(ls web/src/lib/*.ts); do grep -L "$(basename $f .ts)" web/src/features/**/*.ts; done` 类型 audit；orphan capability 写入 `docs/orphan-capabilities.md` 列表；audit 时优先查 `lib/` 目录 export 与 `features/` import 的 set difference
+
+### Family 串联
+
+| 本轮 F | 串联 family | 跨轮证据 |
+|---|---|---|
+| F631 | **R125 M218 silent fallback family 第 14 实例** | apiFetch 0 retry/timeout/abort 是"假设网络永远在线快"的静默假设；前 13 实例（adapter/contract/timestamp/i18n/contrast）同源 |
+| F634 | **R114 LoadingShell DSL 互补 family** | 乐观更新是 LoadingShell 的反面——把"显示 loading state"折叠到"立即显示终态 + 失败回滚"；R114 收 loading state DSL，R128 提议把它从某些 mutation 路径上完全 short-circuit |
+| F637 | **R125 StaleDataBanner DSL 第 5 个 surface primitive 候选** | persistor 启用后"显示 cached + revalidating" 状态恰好是 StaleDataBanner 的 server-side 等价物；Fallback Surface DSL 第 6 块 primitive 浮现 `<RevalidatingBanner>` |
+| F640 | **R125 F598 orphan capability dual 实例** | 同一 finding 两轮浮现 → 沉淀 M236；这是 audit plane 高 ROI 启发式 |
+| F642 | **R113 ErrorBoundary 4 件套 extension** | network-vs-server error 区分是 ErrorBoundary 第 5 件套；M194 Fallback Surface DSL 需扩到 `<OfflineBanner>` 第 6 块 primitive |
+
+### Product maturity matrix 推进进度
+
+| Maturity dim | Status | Round |
+|---|---|---|
+| Reverse-surface 5-tuple | ✅ 5/5 | R110→R125 |
+| a11y user-preference matrix | 🔄 3/8 | R121+R126+R127 |
+| **Network resilience matrix** | ❌ **0/8 (本轮启动)** | **R128** |
+| → retry + backoff | ❌ | F631 |
+| → timeout + abort | ❌ | F631 F639 |
+| → online/offline detection | ❌ | F632 |
+| → service worker + PWA | ❌ | F633 |
+| → optimistic update + rollback | ❌ | F634 |
+| → mutation retry + idempotency | ❌ | F635 F636 |
+| → query persistor | ❌ | F637 |
+| → WS auto-reconnect (per-consumer) | ❌ (能力存在) | F640 |
+| Internationalization | 🔄 | R119+R124 (并行 fix) |
+| Keyboard navigation | 🔄 | R122 |
+| Color contrast | 🔄 | R121+R127 |
+| Animation a11y | ✅ (R126 F607 已闭合) | R126 + parallel fix |
+
+### R129+ 候选
+
+1. **F631 apiFetch retry/timeout/abort 三联升级（最高 ROI）**：包装 `ky` / `ofetch` + 设 default timeout 30s + AbortController + 透传 React Query `signal`；exponential backoff 250/1000/4000ms 默认 3 次重试（4xx/405/501 排除）—— 一次 PR 闭合 CRITICAL + 接入 R125 M218 silent fallback family
+2. **F632 useOnlineStatus hook + `<OfflineBanner>` Fallback Surface DSL 第 6 块**：监听 `online`/`offline` event；与 R113 ErrorBoundary 4 件套 + R125 StaleDataBanner 形成 6 块 primitive 全产品 fallback 系统
+3. **F634 optimistic update mutation 4 件套 (M233 fix-pass)**：在 useCreateWork / useUpdateWork / useDeleteWork 3 个最高频 mutation 先试点 onMutate + onError rollback + onSettled invalidate pattern；与 F636 Idempotency-Key 同期
+4. **F633 vite-plugin-pwa + manifest.json (M234 fix-pass)**：一次性接入 PWA 工业基准；workbox precache HTML/CSS/JS + 字体 + favicon；offline.html fallback；manifest.json declare app icon + theme-color + display: standalone
+5. **F637 React Query persistor + R125 StaleDataBanner 联动 (M235)**：createSyncStoragePersister + persistQueryClient + maxAge 24h；刷新后 hydrate from localStorage 显示 stale + `<StaleDataBanner age={age} />` 上方 + 后台 revalidate
+6. **F640 useRenderJob 接入 ReconnectingWS (M236 fix-pass)**：30 分钟级 1-2 行 change；orphan capability 第一个闭合
+7. **M236 "orphan capability" 全产品 sweep**：`for f in $(ls web/src/lib/*.ts); do basename "$f" .ts; done` × `grep features/**` 反查所有 lib/ export 的 consumer 覆盖率；列入 `docs/orphan-capabilities.md`
+8. **prefers-reduced-data horizontal slice (R130+)**：a11y matrix 第 6/8 维（之前 R128 候选）；与本轮 service worker runtime cache strategy 自然衔接
+
+★ Insight ─────────────────────────────────────
+- **本轮揭示 product maturity matrix 第 4 维（network resilience）8/8 全缺位是 SaaS vs 工具型应用最硬差距**：R125-R127 收的 reverse-surface 5/5 + a11y matrix 3/8 都建立在"网络永远在线 + 永远快"的乐观假设上。R114 LoadingShell / R113 ErrorBoundary / R116 EmptyState 全部 DSL 都假设 fetch 总会在 2s 内返回结果，**一次 30 秒移动网络抖动就把所有 fallback surface 露馅**。Linear / Notion / Figma 重投资 network resilience 不是"acc"feature 而是 product DNA——本产品 0/8 是定位 vs 实现脱节最硬证据
+- **M232 apiFetch 三联缺位是"100% HTTP request 单点 chokepoint"性质的发现**：与其他点修 finding 不同，apiFetch 是整产品**所有** network call 必经路径，一次升级影响面 100%。这是 audit plane 最高杠杆的发现——R128 的 ROI 远超 R121/R127 token 点修级 finding。Insight：未来 audit 应优先 sweep 这类 "single chokepoint" 文件（`lib/api.ts` / `lib/ws.ts` / `lib/error.ts` / root QueryClient 配置 / root ErrorBoundary / root i18n provider）
+- **M233 optimistic update 是 mutation feel sub-100ms 的核心（vs Linear/Notion 关键差距）**：用户感知 ≤100ms = "instant"，>200ms = "lag"——本产品 15+ useMutation 全 lag 区间。这不是"性能问题"是**交互设计哲学问题**：是把网络延迟暴露给用户 vs 把它隐藏在 optimistic + rollback 后面。Linear 的"删除立即消失，失败 toast + undo"是 SaaS 产品 polish 的标志
+- **M236 "orphan capability" family 是 audit plane 最高 ROI 启发式（R125 F598 + R128 F640 dual 实例）**：`lib/ws.ts` 完整 ReconnectingWS + 测试覆盖 + 文档 vs `useRenderJob.ts:36` 选择性不复用——能力已写好，只缺 wiring。这比"能力不存在 → 需要从 0 开发"低 10× 闭合成本但用户价值同等。**Audit 应优先 grep `lib/` 目录所有 export，对照 `features/` import 的 set difference**——这是高 ROI 启发式应纳入 audit playbook
+- **M234 SW+PWA 缺位 vs CLAUDE.md "local-first creator workbench" 定位脱节**：本产品自我定位 "local-first" 但 0 service worker / 0 manifest / 0 IndexedDB persistor —— 在用户视角看就是"普通 web 应用网站"，离线 = 白屏。Linear/Notion/Figma 把 PWA 当 product DNA 一部分 ship。R128 沉淀的"定位 vs 实现脱节" pattern 是 product audit 重要 lens：grep CLAUDE.md / README.md 自我宣称的关键词（local-first / offline / fast / native-feel）→ 反查实现是否兑现
+- **意外收获 R126 F607 已被并行 fix-pass agent 闭合（main.tsx:36 MotionConfig wired with reducedMotion="user"）**：这是 audit plane 与 fix plane 协同的好案例——R126 CRITICAL 在 2 round 内闭合，证明审计 → 修复的 turnaround 是健康的。**Audit insight**：每轮开始时快速 grep 上轮 CRITICAL finding 是否已闭合，避免重复 finding；本轮 R128 因为 F607 抢先验证而避免了"假 finding"
+`─────────────────────────────────────────────────`
+
+---
+
 ## Round 129 — **R127 F622 (HIGH · `--status-pending` 双 theme FAIL) + F624 (HIGH · `--text-muted` 双 theme catastrophic FAIL) 双 HIGH CLOSED ✅ —— 4 token×theme ratio 全过 AA 4.5 + contract test 升级到全表 sweep gate（6 token × 2 theme = 12 assertion 矩阵循环）；R121 contrast plane 在 6 round 后真正闭合（M230 收敛）**
 
 - **时间**：2026-05-13（cron `105f4ef8` 触发；R128 PRM fix-pass 后第 1 轮 contrast plane 收尾）

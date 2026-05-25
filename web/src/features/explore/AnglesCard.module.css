@@ -55,6 +55,11 @@
   min-height: 150px;
 }
 .angle:hover { border-color: var(--accent); transform: translateY(-1px); }
+/* Demo mode: angle is not yet wired to a click handler, so suppress the
+   "clickable" affordance (cursor / hover lift) until the agent hook lands.
+   Keeps the visual layout identical otherwise. */
+.angleDemo { cursor: default; }
+.angleDemo:hover { border-color: var(--glass-border); transform: none; }
 .num { font-family: "Instrument Serif", serif; font-style: italic; font-size: 24px; color: var(--accent); line-height: 1; }
 /* R39: clamp angle body to 5 lines. 3-col grid + flex:1 means a longer
    body in one card stretches the row, breaking visual alignment. The
@@ -74,4 +79,17 @@
 }
 .foot { display: flex; justify-content: space-between; align-items: center; }
 .score { font-family: "JetBrains Mono", monospace; font-size: 10px; color: var(--text-dimmer); letter-spacing: 0.06em; }
-.go { font-size: 11px; color: var(--accent); }
+.go {
+  font-size: 11px;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  cursor: pointer;
+}
+.goDisabled {
+  color: var(--text-dimmer);
+  cursor: not-allowed;
+  opacity: 0.6;
+}
