@@ -4,6 +4,7 @@ import { GenerationDialog } from "@/features/studio/generation/GenerationDialog"
 import { useGatedMediaSrc } from "@/features/studio/media/useGatedMediaSrc";
 import { SearchBox } from "./SearchBox";
 import { AssetPreviewModal } from "./AssetPreviewModal";
+import { useT } from "@/i18n/useT";
 
 interface Props {
   workId: string;
@@ -16,6 +17,7 @@ function hueFromString(s: string): number {
 }
 
 export function LibraryTab({ workId }: Props) {
+  const t = useT();
   const { data: groups = [], isLoading } = useWorkAssets(workId);
   const [active, setActive] = useState<string | null>(null);
   const [genOpen, setGenOpen] = useState(false);
@@ -55,7 +57,7 @@ export function LibraryTab({ workId }: Props) {
               color: "var(--text)",
             }}
           >
-            Assets
+            {t("studio.assetSidebar.heading")}
           </div>
           <button
             type="button"

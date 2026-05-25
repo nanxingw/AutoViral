@@ -25,6 +25,7 @@ import {
   buildTerminalPrefix,
 } from "@/stores/focus";
 import { useActiveSurface, type Surface } from "./useActiveSurface";
+import { useT } from "@/i18n/useT";
 import styles from "./index.module.css";
 
 export interface RightPaneProps {
@@ -56,6 +57,7 @@ const HOTKEY_HINT =
     : "Ctrl+\\";
 
 export function RightPane({ workId }: RightPaneProps) {
+  const t = useT();
   const { active, setActive, toggle } = useActiveSurface(workId);
   const toggleRef = useRef(toggle);
   toggleRef.current = toggle;
@@ -89,12 +91,18 @@ export function RightPane({ workId }: RightPaneProps) {
   return (
     <div className={styles.root} data-area="agent-surface" data-active={active}>
       <div className={styles.tabs} role="tablist" aria-label="Agent surface">
-        <TabButton surface="chat" active={active} onSelect={setActive} label="Chat" icon="✦" />
+        <TabButton
+          surface="chat"
+          active={active}
+          onSelect={setActive}
+          label={t("studio.rightPane.tabChat")}
+          icon="✦"
+        />
         <TabButton
           surface="terminal"
           active={active}
           onSelect={setActive}
-          label="Terminal"
+          label={t("studio.rightPane.tabTerminal")}
           icon="⌨"
         />
         <span className={styles.tabHint} aria-hidden>

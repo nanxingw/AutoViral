@@ -202,8 +202,13 @@ export const en = {
       buildOk: "✓ Indexed {count} clips in {ms} ms",
     },
     assetSidebar: {
+      heading: "Assets",
       tabLibrary: "Library",
       tabInspector: "Inspector",
+    },
+    rightPane: {
+      tabChat: "Chat",
+      tabTerminal: "Terminal",
     },
     assetPreview: {
       btnClose: "Close preview",
@@ -211,6 +216,7 @@ export const en = {
       openInTab: "Open in new tab",
     },
     timeline: {
+      title: "Timeline",
       crashTitle: "Timeline hit a render error",
       crashBody: "Preview, Inspector, and Chat are still usable. Click reset to retry; if it persists, check composition.yaml for malformed clips or NaN keyframe values.",
       crashReset: "Reset timeline",
@@ -782,8 +788,13 @@ export const zh: DeepShape<Messages> = {
       buildOk: "✓ 已索引 {count} 个素材 · 用时 {ms} ms",
     },
     assetSidebar: {
+      heading: "素材",
       tabLibrary: "素材库",
       tabInspector: "检视",
+    },
+    rightPane: {
+      tabChat: "对话",
+      tabTerminal: "终端",
     },
     assetPreview: {
       btnClose: "关闭预览",
@@ -791,6 +802,7 @@ export const zh: DeepShape<Messages> = {
       openInTab: "在新标签页打开",
     },
     timeline: {
+      title: "时间线",
       crashTitle: "时间轴渲染出错",
       crashBody: "预览、检视、聊天仍可用。点击重置可重试；若反复出现，请检查 composition.yaml 是否有畸形 clip 或 NaN 关键帧值。",
       crashReset: "重置时间轴",

@@ -55,7 +55,7 @@ export function Timeline() {
             textTransform: "uppercase",
           }}
         >
-          Timeline
+          {t("studio.timeline.title")}
         </span>
         <div style={{ width: 1, height: 14, background: "var(--divider)" }} />
         <span
