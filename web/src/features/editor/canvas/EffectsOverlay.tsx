@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { Rect } from "react-konva";
 import useImage from "use-image";
+import { grainAlpha } from "./grain";
 
 interface Props {
   width: number;
@@ -30,7 +31,7 @@ function noiseDataUri(opacity: number): string {
       img.data[i] = v;
       img.data[i + 1] = v;
       img.data[i + 2] = v;
-      img.data[i + 3] = Math.round(opacity * 255);
+      img.data[i + 3] = grainAlpha(opacity);
     }
     ctx.putImageData(img, 0, 0);
     return canvas.toDataURL("image/png");
@@ -40,10 +41,11 @@ function noiseDataUri(opacity: number): string {
 }
 
 /** Renders grain + bottom-up gradient overlay on top of the slide content.
- *  Lives above the background and below text/image layers? — actually we
- *  mount it ABOVE everything so the editorial film-grain look applies to
- *  the whole composition, mirroring how impeccable editorial designs add
- *  grain at the export stage. */
+ *  The grain mounts ABOVE everything so the editorial film-grain look applies
+ *  to the whole composition (photo + text), mirroring how editorial designs add
+ *  grain at the export stage. This is safe — and NOT destructive — because the
+ *  grain Rect blends with `soft-light` (never `source-over`), so it only
+ *  modulates the pixels below instead of covering them. See #36. */
 export function EffectsOverlay({ width, height, grain, gradient }: Props) {
   // Memoise a noise PNG per (rounded) grain value so we don't recompute
   // on every render. Round to 0.05 buckets — visually indistinguishable.
@@ -74,6 +76,9 @@ export function EffectsOverlay({ width, height, grain, gradient }: Props) {
       {grain > 0 && grainImg && (
         // Tile the 96×96 noise PNG via fillPatternImage so the grain stays
         // crisp at any output resolution instead of stretching to fit.
+        // `soft-light` blend = noise modulates the composition below rather
+        // than covering it; pure-white/black noise can never drive a pixel to
+        // full white/black, so content (photo + title) always survives. #36
         <Rect
           x={0}
           y={0}
@@ -81,6 +86,7 @@ export function EffectsOverlay({ width, height, grain, gradient }: Props) {
           height={height}
           fillPatternImage={grainImg}
           fillPatternRepeat="repeat"
+          globalCompositeOperation="soft-light"
           listening={false}
         />
       )}
