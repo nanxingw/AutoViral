@@ -66,7 +66,7 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
       {!hideLabel && (
         <div
           style={{
-            width: 110,
+            width: 152,
             flexShrink: 0,
             padding: "8px 12px",
             display: "flex",

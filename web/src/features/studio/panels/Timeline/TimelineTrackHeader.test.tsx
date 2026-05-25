@@ -220,12 +220,19 @@ describe("<TimelineTrackHeader /> — visual state", () => {
     expect(screen.getByText(track.label)).toBeInTheDocument();
   });
 
-  it("aria-pressed on mute / hide toggles reflects track state", () => {
+  it("mute / hide live in the menu as menuitemcheckbox entries", async () => {
     const track = getTrack("audio");
+    const user = userEvent.setup();
     render(<TimelineTrackHeader track={track} fallbackLabel="Music" height={56} />);
-    const muteBtn = screen.getByRole("button", { name: /toggle mute/i });
-    expect(muteBtn.getAttribute("aria-pressed")).toBe("false");
-    const hideBtn = screen.getByRole("button", { name: /toggle visibility/i });
-    expect(hideBtn.getAttribute("aria-pressed")).toBe("false");
+
+    // Inline mute/hide buttons removed by 2026-05-25 redesign — they live
+    // inside the ⋯ menu now (Notion/Linear/Resolve convention). Open menu
+    // and assert both checkbox items render with aria-checked="false".
+    await user.click(screen.getByRole("button", { name: /track options/i }));
+
+    const muteItem = await screen.findByRole("menuitemcheckbox", { name: /^mute/i });
+    expect(muteItem.getAttribute("aria-checked")).toBe("false");
+    const hideItem = await screen.findByRole("menuitemcheckbox", { name: /hide lane/i });
+    expect(hideItem.getAttribute("aria-checked")).toBe("false");
   });
 });

@@ -4,12 +4,12 @@
 
 .root {
   position: relative;
-  width: 110px;
+  width: 152px;
   flex-shrink: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 8px 8px 10px;
+  gap: 4px;
+  padding: 8px 6px 8px 10px;
   border-right: 1px solid var(--divider);
   background: var(--surface-0);
   /* Sticky alignment mirrors Track.tsx label column so headers stay pinned
@@ -59,54 +59,62 @@
 .toggleBtn {
   background: transparent;
   border: 0;
-  padding: 2px;
+  padding: 3px;
   margin: 0;
   cursor: pointer;
   color: var(--text-dimmer);
-  display: none;
+  display: grid;
   place-items: center;
-  border-radius: 3px;
-  transition: color 120ms, background 120ms;
+  border-radius: 4px;
+  transition: color 120ms, background 120ms, opacity 120ms;
+  /* Always present — discoverability beats clutter (Premiere/Resolve/
+     Kdenlive convention). Slightly dim by default so they don't fight
+     the label for visual hierarchy; brighten on row hover + focus. */
+  opacity: 0.45;
 }
-/* Hover-reveal: actions appear only when the row is hovered or a button is
-   focused or "active" (muted/hidden). 110px is tight; reserving permanent
-   layout for 3 icons squeezed the label to 0. */
 .root:hover .toggleBtn,
 .toggleBtn:focus,
 .toggleBtn:focus-visible,
 .toggleBtn[data-active="true"] {
-  display: grid;
+  opacity: 1;
 }
-.toggleBtn:hover { color: var(--accent); }
+.toggleBtn:hover {
+  color: var(--accent);
+  background: var(--surface-1);
+}
 .toggleBtn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
 .toggleBtn[data-active="true"] {
   color: var(--accent-hi, var(--accent));
-  opacity: 1;
 }
 
 .menuBtn {
   background: transparent;
   border: 0;
-  padding: 2px 4px;
+  padding: 3px 5px;
   margin: 0;
   cursor: pointer;
   color: var(--text-dimmer);
-  border-radius: 3px;
-  display: none;
+  border-radius: 4px;
+  display: grid;
   place-items: center;
-  transition: color 120ms, background 120ms;
+  transition: color 120ms, background 120ms, opacity 120ms;
+  /* ⋯ menu is the primary action surface — always visible so users can
+     reliably target it (the prior hover-reveal made it untargetable
+     because the button appeared mid-layout-shift). */
+  opacity: 0.6;
 }
-/* Same hover-reveal pattern as .toggleBtn — hidden from layout entirely
-   when neither hovered, focused, nor in an "expanded" state, so the label
-   gets the full 110px column width to itself. */
 .root:hover .menuBtn,
 .menuBtn:focus,
 .menuBtn:focus-visible,
 .menuBtn[aria-expanded="true"] {
-  display: grid;
+  opacity: 1;
+}
+.menuBtn[aria-expanded="true"] {
+  background: var(--surface-1);
+  color: var(--accent);
 }
 .menuBtn:hover { color: var(--accent); }
 .menuBtn:focus-visible {

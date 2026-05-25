@@ -311,30 +311,10 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
           </span>
         )}
 
-        <button
-          type="button"
-          className={styles.toggleBtn}
-          aria-label={t("studio.timeline.trackHeader.muteAria")}
-          aria-pressed={track.muted}
-          data-active={track.muted ? "true" : "false"}
-          onClick={toggleMuted}
-          title={t("studio.timeline.trackHeader.muteAria")}
-        >
-          {track.muted ? <IconMuted /> : <IconUnmuted />}
-        </button>
-
-        <button
-          type="button"
-          className={styles.toggleBtn}
-          aria-label={t("studio.timeline.trackHeader.hideAria")}
-          aria-pressed={track.hidden}
-          data-active={track.hidden ? "true" : "false"}
-          onClick={toggleHidden}
-          title={t("studio.timeline.trackHeader.hideAria")}
-        >
-          {track.hidden ? <IconHidden /> : <IconVisible />}
-        </button>
-
+        {/* Mute/Hide live INSIDE the ⋯ menu (not as inline buttons). Three
+            icons fought 152px against the label until label collapsed to
+            0 — Notion/Linear/Resolve all consolidate per-row actions into
+            a single overflow menu. Right-click still opens the same menu. */}
         <button
           ref={menuBtnRef}
           type="button"
@@ -366,6 +346,51 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
           </button>
           <button type="button" role="menuitem" className={styles.menuItem} onClick={handleAddBelow}>
             {t("studio.timeline.trackHeader.addBelow")}
+          </button>
+          <hr className={styles.menuDivider} />
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            className={styles.menuItem}
+            aria-checked={track.muted}
+            onClick={() => {
+              toggleMuted();
+              closeMenu();
+            }}
+          >
+            {track.muted ? (
+              <>
+                <IconUnmuted />
+                <span>{t("studio.timeline.trackHeader.unmute")}</span>
+              </>
+            ) : (
+              <>
+                <IconMuted />
+                <span>{t("studio.timeline.trackHeader.mute")}</span>
+              </>
+            )}
+          </button>
+          <button
+            type="button"
+            role="menuitemcheckbox"
+            className={styles.menuItem}
+            aria-checked={track.hidden}
+            onClick={() => {
+              toggleHidden();
+              closeMenu();
+            }}
+          >
+            {track.hidden ? (
+              <>
+                <IconVisible />
+                <span>{t("studio.timeline.trackHeader.show")}</span>
+              </>
+            ) : (
+              <>
+                <IconHidden />
+                <span>{t("studio.timeline.trackHeader.hide")}</span>
+              </>
+            )}
           </button>
           <hr className={styles.menuDivider} />
           <button type="button" role="menuitem" className={styles.menuItem} onClick={handleRename}>

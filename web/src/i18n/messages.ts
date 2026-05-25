@@ -221,6 +221,10 @@ export const en = {
       trackHeader: {
         muteAria: "Toggle mute",
         hideAria: "Toggle visibility",
+        mute: "Mute",
+        unmute: "Unmute",
+        hide: "Hide lane",
+        show: "Show lane",
         menuAria: "Track options",
         addAbove: "Add lane above",
         addBelow: "Add lane below",
@@ -797,6 +801,10 @@ export const zh: DeepShape<Messages> = {
       trackHeader: {
         muteAria: "切换静音",
         hideAria: "切换显示",
+        mute: "静音",
+        unmute: "取消静音",
+        hide: "隐藏轨道",
+        show: "显示轨道",
         menuAria: "轨道选项",
         addAbove: "在上方插入轨道",
         addBelow: "在下方插入轨道",

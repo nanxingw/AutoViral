@@ -170,7 +170,7 @@ export function Timeline() {
           <BladeTool
             pxPerSecond={pxPerSecond}
             totalWidth={totalWidth}
-            labelColumnWidth={110}
+            labelColumnWidth={152}
           />
           {/* Phase 4.H — Playhead + snap-line overlays.
               D5: Playhead is a sibling of <Ruler /> mounted full-height
@@ -186,7 +186,7 @@ export function Timeline() {
               position: "absolute",
               top: 0,
               bottom: 0,
-              left: 110,
+              left: 152,
               right: 0,
               pointerEvents: "none",
               zIndex: 6,
@@ -242,7 +242,7 @@ function Ruler({
         display: "flex",
       }}
     >
-      <div style={{ width: 110, flexShrink: 0, borderRight: "1px solid var(--divider)" }} />
+      <div style={{ width: 152, flexShrink: 0, borderRight: "1px solid var(--divider)" }} />
       <div style={{ flex: 1, position: "relative", minWidth: totalWidth }}>
         {ticks.map((s) => (
           <div
