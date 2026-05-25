@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { enrichWithAnalysis } from "../enrichment.js";
+import { enrichWithAnalysis, mergeAnalysisIntoRaws } from "../enrichment.js";
 import type { RawTrendItem } from "../sources/types.js";
 
 const baseRaw: RawTrendItem = {
@@ -53,5 +53,42 @@ describe("enrichWithAnalysis", () => {
     expect(out.pipelineStatus).toBe("partial");
     expect(out.validation.passed).toBe(false);
     expect(out.validation.issues.length).toBeGreaterThan(0);
+  });
+});
+
+// #41 — a colliding raw id used to collapse the by-id Map so every trend got
+// the SAME analysis. mergeAnalysisIntoRaws must align by index when ids repeat.
+describe("mergeAnalysisIntoRaws", () => {
+  const raw = (id: string, title: string): RawTrendItem => ({
+    ...baseRaw, id, title,
+  });
+  const analysisFor = (n: number) => ({ ...validAnalysis, exampleHook: `hook ${n}`, category: `cat ${n}` });
+
+  it("aligns by id when ids are unique (tolerates agent reordering)", () => {
+    const raws = [raw("yt_a", "A"), raw("yt_b", "B"), raw("yt_c", "C")];
+    // Agent returns them out of order — id alignment must still match.
+    const agentItems = [
+      { id: "yt_c", analysis: analysisFor(2) },
+      { id: "yt_a", analysis: analysisFor(0) },
+      { id: "yt_b", analysis: analysisFor(1) },
+    ];
+    const merged = mergeAnalysisIntoRaws(raws, agentItems, "youtube");
+    expect((merged[0].analysis as any).category).toBe("cat 0");
+    expect((merged[1].analysis as any).category).toBe("cat 1");
+    expect((merged[2].analysis as any).category).toBe("cat 2");
+  });
+
+  it("does NOT collapse to one analysis when every raw shares the same id (#41 repro)", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // The 22-item collision, scaled down: all raws carry youtube_d1085ffa.
+    const raws = Array.from({ length: 4 }).map((_, i) => raw("youtube_d1085ffa", `标题 ${i}`));
+    const agentItems = raws.map((_, i) => ({ id: "youtube_d1085ffa", analysis: analysisFor(i) }));
+    const merged = mergeAnalysisIntoRaws(raws, agentItems, "youtube");
+    // Each trend keeps its OWN analysis (index-aligned), not all the last one.
+    const cats = merged.map((m) => (m.analysis as any).category);
+    expect(cats).toEqual(["cat 0", "cat 1", "cat 2", "cat 3"]);
+    expect(new Set(cats).size).toBe(4); // the bug would make this 1
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("duplicate raw id"));
+    warn.mockRestore();
   });
 });

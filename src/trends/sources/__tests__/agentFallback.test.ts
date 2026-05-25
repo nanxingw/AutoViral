@@ -23,8 +23,38 @@ describe("agentFallbackFromAgentJson", () => {
     expect(items[0].source).toBe("agent_websearch");
     expect(items[0].metrics).toBeNull();
     expect(items[0].cover?.aspect).toBe("9:16");
-    // sha1("https://www.tiktok.com/discover/hot1").slice(0,8) === "3a7d3670"
-    expect(items[0].id).toBe("tiktok_3a7d3670");
+    // id format is `${platform}_${8 hex}` (index folded into the hash input).
+    expect(items[0].id).toMatch(/^tiktok_[0-9a-f]{8}$/);
+  });
+
+  it("emits unique ids even when every topic shares one sourceUrl (#41 repro)", () => {
+    // The prompt tells the agent to reuse a single platform placeholder URL
+    // when it can't verify real links, so all topics arrived with the same
+    // sourceUrl — which collapsed every id to e.g. youtube_d1085ffa and made
+    // enrichment smear one analysis across all 22 trends. The index in the
+    // hash input must keep ids distinct.
+    const placeholder = "https://www.youtube.com/feed/trending";
+    const items = agentFallbackFromAgentJson("youtube", {
+      topics: Array.from({ length: 22 }).map((_, i) => ({
+        title: `不同标题 ${i}`,
+        sourceUrl: placeholder,
+        coverUrl: "",
+      })),
+    });
+    const ids = items.map((x) => x.id);
+    expect(new Set(ids).size).toBe(22); // all distinct, no collision
+  });
+
+  it("emits unique ids even when title AND sourceUrl both repeat", () => {
+    // Pathological: identical topic objects. Index still disambiguates.
+    const items = agentFallbackFromAgentJson("douyin", {
+      topics: Array.from({ length: 5 }).map(() => ({
+        title: "同一个标题",
+        sourceUrl: "https://www.douyin.com/discover",
+        coverUrl: "",
+      })),
+    });
+    expect(new Set(items.map((x) => x.id)).size).toBe(5);
   });
 
   it("falls back to placehold.co URL when agent gives empty cover", () => {

@@ -54,6 +54,34 @@ function stripFence(s: string): string {
   return s.replace(/```json?\s*/gi, "").replace(/```/g, "").trim();
 }
 
+/**
+ * Attach each agent-produced analysis back onto its raw item.
+ *
+ * Normal path: align by id (a Map), which tolerates the agent reordering items.
+ * Defense in depth for #41: if the raws carry duplicate ids (e.g. a source that
+ * hashed a shared placeholder sourceUrl), a by-id Map collapses to one entry and
+ * `get(id)` smears that single analysis across every trend. When we detect a
+ * duplicate id we warn and fall back to positional alignment — the prompt sends
+ * items in order and asks the agent to preserve it, so index i lines up.
+ */
+export function mergeAnalysisIntoRaws(
+  raws: RawTrendItem[],
+  agentItems: Array<{ id?: string; analysis?: unknown }>,
+  platform: Platform,
+): Array<RawTrendItem & { analysis: unknown }> {
+  const ids = raws.map((r) => r.id);
+  const dupCount = ids.length - new Set(ids).size;
+  if (dupCount > 0) {
+    console.warn(
+      `[enrichment] ${platform}: ${dupCount} duplicate raw id(s) detected — ` +
+        `aligning analysis by index instead of id to avoid analysis collapse (#41)`,
+    );
+    return raws.map((r, i) => ({ ...r, analysis: agentItems[i]?.analysis }));
+  }
+  const byId = new Map<string, unknown>(agentItems.map((x) => [x.id, x.analysis]));
+  return raws.map((r) => ({ ...r, analysis: byId.get(r.id) }));
+}
+
 export async function enrichWithAnalysis(
   raws: RawTrendItem[],
   platform: Platform,
@@ -74,10 +102,7 @@ export async function enrichWithAnalysis(
       lastIssues = [{ path: "<root>", message: "agent returned non-JSON" }];
       continue;
     }
-    const byId = new Map<string, any>(
-      (agentParsed.items ?? []).map((x: any) => [x.id, x.analysis]),
-    );
-    const merged = raws.map((r) => ({ ...r, analysis: byId.get(r.id) }));
+    const merged = mergeAnalysisIntoRaws(raws, agentParsed.items ?? [], platform);
     const candidate = {
       platform, items: merged, collectedAt,
       pipelineStatus: "ok" as const, errors: [],

@@ -18,8 +18,15 @@ export function agentFallbackFromAgentJson(
   agentJson: { topics: AgentTopic[] },
 ): RawTrendItem[] {
   const now = new Date().toISOString();
-  return (agentJson.topics ?? []).map((t): RawTrendItem => ({
-    id: `${platform}_${shortHash(t.sourceUrl || t.title)}`,
+  return (agentJson.topics ?? []).map((t, i): RawTrendItem => ({
+    // Fold the array index into the hash input. The agent is prompted to reuse
+    // a single platform placeholder sourceUrl when it can't verify real links
+    // (see PROMPT_TEMPLATE), so hashing sourceUrl||title alone collapsed every
+    // item to the same id (e.g. youtube_d1085ffa ×22) — which then made the
+    // enrichment by-id Map smear one analysis across all trends (#41). The
+    // index guarantees a distinct hash input per item, so ids stay unique even
+    // when sourceUrl/title repeat.
+    id: `${platform}_${shortHash(`${i}\n${t.sourceUrl}\n${t.title}`)}`,
     platform,
     title: t.title,
     sourceUrl: t.sourceUrl,
