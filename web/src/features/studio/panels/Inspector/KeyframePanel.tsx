@@ -7,6 +7,7 @@ import type {
   KeyframeProperty,
 } from "../../types";
 import { useT } from "@/i18n/useT";
+import { clampKeyframeTime, clipKeyframeDuration } from "./keyframeBounds";
 
 // Phase 8.2.D — Inspector KeyframePanel.
 //
@@ -101,6 +102,10 @@ export function KeyframePanel() {
   }
 
   const props = propertiesForClip(clip.kind);
+  // #40 — keyframe time must stay within [0, clip duration]. Clamp at the two
+  // mutation choke points (add + inline edit) since both funnel through here
+  // where `clip` is in scope, and surface the ceiling on the inputs.
+  const maxTime = clipKeyframeDuration(clip);
   const rawKfs = ((clip as { keyframes?: Keyframe[] }).keyframes ?? []).map(
     (kf, i) => ({ kf, idx: i }),
   );
@@ -143,9 +148,10 @@ export function KeyframePanel() {
       {adding && (
         <AddForm
           properties={props}
+          maxTime={maxTime}
           defaultValueFor={(p) => defaultStaticValue(clip, p)}
           onSubmit={(kf) => {
-            addKeyframe(clip.id, kf);
+            addKeyframe(clip.id, { ...kf, time: clampKeyframeTime(kf.time, clip) });
             setAdding(false);
           }}
           onCancel={() => setAdding(false)}
@@ -159,8 +165,17 @@ export function KeyframePanel() {
           key={prop}
           property={prop}
           rows={rows}
+          maxTime={maxTime}
           onRemove={(idx) => removeKeyframe(clip.id, idx)}
-          onUpdate={(idx, patch) => updateKeyframe(clip.id, idx, patch)}
+          onUpdate={(idx, patch) =>
+            updateKeyframe(
+              clip.id,
+              idx,
+              patch.time !== undefined
+                ? { ...patch, time: clampKeyframeTime(patch.time, clip) }
+                : patch,
+            )
+          }
         />
       ))}
     </section>
@@ -212,11 +227,13 @@ function Header({
 
 function AddForm({
   properties,
+  maxTime,
   defaultValueFor,
   onSubmit,
   onCancel,
 }: {
   properties: KeyframeProperty[];
+  maxTime: number;
   defaultValueFor: (p: KeyframeProperty) => number;
   onSubmit: (kf: Keyframe) => void;
   onCancel: () => void;
@@ -275,6 +292,7 @@ function AddForm({
           type="number"
           step="0.1"
           min="0"
+          max={maxTime}
           value={time}
           onChange={(e) => setTime(e.target.value)}
           style={inputStyle}
@@ -349,11 +367,13 @@ function AddForm({
 function PropertyBlock({
   property,
   rows,
+  maxTime,
   onRemove,
   onUpdate,
 }: {
   property: KeyframeProperty;
   rows: Array<{ kf: Keyframe; idx: number }>;
+  maxTime: number;
   onRemove: (idx: number) => void;
   onUpdate: (idx: number, patch: Partial<Keyframe>) => void;
 }) {
@@ -364,6 +384,7 @@ function PropertyBlock({
         <Row
           key={`${property}-${idx}`}
           kf={kf}
+          maxTime={maxTime}
           onUpdate={(patch) => onUpdate(idx, patch)}
           onRemove={() => onRemove(idx)}
         />
@@ -374,10 +395,12 @@ function PropertyBlock({
 
 function Row({
   kf,
+  maxTime,
   onUpdate,
   onRemove,
 }: {
   kf: Keyframe;
+  maxTime: number;
   onUpdate: (patch: Partial<Keyframe>) => void;
   onRemove: () => void;
 }) {
@@ -409,6 +432,7 @@ function Row({
           type="number"
           step="0.1"
           min="0"
+          max={maxTime}
           defaultValue={kf.time}
           onBlur={(e) => {
             const v = Number(e.target.value);
