@@ -133,5 +133,16 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   // 7. Start background services
   await startAnalyticsCollector();
 
+  // 7.B. Backfill missing audio peaks (.peaks.json next to every audio
+  // asset). Fire-and-forget — never blocks startup; failures are logged.
+  // Closes the loop on Phase B of the 2026-05-25 multi-track + waveform
+  // PRD: works opened before this build only had on-the-fly WebAudio
+  // peaks; backfill makes the JSON-fetch path the steady-state route.
+  void import("./audio/peaks-backfill.js").then(({ backfillPeaks }) =>
+    backfillPeaks(join(dataDir, "works")).catch((err) =>
+      console.warn("[peaks-backfill] startup scan failed:", err),
+    ),
+  );
+
   return { server: httpServer };
 }

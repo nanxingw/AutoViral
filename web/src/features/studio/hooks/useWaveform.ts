@@ -55,45 +55,88 @@ interface DecodedWaveform {
 
 const cache = new Map<string, Promise<DecodedWaveform>>();
 
+// Phase B (2026-05-25): server pre-computes `<src>.peaks.json` (Peaks.js
+// v2 shape) so the frontend can render waveforms without decoding the
+// whole audio file in WebAudio. Try the JSON first; fall back to client-
+// side decode for assets that haven't been backfilled yet.
+//
+// Returns null (not throws) on any failure so the caller cleanly falls
+// through. Refuses HTML content-type up-front (SPA fallback masquerading
+// as 200 OK) for the same reason audio decode needs the guard.
+async function tryFetchPeaksJson(src: string): Promise<DecodedWaveform | null> {
+  try {
+    const res = await fetch(`${src}.peaks.json`);
+    if (!res.ok) return null;
+    // SPA-fallback guard: a missing route returns index.html with 200.
+    // Don't require json content-type (Hono's static handler may serve
+    // peaks.json as application/octet-stream); just refuse html.
+    const ct = res.headers?.get?.("content-type") ?? "";
+    if (ct.includes("text/html")) return null;
+    const data = await res.json();
+    if (
+      data?.version !== 2 ||
+      !Array.isArray(data.channels) ||
+      !Array.isArray(data.channels[0])
+    ) {
+      return null;
+    }
+    // channels[0] is the L (or mono) channel, normalised number[] ∈ [0,1].
+    // Per-channel rendering is a follow-up — for now we pick channel 0 so
+    // the existing WaveformBars SVG path keeps working unchanged.
+    return {
+      peaks: new Float32Array(data.channels[0]),
+      durationSec: Number(data.durationSec) || 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function webAudioDecodeAndBucket(src: string): Promise<DecodedWaveform> {
+  const res = await fetch(src);
+  if (!res.ok) throw new Error(`fetch ${src} failed`);
+  const buf = await res.arrayBuffer();
+  const ctx = new AudioContext();
+  try {
+    const audio = await ctx.decodeAudioData(buf);
+    const channel = audio.getChannelData(0);
+    const bucketCount = Math.min(
+      MAX_BUCKETS,
+      Math.max(MIN_BUCKETS, Math.ceil(audio.duration * BUCKETS_PER_SEC)),
+    );
+    const samplesPerBar = Math.max(1, Math.floor(channel.length / bucketCount));
+    const peaks = new Float32Array(bucketCount);
+    for (let i = 0; i < bucketCount; i++) {
+      let max = 0;
+      const start = i * samplesPerBar;
+      const end = Math.min(channel.length, start + samplesPerBar);
+      for (let j = start; j < end; j++) {
+        const v = Math.abs(channel[j]);
+        if (v > max) max = v;
+      }
+      peaks[i] = max;
+    }
+    // Normalize to [0, 1] (pneuma upstream lines 75-77).
+    let globalMax = 0.001;
+    for (let i = 0; i < peaks.length; i++) {
+      if (peaks[i] > globalMax) globalMax = peaks[i];
+    }
+    for (let i = 0; i < peaks.length; i++) {
+      peaks[i] = Math.min(1, peaks[i] / globalMax);
+    }
+    return { peaks, durationSec: audio.duration };
+  } finally {
+    ctx.close?.();
+  }
+}
+
 async function decodeAndBucket(src: string): Promise<DecodedWaveform> {
   const cached = cache.get(src);
   if (cached) return cached;
   const promise = (async () => {
-    const res = await fetch(src);
-    if (!res.ok) throw new Error(`fetch ${src} failed`);
-    const buf = await res.arrayBuffer();
-    const ctx = new AudioContext();
-    try {
-      const audio = await ctx.decodeAudioData(buf);
-      const channel = audio.getChannelData(0);
-      const bucketCount = Math.min(
-        MAX_BUCKETS,
-        Math.max(MIN_BUCKETS, Math.ceil(audio.duration * BUCKETS_PER_SEC)),
-      );
-      const samplesPerBar = Math.max(1, Math.floor(channel.length / bucketCount));
-      const peaks = new Float32Array(bucketCount);
-      for (let i = 0; i < bucketCount; i++) {
-        let max = 0;
-        const start = i * samplesPerBar;
-        const end = Math.min(channel.length, start + samplesPerBar);
-        for (let j = start; j < end; j++) {
-          const v = Math.abs(channel[j]);
-          if (v > max) max = v;
-        }
-        peaks[i] = max;
-      }
-      // Normalize to [0, 1] (pneuma upstream lines 75-77).
-      let globalMax = 0.001;
-      for (let i = 0; i < peaks.length; i++) {
-        if (peaks[i] > globalMax) globalMax = peaks[i];
-      }
-      for (let i = 0; i < peaks.length; i++) {
-        peaks[i] = Math.min(1, peaks[i] / globalMax);
-      }
-      return { peaks, durationSec: audio.duration };
-    } finally {
-      ctx.close?.();
-    }
+    const jsonResult = await tryFetchPeaksJson(src);
+    if (jsonResult) return jsonResult;
+    return webAudioDecodeAndBucket(src);
   })();
   cache.set(src, promise);
   promise.catch(() => cache.delete(src));

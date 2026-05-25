@@ -85,6 +85,9 @@ const MIME_TYPES: Record<string, string> = {
   ".mp4": "video/mp4", ".webm": "video/webm",
   ".mp3": "audio/mpeg", ".wav": "audio/wav",
   ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown",
+  // Phase B (2026-05-25): serve <audio>.peaks.json with json mime so the
+  // frontend useWaveform JSON fast-path sees the correct content-type.
+  ".json": "application/json",
 };
 
 function getMimeType(filePath: string): string {
@@ -1204,6 +1207,19 @@ apiRoutes.post("/api/works/:id/assets/upload", async (c) => {
   await mkdir(dirname(filePath), { recursive: true });
   const buffer = Buffer.from(await file.arrayBuffer());
   await writeFile(filePath, buffer);
+
+  // Audio uploads: fire-and-forget peaks generation so the frontend can
+  // fetch <file>.peaks.json instead of decoding the whole mp3 in WebAudio.
+  // Failure is logged but never blocks the upload response — frontend
+  // falls back to client-side decoding when peaks JSON is missing.
+  // See docs/superpowers/plans/2026-05-25-multi-track-stacking.md.
+  void import("./audio/peaks.js").then(({ generatePeaks, isAudioAsset }) => {
+    if (isAudioAsset(filePath)) {
+      generatePeaks(filePath).catch((err) =>
+        console.warn(`[peaks] gen failed for ${filePath}:`, err),
+      );
+    }
+  });
 
   // Clean URL — GET defaults to workDir/assets/ when no explicit root prefix
   return c.json({
