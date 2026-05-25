@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { applyLayoutToTextLayer, applyLayoutToLayer } from "./layout";
+import { applyLayoutToTextLayer, applyLayoutToLayer, makeTextLayer } from "./layout";
+import { makeEmptyCarousel } from "../types";
+import { PALETTES } from "../palettes";
 import type { TextLayer, ImageLayer } from "../types";
 
 const W = 1080;
@@ -60,6 +62,41 @@ describe("applyLayoutToTextLayer", () => {
     expect(out.style.color).toBe("#ff0");
     expect(out.style.tracking).toBe(5);
     expect(out.style.italic).toBe(true);
+  });
+});
+
+// #43 — the factory behind CopyTab's "+ add text layer". A new layer must
+// adopt the deck's globals (font / palette fg / layout placement) and carry a
+// unique id, so the added layer reads as part of the design.
+describe("makeTextLayer", () => {
+  it("adopts globals font + palette fg and is positioned by current layout", () => {
+    const car = makeEmptyCarousel("w1");
+    car.globals.headlineFont = "mono";
+    car.globals.palette = "neon";
+    car.globals.layout = "left";
+    const layer = makeTextLayer(car);
+    expect(layer.kind).toBe("text");
+    expect(layer.text).toBe(""); // empty → editable placeholder
+    expect(layer.style.font).toBe("mono");
+    expect(layer.style.color).toBe(PALETTES.neon.fg);
+    // "left" layout → left align + ~60% width at the editorial padding.
+    expect(layer.style.align).toBe("left");
+    expect(layer.box.x).toBe(90);
+    expect(layer.box.w).toBe(Math.round(car.width * 0.6));
+  });
+
+  it("centered layout pins the editorial 0.4 y-anchor and full width", () => {
+    const car = makeEmptyCarousel("w1"); // default layout is centered
+    const layer = makeTextLayer(car);
+    expect(layer.style.align).toBe("center");
+    expect(layer.box.y).toBe(Math.round(car.height * 0.4));
+    expect(layer.box.w).toBe(car.width - 180);
+  });
+
+  it("mints a unique id on every call (no collision across adds)", () => {
+    const car = makeEmptyCarousel("w1");
+    const ids = new Set([makeTextLayer(car).id, makeTextLayer(car).id, makeTextLayer(car).id]);
+    expect(ids.size).toBe(3);
   });
 });
 

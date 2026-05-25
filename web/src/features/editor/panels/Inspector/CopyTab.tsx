@@ -2,6 +2,7 @@ import { useEditor } from "../../store";
 import { apiFetch } from "@/lib/api";
 import { useState, useEffect, useRef } from "react";
 import type { TextLayer } from "../../types";
+import { makeTextLayer } from "../../services/layout";
 import { useT } from "@/i18n/useT";
 
 export function CopyTab({ workId }: { workId: string }) {
@@ -9,6 +10,7 @@ export function CopyTab({ workId }: { workId: string }) {
   const currentSlideId = useEditor((s) => s.currentSlideId);
   const selectionLayerId = useEditor((s) => s.selectionLayerId);
   const updateLayer = useEditor((s) => s.updateLayer);
+  const addLayer = useEditor((s) => s.addLayer);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const t = useT();
@@ -29,6 +31,9 @@ export function CopyTab({ workId }: { workId: string }) {
   const candidate = slide?.layers.find((l) => l.id === selectionLayerId);
   const selected: TextLayer | undefined =
     candidate && candidate.kind === "text" ? candidate : undefined;
+  // Distinguish the two empty states: a slide WITH text layers but none
+  // selected ("pick one") vs. a slide with zero text layers ("none exist yet").
+  const slideHasText = Boolean(slide?.layers.some((l) => l.kind === "text"));
 
   const onRewrite = async () => {
     if (!selected) return;
@@ -61,17 +66,56 @@ export function CopyTab({ workId }: { workId: string }) {
     }
   };
 
+  // #43 — the missing last mile. `addLayer` was fully implemented + tested in
+  // the store but had no UI call site, so a blank slide or a text-layer-less
+  // carousel left this tab a dead end. Wire it here: build a globals-styled
+  // text layer and push it; addLayer also selects it, so the component
+  // re-renders straight into the edit form below for immediate typing.
+  const canAddLayer = Boolean(car && currentSlideId);
+  const onAddTextLayer = () => {
+    if (!car || !currentSlideId) return;
+    addLayer(makeTextLayer(car));
+  };
+
+  const addTextLayerButton = canAddLayer ? (
+    <button
+      type="button"
+      onClick={onAddTextLayer}
+      style={{
+        padding: "9px 14px",
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        border: "1px dashed var(--accent, #2a3a4a)",
+        background: "transparent",
+        color: "var(--accent, #2a3a4a)",
+        borderRadius: 6,
+        cursor: "pointer",
+        alignSelf: "flex-start",
+        transition: "background 0.15s, color 0.15s",
+      }}
+    >
+      {t("editor.copyTab.addTextLayer")}
+    </button>
+  ) : null;
+
   if (!selected) {
     return (
       <div
         style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 12,
           fontFamily: "var(--font-mono)",
           fontSize: 11,
           color: "var(--text-dimmer)",
           padding: "12px 0",
         }}
       >
-        {t("editor.copyTab.empty")}
+        <span>{t(canAddLayer && !slideHasText ? "editor.copyTab.emptyHint" : "editor.copyTab.empty")}</span>
+        {addTextLayerButton}
       </div>
     );
   }
@@ -153,6 +197,8 @@ export function CopyTab({ workId }: { workId: string }) {
           {error}
         </div>
       )}
+      {/* Let users keep stacking layers without going back to an empty state. */}
+      {addTextLayerButton}
     </div>
   );
 }

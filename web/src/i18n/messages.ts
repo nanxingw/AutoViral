@@ -134,6 +134,8 @@ export const en = {
     },
     copyTab: {
       empty: "Select a text layer to edit its copy.",
+      emptyHint: "This slide has no text layer yet.",
+      addTextLayer: "+ Add text layer",
       headline: "Headline",
       rewriteWithAI: "Rewrite with AI",
       busy: "...",
@@ -720,6 +722,8 @@ export const zh: DeepShape<Messages> = {
     },
     copyTab: {
       empty: "请先选中文本图层再编辑文案。",
+      emptyHint: "这张幻灯片还没有文字层。",
+      addTextLayer: "+ 新增文字层",
       headline: "标题",
       rewriteWithAI: "AI 改写",
       busy: "…",

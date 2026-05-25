@@ -112,6 +112,11 @@ let _seq = 0;
 const uid = (p: string) =>
   `${p}_${Date.now().toString(36)}_${(++_seq).toString(36)}`;
 
+/** Public layer-id generator. Shares the module-private `uid` counter so ids
+ *  minted by UI affordances (e.g. CopyTab's "+ add text layer") can't collide
+ *  with seed / duplicate ids. (#43 — wiring addLayer to the UI.) */
+export const genLayerId = (): string => uid("t");
+
 export function makeEmptySlide(): Slide {
   return {
     id: uid("s"),
