@@ -1,8 +1,10 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useComposition } from "../../store";
 import { Track } from "./Track";
 import { BladeTool } from "./BladeTool";
 import { Playhead } from "./Playhead";
+import { TimelineTrackHeader } from "./TimelineTrackHeader";
+import { LaneGapAdd } from "./LaneGapAdd";
 import { useT } from "@/i18n/useT";
 
 const TRACK_COLORS: Record<string, string> = {
@@ -103,17 +105,69 @@ export function Timeline() {
         <div style={{ flex: 1, overflow: "auto", position: "relative" }}>
           {/* Ruler */}
           <Ruler duration={comp.duration} pxPerSecond={pxPerSecond} totalWidth={totalWidth} />
-          {/* Tracks */}
-          {comp.tracks.map((t) => (
-            <Track
-              key={t.id}
-              track={t}
-              pxPerSecond={pxPerSecond}
-              totalWidth={totalWidth}
-              color={TRACK_COLORS[t.kind] ?? "var(--accent)"}
-              label={trackLabels[t.kind] ?? t.kind.toUpperCase()}
-            />
-          ))}
+          {/* Tracks — Phase F (issue #33). Sort by displayOrder so the visual
+              order tracks the schema invariant; render TimelineTrackHeader
+              as a sibling of Track (sitting in the same 110px sticky-left
+              slot but at a higher z-index so it covers Track's internal
+              label cell). LaneGapAdd buttons sit between adjacent rows,
+              plus a leading gap above the first row and a trailing gap
+              below the last for symmetric add affordance. */}
+          {(() => {
+            const sortedTracks = [...comp.tracks].sort(
+              (a, b) => a.displayOrder - b.displayOrder,
+            );
+            return sortedTracks.map((track, i) => {
+              const compact = track.kind === "text";
+              const height = compact ? 44 : 56;
+              const fallback = trackLabels[track.kind] ?? track.kind.toUpperCase();
+              return (
+                <Fragment key={track.id}>
+                  {i === 0 && (
+                    // Leading gap — lets the user add a row above tracks[0]
+                    // without having to right-click the existing top header.
+                    <LaneGapAdd lowerTrackId={track.id} />
+                  )}
+                  <div style={{ position: "relative", display: "flex" }}>
+                    {/* The header cell shares the 110px sticky-left slot
+                        with Track's internal label cell but renders at a
+                        higher z-index, so the legacy label is visually
+                        replaced without us having to touch Track.tsx. */}
+                    <div
+                      style={{
+                        position: "sticky",
+                        left: 0,
+                        zIndex: 4,
+                        display: "flex",
+                        alignItems: "stretch",
+                      }}
+                    >
+                      <TimelineTrackHeader
+                        track={track}
+                        fallbackLabel={fallback}
+                        height={height}
+                      />
+                    </div>
+                    <div style={{ flex: 1, marginLeft: -110 }}>
+                      {/* marginLeft -110 reclaims the width the sticky
+                          header reserved so Track's own label + clip lane
+                          still lay out from x=0 underneath. */}
+                      <Track
+                        track={track}
+                        pxPerSecond={pxPerSecond}
+                        totalWidth={totalWidth}
+                        color={TRACK_COLORS[track.kind] ?? "var(--accent)"}
+                        label={fallback}
+                      />
+                    </div>
+                  </div>
+                  <LaneGapAdd
+                    upperTrackId={track.id}
+                    lowerTrackId={sortedTracks[i + 1]?.id}
+                  />
+                </Fragment>
+              );
+            });
+          })()}
           {/* Phase 4.G — click-to-split overlay; renders only while
               bladeMode is on. 4.J wires `B` / `Cmd+B` to toggle. */}
           <BladeTool

@@ -1,0 +1,104 @@
+/* LaneGapAdd — 24x24 "+" hover-revealed button living in the 4px gap
+   between adjacent lane rows. Phase F (issue #33). cool · glass · editorial.
+
+   Dwell timing (150ms) is implemented in JS via setTimeout so the timer can
+   be cancelled when the cursor leaves before commit; CSS transition-delay
+   can't be cancelled mid-flight. The CSS here only renders the visual fade. */
+
+.gap {
+  position: relative;
+  /* Hover hit-area is the entire 4px strip across the lane row. The visible
+     "+" is centred above this strip. */
+  height: 4px;
+  width: 100%;
+  z-index: 5;
+}
+.gap:hover {
+  /* Subtle dividing tint to communicate "drop zone" feel — within brand. */
+  background: var(--accent-lo, transparent);
+}
+
+.btn {
+  position: absolute;
+  top: 50%;
+  left: 14px; /* aligned just inside the label column boundary */
+  transform: translateY(-50%) scale(0.85);
+  width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms ease-out, transform 150ms ease-out, color 120ms, border-color 120ms;
+  backdrop-filter: blur(12px) saturate(140%);
+  -webkit-backdrop-filter: blur(12px) saturate(140%);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+  z-index: 6;
+}
+.btnVisible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) scale(1);
+}
+.btn:hover {
+  color: var(--accent);
+  border-color: var(--accent-lo, var(--accent));
+}
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(-50%) scale(1);
+}
+
+/* ── kind picker popover (heterogeneous gap) ──────────────────────────── */
+.picker {
+  position: fixed;
+  z-index: 100;
+  padding: 4px;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 140px;
+}
+.pickerHeading {
+  font-size: 10px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-dimmer);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 10px 6px;
+}
+.pickerItem {
+  background: transparent;
+  border: 0;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 120ms, color 120ms;
+}
+.pickerItem:hover {
+  background: var(--surface-2, rgba(255,255,255,0.04));
+  color: var(--text);
+}
+.pickerItem:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  color: var(--text);
+}
