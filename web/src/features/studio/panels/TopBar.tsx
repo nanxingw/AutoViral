@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useComposition } from "../store";
 import { useNavigate } from "react-router-dom";
@@ -6,6 +6,8 @@ import { useT } from "@/i18n/useT";
 import { enqueueRender, type EnqueueRenderOptions } from "../services/render";
 import { ExportProgress } from "../render-status/ExportProgress";
 import { CheckpointsMenu } from "@/features/checkpoints/CheckpointsMenu";
+import { ExportCaptionsDialog } from "./Export/ExportCaptionsDialog";
+import type { CaptionTrackOption } from "./Export/CaptionTracksSection";
 
 export interface TopBarProps {
   workId: string;
@@ -31,6 +33,22 @@ export function TopBar({
   const [lastOpts, setLastOpts] = useState<EnqueueRenderOptions>({
     type: "full",
   });
+  const [captionsDialogOpen, setCaptionsDialogOpen] = useState(false);
+
+  // Phase H (#35) — derive the text-track list for the captions dialog.
+  // Reading from the composition store keeps the dialog in sync with the
+  // current lane stack (rename / add / remove a caption lane and the
+  // dialog reflects it on next open).
+  const captionTrackOptions: CaptionTrackOption[] = useMemo(() => {
+    const tracks = comp?.tracks ?? [];
+    return tracks
+      .filter((t) => t.kind === "text")
+      .map((t) => ({
+        id: t.id,
+        label: t.label,
+        language: (t as { language?: string }).language,
+      }));
+  }, [comp]);
 
   async function startExport(opts: EnqueueRenderOptions) {
     setLastOpts(opts);
@@ -283,6 +301,26 @@ export function TopBar({
               >
                 {t("studio.topBar.quickProxyExport")}
               </DropdownMenu.Item>
+              {/* Phase H (#35) — Resolve-model caption track picker. We
+                  always show the item (even with 0 text tracks) so users
+                  discover the feature; the dialog itself surfaces an
+                  empty state when there's nothing to configure. */}
+              <DropdownMenu.Item
+                data-testid="export-captions-trigger"
+                onSelect={() => setCaptionsDialogOpen(true)}
+                style={{
+                  fontSize: 12,
+                  fontFamily: "var(--font-mono)",
+                  letterSpacing: "0.04em",
+                  color: "var(--text)",
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  cursor: "pointer",
+                  outline: "none",
+                }}
+              >
+                Export with captions…
+              </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
@@ -294,6 +332,23 @@ export function TopBar({
           workId={workId}
           onClose={() => setActiveJobId(null)}
           onRetry={() => void startExport(lastOpts)}
+        />
+      ) : null}
+
+      {captionsDialogOpen ? (
+        <ExportCaptionsDialog
+          tracks={captionTrackOptions}
+          onCancel={() => setCaptionsDialogOpen(false)}
+          onExport={(selection) => {
+            setCaptionsDialogOpen(false);
+            void startExport({
+              type: "full",
+              captionTracks: {
+                burnTrackId: selection.burnTrackId,
+                sidecarTrackIds: selection.sidecarTrackIds,
+              },
+            });
+          }}
         />
       ) : null}
     </div>

@@ -12,7 +12,7 @@ import {
   type MixTrack,
 } from "../audio-tools.js";
 import { join } from "node:path";
-import { rename, stat as fsStat } from "node:fs/promises";
+import { rename, stat as fsStat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import type { Composition, ExportPreset } from "../shared/composition.js";
 
@@ -115,6 +115,93 @@ export interface RenderJobOptions {
   signal?: AbortSignal;
   /** Phase 7.C — half-res / 24fps / half-bitrate proxy render. */
   proxy?: boolean;
+  /** Phase H (issue #35) — per-track caption strategy following the DaVinci
+   *  Resolve subtitle model. When supplied, takes precedence over the legacy
+   *  `burnSubtitles` boolean.
+   *
+   *  - `burnTrackId`: id of the single text track to bake into the video
+   *    (rendered by Remotion <Text>). When undefined/null, NO text track is
+   *    burned — every text track is dropped from Stage 1 render input.
+   *  - `sidecarTrackIds`: ids of text tracks emitted as `<output>.<lang>.srt`
+   *    next to the final mp4. These are excluded from Stage 1 render so they
+   *    don't double-render on top of the burned track.
+   *
+   *  Tracks that appear in neither list are dropped (skipped entirely — the
+   *  "both unchecked" path documented in #35).
+   *
+   *  When omitted, render behaviour is unchanged: every text track in the
+   *  composition renders via Remotion (legacy single-track default). */
+  captionTracks?: {
+    burnTrackId?: string | null;
+    sidecarTrackIds?: string[];
+  };
+}
+
+/** Phase H — escape a caption text line into SRT-safe form. SRT uses CRLF
+ *  pair as the segment terminator and CRLF inside a cue separates lines.
+ *  We strip BOMs and normalise existing newlines to single `\n` (the
+ *  emitter joins with `\n` to keep the output well-formed under
+ *  Windows/macOS readers alike). Empty lines become a single space so a
+ *  cue with whitespace-only text doesn't degenerate into an empty
+ *  block that SRT parsers reject. */
+function escapeSrtLine(text: string): string {
+  const collapsed = text
+    .replace(/^﻿/, "")
+    .replace(/\r\n|\r/g, "\n")
+    .replace(/\n+/g, " ")
+    .trim();
+  return collapsed.length === 0 ? " " : collapsed;
+}
+
+/** Format a duration in seconds as `HH:MM:SS,mmm` per SRT spec.
+ *  Clamps negative inputs to zero so a buggy clip with trackOffset < 0
+ *  doesn't emit a `-00:00:00,500` cue (which most parsers reject). */
+function formatSrtTimecode(seconds: number): string {
+  const clamped = Math.max(0, seconds);
+  const totalMs = Math.round(clamped * 1000);
+  const hours = Math.floor(totalMs / 3_600_000);
+  const minutes = Math.floor((totalMs % 3_600_000) / 60_000);
+  const secs = Math.floor((totalMs % 60_000) / 1000);
+  const ms = totalMs % 1000;
+  return (
+    String(hours).padStart(2, "0") +
+    ":" +
+    String(minutes).padStart(2, "0") +
+    ":" +
+    String(secs).padStart(2, "0") +
+    "," +
+    String(ms).padStart(3, "0")
+  );
+}
+
+/** Phase H — convert a text track into an SRT document body. Cues are
+ *  emitted in trackOffset order with a 1-based sequence number per spec.
+ *  Pure; no I/O. Exposed for the multi-caption render test. */
+export function textTrackToSrt(track: {
+  clips: Array<{ kind: string; text?: string; trackOffset: number; duration?: number }>;
+}): string {
+  const cues = track.clips
+    .filter((c) => c.kind === "text" && typeof c.text === "string")
+    .slice()
+    .sort((a, b) => a.trackOffset - b.trackOffset)
+    .map((c, idx) => {
+      const start = formatSrtTimecode(c.trackOffset);
+      const end = formatSrtTimecode(c.trackOffset + (c.duration ?? 0));
+      const body = escapeSrtLine(c.text!);
+      return `${idx + 1}\n${start} --> ${end}\n${body}\n`;
+    });
+  return cues.join("\n");
+}
+
+/** Phase H — sanitise a language tag for a sidecar filename. Falls back
+ *  to ISO 639-2 "und" (undetermined) when the track has no language, per
+ *  the issue spec. Strips path separators / control chars defensively so
+ *  a hostile yaml can't break out of outDir via `../`. */
+function sidecarLangSegment(language?: string | null): string {
+  const raw = (language ?? "und").toString().trim();
+  if (raw.length === 0) return "und";
+  const safe = raw.replace(/[^a-zA-Z0-9_-]/g, "");
+  return safe.length === 0 ? "und" : safe;
 }
 
 /** Round n/2 down to the nearest even integer (libx264 yuv420p requires even dims). */
@@ -314,6 +401,34 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   );
   checkAbort();
 
+  // Phase H (issue #35) — multi-caption track partition.
+  // When opts.captionTracks is supplied, partition every `kind: "text"`
+  // lane into one of three buckets:
+  //   • burn   — survives into Stage 1 (Remotion <Text> bakes it in)
+  //   • sidecar — dropped from Stage 1, written as `<output>.<lang>.srt`
+  //   • drop    — dropped entirely (the "both checkboxes off" path)
+  // When opts.captionTracks is OMITTED, behaviour is unchanged: every text
+  // track renders via Remotion (legacy single-default path). We never mutate
+  // the input comp — both branches build a fresh tracks array.
+  const captionStrategy = opts.captionTracks;
+  const burnTrackId = captionStrategy?.burnTrackId ?? null;
+  const sidecarIdSet = new Set(captionStrategy?.sidecarTrackIds ?? []);
+  const sidecarTextTracks =
+    captionStrategy != null
+      ? comp.tracks.filter(
+          (t) => t.kind === "text" && sidecarIdSet.has(t.id),
+        )
+      : [];
+  const compForStage1: Composition =
+    captionStrategy != null
+      ? {
+          ...comp,
+          tracks: comp.tracks.filter(
+            (t) => t.kind !== "text" || t.id === burnTrackId,
+          ),
+        }
+      : comp;
+
   // Stage 1: Remotion render
   // TODO(phase-7): renderCompositionToMp4 does not yet accept an AbortSignal;
   // we check between stages so cancellation takes effect at the next boundary.
@@ -323,7 +438,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   checkAbort();
   onP("render", 0);
   const compForRender = rewriteClipSrcsToAbsolute(
-    { ...comp, title: opts.outputTitle } as Composition,
+    { ...compForStage1, title: opts.outputTitle } as Composition,
   );
   // R46 #3.d — opt-in streaming renderer. Either an env flag or a
   // per-composition experimentalFlags hint flips the path. We always
@@ -447,6 +562,37 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
     await rename(workingPath, finalPath);
   }
   onP("encode", 1);
+
+  // Phase H (issue #35) — sidecar SRT emission. After the final mp4 path is
+  // settled (so the filename stems match), write one `.srt` per text track
+  // the user flagged as Sidecar. Naming follows YouTube/FCP convention:
+  //   final-1717000000000.en.srt   ← English
+  //   final-1717000000000.zh.srt   ← Chinese
+  // Failure here is non-fatal: the user still gets the rendered video, and
+  // we surface the write error on stderr so a future job can retry. Hard-
+  // failing would mean a 25-minute render gets thrown away over a missing
+  // disk byte — explicitly the wrong trade.
+  if (sidecarTextTracks.length > 0) {
+    const baseNoExt = finalPath.replace(/\.mp4$/, "");
+    await Promise.all(
+      sidecarTextTracks.map(async (track) => {
+        const lang = sidecarLangSegment(
+          (track as { language?: string }).language,
+        );
+        const srtPath = `${baseNoExt}.${lang}.srt`;
+        const body = textTrackToSrt(track as { clips: any[] });
+        try {
+          await writeFile(srtPath, body, "utf-8");
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            `[render] sidecar SRT write failed for ${srtPath}:`,
+            err,
+          );
+        }
+      }),
+    );
+  }
 
   return finalPath;
 }

@@ -50,6 +50,14 @@ export interface RenderJobOptions {
   /** Optional metadata forwarded to runRenderPipeline (burnSubtitles, loudnessTargetLufs). */
   burnSubtitles?: boolean;
   loudnessTargetLufs?: number;
+  /** Phase H (issue #35) — Resolve-model per-text-track caption strategy.
+   *  Forwarded verbatim to runRenderPipeline. burnTrackId selects the lone
+   *  text track to bake into the video; sidecarTrackIds enumerate text
+   *  tracks emitted as `<output>.<lang>.srt` next to the final mp4. */
+  captionTracks?: {
+    burnTrackId?: string | null;
+    sidecarTrackIds?: string[];
+  };
 }
 
 export const TERMINAL_STATUSES: ReadonlySet<RenderJobStatus> = new Set([

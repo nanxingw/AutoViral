@@ -84,7 +84,20 @@ export interface RunRenderPipelineLike {
     proxy?: boolean;
     signal?: AbortSignal;
     onProgress?: (stage: RenderStage, pct: number) => void;
+    captionTracks?: {
+      burnTrackId?: string | null;
+      sidecarTrackIds?: string[];
+    };
   }): Promise<string>;
+}
+
+export interface JobExtras {
+  burnSubtitles?: boolean;
+  loudnessTargetLufs?: number;
+  captionTracks?: {
+    burnTrackId?: string | null;
+    sidecarTrackIds?: string[];
+  };
 }
 
 export interface WorkerDeps {
@@ -94,6 +107,12 @@ export interface WorkerDeps {
   outDirFor: (workId: string) => string;
   /** D3 — defaults to 1. Configurable via AUTOVIRAL_RENDER_CONCURRENCY env var (handled by caller). */
   concurrency?: number;
+  /** Phase H (#35) — pull runtime-only options (captionTracks, etc.) that
+   *  weren't persisted with the job row. Returns undefined for legacy jobs. */
+  extrasFor?: (jobId: string) => JobExtras | undefined;
+  /** Phase H (#35) — invoked once a job reaches a terminal status so the
+   *  caller can release whatever held the extras (memory map, weak ref, etc). */
+  clearExtras?: (jobId: string) => void;
 }
 
 export class RenderQueueWorker {
@@ -213,12 +232,20 @@ export class RenderQueueWorker {
       return;
     }
 
+    // Phase H (#35) — pull runtime-only options (captionTracks, etc.)
+    // out of the queue's in-memory side channel. Legacy jobs return
+    // undefined and fall back to the existing single-track render path.
+    const extras = this.deps.extrasFor?.(jobId);
+
     try {
       const out = await this.deps.runRenderPipeline({
         comp,
         outDir: this.deps.outDirFor(job.workId),
         proxy: job.type === "proxy",
         signal: ac.signal,
+        burnSubtitles: extras?.burnSubtitles,
+        loudnessTargetLufs: extras?.loudnessTargetLufs,
+        captionTracks: extras?.captionTracks,
         onProgress: (stage, pct) => {
           if (this.stopped) return;
           // R43 — aggregate progress across the 5 pipeline stages so the
@@ -267,6 +294,9 @@ export class RenderQueueWorker {
       }
     } finally {
       this.inflight.delete(jobId);
+      // Phase H (#35) — release the extras side-channel entry. Job has
+      // reached a terminal status (done/failed/cancelled) above.
+      this.deps.clearExtras?.(jobId);
     }
   }
 }

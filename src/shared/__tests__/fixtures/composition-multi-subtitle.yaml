@@ -1,0 +1,82 @@
+# Phase H (issue #35) — multi-subtitle track regression fixture.
+#
+# Two concurrent text lanes tagged with different ISO 639-1 language codes
+# (zh + en). The render-pipeline must support:
+#   • Burning exactly one selected track into the video (via Remotion <Text>).
+#   • Emitting every other text track as a sidecar SRT next to the mp4
+#     (filename convention `<output>.<language>.srt`).
+#   • Both off (track skipped — neither burned nor sidecar'd) is legal.
+#
+# Track ids follow the Phase-D `trk_<uuid8>` convention (issue #31). Lane
+# `language` is the new TrackSchema field added in #31 used to tag captions.
+#
+# Clip layout (4 s total):
+#   ZH    |==== 我们今天聊聊 AI ====|     trackOffset 0, duration 4
+#   EN    |======== Today we talk about AI ========|  trackOffset 0, duration 4
+id: c_multi_subtitle
+workId: w_multi_subtitle
+fps: 30
+width: 1080
+height: 1920
+duration: 4
+aspect: "9:16"
+updatedAt: "2026-05-25T00:00:00Z"
+tracks:
+  - id: trk_v0000001
+    kind: video
+    label: V1
+    displayOrder: 0
+    muted: false
+    hidden: false
+    clips: []
+  - id: trk_t0000001
+    kind: text
+    label: "CC1 · ZH"
+    displayOrder: 1
+    language: zh
+    muted: false
+    hidden: false
+    clips:
+      - id: tc_zh_1
+        kind: text
+        text: "我们今天聊聊 AI"
+        trackOffset: 0
+        duration: 4
+        style:
+          font: Inter
+          size: 64
+          weight: 700
+          italic: false
+          tracking: 0
+          color: "#ffffff"
+        position:
+          anchor: bottom
+          xPct: 50
+          yPct: 85
+  - id: trk_t0000002
+    kind: text
+    label: "CC2 · EN"
+    displayOrder: 2
+    language: en
+    muted: false
+    hidden: false
+    clips:
+      - id: tc_en_1
+        kind: text
+        text: "Today we talk about AI"
+        trackOffset: 0
+        duration: 4
+        style:
+          font: Inter
+          size: 56
+          weight: 600
+          italic: false
+          tracking: 0
+          color: "#ffffff"
+        position:
+          anchor: bottom
+          xPct: 50
+          yPct: 92
+assets: []
+provenance: []
+exportPresets: []

@@ -758,6 +758,27 @@ apiRoutes.post("/api/works/:id/render", async (c) => {
   }
   const body = await c.req.json().catch(() => ({}));
   const type: "full" | "proxy" = body.type === "proxy" ? "proxy" : "full";
+  // Phase H (#35) — pass through the per-track caption strategy when the
+  // client supplied one. Shape: { burnTrackId?: string | null,
+  // sidecarTrackIds?: string[] }. We only forward the keys that look like
+  // strings/arrays — defensively ignore anything else so a malformed body
+  // can't poison the worker's filter logic.
+  let captionTracks:
+    | { burnTrackId?: string | null; sidecarTrackIds?: string[] }
+    | undefined;
+  const raw = (body as { captionTracks?: unknown }).captionTracks;
+  if (raw && typeof raw === "object") {
+    const r = raw as Record<string, unknown>;
+    captionTracks = {
+      burnTrackId:
+        typeof r.burnTrackId === "string" || r.burnTrackId === null
+          ? (r.burnTrackId as string | null)
+          : undefined,
+      sidecarTrackIds: Array.isArray(r.sidecarTrackIds)
+        ? r.sidecarTrackIds.filter((x): x is string => typeof x === "string")
+        : undefined,
+    };
+  }
   const job = renderQueue.enqueue({
     workId: id,
     type,
@@ -767,6 +788,7 @@ apiRoutes.post("/api/works/:id/render", async (c) => {
       typeof body.loudnessTargetLufs === "number"
         ? body.loudnessTargetLufs
         : undefined,
+    captionTracks,
   });
   return c.json({ jobId: job.id });
 });

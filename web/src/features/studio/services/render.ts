@@ -5,6 +5,13 @@ export interface EnqueueRenderOptions {
   presetId?: string;
   burnSubtitles?: boolean;
   loudnessTargetLufs?: number;
+  /** Phase H (issue #35) — Resolve-model per-text-track caption strategy.
+   *  When supplied, takes precedence over `burnSubtitles` (which only chose
+   *  the first text track). */
+  captionTracks?: {
+    burnTrackId?: string | null;
+    sidecarTrackIds?: string[];
+  };
 }
 
 export async function enqueueRender(

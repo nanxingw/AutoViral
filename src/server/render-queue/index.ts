@@ -27,6 +27,14 @@ export class RenderQueue {
   private readonly db: Database.Database;
   private readonly store: RenderQueueStore;
   private readonly worker: RenderQueueWorker;
+  // Phase H (#35) — in-memory side channel for runtime-only options that
+  // don't belong in the persistent SQLite row (captionTracks is a UI-driven
+  // ephemeral choice — not a property of the job itself). We forward it to
+  // the worker via this map so the existing store schema stays untouched.
+  // Entries are cleared when the worker terminates a job. Survives only
+  // until process restart; that's intentional — replays after restart fall
+  // back to the legacy single-track render path.
+  private readonly extras = new Map<string, RenderJobOptions>();
 
   constructor(opts: RenderQueueOptions) {
     const path = opts.dbPath ?? defaultDbPath();
@@ -45,12 +53,19 @@ export class RenderQueue {
       loadComposition: opts.loadComposition,
       outDirFor: opts.outDirFor,
       concurrency: opts.concurrency,
+      extrasFor: (jobId) => this.extras.get(jobId),
+      clearExtras: (jobId) => this.extras.delete(jobId),
     });
     this.worker.start();
   }
 
   enqueue(opts: RenderJobOptions): RenderJob {
     const job = this.store.insert(opts);
+    // Only remember extras when the caller actually populated runtime-only
+    // fields — empty map is the cheap path for the legacy single-track UI.
+    if (opts.captionTracks || opts.burnSubtitles || opts.loudnessTargetLufs) {
+      this.extras.set(job.id, opts);
+    }
     this.worker.notify();
     return job;
   }
