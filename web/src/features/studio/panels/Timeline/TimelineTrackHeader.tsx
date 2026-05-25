@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -13,6 +14,7 @@ import { createPortal } from "react-dom";
 import { useComposition } from "../../store";
 import type { Track } from "../../types";
 import { useT } from "@/i18n/useT";
+import { clampMenuToViewport, type MenuPosition } from "./menuPosition";
 import styles from "./TimelineTrackHeader.module.css";
 
 /* ─── Phase F (issue #33) — track header row ───────────────────────────────
@@ -67,11 +69,6 @@ const LANGUAGE_OPTIONS: Array<{ value: string | null; label: string }> = [
   { value: "ja", label: "JA" },
   { value: null, label: "—" },
 ];
-
-interface MenuPosition {
-  top: number;
-  left: number;
-}
 
 interface Props {
   track: Track;
@@ -143,6 +140,22 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
       document.removeEventListener("mousedown", onMouseDown);
     };
   }, [menuPos, closeMenu]);
+
+  // #39 — keep the portaled menu inside the viewport. We can only measure the
+  // menu's real size after it mounts, so we clamp in a layout effect (before
+  // paint, to avoid an off-screen flash). clampMenuToViewport is idempotent,
+  // so the setMenuPos → re-measure cycle converges in one extra render rather
+  // than looping.
+  useLayoutEffect(() => {
+    if (!menuPos || !menuRef.current) return;
+    const { offsetWidth: w, offsetHeight: h } = menuRef.current;
+    const next = clampMenuToViewport(menuPos, w, h, window.innerWidth, window.innerHeight);
+    if (next.top !== menuPos.top || next.left !== menuPos.left) {
+      setMenuPos(next);
+    }
+    // langOpen is a dep because expanding the language submenu grows the menu
+    // height — re-clamp so the extra rows can't fall below the fold.
+  }, [menuPos, langOpen]);
 
   // Focus the input the moment we enter rename mode.
   useEffect(() => {
