@@ -1893,11 +1893,16 @@ async function researchTrends(platforms: string[]): Promise<{ collected: string[
 apiRoutes.get("/api/trends/:platform", async (c) => {
   const platform = c.req.param("platform");
   const trendsDir = join(homedir(), ".autoviral", "trends", platform);
+  // #49 — normalize legacy `{topics}` payloads to the `{items}` schema the
+  // frontend reads, at this single GET exit so every consumer benefits.
+  const { normalizeTrendsPayload } = await import("../trends/normalize.js");
+  const norm = (data: unknown, collectedAtFallback: string) =>
+    normalizeTrendsPayload(data, platform as never, collectedAtFallback);
 
   // Try data.json first (written by agent)
   try {
     const raw = await readFile(join(trendsDir, "data.json"), "utf-8");
-    return c.json(JSON.parse(raw));
+    return c.json(norm(JSON.parse(raw), new Date().toISOString()) as object);
   } catch { /* fall through */ }
 
   // Fall back to dated YAML files. e2e-report F184: skip underscore-prefixed
@@ -1915,7 +1920,13 @@ apiRoutes.get("/api/trends/:platform", async (c) => {
     if (yamlFiles.length === 0) return c.json({ error: "No trend data available" }, 404);
     const raw = await readFile(join(trendsDir, yamlFiles[0]), "utf-8");
     const data = yaml.load(raw);
-    return c.json(data);
+    // Derive a collectedAt fallback from the dated filename (e.g. 2026-05-11)
+    // so legacy topics inherit a plausible timestamp instead of "now".
+    const dateMatch = yamlFiles[0].match(/(\d{4}-\d{2}-\d{2})/);
+    const fallbackAt = dateMatch
+      ? new Date(`${dateMatch[1]}T00:00:00.000Z`).toISOString()
+      : new Date().toISOString();
+    return c.json(norm(data, fallbackAt) as object);
   } catch {
     return c.json({ error: "No trend data available" }, 404);
   }
