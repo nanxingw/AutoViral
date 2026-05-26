@@ -87,6 +87,25 @@ describe("SearchBox", () => {
     });
   });
 
+  // #55 — feature retired in refactor: server returns
+  // {stub:true, reason:"clip_index_removed_in_refactor"}. UI must (1) render
+  // an honest banner explaining unavailability, (2) disable the input, and
+  // (3) NOT render the dead "Build index" button (the regression vector).
+  it("renders the retired banner and hides the build button when feature is removed (#55)", async () => {
+    route({
+      "/api/clip-index/status": {
+        stub: true,
+        reason: "clip_index_removed_in_refactor",
+        assetCount: 0,
+      },
+    });
+    wrap(<SearchBox workId="w1" debounceMs={0} />);
+    expect(await screen.findByTestId("clip-index-removed-banner")).toBeInTheDocument();
+    const input = screen.getByLabelText(/search assets/i) as HTMLInputElement;
+    expect(input.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: /build index/i })).toBeNull();
+  });
+
   it("renders a stub install banner when status reports open_clip missing", async () => {
     route({
       "/api/clip-index/status": { stub: true, reason: "open_clip_torch not installed" },

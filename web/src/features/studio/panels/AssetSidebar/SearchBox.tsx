@@ -51,6 +51,12 @@ export function SearchBox({ workId, debounceMs = 300 }: Props) {
 
   const isInstallStub = stub?.reason?.includes("open_clip");
   const isNoIndex = stub?.reason === "no_index" || stub?.reason === "no_indexable_assets";
+  // #55: feature was removed in the agentic-terminal refactor — server returns
+  // {stub:true, reason:"clip_index_removed_in_refactor"} for build/search/status.
+  // Without an explicit branch, all three feedback paths (install / buildOk /
+  // isError) miss and the UI renders nothing → silent dead button. Honest
+  // degrade: disable the input, hide the build button, surface a banner.
+  const isRemoved = stub?.reason === "clip_index_removed_in_refactor";
 
   // Surface a one-line success when the build returns a non-stub result —
   // otherwise the button just disappears and the user has no confirmation
@@ -58,7 +64,12 @@ export function SearchBox({ workId, debounceMs = 300 }: Props) {
   // but takes a tick; this is the immediate post-click signal.
   const buildOk = build.data && build.data.stub === false ? build.data : null;
 
-  const inputDisabled = !!isInstallStub;
+  const inputDisabled = !!isInstallStub || isRemoved;
+  const placeholderKey = isRemoved
+    ? "studio.assetSearch.placeholderRemoved"
+    : inputDisabled
+      ? "studio.assetSearch.placeholderDisabled"
+      : "studio.assetSearch.placeholder";
 
   return (
     <div
@@ -73,7 +84,7 @@ export function SearchBox({ workId, debounceMs = 300 }: Props) {
       <input
         type="text"
         aria-label="Search assets"
-        placeholder={inputDisabled ? t("studio.assetSearch.placeholderDisabled") : t("studio.assetSearch.placeholder")}
+        placeholder={t(placeholderKey)}
         value={q}
         onChange={(e) => setQ(e.target.value)}
         disabled={inputDisabled}
@@ -114,8 +125,33 @@ export function SearchBox({ workId, debounceMs = 300 }: Props) {
         </div>
       )}
 
-      {/* No-index stub: surface the build button */}
-      {!isInstallStub && (isNoIndex || !status.data || statusStub) && (
+      {/* #55: feature retired in refactor — honest-degrade banner instead of
+          a dead button. Keep `data-testid` so QA/E2E can target it directly. */}
+      {isRemoved && (
+        <div
+          role="status"
+          data-testid="clip-index-removed-banner"
+          style={{
+            fontSize: 10,
+            fontFamily: "var(--font-mono)",
+            color: "var(--text-dimmer)",
+            lineHeight: 1.5,
+            padding: "6px 8px",
+            border: "1px dashed var(--glass-border)",
+            borderRadius: 6,
+          }}
+        >
+          <div style={{ color: "var(--text-dim)" }}>
+            {t("studio.assetSearch.stubRemoved")}
+          </div>
+        </div>
+      )}
+
+      {/* No-index stub: surface the build button. #55: do NOT render this
+          block when the feature is retired — otherwise the "Build index"
+          button comes back as a no-op and we regress to the silent-dead UI
+          state. The `!isRemoved` gate is load-bearing. */}
+      {!isInstallStub && !isRemoved && (isNoIndex || !status.data || statusStub) && (
         <>
           <button
             type="button"

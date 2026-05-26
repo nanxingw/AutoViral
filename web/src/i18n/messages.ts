@@ -197,7 +197,9 @@ export const en = {
     assetSearch: {
       placeholder: "Search assets…",
       placeholderDisabled: "Semantic search unavailable",
+      placeholderRemoved: "Semantic search retired in refactor",
       stubInstall: "Semantic search unavailable",
+      stubRemoved: "Semantic asset search was retired in the agentic-terminal refactor. It will return as a sibling skill — for now, scroll the Library below or filter by filename.",
       btnBuild: "Build index",
       btnBuilding: "Building…",
       buildFailed: "Index build failed: {msg}",
@@ -795,7 +797,9 @@ export const zh: DeepShape<Messages> = {
     assetSearch: {
       placeholder: "搜索素材…",
       placeholderDisabled: "语义搜索不可用",
+      placeholderRemoved: "语义搜索已在重构中下线",
       stubInstall: "语义搜索不可用",
+      stubRemoved: "语义素材搜索已在 agentic-terminal 重构中下线，未来会作为独立 skill 回归。当前请直接浏览下方素材库或按文件名筛选。",
       btnBuild: "构建索引",
       btnBuilding: "构建中…",
       buildFailed: "构建索引失败：{msg}",
