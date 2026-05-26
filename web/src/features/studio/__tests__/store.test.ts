@@ -317,6 +317,68 @@ describe("resizeClip (Phase 4.I)", () => {
     // remaining duration ≥ 0.05
     expect(aAfter.out - aAfter.in).toBeGreaterThanOrEqual(0.05);
   });
+
+  // #48 — resize is the sibling of splitClip (#46); a trim that changes the
+  // clip-local window must rebase/trim keyframes via the same helper. Before
+  // #48, resizeClip touched 0 keyframes, so trimming an animated clip left the
+  // curve mis-aligned with the picture by `delta` seconds.
+  it("left-edge trim rebases keyframes by -delta + boundary at local-0, dropping front frames (#48)", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 6 });
+    useComposition.setState({ comp: makeCompositionWithClips([a]), dragState: null });
+    useComposition.setState((s) => {
+      (s.comp!.tracks[0].clips[0] as any).keyframes = [
+        { property: "scale", time: 1, value: 1.2, easing: "linear" },
+        { property: "scale", time: 5, value: 1.5, easing: "linear" },
+      ];
+    });
+    useComposition.getState().resizeClip("a", "left", 2); // trim 2s off the front
+    const aAfter = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    expect(aAfter.trackOffset).toBeCloseTo(2);
+    // boundary@0 = curve value at local 2 (linear between 1.2@1 and 1.5@5):
+    //   1.2 + 0.3*((2-1)/(5-1)) = 1.275; kf@5 rebased to 5-2=3; kf@1 dropped.
+    expect(aAfter.keyframes.map((k: any) => k.time)).toEqual([0, 3]);
+    expect(aAfter.keyframes[0].value).toBeCloseTo(1.275);
+    expect(aAfter.keyframes[1].value).toBeCloseTo(1.5);
+  });
+
+  it("right-edge trim drops keyframes past the new end + adds a boundary at the cut (#48)", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 6 });
+    useComposition.setState({ comp: makeCompositionWithClips([a]), dragState: null });
+    useComposition.setState((s) => {
+      (s.comp!.tracks[0].clips[0] as any).keyframes = [
+        { property: "scale", time: 1, value: 1.2, easing: "linear" },
+        { property: "scale", time: 5, value: 1.5, easing: "linear" },
+      ];
+    });
+    useComposition.getState().resizeClip("a", "right", 3); // newDur = 3
+    const aAfter = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    expect(aAfter.out).toBeCloseTo(3);
+    // kf@1 kept; kf@5 dropped; boundary@3 = 1.2 + 0.3*((3-1)/4) = 1.35.
+    expect(aAfter.keyframes.map((k: any) => k.time)).toEqual([1, 3]);
+    expect(aAfter.keyframes[1].value).toBeCloseTo(1.35);
+  });
+
+  it("right-edge extend leaves in-bounds keyframes untouched (#48)", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 6 });
+    useComposition.setState({ comp: makeCompositionWithClips([a]), dragState: null });
+    useComposition.setState((s) => {
+      (s.comp!.tracks[0].clips[0] as any).keyframes = [
+        { property: "scale", time: 1, value: 1.2, easing: "linear" },
+        { property: "scale", time: 5, value: 1.5, easing: "linear" },
+      ];
+    });
+    useComposition.getState().resizeClip("a", "right", 99); // extend; no kf past 99
+    const aAfter = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    expect(aAfter.keyframes.map((k: any) => k.time)).toEqual([1, 5]);
+  });
+
+  it("leaves a clip with no keyframes untouched on trim — no empty array invented (#48)", () => {
+    const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 6 });
+    useComposition.setState({ comp: makeCompositionWithClips([a]), dragState: null });
+    useComposition.getState().resizeClip("a", "left", 2);
+    const aAfter = useComposition.getState().comp!.tracks[0].clips[0] as any;
+    expect(aAfter.keyframes).toBeUndefined();
+  });
 });
 
 describe("splitClip (Phase 4.G)", () => {

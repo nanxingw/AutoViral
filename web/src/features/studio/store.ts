@@ -326,11 +326,24 @@ export const useComposition = create<CompState>()(
               cap,
               Math.max(start + MIN_CLIP_DUR, newTime),
             );
+            const newDur = clamped - start;
             if (c.kind === "video" || c.kind === "audio") {
-              c.out = c.in + (clamped - start);
+              c.out = c.in + newDur;
             } else {
               // text / overlay
-              c.duration = clamped - start;
+              c.duration = newDur;
+            }
+            // #48 — a right-edge trim shrinks the clip-local window to
+            // [0, newDur). Keyframe time is trackOffset-relative and the left
+            // edge stays anchored, so existing times remain valid; only the
+            // tail past the new end must be dropped/clamped. Reuse the SAME
+            // helper splitClip uses (#46 sibling): splitKeyframesAtLocal's left
+            // half (.a) keeps keyframes before newDur and inserts a boundary at
+            // newDur preserving the curve up to the cut.
+            const rKfs = (c as { keyframes?: Keyframe[] }).keyframes;
+            if (rKfs && rKfs.some((k) => k.time > newDur + OFFSET_EPSILON)) {
+              (c as { keyframes?: Keyframe[] }).keyframes =
+                splitKeyframesAtLocal(rKfs, newDur).a;
             }
           } else {
             // Left edge: clamp to [0, end - MIN_CLIP_DUR].
@@ -343,6 +356,19 @@ export const useComposition = create<CompState>()(
             } else {
               c.duration -= delta;
               c.trackOffset = clamped;
+            }
+            // #48 — a left-edge trim shifts the clip's content start by `delta`
+            // seconds, so every keyframe (time is trackOffset-relative) must
+            // rebase by -delta and any frames now off the front drop. Reuse
+            // splitKeyframesAtLocal's right half (.b): a boundary at clip-local
+            // 0 holding the interpolated value at the cut, then later keyframes
+            // rebased to 0 — identical math to splitClip's child B (#46), which
+            // keeps C0 continuity instead of snapping to a held value. delta<0
+            // (left-extend) shifts every keyframe right, also handled by .b.
+            const lKfs = (c as { keyframes?: Keyframe[] }).keyframes;
+            if (lKfs && lKfs.length > 0 && Math.abs(delta) > OFFSET_EPSILON) {
+              (c as { keyframes?: Keyframe[] }).keyframes =
+                splitKeyframesAtLocal(lKfs, delta).b;
             }
           }
           s.comp.duration = Math.max(
