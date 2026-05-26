@@ -97,6 +97,40 @@ function getMimeType(filePath: string): string {
   return MIME_TYPES[ext] ?? "application/octet-stream";
 }
 
+// #52 — security headers for served user/agent-uploaded assets. Defends the
+// stored-XSS vector where an uploaded SVG with an inline <script> executes in
+// the app's own origin when its URL is navigated to directly.
+function assetSecurityHeaders(mimeType: string): Record<string, string> {
+  const headers: Record<string, string> = {
+    // Never let the browser sniff a declared type into a more dangerous one
+    // (e.g. an uploaded "image" that is actually HTML being rendered as HTML).
+    "X-Content-Type-Options": "nosniff",
+  };
+  if (mimeType === "image/svg+xml") {
+    // An SVG loaded as a top-level document (direct navigation / <iframe> /
+    // <object>) runs embedded <script> + event handlers → same-origin XSS.
+    // A locked-down CSP plus `sandbox` (no allow-scripts) disables script
+    // execution while the vector still renders shapes + inline styles. SVGs
+    // referenced via <img src> are unaffected — browsers already run those in
+    // a script-disabled "secure static" mode. This covers ANY path a malicious
+    // SVG lands on disk (user upload OR agent prompt-injection), not just the
+    // upload endpoint's allowlist.
+    headers["Content-Security-Policy"] =
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+  }
+  return headers;
+}
+
+// #52 — extension allowlist for the asset upload endpoint. Media only; markup /
+// script / arbitrary types are rejected at the door so they never reach disk.
+// SVG is allowed (it's a legitimate image format the library accepts) but is
+// neutralised on the way out by assetSecurityHeaders.
+const ALLOWED_UPLOAD_EXTS = new Set<string>([
+  ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", // images
+  ".mp4", ".webm", ".mov", ".m4v",                  // video
+  ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac",  // audio
+]);
+
 // ── WsBridge accessor (set by server/index.ts after construction) ─────────
 let wsBridge: WsBridge | null = null;
 
@@ -1184,6 +1218,7 @@ apiRoutes.get("/api/works/:id/assets/*", async (c) => {
             "Content-Range": `bytes ${start}-${end}/${fileSize}`,
             "Content-Length": String(chunkSize),
             "Accept-Ranges": "bytes",
+            ...assetSecurityHeaders(mimeType),
           },
         });
       }
@@ -1195,6 +1230,7 @@ apiRoutes.get("/api/works/:id/assets/*", async (c) => {
         "Content-Type": mimeType,
         "Content-Length": String(fileSize),
         "Accept-Ranges": "bytes",
+        ...assetSecurityHeaders(mimeType),
       },
     });
   } catch {
@@ -1221,6 +1257,20 @@ apiRoutes.post("/api/works/:id/assets/upload", async (c) => {
   // Sanitize basename to prevent path traversal (Codex review 2026-04-27)
   const safeBasename = file.name.replace(/[/\\]/g, "_").replace(/^\.+/, "");
   if (!safeBasename) return c.json({ error: "Invalid filename" }, 400);
+
+  // #52 — reject non-media types at the door (defense-in-depth first gate;
+  // the serve endpoint's nosniff + SVG CSP is the second). Markup / script /
+  // arbitrary extensions never reach disk.
+  const uploadExt = extname(safeBasename).toLowerCase();
+  if (!ALLOWED_UPLOAD_EXTS.has(uploadExt)) {
+    return c.json(
+      {
+        error: `Unsupported file type "${uploadExt || "(none)"}". Allowed: images, video, audio.`,
+        errorCode: "unsupported_asset_type",
+      },
+      415,
+    );
+  }
 
   let filePath: string;
   try {
