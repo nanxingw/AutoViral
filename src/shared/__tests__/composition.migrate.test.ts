@@ -135,6 +135,46 @@ describe("migrateLegacyTrackIds — pre-Phase-D fixture", () => {
   });
 });
 
+// #57 sweep — the migration must cover EVERY legacy on-disk shape, not just
+// the one the original author knew about. This block enumerates the known
+// legacy shapes (real disk samples taken from ~/.autoviral/works); adding a
+// new legacy format = add an entry here + a fixture.
+describe("migrateLegacyTrackIds — legacy-shape sweep (#57)", () => {
+  const CASES: Array<{ name: string; fixture: string; legacyIds: string[] }> = [
+    {
+      name: "video-0 / audio-0 / text-0 / overlay-0 (original schema)",
+      fixture: "composition-legacy-ids.yaml",
+      legacyIds: ["video-0", "audio-0", "text-0", "overlay-0"],
+    },
+    {
+      name: "t_v1 / t_a1 / t_s1 / t_o1 (pre-#31 real disk shape — #57)",
+      fixture: "composition-t-prefix-ids.yaml",
+      legacyIds: ["t_v1", "t_a1", "t_s1", "t_o1"],
+    },
+  ];
+
+  for (const tc of CASES) {
+    it(`rewrites all ids and round-trips through CompositionSchema.parse — ${tc.name}`, async () => {
+      const raw = (await import("js-yaml")).load(
+        await readFile(join(__dirname, "fixtures", tc.fixture), "utf8"),
+      );
+      const legacy = raw as { tracks: Array<{ id: string }> };
+      expect(legacy.tracks.map((t) => t.id)).toEqual(tc.legacyIds);
+
+      const migrated = migrateLegacyTrackIds(legacy);
+      // The schema round-trip is the load-bearing assertion — without #57's
+      // black-list rewrite this throws on the `t_v1` family with the exact
+      // "Track id must start with 'trk_'" Zod error users were hitting in
+      // production.
+      const comp = CompositionSchema.parse(migrated);
+      for (const t of comp.tracks) {
+        expect(t.id).toMatch(TRACK_ID_PREFIX_REGEX);
+      }
+      expect(comp.tracks.map((t) => t.displayOrder)).toEqual([0, 1, 2, 3]);
+    });
+  }
+});
+
 describe("Phase D regression — reorder two tracks then reload, clip refs survive", () => {
   // The whole point of switching from `audio-0` to `trk_<uuid>` is that
   // reordering or renaming a lane must not invalidate references to clips

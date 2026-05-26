@@ -602,12 +602,15 @@ export function findTrack(
  * - If `raw` is not the expected shape (not an object, no `tracks` array) we
  *   return it unchanged — `CompositionSchema.parse` will produce the proper
  *   structured error downstream.
- * - Already-migrated tracks (`id` already `trk_…`) keep their id and have
- *   `displayOrder` assigned from array index if missing. This means running
- *   the migration twice is a no-op for the second pass.
+ * - **#57**: rewrites ANY track id that doesn't already match `^trk_` —
+ *   originally the matcher whitelisted `(video|audio|text|overlay)-\d+`,
+ *   but real on-disk legacy works used the older `t_v1`/`t_a1`/... shape
+ *   that the whitelist missed, bricking 10/13 video works behind a raw
+ *   Zod failure. The black-list approach (rewrite anything that ISN'T the
+ *   canonical prefix) is idempotent — `trk_xxx` stays put — AND
+ *   forward-safe: any future undiscovered legacy shape gets rebuilt the
+ *   first time it's read, no migration code change required.
  */
-const LEGACY_TRACK_ID_REGEX = /^(video|audio|text|overlay)-\d+$/;
-
 export function migrateLegacyTrackIds(raw: unknown): unknown {
   if (!raw || typeof raw !== "object") return raw;
   const obj = raw as Record<string, unknown>;
@@ -618,7 +621,10 @@ export function migrateLegacyTrackIds(raw: unknown): unknown {
     if (!t || typeof t !== "object") return t;
     const track = t as Record<string, unknown>;
     const currentId = typeof track.id === "string" ? track.id : "";
-    const needsIdRewrite = LEGACY_TRACK_ID_REGEX.test(currentId);
+    // Anything that isn't the canonical `trk_` prefix gets rebuilt. This
+    // covers known legacy shapes (`video-0`, `t_v1`) AND future-unknown
+    // ones — the only invariant we care to enforce is the prefix itself.
+    const needsIdRewrite = !TRACK_ID_PREFIX_REGEX.test(currentId);
     const hasDisplayOrder = typeof track.displayOrder === "number";
     if (!needsIdRewrite && hasDisplayOrder) return track;
     return {

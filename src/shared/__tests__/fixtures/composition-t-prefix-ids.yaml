@@ -1,0 +1,52 @@
+# #57 — real-disk legacy shape (mirrors ~/.autoviral/works/w_20260507_1939_614).
+# The `t_<kind><n>` id format predated the `(video|audio|text|overlay)-\d+`
+# format that the original migration recognized; without coverage here the
+# migration silently skipped these tracks and `^trk_` schema bricked them.
+id: c_legacy_t_prefix
+workId: w_legacy_t_prefix
+fps: 30
+width: 1080
+height: 1920
+duration: 6.4
+aspect: '9:16'
+updatedAt: "2026-05-07T19:39:00Z"
+tracks:
+  - id: t_v1
+    kind: video
+    label: 视频 · Video
+    muted: false
+    hidden: false
+    clips:
+      - id: clip_v1_a
+        kind: video
+        src: output/cafe_dawn_v1.mp4
+        in: 0
+        out: 6.4
+        trackOffset: 0
+        transforms:
+          scale: 1
+          x: 0
+          y: 0
+          rotation: 0
+        filters:
+          brightness: 0
+          contrast: 0
+          saturation: 0
+  - id: t_a1
+    kind: audio
+    label: BGM · Music
+    muted: false
+    hidden: false
+    clips: []
+  - id: t_s1
+    kind: text
+    label: 字幕 · Subtitles
+    muted: false
+    hidden: false
+    clips: []
+  - id: t_o1
+    kind: overlay
+    label: 贴图 · Overlay
+    muted: false
+    hidden: false
+    clips: []
