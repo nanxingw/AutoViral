@@ -2,7 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import Editor from "./Editor";
+import Editor, { serializeForDirty } from "./Editor";
+import { makeEmptyCarousel } from "@/features/editor/types";
 
 vi.mock("@/features/editor/services/carousel", () => ({
   loadCarousel: vi.fn(async () => null),
@@ -68,5 +69,53 @@ describe("Editor (Phase 1 agentic-terminal layout)", () => {
   it("still renders the bottom Filmstrip tray (DRAG TO REORDER)", () => {
     mount();
     expect(screen.queryByText(/drag to reorder/i)).toBeTruthy();
+  });
+});
+
+// #50 — autosave must key off content-dirtiness, not structural shape. The old
+// guard (`slides.length<=1 && layers.length===0 → skip`) treated a single
+// empty slide as "untouched" forever, so global edits (grain / palette / layout
+// / bg) — which add no layer — were silently dropped. serializeForDirty is the
+// fingerprint that fixes this: a global edit changes it even when the old guard
+// would have short-circuited both carousels as "empty" and skipped the save.
+describe("autosave dirtiness fingerprint (#50)", () => {
+  it("ignores the volatile updatedAt timestamp", () => {
+    const car = makeEmptyCarousel("w1");
+    const later = { ...car, updatedAt: "2099-01-01T00:00:00.000Z" };
+    expect(serializeForDirty(car)).toBe(serializeForDirty(later));
+  });
+
+  it("a grain edit on a single empty slide changes the fingerprint (the core bug)", () => {
+    const base = makeEmptyCarousel("w1");
+    // The exact scenario the old isEmpty guard mis-skipped: 1 slide, 0 layers.
+    expect(base.slides.length).toBe(1);
+    expect(base.slides[0].layers.length).toBe(0);
+    const edited = {
+      ...base,
+      globals: { ...base.globals, effects: { ...base.globals.effects, grain: 0.99 } },
+    };
+    expect(serializeForDirty(edited)).not.toBe(serializeForDirty(base));
+  });
+
+  it("palette / layout / bg edits each change the fingerprint", () => {
+    const base = makeEmptyCarousel("w1");
+    const palette = { ...base, globals: { ...base.globals, palette: "noir" as const } };
+    const layout = { ...base, globals: { ...base.globals, layout: "left" as const } };
+    const bg = {
+      ...base,
+      slides: [{ ...base.slides[0], bg: { type: "image" as const, value: "/x.png" } }],
+    };
+    const baseline = serializeForDirty(base);
+    expect(serializeForDirty(palette)).not.toBe(baseline);
+    expect(serializeForDirty(layout)).not.toBe(baseline);
+    expect(serializeForDirty(bg)).not.toBe(baseline);
+  });
+
+  it("an unedited reload of the same content is not dirty (blank slate stays unsaved)", () => {
+    // Two pristine empties with the same id/workId fingerprint identically, so
+    // the autosave effect skips the PUT — preserving the legacy auto-build path.
+    const a = makeEmptyCarousel("w1");
+    const b = { ...a }; // same identity fields, no edits
+    expect(serializeForDirty(a)).toBe(serializeForDirty(b));
   });
 });

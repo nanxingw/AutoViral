@@ -3,7 +3,7 @@ import { useParams } from "react-router-dom";
 import type Konva from "konva";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useEditor } from "@/features/editor/store";
-import { makeEmptyCarousel } from "@/features/editor/types";
+import { makeEmptyCarousel, type Carousel } from "@/features/editor/types";
 import {
   loadCarousel,
   saveCarousel,
@@ -57,10 +57,27 @@ function VResizeHandle({ id }: { id: string }) {
   );
 }
 
+// #50 — dirtiness fingerprint for autosave. Serializes everything a user can
+// edit while dropping the volatile `updatedAt` timestamp (not user content),
+// so "current === load-time baseline" reliably means "nothing was edited yet"
+// regardless of structural shape. The old guard used layer-count as a proxy
+// for "untouched", which silently discarded global edits (grain / palette /
+// layout / bg) on single-slide/0-layer carousels because those edits don't add
+// a layer. Comparing against the loaded baseline fixes that AND the inverse
+// (deleting down to a 1-slide/0-layer carousel now persists, instead of being
+// mistaken for a pristine blank and resurrected on refresh).
+export function serializeForDirty(car: Carousel): string {
+  const { updatedAt: _updatedAt, ...rest } = car;
+  return JSON.stringify(rest);
+}
+
 export default function Editor() {
   const { workId } = useParams();
   const loadCar = useEditor((s) => s.loadCarousel);
   const car = useEditor((s) => s.car);
+  // Load-time (or last-persisted) snapshot, keyed by workId. autosave fires
+  // only when the live carousel diverges from this baseline (#50).
+  const baselineRef = useRef<{ workId: string; json: string } | null>(null);
   const [savedAt, setSavedAt] = useState<string | null>(null);
   // R20: surface autosave failures to UI. Previously `.catch(() => undefined)`
   // silently swallowed errors, leaving the topbar showing a stale "Saved · X"
@@ -147,13 +164,25 @@ export default function Editor() {
   useEffect(() => {
     if (!car || !workId) return;
     if (car.workId !== workId) return;   // load-in-progress; don't save stale data
-    // Skip empty carousel — persisting blank slate shadows future legacy auto-build
-    // (and is just noise for "user opened the page but didn't edit").
-    const isEmpty = car.slides.length <= 1 && car.slides[0]?.layers.length === 0;
-    if (isEmpty) return;
+    const currentJson = serializeForDirty(car);
+    // #50 — establish the load-time baseline once per workId. Until the user
+    // actually mutates the carousel, current === baseline and we skip the PUT.
+    // This preserves the original intent (don't persist an untouched blank
+    // slate, which would shadow legacy auto-build) WITHOUT using layer-count as
+    // a proxy for dirtiness — so a grain/palette/layout/bg edit on a single
+    // empty slide now persists instead of being silently dropped.
+    if (!baselineRef.current || baselineRef.current.workId !== workId) {
+      baselineRef.current = { workId, json: currentJson };
+      return; // freshly loaded — treat disk/empty content as already persisted
+    }
+    if (currentJson === baselineRef.current.json) return; // no net change
     const tid = setTimeout(() => {
       saveCarousel(workId, car)
         .then(() => {
+          // Advance the baseline to what we just persisted, so "dirty" means
+          // "differs from last saved state" — a later revert back to disk
+          // content still re-saves correctly.
+          baselineRef.current = { workId, json: currentJson };
           setSavedAt(fmtSavedAt(new Date(), locale));
           setSaveError(null);
         })
