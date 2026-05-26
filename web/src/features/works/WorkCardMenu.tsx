@@ -3,10 +3,11 @@ import { useT } from "@/i18n/useT";
 import styles from "./WorkCardMenu.module.css";
 
 interface WorkCardMenuProps {
+  onRename: () => void;
   onDelete: () => void;
 }
 
-export function WorkCardMenu({ onDelete }: WorkCardMenuProps) {
+export function WorkCardMenu({ onRename, onDelete }: WorkCardMenuProps) {
   const t = useT();
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -56,6 +57,24 @@ export function WorkCardMenu({ onDelete }: WorkCardMenuProps) {
       </button>
       {open && (
         <div className={styles.dropdown} role="menu">
+          {/* #51 — Rename wires the previously-orphaned useUpdateWork hook
+              (PUT /api/works/:id existed + the mutation hook existed, but no UI
+              ever called it). Mirrors Delete's icon + visible-label pattern. */}
+          <button
+            type="button"
+            role="menuitem"
+            className={styles.item}
+            title={t("works.menu.rename")}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              setOpen(false);
+              onRename();
+            }}
+          >
+            <PencilIcon />
+            <span className={styles.itemLabel}>{t("works.menu.rename")}</span>
+          </button>
           <button
             type="button"
             role="menuitem"
@@ -79,6 +98,15 @@ export function WorkCardMenu({ onDelete }: WorkCardMenuProps) {
         </div>
       )}
     </div>
+  );
+}
+
+function PencilIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M12 20h9" />
+      <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
   );
 }
 

@@ -396,6 +396,7 @@ export const en = {
     menu: {
       openMenu: "Open menu",
       delete: "Delete",
+      rename: "Rename",
     },
     delete: {
       title: 'Delete "{title}"?',
@@ -405,6 +406,14 @@ export const en = {
       confirm: "Delete",
       cancel: "Cancel",
       failed: "Couldn't delete. Try again.",
+    },
+    rename: {
+      title: "Rename work",
+      label: "Title",
+      placeholder: "Name this work",
+      confirm: "Save",
+      cancel: "Cancel",
+      failed: "Couldn't rename. Try again.",
     },
   },
   checkpoints: {
@@ -985,6 +994,7 @@ export const zh: DeepShape<Messages> = {
     menu: {
       openMenu: "打开菜单",
       delete: "删除",
+      rename: "重命名",
     },
     delete: {
       title: "删除“{title}”？",
@@ -994,6 +1004,14 @@ export const zh: DeepShape<Messages> = {
       confirm: "删除",
       cancel: "取消",
       failed: "删除失败，请重试。",
+    },
+    rename: {
+      title: "重命名作品",
+      label: "标题",
+      placeholder: "给这个作品起个名字",
+      confirm: "保存",
+      cancel: "取消",
+      failed: "重命名失败，请重试。",
     },
   },
   checkpoints: {

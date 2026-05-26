@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import clsx from "clsx";
-import { useDeleteWork, type WorkSummary } from "@/queries/works";
+import { useDeleteWork, useUpdateWork, type WorkSummary } from "@/queries/works";
 import styles from "./WorksGrid.module.css";
 import { useT, type MessageKey } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
 import { WorkCardMenu } from "./WorkCardMenu";
 import { DeleteWorkConfirm } from "./DeleteWorkConfirm";
+import { RenameWorkDialog } from "./RenameWorkDialog";
 
 interface Props {
   works: WorkSummary[];
@@ -56,6 +57,11 @@ export function WorksGrid({ works, filter }: Props) {
   // creating-state warning. Setting null both closes and clears.
   const [pendingDelete, setPendingDelete] = useState<WorkSummary | null>(null);
   const deleteMut = useDeleteWork();
+  // #51 — rename flow mirrors the delete flow: `pendingRename` is both the
+  // open flag and the payload the dialog edits. useUpdateWork was previously
+  // an orphaned hook with no caller.
+  const [pendingRename, setPendingRename] = useState<WorkSummary | null>(null);
+  const updateMut = useUpdateWork();
 
   return (
     <>
@@ -77,7 +83,10 @@ export function WorksGrid({ works, filter }: Props) {
             // WorkCardMenu.module.css's `:global(.cardHover):hover .trigger`
             // selector can reach across module boundaries.
             <div key={w.id} className={clsx(styles.card, "cardHover")}>
-              <WorkCardMenu onDelete={() => setPendingDelete(w)} />
+              <WorkCardMenu
+                onRename={() => setPendingRename(w)}
+                onDelete={() => setPendingDelete(w)}
+              />
               <Link
                 to={w.type === "short-video" ? `/studio/${w.id}` : `/editor/${w.id}`}
                 className={styles.cardInner}
@@ -111,6 +120,23 @@ export function WorksGrid({ works, filter }: Props) {
           deleteMut.mutate(pendingDelete.id, {
             onSuccess: () => setPendingDelete(null),
           });
+        }}
+      />
+      <RenameWorkDialog
+        open={!!pendingRename}
+        work={pendingRename}
+        pending={updateMut.isPending}
+        errored={updateMut.isError}
+        onCancel={() => {
+          updateMut.reset();
+          setPendingRename(null);
+        }}
+        onConfirm={(title) => {
+          if (!pendingRename) return;
+          updateMut.mutate(
+            { id: pendingRename.id, title },
+            { onSuccess: () => setPendingRename(null) },
+          );
         }}
       />
     </>

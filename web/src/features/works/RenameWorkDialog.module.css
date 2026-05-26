@@ -1,0 +1,85 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 200;
+  display: grid;
+  place-items: center;
+  animation: fade 180ms ease-out;
+}
+.box {
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 24px 24px 18px;
+  max-width: 440px;
+  width: calc(100vw - 48px);
+}
+.title {
+  margin: 0 0 14px;
+  font-size: 17px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.label {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+}
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--surface-2, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 9px 12px;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-color: var(--accent-lo);
+}
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+.btnGhost {
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 14px;
+  cursor: pointer;
+  color: var(--text);
+  font: inherit;
+}
+.btnGhost:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btnPrimary {
+  background: var(--accent);
+  color: var(--surface-0, #0a0b0f);
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 8px 16px;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 500;
+}
+.btnPrimary:disabled { opacity: 0.5; cursor: not-allowed; }
+.btnPrimary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.error {
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  background: rgba(196, 74, 74, 0.12);
+  border-left: 2px solid var(--danger, #c44a4a);
+  color: var(--danger, #c44a4a);
+  font-size: 12px;
+}
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
