@@ -195,6 +195,25 @@ describe("<TimelineTrackHeader /> — action wiring", () => {
     expect(spy).toHaveBeenCalledWith(video.id, { force: true });
   });
 
+  // #53 — the confirm copy used to promise "reversible via Undo", but Studio
+  // has no undo control wired (undoTrackOp is orphaned and a global undo would
+  // desync with un-snapshotted clip edits). The honest copy must NOT promise
+  // recovery and MUST warn the destructive removal can't be undone.
+  it("Remove confirm on a non-empty lane does NOT promise Undo, and warns it can't be undone (#53)", async () => {
+    const user = userEvent.setup();
+    const video = getTrack("video");
+    expect(video.clips.length).toBeGreaterThan(0);
+
+    render(<TimelineTrackHeader track={video} fallbackLabel="Video" height={56} />);
+    await user.click(screen.getByRole("button", { name: /track options/i }));
+    await user.click(screen.getByRole("menuitem", { name: /remove lane/i }));
+
+    const backdrop = screen.getByTestId("track-remove-confirm-backdrop");
+    expect(backdrop).toBeInTheDocument();
+    expect(backdrop.textContent ?? "").toMatch(/can't be undone/i);
+    expect(backdrop.textContent ?? "").not.toMatch(/reversible|via Undo/i);
+  });
+
   it("Remove confirm — Cancel button dismisses without calling removeTrack", async () => {
     const user = userEvent.setup();
     const video = getTrack("video");
