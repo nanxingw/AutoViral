@@ -127,7 +127,17 @@ function NumberField({
         step={step}
         onChange={(e) => {
           const v = Number(e.target.value);
-          if (Number.isFinite(v)) onChange(v);
+          if (!Number.isFinite(v)) return;
+          // #58 — HTML min/max only gate the spinner + :invalid styling,
+          // not typed values; without an edit-site clamp the controlled
+          // input round-trips Y%=999 / duration=0 straight into the
+          // store and renders garbage. Mirror the StaticPropsPanel
+          // pattern: clamp when bounds are provided, pass-through when
+          // they aren't.
+          let clamped = v;
+          if (typeof min === "number") clamped = Math.max(min, clamped);
+          if (typeof max === "number") clamped = Math.min(max, clamped);
+          onChange(clamped);
         }}
         style={{
           width: "100%",
