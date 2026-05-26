@@ -2,6 +2,7 @@ import { useState } from "react";
 import { VariantSwitcher } from "./VariantSwitcher";
 import { KeyframePanel } from "./KeyframePanel";
 import { TextClipPanel } from "./TextClipPanel";
+import { StaticPropsPanel } from "./StaticPropsPanel";
 import { DiveCanvas } from "../../dive/DiveCanvas";
 import { useT } from "@/i18n/useT";
 
@@ -34,6 +35,10 @@ export function InspectorTab() {
         </div>
         <VariantSwitcher />
         <TextClipPanel />
+        {/* #56 — static transform/opacity/filter/volume controls.
+            Sits above KeyframePanel: static value is the no-keyframes
+            baseline; keyframes layer animation on top of it. */}
+        <StaticPropsPanel />
         <KeyframePanel />
         <button
           type="button"
