@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { PlatformTabs } from "@/features/explore/PlatformTabs";
 import { AnglesCard, type Angle } from "@/features/explore/AnglesCard";
 import { TrendingPanel } from "@/features/explore/TrendingPanel";
-import { usePlatformTrends, type Platform } from "@/queries/trends";
+import { usePlatformTrends, type Platform, SUPPORTED_REFRESH_PLATFORMS } from "@/queries/trends";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/i18n/useT";
 
@@ -52,9 +52,11 @@ export default function Explore() {
     try {
       // The /api/trends/refresh endpoint runs sync research on the supported
       // platforms and returns when the new yaml lands; we then nudge react-query.
+      // #82 — only request the platforms that actually have a collector
+      // (the server ignored youtube/tiktok anyway). Single source of truth.
       const result = await apiFetch<{ collected: string[]; errors: string[] }>(`/api/trends/refresh`, {
         method: "POST",
-        body: { platforms: ["youtube", "tiktok", "xiaohongshu", "douyin"] },
+        body: { platforms: [...SUPPORTED_REFRESH_PLATFORMS] },
       });
       if (result.collected.length > 0 && result.errors.length === 0) {
         setCollectStatus("queued"); // full success

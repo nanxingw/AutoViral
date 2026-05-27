@@ -5,10 +5,16 @@ import { ApiError, apiFetch } from "@/lib/api";
 export type Platform = "youtube" | "tiktok" | "xiaohongshu" | "douyin";
 export type ItemSource = "scraper" | "rss" | "agent_websearch" | "proxy";
 
-// e2e-report (2026-05-12): all four platforms are now first-class citizens.
-// Source field on each item distinguishes real scrape from agent inference.
+// #82 — THE single source of truth for "which platforms have a live trend
+// collector". Only 小红书 + 抖音 do: the /api/trends/refresh endpoint collects
+// just these two (Explore.tsx) and 抖音 is the dedicated-script center
+// (api.ts runTrendScript). YouTube/TikTok have no server-side collector, so
+// they are NOT live — landing there shows trendingPanelUnsupported (which was
+// dead code while this list held all 4). PlatformTabs derives its "live" dot
+// from this list so the three surfaces (dot / refresh / unsupported copy)
+// can't drift apart again.
 export const SUPPORTED_REFRESH_PLATFORMS: readonly Platform[] = [
-  "youtube", "tiktok", "xiaohongshu", "douyin",
+  "xiaohongshu", "douyin",
 ] as const;
 
 export interface TrendItem {
