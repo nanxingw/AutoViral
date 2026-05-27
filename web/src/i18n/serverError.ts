@@ -13,12 +13,31 @@ type TFn = (key: MessageKey, params?: Record<string, string | number>) => string
  * is opt-in: server emits it, frontend defines an i18n key, and this
  * helper picks it up automatically.
  */
-export function localizeApiError(err: unknown, t: TFn): string {
+export interface ApiErrorParts {
+  /** Localized, human-readable headline — safe to show non-technical users.
+   *  For schema-validation codes (composition_unreadable / carousel_unreadable
+   *  / composition_yaml_invalid) this NO LONGER embeds the raw server detail
+   *  (#61: a full ZodError JSON dump was being shown as the headline). */
+  message: string;
+  /** Raw technical detail from the server (e.g. ZodError JSON) for a
+   *  collapsible "technical details" panel, NOT the headline. "" when none. */
+  detail: string;
+}
+
+/**
+ * #61 — split a server `ApiError` into a human headline + raw technical detail.
+ * The headline comes from `serverErrors.<code>`; the detail is the server's
+ * `body.detail` verbatim. Callers that want a single string use
+ * `localizeApiError` (headline only); callers with a collapsible diagnostic
+ * panel (Studio/Editor load-failure screens) use the parts.
+ */
+export function localizeApiErrorParts(err: unknown, t: TFn): ApiErrorParts {
+  let detail = "";
   if (err && typeof err === "object" && "errorCode" in err) {
     const code = (err as ApiError).errorCode;
     if (typeof code === "string") {
       const body = (err as ApiError).body;
-      const detail =
+      detail =
         body && typeof body === "object" && "detail" in body
           ? String((body as { detail: unknown }).detail ?? "")
           : "";
@@ -29,9 +48,13 @@ export function localizeApiError(err: unknown, t: TFn): string {
       // If walk() returned the key verbatim (unmapped code), use the
       // raw err.message instead — it's at least the English server text.
       if (localized !== `serverErrors.${code}`) {
-        return localized;
+        return { message: localized, detail };
       }
     }
   }
-  return err instanceof Error ? err.message : String(err);
+  return { message: err instanceof Error ? err.message : String(err), detail };
+}
+
+export function localizeApiError(err: unknown, t: TFn): string {
+  return localizeApiErrorParts(err, t).message;
 }

@@ -20,7 +20,8 @@ import { useShortcuts } from "@/features/studio/hooks/useShortcuts";
 import { useFocusSync } from "@/stores/useFocusSync";
 import { useT } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
-import { localizeApiError } from "@/i18n/serverError";
+import { localizeApiErrorParts } from "@/i18n/serverError";
+import { LoadErrorScreen } from "@/components/LoadErrorScreen";
 import { useWorks } from "@/queries/works";
 import NotFound from "./NotFound";
 
@@ -103,7 +104,9 @@ export default function Studio() {
   // the UI no longer auto-refetches. Phase 3 Task 3.13 restores it via a
   // server-side file watcher → WebSocket → studio refetch.
 
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // #61 — carry message + raw detail separately so the failure screen shows a
+  // human headline and tucks the raw ZodError into a collapsible panel.
+  const [loadError, setLoadError] = useState<{ message: string; detail: string } | null>(null);
   // Mirror of Editor.tsx Round 16 typo guard — defer makeEmptyComposition
   // until we can cross-check works list. 404 on a real-but-unsaved work
   // is fine; 404 on a typo'd workId should NotFound instead of silently
@@ -142,11 +145,15 @@ export default function Studio() {
           // empty comp. Show the error and leave comp null so autosave is
           // skipped (it requires comp.workId === workId). (Codex review 2026-04-27)
           // R26: server-side errorCode → i18n. unmapped → fall back to msg.
-          setLoadError(
-            t("studio.loadError.body", {
-              msg: localizeApiError(err, t) || t("studio.loadError.serverFallbackMsg"),
+          // #61: the raw detail (ZodError JSON) goes to the collapsible panel,
+          // never into the headline sentence.
+          const parts = localizeApiErrorParts(err, t);
+          setLoadError({
+            message: t("studio.loadError.body", {
+              msg: parts.message || t("studio.loadError.serverFallbackMsg"),
             }),
-          );
+            detail: parts.detail,
+          });
         } else {
           // Network unreachable / non-500 non-404 — fresh-start fallback,
           // doesn't go through typo guard (no 404 → no ambiguity).
@@ -204,13 +211,12 @@ export default function Studio() {
   if (loadEmpty && workInList === false) return <NotFound />;
   if (loadError) {
     return (
-      <div style={{ padding: 32, fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
-        <h2>{t("studio.loadError.title")}</h2>
-        <p>{loadError}</p>
-        <p style={{ fontSize: 12, opacity: 0.7 }}>
-          {t("studio.loadError.helpText", { workId })}
-        </p>
-      </div>
+      <LoadErrorScreen
+        title={t("studio.loadError.title")}
+        message={loadError.message}
+        detail={loadError.detail}
+        helpText={t("studio.loadError.helpText", { workId })}
+      />
     );
   }
 

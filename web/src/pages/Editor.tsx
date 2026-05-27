@@ -16,7 +16,8 @@ import { useExport } from "@/features/editor/hooks/useExport";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { useT } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
-import { localizeApiError } from "@/i18n/serverError";
+import { localizeApiErrorParts } from "@/i18n/serverError";
+import { LoadErrorScreen } from "@/components/LoadErrorScreen";
 import { useWorks } from "@/queries/works";
 import NotFound from "./NotFound";
 
@@ -90,7 +91,9 @@ export default function Editor() {
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
 
-  const [loadError, setLoadError] = useState<string | null>(null);
+  // #61 — message + raw detail split so the failure screen shows a human
+  // headline and collapses the raw ZodError into a technical-details panel.
+  const [loadError, setLoadError] = useState<{ message: string; detail: string } | null>(null);
   // Tracks "loadCarousel returned null" — i.e. the work id 404'd. Defer
   // makeEmptyCarousel until we can cross-check works list (Round 16): a
   // 404 on a real-but-unsaved work is fine (NewWorkCard just created it,
@@ -128,11 +131,14 @@ export default function Editor() {
           // Don't overwrite a corrupt carousel.yaml with an empty one.
           // R26: localize the server error via errorCode → i18n key, fall
           // back to err.message for unmapped codes.
-          setLoadError(
-            t("editor.loadError.body", {
-              msg: localizeApiError(err, t) || t("editor.loadError.serverFallbackMsg"),
+          // #61: raw detail (ZodError JSON) → collapsible panel, not headline.
+          const parts = localizeApiErrorParts(err, t);
+          setLoadError({
+            message: t("editor.loadError.body", {
+              msg: parts.message || t("editor.loadError.serverFallbackMsg"),
             }),
-          );
+            detail: parts.detail,
+          });
         } else {
           // Network unreachable / non-500 non-404 — fresh-start fallback,
           // same legacy behaviour, doesn't trigger typo guard.
@@ -202,13 +208,12 @@ export default function Editor() {
   if (loadEmpty && workInList === false) return <NotFound />;
   if (loadError) {
     return (
-      <div style={{ padding: 32, fontFamily: "var(--font-mono)", color: "var(--accent)" }}>
-        <h2>{t("editor.loadError.title")}</h2>
-        <p>{loadError}</p>
-        <p style={{ fontSize: 12, opacity: 0.7 }}>
-          {t("editor.loadError.helpText", { workId })}
-        </p>
-      </div>
+      <LoadErrorScreen
+        title={t("editor.loadError.title")}
+        message={loadError.message}
+        detail={loadError.detail}
+        helpText={t("editor.loadError.helpText", { workId })}
+      />
     );
   }
 
