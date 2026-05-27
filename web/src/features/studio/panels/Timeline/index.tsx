@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { useComposition } from "../../store";
 import { Track } from "./Track";
+import { Ruler } from "./Ruler";
 import { BladeTool } from "./BladeTool";
 import { Playhead } from "./Playhead";
 import { TimelineTrackHeader } from "./TimelineTrackHeader";
@@ -104,7 +105,7 @@ export function Timeline() {
         {/* Lanes (label + waveform area) */}
         <div style={{ flex: 1, overflow: "auto", position: "relative" }}>
           {/* Ruler */}
-          <Ruler duration={comp.duration} pxPerSecond={pxPerSecond} totalWidth={totalWidth} />
+          <Ruler duration={comp.duration} pxPerSecond={pxPerSecond} totalWidth={totalWidth} fps={comp.fps} />
           {/* Tracks — Phase F (issue #33). Sort by displayOrder so the visual
               order tracks the schema invariant; render TimelineTrackHeader
               as a sibling of Track (sitting in the same 110px sticky-left
@@ -211,58 +212,6 @@ export function Timeline() {
             )}
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Ruler({
-  duration,
-  pxPerSecond,
-  totalWidth,
-}: {
-  duration: number;
-  pxPerSecond: number;
-  totalWidth: number;
-}) {
-  const step = duration > 60 ? 10 : duration > 20 ? 4 : 2;
-  const ticks: number[] = [];
-  for (let s = 0; s <= duration; s += step) ticks.push(s);
-
-  return (
-    <div
-      style={{
-        height: 22,
-        borderBottom: "1px solid var(--divider)",
-        position: "sticky",
-        top: 0,
-        background: "var(--surface-1)",
-        backdropFilter: "blur(8px)",
-        zIndex: 4,
-        display: "flex",
-      }}
-    >
-      <div style={{ width: 152, flexShrink: 0, borderRight: "1px solid var(--divider)" }} />
-      <div style={{ flex: 1, position: "relative", minWidth: totalWidth }}>
-        {ticks.map((s) => (
-          <div
-            key={s}
-            style={{
-              position: "absolute",
-              left: s * pxPerSecond,
-              top: 0,
-              bottom: 0,
-              borderLeft: "1px solid var(--divider)",
-              paddingLeft: 4,
-              fontSize: 9,
-              fontFamily: "var(--font-mono)",
-              color: "var(--text-dimmer)",
-              lineHeight: "22px",
-            }}
-          >
-            {Math.floor(s / 60)}:{(s % 60).toString().padStart(2, "0")}
-          </div>
-        ))}
       </div>
     </div>
   );
