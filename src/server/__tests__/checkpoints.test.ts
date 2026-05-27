@@ -143,4 +143,71 @@ describe("checkpoints", () => {
       expect(await restoreCheckpoint("w_test", "..__abc__carousel.yaml")).toBeNull();
     });
   });
+
+  // #90 — manual snapshots can carry an optional user-supplied label, stored
+  // in a sidecar `.labels.json` keyed by filename (NOT in the filename, which
+  // is a strict ts__sha__deliverable identifier).
+  describe("snapshot labels (#90)", () => {
+    it("createCheckpoint persists a label that listCheckpoints reads back", async () => {
+      await withTempDataDir(async (dir) => {
+        const { createCheckpoint, listCheckpoints } = await import("../checkpoints.js");
+        const wDir = join(dir, "works", "w_test");
+        await mkdir(wDir, { recursive: true });
+        await writeFile(join(wDir, "carousel.yaml"), "v: 1\n", "utf-8");
+
+        const written = await createCheckpoint("w_test", "before risky edit");
+        expect(written).toHaveLength(1);
+        expect(written[0].label).toBe("before risky edit");
+
+        // Survives a fresh list (persisted to the sidecar, not just in-memory).
+        const list = await listCheckpoints("w_test");
+        expect(list[0].label).toBe("before risky edit");
+      });
+    });
+
+    it("an unlabelled (auto) snapshot has no label, and the sidecar isn't listed as a checkpoint", async () => {
+      await withTempDataDir(async (dir) => {
+        const { createCheckpoint, listCheckpoints } = await import("../checkpoints.js");
+        const wDir = join(dir, "works", "w_test");
+        await mkdir(wDir, { recursive: true });
+        await writeFile(join(wDir, "carousel.yaml"), "v: 1\n", "utf-8");
+        // labelled create writes the sidecar file into .snapshots/
+        await createCheckpoint("w_test", "named");
+        await writeFile(join(wDir, "carousel.yaml"), "v: 2\n", "utf-8");
+        const auto = await createCheckpoint("w_test"); // no label
+        expect(auto[0].label).toBeUndefined();
+
+        const list = await listCheckpoints("w_test");
+        // Two real checkpoints only — `.labels.json` must NOT parse as one.
+        expect(list).toHaveLength(2);
+        expect(list.some((c) => c.file === ".labels.json")).toBe(false);
+        // The labelled one kept its label; the auto one stays unlabelled.
+        const named = list.find((c) => c.label === "named");
+        expect(named).toBeDefined();
+        expect(list.filter((c) => c.label === undefined)).toHaveLength(1);
+      });
+    });
+
+    it("trims whitespace, caps at 80 chars, and treats blank as unlabelled", async () => {
+      await withTempDataDir(async (dir) => {
+        const { createCheckpoint, listCheckpoints } = await import("../checkpoints.js");
+        const wDir = join(dir, "works", "w_test");
+        await mkdir(wDir, { recursive: true });
+
+        // Blank/whitespace → unlabelled.
+        await writeFile(join(wDir, "carousel.yaml"), "v: 1\n", "utf-8");
+        const blank = await createCheckpoint("w_test", "   ");
+        expect(blank[0].label).toBeUndefined();
+
+        // Trim + cap.
+        await writeFile(join(wDir, "carousel.yaml"), "v: 2\n", "utf-8");
+        const long = "x".repeat(200);
+        const capped = await createCheckpoint("w_test", `  ${long}  `);
+        expect(capped[0].label).toBe("x".repeat(80));
+
+        const list = await listCheckpoints("w_test");
+        expect(list.find((c) => c.label?.length === 80)).toBeDefined();
+      });
+    });
+  });
 });

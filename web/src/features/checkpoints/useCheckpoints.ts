@@ -10,6 +10,8 @@ export interface Checkpoint {
   ts: string;
   sha: string;
   bytes: number;
+  /** #90 — optional user-supplied name (manual snapshots only). */
+  label?: string;
 }
 
 /**
@@ -74,14 +76,17 @@ export function useCheckpoints(workId: string, enabled = true) {
     }
   };
 
-  const createManual = async () => {
+  const createManual = async (label?: string) => {
     setCreatingSnapshot(true);
     setSnapshotError(null);
     setSnapshotResult(null);
     try {
+      // #90 — forward the optional label; the server trims/caps it and
+      // treats empty as an unlabelled snapshot.
+      const trimmed = label?.trim();
       const out = await apiFetch<{ written: string[] }>(
         `/api/works/${workId}/checkpoints`,
-        { method: "POST", body: {} },
+        { method: "POST", body: trimmed ? { label: trimmed } : {} },
       );
       const created = Array.isArray(out.written) && out.written.length > 0;
       setSnapshotResult(created ? "created" : "unchanged");

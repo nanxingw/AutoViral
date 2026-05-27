@@ -51,6 +51,9 @@ export function CheckpointsMenu({ workId }: { workId: string }) {
   // R101 F417 — pending checkpoint awaits user confirmation. Null means
   // dialog is closed. Mirrors AITab + Filmstrip confirm flow.
   const [pendingRestore, setPendingRestore] = useState<Checkpoint | null>(null);
+  // #90 — optional name for the next manual snapshot. Cleared after a
+  // successful create so the field doesn't carry a stale label.
+  const [snapshotLabel, setSnapshotLabel] = useState("");
 
   // R22: previously this called `setOpen(false)` immediately on click — but
   // if restore later rejected, the dropdown was already closed and the user
@@ -165,10 +168,39 @@ export function CheckpointsMenu({ workId }: { workId: string }) {
           {/* R101 F422 — manual "take snapshot now" trigger sits at the
               top so it's the first thing the user sees when they reach
               for "I'm about to do something risky, save first." */}
+          {/* #90 — optional name for the snapshot. Enter triggers the save
+              so a user can type-then-Enter without reaching for the button. */}
+          <input
+            type="text"
+            aria-label={t("checkpoints.labelPlaceholder")}
+            placeholder={t("checkpoints.labelPlaceholder")}
+            value={snapshotLabel}
+            maxLength={80}
+            disabled={creatingSnapshot}
+            onChange={(e) => setSnapshotLabel(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !creatingSnapshot) {
+                e.preventDefault();
+                void createManual(snapshotLabel).then(() => setSnapshotLabel(""));
+              }
+            }}
+            style={{
+              width: "100%",
+              boxSizing: "border-box",
+              padding: "6px 9px",
+              marginBottom: 4,
+              border: "1px solid var(--glass-border)",
+              borderRadius: 4,
+              background: "var(--surface-0, transparent)",
+              color: "var(--text)",
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+            }}
+          />
           <button
             type="button"
             onClick={() => {
-              void createManual();
+              void createManual(snapshotLabel).then(() => setSnapshotLabel(""));
             }}
             disabled={creatingSnapshot}
             style={{
@@ -279,8 +311,34 @@ export function CheckpointsMenu({ workId }: { workId: string }) {
               }}
             >
               <span style={{ color: "var(--accent)" }}>{c.sha}</span>
-              <span style={{ color: "var(--text-soft)" }}>
-                {fmtTs(c.ts, locale, t)} · {c.deliverable.replace(".yaml", "")}
+              <span style={{ color: "var(--text-soft)", minWidth: 0 }}>
+                {/* #90 — a named snapshot leads with its label so multiple
+                    snapshots are distinguishable; sha·time·deliverable
+                    drop to a secondary line. Unnamed snapshots keep the
+                    original single-line meta. */}
+                {c.label ? (
+                  <span style={{ display: "block", minWidth: 0 }}>
+                    <span
+                      style={{
+                        display: "block",
+                        color: "var(--text)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                      }}
+                      title={c.label}
+                    >
+                      {c.label}
+                    </span>
+                    <span style={{ fontSize: 10, color: "var(--text-dimmer)" }}>
+                      {fmtTs(c.ts, locale, t)} · {c.deliverable.replace(".yaml", "")}
+                    </span>
+                  </span>
+                ) : (
+                  <>
+                    {fmtTs(c.ts, locale, t)} · {c.deliverable.replace(".yaml", "")}
+                  </>
+                )}
               </span>
               <span style={{ fontSize: 10, color: "var(--text-dimmer)" }}>
                 {(c.bytes / 1024).toFixed(1)}KB

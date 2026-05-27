@@ -529,6 +529,8 @@ export const en = {
     snapshotCreated: "Snapshot saved · history updated",
     snapshotUnchanged: "Already up to date · nothing changed since last snapshot",
     snapshotFailed: "Snapshot failed: {msg}",
+    // #90 — optional name for a manual snapshot
+    labelPlaceholder: "Name this snapshot (optional)",
     // R101 F417 — restore confirm dialog
     restoreConfirm: {
       title: "Restore the version from {age}?",
@@ -1225,6 +1227,8 @@ export const zh: DeepShape<Messages> = {
     snapshotCreated: "快照已保存 · 历史已更新",
     snapshotUnchanged: "已是最新版 · 自上次快照后无改动",
     snapshotFailed: "快照失败：{msg}",
+    // #90 — 手动快照的可选命名
+    labelPlaceholder: "为这个快照命名（可选）",
     // R101 F417 — 恢复确认弹窗
     restoreConfirm: {
       title: "恢复到 {age} 的版本？",

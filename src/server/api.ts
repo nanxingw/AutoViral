@@ -3136,6 +3136,12 @@ apiRoutes.post("/api/works/:id/checkpoints/restore", async (c) => {
 apiRoutes.post("/api/works/:id/checkpoints", async (c) => {
   const id = c.req.param("id");
   if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId" }, 400);
-  const written = await createCheckpoint(id);
+  // #90 — optional user-supplied label. createCheckpoint trims/caps it and
+  // treats empty as unlabelled, so passing through whatever the body holds
+  // (or nothing) is safe.
+  const body = await c.req
+    .json<{ label?: string }>()
+    .catch(() => ({} as { label?: string }));
+  const written = await createCheckpoint(id, body.label);
   return c.json({ written });
 });
