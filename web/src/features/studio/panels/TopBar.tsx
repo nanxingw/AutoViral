@@ -12,6 +12,7 @@ import { ExportProgress } from "../render-status/ExportProgress";
 import { CheckpointsMenu } from "@/features/checkpoints/CheckpointsMenu";
 import { ExportCaptionsDialog } from "./Export/ExportCaptionsDialog";
 import type { CaptionTrackOption } from "./Export/CaptionTracksSection";
+import { ShortcutsCheatsheet } from "./ShortcutsCheatsheet";
 
 export interface TopBarProps {
   workId: string;
@@ -38,6 +39,7 @@ export function TopBar({
     type: "full",
   });
   const [captionsDialogOpen, setCaptionsDialogOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   // #62 — reentrancy guard for the multi-minute export. enqueueingRef is the
   // REAL lock: a double-click fires two onClicks in the same tick, before any
   // setState has flushed, so a useState flag would still be false on the second
@@ -93,6 +95,28 @@ export function TopBar({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [activeJobId]);
+
+  // #89 — `?` opens the shortcuts cheatsheet (the canonical discoverability
+  // gesture). Mirror useShortcuts' input-element guard so typing a literal
+  // "?" into a field / textarea doesn't pop the modal.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "?") return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        tag === "SELECT" ||
+        (e.target as HTMLElement | null)?.isContentEditable
+      ) {
+        return;
+      }
+      e.preventDefault();
+      setShortcutsOpen(true);
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div
@@ -215,6 +239,32 @@ export function TopBar({
       <CheckpointsMenu workId={workId} />
 
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
+
+      <button
+        type="button"
+        data-bare
+        onClick={() => setShortcutsOpen(true)}
+        aria-label={t("studio.topBar.shortcuts")}
+        title={t("studio.topBar.shortcuts")}
+        data-testid="shortcuts-toggle"
+        style={{
+          width: 32,
+          height: 32,
+          borderRadius: 8,
+          border: "1px solid var(--glass-border)",
+          background: "var(--surface-0)",
+          color: "var(--text-dim)",
+          display: "grid",
+          placeItems: "center",
+          cursor: "pointer",
+          flexShrink: 0,
+          fontFamily: "var(--font-mono)",
+          fontSize: 14,
+          fontWeight: 600,
+        }}
+      >
+        ?
+      </button>
 
       {onToggleSettings ? (
         <button
@@ -381,6 +431,10 @@ export function TopBar({
             });
           }}
         />
+      ) : null}
+
+      {shortcutsOpen ? (
+        <ShortcutsCheatsheet onClose={() => setShortcutsOpen(false)} />
       ) : null}
     </div>
   );

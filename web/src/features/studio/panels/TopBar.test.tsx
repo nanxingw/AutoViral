@@ -85,6 +85,35 @@ describe("TopBar (v4)", () => {
     );
     expect(screen.getByText(/导出|Export/)).toBeTruthy();
   });
+
+  // #89 — keyboard-shortcut discoverability. The "?" button and the "?" key
+  // both open the cheatsheet; nothing else in the UI surfaced the keymap.
+  it("the ? button opens the shortcuts cheatsheet", async () => {
+    render(
+      qcWrap(<MemoryRouter>
+        <TopBar workId="w1" savedAt={null} />
+      </MemoryRouter>),
+    );
+    expect(
+      screen.queryByRole("dialog", { name: /keyboard shortcuts/i }),
+    ).toBeNull();
+    await userEvent.click(screen.getByTestId("shortcuts-toggle"));
+    expect(
+      screen.getByRole("dialog", { name: /keyboard shortcuts/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("pressing ? opens the cheatsheet (discoverability gesture)", () => {
+    render(
+      qcWrap(<MemoryRouter>
+        <TopBar workId="w1" savedAt={null} />
+      </MemoryRouter>),
+    );
+    fireEvent.keyDown(window, { key: "?" });
+    expect(
+      screen.getByRole("dialog", { name: /keyboard shortcuts/i }),
+    ).toBeInTheDocument();
+  });
 });
 
 describe("TopBar — queue-aware export (Phase 7.E)", () => {
