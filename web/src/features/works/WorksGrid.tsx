@@ -12,11 +12,11 @@ import { displayWorkTitle } from "./workTitle";
 
 interface Props {
   works: WorkSummary[];
-  filter: "all" | "draft" | "processing" | "published" | "archived";
+  // #69 — one value per real lifecycle status (was a "processing" bucket).
+  // Works.tsx pre-filters and always passes "all"; this stays general so the
+  // grid can filter standalone if ever reused.
+  filter: "all" | "draft" | "creating" | "ready" | "failed" | "published" | "archived";
 }
-
-// Keep in sync with Works.tsx PROCESSING_STATUSES — see e2e-report F10.
-const PROCESSING_STATUSES = new Set(["creating", "ready", "failed"]);
 
 // Deterministic palette per work id — keeps fallback covers visually distinct
 // instead of every card getting the same blue/gold gradient.
@@ -46,11 +46,7 @@ export function WorksGrid({ works, filter }: Props) {
     day: "numeric",
   });
   const visible =
-    filter === "all"
-      ? works
-      : filter === "processing"
-        ? works.filter((w) => PROCESSING_STATUSES.has(w.status))
-        : works.filter((w) => w.status === filter);
+    filter === "all" ? works : works.filter((w) => w.status === filter);
   const STATUSES = new Set(["draft", "creating", "ready", "failed", "published", "archived"]);
 
   // Delete flow state — `pendingDelete` doubles as both the "is dialog open"

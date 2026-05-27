@@ -371,7 +371,9 @@ export const en = {
     filter: {
       all: "All",
       draft: "Draft",
-      processing: "Processing",
+      creating: "Creating",
+      ready: "Ready",
+      failed: "Failed",
       published: "Published",
       archived: "Archived",
     },
@@ -995,7 +997,9 @@ export const zh: DeepShape<Messages> = {
     filter: {
       all: "全部",
       draft: "草稿",
-      processing: "处理中",
+      creating: "生成中",
+      ready: "就绪",
+      failed: "失败",
       published: "已发布",
       archived: "已归档",
     },

@@ -6,12 +6,18 @@ import { WorksGrid } from "@/features/works/WorksGrid";
 import { InsightRibbon, type Insight } from "@/features/works/InsightRibbon";
 import { useT, type MessageKey } from "@/i18n/useT";
 
-type WorkFilter = "all" | "draft" | "processing" | "published" | "archived";
+type WorkFilter = "all" | "draft" | "creating" | "ready" | "failed" | "published" | "archived";
 
-// "processing" is a UI bucket that covers the three transient backend statuses
-// users never see as a dedicated chip otherwise (creating / ready / failed).
-// Mirrored in WorksGrid.tsx — change both together. See e2e-report F10.
-const PROCESSING_STATUSES = new Set(["creating", "ready", "failed"]);
+// #69 — backend WorkStatus is exactly {draft, creating, ready, failed}. The old
+// "processing" chip bucketed creating+ready+failed together, but only `creating`
+// is in-progress: `ready` is done and `failed` is an error. Lumping them under
+// one "Processing" chip contradicted each card's own badge (就绪/失败) and — worst —
+// HID failed works inside "still processing", so a creator never learned a render
+// failed. We now filter on the real status, one chip per lifecycle state, and the
+// chip vocabulary matches the card-badge vocabulary (works.status.*).
+// published/archived stay in the union for type-safe URL re-entry but the backend
+// doesn't emit them yet, so their chips never render (counts always 0).
+const LIFECYCLE_FILTERS = ["draft", "creating", "ready", "failed"] as const;
 
 export default function Works() {
   const works = useWorks();
@@ -46,7 +52,9 @@ export default function Works() {
   const filterCounts = useMemo(() => ({
     all: list.length,
     draft: list.filter((w) => w.status === "draft").length,
-    processing: list.filter((w) => PROCESSING_STATUSES.has(w.status)).length,
+    creating: list.filter((w) => w.status === "creating").length,
+    ready: list.filter((w) => w.status === "ready").length,
+    failed: list.filter((w) => w.status === "failed").length,
     published: list.filter((w) => w.status === "published").length,
     archived: list.filter((w) => w.status === "archived").length,
   }), [list]);
@@ -57,11 +65,7 @@ export default function Works() {
   const filteredList = useMemo(() => {
     const q = query.trim().toLowerCase();
     return list.filter((w) => {
-      if (filter === "processing") {
-        if (!PROCESSING_STATUSES.has(w.status)) return false;
-      } else if (filter !== "all" && w.status !== filter) {
-        return false;
-      }
+      if (filter !== "all" && w.status !== filter) return false;
       if (!q) return true;
       return w.title.toLowerCase().includes(q);
     });
@@ -128,14 +132,16 @@ export default function Works() {
             />
           </div>
           <div style={{ display: "flex", gap: 4 }}>
-            {/* R98 F395 — "published" / "archived" filter pills hidden until
-               the backend actually emits those statuses (see
-               queries/works.ts). Their counts are always 0, so they were
-               occupying prime nav real estate while deceiving users into
-               thinking publishing was a real feature. WorkFilter union
-               keeps both members so URL-param re-entry stays type-safe
-               if the feature comes back. */}
-            {(["all", "draft", "processing"] as const).map((f) => {
+            {/* #69 — one chip per real lifecycle state. "all" is always shown;
+               each lifecycle chip (draft/creating/ready/failed) appears only when
+               it has works OR is the active filter, so the row reflects reality —
+               crucially, 失败/Failed surfaces the moment a render fails instead of
+               hiding inside a generic "processing" bucket. published/archived stay
+               hidden (backend doesn't emit them; counts always 0) — see
+               R98 F395 + queries/works.ts. */}
+            {(["all", ...LIFECYCLE_FILTERS] as const)
+              .filter((f) => f === "all" || filterCounts[f] > 0 || filter === f)
+              .map((f) => {
               const n = filterCounts[f];
               const isEmpty = n === 0;
               const isActive = filter === f;
