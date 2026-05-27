@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { readFile, writeFile, appendFile, mkdir, readdir, rename, copyFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -130,6 +131,28 @@ const ALLOWED_UPLOAD_EXTS = new Set<string>([
   ".mp4", ".webm", ".mov", ".m4v",                  // video
   ".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac",  // audio
 ]);
+
+// #67 — single source of truth for the upload size cap. BOTH upload endpoints
+// (/works/:id/assets/upload and /shared-assets/:category) use it so the limit
+// can't drift apart again (before this, only shared-assets had a 100MB cap; the
+// per-work endpoint had none → a multi-GB drag-in could OOM the single-process
+// workstation, taking down every work + the render queue + agent sessions).
+export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024; // 100 MB
+
+// #67 — the REAL OOM guard. `parseBody()` buffers the entire multipart body into
+// heap, so a `file.size` check inside the handler runs AFTER the spike already
+// happened. bodyLimit rejects via Content-Length BEFORE any body is read (the
+// normal browser-upload case), and streams-with-a-counter otherwise. onError
+// returns a localizable errorCode instead of the default plain "Payload Too
+// Large" text. Applied as per-route middleware on both upload endpoints.
+const uploadBodyLimit = bodyLimit({
+  maxSize: MAX_UPLOAD_BYTES,
+  onError: (c) =>
+    c.json(
+      { error: `File exceeds the ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB upload limit`, errorCode: "asset_too_large" },
+      413,
+    ),
+});
 
 // ── WsBridge accessor (set by server/index.ts after construction) ─────────
 let wsBridge: WsBridge | null = null;
@@ -1324,7 +1347,10 @@ apiRoutes.get("/api/works/:id/assets/*", async (c) => {
 });
 
 // POST /api/works/:id/assets/upload — upload file to work assets
-apiRoutes.post("/api/works/:id/assets/upload", async (c) => {
+// #67 — uploadBodyLimit (Content-Length-aware) rejects oversized requests before
+// parseBody buffers them into heap. The in-handler file.size check below is the
+// secondary guard (friendly errorCode; covers the no-Content-Length path).
+apiRoutes.post("/api/works/:id/assets/upload", uploadBodyLimit, async (c) => {
   const workId = c.req.param("id");
   if (!SAFE_ID.test(workId)) return c.json({ error: "Invalid workId" }, 400);
 
@@ -1337,6 +1363,15 @@ apiRoutes.post("/api/works/:id/assets/upload", async (c) => {
 
   if (!(file instanceof File)) {
     return c.json({ error: "No file provided" }, 400);
+  }
+
+  // #67 — align with the shared-assets sibling: reject oversized files with a
+  // friendly, localizable code. (Defense-in-depth behind uploadBodyLimit.)
+  if (file.size > MAX_UPLOAD_BYTES) {
+    return c.json(
+      { error: `File exceeds the ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB upload limit`, errorCode: "asset_too_large" },
+      413,
+    );
   }
 
   // Sanitize basename to prevent path traversal (Codex review 2026-04-27)
@@ -1927,7 +1962,7 @@ apiRoutes.post("/api/shared-assets/move", async (c) => {
   }
 });
 
-apiRoutes.post("/api/shared-assets/:category", async (c) => {
+apiRoutes.post("/api/shared-assets/:category", uploadBodyLimit, async (c) => {
   const category = c.req.param("category");
   try {
     validateCategory(category);
@@ -1940,7 +1975,9 @@ apiRoutes.post("/api/shared-assets/:category", async (c) => {
     const uploaded = [];
     for (const f of files) {
       if (!(f instanceof File)) continue;
-      if (f.size > 100 * 1024 * 1024) return c.json({ error: `File ${f.name} exceeds 100MB limit` }, 400);
+      // #67 — use the shared MAX_UPLOAD_BYTES so this and the per-work endpoint
+      // can't drift. (uploadBodyLimit already rejects via Content-Length first.)
+      if (f.size > MAX_UPLOAD_BYTES) return c.json({ error: `File ${f.name} exceeds the ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB upload limit`, errorCode: "asset_too_large" }, 413);
       const buf = Buffer.from(await f.arrayBuffer());
       const asset = await saveSharedAsset(category, f.name, buf);
       uploaded.push({ ...asset, url: `/api/shared-assets/${category}/${encodeURIComponent(asset.name)}` });
