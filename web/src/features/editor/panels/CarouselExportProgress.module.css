@@ -1,0 +1,74 @@
+/* #85 — carousel "export all" progress overlay. Mirrors the Studio
+   ExportProgress / ExportCaptionsDialog shell (portal-to-body backdrop)
+   and, beyond reporting N/M, covers the live canvas while exportAll flips
+   it through every slide so the user doesn't see a glitchy slide-cycle. */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 240;
+  display: grid;
+  place-items: center;
+  animation: fade 160ms ease-out;
+}
+
+.box {
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  padding: 24px 26px 20px;
+  width: min(360px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
+}
+
+.title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  font-family: var(--font-editorial);
+  font-style: italic;
+  color: var(--accent);
+}
+
+.counter {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  letter-spacing: 0.04em;
+}
+
+.track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--glass-border);
+  overflow: hidden;
+}
+
+.fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-lo), var(--accent));
+  border-radius: 3px;
+  transition: width 180ms ease-out;
+}
+
+.hint {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-dimmer);
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

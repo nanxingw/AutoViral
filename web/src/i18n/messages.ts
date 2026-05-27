@@ -106,6 +106,11 @@ export const en = {
       exportCurrent: "Current slide as PNG",
       exportAll: "All slides as PNGs",
     },
+    exportProgress: {
+      title: "Exporting slides…",
+      counter: "{done} / {total}",
+      hint: "Saving each slide as a PNG — keep this tab open.",
+    },
     inspectorTabs: {
       design: "Design",
       copy: "Copy",
@@ -822,6 +827,11 @@ export const zh: DeepShape<Messages> = {
       exportMenu: "导出 ▾",
       exportCurrent: "当前页导出为 PNG",
       exportAll: "全部页面导出为 PNG",
+    },
+    exportProgress: {
+      title: "正在导出图片…",
+      counter: "{done} / {total}",
+      hint: "正在把每页保存为 PNG——请保持此标签页打开。",
     },
     slidesNav: {
       header: "页 · {count}",

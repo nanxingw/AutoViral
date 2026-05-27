@@ -1,8 +1,13 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import type Konva from "konva";
 import { useEditor } from "../store";
 import { exportSinglePng, exportAllPngs } from "../services/exportPng";
 import { captureWhenChanged } from "../services/captureWhenChanged";
+
+export interface ExportProgress {
+  done: number;
+  total: number;
+}
 
 /**
  * Walk every slide and pre-fetch its referenced image URLs into the
@@ -42,6 +47,16 @@ async function preloadCarouselImages(
 export function useExport() {
   const stageRef = useRef<Konva.Stage | null>(null);
   const setCurrentSlide = useEditor((s) => s.setCurrentSlide);
+  // #85 — "导出全部" is a multi-second async walk that flips the LIVE canvas
+  // through every slide (visible glitch) with zero feedback. `exporting`
+  // drives a progress overlay that both reports N/M AND covers the cycling
+  // canvas. `exportingRef` is the real reentrancy lock (a double-click fires
+  // two onClicks in the same tick, before setExporting flushes — a useState
+  // flag would still read false on the second call). See memory:
+  // "useRef is the real race lock, useState is UI feedback only".
+  const exportingRef = useRef(false);
+  const [exporting, setExporting] = useState(false);
+  const [progress, setProgress] = useState<ExportProgress>({ done: 0, total: 0 });
 
   const setStage = useCallback((s: Konva.Stage | null) => {
     stageRef.current = s;
@@ -57,9 +72,15 @@ export function useExport() {
   );
 
   const exportAll = useCallback(async () => {
+    // #85 — block re-entry while an export is in flight (double-click guard).
+    if (exportingRef.current) return;
     const car = useEditor.getState().car;
     if (!car) return;
+    exportingRef.current = true;
+    setExporting(true);
+    setProgress({ done: 0, total: car.slides.length });
     const previousId = useEditor.getState().currentSlideId;
+    try {
     // Warm the browser image cache for every slide's bg + image-layer src
     // BEFORE the iteration starts. Once cached, useImage resolves on the
     // first render tick and toDataURL sees a fully painted stage.
@@ -87,23 +108,33 @@ export function useExport() {
     let baselineSlideId = previousId;
 
     await exportAllPngs(car.id, async (slideId) => {
+      let dataUrl: string;
       if (slideId === baselineSlideId && baseline) {
         // Already on screen and fully painted — its frame is captured.
-        return baseline;
+        dataUrl = baseline;
+      } else {
+        setCurrentSlide(slideId);
+        const res = await captureWhenChanged(capture, baseline, {
+          timeoutMs: 3000,
+          pollMs: 100,
+        });
+        dataUrl = res.dataUrl;
+        if (dataUrl) {
+          baseline = dataUrl;
+          baselineSlideId = slideId;
+        }
       }
-      setCurrentSlide(slideId);
-      const { dataUrl } = await captureWhenChanged(capture, baseline, {
-        timeoutMs: 3000,
-        pollMs: 100,
-      });
-      if (dataUrl) {
-        baseline = dataUrl;
-        baselineSlideId = slideId;
-      }
+      // #85 — one callback invocation == one slide processed; advance the
+      // progress overlay regardless of which capture branch ran.
+      setProgress((p) => ({ ...p, done: Math.min(p.total, p.done + 1) }));
       return dataUrl;
     });
     if (previousId) setCurrentSlide(previousId);
+    } finally {
+      exportingRef.current = false;
+      setExporting(false);
+    }
   }, [setCurrentSlide]);
 
-  return { setStage, exportCurrent, exportAll };
+  return { setStage, exportCurrent, exportAll, exporting, progress };
 }

@@ -13,6 +13,7 @@ import { Inspector } from "@/features/editor/panels/Inspector";
 import { Filmstrip } from "@/features/editor/panels/Filmstrip";
 import { TopBar } from "@/features/editor/panels/TopBar";
 import { useExport } from "@/features/editor/hooks/useExport";
+import { CarouselExportProgress } from "@/features/editor/panels/CarouselExportProgress";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { useT } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
@@ -87,7 +88,7 @@ export default function Editor() {
   // their work out before refreshing.
   const [saveError, setSaveError] = useState<string | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
-  const { setStage, exportCurrent, exportAll } = useExport();
+  const { setStage, exportCurrent, exportAll, exporting, progress } = useExport();
   const t = useT();
   const locale = useLocaleStore((s) => s.locale);
 
@@ -243,6 +244,9 @@ export default function Editor() {
           }}
         />
       </div>
+
+      {/* #85 — progress overlay covers the cycling canvas + reports N/M. */}
+      {exporting && <CarouselExportProgress progress={progress} />}
 
       <div style={{ flex: "1 1 auto", minHeight: 0 }}>
         <PanelGroup
