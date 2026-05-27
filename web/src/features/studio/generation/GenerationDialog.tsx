@@ -639,9 +639,10 @@ function ImageFields({
             type="number"
             value={form.width ?? ""}
             onChange={(e) =>
-              patch("width", e.target.value ? Number(e.target.value) : undefined)
+              patch("width", clampNumericInput(e.target.value, { min: 1 }))
             }
             placeholder="1080"
+            min={1}
             style={inputStyle}
           />
         </Field>
@@ -650,9 +651,10 @@ function ImageFields({
             type="number"
             value={form.height ?? ""}
             onChange={(e) =>
-              patch("height", e.target.value ? Number(e.target.value) : undefined)
+              patch("height", clampNumericInput(e.target.value, { min: 1 }))
             }
             placeholder="1920"
+            min={1}
             style={inputStyle}
           />
         </Field>
@@ -775,7 +777,7 @@ function AudioFields({
             onChange={(e) =>
               patch(
                 "durationSeconds",
-                e.target.value ? Number(e.target.value) : undefined,
+                clampNumericInput(e.target.value, { min: 5, max: 180 }),
               )
             }
             min={5}
@@ -793,6 +795,36 @@ function Row({ children }: { children: React.ReactNode }) {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * #75 — parse + clamp a number-input value at the edit site.
+ *
+ * HTML `min`/`max` only gate the spinner buttons and the `:invalid` pseudo
+ * -class; a typed value (`-5`, `9999`, `7.5`) sails straight through onChange.
+ * In this dialog those values become `--duration` / `--image-size` args for a
+ * *paid, long-running* generation script (dispatchGeneration.ts:228,293), so
+ * "the browser will catch it" is doubly false here. F155 already learned this
+ * for the VIDEO duration (locked to a `<select>`) but the BGM/image siblings
+ * were left as bare inputs — this helper is the shared clamp they all route
+ * through so the next numeric field can't forget (same lesson as the
+ * StaticPropsPanel/#56 + TextClipPanel/#58 edit-site clamps).
+ *
+ * Semantics: empty string → `undefined` (caller falls back to its default);
+ * NaN → `undefined`; otherwise round-to-int (these fields are all integral —
+ * seconds, pixels) and clamp into [min, max] when provided.
+ */
+export function clampNumericInput(
+  raw: string,
+  opts: { min?: number; max?: number } = {},
+): number | undefined {
+  if (raw === "") return undefined;
+  let v = Number(raw);
+  if (!Number.isFinite(v)) return undefined;
+  v = Math.round(v);
+  if (typeof opts.min === "number") v = Math.max(opts.min, v);
+  if (typeof opts.max === "number") v = Math.min(opts.max, v);
+  return v;
+}
 
 function formatElapsed(totalSec: number): string {
   const m = Math.floor(totalSec / 60);
