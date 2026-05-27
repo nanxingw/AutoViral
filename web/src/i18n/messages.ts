@@ -130,7 +130,6 @@ export const en = {
       effects: "Effects",
       effectGrain: "grain",
       effectGradient: "gradient",
-      effectSharpen: "sharpen",
     },
     copyTab: {
       empty: "Select a text layer to edit its copy.",
@@ -755,7 +754,6 @@ export const zh: DeepShape<Messages> = {
       effects: "效果",
       effectGrain: "颗粒",
       effectGradient: "渐变",
-      effectSharpen: "锐化",
     },
     copyTab: {
       empty: "请先选中文本图层再编辑文案。",

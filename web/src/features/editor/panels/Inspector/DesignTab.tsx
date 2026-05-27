@@ -119,16 +119,14 @@ export function DesignTab() {
             updateGlobals({ effects: { ...g.effects, gradient: v } })
           }
         />
-        <Slider
-          label={t("editor.designTab.effectSharpen")}
-          value={g.effects.sharpen}
-          min={0}
-          max={1}
-          step={0.01}
-          onChange={(v) =>
-            updateGlobals({ effects: { ...g.effects, sharpen: v } })
-          }
-        />
+        {/* #70 — the "sharpen" slider was a deceptive dead control: it wrote
+            globals.effects.sharpen but NO renderer consumes it (EffectsOverlay
+            is an additive overlay system — gradient/grain Rects with blend
+            modes — which structurally can't express a pixel-convolution sharpen).
+            Removed the slider rather than ship a fake control between two real
+            ones. The schema field is retained (see types.ts) so existing
+            carousel.yaml round-trips; wire a real Konva.Filters.Enhance pass on
+            the image layers + matching export path if sharpen is ever built. */}
       </Field>
     </div>
   );

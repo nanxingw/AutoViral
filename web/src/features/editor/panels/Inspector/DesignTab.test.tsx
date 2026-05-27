@@ -33,4 +33,17 @@ describe("DesignTab", () => {
     fireEvent.change(screen.getByLabelText("grain"), { target: { value: "0.5" } });
     expect(useEditor.getState().car!.globals.effects.grain).toBeCloseTo(0.5);
   });
+
+  // #70 — the sharpen slider was a deceptive dead control (no renderer
+  // consumed effects.sharpen). It was removed; only grain + gradient remain.
+  // Pins the removal so a future edit can't silently bring the fake control
+  // back without also wiring a real sharpen render path.
+  it("does NOT render a sharpen slider (#70 — removed dead control)", () => {
+    useEditor.getState().loadCarousel(makeEmptyCarousel("w1"));
+    render(<DesignTab />);
+    expect(screen.getByLabelText("grain")).toBeInTheDocument();
+    expect(screen.getByLabelText("gradient")).toBeInTheDocument();
+    expect(screen.queryByLabelText("sharpen")).toBeNull();
+    expect(screen.queryByLabelText("锐化")).toBeNull();
+  });
 });

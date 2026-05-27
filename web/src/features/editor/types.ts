@@ -99,6 +99,13 @@ export const CarouselSchema = z.object({
       .object({
         grain: z.number().default(0.03),
         gradient: z.number().default(0.5),
+        // #70 — DEPRECATED / unrendered. No renderer consumes `sharpen`
+        // (EffectsOverlay is an additive overlay; sharpen needs a pixel
+        // convolution on the image layers). The DesignTab slider was removed
+        // as a deceptive dead control; the field is kept only so existing
+        // carousel.yaml round-trips without a migration. Don't add a new UI
+        // for it until a real Konva.Filters.Enhance render path (preview +
+        // export) lands.
         sharpen: z.number().default(0),
       })
       .default({}),
