@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useComposition } from "../store";
 import { useNavigate } from "react-router-dom";
@@ -38,6 +38,14 @@ export function TopBar({
     type: "full",
   });
   const [captionsDialogOpen, setCaptionsDialogOpen] = useState(false);
+  // #62 — reentrancy guard for the multi-minute export. enqueueingRef is the
+  // REAL lock: a double-click fires two onClicks in the same tick, before any
+  // setState has flushed, so a useState flag would still be false on the second
+  // call (stale render). The ref flips synchronously and gates the second call.
+  // `enqueueing` is UI feedback only (disables the button). See memory:
+  // "useRef is the real race lock, useState is UI feedback only".
+  const enqueueingRef = useRef(false);
+  const [enqueueing, setEnqueueing] = useState(false);
 
   // Phase H (#35) — derive the text-track list for the captions dialog.
   // Reading from the composition store keeps the dialog in sync with the
@@ -55,15 +63,24 @@ export function TopBar({
   }, [comp]);
 
   async function startExport(opts: EnqueueRenderOptions) {
-    // #80 — bridge the active platform preset's loudness target (and preset
-    // id) from the stored composition into the render request. Without this
-    // the server's loudnorm always falls back to -14 and a non-default
-    // preset (e.g. WeChat Channels -16) is silently dropped. Store the
-    // merged opts so a retry re-sends the same target.
-    const merged = resolveRenderOpts(opts, comp?.exportPresets?.[0]);
-    setLastOpts(merged);
-    const { jobId } = await enqueueRender(workId, merged);
-    setActiveJobId(jobId);
+    // #62 — block re-entry while an enqueue is in flight (double-click guard).
+    if (enqueueingRef.current) return;
+    enqueueingRef.current = true;
+    setEnqueueing(true);
+    try {
+      // #80 — bridge the active platform preset's loudness target (and preset
+      // id) from the stored composition into the render request. Without this
+      // the server's loudnorm always falls back to -14 and a non-default
+      // preset (e.g. WeChat Channels -16) is silently dropped. Store the
+      // merged opts so a retry re-sends the same target.
+      const merged = resolveRenderOpts(opts, comp?.exportPresets?.[0]);
+      setLastOpts(merged);
+      const { jobId } = await enqueueRender(workId, merged);
+      setActiveJobId(jobId);
+    } finally {
+      enqueueingRef.current = false;
+      setEnqueueing(false);
+    }
   }
 
   // Escape closes the modal — keeps WebSocket subscription cleanup tied to
@@ -234,6 +251,8 @@ export function TopBar({
           data-bare
           onClick={() => void startExport({ type: "full" })}
           aria-label="Export full render"
+          disabled={enqueueing}
+          aria-busy={enqueueing}
           style={{
             padding: "7px 14px",
             borderRadius: "9px 0 0 9px",
@@ -243,7 +262,8 @@ export function TopBar({
             borderRight: "1px solid var(--accent)",
             background: "linear-gradient(180deg, var(--accent-hi), var(--accent))",
             color: "var(--accent-fg)",
-            cursor: "pointer",
+            cursor: enqueueing ? "wait" : "pointer",
+            opacity: enqueueing ? 0.6 : 1,
             letterSpacing: "-0.005em",
             display: "inline-flex",
             alignItems: "center",
@@ -297,6 +317,7 @@ export function TopBar({
               }}
             >
               <DropdownMenu.Item
+                disabled={enqueueing}
                 onSelect={() => void startExport({ type: "proxy" })}
                 style={{
                   fontSize: 12,

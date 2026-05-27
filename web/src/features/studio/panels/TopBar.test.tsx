@@ -127,6 +127,48 @@ describe("TopBar — queue-aware export (Phase 7.E)", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
   });
 
+  // #62 — the export button is a multi-minute action with no per-work queue
+  // serialization, so a double-click must NOT enqueue two parallel renders.
+  it("blocks a double-click from enqueuing two renders (#62)", async () => {
+    let resolveEnqueue!: (v: { jobId: string }) => void;
+    (renderSvc.enqueueRender as any).mockReturnValue(
+      new Promise<{ jobId: string }>((r) => { resolveEnqueue = r; }),
+    );
+    render(
+      qcWrap(<MemoryRouter>
+        <TopBar workId="w-1" savedAt="now" />
+      </MemoryRouter>),
+    );
+    const btn = screen.getByRole("button", { name: /export full render/i });
+    // Synchronous double-click, before the first enqueue's promise resolves.
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    expect(renderSvc.enqueueRender).toHaveBeenCalledTimes(1);
+    // Let it settle so the modal mounts and we don't leak a pending promise.
+    resolveEnqueue({ jobId: "job_once" });
+    await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
+  });
+
+  it("disables the export button while an enqueue is in flight, re-enables after (#62)", async () => {
+    let resolveEnqueue!: (v: { jobId: string }) => void;
+    (renderSvc.enqueueRender as any).mockReturnValue(
+      new Promise<{ jobId: string }>((r) => { resolveEnqueue = r; }),
+    );
+    render(
+      qcWrap(<MemoryRouter>
+        <TopBar workId="w-1" savedAt="now" />
+      </MemoryRouter>),
+    );
+    const btn = screen.getByRole("button", { name: /export full render/i });
+    fireEvent.click(btn);
+    // Mid-flight: disabled + aria-busy.
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute("aria-busy", "true");
+    resolveEnqueue({ jobId: "job_done" });
+    // After settle: lock released (button enabled again).
+    await waitFor(() => expect(btn).not.toBeDisabled());
+  });
+
   // #80 — end-to-end bridge: a stored platform preset whose loudness target
   // is NOT the server default (-14) must reach the render request. Without
   // the resolveRenderOpts wiring in startExport, the WeChat Channels -16

@@ -14,7 +14,7 @@ import {
 } from "../work-store.js";
 import { MemoryClient } from "../memory.js";
 import type { WsBridge } from "../ws-bridge.js";
-import type { RenderQueue } from "./render-queue/index.js";
+import type { RenderQueue, RenderJob } from "./render-queue/index.js";
 import { getProvider, getDefaultProvider, listProviders } from "../providers/registry.js";
 import {
   getProvider as getVideoProvider,
@@ -394,6 +394,20 @@ export function cancelInFlightRenders(
     }
   }
   return cancelled;
+}
+
+// #62 — the work's currently-active (queued|running) render job, if any. A
+// render is a multi-minute job and the queue has no per-work serialization, so
+// without this a double-click (second POST before the first job leaves the
+// queue) enqueues a SECOND parallel render and orphans the first (the client's
+// ExportProgress only tracks the latest jobId). Exported for testing.
+export function findActiveRenderJob(
+  queue: Pick<RenderQueue, "list">,
+  workId: string,
+): RenderJob | null {
+  return (
+    queue.list(workId).find((j) => j.status === "queued" || j.status === "running") ?? null
+  );
 }
 
 // DELETE /api/works/:id — cascades: cancels in-flight render jobs, kills active
@@ -874,6 +888,15 @@ apiRoutes.post("/api/works/:id/render", async (c) => {
         ? r.sidecarTrackIds.filter((x): x is string => typeof x === "string")
         : undefined,
     };
+  }
+  // #62 — per-work render dedup (defense-in-depth behind the client's reentrancy
+  // lock). If a render for this work is already queued/running, reuse its id so
+  // a concurrent second POST is idempotent: the client attaches to the same
+  // progress stream instead of spawning a parallel render that orphans the
+  // first. A finished job means this is a fresh, intentional re-export → enqueue.
+  const active = findActiveRenderJob(renderQueue, id);
+  if (active) {
+    return c.json({ jobId: active.id, deduped: true });
   }
   const job = renderQueue.enqueue({
     workId: id,
