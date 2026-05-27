@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, within, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { TimelineTrackHeader } from "./TimelineTrackHeader";
@@ -228,6 +228,47 @@ describe("<TimelineTrackHeader /> — action wiring", () => {
     await user.click(screen.getByRole("button", { name: /^cancel$/i }));
     expect(screen.queryByTestId("track-remove-confirm-backdrop")).toBeNull();
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("<TimelineTrackHeader /> — per-track volume (#79)", () => {
+  it("audio lane menu exposes a dB volume slider", async () => {
+    const user = userEvent.setup();
+    const audio = getTrack("audio");
+    render(<TimelineTrackHeader track={audio} fallbackLabel="Music" height={56} />);
+    await user.click(screen.getByRole("button", { name: /track options/i }));
+    expect(screen.getByRole("slider", { name: /track volume in decibels/i })).toBeInTheDocument();
+  });
+
+  it("non-audio lanes do NOT show a volume slider", async () => {
+    const user = userEvent.setup();
+    const video = getTrack("video");
+    render(<TimelineTrackHeader track={video} fallbackLabel="Video" height={56} />);
+    await user.click(screen.getByRole("button", { name: /track options/i }));
+    expect(screen.queryByRole("slider", { name: /track volume in decibels/i })).toBeNull();
+  });
+
+  it("moving the slider calls setTrackVolume(id, db)", async () => {
+    const user = userEvent.setup();
+    const audio = getTrack("audio");
+    const spy = vi.fn(useComposition.getState().setTrackVolume);
+    useComposition.setState({ setTrackVolume: spy as never });
+
+    render(<TimelineTrackHeader track={audio} fallbackLabel="Music" height={56} />);
+    await user.click(screen.getByRole("button", { name: /track options/i }));
+    const slider = screen.getByRole("slider", { name: /track volume in decibels/i });
+    fireEvent.change(slider, { target: { value: "-6" } });
+
+    expect(spy).toHaveBeenCalledWith(audio.id, -6);
+  });
+
+  it("shows the current dB value with a sign", async () => {
+    const user = userEvent.setup();
+    const audio = getTrack("audio");
+    (audio as Track & { volume: number }).volume = 3;
+    render(<TimelineTrackHeader track={audio} fallbackLabel="Music" height={56} />);
+    await user.click(screen.getByRole("button", { name: /track options/i }));
+    expect(screen.getByTestId("track-volume-value").textContent).toBe("+3 dB");
   });
 });
 

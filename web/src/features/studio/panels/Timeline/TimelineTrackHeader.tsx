@@ -87,6 +87,7 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
   const removeTrack = useComposition((s) => s.removeTrack);
   const renameTrack = useComposition((s) => s.renameTrack);
   const setTrackLanguage = useComposition((s) => s.setTrackLanguage);
+  const setTrackVolume = useComposition((s) => s.setTrackVolume);
   // Track ordering — we need it to know which track sits above `track` so
   // "Add lane above" can pick the correct afterTrackId anchor.
   const trackAbove = useComposition((s) => {
@@ -282,6 +283,11 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
     [track.label, fallbackLabel],
   );
   const isSubtitleLane = track.kind === "text";
+  // #79 — per-track dB lane gain. The render pipeline + setTrackVolume store
+  // action shipped with #34 but never got a control; audio tracks rendered at a
+  // fixed 0 dB and mixing was mute-only. Expose a dB slider on audio lanes.
+  const isAudioLane = track.kind === "audio";
+  const trackVolume = track.volume ?? 0;
 
   const rootStyle: CSSProperties = useMemo(() => ({
     minHeight: height,
@@ -383,6 +389,44 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
               </>
             )}
           </button>
+          {isAudioLane && (
+            // dB lane gain. role="group" (not menuitem) so the slider keeps its
+            // own a11y semantics inside the menu; kept open while dragging since
+            // it lives inside menuRef (outside-click is what closes the menu).
+            <div
+              className={styles.menuVolume}
+              role="group"
+              aria-label={t("studio.timeline.trackHeader.volume")}
+              onClick={(e) => e.stopPropagation()}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 12px" }}
+            >
+              <span style={{ fontSize: 11, color: "var(--text-dim)", whiteSpace: "nowrap" }}>
+                {t("studio.timeline.trackHeader.volume")}
+              </span>
+              <input
+                type="range"
+                min={-40}
+                max={6}
+                step={1}
+                value={trackVolume}
+                aria-label={t("studio.timeline.trackHeader.volumeAria")}
+                onChange={(e) => setTrackVolume(track.id, Number(e.currentTarget.value))}
+                style={{ flex: 1, minWidth: 80 }}
+              />
+              <span
+                data-testid="track-volume-value"
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10,
+                  color: "var(--text-dim)",
+                  minWidth: 42,
+                  textAlign: "right",
+                }}
+              >
+                {trackVolume > 0 ? `+${trackVolume}` : trackVolume} dB
+              </span>
+            </div>
+          )}
           <button
             type="button"
             role="menuitemcheckbox"
