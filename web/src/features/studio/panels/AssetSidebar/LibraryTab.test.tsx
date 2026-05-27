@@ -74,3 +74,55 @@ describe("LibraryTab — add asset to timeline (#78)", () => {
     expect(screen.queryByTestId("asset-preview-backdrop")).toBeNull();
   });
 });
+
+describe("LibraryTab — upload own media (#91)", () => {
+  const jsonHeaders = {
+    get: (k: string) =>
+      k.toLowerCase() === "content-type" ? "application/json" : null,
+  };
+
+  it("exposes distinct Upload and Generate buttons (a11y mislabel fixed)", () => {
+    render(wrap(<LibraryTab workId="w1" />));
+    // Pre-fix the only "Upload"-labelled control opened the AI generator.
+    expect(screen.getByRole("button", { name: /upload your own media/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /generate with ai/i })).toBeInTheDocument();
+  });
+
+  it("picking a file POSTs it to the upload endpoint", async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: jsonHeaders,
+      json: async () => ({ success: true, path: "assets/video/a.mp4", url: "/u" }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(wrap(<LibraryTab workId="w1" />));
+    const input = screen.getByTestId("asset-upload-input") as HTMLInputElement;
+    const f = new File([new Uint8Array([1, 2, 3])], "a.mp4", { type: "video/mp4" });
+    fireEvent.change(input, { target: { files: [f] } });
+
+    // Upload fires (sequential mutation → fetch hit).
+    await vi.waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/works/w1/assets/upload",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
+  it("rejects an oversized file client-side without hitting the network", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(wrap(<LibraryTab workId="w1" />));
+    const input = screen.getByTestId("asset-upload-input") as HTMLInputElement;
+    const big = new File([new Uint8Array([1])], "huge.mp4", { type: "video/mp4" });
+    // 100MB cap + 1 — defineProperty since we can't allocate 100MB in a test.
+    Object.defineProperty(big, "size", { value: 100 * 1024 * 1024 + 1 });
+    fireEvent.change(input, { target: { files: [big] } });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toMatch(/huge\.mp4/);
+  });
+});

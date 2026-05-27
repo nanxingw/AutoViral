@@ -1,10 +1,17 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useWorkAssets, type AssetItem } from "@/queries/assets";
 import { GenerationDialog } from "@/features/studio/generation/GenerationDialog";
 import { useGatedMediaSrc } from "@/features/studio/media/useGatedMediaSrc";
 import { SearchBox } from "./SearchBox";
 import { AssetPreviewModal } from "./AssetPreviewModal";
 import { useAddAssetToTimeline, isAddableAsset } from "./addAssetToTimeline";
+import {
+  useUploadAssets,
+  ACCEPTED_UPLOAD,
+  MAX_UPLOAD_BYTES,
+  MAX_UPLOAD_MB,
+} from "./uploadAsset";
+import { localizeApiError } from "@/i18n/serverError";
 import { useT } from "@/i18n/useT";
 
 interface Props {
@@ -26,6 +33,29 @@ export function LibraryTab({ workId }: Props) {
   const [preview, setPreview] = useState<AssetItem | null>(null);
   // #78 — place a library asset onto the timeline (wires the orphaned addClip).
   const addToTimeline = useAddAssetToTimeline();
+  // #91 — import the creator's own media via the orphaned upload endpoint.
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadMut = useUploadAssets(workId);
+  const [sizeError, setSizeError] = useState<string | null>(null);
+
+  function handleFilesPicked(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = ""; // reset so re-picking the same file fires onChange
+    if (!files.length) return;
+    // Client-side cap check mirrors the server's MAX_UPLOAD_BYTES (#67) so the
+    // user gets instant feedback instead of a 413 round-trip.
+    const tooBig = files.filter((f) => f.size > MAX_UPLOAD_BYTES);
+    const ok = files.filter((f) => f.size <= MAX_UPLOAD_BYTES);
+    setSizeError(
+      tooBig.length
+        ? t("studio.assetSidebar.uploadTooLarge", {
+            names: tooBig.map((f) => f.name).join(", "),
+            mb: MAX_UPLOAD_MB,
+          })
+        : null,
+    );
+    if (ok.length) uploadMut.mutate(ok);
+  }
 
   const currentGroup = useMemo(() => {
     if (!groups.length) return null;
@@ -62,28 +92,89 @@ export function LibraryTab({ workId }: Props) {
           >
             {t("studio.assetSidebar.heading")}
           </div>
-          <button
-            type="button"
-            aria-label="Upload"
-            data-bare
-            onClick={() => setGenOpen(true)}
+          <div style={{ display: "flex", gap: 6 }}>
+            {/* #91 — real upload of the creator's own media. The hidden file
+                input does the picking; this button (now honestly labelled
+                "Upload" — it used to open the AI generator) triggers it. */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={ACCEPTED_UPLOAD}
+              multiple
+              data-testid="asset-upload-input"
+              onChange={handleFilesPicked}
+              style={{ display: "none" }}
+            />
+            <button
+              type="button"
+              aria-label={t("studio.assetSidebar.uploadAria")}
+              data-bare
+              disabled={uploadMut.isPending}
+              onClick={() => fileInputRef.current?.click()}
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 7,
+                border: "1px solid var(--glass-border)",
+                background: "var(--surface-0)",
+                color: "var(--text-dim)",
+                display: "grid",
+                placeItems: "center",
+                cursor: uploadMut.isPending ? "wait" : "pointer",
+                opacity: uploadMut.isPending ? 0.5 : 1,
+              }}
+            >
+              {/* upload-cloud glyph */}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 16V8M9 11l3-3 3 3M20 16.5A4.5 4.5 0 0017 8h-1.3A7 7 0 104 15" />
+              </svg>
+            </button>
+            {/* AI generation moved to its own button (was the "+"'s real,
+                mislabelled action — #91). */}
+            <button
+              type="button"
+              aria-label={t("studio.assetSidebar.generateAria")}
+              data-bare
+              onClick={() => setGenOpen(true)}
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 7,
+                border: "1px solid var(--glass-border)",
+                background: "var(--surface-0)",
+                color: "var(--text-dim)",
+                display: "grid",
+                placeItems: "center",
+                cursor: "pointer",
+              }}
+            >
+              {/* sparkle / wand glyph */}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 3l1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6L12 3zM18 15l.8 2.2L21 18l-2.2.8L18 21l-.8-2.2L15 18l2.2-.8L18 15z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        {/* #91 — upload status + errors (size-cap client check + server error). */}
+        {(uploadMut.isPending || sizeError || uploadMut.isError) && (
+          <div
+            role="status"
+            aria-live="polite"
             style={{
-              width: 26,
-              height: 26,
-              borderRadius: 7,
-              border: "1px solid var(--glass-border)",
-              background: "var(--surface-0)",
-              color: "var(--text-dim)",
-              display: "grid",
-              placeItems: "center",
-              cursor: "pointer",
+              marginBottom: 8,
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              letterSpacing: "0.04em",
+              color: uploadMut.isError || sizeError ? "var(--status-error, #d4756c)" : "var(--text-dimmer)",
             }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-              <path d="M12 5v14M5 12h14" />
-            </svg>
-          </button>
-        </div>
+            {uploadMut.isPending
+              ? t("studio.assetSidebar.uploading")
+              : sizeError
+                ? sizeError
+                : localizeApiError(uploadMut.error, t)}
+          </div>
+        )}
         <div style={{ display: "flex", gap: 4, overflowX: "auto" }}>
           {groups.length === 0 && !isLoading && (
             <span

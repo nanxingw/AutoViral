@@ -73,10 +73,14 @@ describe("AssetSidebar", () => {
     await waitFor(() => expect(screen.getByText("NO ASSETS")).toBeTruthy());
   });
 
-  it("clicking the '+' button opens the GenerationDialog (Phase 2 §2.5)", async () => {
+  it("the Generate button opens the GenerationDialog (Phase 2 §2.5)", async () => {
+    // #91 — the AI generator now lives behind its own "Generate with AI"
+    // button. The old "Upload"-labelled "+" that used to open this dialog was
+    // an a11y mislabel (it triggers a real file upload now), so target the
+    // dedicated generate control instead.
     wrap(<AssetSidebar workId="w1" />);
-    const plus = await screen.findByRole("button", { name: /upload/i });
-    fireEvent.click(plus);
+    const generate = await screen.findByRole("button", { name: /generate with ai/i });
+    fireEvent.click(generate);
     await waitFor(() => {
       expect(document.querySelector('[role="dialog"]')).toBeTruthy();
     });
