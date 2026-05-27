@@ -158,7 +158,9 @@ function readInjectEnabled(): boolean {
 
 function TerminalFocusPrefix() {
   // Subscribe to focus changes — every selection write re-renders this.
-  const focus = useFocusStore((s) => s.focus);
+  // The value itself is unused here; the subscription is the point (void to
+  // keep `noUnusedLocals` happy without dropping the re-render trigger).
+  void useFocusStore((s) => s.focus);
   // H0.3 — inject toggle. CLI `autoviral context --inject off` flips this
   // via the ui-context-inject WS event (subscriber lives elsewhere); the
   // local read is from localStorage for cross-reload persistence.

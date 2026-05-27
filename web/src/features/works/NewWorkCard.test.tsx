@@ -37,7 +37,7 @@ describe("NewWorkCard mutation failure path (R21)", () => {
   it("renders error alert when create-work API rejects", async () => {
     apiFetchMock.mockRejectedValueOnce(new Error("backend down"));
     render(wrap(<NewWorkCard />));
-    fireEvent.click(screen.getByText(/SHORT VIDEO/));
+    fireEvent.click(screen.getByText("VIDEO"));
     await waitFor(() => {
       expect(screen.getByRole("alert")).toBeInTheDocument();
     });
@@ -56,7 +56,7 @@ describe("NewWorkCard mutation failure path (R21)", () => {
       updatedAt: "2026-05-09T00:00:00Z",
     });
     render(wrap(<NewWorkCard />));
-    fireEvent.click(screen.getByText(/SHORT VIDEO/));
+    fireEvent.click(screen.getByText("VIDEO"));
     await waitFor(() => {
       expect(navigateMock).toHaveBeenCalledWith("/studio/w_new");
     });

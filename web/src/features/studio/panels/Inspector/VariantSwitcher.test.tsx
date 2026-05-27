@@ -25,7 +25,12 @@ function setupCompWithClipBoundToAsset(boundAssetId: string) {
 
 describe("VariantSwitcher", () => {
   it("renders an empty-state hint when no clip is selected", () => {
-    useComposition.setState({ comp: null, selection: null });
+    // F107: a comp WITH clips but no selection shows emptyNoSelection
+    // ("No clip selected — pick one in the timeline"); a clip-less comp shows
+    // emptyNoClipsYet instead. Mount a clip so we hit the no-selection branch.
+    const comp = makeAssetGraph({ ids: ["solo"] });
+    comp.tracks[0].clips.push(makeVideoClip({ id: "c", src: "/assets/solo.png" }));
+    useComposition.setState({ comp, selection: null });
     render(<VariantSwitcher />);
     expect(screen.getByText(/no clip selected/i)).toBeInTheDocument();
   });

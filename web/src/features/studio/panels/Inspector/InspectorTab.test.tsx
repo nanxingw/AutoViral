@@ -21,7 +21,16 @@ describe("InspectorTab", () => {
   });
 
   it("shows the no-selection empty state when nothing is selected", () => {
-    useComposition.setState({ comp: null, selection: null });
+    // VariantSwitcher now distinguishes "timeline has clips but none selected"
+    // (emptyNoSelection: "No clip selected — pick one in the timeline") from
+    // "timeline empty" (emptyNoClipsYet). To exercise the genuine
+    // no-selection state we mount a comp WITH a clip but leave selection null.
+    const comp = makeAssetGraph({
+      ids: ["root", "alpha"],
+      edges: [["root", "alpha"]],
+    });
+    comp.tracks[0].clips.push(makeVideoClip({ id: "c", src: "/assets/alpha.png" }));
+    useComposition.setState({ comp, selection: null });
     render(<InspectorTab />);
     expect(screen.getByText(/no clip selected/i)).toBeInTheDocument();
   });

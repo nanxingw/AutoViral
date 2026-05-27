@@ -34,6 +34,10 @@ vi.mock("remotion", async (orig) => {
   return {
     ...actual,
     Sequence: Passthrough,
+    // VideoTrackRenderer renders <Video> (browser-side path, 2026-05-08), not
+    // <OffthreadVideo>; the playbackRate prop the AC asserts flows into Video.
+    // Mock it so the real component doesn't throw "No video config found".
+    Video: FakeVideo,
     OffthreadVideo: FakeVideo,
     Audio: Passthrough,
     Img: FakeVideo,

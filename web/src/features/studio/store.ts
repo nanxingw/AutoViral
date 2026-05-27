@@ -741,6 +741,7 @@ export const useComposition = create<CompState>()(
           kind,
           label,
           displayOrder: insertOrder,
+          volume: 0, // dB gain, unity default (matches TrackSchema.volume)
           muted: false,
           hidden: false,
           clips: [],

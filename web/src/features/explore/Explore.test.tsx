@@ -15,7 +15,7 @@ describe("Explore page", () => {
   it("renders hero, angles, platform tabs, trending panel", async () => {
     render(wrap(<Explore />));
     expect(screen.getByText(/PULSE OF THE ALGORITHM/i)).toBeInTheDocument();
-    expect(screen.getByText(/Three/i)).toBeInTheDocument();
+    expect(screen.getByText(/starter angles/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText(/POV: cat is chef/i)).toBeInTheDocument());
   });
 });

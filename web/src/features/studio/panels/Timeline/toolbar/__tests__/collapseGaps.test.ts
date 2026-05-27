@@ -14,6 +14,8 @@ function makeTrack(clips: ReturnType<typeof makeVideoClip>[]): Track {
     id: "tv",
     kind: "video",
     label: "v",
+    displayOrder: 0,
+    volume: 0,
     muted: false,
     hidden: false,
     clips,

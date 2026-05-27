@@ -11,14 +11,16 @@ describe("<ThemeToggle />", () => {
 
   it("renders sun icon when theme is dark and moon when light", () => {
     render(<ThemeToggle />);
-    expect(screen.getByLabelText(/toggle theme/i)).toBeInTheDocument();
+    // F31/F32 a11y: the label is target-state-aware ("Switch to light theme"
+    // when currently dark) — it no longer reads the static "Toggle theme".
+    expect(screen.getByLabelText(/switch to (light|dark) theme/i)).toBeInTheDocument();
     expect(document.querySelector("[data-icon='sun']")).toBeInTheDocument();
   });
 
   it("toggles theme on click", async () => {
     const user = userEvent.setup();
     render(<ThemeToggle />);
-    await user.click(screen.getByLabelText(/toggle theme/i));
+    await user.click(screen.getByLabelText(/switch to (light|dark) theme/i));
     expect(useTheme.getState().theme).toBe("light");
   });
 });

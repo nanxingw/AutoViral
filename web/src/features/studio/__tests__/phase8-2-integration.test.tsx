@@ -22,6 +22,10 @@ vi.mock("remotion", async (orig) => {
   return {
     ...actual,
     Sequence: Passthrough,
+    // VideoTrackRenderer renders <Video> (browser-side path, 2026-05-08), not
+    // <OffthreadVideo>. Without mocking Video the real component calls the
+    // internal useVideoConfig and throws "No video config found".
+    Video: FakeVideo,
     OffthreadVideo: FakeVideo,
     Audio: Passthrough,
     Img: FakeVideo,

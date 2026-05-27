@@ -79,6 +79,8 @@ export function threeClipVideoTrack(): { track: Track; clips: VideoClip[] } {
     id: "track-video",
     kind: "video",
     label: "Video",
+    displayOrder: 0,
+    volume: 0,
     muted: false,
     hidden: false,
     clips: [a, b, d],

@@ -2,7 +2,21 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, waitFor, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TopBar } from "../panels/TopBar";
+
+// TopBar reads from react-query (work/render state), so every render must be
+// wrapped in a QueryClientProvider or it throws "No QueryClient set".
+function renderTopBar() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter>
+        <TopBar workId="w-1" savedAt="now" />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
 
 // Phase 7.F — integration tests for the four ACs from master plan §7.3.
 //
@@ -96,11 +110,7 @@ beforeEach(() => {
 
 describe("Phase 7 ACs — integration", () => {
   it("AC1: enqueue → modal shows queued → running stages → done in real-time", async () => {
-    render(
-      <MemoryRouter>
-        <TopBar workId="w-1" savedAt="now" />
-      </MemoryRouter>,
-    );
+    renderTopBar();
     await userEvent.click(screen.getByRole("button", { name: /export full render/i }));
     await waitFor(() => expect(FakeWs.instances).toHaveLength(1));
     const ws = FakeWs.instances[0]!;
@@ -126,11 +136,7 @@ describe("Phase 7 ACs — integration", () => {
   });
 
   it("AC2: cancel mid-render flips state and fires DELETE on the job", async () => {
-    render(
-      <MemoryRouter>
-        <TopBar workId="w-1" savedAt="now" />
-      </MemoryRouter>,
-    );
+    renderTopBar();
     await userEvent.click(screen.getByRole("button", { name: /export full render/i }));
     await waitFor(() => expect(FakeWs.instances).toHaveLength(1));
 
@@ -148,11 +154,7 @@ describe("Phase 7 ACs — integration", () => {
   });
 
   it("AC3: Quick proxy export sends type=proxy in the enqueue body", async () => {
-    render(
-      <MemoryRouter>
-        <TopBar workId="w-1" savedAt="now" />
-      </MemoryRouter>,
-    );
+    renderTopBar();
     await userEvent.click(screen.getByRole("button", { name: /more export options/i }));
     await userEvent.click(screen.getByRole("menuitem", { name: /quick proxy export/i }));
 
@@ -167,11 +169,7 @@ describe("Phase 7 ACs — integration", () => {
   });
 
   it("AC4: failed render shows error + log; Retry re-enqueues with the same options", async () => {
-    render(
-      <MemoryRouter>
-        <TopBar workId="w-1" savedAt="now" />
-      </MemoryRouter>,
-    );
+    renderTopBar();
     await userEvent.click(screen.getByRole("button", { name: /export full render/i }));
     await waitFor(() => expect(FakeWs.instances).toHaveLength(1));
 

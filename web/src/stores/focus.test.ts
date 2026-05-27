@@ -7,7 +7,10 @@ import {
 } from "./focus";
 
 // Stub apiFetch so writes don't try to hit the network.
-const apiFetchMock = vi.fn(async () => ({}));
+// Rest param so `apiFetchMock(...args)` type-checks AND mock.calls entries are
+// typed as unknown[] (not the empty tuple []), which lets the throttle-count
+// assertions index c[1] without TS2493.
+const apiFetchMock = vi.fn(async (..._args: unknown[]) => ({}));
 vi.mock("@/lib/api", () => ({
   apiFetch: (...args: unknown[]) => apiFetchMock(...args),
 }));

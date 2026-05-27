@@ -38,6 +38,21 @@ vi.mock("@/lib/api", () => ({
   apiFetch: vi.fn(async (url: string) => {
     if (url.includes("/chat")) return { blocks: [] };
     if (url.includes("/assets")) return { assets: [] };
+    // Studio's load flow (Round 16 typo-guard) only auto-creates an empty
+    // composition once the works list confirms the workId exists — otherwise
+    // it routes to NotFound. With loadComposition mocked to null, the Player
+    // never renders unless useWorks resolves with w1 present. Seed it.
+    if (url.endsWith("/api/works"))
+      return [
+        {
+          id: "w1",
+          title: "W1",
+          type: "short-video",
+          status: "draft",
+          thumbnail: null,
+          updatedAt: "2026-05-09T00:00:00Z",
+        },
+      ];
     return {};
   }),
 }));

@@ -6,7 +6,7 @@ import { useComposition } from "@/features/studio/store";
 import { apiFetch } from "@/lib/api";
 import { useT, type MessageKey } from "@/i18n/useT";
 import { useEffect, useRef, useState, useMemo, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { resolveAssetUrl } from "@/features/studio/composition/resolveAssetUrl";
 import {
@@ -845,7 +845,7 @@ function ChatBlock({
               key={i}
               remarkPlugins={[remarkGfm]}
               urlTransform={urlTransform}
-              components={mdComponents}
+              components={mdComponents as Components}
             >
               {seg.text}
             </ReactMarkdown>

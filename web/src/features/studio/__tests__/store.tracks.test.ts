@@ -286,13 +286,19 @@ describe("renameTrack / setTrackLanguage / setTrackVolume", () => {
   it("setTrackVolume on non-audio kinds is a friendly no-op", () => {
     useComposition.getState().loadComposition(freshComp());
     const videoId = tracksFromState().find((t) => t.kind === "video")!.id;
+    // Capture the seeded volume up front (TrackSchema defaults it to 0 dB),
+    // then assert the no-op leaves it UNCHANGED — i.e. the -6 never lands on a
+    // non-audio track. Mirrors the setTrackLanguage non-text no-op assertion.
+    const before = (tracksFromState().find((t) => t.id === videoId)! as Track & {
+      volume?: number;
+    }).volume;
     expect(() =>
       useComposition.getState().setTrackVolume(videoId, -6),
     ).not.toThrow();
     const t = tracksFromState().find((t) => t.id === videoId)! as Track & {
       volume?: number;
     };
-    expect(t.volume).toBeUndefined();
+    expect(t.volume).toBe(before); // unchanged, never -6
   });
 });
 
