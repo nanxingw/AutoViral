@@ -23,6 +23,8 @@ import {
 } from "./providers/registry.js";
 import { listSharedAssetsWithMeta, getSharedAssetPath, validateCategory, sanitizeFilename, saveSharedAsset, deleteSharedAsset, moveSharedAsset } from "../shared-assets.js";
 import { getLatestCreatorData, getCreatorHistory, collectData } from "../analytics-collector.js";
+import cron from "node-cron";
+import { restartResearchScheduler } from "../research-scheduler.js";
 import { log, readLogs } from "../logger.js";
 import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } from "../test-runner.js";
 import { evaluateWork } from "../test-evaluator.js";
@@ -291,11 +293,23 @@ apiRoutes.put("/api/config", async (c) => {
     config.research.enabled = body.researchEnabled as boolean;
   }
   if (body.researchCron !== undefined) {
+    const cronExpr = String(body.researchCron).trim();
+    // #64 — validate BEFORE persisting. An invalid cron would later throw inside
+    // cron.schedule and silently kill the research scheduler, leaving the toggle
+    // looking healthy while auto-research never fires.
+    if (cronExpr && !cron.validate(cronExpr)) {
+      return c.json({ error: "Invalid cron expression", errorCode: "invalid_cron" }, 400);
+    }
     if (!config.research) config.research = { enabled: true, schedule: "7 9,21 * * *", platforms: ["douyin", "xiaohongshu"] };
-    config.research.schedule = body.researchCron as string;
+    config.research.schedule = cronExpr || "7 9,21 * * *";
   }
 
   await saveConfig(config);
+  // #64 — apply research schedule/enable changes live so the Settings control
+  // actually takes effect without a server restart.
+  if (body.researchEnabled !== undefined || body.researchCron !== undefined) {
+    void restartResearchScheduler();
+  }
   return c.json(config);
 });
 
@@ -2026,7 +2040,10 @@ apiRoutes.put("/api/interests", async (c) => {
 // ---------------------------------------------------------------------------
 
 
-async function researchTrends(platforms: string[]): Promise<{ collected: string[]; errors: string[] }> {
+// #64 — exported so the research scheduler (src/research-scheduler.ts) runs the
+// EXACT same collection as the manual POST /api/trends/refresh, keeping scheduled
+// and manual research identical.
+export async function researchTrends(platforms: string[]): Promise<{ collected: string[]; errors: string[] }> {
   const { collectPlatform, defaultPipelineDeps } = await import("../trends/pipeline.js");
   const { writeValidatedTrendsYaml } = await import("../trends/write.js");
   const { gcOldCovers, coversDir } = await import("../trends/covers.js");

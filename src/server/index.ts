@@ -16,6 +16,7 @@ import { WsBridge } from "../ws-bridge.js";
 import { attachTerminalWebSocket } from "./terminal/terminal-ws.js";
 import { attachBridgeWebSocket } from "./bridge/bridge-ws.js";
 import { startAnalyticsCollector } from "../analytics-collector.js";
+import { startResearchScheduler } from "../research-scheduler.js";
 import { RenderQueue, defaultDbPath } from "./render-queue/index.js";
 import { RenderWsRouter } from "./render-ws.js";
 import { runRenderPipeline } from "./render-pipeline.js";
@@ -132,6 +133,9 @@ export async function startServer(port: number): Promise<{ server: Server }> {
 
   // 7. Start background services
   await startAnalyticsCollector();
+  // #64 — boot the auto-research scheduler so config.research.{enabled,schedule}
+  // actually drives periodic trend collection (was a fully orphaned control).
+  await startResearchScheduler();
 
   // 7.B. Backfill missing audio peaks (.peaks.json next to every audio
   // asset). Fire-and-forget — never blocks startup; failures are logged.
