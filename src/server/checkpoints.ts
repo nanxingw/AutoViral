@@ -124,11 +124,15 @@ export async function listCheckpoints(workId: string): Promise<Checkpoint[]> {
 /**
  * Restore a checkpoint by filename. Overwrites the corresponding live
  * deliverable. Caller is responsible for nudging the frontend to reload.
+ *
+ * Returns `preRestoreSnapshot`: the snapshot we took of the CURRENT live state
+ * just before overwriting it (null if current state was already captured), so
+ * the caller can tell the user the restore is reversible.
  */
 export async function restoreCheckpoint(
   workId: string,
   file: string,
-): Promise<{ deliverable: Deliverable } | null> {
+): Promise<{ deliverable: Deliverable; preRestoreSnapshot: Checkpoint | null } | null> {
   // Parse + validate filename so a bad path can't escape .snapshots/.
   if (file.includes("/") || file.includes("\\") || file.includes("..")) return null;
   const parts = file.split("__");
@@ -139,8 +143,26 @@ export async function restoreCheckpoint(
   const wDir = join(dataDir, "works", workId);
   const src = join(snapshotsDir(workId), file);
   if (!existsSync(src)) return null;
+
+  // #68 — snapshot the CURRENT live state BEFORE overwriting it. Restoring an
+  // old snapshot is itself a destructive write, and the autosave path
+  // (PUT /composition) does NOT checkpoint — a user's manual edits live ONLY in
+  // the live yaml. Without this pre-snapshot, restore would silently overwrite
+  // and permanently lose those edits, with nothing to roll back to. Taking it
+  // here makes restore reversible. createCheckpoint dedupes on content sha, so
+  // it's a no-op when nothing has changed and a lifesaver when edits are
+  // pending. We must NOT swallow its errors (unlike the fire-and-forget
+  // per-turn checkpoint in ws-bridge): if we can't preserve the current state,
+  // we abort the restore rather than destroy it.
+  const preRestore = await createCheckpoint(workId);
+  const preRestoreSnapshot = preRestore.find((c) => c.deliverable === deliverable) ?? null;
+
   const target = join(wDir, deliverable);
   await copyFile(src, target);
-  logBridge("checkpoint_restored", workId, { file, deliverable });
-  return { deliverable };
+  logBridge("checkpoint_restored", workId, {
+    file,
+    deliverable,
+    preRestoreSha: preRestoreSnapshot?.sha ?? "unchanged",
+  });
+  return { deliverable, preRestoreSnapshot };
 }

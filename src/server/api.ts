@@ -3108,7 +3108,9 @@ apiRoutes.post("/api/works/:id/checkpoints/restore", async (c) => {
   if (!file) return c.json({ error: "Missing 'file'" }, 400);
   const out = await restoreCheckpoint(id, file);
   if (!out) return c.json({ error: "Checkpoint not found or invalid name" }, 404);
-  return c.json({ ok: true, deliverable: out.deliverable });
+  // #68 — preRestoreSnapshot lets the client confirm the restore is reversible
+  // (current state was auto-snapshotted before the overwrite).
+  return c.json({ ok: true, deliverable: out.deliverable, preRestoreSnapshot: out.preRestoreSnapshot });
 });
 
 // POST /api/works/:id/checkpoints — manual snapshot trigger. Useful before

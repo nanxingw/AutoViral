@@ -460,7 +460,7 @@ export const en = {
     // R101 F417 — restore confirm dialog
     restoreConfirm: {
       title: "Restore the version from {age}?",
-      body: "All edits made since this snapshot will be lost. Take a fresh snapshot first if you want to keep them.",
+      body: "Your current version is saved as a new restore point first, so you can undo this restore if it's not what you wanted.",
       metaSha: "Snapshot",
       metaAge: "Saved",
       metaSize: "Size",
@@ -1084,7 +1084,7 @@ export const zh: DeepShape<Messages> = {
     // R101 F417 — 恢复确认弹窗
     restoreConfirm: {
       title: "恢复到 {age} 的版本？",
-      body: "从那次快照之后的所有改动都会丢失。如果还想保留当前进度，先按上方的「立即保存快照」。",
+      body: "恢复前会先把当前版本存为一个新还原点，万一恢复错了还能再恢复回来。",
       metaSha: "快照",
       metaAge: "时间",
       metaSize: "大小",
