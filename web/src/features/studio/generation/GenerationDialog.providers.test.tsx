@@ -53,10 +53,15 @@ beforeEach(() => {
 });
 
 describe("GenerationDialog provider dropdown (Phase 8.4)", () => {
-  it("fetches /api/providers and renders dropdown options", async () => {
-    wrap(
-      <GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />,
-    );
+  // #92 — the provider list is video-only, so the dropdown now renders on the
+  // VIDEO tab only. Switch to it before asserting on the select.
+  function openVideoTab() {
+    wrap(<GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
+  }
+
+  it("fetches /api/providers and renders dropdown options (video tab)", async () => {
+    openVideoTab();
     const select = (await screen.findByLabelText(
       "Provider",
     )) as HTMLSelectElement;
@@ -73,9 +78,7 @@ describe("GenerationDialog provider dropdown (Phase 8.4)", () => {
   });
 
   it("defaults to first non-stub provider", async () => {
-    wrap(
-      <GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />,
-    );
+    openVideoTab();
     const select = (await screen.findByLabelText(
       "Provider",
     )) as HTMLSelectElement;
@@ -85,15 +88,38 @@ describe("GenerationDialog provider dropdown (Phase 8.4)", () => {
   });
 
   it("user can change selection", async () => {
-    wrap(
-      <GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />,
-    );
+    openVideoTab();
     const select = (await screen.findByLabelText(
       "Provider",
     )) as HTMLSelectElement;
     await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
     fireEvent.change(select, { target: { value: "kling" } });
     expect(select.value).toBe("kling");
+  });
+
+  // #92 regression net — the dropdown must NOT appear on the IMAGE tab (the
+  // dialog's default). It was a misleading dead control there: image gen
+  // ignores selectedProviderId and the list is all video models.
+  it("does NOT render the provider dropdown on the IMAGE tab (#92)", async () => {
+    wrap(<GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />);
+    // Let the providers query resolve so we know absence isn't just a race.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /^video$/i })).toBeInTheDocument(),
+    );
+    expect(screen.queryByLabelText("Provider")).toBeNull();
+  });
+
+  // #92 — stub providers must be disabled so they can't be picked.
+  it("disables stub providers in the dropdown (#92)", async () => {
+    openVideoTab();
+    const select = (await screen.findByLabelText(
+      "Provider",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
+    const runway = Array.from(select.options).find((o) => o.value === "runway")!;
+    const sora = Array.from(select.options).find((o) => o.value === "sora")!;
+    expect(runway.disabled).toBe(true); // stub
+    expect(sora.disabled).toBe(false); // real
   });
 });
 
@@ -149,14 +175,13 @@ describe("GenerationDialog generate dispatch (Phase 8.4 wiring)", () => {
     wrap(
       <GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />,
     );
-    // Wait for provider options
+    // #92 — the provider dropdown is video-only now; switch first, then wait
+    // for provider options.
+    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
     const select = (await screen.findByLabelText(
       "Provider",
     )) as HTMLSelectElement;
     await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
-
-    // Switch to video kind tab
-    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
 
     // Pick 9:16 aspect ratio for the dispatch (default state carries 1:1
     // from the image tab; the field exists once VideoFields render).
@@ -219,11 +244,12 @@ describe("GenerationDialog generate dispatch (Phase 8.4 wiring)", () => {
         <GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />
       </QueryClientProvider>,
     );
+    // #92 — provider dropdown is video-only; switch first.
+    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
     const select = (await screen.findByLabelText(
       "Provider",
     )) as HTMLSelectElement;
     await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
-    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
     fireEvent.change(
       screen.getByPlaceholderText(/panda lazily blinking/i),
       { target: { value: "a panda eating bamboo at golden hour" } },

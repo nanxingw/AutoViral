@@ -81,12 +81,13 @@ describe("GenerationDialog inline progress", () => {
 
     wrap(<GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />);
 
+    // #92 — provider dropdown is video-only; switch before finding it.
+    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
     const select = (await screen.findByLabelText(
       "Provider",
     )) as HTMLSelectElement;
     await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
     fireEvent.change(
       screen.getByPlaceholderText(/panda lazily blinking/i),
       { target: { value: "a panda eating bamboo at golden hour" } },
@@ -152,12 +153,13 @@ describe("GenerationDialog chat side-effect gating", () => {
 
     wrap(<GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />);
 
+    // #92 — provider dropdown is video-only; switch before finding it.
+    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
     const select = (await screen.findByLabelText(
       "Provider",
     )) as HTMLSelectElement;
     await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
 
-    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
     fireEvent.change(
       screen.getByPlaceholderText(/panda lazily blinking/i),
       { target: { value: "a panda eating bamboo at golden hour" } },
@@ -199,14 +201,12 @@ describe("GenerationDialog chat side-effect gating", () => {
 
     wrap(<GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />);
 
-    // Default kind is image. Wait until providers fetch settles so the dialog
-    // is fully rendered.
-    await screen.findByLabelText("Provider");
-
-    // Fill image prompt (>=10 chars).
-    const prompt = screen.getByPlaceholderText(
+    // Default kind is image. #92 — the Provider dropdown no longer renders on
+    // the image tab, so wait on the image prompt field (always present here)
+    // to know the dialog is fully rendered instead.
+    const prompt = (await screen.findByPlaceholderText(
       /panda eating bamboo, editorial color grade/i,
-    ) as HTMLTextAreaElement;
+    )) as HTMLTextAreaElement;
     fireEvent.change(prompt, {
       target: { value: "a calm editorial portrait of a panda" },
     });

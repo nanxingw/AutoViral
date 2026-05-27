@@ -438,7 +438,14 @@ export function GenerationDialog(props: GenerationDialogProps) {
               </Field>
             )}
 
-            {providers.length > 0 && (
+            {/* #92 — the provider list is video-only (all entries are t2v/i2v
+                models; hint literally reads "用于视频生成的服务方"). image/audio
+                generation ignores selectedProviderId entirely (toRequest +
+                dispatchGeneration hardcode the image/audio model), so showing
+                this select on those tabs was a misleading dead control that
+                defaulted to a *video* model. Gate it to the VIDEO tab. Stub
+                providers are also disabled so they can't be picked. */}
+            {form.kind === "video" && providers.length > 0 && (
               <Field label={t("studio.generationDialog.fieldProvider")} hint={t("studio.generationDialog.fieldProviderHint")}>
                 <select
                   aria-label="Provider"
@@ -447,7 +454,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
                   style={inputStyle}
                 >
                   {providers.map((p) => (
-                    <option key={p.id} value={p.id}>
+                    <option key={p.id} value={p.id} disabled={p.stub}>
                       {p.displayName}
                       {p.stub ? " (stub)" : ""}
                     </option>
@@ -459,8 +466,10 @@ export function GenerationDialog(props: GenerationDialogProps) {
                 degraded silently to [], indistinguishable from "no providers
                 configured" — user saw the dialog with no provider field and
                 no clue why. Now apiFetch throws on non-2xx → providersQuery
-                .isError flips → render inline alert. */}
-            {providersQuery.isError && (
+                .isError flips → render inline alert.
+                #92 — providers only matter for the VIDEO tab, so a fetch
+                error is irrelevant noise on image/audio; gate it too. */}
+            {form.kind === "video" && providersQuery.isError && (
               <div
                 role="alert"
                 style={{
