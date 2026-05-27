@@ -13,9 +13,13 @@ interface Props {
    *  chip header + visually de-emphasizes each card so users don't read
    *  the bodies as real algorithm output. Same pattern as AnglesCard. */
   note?: string;
+  /** #76 — explanatory label for the (disabled) CTA in demo mode. Shown as
+   *  title + aria-label so the CTA reads as "not wired yet", not a dead link.
+   *  Mirrors AnglesCard's `explore.angleGenerateDisabled`. */
+  ctaDisabledLabel?: string;
 }
 
-export function InsightRibbon({ insights, note }: Props) {
+export function InsightRibbon({ insights, note, ctaDisabledLabel }: Props) {
   const isDemo = !!note;
   return (
     <>
@@ -55,7 +59,33 @@ export function InsightRibbon({ insights, note }: Props) {
             <h3 className={styles.head}>{i.body}</h3>
             <div className={styles.foot}>
               <span>{i.date}</span>
-              {i.cta && <span style={{ color: "var(--accent)" }}>{i.cta}</span>}
+              {/* #76 — the CTA was a fake-clickable <span> (accent color +
+                  arrow, no role/handler/disabled). In demo mode render a real
+                  disabled <button> with an explanatory title/aria-label so it
+                  reads as "not available yet", matching AnglesCard. */}
+              {i.cta &&
+                (isDemo ? (
+                  <button
+                    type="button"
+                    disabled
+                    title={ctaDisabledLabel}
+                    aria-label={
+                      ctaDisabledLabel ? `${i.cta} — ${ctaDisabledLabel}` : i.cta
+                    }
+                    style={{
+                      background: "none",
+                      border: "none",
+                      padding: 0,
+                      font: "inherit",
+                      color: "var(--text-dimmer)",
+                      cursor: "not-allowed",
+                    }}
+                  >
+                    {i.cta}
+                  </button>
+                ) : (
+                  <span style={{ color: "var(--accent)" }}>{i.cta}</span>
+                ))}
             </div>
           </div>
         ))}

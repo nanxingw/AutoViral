@@ -6,12 +6,6 @@ import { WorksGrid } from "@/features/works/WorksGrid";
 import { InsightRibbon, type Insight } from "@/features/works/InsightRibbon";
 import { useT, type MessageKey } from "@/i18n/useT";
 
-const PLACEHOLDER_INSIGHTS: Insight[] = [
-  { tag: "COMPETITOR GAP", body: "Tutorial content under-served in your niche — 3 of 5 top creators have abandoned it.", date: "—", cta: "+ Generate Work →" },
-  { tag: "AUDIENCE SIGNAL", body: "Your audience peak shifted to 8 PM weekdays — 2.3× engagement vs morning posts.", date: "—", cta: "Adjust Schedule →" },
-  { tag: "STYLE RECOMMENDATION", body: "Warm color grading correlates with +18% retention across last 47 posts.", date: "—", cta: "Apply Preset →" },
-];
-
 type WorkFilter = "all" | "draft" | "processing" | "published" | "archived";
 
 // "processing" is a UI bucket that covers the three transient backend statuses
@@ -25,6 +19,14 @@ export default function Works() {
   const [query, setQuery] = useState("");
   const list = works.data ?? [];
   const t = useT();
+
+  // #76 — sample insight cards, localized (were hardcoded English literals).
+  // Built inside the component so they re-localize on language switch.
+  const placeholderInsights: Insight[] = [
+    { tag: t("works.insightSample1Tag"), body: t("works.insightSample1Body"), date: "—", cta: t("works.insightSample1Cta") },
+    { tag: t("works.insightSample2Tag"), body: t("works.insightSample2Body"), date: "—", cta: t("works.insightSample2Cta") },
+    { tag: t("works.insightSample3Tag"), body: t("works.insightSample3Body"), date: "—", cta: t("works.insightSample3Cta") },
+  ];
 
   const counts = useMemo(() => ({
     drafts: list.filter((w) => w.status === "draft").length,
@@ -253,7 +255,11 @@ export default function Works() {
           {t("works.h2InspirationLead")} <em style={{ fontFamily: "Instrument Serif", fontStyle: "italic" }}>{t("works.h2InspirationEm")}</em>
         </h2>
       </div>
-      <InsightRibbon insights={PLACEHOLDER_INSIGHTS} note={t("works.insightsRibbonNote")} />
+      <InsightRibbon
+        insights={placeholderInsights}
+        note={t("works.insightsRibbonNote")}
+        ctaDisabledLabel={t("works.insightCtaDisabled")}
+      />
     </main>
   );
 }
