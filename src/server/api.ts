@@ -22,7 +22,7 @@ import {
   listProviders as listVideoProviders,
 } from "./providers/registry.js";
 import { listSharedAssetsWithMeta, getSharedAssetPath, validateCategory, sanitizeFilename, saveSharedAsset, deleteSharedAsset, moveSharedAsset } from "../shared-assets.js";
-import { getLatestCreatorData, getCreatorHistory, collectData } from "../analytics-collector.js";
+import { getLatestCreatorData, getCreatorHistory, collectData, isCollectorAvailable } from "../analytics-collector.js";
 import cron from "node-cron";
 import { restartResearchScheduler } from "../research-scheduler.js";
 import { log, readLogs } from "../logger.js";
@@ -1480,6 +1480,18 @@ apiRoutes.get("/api/analytics/creator/history", async (c) => {
 
 // POST /api/analytics/refresh — manually trigger a Douyin data collection
 apiRoutes.post("/api/analytics/refresh", async (c) => {
+  // #72 — the collector script was removed in the refactor. Tell the client
+  // honestly (501 + retired code) instead of spawning a doomed python3 and
+  // returning a generic "collect_failed" 500 that the UI swallowed silently.
+  if (!isCollectorAvailable()) {
+    return c.json(
+      {
+        error: "Analytics collection was retired in the agentic-terminal refactor.",
+        errorCode: "analytics_collection_retired",
+      },
+      501
+    );
+  }
   const config = await loadConfig();
   const douyinUrl = config.analytics?.douyinUrl ?? "";
   if (!douyinUrl) {

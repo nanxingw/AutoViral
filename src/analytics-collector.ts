@@ -2,6 +2,7 @@ import cron from "node-cron"
 import { execFile } from "node:child_process"
 import { promisify } from "node:util"
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises"
+import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
 import { loadConfig } from "./config.js"
@@ -9,6 +10,33 @@ import { loadConfig } from "./config.js"
 const execFileAsync = promisify(execFile)
 const ANALYTICS_DIR = join(homedir(), ".autoviral", "analytics", "douyin")
 const LATEST_FILE = join(ANALYTICS_DIR, "latest.json")
+
+// #72 — the Douyin collector is a Python script that lived under
+// skills/autoviral/modules/research/scripts/. That whole `modules/` tree was
+// deleted in the agentic-terminal refactor (commit 29b9e96, archived in git
+// tag pre-skill-rewrite-snapshot). Without this guard, collectData spawned
+// python3 against a non-existent path on EVERY cron tick — a silent ENOENT
+// loop that froze the analytics page with no explanation and spammed a doomed
+// child process every N minutes. Treat a missing script as "collection
+// retired" and degrade honestly instead.
+function collectorScriptPath(): string {
+  return join(
+    homedir(),
+    ".claude",
+    "skills",
+    "autoviral",
+    "modules",
+    "research",
+    "scripts",
+    "creator-analytics",
+    "collect.py",
+  )
+}
+
+/** True only when the collector script is actually present on disk. */
+export function isCollectorAvailable(): boolean {
+  return existsSync(collectorScriptPath())
+}
 
 let task: cron.ScheduledTask | null = null
 
@@ -46,7 +74,14 @@ export interface CreatorData {
 }
 
 export async function collectData(douyinUrl: string): Promise<CreatorData | null> {
-  const scriptPath = join(homedir(), ".claude", "skills", "autoviral", "modules", "research", "scripts", "creator-analytics", "collect.py")
+  const scriptPath = collectorScriptPath()
+  // #72 — bail before spawning python3 if the collector was removed in the
+  // refactor. Returning null here is the same shape callers already handle,
+  // but without the doomed child process + ENOENT log line.
+  if (!existsSync(scriptPath)) {
+    console.warn("[analytics] Collector script not found (retired in refactor) — skipping collection")
+    return null
+  }
   try {
     await mkdir(ANALYTICS_DIR, { recursive: true })
     const { stdout } = await execFileAsync("python3", [
@@ -94,6 +129,13 @@ export async function getCreatorHistory(days: number = 30): Promise<Array<{ date
 }
 
 export async function startAnalyticsCollector(): Promise<void> {
+  // #72 — don't schedule a recurring python3 spawn for a script that no
+  // longer exists. This is the core of the silent-failure fix: previously
+  // the cron fired every N minutes, each tick ENOENT-failing invisibly.
+  if (!isCollectorAvailable()) {
+    console.log("[analytics] Collector script retired in refactor — collection disabled, not scheduling")
+    return
+  }
   const config = await loadConfig()
   const analytics = config.analytics
   if (!analytics?.enabled || !analytics?.douyinUrl) {

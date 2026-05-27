@@ -168,3 +168,45 @@ describe("SettingsPanel — OpenRouter section", () => {
     expect(savedBody.openrouterKey).toBe("");
   });
 });
+
+describe("SettingsPanel — analytics refresh retired (#72)", () => {
+  beforeEach(() => {
+    useSettingsPanelStore.setState({ open: true, focusSection: null });
+  });
+
+  it("surfaces the honest 'retired' message when refresh returns analytics_collection_retired", async () => {
+    mswServer.use(
+      http.get("/api/config", () =>
+        HttpResponse.json({
+          openrouterKey: "",
+          secretMeta: { openrouterKey: { set: false, lastFour: "" } },
+          // douyinUrl must be set or the refresh button is disabled.
+          douyinUrl: "https://www.douyin.com/user/abc",
+          researchEnabled: false,
+          researchCron: "0 9 * * *",
+          model: "sonnet",
+          analyticsLastCollectedAt: null,
+        }),
+      ),
+      http.post("/api/analytics/refresh", () =>
+        HttpResponse.json(
+          {
+            error: "Analytics collection was retired in the agentic-terminal refactor.",
+            errorCode: "analytics_collection_retired",
+          },
+          { status: 501 },
+        ),
+      ),
+    );
+    renderPanel();
+
+    const refreshBtn = await screen.findByRole("button", { name: /refresh now|立即同步/i });
+    await waitFor(() => expect(refreshBtn).not.toBeDisabled());
+    fireEvent.click(refreshBtn);
+
+    // The previously-silent failure now renders a localized honest message
+    // instead of the button quietly no-op'ing.
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/retired in the agentic-terminal refactor/i);
+  });
+});

@@ -3,6 +3,7 @@ import { useReducedMotion } from "motion/react";
 import { useSettingsPanelStore } from "@/stores/settings";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useT } from "@/i18n/useT";
+import { localizeApiError } from "@/i18n/serverError";
 import { useLocaleStore } from "@/i18n/store";
 import { useConfig, useRefreshAnalytics, useSaveConfig, type AppConfig, type SecretMetaEntry } from "@/queries/config";
 import styles from "./SettingsPanel.module.css";
@@ -250,6 +251,14 @@ export function SettingsPanel() {
                     </span>
                   )}
                 </div>
+                {/* #72 — surface the refresh error. The collector script was
+                    removed in the refactor, so this now reports an honest
+                    "retired" message instead of the button silently no-op'ing. */}
+                {refreshMut.isError && (
+                  <p role="alert" className={styles.sectionHint} style={{ color: "var(--status-error, #d4756c)" }}>
+                    {localizeApiError(refreshMut.error, t)}
+                  </p>
+                )}
               </section>
 
               <section data-section="model">

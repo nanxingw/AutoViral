@@ -36,6 +36,7 @@ export const en = {
     tts_provider_error: "TTS provider error: {detail}",
     create_work_validation: "Missing required fields (title / type / platforms).",
     create_work_failed: "Couldn't create work: {detail}",
+    analytics_collection_retired: "Audience-data collection was retired in the agentic-terminal refactor — the Douyin collector script no longer ships. This panel is inactive.",
   },
   notFound: {
     code: "404",
@@ -740,6 +741,7 @@ export const zh: DeepShape<Messages> = {
     tts_provider_error: "TTS 服务出错：{detail}",
     create_work_validation: "缺少必填字段（标题 / 类型 / 平台）。",
     create_work_failed: "创建作品失败：{detail}",
+    analytics_collection_retired: "受众数据采集已在 agentic-terminal 重构中下线——抖音采集脚本不再随产品发布，本面板已停用。",
   },
   notFound: {
     code: "404",

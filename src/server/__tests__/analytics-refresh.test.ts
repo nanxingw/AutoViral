@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
 
-// Hoisted mocks
+// Hoisted mocks. isCollectorAvailable defaults true so the existing
+// happy/error paths run; the #72 test flips it to false.
 vi.mock("../../analytics-collector.js", () => ({
   collectData: vi.fn(),
   getLatestCreatorData: vi.fn(),
   getCreatorHistory: vi.fn(),
+  isCollectorAvailable: vi.fn(() => true),
 }));
 vi.mock("../../config.js", () => ({
   loadConfig: vi.fn(),
@@ -19,6 +21,11 @@ describe("POST /api/analytics/refresh", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
+    // clearAllMocks resets calls but NOT mockReturnValue, so re-assert the
+    // default (available) here — otherwise the #72 test's false leaks into
+    // the happy/error-path tests.
+    const { isCollectorAvailable } = await import("../../analytics-collector.js");
+    (isCollectorAvailable as any).mockReturnValue(true);
     const { apiRoutes } = await import("../api.js");
     app = new Hono().route("/", apiRoutes);
   });
@@ -31,6 +38,20 @@ describe("POST /api/analytics/refresh", () => {
     expect(res.status).toBe(400);
     const body = await res.json();
     expect(body.errorCode).toBe("douyin_url_missing");
+  });
+
+  // #72 — collector script removed in the refactor → honest 501 BEFORE any
+  // douyinUrl / spawn logic, so the UI can explain instead of silent no-op.
+  it("returns 501 analytics_collection_retired when the collector script is gone", async () => {
+    const { isCollectorAvailable, collectData } = await import("../../analytics-collector.js");
+    (isCollectorAvailable as any).mockReturnValue(false);
+
+    const res = await app.request("/api/analytics/refresh", { method: "POST" });
+    expect(res.status).toBe(501);
+    const body = await res.json();
+    expect(body.errorCode).toBe("analytics_collection_retired");
+    // The retired guard short-circuits before collectData is ever called.
+    expect(collectData).not.toHaveBeenCalled();
   });
 
   it("returns 200 + collectedAt/worksCount on success", async () => {
