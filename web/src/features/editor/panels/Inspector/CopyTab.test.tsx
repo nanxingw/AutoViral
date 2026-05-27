@@ -142,3 +142,89 @@ describe("CopyTab", () => {
     expect(useEditor.getState().car!.slides[0].layers).toHaveLength(2);
   });
 });
+
+// #81 — per-layer text style controls. The schema + Konva TextLayerNode
+// already supported color/size/font/weight/italic/align/tracking; CopyTab
+// only ever wrote `text`. These pin each control to its style field and
+// guard the shallow-merge (updateLayer Object.assign) sibling-preservation.
+describe("CopyTab — per-layer style controls (#81)", () => {
+  beforeEach(() =>
+    useEditor.setState({ car: null, currentSlideId: null, selectionLayerId: null }),
+  );
+
+  const liveStyle = () => {
+    const l = useEditor.getState().car!.slides[0].layers[0] as Extract<
+      Layer,
+      { kind: "text" }
+    >;
+    return l.style;
+  };
+
+  it("color picker writes style.color", () => {
+    seed();
+    render(<CopyTab workId="w1" />);
+    fireEvent.change(screen.getByLabelText("Color"), {
+      target: { value: "#ff0000" },
+    });
+    expect(liveStyle().color).toBe("#ff0000");
+  });
+
+  it("size input writes style.size and clamps to the 240 ceiling", () => {
+    seed();
+    render(<CopyTab workId="w1" />);
+    const size = screen.getByLabelText("Size");
+    fireEvent.change(size, { target: { value: "72" } });
+    expect(liveStyle().size).toBe(72);
+    fireEvent.change(size, { target: { value: "9999" } });
+    expect(liveStyle().size).toBe(240);
+  });
+
+  it("font select writes the font enum", () => {
+    seed();
+    render(<CopyTab workId="w1" />);
+    fireEvent.change(screen.getByLabelText("Font"), { target: { value: "serif" } });
+    expect(liveStyle().font).toBe("serif");
+  });
+
+  it("weight select writes a numeric style.weight", () => {
+    seed();
+    render(<CopyTab workId="w1" />);
+    fireEvent.change(screen.getByLabelText("Weight"), { target: { value: "800" } });
+    expect(liveStyle().weight).toBe(800);
+    expect(typeof liveStyle().weight).toBe("number");
+  });
+
+  it("align select writes style.align", () => {
+    seed();
+    render(<CopyTab workId="w1" />);
+    fireEvent.change(screen.getByLabelText("Align"), { target: { value: "right" } });
+    expect(liveStyle().align).toBe("right");
+  });
+
+  it("tracking input writes style.tracking (negative allowed)", () => {
+    seed();
+    render(<CopyTab workId="w1" />);
+    fireEvent.change(screen.getByLabelText("Tracking"), { target: { value: "-4" } });
+    expect(liveStyle().tracking).toBe(-4);
+  });
+
+  it("italic checkbox toggles style.italic", () => {
+    seed();
+    render(<CopyTab workId="w1" />);
+    fireEvent.click(screen.getByLabelText("Italic"));
+    expect(liveStyle().italic).toBe(true);
+  });
+
+  it("a style edit preserves the sibling style fields (shallow-merge guard)", () => {
+    seed(); // size:24, font:sans, weight:400
+    render(<CopyTab workId="w1" />);
+    fireEvent.change(screen.getByLabelText("Color"), {
+      target: { value: "#00ff00" },
+    });
+    const s = liveStyle();
+    expect(s.color).toBe("#00ff00");
+    expect(s.size).toBe(24);
+    expect(s.font).toBe("sans");
+    expect(s.weight).toBe(400);
+  });
+});

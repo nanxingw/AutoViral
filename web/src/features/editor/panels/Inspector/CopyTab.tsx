@@ -134,6 +134,21 @@ export function CopyTab({ workId }: { workId: string }) {
     );
   }
 
+  // #81 — per-layer style controls. The TextLayer schema + the Konva
+  // TextLayerNode renderer already support color/size/font/weight/italic/
+  // align/tracking end-to-end; CopyTab only ever wrote `text`. updateLayer
+  // does a shallow Object.assign, so each style edit MUST spread the rest
+  // of `style` or it wipes the sibling fields (same guard as Studio #86).
+  const style = selected.style;
+  const patchStyle = (next: Partial<TextLayer["style"]>) =>
+    updateLayer(selected.id, { style: { ...style, ...next } });
+  // `style.color` may hold a palette sentinel ("palette:fg"/"palette:accent")
+  // rather than a hex; a <input type=color> can't display those, so show a
+  // neutral hex until the user explicitly picks a color (which then becomes
+  // an explicit per-layer override, the intended behaviour).
+  const colorIsHex = /^#[0-9a-fA-F]{3,8}$/.test(style.color);
+  const colorInputValue = colorIsHex ? style.color : "#111111";
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
       <label
@@ -175,6 +190,71 @@ export function CopyTab({ workId }: { workId: string }) {
           e.target.style.boxShadow = "none";
         }}
       />
+
+      {/* #81 — per-layer text style controls. */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <FieldLabel>{t("editor.copyTab.styleSection")}</FieldLabel>
+        <div style={{ display: "flex", gap: 8 }}>
+          <StyleColor
+            label={t("editor.copyTab.styleColor")}
+            value={colorInputValue}
+            onChange={(v) => patchStyle({ color: v })}
+          />
+          <StyleNumber
+            label={t("editor.copyTab.styleSize")}
+            value={style.size}
+            min={8}
+            max={240}
+            onChange={(v) => patchStyle({ size: v })}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <StyleSelect
+            label={t("editor.copyTab.styleFont")}
+            value={style.font}
+            options={[
+              { value: "serif", label: t("editor.copyTab.fontSerif") },
+              { value: "sans", label: t("editor.copyTab.fontSans") },
+              { value: "mono", label: t("editor.copyTab.fontMono") },
+            ]}
+            onChange={(v) => patchStyle({ font: v as TextLayer["style"]["font"] })}
+          />
+          <StyleSelect
+            label={t("editor.copyTab.styleWeight")}
+            value={String(style.weight)}
+            options={[400, 500, 600, 700, 800, 900].map((w) => ({
+              value: String(w),
+              label: String(w),
+            }))}
+            onChange={(v) => patchStyle({ weight: Number(v) })}
+          />
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+          <StyleSelect
+            label={t("editor.copyTab.styleAlign")}
+            value={style.align}
+            options={[
+              { value: "left", label: t("editor.copyTab.alignLeft") },
+              { value: "center", label: t("editor.copyTab.alignCenter") },
+              { value: "right", label: t("editor.copyTab.alignRight") },
+            ]}
+            onChange={(v) => patchStyle({ align: v as TextLayer["style"]["align"] })}
+          />
+          <StyleNumber
+            label={t("editor.copyTab.styleTracking")}
+            value={style.tracking}
+            min={-10}
+            max={80}
+            onChange={(v) => patchStyle({ tracking: v })}
+          />
+          <StyleCheckbox
+            label={t("editor.copyTab.styleItalic")}
+            checked={style.italic}
+            onChange={(v) => patchStyle({ italic: v })}
+          />
+        </div>
+      </div>
+
       <button
         type="button"
         disabled={busy}
@@ -243,5 +323,140 @@ export function CopyTab({ workId }: { workId: string }) {
         {confirmingDelete ? t("editor.copyTab.confirmDeleteLayer") : t("editor.copyTab.deleteLayer")}
       </button>
     </div>
+  );
+}
+
+// ─── #81 style-control primitives (compact, match CopyTab's mono aesthetic) ──
+
+const fieldLabelStyle: React.CSSProperties = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 9,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  color: "var(--text-dimmer)",
+};
+
+const controlStyle: React.CSSProperties = {
+  width: "100%",
+  padding: "5px 6px",
+  border: "1px solid var(--border, rgba(0,0,0,0.12))",
+  borderRadius: 6,
+  background: "var(--surface-0, transparent)",
+  color: "var(--text)",
+  fontFamily: "var(--font-mono)",
+  fontSize: 12,
+};
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return <label style={fieldLabelStyle}>{children}</label>;
+}
+
+function StyleSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: { value: string; label: string }[];
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+      <FieldLabel>{label}</FieldLabel>
+      <select
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={controlStyle}
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>
+            {o.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function StyleNumber({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+      <FieldLabel>{label}</FieldLabel>
+      <input
+        type="number"
+        aria-label={label}
+        value={value}
+        min={min}
+        max={max}
+        onChange={(e) => {
+          const raw = Number(e.target.value);
+          if (!Number.isFinite(raw)) return;
+          // Clamp at the edit site — HTML min/max only gate the spinner.
+          onChange(Math.min(max, Math.max(min, raw)));
+        }}
+        style={controlStyle}
+      />
+    </label>
+  );
+}
+
+function StyleColor({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+      <FieldLabel>{label}</FieldLabel>
+      <input
+        type="color"
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        style={{ ...controlStyle, height: 28, padding: 2, cursor: "pointer" }}
+      />
+    </label>
+  );
+}
+
+function StyleCheckbox({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+}) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: 4, flex: 1 }}>
+      <FieldLabel>{label}</FieldLabel>
+      <input
+        type="checkbox"
+        aria-label={label}
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        style={{ width: 16, height: 16, cursor: "pointer", accentColor: "var(--accent)" }}
+      />
+    </label>
   );
 }
