@@ -25,6 +25,13 @@ export function AITab({ workId }: { workId: string }) {
   const [busy, setBusy] = useState<null | "regen" | "quick">(null);
   const [msg, setMsg] = useState<string | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // #71 — the exact runAssets payload awaiting confirmation. BOTH the quick-style
+  // chips and the "regenerate all" button now stage their (paid, destructive)
+  // /invoke{assets} call here and route through the single RegenerateConfirmDialog,
+  // instead of the chips firing raw on click. Cleared on confirm or cancel.
+  const [pendingRun, setPendingRun] = useState<
+    { input: Record<string, unknown>; label: "regen" | "quick" } | null
+  >(null);
   const slideCount = car?.slides.length ?? 0;
   const t = useT();
   // R36: cancellation flag for in-flight polls. The poll loop is
@@ -165,7 +172,12 @@ export function AITab({ workId }: { workId: string }) {
               <button
                 key={q.prompt}
                 type="button"
-                onClick={() => runAssets({ stylePrompt: q.prompt }, "quick")}
+                onClick={() => {
+                  // #71 — gate the chip behind the same cost/destructive confirm
+                  // as the main button (was firing the paid regen immediately).
+                  setPendingRun({ input: { stylePrompt: q.prompt }, label: "quick" });
+                  setConfirmOpen(true);
+                }}
                 disabled={isDisabled}
                 style={{
                   ...chipBtn,
@@ -183,7 +195,10 @@ export function AITab({ workId }: { workId: string }) {
       <button
         type="button"
         disabled={busy !== null || slideCount === 0}
-        onClick={() => setConfirmOpen(true)}
+        onClick={() => {
+          setPendingRun({ input: { regenerateAll: true, stylePrompt: prompt }, label: "regen" });
+          setConfirmOpen(true);
+        }}
         style={primaryBtn}
       >
         {busy === "regen"
@@ -194,11 +209,17 @@ export function AITab({ workId }: { workId: string }) {
       <RegenerateConfirmDialog
         open={confirmOpen}
         slideCount={slideCount}
-        stylePrompt={prompt}
-        onCancel={() => setConfirmOpen(false)}
+        // Show the style that's actually about to run: a chip's preset prompt
+        // when staged from a chip, otherwise the textarea content.
+        stylePrompt={(pendingRun?.input.stylePrompt as string | undefined) ?? prompt}
+        onCancel={() => {
+          setConfirmOpen(false);
+          setPendingRun(null);
+        }}
         onConfirm={() => {
           setConfirmOpen(false);
-          void runAssets({ regenerateAll: true, stylePrompt: prompt }, "regen");
+          if (pendingRun) void runAssets(pendingRun.input, pendingRun.label);
+          setPendingRun(null);
         }}
       />
 
