@@ -5,7 +5,7 @@ import { promisify } from "node:util";
 import { join, extname } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
-import { loadConfig, saveConfig, dataDir, repoRoot } from "../config.js";
+import { loadConfig, saveConfig, dataDir, repoRoot, type Config } from "../config.js";
 import {
   listWorks, getWork, createWork as storeCreateWork,
   updateWork as storeUpdateWork, deleteWork as storeDeleteWork,
@@ -159,18 +159,50 @@ apiRoutes.get("/api/status", async (c) => {
   });
 });
 
-// R109 F475 — server-side secret redaction. The GET endpoint never returns
-// plaintext credentials; `secretMeta[k] = { set, lastFour }` lets the UI
-// show a "currently stored ····XXXX" hint without holding the secret in
-// browser memory. PUT semantics: empty-string in body for a secret field
-// means "leave the stored value alone" (so the user can save other fields
-// without re-typing keys).
+// R109 F475 + #60 — server-side secret redaction. The GET endpoint NEVER
+// returns plaintext credentials; each secret becomes a `secretMeta[k] =
+// { set, lastFour }` entry so the UI can show a "currently stored ····XXXX"
+// hint without the secret ever entering browser memory.
+//
+// SECRET_PATHS is the single sweep that enumerates EVERY credential-bearing
+// path in the config. The GET handler (a) strips each secret-bearing nested
+// object from the spread so no plaintext escapes, and (b) builds secretMeta
+// from this list. Before #60 only `openrouterKey` was redacted while the raw
+// `...config` spread leaked jimeng.accessKey/secretKey and memory.apiKey in
+// plaintext — the classic "redacted one field, forgot the rest" sweep-gate
+// drift. Add a new secret to the config → add ONE line here and it is covered
+// everywhere (response strip + meta) at once.
+export const SECRET_PATHS = [
+  { metaKey: "openrouterKey", read: (c: Config) => c.openrouter?.apiKey },
+  { metaKey: "jimengAccessKey", read: (c: Config) => c.jimeng?.accessKey },
+  { metaKey: "jimengSecretKey", read: (c: Config) => c.jimeng?.secretKey },
+  { metaKey: "memoryApiKey", read: (c: Config) => c.memory?.apiKey },
+] as const;
+
+// Nested config keys whose entire object is credential-bearing and must be
+// dropped from the GET response spread. (memory.syncEnabled — the only
+// non-secret field any client reads — is surfaced explicitly below.)
+export const SECRET_BEARING_KEYS = ["openrouter", "jimeng", "memory"] as const;
+
+// PUT-editable secret flat fields: empty string in the body means "leave the
+// stored value alone" so the user can save other fields without re-typing
+// keys. Only openrouterKey is editable via the Settings UI today.
 const SECRET_FIELDS = ["openrouterKey"] as const;
 
 function maskTail(s: string): string {
   if (!s) return "";
   if (s.length <= 4) return "•".repeat(s.length);
   return s.slice(-4);
+}
+
+/** Build the redacted secretMeta map by sweeping SECRET_PATHS. */
+function buildSecretMeta(config: Config): Record<string, { set: boolean; lastFour: string }> {
+  const meta: Record<string, { set: boolean; lastFour: string }> = {};
+  for (const { metaKey, read } of SECRET_PATHS) {
+    const v = read(config) ?? "";
+    meta[metaKey] = { set: !!v, lastFour: maskTail(v) };
+  }
+  return meta;
 }
 
 // GET /api/config
@@ -183,19 +215,19 @@ apiRoutes.get("/api/config", async (c) => {
     const parsed = JSON.parse(raw);
     analyticsLastCollectedAt = parsed.collected_at ?? null;
   } catch { /* file may not exist; ok */ }
-  const openrouterKey = config.openrouter?.apiKey ?? "";
-  // Strip nested plaintext from the spreadable config so we don't accidentally
-  // leak it via ...config below (openrouter lives under its own key).
-  const { openrouter: _o, ...configRest } = config as unknown as Record<string, unknown> & {
-    openrouter?: { apiKey?: string };
-  };
+  // #60 — strip EVERY secret-bearing nested object from the spread so no
+  // plaintext credential escapes via `...configRest`. Previously only
+  // `openrouter` was stripped, leaving jimeng.accessKey/secretKey and
+  // memory.apiKey to leak. The redacted values resurface (set/lastFour only)
+  // through secretMeta below.
+  const configRest = { ...(config as unknown as Record<string, unknown>) };
+  for (const k of SECRET_BEARING_KEYS) delete configRest[k];
   return c.json({
     ...configRest,
-    // Secret fields: never returned in plaintext.
+    // Secret fields: never returned in plaintext. The flat `openrouterKey`
+    // stays in the shape (always "") so older clients don't crash on undefined.
     openrouterKey: "",
-    secretMeta: {
-      openrouterKey: { set: !!openrouterKey, lastFour: maskTail(openrouterKey) },
-    },
+    secretMeta: buildSecretMeta(config),
     douyinUrl: config.analytics?.douyinUrl ?? "",
     memorySyncEnabled: config.memory?.syncEnabled ?? false,
     researchEnabled: config.research?.enabled ?? false,

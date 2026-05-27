@@ -11,6 +11,12 @@ export interface Config {
   port: number;
   model: string;
   openrouter?: { apiKey: string };
+  // #60 — jimeng (火山引擎/即梦) cloud credentials. Present in real on-disk
+  // configs but was never declared here, so the GET /api/config redaction
+  // sweep couldn't "see" it and leaked accessKey/secretKey in plaintext via
+  // the untyped `...config` spread. Declaring it makes the secret path typed
+  // and enumerable by SECRET_PATHS (src/server/api.ts).
+  jimeng?: { accessKey?: string; secretKey?: string };
   research: { enabled: boolean; schedule: string; platforms: string[] };
   interests?: string[];
   memory?: { apiKey: string; userId: string; syncEnabled: boolean };
