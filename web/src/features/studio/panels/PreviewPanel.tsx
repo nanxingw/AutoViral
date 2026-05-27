@@ -20,6 +20,7 @@ interface MemoPlayerStageProps {
   comp: Composition;
   durationInFrames: number;
   fps: number;
+  playbackRate: number;
 }
 
 const MemoPlayerStage = memo(function MemoPlayerStage({
@@ -27,6 +28,7 @@ const MemoPlayerStage = memo(function MemoPlayerStage({
   comp,
   durationInFrames,
   fps,
+  playbackRate,
 }: MemoPlayerStageProps) {
   // useMemo on the inputProps so the comp wrapper object only changes
   // when comp itself changes — not on every PreviewPanel re-render.
@@ -41,11 +43,17 @@ const MemoPlayerStage = memo(function MemoPlayerStage({
       compositionWidth={comp.width}
       compositionHeight={comp.height}
       style={PLAYER_STYLE}
+      // #74 — Speed is a declarative Player prop (it rescales Remotion's
+      // playback clock), unlike volume which is imperative on the ref.
+      playbackRate={playbackRate}
       // No `controls` — we render our own transport bar below.
       clickToPlay
     />
   );
 });
+
+// #74 — speed presets the "1×" transport button cycles through.
+const SPEEDS = [0.5, 1, 1.5, 2] as const;
 
 function formatTime(s: number): string {
   const m = Math.floor(s / 60);
@@ -61,6 +69,13 @@ export function PreviewPanel() {
   // preview + timeline + dive views.
   const frame = useComposition((s) => s.currentFrame);
   const [playing, setPlaying] = useState(false);
+  // #74 — these two transport controls used to be dead (aria-label + cursor
+  // but no onClick). Volume is driven imperatively on the PlayerRef; speed is
+  // a declarative <Player playbackRate> prop. `volume` is the last non-zero
+  // level so un-muting restores it instead of jumping to silence.
+  const [volume, setVolume] = useState(1);
+  const [muted, setMuted] = useState(false);
+  const [rate, setRate] = useState(1);
   const playerRef = useRef<PlayerRef | null>(null);
 
   // Subscribe to player frame updates so the scrubber + timecode track playback.
@@ -112,6 +127,46 @@ export function PreviewPanel() {
     p.seekTo(f);
     useComposition.getState().setFrame(f);
   }, [comp]);
+
+  // #74 — volume level. Setting a non-zero level also un-mutes (you can't
+  // raise volume while muted and expect silence). Mute toggle is separate.
+  const applyVolume = useCallback((v: number) => {
+    const clamped = Math.max(0, Math.min(1, v));
+    setVolume(clamped);
+    const p = playerRef.current;
+    if (!p) return;
+    p.setVolume(clamped);
+    if (clamped > 0 && p.isMuted()) {
+      p.unmute();
+      setMuted(false);
+    }
+  }, []);
+
+  const toggleMute = useCallback(() => {
+    const p = playerRef.current;
+    setMuted((m) => {
+      const next = !m;
+      if (p) {
+        if (next) p.mute();
+        else {
+          p.unmute();
+          // Restore the last level (unmute alone keeps Remotion's internal
+          // volume, but if it was 0 the user would hear nothing).
+          p.setVolume(volume > 0 ? volume : 1);
+          if (volume === 0) setVolume(1);
+        }
+      }
+      return next;
+    });
+  }, [volume]);
+
+  // #74 — cycle 0.5× → 1× → 1.5× → 2× → 0.5×. The prop flows into <Player>.
+  const cycleSpeed = useCallback(() => {
+    setRate((r) => {
+      const i = SPEEDS.indexOf(r as (typeof SPEEDS)[number]);
+      return SPEEDS[(i + 1) % SPEEDS.length];
+    });
+  }, []);
 
   if (!comp) {
     return (
@@ -241,6 +296,7 @@ export function PreviewPanel() {
             comp={comp}
             durationInFrames={durationInFrames}
             fps={fps}
+            playbackRate={rate}
           />
           {/* Safe-zone overlay */}
           <div
@@ -358,28 +414,54 @@ export function PreviewPanel() {
         <button
           type="button"
           data-bare
+          aria-label={muted ? "Unmute" : "Mute"}
+          aria-pressed={muted}
+          title={muted ? "Unmute" : "Mute"}
+          onClick={toggleMute}
+          style={{
+            ...transportIconBtn(),
+            color: muted ? "var(--text-dimmer)" : "var(--text-dim)",
+          }}
+        >
+          {muted || volume === 0 ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" />
+              <line x1="23" y1="9" x2="17" y2="15" />
+              <line x1="17" y1="9" x2="23" y2="15" />
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" />
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
+            </svg>
+          )}
+        </button>
+        <input
+          type="range"
+          min={0}
+          max={1}
+          step={0.01}
+          value={muted ? 0 : volume}
           aria-label="Volume"
           title="Volume"
-          style={transportIconBtn()}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-            <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor" />
-            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" />
-          </svg>
-        </button>
+          onChange={(e) => applyVolume(parseFloat(e.target.value))}
+          style={{ width: 64, accentColor: "var(--accent)", cursor: "pointer", flexShrink: 0 }}
+        />
         <button
           type="button"
           data-bare
           aria-label="Speed"
           title="Speed"
+          onClick={cycleSpeed}
           style={{
             ...transportIconBtn(),
             width: 38,
             fontFamily: "var(--font-mono)",
             fontSize: 10,
+            color: rate === 1 ? "var(--text-dim)" : "var(--accent)",
           }}
         >
-          1×
+          {rate}×
         </button>
       </div>
     </div>
