@@ -140,6 +140,8 @@ export const en = {
       busy: "...",
       emptyResponse: "Empty response from rewriter",
       rewriteFailed: "Rewrite failed — please try again.",
+      deleteLayer: "Delete layer",
+      confirmDeleteLayer: "Click again to delete",
     },
     aiTab: {
       stylePrompt: "Style prompt",
@@ -766,6 +768,8 @@ export const zh: DeepShape<Messages> = {
       busy: "…",
       emptyResponse: "改写结果为空",
       rewriteFailed: "改写失败——请重试。",
+      deleteLayer: "删除图层",
+      confirmDeleteLayer: "再次点击删除",
     },
     aiTab: {
       stylePrompt: "风格描述",

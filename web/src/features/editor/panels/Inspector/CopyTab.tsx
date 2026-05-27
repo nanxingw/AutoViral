@@ -11,8 +11,16 @@ export function CopyTab({ workId }: { workId: string }) {
   const selectionLayerId = useEditor((s) => s.selectionLayerId);
   const updateLayer = useEditor((s) => s.updateLayer);
   const addLayer = useEditor((s) => s.addLayer);
+  const removeLayer = useEditor((s) => s.removeLayer);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // #66 — removeLayer was a fully-implemented + tested store action with ZERO UI
+  // consumers, so deleting one text layer forced nuking the whole slide. This is
+  // its first call site. Two-click inline confirm (not a modal — a single layer
+  // is low-stakes + easily re-added) guards against an accidental click since the
+  // editor has no inline undo. Deliberately NOT a global Delete/Backspace key:
+  // this tab has a textarea, and a global handler would eat Backspace mid-typing.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const t = useT();
   // R37: same unmount-safety pattern as R36 AITab. /text-rewrite is a
   // single round-trip (1-5s) so the window is shorter than AITab's 60s
@@ -26,6 +34,12 @@ export function CopyTab({ workId }: { workId: string }) {
       aliveRef.current = false;
     };
   }, []);
+
+  // Reset the delete-confirm arming whenever the selected layer changes, so a
+  // primed "click again to delete" can't carry over to a different layer.
+  useEffect(() => {
+    setConfirmingDelete(false);
+  }, [selectionLayerId]);
 
   const slide = car?.slides.find((s) => s.id === currentSlideId);
   const candidate = slide?.layers.find((l) => l.id === selectionLayerId);
@@ -199,6 +213,35 @@ export function CopyTab({ workId }: { workId: string }) {
       )}
       {/* Let users keep stacking layers without going back to an empty state. */}
       {addTextLayerButton}
+      {/* #66 — delete THIS layer (vs. the only prior option: nuking the whole
+          slide). Two-click inline confirm; the armed state is reset by the
+          selection-change effect above. */}
+      <button
+        type="button"
+        onClick={() => {
+          if (confirmingDelete) {
+            removeLayer(selected.id);
+            setConfirmingDelete(false);
+          } else {
+            setConfirmingDelete(true);
+          }
+        }}
+        style={{
+          padding: "8px 12px",
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          letterSpacing: "0.04em",
+          border: `1px solid ${confirmingDelete ? "var(--text-warn, #c44a4a)" : "var(--border, rgba(0,0,0,0.12))"}`,
+          background: confirmingDelete ? "rgba(196, 74, 74, 0.08)" : "transparent",
+          color: confirmingDelete ? "var(--text-warn, #c44a4a)" : "var(--text-dim)",
+          borderRadius: 6,
+          cursor: "pointer",
+          alignSelf: "flex-start",
+          transition: "background 0.15s, color 0.15s, border-color 0.15s",
+        }}
+      >
+        {confirmingDelete ? t("editor.copyTab.confirmDeleteLayer") : t("editor.copyTab.deleteLayer")}
+      </button>
     </div>
   );
 }

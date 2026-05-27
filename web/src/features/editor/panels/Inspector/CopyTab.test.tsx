@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { render, fireEvent, screen, waitFor } from "@testing-library/react";
+import { render, fireEvent, screen, waitFor, act } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { CopyTab } from "./CopyTab";
 import { useEditor } from "../../store";
@@ -26,6 +26,16 @@ function seed() {
   };
   useEditor.getState().addLayer(layer);
   useEditor.getState().setSelectionLayer("t1");
+}
+
+function textLayer(id: string, text: string): Layer {
+  return {
+    id,
+    kind: "text",
+    box: { x: 0, y: 0, w: 200, h: 60, rotation: 0 },
+    text,
+    style: { font: "sans", size: 24, weight: 400, italic: false, color: "#000", align: "left", tracking: 0 },
+  };
 }
 
 describe("CopyTab", () => {
@@ -95,5 +105,40 @@ describe("CopyTab", () => {
       >;
       expect(layer.text).toBe("rewritten");
     });
+  });
+
+  // #66 — removeLayer had zero UI. The delete button is its first call site,
+  // two-click confirmed (no inline undo in the editor).
+  it("first click on delete arms a confirm but does NOT remove the layer (#66)", () => {
+    seed();
+    render(<CopyTab workId="w1" />);
+    fireEvent.click(screen.getByRole("button", { name: /^Delete layer$/i }));
+    expect(useEditor.getState().car!.slides[0].layers).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /Click again to delete/i })).toBeInTheDocument();
+  });
+
+  it("second click removes the layer and clears the selection (#66)", () => {
+    seed();
+    render(<CopyTab workId="w1" />);
+    fireEvent.click(screen.getByRole("button", { name: /^Delete layer$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Click again to delete/i }));
+    expect(useEditor.getState().car!.slides[0].layers).toHaveLength(0);
+    expect(useEditor.getState().selectionLayerId).toBeNull();
+  });
+
+  it("switching to a different layer disarms a primed delete (#66)", () => {
+    seed(); // t1 selected
+    useEditor.getState().addLayer(textLayer("t2", "second")); // addLayer selects t2
+    act(() => useEditor.getState().setSelectionLayer("t1"));
+    render(<CopyTab workId="w1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Delete layer$/i })); // arm on t1
+    expect(screen.getByRole("button", { name: /Click again to delete/i })).toBeInTheDocument();
+
+    act(() => useEditor.getState().setSelectionLayer("t2")); // change selection
+    // re-armed state cleared: button is back to the un-primed label, both layers intact
+    expect(screen.getByRole("button", { name: /^Delete layer$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Click again to delete/i })).toBeNull();
+    expect(useEditor.getState().car!.slides[0].layers).toHaveLength(2);
   });
 });
