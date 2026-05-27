@@ -157,3 +157,91 @@ describe("<StaticPropsPanel />", () => {
     expect(live.kind === "audio" && live.fadeIn).toBe(0.5);
   });
 });
+
+// #87 — fade in/out, audio type, and sidechain ducking controls. Every
+// field below is consumed by compositionToMixTracks (render-pipeline.ts):
+// fadeIn/fadeOut → mt.fadeIn/fadeOut, type → mt.type + ducking trigger
+// detection, ducking.ratio → mt.ducking.ratio. attack/release are stored
+// (schema-required) but the adapter drops them, so they are deliberately
+// NOT exposed as editable controls — exposing them would be a silent leak.
+describe("<StaticPropsPanel /> — audio fade / type / ducking (#87)", () => {
+  beforeEach(() => {
+    useComposition.setState({
+      comp: compWithAudioClip("a1"),
+      selection: "a1",
+    });
+  });
+
+  it("fade-in slider writes fadeIn (seconds)", () => {
+    render(<StaticPropsPanel />);
+    fireEvent.change(screen.getByRole("slider", { name: /fade in/i }), {
+      target: { value: "1.5" },
+    });
+    const live = liveClip("a1");
+    expect(live.kind === "audio" && live.fadeIn).toBe(1.5);
+  });
+
+  it("fade-out number input writes fadeOut and clamps to the 10s ceiling", () => {
+    render(<StaticPropsPanel />);
+    fireEvent.change(screen.getByRole("spinbutton", { name: /fade out/i }), {
+      target: { value: "999" },
+    });
+    const live = liveClip("a1");
+    expect(live.kind === "audio" && live.fadeOut).toBe(10);
+  });
+
+  it("type select writes the audio type discriminator", () => {
+    render(<StaticPropsPanel />);
+    fireEvent.change(screen.getByRole("combobox", { name: /type/i }), {
+      target: { value: "voiceover" },
+    });
+    const live = liveClip("a1");
+    expect(live.kind === "audio" && live.type).toBe("voiceover");
+  });
+
+  it("ducking checkbox seeds the full schema shape; the ratio row is hidden until enabled", () => {
+    render(<StaticPropsPanel />);
+    // Ratio control only exists once ducking is on.
+    expect(screen.queryByRole("slider", { name: /ratio/i })).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: /ducking/i }));
+    const live = liveClip("a1");
+    expect(live.kind === "audio" && live.ducking).toEqual({
+      ratio: 4,
+      attack: 200,
+      release: 1000,
+    });
+    expect(screen.getByRole("slider", { name: /ratio/i })).toBeInTheDocument();
+  });
+
+  it("ducking ratio slider updates ratio and preserves the seeded attack/release", () => {
+    useComposition.setState({
+      comp: compWithAudioClip("a1", {
+        ducking: { ratio: 4, attack: 200, release: 1000 },
+      }),
+      selection: "a1",
+    });
+    render(<StaticPropsPanel />);
+    fireEvent.change(screen.getByRole("slider", { name: /ratio/i }), {
+      target: { value: "8" },
+    });
+    const live = liveClip("a1");
+    expect(live.kind === "audio" && live.ducking).toEqual({
+      ratio: 8,
+      attack: 200,
+      release: 1000,
+    });
+  });
+
+  it("disabling ducking clears the optional object", () => {
+    useComposition.setState({
+      comp: compWithAudioClip("a1", {
+        ducking: { ratio: 4, attack: 200, release: 1000 },
+      }),
+      selection: "a1",
+    });
+    render(<StaticPropsPanel />);
+    fireEvent.click(screen.getByRole("checkbox", { name: /ducking/i }));
+    const live = liveClip("a1");
+    expect(live.kind === "audio" && live.ducking).toBeUndefined();
+  });
+});

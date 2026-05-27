@@ -281,9 +281,12 @@ export function StaticPropsPanel() {
     });
   }
 
-  // Audio — volume only here (fade/ducking/type are different design
-  // surfaces and out of scope for #56). Bounds from AudioClip schema
-  // (composition.ts:174): 0..1.5.
+  // Audio — volume + fade in/out as numeric rows (#87). Bounds from the
+  // AudioClip schema (composition.ts:175-177): volume 0..1.5, fade ≥0
+  // (seconds — capped at 10s here, a sane editing ceiling; the schema has
+  // no upper bound). `type` (select) and `ducking` (toggle + ratio) are
+  // not numeric Rows, so they render in a dedicated block below. All three
+  // are consumed by compositionToMixTracks (render-pipeline.ts:285-296).
   if (clip.kind === "audio") {
     sections.push({
       title: t("studio.inspector.sectionAudio"),
@@ -298,11 +301,42 @@ export function StaticPropsPanel() {
           defaultValue: 1,
           onChange: (v) => updateClip(clip.id, { volume: v }),
         },
+        {
+          key: "fadeIn",
+          label: t("studio.inspector.propFadeIn"),
+          value: clip.fadeIn ?? 0,
+          min: 0,
+          max: 10,
+          step: 0.1,
+          defaultValue: 0,
+          onChange: (v) => updateClip(clip.id, { fadeIn: v }),
+        },
+        {
+          key: "fadeOut",
+          label: t("studio.inspector.propFadeOut"),
+          value: clip.fadeOut ?? 0,
+          min: 0,
+          max: 10,
+          step: 0.1,
+          defaultValue: 0,
+          onChange: (v) => updateClip(clip.id, { fadeOut: v }),
+        },
       ],
     });
   }
 
-  if (sections.length === 0) return null;
+  // Non-numeric audio controls that don't fit the numeric Row model:
+  // `type` (enum select) drives mix routing + ducking trigger detection,
+  // `ducking` is an optional sidechain config. Both are real render inputs
+  // (render-pipeline.ts:285,291). NOTE: the schema's ducking carries
+  // attack+release too, but compositionToMixTracks forwards ONLY `ratio`
+  // (render-pipeline.ts:244-246 — "MixTrack doesn't model" them). Surfacing
+  // attack/release sliders would be a silent leak (user edits → render
+  // ignores), so we expose ratio only and seed attack/release with sane
+  // defaults to satisfy the (required) schema fields.
+  const audioClip = clip.kind === "audio" ? clip : null;
+
+  if (sections.length === 0 && !audioClip) return null;
 
   const resetAriaTpl = (prop: string) =>
     t("studio.inspector.resetAria", { prop });
@@ -320,6 +354,78 @@ export function StaticPropsPanel() {
           ))}
         </div>
       ))}
+
+      {audioClip && (
+        <div style={sectionStyle}>
+          <div style={rowStyle}>
+            <label htmlFor="audio-type" style={labelStyle}>
+              {t("studio.inspector.audioType")}
+            </label>
+            <select
+              id="audio-type"
+              aria-label={t("studio.inspector.audioType")}
+              value={audioClip.type ?? "bgm"}
+              onChange={(e) =>
+                updateClip(audioClip.id, {
+                  type: e.target.value as typeof audioClip.type,
+                })
+              }
+              style={{ ...numberInputStyle, gridColumn: "2 / span 3", textAlign: "left" }}
+            >
+              <option value="original">{t("studio.inspector.audioTypeOriginal")}</option>
+              <option value="bgm">{t("studio.inspector.audioTypeBgm")}</option>
+              <option value="voiceover">{t("studio.inspector.audioTypeVoiceover")}</option>
+              <option value="sfx">{t("studio.inspector.audioTypeSfx")}</option>
+            </select>
+          </div>
+
+          <div style={rowStyle}>
+            <label htmlFor="audio-ducking" style={labelStyle}>
+              {t("studio.inspector.ducking")}
+            </label>
+            <input
+              id="audio-ducking"
+              type="checkbox"
+              aria-label={t("studio.inspector.ducking")}
+              checked={!!audioClip.ducking}
+              onChange={(e) =>
+                updateClip(audioClip.id, {
+                  // Enabling seeds the full schema-required shape; only
+                  // `ratio` reaches render today (see note above).
+                  ducking: e.target.checked
+                    ? { ratio: 4, attack: 200, release: 1000 }
+                    : undefined,
+                })
+              }
+              style={{ justifySelf: "start", width: 16, height: 16, accentColor: "var(--accent)" }}
+            />
+          </div>
+
+          {audioClip.ducking && (
+            <>
+              <PropRow
+                row={{
+                  key: "duckingRatio",
+                  label: t("studio.inspector.duckingRatio"),
+                  value: audioClip.ducking.ratio,
+                  min: 1,
+                  max: 20,
+                  step: 0.5,
+                  defaultValue: 4,
+                  onChange: (v) =>
+                    updateClip(audioClip.id, {
+                      ducking: { ...audioClip.ducking!, ratio: v },
+                    }),
+                }}
+                resetAriaTpl={resetAriaTpl}
+              />
+              <div style={{ ...labelStyle, gridColumn: "1 / -1", color: "var(--text-dimmer)" }}>
+                {t("studio.inspector.duckingHint")}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }
