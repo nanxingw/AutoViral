@@ -376,14 +376,41 @@ apiRoutes.put("/api/works/:id", async (c) => {
   }
 });
 
-// DELETE /api/works/:id — cascades: kills active CLI session (if creating), then rm -rf work dir.
-// Order matters: killSession first prevents the CLI subprocess from writing
-// chat.jsonl into the work directory while storeDeleteWork is rm -rf'ing it.
+// #63 — cancel a work's in-flight render jobs (queued/running) so the render
+// worker stops writing into works/<id>/output/ BEFORE the directory is deleted.
+// Terminal jobs (done/failed/cancelled) are left untouched. cancel() aborts the
+// ffmpeg/Remotion subprocess via AbortSignal (#44), so it exits cleanly instead
+// of racing the rm -rf. Returns the ids it cancelled (for logging/testing).
+// Exported so the cancel-selection logic can be unit-tested with a fake queue.
+export function cancelInFlightRenders(
+  queue: Pick<RenderQueue, "list" | "cancel">,
+  workId: string,
+): string[] {
+  const cancelled: string[] = [];
+  for (const job of queue.list(workId)) {
+    if (job.status === "queued" || job.status === "running") {
+      queue.cancel(job.id);
+      cancelled.push(job.id);
+    }
+  }
+  return cancelled;
+}
+
+// DELETE /api/works/:id — cascades: cancels in-flight render jobs, kills active
+// CLI session (if creating), then rm -rf work dir.
+// Order matters: BOTH concurrent writers into works/<id>/ must be stopped before
+// storeDeleteWork rm -rf's it — the CLI subprocess (chat.jsonl) AND the render
+// worker (output/ frames). Stopping writers first avoids ENOENT crashes and
+// zombie output dirs re-created by a still-running render after deletion (#63).
 apiRoutes.delete("/api/works/:id", async (c) => {
   const id = c.req.param("id");
   try {
     const work = await getWork(id);
     if (!work) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
+    // #63 — stop the render worker writing into this work dir before rm -rf.
+    if (renderQueue) {
+      cancelInFlightRenders(renderQueue, id);
+    }
     if (work.cliSessionId && wsBridge) {
       wsBridge.killSession(id);
     }
