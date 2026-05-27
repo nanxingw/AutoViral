@@ -14,8 +14,10 @@ export function NewWorkCard() {
   // feedback — and clicking again would queue a parallel POST. Both fixed.
   const [createError, setCreateError] = useState<string | null>(null);
   // R101 F406 — give the user a place to name the work before commit.
-  // Empty input falls back to the localized "Untitled" so the existing
-  // direct-click path stays one click.
+  // #83 — empty input stays an EMPTY title; WorksGrid localizes the
+  // "未命名/Untitled" placeholder at render time. Baking `t(...)` here froze
+  // the title's language to creation-time locale (an EN-created blank work
+  // showed "Untitled" forever even in ZH).
   const [pendingTitle, setPendingTitle] = useState("");
   // R101 F414 — Tier 2 race protection. `create.isPending` is a hook value
   // that only refreshes on the next render, so three back-to-back
@@ -32,7 +34,7 @@ export function NewWorkCard() {
     lockRef.current = true;
     setNavigating(true);
     setCreateError(null);
-    const title = pendingTitle.trim() || t("works.untitledWork");
+    const title = pendingTitle.trim();
     try {
       const w = await create.mutateAsync({ title, type });
       navigate(type === "short-video" ? `/studio/${w.id}` : `/editor/${w.id}`);

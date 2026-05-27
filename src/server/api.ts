@@ -298,11 +298,14 @@ apiRoutes.post("/api/works", async (c) => {
       platforms: string[];
       topicHint?: string;
     }>();
-    if (!body.title || !body.type || !body.platforms) {
-      return c.json({ error: "title, type, and platforms are required", errorCode: "create_work_validation" }, 400);
+    // #83 — title is optional: a blank work stores an EMPTY title and the
+    // UI localizes the "未命名/Untitled" placeholder at render time (baking
+    // the localized string in froze its language to creation-time locale).
+    if (!body.type || !body.platforms) {
+      return c.json({ error: "type and platforms are required", errorCode: "create_work_validation" }, 400);
     }
     const work = await storeCreateWork({
-      title: body.title,
+      title: body.title ?? "",
       type: body.type as "short-video" | "image-text",
       contentCategory: body.contentCategory as any,
       videoSource: body.videoSource as any,

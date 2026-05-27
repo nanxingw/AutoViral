@@ -8,6 +8,7 @@ import { useLocaleStore } from "@/i18n/store";
 import { WorkCardMenu } from "./WorkCardMenu";
 import { DeleteWorkConfirm } from "./DeleteWorkConfirm";
 import { RenameWorkDialog } from "./RenameWorkDialog";
+import { displayWorkTitle } from "./workTitle";
 
 interface Props {
   works: WorkSummary[];
@@ -96,7 +97,10 @@ export function WorksGrid({ works, filter }: Props) {
                   {typeLabel} · {statusLabel}
                 </div>
                 <div className={styles.meta}>
-                  <h3>{w.title}</h3>
+                  {/* #83 — localize the placeholder at render. Handles both
+                      a blank stored title AND historic works that baked a
+                      localized "Untitled"/"未命名" literal into storage. */}
+                  <h3>{displayWorkTitle(w.title, t("works.untitledWork"))}</h3>
                   <div className={styles.subline}>
                     <span>{dateFmt.format(new Date(w.updatedAt))}</span>
                   </div>
@@ -161,7 +165,7 @@ function WorkCover({ work }: { work: WorkSummary }) {
   // build it from the localized type label + the work's title, falling
   // back to "Untitled" when the title is blank so the string stays
   // readable. WCAG 1.1.1 — content-bearing images must describe content.
-  const titleForAlt = work.title || t("works.untitledWork");
+  const titleForAlt = displayWorkTitle(work.title, t("works.untitledWork"));
   const altKey: MessageKey =
     work.type === "short-video" ? "works.coverAltVideo" : "works.coverAltImage";
   const coverAlt = t(altKey, { title: titleForAlt });

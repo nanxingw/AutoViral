@@ -27,4 +27,17 @@ describe("work-store — D3 type cleanup", () => {
       expect(out).not.toHaveProperty("pipeline");
     });
   });
+
+  // #83 — a blank work stores an EMPTY title (not a localized placeholder);
+  // the UI localizes "未命名/Untitled" at render. The store must accept and
+  // round-trip an empty title without coercing it to anything.
+  it("createWork accepts an empty title and round-trips it (#83)", async () => {
+    await withTempDataDir(async () => {
+      const { createWork, getWork } = await import("./work-store.js");
+      const w = await createWork({ title: "", type: "short-video", platforms: ["douyin"] });
+      expect(w.title).toBe("");
+      const reloaded = await getWork(w.id);
+      expect(reloaded?.title).toBe("");
+    });
+  });
 });
