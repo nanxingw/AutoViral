@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { VariantSwitcher } from "./VariantSwitcher";
+import { ClipTrackSelect } from "./ClipTrackSelect";
 import { KeyframePanel } from "./KeyframePanel";
 import { TextClipPanel } from "./TextClipPanel";
 import { StaticPropsPanel } from "./StaticPropsPanel";
@@ -34,6 +35,9 @@ export function InspectorTab() {
           {t("studio.inspector.header")}
         </div>
         <VariantSwitcher />
+        {/* #88 — move the selected clip to another same-kind lane (renders
+            for every clip kind, above the kind-specific panels). */}
+        <ClipTrackSelect />
         <TextClipPanel />
         {/* #56 — static transform/opacity/filter/volume controls.
             Sits above KeyframePanel: static value is the no-keyframes

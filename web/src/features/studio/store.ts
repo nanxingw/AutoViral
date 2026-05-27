@@ -110,6 +110,11 @@ interface CompState {
   setBeats: (b: number[]) => void;
   recomputeDuration: () => void;
   moveClipWithinTrack: (trackId: string, fromIndex: number, toIndex: number) => void;
+  // #88 — move a clip to a different track, preserving its trackOffset (time
+  // position). No-op unless the target track exists, differs from the source,
+  // and shares the source track's kind (a video clip can't live on an audio
+  // lane). Like the other clip-level mutations it does NOT push undo history.
+  moveClipToTrack: (clipId: string, targetTrackId: string) => void;
   // Phase 1.6 — provenance graph mutations
   addAsset: (asset: AssetEntry) => void;
   addProvenance: (edge: ProvenanceEdge) => void;
@@ -247,6 +252,38 @@ export const useComposition = create<CompState>()(
           c.trackOffset = cursor;
           cursor += clipDuration(c);
         }
+        s.comp.duration = Math.max(
+          0,
+          ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
+        );
+      }),
+    moveClipToTrack: (clipId, targetTrackId) =>
+      set((s) => {
+        if (!s.comp) return;
+        // Locate the clip + the track it currently lives on.
+        let sourceTrack: (typeof s.comp.tracks)[number] | undefined;
+        let clip: Clip | undefined;
+        for (const tr of s.comp.tracks) {
+          const found = (tr.clips as Clip[]).find((c) => c.id === clipId);
+          if (found) {
+            sourceTrack = tr;
+            clip = found;
+            break;
+          }
+        }
+        if (!sourceTrack || !clip) return;
+        const target = s.comp.tracks.find((t) => t.id === targetTrackId);
+        if (!target) return;
+        if (target.id === sourceTrack.id) return; // already there
+        // Kind guard: a clip only belongs on a track of its own kind. The
+        // source track kind is authoritative (the clip was validly placed).
+        if (target.kind !== sourceTrack.kind) return;
+        // Detach from source, attach to target — trackOffset (time) is kept,
+        // so the clip stays at the same horizontal position, just on a new lane.
+        sourceTrack.clips = (sourceTrack.clips as Clip[]).filter(
+          (c) => c.id !== clipId,
+        ) as typeof sourceTrack.clips;
+        (target.clips as Clip[]).push(clip);
         s.comp.duration = Math.max(
           0,
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
