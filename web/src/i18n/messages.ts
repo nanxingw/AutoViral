@@ -266,6 +266,7 @@ export const en = {
       heading: "Assets",
       tabLibrary: "Library",
       tabInspector: "Inspector",
+      addToTimeline: "Add to timeline",
     },
     rightPane: {
       tabChat: "Chat",
@@ -275,6 +276,7 @@ export const en = {
       btnClose: "Close preview",
       noInlinePreview: "No inline preview for this format.",
       openInTab: "Open in new tab",
+      addToTimeline: "Add to timeline",
     },
     timeline: {
       title: "Timeline",
@@ -988,6 +990,7 @@ export const zh: DeepShape<Messages> = {
       heading: "素材",
       tabLibrary: "素材库",
       tabInspector: "检视",
+      addToTimeline: "加入时间线",
     },
     rightPane: {
       tabChat: "对话",
@@ -997,6 +1000,7 @@ export const zh: DeepShape<Messages> = {
       btnClose: "关闭预览",
       noInlinePreview: "此格式无法内嵌预览。",
       openInTab: "在新标签页打开",
+      addToTimeline: "加入时间线",
     },
     timeline: {
       title: "时间线",

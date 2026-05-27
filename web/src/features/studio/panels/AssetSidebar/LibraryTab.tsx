@@ -4,6 +4,7 @@ import { GenerationDialog } from "@/features/studio/generation/GenerationDialog"
 import { useGatedMediaSrc } from "@/features/studio/media/useGatedMediaSrc";
 import { SearchBox } from "./SearchBox";
 import { AssetPreviewModal } from "./AssetPreviewModal";
+import { useAddAssetToTimeline, isAddableAsset } from "./addAssetToTimeline";
 import { useT } from "@/i18n/useT";
 
 interface Props {
@@ -23,6 +24,8 @@ export function LibraryTab({ workId }: Props) {
   const [genOpen, setGenOpen] = useState(false);
   // R43 — click any AssetTile to open large preview. null = closed.
   const [preview, setPreview] = useState<AssetItem | null>(null);
+  // #78 — place a library asset onto the timeline (wires the orphaned addClip).
+  const addToTimeline = useAddAssetToTimeline();
 
   const currentGroup = useMemo(() => {
     if (!groups.length) return null;
@@ -150,6 +153,12 @@ export function LibraryTab({ workId }: Props) {
                 item={item}
                 index={i}
                 onOpen={() => setPreview(item)}
+                onAdd={
+                  isAddableAsset(item)
+                    ? () => addToTimeline(item)
+                    : undefined
+                }
+                addLabel={t("studio.assetSidebar.addToTimeline")}
               />
             ))}
           </div>
@@ -161,7 +170,18 @@ export function LibraryTab({ workId }: Props) {
         open={genOpen}
         onOpenChange={setGenOpen}
       />
-      <AssetPreviewModal asset={preview} onClose={() => setPreview(null)} />
+      <AssetPreviewModal
+        asset={preview}
+        onClose={() => setPreview(null)}
+        onAddToTimeline={
+          preview && isAddableAsset(preview)
+            ? () => {
+                addToTimeline(preview);
+                setPreview(null);
+              }
+            : undefined
+        }
+      />
     </div>
   );
 }
@@ -170,10 +190,16 @@ function AssetTile({
   item,
   index,
   onOpen,
+  onAdd,
+  addLabel,
 }: {
   item: AssetItem;
   index: number;
   onOpen: () => void;
+  // #78 — when set, render a "＋" affordance that appends this asset to the
+  // timeline. Undefined for kinds that have no timeline clip (text / other).
+  onAdd?: () => void;
+  addLabel?: string;
 }) {
   const hue = hueFromString(item.path);
   const fallbackBg = `linear-gradient(145deg, hsl(${hue}, 40%, 25%), hsl(${(hue + 30) % 360}, 30%, 12%))`;
@@ -387,6 +413,42 @@ function AssetTile({
       >
         {(index + 1).toString().padStart(2, "0")}
       </div>
+
+      {/* #78 — top-right "＋" appends this asset to the timeline. stopPropagation
+          so it doesn't also fire the tile's open-preview click. Only rendered
+          for placeable kinds (onAdd set). */}
+      {onAdd && (
+        <button
+          type="button"
+          aria-label={addLabel}
+          title={addLabel}
+          data-bare
+          onClick={(e) => {
+            e.stopPropagation();
+            onAdd();
+          }}
+          style={{
+            position: "absolute",
+            top: 6,
+            right: 6,
+            width: 22,
+            height: 22,
+            display: "grid",
+            placeItems: "center",
+            borderRadius: 6,
+            border: "1px solid rgba(255,255,255,0.35)",
+            background: "rgba(0,0,0,0.5)",
+            color: "white",
+            cursor: "pointer",
+            padding: 0,
+            lineHeight: 0,
+          }}
+        >
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+        </button>
+      )}
 
       {/* Bottom label */}
       <div

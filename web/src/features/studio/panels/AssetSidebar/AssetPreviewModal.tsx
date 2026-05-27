@@ -8,6 +8,9 @@ import type { AssetItem } from "@/queries/assets";
 interface Props {
   asset: AssetItem | null;
   onClose: () => void;
+  // #78 — when set, render an "Add to timeline" action that appends this asset
+  // as a clip. Undefined for kinds with no timeline representation.
+  onAddToTimeline?: () => void;
 }
 
 /**
@@ -26,7 +29,7 @@ interface Props {
  * keyboard focus management — same pattern as ReframeConfirmDialog and
  * ExportProgress.
  */
-export function AssetPreviewModal({ asset, onClose }: Props) {
+export function AssetPreviewModal({ asset, onClose, onAddToTimeline }: Props) {
   const open = asset !== null;
   const t = useT();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -126,27 +129,55 @@ export function AssetPreviewModal({ asset, onClose }: Props) {
                   {asset.kind} · {asset.ext}
                 </div>
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                aria-label={t("studio.assetPreview.btnClose")}
-                data-bare
-                style={{
-                  width: 28,
-                  height: 28,
-                  display: "grid",
-                  placeItems: "center",
-                  borderRadius: 6,
-                  border: "1px solid var(--glass-border)",
-                  background: "transparent",
-                  color: "var(--text-dim)",
-                  cursor: "pointer",
-                  fontSize: 16,
-                  flexShrink: 0,
-                }}
-              >
-                ×
-              </button>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+                {onAddToTimeline && (
+                  <button
+                    type="button"
+                    onClick={onAddToTimeline}
+                    style={{
+                      height: 28,
+                      padding: "0 12px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      borderRadius: 6,
+                      border: "1px solid var(--accent)",
+                      background: "var(--accent-glow)",
+                      color: "var(--accent-hi)",
+                      cursor: "pointer",
+                      fontSize: 11,
+                      fontFamily: "var(--font-mono)",
+                      letterSpacing: "0.04em",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <path d="M12 5v14M5 12h14" />
+                    </svg>
+                    {t("studio.assetPreview.addToTimeline")}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  aria-label={t("studio.assetPreview.btnClose")}
+                  data-bare
+                  style={{
+                    width: 28,
+                    height: 28,
+                    display: "grid",
+                    placeItems: "center",
+                    borderRadius: 6,
+                    border: "1px solid var(--glass-border)",
+                    background: "transparent",
+                    color: "var(--text-dim)",
+                    cursor: "pointer",
+                    fontSize: 16,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
             </header>
 
             <div
