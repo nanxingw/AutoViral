@@ -14,6 +14,39 @@ export interface EnqueueRenderOptions {
   };
 }
 
+/** Minimal shape of the active export preset we bridge into render opts.
+ *  Mirrors the relevant fields of composition.ExportPreset (#80). */
+export interface RenderPresetSource {
+  id?: string;
+  loudnessTargetLufs?: number;
+}
+
+/**
+ * #80 — bridge the stored platform preset's loudness target (and preset id)
+ * into the render request.
+ *
+ * The server's loudnorm pipeline reads `body.loudnessTargetLufs` and otherwise
+ * falls back to -14 (render-pipeline.ts). The preset is persisted in
+ * `comp.exportPresets[0]` but the export call only ever sent `{type,...}`, so
+ * any non-default target (e.g. WeChat Channels -16) was silently dropped and
+ * every export normalised to -14. This forwards it explicitly.
+ *
+ * Values already present on `opts` win, so a future explicit caller can still
+ * override the preset. A missing preset / field leaves the key `undefined`,
+ * preserving the server's -14 default (no regression for the 7 presets that
+ * are already -14).
+ */
+export function resolveRenderOpts(
+  opts: EnqueueRenderOptions,
+  preset: RenderPresetSource | undefined,
+): EnqueueRenderOptions {
+  return {
+    ...opts,
+    presetId: opts.presetId ?? preset?.id,
+    loudnessTargetLufs: opts.loudnessTargetLufs ?? preset?.loudnessTargetLufs,
+  };
+}
+
 export async function enqueueRender(
   workId: string,
   opts: EnqueueRenderOptions,

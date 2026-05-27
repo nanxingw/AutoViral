@@ -5,11 +5,19 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TopBar } from "./TopBar";
 import * as renderSvc from "../services/render";
+import { useComposition } from "../store";
+import { makeEmptyComposition } from "../types";
 
-vi.mock("../services/render", () => ({
-  enqueueRender: vi.fn(),
-  cancelRender: vi.fn(),
-}));
+// Mock only the network calls; keep the real `resolveRenderOpts` (a pure
+// merge helper, #80) so the export path exercises the actual preset bridge.
+vi.mock("../services/render", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/render")>();
+  return {
+    ...actual,
+    enqueueRender: vi.fn(),
+    cancelRender: vi.fn(),
+  };
+});
 
 // TopBar embeds CheckpointsMenu which uses react-query. Wrap each render
 // with a fresh QueryClient so the hook can mount without "No QueryClient"
@@ -117,5 +125,54 @@ describe("TopBar — queue-aware export (Phase 7.E)", () => {
     await waitFor(() => expect(screen.getByRole("dialog")).toBeInTheDocument());
     await userEvent.keyboard("{Escape}");
     await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  // #80 — end-to-end bridge: a stored platform preset whose loudness target
+  // is NOT the server default (-14) must reach the render request. Without
+  // the resolveRenderOpts wiring in startExport, the WeChat Channels -16
+  // target was silently dropped and every export normalised to -14.
+  it("forwards the active preset's loudnessTargetLufs into the render request (#80)", async () => {
+    (renderSvc.enqueueRender as any).mockResolvedValue({ jobId: "job_wx" });
+    const comp = makeEmptyComposition({ workId: "w-1" });
+    comp.exportPresets = [
+      {
+        id: "weixin-channels",
+        label: "视频号 9:16",
+        platform: "weixin-channels",
+        width: 1080,
+        height: 1920,
+        fps: 30,
+        videoBitrate: 8_000_000,
+        audioBitrate: 192_000,
+        codec: "h264",
+        container: "mp4",
+        loudnessTargetLufs: -16,
+        safeZonePct: 0.05,
+      },
+    ];
+    useComposition.setState({ comp });
+    try {
+      render(
+        qcWrap(<MemoryRouter>
+          <TopBar workId="w-1" savedAt="now" />
+        </MemoryRouter>),
+      );
+      await userEvent.click(
+        screen.getByRole("button", { name: /export full render/i }),
+      );
+      await waitFor(() => {
+        const call = (renderSvc.enqueueRender as any).mock.calls.at(-1);
+        expect(call?.[0]).toBe("w-1");
+        expect(call?.[1]).toMatchObject({
+          type: "full",
+          loudnessTargetLufs: -16,
+          presetId: "weixin-channels",
+        });
+      });
+    } finally {
+      // Don't leak the seeded comp into sibling tests (zustand is a
+      // module-level singleton).
+      useComposition.setState({ comp: null });
+    }
   });
 });

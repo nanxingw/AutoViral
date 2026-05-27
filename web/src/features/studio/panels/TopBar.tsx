@@ -3,7 +3,11 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useComposition } from "../store";
 import { useNavigate } from "react-router-dom";
 import { useT } from "@/i18n/useT";
-import { enqueueRender, type EnqueueRenderOptions } from "../services/render";
+import {
+  enqueueRender,
+  resolveRenderOpts,
+  type EnqueueRenderOptions,
+} from "../services/render";
 import { ExportProgress } from "../render-status/ExportProgress";
 import { CheckpointsMenu } from "@/features/checkpoints/CheckpointsMenu";
 import { ExportCaptionsDialog } from "./Export/ExportCaptionsDialog";
@@ -51,8 +55,14 @@ export function TopBar({
   }, [comp]);
 
   async function startExport(opts: EnqueueRenderOptions) {
-    setLastOpts(opts);
-    const { jobId } = await enqueueRender(workId, opts);
+    // #80 — bridge the active platform preset's loudness target (and preset
+    // id) from the stored composition into the render request. Without this
+    // the server's loudnorm always falls back to -14 and a non-default
+    // preset (e.g. WeChat Channels -16) is silently dropped. Store the
+    // merged opts so a retry re-sends the same target.
+    const merged = resolveRenderOpts(opts, comp?.exportPresets?.[0]);
+    setLastOpts(merged);
+    const { jobId } = await enqueueRender(workId, merged);
     setActiveJobId(jobId);
   }
 
