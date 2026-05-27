@@ -8,6 +8,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
+import { useT } from "@/i18n/useT";
 import {
   CaptionTracksSection,
   defaultCaptionSelection,
@@ -27,6 +28,7 @@ export function ExportCaptionsDialog({
   onCancel,
   onExport,
 }: ExportCaptionsDialogProps) {
+  const t = useT();
   const initial = useMemo(() => defaultCaptionSelection(tracks), [tracks]);
   const [selection, setSelection] = useState<CaptionSelection>(initial);
 
@@ -48,7 +50,7 @@ export function ExportCaptionsDialog({
     <div className={styles.backdrop} role="dialog" aria-modal="true" aria-labelledby="export-captions-title">
       <div className={styles.box}>
         <h2 id="export-captions-title" className={styles.title}>
-          Export with captions
+          {t("studio.captionExport.dialogTitle")}
         </h2>
         <CaptionTracksSection
           tracks={tracks}
@@ -61,14 +63,14 @@ export function ExportCaptionsDialog({
             className={styles.btnGhost}
             onClick={onCancel}
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             type="button"
             className={styles.btnPrimary}
             onClick={() => onExport(selection)}
           >
-            Export
+            {t("studio.captionExport.export")}
           </button>
         </div>
       </div>

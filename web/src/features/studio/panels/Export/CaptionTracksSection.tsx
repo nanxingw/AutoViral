@@ -18,6 +18,7 @@
 // rendering / wiring boundary explicit and the test surface small.
 
 import { useMemo } from "react";
+import { useT } from "@/i18n/useT";
 import styles from "./CaptionTracksSection.module.css";
 
 export interface CaptionTrackOption {
@@ -42,9 +43,6 @@ export interface CaptionTracksSectionProps {
   onSelectionChange: (next: CaptionSelection) => void;
 }
 
-const BURN_DISABLED_TOOLTIP =
-  "Only one track can be burned in at export";
-
 /** Pure helper exposed for tests — derives the default selection
  *  (first track burned, rest sidecar) from a list of text tracks. */
 export function defaultCaptionSelection(
@@ -65,6 +63,7 @@ export function CaptionTracksSection({
   selection,
   onSelectionChange,
 }: CaptionTracksSectionProps) {
+  const t = useT();
   const sidecarSet = useMemo(
     () => new Set(selection.sidecarTrackIds),
     [selection.sidecarTrackIds],
@@ -104,14 +103,11 @@ export function CaptionTracksSection({
       <section className={styles.root} aria-labelledby="captions-section-title">
         <header className={styles.header}>
           <h3 id="captions-section-title" className={styles.title}>
-            Caption tracks
+            {t("studio.captionExport.sectionTitle")}
           </h3>
           <span className={styles.eyebrow}>RESOLVE MODEL</span>
         </header>
-        <p className={styles.empty}>
-          No text tracks in this composition. Add a caption lane to control
-          burn/sidecar at export.
-        </p>
+        <p className={styles.empty}>{t("studio.captionExport.empty")}</p>
       </section>
     );
   }
@@ -120,23 +116,24 @@ export function CaptionTracksSection({
     <section className={styles.root} aria-labelledby="captions-section-title">
       <header className={styles.header}>
         <h3 id="captions-section-title" className={styles.title}>
-          Caption tracks
+          {t("studio.captionExport.sectionTitle")}
         </h3>
         <span className={styles.eyebrow}>RESOLVE MODEL</span>
       </header>
-      <p className={styles.intro}>
-        Choose which lane bakes into the video and which write a sidecar
-        SRT next to the export. Both off skips the track entirely.
-      </p>
-      <div className={styles.grid} role="table" aria-label="Caption tracks">
+      <p className={styles.intro}>{t("studio.captionExport.intro")}</p>
+      <div
+        className={styles.grid}
+        role="table"
+        aria-label={t("studio.captionExport.sectionTitle")}
+      >
         <div className={styles.gridHead} role="columnheader">
-          Track
+          {t("studio.captionExport.colTrack")}
         </div>
         <div className={styles.gridHeadRight} role="columnheader">
-          Burn
+          {t("studio.captionExport.colBurn")}
         </div>
         <div className={styles.gridHeadRight} role="columnheader">
-          Sidecar
+          {t("studio.captionExport.colSidecar")}
         </div>
         {tracks.map((track) => {
           const isBurned = selection.burnTrackId === track.id;
@@ -153,7 +150,9 @@ export function CaptionTracksSection({
                 <span
                   className={lang ? styles.langTag : styles.langTagUnd}
                   aria-label={
-                    lang ? `Language ${lang}` : "Language undetermined"
+                    lang
+                      ? t("studio.captionExport.langAria", { lang })
+                      : t("studio.captionExport.langUndAria")
                   }
                 >
                   {lang || "und"}
@@ -166,7 +165,7 @@ export function CaptionTracksSection({
                     className={styles.checkbox}
                     checked={isBurned}
                     disabled={burnDisabled}
-                    aria-label={`Burn ${track.label} into video`}
+                    aria-label={t("studio.captionExport.burnAria", { label: track.label })}
                     data-testid={`burn-${track.id}`}
                     onChange={(e) => toggleBurn(track.id, e.target.checked)}
                   />
@@ -175,7 +174,7 @@ export function CaptionTracksSection({
                       className={`${styles.tooltip} ${styles.tooltipOnHover}`}
                       role="tooltip"
                     >
-                      {BURN_DISABLED_TOOLTIP}
+                      {t("studio.captionExport.burnDisabledTooltip")}
                     </span>
                   ) : null}
                 </span>
@@ -185,7 +184,7 @@ export function CaptionTracksSection({
                   type="checkbox"
                   className={styles.checkbox}
                   checked={isSidecar}
-                  aria-label={`Sidecar ${track.label} as SRT`}
+                  aria-label={t("studio.captionExport.sidecarAria", { label: track.label })}
                   data-testid={`sidecar-${track.id}`}
                   onChange={(e) => toggleSidecar(track.id, e.target.checked)}
                 />
@@ -195,8 +194,9 @@ export function CaptionTracksSection({
         })}
       </div>
       <p className={styles.footnote}>
-        Sidecar files land as <code>&lt;output&gt;.{"<lang>"}.srt</code>{" "}
-        beside the mp4 (YouTube/FCP convention).
+        {t("studio.captionExport.footnotePre")}{" "}
+        <code>&lt;output&gt;.{"<lang>"}.srt</code>{" "}
+        {t("studio.captionExport.footnotePost")}
       </p>
     </section>
   );

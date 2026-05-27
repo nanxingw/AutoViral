@@ -400,7 +400,7 @@ export function TopBar({
                   outline: "none",
                 }}
               >
-                Export with captions…
+                {t("studio.captionExport.trigger")}
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>

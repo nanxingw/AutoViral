@@ -6,10 +6,11 @@
 // radio-like Burn constraint, Sidecar toggles, and empty-state copy all
 // behave as the issue's acceptance criteria require.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { useState } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useLocaleStore } from "@/i18n/store";
 import {
   CaptionTracksSection,
   defaultCaptionSelection,
@@ -40,6 +41,46 @@ const TWO_TRACK_FIXTURE: CaptionTrackOption[] = [
   { id: "trk_t0000001", label: "CC1 · ZH", language: "zh" },
   { id: "trk_t0000002", label: "CC2 · EN", language: "en" },
 ];
+
+// #73 — the whole caption-export surface was hardcoded English. These pin
+// that the prose + column headers localize, so a ZH user no longer sees an
+// English-only dialog. (Default test locale is EN, so the other suites still
+// assert the English copy.)
+describe("CaptionTracksSection — i18n (#73)", () => {
+  afterEach(() => {
+    useLocaleStore.getState().setLocale("en");
+  });
+
+  it("renders Chinese copy under the zh locale", () => {
+    useLocaleStore.getState().setLocale("zh");
+    render(<Harness tracks={TWO_TRACK_FIXTURE} />);
+    // Title + column headers are translated, not the English originals.
+    expect(screen.getByText("字幕轨道")).toBeInTheDocument();
+    expect(screen.getByText("烧录")).toBeInTheDocument();
+    expect(screen.getByText("外挂")).toBeInTheDocument();
+    expect(screen.queryByText("Caption tracks")).toBeNull();
+    expect(screen.queryByText("Burn")).toBeNull();
+  });
+
+  it("localizes the empty-state copy under zh", () => {
+    useLocaleStore.getState().setLocale("zh");
+    render(<Harness tracks={[]} />);
+    expect(screen.getByText(/没有文本轨道/)).toBeInTheDocument();
+    expect(screen.queryByText(/No text tracks/)).toBeNull();
+  });
+
+  it("localizes the burn-disabled tooltip aria + checkbox aria under zh", async () => {
+    useLocaleStore.getState().setLocale("zh");
+    render(<Harness tracks={TWO_TRACK_FIXTURE} />);
+    // Burn aria is translated and interpolates the label.
+    expect(
+      screen.getByLabelText("将 CC1 · ZH 烧录进视频"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByLabelText("将 CC2 · EN 导出为 SRT 外挂字幕"),
+    ).toBeInTheDocument();
+  });
+});
 
 describe("CaptionTracksSection — defaults", () => {
   it("renders one row per text track with the language tag", () => {
