@@ -13,7 +13,20 @@ const PLATFORM_LABEL: Record<Platform, string> = {
   douyin: "抖音",
 };
 
-export function TrendingPanel({ platform, items }: { platform: Platform; items: TrendItem[] }) {
+export function TrendingPanel({
+  platform,
+  items,
+  onUse,
+  busy = false,
+}: {
+  platform: Platform;
+  items: TrendItem[];
+  // #65 — "create from this trend": when provided, each row gets a button that
+  // hands the trend (title + AI hook) up to the page to seed a new work's
+  // topicHint. Undefined → read-only panel (back-compat).
+  onUse?: (item: TrendItem) => void;
+  busy?: boolean;
+}) {
   const t = useT();
   const list = items ?? [];
   return (
@@ -62,6 +75,16 @@ export function TrendingPanel({ platform, items }: { platform: Platform; items: 
                 {t(`explore.sourceBadge.${item.source === "agent_websearch" ? "agentWebsearch" : item.source}`)}
               </span>
             </div>
+            {onUse && (
+              <button
+                type="button"
+                className={styles.useBtn}
+                disabled={busy}
+                onClick={() => onUse(item)}
+              >
+                {t("explore.useTrend")}
+              </button>
+            )}
           </div>
         </div>
       ))}

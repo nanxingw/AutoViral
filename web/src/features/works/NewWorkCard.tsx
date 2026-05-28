@@ -19,6 +19,10 @@ export function NewWorkCard() {
   // the title's language to creation-time locale (an EN-created blank work
   // showed "Untitled" forever even in ZH).
   const [pendingTitle, setPendingTitle] = useState("");
+  // #65 — optional creative brief / 选题方向. Drives the agent's research +
+  // output server-side (work.topicHint); empty stays undefined so the server
+  // falls back to title as before.
+  const [pendingHint, setPendingHint] = useState("");
   // R101 F414 — Tier 2 race protection. `create.isPending` is a hook value
   // that only refreshes on the next render, so three back-to-back
   // synchronous .click() calls all read the stale `false` and fire three
@@ -35,8 +39,9 @@ export function NewWorkCard() {
     setNavigating(true);
     setCreateError(null);
     const title = pendingTitle.trim();
+    const topicHint = pendingHint.trim() || undefined;
     try {
-      const w = await create.mutateAsync({ title, type });
+      const w = await create.mutateAsync({ title, type, topicHint });
       navigate(type === "short-video" ? `/studio/${w.id}` : `/editor/${w.id}`);
       // lock stays held — the component unmounts on navigate.
     } catch (err: unknown) {
@@ -63,6 +68,17 @@ export function NewWorkCard() {
         aria-label={t("works.newWorkTitleAria")}
         disabled={locked}
         maxLength={120}
+        className={styles.titleInput}
+        data-bare
+      />
+      <input
+        type="text"
+        value={pendingHint}
+        onChange={(e) => setPendingHint(e.target.value)}
+        placeholder={t("works.topicHintPlaceholder")}
+        aria-label={t("works.topicHintAria")}
+        disabled={locked}
+        maxLength={280}
         className={styles.titleInput}
         data-bare
       />

@@ -62,4 +62,44 @@ describe("NewWorkCard mutation failure path (R21)", () => {
     });
     expect(screen.queryByRole("alert")).toBeNull();
   });
+
+  it("#65 — sends the optional topicHint brief in the create payload", async () => {
+    apiFetchMock.mockResolvedValueOnce({
+      id: "w_brief",
+      title: "",
+      type: "short-video",
+      status: "draft",
+      thumbnail: null,
+      updatedAt: "2026-05-09T00:00:00Z",
+    });
+    render(wrap(<NewWorkCard />));
+    fireEvent.change(screen.getByLabelText(/creative brief/i), {
+      target: { value: "拍一条猫咪做饭的搞笑短视频" },
+    });
+    fireEvent.click(screen.getByText("VIDEO"));
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalled());
+    const [, opts] = apiFetchMock.mock.calls.find(
+      ([url]) => url === "/api/works",
+    )!;
+    expect(opts.body.topicHint).toBe("拍一条猫咪做饭的搞笑短视频");
+    expect(opts.body.type).toBe("short-video");
+  });
+
+  it("#65 — omits topicHint (undefined) when the brief is left blank", async () => {
+    apiFetchMock.mockResolvedValueOnce({
+      id: "w_blank",
+      title: "",
+      type: "short-video",
+      status: "draft",
+      thumbnail: null,
+      updatedAt: "2026-05-09T00:00:00Z",
+    });
+    render(wrap(<NewWorkCard />));
+    fireEvent.click(screen.getByText("VIDEO"));
+    await waitFor(() => expect(apiFetchMock).toHaveBeenCalled());
+    const [, opts] = apiFetchMock.mock.calls.find(
+      ([url]) => url === "/api/works",
+    )!;
+    expect(opts.body.topicHint).toBeUndefined();
+  });
 });

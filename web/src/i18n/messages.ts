@@ -500,6 +500,8 @@ export const en = {
     newWork: "Create work",
     newWorkTitlePlaceholder: "Name this work — or leave blank",
     newWorkTitleAria: "Title for the new work",
+    topicHintPlaceholder: "Topic / brief — what should the agent make? (optional)",
+    topicHintAria: "Creative brief for the new work",
     creatingLabel: "Creating…",
     emptySearch: "No works match {query}",
     h2WorksLead: "My",
@@ -607,6 +609,7 @@ export const en = {
     sampleAngle3Body: "Hijack the #fyp · cooking · keyboards mash-up — niche cross-pollination spiking.",
     trendingTitleEm: "Trending",
     trendingNoData: "NO DATA",
+    useTrend: "Create from this →",
     trendingTopMeta: "TOP {count} · 24H",
     sourceBadge: {
       rss: "RSS",
@@ -1231,6 +1234,8 @@ export const zh: DeepShape<Messages> = {
     newWork: "新建作品",
     newWorkTitlePlaceholder: "给作品起个名字 · 可留空",
     newWorkTitleAria: "新作品标题",
+    topicHintPlaceholder: "选题方向 / 简报 — 想让 agent 做什么?(可选)",
+    topicHintAria: "新作品的创作简报",
     creatingLabel: "创建中…",
     emptySearch: "没有作品匹配 {query}",
     h2WorksLead: "我的",
@@ -1338,6 +1343,7 @@ export const zh: DeepShape<Messages> = {
     sampleAngle3Body: "蹭 #fyp · 烹饪 · 键盘混搭话题——小众跨界正在升温。",
     trendingTitleEm: "热门",
     trendingNoData: "暂无数据",
+    useTrend: "用此创作 →",
     trendingTopMeta: "前 {count} · 24H",
     sourceBadge: {
       rss: "RSS",

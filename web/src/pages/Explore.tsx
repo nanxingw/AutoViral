@@ -1,11 +1,26 @@
 import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { PlatformTabs } from "@/features/explore/PlatformTabs";
 import { AnglesCard, type Angle } from "@/features/explore/AnglesCard";
 import { TrendingPanel } from "@/features/explore/TrendingPanel";
-import { usePlatformTrends, type Platform, SUPPORTED_REFRESH_PLATFORMS } from "@/queries/trends";
+import { usePlatformTrends, type Platform, type TrendItem, SUPPORTED_REFRESH_PLATFORMS } from "@/queries/trends";
+import { useCreateWork } from "@/queries/works";
+import { localizeApiError } from "@/i18n/serverError";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/i18n/useT";
+
+// #65 — compose a creative brief (topicHint) from a trend so the agent's
+// research/output is seeded by the trend's title + AI-computed hook, not just
+// a bare title. Trims empty analysis fields so the brief stays clean.
+export function buildTrendTopicHint(item: TrendItem): string {
+  const parts = [
+    item.title,
+    item.analysis?.category,
+    item.analysis?.exampleHook,
+  ].filter((p): p is string => !!p && p.trim().length > 0);
+  return parts.join("\n");
+}
 
 // e2e-report F186: previous score strings were `FIT 94 · 5.2K est. reach`,
 // `FIT 87 · 3.8K est. reach`, `FIT 79 · risky` — fake-precision numbers that
@@ -32,6 +47,23 @@ export default function Explore() {
   const trends = usePlatformTrends(platform);
   const qc = useQueryClient();
   const t = useT();
+  const navigate = useNavigate();
+  // #65 — turn a trend into a new work seeded with topicHint, then open it.
+  // Trends are video hooks → short-video. Guard re-entry on the pending flag.
+  const createWork = useCreateWork();
+  async function useTrend(item: TrendItem) {
+    if (createWork.isPending) return;
+    try {
+      const w = await createWork.mutateAsync({
+        title: item.title,
+        type: "short-video",
+        topicHint: buildTrendTopicHint(item),
+      });
+      navigate(`/studio/${w.id}`);
+    } catch {
+      // surfaced inline via createWork.isError below
+    }
+  }
   const STATIC_ANGLES: Angle[] = SAMPLE_ANGLE_META.map((a) => ({
     num: a.num,
     score: t(a.scoreKey),
@@ -139,7 +171,19 @@ export default function Explore() {
       {trends.isLoading ? (
         <div style={{ color: "var(--text-dim)" }}>{t("explore.loadingTrends")}</div>
       ) : trends.data ? (
-        <TrendingPanel platform={platform} items={trends.data.items} />
+        <>
+          {createWork.isError && (
+            <div role="alert" style={{ color: "var(--status-error, #d4756c)", fontSize: 12, marginBottom: 8, fontFamily: "var(--font-mono)" }}>
+              {localizeApiError(createWork.error, t)}
+            </div>
+          )}
+          <TrendingPanel
+            platform={platform}
+            items={trends.data.items}
+            onUse={useTrend}
+            busy={createWork.isPending}
+          />
+        </>
       ) : (
         <div style={{ color: "var(--text-dim)" }}>{t("explore.noTrendsData")}</div>
       )}

@@ -20,6 +20,11 @@ export interface CreateWorkInput {
   title: string;
   type: WorkSummary["type"];
   platforms?: string[];
+  // #65 — the creative brief / 选题方向 that drives the agent's research +
+  // output (server consumes work.topicHint in ws-bridge buildContext and the
+  // agent prompt; falls back to title when absent). useCreateWork spreads the
+  // whole input, so adding the field here is enough to make it reachable.
+  topicHint?: string;
 }
 
 export const worksKey = ["works"] as const;
