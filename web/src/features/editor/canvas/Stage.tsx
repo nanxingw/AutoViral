@@ -1,5 +1,5 @@
 import { forwardRef } from "react";
-import { Stage as KStage, Layer as KLayer } from "react-konva";
+import { Stage as KStage, Layer as KLayer, Line } from "react-konva";
 import type Konva from "konva";
 import { useEditor } from "../store";
 import { Background } from "./background/Background";
@@ -25,6 +25,7 @@ export const Stage = forwardRef<Konva.Stage, StageProps>(function Stage(
   const car = useEditor((s) => s.car);
   const currentSlideId = useEditor((s) => s.currentSlideId);
   const setSelection = useEditor((s) => s.setSelectionLayer);
+  const snapGuides = useEditor((s) => s.snapGuides);
 
   if (!car || !currentSlideId) return null;
   const slide = car.slides.find((s) => s.id === currentSlideId);
@@ -60,6 +61,28 @@ export const Stage = forwardRef<Konva.Stage, StageProps>(function Stage(
           grain={car.globals.effects.grain}
           gradient={car.globals.effects.gradient}
         />
+        {/* #59 — smart-guide lines while dragging. Drawn last so they sit on
+            top; non-listening so they never intercept pointer events. 2 canvas
+            px ≈ 1 screen px at the 0.5 display scale. */}
+        {snapGuides.map((g, i) =>
+          g.axis === "x" ? (
+            <Line
+              key={`gx-${i}`}
+              points={[g.pos, 0, g.pos, car.height]}
+              stroke="#ff3b81"
+              strokeWidth={2}
+              listening={false}
+            />
+          ) : (
+            <Line
+              key={`gy-${i}`}
+              points={[0, g.pos, car.width, g.pos]}
+              stroke="#ff3b81"
+              strokeWidth={2}
+              listening={false}
+            />
+          ),
+        )}
       </KLayer>
     </KStage>
   );

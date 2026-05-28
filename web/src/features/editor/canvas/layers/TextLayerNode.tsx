@@ -4,6 +4,7 @@ import type Konva from "konva";
 import type { TextLayer } from "../../types";
 import { useEditor } from "../../store";
 import { PALETTES } from "../../palettes";
+import { useLayerSnapDrag } from "../useLayerSnapDrag";
 
 const FONT_FAMILY: Record<TextLayer["style"]["font"], string> = {
   serif: "Instrument Serif, serif",
@@ -24,6 +25,7 @@ export function TextLayerNode({ layer }: { layer: TextLayer }) {
   const globals = useEditor((s) => s.car?.globals);
   const ref = useRef<Konva.Text | null>(null);
   const trRef = useRef<Konva.Transformer | null>(null);
+  const { onDragMove, onDragEnd } = useLayerSnapDrag(layer);
 
   // Resolve palette sentinels + globals.headlineFont fallback so DesignTab's
   // controls actually surface on every text layer that hasn't overridden.
@@ -65,11 +67,8 @@ export function TextLayerNode({ layer }: { layer: TextLayer }) {
         draggable
         onClick={() => setSelection(layer.id)}
         onTap={() => setSelection(layer.id)}
-        onDragEnd={(e) =>
-          updateLayer(layer.id, {
-            box: { ...layer.box, x: e.target.x(), y: e.target.y() },
-          })
-        }
+        onDragMove={onDragMove}
+        onDragEnd={onDragEnd}
         onTransformEnd={(e) => {
           const node = e.target;
           updateLayer(layer.id, {

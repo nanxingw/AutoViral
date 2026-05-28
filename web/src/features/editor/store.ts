@@ -4,11 +4,16 @@ import type { Carousel, Slide, Layer, PaletteId } from "./types";
 import { makeEmptySlide } from "./types";
 import { applyLayoutToLayer } from "./services/layout";
 import { PALETTES } from "./palettes";
+import type { SnapGuide } from "./canvas/snapping";
 
 interface EditorState {
   car: Carousel | null;
   currentSlideId: string | null;
   selectionLayerId: string | null;
+  // #59 — active smart-guide lines while a layer is being dragged (canvas
+  // coords). Set on dragmove, cleared on dragend. Rendered by the Stage.
+  snapGuides: SnapGuide[];
+  setSnapGuides: (guides: SnapGuide[]) => void;
   loadCarousel: (c: Carousel | null) => void;
   setCurrentSlide: (id: string) => void;
   addSlide: () => void;
@@ -42,6 +47,11 @@ export const useEditor = create<EditorState>()(
     car: null,
     currentSlideId: null,
     selectionLayerId: null,
+    snapGuides: [],
+    setSnapGuides: (guides) =>
+      set((s) => {
+        s.snapGuides = guides;
+      }),
     loadCarousel: (c) =>
       set((s) => {
         // Accept null — Editor.tsx calls loadCar(null) during workId-switch

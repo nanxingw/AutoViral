@@ -4,6 +4,7 @@ import type Konva from "konva";
 import useImage from "use-image";
 import type { ImageLayer } from "../../types";
 import { useEditor } from "../../store";
+import { useLayerSnapDrag } from "../useLayerSnapDrag";
 
 export function ImageLayerNode({ layer }: { layer: ImageLayer }) {
   const isSelected = useEditor((s) => s.selectionLayerId === layer.id);
@@ -11,6 +12,7 @@ export function ImageLayerNode({ layer }: { layer: ImageLayer }) {
   const updateLayer = useEditor((s) => s.updateLayer);
   const ref = useRef<Konva.Image | null>(null);
   const trRef = useRef<Konva.Transformer | null>(null);
+  const { onDragMove, onDragEnd } = useLayerSnapDrag(layer);
   // R33: consume `status` from useImage. Previously the second tuple was
   // ignored, so a broken URL silently rendered an invisible Konva image —
   // user saw a blank layer with no clue why. Now render a red dashed Rect
@@ -56,11 +58,8 @@ export function ImageLayerNode({ layer }: { layer: ImageLayer }) {
         draggable
         onClick={() => setSelection(layer.id)}
         onTap={() => setSelection(layer.id)}
-        onDragEnd={(e) =>
-          updateLayer(layer.id, {
-            box: { ...layer.box, x: e.target.x(), y: e.target.y() },
-          })
-        }
+        onDragMove={onDragMove}
+        onDragEnd={onDragEnd}
         onTransformEnd={(e) => {
           const node = e.target;
           updateLayer(layer.id, {

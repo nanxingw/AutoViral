@@ -4,6 +4,7 @@ import type Konva from "konva";
 import useImage from "use-image";
 import type { StickerLayer } from "../../types";
 import { useEditor } from "../../store";
+import { useLayerSnapDrag } from "../useLayerSnapDrag";
 
 export function StickerLayerNode({ layer }: { layer: StickerLayer }) {
   const isSelected = useEditor((s) => s.selectionLayerId === layer.id);
@@ -11,6 +12,7 @@ export function StickerLayerNode({ layer }: { layer: StickerLayer }) {
   const updateLayer = useEditor((s) => s.updateLayer);
   const ref = useRef<Konva.Image | null>(null);
   const trRef = useRef<Konva.Transformer | null>(null);
+  const { onDragMove, onDragEnd } = useLayerSnapDrag(layer);
   // R33: same fix as ImageLayerNode — surface broken sticker URLs.
   const [img, status] = useImage(layer.src, "anonymous");
 
@@ -52,11 +54,8 @@ export function StickerLayerNode({ layer }: { layer: StickerLayer }) {
         draggable
         onClick={() => setSelection(layer.id)}
         onTap={() => setSelection(layer.id)}
-        onDragEnd={(e) =>
-          updateLayer(layer.id, {
-            box: { ...layer.box, x: e.target.x(), y: e.target.y() },
-          })
-        }
+        onDragMove={onDragMove}
+        onDragEnd={onDragEnd}
         onTransformEnd={(e) => {
           const node = e.target;
           updateLayer(layer.id, {

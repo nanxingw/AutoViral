@@ -3,6 +3,7 @@ import { useRef, useEffect } from "react";
 import type Konva from "konva";
 import type { ShapeLayer } from "../../types";
 import { useEditor } from "../../store";
+import { useLayerSnapDrag } from "../useLayerSnapDrag";
 
 export function ShapeLayerNode({ layer }: { layer: ShapeLayer }) {
   const isSelected = useEditor((s) => s.selectionLayerId === layer.id);
@@ -10,6 +11,7 @@ export function ShapeLayerNode({ layer }: { layer: ShapeLayer }) {
   const updateLayer = useEditor((s) => s.updateLayer);
   const ref = useRef<Konva.Node | null>(null);
   const trRef = useRef<Konva.Transformer | null>(null);
+  const { onDragMove, onDragEnd } = useLayerSnapDrag(layer);
 
   useEffect(() => {
     if (isSelected && ref.current && trRef.current) {
@@ -28,10 +30,8 @@ export function ShapeLayerNode({ layer }: { layer: ShapeLayer }) {
     draggable: true,
     onClick: () => setSelection(layer.id),
     onTap: () => setSelection(layer.id),
-    onDragEnd: (e: Konva.KonvaEventObject<DragEvent>) =>
-      updateLayer(layer.id, {
-        box: { ...layer.box, x: e.target.x(), y: e.target.y() },
-      }),
+    onDragMove,
+    onDragEnd,
     onTransformEnd: (e: Konva.KonvaEventObject<Event>) => {
       const node = e.target;
       updateLayer(layer.id, {
