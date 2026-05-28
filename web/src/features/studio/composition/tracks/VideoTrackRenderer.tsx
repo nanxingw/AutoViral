@@ -1,4 +1,7 @@
 import { Sequence, Video, useVideoConfig, useCurrentFrame } from "remotion";
+import { TransitionSeries, linearTiming } from "@remotion/transitions";
+import { groupChains } from "../transitions/groupChains";
+import { presentationFor } from "../transitions/presentations";
 import type { VideoClip, Track } from "../../types";
 import { toCssFilter } from "../filters/cssFilters";
 import { interpolateProperty } from "@shared/keyframes";
@@ -94,16 +97,56 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
 export function VideoTrackRenderer({ track }: { track: Track }) {
   const { fps } = useVideoConfig();
   if (track.hidden) return null;
+  const chains = groupChains(track.clips as VideoClip[], track.transitions ?? []);
   return (
     <>
-      {(track.clips as VideoClip[]).map((c) => {
-        const from = Math.round(c.trackOffset * fps);
-        // Phase 8.3.C — Sequence durationInFrames reflects the speed-adjusted
-        // timeline width (D7); for static speed=k, that's (out - in) / k.
-        const dur = Math.max(1, Math.round(effectiveClipDuration(c) * fps));
+      {chains.map((chain) => {
+        const first = chain.clips[0];
+        const from = Math.round(first.trackOffset * fps);
+        // Single-clip chain → plain <Sequence> (unchanged behaviour). This
+        // covers ALL tracks until the user adds a transition; matters for
+        // back-compat with every existing test + work.
+        if (chain.clips.length === 1) {
+          const dur = Math.max(1, Math.round(effectiveClipDuration(first) * fps));
+          return (
+            <Sequence key={first.id} from={from} durationInFrames={dur}>
+              <VideoClipRenderer clip={first} />
+            </Sequence>
+          );
+        }
+        // Multi-clip chain → wrap the chain at its first clip's time, then let
+        // Remotion's <TransitionSeries> compose .Sequence + .Transition. The
+        // transition consumes durationInFrames from BOTH adjacent sequences
+        // (handles), shortening the chain by sum(transition durations) — same
+        // visual outcome as the EXPORT because Stage 1 of render-pipeline runs
+        // this exact <Scene/> (WYSIWYG by construction, #54 Phase 1).
         return (
-          <Sequence key={c.id} from={from} durationInFrames={dur}>
-            <VideoClipRenderer clip={c} />
+          <Sequence key={chain.clips.map((c) => c.id).join(":")} from={from}>
+            <TransitionSeries>
+              {chain.clips.flatMap((c, i) => {
+                const seqDur = Math.max(1, Math.round(effectiveClipDuration(c) * fps));
+                const nodes: React.ReactNode[] = [
+                  <TransitionSeries.Sequence
+                    key={`s-${c.id}`}
+                    durationInFrames={seqDur}
+                  >
+                    <VideoClipRenderer clip={c} />
+                  </TransitionSeries.Sequence>,
+                ];
+                const t = chain.transitions[i];
+                if (t) {
+                  const trDur = Math.max(1, Math.round(t.durationSec * fps));
+                  nodes.push(
+                    <TransitionSeries.Transition
+                      key={`t-${t.id}`}
+                      presentation={presentationFor(t.preset)}
+                      timing={linearTiming({ durationInFrames: trDur })}
+                    />,
+                  );
+                }
+                return nodes;
+              })}
+            </TransitionSeries>
           </Sequence>
         );
       })}

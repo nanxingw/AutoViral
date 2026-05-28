@@ -83,6 +83,7 @@ export function threeClipVideoTrack(): { track: Track; clips: VideoClip[] } {
     volume: 0,
     muted: false,
     hidden: false,
+    transitions: [],
     clips: [a, b, d],
   };
   return { track, clips: [a, b, d] };

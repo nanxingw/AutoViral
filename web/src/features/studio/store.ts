@@ -9,8 +9,10 @@ import type {
   ExportPreset,
   Keyframe,
   Track,
+  Transition,
 } from "./types";
 import { newTrackId } from "@shared/composition";
+import { clampHandleDuration, getPresetMeta } from "@shared/transitions";
 import { addOrReplaceKeyframe, splitKeyframesAtLocal } from "@shared/keyframes";
 import {
   clipDuration,
@@ -115,6 +117,22 @@ interface CompState {
   // and shares the source track's kind (a video clip can't live on an audio
   // lane). Like the other clip-level mutations it does NOT push undo history.
   moveClipToTrack: (clipId: string, targetTrackId: string) => void;
+  // #54 Phase 1 — transitions at cut points on a video track. Each action is
+  // a no-op for unknown ids / non-video tracks / orphan afterClipId (the cut
+  // point's predecessor must exist AND have a successor — a transition pinned
+  // to the last clip has nothing to fade INTO). addTransition mints the id +
+  // clamps durationSec to the handle (min of the two adjacent clips' usable
+  // duration); returns the new id, or null on rejection.
+  addTransition: (
+    trackId: string,
+    init: { afterClipId: string; preset: Transition["preset"]; durationSec?: number },
+  ) => string | null;
+  updateTransition: (
+    trackId: string,
+    transitionId: string,
+    patch: Partial<Pick<Transition, "preset" | "durationSec" | "alignment" | "easing">>,
+  ) => void;
+  removeTransition: (trackId: string, transitionId: string) => void;
   // Phase 1.6 — provenance graph mutations
   addAsset: (asset: AssetEntry) => void;
   addProvenance: (edge: ProvenanceEdge) => void;
@@ -192,7 +210,7 @@ function snapshotTracks(tracks: Track[]): Track[] {
 }
 
 export const useComposition = create<CompState>()(
-  immer((set) => ({
+  immer((set, get) => ({
     comp: null,
     selection: null,
     currentFrame: 0,
@@ -289,11 +307,83 @@ export const useComposition = create<CompState>()(
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
         );
       }),
+    addTransition: (trackId, init) => {
+      // Validation FIRST (read state pre-mutation), then mint+set.
+      const pre = get();
+      if (!pre.comp) return null;
+      const track = pre.comp.tracks.find((t) => t.id === trackId);
+      if (!track || track.kind !== "video") return null; // Phase 1: video only
+      const clips = track.clips as Clip[];
+      const beforeIdx = clips.findIndex((c) => c.id === init.afterClipId);
+      // afterClipId must exist AND not be the last clip (needs a successor).
+      if (beforeIdx < 0 || beforeIdx >= clips.length - 1) return null;
+      const before = clips[beforeIdx];
+      const after = clips[beforeIdx + 1];
+      const desired = init.durationSec ?? getPresetMeta(init.preset).defaultDurationSec;
+      const dur = clampHandleDuration(
+        desired,
+        clipDuration(before),
+        clipDuration(after),
+      );
+      const id = `tr_${(globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2))}`;
+      set((s) => {
+        if (!s.comp) return;
+        const t = s.comp.tracks.find((tt) => tt.id === trackId);
+        if (!t) return;
+        if (!t.transitions) t.transitions = [];
+        t.transitions.push({
+          id,
+          afterClipId: init.afterClipId,
+          preset: init.preset,
+          durationSec: dur,
+          alignment: "center",
+          easing: "linear",
+        });
+      });
+      return id;
+    },
+    updateTransition: (trackId, transitionId, patch) =>
+      set((s) => {
+        if (!s.comp) return;
+        const t = s.comp.tracks.find((tt) => tt.id === trackId);
+        if (!t || !t.transitions) return;
+        const tr = t.transitions.find((x) => x.id === transitionId);
+        if (!tr) return;
+        // Re-clamp durationSec against current adjacent clip durations so the
+        // handle invariant never breaks even if the user trimmed a clip after.
+        if (patch.durationSec !== undefined) {
+          const beforeIdx = (t.clips as Clip[]).findIndex((c) => c.id === tr.afterClipId);
+          if (beforeIdx >= 0 && beforeIdx < t.clips.length - 1) {
+            const before = (t.clips as Clip[])[beforeIdx];
+            const after = (t.clips as Clip[])[beforeIdx + 1];
+            tr.durationSec = clampHandleDuration(
+              patch.durationSec,
+              clipDuration(before),
+              clipDuration(after),
+            );
+          }
+        }
+        if (patch.preset !== undefined) tr.preset = patch.preset;
+        if (patch.alignment !== undefined) tr.alignment = patch.alignment;
+        if (patch.easing !== undefined) tr.easing = patch.easing;
+      }),
+    removeTransition: (trackId, transitionId) =>
+      set((s) => {
+        if (!s.comp) return;
+        const t = s.comp.tracks.find((tt) => tt.id === trackId);
+        if (!t || !t.transitions) return;
+        t.transitions = t.transitions.filter((x) => x.id !== transitionId);
+      }),
     removeClip: (clipId) =>
       set((s) => {
         if (!s.comp) return;
         for (const t of s.comp.tracks) {
           t.clips = (t.clips as Clip[]).filter((c) => c.id !== clipId) as typeof t.clips;
+          // #54 — drop transitions whose afterClip just vanished (otherwise the
+          // next zod parse rejects on the orphan superRefine).
+          if (t.transitions?.length) {
+            t.transitions = t.transitions.filter((tr) => tr.afterClipId !== clipId);
+          }
         }
         s.comp.duration = Math.max(
           0,
@@ -782,6 +872,7 @@ export const useComposition = create<CompState>()(
           muted: false,
           hidden: false,
           clips: [],
+          transitions: [], // #54 — TrackSchema.transitions default [], required on output type
           ...(opts?.language ? { language: opts.language } : {}),
         };
         s.comp.tracks.push(newTrack);

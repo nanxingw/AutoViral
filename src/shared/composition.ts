@@ -257,6 +257,28 @@ export type Clip = VideoClip | AudioClip | TextClip | OverlayClip;
 // any new write must be in the canonical shape).
 export const TRACK_ID_PREFIX_REGEX = /^trk_/;
 
+// #54 Phase 1 — transition between two adjacent video clips on the same
+// track. `afterClipId` pins the cut point (clip immediately after which the
+// transition fires). preset comes from the shared registry so server +
+// preview consume the same metadata; durationSec is the cross-fade width
+// in seconds and is taken from BOTH adjacent clips' content time (handles).
+// Schema lives here (not the renderer) so a clip-delete that orphans a
+// transition is catchable at parse time; the store also prunes on remove.
+export const TransitionPresetEnum = z.enum([
+  "cross-dissolve",
+  "wipe-left",
+  "push-left",
+]);
+export const TransitionSchema = z.object({
+  id: z.string(),
+  afterClipId: z.string(),
+  preset: TransitionPresetEnum,
+  durationSec: z.number().min(0.05).max(5).default(0.5),
+  alignment: z.enum(["center", "start", "end"]).default("center"),
+  easing: z.enum(["linear", "spring", "ease-in-out"]).default("linear"),
+});
+export type Transition = z.infer<typeof TransitionSchema>;
+
 export const TrackSchema = z
   .object({
     id: z.string().regex(TRACK_ID_PREFIX_REGEX, {
@@ -284,6 +306,10 @@ export const TrackSchema = z
         OverlayClipObjectSchema,
       ]),
     ),
+    // #54 Phase 1 — transitions at cut points (only meaningful on video
+    // tracks for Phase 1; defaulting to [] on non-video is a safe no-op,
+    // mirroring the `volume` field's discriminator-free shape).
+    transitions: z.array(TransitionSchema).default([]),
   })
   .superRefine((track, ctx) => {
     track.clips.forEach((clip, ci) => {
@@ -301,6 +327,25 @@ export const TrackSchema = z
           });
         }
       });
+    });
+    // #54 — every transition must pin to a real clip on the same track and the
+    // afterClipId must NOT be the last clip (a transition needs a successor).
+    const ids = new Set(track.clips.map((c) => c.id));
+    const lastId = track.clips[track.clips.length - 1]?.id;
+    (track.transitions ?? []).forEach((tr, ti) => {
+      if (!ids.has(tr.afterClipId)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["transitions", ti, "afterClipId"],
+          message: `transition.afterClipId '${tr.afterClipId}' does not match any clip in this track`,
+        });
+      } else if (tr.afterClipId === lastId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["transitions", ti, "afterClipId"],
+          message: `transition pinned to the last clip has no successor to fade into`,
+        });
+      }
     });
   });
 export type Track = z.infer<typeof TrackSchema>;
@@ -667,6 +712,7 @@ export function makeEmptyComposition(opts: {
         muted: false,
         hidden: false,
         clips: [],
+        transitions: [],
       },
       {
         id: newTrackId(),
@@ -677,6 +723,7 @@ export function makeEmptyComposition(opts: {
         muted: false,
         hidden: false,
         clips: [],
+        transitions: [],
       },
       {
         id: newTrackId(),
@@ -687,6 +734,7 @@ export function makeEmptyComposition(opts: {
         muted: false,
         hidden: false,
         clips: [],
+        transitions: [],
       },
       {
         id: newTrackId(),
@@ -698,6 +746,7 @@ export function makeEmptyComposition(opts: {
         muted: false,
         hidden: false,
         clips: [],
+        transitions: [],
       },
     ],
     updatedAt: now,

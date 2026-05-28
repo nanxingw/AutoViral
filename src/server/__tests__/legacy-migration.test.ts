@@ -9,6 +9,7 @@ describe("synthesiseLegacyAssetsAndProvenance", () => {
       duration: 4, aspect: "9:16", updatedAt: "2026-04-28T00:00:00Z",
       tracks: [
         { id: "video-0", kind: "video", label: "Video", muted: false, hidden: false,
+      transitions: [],
           clips: [{ id: "clip-1", kind: "video",
             src: "/api/works/w1/assets/clips/shot1.mp4",
             in: 0, out: 4, trackOffset: 0,
@@ -57,6 +58,7 @@ describe("synthesiseLegacyAssetsAndProvenance", () => {
       duration: 8, aspect: "9:16", updatedAt: "2026-04-28T00:00:00Z",
       tracks: [
         { id: "video-0", kind: "video", label: "Video", muted: false, hidden: false,
+      transitions: [],
           clips: [
             { id: "clip-a", kind: "video", src: sharedSrc, in: 0, out: 4, trackOffset: 0,
               transforms: { scale: 1, x: 0, y: 0, rotation: 0 },

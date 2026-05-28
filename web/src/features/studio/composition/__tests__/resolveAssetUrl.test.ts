@@ -105,19 +105,19 @@ describe("resolveCompositionAssets", () => {
       ...baseComp(),
       tracks: [
         {
-          id: "tv", kind: "video", label: "V", displayOrder: 0, volume: 0, muted: false, hidden: false,
+          id: "tv", kind: "video", label: "V", displayOrder: 0, volume: 0, transitions: [], muted: false, hidden: false,
           clips: [{ id: "c1", kind: "video", src: "assets/videos/a.mp4", in: 0, out: 3, trackOffset: 0, transforms: {} as any, filters: {} as any }],
         },
         {
-          id: "ta", kind: "audio", label: "A", displayOrder: 1, volume: 0, muted: false, hidden: false,
+          id: "ta", kind: "audio", label: "A", displayOrder: 1, volume: 0, transitions: [], muted: false, hidden: false,
           clips: [{ id: "c2", kind: "audio", src: "assets/audio/b.mp3", in: 0, out: 3, trackOffset: 0, transforms: {} as any, filters: {} as any } as any],
         },
         {
-          id: "to", kind: "overlay", label: "O", displayOrder: 2, volume: 0, muted: false, hidden: false,
+          id: "to", kind: "overlay", label: "O", displayOrder: 2, volume: 0, transitions: [], muted: false, hidden: false,
           clips: [{ id: "c3", kind: "overlay", src: "assets/overlays/c.png", in: 0, out: 3, trackOffset: 0, transforms: {} as any, filters: {} as any, position: { x: 0, y: 0, w: 100, h: 100 } } as any],
         },
         {
-          id: "tt", kind: "text", label: "T", displayOrder: 3, volume: 0, muted: false, hidden: false,
+          id: "tt", kind: "text", label: "T", displayOrder: 3, volume: 0, transitions: [], muted: false, hidden: false,
           clips: [{ id: "c4", kind: "text", text: "hello", in: 0, out: 3, trackOffset: 0 } as any],
         },
       ],
@@ -134,7 +134,7 @@ describe("resolveCompositionAssets", () => {
     const comp: Composition = {
       ...baseComp(),
       tracks: [{
-        id: "t", kind: "video", label: "V", displayOrder: 0, volume: 0, muted: false, hidden: false,
+        id: "t", kind: "video", label: "V", displayOrder: 0, volume: 0, transitions: [], muted: false, hidden: false,
         clips: [{ id: "c", kind: "video", src: "https://cdn/x.mp4", in: 0, out: 3, trackOffset: 0, transforms: {} as any, filters: {} as any }],
       }],
     };

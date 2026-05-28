@@ -32,6 +32,7 @@ function makeComp(workId: string, overrides: Partial<Composition> = {}): Composi
         label: "Video",
         muted: false,
         hidden: false,
+      transitions: [],
         clips: [],
       },
     ],
@@ -167,6 +168,7 @@ describe("POST /api/works/:id/composition/gc-orphans", () => {
             label: "Video",
             muted: false,
             hidden: false,
+      transitions: [],
             clips: [
               {
                 id: "vc_0",

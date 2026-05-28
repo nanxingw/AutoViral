@@ -18,6 +18,7 @@ function makeTrack(clips: ReturnType<typeof makeVideoClip>[]): Track {
     volume: 0,
     muted: false,
     hidden: false,
+    transitions: [],
     clips,
   };
 }
