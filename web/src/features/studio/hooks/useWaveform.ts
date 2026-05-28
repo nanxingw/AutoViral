@@ -80,11 +80,24 @@ async function tryFetchPeaksJson(src: string): Promise<DecodedWaveform | null> {
     ) {
       return null;
     }
-    // channels[0] is the L (or mono) channel, normalised number[] ∈ [0,1].
-    // Per-channel rendering is a follow-up — for now we pick channel 0 so
-    // the existing WaveformBars SVG path keeps working unchanged.
+    // #30 — fold all channels to one display waveform on the fly (per-channel
+    // data stays in storage for future L-only/R-only/stacked modes). The issue
+    // says "summed"; we fold by MAX-across-channels rather than an arithmetic
+    // sum because (a) it stays in [0,1] like the rest of the pipeline and (b) a
+    // literal sum would saturate stereo content to 1.0 and render a solid block.
+    // Max also matches the WebAudio path's per-bucket max-abs semantics.
+    const channels = data.channels as number[][];
+    const len = channels[0].length;
+    const peaks = new Float32Array(len);
+    for (let c = 0; c < channels.length; c++) {
+      const ch = channels[c];
+      for (let i = 0; i < len; i++) {
+        const v = ch[i] ?? 0;
+        if (v > peaks[i]) peaks[i] = v;
+      }
+    }
     return {
-      peaks: new Float32Array(data.channels[0]),
+      peaks,
       durationSec: Number(data.durationSec) || 0,
     };
   } catch {

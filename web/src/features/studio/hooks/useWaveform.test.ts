@@ -165,3 +165,112 @@ describe("useWaveform", () => {
     expect(result.current.peaks).toBeNull();
   });
 });
+
+// #30 — prefer the server's prebaked `<src>.peaks.json` (PeaksFileV2) and only
+// fall back to the WebAudio decode for assets without it / bad responses.
+describe("useWaveform — prebaked peaks.json (#30)", () => {
+  // A spy decodeAudioData so we can assert the WebAudio path is (not) taken.
+  function installDecodeSpy() {
+    const decodeSpy = vi.fn(async () => ({
+      getChannelData: () => new Float32Array(48000),
+      duration: 1,
+      numberOfChannels: 1,
+      sampleRate: 48000,
+    }));
+    class SpyAudioContext {
+      static __mocked = true;
+      decodeAudioData = decodeSpy;
+      close = vi.fn();
+    }
+    (globalThis as Record<string, unknown>).AudioContext = SpyAudioContext;
+    return decodeSpy;
+  }
+
+  // Fetch stub: `*.peaks.json` → peaksResponse; anything else → audio bytes
+  // (the WebAudio fallback path).
+  function stubFetch(peaksResponse: () => Partial<Response> | null) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (url.endsWith(".peaks.json")) {
+          const r = peaksResponse();
+          if (r) return r as unknown as Response;
+        }
+        return {
+          ok: true,
+          headers: { get: () => "audio/mpeg" },
+          arrayBuffer: async () => new ArrayBuffer(0),
+        } as unknown as Response;
+      }),
+    );
+  }
+
+  function jsonRes(body: unknown, contentType = "application/json"): Partial<Response> {
+    return {
+      ok: true,
+      headers: { get: (k: string) => (k.toLowerCase() === "content-type" ? contentType : null) } as Headers,
+      json: async () => body,
+    };
+  }
+
+  it("happy path: a valid v2 file renders without touching WebAudio", async () => {
+    const decodeSpy = installDecodeSpy();
+    stubFetch(() =>
+      jsonRes({ version: 2, channels: [[0.1, 0.5, 0.9]], durationSec: 12.5 }),
+    );
+    const { result } = renderHook(() => useWaveform("/bgm.mp3"));
+    await waitFor(() => expect(result.current.peaks).not.toBeNull());
+    expect(Array.from(result.current.peaks!)).toEqual([
+      expect.closeTo(0.1, 5),
+      expect.closeTo(0.5, 5),
+      expect.closeTo(0.9, 5),
+    ]);
+    expect(result.current.sourceDuration).toBe(12.5);
+    expect(decodeSpy).not.toHaveBeenCalled(); // no WebAudio decode
+  });
+
+  it("folds multiple channels by max (one display waveform)", async () => {
+    installDecodeSpy();
+    stubFetch(() =>
+      jsonRes({
+        version: 2,
+        channels: [
+          [0.2, 0.8, 0.1],
+          [0.5, 0.3, 0.4],
+        ],
+        durationSec: 3,
+      }),
+    );
+    const { result } = renderHook(() => useWaveform("/stereo.mp3"));
+    await waitFor(() => expect(result.current.peaks).not.toBeNull());
+    expect(Array.from(result.current.peaks!)).toEqual([
+      expect.closeTo(0.5, 5),
+      expect.closeTo(0.8, 5),
+      expect.closeTo(0.4, 5),
+    ]);
+  });
+
+  it("falls back to WebAudio on 404", async () => {
+    const decodeSpy = installDecodeSpy();
+    stubFetch(() => ({ ok: false, status: 404 }));
+    const { result } = renderHook(() => useWaveform("/legacy.mp3"));
+    await waitFor(() => expect(result.current.peaks).not.toBeNull());
+    expect(decodeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back when the peaks URL returns text/html (SPA fallback)", async () => {
+    const decodeSpy = installDecodeSpy();
+    stubFetch(() => jsonRes("<!doctype html>", "text/html"));
+    const { result } = renderHook(() => useWaveform("/spa.mp3"));
+    await waitFor(() => expect(result.current.peaks).not.toBeNull());
+    expect(decodeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back on a version mismatch", async () => {
+    const decodeSpy = installDecodeSpy();
+    stubFetch(() => jsonRes({ version: 99, channels: [[0.1, 0.2]], durationSec: 2 }));
+    const { result } = renderHook(() => useWaveform("/future.mp3"));
+    await waitFor(() => expect(result.current.peaks).not.toBeNull());
+    expect(decodeSpy).toHaveBeenCalledTimes(1);
+  });
+});
