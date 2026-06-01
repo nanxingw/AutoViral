@@ -102,12 +102,12 @@ describe("runRenderPipeline — with ducking", () => {
     ...baseComp,
     tracks: [
       { id: "audio-bgm", kind: "audio", label: "BGM", muted: false, hidden: false,
-      transitions: [],
+      volume: 0, displayOrder: 0, transitions: [],
         clips: [{ id: "a1", kind: "audio", src: "/bgm.mp3", in: 0, out: 4, trackOffset: 0,
                   volume: 1, fadeIn: 0, fadeOut: 0, type: "bgm",
                   ducking: { ratio: 4, attack: 200, release: 1000 } }] },
       { id: "audio-vo", kind: "audio", label: "VO", muted: false, hidden: false,
-      transitions: [],
+      volume: 0, displayOrder: 1, transitions: [],
         clips: [{ id: "a2", kind: "audio", src: "/vo.mp3", in: 0, out: 4, trackOffset: 0,
                   volume: 1, fadeIn: 0, fadeOut: 0, type: "voiceover" }] },
     ],
@@ -128,7 +128,7 @@ describe("runRenderPipeline — with burn-in subtitles", () => {
     ...baseComp,
     tracks: [
       { id: "text-0", kind: "text", label: "Subtitles", muted: false, hidden: false,
-      transitions: [],
+      volume: 0, displayOrder: 0, transitions: [],
         clips: [{ id: "t1", kind: "text", text: "Hi", trackOffset: 0, duration: 2,
                   style: { font: "Inter", size: 48, weight: 700, italic: false, tracking: 0, color: "#fff" },
                   position: { anchor: "bottom", xPct: 50, yPct: 85 } }] },
@@ -351,6 +351,8 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
           label: "Video",
           muted: false,
           hidden: false,
+          volume: 0,
+          displayOrder: 0,
       transitions: [],
           clips: [
             {

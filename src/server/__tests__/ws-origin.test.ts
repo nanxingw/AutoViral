@@ -19,7 +19,7 @@ function fakeSocket(): { socket: Duplex; destroyed: boolean } {
       state.destroyed = true;
     },
   } as unknown as Duplex;
-  return { socket, destroyed: state as any as boolean, ...state };
+  return { socket, ...state };
 }
 
 describe("isOriginAllowed", () => {

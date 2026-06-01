@@ -78,7 +78,15 @@ export function mergeAnalysisIntoRaws(
     );
     return raws.map((r, i) => ({ ...r, analysis: agentItems[i]?.analysis }));
   }
-  const byId = new Map<string, unknown>(agentItems.map((x) => [x.id, x.analysis]));
+  // Only id-bearing agent items can align to a raw (every RawTrendItem.id is a
+  // non-optional string). An agent item missing its id could never be retrieved
+  // via byId.get(r.id) anyway, so dropping it here preserves the by-id alignment
+  // exactly while keeping the Map keys strictly string.
+  const byId = new Map<string, unknown>(
+    agentItems
+      .filter((x): x is { id: string; analysis?: unknown } => x.id !== undefined)
+      .map((x) => [x.id, x.analysis]),
+  );
   return raws.map((r) => ({ ...r, analysis: byId.get(r.id) }));
 }
 

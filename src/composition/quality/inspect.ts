@@ -52,8 +52,14 @@ export function inspectComposition(input: unknown): InspectReport {
     const containerPadX = 80; // safe inside margin
     const usableWidth = comp.width - containerPadX * 2;
     captions.groups.forEach((g, gi) => {
-      const fontSize = g.style.fontSize;
-      const bottomOffset = g.style.bottomOffsetPx;
+      // fontSize is `number | string` in the schema; arithmetic below relies
+      // on JS numeric coercion (`"40" * 1.4` === 40 * 1.4), so coerce once to
+      // keep the exact same numeric outcome (NaN for non-numeric strings too).
+      const fontSize = Number(g.style.fontSize);
+      // bottomOffsetPx is optional; when absent the original `undefined + x`
+      // yielded NaN and `NaN > height` was false (no finding). NaN preserves
+      // that exact "no spurious finding" outcome.
+      const bottomOffset = g.style.bottomOffsetPx ?? Number.NaN;
       // out-of-canvas: caption baseline + line height beyond frame bottom?
       const estLineHeight = fontSize * 1.4;
       if (bottomOffset + estLineHeight > comp.height) {

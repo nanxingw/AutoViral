@@ -55,7 +55,7 @@ describe("TTS provider (H4.1)", () => {
   it("respects voice + format overrides", async () => {
     const fakeBytes = Buffer.from("WAV-fake");
     const fetchMock = vi.fn(
-      async () =>
+      async (..._args: Parameters<typeof globalThis.fetch>) =>
         new Response(fakeBytes, { status: 200, statusText: "OK" }) as Response,
     );
     const res = await synthesize({
@@ -71,8 +71,10 @@ describe("TTS provider (H4.1)", () => {
     expect(res.relativeUri).toMatch(/\.wav$/);
 
     // Verify the request body matches
-    const callArgs = fetchMock.mock.calls[0]?.[1] as { body: string };
-    const sent = JSON.parse(callArgs.body) as Record<string, unknown>;
+    const callArgs = fetchMock.mock.calls[0]?.[1];
+    const body = callArgs?.body;
+    expect(typeof body).toBe("string");
+    const sent = JSON.parse(body as string) as Record<string, unknown>;
     expect(sent.voice).toBe("nova");
     expect(sent.response_format).toBe("wav");
     expect(sent.input).toBe("Test");
@@ -135,7 +137,7 @@ describe("TTS provider (H4.1)", () => {
 
   it("prefers OPENAI_API_KEY over OPENROUTER_API_KEY when both are set", async () => {
     const fetchMock = vi.fn(
-      async () =>
+      async (..._args: Parameters<typeof globalThis.fetch>) =>
         new Response(Buffer.from("x"), { status: 200, statusText: "OK" }) as Response,
     );
     await synthesize({

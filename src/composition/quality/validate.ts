@@ -45,7 +45,11 @@ function parseRgba(s: string): [number, number, number, number] | null {
   return [+m[1]!, +m[2]!, +m[3]!, m[4] !== undefined ? +m[4]! : 1];
 }
 
-function parseColor(s: string): [number, number, number, number] | null {
+function parseColor(s: string | undefined): [number, number, number, number] | null {
+  // color/background are optional in the schema; an absent value parses to
+  // null (same as an unparseable string) so callers hit the `if (!fg...)`
+  // early-return — the existing graceful-skip path.
+  if (s === undefined) return null;
   if (s.startsWith("rgb")) return parseRgba(s);
   const hex = parseHex(s);
   return hex ? [hex[0], hex[1], hex[2], 1] : null;
@@ -101,7 +105,9 @@ export function validateComposition(input: unknown): ValidateReport {
       const r = ratio([fg[0], fg[1], fg[2]], effectiveBg);
       // Large text threshold (≥18pt or 14pt bold) is 3:1; the conservative
       // default for caption-style text is 4.5:1 AA.
-      const isLargeText = g.style.fontSize >= 56; // ~24pt+ at standard DPI
+      // fontSize is `number | string`; `>=` already coerced strings to numbers
+      // at runtime (`"40" >= 56` === `40 >= 56`), so Number(...) is identical.
+      const isLargeText = Number(g.style.fontSize) >= 56; // ~24pt+ at standard DPI
       const threshold = isLargeText ? 3 : 4.5;
       if (r < threshold) {
         findings.push({

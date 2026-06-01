@@ -14,6 +14,23 @@ import { getSource } from "../trends/sources/index.js";
 
 export type Platform = "douyin" | "bilibili" | "youtube" | "xiaohongshu";
 
+/**
+ * Some legacy/alternate source shapes expose a `fetch(topic?)` method instead
+ * of the current `Source.collect()` signature. We probe for it structurally so
+ * the facade stays robust to either shape; the current `Source` implementations
+ * don't carry `fetch`, so this guard returns false for them and we skip — same
+ * best-effort behaviour as before, just without the unsafe cast.
+ */
+type FetchableSource = { fetch: (topic?: string) => Promise<unknown[]> };
+
+function hasFetch(source: unknown): source is FetchableSource {
+  return (
+    typeof source === "object" &&
+    source !== null &&
+    typeof (source as { fetch?: unknown }).fetch === "function"
+  );
+}
+
 export interface TrendItem {
   platform: Platform;
   title: string;
@@ -46,14 +63,12 @@ export async function getTrends(opts: {
   for (const platform of requested) {
     try {
       const source = getSource(platform as never);
-      if (!source || typeof (source as { fetch?: unknown }).fetch !== "function") {
+      if (!hasFetch(source)) {
         continue;
       }
       // Each source's signature varies — best-effort invocation; on any
       // failure we just skip the platform.
-      const rawItems = (await (source as {
-        fetch: (q?: string) => Promise<unknown[]>;
-      }).fetch(opts.topic).catch(() => [])) as Array<{
+      const rawItems = (await source.fetch(opts.topic).catch(() => [])) as Array<{
         title?: string;
         url?: string;
         score?: number;
