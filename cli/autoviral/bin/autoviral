@@ -1,0 +1,17 @@
+#!/bin/sh
+# autoviral CLI launcher — a repo-contained shim.
+#
+# The agentic-terminal refactor's premise is "the agent drives AutoViral via the
+# `autoviral` CLI on its PATH". Rather than a machine-global `npm link` (which
+# doesn't survive fresh clones / other machines), the bridge and terminal
+# prepend THIS directory to the spawned agent's PATH (see src/ws-bridge.ts
+# spawnCli + src/server/terminal/terminal-ws.ts). This script resolves the built
+# CLI relative to itself, so it works from any clone once `npm run build:cli` has
+# produced dist/cli.js.
+here=$(cd "$(dirname "$0")" && pwd)
+cli="$here/../dist/cli.js"
+if [ ! -f "$cli" ]; then
+  echo "autoviral: CLI is not built — expected $cli. Run \`npm run build:cli\` from the repo root." >&2
+  exit 127
+fi
+exec node "$cli" "$@"

@@ -2,7 +2,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { Server as HttpServer, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { PtyPool } from "./pty-pool.js";
-import { homedir } from "node:os";
+import { dataDir } from "../../config.js";
 import { join } from "node:path";
 import { enforceLoopbackOrigin } from "../ws-origin.js";
 
@@ -65,7 +65,7 @@ export function attachTerminalWebSocket(
   }
 
   function handle(ws: WebSocket, workId: string): void {
-    const cwd = join(homedir(), ".autoviral/works", workId);
+    const cwd = join(dataDir, "works", workId);
     const session = pool.spawn({
       workId,
       cwd,
@@ -73,6 +73,11 @@ export function attachTerminalWebSocket(
       cols: 80,
       rows: 24,
       env: {
+        // Prepend the repo-contained `autoviral` shim dir so the command
+        // resolves in the Studio terminal panel (pty-pool merges process.env,
+        // so this prepends to the inherited PATH). Mirrors the chat-agent
+        // wiring in ws-bridge.ts spawnCli.
+        PATH: `${join(process.cwd(), "cli", "autoviral", "bin")}:${process.env.PATH ?? ""}`,
         AUTOVIRAL_WORK_ID: workId,
         AUTOVIRAL_PORT: String(port),
         AUTOVIRAL_CWD: cwd,
