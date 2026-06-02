@@ -1,9 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import Editor, { serializeForDirty } from "./Editor";
-import { makeEmptyCarousel } from "@/features/editor/types";
+import Editor, { serializeForDirty, carouselJumpToLocator } from "./Editor";
+import { makeEmptyCarousel, type Layer } from "@/features/editor/types";
+import { useEditor } from "@/features/editor/store";
 
 vi.mock("@/features/editor/services/carousel", () => ({
   loadCarousel: vi.fn(async () => null),
@@ -39,6 +40,15 @@ vi.mock("@/features/terminal/TerminalPanel", () => ({
   ),
 }));
 
+// Stub ChatPanel — the carousel left column now mounts RightPane, which
+// hosts the real ChatPanel (WebSocket + checkpoints + /api/status fetch).
+// This is a layout test; we only assert the chat surface is present.
+vi.mock("@/features/studio/panels/Chat", () => ({
+  ChatPanel: ({ workId }: { workId: string }) => (
+    <div data-testid="chat-panel-stub">CHAT · {workId}</div>
+  ),
+}));
+
 function mount() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -52,12 +62,25 @@ function mount() {
   );
 }
 
-// 2026-05-14 (Phase 1 agentic-terminal): Editor's left column now mounts
-// TerminalPanel instead of ChatPanel — same agentic shell as Studio.
-describe("Editor (Phase 1 agentic-terminal layout)", () => {
-  it("renders the TerminalPanel in the left column", () => {
+// 2026-06-02 (#1 carousel chat): Editor's left column now mounts the shared
+// RightPane (Chat | Terminal tabs) — the same agent surface as Studio —
+// instead of a bare TerminalPanel. Chat is the default-active tab (ADR-005),
+// and the Terminal still lives behind its tab (kept mounted via display:none).
+describe("Editor left column — agent surface (#1 carousel chat)", () => {
+  it("mounts the agent ChatPanel (carousel now has a chat UI, not terminal-only)", () => {
+    mount();
+    expect(screen.queryByTestId("chat-panel-stub")).toBeTruthy();
+  });
+
+  it("still mounts the TerminalPanel (now the Terminal tab inside RightPane)", () => {
     mount();
     expect(screen.queryByTestId("terminal-panel-stub")).toBeTruthy();
+  });
+
+  it("offers both Chat and Terminal tabs", () => {
+    mount();
+    expect(screen.queryByRole("tab", { name: /chat/i })).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: /terminal/i })).toBeTruthy();
   });
 
   it("does NOT mount the legacy SlidesNav in the left column", () => {
@@ -69,6 +92,67 @@ describe("Editor (Phase 1 agentic-terminal layout)", () => {
   it("still renders the bottom Filmstrip tray (DRAG TO REORDER)", () => {
     mount();
     expect(screen.queryByText(/drag to reorder/i)).toBeTruthy();
+  });
+});
+
+// #1 — the carousel agent emits <viewer-locator/> clicks; LocatorData has no
+// slideId field, so carouselJumpToLocator treats `clipId` as a generic target
+// id (slide → jump; layer → jump+select). It must NEVER fall through to
+// ChatPanel's Studio default, which mutates the (wrong) video store.
+describe("carouselJumpToLocator (#1 — agent locator → slide/layer nav)", () => {
+  beforeEach(() => {
+    // reset the shared editor store between cases
+    useEditor.getState().loadCarousel(null);
+  });
+
+  it("jumps to a slide when clipId matches a slide id", () => {
+    useEditor.getState().loadCarousel(makeEmptyCarousel("w1"));
+    useEditor.getState().addSlide(); // 2 slides; current is now slide 2
+    const [s1, s2] = useEditor.getState().car!.slides.map((s) => s.id);
+    expect(useEditor.getState().currentSlideId).toBe(s2);
+
+    carouselJumpToLocator({ clipId: s1 });
+    expect(useEditor.getState().currentSlideId).toBe(s1);
+  });
+
+  it("jumps to a layer's slide AND selects it when clipId is a layer id", () => {
+    useEditor.getState().loadCarousel(makeEmptyCarousel("w1"));
+    const headline: Layer = {
+      id: "L_headline",
+      kind: "text",
+      box: { x: 0, y: 0, w: 100, h: 50, rotation: 0 },
+      text: "标题",
+      style: {
+        font: "sans",
+        size: 48,
+        weight: 700,
+        italic: false,
+        color: "#111",
+        align: "center",
+        tracking: 0,
+      },
+    };
+    useEditor.getState().addLayer(headline); // lands on slide 1
+    useEditor.getState().addSlide(); // move current away to slide 2
+    const slide1 = useEditor.getState().car!.slides[0].id;
+
+    carouselJumpToLocator({ clipId: "L_headline" });
+    expect(useEditor.getState().currentSlideId).toBe(slide1);
+    expect(useEditor.getState().selectionLayerId).toBe("L_headline");
+  });
+
+  it("is a no-op for an unknown id (does not change the current slide)", () => {
+    useEditor.getState().loadCarousel(makeEmptyCarousel("w1"));
+    const before = useEditor.getState().currentSlideId;
+    carouselJumpToLocator({ clipId: "does_not_exist" });
+    expect(useEditor.getState().currentSlideId).toBe(before);
+  });
+
+  it("is a no-op when the locator carries no id", () => {
+    useEditor.getState().loadCarousel(makeEmptyCarousel("w1"));
+    const before = useEditor.getState().currentSlideId;
+    carouselJumpToLocator({ time: 3.2 });
+    expect(useEditor.getState().currentSlideId).toBe(before);
   });
 });
 

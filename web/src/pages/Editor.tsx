@@ -14,7 +14,9 @@ import { Filmstrip } from "@/features/editor/panels/Filmstrip";
 import { TopBar } from "@/features/editor/panels/TopBar";
 import { useExport } from "@/features/editor/hooks/useExport";
 import { CarouselExportProgress } from "@/features/editor/panels/CarouselExportProgress";
-import { TerminalPanel } from "@/features/terminal/TerminalPanel";
+import { RightPane } from "@/features/studio/panels/RightPane";
+import { buildEditorViewerContext } from "@/features/editor/services/viewerContext";
+import type { LocatorData } from "@/features/chat/types";
 import { useT } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
 import { localizeApiErrorParts } from "@/i18n/serverError";
@@ -32,6 +34,38 @@ function fmtSavedAt(d: Date, locale: string): string {
     minute: "2-digit",
     hour12: locale !== "zh",
   }).format(d);
+}
+
+/** Viewer-context envelope for the carousel agent — describes the current
+ *  slide + selected layer instead of Studio's (nonexistent here) video clip.
+ *  Read lazily from the store so it reflects the selection at send time. */
+function carouselViewerContext(): string | null {
+  const s = useEditor.getState();
+  return buildEditorViewerContext(s.car, s.currentSlideId, s.selectionLayerId);
+}
+
+/** Resolve an agent `<viewer-locator/>` click to a carousel navigation.
+ *  LocatorData carries no slideId field, so `clipId` is treated as the
+ *  generic target id: a slide id jumps to that slide; a layer id jumps to
+ *  its slide and selects it. Unknown / empty ids are a no-op — this must
+ *  never fall through to ChatPanel's Studio default, which mutates the
+ *  video composition store. Exported for unit testing. */
+export function carouselJumpToLocator(data: LocatorData): void {
+  const id = data.clipId;
+  if (!id) return;
+  const { car, setCurrentSlide, setSelectionLayer } = useEditor.getState();
+  if (!car) return;
+  if (car.slides.some((sl) => sl.id === id)) {
+    setCurrentSlide(id);
+    return;
+  }
+  for (const sl of car.slides) {
+    if (sl.layers.some((l) => l.id === id)) {
+      setCurrentSlide(sl.id);
+      setSelectionLayer(id);
+      return;
+    }
+  }
 }
 
 // Match Studio's resize-handle look so editor↔studio interaction stays uniform.
@@ -259,7 +293,14 @@ export default function Editor() {
               data-area="chat"
               style={{ height: "100%", overflow: "hidden", minHeight: 0, borderRight: "1px solid var(--glass-border)" }}
             >
-              {workId ? <TerminalPanel workId={workId} /> : null}
+              {workId ? (
+                <RightPane
+                  workId={workId}
+                  getViewerContext={carouselViewerContext}
+                  onJumpToLocator={carouselJumpToLocator}
+                  showTerminalPrefix={false}
+                />
+              ) : null}
             </div>
           </Panel>
 

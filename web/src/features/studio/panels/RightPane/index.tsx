@@ -15,7 +15,7 @@
  * `useActiveSurface.ts`.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChatPanel } from "@/features/studio/panels/Chat";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
 import { useToastStore } from "@/stores/toast";
@@ -24,12 +24,29 @@ import {
   buildViewerContext,
   buildTerminalPrefix,
 } from "@/stores/focus";
+import type { LocatorData } from "@/features/chat/types";
 import { useActiveSurface, type Surface } from "./useActiveSurface";
 import { useT } from "@/i18n/useT";
 import styles from "./index.module.css";
 
 export interface RightPaneProps {
   workId: string;
+  /** Viewer-context envelope builder prepended to each outgoing chat
+   *  message. Defaults to Studio's clip-based buildViewerContext; the
+   *  carousel editor passes buildEditorViewerContext so the agent sees the
+   *  current slide / layer instead of a (nonexistent) video clip. */
+  getViewerContext?: () => string | null;
+  /** Agent-locator jump handler for `<viewer-locator/>` clicks. When
+   *  omitted, ChatPanel falls back to the Studio playhead/selection jump,
+   *  which mutates the VIDEO composition store — so any non-video editor
+   *  MUST pass its own handler or a locator click corrupts the wrong store. */
+  onJumpToLocator?: (data: LocatorData) => void;
+  /** Opt-in chat shortcut buttons (rendered between messages + composer).
+   *  Fill-then-review only — the instant-send Studio chips were removed. */
+  quickActions?: ReactNode;
+  /** Render the Studio clip-focus terminal prefix line (`[ctx: clip=…]`).
+   *  The carousel surface has no clip focus, so it passes false. */
+  showTerminalPrefix?: boolean;
 }
 
 const HOTKEY_TOAST_SEEN_KEY = "autoviral.rightPane.hotkeyToastSeen";
@@ -56,7 +73,13 @@ const HOTKEY_HINT =
     ? "⌘\\"
     : "Ctrl+\\";
 
-export function RightPane({ workId }: RightPaneProps) {
+export function RightPane({
+  workId,
+  getViewerContext = buildViewerContext,
+  onJumpToLocator,
+  quickActions,
+  showTerminalPrefix = true,
+}: RightPaneProps) {
   const t = useT();
   const { active, setActive, toggle } = useActiveSurface(workId);
   const toggleRef = useRef(toggle);
@@ -123,7 +146,12 @@ export function RightPane({ workId }: RightPaneProps) {
           {/* The viewer-context envelope (pneuma-style) is automatically
               prepended to every outgoing user message. ChatPanel calls
               getViewerContext() right before sending. */}
-          <ChatPanel workId={workId} getViewerContext={buildViewerContext} />
+          <ChatPanel
+            workId={workId}
+            getViewerContext={getViewerContext}
+            onJumpToLocator={onJumpToLocator}
+            quickActions={quickActions}
+          />
         </div>
         <div
           data-surface="terminal"
@@ -131,7 +159,7 @@ export function RightPane({ workId }: RightPaneProps) {
           role="tabpanel"
           aria-hidden={active !== "terminal"}
         >
-          <TerminalFocusPrefix />
+          {showTerminalPrefix && <TerminalFocusPrefix />}
           <div className={styles.terminalInner}>
             <TerminalPanel workId={workId} />
           </div>
