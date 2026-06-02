@@ -344,6 +344,9 @@ export function PreviewPanel() {
           style={{
             width: 40,
             height: 40,
+            // padding:0 — keep the play glyph optically centred despite the
+            // leaked global pill padding (see transportIconBtn).
+            padding: 0,
             borderRadius: "50%",
             display: "grid",
             placeItems: "center",
@@ -543,6 +546,10 @@ function transportIconBtn(): React.CSSProperties {
   return {
     width: 32,
     height: 32,
+    // padding:0 cancels the global .studio-shell pill rule (5px 11px) that
+    // data-bare does NOT opt out of — without it the 14px transport glyphs
+    // sit ~3px right of centre. border-box + fixed width = no size change.
+    padding: 0,
     borderRadius: 8,
     border: "1px solid var(--glass-border)",
     background: "var(--surface-0)",

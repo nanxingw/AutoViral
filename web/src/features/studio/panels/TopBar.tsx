@@ -278,6 +278,9 @@ export function TopBar({
           style={{
             width: 32,
             height: 32,
+            // padding:0 cancels the leaked global pill padding (data-bare doesn't
+            // opt out of it) so the gear glyph centres instead of shifting right.
+            padding: 0,
             borderRadius: 8,
             border: "1px solid var(--glass-border)",
             background: settingsOpen ? "var(--surface-1)" : "var(--surface-0)",

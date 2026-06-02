@@ -108,12 +108,21 @@ export function LibraryTab({ workId }: Props) {
             <button
               type="button"
               aria-label={t("studio.assetSidebar.uploadAria")}
+              // Native tooltip on hover — the icon alone wasn't legible; aria-label
+              // only reaches screen readers, not a visual hover hint (#asset-toolbar).
+              title={t("studio.assetSidebar.uploadAria")}
               data-bare
               disabled={uploadMut.isPending}
               onClick={() => fileInputRef.current?.click()}
               style={{
                 width: 26,
                 height: 26,
+                // padding:0 resets the global .studio-shell pill rule's 5px 11px
+                // (data-bare does NOT actually opt out of it). Without this the
+                // 11px side-padding crushes the content box to 2px and shoves the
+                // 14px glyph ~6px right of centre. border-box + fixed width means
+                // this changes nothing but the glyph's centring.
+                padding: 0,
                 borderRadius: 7,
                 border: "1px solid var(--glass-border)",
                 background: "var(--surface-0)",
@@ -134,11 +143,16 @@ export function LibraryTab({ workId }: Props) {
             <button
               type="button"
               aria-label={t("studio.assetSidebar.generateAria")}
+              // Native tooltip — same reason as the upload button above.
+              title={t("studio.assetSidebar.generateAria")}
               data-bare
               onClick={() => setGenOpen(true)}
               style={{
                 width: 26,
                 height: 26,
+                // padding:0 — see the upload button: undo the leaked pill padding
+                // so the 14px sparkle glyph centres instead of sitting ~6px right.
+                padding: 0,
                 borderRadius: 7,
                 border: "1px solid var(--glass-border)",
                 background: "var(--surface-0)",
