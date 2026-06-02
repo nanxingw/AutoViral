@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildSystemPrompt, ALLOWED_STREAM_TYPES } from "./ws-bridge.js";
+import { buildSystemPrompt, ALLOWED_STREAM_TYPES, splitUserWireText } from "./ws-bridge.js";
 
 const baseWork = (overrides: Record<string, unknown> = {}) => ({
   id: "w_test",
@@ -85,6 +85,18 @@ describe("buildSystemPrompt", () => {
     expect(p).toMatch(/图文|image[- ]text/i);
   });
 
+  it("documents the user-attachments envelope + tells the agent to Read the absolute path", () => {
+    const ws = "/tmp/autoviral-test/works/w_att";
+    const p = buildSystemPrompt(baseWork() as any, { port: 3271, workspacePath: ws });
+    // The agent must recognise the envelope the frontend prepends.
+    expect(p).toMatch(/<attachments>/);
+    expect(p).toMatch(/用户附件|attachment/i);
+    // cwd is the project root, so attachments must be Read via the ABSOLUTE
+    // workspace path — the prompt must spell that out.
+    expect(p).toMatch(/Read/);
+    expect(p).toContain(`${ws}/`);
+  });
+
   // Regression lock — see src/ws-bridge.ts deliverable contract block.
   // Bug 2026-05-08: prompt told the agent "data/works/<id>/" (relative), agent's
   // cwd is project root, files landed at <project>/data/works/... which
@@ -101,6 +113,49 @@ describe("buildSystemPrompt", () => {
       expect(p).toContain(ws);
       expect(p).not.toMatch(/把产物写入 data\/works\//);
     }
+  });
+});
+
+// The agent gets the full envelope-prefixed wire text, but what we PERSIST +
+// show in the user bubble must be the clean text + structured attachments —
+// else a reloaded chat shows raw <viewer-context>/<attachments> XML and loses
+// its thumbnails (review finding 2026-06-02).
+describe("splitUserWireText", () => {
+  it("returns plain text untouched when there are no envelopes", () => {
+    expect(splitUserWireText("hello world", "w")).toEqual({ text: "hello world", attachments: undefined });
+  });
+
+  it("strips a leading viewer-context envelope", () => {
+    const wire = `<viewer-context>\n  <playhead seconds="21.42"/>\n</viewer-context>\n\n看看这个`;
+    expect(splitUserWireText(wire, "w")).toEqual({ text: "看看这个", attachments: undefined });
+  });
+
+  it("strips the attachments envelope AND returns structured attachments (url = served path)", () => {
+    const wire = `<attachments>\n  <file path="assets/images/ref.png" type="image" name="ref.png" />\n</attachments>\n\n描述一下`;
+    const r = splitUserWireText(wire, "w");
+    expect(r.text).toBe("描述一下");
+    expect(r.attachments).toEqual([
+      { path: "assets/images/ref.png", url: "/api/works/w/assets/images/ref.png", name: "ref.png", kind: "image" },
+    ]);
+  });
+
+  it("strips both envelopes together (viewer-context + attachments)", () => {
+    const wire = `<viewer-context>\n  <playhead seconds="1"/>\n</viewer-context>\n\n<attachments>\n  <file path="a/b.mp4" type="video" name="b.mp4" />\n</attachments>\n\nhi`;
+    const r = splitUserWireText(wire, "w");
+    expect(r.text).toBe("hi");
+    expect(r.attachments).toEqual([{ path: "a/b.mp4", url: "/api/works/w/a/b.mp4", name: "b.mp4", kind: "video" }]);
+  });
+
+  it("dedups duplicate <file> entries by path", () => {
+    const wire = `<attachments>\n  <file path="x.png" type="image" name="x.png" />\n  <file path="x.png" type="image" name="x.png" />\n</attachments>\n\nq`;
+    const r = splitUserWireText(wire, "w");
+    expect(r.attachments).toHaveLength(1);
+    expect(r.text).toBe("q");
+  });
+
+  it("unescapes XML entities in the attachment filename", () => {
+    const wire = `<attachments>\n  <file path="p.png" type="image" name="a&quot;b.png" />\n</attachments>\n\nz`;
+    expect(splitUserWireText(wire, "w").attachments?.[0].name).toBe('a"b.png');
   });
 });
 

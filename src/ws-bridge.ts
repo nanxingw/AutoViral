@@ -28,6 +28,16 @@ import { syncMessage } from "./memory-sync.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
+/** Media the user attached to a chat message. Parsed out of the <attachments>
+ *  envelope when the message is recorded, so the persisted/reloaded user block
+ *  carries structured thumbnails instead of the raw envelope XML. */
+export interface ChatBlockAttachment {
+  path: string;
+  url: string;
+  name: string;
+  kind: string;
+}
+
 export interface ChatBlock {
   type: "user" | "text" | "thinking" | "tool_use" | "tool_result" | "locator";
   text: string;
@@ -35,6 +45,8 @@ export interface ChatBlock {
   collapsed?: boolean;
   timestamp?: string;
   source?: "creator" | "evaluator";
+  /** Set on user blocks that carried media attachments. */
+  attachments?: ChatBlockAttachment[];
   // ─── Locator-specific fields (Phase 2.1) ───
   label?: string;
   data?: { clipId?: string; time?: number; assetId?: string; trackId?: string };
@@ -172,6 +184,17 @@ Skill('autoviral')
   - path 用相对 work 目录的 \`assets/images/foo.png\` 或 \`assets/clips/bar.mp4\` 即可，前端会自动 resolve 到 \`/api/works/<id>/assets/...\`
   - 例："已生成第 3 张候选： ![v3](assets/images/v3.png)"——用户在 chat 里直接看图，不用切到 asset library。
 
+## 用户附件
+用户可能给消息附带**图片 / 视频 / 音频**。它们以下面这种 envelope 出现在消息开头（前端自动加的，用户气泡里看到的是缩略图）：
+\`\`\`
+<attachments>
+  <file path="assets/images/ref.png" type="image" name="ref.png" />
+</attachments>
+\`\`\`
+- 文件**已经上传**到本作品的 assets/ 目录。\`path\` 是相对 workspace root 的；你的 shell cwd 是项目根**不是** workspace，所以 Read 时要用绝对路径 **\`${workspacePath}/<path>\`**（例：\`${workspacePath}/assets/images/ref.png\`）。
+- **要"看到"图片就用 Read 工具读那个绝对路径**——图片会直接呈现给你。比如用户附了张参考图，先 Read 看清楚，再决定怎么用它驱动 i2v / 定风格 / 调色。
+- 这些附件同时已经是作品的正式 asset（在素材库可见），可直接作为 \`clip add --src <path>\` / image-to-video 的 first_frame 等使用，无需重新生成。
+
 ## 风格约束
 - 中文优先；技术名词保留英文
 - 不向用户复述"我在做哪一步 / 哪个能力"——直接给结果，或问具体问题
@@ -179,6 +202,62 @@ Skill('autoviral')
 - 任何交付前对照你加载的 editorial-taste sibling skill 的 rubric 自评；AutoViral 工位本身不内置审美评分
 
 完成本轮工作后，把最终产物写入 ${deliverableAbs}（其它中间产物落对应子目录），然后用一句话告诉用户做了什么、看哪里。`;
+}
+
+const VIEWER_CONTEXT_BLOCK_RX = /^<viewer-context[\s\S]*?<\/viewer-context>\s*/;
+const ATTACHMENTS_BLOCK_RX = /^<attachments>[\s\S]*?<\/attachments>\s*/;
+const ATTACH_FILE_RX = /<file\s+path="([^"]*)"\s+type="([^"]*)"\s+name="([^"]*)"\s*\/>/g;
+
+function unescapeXmlAttr(s: string): string {
+  return s
+    .replace(/&quot;/g, '"')
+    .replace(/&gt;/g, ">")
+    .replace(/&lt;/g, "<")
+    .replace(/&amp;/g, "&");
+}
+
+/**
+ * Split a wire message (the envelope-prefixed text the frontend sends) into the
+ * clean user text + structured attachments. The agent still receives the FULL
+ * wire text — it needs the <viewer-context>/<attachments> envelopes — but what
+ * we PERSIST and show in the user bubble is the clean version, so a reloaded
+ * chat renders clean text + attachment thumbnails instead of raw envelope XML.
+ * Attachment `url` is the workspace-relative path; the browser's resolveAssetUrl
+ * turns it into a served URL. Dedups by path.
+ */
+export function splitUserWireText(wireText: string, workId: string): { text: string; attachments?: ChatBlockAttachment[] } {
+  let rest = wireText;
+  const attachments: ChatBlockAttachment[] = [];
+  const seen = new Set<string>();
+  // Leading envelopes are "\n\n"-joined in either order — strip until neither
+  // matches (guard bounds the loop against a pathological input).
+  for (let guard = 0; guard < 8; guard++) {
+    const vc = rest.match(VIEWER_CONTEXT_BLOCK_RX);
+    if (vc) {
+      rest = rest.slice(vc[0].length);
+      continue;
+    }
+    const at = rest.match(ATTACHMENTS_BLOCK_RX);
+    if (at) {
+      ATTACH_FILE_RX.lastIndex = 0;
+      let m: RegExpExecArray | null;
+      while ((m = ATTACH_FILE_RX.exec(at[0]))) {
+        const path = m[1];
+        if (seen.has(path)) continue;
+        seen.add(path);
+        // Store the fully-served URL — IDENTICAL to the live upload path's
+        // r.url — so the bubble's resolveAssetUrl passes it straight through on
+        // reload. Storing the bare relative "assets/…" path instead made the
+        // resolver re-prefix it to /assets/assets/… → a 404'd broken thumbnail.
+        const url = `/api/works/${workId}/${path}`;
+        attachments.push({ path, url, name: unescapeXmlAttr(m[3]), kind: m[2] });
+      }
+      rest = rest.slice(at[0].length);
+      continue;
+    }
+    break;
+  }
+  return { text: rest.replace(/^\s+/, ""), attachments: attachments.length ? attachments : undefined };
 }
 
 /**
@@ -437,9 +516,13 @@ export class WsBridge {
   recordUserMessage(workId: string, text: string): void {
     const session = this.sessions.get(workId);
     if (!session) return;
+    // Persist/display the CLEAN user text + structured attachments — the agent
+    // already got the full envelope-prefixed wire text at spawn time.
+    const { text: displayText, attachments } = splitUserWireText(text, workId);
     const userBlock: ChatBlock = {
       type: "user",
-      text,
+      text: displayText,
+      ...(attachments ? { attachments } : {}),
       timestamp: new Date().toISOString(),
     };
     session.messageHistory.push(userBlock);
@@ -458,9 +541,13 @@ export class WsBridge {
     const session = this.sessions.get(workId);
     if (!session) return false;
 
+    // Persist/display the CLEAN user text + structured attachments — spawnCli
+    // below still gets the full envelope-prefixed `text` (the agent needs it).
+    const { text: displayText, attachments } = splitUserWireText(text, workId);
     const userBlock: ChatBlock = {
       type: "user",
-      text,
+      text: displayText,
+      ...(attachments ? { attachments } : {}),
       timestamp: new Date().toISOString(),
     };
     session.messageHistory.push(userBlock);

@@ -1,6 +1,7 @@
 import { useChatSocket } from "@/features/chat/useChatSocket";
 import { useChatStore } from "@/features/chat/store";
-import type { StreamBlock, LocatorData, TurnUsage } from "@/features/chat/types";
+import type { StreamBlock, LocatorData, TurnUsage, ChatAttachment } from "@/features/chat/types";
+import { uploadAsset, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB, ACCEPTED_UPLOAD } from "@/features/studio/panels/AssetSidebar/uploadAsset";
 import { LocatorBlockView } from "@/features/chat/LocatorBlock";
 import { useComposition } from "@/features/studio/store";
 import { apiFetch } from "@/lib/api";
@@ -18,6 +19,112 @@ import { highlightCode } from "./highlight";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { useComposerDraft } from "@/stores/composerDraft";
+
+/** Classify a picked file into the kinds the upload endpoint accepts. Mirrors
+ *  uploadAsset's subdirFor: MIME first, extension fallback. */
+export function attachmentKind(file: File): ChatAttachment["kind"] {
+  const type = file.type;
+  if (type.startsWith("video/")) return "video";
+  if (type.startsWith("audio/")) return "audio";
+  if (type.startsWith("image/")) return "image";
+  const ext = file.name.split(".").pop()?.toLowerCase() ?? "";
+  if (["mp4", "webm", "mov", "m4v"].includes(ext)) return "video";
+  if (["mp3", "wav", "m4a", "aac", "ogg", "flac"].includes(ext)) return "audio";
+  return "image";
+}
+
+/** One image/video thumbnail with a graceful failure fallback — a broken URL
+ *  (e.g. an asset GC'd between sessions) shows the filename instead of the
+ *  browser's broken-image glyph. */
+function AttachmentThumbMedia({ a, workId }: { a: ChatAttachment; workId: string }) {
+  const [failed, setFailed] = useState(false);
+  if (failed) {
+    return (
+      <span style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--text-dim)", padding: 4, textAlign: "center", lineHeight: 1.2, wordBreak: "break-all" }}>
+        {a.name.slice(0, 16)}
+      </span>
+    );
+  }
+  const src = resolveAssetUrl(a.url, workId);
+  const style = { width: "100%", height: "100%", objectFit: "cover" } as const;
+  return a.kind === "video" ? (
+    <video src={src} muted playsInline preload="metadata" onError={() => setFailed(true)} style={style} />
+  ) : (
+    <img src={src} alt={a.name} loading="lazy" onError={() => setFailed(true)} style={style} />
+  );
+}
+
+/** Thumbnails of the media attached to a user message (or staged in the
+ *  composer). Image/video render inline (with a filename fallback on load
+ *  failure); audio shows a labelled chip. `onRemove`, when given, renders a ×
+ *  to unstage (composer use). */
+function AttachmentThumbs({
+  attachments,
+  workId,
+  onRemove,
+}: {
+  attachments: ChatAttachment[];
+  workId: string;
+  onRemove?: (path: string) => void;
+}) {
+  if (!attachments.length) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: onRemove ? 8 : 6 }}>
+      {attachments.map((a) => (
+        <div
+          key={a.path}
+          title={a.name}
+          style={{
+            position: "relative",
+            width: 56,
+            height: 56,
+            borderRadius: 8,
+            overflow: "hidden",
+            border: "1px solid var(--glass-border)",
+            background: "var(--surface-2)",
+            display: "grid",
+            placeItems: "center",
+            flexShrink: 0,
+          }}
+        >
+          {a.kind === "audio" ? (
+            <span style={{ fontSize: 9, fontFamily: "var(--font-mono)", color: "var(--text-dim)", padding: 4, textAlign: "center", lineHeight: 1.2, wordBreak: "break-all" }}>
+              🎵 {a.name.slice(0, 14)}
+            </span>
+          ) : (
+            <AttachmentThumbMedia a={a} workId={workId} />
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              onClick={() => onRemove(a.path)}
+              aria-label={`Remove ${a.name}`}
+              style={{
+                position: "absolute",
+                top: 2,
+                right: 2,
+                width: 16,
+                height: 16,
+                borderRadius: "50%",
+                border: "none",
+                background: "rgba(0,0,0,0.6)",
+                color: "#fff",
+                fontSize: 11,
+                lineHeight: "16px",
+                cursor: "pointer",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+              }}
+            >
+              ×
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 /** Render an agent-emitted ```yaml block``` with our hand-rolled highlighter.
  *  Only fires for fenced code blocks (where react-markdown sets a className
@@ -248,6 +355,14 @@ export function ChatPanel({
   const streaming = useChatStore((s) => s.streaming);
   const [input, setInput] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(false);
+  // Composer attachments (#chat-upload): media the user attached, already
+  // uploaded to the work's assets/ via uploadAsset. Sent as an <attachments>
+  // envelope so the agent can Read them; rendered as thumbnails in the bubble.
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const t = useT();
 
@@ -304,11 +419,77 @@ export function ChatPanel({
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
   }, [blocks.length]);
 
+  const canSend = input.trim().length > 0 || attachments.length > 0;
   const submit = () => {
-    if (!input.trim()) return;
-    send(input);
+    if (!canSend || uploading) return;
+    send(input, attachments.length ? attachments : undefined);
     setInput("");
+    setAttachments([]);
+    setUploadError(null);
   };
+
+  // Upload each picked file to the work's assets/ and add a chip. The server
+  // gates type (image/video/audio) + size; we pre-reject oversized files so the
+  // user gets instant feedback instead of a round-tripped 413. Files upload in
+  // parallel; partial failures surface inline without dropping the successes.
+  const addFiles = async (files: File[]) => {
+    if (!files.length) return;
+    setUploadError(null);
+    const tooBig = files.filter((f) => f.size > MAX_UPLOAD_BYTES);
+    const ok = files.filter((f) => f.size <= MAX_UPLOAD_BYTES);
+    if (!ok.length) {
+      if (tooBig.length) setUploadError(t("chat.attach.tooLarge").replace("{mb}", String(MAX_UPLOAD_MB)));
+      return;
+    }
+    setUploading(true);
+    const settled = await Promise.allSettled(
+      ok.map(async (f): Promise<ChatAttachment> => {
+        const r = await uploadAsset(workId, f);
+        return { path: r.path, url: r.url, name: f.name, kind: attachmentKind(f) };
+      }),
+    );
+    const added = settled
+      .filter((s): s is PromiseFulfilledResult<ChatAttachment> => s.status === "fulfilled")
+      .map((s) => s.value);
+    // Dedup by path: re-picking / re-dropping the same file resolves to the
+    // same deterministic server path (the endpoint overwrites, no uniquify).
+    // Without this we'd get duplicate chips (React key collision) + a repeated
+    // <file> line in the agent envelope.
+    if (added.length) {
+      setAttachments((prev) => {
+        const seen = new Set(prev.map((p) => p.path));
+        return [...prev, ...added.filter((a) => !seen.has(a.path))];
+      });
+    }
+    // Surface BOTH failure modes — a single error slot would let the generic
+    // "failed" silently clobber the more specific "too large".
+    const failed = settled.some((s) => s.status === "rejected");
+    const msgs = [
+      tooBig.length ? t("chat.attach.tooLarge").replace("{mb}", String(MAX_UPLOAD_MB)) : null,
+      failed ? t("chat.attach.failed") : null,
+    ].filter(Boolean);
+    setUploadError(msgs.length ? msgs.join(" ") : null);
+    setUploading(false);
+  };
+
+  const onPickFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    void addFiles(Array.from(e.target.files ?? []));
+    e.target.value = ""; // allow re-picking the same file
+  };
+  const onPaste = (e: React.ClipboardEvent) => {
+    const files = Array.from(e.clipboardData.files ?? []);
+    if (files.length) {
+      e.preventDefault();
+      void addFiles(files);
+    }
+  };
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    void addFiles(Array.from(e.dataTransfer.files ?? []));
+  };
+  const removeAttachment = (path: string) =>
+    setAttachments((a) => a.filter((x) => x.path !== path));
 
   // Onboarding chips wired into the empty state. Clicking writes the
   // suggestion into the composer + focuses it; user can tweak then send.
@@ -565,20 +746,55 @@ export function ChatPanel({
       {/* Composer */}
       <div style={{ padding: 12, borderTop: "1px solid var(--divider)", flexShrink: 0 }}>
         <div
+          onDragOver={(e) => {
+            e.preventDefault();
+            if (!dragOver) setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={onDrop}
           style={{
             background: "var(--surface-0)",
             borderRadius: 12,
-            border: "1px solid var(--glass-border)",
+            border: `1px solid ${dragOver ? "var(--accent)" : "var(--glass-border)"}`,
+            boxShadow: dragOver ? "0 0 0 3px var(--accent-glow)" : "none",
             padding: 10,
             display: "flex",
             flexDirection: "column",
             gap: 8,
+            transition: "border-color 0.15s, box-shadow 0.15s",
           }}
         >
+          {/* Hidden file picker — the OS dialog is limited to the kinds the
+              server accepts (image/video/audio). */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={ACCEPTED_UPLOAD}
+            multiple
+            onChange={onPickFiles}
+            style={{ display: "none" }}
+            data-testid="chat-file-input"
+          />
+          {/* Staged attachments — thumbnails with a × to unstage before send. */}
+          <AttachmentThumbs attachments={attachments} workId={workId} onRemove={removeAttachment} />
+          {uploadError && (
+            <div
+              role="alert"
+              style={{
+                fontSize: 11,
+                color: "var(--status-error, #d4756c)",
+                fontFamily: "var(--font-mono)",
+                lineHeight: 1.4,
+              }}
+            >
+              {uploadError}
+            </div>
+          )}
           <textarea
             ref={composerRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onPaste={onPaste}
             onKeyDown={(e) => {
               if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                 e.preventDefault();
@@ -602,6 +818,30 @@ export function ChatPanel({
             }}
           />
           <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {/* Attach media — opens the file picker; also supports drag-drop
+                onto the composer and paste from clipboard. */}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading}
+              aria-label={t("chat.attach.button")}
+              title={t("chat.attach.button")}
+              style={{
+                width: 28,
+                height: 28,
+                display: "grid",
+                placeItems: "center",
+                background: "transparent",
+                border: "none",
+                borderRadius: 7,
+                color: uploading ? "var(--text-dimmer)" : "var(--text-dim)",
+                cursor: uploading ? "wait" : "pointer",
+                fontSize: 15,
+                transition: "color 0.15s",
+              }}
+            >
+              {uploading ? "…" : "📎"}
+            </button>
             <span
               style={{
                 fontSize: 10,
@@ -639,18 +879,18 @@ export function ChatPanel({
             ) : (
               <button
                 onClick={submit}
-                disabled={!input.trim()}
+                disabled={!canSend || uploading}
                 style={{
                   width: 28,
                   height: 28,
                   display: "grid",
                   placeItems: "center",
-                  background: input.trim() ? "var(--accent)" : "var(--surface-2)",
+                  background: canSend && !uploading ? "var(--accent)" : "var(--surface-2)",
                   border: "none",
                   borderRadius: 7,
-                  color: input.trim() ? "var(--accent-fg)" : "var(--text-dimmer)",
-                  cursor: input.trim() ? "pointer" : "default",
-                  boxShadow: input.trim() ? "0 0 12px var(--accent-glow)" : "none",
+                  color: canSend && !uploading ? "var(--accent-fg)" : "var(--text-dimmer)",
+                  cursor: canSend && !uploading ? "pointer" : "default",
+                  boxShadow: canSend && !uploading ? "0 0 12px var(--accent-glow)" : "none",
                   transition: "background 0.15s",
                   fontWeight: 700,
                 }}
@@ -723,6 +963,9 @@ function ChatBlock({
             wordBreak: "break-word",
           }}
         >
+          {block.attachments?.length ? (
+            <AttachmentThumbs attachments={block.attachments} workId={workId} />
+          ) : null}
           {block.text}
         </div>
       </div>

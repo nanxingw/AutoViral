@@ -19,6 +19,22 @@ export interface TurnUsage {
   cacheReadTokens?: number;
 }
 
+/** A media file the user attached to a chat message (image / video / audio).
+ *  Uploaded to the work's assets/ via POST /api/works/:id/assets/upload, then
+ *  referenced by workspace-relative path so the agent can Read it. The local
+ *  user bubble renders a thumbnail; the agent receives the path in an
+ *  <attachments> envelope (see useChatSocket.send + ws-bridge buildSystemPrompt). */
+export interface ChatAttachment {
+  /** Workspace-relative path, e.g. "assets/images/ref.png". The agent joins
+   *  this onto its workspace root (cwd is the project root, NOT the work dir). */
+  path: string;
+  /** Served URL for the local thumbnail, e.g. "/api/works/:id/assets/images/ref.png". */
+  url: string;
+  /** Original filename, shown on the chip. */
+  name: string;
+  kind: "image" | "video" | "audio";
+}
+
 export interface StreamBlock {
   id: string;
   type: StreamBlockType;
@@ -27,6 +43,9 @@ export interface StreamBlock {
   collapsed?: boolean;
   questions?: string[];
   ts: number;
+  /** Media the user attached to this (user) message. Rendered as thumbnails
+   *  in the bubble; the agent got the paths via the <attachments> envelope. */
+  attachments?: ChatAttachment[];
   /** Set on the last text block of a turn when turn_complete arrives.
    *  Lets the bubble render a small cost/duration/tokens badge. */
   usage?: TurnUsage;

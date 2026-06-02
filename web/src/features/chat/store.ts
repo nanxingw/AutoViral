@@ -1,10 +1,10 @@
 import { create } from "zustand";
-import type { StreamBlock, StreamBlockType, TurnUsage } from "./types";
+import type { StreamBlock, StreamBlockType, TurnUsage, ChatAttachment } from "./types";
 
 interface ChatStore {
   blocks: StreamBlock[];
   streaming: boolean;
-  push: (b: { type: StreamBlockType; text: string; toolName?: string; questions?: string[] }) => void;
+  push: (b: { type: StreamBlockType; text: string; toolName?: string; questions?: string[]; attachments?: ChatAttachment[] }) => void;
   /** Replace the whole conversation — used when seeding from server-side chat.json. */
   setBlocks: (blocks: StreamBlock[]) => void;
   setStreaming: (s: boolean) => void;

@@ -1,8 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { ReconnectingWS, type WSState } from "@/lib/ws";
 import { useChatStore } from "./store";
-import type { StreamBlock, StreamBlockType, ViewerAction } from "./types";
+import type { StreamBlock, StreamBlockType, ViewerAction, ChatAttachment } from "./types";
 import { extractViewerActions } from "./types";
+
+/** Minimal XML attribute escape for the <attachments> envelope. Filenames are
+ *  server-sanitised (no slashes) but may still contain quotes / angle brackets. */
+function escapeXmlAttr(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Build the `<attachments>` envelope the agent reads. Paths are workspace-
+ *  relative; the agent joins them onto its workspace root (its cwd is the
+ *  project root, not the work dir — see ws-bridge buildSystemPrompt). */
+export function buildAttachmentsEnvelope(attachments: ChatAttachment[]): string | null {
+  if (!attachments.length) return null;
+  const lines = attachments.map(
+    (a) => `  <file path="${escapeXmlAttr(a.path)}" type="${a.kind}" name="${escapeXmlAttr(a.name)}" />`,
+  );
+  return `<attachments>\n${lines.join("\n")}\n</attachments>`;
+}
 
 // The bridge speaks `{ event, data, timestamp }` frames in both directions —
 // see src/ws-bridge.ts. Frontend used to assume a flat `{ type, text }`
@@ -87,6 +108,10 @@ export function useChatSocket(
               type: ((b.type as StreamBlockType) ?? "text") as StreamBlockType,
               text: asString(b.text),
               toolName: b.toolName as string | undefined,
+              // Carry persisted user-message attachments through the WS reseed —
+              // otherwise on reload the message_history frame overwrites the
+              // HTTP-seeded blocks and the bubble thumbnails vanish.
+              attachments: b.attachments as ChatAttachment[] | undefined,
               ts:
                 typeof b.timestamp === "string"
                   ? Date.parse(b.timestamp)
@@ -99,6 +124,9 @@ export function useChatSocket(
             push({
               type: ((data.type as StreamBlockType) ?? "text") as StreamBlockType,
               text: asString(data.text),
+              // Live broadcast of a user message (e.g. a second tab) carries its
+              // attachments too, so cross-tab bubbles render thumbnails.
+              attachments: data.attachments as ChatAttachment[] | undefined,
             });
             break;
           }
@@ -202,20 +230,21 @@ export function useChatSocket(
 
   return {
     state: wsState,
-    send(text: string) {
-      // Optionally prepend a <viewer-context>...</viewer-context> envelope
-      // describing what the user has selected / where the playhead is. The
-      // agent reads it; the local bubble does not. Mirrors clipcraft's
-      // extractContext mechanism.
+    send(text: string, attachments?: ChatAttachment[]) {
+      // The wire message prepends two agent-only envelopes, in order:
+      //   1. <viewer-context> — what the user has selected / playhead state
+      //   2. <attachments>    — media the user attached (workspace-rel paths)
+      // Both are for the agent's eyes; the local bubble shows only the user's
+      // text (+ attachment thumbnails). Mirrors clipcraft's extractContext.
       const ctx = getViewerContext?.() ?? null;
-      const wireText = ctx ? `${ctx}\n\n${text}` : text;
+      const attachEnv = attachments?.length ? buildAttachmentsEnvelope(attachments) : null;
+      const wireText = [ctx, attachEnv, text].filter(Boolean).join("\n\n");
       // Bridge expects `{ action: "send", text }` — see ws-bridge.ts ws.on
       // 'message' handler. Sending `{ type: "user", text }` was a no-op.
       ref.current?.send(JSON.stringify({ action: "send", text: wireText }));
-      // Optimistic local echo: only the user's raw text, never the context
-      // envelope (otherwise every bubble would include a verbose tag the
-      // user neither typed nor cares about).
-      push({ type: "user", text });
+      // Optimistic local echo: the user's raw text + attachment thumbnails,
+      // never the verbose context/attachment envelopes.
+      push({ type: "user", text, attachments });
     },
   };
 }

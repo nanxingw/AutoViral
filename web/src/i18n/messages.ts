@@ -712,6 +712,11 @@ export const en = {
     composerPlaceholder: "ask anything…",
     sendHint: "⌘↵ SEND",
     stopTitle: "Stop running turn",
+    attach: {
+      button: "Attach image, video, or audio",
+      tooLarge: "File too large — max {mb}MB.",
+      failed: "Upload failed. Please try again.",
+    },
     wsConnecting: "CONNECTING…",
     wsReconnecting: "RECONNECTING…",
     wsReconnectingTitle: "Connection lost — your message will queue and send when the bridge is back.",
@@ -1498,6 +1503,11 @@ export const zh: DeepShape<Messages> = {
     composerPlaceholder: "问点什么…",
     sendHint: "⌘↵ 发送",
     stopTitle: "停止当前回合",
+    attach: {
+      button: "添加图片 / 视频 / 音频",
+      tooLarge: "文件太大 —— 最大 {mb}MB。",
+      failed: "上传失败，请重试。",
+    },
     wsConnecting: "连接中…",
     wsReconnecting: "重连中…",
     wsReconnectingTitle: "连接已断开——你的消息会暂存，桥接恢复后会自动发送。",
