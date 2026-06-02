@@ -4,6 +4,31 @@
    heavy accent button. Inline styles can't express :hover/:focus-visible/:active,
    so the interactive bits live here. */
 
+/* The composer box. Focus lives on the BOX (a soft accent ring on
+   :focus-within), not as a hard rectangular outline on the textarea — the
+   global a11y rule (globals.css textarea:focus-visible) draws a 2px --accent
+   outline that reads as a harsh black square in light mode. We keep focus
+   indication (a11y) but make it tasteful, and suppress the inner outline. */
+.box {
+  background: var(--surface-0);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+.box:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--glass-border));
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.box textarea:focus,
+.box textarea:focus-visible {
+  outline: none !important;
+  outline-offset: 0 !important;
+}
+
 .iconBtn {
   width: 30px;
   height: 30px;
@@ -137,6 +162,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .box,
   .iconBtn,
   .send,
   .stop {

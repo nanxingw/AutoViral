@@ -787,18 +787,10 @@ export function ChatPanel({
 
       {/* Composer */}
       <div style={{ padding: 12, borderTop: "1px solid var(--divider)", flexShrink: 0 }}>
-        {/* Drag-drop is handled at the panel root (whole-panel drop zone). */}
-        <div
-          style={{
-            background: "var(--surface-0)",
-            borderRadius: 12,
-            border: "1px solid var(--glass-border)",
-            padding: 10,
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-          }}
-        >
+        {/* Drag-drop is handled at the panel root (whole-panel drop zone).
+            Focus shows as a soft ring on this box (.box:focus-within), not a
+            hard outline on the textarea. */}
+        <div className={composerStyles.box}>
           {/* Hidden file picker — the OS dialog is limited to the kinds the
               server accepts (image/video/audio). */}
           <input
@@ -861,7 +853,9 @@ export function ChatPanel({
               disabled={uploading}
               aria-label={t("chat.attach.button")}
               title={t("chat.attach.button")}
-              className={composerStyles.iconBtn}
+              // `send-btn` opts these out of the global .studio-shell pill-button
+              // chrome (globals.css) so our icon-button styles aren't overridden.
+              className={`${composerStyles.iconBtn} send-btn`}
             >
               {uploading ? <span className={composerStyles.spinner} aria-hidden="true" /> : <PaperclipIcon />}
             </button>
@@ -872,7 +866,7 @@ export function ChatPanel({
                 onClick={abort}
                 aria-label="Stop"
                 title={t("chat.stopTitle")}
-                className={`${composerStyles.iconBtn} ${composerStyles.stop}`}
+                className={`${composerStyles.iconBtn} ${composerStyles.stop} send-btn`}
               >
                 <StopIcon />
               </button>
@@ -881,7 +875,7 @@ export function ChatPanel({
                 onClick={submit}
                 disabled={!canSend || uploading}
                 aria-label="Send"
-                className={`${composerStyles.iconBtn} ${composerStyles.send}`}
+                className={`${composerStyles.iconBtn} ${composerStyles.send} send-btn`}
               >
                 <ArrowUpIcon />
               </button>
