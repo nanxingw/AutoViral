@@ -6,11 +6,11 @@
 # docs/skill-structure-guide.md.
 #
 # Out-of-scope (allowed forbidden words):
-#   - docs/how-it-works.md, docs/desigen/, docs/experience/ — ARCHIVED legacy
-#     architecture notes; banner at top of each marks them as historical.
-#   - docs/research-*.md — external research notes referencing generic ML
+#   - docs/reference/how-it-works.md, docs/design/, docs/reference/experience/ —
+#     ARCHIVED legacy architecture notes; banner at top of each marks them as historical.
+#   - docs/reference/research-*.md — external research notes referencing generic ML
 #     "pipeline" terminology, not product description.
-#   - docs/superpowers/ — spec / plan / notes (gitignored anyway).
+#   - docs/archive/ — spec / plan / notes (gitignored anyway).
 #   - migration scripts whose explicit purpose is to remove the field.
 #   - test files referencing legacy names in 410 assertions / forbidden lists.
 #   - this script itself.

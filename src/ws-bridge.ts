@@ -20,6 +20,7 @@ import type { Duplex } from "node:stream";
 import { appendFile } from "node:fs/promises";
 import { logBridge, logBridgeDebug } from "./logger.js";
 import { loadConfig, dataDir } from "./config.js";
+import { PACKAGE_ROOT } from "./paths.js";
 import { getWork, updateWork, saveWorkChat, loadWorkChat, type Work } from "./work-store.js";
 import { createCheckpoint } from "./server/checkpoints.js";
 import { listSharedAssets } from "./shared-assets.js";
@@ -740,16 +741,19 @@ export class WsBridge {
     // `command not found`, and even resolved it exits 2 on a missing
     // AUTOVIRAL_WORK_ID. AUTOVIRAL_PORT is already set process-wide in
     // startServer(), but we set it explicitly here to stay self-contained.
-    const cliBinDir = join(process.cwd(), "cli", "autoviral", "bin");
+    // Anchor on PACKAGE_ROOT (not process.cwd()) — in a packaged Electron app
+    // the working dir is not the repo checkout, so the repo-contained shim dir
+    // and AUTOVIRAL_PROJECT_DIR must resolve from the bundled package root.
+    const cliBinDir = join(PACKAGE_ROOT, "cli", "autoviral", "bin");
     const workCwd = join(dataDir, "works", session.workId);
     const proc = spawn("claude", args, {
-      cwd: process.cwd(),
+      cwd: PACKAGE_ROOT,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
         PATH: `${cliBinDir}:${process.env.PATH ?? ""}`,
         CLAUDE_CODE_ENTRYPOINT: "cli",
-        AUTOVIRAL_PROJECT_DIR: process.cwd(),
+        AUTOVIRAL_PROJECT_DIR: PACKAGE_ROOT,
         AUTOVIRAL_WORK_ID: session.workId,
         AUTOVIRAL_PORT: String(this.serverPort),
         AUTOVIRAL_CWD: workCwd,
@@ -1019,10 +1023,30 @@ export class WsBridge {
     });
 
     proc.on("error", (err) => {
+      // A packaged Electron app inherits a minimal GUI PATH that often does
+      // NOT include the `claude` binary, so spawn() fails with ENOENT. Surface
+      // a clear, actionable message instead of a cryptic spawn error — and
+      // never let it crash the daemon (this handler swallows it).
+      session.cliProcess = undefined;
+      session.idle = true;
+      const isNotFound = (err as NodeJS.ErrnoException).code === "ENOENT";
+      const message = isNotFound
+        ? "无法启动创作 agent：找不到 `claude` 命令。请确认 Claude Code CLI 已安装并在 PATH 上（在终端运行 `claude --version` 验证）。"
+        : `创作 agent 启动失败：${err.message}`;
+      logBridge("cli_spawn_error", session.workId, {
+        code: (err as NodeJS.ErrnoException).code,
+        message: err.message,
+      });
       this.broadcastToBrowsers(session.workId, {
         event: "cli_error",
-        data: { workId: session.workId, error: err.message },
+        data: { workId: session.workId, error: message, code: (err as NodeJS.ErrnoException).code },
       });
+      if (session.workId.startsWith("trends_")) {
+        this.broadcastToBrowsers(session.workId, {
+          event: "research_error",
+          data: { message },
+        });
+      }
     });
   }
 

@@ -14,6 +14,7 @@ import {
 import { join } from "node:path";
 import { rename, stat as fsStat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { FFMPEG_BIN } from "./ffmpeg-paths.js";
 import type { Composition, ExportPreset } from "../shared/composition.js";
 
 /**
@@ -39,7 +40,7 @@ async function hasMeaningfulAudio(inputPath: string): Promise<boolean> {
     return true;
   }
   return new Promise((resolve) => {
-    const proc = spawn("ffmpeg", [
+    const proc = spawn(FFMPEG_BIN, [
       "-hide_banner",
       "-i", inputPath,
       "-af", "volumedetect",
@@ -351,7 +352,7 @@ export async function runEncodeStage(
       reject(new Error("runEncodeStage: aborted before spawn"));
       return;
     }
-    const child = spawn("ffmpeg", args);
+    const child = spawn(FFMPEG_BIN, args);
     let stderr = "";
     child.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
     const onAbort = () => {

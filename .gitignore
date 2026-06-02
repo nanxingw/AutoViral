@@ -34,3 +34,9 @@ autoviral design/
 skills/*
 !skills/autoviral
 skills-lock.json
+# Electron desktop shell build artifacts — compiled main, staged native
+# toolchain (chromium / ffmpeg / pre-built remotion bundle), and packaged
+# installers. Source (desktop/*.ts, *.yml, tsconfig) IS committed.
+desktop/out/
+desktop/release/
+desktop/build-resources/

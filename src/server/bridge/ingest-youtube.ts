@@ -18,6 +18,7 @@ import { homedir } from "node:os";
 import yaml from "js-yaml";
 
 import { uiEventBus, type UiEvent } from "./ui-events.js";
+import { FFPROBE_BIN } from "../ffmpeg-paths.js";
 import {
   readCompositionFor,
   writeCompositionFor,
@@ -164,7 +165,7 @@ export async function ingestYouTubeIntoWork(
   let durationSec = 0;
   try {
     const { stdout } = await execFileAsync(
-      "ffprobe",
+      FFPROBE_BIN,
       [
         "-v", "error",
         "-show_entries", "format=duration",

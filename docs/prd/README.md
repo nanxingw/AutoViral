@@ -1,0 +1,41 @@
+# PRD · 产品 / 治理需求文档
+
+> PRD（Product Requirements Document）回答一个问题：**为谁、建什么、用什么验收标准判定建成了**。它是 issue 的上游——一份 PRD 切成若干可独立认领的 issue（经 `to-issues` skill），issue 才进入实现。PRD 不写「怎么实现」（那是 ADR / 实现计划的事），只写「要什么、不要什么、怎么算成」。
+
+---
+
+## 约定
+
+- **位置**：所有 PRD 落在 `docs/prd/` 下，平铺，不再分子目录。
+- **命名**：`NNNN-slug.md`，四位单调递增序号 + 短横线小写标题（如 `0001-v0.1.0-release-and-conventions.md`）。序号一旦分配不复用、不回填；新 PRD 取「当前最大序号 + 1」。
+- **产出方式**：优先用 `to-prd` skill 从对话上下文生成草稿，再用 `to-issues` 切片发布到 GitHub Issues。issue tracker 的位置、label、发布规则见 [`../agents/issue-tracker.md`](../agents/issue-tracker.md) 与 [`../agents/index.md`](../agents/index.md)。
+- **状态头**：每份 PRD 顶部带 `状态` + `日期`（PRD-0001 用「Proposed」；规范状态机见下）。状态变化时改头部并补一行日期，不要删旧状态历史。
+  - `Draft` — 起草中，尚未定稿。
+  - `Active` — 已定稿、已切 issue、正在实现。
+  - `Shipped` — 验收标准全部满足、对应 release 已发出。
+  - `Superseded` — 被更新的 PRD 取代（注明取代它的 PRD 编号）。
+- **与 ADR 的边界**：PRD 写「为谁建什么 + 验收口径」（产品/治理视角）；ADR（[`../adr/`](../adr/)）写「为什么选这个架构 + 权衡了什么」（架构视角）。一份 PRD 里若出现需要锁定的架构选择，把它独立成 ADR 并在 PRD 里链过去——不要把架构论证塞进 PRD 正文。
+
+---
+
+## 一份 PRD 应包含的小节（可复用清单）
+
+不是每份 PRD 都要塞满所有小节，但下面这些是默认骨架；缺哪个要想清楚是否真的不需要。
+
+- [ ] **状态头** — 状态 + 日期 + 作者 + 类型（feature / governance）+ 影响分支。
+- [ ] **Why / Problem Statement** — 为什么现在要做；不做的代价是什么。
+- [ ] **目标用户（for whom）** — 谁会因此受益（用 user story 或角色描述具体化）。
+- [ ] **In scope** — 这份 PRD 明确承诺交付的东西。
+- [ ] **Out of scope / Non-Goals** — 明确**不**做的东西，挡住范围蔓延。
+- [ ] **验收标准（acceptance criteria）** — 可观测、可验证的判定条件。**必须遵守 E2E 规则**：端到端通过的唯一标准是浏览器里看得到用户被许诺的结果，不是后端 artifact（详见 [`/.claude/rules/e2e-testing.md`](../../.claude/rules/e2e-testing.md)）。
+- [ ] **领域不变量（domain invariants）** — 本需求触及 [`/CONTEXT.md`](../../CONTEXT.md) 里哪些不变量；保证不会被静默破坏。
+- [ ] **Issue 切片（issue slices）** — 如何切成可独立认领的 tracer-bullet 垂直切片（喂给 `to-issues`）。
+- [ ] **风险（risks）** — 已知风险、未决问题（Open Questions）、回退策略。
+
+---
+
+## 现有 PRD
+
+| 编号 | 标题 | 状态 | 日期 |
+|---|---|---|---|
+| [0001](0001-v0.1.0-release-and-conventions.md) | v0.1.0 发布与工程约定（包改名 `autoviral@0.1.0` / docs 重组 / Electron 桌面壳 / CI+Release / 合 main 打 tag） | Proposed | 2026-06-02 |

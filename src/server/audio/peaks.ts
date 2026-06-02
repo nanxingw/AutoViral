@@ -22,6 +22,7 @@
 
 import { spawn } from "node:child_process";
 import { stat, writeFile } from "node:fs/promises";
+import { FFMPEG_BIN, FFPROBE_BIN } from "../ffmpeg-paths.js";
 
 export interface PeaksFileV2 {
   version: 2;
@@ -47,7 +48,7 @@ interface ProbeResult {
 
 function probeAudio(srcPath: string): Promise<ProbeResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn("ffprobe", [
+    const child = spawn(FFPROBE_BIN, [
       "-v", "error",
       "-select_streams", "a:0",
       "-show_entries", "stream=sample_rate,channels:format=duration",
@@ -86,7 +87,7 @@ function decodePcm(
   sampleRate: number,
 ): Promise<Buffer> {
   return new Promise((resolve, reject) => {
-    const child = spawn("ffmpeg", [
+    const child = spawn(FFMPEG_BIN, [
       "-v", "error",
       "-i", srcPath,
       "-ac", String(channels),

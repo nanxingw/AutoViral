@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import { stat, writeFile, mkdtemp } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { FFMPEG_BIN, FFPROBE_BIN } from "./server/ffmpeg-paths.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
@@ -64,7 +65,7 @@ const NO_AUDIO: AudioAnalysis = {
  */
 export async function analyzeAudio(filePath: string): Promise<AudioAnalysis> {
   // ── Step 1: Stream detection ────────────────────────────────────────────
-  const probeStreams = await runCmd("ffprobe", [
+  const probeStreams = await runCmd(FFPROBE_BIN, [
     "-v", "error",
     "-show_entries", "stream=codec_type",
     "-of", "csv=p=0",
@@ -76,7 +77,7 @@ export async function analyzeAudio(filePath: string): Promise<AudioAnalysis> {
   }
 
   // ── Step 2: Volume detection ────────────────────────────────────────────
-  const volOutput = await runCmd("ffmpeg", [
+  const volOutput = await runCmd(FFMPEG_BIN, [
     "-i", filePath,
     "-af", "volumedetect",
     "-f", "null",
@@ -90,7 +91,7 @@ export async function analyzeAudio(filePath: string): Promise<AudioAnalysis> {
   const peakVolume = maxMatch ? parseFloat(maxMatch[1]) : -999;
 
   // ── Step 3: Silence detection ───────────────────────────────────────────
-  const durationOutput = await runCmd("ffprobe", [
+  const durationOutput = await runCmd(FFPROBE_BIN, [
     "-v", "error",
     "-show_entries", "format=duration",
     "-of", "csv=p=0",
@@ -101,7 +102,7 @@ export async function analyzeAudio(filePath: string): Promise<AudioAnalysis> {
 
   let silenceRatio = 1.0;
   if (totalDuration > 0) {
-    const silenceOutput = await runCmd("ffmpeg", [
+    const silenceOutput = await runCmd(FFMPEG_BIN, [
       "-i", filePath,
       "-af", "silencedetect=noise=-40dB:d=0.3",
       "-f", "null",
@@ -164,7 +165,7 @@ export async function mixAudioTracks(opts: MixOptions): Promise<void> {
   }
 
   // ── Step 1: Get video duration via ffprobe ──────────────────────────────
-  const durationOut = await runCmd("ffprobe", [
+  const durationOut = await runCmd(FFPROBE_BIN, [
     "-v", "error",
     "-show_entries", "format=duration",
     "-of", "csv=p=0",
@@ -291,10 +292,10 @@ export async function mixAudioTracks(opts: MixOptions): Promise<void> {
     outputPath,
   ];
 
-  await runCmd("ffmpeg", ffmpegArgs, 5 * 60 * 1000); // 5-minute timeout
+  await runCmd(FFMPEG_BIN, ffmpegArgs, 5 * 60 * 1000); // 5-minute timeout
 
   // ── Step 7: Verify output has audio ─────────────────────────────────────
-  const verifyOut = await runCmd("ffprobe", [
+  const verifyOut = await runCmd(FFPROBE_BIN, [
     "-v", "error",
     "-show_entries", "stream=codec_type",
     "-of", "csv=p=0",
@@ -374,7 +375,7 @@ export async function normalizeLufs(
   const pass1Filter =
     `loudnorm=I=${opts.target}:LRA=${opts.lra}:tp=${opts.truePeak}:print_format=json`;
   const pass1Stderr = await runCmd(
-    "ffmpeg",
+    FFMPEG_BIN,
     ["-i", inputPath, "-af", pass1Filter, "-f", "null", "-"],
     60_000,
   );
@@ -418,7 +419,7 @@ export async function normalizeLufs(
     : ["-c:a", "pcm_s16le", "-ar", "48000"];
 
   await runCmd(
-    "ffmpeg",
+    FFMPEG_BIN,
     [
       "-i", inputPath,
       "-af", pass2Filter,
@@ -443,7 +444,7 @@ export async function normalizeLufs(
  */
 export async function measureLufs(filePath: string): Promise<number> {
   const stderr = await runCmd(
-    "ffmpeg",
+    FFMPEG_BIN,
     ["-i", filePath, "-af", "loudnorm=print_format=json", "-f", "null", "-"],
     60_000,
   );

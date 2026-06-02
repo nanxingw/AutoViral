@@ -20,6 +20,7 @@
 import { spawn } from "node:child_process";
 import { FrameReorderBuffer } from "./frame-reorder-buffer.js";
 import { pickEncoder, type LibX264Preset } from "./gpu-encoder.js";
+import { FFMPEG_BIN } from "../ffmpeg-paths.js";
 
 export interface StreamingEncodeOptions {
   /** Total frame count of the output video. */
@@ -119,7 +120,7 @@ export async function streamingEncode(
     outputPath,
   ];
 
-  const ff = spawn("ffmpeg", args, { stdio: ["pipe", "ignore", "pipe"] });
+  const ff = spawn(FFMPEG_BIN, args, { stdio: ["pipe", "ignore", "pipe"] });
   let stderr = "";
   ff.stderr.on("data", (b: Buffer | string) => {
     stderr += b.toString();

@@ -57,6 +57,6 @@ hyperframes is referenced as a technique source (its `references/captions.md`, `
 
 ## References
 
-- PRD: `docs/superpowers/plans/2026-05-15-autoviral-absorb-hyperframes-tech.md`
+- PRD: `docs/archive/plans/2026-05-15-autoviral-absorb-hyperframes-tech.md`
 - hyperframes source (read-only inspection): https://github.com/heygen-com/hyperframes
-- Prior plan (now archived): `docs/superpowers/plans/2026-05-14-agentic-terminal-refactor.md`
+- Prior plan (now archived): `docs/archive/plans/2026-05-14-agentic-terminal-refactor.md`

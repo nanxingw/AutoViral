@@ -15,7 +15,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ── Mocks ──────────────────────────────────────────────────────────────
 // Hoist via vi.mock so the mock factory runs before any import below.
 
-const bundleMock = vi.fn(async (_args: unknown) => "/fake/bundle/url");
+// After the packaging refactor the bundle() call moved into remotion-paths.ts
+// (resolveRemotionServeUrl). We mock that module directly so the unit test stays
+// isolated from src/paths.ts + real webpack, while still asserting the exact
+// external behavior: the resolved serveUrl flows into selectComposition +
+// renderFrames, and browserExecutable defaults to undefined in this env.
+const resolveServeUrlMock = vi.fn(async () => "/fake/bundle/url");
+const browserExecutableMock = vi.fn((): string | undefined => undefined);
+
 const selectCompositionMock = vi.fn(async (_args: unknown) => ({
   id: "main",
   width: 100,
@@ -52,8 +59,9 @@ const makeCancelSignalMock = vi.fn(() => ({
   cancel: cancelMock,
 }));
 
-vi.mock("@remotion/bundler", () => ({
-  bundle: (args: unknown) => bundleMock(args),
+vi.mock("../remotion-paths.js", () => ({
+  resolveRemotionServeUrl: () => resolveServeUrlMock(),
+  remotionBrowserExecutable: () => browserExecutableMock(),
 }));
 vi.mock("@remotion/renderer", () => ({
   renderFrames: (args: unknown) => renderFramesMock(args),
@@ -86,7 +94,8 @@ const fakeComp = {
 };
 
 beforeEach(() => {
-  bundleMock.mockClear();
+  resolveServeUrlMock.mockClear();
+  browserExecutableMock.mockClear();
   selectCompositionMock.mockClear();
   renderFramesMock.mockClear();
   streamingEncodeMock.mockClear();
@@ -99,28 +108,31 @@ beforeEach(() => {
 // ── Tests ──────────────────────────────────────────────────────────────
 
 describe("renderViaStreamingBridge", () => {
-  it("calls bundle, selectComposition, and renderFrames in sequence", async () => {
+  it("resolves the serveUrl, then calls selectComposition and renderFrames in sequence", async () => {
     // Stub renderFrames to immediately resolve without emitting frames;
     // our streamingEncode mock doesn't need them.
     renderFramesHolder.impl = async () => ({ frameCount: 10 });
 
     const out = await renderViaStreamingBridge(fakeComp, "/tmp/out", {});
 
-    expect(bundleMock).toHaveBeenCalledTimes(1);
+    expect(resolveServeUrlMock).toHaveBeenCalledTimes(1);
     expect(selectCompositionMock).toHaveBeenCalledTimes(1);
     expect(renderFramesMock).toHaveBeenCalledTimes(1);
     expect(streamingEncodeMock).toHaveBeenCalledTimes(1);
-    // selectComposition is called with the bundle URL produced by bundle.
+    // selectComposition is called with the serveUrl from resolveRemotionServeUrl.
     expect(selectCompositionMock.mock.calls[0][0]).toMatchObject({
       serveUrl: "/fake/bundle/url",
       id: "main",
     });
-    // renderFrames receives the same bundle URL + jpeg image format +
-    // outputDir:null (the streaming-mode flag).
+    // browserExecutable defaults to undefined in this env (auto-download in dev).
+    expect((selectCompositionMock.mock.calls[0][0] as any).browserExecutable).toBeUndefined();
+    // renderFrames receives the same serveUrl + jpeg image format +
+    // outputDir:null (the streaming-mode flag) + undefined browserExecutable.
     const rfArgs = renderFramesMock.mock.calls[0][0];
     expect(rfArgs.serveUrl).toBe("/fake/bundle/url");
     expect(rfArgs.imageFormat).toBe("jpeg");
     expect(rfArgs.outputDir).toBeNull();
+    expect(rfArgs.browserExecutable).toBeUndefined();
     // streamingEncode is called with mjpeg + the comp dimensions.
     expect(streamingEncodeMock.mock.calls[0][1]).toMatchObject({
       totalFrames: 10,
@@ -169,14 +181,14 @@ describe("renderViaStreamingBridge", () => {
 
   // ── #44 cancellation wiring ───────────────────────────────────────────
 
-  it("throws before bundling when the signal is already aborted (#44)", async () => {
+  it("throws before resolving the serveUrl when the signal is already aborted (#44)", async () => {
     const ac = new AbortController();
     ac.abort();
     await expect(
       renderViaStreamingBridge(fakeComp, "/tmp/out", { signal: ac.signal }),
     ).rejects.toThrow(/aborted before render/);
     // No expensive work kicked off for an already-cancelled job.
-    expect(bundleMock).not.toHaveBeenCalled();
+    expect(resolveServeUrlMock).not.toHaveBeenCalled();
     expect(renderFramesMock).not.toHaveBeenCalled();
   });
 

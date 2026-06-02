@@ -1,0 +1,216 @@
+# Release — fired by pushing a SemVer tag (v0.1.0, v1.2.3, …).
+#
+# Pipeline:
+#   verify-version  → assert the tag matches package.json (no drift)
+#   desktop         → build mac + win installers, publish to the GitHub release
+#   publish-npm     → publish the root "autoviral" package to npm with provenance
+#   github-release  → set the release notes from the CHANGELOG section
+#
+# Action versions verified 2026-06-02 against upstream READMEs:
+#   actions/checkout@v6 · actions/setup-node@v6 · actions/cache@v5
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Gate: the pushed tag MUST equal package.json version ────────────────────
+  # Prevents tag/version drift (a vX.Y.Z tag publishing a different package
+  # version to npm). Exposes the bare version (no leading "v") to downstream jobs.
+  verify-version:
+    name: verify version
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Assert tag == package.json version
+        id: check
+        run: |
+          TAG=${GITHUB_REF_NAME#v}
+          PKG=$(jq -r .version package.json)
+          if [ "$TAG" != "$PKG" ]; then
+            echo "tag $TAG != package.json $PKG" && exit 1
+          fi
+          echo "version=$PKG" >> "$GITHUB_OUTPUT"
+          echo "Release version: $PKG"
+
+  # ── Desktop installers (mac dmg/zip + win nsis), published to the release ───
+  desktop:
+    name: desktop (${{ matrix.os }})
+    needs: verify-version
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          cache: npm
+
+      # Cache electron + electron-builder download dirs (Electron binary,
+      # app-builder helpers, winCodeSign, nsis, etc.). Per-OS paths — these
+      # caches are large and machine-specific, so keying on os keeps them clean.
+      - name: Cache Electron download dirs (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/Library/Caches/electron
+            ~/Library/Caches/electron-builder
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
+
+      - name: Cache Electron download dirs (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~\AppData\Local\electron\Cache
+            ~\AppData\Local\electron-builder\Cache
+          key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-electron-
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Stage the native toolchain into desktop/build-resources/:
+      #   prebundle:remotion (remotion-bundle) + ensure:chromium (Chrome Headless
+      #   Shell + ffmpeg/ffprobe, host-arch). Required before electron-builder
+      #   copies them via extraResources.
+      - name: Stage desktop resources
+        run: npm run desktop:resources
+
+      # The desktop:build:* scripts already compile the daemon + frontend + CLI +
+      # electron main and invoke electron-builder WITH `-c desktop/electron-builder.yml`.
+      # `--publish always` uploads the artifacts to the GitHub release (electron-builder
+      # creates/updates the release for tag v<version>). electron-builder reads the
+      # GitHub token from GH_TOKEN.
+      #
+      # Signing is OPTIONAL and absent for the 0.1.0 default → builds are UNSIGNED
+      # (electron-builder warns, it is not a hard failure). To sign later, set the
+      # CSC_*/APPLE_*/WIN_CSC_* secrets below and they flow in automatically.
+      - name: Build & publish desktop (macOS)
+        if: runner.os == 'macOS'
+        run: npm run desktop:build:mac -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional macOS signing + notarization (unset ⇒ unsigned 0.1.0 build):
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Build & publish desktop (Windows)
+        if: runner.os == 'Windows'
+        run: npm run desktop:build:win -- --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional Windows signing (unset ⇒ unsigned 0.1.0 build):
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+
+  # ── Publish the npm package (the self-contained "autoviral" form factor) ────
+  publish-npm:
+    name: publish to npm
+    needs: desktop
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # id-token: write is required for npm provenance (npm mints a Sigstore
+      # attestation from this OIDC token). npm >= 9.5.0 is required; Node 20.x
+      # ships npm 10+, so the requirement is satisfied.
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          registry-url: https://registry.npmjs.org
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Build explicitly so compile/type failures surface here, not buried inside
+      # prepublishOnly (which also runs "npm run build && npm run build:cli" on publish).
+      - name: Build
+        run: npm run build
+
+      # Publish from the REPO ROOT — the root "autoviral" package is the npm form
+      # factor, self-contained: its "files" ships dist/ + skills/ + web/dist/ + the
+      # in-Studio agent's protocol CLI shim (cli/autoviral/dist + bin + package.json).
+      #
+      # NPM_TOKEN must be an npm Automation or Granular Access token with publish
+      # rights to the "autoviral" package; the package is published PUBLIC.
+      - name: Publish
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # ── Set the GitHub release notes from the CHANGELOG ─────────────────────────
+  # electron-builder's --publish always may have already created the release for
+  # this tag (to attach installers). We therefore check first: if the release
+  # exists we `gh release edit` its notes; otherwise we `gh release create`.
+  # (pneuma pattern: the CHANGELOG section IS the release notes.)
+  github-release:
+    name: github release notes
+    # Gated on publish-npm too: finalize the CHANGELOG-sourced release notes only
+    # after BOTH the installers (desktop) AND the npm publish succeed, so a failed
+    # npm publish surfaces as a red run instead of a notes-complete "partial" release.
+    needs: [verify-version, desktop, publish-npm]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Compose & publish release notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.verify-version.outputs.version }}
+        run: |
+          set -euo pipefail
+          NOTES_FILE="$(mktemp)"
+          # Extract the "## [VERSION] - DATE" section body up to the next "## [" heading.
+          awk -v ver="## [${VERSION}]" 'index($0,ver){f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md > "$NOTES_FILE"
+          # Fallback if the CHANGELOG has no matching section (or it is empty).
+          if [ ! -s "$NOTES_FILE" ]; then
+            echo "Release v${VERSION}" > "$NOTES_FILE"
+          fi
+
+          TAG="v${VERSION}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG exists (likely from electron-builder) — updating notes."
+            gh release edit "$TAG" --title "$TAG" --notes-file "$NOTES_FILE"
+          else
+            echo "Creating release $TAG."
+            gh release create "$TAG" --title "$TAG" --notes-file "$NOTES_FILE"
+          fi

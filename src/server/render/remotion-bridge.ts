@@ -21,17 +21,14 @@
 // stash buffers in the map; the producer's await for frame N picks up
 // whenever it lands.
 
-import { bundle } from "@remotion/bundler";
 import { renderFrames, selectComposition, makeCancelSignal } from "@remotion/renderer";
 import { join } from "node:path";
 import { streamingEncode, type StreamingEncodeProducer } from "./streaming-encoder.js";
 import { buildSafeOutputFilename } from "../remotion-renderer.js";
-
-// Mirror web/tsconfig.json paths so Remotion's webpack resolves
-// `@shared/*` imports inside the bundled composition tree the same way
-// Vite does. Kept in sync with `remotion-renderer.ts` — if you change
-// the alias here, change it there too (and vice versa).
-const SHARED_ALIAS_TARGET = join(process.cwd(), "src/shared");
+import {
+  resolveRemotionServeUrl,
+  remotionBrowserExecutable,
+} from "../remotion-paths.js";
 
 export interface RenderViaStreamingBridgeOptions {
   /** 0..1 fraction of frames rendered. Called as renderFrames advances. */
@@ -93,30 +90,13 @@ export async function renderViaStreamingBridge(
   const onAbort = () => cancelBridge?.cancel();
   opts.signal?.addEventListener("abort", onAbort, { once: true });
 
-  const bundleLocation = await bundle({
-    entryPoint: join(
-      process.cwd(),
-      "web/src/features/studio/composition/RemotionRoot.tsx",
-    ),
-    webpackOverride: (c) => {
-      c.resolve = c.resolve ?? {};
-      c.resolve.alias = {
-        ...(c.resolve.alias ?? {}),
-        "@shared": SHARED_ALIAS_TARGET,
-      };
-      // src/shared/*.ts uses NodeNext-style explicit ".js" suffixes.
-      c.resolve.extensionAlias = {
-        ...(c.resolve.extensionAlias ?? {}),
-        ".js": [".ts", ".tsx", ".js"],
-      };
-      return c;
-    },
-  });
+  const bundleLocation = await resolveRemotionServeUrl();
 
   const composition = await selectComposition({
     serveUrl: bundleLocation,
     id: "main",
     inputProps: { comp },
+    browserExecutable: remotionBrowserExecutable(),
   });
 
   const totalFrames = Math.max(1, Math.round(comp.duration * comp.fps));
@@ -164,6 +144,7 @@ export async function renderViaStreamingBridge(
     },
     serveUrl: bundleLocation,
     inputProps: { comp },
+    browserExecutable: remotionBrowserExecutable(),
     cancelSignal: cancelBridge?.cancelSignal,
     imageFormat: "jpeg",
     // outputDir: null means "don't write frames to disk" — we pull

@@ -10,7 +10,14 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const bundleMock = vi.fn(async (_args: unknown) => "/fake/bundle/url");
+// After the packaging refactor the bundle() call moved into remotion-paths.ts
+// (resolveRemotionServeUrl). We mock that module directly so the unit test stays
+// isolated from src/paths.ts + real webpack, while still asserting the exact
+// external behavior: the resolved serveUrl flows into selectComposition +
+// renderMedia, and browserExecutable defaults to undefined in this env.
+const resolveServeUrlMock = vi.fn(async () => "/fake/bundle/url");
+const browserExecutableMock = vi.fn((): string | undefined => undefined);
+
 const selectCompositionMock = vi.fn(async (_args: unknown) => ({
   id: "main",
   width: 100,
@@ -40,8 +47,9 @@ const makeCancelSignalMock = vi.fn(() => ({
   cancel: cancelMock,
 }));
 
-vi.mock("@remotion/bundler", () => ({
-  bundle: (args: unknown) => bundleMock(args),
+vi.mock("./remotion-paths.js", () => ({
+  resolveRemotionServeUrl: () => resolveServeUrlMock(),
+  remotionBrowserExecutable: () => browserExecutableMock(),
 }));
 vi.mock("@remotion/renderer", () => ({
   renderMedia: (args: unknown) => renderMediaMock(args),
@@ -62,7 +70,8 @@ const fakeComp = {
 };
 
 beforeEach(() => {
-  bundleMock.mockClear();
+  resolveServeUrlMock.mockClear();
+  browserExecutableMock.mockClear();
   selectCompositionMock.mockClear();
   renderMediaMock.mockClear();
   makeCancelSignalMock.mockClear();
@@ -83,12 +92,21 @@ describe("buildSafeOutputFilename", () => {
 });
 
 describe("renderCompositionToMp4 — happy path", () => {
-  it("bundles, selects, renders, and returns an .mp4 path", async () => {
+  it("resolves the serveUrl, selects, renders, and returns an .mp4 path", async () => {
     const out = await renderCompositionToMp4(fakeComp, "/tmp/out", {});
-    expect(bundleMock).toHaveBeenCalledTimes(1);
+    expect(resolveServeUrlMock).toHaveBeenCalledTimes(1);
     expect(selectCompositionMock).toHaveBeenCalledTimes(1);
     expect(renderMediaMock).toHaveBeenCalledTimes(1);
     expect(out.endsWith(".mp4")).toBe(true);
+    // serveUrl from resolveRemotionServeUrl flows into both Remotion calls.
+    expect(selectCompositionMock.mock.calls[0][0]).toMatchObject({
+      serveUrl: "/fake/bundle/url",
+      id: "main",
+    });
+    expect(renderMediaMock.mock.calls[0][0].serveUrl).toBe("/fake/bundle/url");
+    // browserExecutable defaults to undefined in this env (auto-download in dev).
+    expect((selectCompositionMock.mock.calls[0][0] as any).browserExecutable).toBeUndefined();
+    expect(renderMediaMock.mock.calls[0][0].browserExecutable).toBeUndefined();
   });
 
   it("forwards Remotion onProgress(renderedFrames) as a 0..1 fraction", async () => {
@@ -105,13 +123,13 @@ describe("renderCompositionToMp4 — happy path", () => {
 });
 
 describe("renderCompositionToMp4 — #44 cancellation wiring", () => {
-  it("throws before bundling when the signal is already aborted", async () => {
+  it("throws before resolving the serveUrl when the signal is already aborted", async () => {
     const ac = new AbortController();
     ac.abort();
     await expect(
       renderCompositionToMp4(fakeComp, "/tmp/out", { signal: ac.signal }),
     ).rejects.toThrow(/aborted before render/);
-    expect(bundleMock).not.toHaveBeenCalled();
+    expect(resolveServeUrlMock).not.toHaveBeenCalled();
     expect(renderMediaMock).not.toHaveBeenCalled();
   });
 

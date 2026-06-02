@@ -1,5 +1,5 @@
 // Zod schemas for the AutoViral Bridge Protocol v1.
-// See docs/superpowers/specs/2026-05-14-agentic-terminal-bridge-protocol.md
+// See docs/archive/specs/2026-05-14-agentic-terminal-bridge-protocol.md
 //
 // These types are the contract shared between:
 //   - the @autoviral/cli HTTP client (cli/autoviral/src/client.ts)

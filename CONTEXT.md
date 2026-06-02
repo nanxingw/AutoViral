@@ -113,14 +113,14 @@ skills/autoviral/           # The operator manual (agent-agnostic markdown)
 └── recipes/                # Common task patterns
 
 docs/                       # Long-form project docs
-├── superpowers/plans/      # Phased implementation plans (incl. the active PRD)
+├── archive/plans/          # Phased implementation plans (incl. the active PRD)
 ├── adr/                    # Architecture Decision Records (created 2026-05-15)
 └── agents/                 # mattpocock skill config (created 2026-05-15)
 ```
 
 ## Glossary updates
 
-- **2026-05-14** · agentic-terminal refactor — skill stripped of taste content. See `docs/superpowers/plans/2026-05-14-agentic-terminal-refactor.md`.
-- **2026-05-15** · PRD lock — AutoViral owns editing; sibling skills split into taste + engineering. See `docs/superpowers/plans/2026-05-15-autoviral-absorb-hyperframes-tech.md`.
+- **2026-05-14** · agentic-terminal refactor — skill stripped of taste content. See `docs/archive/plans/2026-05-14-agentic-terminal-refactor.md`.
+- **2026-05-15** · PRD lock — AutoViral owns editing; sibling skills split into taste + engineering. See `docs/archive/plans/2026-05-15-autoviral-absorb-hyperframes-tech.md`.
 - **2026-05-15** · Adopted mattpocock skills (`to-prd` / `to-issues` / `triage` / `diagnose` / `tdd` / `handoff` / `caveman` / `prototype` / `zoom-out` / `grill-me` / `improve-codebase-architecture` / `write-a-skill` / `find-skills`) as the engineering-process skill family. Replaces superpowers:* in this project. See `memory/feedback_use_mattpocock_not_superpowers.md`.
 - **2026-05-17** · Right-pane dual-surface decision — Chat (`claude -p` subprocess) coexists with Terminal (xterm.js) as horizontal-tabbed siblings. Default surface: Chat. Both consume the same focus channel from H0. See [ADR-005](docs/adr/ADR-005-dual-chat-entry-layout.md). Resolves M.1 ([Issue #6](https://github.com/nanxingw/AutoViral/issues/6)).

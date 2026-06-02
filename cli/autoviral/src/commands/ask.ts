@@ -8,7 +8,6 @@
 //   timeout    → 124
 // Also prints the answer to stdout so chained scripts can `case $(...)`.
 
-import { fetch as undiciFetch } from "undici";
 import { readContext } from "../client.js";
 
 export async function askCommand(args: string[]): Promise<void> {
@@ -28,7 +27,7 @@ export async function askCommand(args: string[]): Promise<void> {
 
   const ctx = readContext();
   const url = `http://127.0.0.1:${ctx.port}/api/bridge/v1/ask`;
-  const res = await undiciFetch(url, {
+  const res = await fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

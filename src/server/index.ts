@@ -9,6 +9,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import type { Server } from "node:http";
 import { loadConfig, dataDir } from "../config.js";
+import { PACKAGE_ROOT } from "../paths.js";
 import { initProviders } from "../providers/registry.js";
 import { ensureSharedDirs } from "../shared-assets.js";
 import { apiRoutes, setWsBridge, setRenderQueue } from "./api.js";
@@ -44,7 +45,9 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   await ensureSharedDirs();
 
   // 3.5. Sync skills to ~/.claude/skills/ (agent reads from there)
-  const projectSkills = join(process.cwd(), "skills");
+  // Anchor on PACKAGE_ROOT (not process.cwd()) so the bundled skills/ resolves
+  // inside a packaged Electron app where the working dir is not the repo root.
+  const projectSkills = join(PACKAGE_ROOT, "skills");
   const installedSkills = join(homedir(), ".claude", "skills");
   if (existsSync(projectSkills)) {
     try {
@@ -109,6 +112,16 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   });
 
   const httpServer = nodeServer as unknown as Server;
+
+  // Fail fast + clearly on a held port (e.g. another AutoViral daemon). Without
+  // this the desktop shell's health probe would just spin until its 10s timeout.
+  httpServer.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`Port ${port} is already in use — is another AutoViral daemon running?`);
+      process.exit(1);
+    }
+    throw err;
+  });
 
   // Terminal WS adapter — attached without auto-binding so we can multiplex
   // through the single upgrade handler below.

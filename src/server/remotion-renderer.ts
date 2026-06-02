@@ -1,10 +1,9 @@
-import { bundle } from "@remotion/bundler";
 import { renderMedia, selectComposition, makeCancelSignal } from "@remotion/renderer";
 import { join } from "node:path";
-
-// Mirror web/tsconfig.json paths so Remotion's webpack resolves `@shared/*`
-// imports inside the bundled composition tree the same way Vite does.
-const SHARED_ALIAS_TARGET = join(process.cwd(), "src/shared");
+import {
+  resolveRemotionServeUrl,
+  remotionBrowserExecutable,
+} from "./remotion-paths.js";
 
 export function buildSafeOutputFilename(
   title: string | undefined,
@@ -59,31 +58,12 @@ export async function renderCompositionToMp4(
   if (opts.signal?.aborted) {
     throw new Error("renderCompositionToMp4: aborted before render");
   }
-  const bundleLocation = await bundle({
-    entryPoint: join(
-      process.cwd(),
-      "web/src/features/studio/composition/RemotionRoot.tsx",
-    ),
-    webpackOverride: (c) => {
-      c.resolve = c.resolve ?? {};
-      c.resolve.alias = {
-        ...(c.resolve.alias ?? {}),
-        "@shared": SHARED_ALIAS_TARGET,
-      };
-      // src/shared/*.ts uses NodeNext-style explicit ".js" suffixes
-      // (e.g. `from "./composition.js"`). Webpack must map those to the
-      // .ts/.tsx source the bundler is actually loading.
-      c.resolve.extensionAlias = {
-        ...(c.resolve.extensionAlias ?? {}),
-        ".js": [".ts", ".tsx", ".js"],
-      };
-      return c;
-    },
-  });
+  const bundleLocation = await resolveRemotionServeUrl();
   const composition = await selectComposition({
     serveUrl: bundleLocation,
     id: "main",
     inputProps: { comp },
+    browserExecutable: remotionBrowserExecutable(),
   });
   const outFile = join(outDir, buildSafeOutputFilename(comp.title));
   // Override every dimension prop from the composition data — Remotion's
@@ -109,6 +89,7 @@ export async function renderCompositionToMp4(
       codec: "h264",
       outputLocation: outFile,
       inputProps: { comp },
+      browserExecutable: remotionBrowserExecutable(),
       cancelSignal: cancelBridge?.cancelSignal,
       // R46 #2.5 — surface per-frame progress so the pipeline progress
       // budget (worker.ts STAGE_BUDGET.render = 0.75) advances smoothly

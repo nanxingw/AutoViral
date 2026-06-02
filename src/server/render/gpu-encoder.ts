@@ -17,6 +17,7 @@
 
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { FFMPEG_BIN } from "../ffmpeg-paths.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -117,7 +118,7 @@ export async function detectAvailableEncoders(): Promise<Set<string>> {
 
   const set = new Set<string>();
   try {
-    const { stdout } = await execFileAsync("ffmpeg", ["-hide_banner", "-encoders"], {
+    const { stdout } = await execFileAsync(FFMPEG_BIN, ["-hide_banner", "-encoders"], {
       timeout: 15_000,
       maxBuffer: 4 * 1024 * 1024,
     });

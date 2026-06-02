@@ -39,10 +39,20 @@ skills/autoviral/
 - **零强制顺序**：agent 按需查文档，不强迫线性流程
 - **Single source of truth**：`autoviral docs` 命令输出 = `manual/*.md` 内容
 
-转型实施中。当前进度看 `docs/superpowers/plans/2026-05-14-agentic-terminal-refactor.md`，协议看 `docs/superpowers/specs/2026-05-14-agentic-terminal-bridge-protocol.md`。已删除的 `taste/` 和 `modules/` 内容归档在 git tag `pre-skill-rewrite-snapshot`。
+转型实施中。当前进度看 `docs/archive/plans/2026-05-14-agentic-terminal-refactor.md`，协议看 `docs/archive/specs/2026-05-14-agentic-terminal-bridge-protocol.md`。已删除的 `taste/` 和 `modules/` 内容归档在 git tag `pre-skill-rewrite-snapshot`。
 
-旧规则归档：[docs/skill-structure-guide.md](docs/skill-structure-guide.md)（已过时，仅供历史参考）
+旧规则归档：[docs/skill-structure-guide.md](docs/skill-structure-guide.md)（已过时，仅供历史参考）。完整文档地图见 [docs/README.md](docs/README.md)。
 
+## 版本与发布约定
+
+- **包名**：`autoviral`（unscoped），发布到 npm。
+- **版本号**：SemVer，整仓单一版本号，当前 `0.1.0`（pre-1.0；0.x 期间 minor bump 可能带破坏性行为变化）。
+- **包管理器**：npm（不用 bun / pnpm；已删除 `bun.lock`）。
+- **bump 规则**：MAJOR = 破坏性变更 / MINOR = 向后兼容的新功能 / PATCH = 向后兼容的修复（0.x 例外见上）。
+- **CHANGELOG**：遵循 [Keep a Changelog](https://keepachangelog.com)，`## [版本] - 日期` 语法是 release notes 的单一事实源。
+- **发布**：打 tag `vX.Y.Z` 触发 GitHub Actions release。
+- **桌面端**：Electron + electron-builder（mac `dmg` + win `nsis`）。
+- **PRD**：全部写在 `docs/prd/`（`NNNN-slug.md`）；完整文档地图见 [docs/README.md](docs/README.md)。
 
 <rules>
 启动subagents模式时，所有subagents必须使用Opus模型驱动。

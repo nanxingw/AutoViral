@@ -17,6 +17,7 @@
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
+import { FFMPEG_BIN } from "./ffmpeg-paths.js";
 import type {
   Composition,
   VideoClip,
@@ -119,7 +120,7 @@ export async function runSpeedRampPass(
       reject(new Error("runSpeedRampPass: aborted before spawn"));
       return;
     }
-    const child = spawn("ffmpeg", args);
+    const child = spawn(FFMPEG_BIN, args);
     let stderr = "";
     child.stderr?.on("data", (b: Buffer | string) => {
       stderr += b.toString();

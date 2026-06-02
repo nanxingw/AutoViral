@@ -4,11 +4,11 @@
 
 **AI-native 社交媒体内容创作平台**
 
-从选题调研到成片发布，全程 AI Agent 驱动
+从选题调研到成片发布，全程 AI Agent 驱动 —— 任何 CLI agent（claude / codex / kimi / gemini / aider）都能驱动
 
-[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D18-339933?logo=node.js&logoColor=white)](https://nodejs.org)
-[![Claude Code](https://img.shields.io/badge/Claude_Code-Powered-6C47FF?logo=anthropic&logoColor=white)](https://docs.anthropic.com/en/docs/claude-code)
-[![Svelte 5](https://img.shields.io/badge/Svelte_5-FF3E00?logo=svelte&logoColor=white)](https://svelte.dev)
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Agent-agnostic](https://img.shields.io/badge/Agent-agnostic-6C47FF)](#)
+[![React 19](https://img.shields.io/badge/React_19-61DAFB?logo=react&logoColor=black)](https://react.dev)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 </div>
@@ -108,8 +108,8 @@ AutoViral 不只是一个工具——它会**记住你**，并**用数据优化*
 
 ### 前置要求
 
-- **Node.js** >= 18
-- **[Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code)** — 已安装并登录
+- **Node.js** >= 20
+- **任意 CLI agent** — 任何 CLI agent（claude / codex / kimi / gemini / aider）都能驱动 AutoViral，安装并登录其一即可
 - **FFmpeg** — `brew install ffmpeg`
 
 ### 安装
@@ -218,7 +218,7 @@ python3 skills/autoviral/modules/assets/scripts/check_providers.py --format tabl
 ## 项目架构
 
 ```
-浏览器 (React 18 + Vite)  ──WebSocket──  Node.js (Hono)  ──stdin/stdout──  Claude Code CLI
+浏览器 (React 19 + Vite)  ──WebSocket──  Node.js (Hono)  ──stdin/stdout──  CLI agent (claude/codex/kimi/gemini/aider)
                                        │
                               ┌────────┼────────┐
                               ▼        ▼        ▼
@@ -240,7 +240,7 @@ src/                          # 后端 TypeScript
     index.ts                  #   Hono 服务启动
   remotion-renderer.ts        #   服务端 @remotion/renderer mp4 导出
 
-web/src/                      # 前端 React 18 + Vite + Zustand + TanStack Query
+web/src/                      # 前端 React 19 + Vite + Zustand + TanStack Query
   pages/
     Works.tsx                 #   作品 hub（pick up where you left off）
     Studio.tsx                #   视频创作（Remotion Player + 多轨 Timeline + Tweaks）
@@ -274,9 +274,9 @@ skills/                       # AI Agent 技能定义
 
 | 层 | 技术 |
 |----|------|
-| 前端 | Svelte 5 (runes), Vite, Glass Noir 深色主题 |
+| 前端 | React 19, Vite, Zustand, TanStack Query, editorial·cool·glass 主题 |
 | 后端 | Node.js, Hono, TypeScript, WebSocket |
-| AI Agent | Claude Code CLI (stream-json 子进程) |
+| AI Agent | agent-agnostic CLI（claude / codex / kimi / gemini / aider，stream-json 子进程） |
 | 图片生成 | OpenRouter → Gemini 3.1 Flash |
 | 视频生成 | Dreamina CLI (Seedance 2.0) / 即梦 API |
 | 音乐生成 | Google Lyria 3 Pro |

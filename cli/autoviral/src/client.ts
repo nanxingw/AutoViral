@@ -6,7 +6,8 @@
 // with exit 2 so this binary is safe to leave on the user's global PATH:
 // running it outside the Studio fails fast with a clear message.
 
-import { fetch as undiciFetch } from "undici";
+// HTTP via Node 20+ global fetch (dropped undici — keeps this CLI a clean,
+// dependency-free ESM bundle; engines.node is >=20 so global fetch is guaranteed).
 
 export interface BridgeContext {
   workId: string;
@@ -34,7 +35,7 @@ export async function bridgeRequest<T>(
   body?: unknown,
 ): Promise<T> {
   const url = `http://127.0.0.1:${ctx.port}/api/bridge/v1${path}`;
-  const res = await undiciFetch(url, {
+  const res = await fetch(url, {
     method,
     headers: {
       "Content-Type": "application/json",

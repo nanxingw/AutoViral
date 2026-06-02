@@ -3,6 +3,7 @@ import type { Server as HttpServer, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { PtyPool } from "./pty-pool.js";
 import { dataDir } from "../../config.js";
+import { PACKAGE_ROOT } from "../../paths.js";
 import { join } from "node:path";
 import { enforceLoopbackOrigin } from "../ws-origin.js";
 
@@ -76,8 +77,9 @@ export function attachTerminalWebSocket(
         // Prepend the repo-contained `autoviral` shim dir so the command
         // resolves in the Studio terminal panel (pty-pool merges process.env,
         // so this prepends to the inherited PATH). Mirrors the chat-agent
-        // wiring in ws-bridge.ts spawnCli.
-        PATH: `${join(process.cwd(), "cli", "autoviral", "bin")}:${process.env.PATH ?? ""}`,
+        // wiring in ws-bridge.ts spawnCli. Anchors on PACKAGE_ROOT (not
+        // process.cwd()) so it resolves inside a packaged Electron app.
+        PATH: `${join(PACKAGE_ROOT, "cli", "autoviral", "bin")}:${process.env.PATH ?? ""}`,
         AUTOVIRAL_WORK_ID: workId,
         AUTOVIRAL_PORT: String(port),
         AUTOVIRAL_CWD: cwd,

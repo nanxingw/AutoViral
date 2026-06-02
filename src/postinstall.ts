@@ -71,11 +71,11 @@ async function installSkillCreator(): Promise<void> {
   const targetDir = join(TARGET_SKILLS, "skill-creator");
 
   if (await exists(join(targetDir, "SKILL.md"))) {
-    console.log("autocode: skill-creator already installed, skipping");
+    console.log("autoviral: skill-creator already installed, skipping");
     return;
   }
 
-  console.log("autocode: installing skill-creator from official Anthropic repo...");
+  console.log("autoviral: installing skill-creator from official Anthropic repo...");
 
   const tmpDir = join(tmpdir(), `skill-creator-${Date.now()}`);
   try {
@@ -93,13 +93,13 @@ async function installSkillCreator(): Promise<void> {
     const srcDir = join(tmpDir, SKILL_CREATOR_PATH);
     if (await exists(srcDir)) {
       await copyDir(srcDir, targetDir);
-      console.log("autocode: skill-creator installed successfully");
+      console.log("autoviral: skill-creator installed successfully");
     } else {
-      console.warn("autocode: skill-creator not found in official repo");
+      console.warn("autoviral: skill-creator not found in official repo");
     }
   } catch (err) {
     console.warn(
-      "autocode: could not install skill-creator (git may not be available):",
+      "autoviral: could not install skill-creator (git may not be available):",
       err instanceof Error ? err.message : err
     );
   } finally {
@@ -125,7 +125,7 @@ async function repairNodePtyPermissions(): Promise<void> {
       try {
         await chmod(helper, 0o755);
       } catch (err) {
-        console.warn(`autocode: chmod ${helper}:`, err instanceof Error ? err.message : err);
+        console.warn(`autoviral: chmod ${helper}:`, err instanceof Error ? err.message : err);
       }
     }
   }
@@ -134,13 +134,13 @@ async function repairNodePtyPermissions(): Promise<void> {
 async function main(): Promise<void> {
   try {
     if (!await exists(SOURCE_SKILLS)) {
-      console.log("autocode: skills/ directory not found, skipping postinstall");
+      console.log("autoviral: skills/ directory not found, skipping postinstall");
       return;
     }
 
-    console.log("autocode: installing skills to ~/.claude/skills/");
+    console.log("autoviral: installing skills to ~/.claude/skills/");
     await copyDir(SOURCE_SKILLS, TARGET_SKILLS);
-    console.log("autocode: skills installed successfully");
+    console.log("autoviral: skills installed successfully");
 
     // Install skill-creator from official repo if not present
     await installSkillCreator();
@@ -148,7 +148,7 @@ async function main(): Promise<void> {
     // Repair node-pty spawn-helper permissions (see fn docstring)
     await repairNodePtyPermissions();
   } catch (err) {
-    console.warn("autocode: postinstall warning:", err instanceof Error ? err.message : err);
+    console.warn("autoviral: postinstall warning:", err instanceof Error ? err.message : err);
     // Don't crash the install
   }
 }

@@ -1,6 +1,6 @@
 // Bridge router smoke tests. Phase 0 only exercises whoami — the rest of
 // the surface grows in Phase 2-3 with corresponding tests. See
-// docs/superpowers/plans/2026-05-14-agentic-terminal-refactor.md.
+// docs/archive/plans/2026-05-14-agentic-terminal-refactor.md.
 
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";

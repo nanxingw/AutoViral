@@ -76,6 +76,6 @@ The chosen pattern maps directly onto issues M.2 / M.3 / M.4 / M.5:
 ## References
 
 - [Issue #6 (M.1)](https://github.com/nanxingw/AutoViral/issues/6) — the HITL gate this ADR closes.
-- [PRD](../superpowers/plans/2026-05-15-autoviral-absorb-hyperframes-tech.md) — Phase M and the dual-chat conversation rationale.
+- [PRD](../archive/plans/2026-05-15-autoviral-absorb-hyperframes-tech.md) — Phase M and the dual-chat conversation rationale.
 - `web/src/features/chat/useChatSocket.ts` on `origin/main` — pneuma-inspired chat protocol reference.
 - `web/src/features/terminal/TerminalPanel.tsx` on current branch — terminal surface reference.

@@ -6,13 +6,20 @@
   "bin": {
     "autoviral": "./dist/cli.js"
   },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup src/cli.ts --format esm --target node20 --no-splitting --minify --out-dir dist",
     "test": "vitest run",
     "dev": "tsup src/cli.ts --format esm --target node20 --no-splitting --watch --out-dir dist"
   },
+  "comment": "yaml stays an EXTERNAL runtime dep (NOT bundled): yaml's CJS does require('process'), which tsup's ESM output cannot satisfy ('Dynamic require of process is not supported'). It is hoisted into the ROOT autoviral package's dependencies so the published/packaged bin resolves it at runtime; the desktop build asarUnpacks node_modules/yaml. undici was dropped entirely — HTTP now uses Node 20+ global fetch.",
   "dependencies": {
-    "undici": "^7",
     "yaml": "^2"
   },
   "devDependencies": {

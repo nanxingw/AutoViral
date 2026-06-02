@@ -2,6 +2,7 @@ import type { VideoProvider, VideoGenerateOptions, VideoGenerateResult } from ".
 import { writeFile, mkdir, rename, unlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
+import { FFMPEG_BIN } from "../ffmpeg-paths.js";
 
 /**
  * Re-encode an mp4 to be browser-friendly for the studio player.
@@ -29,7 +30,7 @@ async function normalizeVideoForBrowser(filePath: string, fps: number): Promise<
   const tmpPath = `${filePath}.tmp.mp4`;
   await new Promise<void>((resolve, reject) => {
     const ff = spawn(
-      "ffmpeg",
+      FFMPEG_BIN,
       [
         "-y", "-loglevel", "error",
         "-i", filePath,

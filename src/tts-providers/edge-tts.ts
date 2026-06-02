@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type { TtsProvider, TtsRequest, TtsResult } from "./types.js";
+import { FFPROBE_BIN } from "../server/ffmpeg-paths.js";
 
 /**
  * Resolves the edge-tts binary path with this precedence:
@@ -86,7 +87,7 @@ async function runEdgeTtsCli(
 
 async function ffprobeDuration(filePath: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    const child = spawn("ffprobe", [
+    const child = spawn(FFPROBE_BIN, [
       "-v",
       "error",
       "-show_entries",

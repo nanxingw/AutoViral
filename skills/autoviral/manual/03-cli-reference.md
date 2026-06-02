@@ -1,6 +1,6 @@
 # CLI reference
 
-Every `autoviral` subcommand currently shipped. Source of truth: `cli/autoviral/src/commands/*.ts`. Wire-level surface: `docs/superpowers/specs/2026-05-14-agentic-terminal-bridge-protocol.md` (v1, frozen).
+Every `autoviral` subcommand currently shipped. Source of truth: `cli/autoviral/src/commands/*.ts`. Wire-level surface: `docs/archive/specs/2026-05-14-agentic-terminal-bridge-protocol.md` (v1, frozen).
 
 The CLI auto-formats output: **JSON when stdout is piped** (`stdout.isTTY === false`), **YAML / human table when interactive**. Override either direction with `--format json|yaml|table`.
 

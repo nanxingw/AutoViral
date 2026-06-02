@@ -5,14 +5,13 @@
 // reading context and don't need to parse JSON. So this command bypasses
 // bridgeRequest and uses undici fetch directly.
 
-import { fetch as undiciFetch } from "undici";
 import { readContext } from "../client.js";
 
 export async function docsCommand(args: string[]): Promise<void> {
   const ctx = readContext();
   const topic = args[0];
   const qs = topic ? `?topic=${encodeURIComponent(topic)}` : "";
-  const res = await undiciFetch(
+  const res = await fetch(
     `http://127.0.0.1:${ctx.port}/api/bridge/v1/docs${qs}`,
     { headers: { "X-AutoViral-Work-Id": ctx.workId } },
   );

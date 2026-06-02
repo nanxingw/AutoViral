@@ -19,4 +19,4 @@ Pointer file. The actual content lives in two places:
 3. **`docs/adr/`** — learn the decisions that produced those constraints (chronologically: ADR-001 → ADR-002 → ...).
 4. **`CLAUDE.md`** — project-specific guidance for Claude Code (testing rules, aesthetic direction, agent behavior).
 5. **`skills/autoviral/SKILL.md`** + `manual/` — how to operate AutoViral as a tool.
-6. **The current PRD** in `docs/superpowers/plans/` — what's being built right now.
+6. **The current PRD** in `docs/archive/plans/` — what's being built right now.

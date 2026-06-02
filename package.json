@@ -1,27 +1,44 @@
 {
-  "name": "@nanxingw/autocode-cli",
-  "version": "0.2.0",
-  "description": "AutoCode — Self-evolving intelligence for Claude Code: skills, memory, and autonomous tasks",
+  "name": "autoviral",
+  "version": "0.1.0",
+  "description": "AutoViral — AI-native 创作者工位 + agent-agnostic 操作协议：终端里任何 CLI agent 都能驱动的本地视频/图文创作工作台",
   "type": "module",
+  "main": "desktop/out/main.js",
   "workspaces": [
-    "packages/*"
+    "packages/*",
+    "cli/*"
   ],
   "bin": {
-    "autocode": "dist/index.js",
     "autoviral": "dist/index.js"
   },
   "files": [
     "dist/",
+    "!dist/**/*.test.js",
+    "!dist/**/*.test.d.ts",
+    "!dist/**/*.js.map",
+    "!dist/**/*.d.ts.map",
     "skills/",
-    "web/dist/"
+    "web/dist/",
+    "!web/dist/**/*.map",
+    "cli/autoviral/dist/",
+    "cli/autoviral/bin/",
+    "cli/autoviral/package.json"
   ],
   "scripts": {
     "build": "npm run build:backend && npm run build:frontend",
-    "build:backend": "tsc",
+    "build:backend": "tsc && node scripts/write-dist-pkg.mjs",
     "build:frontend": "vite build",
+    "desktop:compile": "tsc -p desktop/tsconfig.json",
+    "prebundle:remotion": "node scripts/bundle-remotion.mjs desktop/build-resources/remotion-bundle",
+    "ensure:chromium": "node scripts/ensure-chromium.mjs",
+    "desktop:resources": "npm run prebundle:remotion && npm run ensure:chromium",
+    "desktop:dev": "npm run build:backend && npm run build:frontend && npm run build:cli && npm run desktop:resources && npm run desktop:compile && electron desktop/out/main.js",
+    "desktop:build:mac": "npm run build:backend && npm run build:frontend && npm run build:cli && npm run desktop:resources && npm run desktop:compile && electron-builder -c desktop/electron-builder.yml --mac",
+    "desktop:build:win": "npm run build:backend && npm run build:frontend && npm run build:cli && npm run desktop:resources && npm run desktop:compile && electron-builder -c desktop/electron-builder.yml --win",
+    "desktop:publish": "npm run build:backend && npm run build:frontend && npm run build:cli && npm run desktop:resources && npm run desktop:compile && electron-builder -c desktop/electron-builder.yml --mac --win --publish always",
     "dev": "tsc --watch",
     "dev:frontend": "vite dev",
-    "postinstall": "node dist/postinstall.js",
+    "postinstall": "node scripts/postinstall-guard.mjs",
     "test": "npm run test:web && npm run test:server",
     "pretest:web": "pkill -f 'vitest.*web/vitest.config' || true",
     "test:web": "vitest --config web/vitest.config.ts run",
@@ -33,16 +50,18 @@
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "build:cli": "cd cli/autoviral && npm run build",
-    "install:cli": "cd cli/autoviral && npm install && npm run build && npm link"
+    "install:cli": "cd cli/autoviral && npm install && npm run build && npm link",
+    "prepublishOnly": "npm run build && npm run build:cli"
   },
   "keywords": [
-    "claude-code",
-    "autocode",
     "autoviral",
+    "video",
+    "content-creation",
     "ai",
     "agent",
-    "automation",
-    "claude"
+    "remotion",
+    "studio",
+    "creator-workstation"
   ],
   "dependencies": {
     "@dagrejs/dagre": "^3.0.0",
@@ -70,11 +89,14 @@
     "date-fns": "^4.1.0",
     "dompurify": "^3.3.3",
     "dotenv": "^16.4.0",
+    "electron-log": "^5.4.4",
+    "electron-updater": "^6.8.3",
     "fast-xml-parser": "^5.8.0",
     "highlight.js": "^11.11.1",
     "hono": "^4.0.0",
     "immer": "^10.1.1",
     "js-yaml": "^4.1.0",
+    "yaml": "^2.9.0",
     "konva": "^9.3.22",
     "marked": "^17.0.4",
     "motion": "^11",
@@ -95,6 +117,8 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
+    "@ffprobe-installer/ffprobe": "^2.1.2",
     "@playwright/test": "^1.58.2",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
@@ -107,7 +131,10 @@
     "@types/react-dom": "^19",
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
+    "electron": "^42.3.1",
+    "electron-builder": "^26.8.1",
     "execa": "^9.6.1",
+    "ffmpeg-static": "^5.3.0",
     "happy-dom": "^15.11.7",
     "msw": "^2.6.8",
     "tsup": "^8.5.1",
@@ -116,12 +143,12 @@
     "vitest": "^3.0.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/nanxingw/autocode.git"
+    "url": "git+https://github.com/nanxingw/AutoViral.git"
   },
   "publishConfig": {
     "access": "public"

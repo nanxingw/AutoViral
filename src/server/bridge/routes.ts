@@ -2,12 +2,13 @@
 // Phase 0: whoami only (smoke test of the wire). Phase 2-3 expand to
 // read-only (comp/list/docs) + writes (clip add/set/remove) + UI commands
 // (select/seek/play/pause/toast/progress) + approval gate (ask) + tasks
-// (export/render). See docs/superpowers/specs/2026-05-14-agentic-terminal-
+// (export/render). See docs/archive/specs/2026-05-14-agentic-terminal-
 // bridge-protocol.md for the full surface.
 
 import { Hono, type Context } from "hono";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { PACKAGE_ROOT } from "../../paths.js";
 import { readdir, readFile } from "node:fs/promises";
 import type { WhoAmIResponse } from "./schemas.js";
 import {
@@ -58,7 +59,9 @@ function writeInject(workId: string, enabled: boolean): void {
 }
 
 function manualDir(): string {
-  return process.env.AUTOVIRAL_MANUAL_DIR ?? join(process.cwd(), "skills/autoviral/manual");
+  // Anchor on PACKAGE_ROOT (not process.cwd()) so `autoviral docs` resolves the
+  // bundled manual inside a packaged Electron app; AUTOVIRAL_MANUAL_DIR still wins.
+  return process.env.AUTOVIRAL_MANUAL_DIR ?? join(PACKAGE_ROOT, "skills/autoviral/manual");
 }
 
 export const bridgeRouter = new Hono();

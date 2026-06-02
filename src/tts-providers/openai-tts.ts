@@ -16,6 +16,7 @@
 import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import type { TtsProvider, TtsRequest, TtsResult } from "./types.js";
+import { FFPROBE_BIN } from "../server/ffmpeg-paths.js";
 
 const OPENAI_TTS_URL = "https://api.openai.com/v1/audio/speech";
 
@@ -50,7 +51,7 @@ function resolveKey(env: NodeJS.ProcessEnv): string {
 
 async function ffprobeDuration(filePath: string): Promise<number> {
   return new Promise((resolve, reject) => {
-    const child = spawn("ffprobe", [
+    const child = spawn(FFPROBE_BIN, [
       "-v",
       "error",
       "-show_entries",

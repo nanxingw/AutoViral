@@ -33,7 +33,7 @@ autoviral list assets [--kind video]   # asset registry, optionally per-kind
 Phase 3 will ship writes + UI control: `clip add/set/remove`, `select`, `seek`,
 `play`/`pause`, `toast`, `progress`, `ask`, `export`, `render`.
 
-See [the plan](../../docs/superpowers/plans/2026-05-14-agentic-terminal-refactor.md)
+See [the plan](../../docs/archive/plans/2026-05-14-agentic-terminal-refactor.md)
 for the full command surface and rollout schedule.
 
 ## Environment

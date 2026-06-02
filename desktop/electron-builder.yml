@@ -1,0 +1,127 @@
+# electron-builder config for the AutoViral desktop shell.
+# Verified against electron-builder 26.x (context7, 2026-06).
+#
+# Run from the repo root via the package.json desktop:build:* scripts, which
+# first compile the daemon (+ dist/package.json), the web bundle, the Remotion
+# bundle, the Chromium shell, and the Electron main process.
+
+appId: com.autoviral.studio
+productName: AutoViral
+copyright: Copyright © 2026 AutoViral
+
+directories:
+  output: desktop/release
+  # buildResources is left at its default (a "build/" dir for icons/entitlements)
+  # — deliberately NOT pointed at desktop/build-resources, which holds the large
+  # staged native binaries we copy via extraResources. Keeping them separate
+  # avoids electron-builder scanning the staged-binary tree as build assets.
+
+# ── What goes INTO the asar ────────────────────────────────────────────────
+# Globs are relative to the project (repo) root. We ship the compiled daemon
+# (incl. its ESM marker package.json), the built web bundle, the skill manuals,
+# the built CLI + its bin shim, and the Electron main process. package.json is
+# the app's own manifest (electron-builder reads "main" from it).
+files:
+  - dist/**/*
+  - dist/package.json
+  - web/dist/**/*
+  - skills/**/*
+  - cli/autoviral/dist/**/*
+  - cli/autoviral/bin/**/*
+  - cli/autoviral/package.json
+  - desktop/out/**/*
+  - package.json
+  - "!**/*.map"
+  - "!**/*.test.*"
+  - "!**/__tests__/**"
+
+asar: true
+
+# ── What must live on the REAL filesystem (not inside the asar) ─────────────
+# The ESM daemon spawns as a child Node process and needs these on disk:
+#   - dist/** + dist/package.json: Node reads the nearest package.json to decide
+#     ESM vs CJS. Inside an asar it can't, and "type":"module" wouldn't apply →
+#     SyntaxError on the ESM daemon. MUST be unpacked.
+#   - cli/autoviral/** + skills/**: ws-bridge.ts / index.ts join(PACKAGE_ROOT, …)
+#     these as real paths; the agent execs the bin shim from disk.
+#   - native addons (better-sqlite3, node-pty) + Remotion's platform compositor
+#     binaries + esbuild's platform binary: native code can't run from an asar.
+asarUnpack:
+  - dist/**
+  - dist/package.json
+  - cli/autoviral/**
+  - skills/**
+  - node_modules/better-sqlite3/**
+  - node_modules/node-pty/**
+  - node_modules/@remotion/compositor-*/**
+  - node_modules/esbuild/**
+  # yaml is an external runtime dep of the bundled @autoviral/cli (its CJS does
+  # require('process') so it can't be tsup-bundled into ESM). Unpack it so the
+  # asar-unpacked cli.js can resolve it from app.asar.unpacked/node_modules/yaml.
+  - node_modules/yaml/**
+
+# ── Bundled native toolchain, copied to <resources>/ ────────────────────────
+# main.ts resolves these via process.resourcesPath. ffmpeg + ffprobe are STAGED
+# at build time into desktop/build-resources/ffmpeg/ by scripts/ensure-chromium.mjs
+# (it resolves ffmpeg-static + the @ffprobe-installer platform subpackage and
+# copies both binaries to a single, arch-correct dir). Chromium + remotion-bundle
+# are likewise staged by ensure-chromium.mjs + bundle-remotion.mjs. Using staged
+# dirs keeps the globs platform-independent (no hardcoded darwin-arm64 path).
+extraResources:
+  - from: desktop/build-resources/ffmpeg
+    to: ffmpeg
+  - from: desktop/build-resources/chromium
+    to: chromium
+  - from: desktop/build-resources/remotion-bundle
+    to: remotion-bundle
+
+# ── Native ABI rebuild ──────────────────────────────────────────────────────
+# better-sqlite3 + node-pty are native addons that MUST be rebuilt against
+# ELECTRON's V8 ABI (not the system Node ABI). The daemon runs under
+# ELECTRON_RUN_AS_NODE=1 — still the Electron binary — so Electron's ABI is the
+# right target for it too. We rebuild EXPLICITLY + PER-ARCH via a @electron/rebuild
+# beforeBuild hook (desktop/before-build.cjs), which is required when emitting
+# both arm64 + x64 from one host (the default host-arch rebuild can't). The hook
+# returns false to skip electron-builder's built-in rebuild. npmRebuild stays
+# true as a safety net; buildDependenciesFromSource:false → prefer prebuilds.
+beforeBuild: desktop/before-build.cjs
+npmRebuild: true
+buildDependenciesFromSource: false
+
+mac:
+  category: public.app-category.video
+  hardenedRuntime: false
+  gatekeeperAssess: false
+  # Unsigned for 0.1.0 (identity:null disables code signing). Squirrel.Mac can't
+  # apply unsigned updates → main.ts uses check+notify+openExternal on darwin.
+  identity: null
+  # 0.1.0: arm64 only. ffmpeg-static / @ffprobe-installer / Chrome Headless Shell
+  # are staged HOST-arch only, so emitting x64 from an arm64 host would ship
+  # wrong-arch binaries. A real x64 mac build belongs on an x64 CI runner (each
+  # arch built on its native host stages the correct binaries). See PRD-0001.
+  target:
+    - target: dmg
+      arch:
+        - arm64
+    # zip is REQUIRED for electron-updater on mac (produces latest-mac.yml).
+    - target: zip
+      arch:
+        - arm64
+
+win:
+  # x64 only for 0.1.0 — better-sqlite3 win-arm64 prebuilds are unverified.
+  target:
+    - target: nsis
+      arch:
+        - x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+
+# ── Auto-update publish target ──────────────────────────────────────────────
+publish:
+  - provider: github
+    owner: nanxingw
+    repo: AutoViral

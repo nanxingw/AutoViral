@@ -32,6 +32,7 @@ import { spawn } from "node:child_process";
 import { writeFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
+import { FFMPEG_BIN } from "../ffmpeg-paths.js";
 
 export interface TransitionInput {
   /** Path to the outgoing video clip. */
@@ -108,7 +109,7 @@ export async function applyLightLeakTransition(
   ];
 
   return new Promise<string>((resolve, reject) => {
-    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const ff = spawn(FFMPEG_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     ff.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
     ff.on("close", (code) => {
@@ -180,7 +181,7 @@ export async function ensureLightLeakOverlay(width: number, height: number): Pro
     tmp,
   ];
   await new Promise<void>((resolve, reject) => {
-    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const ff = spawn(FFMPEG_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     ff.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
     ff.on("close", (code) => {
@@ -254,7 +255,7 @@ export async function applyGlitchCutTransition(
   ];
 
   return new Promise<string>((resolve, reject) => {
-    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const ff = spawn(FFMPEG_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     ff.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
     ff.on("close", (code) => {
@@ -323,7 +324,7 @@ export async function applyDomainWarpTransition(
   ];
 
   return new Promise<string>((resolve, reject) => {
-    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const ff = spawn(FFMPEG_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     ff.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
     ff.on("close", (code) => {
@@ -392,7 +393,7 @@ export async function applyGravLensTransition(
   ];
 
   return new Promise<string>((resolve, reject) => {
-    const ff = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    const ff = spawn(FFMPEG_BIN, args, { stdio: ["ignore", "ignore", "pipe"] });
     let stderr = "";
     ff.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
     ff.on("close", (code) => {

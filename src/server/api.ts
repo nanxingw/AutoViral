@@ -7,6 +7,8 @@ import { join, extname } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
 import { loadConfig, saveConfig, dataDir, repoRoot, type Config } from "../config.js";
+import { PACKAGE_ROOT } from "../paths.js";
+import { FFPROBE_BIN } from "./ffmpeg-paths.js";
 import {
   listWorks, getWork, createWork as storeCreateWork,
   updateWork as storeUpdateWork, deleteWork as storeDeleteWork,
@@ -54,7 +56,7 @@ export const apiRoutes = new Hono();
 
 // AutoViral Bridge Protocol v1 — the agent-agnostic RPC surface that the
 // `autoviral` CLI calls into. Mounted before any wildcard routes so its
-// versioned prefix never gets shadowed. See docs/superpowers/specs/2026-
+// versioned prefix never gets shadowed. See docs/archive/specs/2026-
 // 05-14-agentic-terminal-bridge-protocol.md for the contract.
 apiRoutes.route("/api/bridge/v1", bridgeRouter);
 
@@ -63,18 +65,36 @@ apiRoutes.route("/api/bridge/v1", bridgeRouter);
 const execFileAsync = promisify(execFile);
 
 async function runTrendScript(platform: string): Promise<string> {
-  const scriptsDir = join(process.cwd(), 'skills', 'autoviral', 'modules', 'research', 'scripts');
+  // Anchor on PACKAGE_ROOT (not process.cwd()) so it resolves in a packaged app.
+  // NOTE: skills/autoviral/modules/ was DELETED in the agentic-terminal refactor
+  // (see CLAUDE.md / ADR-004), so these research scripts no longer ship. Rather
+  // than spawn a nonexistent script (which would throw an opaque ENOENT), we
+  // detect the missing script and degrade gracefully: returning '' makes the
+  // caller fall back to live WebSearch (see the `dataClause` ternary at the call
+  // site). TODO(agentic-terminal): if real-time trend ingestion is revived, port
+  // these to the new skill layout and drop this guard.
+  const scriptsDir = join(PACKAGE_ROOT, 'skills', 'autoviral', 'modules', 'research', 'scripts');
+  const script = platform === 'douyin' ? 'douyin_hot_search.py' : 'newsnow_trends.py';
+  const scriptPath = join(scriptsDir, script);
+
+  const { existsSync } = await import("node:fs");
+  if (!existsSync(scriptPath)) {
+    console.warn(
+      `[trends] research script unavailable (${scriptPath}); falling back to WebSearch`,
+    );
+    return '';
+  }
 
   try {
     if (platform === 'douyin') {
       const { stdout } = await execFileAsync('python3', [
-        join(scriptsDir, 'douyin_hot_search.py'), '--top', '30'
+        scriptPath, '--top', '30'
       ], { timeout: 30000 });
       return stdout;
     }
     // Other platforms via newsnow
     const { stdout } = await execFileAsync('python3', [
-      join(scriptsDir, 'newsnow_trends.py'), platform, '--top', '20'
+      scriptPath, platform, '--top', '20'
     ], { timeout: 30000 });
     return stdout;
   } catch (err) {
@@ -533,7 +553,7 @@ async function synthesiseLegacyComposition(
   // ffprobe-based duration; fall back to 5s defaults when ffprobe absent or fails
   async function probeDuration(absPath: string): Promise<number> {
     try {
-      const { stdout } = await execFileAsync("ffprobe", [
+      const { stdout } = await execFileAsync(FFPROBE_BIN, [
         "-v", "error",
         "-show_entries", "format=duration",
         "-of", "csv=p=0",
@@ -1425,7 +1445,7 @@ apiRoutes.post("/api/works/:id/assets/upload", uploadBodyLimit, async (c) => {
   // fetch <file>.peaks.json instead of decoding the whole mp3 in WebAudio.
   // Failure is logged but never blocks the upload response — frontend
   // falls back to client-side decoding when peaks JSON is missing.
-  // See docs/superpowers/plans/2026-05-25-multi-track-stacking.md.
+  // See docs/archive/plans/2026-05-25-multi-track-stacking.md.
   void import("./audio/peaks.js").then(({ generatePeaks, isAudioAsset }) => {
     if (isAudioAsset(filePath)) {
       generatePeaks(filePath).catch((err) =>

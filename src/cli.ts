@@ -8,6 +8,24 @@ import { exec, spawn } from "node:child_process";
 const PID_FILE = join(homedir(), ".autoviral", "daemon.pid");
 const LOG_FILE = join(homedir(), ".autoviral", "daemon.log");
 
+/**
+ * Decide which port the daemon binds to.
+ *
+ * The Electron desktop shell injects AUTOVIRAL_PORT into the daemon's env and
+ * then health-checks a FIXED port. The bound port must therefore honor that
+ * injection; config.port is only the dev/standalone fallback. A blank or
+ * non-numeric AUTOVIRAL_PORT (e.g. unset) falls through to config.port.
+ *
+ * Exported so the override precedence is unit-testable at the smallest pure
+ * boundary (no daemon, no network).
+ */
+export function resolveBindPort(
+  configPort: number,
+  envPort: string | undefined = process.env.AUTOVIRAL_PORT,
+): number {
+  return Number(envPort) || configPort;
+}
+
 async function readPid(): Promise<number | null> {
   try {
     const raw = await readFile(PID_FILE, "utf-8");
@@ -30,9 +48,9 @@ export function runCLI(): void {
   const program = new Command();
 
   program
-    .name("autocode")
+    .name("autoviral")
     .description("AutoViral — AI-powered content creation")
-    .version("0.2.0");
+    .version("0.1.0");
 
   program
     .command("start")
@@ -43,7 +61,7 @@ export function runCLI(): void {
       const existingPid = await readPid();
       if (existingPid && isProcessRunning(existingPid)) {
         console.log(`Server already running (PID ${existingPid})`);
-        console.log(`Run 'autocode stop' first, then start again.`);
+        console.log(`Run 'autoviral stop' first, then start again.`);
         return;
       }
 
@@ -107,10 +125,14 @@ export function runCLI(): void {
       console.log(`Starting AutoViral server (PID ${process.pid})`);
       console.log(`Model: ${config.model}`);
 
-      // Start web server (initializes providers, shared dirs, etc.)
+      // Start web server (initializes providers, shared dirs, etc.).
+      // The Electron desktop shell injects AUTOVIRAL_PORT and then health-checks
+      // a FIXED port; if a stale config.port differs, the shell would time out.
+      // So the injected port wins, with config.port as the dev fallback.
+      const bindPort = resolveBindPort(config.port);
       const { startServer } = await import("./server/index.js");
-      await startServer(config.port);
-      console.log(`Dashboard: http://localhost:${config.port}`);
+      await startServer(bindPort);
+      console.log(`Dashboard: http://localhost:${bindPort}`);
 
       // Keep process alive
       process.on("SIGTERM", async () => {

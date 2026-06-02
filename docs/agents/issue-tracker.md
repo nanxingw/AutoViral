@@ -16,13 +16,13 @@
 ## Issue body conventions
 
 - **First line of body:** `> Parent: #<n>` if derived from a PRD or parent issue.
-- **PRD reference:** if the issue comes from a PRD in `docs/superpowers/plans/`, link the path explicitly in the body: `Source: docs/superpowers/plans/<file>.md`.
+- **PRD reference:** if the issue comes from a PRD in `docs/archive/plans/`, link the path explicitly in the body: `Source: docs/archive/plans/<file>.md`.
 - **Acceptance criteria:** a checklist in the body. Each box should be testable.
 - **Code-area hints:** include the deepest directory the issue touches so AFK agents can `cd` directly.
 
 ## What goes where
 
-- **PRDs / plans → `docs/superpowers/plans/`** (canonical source) + a single tracking issue with the `ready-for-agent` label.
+- **PRDs / plans → `docs/archive/plans/`** (canonical source) + a single tracking issue with the `ready-for-agent` label.
 - **Architecture decisions → `docs/adr/`** (immutable). Discussion happens in PRs / issues; the ADR captures the conclusion.
 - **In-flight work → GitHub Issues** (mutable). Issues link out to ADRs and PRDs.
 
