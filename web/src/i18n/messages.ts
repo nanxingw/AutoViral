@@ -715,6 +715,8 @@ export const en = {
     wsConnecting: "CONNECTING…",
     wsReconnecting: "RECONNECTING…",
     wsReconnectingTitle: "Connection lost — your message will queue and send when the bridge is back.",
+    wsConnected: "CONNECTED",
+    wsConnectedTitle: "Connected to the creative agent — live.",
     modelSwitch: {
       aria: "Switch agent model tier",
       lockedDuringRun: "Finish the current turn before switching model",
@@ -1499,6 +1501,8 @@ export const zh: DeepShape<Messages> = {
     wsConnecting: "连接中…",
     wsReconnecting: "重连中…",
     wsReconnectingTitle: "连接已断开——你的消息会暂存，桥接恢复后会自动发送。",
+    wsConnected: "已连接",
+    wsConnectedTitle: "已连接到创作代理 —— 实时在线。",
     modelSwitch: {
       aria: "切换代理模型档位",
       lockedDuringRun: "请等当前回合结束后再切换模型",

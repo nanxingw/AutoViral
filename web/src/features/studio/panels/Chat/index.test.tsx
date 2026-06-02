@@ -6,7 +6,7 @@ import { useChatStore } from "@/features/chat/store";
 import { useComposerDraft } from "@/stores/composerDraft";
 
 vi.mock("@/features/chat/useChatSocket", () => ({
-  useChatSocket: () => ({ send: vi.fn() }),
+  useChatSocket: () => ({ send: vi.fn(), state: "open" }),
 }));
 
 vi.mock("@/lib/api", () => ({

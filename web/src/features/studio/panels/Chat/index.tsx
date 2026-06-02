@@ -16,6 +16,7 @@ import {
 } from "@/features/checkpoints/useCheckpoints";
 import { highlightCode } from "./highlight";
 import { ModelSwitcher } from "./ModelSwitcher";
+import { ConnectionStatus } from "./ConnectionStatus";
 import { useComposerDraft } from "@/stores/composerDraft";
 
 /** Render an agent-emitted ```yaml block``` with our hand-rolled highlighter.
@@ -394,23 +395,7 @@ export function ChatPanel({
           >
             <ModelSwitcher workId={workId} streaming={streaming} />
             {streaming ? ` · ${t("chat.streaming")}` : ""}
-            {wsState !== "open" && (
-              <span
-                title={t("chat.wsReconnectingTitle")}
-                style={{
-                  marginLeft: 8,
-                  padding: "1px 6px",
-                  borderRadius: 4,
-                  border: "1px solid var(--status-error, #d4756c)",
-                  background: "rgba(212, 117, 108, 0.08)",
-                  color: "var(--status-error, #d4756c)",
-                  fontSize: 9,
-                  letterSpacing: "0.08em",
-                }}
-              >
-                {wsState === "connecting" ? t("chat.wsConnecting") : t("chat.wsReconnecting")}
-              </span>
-            )}
+            <ConnectionStatus state={wsState} />
           </div>
         </div>
         <div
