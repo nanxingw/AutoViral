@@ -4,6 +4,7 @@ import { ClipTrackSelect } from "./ClipTrackSelect";
 import { KeyframePanel } from "./KeyframePanel";
 import { TextClipPanel } from "./TextClipPanel";
 import { StaticPropsPanel } from "./StaticPropsPanel";
+import { TransitionPanel } from "./TransitionPanel";
 import { DiveCanvas } from "../../dive/DiveCanvas";
 import { useT } from "@/i18n/useT";
 
@@ -44,6 +45,9 @@ export function InspectorTab() {
             baseline; keyframes layer animation on top of it. */}
         <StaticPropsPanel />
         <KeyframePanel />
+        {/* #54 Phase 2 — transition between this video clip and the next.
+            Renders only for a video clip that has a successor on its lane. */}
+        <TransitionPanel />
         <button
           type="button"
           onClick={() => setDiveOpen(true)}

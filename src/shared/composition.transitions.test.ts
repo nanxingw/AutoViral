@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { TransitionSchema, TrackSchema } from "./composition.js";
+import { TRANSITION_PRESETS } from "./transitions.js";
 
 // #54 Phase 1 — schema-level guarantees for the transition object + the
 // Track-level orphan / last-clip guards (superRefine).
@@ -39,6 +40,17 @@ describe("TransitionSchema (#54)", () => {
     expect(() =>
       TransitionSchema.parse({ id: "x", afterClipId: "a", preset: "bogus" }),
     ).toThrow();
+  });
+
+  it("accepts EVERY preset in the shared registry (enum derives from it — no drift)", () => {
+    // Single-source-of-truth contract: TransitionPresetEnum = z.enum(TRANSITION_PRESETS).
+    // Adding a preset to the registry must auto-extend schema validation; if this
+    // ever fails, the enum was hardcoded out of lockstep again.
+    for (const preset of TRANSITION_PRESETS) {
+      expect(() =>
+        TransitionSchema.parse({ id: "tr_x", afterClipId: "a", preset }),
+      ).not.toThrow();
+    }
   });
 
   it("rejects durationSec out of [0.05, 5]", () => {

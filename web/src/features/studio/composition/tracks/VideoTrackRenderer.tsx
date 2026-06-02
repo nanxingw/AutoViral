@@ -1,8 +1,25 @@
-import { Sequence, Video, useVideoConfig, useCurrentFrame } from "remotion";
-import { TransitionSeries, linearTiming } from "@remotion/transitions";
+import { Sequence, Video, useVideoConfig, useCurrentFrame, Easing } from "remotion";
+import { TransitionSeries, linearTiming, springTiming } from "@remotion/transitions";
 import { groupChains } from "../transitions/groupChains";
 import { presentationFor } from "../transitions/presentations";
+import type { Transition } from "@shared/composition";
 import type { VideoClip, Track } from "../../types";
+
+/** Map a transition's `easing` field to a Remotion timing function. Phase 1
+ *  persisted easing/alignment but the renderer hardcoded linearTiming, so the
+ *  field was dead data; this wires it: spring → springTiming, ease-in-out →
+ *  eased linearTiming, linear → straight linearTiming. */
+function timingFor(easing: Transition["easing"], durationInFrames: number) {
+  switch (easing) {
+    case "spring":
+      return springTiming({ durationInFrames, config: { damping: 200 } });
+    case "ease-in-out":
+      return linearTiming({ durationInFrames, easing: Easing.inOut(Easing.ease) });
+    case "linear":
+    default:
+      return linearTiming({ durationInFrames });
+  }
+}
 import { toCssFilter } from "../filters/cssFilters";
 import { interpolateProperty } from "@shared/keyframes";
 import {
@@ -95,7 +112,7 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
 }
 
 export function VideoTrackRenderer({ track }: { track: Track }) {
-  const { fps } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
   if (track.hidden) return null;
   const chains = groupChains(track.clips as VideoClip[], track.transitions ?? []);
   return (
@@ -139,8 +156,8 @@ export function VideoTrackRenderer({ track }: { track: Track }) {
                   nodes.push(
                     <TransitionSeries.Transition
                       key={`t-${t.id}`}
-                      presentation={presentationFor(t.preset)}
-                      timing={linearTiming({ durationInFrames: trDur })}
+                      presentation={presentationFor(t.preset, { width, height })}
+                      timing={timingFor(t.easing, trDur)}
                     />,
                   );
                 }

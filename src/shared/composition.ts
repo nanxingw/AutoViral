@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TRANSITION_PRESETS } from "./transitions.js";
 
 export const FPS_VALUES = [24, 25, 30, 60] as const;
 export const ASPECTS = ["9:16", "1:1", "16:9", "4:5"] as const;
@@ -264,11 +265,10 @@ export const TRACK_ID_PREFIX_REGEX = /^trk_/;
 // in seconds and is taken from BOTH adjacent clips' content time (handles).
 // Schema lives here (not the renderer) so a clip-delete that orphans a
 // transition is catchable at parse time; the store also prunes on remove.
-export const TransitionPresetEnum = z.enum([
-  "cross-dissolve",
-  "wipe-left",
-  "push-left",
-]);
+// Single source of truth: the preset list lives in ./transitions (the shared
+// registry). Deriving the enum from it means adding a preset there auto-extends
+// schema validation — no second hardcoded list to drift out of lockstep.
+export const TransitionPresetEnum = z.enum(TRANSITION_PRESETS);
 export const TransitionSchema = z.object({
   id: z.string(),
   afterClipId: z.string(),

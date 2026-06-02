@@ -12,9 +12,24 @@
 // "render-only" or "preview-only" orphan.
 
 export const TRANSITION_PRESETS = [
+  // ① dissolve
   "cross-dissolve",
+  // ② wipe — directional + radial
   "wipe-left",
+  "wipe-right",
+  "wipe-up",
+  "wipe-down",
+  "clock-wipe",
+  "iris",
+  // ③ slide / push
   "push-left",
+  "push-right",
+  "push-up",
+  "push-down",
+  // ④ motion
+  "flip",
+  // ⑥ cut
+  "hard-cut",
 ] as const;
 
 export type TransitionPreset = (typeof TRANSITION_PRESETS)[number];
@@ -42,9 +57,19 @@ export interface TransitionPresetMeta {
 }
 
 export const TRANSITION_PRESET_META: Record<TransitionPreset, TransitionPresetMeta> = {
-  "cross-dissolve": { family: "dissolve", ffmpegXfade: "fade",      defaultDurationSec: 0.5 },
-  "wipe-left":      { family: "wipe",     ffmpegXfade: "wipeleft",  defaultDurationSec: 0.5 },
-  "push-left":      { family: "slide",    ffmpegXfade: "slideleft", defaultDurationSec: 0.5 },
+  "cross-dissolve": { family: "dissolve", ffmpegXfade: "fade",       defaultDurationSec: 0.5 },
+  "wipe-left":      { family: "wipe",     ffmpegXfade: "wipeleft",   defaultDurationSec: 0.5 },
+  "wipe-right":     { family: "wipe",     ffmpegXfade: "wiperight",  defaultDurationSec: 0.5 },
+  "wipe-up":        { family: "wipe",     ffmpegXfade: "wipeup",     defaultDurationSec: 0.5 },
+  "wipe-down":      { family: "wipe",     ffmpegXfade: "wipedown",   defaultDurationSec: 0.5 },
+  "clock-wipe":     { family: "wipe",     ffmpegXfade: "radial",     defaultDurationSec: 0.7 },
+  "iris":           { family: "wipe",     ffmpegXfade: "circleopen", defaultDurationSec: 0.7 },
+  "push-left":      { family: "slide",    ffmpegXfade: "slideleft",  defaultDurationSec: 0.5 },
+  "push-right":     { family: "slide",    ffmpegXfade: "slideright", defaultDurationSec: 0.5 },
+  "push-up":        { family: "slide",    ffmpegXfade: "slideup",    defaultDurationSec: 0.5 },
+  "push-down":      { family: "slide",    ffmpegXfade: "slidedown",  defaultDurationSec: 0.5 },
+  "flip":           { family: "motion",   ffmpegXfade: "",           defaultDurationSec: 0.7 },
+  "hard-cut":       { family: "cut",      ffmpegXfade: "",           defaultDurationSec: 0.05 },
 };
 
 export function getPresetMeta(preset: TransitionPreset): TransitionPresetMeta {

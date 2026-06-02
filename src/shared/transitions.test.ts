@@ -16,17 +16,41 @@ describe("transition preset registry (#54)", () => {
     }
   });
 
-  it("covers families ①②③ (dissolve / wipe / slide) at least once each", () => {
+  it("covers families ①②③④⑥ after Phase 2 (dissolve / wipe / slide / motion / cut)", () => {
     const families = new Set(TRANSITION_PRESETS.map((p) => getPresetMeta(p).family));
-    expect(families.has("dissolve")).toBe(true);
-    expect(families.has("wipe")).toBe(true);
-    expect(families.has("slide")).toBe(true);
+    for (const fam of ["dissolve", "wipe", "slide", "motion", "cut"] as const) {
+      expect(families.has(fam)).toBe(true);
+    }
   });
 
-  it("each preset names an ffmpeg xfade transition (for Phase 2+ render parity)", () => {
+  it("ffmpegXfade is a string; directional families name a real xfade, motion/cut may be empty (no ffmpeg analog)", () => {
+    // The field is reserved for a future ffmpeg-xfade fallback path and is NOT
+    // consumed by Phase 1/2 (everything renders WYSIWYG via Remotion). flip is a
+    // 3D transform and hard-cut is `none()` — neither has an xfade equivalent,
+    // so an empty string is the honest value, not a placeholder lie.
     for (const p of TRANSITION_PRESETS) {
-      expect(typeof TRANSITION_PRESET_META[p].ffmpegXfade).toBe("string");
-      expect(TRANSITION_PRESET_META[p].ffmpegXfade.length).toBeGreaterThan(0);
+      const meta = TRANSITION_PRESET_META[p];
+      expect(typeof meta.ffmpegXfade).toBe("string");
+      if (meta.family === "dissolve" || meta.family === "wipe" || meta.family === "slide") {
+        expect(meta.ffmpegXfade.length).toBeGreaterThan(0);
+      }
+    }
+  });
+
+  it("includes the Phase 2 preset additions", () => {
+    for (const p of [
+      "wipe-right",
+      "wipe-up",
+      "wipe-down",
+      "clock-wipe",
+      "iris",
+      "push-right",
+      "push-up",
+      "push-down",
+      "flip",
+      "hard-cut",
+    ] as const) {
+      expect((TRANSITION_PRESETS as readonly string[]).includes(p)).toBe(true);
     }
   });
 });
