@@ -29,6 +29,7 @@ export function ImageLayerNode({ layer }: { layer: ImageLayer }) {
   if (status === "failed") {
     return (
       <Rect
+        id={layer.id}
         x={layer.box.x}
         y={layer.box.y}
         width={layer.box.w}
@@ -48,6 +49,7 @@ export function ImageLayerNode({ layer }: { layer: ImageLayer }) {
     <>
       <KImage
         ref={ref}
+        id={layer.id}
         image={img}
         x={layer.box.x}
         y={layer.box.y}

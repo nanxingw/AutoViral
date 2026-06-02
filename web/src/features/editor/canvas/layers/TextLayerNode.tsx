@@ -51,6 +51,7 @@ export function TextLayerNode({ layer }: { layer: TextLayer }) {
     <>
       <Text
         ref={ref}
+        id={layer.id}
         x={layer.box.x}
         y={layer.box.y}
         width={layer.box.w}

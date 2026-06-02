@@ -26,6 +26,7 @@ export function StickerLayerNode({ layer }: { layer: StickerLayer }) {
   if (status === "failed") {
     return (
       <Rect
+        id={layer.id}
         x={layer.box.x}
         y={layer.box.y}
         width={layer.box.w}
@@ -45,6 +46,7 @@ export function StickerLayerNode({ layer }: { layer: StickerLayer }) {
     <>
       <KImage
         ref={ref}
+        id={layer.id}
         image={img}
         x={layer.box.x}
         y={layer.box.y}

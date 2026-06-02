@@ -1,13 +1,18 @@
-import { forwardRef } from "react";
+import { forwardRef, useState } from "react";
 import { Stage as KStage, Layer as KLayer, Line } from "react-konva";
 import type Konva from "konva";
 import { useEditor } from "../store";
+import type { Layer } from "../types";
 import { Background } from "./background/Background";
 import { EffectsOverlay } from "./EffectsOverlay";
 import { TextLayerNode } from "./layers/TextLayerNode";
 import { ImageLayerNode } from "./layers/ImageLayerNode";
 import { ShapeLayerNode } from "./layers/ShapeLayerNode";
 import { StickerLayerNode } from "./layers/StickerLayerNode";
+import { ContextMenu } from "@/components/ContextMenu";
+import { useComposerDraft } from "@/stores/composerDraft";
+import { describeLayer } from "@/features/chat/describeElement";
+import { useT } from "@/i18n/useT";
 
 interface StageProps {
   scale?: number;
@@ -26,12 +31,31 @@ export const Stage = forwardRef<Konva.Stage, StageProps>(function Stage(
   const currentSlideId = useEditor((s) => s.currentSlideId);
   const setSelection = useEditor((s) => s.setSelectionLayer);
   const snapGuides = useEditor((s) => s.snapGuides);
+  // #5 — right-click "加入聊天上下文" menu anchor (viewport coords) + the layer.
+  const inject = useComposerDraft((s) => s.inject);
+  const t = useT();
+  const [menu, setMenu] = useState<{ layer: Layer; x: number; y: number } | null>(
+    null,
+  );
 
   if (!car || !currentSlideId) return null;
   const slide = car.slides.find((s) => s.id === currentSlideId);
   if (!slide) return null;
 
+  // Konva events bubble to the stage; each layer node carries id={layer.id},
+  // so we resolve the right-clicked node back to its layer. Background /
+  // overlay / empty stage have no id → no menu (browser default left alone).
+  const handleContextMenu = (e: Konva.KonvaEventObject<MouseEvent>) => {
+    const id = e.target.id();
+    const layer = id ? slide.layers.find((l) => l.id === id) : undefined;
+    if (!layer) return;
+    e.evt.preventDefault();
+    setSelection(layer.id); // select so buildEditorViewerContext carries this layer's id
+    setMenu({ layer, x: e.evt.clientX, y: e.evt.clientY });
+  };
+
   return (
+    <>
     <KStage
       ref={ref}
       width={car.width * scale}
@@ -42,6 +66,7 @@ export const Stage = forwardRef<Konva.Stage, StageProps>(function Stage(
         // click on empty stage clears selection
         if (e.target === e.target.getStage()) setSelection(null);
       }}
+      onContextMenu={handleContextMenu}
     >
       <KLayer>
         <Background bg={slide.bg} width={car.width} height={car.height} />
@@ -85,5 +110,28 @@ export const Stage = forwardRef<Konva.Stage, StageProps>(function Stage(
         )}
       </KLayer>
     </KStage>
+      {menu && (
+        <ContextMenu
+          x={menu.x}
+          y={menu.y}
+          onClose={() => setMenu(null)}
+          ariaLabel={t("chat.addToContext.menuAria")}
+          items={[
+            {
+              label: t("chat.addToContext.add"),
+              onSelect: () =>
+                inject(
+                  describeLayer(menu.layer, {
+                    text: t("chat.addToContext.layer.text"),
+                    image: t("chat.addToContext.layer.image"),
+                    shape: t("chat.addToContext.layer.shape"),
+                    sticker: t("chat.addToContext.layer.sticker"),
+                  }),
+                ),
+            },
+          ]}
+        />
+      )}
+    </>
   );
 });

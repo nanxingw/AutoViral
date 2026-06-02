@@ -21,6 +21,7 @@ export function ShapeLayerNode({ layer }: { layer: ShapeLayer }) {
   }, [isSelected]);
 
   const common = {
+    id: layer.id,
     x: layer.box.x,
     y: layer.box.y,
     rotation: layer.box.rotation,
