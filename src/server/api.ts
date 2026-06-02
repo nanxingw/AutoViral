@@ -29,7 +29,8 @@ import { log, readLogs } from "../logger.js";
 import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } from "../test-runner.js";
 import { evaluateWork } from "../test-evaluator.js";
 import { analyzeAudio, mixAudioTracks } from "../audio-tools.js";
-import { pickProvider } from "../tts-providers/registry.js";
+import { pickProvider, generateWithFallback } from "../tts-providers/registry.js";
+import { uiEventBus } from "./bridge/ui-events.js";
 import { resolveAssetPath, resolveAssetSubpath, UnsafePathError, SAFE_ID } from "./safe-paths.js";
 import { listCheckpoints, restoreCheckpoint, createCheckpoint } from "./checkpoints.js";
 import {
@@ -1935,6 +1936,63 @@ apiRoutes.post("/api/audio/tts", async (c) => {
     });
   } catch (e: any) {
     return c.json({ error: "TTS provider error", message: e?.message ?? String(e), errorCode: "tts_provider_error", detail: e?.message ?? String(e) }, 500);
+  }
+});
+
+// POST /api/works/:id/tts — work-scoped dual-provider TTS (#3).
+// Synthesizes narration into the work's assets/audio/ dir, broadcasts an
+// "asset-added" UI event so the Studio library refreshes, then returns.
+// Uses generateWithFallback: edge-tts is tried first, OpenAI is the fallback.
+apiRoutes.post("/api/works/:id/tts", async (c) => {
+  const id = c.req.param("id");
+  // Guard the work id before it ever touches the filesystem — this endpoint
+  // mkdir-creates + writes a file, so an unsanitized `../..` id would be a
+  // write-side path traversal (strictly worse than a read). Same guard every
+  // other works/:id write route in this file uses (Codex 2026-04-27 mandate).
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId" }, 400);
+  const body = await c.req.json().catch(() => null);
+  const text = body && typeof body.text === "string" ? body.text : "";
+  const voice = body && typeof body.voice === "string" ? body.voice : "";
+  if (!text || text.trim().length === 0) {
+    return c.json({ error: "TTS request missing required field: text" }, 400);
+  }
+  if (!voice) {
+    return c.json({ error: "TTS request missing required field: voice" }, 400);
+  }
+  const language = body && typeof body.language === "string" ? body.language : undefined;
+  const provider: "auto" | "edge-tts" | "openai" =
+    body && (body.provider === "edge-tts" || body.provider === "openai")
+      ? body.provider
+      : "auto";
+
+  const { createHash } = await import("node:crypto");
+  const workDir = join(dataDir, "works", id);
+  const audioDir = join(workDir, "assets", "audio");
+  await mkdir(audioDir, { recursive: true });
+  const stem = createHash("sha1").update(`${voice}|${text}`).digest("hex").slice(0, 12);
+  const filename = `tts_${stem}.mp3`;
+  const outputPath = join(audioDir, filename);
+  const relativeUri = `assets/audio/${filename}`;
+
+  try {
+    const result = await generateWithFallback({ text, voice, language, outputPath }, { provider });
+    // Mirror broadcast() in bridge/routes.ts: same event shape + ts expression.
+    uiEventBus.publish(id, {
+      type: "asset-added",
+      workId: id,
+      ts: Date.now(),
+      payload: { kind: "audio", uri: relativeUri, origin: "tts" },
+    });
+    return c.json({
+      ok: true,
+      relativeUri,
+      providerId: result.providerId,
+      durationSec: result.duration,
+      voice,
+    });
+  } catch (e: any) {
+    const detail = e?.message ?? String(e);
+    return c.json({ error: "TTS provider error", errorCode: "tts_provider_error", detail }, 500);
   }
 });
 

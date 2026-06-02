@@ -83,6 +83,8 @@ export interface FormState {
   audioSubKind: AudioSubKind;
   voice?: string;
   durationSeconds?: number;
+  /** TTS provider routing — "auto" tries edge-tts then OpenAI as fallback. */
+  ttsProvider?: "auto" | "edge-tts" | "openai";
   // Variant mode
   changeDirection: string;
 }
@@ -91,6 +93,7 @@ const TTS_VOICES: { value: string; label: string }[] = [
   { value: "zh-CN-XiaoxiaoNeural", label: "中性女声 (zh-CN-Xiaoxiao)" },
   { value: "zh-CN-YunjianNeural", label: "沉稳男声 (zh-CN-Yunjian)" },
   { value: "en-US-AriaNeural", label: "英文女声 (en-US-Aria)" },
+  { value: "en-US-GuyNeural", label: "英文男声 (en-US-Guy)" },
 ];
 
 const IMAGE_ASPECTS = ["1:1", "9:16", "16:9", "4:5"] as const;
@@ -115,6 +118,7 @@ export const INITIAL_FORM_STATE: FormState = {
   audioSubKind: "bgm",
   voice: "zh-CN-XiaoxiaoNeural",
   durationSeconds: 30,
+  ttsProvider: "auto",
   changeDirection: "",
 };
 
@@ -310,6 +314,30 @@ export function GenerationDialog(props: GenerationDialogProps) {
   const shouldDispatchProvider =
     !isVariant && form.kind === "video" && !!selectedProviderId;
 
+  // #3 — TTS gets its own direct-dispatch path (mirrors the video provider
+  // path). The old buildGenerationNotification route for TTS pointed at a
+  // since-deleted python script, so we POST to the work-scoped /tts endpoint
+  // and let the server's edge-tts→OpenAI fallback registry do the work.
+  const shouldDispatchTts =
+    !isVariant && form.kind === "audio" && form.audioSubKind === "tts";
+
+  async function dispatchTtsGenerate(): Promise<void> {
+    const res = await fetch(`/api/works/${workId}/tts`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        text: form.prompt,
+        voice: form.voice,
+        provider: form.ttsProvider ?? "auto",
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`tts dispatch failed (${res.status}) ${text}`);
+    }
+    await queryClient.invalidateQueries({ queryKey: ["assets", workId] });
+  }
+
   async function dispatchProviderGenerate(): Promise<void> {
     if (!selectedProviderId) return;
     const aspectRatio = (form.aspectRatio ?? "9:16") as string;
@@ -349,6 +377,22 @@ export function GenerationDialog(props: GenerationDialogProps) {
         setDispatchError(
           err instanceof Error ? err.message : t("studio.generationDialog.errFallback"),
         );
+        setIsGenerating(false);
+        return; // keep dialog open so user sees the error
+      }
+      setIsGenerating(false);
+    } else if (shouldDispatchTts) {
+      // #3 — TTS direct dispatch. Same try/catch/keep-open flow as video.
+      // No chat notification (the old TTS notification path is dead).
+      setIsGenerating(true);
+      try {
+        await dispatchTtsGenerate();
+      } catch (err) {
+        // The thrown message is raw English server text (e.g. "all providers
+        // failed: edge-tts ENOENT, no OpenAI key") — show the localized
+        // fallback to the user and keep the technical detail in the console.
+        console.warn("[tts] dispatch failed:", err);
+        setDispatchError(t("studio.generationDialog.ttsErrFallback"));
         setIsGenerating(false);
         return; // keep dialog open so user sees the error
       }
@@ -535,7 +579,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
             )}
           </div>
 
-          {isGenerating && shouldDispatchProvider && (
+          {isGenerating && (shouldDispatchProvider || shouldDispatchTts) && (
             <div
               role="status"
               aria-live="polite"
@@ -545,9 +589,15 @@ export function GenerationDialog(props: GenerationDialogProps) {
               <span style={pulseDotStyle} aria-hidden="true" />
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 <span style={progressLabelStyle}>
-                  Generating via {selectedProvider?.displayName ?? "provider"}
-                  {" · "}
-                  typically 70-180s for Seedance
+                  {shouldDispatchTts ? (
+                    t("studio.generationDialog.ttsGenerating")
+                  ) : (
+                    <>
+                      Generating via {selectedProvider?.displayName ?? "provider"}
+                      {" · "}
+                      typically 70-180s for Seedance
+                    </>
+                  )}
                 </span>
                 <span style={progressTimerStyle}>
                   {t("studio.generationDialog.progressElapsed", { time: formatElapsed(elapsedSec) })}
@@ -765,19 +815,44 @@ function AudioFields({
         </div>
       )}
       {form.audioSubKind === "tts" ? (
-        <Field label={t("studio.generationDialog.fieldVoice")}>
-          <select
-            value={form.voice ?? TTS_VOICES[0].value}
-            onChange={(e) => patch("voice", e.target.value)}
-            style={inputStyle}
-          >
-            {TTS_VOICES.map((v) => (
-              <option key={v.value} value={v.value}>
-                {v.label}
+        <>
+          <Field label={t("studio.generationDialog.fieldVoice")}>
+            <select
+              value={form.voice ?? TTS_VOICES[0].value}
+              onChange={(e) => patch("voice", e.target.value)}
+              style={inputStyle}
+            >
+              {TTS_VOICES.map((v) => (
+                <option key={v.value} value={v.value}>
+                  {v.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label={t("studio.generationDialog.ttsProviderLabel")}>
+            <select
+              aria-label={t("studio.generationDialog.ttsProviderLabel")}
+              value={form.ttsProvider ?? "auto"}
+              onChange={(e) =>
+                patch(
+                  "ttsProvider",
+                  e.target.value as "auto" | "edge-tts" | "openai",
+                )
+              }
+              style={inputStyle}
+            >
+              <option value="auto">
+                {t("studio.generationDialog.ttsProviderAuto")}
               </option>
-            ))}
-          </select>
-        </Field>
+              <option value="edge-tts">
+                {t("studio.generationDialog.ttsProviderEdge")}
+              </option>
+              <option value="openai">
+                {t("studio.generationDialog.ttsProviderOpenai")}
+              </option>
+            </select>
+          </Field>
+        </>
       ) : (
         <Field label="Duration (seconds)">
           <input

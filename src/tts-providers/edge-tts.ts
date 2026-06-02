@@ -1,6 +1,26 @@
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import type { TtsProvider, TtsRequest, TtsResult } from "./types.js";
+
+/**
+ * Resolves the edge-tts binary path with this precedence:
+ *   1. EDGE_TTS_PATH override (dev machines where pipx put it outside PATH)
+ *   2. the managed venv at <dataDir>/tts-venv/bin/edge-tts, if present
+ *   3. bare "edge-tts" (rely on inherited PATH)
+ *
+ * venvBase = AUTOVIRAL_DATA_DIR ?? ~/.autoviral — same root the rest of the
+ * server uses for the data dir.
+ */
+export function resolveEdgeTtsBin(): string {
+  if (process.env.EDGE_TTS_PATH) return process.env.EDGE_TTS_PATH;
+  const venvBase = process.env.AUTOVIRAL_DATA_DIR ?? join(homedir(), ".autoviral");
+  const venvBin = join(venvBase, "tts-venv", "bin", "edge-tts");
+  if (existsSync(venvBin)) return venvBin;
+  return "edge-tts";
+}
 
 /**
  * Translates AutoViral's expressive tag dialect into Edge TTS SSML fragments.
@@ -44,9 +64,8 @@ async function runEdgeTtsCli(
   outputPath: string,
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    // EDGE_TTS_PATH override: dev machines where pipx put edge-tts outside
-    // the inherited PATH (e.g. ~/.local/bin) can point Node at the binary.
-    const bin = process.env.EDGE_TTS_PATH ?? "edge-tts";
+    // EDGE_TTS_PATH override / managed venv / bare binary — see resolveEdgeTtsBin.
+    const bin = resolveEdgeTtsBin();
     const child = spawn(bin, [
       "--voice",
       voice,
@@ -120,6 +139,12 @@ export const edgeTtsProvider: TtsProvider = {
       tags: ["male", "casual"],
     },
   ],
+  async isAvailable(): Promise<boolean> {
+    const resolved = resolveEdgeTtsBin();
+    // A concrete path must exist on disk; a bare "edge-tts" is presumed
+    // available (the registry still catches a runtime ENOENT and falls back).
+    return existsSync(resolved) || resolved === "edge-tts";
+  },
   async generate(req: TtsRequest): Promise<TtsResult> {
     const ssml = mapExpressiveTagsToSsml(req.text);
     await runEdgeTtsCli(ssml, req.voice, req.outputPath);

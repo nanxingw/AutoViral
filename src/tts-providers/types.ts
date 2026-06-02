@@ -20,4 +20,10 @@ export interface TtsProvider {
   supportsLanguages: string[];
   voices: Array<{ id: string; name: string; lang: string; tags: string[] }>;
   generate(req: TtsRequest): Promise<TtsResult>;
+  /**
+   * Optional availability probe. The registry's generateWithFallback uses this
+   * to skip a provider before invoking generate() — e.g. edge-tts checks its
+   * binary resolves, openai checks an API key is in env. Absent → assume true.
+   */
+  isAvailable?(): Promise<boolean>;
 }
