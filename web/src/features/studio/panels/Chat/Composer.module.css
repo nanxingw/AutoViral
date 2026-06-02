@@ -1,0 +1,151 @@
+/* Composer action row — impeccable pass (2026-06-02).
+   Hierarchy comes from FILL (ghost vs accent), not size: attach + send share
+   one 30x30 shell, so the paperclip no longer reads as a stray emoji next to a
+   heavy accent button. Inline styles can't express :hover/:focus-visible/:active,
+   so the interactive bits live here. */
+
+.iconBtn {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.12s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.iconBtn:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.iconBtn:active {
+  transform: scale(0.92);
+}
+.iconBtn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--surface-0), 0 0 0 3.5px var(--accent);
+}
+.iconBtn:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.iconBtn:disabled:hover {
+  background: transparent;
+  color: var(--text-dim);
+}
+
+/* Primary send — accent fill. No always-on glow (decorative); a subtle lift
+   surfaces only on hover, per the restrained editorial tone. */
+.send {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.send:hover {
+  background: var(--accent-hi, var(--accent));
+  color: var(--accent-fg);
+  box-shadow: 0 0 14px var(--accent-glow);
+}
+.send:disabled {
+  opacity: 1;
+  background: var(--surface-2);
+  color: var(--text-dimmer);
+}
+.send:disabled:hover {
+  background: var(--surface-2);
+  box-shadow: none;
+}
+
+/* Stop — same shell, error fill (momentary, only while streaming). */
+.stop {
+  background: var(--status-error, #c44a4a);
+  color: #fff;
+}
+.stop:hover {
+  background: var(--status-error, #c44a4a);
+  color: #fff;
+  box-shadow: 0 0 14px rgba(196, 74, 74, 0.4);
+}
+
+.icon {
+  display: block;
+}
+
+/* Upload-in-flight spinner that replaces the paperclip. */
+.spinner {
+  width: 15px;
+  height: 15px;
+  border: 1.6px solid var(--glass-border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: composerSpin 0.7s linear infinite;
+}
+@keyframes composerSpin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Keyboard hint — grouped with the send action, de-emphasized. */
+.kbdHint {
+  font-size: 10px;
+  color: var(--text-dimmer);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  user-select: none;
+  white-space: nowrap;
+}
+
+/* Full-panel drag-and-drop affordance. The whole chat panel is the drop zone
+   (not just the small input box), with a clear overlay so a dropped file never
+   silently misses. pointer-events:none lets the drop reach the panel handler. */
+.dropOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--surface-0) 72%, transparent);
+  backdrop-filter: blur(2px);
+  border: 1.5px dashed var(--accent);
+  animation: dropFade 0.16s ease;
+}
+.dropInner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+@keyframes dropFade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .iconBtn,
+  .send,
+  .stop {
+    transition: none;
+  }
+  .spinner {
+    animation: none;
+  }
+  .dropOverlay {
+    animation: none;
+  }
+}

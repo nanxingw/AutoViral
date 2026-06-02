@@ -19,6 +19,26 @@ import { highlightCode } from "./highlight";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { useComposerDraft } from "@/stores/composerDraft";
+import composerStyles from "./Composer.module.css";
+
+/** Clean line icons (feather/lucide geometry) — a consistent SVG family that
+ *  replaces the stray 📎 emoji and reads as intentional against the editorial
+ *  tone. currentColor inherits the button's ghost/accent state. */
+const PaperclipIcon = () => (
+  <svg className={composerStyles.icon} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M21.44 11.05l-9.19 9.19a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+  </svg>
+);
+const ArrowUpIcon = () => (
+  <svg className={composerStyles.icon} width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M12 19V5M6 11l6-6 6 6" />
+  </svg>
+);
+const StopIcon = () => (
+  <svg className={composerStyles.icon} width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+    <rect x="5" y="5" width="14" height="14" rx="2.5" />
+  </svg>
+);
 
 /** Classify a picked file into the kinds the upload endpoint accepts. Mirrors
  *  uploadAsset's subdirFor: MIME first, extension fallback. */
@@ -537,7 +557,29 @@ export function ChatPanel({
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div
+      onDragOver={(e) => {
+        // The WHOLE panel is the drop zone — a file dropped anywhere in chat
+        // lands, not only on the small input box. Must preventDefault to allow drop.
+        e.preventDefault();
+        if (!dragOver) setDragOver(true);
+      }}
+      onDragLeave={(e) => {
+        // Only clear when the cursor actually leaves the panel (not when moving
+        // over a child element), so the overlay doesn't flicker.
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setDragOver(false);
+      }}
+      onDrop={onDrop}
+      style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", position: "relative" }}
+    >
+      {dragOver && (
+        <div className={composerStyles.dropOverlay} data-testid="chat-drop-overlay">
+          <div className={composerStyles.dropInner}>
+            <PaperclipIcon />
+            {t("chat.attach.dropHint")}
+          </div>
+        </div>
+      )}
       {/* Header */}
       <div
         style={{
@@ -745,23 +787,16 @@ export function ChatPanel({
 
       {/* Composer */}
       <div style={{ padding: 12, borderTop: "1px solid var(--divider)", flexShrink: 0 }}>
+        {/* Drag-drop is handled at the panel root (whole-panel drop zone). */}
         <div
-          onDragOver={(e) => {
-            e.preventDefault();
-            if (!dragOver) setDragOver(true);
-          }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={onDrop}
           style={{
             background: "var(--surface-0)",
             borderRadius: 12,
-            border: `1px solid ${dragOver ? "var(--accent)" : "var(--glass-border)"}`,
-            boxShadow: dragOver ? "0 0 0 3px var(--accent-glow)" : "none",
+            border: "1px solid var(--glass-border)",
             padding: 10,
             display: "flex",
             flexDirection: "column",
             gap: 8,
-            transition: "border-color 0.15s, box-shadow 0.15s",
           }}
         >
           {/* Hidden file picker — the OS dialog is limited to the kinds the
@@ -817,86 +852,38 @@ export function ChatPanel({
               width: "100%",
             }}
           />
-          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-            {/* Attach media — opens the file picker; also supports drag-drop
-                onto the composer and paste from clipboard. */}
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* Attach — file picker; whole-panel drag-drop + clipboard paste
+                also work. Ghost icon button, same 30x30 shell as send. */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
               aria-label={t("chat.attach.button")}
               title={t("chat.attach.button")}
-              style={{
-                width: 28,
-                height: 28,
-                display: "grid",
-                placeItems: "center",
-                background: "transparent",
-                border: "none",
-                borderRadius: 7,
-                color: uploading ? "var(--text-dimmer)" : "var(--text-dim)",
-                cursor: uploading ? "wait" : "pointer",
-                fontSize: 15,
-                transition: "color 0.15s",
-              }}
+              className={composerStyles.iconBtn}
             >
-              {uploading ? "…" : "📎"}
+              {uploading ? <span className={composerStyles.spinner} aria-hidden="true" /> : <PaperclipIcon />}
             </button>
-            <span
-              style={{
-                fontSize: 10,
-                color: "var(--text-dimmer)",
-                fontFamily: "var(--font-mono)",
-                letterSpacing: "0.06em",
-              }}
-            >
-              {t("chat.sendHint")}
-            </span>
             <div style={{ flex: 1 }} />
+            <span className={composerStyles.kbdHint}>{t("chat.sendHint")}</span>
             {streaming ? (
               <button
                 onClick={abort}
-                style={{
-                  width: 28,
-                  height: 28,
-                  display: "grid",
-                  placeItems: "center",
-                  background: "var(--spark-red, #c44a4a)",
-                  border: "none",
-                  borderRadius: 7,
-                  color: "#fff",
-                  cursor: "pointer",
-                  boxShadow: "0 0 12px rgba(196,74,74,0.45)",
-                  transition: "background 0.15s",
-                  fontWeight: 700,
-                }}
                 aria-label="Stop"
                 title={t("chat.stopTitle")}
+                className={`${composerStyles.iconBtn} ${composerStyles.stop}`}
               >
-                {/* filled square — pneuma's universal "stop the agent" glyph */}
-                ◼
+                <StopIcon />
               </button>
             ) : (
               <button
                 onClick={submit}
                 disabled={!canSend || uploading}
-                style={{
-                  width: 28,
-                  height: 28,
-                  display: "grid",
-                  placeItems: "center",
-                  background: canSend && !uploading ? "var(--accent)" : "var(--surface-2)",
-                  border: "none",
-                  borderRadius: 7,
-                  color: canSend && !uploading ? "var(--accent-fg)" : "var(--text-dimmer)",
-                  cursor: canSend && !uploading ? "pointer" : "default",
-                  boxShadow: canSend && !uploading ? "0 0 12px var(--accent-glow)" : "none",
-                  transition: "background 0.15s",
-                  fontWeight: 700,
-                }}
                 aria-label="Send"
+                className={`${composerStyles.iconBtn} ${composerStyles.send}`}
               >
-                ↑
+                <ArrowUpIcon />
               </button>
             )}
           </div>

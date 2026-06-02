@@ -714,6 +714,7 @@ export const en = {
     stopTitle: "Stop running turn",
     attach: {
       button: "Attach image, video, or audio",
+      dropHint: "Drop image, video, or audio",
       tooLarge: "File too large — max {mb}MB.",
       failed: "Upload failed. Please try again.",
     },
@@ -1505,6 +1506,7 @@ export const zh: DeepShape<Messages> = {
     stopTitle: "停止当前回合",
     attach: {
       button: "添加图片 / 视频 / 音频",
+      dropHint: "拖放图片 / 视频 / 音频",
       tooLarge: "文件太大 —— 最大 {mb}MB。",
       failed: "上传失败，请重试。",
     },

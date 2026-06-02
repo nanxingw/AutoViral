@@ -97,6 +97,26 @@ describe("ChatPanel composer attachments", () => {
     expect(screen.getAllByAltText("same.png")).toHaveLength(1);
   });
 
+  it("accepts a file dropped anywhere on the chat panel (whole-panel drop zone)", async () => {
+    const { container } = render(wrap(<ChatPanel workId="w" />));
+    const panel = container.firstChild as HTMLElement; // root div carries the drag handlers
+    const file = new File(["x"], "dropped.png", { type: "image/png" });
+    await act(async () => {
+      fireEvent.dragOver(panel);
+      fireEvent.drop(panel, { dataTransfer: { files: [file] } });
+    });
+    await waitFor(() => expect(uploadAssetMock).toHaveBeenCalledWith("w", file));
+    await waitFor(() => expect(screen.getByAltText("dropped.png")).toBeTruthy());
+  });
+
+  it("reveals a drop overlay only while dragging over the panel", async () => {
+    const { container } = render(wrap(<ChatPanel workId="w" />));
+    const panel = container.firstChild as HTMLElement;
+    expect(screen.queryByTestId("chat-drop-overlay")).toBeNull();
+    fireEvent.dragOver(panel);
+    expect(screen.getByTestId("chat-drop-overlay")).toBeTruthy();
+  });
+
   it("removes a staged attachment when its × is clicked", async () => {
     render(wrap(<ChatPanel workId="w" />));
     await pick("drop.png");
