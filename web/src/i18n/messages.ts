@@ -682,19 +682,6 @@ export const en = {
         regenImage: "Regenerate this image",
         swapPalette: "Swap palette",
       },
-      studio: {
-        regenClip: "Regenerate this clip",
-        adjustRhythm: "Adjust rhythm",
-        swapBgm: "Swap BGM",
-        generateNarration: "Add narration",
-        generateCaptions: "Auto-caption",
-        narrationLangHint: "Generate a 30–60 s Chinese voiceover and add it to the audio track",
-        captionsLangHint: "Auto-transcribe speech and add word-level captions to the timeline",
-        needVideoHint: "Add a video clip first to use this action",
-        regenClipHint: "Regenerate this clip with a fresh take",
-        adjustRhythmHint: "Re-pace the cuts around this clip",
-        swapBgmHint: "Suggest three BGM candidates in different styles",
-      },
       mandarinAgentHint: "Agent responds in Mandarin",
     },
   },
@@ -1415,23 +1402,6 @@ export const zh: DeepShape<Messages> = {
         rewriteHook: "写一段引导文案",
         regenImage: "重生成此图",
         swapPalette: "换调色板",
-      },
-      studio: {
-        regenClip: "重生成此片段",
-        adjustRhythm: "调整节奏",
-        swapBgm: "换 BGM 风格",
-        generateNarration: "+ 配音",
-        generateCaptions: "+ 字幕",
-        // e2e-report F148: ZH locale 之前全部空字符串 → ZH 用户 hover 完全没
-        // 提示。F79 当年判断「ZH 用户读得懂 prompt 不需要 tooltip」忽视了
-        // tooltip 的另一价值：在 click 之前一句话告诉用户「这个按钮会做什么」。
-        // Editor 调性参考用，此处给功能性描述。
-        narrationLangHint: "为视频生成 30–60 秒中文旁白并加到音频轨",
-        captionsLangHint: "自动识别语音并按词级时间戳加到时间轴",
-        needVideoHint: "先添加视频片段再使用此功能",
-        regenClipHint: "换一种角度重新生成这段片段",
-        adjustRhythmHint: "重新调整这段片段前后的剪辑节奏",
-        swapBgmHint: "给出三个不同风格的 BGM 候选",
       },
       mandarinAgentHint: "Agent 会用中文回应",
     },

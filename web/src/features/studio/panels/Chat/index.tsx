@@ -15,7 +15,6 @@ import {
   type Checkpoint,
 } from "@/features/checkpoints/useCheckpoints";
 import { highlightCode } from "./highlight";
-import { QuickActions } from "./QuickActions";
 
 /** Render an agent-emitted ```yaml block``` with our hand-rolled highlighter.
  *  Only fires for fenced code blocks (where react-markdown sets a className
@@ -197,8 +196,10 @@ function jumpToStudioComposition(data: LocatorData) {
 
 export interface ChatPanelProps {
   workId: string;
-  /** Editor-specific shortcut buttons rendered between messages and composer.
-   *  Defaults to Studio's <QuickActions /> for backward compatibility. */
+  /** Optional shortcut buttons rendered between messages and composer.
+   *  No default — the Studio instant-send chips were removed (they fired a
+   *  prefilled prompt on a single click with no chance to review). Editors
+   *  may opt in by passing a fill-then-review affordance here. */
   quickActions?: ReactNode;
   /** Called when the user activates an inline `<viewer-locator/>` block in an
    *  assistant message. Defaults to studio playhead/selection jump. */
@@ -578,7 +579,7 @@ export function ChatPanel({
         )}
       </div>
 
-      {quickActions ?? <QuickActions />}
+      {quickActions}
 
       {/* Composer */}
       <div style={{ padding: 12, borderTop: "1px solid var(--divider)", flexShrink: 0 }}>
