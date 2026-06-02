@@ -715,6 +715,11 @@ export const en = {
     wsConnecting: "CONNECTING…",
     wsReconnecting: "RECONNECTING…",
     wsReconnectingTitle: "Connection lost — your message will queue and send when the bridge is back.",
+    modelSwitch: {
+      aria: "Switch agent model tier",
+      lockedDuringRun: "Finish the current turn before switching model",
+      alwaysLatest: "Always uses the latest version of the tier",
+    },
     crashTitle: "Chat hit a render error",
     crashBody: "The rest of the page is fine. Click reset to retry chat.",
     crashReset: "Reset chat panel",
@@ -1494,6 +1499,11 @@ export const zh: DeepShape<Messages> = {
     wsConnecting: "连接中…",
     wsReconnecting: "重连中…",
     wsReconnectingTitle: "连接已断开——你的消息会暂存，桥接恢复后会自动发送。",
+    modelSwitch: {
+      aria: "切换代理模型档位",
+      lockedDuringRun: "请等当前回合结束后再切换模型",
+      alwaysLatest: "始终使用该档位的最新版本",
+    },
     crashTitle: "聊天面板渲染出错",
     crashBody: "页面其余部分仍可用。点击重置可重试。",
     crashReset: "重置聊天面板",

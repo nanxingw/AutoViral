@@ -2384,6 +2384,39 @@ apiRoutes.post("/api/works/:id/session", async (c) => {
   }
 });
 
+// POST /api/agent/model — switch the creative agent's model TIER.
+//
+// We persist the short ALIAS (opus/sonnet/haiku), never a pinned version. The
+// Claude Code CLI resolves the alias to the latest member of that family at
+// spawn time (`--model opus` → whatever the current Opus is), so the user picks
+// a tier and the version auto-follows — they never choose "4.7 vs 4.8".
+//
+// The model is bound when the CLI session spawns (--model), so a LIVE session
+// keeps whatever tier it started with. When a workId is supplied we kill that
+// work's session so the next message respawns on the new tier; the badge in the
+// UI updates immediately and the switch takes effect on the user's next turn.
+const AGENT_MODEL_ALIASES = ["opus", "sonnet", "haiku"] as const;
+apiRoutes.post("/api/agent/model", async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const model = body && typeof body.model === "string" ? body.model : "";
+  if (!(AGENT_MODEL_ALIASES as readonly string[]).includes(model)) {
+    return c.json(
+      { error: "Invalid model alias", errorCode: "invalid_model_alias", allowed: AGENT_MODEL_ALIASES },
+      400,
+    );
+  }
+  const config = await loadConfig();
+  config.model = model;
+  await saveConfig(config);
+  // Respawn the work's session (if any) so the new tier takes effect next turn.
+  const workId = body && typeof body.workId === "string" ? body.workId : null;
+  let respawned = false;
+  if (workId && SAFE_ID.test(workId) && wsBridge) {
+    respawned = wsBridge.killSession(workId);
+  }
+  return c.json({ ok: true, model, respawned });
+});
+
 // POST /api/works/:id/chat
 apiRoutes.post("/api/works/:id/chat", async (c) => {
   const id = c.req.param("id");

@@ -15,6 +15,7 @@ import {
   type Checkpoint,
 } from "@/features/checkpoints/useCheckpoints";
 import { highlightCode } from "./highlight";
+import { ModelSwitcher } from "./ModelSwitcher";
 import { useComposerDraft } from "@/stores/composerDraft";
 
 /** Render an agent-emitted ```yaml block``` with our hand-rolled highlighter.
@@ -221,17 +222,6 @@ export interface ChatPanelProps {
   onTurnComplete?: () => void;
 }
 
-// CLI aliases → current 4.x family member. The backend stores a short alias
-// like "opus" / "sonnet" / "haiku" in config.model and passes it verbatim to
-// the Claude Code CLI (`--model opus`). The CLI resolves it to whatever the
-// latest version of that family is. Mirror that resolution in the UI badge so
-// it stops lying about the actual model behind the chat.
-const MODEL_ALIAS_LABEL: Record<string, string> = {
-  opus: "CLAUDE-OPUS-4.7",
-  sonnet: "CLAUDE-SONNET-4.6",
-  haiku: "CLAUDE-HAIKU-4.5",
-};
-
 export function ChatPanel({
   workId,
   quickActions,
@@ -257,25 +247,8 @@ export function ChatPanel({
   const streaming = useChatStore((s) => s.streaming);
   const [input, setInput] = useState("");
   const [loadingHistory, setLoadingHistory] = useState(false);
-  const [modelLabel, setModelLabel] = useState("CLAUDE-OPUS-4.7");
   const scrollRef = useRef<HTMLDivElement>(null);
   const t = useT();
-
-  // Pull the live model from the server once on mount. Falls back silently
-  // to the default opus label if the call fails.
-  useEffect(() => {
-    let cancelled = false;
-    apiFetch<{ model?: string }>(`/api/status`)
-      .then((data) => {
-        if (cancelled) return;
-        const raw = (data.model ?? "opus").toLowerCase();
-        setModelLabel(MODEL_ALIAS_LABEL[raw] ?? raw.toUpperCase());
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Load chat history on mount / workId change. Without this, switching into a
   // work showed an empty panel even when chat.json had hundreds of past blocks.
@@ -419,7 +392,8 @@ export function ChatPanel({
               letterSpacing: "0.06em",
             }}
           >
-            {modelLabel}{streaming ? ` · ${t("chat.streaming")}` : ""}
+            <ModelSwitcher workId={workId} streaming={streaming} />
+            {streaming ? ` · ${t("chat.streaming")}` : ""}
             {wsState !== "open" && (
               <span
                 title={t("chat.wsReconnectingTitle")}

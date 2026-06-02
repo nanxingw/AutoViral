@@ -55,12 +55,12 @@ describe("ChatPanel", () => {
     expect(screen.getAllByRole("listitem").length).toBeGreaterThanOrEqual(2);
   });
 
-  it("renders the editorial header with the live Claude model label", async () => {
-    // The mocked apiFetch returns no `model` field, so the alias resolver
-    // falls back to "opus" → CLAUDE-OPUS-4.7. Assert on the family slug so
-    // the test stays robust as the alias map evolves.
+  it("renders the editorial header with the live model TIER (no version number)", async () => {
+    // The mocked apiFetch returns no `model` field, so the switcher falls back
+    // to the "opus" tier → badge reads "Opus". We deliberately show only the
+    // tier, never a pinned version (4.x), so the badge never goes stale.
     render(withQueryClient(<ChatPanel workId="w1" />));
-    expect(await screen.findByText(/CLAUDE-OPUS/i)).toBeTruthy();
+    expect(await screen.findByText(/Opus/i)).toBeTruthy();
   });
 
   // #5 — element affordances inject a reference phrase into the composer via

@@ -27,12 +27,18 @@ export interface Config {
   };
 }
 
-const CONFIG_DIR = join(homedir(), ".autoviral");
+// AUTOVIRAL_DATA_DIR relocates ALL on-disk state (works, trends AND config.yaml)
+// so tests can run fully isolated. Previously CONFIG_DIR was pinned to homedir
+// and ignored the override, so loadConfig/saveConfig always hit the real
+// ~/.autoviral/config.yaml — any test that persisted config clobbered the user's
+// file. Honour the override here too (production leaves the env var unset, so the
+// path is unchanged). Resolved at module load — tests use vi.resetModules.
+const CONFIG_DIR = process.env.AUTOVIRAL_DATA_DIR ?? join(homedir(), ".autoviral");
 const CONFIG_PATH = join(CONFIG_DIR, "config.yaml");
 
 /** Base data directory for works, trends, etc.
  *  Tests can override via AUTOVIRAL_DATA_DIR; resolved at module load. */
-export const dataDir = process.env.AUTOVIRAL_DATA_DIR ?? CONFIG_DIR;
+export const dataDir = CONFIG_DIR;
 
 /** Repo root directory — used by the rubric reader and any code that needs
  *  to load files shipped with the package. Resolves to the parent of the
