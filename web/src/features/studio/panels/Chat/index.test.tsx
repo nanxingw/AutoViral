@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChatPanel } from "./index";
 import { useChatStore } from "@/features/chat/store";
+import { useComposerDraft } from "@/stores/composerDraft";
 
 vi.mock("@/features/chat/useChatSocket", () => ({
   useChatSocket: () => ({ send: vi.fn() }),
@@ -60,5 +61,33 @@ describe("ChatPanel", () => {
     // the test stays robust as the alias map evolves.
     render(withQueryClient(<ChatPanel workId="w1" />));
     expect(await screen.findByText(/CLAUDE-OPUS/i)).toBeTruthy();
+  });
+
+  // #5 — element affordances inject a reference phrase into the composer via
+  // the composer-draft store (the textarea has no external setter otherwise).
+  it("appends composer-draft inject() text into the composer textarea", async () => {
+    render(withQueryClient(<ChatPanel workId="w1" />));
+    const textarea = (await screen.findByPlaceholderText(/问点什么|ask anything/i)) as HTMLTextAreaElement;
+    expect(textarea.value).toBe("");
+
+    act(() => {
+      useComposerDraft.getState().inject("字幕「樱花季」(3.2s)");
+    });
+    expect(textarea.value).toBe("字幕「樱花季」(3.2s) ");
+
+    // A second add appends after the first (space-separated), so multiple
+    // elements can be referenced in one message.
+    act(() => {
+      useComposerDraft.getState().inject("视频「sakura」(0.0s)");
+    });
+    expect(textarea.value).toBe("字幕「樱花季」(3.2s) 视频「sakura」(0.0s) ");
+  });
+
+  it("re-fires for the SAME injected text (nonce bump, not text dedupe)", async () => {
+    render(withQueryClient(<ChatPanel workId="w1" />));
+    const textarea = (await screen.findByPlaceholderText(/问点什么|ask anything/i)) as HTMLTextAreaElement;
+    act(() => useComposerDraft.getState().inject("叠加(1.0s)"));
+    act(() => useComposerDraft.getState().inject("叠加(1.0s)"));
+    expect(textarea.value).toBe("叠加(1.0s) 叠加(1.0s) ");
   });
 });

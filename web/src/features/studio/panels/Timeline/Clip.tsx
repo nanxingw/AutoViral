@@ -1,5 +1,10 @@
+import { useState } from "react";
 import { useComposition } from "../../store";
 import { useClipResize } from "./hooks/useClipResize";
+import { ContextMenu } from "@/components/ContextMenu";
+import { useComposerDraft } from "@/stores/composerDraft";
+import { describeClip } from "@/features/chat/describeElement";
+import { useT } from "@/i18n/useT";
 import clsx from "clsx";
 
 export function Clip({
@@ -27,6 +32,10 @@ export function Clip({
   // we wire window-level pointermove/up/cancel/keydown listeners below so
   // resize works even when the cursor leaves the handle.
   const resize = useClipResize({ clipId, pxPerSecond });
+  const t = useT();
+  const inject = useComposerDraft((s) => s.inject);
+  // #5 — right-click "加入聊天上下文" menu anchor (viewport coords), or null.
+  const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
   if (!clip) return null;
 
   const dur = "duration" in clip ? clip.duration : clip.out - clip.in;
@@ -42,7 +51,17 @@ export function Clip({
     typeof document !== "undefined" &&
     document.documentElement.getAttribute("data-theme") === "light";
 
+  const onContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault();
+    setSelection(clipId); // select so the viewer-context envelope carries this clip's id
+    setMenuPos({ x: e.clientX, y: e.clientY });
+  };
+
   const onPointerDown = (e: React.PointerEvent) => {
+    // Only the primary (left) button starts a drag — right/middle click is for
+    // the context menu, and without this guard a right-click would also kick
+    // off the body-drag pipeline and move the clip.
+    if (e.button !== 0) return;
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     setSelection(clipId);
     beginDrag(clipId);
@@ -162,6 +181,7 @@ export function Clip({
   }
 
   return (
+    <>
     <div
       className={clsx("timeline-clip", clip.kind, isSelected && "selected")}
       style={{
@@ -180,6 +200,7 @@ export function Clip({
         transition: "box-shadow 0.15s",
       }}
       onPointerDown={onPointerDown}
+      onContextMenu={onContextMenu}
     >
       {/* R47-fix4: text clips skip the duration sub-label. Text track is
           a compact 44px row, and showing both "2.3s" + the actual subtitle
@@ -247,5 +268,28 @@ export function Clip({
         }}
       />
     </div>
+      {menuPos && (
+        <ContextMenu
+          x={menuPos.x}
+          y={menuPos.y}
+          onClose={() => setMenuPos(null)}
+          ariaLabel={t("chat.addToContext.menuAria")}
+          items={[
+            {
+              label: t("chat.addToContext.add"),
+              onSelect: () =>
+                inject(
+                  describeClip(clip, {
+                    video: t("chat.addToContext.clip.video"),
+                    audio: t("chat.addToContext.clip.audio"),
+                    text: t("chat.addToContext.clip.text"),
+                    overlay: t("chat.addToContext.clip.overlay"),
+                  }),
+                ),
+            },
+          ]}
+        />
+      )}
+    </>
   );
 }

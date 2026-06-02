@@ -1,7 +1,8 @@
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, screen } from "@testing-library/react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { Clip } from "./Clip";
 import { useComposition } from "../../store";
+import { useComposerDraft } from "@/stores/composerDraft";
 import { makeEmptyComposition } from "../../types";
 
 beforeEach(() => {
@@ -24,6 +25,7 @@ beforeEach(() => {
     beats: [],
     dragState: null,
   });
+  useComposerDraft.setState({ nonce: 0, text: "" });
 });
 
 describe("Clip", () => {
@@ -107,6 +109,47 @@ describe("Clip", () => {
       (c) => c.id === "v1",
     )! as { out: number };
     expect(v.out).toBeCloseTo(5);
+  });
+
+  // #5 — right-click "加入聊天上下文" context menu.
+  it("right-click opens the add-to-context menu and selects the clip", () => {
+    const { container } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    fireEvent.contextMenu(container.firstChild as HTMLElement, {
+      clientX: 40,
+      clientY: 40,
+    });
+    // selecting the clip is what makes the viewer-context envelope carry its id
+    expect(useComposition.getState().selection).toBe("v1");
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    expect(screen.getByRole("menuitem")).toBeInTheDocument();
+  });
+
+  it("clicking the menu item injects the clip reference into the composer draft", () => {
+    const { container } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    fireEvent.contextMenu(container.firstChild as HTMLElement, {
+      clientX: 40,
+      clientY: 40,
+    });
+    fireEvent.click(screen.getByRole("menuitem"));
+    // noun prefix is locale-dependent; assert on the locale-agnostic
+    // name「x」 + (1.0s) offset built from src "/x.mp4" at trackOffset 1.
+    expect(useComposerDraft.getState().text).toMatch(/「x」\(1\.0s\)/);
+  });
+
+  it("right-click (button 2) pointerdown does NOT begin a body-drag", () => {
+    const { container } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    fireEvent.pointerDown(container.firstChild as HTMLElement, {
+      clientX: 0,
+      pointerId: 9,
+      button: 2,
+    });
+    expect(useComposition.getState().dragState).toBeNull();
   });
 
   it("Escape during a resize drag reverts the clip", () => {

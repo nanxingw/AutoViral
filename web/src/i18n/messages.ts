@@ -684,6 +684,22 @@ export const en = {
       },
       mandarinAgentHint: "Agent responds in Mandarin",
     },
+    addToContext: {
+      menuAria: "Element actions",
+      add: "Add to chat context",
+      clip: {
+        video: "video",
+        audio: "audio",
+        text: "caption",
+        overlay: "overlay",
+      },
+      layer: {
+        text: "text layer",
+        image: "image layer",
+        shape: "shape layer",
+        sticker: "sticker layer",
+      },
+    },
   },
   settings: {
     title: "Settings",
@@ -1404,6 +1420,22 @@ export const zh: DeepShape<Messages> = {
         swapPalette: "换调色板",
       },
       mandarinAgentHint: "Agent 会用中文回应",
+    },
+    addToContext: {
+      menuAria: "元素操作",
+      add: "加入聊天上下文",
+      clip: {
+        video: "视频",
+        audio: "音频",
+        text: "字幕",
+        overlay: "叠加",
+      },
+      layer: {
+        text: "文字图层",
+        image: "图片图层",
+        shape: "形状图层",
+        sticker: "贴纸图层",
+      },
     },
   },
   settings: {

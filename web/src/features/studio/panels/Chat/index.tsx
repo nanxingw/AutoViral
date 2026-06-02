@@ -15,6 +15,7 @@ import {
   type Checkpoint,
 } from "@/features/checkpoints/useCheckpoints";
 import { highlightCode } from "./highlight";
+import { useComposerDraft } from "@/stores/composerDraft";
 
 /** Render an agent-emitted ```yaml block``` with our hand-rolled highlighter.
  *  Only fires for fenced code blocks (where react-markdown sets a className
@@ -344,6 +345,27 @@ export function ChatPanel({
     setInput(text + " ");
     requestAnimationFrame(() => composerRef.current?.focus());
   };
+
+  // #5 — element affordances ("加入聊天上下文" on a clip / canvas layer) inject
+  // a reference phrase into THIS composer via the composer-draft store, since
+  // the textarea has no external setter. Subscribe to the nonce (not the text)
+  // so adding the same element twice still appends; read the text imperatively.
+  const draftNonce = useComposerDraft((s) => s.nonce);
+  // Seed with the current nonce so a freshly mounted ChatPanel never replays
+  // an injection that happened before it mounted — only FUTURE inject() calls
+  // append to this composer.
+  const lastDraftNonce = useRef(useComposerDraft.getState().nonce);
+  useEffect(() => {
+    if (draftNonce === lastDraftNonce.current) return;
+    lastDraftNonce.current = draftNonce;
+    const text = useComposerDraft.getState().text;
+    if (!text) return;
+    setInput((prev) => {
+      const sep = prev && !prev.endsWith(" ") ? " " : "";
+      return prev + sep + text + " ";
+    });
+    requestAnimationFrame(() => composerRef.current?.focus());
+  }, [draftNonce]);
 
   // POST /api/works/:id/abort — kills the running CLI process and lets the
   // turn complete handler broadcast cli_exited so streaming flips off.
