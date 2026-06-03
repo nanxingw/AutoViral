@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createWork, getWork, updateWork, listAssets } from "./domain/work-store.js";
+import { createWork, getWork, updateWork, listAssets, type WorkType } from "./domain/work-store.js";
 import { loadConfig } from "./infra/config.js";
 import { log } from "./infra/logger.js";
 import type { WsBridge, ChatBlock } from "./ws-bridge.js";
@@ -16,7 +16,7 @@ const TEST_RUNS_DIR = join(homedir(), ".autoviral", "test-runs");
 
 export interface RunConfig {
   title?: string;
-  type: "short-video" | "image-text";
+  type: WorkType;
   platform: "douyin" | "xiaohongshu";
   topicHint?: string;
   model?: string;

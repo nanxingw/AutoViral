@@ -1,10 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "@/lib/api";
+import type { WorkType } from "@shared/content-types/registry";
 
 export interface WorkSummary {
   id: string;
   title: string;
-  type: "short-video" | "image-text";
+  // I06 / ADR-006 — the content-type union is owned by the shared registry.
+  type: WorkType;
   // Backend statuses (src/work-store.ts WorkStatus) + frontend filter-only statuses
   // ("published" / "archived" are UI groupings that don't yet exist server-side).
   status: "draft" | "creating" | "ready" | "failed" | "published" | "archived";

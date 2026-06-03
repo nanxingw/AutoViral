@@ -5,6 +5,7 @@ import { useDeleteWork, useUpdateWork, type WorkSummary } from "@/queries/works"
 import styles from "./WorksGrid.module.css";
 import { useT, type MessageKey } from "@/i18n/useT";
 import { useLocaleStore } from "@/i18n/store";
+import { getContentType } from "@shared/content-types/registry";
 import { WorkCardMenu } from "./WorkCardMenu";
 import { DeleteWorkConfirm } from "./DeleteWorkConfirm";
 import { RenameWorkDialog } from "./RenameWorkDialog";
@@ -64,9 +65,10 @@ export function WorksGrid({ works, filter }: Props) {
     <>
       <div className={styles.grid}>
         {visible.map((w) => {
-          const typeLabel = t(
-            (w.type === "short-video" ? "works.type.video" : "works.type.image") as MessageKey,
-          );
+          // I06 / ADR-006 — label, route, and cover-alt all come from the
+          // content-type registry manifest instead of per-type ternaries.
+          const ct = getContentType(w.type);
+          const typeLabel = t(ct.labelKey as MessageKey);
           const statusLabel = t(
             (`works.status.${STATUSES.has(w.status) ? w.status : "draft"}`) as MessageKey,
           );
@@ -85,7 +87,7 @@ export function WorksGrid({ works, filter }: Props) {
                 onDelete={() => setPendingDelete(w)}
               />
               <Link
-                to={w.type === "short-video" ? `/studio/${w.id}` : `/editor/${w.id}`}
+                to={ct.routePath(w.id)}
                 className={styles.cardInner}
               >
                 <WorkCover work={w} />
@@ -162,8 +164,7 @@ function WorkCover({ work }: { work: WorkSummary }) {
   // back to "Untitled" when the title is blank so the string stays
   // readable. WCAG 1.1.1 — content-bearing images must describe content.
   const titleForAlt = displayWorkTitle(work.title, t("works.untitledWork"));
-  const altKey: MessageKey =
-    work.type === "short-video" ? "works.coverAltVideo" : "works.coverAltImage";
+  const altKey = getContentType(work.type).coverAltKey as MessageKey;
   const coverAlt = t(altKey, { title: titleForAlt });
   if (!cover || failed) {
     return <div className={styles.thumb} style={{ background: fallbackGradient(work.id) }} />;

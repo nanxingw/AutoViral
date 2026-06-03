@@ -1,4 +1,4 @@
-// Carousel domain schema — the SSoT for `carousel.yaml` (image-text works).
+// Carousel domain schema — the SSoT for `carousel.yaml` (the carousel work type).
 //
 // Promoted from web/src/features/editor/types.ts to src/shared/ (ADR-006) so
 // it is reachable by server + web + the `autoviral` CLI. The server now

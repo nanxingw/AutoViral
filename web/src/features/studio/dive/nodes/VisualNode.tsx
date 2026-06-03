@@ -25,7 +25,7 @@ export function VisualNode({ data }: NodeProps<DiveNode>) {
   return (
     <NodeShell assetId={data.asset.id} isCurrent={data.isCurrent} onUse={data.onUse}>
       {isVideoAsset(data.asset) ? (
-        // #84 — clip assets in a short-video work are .mp4; an <img> can't
+        // #84 — clip assets in a video work are .mp4; an <img> can't
         // decode them (complete:true, naturalWidth:0 → blank gray card).
         // Render a <video> instead. preload="metadata" paints the first
         // frame as a poster WITHOUT autoplaying — deliberately no autoplay

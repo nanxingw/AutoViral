@@ -16,10 +16,20 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { dataDir } from "../infra/config.js";
 import { logBridge } from "../infra/logger.js";
+import {
+  listContentTypes,
+  type ContentTypeManifest,
+} from "../shared/content-types/registry.js";
 
 const SNAPSHOT_DIR = ".snapshots";
-const DELIVERABLES = ["carousel.yaml", "composition.yaml"] as const;
-type Deliverable = (typeof DELIVERABLES)[number];
+// I06 / ADR-006 — the snapshot targets are exactly the content types'
+// deliverable files (each type's one deliverable IS its one checkpoint
+// target — Decision #2 collapsed `checkpointTargets` into `deliverableFile`).
+// Derived from the registry so adding a content type auto-extends checkpoint
+// coverage with no constant to hand-edit. The narrow string-literal union is
+// preserved by typing off the manifest field, not the runtime array.
+type Deliverable = ContentTypeManifest["deliverableFile"];
+const DELIVERABLES: Deliverable[] = listContentTypes().map((t) => t.deliverableFile);
 
 // #90 — user-supplied snapshot labels live in a sidecar JSON keyed by
 // filename, NOT in the filename itself. The filename is a strict

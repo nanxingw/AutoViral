@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { listAssets, loadWorkChat } from "./domain/work-store.js";
+import { listAssets, loadWorkChat, type WorkType } from "./domain/work-store.js";
 import { log } from "./infra/logger.js";
 
 const execFileAsync = promisify(execFile);
@@ -39,7 +39,7 @@ export interface EvaluationReport {
 
 export async function evaluateWork(
   workId: string,
-  contentType: "short-video" | "image-text",
+  contentType: WorkType,
 ): Promise<EvaluationReport> {
   log("info", "server", "evaluation_started", workId);
 

@@ -43,6 +43,7 @@ import {
   migrateLegacyTrackIds,
   newTrackId,
 } from "../shared/composition.js";
+import { isWorkType, getContentType } from "../shared/content-types/registry.js";
 import { z } from "zod";
 import { tmpdir } from "node:os";
 import { runPythonScript } from "./python-bridge.js";
@@ -394,9 +395,14 @@ apiRoutes.post("/api/works", async (c) => {
     if (!body.type || !body.platforms) {
       return c.json({ error: "type and platforms are required", errorCode: "create_work_validation" }, 400);
     }
+    // I06 / ADR-006 — validate the work type against the registry at the trust
+    // boundary instead of an unchecked cast to the bare literal union.
+    if (!isWorkType(body.type)) {
+      return c.json({ error: "unknown work type", errorCode: "create_work_validation" }, 400);
+    }
     const work = await storeCreateWork({
       title: body.title ?? "",
-      type: body.type as "short-video" | "image-text",
+      type: body.type,
       contentCategory: body.contentCategory as any,
       videoSource: body.videoSource as any,
       videoSearchQuery: body.videoSearchQuery,
@@ -536,7 +542,11 @@ async function synthesiseLegacyComposition(
   workId: string,
   workType: string,
 ): Promise<unknown | null> {
-  if (workType !== "short-video") return null;
+  // I06 / ADR-006 — this synthesiser only applies to works whose deliverable
+  // is composition.yaml. Dispatch off the registry manifest instead of a bare
+  // literal so a new content type can't silently fall through here.
+  if (!isWorkType(workType) || getContentType(workType).deliverableFile !== "composition.yaml")
+    return null;
   const wDir = join(dataDir, "works", workId);
   const collect = async (dir: string, exts: RegExp): Promise<string[]> => {
     try {
@@ -830,7 +840,7 @@ apiRoutes.get("/api/works/:id/carousel", async (c) => {
     if (err?.code === "ENOENT") {
       // No persisted carousel — try to synthesise one from output/*.png
       // (the user's already-finished carousel images). Mirrors the legacy
-      // composition fallback for short-video works.
+      // composition fallback on the video deliverable path.
       const synthesised = await synthesiseLegacyCarousel(id, w.type);
       if (synthesised) return c.json(synthesised);
       return c.json({ error: "Carousel not found", errorCode: "carousel_not_found" }, 404);
@@ -843,7 +853,9 @@ async function synthesiseLegacyCarousel(
   workId: string,
   workType: string,
 ): Promise<unknown | null> {
-  if (workType !== "image-text") return null;
+  // I06 / ADR-006 — applies only to works whose deliverable is carousel.yaml.
+  if (!isWorkType(workType) || getContentType(workType).deliverableFile !== "carousel.yaml")
+    return null;
   const wDir = join(dataDir, "works", workId);
   const collect = async (dir: string, exts: RegExp): Promise<string[]> => {
     try {

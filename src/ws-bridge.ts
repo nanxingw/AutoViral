@@ -22,6 +22,7 @@ import { logBridge, logBridgeDebug } from "./infra/logger.js";
 import { loadConfig, dataDir } from "./infra/config.js";
 import { PACKAGE_ROOT } from "./infra/paths.js";
 import { getWork, updateWork, saveWorkChat, loadWorkChat, type Work } from "./domain/work-store.js";
+import { getContentType } from "./shared/content-types/registry.js";
 import { createCheckpoint } from "./server/checkpoints.js";
 import { listSharedAssets } from "./shared-assets.js";
 import { MemoryClient } from "./domain/memory.js";
@@ -89,10 +90,13 @@ export function buildSystemPrompt(
   opts: { port: number; workspacePath: string },
 ): string {
   const { port, workspacePath } = opts;
-  const isVideo = work.type === "short-video";
-  const typeLabel = isVideo ? "短视频 (short-video)" : "图文 (image-text)";
+  // I06 / ADR-006 — drive the deliverable + the video-vs-carousel prompt
+  // branch off the content-type registry manifest, not a bare type literal.
+  const manifest = getContentType(work.type);
+  const deliverableFile = manifest.deliverableFile;
+  const isVideo = deliverableFile === "composition.yaml";
+  const typeLabel = isVideo ? "短视频" : "图文";
   const platforms = work.platforms.join(", ");
-  const deliverableFile = isVideo ? "composition.yaml" : "carousel.yaml";
   const deliverableAbs = `${workspacePath}/${deliverableFile}`;
 
   return `你是 AutoViral 的创作 agent，正在协助用户完成一个 ${typeLabel} 作品。目标平台：${platforms}。

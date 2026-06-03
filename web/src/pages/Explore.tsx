@@ -49,7 +49,9 @@ export default function Explore() {
   const t = useT();
   const navigate = useNavigate();
   // #65 — turn a trend into a new work seeded with topicHint, then open it.
-  // Trends are video hooks → short-video. Guard re-entry on the pending flag.
+  // Trends are video hooks → always seed a video work. Guard re-entry on the
+  // pending flag. (The chosen type literal below is a deliberate domain
+  // default, not type dispatch — a trend never produces a carousel work.)
   const createWork = useCreateWork();
   async function useTrend(item: TrendItem) {
     if (createWork.isPending) return;

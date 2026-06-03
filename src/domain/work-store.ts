@@ -9,7 +9,13 @@ import { dataDir } from "../infra/config.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export type WorkType = "short-video" | "image-text";
+// I06 / ADR-006 — the content-type union is now OWNED by the registry
+// (derived from its manifest ids). Imported into scope for the `Work` shape
+// below AND re-exported for back-compat so every existing `WorkType` import
+// from work-store keeps working with no churn. src/shared must NOT import from
+// src/domain; the dependency points this way.
+import type { WorkType } from "../shared/content-types/registry.js";
+export type { WorkType };
 export type WorkStatus = "draft" | "creating" | "ready" | "failed";
 
 export type ContentCategory = "anxiety" | "conflict" | "comedy" | "envy" | "other";

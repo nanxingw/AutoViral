@@ -1,9 +1,38 @@
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { useCreateWork } from "@/queries/works";
-import { useT } from "@/i18n/useT";
+import { useT, type MessageKey } from "@/i18n/useT";
 import { localizeApiError } from "@/i18n/serverError";
+import {
+  listContentTypes,
+  getContentType,
+  type WorkType,
+} from "@shared/content-types/registry";
 import styles from "./NewWorkCard.module.css";
+
+// I06 / ADR-006 — the create buttons now iterate the content-type registry.
+// Per-type PRESENTATION (icon + sub-label) is web-only and stays out of the
+// pure shared manifest (Decision #4: manifest carries data + i18n keys, not
+// React). This small local table keys off the registry's WorkType so adding a
+// type means a registry entry + one row here, not a new hand-wired button.
+const TYPE_ICONS: Record<WorkType, ReactNode> = {
+  "short-video": (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+      <polygon points="6 4 20 12 6 20 6 4" />
+    </svg>
+  ),
+  "image-text": (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="9" cy="9" r="2" />
+      <path d="M21 15l-5-5L5 21" />
+    </svg>
+  ),
+};
+const TYPE_SUB_KEYS: Record<WorkType, MessageKey> = {
+  "short-video": "works.type.videoSub",
+  "image-text": "works.type.imageSub",
+};
 
 export function NewWorkCard() {
   const navigate = useNavigate();
@@ -33,7 +62,7 @@ export function NewWorkCard() {
   const lockRef = useRef(false);
   const [navigating, setNavigating] = useState(false);
 
-  async function pick(type: "short-video" | "image-text") {
+  async function pick(type: WorkType) {
     if (lockRef.current) return;
     lockRef.current = true;
     setNavigating(true);
@@ -42,7 +71,7 @@ export function NewWorkCard() {
     const topicHint = pendingHint.trim() || undefined;
     try {
       const w = await create.mutateAsync({ title, type, topicHint });
-      navigate(type === "short-video" ? `/studio/${w.id}` : `/editor/${w.id}`);
+      navigate(getContentType(type).routePath(w.id));
       // lock stays held — the component unmounts on navigate.
     } catch (err: unknown) {
       // R27: prefer the localized server-error path (errorCode → i18n key)
@@ -83,42 +112,22 @@ export function NewWorkCard() {
         data-bare
       />
       <div className={styles.options}>
-        <button
-          type="button"
-          className={styles.opt}
-          onClick={() => {
-            void pick("short-video");
-          }}
-          disabled={locked}
-          style={locked ? { opacity: 0.5, cursor: "wait" } : undefined}
-        >
-          <div className={styles.ico}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-              <polygon points="6 4 20 12 6 20 6 4" />
-            </svg>
-          </div>
-          <div className={styles.lbl}>{t("works.type.video")}</div>
-          <div className={styles.sub}>{t("works.type.videoSub")}</div>
-        </button>
-        <button
-          type="button"
-          className={styles.opt}
-          onClick={() => {
-            void pick("image-text");
-          }}
-          disabled={locked}
-          style={locked ? { opacity: 0.5, cursor: "wait" } : undefined}
-        >
-          <div className={styles.ico}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="9" cy="9" r="2" />
-              <path d="M21 15l-5-5L5 21" />
-            </svg>
-          </div>
-          <div className={styles.lbl}>{t("works.type.image")}</div>
-          <div className={styles.sub}>{t("works.type.imageSub")}</div>
-        </button>
+        {listContentTypes().map((ct) => (
+          <button
+            key={ct.id}
+            type="button"
+            className={styles.opt}
+            onClick={() => {
+              void pick(ct.id);
+            }}
+            disabled={locked}
+            style={locked ? { opacity: 0.5, cursor: "wait" } : undefined}
+          >
+            <div className={styles.ico}>{TYPE_ICONS[ct.id]}</div>
+            <div className={styles.lbl}>{t(ct.labelKey as MessageKey)}</div>
+            <div className={styles.sub}>{t(TYPE_SUB_KEYS[ct.id])}</div>
+          </button>
+        ))}
       </div>
       {locked && (
         <div

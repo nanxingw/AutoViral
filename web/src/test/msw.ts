@@ -1,13 +1,18 @@
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
+import { WORK_TYPE_IDS } from "@shared/content-types/registry";
+
+// I06 / ADR-006 — mock work-type values derive from the registry ids so the
+// fixtures can't drift from the real content-type union.
+const [VIDEO, IMAGE_TEXT] = WORK_TYPE_IDS;
 
 export const handlers = [
   http.get("/api/works", () =>
     HttpResponse.json({
       works: [
-        { id: "w1", title: "Hook Formula", type: "image-text", status: "published", thumbnail: null, updatedAt: "2026-04-22T10:00:00Z" },
-        { id: "w2", title: "Why Nobody Watches", type: "short-video", status: "published", thumbnail: null, updatedAt: "2026-04-23T10:00:00Z" },
-        { id: "w3", title: "Competitor Blind Spots", type: "short-video", status: "draft", thumbnail: null, updatedAt: "2026-04-24T10:00:00Z" },
+        { id: "w1", title: "Hook Formula", type: IMAGE_TEXT, status: "published", thumbnail: null, updatedAt: "2026-04-22T10:00:00Z" },
+        { id: "w2", title: "Why Nobody Watches", type: VIDEO, status: "published", thumbnail: null, updatedAt: "2026-04-23T10:00:00Z" },
+        { id: "w3", title: "Competitor Blind Spots", type: VIDEO, status: "draft", thumbnail: null, updatedAt: "2026-04-24T10:00:00Z" },
       ],
     }),
   ),
