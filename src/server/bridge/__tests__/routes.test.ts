@@ -443,6 +443,128 @@ describe("bridge router — Phase 2 docs", () => {
     const res = await app.request("/api/bridge/v1/docs?topic=does-not-exist");
     expect(res.status).toBe(404);
   });
+
+  // I08 — subdir-aware topic resolution (groundwork for I09).
+  it("GET /docs?topic=carousel/02-schema returns the nested carousel chapter", async () => {
+    const res = await app.request(
+      "/api/bridge/v1/docs?topic=" + encodeURIComponent("carousel/02-schema"),
+    );
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toMatch(/Carousel schema/i);
+    expect(text).toMatch(/discriminated union/i);
+  });
+
+  it("GET /docs (no topic) includes the carousel subdir chapter in the full dump", async () => {
+    const res = await app.request("/api/bridge/v1/docs");
+    const text = await res.text();
+    expect(text).toMatch(/Carousel schema/i);
+  });
+
+  it("GET /docs?topic=../../package rejects path traversal with 404", async () => {
+    const res = await app.request(
+      "/api/bridge/v1/docs?topic=" + encodeURIComponent("../../package"),
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
+describe("bridge router — I08 carousel writes", () => {
+  let workRoot: string;
+  const workId = "w_car";
+  let slideId = "";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  beforeAll(async () => {
+    const { mkdtemp, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const yamlMod = (await import("js-yaml")).default;
+    const { makeEmptyCarousel } = await import("../../../shared/carousel.js");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-carousel-route-"));
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(
+      join(workRoot, workId, "carousel.yaml"),
+      yamlMod.dump(makeEmptyCarousel(workId), { lineWidth: -1 }),
+      "utf8",
+    );
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  it("POST /carousel/slide appends a slide and returns its id", async () => {
+    const res = await app.request("/api/bridge/v1/carousel/slide", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { id: string } };
+    expect(body.ok).toBe(true);
+    expect(typeof body.result?.id).toBe("string");
+    slideId = body.result!.id;
+  });
+
+  it("POST /carousel/slide/:id/layer adds a text layer (zod fills style defaults)", async () => {
+    const res = await app.request(
+      `/api/bridge/v1/carousel/slide/${encodeURIComponent(slideId)}/layer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({
+          kind: "text",
+          box: { x: 80, y: 80, w: 920, h: 200 },
+          text: "标题",
+        }),
+      },
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { id: string } };
+    expect(body.ok).toBe(true);
+    expect(typeof body.result?.id).toBe("string");
+  });
+
+  it("POST layer with a bogus kind → 400 + code 4, carousel.yaml untouched", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const target = join(workRoot, workId, "carousel.yaml");
+    const before = await readFile(target, "utf8");
+    const res = await app.request(
+      `/api/bridge/v1/carousel/slide/${encodeURIComponent(slideId)}/layer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ kind: "bogus", box: { x: 0, y: 0, w: 1, h: 1 } }),
+      },
+    );
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    expect(await readFile(target, "utf8")).toBe(before);
+  });
+
+  it("POST layer onto a non-existent slide → 400", async () => {
+    const res = await app.request(
+      "/api/bridge/v1/carousel/slide/s_nope/layer",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ kind: "text", box: { x: 0, y: 0, w: 1, h: 1 }, text: "x" }),
+      },
+    );
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /carousel/slide without the work-id header → 400", async () => {
+    const res = await app.request("/api/bridge/v1/carousel/slide", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("bridge router — H0.1 focus channel", () => {

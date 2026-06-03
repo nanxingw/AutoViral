@@ -48,7 +48,13 @@ function extractRefs(source: string, text: string): Ref[] {
   // Form 1: `autoviral docs <slug>` — a real topic is two digits + "-" + slug
   // (e.g. 02-composition-schema). `<topic>` / `[topic]` placeholders never
   // match this shape, so they're excluded by construction.
-  const docsRx = /autoviral docs ([a-z0-9][a-z0-9-]*)/g;
+  //
+  // I08 — a topic may now be a SUBDIR chapter like `carousel/02-schema` (the
+  // server resolves the `/` into a real subdir under manual/). The slug class
+  // therefore allows `/` segments. The fs assertion resolves the topic against
+  // MANUAL_DIR exactly as the server's /docs endpoint does, so a dangling
+  // subdir ref (e.g. a rename of carousel/02-schema.md) makes this guard red.
+  const docsRx = /autoviral docs ([a-z0-9][a-z0-9-]*(?:\/[a-z0-9][a-z0-9-]*)*)/g;
   for (const m of text.matchAll(docsRx)) {
     const topic = m[1];
     if (PLACEHOLDER_TOPICS.has(topic)) continue;

@@ -7,7 +7,7 @@
 
 import { Hono, type Context } from "hono";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, relative, sep } from "node:path";
 import { PACKAGE_ROOT } from "../../infra/paths.js";
 import { readdir, readFile } from "node:fs/promises";
 import type { WhoAmIResponse } from "./schemas.js";
@@ -24,6 +24,15 @@ import {
   mutateCompositionFor,
   diffCompositionFor,
 } from "./composition-ops.js";
+import { mutateCarouselFor } from "./carousel-ops.js";
+import {
+  LayerSchema,
+  SlideBgSchema,
+  makeEmptySlide,
+  genLayerId,
+  type Slide,
+  type Layer,
+} from "../../shared/carousel.js";
 import { uiEventBus } from "./ui-events.js";
 import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
@@ -713,6 +722,101 @@ bridgeRouter.patch("/clip/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// ─── I08 — carousel write endpoints ─────────────────────────────────────────
+// The carousel analogue of the clip endpoints. Both go through
+// mutateCarouselFor which read-modifies-writes carousel.yaml atomically +
+// validates the WHOLE carousel via CarouselSchema before it touches disk.
+// On validation failure the mutator throws and disk state is left untouched —
+// the only invariant the agent can chain on. Invalid input → HTTP 400
+// `{ ok:false, error, code:4 }` → CLI exit 4 (per contracts/error-codes.md).
+//
+// Why two verbs: `add-slide` + `set-layer` are the carousel mutations that
+// recur often enough to justify a round-trip. Richer mutations (reorder
+// slides, restyle globals) are composed client-side and PUT as a full
+// carousel via /api/works/:id/carousel.
+
+// POST /carousel/slide — append a slide (optionally at an index). Body:
+//   { at?: number, bg?: SlideBg }  — all optional; defaults to an empty
+//   gradient slide appended at the end. Returns { id } of the new slide.
+bridgeRouter.post("/carousel/slide", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    at?: number;
+    bg?: unknown;
+  };
+  let newId = "";
+  try {
+    await mutateCarouselFor({ workId: g.workId }, (carousel) => {
+      const slide: Slide = makeEmptySlide();
+      if (body.bg !== undefined) {
+        // Validate just the bg sub-shape eagerly so a bad --bg fails with a
+        // pointed message rather than a whole-carousel zod dump. The final
+        // CarouselSchema.parse in writeCarouselFor is the real gate.
+        slide.bg = SlideBgSchema.parse(body.bg);
+      }
+      newId = slide.id;
+      const at =
+        typeof body.at === "number" && Number.isFinite(body.at)
+          ? Math.max(0, Math.min(carousel.slides.length, Math.trunc(body.at)))
+          : carousel.slides.length;
+      const slides = [...carousel.slides];
+      slides.splice(at, 0, slide);
+      return { ...carousel, slides, updatedAt: new Date().toISOString() };
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message, code: 4 }, 400);
+  }
+  return c.json({ ok: true, result: { id: newId } });
+});
+
+// POST /carousel/slide/:slideId/layer — add or replace one layer on a slide.
+// Body is a full Layer object (the discriminated union — { kind:"text"|...,
+// box, ... }). If `id` is present and matches an existing layer it is
+// REPLACED in place; otherwise a fresh id is minted and the layer appended.
+// The layer is validated against LayerSchema (zod fills defaults) before the
+// whole carousel is re-validated by writeCarouselFor. Returns { id }.
+bridgeRouter.post("/carousel/slide/:slideId/layer", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const slideId = c.req.param("slideId");
+  const raw = (await c.req.json().catch(() => null)) as Record<string, unknown> | null;
+  if (!raw || typeof raw !== "object") {
+    return c.json({ ok: false, error: "layer body must be a JSON object", code: 4 }, 400);
+  }
+  let layerId = "";
+  try {
+    await mutateCarouselFor({ workId: g.workId }, (carousel) => {
+      const idx = carousel.slides.findIndex((s) => s.id === slideId);
+      if (idx === -1) throw new Error(`no slide with id "${slideId}"`);
+      const slide = carousel.slides[idx];
+      // Mint an id if none supplied; preserve a supplied id so a re-POST with
+      // the same id is an idempotent replace (not a duplicate append).
+      const incomingId =
+        typeof raw.id === "string" && raw.id.length > 0 ? raw.id : genLayerId();
+      // LayerSchema is the discriminated union — it rejects an unknown `kind`
+      // and fills per-kind style defaults. Parse here so a malformed layer
+      // fails BEFORE we mutate the slide array.
+      const layer: Layer = LayerSchema.parse({ ...raw, id: incomingId });
+      layerId = layer.id;
+      const existing = slide.layers.findIndex((l) => l.id === layer.id);
+      const layers =
+        existing === -1
+          ? [...slide.layers, layer]
+          : slide.layers.map((l, i) => (i === existing ? layer : l));
+      const slides = carousel.slides.map((s, i) =>
+        i === idx ? { ...s, layers } : s,
+      );
+      return { ...carousel, slides, updatedAt: new Date().toISOString() };
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message, code: 4 }, 400);
+  }
+  return c.json({ ok: true, result: { id: layerId } });
+});
+
 // POST /ingest/youtube — download a YouTube URL into the current work,
 // transcribe with Whisper, translate to the target language via OpenRouter,
 // then bootstrap composition.yaml so the Studio can render the result.
@@ -745,11 +849,23 @@ bridgeRouter.get("/docs", async (c) => {
   const dir = manualDir();
   try {
     if (topic) {
-      const file = join(dir, topic.endsWith(".md") ? topic : `${topic}.md`);
+      // I08 — subdir-aware topic resolution. A topic may now be a nested
+      // chapter like `carousel/02-schema`; node's `join` resolves the `/`
+      // into a real subdir path. We `resolve` both sides and verify the
+      // target stays INSIDE the manual dir so a crafted `../../secret` topic
+      // can't escape the manual tree.
+      const rel = topic.endsWith(".md") ? topic : `${topic}.md`;
+      const file = resolve(dir, rel);
+      const within = relative(resolve(dir), file);
+      if (within.startsWith("..") || within.startsWith(sep) || within === "") {
+        return c.json({ ok: false, error: `invalid docs topic: ${topic}` }, 404);
+      }
       const md = await readFile(file, "utf8");
       return c.text(md);
     }
-    const files = (await readdir(dir)).filter((f) => f.endsWith(".md")).sort();
+    // No topic → concatenate the whole manual, recursing one level into
+    // subdirs (e.g. carousel/) so a content-type's chapters are included.
+    const files = await listManualMarkdown(dir);
     const chunks = await Promise.all(files.map((f) => readFile(join(dir, f), "utf8")));
     return c.text(chunks.join("\n\n---\n\n"));
   } catch (err) {
@@ -757,3 +873,19 @@ bridgeRouter.get("/docs", async (c) => {
     return c.json({ ok: false, error: message }, 404);
   }
 });
+
+// Collect markdown chapters under the manual dir, recursing one level into
+// subdirectories (carousel/, etc.). Returns paths RELATIVE to `dir`, sorted
+// so the dump order is stable (top-level chapters first, then subdir chapters).
+async function listManualMarkdown(dir: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const out: string[] = [];
+  for (const e of entries) {
+    if (e.isFile() && e.name.endsWith(".md")) out.push(e.name);
+    else if (e.isDirectory()) {
+      const sub = await readdir(join(dir, e.name)).catch(() => [] as string[]);
+      for (const f of sub) if (f.endsWith(".md")) out.push(`${e.name}/${f}`);
+    }
+  }
+  return out.sort();
+}

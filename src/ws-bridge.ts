@@ -167,7 +167,7 @@ Skill('autoviral')
   ${deliverableAbs}
 - ${isVideo
     ? "composition.yaml：优先用 `autoviral clip add/set/remove` 改（原子 + zod 校验 + 实时驱动 Studio）；CLI 这一期还没覆盖的字段 / clip 种类，按 `autoviral docs 02-composition-schema` 给的 schema 直接编辑 composition.yaml。"
-    : "carousel.yaml（图文暂无 CLI，直接写这个绝对路径文件）：{ id, workId, width, height, globals: { headlineFont, palette, layout, effects }, slides: [{ id, bg, layers }], updatedAt }。"}
+    : "carousel.yaml：优先用 `autoviral carousel add-slide` / `autoviral carousel set-layer <slideId> --kind text|image|shape|sticker ...` 改（原子 + zod 校验 + 实时驱动 Studio）——**不要盲写这个文件**，layer 是 discriminated union、box / bg / enum 约束很多，盲写几乎必然 zod 校验不过导致用户看不到图文。完整 schema 与每种 layer 的字段查 `autoviral docs carousel/02-schema`。"}
 - **不要**写到相对路径 \`data/works/...\`：你的 shell cwd 是项目根而不是 workspace，相对路径会落错位置导致 frontend 看不到产物。（\`autoviral\` 命令的 \`--src\` 等路径相对 workspace root，由 CLI 解析，不受此限。）
 - 中间产物按子目录归类：research/ plan/ assets/(frames|clips|images) output/
 

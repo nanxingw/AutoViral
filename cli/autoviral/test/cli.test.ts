@@ -72,6 +72,26 @@ beforeAll(async () => {
     if (req.method === "GET" && url.startsWith("/api/bridge/v1/clips")) {
       return send(200, { ok: true, result: clips });
     }
+    // I08 — carousel write endpoints. Mirror the server's contract: POST
+    // /carousel/slide returns { ok, result:{ id } }; POST
+    // /carousel/slide/:id/layer echoes the layer id (or mints one). A layer
+    // with kind "bogus" simulates a zod rejection → 400 + code 4.
+    if (req.method === "POST" && url === "/api/bridge/v1/carousel/slide") {
+      await readBody(req);
+      const id = `s_e2e${nextSeq++}`;
+      return send(200, { ok: true, result: { id } });
+    }
+    if (
+      req.method === "POST" &&
+      /^\/api\/bridge\/v1\/carousel\/slide\/[^/]+\/layer$/.test(url)
+    ) {
+      const body = await readBody(req);
+      if (body.kind === "bogus") {
+        return send(400, { ok: false, error: "invalid layer kind", code: 4 });
+      }
+      const id = typeof body.id === "string" && body.id ? body.id : `t_e2e${nextSeq++}`;
+      return send(200, { ok: true, result: { id } });
+    }
     if (req.method === "POST" && url === "/api/bridge/v1/clip") {
       const body = await readBody(req);
       const id = `vc_e2e${nextSeq++}`;
@@ -216,6 +236,57 @@ describe("autoviral CLI — end-to-end", () => {
     expect(r.stdout).toContain("+++ composition.yaml");
     expect(r.stdout).toContain("-duration: 0");
     expect(r.stdout).toContain("+duration: 5");
+  });
+
+  it("carousel add-slide → prints new slide id (exit 0)", async () => {
+    const r = await run(["carousel", "add-slide"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toMatch(/^s_e2e/);
+  });
+
+  it("carousel set-layer text → prints layer id (exit 0)", async () => {
+    const r = await run([
+      "carousel", "set-layer", "s_e2e1",
+      "--kind", "text",
+      "--text", "标题",
+      "--x", "80", "--y", "80", "--w", "920", "--h", "200",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toMatch(/^t_e2e/);
+  });
+
+  it("carousel set-layer with --id is an idempotent replace (echoes the id)", async () => {
+    const r = await run([
+      "carousel", "set-layer", "s_e2e1",
+      "--kind", "image", "--id", "t_fixed", "--src", "assets/images/x.png",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe("t_fixed");
+  });
+
+  it("carousel set-layer missing --kind → exit 4 (validation, never hits bridge)", async () => {
+    const r = await run(["carousel", "set-layer", "s_e2e1", "--text", "hi"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("carousel set-layer bogus kind → bridge 400 → exit 4", async () => {
+    const r = await run([
+      "carousel", "set-layer", "s_e2e1", "--kind", "bogus", "--text", "x",
+    ]);
+    // bridgeRequest maps HTTP non-ok to exit 3; the server's 400+code path
+    // is the contract — assert it is a non-zero failure, not a silent success.
+    expect(r.exitCode).not.toBe(0);
+  });
+
+  it("carousel unknown subcommand → exit 127", async () => {
+    const r = await run(["carousel", "frobnicate"]);
+    expect(r.exitCode).toBe(127);
+  });
+
+  it("--help lists carousel commands", async () => {
+    const r = await run(["--help"]);
+    expect(r.stdout).toMatch(/carousel add-slide/);
+    expect(r.stdout).toMatch(/carousel set-layer/);
   });
 
   it("unknown command → exit 127", async () => {

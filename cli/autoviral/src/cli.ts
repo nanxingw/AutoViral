@@ -15,6 +15,7 @@ import { playCommand, pauseCommand } from "./commands/play.js";
 import { toastCommand } from "./commands/toast.js";
 import { progressCommand } from "./commands/progress.js";
 import { clipCommand } from "./commands/clip.js";
+import { carouselCommand } from "./commands/carousel.js";
 import { askCommand } from "./commands/ask.js";
 import { exportCommand, renderCommand } from "./commands/export.js";
 import { ingestCommand } from "./commands/ingest.js";
@@ -42,6 +43,7 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   toast: toastCommand,
   progress: progressCommand,
   clip: clipCommand,
+  carousel: carouselCommand,
   ask: askCommand,
   export: exportCommand,
   render: renderCommand,
@@ -95,6 +97,9 @@ function usage(): string {
     "  clip add --src <path> [--track video|audio|text|overlay] [--offset s] [--duration s]",
     "  clip set <id> [--key value]...",
     "  clip remove <id>",
+    "  carousel add-slide [--at N] [--bg-type gradient|image|solid --bg-value V]",
+    "  carousel set-layer <slideId> --kind <text|image|shape|sticker> [--id L] [--x N --y N --w N --h N] [...]",
+    "    Carousel (图文) write surface. Full schema: `autoviral docs carousel/02-schema`.",
     "  ask <message> [--yes-no|--ok-cancel] [--timeout seconds]",
     "  export [--preset name] [--proxy]",
     "  render                        Alias for `export --proxy`",
