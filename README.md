@@ -65,11 +65,11 @@ AutoViral 是一个本地运行的 AI 内容工作台，你描述一个选题，
 
 | 能力 | 技术方案 | 说明 |
 |------|---------|------|
-| AI 图片生成 | OpenAI GPT-5.4 Image (via OpenRouter) | 支持 4K、自定义宽高比、图生图 |
-| AI 视频生成 | Dreamina CLI (Seedance 2.0) | 文生视频、图生视频、首尾帧、多帧 |
-| AI 音乐生成 | Google Lyria 3 Pro | 文生音乐、图生音乐 |
+| AI 图片生成 | OpenRouter · `openai/gpt-5.4-image-2`（NanoBanana） | 支持 4K、自定义宽高比、图生图 |
+| AI 视频生成 | OpenRouter · `bytedance/seedance-2.0`（Seedance） | 图生视频，时长 {3,5,10}s |
+| 配音 (TTS) | edge-tts → OpenAI 兜底 | 中/英旁白音轨 |
 | 图文排版 | HTML/CSS + Playwright | 5 套小红书模板、专业字体 |
-| 视频合成 | FFmpeg | 拼接、字幕、配乐、转场 |
+| 视频合成 | Remotion + FFmpeg | 合成、字幕、配乐、转场 |
 | 趋势调研 | AI Web Search | 抖音/小红书实时热点 |
 | 数据分析 | 定时采集 | 粉丝/播放/互动数据追踪 |
 | 质量评审 | LLM-as-Judge | 每步可选质量门控 |
@@ -129,20 +129,11 @@ cp .env.example .env
 编辑 `.env`：
 
 ```env
-# 图片生成（Gemini，推荐）
+# OpenRouter 是唯一的外部生成网关 —— 图片 / 视频 / 翻译都走它
 OPENROUTER_API_KEY=sk-or-v1-xxxxxxxx
-
-# 视频生成备用（即梦 API，可选）
-JIMENG_ACCESS_KEY=AKLTxxxxxxxx
-JIMENG_SECRET_KEY=xxxxxxxx
 ```
 
-**视频生成首选方案**：安装 [Dreamina CLI](https://jimeng.jianying.com/cli)（免费，浏览器登录即可）：
-
-```bash
-curl -fsSL https://jimeng.jianying.com/cli | bash
-dreamina login    # 浏览器弹窗登录
-```
+一把 OpenRouter Key 即可解锁图片（`openai/gpt-5.4-image-2`）、视频（`bytedance/seedance-2.0`）与翻译。TTS（edge-tts）无需额外 Key；只有用 OpenAI 作为 TTS 兜底时才需配 `OPENAI_API_KEY`（可选）。
 
 ### 启动
 
@@ -161,18 +152,20 @@ autoviral start --foreground   # 前台启动（看日志）
 
 点击「新建作品」，输入标题和创作方向（如"科幻短片，月球大战"），选择类型和平台。
 
-### 2. 四个能力模块（modules-as-capabilities，无强制顺序）
+### 2. 在工位里和 agent 协作（无强制顺序）
 
-进入 Studio（视频）或 Editor（图文），按用户意图调用任意模块：
+进入 **Studio**（短视频，`composition.yaml`）或 **Editor**（图文，`carousel.yaml`），在右侧 agent 面板里描述你想要的东西。agent 加载操作手册 skill（`skills/autoviral/`）并通过 `autoviral` CLI 驱动工位——它不强迫线性流程，按你的意图直接动手：
 
-| 模块 | 短视频 | 图文 |
+| 你想做 | 短视频 | 图文 |
 |------|--------|------|
-| **research** | 搜索热点趋势、分析竞品 | 搜索话题热度、参考爆款 |
-| **planning** | 分镜脚本、画面描述、台词 | 每张图的内容规划、文案 |
-| **assets** | 生首帧 → 生视频片段 → 生配乐 | 生配图 → 排版渲染 |
-| **assembly** | Remotion 合成 + 字幕 + 配乐 | Konva 多图层 + 排序 + 发布文案 |
+| 找选题 | 搜索热点趋势、分析竞品 | 搜索话题热度、参考爆款 |
+| 定方案 | 分镜脚本、画面描述、台词 | 每张图的内容规划、文案 |
+| 出素材 | 生首帧 → 生视频片段 → 配音 | 生配图 → 排版渲染 |
+| 成片 | Remotion 合成 + 字幕 + 配乐 | Konva 多图层 + 排序 + 发布文案 |
 
-任何模块都可以做起点。用户给完整 brief 就直接进 assets/assembly；想试趋势就单独调 research。Agent 不会反问"我们应该先做哪一步"——按你的意图直接动手。
+任意一步都能做起点：给完整 brief 就直接出素材、成片；只想看趋势就单独调研。agent 不会反问"我们应该先做哪一步"。
+
+> 工位本身对"什么是好视频"不持立场——审美交给你挂载的 sibling taste skill（`editorial-pro` 等），`skills/autoviral/` 只教 agent **如何操作这个工位**。
 
 ### 3. 预览与导出
 
@@ -186,59 +179,60 @@ autoviral start --foreground   # 前台启动（看日志）
 
 ## AI 生成服务
 
-AutoViral 支持多个 AI 生成服务，按优先级自动选择：
+**OpenRouter 是唯一的外部生成网关**——图片、视频、翻译全部通过它，统一一把 Key、统一密钥管理（架构不变量 #2，不存在直连各家厂商的旁路）。
 
-### 图片生成
+| 能力 | 模型 | 密钥 | 说明 |
+|------|------|------|------|
+| 图片生成 | `openai/gpt-5.4-image-2`（NanoBanana，~$0.04/张） | `OPENROUTER_API_KEY` | 支持 4K / 宽高比 / 图生图 |
+| 视频生成 | `bytedance/seedance-2.0`（Seedance，~$0.76/3s） | `OPENROUTER_API_KEY`（复用） | 图生视频，时长仅 {3,5,10}s，输出固定 720×1280@24 |
+| 翻译 | `anthropic/claude-sonnet-4.5` | `OPENROUTER_API_KEY`（复用） | YouTube ingest 等流程的字幕翻译 |
 
-| 优先级 | 服务 | 密钥 | 说明 |
-|--------|------|------|------|
-| — | **OpenRouter (openai/gpt-5.4-image-2)** | `OPENROUTER_API_KEY` | 唯一通道，支持 4K/宽高比/图生图。不再保留备用路径。 |
+> 配音 (TTS) 不走 OpenRouter：默认本地 edge-tts，可选用 OpenAI 作兜底（需 `OPENAI_API_KEY`）。
 
-### 视频生成
-
-| 优先级 | 服务 | 配置方式 | 说明 |
-|--------|------|---------|------|
-| 1 | **Dreamina CLI (Seedance 2.0)** | `dreamina login` | 推荐，支持图生视频、多帧 |
-| 2 | 即梦 API | `JIMENG_ACCESS_KEY` + `SECRET_KEY` | 备用 |
-
-### 音乐生成
-
-| 服务 | 密钥 | 说明 |
-|------|------|------|
-| **Google Lyria 3 Pro** | `OPENROUTER_API_KEY`（复用） | 文生音乐、图生音乐 |
-
-检查当前环境可用服务：
+检查当前工位上下文与环境接线是否就绪（在 Studio 终端面板里运行）：
 
 ```bash
-python3 skills/autoviral/modules/assets/scripts/check_providers.py --format table
+autoviral whoami    # 打印当前 work / 端口 / 版本；env 未接线时非零退出，是安全 smoke test
+autoviral docs      # 打印操作手册；autoviral docs <topic> 看单节
 ```
 
 ---
 
 ## 项目架构
 
+Studio 前端与后端之间是一条 **bridge（HTTP + WebSocket）** 协议；CLI agent 不直连后端进程，而是通过 `autoviral` CLI 调 bridge 的 `/api/bridge/v1/*` 端点——React UI 和 `autoviral` CLI 共用同一条 bridge，所以任何 CLI agent 都能用同一套命令驱动工位。
+
 ```
-浏览器 (React 19 + Vite)  ──WebSocket──  Node.js (Hono)  ──stdin/stdout──  CLI agent (claude/codex/kimi/gemini/aider)
-                                       │
-                              ┌────────┼────────┐
-                              ▼        ▼        ▼
-                          Dreamina   Gemini   Lyria
-                          (视频)    (图片)   (音乐)
+浏览器 (React 19 + Vite)
+        │  HTTP / WebSocket（bridge）
+        ▼
+Node.js daemon (Express + Hono, :3271)
+        │  bridge /api/bridge/v1/*
+        ▼
+CLI agent (claude / codex / kimi / gemini / aider)
+        │  调 `autoviral` CLI（协议层），不直接读 src/
+        ▼
+OpenRouter（唯一外部网关）—— 图片 NanoBanana / 视频 Seedance / 翻译
 ```
+
+> 终端面板里的 agent 通过 `autoviral whoami` / `docs` / `context` 等命令操作工位；这是一条稳定的协议层，不是早期的 `/invoke` RPC 端点。
 
 ### 目录结构
 
 ```
 src/                          # 后端 TypeScript
-  cli.ts                      #   CLI 入口（start/stop/config）
-  config.ts                   #   配置管理（.env + config.yaml）
-  work-store.ts               #   作品存储（YAML 持久化）
-  ws-bridge.ts                #   WebSocket 桥接（浏览器 ↔ Claude CLI）
-  analytics-collector.ts      #   数据采集
-  server/
-    api.ts                    #   REST + WebSocket API（/invoke 端点；评审为只读 rubric 工具）
-    index.ts                  #   Hono 服务启动
-  remotion-renderer.ts        #   服务端 @remotion/renderer mp4 导出
+  index.ts                    #   daemon 入口
+  cli.ts                      #   autoviral CLI 入口（start/stop/config …）
+  infra/                      #   跨切面基础设施（config / logger / paths）
+  domain/                     #   核心领域（work-store / memory / analytics-collector / audio-tools）
+  server/                     #   Express + WS bridge
+    api.ts                    #     REST 端点（config / works / assets …）
+    bridge/                   #     /api/bridge/v1/* —— 终端面向的协议（routes、ingest-youtube）
+    render-pipeline.ts        #     Remotion 驱动的 mp4 导出
+  providers/                  #   OpenRouter 适配器（image / video）
+  tts-providers/              #   edge-tts → OpenAI 兜底
+  shared/                     #   composition.ts / carousel.ts（zod schema）
+  ws-bridge.ts                #   chat-agent WS 桥接（claude -p 子进程）
 
 web/src/                      # 前端 React 19 + Vite + Zustand + TanStack Query
   pages/
@@ -250,18 +244,17 @@ web/src/                      # 前端 React 19 + Vite + Zustand + TanStack Quer
   features/
     studio/                   #   视频合成数据模型 / Remotion composition / Tweaks
     editor/                   #   图文 carousel / Konva canvas / Inspector
+    terminal/                 #   xterm.js 面板（承载任意 CLI agent）
     chat/                     #   WS 客户端 + StreamBlock
 
-skills/                       # AI Agent 技能定义
-  autoviral/                  #   一体化创作技能（单 skill，任意起点切入）
-    SKILL.md                  #     主入口（prime directive + 模块地图 + 任意起点原则）
-    taste/                    #     品味读物（7 份：叙事 / 镜头 / 节奏 / 排版 / schema / rubric）
-    modules/
-      research/               #     事实收集（热搜脚本 + 达人分析 + 视频解构）
-      planning/               #     情感意图 → 可执行 brief（镜头表 / 图文结构 / 文案）
-      assets/                 #     生成引擎（OpenRouter / Dreamina / Jimeng / Lyria / Playwright）
-      assembly/               #     成片引擎（ffmpeg / subtitle_burn / beat-sync / audio-mix）
-    references/               #     模块间契约
+cli/autoviral/                # `autoviral` CLI（协议层，独立分发）
+  src/commands/               #   whoami / docs / context / clip / check / ingest / export …
+
+skills/autoviral/             # 操作手册 skill（agent-agnostic markdown，不教审美）
+  SKILL.md                    #   入口：你在 AutoViral 工位里
+  manual/                     #   编号阅读顺序（00-quickstart … 05-conventions）
+  recipes/                    #   常见任务的 step-by-step pattern
+  contracts/                  #   错误码 / 事件流 schema
 
 ~/.autoviral/                 # 运行时数据
   config.yaml                 #   配置
@@ -275,13 +268,13 @@ skills/                       # AI Agent 技能定义
 | 层 | 技术 |
 |----|------|
 | 前端 | React 19, Vite, Zustand, TanStack Query, editorial·cool·glass 主题 |
-| 后端 | Node.js, Hono, TypeScript, WebSocket |
-| AI Agent | agent-agnostic CLI（claude / codex / kimi / gemini / aider，stream-json 子进程） |
-| 图片生成 | OpenRouter → Gemini 3.1 Flash |
-| 视频生成 | Dreamina CLI (Seedance 2.0) / 即梦 API |
-| 音乐生成 | Google Lyria 3 Pro |
-| 图文排版 | HTML/CSS + Playwright + Jinja2 模板 |
-| 视频编辑 | FFmpeg |
+| 后端 | Node.js, Express + Hono, TypeScript, WebSocket（bridge） |
+| AI Agent | agent-agnostic CLI（claude / codex / kimi / gemini / aider）经 `autoviral` CLI 驱动 |
+| 图片生成 | OpenRouter · `openai/gpt-5.4-image-2`（NanoBanana） |
+| 视频生成 | OpenRouter · `bytedance/seedance-2.0`（Seedance） |
+| 配音 (TTS) | edge-tts → OpenAI 兜底 |
+| 图文排版 | HTML/CSS + Playwright + 模板 |
+| 视频合成 | Remotion + FFmpeg |
 
 ---
 

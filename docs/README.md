@@ -6,13 +6,15 @@ AutoViral 是一个常驻 Node daemon（`node dist/index.js start`，端口 3271
 
 ---
 
-## 先读这三份
+## 先读这几份
 
-按优先级从高到低，三份文档构成项目的「宪法」。任何冲突以**靠上**的为准。
+按优先级从高到低，这几份文档构成项目的「宪法」。任何冲突以**靠上**的为准。
 
 | 文档 | 里面是什么 | 为什么先读 |
 |---|---|---|
+| [`/README.md`](../README.md) | 项目门面：它能做什么、快速开始、provider/架构/目录现状（已与 0.1.0 对齐） | 新人/新 agent 的第一印象与上手路径；想知道「这是什么、怎么跑起来」时 |
 | [`/CLAUDE.md`](../CLAUDE.md) | 项目指令：skill 体系、美学方向、测试纪律、`<rules>`、行为底线（Evidence over agreement / Boil the ocean） | **最高优先级**，覆盖任何 agent 的默认行为；动手前必读 |
+| [`/AGENT.md`](../AGENT.md) | 非-Claude CLI agent（codex/kimi/gemini/aider）的项目级入口：薄包装指向 CLAUDE.md / CONTEXT.md 的共享规则 + backend 专属段（build/test、双 agent surface、provider 网关） | 你不是 Claude Code 时先读；它把 CLAUDE.md 钉为同角色 backend 对照，不另写一份规则 |
 | [`/CONTEXT.md`](../CONTEXT.md) | 领域词汇表（work / composition / track / clip / bridge / focus …）+ 架构不变量 + 高层 code map | 统一术语、避免发明新词或违反不变量；做任何非平凡改动前必读 |
 | [`agents/index.md`](agents/index.md) | mattpocock skill 家族的 per-repo 配置：issue tracker、triage label、领域文档指向 | `to-prd` / `to-issues` / `triage` / `diagnose` 等 skill 据此工作；要走协作流程时读 |
 
