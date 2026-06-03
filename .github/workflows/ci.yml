@@ -55,9 +55,18 @@ jobs:
         run: npm ci
 
       # build = build:backend (tsc + write-dist-pkg.mjs) + build:frontend (vite).
-      # npx tsc --noEmit is green, so this gates type + compile health.
+      # build:backend's `tsc` type-checks the daemon/shared source; build:frontend
+      # (vite) bundles the web app but does NOT type-check it. The web typecheck
+      # gate below covers that gap.
       - name: Build
         run: npm run build
+
+      # vite never runs tsc on web/, so web's strictest tsconfig
+      # (noUnusedLocals / noUnusedParameters / noFallthroughCasesInSwitch /
+      # verbatimModuleSyntax) only enforces here. Keep it after Build so a green
+      # build is a precondition.
+      - name: Typecheck (web)
+        run: npm run typecheck:web
 
       # Sequential test steps — never concurrent (see header note + project rule).
       - name: Test (web)
