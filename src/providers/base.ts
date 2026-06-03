@@ -13,17 +13,6 @@ export interface ImageOpts {
   model?: string
 }
 
-export interface VideoOpts {
-  prompt: string
-  firstFrame?: string
-  lastFrame?: string
-  resolution?: string
-  duration?: number       // seconds; provider-specific allowed values
-  modelVersion?: string   // e.g. 'bytedance/seedance-2.0'
-  workId: string
-  filename: string
-}
-
 export interface GenerateResult {
   success: boolean
   assetPath?: string
@@ -32,10 +21,11 @@ export interface GenerateResult {
   code?: 'TIMEOUT' | 'API_ERROR' | 'DOWNLOAD_FAILED' | 'INVALID_PARAMS'
 }
 
+// Image-capability provider contract. ADR-007 dropped the supportsImage /
+// supportsVideo boolean flags + the unused generateVideo() leg — capability is
+// a single tag on the registry entry now, and video providers implement the
+// separate VideoProvider contract under src/providers/video/.
 export interface GenerateProvider {
   name: string
-  supportsImage: boolean
-  supportsVideo: boolean
   generateImage(opts: ImageOpts): Promise<GenerateResult>
-  generateVideo(opts: VideoOpts): Promise<GenerateResult>
 }

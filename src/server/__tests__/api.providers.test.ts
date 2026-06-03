@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { join } from "node:path";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import yaml from "js-yaml";
@@ -33,16 +33,26 @@ async function setupEmptyComposition(
   );
 }
 
-describe("Phase 8.4 provider endpoints", () => {
+// ADR-007 — video is honestly seedance-only (OpenRouter). The runway/sora/kling
+// stubs were dropped: they produced nothing and implied direct vendor calls.
+// These tests assert the seedance-only contract and that dispatch still writes
+// the asset + provenance edge. With no OPENROUTER_API_KEY the seedance adapter
+// returns a stub assetUri (no network), which keeps these tests offline.
+describe("Phase 8.4 provider endpoints (ADR-007 seedance-only)", () => {
   beforeEach(() => {
-    delete process.env.RUNWAY_API_KEY;
-    delete process.env.SORA_API_KEY;
-    delete process.env.KLING_API_KEY;
-    delete process.env.OPENROUTER_API_KEY;
+    // Force seedance into stub mode (no real OpenRouter call). config.ts runs
+    // dotenv.config() on import, which would re-populate a real key from .env
+    // and overwrite a `delete` — but dotenv never OVERWRITES an already-set var,
+    // so pinning it to "" here keeps the adapter offline across vi.resetModules.
+    process.env.OPENROUTER_API_KEY = "";
     vi.resetModules();
   });
 
-  it("GET /api/providers returns 4 providers", async () => {
+  afterEach(() => {
+    delete process.env.OPENROUTER_API_KEY;
+  });
+
+  it("GET /api/providers returns only seedance", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
       const res = await apiRoutes.fetch(
@@ -50,13 +60,25 @@ describe("Phase 8.4 provider endpoints", () => {
       );
       expect(res.status).toBe(200);
       const json: any = await res.json();
-      expect(json.providers).toHaveLength(4);
-      expect(json.providers.map((p: any) => p.id).sort()).toEqual([
-        "kling",
-        "runway",
-        "seedance",
-        "sora",
-      ]);
+      expect(json.providers).toHaveLength(1);
+      expect(json.providers[0].id).toBe("seedance");
+      // No OPENROUTER_API_KEY → reported as a disabled (stub) option.
+      expect(json.providers[0].stub).toBe(true);
+      expect(json.providers[0].available).toBe(false);
+    });
+  });
+
+  it("the dropped stubs are no longer listed", async () => {
+    await withTempDataDir(async () => {
+      const { apiRoutes } = await import("../api.js");
+      const res = await apiRoutes.fetch(
+        new Request("http://localhost/api/providers"),
+      );
+      const json: any = await res.json();
+      const ids = json.providers.map((p: any) => p.id);
+      expect(ids).not.toContain("runway");
+      expect(ids).not.toContain("sora");
+      expect(ids).not.toContain("kling");
     });
   });
 
@@ -64,7 +86,7 @@ describe("Phase 8.4 provider endpoints", () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
       const res = await apiRoutes.fetch(
-        jsonReq("POST", "/api/providers/runway/generate-video", {
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
           workId: "w1",
           durationSec: 4,
           aspectRatio: "9:16",
@@ -78,7 +100,7 @@ describe("Phase 8.4 provider endpoints", () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
       const res = await apiRoutes.fetch(
-        jsonReq("POST", "/api/providers/ghost/generate-video", {
+        jsonReq("POST", "/api/providers/runway/generate-video", {
           workId: "w1",
           prompt: "hi",
           durationSec: 4,
@@ -89,11 +111,11 @@ describe("Phase 8.4 provider endpoints", () => {
     });
   });
 
-  it("POST with valid runway returns 200 with stub assetUri", async () => {
+  it("POST with valid seedance returns 200 with stub assetUri (no key)", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
       const res = await apiRoutes.fetch(
-        jsonReq("POST", "/api/providers/runway/generate-video", {
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
           workId: "w1",
           prompt: "a sunny beach",
           durationSec: 4,
@@ -102,7 +124,7 @@ describe("Phase 8.4 provider endpoints", () => {
       );
       expect(res.status).toBe(200);
       const json: any = await res.json();
-      expect(json.assetUri).toMatch(/runway-/);
+      expect(json.assetUri).toMatch(/seedance-/);
       expect(json.stub).toBe(true);
     });
   });
@@ -119,7 +141,7 @@ describe("Phase 8.4 provider endpoints", () => {
       await setupEmptyComposition(dataDir, w.id);
 
       const res = await apiRoutes.fetch(
-        jsonReq("POST", "/api/providers/runway/generate-video", {
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
           workId: w.id,
           prompt: "a sunny beach at golden hour",
           durationSec: 4,
@@ -157,7 +179,7 @@ describe("Phase 8.4 provider endpoints", () => {
       await setupEmptyComposition(dataDir, w.id);
 
       const res = await apiRoutes.fetch(
-        jsonReq("POST", "/api/providers/sora/generate-video", {
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
           workId: w.id,
           prompt: "a calm lake at dawn",
           durationSec: 6,
@@ -178,7 +200,7 @@ describe("Phase 8.4 provider endpoints", () => {
       expect(genEdge!.fromAssetId).toBeNull();
       expect(genEdge!.toAssetId).toBe(json.assetId);
       const params = genEdge!.operation.params as Record<string, unknown>;
-      expect(params.providerId).toBe("sora");
+      expect(params.providerId).toBe("seedance");
       expect(params.prompt).toBe("a calm lake at dawn");
       expect(params).toHaveProperty("costUsd");
       expect(params).toHaveProperty("stub");
@@ -189,7 +211,7 @@ describe("Phase 8.4 provider endpoints", () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
       const res = await apiRoutes.fetch(
-        jsonReq("POST", "/api/providers/sora/generate-video", {
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
           workId: "w1",
           prompt: "a calm lake",
           durationSec: 4,

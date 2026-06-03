@@ -101,7 +101,7 @@ src/                        # Backend (Node + TypeScript)
 │   │   ├── routes.ts       # endpoint dispatch
 │   │   └── ingest-youtube.ts  # YouTube → composition pipeline
 │   └── render-pipeline.ts  # Remotion-driven export
-├── providers/              # OpenRouter-backed image/video adapters
+├── providers/              # single capability-tagged registry (ADR-007): registry.ts + video/ (seedance) + tts/ (edge-tts → openai) + nanobanana image
 ├── shared/                 # composition.ts (zod schema), shared types
 ├── trends/sources/         # Multi-platform trend scrapers
 ├── ws-bridge.ts            # chat-agent WS bridge (infra/domain grouping deferred — PRD Open Q)

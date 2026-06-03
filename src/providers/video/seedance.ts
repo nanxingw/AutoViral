@@ -2,7 +2,7 @@ import type { VideoProvider, VideoGenerateOptions, VideoGenerateResult } from ".
 import { writeFile, mkdir, rename, unlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import { FFMPEG_BIN } from "../ffmpeg-paths.js";
+import { FFMPEG_BIN } from "../../server/ffmpeg-paths.js";
 
 /**
  * Re-encode an mp4 to be browser-friendly for the studio player.

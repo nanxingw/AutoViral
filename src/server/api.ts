@@ -19,10 +19,6 @@ import { MemoryClient } from "../domain/memory.js";
 import type { WsBridge } from "../ws-bridge.js";
 import type { RenderQueue, RenderJob } from "./render-queue/index.js";
 import { getProvider, getDefaultProvider, listProviders } from "../providers/registry.js";
-import {
-  getProvider as getVideoProvider,
-  listProviders as listVideoProviders,
-} from "./providers/registry.js";
 import { listSharedAssetsWithMeta, getSharedAssetPath, validateCategory, sanitizeFilename, saveSharedAsset, deleteSharedAsset, moveSharedAsset } from "../shared-assets.js";
 import { getLatestCreatorData, getCreatorHistory, collectData, isCollectorAvailable } from "../domain/analytics-collector.js";
 import cron from "node-cron";
@@ -31,7 +27,7 @@ import { log, readLogs } from "../infra/logger.js";
 import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } from "../test-runner.js";
 import { evaluateWork } from "../test-evaluator.js";
 import { analyzeAudio, mixAudioTracks } from "../domain/audio-tools.js";
-import { pickProvider, generateWithFallback } from "../tts-providers/registry.js";
+import { pickProvider, generateWithFallback } from "../providers/tts/registry.js";
 import { uiEventBus } from "./bridge/ui-events.js";
 import { resolveAssetPath, resolveAssetSubpath, UnsafePathError, SAFE_ID } from "./safe-paths.js";
 import { listCheckpoints, restoreCheckpoint, createCheckpoint } from "./checkpoints.js";
@@ -1574,7 +1570,7 @@ apiRoutes.post("/api/generate/image", async (c) => {
   if (!safeFilename) {
     return c.json({ success: false, error: "Invalid filename", code: "INVALID_PARAMS" }, 400);
   }
-  const provider = providerName ? getProvider(providerName) : getDefaultProvider("image");
+  const provider = providerName ? getProvider("image", providerName) : getDefaultProvider("image");
   if (!provider) {
     return c.json({ success: false, error: "No image provider available", code: "INVALID_PARAMS" }, 400);
   }
@@ -1618,15 +1614,35 @@ apiRoutes.post("/api/generate/video", async (c) => {
   if (firstFrame && !safeFirstFrame) {
     return c.json({ success: false, error: "Invalid firstFrame path", code: "INVALID_PATH" }, 400);
   }
-  const provider = providerName ? getProvider(providerName) : getDefaultProvider("video");
+  const provider = providerName ? getProvider("video", providerName) : getDefaultProvider("video");
   if (!provider) {
     return c.json({ success: false, error: "No video provider available", code: "INVALID_PARAMS" }, 400);
   }
   try {
+    // Map this route's legacy shape onto the VideoProvider contract (seedance,
+    // OpenRouter). The mp4 lands in the work's assets/<provider>/ tree so the
+    // existing /api/works/:id/assets/* serving picks it up; we convert the
+    // absolute write path back to a work-relative uri for the response.
+    const wDirAbs = join(dataDir, "works", workId);
+    const outDirAbs = join(wDirAbs, "assets", provider.name);
     const result = await provider.generateVideo({
-      prompt, firstFrame: safeFirstFrame ?? firstFrame, lastFrame, resolution, workId, filename: safeFilename,
+      prompt,
+      durationSec: 5,
+      aspectRatio: resolution === "16:9" ? "16:9" : "9:16",
+      outputAbsoluteDir: outDirAbs,
+      ...(safeFirstFrame ?? firstFrame ? { firstFrameImage: safeFirstFrame ?? firstFrame } : {}),
+      ...(lastFrame ? { lastFrameImage: lastFrame } : {}),
     });
-    return c.json(result);
+    const relativeUri = result.assetUri.startsWith(wDirAbs + "/")
+      ? result.assetUri.slice(wDirAbs.length + 1)
+      : result.assetUri;
+    return c.json({
+      success: true,
+      assetPath: result.assetUri,
+      previewUrl: `/api/works/${workId}/${relativeUri}`,
+      stub: result.stub,
+      costUsd: result.costUsd,
+    });
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
   }
@@ -1650,7 +1666,7 @@ apiRoutes.post("/api/generate/image/batch", async (c) => {
     return c.json({ success: false, error: "Invalid workId or shotId", code: "INVALID_PARAMS" }, 400);
   }
   const n = Math.min(Math.max(1, Number(count) || 4), 8);
-  const provider = providerName ? getProvider(providerName) : getDefaultProvider("image");
+  const provider = providerName ? getProvider("image", providerName) : getDefaultProvider("image");
   if (!provider) {
     return c.json({ success: false, error: "No image provider available", code: "INVALID_PARAMS" }, 400);
   }
@@ -2028,8 +2044,8 @@ apiRoutes.post("/api/works/:id/tts", async (c) => {
   }
 });
 
-// GET /api/generate/providers
-apiRoutes.get("/api/generate/providers", (c) => c.json(listProviders()));
+// GET /api/generate/providers — image providers for the image-gen UI.
+apiRoutes.get("/api/generate/providers", (c) => c.json(listProviders("image")));
 
 // ---------------------------------------------------------------------------
 // Shared Assets
@@ -2938,8 +2954,23 @@ apiRoutes.post("/api/video/reframe", async (c) => {
 });
 
 // Phase 8.4 — provider listing
+//
+// The generation dialog consumes { id, displayName, available, stub }. Since
+// ADR-007 video is seedance-only (OpenRouter), this maps the unified registry's
+// video listing to that shape. `stub: true` (no OPENROUTER_API_KEY) makes the
+// dialog disable the option — #92's "dead dropdown" is now honest: one real
+// provider, disabled until a key is present.
 apiRoutes.get("/api/providers", (c) => {
-  return c.json({ providers: listVideoProviders() });
+  const providers = listProviders("video").map((p) => {
+    const adapter = getProvider("video", p.name);
+    return {
+      id: p.name,
+      displayName: adapter?.displayName ?? p.name,
+      available: p.available,
+      stub: !p.available,
+    };
+  });
+  return c.json({ providers });
 });
 
 // Phase 8.4 — provider dispatch
@@ -2962,7 +2993,7 @@ apiRoutes.post("/api/providers/:providerId/generate-video", async (c) => {
     /** R44 — optional last-frame anchor for morph effects. */
     lastFrameImage?: string;
   }>();
-  const provider = getVideoProvider(providerId);
+  const provider = getProvider("video", providerId);
   if (!provider) return c.json({ error: "unknown provider" }, 404);
   if (!body.prompt || !body.workId) {
     return c.json({ error: "prompt and workId required" }, 400);

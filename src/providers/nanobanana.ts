@@ -1,15 +1,13 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { dataDir } from '../infra/config.js'
-import type { GenerateProvider, ImageOpts, VideoOpts, GenerateResult } from './base.js'
+import type { GenerateProvider, ImageOpts, GenerateResult } from './base.js'
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const DEFAULT_MODEL = 'openai/gpt-5.4-image-2'
 
 export class NanoBananaProvider implements GenerateProvider {
   readonly name = 'nanobanana'
-  readonly supportsImage = true
-  readonly supportsVideo = false
 
   private apiKey: string
 
@@ -134,13 +132,5 @@ export class NanoBananaProvider implements GenerateProvider {
     }
 
     return null
-  }
-
-  async generateVideo(_opts: VideoOpts): Promise<GenerateResult> {
-    return {
-      success: false,
-      error: 'NanoBanana provider does not support video generation',
-      code: 'INVALID_PARAMS',
-    }
   }
 }

@@ -10,13 +10,12 @@
  * mapVoiceToOpenAi() infers a gender-matched OpenAI voice. OpenAI auto-detects
  * the language from the input text, so no language flag is sent.
  *
- * Key resolution mirrors src/providers/tts: OPENAI_API_KEY preferred, else
- * OPENROUTER_API_KEY, else throw.
+ * Key resolution: OPENAI_API_KEY preferred, else OPENROUTER_API_KEY, else throw.
  */
 import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
 import type { TtsProvider, TtsRequest, TtsResult } from "./types.js";
-import { FFPROBE_BIN } from "../server/ffmpeg-paths.js";
+import { FFPROBE_BIN } from "../../server/ffmpeg-paths.js";
 
 const OPENAI_TTS_URL = "https://api.openai.com/v1/audio/speech";
 

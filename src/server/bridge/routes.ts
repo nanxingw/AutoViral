@@ -34,11 +34,7 @@ import {
   subscribe as subscribeFocus,
 } from "../../focus/index.js";
 import { resolve as resolveVariables } from "../../composition/variables/index.js";
-import {
-  synthesize as synthesizeTts,
-  TTS_VOICES,
-  TTS_FORMATS,
-} from "../../providers/tts/index.js";
+import { synthesizeNarration } from "../../providers/tts/registry.js";
 import { getContext, getProfile, getTrends } from "../../context/index.js";
 import { lintComposition } from "../../composition/quality/lint.js";
 import { inspectComposition } from "../../composition/quality/inspect.js";
@@ -474,15 +470,16 @@ bridgeRouter.post("/context/inject", async (c) => {
 });
 
 // ─── H4.1 — TTS preprocess ──────────────────────────────────────────────────
-// Synthesize narration audio via OpenAI's /v1/audio/speech endpoint.
-// Drops the resulting mp3 (or wav/opus/etc.) into the work's
-// assets/audio/ directory and broadcasts an asset-added event so the
-// Studio UI picks it up immediately.
+// Synthesize narration audio through the unified TTS registry (ADR-007): edge-
+// tts first, OpenAI as the keyed fallback. Drops the audio into the work's
+// assets/audio/ directory and broadcasts an asset-added event so the Studio UI
+// picks it up immediately. `voice` is an edge voice id (e.g.
+// "zh-CN-XiaoxiaoNeural"); the openai fallback maps it to a gender-matched voice.
 const TtsRequestSchema = z.object({
   text: z.string().min(1),
-  voice: z.enum(TTS_VOICES).optional(),
-  format: z.enum(TTS_FORMATS).optional(),
-  model: z.string().optional(),
+  voice: z.string().optional(),
+  format: z.string().optional(),
+  language: z.string().optional(),
   filenameStem: z.string().optional(),
 });
 
@@ -495,7 +492,7 @@ bridgeRouter.post("/preprocess/tts", async (c) => {
       process.env.AUTOVIRAL_WORKS_ROOT ??
       join(homedir(), ".autoviral/works");
     const workDir = join(worksRoot, g.workId);
-    const result = await synthesizeTts({ ...body, workDir });
+    const result = await synthesizeNarration({ ...body, workDir });
     broadcast(g.workId, "asset-added", {
       kind: "audio",
       uri: result.relativeUri,
