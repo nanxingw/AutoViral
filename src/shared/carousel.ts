@@ -97,9 +97,19 @@ export const SlideSchema = z.object({
 });
 export type Slide = z.infer<typeof SlideSchema>;
 
+// ─── Schema versioning (I10 / W7.5) ──────────────────────────────────────────
+// Symmetric with composition.ts — `schemaVersion` declares which migrations a
+// carousel.yaml has been through. OPTIONAL (absent ⇒ version 1, the floor);
+// the default-1 lives in `readSchemaVersion()` not zod `.default`, so the
+// `z.infer` output type stays `number | undefined` and existing Carousel
+// literals don't have to stamp a redundant field. makeEmptyCarousel writes it
+// explicitly so a fresh carousel.yaml is grep-confirmable.
+export const CAROUSEL_SCHEMA_VERSION = 1;
+
 export const CarouselSchema = z.object({
   id: z.string(),
   workId: z.string(),
+  schemaVersion: z.number().int().positive().optional(),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
   globals: z.object({
@@ -150,6 +160,8 @@ export function makeEmptyCarousel(workId: string): Carousel {
   return {
     id: uid("car"),
     workId,
+    // I10 — fresh carousels minted at the latest schema version. grep-confirmable.
+    schemaVersion: CAROUSEL_SCHEMA_VERSION,
     width: 1080,
     height: 1350,
     globals: {

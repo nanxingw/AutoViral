@@ -555,9 +555,26 @@ export const VariableDeclarationSchema = z.object({
 });
 export type VariableDeclaration = z.infer<typeof VariableDeclarationSchema>;
 
+// ─── Schema versioning (I10 / W7.5) ──────────────────────────────────────────
+// `schemaVersion` declares which migrations a given composition.yaml has
+// already been through. OPTIONAL — every pre-I10 file on disk has no such
+// field, and an absent field means "version 1" (the floor). We model the
+// default at the consumer layer via `readSchemaVersion()` in
+// src/shared/migrations, NOT via zod `.default(1)`: a `.default` would make
+// the field REQUIRED on the `z.infer` OUTPUT type, forcing every Composition
+// literal (fixtures, synthesisers) to stamp a redundant `schemaVersion: 1`.
+// `.optional()` keeps the output type `number | undefined` so existing
+// construction sites stay valid while the migration floor stays exactly 1.
+// New works still write `schemaVersion: COMPOSITION_SCHEMA_VERSION` explicitly
+// (makeEmptyComposition below) so a fresh yaml is grep-confirmable. The number
+// is bumped only when a real from→to migration lands (PRD-0002 N6 — boot-time
+// runner deferred).
+export const COMPOSITION_SCHEMA_VERSION = 1;
+
 export const CompositionSchema = z.object({
   id: z.string(),
   workId: z.string(),
+  schemaVersion: z.number().int().positive().optional(),
   fps: z.union([z.literal(24), z.literal(25), z.literal(30), z.literal(60)]),
   width: z.number().int().positive(),
   height: z.number().int().positive(),
@@ -697,6 +714,9 @@ export function makeEmptyComposition(opts: {
   return {
     id: `c_${opts.workId}`,
     workId: opts.workId,
+    // I10 — fresh works are minted at the latest schema version so the
+    // migration registry never re-runs migrations on them. grep-confirmable.
+    schemaVersion: COMPOSITION_SCHEMA_VERSION,
     fps: opts.fps ?? 30,
     width: w,
     height: h,
