@@ -129,7 +129,13 @@ nsis:
   perMachine: false
 
 # ── Auto-update publish target ──────────────────────────────────────────────
+# releaseType: release (not the default draft) so electron-builder uploads to a
+# PUBLISHED release. Default 'draft' refuses to touch an already-published tag
+# ("existing type not compatible with publishing type") — which silently left the
+# old (broken, no-icon) installers in place on a re-run. With 'release' it targets
+# the published v0.1.0 release directly, on first run AND re-runs.
 publish:
   - provider: github
     owner: nanxingw
     repo: AutoViral
+    releaseType: release
