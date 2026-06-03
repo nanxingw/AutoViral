@@ -46,7 +46,7 @@ skills/autoviral/
 ## 版本与发布约定
 
 - **包名**：`autoviral`（unscoped），发布到 npm。
-- **版本号**：SemVer，整仓单一版本号，当前 `0.1.0`（pre-1.0；0.x 期间 minor bump 可能带破坏性行为变化）。
+- **版本号**：SemVer，整仓单一版本号，当前 `0.1.1`（pre-1.0；0.x 期间 minor bump 可能带破坏性行为变化）。
 - **包管理器**：npm（不用 bun / pnpm；已删除 `bun.lock`）。
 - **bump 规则**：MAJOR = 破坏性变更 / MINOR = 向后兼容的新功能 / PATCH = 向后兼容的修复（0.x 例外见上）。
 - **CHANGELOG**：遵循 [Keep a Changelog](https://keepachangelog.com)，`## [版本] - 日期` 语法是 release notes 的单一事实源。

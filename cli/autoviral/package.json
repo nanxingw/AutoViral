@@ -1,6 +1,6 @@
 {
   "name": "@autoviral/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Agent-facing CLI that bridges any shell agent to the AutoViral Studio.",
   "type": "module",
   "bin": {

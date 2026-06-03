@@ -10,6 +10,36 @@ All notable changes to this project will be documented in this file.
 ### Added
 - _（待补充）_
 
+## [0.1.1] - 2026-06-03
+
+**可扩展性奠基与结构清债**（PRD-0002）。对外可见行为零破坏——破坏面刻意压在内部结构 + 文档治理：把"加内容类型 / 加 provider"从跨 5+ 文件的散弹手术降维成"往中央注册表加一条"。落地三个深模块骨架 + 清掉一批工程债 + 补齐文档双轨治理。三个 keystone 架构决策经 grill-with-docs 压测后落 [ADR-006](docs/adr/ADR-006-content-type-registry.md) / [ADR-007](docs/adr/ADR-007-single-media-provider-registry.md)。
+
+### Added
+- **ContentTypeRegistry**（`src/shared/content-types/`，[ADR-006](docs/adr/ADR-006-content-type-registry.md)）— 内容类型从写死的二元枚举（`WorkType`）抽成中央清单（`getContentType` / `listContentTypes`）。`DELIVERABLES`、路由、create 按钮、checkpoint 目标全部派生自注册表；加第三种内容类型从"改 5+ 文件 + 复制视图树"降为"加一条注册项"。genuine type-dispatch 字面量从 34 处降到 0。
+- **carousel 协议层 + 知识层**（关 PRD 唯一 high gap）— `autoviral carousel add-slide` / `set-layer` CLI 命令（走 bridge → 服务端 zod 校验，对齐 `clip add/set` 模式）+ `skills/autoviral/manual/carousel/02-schema.md` 完整 schema 文档。agent 编辑图文不再凭一行 prose 盲写 carousel.yaml。
+- **单一 MediaProvider registry**（`src/providers/registry.ts`，[ADR-007](docs/adr/ADR-007-single-media-provider-registry.md)）— image / video / TTS 四套并行机制收敛为一个 capability-tagged 注册表（`getProvider(cap,name)` / `getDefaultProvider(cap)` / `listProviders(cap?)`），声明式 `envKey`，单一 `initProviders` 装配。兑现不变量 #2。
+- **升级骨架**（`src/shared/migrations/`，深模块 ③）— composition / carousel schema 加 optional `schemaVersion` 字段 + 顺序迁移注册表骨架；收编现有内联迁移器与独立迁移脚本。
+- **`AGENT.md`** — 非-Claude CLI agent（codex / kimi / gemini / aider）的项目级入口，兑现 agent-agnostic 承诺。
+- **文档治理** — `docs/adr/README.md` ADR 索引 + 状态机；CONTRIBUTING「Version Bump Checklist」+「运维 Known Gotchas」锚点。
+- **docs-drift 守卫测试**（`src/docs-drift.test.ts`）— prompt / SKILL.md 里的 manual 引用一旦悬空即变红，subdir-aware。
+- **CI web 类型门** — `typecheck:web`（web 最严 tsconfig：`noUnusedLocals` 等）首次入 CI。
+
+### Changed
+- **carousel schema 提升到 `src/shared/carousel.ts`**（[ADR-006](docs/adr/ADR-006-content-type-registry.md)）— 从 web-only 变为 server / CLI / migrations 可达；web `editor/types.ts` 留 re-export shim，旧 import 零改动。
+- **skill manual 按内容类型 co-located 重构** — `manual/{_shared,video,carousel}/` 子树 + `SKILL.md` 按 `work.type` 分发；recipes 分区 `recipes/{video,carousel}/`。
+- **`api.ts` god-module 按域拆分** — 3270 行 / 80 路由 → `src/server/routes/*.ts` 九个子 router（works/render/generate/audio/trends/analytics/assets/system/_shared），主文件 64 行。端点路径 / 行为 / 契约零变化。
+- **`src/` root 归类** — 平铺模块归到 `src/infra/`（config/logger/paths）+ `src/domain/`（work-store/memory/analytics-collector/audio-tools）。
+- 移除 `autoviral start --pm2` 路径（服务器部署时代残留，desktop-class app 不适用）。
+
+### Removed
+- **runway / sora / kling video stub providers** — 产不出真实输出、隐含直连厂商，违反不变量 #2；video 诚实 OpenRouter-only（seedance）。
+- **化石清理** — `svelte.config.js`（React 19 项目无 svelte 依赖）/ 孤儿 `web/package-lock.json` / commit 进仓的 `.vite/` 缓存 / `test-studio.mjs` / `ecosystem.config.cjs`。
+- 发布构建不再把 `*.test.ts` 编进 `dist/`（新 `tsconfig.build.json`）。
+
+### Fixed
+- README drift — 删除已不存在的 `modules/` 脚本、`check_providers.py`、`/invoke` 协议、多 provider 表（Dreamina/即梦/Lyria）等死引用，对齐 0.1.0 现状。
+- `ci.yml` 谎称 `tsc --noEmit` 已绿的假注释。
+
 ## [0.1.0] - 2026-06-02
 
 首个公开基线。本版本将 AutoViral 重新定位为**创作者工位 + agent-agnostic 操作协议**，修复"AutoViral 是被 Claude Code 驱动的视频工具"这一旧叙事；任何在 Studio 终端面板里运行的 CLI agent（claude / codex / kimi / gemini / aider / cursor-agent）都可通过加载 operator-manual skill 并调用 `autoviral` CLI 来驱动工位。包身份一并重置为 `autoviral@0.1.0`。
