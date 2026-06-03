@@ -64,6 +64,27 @@ describe("carousel-ops — read / write / mutate", () => {
     expect(parsed.slides.some((s) => s.id === "s_added")).toBe(true);
   });
 
+  it("mutateCarouselFor SEEDS a blank carousel on a fresh work (no carousel.yaml yet → no ENOENT)", async () => {
+    // A freshly-created image-text work has no carousel.yaml on disk — the
+    // Editor holds makeEmptyCarousel in memory and only writes on first save.
+    // The most common agent path (create work → `autoviral carousel add-slide`)
+    // must NOT ENOENT; the mutator seeds the canonical blank carousel and the
+    // write materialises carousel.yaml. (Symmetry with composition first-write.)
+    const freshRoot = await mkdtemp(join(tmpdir(), "autoviral-carousel-fresh-"));
+    const freshId = "w_fresh";
+    await mkdir(join(freshRoot, freshId), { recursive: true }); // NB: no carousel.yaml
+    const blankSlides = makeEmptyCarousel(freshId).slides.length; // canonical blank = 1
+    const next = await mutateCarouselFor({ workId: freshId, worksRoot: freshRoot }, (c) => ({
+      ...c,
+      slides: [...c.slides, { id: "s_first", bg: { type: "solid", value: "#123456" }, layers: [] }],
+    }));
+    expect(next.slides.length).toBe(blankSlides + 1);
+    expect(next.slides.some((s) => s.id === "s_first")).toBe(true);
+    // carousel.yaml is now materialised on disk with the seeded + appended slides.
+    const raw = await readFile(carouselPathFor({ workId: freshId, worksRoot: freshRoot }), "utf8");
+    expect((yaml.load(raw) as { slides: unknown[] }).slides.length).toBe(blankSlides + 1);
+  });
+
   it("mutateCarouselFor rejects a bad layer kind and leaves the file untouched", async () => {
     const target = carouselPathFor({ workId, worksRoot: workRoot });
     const before = await readFile(target, "utf8");

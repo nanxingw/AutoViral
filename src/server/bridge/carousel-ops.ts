@@ -17,7 +17,7 @@ import { readFile, writeFile, rename, mkdtemp, mkdir } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import yaml from "js-yaml";
-import { CarouselSchema, type Carousel } from "../../shared/carousel.js";
+import { CarouselSchema, makeEmptyCarousel, type Carousel } from "../../shared/carousel.js";
 import { migrate } from "../../shared/migrations/index.js";
 
 export interface CarouselOpsContext {
@@ -75,7 +75,20 @@ export async function mutateCarouselFor(
   ctx: CarouselOpsContext,
   mutator: (carousel: Carousel) => Carousel,
 ): Promise<Carousel> {
-  const current = await readCarouselFor(ctx);
+  // First-write symmetry with composition-ops: a freshly-created image-text
+  // work has NO carousel.yaml on disk yet — the Editor holds makeEmptyCarousel
+  // in memory and only writes on the first user save. Without this, the most
+  // common agent path (create image-text work → `autoviral carousel add-slide`)
+  // ENOENTs on the very first command. Seed the canonical blank carousel
+  // (makeEmptyCarousel — the same shape the Editor shows) so the mutation
+  // applies to it and the next write materialises carousel.yaml on disk.
+  let current: Carousel;
+  try {
+    current = await readCarouselFor(ctx);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
+    current = makeEmptyCarousel(ctx.workId);
+  }
   const next = mutator(current);
   await writeCarouselFor(ctx, next);
   return next;
