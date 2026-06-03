@@ -14,9 +14,11 @@ A creator workstation for short-form video / image / poster content. Single-user
 
 | Term | Meaning |
 |---|---|
-| **work** | A single creator project. Lives at `~/.autoviral/works/<workId>/`. Has a 1:1 relationship with a `composition.yaml`. The Studio URL is `/studio/<workId>`. |
+| **work** | A single creator project. Lives at `~/.autoviral/works/<workId>/`. Each work has exactly one **content type**, which decides its deliverable file + editor route. |
 | **workId** | Stable identifier of the form `w_<YYYYMMDD>_<HHMM>_<short-rand>` (e.g. `w_20260513_1919_74d`). Used as both directory name and route segment. |
-| **composition.yaml** | The work's canonical data file. Zod-validated. Holds tracks, clips, captions, export presets, and (after the variables PRD lands) a `variables` declaration block. |
+| **content type** | The kind of creation a work produces. Two today: `short-video` (deliverable `composition.yaml`, edited in Studio at `/studio/<workId>`) and `image-text` (deliverable `carousel.yaml`, edited in Editor at `/editor/<workId>`). Declared in a central registry (`src/shared/content-types/`) rather than scattered string branches. *See [ADR-006](docs/adr/ADR-006-content-type-registry.md).* |
+| **composition.yaml** | The `short-video` work's canonical data file. Zod-validated (`src/shared/composition.ts`). Holds tracks, clips, captions, export presets, and (after the variables PRD lands) a `variables` declaration block. |
+| **carousel.yaml** | The `image-text` work's canonical data file — the carousel counterpart of composition.yaml. Zod-validated (`src/shared/carousel.ts` after ADR-006). Holds slides, each with a background + layers (text / image / shape / sticker discriminated union) + globals. |
 | **assets/** | Per-work directory of media files: `assets/clips/*.mp4`, `assets/audio/*.mp3`, `assets/images/*.png`, `assets/subtitles/*.srt`. |
 | **plan/** | Per-work directory of agent-produced intermediate artifacts (transcripts, segment JSON, brief markdown). Not user-facing. |
 
@@ -68,9 +70,9 @@ These are constraints that should not be silently violated. If breaking one beco
 
 1. **Remotion is the renderer.** No HTML / GSAP / WebGL composition language. Studio's composition rendering goes through React + Remotion components in `web/src/features/studio/composition/`. *Rationale: [ADR-002](docs/adr/ADR-002-renderer-stays-remotion.md).*
 
-2. **OpenRouter is the only external gateway.** Provider plugins live in `src/providers/<name>/` and register via `src/providers/registry.ts`. No direct vendor calls. *Rationale: c1c374e commit message + uniform secret management.*
+2. **OpenRouter is the only external gateway.** Provider plugins live in `src/providers/<name>/` and register via the single capability-tagged `src/providers/registry.ts` — image, video, and TTS all through one registry, one `MediaProvider` contract, one `envKey` convention. No direct vendor calls (the runway/sora/kling video stubs are dropped — video is OpenRouter-only via seedance). *Rationale: c1c374e commit message + uniform secret management; consolidation decided in [ADR-007](docs/adr/ADR-007-single-media-provider-registry.md), lands in v0.1.1 (W5).*
 
-3. **composition.yaml is the SSoT for a work.** Schema in `src/shared/composition.ts`. All mutations go through zod validation + atomic write (tmpfile + rename). No agent should bypass and write the file directly without revalidation.
+3. **The deliverable yaml is the SSoT for a work.** `composition.yaml` (schema `src/shared/composition.ts`) for `short-video`; `carousel.yaml` (schema `src/shared/carousel.ts` after [ADR-006](docs/adr/ADR-006-content-type-registry.md)) for `image-text`. All mutations go through zod validation + atomic write (tmpfile + rename). No agent should bypass and write the file directly without revalidation — this is why carousel gets server-side CLI commands (W6) instead of blind yaml writes.
 
 4. **Terminal-panel agents are skill-agnostic.** Any CLI agent (Claude / Codex / Kimi / Gemini / Aider) should drive AutoViral identically via the `autoviral` CLI + bridge. No agent-specific paths in the CLI or backend.
 
