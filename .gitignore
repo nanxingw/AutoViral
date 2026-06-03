@@ -40,3 +40,8 @@ skills-lock.json
 desktop/out/
 desktop/release/
 desktop/build-resources/
+# Local issue tracker stand-in — `to-issues` breakdown of a PRD into
+# tracer-bullet slices, kept as local working files until `gh` is available
+# to publish them as real GitHub Issues. Canonical source is the PRD in
+# docs/prd/ (committed); these slice files are transient local state.
+docs/issues/
