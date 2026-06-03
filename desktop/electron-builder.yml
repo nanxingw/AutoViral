@@ -31,6 +31,13 @@ files:
   - cli/autoviral/package.json
   - desktop/out/**/*
   - package.json
+  # Production node_modules. MUST be explicit: this repo is an npm WORKSPACE root
+  # (workspaces: packages/* + cli/*), and with a custom `files` whitelist
+  # electron-builder's automatic production-dep collection yields NOTHING — the
+  # 0.1.0 app.asar shipped with ZERO node_modules, so main.js (electron-updater /
+  # electron-log) AND the spawned daemon (hono/zod/better-sqlite3/...) all failed
+  # with "Cannot find module". Dev dependencies are still always excluded.
+  - node_modules/**/*
   - "!**/*.map"
   - "!**/*.test.*"
   - "!**/__tests__/**"
