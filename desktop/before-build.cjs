@@ -36,7 +36,11 @@ module.exports = async function beforeBuild(ctx) {
     onlyModules: ["better-sqlite3", "node-pty"],
     force: true,
   });
-  // Returning false tells electron-builder to skip its built-in npm rebuild —
-  // we've handled it.
-  return false;
+  // Return undefined (NOT false). electron-builder's own rebuild is already
+  // disabled via npmRebuild:false in electron-builder.yml. Returning false here
+  // would additionally short-circuit installOrRebuild's dependency resolution,
+  // which — combined with a custom files whitelist on this npm-workspace root —
+  // makes the node_modules collector ship ZERO production deps. See the
+  // electron-builder.yml note on the (npmRebuild:true + beforeBuild) => 0 trap.
+  return undefined;
 };

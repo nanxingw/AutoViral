@@ -89,10 +89,17 @@ extraResources:
 # right target for it too. We rebuild EXPLICITLY + PER-ARCH via a @electron/rebuild
 # beforeBuild hook (desktop/before-build.cjs), which is required when emitting
 # both arm64 + x64 from one host (the default host-arch rebuild can't). The hook
-# returns false to skip electron-builder's built-in rebuild. npmRebuild stays
-# true as a safety net; buildDependenciesFromSource:false → prefer prebuilds.
+# buildDependenciesFromSource:false → prefer prebuilds.
+#
+# npmRebuild MUST be false here. With BOTH npmRebuild:true AND a beforeBuild hook,
+# electron-builder's installOrRebuild runs the workspace dependency resolution and
+# the node_modules collector uses that (empty, on a workspace root) result —
+# shipping an app.asar with ZERO node_modules. Verified by a build matrix: only
+# (npmRebuild:true + beforeBuild) yields 0; every other combo yields the full 444
+# production packages. The beforeBuild hook already does the per-arch Electron-ABI
+# rebuild of better-sqlite3/node-pty, so electron-builder's own rebuild is redundant.
 beforeBuild: desktop/before-build.cjs
-npmRebuild: true
+npmRebuild: false
 buildDependenciesFromSource: false
 
 mac:
