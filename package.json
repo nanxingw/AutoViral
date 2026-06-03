@@ -28,7 +28,7 @@
     "build": "npm run build:backend && npm run build:frontend",
     "build:backend": "tsc && node scripts/write-dist-pkg.mjs",
     "build:frontend": "vite build",
-    "desktop:compile": "tsc -p desktop/tsconfig.json",
+    "desktop:compile": "tsc -p desktop/tsconfig.json && node scripts/write-desktop-pkg.mjs",
     "prebundle:remotion": "node scripts/bundle-remotion.mjs desktop/build-resources/remotion-bundle",
     "ensure:chromium": "node scripts/ensure-chromium.mjs",
     "desktop:resources": "npm run prebundle:remotion && npm run ensure:chromium",

@@ -168,10 +168,19 @@ jobs:
       #
       # NPM_TOKEN must be an npm Automation or Granular Access token with publish
       # rights to the "autoviral" package; the package is published PUBLIC.
+      # Idempotent: npm versions are immutable, so re-running a release (e.g. to
+      # rebuild ONLY the desktop installers for the same version) must NOT fail
+      # here. If autoviral@<version> is already on the registry, skip the publish.
       - name: Publish
-        run: npm publish --provenance --access public
+        run: |
+          if npm view "autoviral@${VERSION}" version >/dev/null 2>&1; then
+            echo "autoviral@${VERSION} already on npm — skipping publish (idempotent re-run)."
+          else
+            npm publish --provenance --access public
+          fi
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ needs.verify-version.outputs.version }}
 
   # ── Set the GitHub release notes from the CHANGELOG ─────────────────────────
   # electron-builder's --publish always may have already created the release for

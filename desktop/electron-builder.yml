@@ -90,6 +90,11 @@ buildDependenciesFromSource: false
 
 mac:
   category: public.app-category.video
+  # App + DMG icon. build/icon.icns (multi-res, generated from web/public/logo.svg)
+  # is also the buildResources default name → belt-and-suspenders with auto-
+  # discovery. Without an icon electron-builder ships the default Electron icon
+  # (the 0.1.0 "no logo" gap).
+  icon: build/icon.icns
   hardenedRuntime: false
   gatekeeperAssess: false
   # Unsigned for 0.1.0 (identity:null disables code signing). Squirrel.Mac can't
@@ -109,6 +114,9 @@ mac:
         - arm64
 
 win:
+  # exe + installer icon. electron-builder generates the .ico from build/icon.png
+  # (≥256). Without it the exe ships the default Electron icon.
+  icon: build/icon.png
   # x64 only for 0.1.0 — better-sqlite3 win-arm64 prebuilds are unverified.
   target:
     - target: nsis
