@@ -26,7 +26,7 @@
   ],
   "scripts": {
     "build": "npm run build:backend && npm run build:frontend",
-    "build:backend": "tsc && node scripts/write-dist-pkg.mjs",
+    "build:backend": "tsc -p tsconfig.build.json && node scripts/write-dist-pkg.mjs",
     "build:frontend": "vite build",
     "typecheck:web": "tsc --noEmit -p web/tsconfig.json",
     "desktop:compile": "tsc -p desktop/tsconfig.json && node scripts/write-desktop-pkg.mjs",

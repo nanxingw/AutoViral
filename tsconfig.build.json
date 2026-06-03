@@ -1,0 +1,5 @@
+{
+  "//": "Publish-build tsconfig — extends the root config but excludes test files so dist/ ships only shippable code (no *.test.js). The root tsconfig.json stays test-inclusive for IDE + vitest typechecking. build:backend points here; do not point IDE/typecheck tooling at this file.",
+  "extends": "./tsconfig.json",
+  "exclude": ["node_modules", "dist", "web", "**/*.test.ts", "**/__tests__/**"]
+}

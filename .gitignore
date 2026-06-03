@@ -1,6 +1,7 @@
 node_modules/
 dist/
 web/dist/
+.vite/
 .env
 .env.local
 *.log

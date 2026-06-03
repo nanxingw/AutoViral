@@ -56,30 +56,12 @@ export function runCLI(): void {
     .command("start")
     .description("Start the AutoViral server")
     .option("--foreground", "Run in foreground (don't daemonize)")
-    .option("--pm2", "Start with pm2 process manager (auto-restart on crash)")
-    .action(async (opts: { foreground?: boolean; pm2?: boolean }) => {
+    .action(async (opts: { foreground?: boolean }) => {
       const existingPid = await readPid();
       if (existingPid && isProcessRunning(existingPid)) {
         console.log(`Server already running (PID ${existingPid})`);
         console.log(`Run 'autoviral stop' first, then start again.`);
         return;
-      }
-
-      // pm2 mode: delegate to pm2
-      if (opts.pm2) {
-        try {
-          const { execSync: execSyncPm2 } = await import("node:child_process");
-          execSyncPm2("pm2 --version", { stdio: "ignore" });
-          const configPath = join(process.cwd(), "ecosystem.config.cjs");
-          execSyncPm2(`pm2 start ${configPath}`, { stdio: "inherit" });
-          console.log("AutoViral started with pm2 (auto-restart enabled)");
-          console.log("Use 'pm2 logs autoviral' to view logs");
-          console.log("Use 'pm2 stop autoviral' to stop");
-          return;
-        } catch {
-          console.error("pm2 not found. Install with: npm install -g pm2");
-          console.log("Falling back to normal start...");
-        }
       }
 
       // If not --foreground and not already a spawned daemon, fork to background
