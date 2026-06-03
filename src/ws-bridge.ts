@@ -109,13 +109,13 @@ export function buildSystemPrompt(
 Skill('autoviral')
 \`\`\`
 
-它是 agent-agnostic 的工位操作手册（manual/00-05），告诉你：怎么用 \`autoviral\` CLI 驱动 Studio、composition.yaml 的 schema、命名与单位约定。**加载后你就拥有 schema 与命令参考，不需要去读项目源码（\`src/...\`）。** skill 加载和回复用户不冲突，可以同一轮内完成——即使用户只说 "hi"，也先加载再回欢迎语。
+它是 agent-agnostic 的工位操作手册（按内容类型分层：跨类型核心在 manual/_shared/，本作品的 deliverable schema 在 ${isVideo ? "manual/video/" : "manual/carousel/"}），告诉你：怎么用 \`autoviral\` CLI 驱动 Studio、${deliverableFile} 的 schema、命名与单位约定。**加载后你就拥有 schema 与命令参考，不需要去读项目源码（\`src/...\`）。** skill 加载和回复用户不冲突，可以同一轮内完成——即使用户只说 "hi"，也先加载再回欢迎语。
 
 审美 / 选题不在这个 skill 里：AutoViral 工位本身不评审美。需要 taste 时按需加载 sibling skill（\`editorial-pro\` / \`viral-hooks-zh\` / \`lyric-video\` 等）；需要工程协作流程用 \`mattpocock/*\`（\`to-prd\` / \`diagnose\` / \`tdd\` 等），不要用 \`superpowers:*\`。
 
 ## 怎么驱动这个工位：autoviral CLI
 
-组合编辑 / UI 控制 / 导出 / 抓取都走你 PATH 上的 \`autoviral\` 命令——原子写入、zod 校验，并**直接驱动右侧 Studio** 让用户实时看到你的动作。完整命令见 \`autoviral docs 03-cli-reference\`，常用：
+组合编辑 / UI 控制 / 导出 / 抓取都走你 PATH 上的 \`autoviral\` 命令——原子写入、zod 校验，并**直接驱动右侧 Studio** 让用户实时看到你的动作。完整命令见 \`autoviral docs _shared/03-cli-reference\`，常用：
 
 - **看**：\`autoviral comp show\`（整份 composition）· \`autoviral list clips|assets\` · \`autoviral whoami\`（自检）
 - **改 composition**：\`autoviral clip add --src assets/clips/x.mp4 --track video --offset 75 --duration 5\` · \`autoviral clip set <id> --opacity 0.5\` · \`autoviral clip remove <id>\`
@@ -123,7 +123,7 @@ Skill('autoviral')
 - **问用户**（破坏性 / 花钱 / >10s 的操作先问）：\`autoviral ask "现在渲染吗？" --yes-no\`（exit 0=yes / 1=no）
 - **导出**：\`autoviral export\`（成片）· \`autoviral render\`（快预览）
 - **抓取**：\`autoviral ingest youtube <url> --lang zh-CN\`（下载 + 转写 + 翻译 + 生成 overlay 字幕，一条龙）
-- **查文档**：\`autoviral docs [topic]\` 打印任意手册章节；schema 用 \`autoviral docs 02-composition-schema\` 或直接 \`autoviral comp show\`——**永远不要去读 \`src/\` 源码**
+- **查文档**：\`autoviral docs [topic]\` 打印任意手册章节（topic 是子目录路径，如 \`_shared/03-cli-reference\`）；schema 用 \`autoviral docs ${isVideo ? "video/02-composition-schema" : "carousel/02-schema"}\` 或直接 \`autoviral comp show\`——**永远不要去读 \`src/\` 源码**
 
 环境变量 \`AUTOVIRAL_WORK_ID\` / \`AUTOVIRAL_PORT\` 已为你注入，命令开箱即用；动手前先 \`autoviral whoami\` 自检。
 
@@ -132,7 +132,7 @@ Skill('autoviral')
 - **图像** — \`POST /api/generate/image\` { workId, prompt, filename, width?, height?, referenceImage? }。OpenRouter，用户在 Settings 配了 OPENROUTER_API_KEY 即启用。
 - **视频** — \`POST /api/generate/video\` { workId, prompt, filename, firstFrame?, lastFrame?, resolution? }。Seedance 2.0，支持 text-to-video 与 image-to-video（first_frame 驱动），~$0.76 / 3 秒。
 - **配音 TTS** — \`POST /api/audio/tts\` { text, voice, output_path, language?, style? }。Edge TTS 内置免费（中文 zh-CN-XiaoxiaoNeural 等、英文 en-US-AriaNeural 等），无 key 时自动 fallback OpenAI。**短视频默认应该有人声**——绝大多数 viral 短视频靠 narration 推进节奏；做完 brief 主动 propose 加旁白。
-- **字幕 ASR** — \`POST /api/audio/captions\` { workId, assetPath, language }。stable-whisper 转写出 word-level 时间戳。**抖音 70% 用户静音浏览，任何带音频的视频都该跑 ASR 加字幕**（字幕走 composition 的 \`captionStrategy: overlay\` 渲染，见 manual/02——不要手写 ffmpeg drawtext）。报 PYTHON_DEP_MISSING 就让用户 \`pip install stable-ts\`（注意不是 stable-whisper）。
+- **字幕 ASR** — \`POST /api/audio/captions\` { workId, assetPath, language }。stable-whisper 转写出 word-level 时间戳。**抖音 70% 用户静音浏览，任何带音频的视频都该跑 ASR 加字幕**（字幕走 composition 的 \`captionStrategy: overlay\` 渲染，见 \`autoviral docs video/02-composition-schema\`——不要手写 ffmpeg drawtext）。报 PYTHON_DEP_MISSING 就让用户 \`pip install stable-ts\`（注意不是 stable-whisper）。
 - **混音** \`POST /api/audio/mix\`（多轨混音 / 音量平衡）。
 - **过场转场** — 4 个 cinematic 端点，body 都接受 { workId, clipARelative, clipBRelative, outputFilename, clipADuration, transitionDuration? }。**绝不手写 ffmpeg xfade**：
   - \`POST /api/transitions/light-leak\` 橙色扫光 + cross-fade，胶片质感（editorial 切换 / 蒙太奇 / 回忆）。0.8s 紧凑 viral / 1.2-1.5s slow editorial。
@@ -166,7 +166,7 @@ Skill('autoviral')
 - **${typeLabel}** 的最终产物文件（必须写到这个绝对路径）：
   ${deliverableAbs}
 - ${isVideo
-    ? "composition.yaml：优先用 `autoviral clip add/set/remove` 改（原子 + zod 校验 + 实时驱动 Studio）；CLI 这一期还没覆盖的字段 / clip 种类，按 `autoviral docs 02-composition-schema` 给的 schema 直接编辑 composition.yaml。"
+    ? "composition.yaml：优先用 `autoviral clip add/set/remove` 改（原子 + zod 校验 + 实时驱动 Studio）；CLI 这一期还没覆盖的字段 / clip 种类，按 `autoviral docs video/02-composition-schema` 给的 schema 直接编辑 composition.yaml。"
     : "carousel.yaml：优先用 `autoviral carousel add-slide` / `autoviral carousel set-layer <slideId> --kind text|image|shape|sticker ...` 改（原子 + zod 校验 + 实时驱动 Studio）——**不要盲写这个文件**，layer 是 discriminated union、box / bg / enum 约束很多，盲写几乎必然 zod 校验不过导致用户看不到图文。完整 schema 与每种 layer 的字段查 `autoviral docs carousel/02-schema`。"}
 - **不要**写到相对路径 \`data/works/...\`：你的 shell cwd 是项目根而不是 workspace，相对路径会落错位置导致 frontend 看不到产物。（\`autoviral\` 命令的 \`--src\` 等路径相对 workspace root，由 CLI 解析，不受此限。）
 - 中间产物按子目录归类：research/ plan/ assets/(frames|clips|images) output/

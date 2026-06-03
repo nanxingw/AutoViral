@@ -9,16 +9,31 @@ You are a CLI agent running inside the **AutoViral Studio terminal panel**. The 
 
 You drive AutoViral via the `autoviral` CLI on your PATH. It is the agent-agnostic bridge — any of you (Claude, GPT, Kimi, Gemini) talks to the Studio through the same commands.
 
-## Read this in order
+## Read by work type (the manual is co-located, not one flat list)
 
-1. **manual/00-quickstart.md** — 5-minute zero-to-export walkthrough
-2. **manual/01-workspace-layout.md** — where the files live
-3. **manual/02-composition-schema.md** — the data you'll be mutating
-4. **manual/03-cli-reference.md** — every command you can call
-5. **manual/04-ui-control.md** — how to make the Studio dance for the user
-6. **manual/05-conventions.md** — naming, units, gotchas
+The manual is split into a **cross-type core** plus a **per-content-type** subtree,
+so an agent editing a 图文 carousel is never force-fed a whole chapter of video
+composition schema (and vice-versa). Check `work.type` (`autoviral whoami` →
+the work's type, or the `${AUTOVIRAL_WORK_ID}` work's `work.yaml`), then read the
+matching set:
 
-When stuck, run `autoviral docs <topic>` to print any section.
+**Always read (cross-type core — `manual/_shared/`):**
+
+1. **manual/_shared/00-quickstart.md** — 5-minute zero-to-export walkthrough
+2. **manual/_shared/01-workspace-layout.md** — where the files live
+3. **manual/_shared/03-cli-reference.md** — every command you can call
+4. **manual/_shared/04-ui-control.md** — how to make the Studio dance for the user
+5. **manual/_shared/05-conventions.md** — naming, units, gotchas
+
+**Then read the deliverable schema for THIS work's type:**
+
+- **short-video** (`composition.yaml`) → **manual/video/02-composition-schema.md** — tracks, clips, keyframes, the data you mutate via `autoviral clip ...`
+- **image-text / 图文** (`carousel.yaml`) → **manual/carousel/02-schema.md** — slides, layers (discriminated union), `bg`, the data you mutate via `autoviral carousel ...`
+
+When stuck, run `autoviral docs <topic>` to print any section — topics are the
+subdir paths, e.g. `autoviral docs _shared/03-cli-reference`,
+`autoviral docs video/02-composition-schema`, `autoviral docs carousel/02-schema`.
+`autoviral docs` with no topic concatenates the whole manual (all subtrees).
 
 ## Aesthetic / taste decisions are NOT in this skill
 
@@ -33,7 +48,10 @@ This manual only documents how to operate the tool; **what** to operate it towar
 
 ## Recipes for common tasks
 
-See `recipes/`:
+Recipes are partitioned by content type — `recipes/video/` and `recipes/carousel/`.
+Read the partition that matches `work.type`.
+
+**`recipes/video/`** (short-video):
 
 - `crossfade-between-clips.md`
 - `swap-clip-source.md`
@@ -41,6 +59,10 @@ See `recipes/`:
 - `apply-platform-preset.md`
 - `add-subtitle-overlay.md`
 - `ingest-youtube.md` — turn a YouTube URL into a 中文 short via the one-shot `autoviral ingest youtube` pipeline
+
+**`recipes/carousel/`** (图文):
+
+- `restyle-all-slides.md` — restyle every slide/headline at once (globals PUT vs per-layer `set-layer` loop). This is also the **template** for new content-type recipes.
 
 ## Contracts
 

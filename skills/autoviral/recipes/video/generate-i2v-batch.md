@@ -87,7 +87,7 @@ autoviral seek 0
 
 ## Polishing the batch with crossfades
 
-Right after `clip add` returns, the clips are hard-cut. To add crossfades, see `recipes/crossfade-between-clips.md` — the `--out` and `--keyframes` patches apply unchanged.
+Right after `clip add` returns, the clips are hard-cut. To add crossfades, see `recipes/video/crossfade-between-clips.md` — the `--out` and `--keyframes` patches apply unchanged.
 
 ## Cost / quota awareness
 

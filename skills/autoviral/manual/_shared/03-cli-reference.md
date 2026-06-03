@@ -26,8 +26,8 @@ Print the operator manual. Returns raw markdown (not JSON-wrapped) so agents pip
 
 ```bash
 autoviral docs                       # full manual concatenated
-autoviral docs 03-cli-reference      # this file
-autoviral docs 02-composition-schema
+autoviral docs _shared/03-cli-reference   # this file
+autoviral docs video/02-composition-schema
 ```
 
 Unknown topic → exit 3.

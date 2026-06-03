@@ -432,11 +432,22 @@ describe("bridge router — Phase 2 docs", () => {
     expect(text).toMatch(/autoviral/i);
   });
 
-  it("GET /docs?topic=00-quickstart returns the named file", async () => {
-    const res = await app.request("/api/bridge/v1/docs?topic=00-quickstart");
+  it("GET /docs?topic=_shared/00-quickstart returns the named subdir file (I09 co-location)", async () => {
+    const res = await app.request(
+      "/api/bridge/v1/docs?topic=" + encodeURIComponent("_shared/00-quickstart"),
+    );
     expect(res.status).toBe(200);
     const text = await res.text();
     expect(text).toMatch(/quickstart/i);
+  });
+
+  it("GET /docs?topic=video/02-composition-schema returns the nested video chapter (I09)", async () => {
+    const res = await app.request(
+      "/api/bridge/v1/docs?topic=" + encodeURIComponent("video/02-composition-schema"),
+    );
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toMatch(/composition/i);
   });
 
   it("GET /docs?topic=does-not-exist → 404", async () => {

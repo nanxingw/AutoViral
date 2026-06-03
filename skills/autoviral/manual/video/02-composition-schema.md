@@ -111,7 +111,7 @@ keyframes:
     easing: easeOut
 ```
 
-That snippet is the **first half of a crossfade** — fade in over 0.18s. See `recipes/crossfade-between-clips.md` for the full pattern (extend `out` + paired keyframes on consecutive clips).
+That snippet is the **first half of a crossfade** — fade in over 0.18s. See `recipes/video/crossfade-between-clips.md` for the full pattern (extend `out` + paired keyframes on consecutive clips).
 
 Speed keyframes are special: their `value` must be in `[0.1, 4.0]`. The schema rejects out-of-range values on the clip's superRefine.
 

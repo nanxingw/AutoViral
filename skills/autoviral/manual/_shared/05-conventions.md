@@ -26,7 +26,7 @@ When inserting a clip into the middle of a track, you usually need to bump every
 
 The schema does not enforce non-overlapping clips. Two video clips on the same track can occupy the same `[trackOffset, trackOffset + (out - in)]` window. The render pipeline compositest hem with the later clip on top (per `clips[]` array order).
 
-This is **how crossfades work**: clip A ends at t=5.18, clip B starts at t=5.0, with paired opacity keyframes on both. See `recipes/crossfade-between-clips.md`.
+This is **how crossfades work**: clip A ends at t=5.18, clip B starts at t=5.0, with paired opacity keyframes on both. See `recipes/video/crossfade-between-clips.md`.
 
 ## Keyframe `time` is clip-local
 

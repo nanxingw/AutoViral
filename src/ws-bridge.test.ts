@@ -75,9 +75,17 @@ describe("buildSystemPrompt", () => {
       for (const dead of DEAD) {
         expect(p, `prompt must not reference removed "${dead}"`).not.toContain(dead);
       }
-      // The agent should be told the skill/manual is the schema source.
-      expect(p).toMatch(/autoviral docs 02-composition-schema|操作手册/);
+      // The agent should be told the co-located skill/manual is the schema
+      // source — via the subdir-aware `autoviral docs <type>/<chapter>` form
+      // (I09). Either deliverable schema topic satisfies this; both prompts
+      // also load the 操作手册 skill.
+      expect(p).toMatch(
+        /autoviral docs (?:video\/02-composition-schema|carousel\/02-schema)|操作手册/,
+      );
     }
+    // Each variant must point at ITS OWN deliverable schema chapter.
+    expect(variants[0]).toMatch(/autoviral docs video\/02-composition-schema/);
+    expect(variants[1]).toMatch(/autoviral docs carousel\/02-schema/);
   });
 
   it("works for image-text type without referencing video-only modules", () => {

@@ -93,8 +93,8 @@ The CLI prints the output path to stdout. The Studio shows render progress via t
 
 ```bash
 autoviral docs                       # full manual (concatenated)
-autoviral docs 03-cli-reference      # one section
-autoviral docs recipes/crossfade-between-clips
+autoviral docs _shared/03-cli-reference   # one section
+autoviral docs recipes/video/crossfade-between-clips
 ```
 
-That's the loop. Read `01-workspace-layout` next to learn where files live, then `03-cli-reference` for every flag.
+That's the loop. Read `_shared/01-workspace-layout` next to learn where files live, then `_shared/03-cli-reference` for every flag. For the deliverable schema, read `video/02-composition-schema` (short-video) or `carousel/02-schema` (图文).

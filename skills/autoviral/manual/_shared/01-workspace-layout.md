@@ -60,7 +60,7 @@ The CLI sets `AUTOVIRAL_CWD` to that path. When you `cd` after the terminal open
 
 ## A real workspace (sanity-check)
 
-`~/.autoviral/works/w_20260513_1919_74d/` ships with 19 video clips, BGM, and three title text clips. If you ever need a worked example, this is the canonical one — see `recipes/crossfade-between-clips.md` for the exact composition.yaml structure it produces.
+`~/.autoviral/works/w_20260513_1919_74d/` ships with 19 video clips, BGM, and three title text clips. If you ever need a worked example, this is the canonical one — see `recipes/video/crossfade-between-clips.md` for the exact composition.yaml structure it produces.
 
 ## Multi-tab safety
 
