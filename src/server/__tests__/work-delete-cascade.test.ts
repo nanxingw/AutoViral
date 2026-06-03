@@ -4,7 +4,7 @@ import { Hono } from "hono";
 // Hoisted mocks — only mock what we need to intercept. api.ts has many
 // top-level imports; we only override work-store (the unit under test) and
 // config (to avoid filesystem touches).
-vi.mock("../../work-store.js", () => ({
+vi.mock("../../domain/work-store.js", () => ({
   listWorks: vi.fn(),
   getWork: vi.fn(),
   createWork: vi.fn(),
@@ -14,7 +14,7 @@ vi.mock("../../work-store.js", () => ({
   getAssetPath: vi.fn(),
   saveWorkChat: vi.fn(),
 }));
-vi.mock("../../config.js", () => ({
+vi.mock("../../infra/config.js", () => ({
   loadConfig: vi.fn().mockResolvedValue({ analytics: { douyinUrl: "" } }),
   saveConfig: vi.fn(),
   dataDir: "/tmp/autoviral-test",
@@ -46,7 +46,7 @@ describe("DELETE /api/works/:id — in-flight protection", () => {
   });
 
   it("kills active CLI session before deleting a creating work", async () => {
-    const { getWork, deleteWork } = await import("../../work-store.js");
+    const { getWork, deleteWork } = await import("../../domain/work-store.js");
     const callOrder: string[] = [];
     (getWork as any).mockResolvedValue({
       id: "w_test_creating",
@@ -69,7 +69,7 @@ describe("DELETE /api/works/:id — in-flight protection", () => {
   });
 
   it("skips killSession when work has no cliSessionId", async () => {
-    const { getWork, deleteWork } = await import("../../work-store.js");
+    const { getWork, deleteWork } = await import("../../domain/work-store.js");
     (getWork as any).mockResolvedValue({ id: "w_done", status: "ready" });
     (deleteWork as any).mockResolvedValue(true);
 
@@ -79,7 +79,7 @@ describe("DELETE /api/works/:id — in-flight protection", () => {
   });
 
   it("returns 404 when work does not exist", async () => {
-    const { getWork } = await import("../../work-store.js");
+    const { getWork } = await import("../../domain/work-store.js");
     (getWork as any).mockResolvedValue(null);
 
     const res = await app.request("/api/works/w_missing", { method: "DELETE" });

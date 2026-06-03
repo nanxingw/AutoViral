@@ -10,7 +10,7 @@ const { loadConfig, saveConfig, restartResearchScheduler } = vi.hoisted(() => ({
   saveConfig: vi.fn(),
   restartResearchScheduler: vi.fn(),
 }));
-vi.mock("../../config.js", () => ({
+vi.mock("../../infra/config.js", () => ({
   loadConfig,
   saveConfig,
   dataDir: "/tmp/autoviral-test",

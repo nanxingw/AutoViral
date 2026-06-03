@@ -10,7 +10,7 @@ const { validate, schedule, stop, loadConfig } = vi.hoisted(() => ({
   loadConfig: vi.fn(),
 }));
 vi.mock("node-cron", () => ({ default: { validate, schedule, getTasks: vi.fn() } }));
-vi.mock("./config.js", () => ({ loadConfig }));
+vi.mock("./infra/config.js", () => ({ loadConfig }));
 
 async function start() {
   vi.resetModules();

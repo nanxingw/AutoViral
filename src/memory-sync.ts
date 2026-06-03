@@ -1,5 +1,5 @@
-import { MemoryClient } from "./memory.js"
-import { loadConfig } from "./config.js"
+import { MemoryClient } from "./domain/memory.js"
+import { loadConfig } from "./infra/config.js"
 
 interface ConversationBlock {
   type: string

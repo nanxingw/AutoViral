@@ -1,5 +1,5 @@
 import { Command } from "commander";
-import { loadConfig, saveConfig, type Config, getConfigDir } from "./config.js";
+import { loadConfig, saveConfig, type Config, getConfigDir } from "./infra/config.js";
 import { readFile, writeFile, unlink, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";

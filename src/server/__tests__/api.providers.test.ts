@@ -110,7 +110,7 @@ describe("Phase 8.4 provider endpoints", () => {
   it("registers new asset on composition.yaml after successful POST", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Provider Demo",
         type: "short-video",
@@ -148,7 +148,7 @@ describe("Phase 8.4 provider endpoints", () => {
   it("appends a generate provenance edge with provider+prompt params", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Provider Demo 2",
         type: "short-video",

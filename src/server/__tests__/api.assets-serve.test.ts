@@ -22,7 +22,7 @@ describe("GET /api/works/:id/assets/* — path normalisation", () => {
   it("serves a file under assets/clips/ via the canonical single-prefix URL", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Asset URL test (single)",
         type: "short-video",
@@ -44,7 +44,7 @@ describe("GET /api/works/:id/assets/* — path normalisation", () => {
   it("serves the same file via the doubled-`assets/` URL (frontend bug shape)", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Asset URL test (doubled)",
         type: "short-video",
@@ -77,7 +77,7 @@ describe("GET /api/works/:id/assets/* — security headers (#52)", () => {
   it("serves SVG with nosniff + a script-blocking CSP sandbox", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({ title: "svg", type: "image-text", platforms: ["douyin"] });
       const wDir = join(dataDir, "works", w.id);
       await mkdir(join(wDir, "assets", "images"), { recursive: true });
@@ -98,7 +98,7 @@ describe("GET /api/works/:id/assets/* — security headers (#52)", () => {
   it("adds nosniff but NOT a CSP to a normal image (CSP is SVG-only)", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({ title: "png", type: "image-text", platforms: ["douyin"] });
       const wDir = join(dataDir, "works", w.id);
       await mkdir(join(wDir, "assets", "images"), { recursive: true });
@@ -127,7 +127,7 @@ describe("POST /api/works/:id/assets/upload — type allowlist (#52)", () => {
   it("rejects a non-media extension (e.g. .html) with 415 + errorCode", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({ title: "up", type: "image-text", platforms: ["douyin"] });
       void dataDir;
       const res = await uploadFile(apiRoutes, w.id, "evil.html", "text/html", "<script>1</script>");
@@ -140,7 +140,7 @@ describe("POST /api/works/:id/assets/upload — type allowlist (#52)", () => {
   it("accepts a png upload (allowlisted)", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({ title: "up2", type: "image-text", platforms: ["douyin"] });
       void dataDir;
       const res = await uploadFile(apiRoutes, w.id, "pic.png", "image/png", "fake-png-bytes");
@@ -153,7 +153,7 @@ describe("POST /api/works/:id/assets/upload — type allowlist (#52)", () => {
   it("end-to-end: an uploaded SVG is served back with the script-blocking CSP", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({ title: "e2e", type: "image-text", platforms: ["douyin"] });
       void dataDir;
       const up = await uploadFile(apiRoutes, w.id, "probe.svg", "image/svg+xml", XSS_SVG);

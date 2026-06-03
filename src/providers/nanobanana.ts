@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { dataDir } from '../config.js'
+import { dataDir } from '../infra/config.js'
 import type { GenerateProvider, ImageOpts, VideoOpts, GenerateResult } from './base.js'
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'

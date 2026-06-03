@@ -27,7 +27,7 @@ import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 import yaml from "js-yaml";
 import { CompositionSchema, type Composition } from "../../shared/composition.js";
-import { mixAudioTracks } from "../../audio-tools.js";
+import { mixAudioTracks } from "../../domain/audio-tools.js";
 
 // Re-import the unit's adapter via the named test export.
 import { __compositionToMixTracksForTest } from "../render-pipeline.js";

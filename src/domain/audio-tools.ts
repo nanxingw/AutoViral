@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { stat, writeFile, mkdtemp } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { FFMPEG_BIN, FFPROBE_BIN } from "./server/ffmpeg-paths.js";
+import { FFMPEG_BIN, FFPROBE_BIN } from "../server/ffmpeg-paths.js";
 
 // ── Types ──────────────────────────────────────────────────────────────────
 

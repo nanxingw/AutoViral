@@ -8,7 +8,7 @@
 import { Hono, type Context } from "hono";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { PACKAGE_ROOT } from "../../paths.js";
+import { PACKAGE_ROOT } from "../../infra/paths.js";
 import { readdir, readFile } from "node:fs/promises";
 import type { WhoAmIResponse } from "./schemas.js";
 import {

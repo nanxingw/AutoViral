@@ -9,7 +9,7 @@ describe("/api/works/:id/composition", () => {
   it("GET returns 404 when composition not yet saved", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "T",
         type: "short-video",
@@ -25,7 +25,7 @@ describe("/api/works/:id/composition", () => {
   it("PUT saves and GET returns same payload", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "T",
         type: "short-video",

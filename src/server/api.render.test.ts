@@ -53,7 +53,7 @@ describe("Phase 7.B REST endpoints", () => {
   it("POST /api/works/:id/render — enqueues and returns { jobId }", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes, setRenderQueue } = await import("./api.js");
-      const { createWork } = await import("../work-store.js");
+      const { createWork } = await import("../domain/work-store.js");
       setRenderQueue(queue as any);
 
       const w = await createWork({

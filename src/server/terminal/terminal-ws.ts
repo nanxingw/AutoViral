@@ -2,8 +2,8 @@ import { WebSocketServer, type WebSocket } from "ws";
 import type { Server as HttpServer, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { PtyPool } from "./pty-pool.js";
-import { dataDir } from "../../config.js";
-import { PACKAGE_ROOT } from "../../paths.js";
+import { dataDir } from "../../infra/config.js";
+import { PACKAGE_ROOT } from "../../infra/paths.js";
 import { join } from "node:path";
 import { enforceLoopbackOrigin } from "../ws-origin.js";
 

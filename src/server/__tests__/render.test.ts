@@ -47,7 +47,7 @@ describe("POST /api/works/:id/render — legacy guards", () => {
     // status code is purely a semantic signal for triage / dev tooling.
     await withTempDataDir(async () => {
       const { apiRoutes, setRenderQueue } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       setRenderQueue(new FakeQueue() as any);
       const w = await createWork({
         title: "T",
@@ -79,7 +79,7 @@ describe("POST /api/works/:id/render — legacy guards", () => {
       const { apiRoutes, setRenderQueue } = await import("../api.js");
       // Force the un-initialized state.
       setRenderQueue(null as any);
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "T",
         type: "short-video",

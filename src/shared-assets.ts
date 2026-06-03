@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { dataDir } from "./config.js";
+import { dataDir } from "./infra/config.js";
 
 const SHARED_DIR = path.join(dataDir, "shared-assets");
 const CATEGORIES = ["characters", "scenes", "music", "templates", "branding", "general"] as const;

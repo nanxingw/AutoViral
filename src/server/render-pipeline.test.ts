@@ -5,8 +5,8 @@ import { EventEmitter } from "node:events";
 vi.mock("./remotion-renderer.js", () => ({
   renderCompositionToMp4: vi.fn(async (_comp, outDir) => `${outDir}/render-intermediate.mp4`),
 }));
-vi.mock("../audio-tools.js", async (orig) => {
-  const real = await orig<typeof import("../audio-tools.js")>();
+vi.mock("../domain/audio-tools.js", async (orig) => {
+  const real = await orig<typeof import("../domain/audio-tools.js")>();
   return {
     ...real,
     mixAudioTracks: vi.fn(async (_opts) => undefined),
@@ -50,7 +50,7 @@ import {
   __compositionToMixTracksForTest,
 } from "./render-pipeline.js";
 import { renderCompositionToMp4 } from "./remotion-renderer.js";
-import { mixAudioTracks, normalizeLufs, burnSubtitles } from "../audio-tools.js";
+import { mixAudioTracks, normalizeLufs, burnSubtitles } from "../domain/audio-tools.js";
 import type { Composition, ExportPreset } from "../shared/composition.js";
 
 const _spawn = spawn as unknown as ReturnType<typeof vi.fn>;

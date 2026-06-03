@@ -11,7 +11,7 @@ describe("/api/works/:id/carousel", () => {
   it("GET returns 404 when carousel not yet saved", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "T",
         type: "image-text",
@@ -27,7 +27,7 @@ describe("/api/works/:id/carousel", () => {
   it("PUT saves and GET returns same payload", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "T",
         type: "image-text",
@@ -86,7 +86,7 @@ describe("GET /api/works/:id/carousel — legacy synthesise (SV.I)", () => {
   it("synthesises a carousel from output/*.png when no carousel.yaml exists", async () => {
     await withTempDataDir(async (dir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Legacy",
         type: "image-text",
@@ -114,7 +114,7 @@ describe("GET /api/works/:id/carousel — legacy synthesise (SV.I)", () => {
   it("returns 404 for a short-video work (synthesise is image-text only)", async () => {
     await withTempDataDir(async (dir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "SV",
         type: "short-video",

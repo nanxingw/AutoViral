@@ -28,7 +28,7 @@ describe("upload size cap (#67)", () => {
   it("rejects an oversized work-asset upload with 413 + asset_too_large (before buffering)", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const work = await createWork({ title: "T", type: "short-video", platforms: ["douyin"] });
       const res = await apiRoutes.fetch(oversizedRequest(`/api/works/${work.id}/assets/upload`));
       expect(res.status).toBe(413);
@@ -48,7 +48,7 @@ describe("upload size cap (#67)", () => {
   it("does NOT reject a normally-sized work-asset upload (middleware passes valid bodies through)", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const work = await createWork({ title: "T", type: "short-video", platforms: ["douyin"] });
       const fd = new FormData();
       fd.append("file", new File(["fake-png-bytes"], "pic.png", { type: "image/png" }));

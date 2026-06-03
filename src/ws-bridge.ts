@@ -18,13 +18,13 @@ import yaml from "js-yaml";
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { appendFile } from "node:fs/promises";
-import { logBridge, logBridgeDebug } from "./logger.js";
-import { loadConfig, dataDir } from "./config.js";
-import { PACKAGE_ROOT } from "./paths.js";
-import { getWork, updateWork, saveWorkChat, loadWorkChat, type Work } from "./work-store.js";
+import { logBridge, logBridgeDebug } from "./infra/logger.js";
+import { loadConfig, dataDir } from "./infra/config.js";
+import { PACKAGE_ROOT } from "./infra/paths.js";
+import { getWork, updateWork, saveWorkChat, loadWorkChat, type Work } from "./domain/work-store.js";
 import { createCheckpoint } from "./server/checkpoints.js";
 import { listSharedAssets } from "./shared-assets.js";
-import { MemoryClient } from "./memory.js";
+import { MemoryClient } from "./domain/memory.js";
 import { syncMessage } from "./memory-sync.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────

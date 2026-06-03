@@ -14,8 +14,8 @@ import { readFile, writeFile, mkdir, readdir, stat, copyFile } from "node:fs/pro
 import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { dataDir } from "../config.js";
-import { logBridge } from "../logger.js";
+import { dataDir } from "../infra/config.js";
+import { logBridge } from "../infra/logger.js";
 
 const SNAPSHOT_DIR = ".snapshots";
 const DELIVERABLES = ["carousel.yaml", "composition.yaml"] as const;

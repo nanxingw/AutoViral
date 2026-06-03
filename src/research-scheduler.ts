@@ -1,5 +1,5 @@
 import cron from "node-cron";
-import { loadConfig } from "./config.js";
+import { loadConfig } from "./infra/config.js";
 
 /**
  * #64 — the Settings "启用自动调研" toggle + cron expression were fully surfaced

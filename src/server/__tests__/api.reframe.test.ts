@@ -86,7 +86,7 @@ describe("POST /api/video/reframe", () => {
     await withTempDataDir(async (dataDir) => {
       _existsSync.mockReturnValue(false); // scripts deleted in the refactor
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Demo",
         type: "short-video",
@@ -119,7 +119,7 @@ describe("POST /api/video/reframe", () => {
   it("happy path: runs saliency + crop, registers asset + reframe edge, persists composition", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Demo Clip",
         type: "short-video",
@@ -216,7 +216,7 @@ describe("POST /api/video/reframe", () => {
   it("returns 404 when the videoId is not in the composition", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Demo",
         type: "short-video",
@@ -238,7 +238,7 @@ describe("POST /api/video/reframe", () => {
   it("returns 500 propagating Python bridge errors with the stderr cause", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Demo",
         type: "short-video",
@@ -266,7 +266,7 @@ describe("POST /api/video/reframe", () => {
   it("uses the strategy_used reported by saliency.py (after fallbacks) on the edge", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Demo",
         type: "short-video",

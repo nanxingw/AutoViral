@@ -62,7 +62,7 @@ describe("POST /api/post-process/lip-sync (Phase 8.6)", () => {
   it("returns 400 when audioAssetId is missing", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "LS",
         type: "short-video",
@@ -85,7 +85,7 @@ describe("POST /api/post-process/lip-sync (Phase 8.6)", () => {
   it("runs lip-sync (stub mode), returns assetUri + stub flag", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Demo Clip",
         type: "short-video",

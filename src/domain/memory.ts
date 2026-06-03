@@ -1,7 +1,7 @@
 // EverMemOS Memory Integration — MemoryClient for AutoViral
 // Connects to the EverMind API for persistent memory (style profiles, content history, etc.)
 
-import { loadConfig } from "./config.js";
+import { loadConfig } from "../infra/config.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

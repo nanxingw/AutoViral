@@ -9,7 +9,7 @@ describe("POST /api/works/:id/invoke", () => {
   it("returns 202 and triggers a session for a valid module", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes, setWsBridge } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       // Stub WsBridge — invoke endpoint only needs createSession/getSession/sendMessage shape.
       const stub: any = {
         getSession: vi.fn().mockReturnValue(undefined),
@@ -31,7 +31,7 @@ describe("POST /api/works/:id/invoke", () => {
   it("rejects unknown module with 400", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes, setWsBridge } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const stub: any = { getSession: vi.fn(), createSession: vi.fn(), sendMessage: vi.fn() };
       setWsBridge(stub);
 
@@ -59,7 +59,7 @@ describe("POST /api/works/:id/invoke", () => {
   it("does NOT enforce ordering — assembly module callable first", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes, setWsBridge } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const stub: any = {
         getSession: vi.fn().mockReturnValue(undefined),
         createSession: vi.fn().mockResolvedValue({ workId: "x" }),

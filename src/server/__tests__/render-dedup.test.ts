@@ -41,8 +41,8 @@ describe("POST /api/works/:id/render dedup (#62)", () => {
 
   async function setup(activeJobs: FakeJob[]) {
     const { apiRoutes, setRenderQueue } = await import("../api.js");
-    const { createWork } = await import("../../work-store.js");
-    const { dataDir } = await import("../../config.js");
+    const { createWork } = await import("../../domain/work-store.js");
+    const { dataDir } = await import("../../infra/config.js");
 
     const work = await createWork({ title: "T", type: "short-video", platforms: ["douyin"] });
     // The handler fail-fasts unless composition.yaml exists on disk.

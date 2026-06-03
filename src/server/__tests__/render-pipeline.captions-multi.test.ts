@@ -34,8 +34,8 @@ vi.mock("../remotion-renderer.js", () => ({
 // uses to import is `../audio-tools.js`, but vi.mock paths resolve
 // relative to the test file (src/server/__tests__/...), so this needs
 // two `..` segments.
-vi.mock("../../audio-tools.js", async (orig) => {
-  const real = await orig<typeof import("../../audio-tools.js")>();
+vi.mock("../../domain/audio-tools.js", async (orig) => {
+  const real = await orig<typeof import("../../domain/audio-tools.js")>();
   return {
     ...real,
     mixAudioTracks: vi.fn(async () => undefined),

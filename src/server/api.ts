@@ -6,16 +6,16 @@ import { promisify } from "node:util";
 import { join, extname } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
-import { loadConfig, saveConfig, dataDir, repoRoot, type Config } from "../config.js";
-import { PACKAGE_ROOT } from "../paths.js";
+import { loadConfig, saveConfig, dataDir, repoRoot, type Config } from "../infra/config.js";
+import { PACKAGE_ROOT } from "../infra/paths.js";
 import { FFPROBE_BIN } from "./ffmpeg-paths.js";
 import {
   listWorks, getWork, createWork as storeCreateWork,
   updateWork as storeUpdateWork, deleteWork as storeDeleteWork,
   listAssets, getAssetPath,
   saveWorkChat,
-} from "../work-store.js";
-import { MemoryClient } from "../memory.js";
+} from "../domain/work-store.js";
+import { MemoryClient } from "../domain/memory.js";
 import type { WsBridge } from "../ws-bridge.js";
 import type { RenderQueue, RenderJob } from "./render-queue/index.js";
 import { getProvider, getDefaultProvider, listProviders } from "../providers/registry.js";
@@ -24,13 +24,13 @@ import {
   listProviders as listVideoProviders,
 } from "./providers/registry.js";
 import { listSharedAssetsWithMeta, getSharedAssetPath, validateCategory, sanitizeFilename, saveSharedAsset, deleteSharedAsset, moveSharedAsset } from "../shared-assets.js";
-import { getLatestCreatorData, getCreatorHistory, collectData, isCollectorAvailable } from "../analytics-collector.js";
+import { getLatestCreatorData, getCreatorHistory, collectData, isCollectorAvailable } from "../domain/analytics-collector.js";
 import cron from "node-cron";
 import { restartResearchScheduler } from "../research-scheduler.js";
-import { log, readLogs } from "../logger.js";
+import { log, readLogs } from "../infra/logger.js";
 import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } from "../test-runner.js";
 import { evaluateWork } from "../test-evaluator.js";
-import { analyzeAudio, mixAudioTracks } from "../audio-tools.js";
+import { analyzeAudio, mixAudioTracks } from "../domain/audio-tools.js";
 import { pickProvider, generateWithFallback } from "../tts-providers/registry.js";
 import { uiEventBus } from "./bridge/ui-events.js";
 import { resolveAssetPath, resolveAssetSubpath, UnsafePathError, SAFE_ID } from "./safe-paths.js";
@@ -2552,7 +2552,7 @@ apiRoutes.all("/api/works/:id/steps/:step/history", (c) => c.json(D3_GONE_BODY, 
 apiRoutes.get("/api/works/:id/chat", async (c) => {
   const id = c.req.param("id");
   try {
-    const { loadWorkChat } = await import("../work-store.js");
+    const { loadWorkChat } = await import("../domain/work-store.js");
     const chat = await loadWorkChat(id);
     if (!chat) return c.json({ error: "No chat history" }, 404);
     return c.json(chat);
@@ -2566,7 +2566,7 @@ apiRoutes.put("/api/works/:id/chat", async (c) => {
   const id = c.req.param("id");
   const body = await c.req.json();
   try {
-    const { saveWorkChat } = await import("../work-store.js");
+    const { saveWorkChat } = await import("../domain/work-store.js");
     await saveWorkChat(id, body);
     return c.json({ saved: true });
   } catch {

@@ -5,7 +5,7 @@
 import { readFile, writeFile, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { join, relative } from "node:path";
 import yaml from "js-yaml";
-import { dataDir } from "./config.js";
+import { dataDir } from "../infra/config.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

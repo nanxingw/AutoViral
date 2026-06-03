@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { withTempDataDir } from "./server/__tests__/_helpers.js";
+import { withTempDataDir } from "../server/__tests__/_helpers.js";
 
 describe("work-store — D3 type cleanup", () => {
   beforeEach(() => vi.resetModules());

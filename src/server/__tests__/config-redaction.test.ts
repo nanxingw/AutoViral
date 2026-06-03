@@ -25,12 +25,12 @@ const h = vi.hoisted(() => {
   return { baseConfig, state: { saved: null as any } };
 });
 
-// Path is resolved relative to THIS test file. api.ts imports "../config.js"
-// (= src/config.ts); from src/server/__tests__/ that same module is
-// "../../config.js". Getting this wrong makes the mock silently no-op and the
+// Path is resolved relative to THIS test file. api.ts imports "../infra/config.js"
+// (= src/infra/config.ts); from src/server/__tests__/ that same module is
+// "../../infra/config.js". Getting this wrong makes the mock silently no-op and the
 // suite reads the dev's real ~/.autoviral config (false negatives).
-vi.mock("../../config.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../config.js")>();
+vi.mock("../../infra/config.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../infra/config.js")>();
   return {
     ...actual,
     loadConfig: vi.fn(async () => structuredClone(h.state.saved ?? h.baseConfig)),

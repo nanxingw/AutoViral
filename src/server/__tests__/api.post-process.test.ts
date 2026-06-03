@@ -69,7 +69,7 @@ describe("POST /api/post-process/:operation (Phase 8.5)", () => {
   it("returns 400 for unknown operation", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "PP",
         type: "short-video",
@@ -92,7 +92,7 @@ describe("POST /api/post-process/:operation (Phase 8.5)", () => {
   it("frame-interpolate runs adapter (stub mode), returns new assetUri + stub flag", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Demo Clip",
         type: "short-video",
@@ -119,7 +119,7 @@ describe("POST /api/post-process/:operation (Phase 8.5)", () => {
   it("super-resolve adds provenance edge with operation+stub params", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "Demo Clip",
         type: "short-video",

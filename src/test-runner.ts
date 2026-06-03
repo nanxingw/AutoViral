@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { createWork, getWork, updateWork, listAssets } from "./work-store.js";
-import { loadConfig } from "./config.js";
-import { log } from "./logger.js";
+import { createWork, getWork, updateWork, listAssets } from "./domain/work-store.js";
+import { loadConfig } from "./infra/config.js";
+import { log } from "./infra/logger.js";
 import type { WsBridge, ChatBlock } from "./ws-bridge.js";
 
 const execFileAsync = promisify(execFile);

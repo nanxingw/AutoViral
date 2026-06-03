@@ -3,8 +3,8 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { listAssets, loadWorkChat } from "./work-store.js";
-import { log } from "./logger.js";
+import { listAssets, loadWorkChat } from "./domain/work-store.js";
+import { log } from "./infra/logger.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -89,7 +89,7 @@ export async function evaluateWork(
 
 async function checkProcess(workId: string): Promise<CheckResult[]> {
   const checks: CheckResult[] = [];
-  const { getWork } = await import("./work-store.js");
+  const { getWork } = await import("./domain/work-store.js");
   const work = await getWork(workId);
 
   if (!work) {

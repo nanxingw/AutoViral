@@ -19,7 +19,7 @@
 
 import { bundle } from "@remotion/bundler";
 import { join } from "node:path";
-import { PACKAGE_ROOT } from "../paths.js";
+import { PACKAGE_ROOT } from "../infra/paths.js";
 
 /**
  * Resolve the Remotion serve URL (a bundle directory / URL passed to

@@ -10,7 +10,7 @@ import {
   burnSubtitles,
   compositionTextTrackToJson,
   type MixTrack,
-} from "../audio-tools.js";
+} from "../domain/audio-tools.js";
 import { join } from "node:path";
 import { rename, stat as fsStat, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";

@@ -15,7 +15,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
-import { listAssets } from "../work-store.js";
+import { listAssets } from "../domain/work-store.js";
 
 const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 

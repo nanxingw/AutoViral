@@ -23,7 +23,7 @@ import {
   readCompositionFor,
   writeCompositionFor,
 } from "./composition-ops.js";
-import { loadConfig } from "../../config.js";
+import { loadConfig } from "../../infra/config.js";
 import {
   type Composition,
   makeEmptyComposition,

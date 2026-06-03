@@ -3,13 +3,13 @@ import { Hono } from "hono";
 
 // Hoisted mocks. isCollectorAvailable defaults true so the existing
 // happy/error paths run; the #72 test flips it to false.
-vi.mock("../../analytics-collector.js", () => ({
+vi.mock("../../domain/analytics-collector.js", () => ({
   collectData: vi.fn(),
   getLatestCreatorData: vi.fn(),
   getCreatorHistory: vi.fn(),
   isCollectorAvailable: vi.fn(() => true),
 }));
-vi.mock("../../config.js", () => ({
+vi.mock("../../infra/config.js", () => ({
   loadConfig: vi.fn(),
   saveConfig: vi.fn(),
   dataDir: "/tmp/autoviral-test",
@@ -24,14 +24,14 @@ describe("POST /api/analytics/refresh", () => {
     // clearAllMocks resets calls but NOT mockReturnValue, so re-assert the
     // default (available) here — otherwise the #72 test's false leaks into
     // the happy/error-path tests.
-    const { isCollectorAvailable } = await import("../../analytics-collector.js");
+    const { isCollectorAvailable } = await import("../../domain/analytics-collector.js");
     (isCollectorAvailable as any).mockReturnValue(true);
     const { apiRoutes } = await import("../api.js");
     app = new Hono().route("/", apiRoutes);
   });
 
   it("returns 400 when douyinUrl is not configured", async () => {
-    const { loadConfig } = await import("../../config.js");
+    const { loadConfig } = await import("../../infra/config.js");
     (loadConfig as any).mockResolvedValue({ analytics: { douyinUrl: "" } });
 
     const res = await app.request("/api/analytics/refresh", { method: "POST" });
@@ -43,7 +43,7 @@ describe("POST /api/analytics/refresh", () => {
   // #72 — collector script removed in the refactor → honest 501 BEFORE any
   // douyinUrl / spawn logic, so the UI can explain instead of silent no-op.
   it("returns 501 analytics_collection_retired when the collector script is gone", async () => {
-    const { isCollectorAvailable, collectData } = await import("../../analytics-collector.js");
+    const { isCollectorAvailable, collectData } = await import("../../domain/analytics-collector.js");
     (isCollectorAvailable as any).mockReturnValue(false);
 
     const res = await app.request("/api/analytics/refresh", { method: "POST" });
@@ -55,8 +55,8 @@ describe("POST /api/analytics/refresh", () => {
   });
 
   it("returns 200 + collectedAt/worksCount on success", async () => {
-    const { loadConfig } = await import("../../config.js");
-    const { collectData } = await import("../../analytics-collector.js");
+    const { loadConfig } = await import("../../infra/config.js");
+    const { collectData } = await import("../../domain/analytics-collector.js");
     (loadConfig as any).mockResolvedValue({
       analytics: { douyinUrl: "https://www.douyin.com/user/abc" },
     });
@@ -73,8 +73,8 @@ describe("POST /api/analytics/refresh", () => {
   });
 
   it("returns 500 when collectData fails", async () => {
-    const { loadConfig } = await import("../../config.js");
-    const { collectData } = await import("../../analytics-collector.js");
+    const { loadConfig } = await import("../../infra/config.js");
+    const { collectData } = await import("../../domain/analytics-collector.js");
     (loadConfig as any).mockResolvedValue({
       analytics: { douyinUrl: "https://www.douyin.com/user/abc" },
     });

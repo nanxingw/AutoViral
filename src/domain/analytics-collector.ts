@@ -5,7 +5,7 @@ import { readFile, writeFile, mkdir, readdir } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
-import { loadConfig } from "./config.js"
+import { loadConfig } from "../infra/config.js"
 
 const execFileAsync = promisify(execFile)
 const ANALYTICS_DIR = join(homedir(), ".autoviral", "analytics", "douyin")

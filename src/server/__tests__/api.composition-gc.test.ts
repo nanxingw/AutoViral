@@ -70,7 +70,7 @@ describe("POST /api/works/:id/composition/gc-orphans", () => {
   it("returns 0/0/[] when nothing is missing", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "GC: no orphans",
         type: "short-video",
@@ -105,7 +105,7 @@ describe("POST /api/works/:id/composition/gc-orphans", () => {
   it("marks status='failed' on a missing video asset and lists it in orphans", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "GC: missing video",
         type: "short-video",
@@ -147,7 +147,7 @@ describe("POST /api/works/:id/composition/gc-orphans", () => {
   it("removes a timeline clip that referenced an orphan asset", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "GC: clip removed",
         type: "short-video",
@@ -213,7 +213,7 @@ describe("POST /api/works/:id/composition/gc-orphans", () => {
   it("removes provenance edges that point at a removed-orphan asset id", async () => {
     await withTempDataDir(async (dataDir) => {
       const { apiRoutes } = await import("../api.js");
-      const { createWork } = await import("../../work-store.js");
+      const { createWork } = await import("../../domain/work-store.js");
       const w = await createWork({
         title: "GC: provenance pruned",
         type: "short-video",

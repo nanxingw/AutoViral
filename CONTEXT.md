@@ -86,6 +86,15 @@ These are constraints that should not be silently violated. If breaking one beco
 
 ```
 src/                        # Backend (Node + TypeScript)
+├── infra/                  # Cross-cutting plumbing (no domain logic)
+│   ├── config.ts           # ~/.autoviral config load/save + dataDir
+│   ├── logger.ts           # structured log sources + readLogs
+│   └── paths.ts            # PACKAGE_ROOT and friends
+├── domain/                 # Core domain logic (work + media primitives)
+│   ├── work-store.ts       # persistent work (content) CRUD + assets
+│   ├── memory.ts           # EverMemOS MemoryClient
+│   ├── analytics-collector.ts  # creator-data scrape + cron
+│   └── audio-tools.ts      # ffmpeg mix / loudnorm / subtitle burn
 ├── server/                 # Express + WS bridge
 │   ├── api.ts              # REST endpoints (config / works / assets)
 │   ├── bridge/             # /bridge/* — terminal-facing protocol
@@ -95,6 +104,7 @@ src/                        # Backend (Node + TypeScript)
 ├── providers/              # OpenRouter-backed image/video adapters
 ├── shared/                 # composition.ts (zod schema), shared types
 ├── trends/sources/         # Multi-platform trend scrapers
+├── ws-bridge.ts            # chat-agent WS bridge (infra/domain grouping deferred — PRD Open Q)
 └── postinstall.ts          # First-run setup (copies skills/, installs skill-creator, repairs node-pty perms)
 
 web/                        # Frontend (React + Vite + CSS modules)
@@ -125,4 +135,5 @@ docs/                       # Long-form project docs
 - **2026-05-14** · agentic-terminal refactor — skill stripped of taste content. See `docs/archive/plans/2026-05-14-agentic-terminal-refactor.md`.
 - **2026-05-15** · PRD lock — AutoViral owns editing; sibling skills split into taste + engineering. See `docs/archive/plans/2026-05-15-autoviral-absorb-hyperframes-tech.md`.
 - **2026-05-15** · Adopted mattpocock skills (`to-prd` / `to-issues` / `triage` / `diagnose` / `tdd` / `handoff` / `caveman` / `prototype` / `zoom-out` / `grill-me` / `improve-codebase-architecture` / `write-a-skill` / `find-skills`) as the engineering-process skill family. Replaces superpowers:* in this project. See `memory/feedback_use_mattpocock_not_superpowers.md`.
+- **2026-06-03** · I12 (PRD-0002 W7) — grouped flat `src/*.ts` into responsibility dirs: `src/infra/` (config/logger/paths) + `src/domain/` (work-store/memory/analytics-collector/audio-tools). Pure `git mv` + import rewrite; agent bridge files (`ws-bridge.ts`) left at `src/` root per PRD Open Question.
 - **2026-05-17** · Right-pane dual-surface decision — Chat (`claude -p` subprocess) coexists with Terminal (xterm.js) as horizontal-tabbed siblings. Default surface: Chat. Both consume the same focus channel from H0. See [ADR-005](docs/adr/ADR-005-dual-chat-entry-layout.md). Resolves M.1 ([Issue #6](https://github.com/nanxingw/AutoViral/issues/6)).

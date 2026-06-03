@@ -57,7 +57,7 @@ describe("DELETE /api/works/:id cancels in-flight renders before rm -rf (#63)", 
   it("cancels the work's running render job, then deletes the work", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes, setRenderQueue } = await import("../api.js");
-      const { createWork, getWork } = await import("../../work-store.js");
+      const { createWork, getWork } = await import("../../domain/work-store.js");
 
       const work = await createWork({ title: "T", type: "short-video", platforms: ["douyin"] });
 
@@ -92,7 +92,7 @@ describe("DELETE /api/works/:id cancels in-flight renders before rm -rf (#63)", 
   it("deletes cleanly when no render queue is wired (renderQueue null)", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes, setRenderQueue } = await import("../api.js");
-      const { createWork, getWork } = await import("../../work-store.js");
+      const { createWork, getWork } = await import("../../domain/work-store.js");
       setRenderQueue(null);
       const work = await createWork({ title: "T2", type: "short-video", platforms: ["douyin"] });
       const res = await apiRoutes.fetch(
