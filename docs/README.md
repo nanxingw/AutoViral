@@ -23,7 +23,7 @@ AutoViral 是一个常驻 Node daemon（`node dist/index.js start`，端口 3271
 | 目录 | 里面是什么 | 何时读 |
 |---|---|---|
 | [`prd/`](prd/) | 产品 / 治理 PRD，`NNNN-slug.md` 单调编号（`0001` 已存在）。回答「为谁建什么、验收标准是什么」，是 issue 的上游 | 想知道某个能力的需求来源、范围边界、验收口径时；写新需求前先看 [`prd/README.md`](prd/README.md) |
-| [`adr/`](adr/) | 架构决策记录 `ADR-NNN-*.md`（现有 5 份）。回答「为什么是这个架构选择、当时权衡了什么」 | 要改架构、质疑某个不变量、或判断一个提案是否与既有决策冲突时 |
+| [`adr/`](adr/) | 架构决策记录 `ADR-NNN-*.md`（现有 7 份，索引见 [`adr/README.md`](adr/README.md)）。回答「为什么是这个架构选择、当时权衡了什么」 | 要改架构、质疑某个不变量、或判断一个提案是否与既有决策冲突时 |
 | [`agents/`](agents/) | agent 协作约定：`index.md` / `issue-tracker.md` / `triage-labels.md` / `domain.md` | 用 mattpocock skill 建 issue / triage / 发 PRD 时 |
 | [`reference/`](reference/) | 长青技术参考（不随单个 feature 失效的事实性资料） | 查某个外部依赖、协议、API 的稳定细节时 |
 | [`design/`](design/) | 设计稿与视觉规范（吸收了原拼写错误目录 `desigen/`） | 做 UI / 视觉相关改动、需要对齐美学方向时（配合 CLAUDE.md 的 Aesthetic Direction） |

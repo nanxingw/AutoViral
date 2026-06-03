@@ -119,10 +119,36 @@ python 侧测试用 `npm run test:python`（`python3 -m pytest skills/autoviral`
    - **MINOR** — 向后兼容的新能力（新 Studio feature、新 CLI 子命令、新 skill recipe、新桌面 target）。
    - **PATCH** — 向后兼容的修复（bug fix、文案 / i18n、性能、纯 docs）。
    - **pre-1.0 caveat**：0.x 阶段 API 视为未稳定，`0.MINOR` 提升可能携带行为变化，1.0 前不对外承诺 semver 破坏性保证。
+
+   #### Version Bump Checklist —— 版本号散在多处，下面这些**必须在同一个 commit 里全部改完**
+
+   版本号不是只活在 `package.json`。漏改任何一处就会让「文档里写的版本」与「实际发布的版本」漂移。bump 时逐项核对：
+
+   - [ ] **`package.json` 的 `version` 字段** —— 唯一权威源，tag `vX.Y.Z` 必须与它对齐。
+   - [ ] **`CHANGELOG.md`** —— 新增 `## [X.Y.Z] - YYYY-MM-DD` 段落（Keep a Changelog 格式，详见下一步）。这是发布说明的单一事实源。
+   - [ ] **`CLAUDE.md` 里硬编码的版本行** —— 「版本与发布约定」节有一行 `当前 `0.1.0``（grep `CLAUDE.md` 找当前版本号）。这是 agent 默认行为指令的一部分，漏改会让 agent 以为版本没动。
+   - [ ] **`README.md` 的版本徽章（若有）** —— 目前根 README 只有 Node / Agent / React / License 徽章，**没有版本徽章**；若将来加了 `version` shields.io 徽章，bump 时一并改。
+   - [ ] **改完一次性 `git add` 上述文件 + 一个 commit** —— 不要分多个 commit，保证任何一个 commit 上版本信息内部一致。
 2. **写 CHANGELOG 段落**：采用 [Keep a Changelog] 格式，标题语法严格为 `## [MAJOR.MINOR.PATCH] - YYYY-MM-DD`，分类 Added / Fixed / Changed / Improved。**这段就是发布说明的单一事实来源**——保持标题语法可被 awk 抽取喂给 `gh release create --notes-file`，让 CHANGELOG 与 GitHub Release 不漂移。
 3. **打 tag 并 push**：`git tag vX.Y.Z` 后 push tag。tag 必须与 `package.json` 的 version 对齐。
 4. **CI 接管**：`.github/workflows/release.yml` 由 `v*.*.*` tag push 触发——矩阵构建桌面安装包（mac + win）并 publish 协议 CLI（`@autoviral/cli`）。发布前 `.github/workflows/ci.yml` 已在 push/PR 上验证过 `npm run build` + `test:web` + `test:server` 全绿（尊重 maxThreads/maxForks=2 上限），保证 release 不带红上车。
 
 > 0.1.0 接受 unsigned 安装包（无 mac notarization / win Authenticode），发布说明里附绕过 Gatekeeper / SmartScreen 的一行指引。详见 [PRD-0001](docs/prd/0001-v0.1.0-release-and-conventions.md) 的 Release & Versioning Policy。
+
+---
+
+## 运维 Known Gotchas
+
+> 这是反复踩过的运维坑的集中锚点——以前只活在私有 memory 里，现在让所有 agent / contributor 可见。新踩到一个高复用的坑就加一条，别让它沉回 memory。
+
+- **`@remotion/transitions` 必须 exact-pin 到当前 resolved 的 remotion 版本。** 用 `^semver` 会拉到比 `remotion` 更新的版本，运行时报「Multiple versions of Remotion」直接 crash。bump remotion 时同步把 `@remotion/transitions` 锁到同一个具体版本号，不要用 caret/tilde 范围。
+
+- **改了 `src/`（后端 / shared / server）后，跑浏览器 E2E 之前必须 `npm run build:backend` 并 RESTART daemon。** `dist` 的 server JS 在进程启动时就冻结了，光改源码不重建+不重启 daemon，改动不生效——这与前端 Vite（刷新页面即可）不同。历史上多次把「stale daemon 里的旧 enum / 旧路由」误诊成代码 bug。详见上文「陈旧 dist 陷阱」。
+
+- **陈旧 dist 陷阱（前端版）。** `localhost:3271` 服务的是预构建的 `web/dist`，不是 Vite HMR——它会落后于你刚改的 `web/src`。排查「UI 上某个东西不见了」之前，先 `npm run build:frontend` 确认 bundle 新鲜，否则会据陈旧 bundle 误报「组件缺失」。
+
+- **`npm run build`（根）的 tsc gate 可能因历史 test-fixture 类型债失败、连带挡住 vite。** 只想起前端时单跑 `npm run build:frontend`，不要被根 build 的红挡住。
+
+- **vitest worker 必须封顶（两个 pool 都要 = 2），绝不并发跑两个 vitest。** 详见上文「测试纪律」；默认会开 7 worker × ~150MB ≈ 1GB 常驻，炸过两次内存。跑完 `pgrep -f vitest | wc -l` 应 ≤ 3。
 
 [Keep a Changelog]: https://keepachangelog.com/
