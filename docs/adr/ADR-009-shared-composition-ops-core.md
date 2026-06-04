@@ -1,7 +1,7 @@
 # ADR-009: Shared composition-ops core — 意图级 mutation 单一实现，store + bridge 共消费
 
-- **Status:** Proposed
-- **Date:** 2026-06-04
+- **Status:** Accepted
+- **Date:** 2026-06-04（Proposed）· 2026-06-04（Accepted — nanxingw 拍板）
 - **Deciders:** nanxingw + AI design partner（PRD-0004 调研 + 模块设计核对）
 - **Related:** [ADR-001](ADR-001-autoviral-owns-the-editing-layer.md)（AutoViral 自有编辑层）· [ADR-002](ADR-002-renderer-stays-remotion.md)（渲染留 Remotion）
 - **Resolves:** [PRD-0004](../prd/0004-v0.1.3-wire-the-nle-to-agents.md) keystone（M1）— HITL gate；解锁 issue 切片 S6–S10 / S12 / S17（见 [0004-issue-slices](../prd/0004-v0.1.3-issue-slices.md)）
@@ -98,4 +98,4 @@ function addTrack(comp: Composition, p: { kind: Track["kind"]; /* opts */ }): { 
 
 ---
 
-> **HITL 待办**：本 ADR 为 `Proposed`，待 nanxingw review 拍板后改 `Accepted` 并在 [README 索引](README.md)补行；之后方可开 S6（第一个意图动词 `clip split`，建立 ops 骨架）。
+> **已采纳（2026-06-04）**：nanxingw review 通过。S6（`clip split`，建立 ops 骨架）已解锁；按依赖图先做 S2（写路径 broadcast，S6 的 demo 前置）。

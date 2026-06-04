@@ -30,4 +30,4 @@
 | [ADR-006](ADR-006-content-type-registry.md) | ContentTypeRegistry — 内容类型的中央清单（v0.1.1 深模块 ①） | Accepted | 2026-06-03 |
 | [ADR-007](ADR-007-single-media-provider-registry.md) | Single MediaProvider registry — 能力标签、单一入口（v0.1.1 深模块 ②） | Accepted | 2026-06-03 |
 | [ADR-008](ADR-008-multi-session-chat-terminal.md) | 多会话 Chat + Terminal — `(workId, sessionId)` keying、sidecar 持久化、focus 共享（v0.1.2 §5 keystone） | Accepted | 2026-06-04 |
-| [ADR-009](ADR-009-shared-composition-ops-core.md) | Shared composition-ops core — 意图级 mutation 单一实现、原地 mutate、store + bridge 共消费（v0.1.3 keystone / PRD-0004 M1） | Proposed | 2026-06-04 |
+| [ADR-009](ADR-009-shared-composition-ops-core.md) | Shared composition-ops core — 意图级 mutation 单一实现、原地 mutate、store + bridge 共消费（v0.1.3 keystone / PRD-0004 M1） | Accepted | 2026-06-04 |
