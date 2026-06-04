@@ -77,4 +77,37 @@ describe("VideoClip.transforms crop + flip schema (S18)", () => {
       }),
     ).toThrow();
   });
+
+  // S18 review fix (medium) — out-of-bounds crop must be rejected at the schema
+  // layer, not split-fail downstream (ffmpeg crash vs preview silent-clamp). The
+  // bounds invariant is x+w<=1 AND y+h<=1: a crop window can't extend past the
+  // right/bottom edge of the source frame.
+  it("rejects a crop that runs off the RIGHT edge (x+w>1)", () => {
+    const clip = bareVideoClip();
+    expect(() =>
+      VideoClipSchema.parse({
+        ...clip,
+        transforms: { ...clip.transforms, crop: { x: 0.8, y: 0, w: 0.5, h: 0.5 } },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a crop that runs off the BOTTOM edge (y+h>1)", () => {
+    const clip = bareVideoClip();
+    expect(() =>
+      VideoClipSchema.parse({
+        ...clip,
+        transforms: { ...clip.transforms, crop: { x: 0, y: 0.7, w: 0.5, h: 0.5 } },
+      }),
+    ).toThrow();
+  });
+
+  it("accepts a crop that exactly reaches the edges (x+w==1, y+h==1)", () => {
+    const clip = bareVideoClip();
+    const parsed = VideoClipSchema.parse({
+      ...clip,
+      transforms: { ...clip.transforms, crop: { x: 0.5, y: 0.4, w: 0.5, h: 0.6 } },
+    });
+    expect(parsed.transforms.crop).toEqual({ x: 0.5, y: 0.4, w: 0.5, h: 0.6 });
+  });
 });

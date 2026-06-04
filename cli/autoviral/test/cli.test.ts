@@ -884,6 +884,35 @@ describe("autoviral CLI — end-to-end", () => {
     });
   });
 
+  // S18 review fix (low) — a partial `--crop '{"x":0.1}'` used to flatten into a
+  // half-crop {x:0.1} that the CLI happily sent; the mutate landed in memory and
+  // only the write-schema parse later complained (about a confusing schema path,
+  // not "crop needs x/y/w/h"). Validate the four leaves up front so the agent
+  // gets an actionable error and NO PATCH is sent.
+  it("clip set --crop '{\"x\":0.1}' (partial) → exit 4, clear error, NO patch sent", async () => {
+    lastClipPatch = null;
+    const r = await run(["clip", "set", "vc_s01", "--crop", '{"x":0.1}']);
+    expect(r.exitCode).toBe(4);
+    expect(r.stderr).toMatch(/crop/i);
+    expect(r.stderr).toMatch(/x.*y.*w.*h|x, y, w, h|四个|all four/i);
+    expect(lastClipPatch).toBeNull();
+  });
+
+  it("clip set --crop with all four leaves still works (no false positive)", async () => {
+    lastClipPatch = null;
+    const r = await run([
+      "clip", "set", "vc_s01",
+      "--crop", '{"x":0,"y":0,"w":1,"h":1}',
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({
+      "transforms.crop.x": 0,
+      "transforms.crop.y": 0,
+      "transforms.crop.w": 1,
+      "transforms.crop.h": 1,
+    });
+  });
+
   it("clip set --brightness 0.5 --italic true → maps + coerces both", async () => {
     lastClipPatch = null;
     const r = await run([

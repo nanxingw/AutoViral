@@ -12,12 +12,27 @@ export type Aspect = (typeof ASPECTS)[number];
 // `crop=w*W:h*H:x*W:y*H`. All four leaves are required WHEN crop is present
 // (a half-specified crop is ambiguous), but `crop` itself is optional so a
 // pre-S18 work with no crop key parses unchanged.
-const CropSchema = z.object({
-  x: z.number().min(0).max(1),
-  y: z.number().min(0).max(1),
-  w: z.number().min(0).max(1),
-  h: z.number().min(0).max(1),
-});
+const CropSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    w: z.number().min(0).max(1),
+    h: z.number().min(0).max(1),
+  })
+  // S18 review fix (medium) — every leaf ∈[0,1] is NOT enough: a crop window
+  // must also stay INSIDE the source frame (x+w<=1, y+h<=1). Without this an
+  // out-of-bounds crop split-fails — ffmpeg `crop=` overruns the source pixels
+  // and aborts the whole export, while the preview's clip-path inset() goes
+  // negative and the browser silently clamps it to "no crop". Refusing it at
+  // the schema layer (code:4 on write) keeps both consumers honest.
+  .refine((c) => c.x + c.w <= 1, {
+    message: "裁剪区域超出画面右边界 (x + w 必须 <= 1)",
+    path: ["w"],
+  })
+  .refine((c) => c.y + c.h <= 1, {
+    message: "裁剪区域超出画面下边界 (y + h 必须 <= 1)",
+    path: ["h"],
+  });
 export type Crop = z.infer<typeof CropSchema>;
 
 const TransformsSchema = z.object({

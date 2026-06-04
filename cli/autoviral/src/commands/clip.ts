@@ -234,6 +234,28 @@ export async function clipCommand(args: string[]): Promise<void> {
       const value = STRING_VALUED_PATHS.has(path)
         ? v
         : parseFlagValue(v);
+      // S18 review fix (low) — `--crop` is an object whose FOUR leaves
+      // (x/y/w/h) the server whitelists individually. A partial object (e.g.
+      // `--crop '{"x":0.1}'`) would flatten into a half-crop and only fail at
+      // the write-schema parse later — with a confusing schema path, not a
+      // "crop needs x/y/w/h" message. Validate the four leaves here so the
+      // agent gets an actionable error up front and NO patch is sent.
+      if (path === "transforms.crop") {
+        const c = value as Record<string, unknown> | null;
+        const leaves = ["x", "y", "w", "h"] as const;
+        const ok =
+          c != null &&
+          typeof c === "object" &&
+          !Array.isArray(c) &&
+          leaves.every((k) => typeof c[k] === "number");
+        if (!ok) {
+          process.stderr.write(
+            "autoviral clip set --crop: crop 需同时给出 x, y, w, h 四个数值 " +
+              '(例: --crop \'{"x":0,"y":0,"w":0.5,"h":1}\')\n',
+          );
+          process.exit(4);
+        }
+      }
       // S11 fix-up — the server's per-kind whitelist only lists DOTTED LEAVES
       // (`ducking.ratio`, never a bare `ducking`). So an OBJECT-valued flag
       // (`--ducking '{"ratio":0.4}'`) must be FLATTENED into `{ "ducking.ratio":

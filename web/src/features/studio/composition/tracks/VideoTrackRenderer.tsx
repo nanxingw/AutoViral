@@ -85,13 +85,17 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   //            so the letterbox bars become a soft blurred fill of the frame.
   const fitMode = clip.fitMode ?? "cover";
   // S18 (US 27/28) — crop + flip CONSUMPTION. flipH/flipV append a mirroring
-  // scaleX(-1)/scaleY(-1) onto the existing transform chain; crop maps the
-  // normalised {x,y,w,h} sub-region to a CSS clip-path inset() so the preview
-  // crops exactly the region the ffmpeg `crop=` filter will. Absent = no-op
-  // (back-compat for every pre-S18 work). These mirror the export filtergraph
-  // in src/server/transforms-ffmpeg.ts (WYSIWYG by construction).
+  // scaleX(-1)/scaleY(-1) onto the existing transform chain. crop is a
+  // CROP-AND-ZOOM (not a mask): the export crops the source to a SMALLER MP4
+  // then Remotion objectFit:cover RESCALES it to fill the canvas, so the
+  // preview must likewise ZOOM the {x,y,w,h} sub-region to fill the box. We do
+  // that with an overflow:hidden wrapper window + an inner <Video> enlarged by
+  // 1/w × 1/h and shifted by -x/w × -y/h (sprite-sheet crop-zoom). Absent =
+  // no-op (back-compat for every pre-S18 work). This mirrors the export
+  // filtergraph in src/server/transforms-ffmpeg.ts (WYSIWYG by construction —
+  // both sides show the SAME zoomed-to-fill sub-region, see cropFlip test).
   const flip = cssFlipSuffix(clip.transforms);
-  const clipPath = cssCropInset(clip.transforms.crop);
+  const zoom = cssCropZoom(clip.transforms.crop);
   const transform =
     `translate(${x}px, ${y}px) rotate(${rotation}deg) scale(${scale})` + flip;
   // Browser-side player uses <Video> (single <video> element backed by
@@ -118,55 +122,68 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
     pauseWhenBuffering: true,
   } as const;
 
+  // S18 review fix (critical/medium) — the crop-zoom geometry lives on the
+  // inner <Video> (position:absolute width/height/left/top from `zoom`); the
+  // overflow:hidden window that clips the enlarged frame to the box is the
+  // wrapper. When there's no crop, zoom is null and the inner layer keeps the
+  // legacy 100%-fill sizing inside a plain (overflow:visible) wrapper, so a
+  // pre-S18 clip renders byte-identically.
+  const innerSizing = zoom
+    ? { position: "absolute" as const, ...zoom }
+    : { width: "100%", height: "100%" };
+
   // blur → two stacked layers: a blurred cover fill behind a contained frame.
+  // BOTH layers must consume the same crop-zoom + flip so the blurred backdrop
+  // is the SAME (cropped, mirrored) frame the export bakes into its single
+  // source MP4 (review fix medium — blur background used to show the un-cropped
+  // un-flipped original, diverging from export).
   if (fitMode === "blur") {
     return (
-      <div style={{ position: "absolute", inset: 0, opacity }}>
+      <div style={{ position: "absolute", inset: 0, opacity, overflow: "hidden" }}>
         <Video
           {...baseProps}
           style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
+            ...innerSizing,
             objectFit: "cover",
             // The blurred background scales slightly past the frame so the blur
             // has no hard edges, and stacks the clip's own filter chain on top.
             filter: `blur(48px) ${filter || ""}`.trim(),
-            transform: "scale(1.1)",
+            transform: `${transform} scale(1.1)`,
           }}
         />
         <Video
           {...baseProps}
           style={{
-            position: "absolute",
-            inset: 0,
-            width: "100%",
-            height: "100%",
+            ...innerSizing,
             objectFit: "contain",
             filter: filter || undefined,
             transform,
-            clipPath,
           }}
         />
       </div>
     );
   }
 
-  // cover / contain → a single layer, objectFit driven by fitMode.
-  return (
+  // cover / contain → a single layer, objectFit driven by fitMode. When crop is
+  // present the layer is zoomed (innerSizing) and must be clipped by an
+  // overflow:hidden window; otherwise it's the legacy bare <Video>.
+  const layer = (
     <Video
       {...baseProps}
       style={{
-        width: "100%",
-        height: "100%",
+        ...innerSizing,
         objectFit: fitMode === "contain" ? "contain" : "cover",
         filter: filter || undefined,
         transform,
-        clipPath,
-        opacity,
+        opacity: zoom ? undefined : opacity,
       }}
     />
+  );
+  if (!zoom) return layer;
+  return (
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden", opacity }}>
+      {layer}
+    </div>
   );
 }
 
@@ -187,24 +204,48 @@ export function cssFlipSuffix(t: {
 }
 
 /**
- * S18 — map a NORMALISED crop {x,y,w,h} (fractions of the source frame) to a
- * CSS `clip-path: inset(top right bottom left)` so the preview crops exactly
- * the sub-region the ffmpeg `crop=` filter keeps. Returns undefined when crop
- * is absent (no clip-path → no crop, back-compat). Mirrors the export math in
- * src/server/transforms-ffmpeg.ts.
+ * S18 (review fix critical) — map a NORMALISED crop {x,y,w,h} (fractions of the
+ * source frame) to the CROP-AND-ZOOM CSS geometry for the inner <Video>, so the
+ * sub-region ZOOMS to fill its box — matching the export, which crops the source
+ * to a smaller MP4 then Remotion objectFit:cover rescales it to fill the canvas.
+ *
+ * (The OLD cssCropInset used clip-path: inset() — a MASK that kept the sub-region
+ * in its original position with the rest transparent. That is a different visual
+ * operation from the export's crop-then-rescale, so preview ≠ export. This helper
+ * replaces it.)
+ *
+ * Geometry (sprite-sheet crop-zoom), with `transform-origin` left at default
+ * because we size+position rather than scale:
+ *   width  = 100/w %   (enlarge so the w-wide sub-region spans the full box)
+ *   height = 100/h %
+ *   left   = -x/w*100 %  (shift the sub-region's origin to the box origin)
+ *   top    = -y/h*100 %
+ * The caller renders this inside an overflow:hidden window so the enlarged frame
+ * is clipped to the box. Returns undefined when crop is absent (back-compat —
+ * the inner <Video> keeps its legacy 100%-fill sizing). Mirrors the export math
+ * in src/server/transforms-ffmpeg.ts.
  */
-export function cssCropInset(crop?: {
+export function cssCropZoom(crop?: {
   x: number;
   y: number;
   w: number;
   h: number;
-}): string | undefined {
+}): { width: string; height: string; left: string; top: string } | undefined {
   if (!crop) return undefined;
-  const top = crop.y * 100;
-  const right = (1 - (crop.x + crop.w)) * 100;
-  const bottom = (1 - (crop.y + crop.h)) * 100;
-  const left = crop.x * 100;
-  return `inset(${pct(top)} ${pct(right)} ${pct(bottom)} ${pct(left)})`;
+  // Defensive clamp (review fix) — even though CropSchema now refuses out-of-
+  // bounds crops on write, a hand-rolled/legacy in-memory comp could still carry
+  // w/h=0 (→ div-by-zero) or off-frame values. Clamp w/h away from 0 and the
+  // origin into [0,1] so the geometry never produces NaN/Infinity.
+  const w = Math.min(1, Math.max(1e-4, crop.w));
+  const h = Math.min(1, Math.max(1e-4, crop.h));
+  const x = Math.min(1 - w, Math.max(0, crop.x));
+  const y = Math.min(1 - h, Math.max(0, crop.y));
+  return {
+    width: pct(100 / w),
+    height: pct(100 / h),
+    left: pct((-x / w) * 100),
+    top: pct((-y / h) * 100),
+  };
 }
 
 function pct(n: number): string {
