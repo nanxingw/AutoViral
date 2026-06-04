@@ -699,6 +699,132 @@ describe("bridge router — Phase 3 clip writes", () => {
     }
   });
 
+  // S7 (US 2/9) — POST /clip/:id/trim delegates to the shared `ops.trimClip`.
+  // The fixture's `vc_s01` is a video clip in:0 out:4 trackOffset:0 (single
+  // clip on its track → no neighbour cap). Trimming out to 2.0 shrinks the
+  // source window in place; trackOffset stays anchored.
+  it("POST /clip/:id/trim sets out in place, trackOffset anchored", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/trim", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ out: 2.0 }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { id: string } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.id).toBe("vc_s01");
+
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: { tracks: Array<{ clips: Array<{ id: string; in?: number; out?: number; trackOffset: number }> }> };
+    };
+    const clip = compBody.result.tracks
+      .flatMap((t) => t.clips)
+      .find((c) => c.id === "vc_s01");
+    expect(clip?.in).toBeCloseTo(0);
+    expect(clip?.out).toBeCloseTo(2);
+    expect(clip?.trackOffset).toBeCloseTo(0);
+  });
+
+  it("POST /clip/:id/trim with an unknown clipId → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/nope/trim", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ out: 2.0 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /clip/:id/trim without in/out → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/trim", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /clip/:id/trim on a text clip → 400 + code 4 (no in/out window)", async () => {
+    const res = await app.request("/api/bridge/v1/clip/tc_hook01/trim", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ out: 2.0 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /clip/:id/trim without a work-id header → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/trim", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ out: 2.0 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /clip/:id/trim broadcasts composition-changed after the write lands", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      // Add a fresh trimmable clip so this test is independent of prior trims.
+      const add = await app.request("/api/bridge/v1/clip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ src: "assets/sample-shot.mp4", track: "video", offset: 50, duration: 4 }),
+      });
+      const addedId = ((await add.json()) as { result: { id: string } }).result.id;
+      events.length = 0;
+      const res = await app.request("/api/bridge/v1/clip/" + addedId + "/trim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ out: 2 }),
+      });
+      expect(res.status).toBe(200);
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  it("POST /clip/:id/trim with an unknown clip does NOT broadcast", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/clip/nope/trim", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ out: 2 }),
+      });
+      expect(res.status).toBe(400);
+      expect(events).not.toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
   // S2 (US 17) — a successful clip write broadcasts composition-changed on
   // the uiEventBus right after the atomic write lands, so Studio refetches
   // without depending on fs.watch.

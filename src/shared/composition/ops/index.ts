@@ -5,4 +5,5 @@
 // moveClipToTrack; …). Single source of truth for write-path invariants.
 export { CompositionOpError } from "./errors.js";
 export { splitClip } from "./splitClip.js";
+export { trimClip } from "./trimClip.js";
 export { patchClipProps } from "./patchClipProps.js";

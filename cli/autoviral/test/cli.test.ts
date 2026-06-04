@@ -172,6 +172,21 @@ beforeAll(async () => {
       clips.push({ id, trackKind: target.trackKind });
       return send(200, { ok: true, result: { id } });
     }
+    // S7 (US 2/9) — POST /clip/:id/trim. Mirrors the server contract: a known
+    // clipId sets its source window in place + returns { id }; an unknown
+    // clipId is the op's CompositionOpError → 400 + code 4 → CLI exit 4.
+    {
+      const trimMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/trim$/.exec(url ?? "");
+      if (req.method === "POST" && trimMatch) {
+        await readBody(req);
+        const clipId = decodeURIComponent(trimMatch[1]);
+        const target = clips.find((c) => c.id === clipId);
+        if (!target) {
+          return send(400, { ok: false, error: "no such clip", code: 4 });
+        }
+        return send(200, { ok: true, result: { id: clipId } });
+      }
+    }
     if (req.method === "POST" && (
       url === "/api/bridge/v1/select" ||
       url === "/api/bridge/v1/seek" ||
@@ -351,6 +366,38 @@ describe("autoviral CLI — end-to-end", () => {
 
   it("clip split an unknown clip → bridge 400 code:4 → exit 4", async () => {
     const r = await run(["clip", "split", "nope", "--at", "2.0"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  // S7 (US 2/9) — `autoviral clip trim <id> --in --out` POSTs the source
+  // window to /clip/:id/trim; the bridge runs the shared `ops.trimClip`.
+  it("clip trim <id> --out <sec> → exit 0", async () => {
+    const r = await run(["clip", "trim", "vc_s01", "--out", "2.0"]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  it("clip trim <id> --in <sec> --out <sec> → exit 0 (both edges)", async () => {
+    const r = await run(["clip", "trim", "vc_s01", "--in", "0.5", "--out", "3.0"]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  it("clip trim with no id → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "trim", "--out", "2.0"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip trim with neither --in nor --out → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "trim", "vc_s01"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip trim with a non-numeric --out → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "trim", "vc_s01", "--out", "abc"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip trim an unknown clip → bridge 400 code:4 → exit 4", async () => {
+    const r = await run(["clip", "trim", "nope", "--out", "2.0"]);
     expect(r.exitCode).toBe(4);
   });
 

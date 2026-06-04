@@ -108,6 +108,7 @@ function usage(): string {
     "  clip add --src <path> [--track video|audio|text] [--offset s] [--duration s]",
     "  clip set <id> [--key value]...",
     "  clip split <id> --at <seconds>",
+    "  clip trim <id> [--in <seconds>] [--out <seconds>]",
     "  clip remove <id>",
     "  carousel add-slide [--at N] [--bg-type gradient|image|solid --bg-value V]",
     "  carousel set-layer <slideId> --kind <text|image|shape|sticker> [--id L] [--x N --y N --w N --h N] [...]",

@@ -1,4 +1,4 @@
-// `autoviral clip add|set|remove|split` — composition.yaml write surface.
+// `autoviral clip add|set|remove|split|trim` — composition.yaml write surface.
 //
 // All three sub-verbs round-trip through the bridge so the canonical
 // disk state is always the server's (no local edit-then-push). The
@@ -71,6 +71,49 @@ export async function clipCommand(args: string[]): Promise<void> {
       at,
     });
     process.stdout.write(`${result.id}\n`);
+    return;
+  }
+
+  if (sub === "trim") {
+    // S7 (US 2/9) — `autoviral clip trim <id> --in <sec> --out <sec>`. The
+    // bridge runs the shared `ops.trimClip` (same invariants the Studio
+    // edge-drag enforces), so the agent's trim and a human's drag converge on
+    // the same composition. At least one of --in / --out is required; we
+    // validate locally (exit 4, never hits the bridge) so an obviously-
+    // malformed invocation fails fast.
+    const id = rest[0];
+    if (!id || id.startsWith("--")) {
+      process.stderr.write("usage: autoviral clip trim <id> [--in <seconds>] [--out <seconds>]\n");
+      process.exit(4);
+    }
+    const opts = parseFlags(rest.slice(1));
+    const body: Record<string, unknown> = {};
+    if (opts["--in"] !== undefined) {
+      const v = Number(opts["--in"]);
+      if (!Number.isFinite(v)) {
+        process.stderr.write("autoviral clip trim: --in <seconds> must be a number\n");
+        process.exit(4);
+      }
+      body.in = v;
+    }
+    if (opts["--out"] !== undefined) {
+      const v = Number(opts["--out"]);
+      if (!Number.isFinite(v)) {
+        process.stderr.write("autoviral clip trim: --out <seconds> must be a number\n");
+        process.exit(4);
+      }
+      body.out = v;
+    }
+    if (body.in === undefined && body.out === undefined) {
+      process.stderr.write("autoviral clip trim: at least one of --in / --out is required\n");
+      process.exit(4);
+    }
+    await bridgeRequest(
+      ctx,
+      "POST",
+      `/clip/${encodeURIComponent(id)}/trim`,
+      body,
+    );
     return;
   }
 

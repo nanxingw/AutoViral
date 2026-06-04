@@ -720,6 +720,56 @@ bridgeRouter.post("/split", async (c) => {
   return c.json({ ok: true, result: { id: newId } });
 });
 
+// S7 (US 2/9) — POST /clip/:id/trim: source-window trim through the shared
+// composition-ops core. Body `{ in?, out? }` sets the clip's source window
+// directly; the adjacency cap, minimum-duration floor and keyframe rebase are
+// `ops.trimClip` — the SAME invariants the Studio edge-drag enforces — so an
+// agent trimming via the CLI and a human dragging an edge converge on the same
+// composition. Missing work-id / illegal params (unknown id, no in/out,
+// degenerate window, duration-based clip) → CompositionOpError{code:4} →
+// HTTP 400 + code:4 → CLI exit 4.
+bridgeRouter.post("/clip/:id/trim", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  }
+  const body = (await c.req.json().catch(() => ({}))) as {
+    in?: unknown;
+    out?: unknown;
+  };
+  let inSec: number | undefined;
+  let outSec: number | undefined;
+  if (body.in !== undefined) {
+    if (typeof body.in !== "number" || !Number.isFinite(body.in)) {
+      return c.json({ ok: false, error: "invalid in (seconds)", code: 4 }, 400);
+    }
+    inSec = body.in;
+  }
+  if (body.out !== undefined) {
+    if (typeof body.out !== "number" || !Number.isFinite(body.out)) {
+      return c.json({ ok: false, error: "invalid out (seconds)", code: 4 }, 400);
+    }
+    outSec = body.out;
+  }
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.trimClip(comp, { clipId: id, in: inSec, out: outSec });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-trim" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
 // POST /ask blocks the HTTP response until the Studio user clicks
 // YES/NO in the ApprovalPrompt modal — or until timeoutMs elapses.
 // CLI exit codes (per protocol §5): yes=0, no=1, cancelled=2, timeout=124.
