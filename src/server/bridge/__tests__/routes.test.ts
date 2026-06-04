@@ -940,6 +940,163 @@ describe("bridge router — Phase 3 clip writes", () => {
     expect(body.ok).toBe(false);
     expect(body.code).toBe(4);
   });
+
+  // S9 (US 4/5/9) — POST /transition + DELETE /transition/:id delegate to the
+  // shared `ops.addTransition` / `ops.removeTransition`. The describe's on-disk
+  // composition accumulates across tests (no per-test reset), so we never rely on
+  // `vc_s01` being last; instead each test appends its OWN pair of adjacent video
+  // clips and pins the transition between the two ids it just minted — order-
+  // independent. The fixture's legacy track id `video-0` is rewritten by
+  // `migrateLegacyTrackIds` on read, so we resolve the live video-track id at
+  // runtime rather than hardcoding it.
+  async function videoTrackId(): Promise<string> {
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const body = (await comp.json()) as {
+      result: { tracks: Array<{ id: string; kind: string }> };
+    };
+    return body.result.tracks.find((t) => t.kind === "video")!.id;
+  }
+  async function addVideoClip(offset: number): Promise<string> {
+    const add = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ src: "assets/sample-shot.mp4", track: "video", offset, duration: 4 }),
+    });
+    expect(add.status).toBe(200);
+    return ((await add.json()) as { result: { id: string } }).result.id;
+  }
+
+  it("POST /transition adds a cross-dissolve after a clip + DELETE restores the hard cut", async () => {
+    const first = await addVideoClip(100);
+    await addVideoClip(104); // successor → `first` is no longer last
+    const vTrack = await videoTrackId();
+    const post = await app.request("/api/bridge/v1/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ trackId: vTrack, afterClipId: first, preset: "cross-dissolve" }),
+    });
+    expect(post.status).toBe(200);
+    const postBody = (await post.json()) as { ok: boolean; result?: { id: string } };
+    expect(postBody.ok).toBe(true);
+    expect(postBody.result?.id).toMatch(/^tr_/);
+    const transitionId = postBody.result!.id;
+
+    // Read back: the transition is on the video track, pinned to `first`.
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: { tracks: Array<{ id: string; transitions?: Array<{ id: string; afterClipId: string; preset: string }> }> };
+    };
+    const v0 = compBody.result.tracks.find((t) => t.id === vTrack)!;
+    const tr = v0.transitions?.find((x) => x.id === transitionId);
+    expect(tr?.afterClipId).toBe(first);
+    expect(tr?.preset).toBe("cross-dissolve");
+
+    // DELETE restores the hard cut (transition gone).
+    const del = await app.request(`/api/bridge/v1/transition/${transitionId}`, {
+      method: "DELETE",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    expect(del.status).toBe(200);
+    const comp2 = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody2 = (await comp2.json()) as {
+      result: { tracks: Array<{ id: string; transitions?: Array<{ id: string }> }> };
+    };
+    const v0After = compBody2.result.tracks.find((t) => t.id === vTrack)!;
+    expect(v0After.transitions?.some((x) => x.id === transitionId) ?? false).toBe(false);
+  });
+
+  it("POST /transition pinned to the LAST clip → 400 + code 4", async () => {
+    // Add a clip and pin a transition AFTER it while it is the last clip → reject.
+    const last = await addVideoClip(200);
+    const vTrack = await videoTrackId();
+    const res = await app.request("/api/bridge/v1/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ trackId: vTrack, afterClipId: last, preset: "cross-dissolve" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /transition with an unknown preset → 400 + code 4", async () => {
+    const first = await addVideoClip(300);
+    await addVideoClip(304);
+    const vTrack = await videoTrackId();
+    const res = await app.request("/api/bridge/v1/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ trackId: vTrack, afterClipId: first, preset: "no-such-preset" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /transition without a work-id header → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ trackId: "video-0", afterClipId: "vc_s01", preset: "cross-dissolve" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("DELETE /transition/:id with an unknown id → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/transition/tr_ghost", {
+      method: "DELETE",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /transition broadcasts composition-changed after the write lands", async () => {
+    const first = await addVideoClip(400);
+    await addVideoClip(404);
+    const vTrack = await videoTrackId();
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/transition", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ trackId: vTrack, afterClipId: first, preset: "wipe-left" }),
+      });
+      expect(res.status).toBe(200);
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  it("POST /transition rejected (last-clip) does NOT broadcast", async () => {
+    const last = await addVideoClip(500);
+    const vTrack = await videoTrackId();
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/transition", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ trackId: vTrack, afterClipId: last, preset: "cross-dissolve" }),
+      });
+      expect(res.status).toBe(400);
+      expect(events).not.toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
 });
 
 describe("bridge router — Phase 3 approval gate", () => {

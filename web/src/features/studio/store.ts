@@ -12,7 +12,7 @@ import type {
   Transition,
 } from "./types";
 import { newTrackId } from "@shared/composition";
-import { clampHandleDuration, getPresetMeta } from "@shared/transitions";
+import { clampHandleDuration } from "@shared/transitions";
 import { addOrReplaceKeyframe, splitKeyframesAtLocal } from "@shared/keyframes";
 // ADR-009 (S6) — shared composition-ops core. splitClip's invariants live here
 // now (single source of truth shared with the bridge); the store action calls
@@ -244,7 +244,7 @@ function snapshotTracks(tracks: Track[]): Track[] {
 }
 
 export const useComposition = create<CompState>()(
-  immer((set, get) => ({
+  immer((set) => ({
     comp: null,
     selection: null,
     currentFrame: 0,
@@ -384,40 +384,36 @@ export const useComposition = create<CompState>()(
         }
         s.clipHistory.future = [];
       }),
+    // ADR-009 (S9) — transition add now lives in the shared composition-ops core
+    // (`ops.addTransition`), consumed identically by the bridge (`autoviral
+    // transition add --track --after --preset --duration`). The store action is a
+    // thin immer wrapper that preserves the historical `string | null` contract:
+    // the op THROWS a typed CompositionOpError on a rejection (unknown track /
+    // clip, last-clip anchor, non-video track, unknown preset), so we catch it and
+    // return null (the UI's silent-no-op contract — an invalid add just doesn't
+    // happen). The op mints the same `tr_<uuid>` id and clamps durationSec to the
+    // handle, so the existing store transition tests pass without touching a single
+    // assertion. We capture the minted id out of the producer to return it.
     addTransition: (trackId, init) => {
-      // Validation FIRST (read state pre-mutation), then mint+set.
-      const pre = get();
-      if (!pre.comp) return null;
-      const track = pre.comp.tracks.find((t) => t.id === trackId);
-      if (!track || track.kind !== "video") return null; // Phase 1: video only
-      const clips = track.clips as Clip[];
-      const beforeIdx = clips.findIndex((c) => c.id === init.afterClipId);
-      // afterClipId must exist AND not be the last clip (needs a successor).
-      if (beforeIdx < 0 || beforeIdx >= clips.length - 1) return null;
-      const before = clips[beforeIdx];
-      const after = clips[beforeIdx + 1];
-      const desired = init.durationSec ?? getPresetMeta(init.preset).defaultDurationSec;
-      const dur = clampHandleDuration(
-        desired,
-        clipDuration(before),
-        clipDuration(after),
-      );
-      const id = `tr_${(globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2))}`;
+      let mintedId: string | null = null;
       set((s) => {
         if (!s.comp) return;
-        const t = s.comp.tracks.find((tt) => tt.id === trackId);
-        if (!t) return;
-        if (!t.transitions) t.transitions = [];
-        t.transitions.push({
-          id,
-          afterClipId: init.afterClipId,
-          preset: init.preset,
-          durationSec: dur,
-          alignment: "center",
-          easing: "linear",
-        });
+        try {
+          const { transitionId } = ops.addTransition(s.comp, {
+            trackId,
+            afterClipId: init.afterClipId,
+            preset: init.preset,
+            durationSec: init.durationSec,
+          });
+          mintedId = transitionId;
+        } catch (err) {
+          if (err instanceof CompositionOpError) {
+            return; // silent no-op contract — leave the composition untouched.
+          }
+          throw err;
+        }
       });
-      return id;
+      return mintedId;
     },
     updateTransition: (trackId, transitionId, patch) =>
       set((s) => {
@@ -444,12 +440,24 @@ export const useComposition = create<CompState>()(
         if (patch.alignment !== undefined) tr.alignment = patch.alignment;
         if (patch.easing !== undefined) tr.easing = patch.easing;
       }),
-    removeTransition: (trackId, transitionId) =>
+    // ADR-009 (S9) — transition remove now routes through the shared op
+    // (`ops.removeTransition`), consumed identically by the bridge (`autoviral
+    // transition remove <id>`). The op finds the transition across any track (so
+    // the `trackId` arg is now advisory — kept for the existing call sites + test
+    // signatures) and THROWS CompositionOpError when no transition matches; the
+    // store keeps the historical silent-no-op contract, so we catch and leave the
+    // composition untouched. Existing store tests pass unchanged.
+    removeTransition: (_trackId, transitionId) =>
       set((s) => {
         if (!s.comp) return;
-        const t = s.comp.tracks.find((tt) => tt.id === trackId);
-        if (!t || !t.transitions) return;
-        t.transitions = t.transitions.filter((x) => x.id !== transitionId);
+        try {
+          ops.removeTransition(s.comp, { transitionId });
+        } catch (err) {
+          if (err instanceof CompositionOpError) {
+            return; // silent no-op — unknown id leaves the composition untouched.
+          }
+          throw err;
+        }
       }),
     removeClip: (clipId) =>
       set((s) => {

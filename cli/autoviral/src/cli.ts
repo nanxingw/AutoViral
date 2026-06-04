@@ -15,6 +15,7 @@ import { playCommand, pauseCommand } from "./commands/play.js";
 import { toastCommand } from "./commands/toast.js";
 import { progressCommand } from "./commands/progress.js";
 import { clipCommand } from "./commands/clip.js";
+import { transitionCommand } from "./commands/transition.js";
 import { carouselCommand } from "./commands/carousel.js";
 import { askCommand } from "./commands/ask.js";
 import { exportCommand, renderCommand } from "./commands/export.js";
@@ -47,6 +48,7 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   toast: toastCommand,
   progress: progressCommand,
   clip: clipCommand,
+  transition: transitionCommand,
   carousel: carouselCommand,
   ask: askCommand,
   export: exportCommand,
@@ -110,6 +112,10 @@ function usage(): string {
     "  clip split <id> --at <seconds>",
     "  clip trim <id> [--in <seconds>] [--out <seconds>]",
     "  clip remove <id>",
+    "  transition add --track <trackId> --after <clipId> --preset <name> [--duration <seconds>]",
+    "    Add a cut-point transition between two adjacent video clips. Presets come",
+    "    from the shared registry (cross-dissolve / wipe-* / push-* / …).",
+    "  transition remove <id>          Remove a transition (restore a hard cut).",
     "  carousel add-slide [--at N] [--bg-type gradient|image|solid --bg-value V]",
     "  carousel set-layer <slideId> --kind <text|image|shape|sticker> [--id L] [--x N --y N --w N --h N] [...]",
     "    Carousel (图文) write surface. Full schema: `autoviral docs carousel/02-schema`.",

@@ -202,6 +202,30 @@ beforeAll(async () => {
         return send(200, { ok: true, result: { id: clipId } });
       }
     }
+    // S9 (US 4/5/9) — POST /transition. Mirrors the server contract: a known
+    // afterClipId + a registry preset mints a transition id; an unknown preset
+    // or a last-clip anchor is the op's CompositionOpError → 400 + code 4 → CLI
+    // exit 4. The mock keys "rejectable" inputs off the preset/anchor so the CLI
+    // wire format + exit codes are exercised without the real op.
+    if (req.method === "POST" && url === "/api/bridge/v1/transition") {
+      const body = await readBody(req);
+      if (body.preset === "no-such-preset" || body.afterClipId === "tc_hook01") {
+        return send(400, { ok: false, error: "rejected", code: 4 });
+      }
+      return send(200, { ok: true, result: { id: `tr_seq${nextSeq++}` } });
+    }
+    // S9 (US 4/5/9) — DELETE /transition/:id. A known id resolves; `tr_ghost`
+    // is the op's CompositionOpError → 400 + code 4 → CLI exit 4.
+    {
+      const trMatch = /^\/api\/bridge\/v1\/transition\/([^/]+)$/.exec(url ?? "");
+      if (req.method === "DELETE" && trMatch) {
+        const id = decodeURIComponent(trMatch[1]);
+        if (id === "tr_ghost") {
+          return send(400, { ok: false, error: "no such transition", code: 4 });
+        }
+        return send(200, { ok: true, result: { id } });
+      }
+    }
     if (req.method === "POST" && (
       url === "/api/bridge/v1/select" ||
       url === "/api/bridge/v1/seek" ||
@@ -437,6 +461,90 @@ describe("autoviral CLI — end-to-end", () => {
   it("clip move an unknown clip → bridge 400 code:4 → exit 4", async () => {
     const r = await run(["clip", "move", "nope", "--to-track", "trk_v2"]);
     expect(r.exitCode).toBe(4);
+  });
+
+  // S9 (US 4/5/9) — `autoviral transition add --track --after --preset --duration`
+  // POSTs to /transition; `transition remove <id>` DELETEs /transition/:id. The
+  // bridge runs the shared `ops.addTransition` / `ops.removeTransition`.
+  it("transition add --track --after --preset → prints the new transition id", async () => {
+    const r = await run([
+      "transition", "add",
+      "--track", "trk_v",
+      "--after", "vc_s01",
+      "--preset", "cross-dissolve",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toMatch(/^tr_/);
+  });
+
+  it("transition add with --duration → exit 0 (duration forwarded)", async () => {
+    const r = await run([
+      "transition", "add",
+      "--track", "trk_v",
+      "--after", "vc_s01",
+      "--preset", "wipe-left",
+      "--duration", "0.8",
+    ]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  it("transition add with no --track → exit 4 (never hits bridge)", async () => {
+    const r = await run(["transition", "add", "--after", "vc_s01", "--preset", "cross-dissolve"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("transition add with no --after → exit 4 (never hits bridge)", async () => {
+    const r = await run(["transition", "add", "--track", "trk_v", "--preset", "cross-dissolve"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("transition add with no --preset → exit 4 (never hits bridge)", async () => {
+    const r = await run(["transition", "add", "--track", "trk_v", "--after", "vc_s01"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("transition add with a non-numeric --duration → exit 4 (never hits bridge)", async () => {
+    const r = await run([
+      "transition", "add", "--track", "trk_v", "--after", "vc_s01",
+      "--preset", "cross-dissolve", "--duration", "abc",
+    ]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("transition add with an unknown preset → bridge 400 code:4 → exit 4", async () => {
+    const r = await run([
+      "transition", "add", "--track", "trk_v", "--after", "vc_s01",
+      "--preset", "no-such-preset",
+    ]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("transition add pinned to a last clip → bridge 400 code:4 → exit 4", async () => {
+    const r = await run([
+      "transition", "add", "--track", "trk_v", "--after", "tc_hook01",
+      "--preset", "cross-dissolve",
+    ]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("transition remove <id> → exit 0", async () => {
+    const r = await run(["transition", "remove", "tr_seq1"]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  it("transition remove with no id → exit 4 (never hits bridge)", async () => {
+    const r = await run(["transition", "remove"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("transition remove an unknown id → bridge 400 code:4 → exit 4", async () => {
+    const r = await run(["transition", "remove", "tr_ghost"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("transition unknown subcommand → exit 127", async () => {
+    const r = await run(["transition", "frobnicate"]);
+    expect(r.exitCode).toBe(127);
   });
 
   // S11 — `clip set` maps ergonomic flags to canonical nested paths and coerces

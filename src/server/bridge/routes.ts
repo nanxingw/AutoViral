@@ -812,6 +812,97 @@ bridgeRouter.post("/clip/:id/move", async (c) => {
   return c.json({ ok: true, result: { id } });
 });
 
+// S9 (US 4/5/9) — POST /transition: add a cut-point transition on a video track
+// through the shared composition-ops core. Body `{ trackId, afterClipId, preset,
+// durationSec? }`; the video-only guard, the last-clip-anchor rejection, the
+// shared-registry preset check and the handle clamp are all `ops.addTransition`
+// — the SAME invariants the Studio transition picker enforces — so an agent
+// adding a transition via the CLI (`autoviral transition add --track --after
+// --preset --duration`) and a human picking one in the UI converge on the same
+// composition. Missing work-id / illegal params (unknown track / clip, last-clip
+// anchor, non-video track, unknown preset) → CompositionOpError{code:4} → HTTP
+// 400 + code:4 → CLI exit 4. We echo the minted transition id back to the agent.
+bridgeRouter.post("/transition", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    trackId?: unknown;
+    afterClipId?: unknown;
+    preset?: unknown;
+    durationSec?: unknown;
+  };
+  if (typeof body.trackId !== "string" || !body.trackId) {
+    return c.json({ ok: false, error: "missing trackId", code: 4 }, 400);
+  }
+  if (typeof body.afterClipId !== "string" || !body.afterClipId) {
+    return c.json({ ok: false, error: "missing afterClipId", code: 4 }, 400);
+  }
+  if (typeof body.preset !== "string" || !body.preset) {
+    return c.json({ ok: false, error: "missing preset", code: 4 }, 400);
+  }
+  let durationSec: number | undefined;
+  if (body.durationSec !== undefined) {
+    if (typeof body.durationSec !== "number" || !Number.isFinite(body.durationSec)) {
+      return c.json({ ok: false, error: "invalid durationSec (seconds)", code: 4 }, 400);
+    }
+    durationSec = body.durationSec;
+  }
+  const trackId = body.trackId;
+  const afterClipId = body.afterClipId;
+  const preset = body.preset;
+  let newId = "";
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        const { transitionId } = ops.addTransition(comp, {
+          trackId,
+          afterClipId,
+          preset,
+          durationSec,
+        });
+        newId = transitionId;
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "transition-add" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id: newId } });
+});
+
+// S9 (US 4/5/9) — DELETE /transition/:id: remove a transition (restore a hard
+// cut) through the shared `ops.removeTransition`, the SAME op the Studio remove
+// path runs, so the agent's `autoviral transition remove <id>` and a human's
+// click converge. An unknown transition id → CompositionOpError{code:4} → HTTP
+// 400 + code:4 → CLI exit 4.
+bridgeRouter.delete("/transition/:id", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing transition id", code: 4 }, 400);
+  }
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.removeTransition(comp, { transitionId: id });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "transition-remove" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
 // POST /ask blocks the HTTP response until the Studio user clicks
 // YES/NO in the ApprovalPrompt modal — or until timeoutMs elapses.
 // CLI exit codes (per protocol §5): yes=0, no=1, cancelled=2, timeout=124.
