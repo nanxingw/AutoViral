@@ -85,4 +85,32 @@ describe("preflight — pure candidate validator", () => {
       result.warnings.some((w) => w.includes("undeclared asset id")),
     ).toBe(true);
   });
+
+  // S13 rework — preflight MUST validate against the SAME schema the write
+  // chokepoint enforces (CompositionWriteSchema, .strict()). The lenient read
+  // schema silently STRIPS unknown keys, so a typo'd key used to PASS preflight
+  // (false-green) yet still 400 at `comp put`. These two cases pin that the
+  // strict unrecognized_keys rejection now flows through preflight.
+  it("an unknown TOP-LEVEL key (typo) is a hard error, not silently stripped", () => {
+    const bogus = validCandidate() as unknown as Record<string, unknown>;
+    // `tracts` is the classic typo for `tracks` — exactly the vector
+    // composition-ops.test.ts:92 covers for the write path.
+    bogus.tracts = [];
+    const result = preflight(bogus);
+    expect(result.ok).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes("tracts"))).toBe(true);
+  });
+
+  it("an unknown CLIP-LEVEL key (typo) is a hard error, not silently stripped", () => {
+    const candidate = validCandidate();
+    const videoTrack = candidate.tracks.find((t) => t.kind === "video")!;
+    // `bogusClipField` is the exact vector composition-ops.test.ts:105 covers.
+    (videoTrack.clips[0] as unknown as Record<string, unknown>).bogusClipField =
+      1;
+    const result = preflight(candidate);
+    expect(result.ok).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(result.errors.some((e) => e.includes("bogusClipField"))).toBe(true);
+  });
 });

@@ -11,13 +11,26 @@
 //                  still accepts these; surfacing them lets the agent self-heal.
 //
 // PURITY CONTRACT (ADR-009): this module is IO-free. No fs / http / event bus.
-// It is the ONE @shared module allowed to call CompositionSchema.safeParse,
-// because it IS the validator (the no-parse rule covers mutators, not the
-// validator itself). The fs-bound `missing-asset` lint rule lives in the
-// server's quality/lint.ts and is deliberately NOT mirrored here — preflight
-// reasons about SHAPE + CROSS-REFERENCES only, never about disk state.
+// It is the ONE @shared module allowed to call the schema's safeParse, because
+// it IS the validator (the no-parse rule covers mutators, not the validator
+// itself). The fs-bound `missing-asset` lint rule lives in the server's
+// quality/lint.ts and is deliberately NOT mirrored here — preflight reasons
+// about SHAPE + CROSS-REFERENCES only, never about disk state.
+//
+// S13 rework — preflight validates against the STRICT CompositionWriteSchema,
+// the SAME schema the write chokepoint (writeCompositionFor) enforces. The
+// lenient CompositionSchema is a plain z.object that SILENTLY STRIPS unknown
+// keys, so a typo'd top-level key (`tracts`) or clip field (`bogusClipField`)
+// used to PASS preflight (ok:true, false-green) yet still 400 + code:4 at
+// `comp put` — defeating the whole point of validating first. Validating
+// against CompositionWriteSchema makes the unrecognized_keys rejection flow
+// through preflight, so what passes here passes the write, and what fails here
+// fails the write. Same gate for /comp/validate AND PUT /comp?dry-run.
 
-import { CompositionSchema, type Composition } from "../composition.js";
+import {
+  CompositionWriteSchema,
+  type Composition,
+} from "../composition.js";
 
 export interface PreflightResult {
   /** True iff there are zero blocking errors. Warnings do NOT flip this. */
@@ -41,7 +54,9 @@ export function preflight(candidate: unknown): PreflightResult {
   // 1) Schema gate. safeParse never throws — we collect every issue as a
   //    blocking error. If the shape is wrong the semantic checks below would
   //    operate on garbage, so we stop here and return the schema errors.
-  const parsed = CompositionSchema.safeParse(candidate);
+  //    S13 rework: STRICT write schema, not the lenient read schema — see the
+  //    module header. This is what makes preflight agree with `comp put`.
+  const parsed = CompositionWriteSchema.safeParse(candidate);
   if (!parsed.success) {
     for (const issue of parsed.error.issues) {
       const path = issue.path.join(".");

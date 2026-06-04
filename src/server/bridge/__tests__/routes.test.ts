@@ -1960,6 +1960,96 @@ describe("bridge router — S13 /comp/validate + PUT /comp dry-run", () => {
     expect(body.result.warnings.some((w) => w.includes("overlaps"))).toBe(true);
   });
 
+  // S13 rework — preflight MUST agree with the write chokepoint. A typo'd
+  // top-level key (`tracts`) or clip key (`bogusClipField`) is stripped by the
+  // lenient read schema but REJECTED by CompositionWriteSchema at `comp put`.
+  // Before this fix /comp/validate returned ok:true (false-green) for these,
+  // then the subsequent PUT still 400'd — defeating the slice's whole purpose.
+  it("POST /comp/validate rejects a typo'd TOP-LEVEL key (matches the write path), disk UNCHANGED", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    const comp = await currentComp();
+    const res = await app.request("/api/bridge/v1/comp/validate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ ...comp, tracts: [] }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result: { ok: boolean; errors: string[] };
+    };
+    expect(body.result.ok).toBe(false);
+    expect(body.result.errors.some((e) => e.includes("tracts"))).toBe(true);
+    expect(await readFile(target, "utf8")).toBe(before);
+  });
+
+  it("POST /comp/validate rejects a typo'd CLIP-LEVEL key (matches the write path), disk UNCHANGED", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    const comp = await currentComp();
+    const tracks = (comp.tracks as Array<Record<string, unknown>>).map((t, ti) =>
+      ti === 0
+        ? {
+            ...t,
+            clips: (t.clips as Array<Record<string, unknown>>).map((cl, ci) =>
+              ci === 0 ? { ...cl, bogusClipField: 1 } : cl,
+            ),
+          }
+        : t,
+    );
+    const res = await app.request("/api/bridge/v1/comp/validate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ ...comp, tracks }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      result: { ok: boolean; errors: string[] };
+    };
+    expect(body.result.ok).toBe(false);
+    expect(
+      body.result.errors.some((e) => e.includes("bogusClipField")),
+    ).toBe(true);
+    expect(await readFile(target, "utf8")).toBe(before);
+  });
+
+  it("PUT /comp?dry-run=true rejects a typo'd top-level key (same verdict the live PUT would 400 on), disk UNCHANGED", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const comp = await currentComp();
+      const res = await app.request("/api/bridge/v1/comp?dry-run=true", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AutoViral-Work-Id": workId,
+        },
+        body: JSON.stringify({ ...comp, tracts: [] }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        result: { ok: boolean; errors: string[] };
+      };
+      expect(body.result.ok).toBe(false);
+      expect(body.result.errors.some((e) => e.includes("tracts"))).toBe(true);
+      expect(await readFile(target, "utf8")).toBe(before);
+      expect(events).not.toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
   it("POST /comp/validate without the work-id header → 400 + code 4", async () => {
     const res = await app.request("/api/bridge/v1/comp/validate", {
       method: "POST",
