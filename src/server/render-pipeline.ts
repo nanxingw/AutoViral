@@ -72,12 +72,18 @@ async function hasMeaningfulAudio(inputPath: string): Promise<boolean> {
  * route, which is already wired for browser preview. URLs with an
  * existing scheme (http://, https://, data:, blob:) pass through.
  */
-function rewriteClipSrcsToAbsolute(comp: Composition): Composition {
+export function rewriteClipSrcsToAbsolute(comp: Composition): Composition {
   const SCHEME = /^[a-z][a-z0-9+.\-]*:/i;
   const port = process.env.AUTOVIRAL_PORT ?? "3271";
   const baseUrl = `http://localhost:${port}/api/works/${comp.workId}`;
   const resolveOne = (src: string): string => {
     if (!src || SCHEME.test(src)) return src;
+    // Some comps store clip.src already as a page-absolute path
+    // ("/api/works/<id>/assets/..."). It only needs the localhost origin so
+    // headless Chromium can fetch it — re-wrapping it through the assets/
+    // prefix below would double-prefix into a 404 (snapshot E2E 2026-06-04;
+    // the mp4 export path shares this fn, so this fixes both).
+    if (src.startsWith("/")) return `http://localhost:${port}${src}`;
     // Server route already prefixes "assets/", so we only need the suffix.
     const trimmed = src.startsWith("assets/") ? src.slice("assets/".length) : src;
     const segments = trimmed.split("/").map(encodeURIComponent).join("/");

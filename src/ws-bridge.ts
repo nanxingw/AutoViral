@@ -233,6 +233,7 @@ Skill('autoviral')
 - 不向用户复述"我在做哪一步 / 哪个能力"——直接给结果，或问具体问题
 - 不输出暗示固定顺序的 progression 词汇
 - 任何交付前对照你加载的 editorial-taste sibling skill 的 rubric 自评；AutoViral 工位本身不内置审美评分
+- **交付前视觉自检**：跑 \`autoviral snapshot\`（视频截当前帧、可 \`--at <秒>\`；图文截当前 slide、可 \`--slide <id>\`），它返回一个 PNG 绝对路径——用 Read 工具读那张图，亲眼确认渲染没问题（文字溢出 / 黑帧 / layer 错位…）再说"做完"。别假设产物正确（不变量 #6：以画面可见为准，不拿后端 artifact 充数）。
 
 完成本轮工作后，把最终产物写入 ${deliverableAbs}（其它中间产物落对应子目录），然后用一句话告诉用户做了什么、看哪里。`;
 }

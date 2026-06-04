@@ -18,6 +18,7 @@ import { clipCommand } from "./commands/clip.js";
 import { carouselCommand } from "./commands/carousel.js";
 import { askCommand } from "./commands/ask.js";
 import { exportCommand, renderCommand } from "./commands/export.js";
+import { snapshotCommand } from "./commands/snapshot.js";
 import { ingestCommand } from "./commands/ingest.js";
 import { preprocessCommand } from "./commands/preprocess.js";
 import { contextCommand } from "./commands/context.js";
@@ -47,6 +48,7 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   ask: askCommand,
   export: exportCommand,
   render: renderCommand,
+  snapshot: snapshotCommand,
   ingest: ingestCommand,
   preprocess: preprocessCommand,
   context: contextCommand,
@@ -103,6 +105,9 @@ function usage(): string {
     "  ask <message> [--yes-no|--ok-cancel] [--timeout seconds]",
     "  export [--preset name] [--proxy]",
     "  render                        Alias for `export --proxy`",
+    "  snapshot [--at <time>] [--slide <id>]",
+    "    Capture the CURRENT frame (video) or slide (carousel) as a PNG and",
+    "    print its path — Read it to visually self-check before delivering.",
     "",
     "Ingest:",
     "  ingest youtube <url> [--lang zh-CN] [--model <openrouter-id>]",

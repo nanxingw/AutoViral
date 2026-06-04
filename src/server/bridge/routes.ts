@@ -36,6 +36,7 @@ import {
 import { uiEventBus } from "./ui-events.js";
 import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
+import { renderSnapshot } from "../snapshot.js";
 import { ingestYouTubeIntoWork } from "./ingest-youtube.js";
 import {
   read as readFocus,
@@ -694,6 +695,32 @@ bridgeRouter.post("/export", async (c) => {
       ok: true,
       result: { path: finalPath, resolvedValues, issues },
     });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+// POST /snapshot — I21. Capture the CURRENT frame (video, via Remotion
+// renderStill at the playhead or --at <seconds>) or the current slide
+// (carousel, --slide <id>) as a PNG and return its absolute path. The CLI
+// prints the path so the agent can Read it and visually self-check the output
+// before declaring done (invariant #6 — verify what's visible, not the assumed
+// artifact). Much faster than a full export: one frame, not the whole timeline.
+bridgeRouter.post("/snapshot", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    at?: number;
+    slide?: string;
+  };
+  try {
+    const result = await renderSnapshot({
+      workId: g.workId,
+      at: typeof body.at === "number" ? body.at : undefined,
+      slide: typeof body.slide === "string" ? body.slide : undefined,
+    });
+    return c.json({ ok: true, result });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message }, 500);

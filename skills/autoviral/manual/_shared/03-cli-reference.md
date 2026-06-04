@@ -202,6 +202,21 @@ autoviral export --proxy               # faster preview render
 
 Alias for `autoviral export --proxy`. Use for quick review cycles.
 
+### `autoviral snapshot [--at <time>] [--slide <id>]`
+
+Capture the CURRENT frame (video) or slide (carousel) as a single PNG and print its absolute path on stdout, so you can `Read` it and visually self-check your output before declaring done (invariant #6 — verify what's actually visible, don't assume the backend artifact is right). Much faster than a full export: one frame, not the whole timeline.
+
+```bash
+autoviral snapshot                      # current playhead (video) / first slide (carousel)
+autoviral snapshot --at 12.5s           # video: still at a specific time (seconds|'12.5s'|'1m30s')
+autoviral snapshot --slide s2           # carousel: a specific slide by id
+```
+
+- **Video work** → Remotion `renderStill` at the playhead (or `--at`), same Scene as the mp4 render, so every overlay/text layer is baked into the PNG — fully faithful.
+- **Carousel work** → returns a real exported `output/` page if one exists (text layers baked in); otherwise the slide's BACKGROUND image only. There is no headless carousel renderer yet, so in the background-only case the text/shape/sticker layers are **NOT** composited into the PNG. The CLI prints a caveat to stderr in that case — **do not infer text layout/overflow from a background-only snapshot.**
+
+stdout is a clean absolute path (the caveat, if any, goes to stderr), so `$(autoviral snapshot)` substitution works in a shell.
+
 ## Ingest
 
 ### `autoviral ingest youtube <url> [--lang zh-CN] [--model <openrouter-id>]`

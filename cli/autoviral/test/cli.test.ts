@@ -115,6 +115,29 @@ beforeAll(async () => {
       await readBody(req);
       return send(200, { ok: true });
     }
+    if (req.method === "POST" && url === "/api/bridge/v1/snapshot") {
+      const body = await readBody(req);
+      // Echo the requested frame/slide into the path so the test can assert the
+      // CLI forwarded --at / --slide correctly. Mirrors the server contract:
+      // { ok, result: { path, kind, textLayersComposited } }. A --slide request
+      // simulates the carousel background-only fallback (text NOT composited) so
+      // the test can assert the CLI prints the caveat; otherwise faithful.
+      const isCarousel = typeof body.slide === "string";
+      const tag =
+        typeof body.at === "number"
+          ? `at-${body.at}`
+          : isCarousel
+            ? `slide-${body.slide}`
+            : "current";
+      return send(200, {
+        ok: true,
+        result: {
+          path: `/tmp/work/output/snapshot-${tag}.png`,
+          kind: isCarousel ? "carousel-slide" : "video-still",
+          textLayersComposited: !isCarousel,
+        },
+      });
+    }
     if (req.method === "POST" && url === "/api/bridge/v1/ask") {
       const body = await readBody(req);
       // Simulate a timeout when the caller asked for <100ms — covers
@@ -287,6 +310,48 @@ describe("autoviral CLI — end-to-end", () => {
     const r = await run(["--help"]);
     expect(r.stdout).toMatch(/carousel add-slide/);
     expect(r.stdout).toMatch(/carousel set-layer/);
+  });
+
+  it("snapshot → prints the PNG path (exit 0) with no caveat on the faithful path", async () => {
+    const r = await run(["snapshot"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe("/tmp/work/output/snapshot-current.png");
+    // Video/faithful path (textLayersComposited:true) → no honesty caveat.
+    expect(r.stderr).not.toMatch(/background only/);
+  });
+
+  it("snapshot --at forwards a parsed time to the bridge", async () => {
+    const r = await run(["snapshot", "--at", "1m30s"]);
+    expect(r.exitCode).toBe(0);
+    // 1m30s → 90 seconds.
+    expect(r.stdout.trim()).toBe("/tmp/work/output/snapshot-at-90.png");
+  });
+
+  it("snapshot --slide forwards the slide id to the bridge", async () => {
+    const r = await run(["snapshot", "--slide", "s2"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe("/tmp/work/output/snapshot-slide-s2.png");
+  });
+
+  it("snapshot prints the base-only caveat to stderr when text isn't composited (path stays clean on stdout)", async () => {
+    // The mock returns textLayersComposited:false for a --slide (carousel
+    // background-only fallback). The caveat must go to stderr so stdout stays a
+    // parse-clean path for `$(autoviral snapshot)`.
+    const r = await run(["snapshot", "--slide", "s2"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe("/tmp/work/output/snapshot-slide-s2.png");
+    expect(r.stderr).toMatch(/background only/);
+    expect(r.stderr).toMatch(/do not infer text layout\/overflow/);
+  });
+
+  it("snapshot --at with a bad time → exit 4 (never hits bridge)", async () => {
+    const r = await run(["snapshot", "--at", "banana"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("--help lists snapshot", async () => {
+    const r = await run(["--help"]);
+    expect(r.stdout).toMatch(/snapshot/);
   });
 
   it("unknown command → exit 127", async () => {
