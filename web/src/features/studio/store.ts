@@ -29,6 +29,9 @@ import {
 } from "@autoviral/timeline";
 import { rippleDeleteFromTrack } from "./panels/Timeline/toolbar/rippleDelete";
 import { collapseGapsOnTrack } from "./panels/Timeline/toolbar/collapseGaps";
+import { useToastStore } from "@/stores/toast";
+import { MESSAGES } from "@/i18n/messages";
+import { useLocaleStore } from "@/i18n/store";
 
 // Phase 4.B — `dragState.preview` is a Map; immer needs the MapSet plugin
 // enabled at module load to draft map mutations under produce().
@@ -617,10 +620,11 @@ export const useComposition = create<CompState>()(
     // ADR-009 (S6) — the split math + invariants now live in the shared
     // composition-ops core (`ops.splitClip`), consumed identically by the
     // bridge. The store action is a thin immer wrapper: snapshot for undo,
-    // call the op on the draft (it mutates `s.comp` in place), and translate
-    // the op's typed CompositionOpError (unknown id / out-of-clip / boundary)
-    // back into this layer's D4 SILENT no-op — so the UI affordance never
-    // surfaces an error for a split that simply landed on a gap. The op math is
+    // call the op on the draft (it mutates `s.comp` in place), and — per
+    // ADR-009 decision #4 — SURFACE the op's typed CompositionOpError (unknown
+    // id / out-of-clip / boundary) as a user-visible toast rather than swallow
+    // it silently. The UI is left untouched (no throw, no partial mutation),
+    // but the user now learns why the split landed nowhere. The op math is
     // unchanged from the old inline body, so the existing store splitClip tests
     // pass without touching a single assertion (zero-behaviour-change proof).
     splitClip: (clipId, atSec) =>
@@ -632,7 +636,18 @@ export const useComposition = create<CompState>()(
         try {
           ops.splitClip(s.comp, { clipId, atSec });
         } catch (err) {
-          if (err instanceof CompositionOpError) return; // D4 silent no-op
+          if (err instanceof CompositionOpError) {
+            // ADR-009 #4 — surface, don't swallow. Push a localized headline
+            // toast with the op's technical message as the detail line.
+            const locale = useLocaleStore.getState().locale;
+            useToastStore.getState().push({
+              variant: "warn",
+              message: MESSAGES[locale].studio.toast.splitFailed,
+              detail: err.message,
+              ttlMs: 4000,
+            });
+            return; // UI untouched (no partial split), but the user is told.
+          }
           throw err;
         }
         s.clipHistory.past.push(preTracks);

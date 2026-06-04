@@ -218,6 +218,9 @@ export const en = {
       toggleSettings: "Studio tweaks",
       shortcuts: "Keyboard shortcuts",
     },
+    toast: {
+      splitFailed: "Can't split here",
+    },
     shortcuts: {
       title: "Keyboard shortcuts",
       openHint: "Press ? to open this anytime",
@@ -1055,6 +1058,9 @@ export const zh: DeepShape<Messages> = {
       quickProxyExport: "快速代理导出",
       toggleSettings: "工作台偏好",
       shortcuts: "键盘快捷键",
+    },
+    toast: {
+      splitFailed: "无法在此处分割",
     },
     shortcuts: {
       title: "键盘快捷键",

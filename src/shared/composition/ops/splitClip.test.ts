@@ -141,6 +141,37 @@ describe("@shared composition ops — splitClip", () => {
     );
   });
 
+  it("gives each half its OWN nested objects — no shared aliasing (S11 patch must not bleed)", () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "split-b" as `${string}-${string}-${string}-${string}-${string}`,
+    );
+    const clip = videoClip({ id: "a", trackOffset: 2, in: 0, out: 6 }) as any;
+    clip.transforms = { scale: 1, x: 0, y: 0, rotation: 0 };
+    clip.filters = { brightness: 0, contrast: 0, saturation: 0 };
+    clip.style = { color: "#fff", fontSize: 48 };
+    const comp = compWith([clip]);
+    splitClip(comp, { clipId: "a", atSec: 5 });
+
+    const [first, second] = [...(comp.tracks[0].clips as Clip[])].sort(
+      (x, y) => x.trackOffset - y.trackOffset,
+    ) as any[];
+
+    // The nested objects must be distinct instances between the two halves.
+    expect(first.transforms).not.toBe(second.transforms);
+    expect(first.filters).not.toBe(second.filters);
+    expect(first.style).not.toBe(second.style);
+
+    // Behavioural proof: an IN-PLACE patch on child A (mirrors the backend
+    // patchClipProps mutate-comp path) must NOT touch child B.
+    first.transforms.scale = 2.5;
+    first.filters.brightness = 0.9;
+    first.style.color = "#000";
+    expect(second.transforms.scale).toBeCloseTo(1);
+    expect(second.filters.brightness).toBeCloseTo(0);
+    expect(second.style.color).toBe("#fff");
+    vi.restoreAllMocks();
+  });
+
   it("throws CompositionOpError{code:4} when the clip id is unknown", () => {
     const comp = compWith([videoClip({ id: "a", trackOffset: 0, in: 0, out: 4 })]);
     try {

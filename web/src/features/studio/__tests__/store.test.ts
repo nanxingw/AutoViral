@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useComposition } from "../store";
+import { useToastStore } from "@/stores/toast";
 import { makeEmptyComposition } from "../types";
 import {
   makeAssetEntry,
@@ -472,6 +473,7 @@ describe("resizeClip (Phase 4.I)", () => {
 
 describe("splitClip (Phase 4.G)", () => {
   beforeEach(() => {
+    useToastStore.getState().clear();
     const a = makeVideoClip({ id: "a", trackOffset: 2, in: 0, out: 6 }); // duration 6 → on timeline 2..8
     useComposition.setState({
       comp: makeCompositionWithClips([a]),
@@ -523,6 +525,24 @@ describe("splitClip (Phase 4.G)", () => {
       useComposition.getState().splitClip("missing", 4),
     ).not.toThrow();
     expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(1);
+  });
+
+  it("surfaces a toast (ADR-009 #4) — not a silent no-op — on an illegal split", () => {
+    // Boundary split → CompositionOpError; the store must SURFACE it.
+    useComposition.getState().splitClip("a", 2); // start boundary (zero-width)
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(1); // UI untouched
+    const entries = useToastStore.getState().entries;
+    expect(entries.length).toBe(1);
+    expect(entries[0].variant).toBe("warn");
+    // detail carries the op's technical message so power users can debug.
+    expect(entries[0].detail).toMatch(/splitClip/);
+  });
+
+  it("surfaces a toast when the clip id is unknown", () => {
+    useComposition.getState().splitClip("missing", 4);
+    const entries = useToastStore.getState().entries;
+    expect(entries.length).toBe(1);
+    expect(entries[0].detail).toMatch(/no clip with id/);
   });
 
   it("inherits transforms + filters identically (audit Q3)", () => {

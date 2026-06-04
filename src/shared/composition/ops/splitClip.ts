@@ -26,6 +26,26 @@ function clipDuration(c: Clip): number {
   return Math.max(0, (c as { duration: number }).duration);
 }
 
+// Recursive structural clone that READS THROUGH the source value (works on a
+// plain object AND on an immer draft Proxy — unlike `structuredClone`, which
+// rejects exotic/proxy objects with DataCloneError). Clips are pure JSON data
+// (no Date / Map / functions), so a plain object/array walk is faithful. Used
+// to give each split half its OWN copy of every nested mutable object so a
+// later in-place patch on one half can't bleed into the other.
+function cloneDeep<T>(value: T): T {
+  if (Array.isArray(value)) {
+    return value.map((v) => cloneDeep(v)) as unknown as T;
+  }
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(value as object)) {
+      out[k] = cloneDeep((value as Record<string, unknown>)[k]);
+    }
+    return out as T;
+  }
+  return value;
+}
+
 function clipEnd(c: Clip): number {
   return c.trackOffset + clipDuration(c);
 }
@@ -43,7 +63,9 @@ function recomputeDuration(comp: Composition): void {
  * child B gets a freshly-minted id (`crypto.randomUUID()`) and covers
  * `[atSec, end)`. Keyframes are partitioned + rebased to clip-local 0 for child
  * B (#46 parity). Both halves inherit transforms / filters / style / position
- * / volume / fades identically (object spread).
+ * / volume / fades identically, but via a per-child deep clone so the two
+ * halves never alias the same nested mutable object (a later in-place patch on
+ * one half must not bleed into the other).
  *
  * Throws `CompositionOpError{code:4}` when:
  *  - no clip matches `clipId`, or
@@ -86,25 +108,31 @@ export function splitClip(
       ? splitKeyframesAtLocal(origKfs, offsetIntoClip)
       : { a: undefined as Keyframe[] | undefined, b: undefined as Keyframe[] | undefined };
 
-    let childA: Clip;
-    let childB: Clip;
+    // Deep-clone `orig` once per child so the two halves NEVER share a nested
+    // mutable object (transforms / filters / style / position / fade / …). A
+    // shallow `{...orig}` only copies the top level, leaving both children
+    // pointing at the SAME transforms/filters/style objects — so a later
+    // in-place patch on child A (S11 patchClipProps mutates nested fields in
+    // the backend mutate-comp path) would silently corrupt child B. ADR-009
+    // permits deep-cloning a child's nested objects; it never replaces `comp`,
+    // `comp.tracks`, or `comp.tracks[i]` (we splice fresh clip objects into the
+    // SAME `clips` array below). `cloneDeep` (not `structuredClone`) is used
+    // because `orig` may be an immer draft Proxy on the store path, which
+    // `structuredClone` rejects with DataCloneError. We overwrite each child's
+    // `keyframes` with its already-partitioned array afterwards.
+    let childA: Clip = cloneDeep(orig);
+    let childB: Clip = cloneDeep(orig);
     if (orig.kind === "video" || orig.kind === "audio") {
-      childA = { ...orig, out: orig.in + offsetIntoClip };
-      childB = {
-        ...orig,
-        id: newClipId,
-        in: orig.in + offsetIntoClip,
-        trackOffset: atSec,
-      };
+      (childA as { out: number }).out = orig.in + offsetIntoClip;
+      (childB as { id: string; in: number; trackOffset: number }).id = newClipId;
+      (childB as { in: number }).in = orig.in + offsetIntoClip;
+      (childB as { trackOffset: number }).trackOffset = atSec;
     } else {
       // text / overlay — duration-based.
-      childA = { ...orig, duration: offsetIntoClip } as Clip;
-      childB = {
-        ...orig,
-        id: newClipId,
-        trackOffset: atSec,
-        duration: dur - offsetIntoClip,
-      } as Clip;
+      (childA as { duration: number }).duration = offsetIntoClip;
+      (childB as { id: string }).id = newClipId;
+      (childB as { trackOffset: number }).trackOffset = atSec;
+      (childB as { duration: number }).duration = dur - offsetIntoClip;
     }
     if (origKfs) {
       (childA as { keyframes?: Keyframe[] }).keyframes = kfA;
