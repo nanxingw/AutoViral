@@ -268,8 +268,25 @@ export const useComposition = create<CompState>()(
         for (const t of s.comp.tracks) {
           const c = (t.clips as Clip[]).find((c) => c.id === clipId);
           if (c) {
-            // Snapshot the pre-edit tracks ONLY once we know the target exists,
-            // so a set() against an unknown clipId doesn't litter the undo stack.
+            // S20 fix-up — only snapshot for Cmd+Z when the patch actually
+            // changes a value. `updateClip('b', { trackOffset: 9 })` when
+            // trackOffset is already 9 used to push an identical state, so a
+            // stray Cmd+Z would appear to do nothing AND the duplicate would
+            // evict genuinely-useful older history sooner under the 50-cap.
+            // Compare every patched field; if none differs, this is a no-op.
+            const rec = c as unknown as Record<string, unknown>;
+            const changesSomething = Object.entries(patch).some(
+              ([k, v]) => !Object.is(rec[k], v),
+            );
+            if (!changesSomething) {
+              // value-identical patch — apply (harmless) without history.
+              Object.assign(c, patch);
+              touched = true;
+              break;
+            }
+            // Snapshot the pre-edit tracks ONLY once we know the target exists
+            // AND a value really changes, so neither an unknown clipId nor a
+            // no-op patch litters the undo stack.
             pushClipHistory(s);
             Object.assign(c, patch);
             touched = true;
@@ -293,6 +310,10 @@ export const useComposition = create<CompState>()(
         if (!t) return;
         const clips = t.clips as Clip[];
         if (fromIndex < 0 || fromIndex >= clips.length || toIndex < 0 || toIndex >= clips.length) return;
+        // S20 fix-up — a same-position move (fromIndex === toIndex) changes
+        // nothing; pushing history here would snapshot an identical state and
+        // make a later Cmd+Z appear to no-op. Bail before the snapshot.
+        if (fromIndex === toIndex) return;
         pushClipHistory(s);
         const [moved] = clips.splice(fromIndex, 1);
         clips.splice(toIndex, 0, moved);
@@ -449,6 +470,12 @@ export const useComposition = create<CompState>()(
         for (let i = 0; i < s.comp.tracks.length; i++) {
           const t = s.comp.tracks[i];
           if ((t.clips as Clip[]).some((c) => c.id === clipId)) {
+            // S20 fix-up — ripple-delete is the single most destructive clip
+            // edit (removes a clip AND ripples its successors left), yet it was
+            // the one clip mutation that never snapshotted for Cmd+Z. Snapshot
+            // ONLY once the target is found, so a stray ripple-delete of an
+            // unknown id doesn't litter the stack (mirrors removeClip).
+            pushClipHistory(s);
             s.comp.tracks[i] = rippleDeleteFromTrack(t, clipId) as typeof t;
             break;
           }
@@ -463,9 +490,22 @@ export const useComposition = create<CompState>()(
         if (!s.comp) return;
         const idx = s.comp.tracks.findIndex((t) => t.id === trackId);
         if (idx < 0) return;
-        s.comp.tracks[idx] = collapseGapsOnTrack(
-          s.comp.tracks[idx],
-        ) as typeof s.comp.tracks[number];
+        const before = s.comp.tracks[idx];
+        const collapsed = collapseGapsOnTrack(before) as typeof before;
+        // S20 fix-up — collapse-gaps repositions every clip on the track but
+        // never snapshotted for Cmd+Z. Only push history when the collapse
+        // actually moved a clip (compare offsets pre/post), so collapsing an
+        // already-tight track is a true no-op and doesn't pad the undo stack
+        // with an identical state (which would evict useful history sooner
+        // under the 50-deep cap and let a stray Cmd+Z appear to do nothing).
+        const moved =
+          before.clips.length !== collapsed.clips.length ||
+          before.clips.some(
+            (c, i) => c.trackOffset !== collapsed.clips[i]?.trackOffset,
+          );
+        if (!moved) return;
+        pushClipHistory(s);
+        s.comp.tracks[idx] = collapsed;
         s.comp.duration = Math.max(
           0,
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
@@ -1133,6 +1173,7 @@ export const useComposition = create<CompState>()(
           0,
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
         );
+        reconcileSelection(s);
       }),
     redoClipOp: () =>
       set((s) => {
@@ -1145,6 +1186,7 @@ export const useComposition = create<CompState>()(
           0,
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
         );
+        reconcileSelection(s);
       }),
   })),
 );
@@ -1179,6 +1221,20 @@ function pushClipHistory(s: {
     s.clipHistory.past.shift();
   }
   s.clipHistory.future = [];
+}
+
+// S20 fix-up — after a clip-op undo/redo restores `tracks`, the current
+// `selection` may point at a clip id that no longer exists in the restored
+// tracks (undoing an addClip whose new clip is selected, or redoing a
+// removeClip). A dangling selection makes the Inspector / handles read a clip
+// that isn't there. Drop it to null when it no longer resolves; leave a valid
+// selection untouched.
+function reconcileSelection(s: { comp: Composition | null; selection: string | null }) {
+  if (!s.comp || s.selection == null) return;
+  const stillExists = s.comp.tracks.some((t) =>
+    (t.clips as Clip[]).some((c) => c.id === s.selection),
+  );
+  if (!stillExists) s.selection = null;
 }
 
 // Recompact displayOrder so the array sorted by displayOrder is contiguous

@@ -1,9 +1,16 @@
 // S20 (US 32) — clip-level undo stack. Mirrors the track-op undo in
 // store.tracks.test.ts but scoped to clip mutations: split / trim (resizeClip)
 // / move (moveClipToTrack + moveClipWithinTrack) / set (updateClip) /
-// removeClip / addClip. Each clip op snapshots the full tracks array BEFORE
-// mutating; undoClipOp restores it, redoClipOp replays. A fresh clip op
-// invalidates the redo branch (standard editor semantics).
+// removeClip / addClip / ripple-delete / collapse-gaps. Each clip op snapshots
+// the full tracks array BEFORE mutating; undoClipOp restores it, redoClipOp
+// replays. A fresh clip op invalidates the redo branch (standard editor
+// semantics).
+//
+// S20 fix-up coverage (every assertion below is a real, previously-failing
+// case): move (moveClipToTrack + moveClipWithinTrack) undo was claimed but
+// untested; ripple-delete + collapse-gaps never pushed history at all; no-op
+// patches (same-value updateClip / same-index move) padded the stack; and
+// undo over add/remove left a dangling `selection`. All are pinned here.
 //
 // The real Cmd+Z keybinding that drives undoClipOp from the keyboard is a UI
 // concern verified by the E2E workflow; here we pin the store action only.
@@ -135,6 +142,127 @@ describe("clip-level undo / redo (S20)", () => {
     const after = clipsOnFirstTrack();
     expect(after).toHaveLength(1);
     expect(after[0].id).toBe("a");
+  });
+
+  it("ripple-delete → undo brings the clip back AND restores neighbour offsets", () => {
+    useComposition.getState().loadComposition(comp());
+    // a:[0,4) b:[4,8). Ripple-delete a → b shifts left to trackOffset 0.
+    const bOffsetBefore = clipsOnFirstTrack().find((c) => c.id === "b")!.trackOffset;
+    useComposition.getState().rippleDeleteClip("a");
+    const afterDelete = clipsOnFirstTrack();
+    expect(afterDelete.some((c) => c.id === "a")).toBe(false);
+    // b rippled left to 0
+    expect(afterDelete.find((c) => c.id === "b")!.trackOffset).toBe(0);
+
+    useComposition.getState().undoClipOp();
+    const undone = clipsOnFirstTrack();
+    // a is back
+    expect(undone.some((c) => c.id === "a")).toBe(true);
+    // and b is back at its original offset (the ripple shift was undone)
+    expect(undone.find((c) => c.id === "b")!.trackOffset).toBe(bOffsetBefore);
+  });
+
+  it("collapse-gaps → undo restores the original clip offsets", () => {
+    useComposition.getState().loadComposition(comp());
+    const trackId = useComposition.getState().comp!.tracks[0].id;
+    // Open a gap: push b out to 10 so collapse-gaps will pull it back to 4.
+    useComposition.getState().updateClip("b", { trackOffset: 10 });
+    expect(clipsOnFirstTrack().find((c) => c.id === "b")!.trackOffset).toBe(10);
+
+    useComposition.getState().collapseGaps(trackId);
+    // a stays at 0 (dur 4), b collapses back to 4.
+    expect(clipsOnFirstTrack().find((c) => c.id === "b")!.trackOffset).toBe(4);
+
+    useComposition.getState().undoClipOp();
+    // collapse undone → b back at 10 (the pre-collapse state).
+    expect(clipsOnFirstTrack().find((c) => c.id === "b")!.trackOffset).toBe(10);
+  });
+
+  it("moveClipToTrack → undo restores the clip to its original lane", () => {
+    useComposition.getState().loadComposition(comp());
+    const sourceTrackId = useComposition.getState().comp!.tracks[0].id;
+    // Add a second same-kind (video) lane to move into.
+    const destTrackId = useComposition.getState().addTrack("video");
+
+    useComposition.getState().moveClipToTrack("b", destTrackId);
+    const tracksAfter = useComposition.getState().comp!.tracks;
+    const dest = tracksAfter.find((t) => t.id === destTrackId)!;
+    const source = tracksAfter.find((t) => t.id === sourceTrackId)!;
+    expect((dest.clips as Clip[]).some((c) => c.id === "b")).toBe(true);
+    expect((source.clips as Clip[]).some((c) => c.id === "b")).toBe(false);
+
+    useComposition.getState().undoClipOp();
+    const restored = useComposition.getState().comp!.tracks;
+    const destAfter = restored.find((t) => t.id === destTrackId)!;
+    const sourceAfter = restored.find((t) => t.id === sourceTrackId)!;
+    // b is back on the source lane, gone from the dest lane.
+    expect((sourceAfter.clips as Clip[]).some((c) => c.id === "b")).toBe(true);
+    expect((destAfter.clips as Clip[]).some((c) => c.id === "b")).toBe(false);
+  });
+
+  it("moveClipWithinTrack → undo restores the original order + offsets", () => {
+    useComposition.getState().loadComposition(comp());
+    const trackId = useComposition.getState().comp!.tracks[0].id;
+    const orderBefore = clipsOnFirstTrack().map((c) => c.id);
+    const offsetsBefore = clipsOnFirstTrack().map((c) => c.trackOffset);
+
+    // Reorder a (idx 0) to idx 1, swapping with b.
+    useComposition.getState().moveClipWithinTrack(trackId, 0, 1);
+    expect(clipsOnFirstTrack().map((c) => c.id)).toEqual(["b", "a"]);
+
+    useComposition.getState().undoClipOp();
+    expect(clipsOnFirstTrack().map((c) => c.id)).toEqual(orderBefore);
+    expect(clipsOnFirstTrack().map((c) => c.trackOffset)).toEqual(offsetsBefore);
+  });
+
+  it("updateClip with a no-op patch (same value) does NOT push history", () => {
+    useComposition.getState().loadComposition(comp());
+    const currentOffset = clipsOnFirstTrack().find((c) => c.id === "b")!.trackOffset;
+    const depthBefore = useComposition.getState().clipHistory.past.length;
+    // Patch trackOffset to the value it already has → must be a no-op push-wise.
+    useComposition.getState().updateClip("b", { trackOffset: currentOffset });
+    expect(useComposition.getState().clipHistory.past.length).toBe(depthBefore);
+  });
+
+  it("moveClipWithinTrack with fromIndex === toIndex does NOT push history", () => {
+    useComposition.getState().loadComposition(comp());
+    const trackId = useComposition.getState().comp!.tracks[0].id;
+    const depthBefore = useComposition.getState().clipHistory.past.length;
+    useComposition.getState().moveClipWithinTrack(trackId, 0, 0);
+    expect(useComposition.getState().clipHistory.past.length).toBe(depthBefore);
+  });
+
+  it("undo of an addClip whose new clip is selected clears the dangling selection", () => {
+    useComposition.getState().loadComposition(comp());
+    const trackId = useComposition.getState().comp!.tracks[0].id;
+    useComposition.getState().addClip(trackId, {
+      id: "c",
+      kind: "video",
+      src: "/c.mp4",
+      in: 0,
+      out: 2,
+      trackOffset: 8,
+      transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+      filters: { brightness: 0, contrast: 0, saturation: 0 },
+    });
+    // Select the freshly added clip.
+    useComposition.getState().setSelection("c");
+    expect(useComposition.getState().selection).toBe("c");
+
+    // Undo removes clip "c" — selection must not dangle.
+    useComposition.getState().undoClipOp();
+    expect(clipsOnFirstTrack().some((cl) => cl.id === "c")).toBe(false);
+    expect(useComposition.getState().selection).toBeNull();
+  });
+
+  it("undo that keeps the selected clip alive preserves the selection", () => {
+    useComposition.getState().loadComposition(comp());
+    useComposition.getState().setSelection("b");
+    // A set on "a" (not "b") — undoing it must NOT clear the still-valid
+    // selection on "b".
+    useComposition.getState().updateClip("a", { trackOffset: 99 });
+    useComposition.getState().undoClipOp();
+    expect(useComposition.getState().selection).toBe("b");
   });
 
   it("clip ops do not push onto the track-op history stack (and vice-versa)", () => {
