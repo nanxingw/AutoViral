@@ -29,6 +29,11 @@ export async function clipCommand(args: string[]): Promise<void> {
       src: opts["--src"],
       text: opts["--text"],
       track,
+      // S10 (US 7/8) — `--track-id <trackId>` lands the clip on EXACTLY that
+      // lane (e.g. A2) instead of the first same-kind lane. `--track` is the
+      // KIND (video/audio/text/overlay); `--track-id` is the lane id. Omit it
+      // to keep the legacy first-same-kind-lane fallback.
+      trackId: opts["--track-id"] || undefined,
       offset: opts["--offset"] ? Number(opts["--offset"]) : 0,
       duration: opts["--duration"] ? Number(opts["--duration"]) : undefined,
       in: opts["--in"] ? Number(opts["--in"]) : undefined,

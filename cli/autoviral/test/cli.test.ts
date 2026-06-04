@@ -28,6 +28,12 @@ let nextSeq = 1;
 // S11 — capture the last PATCH /clip body so the CLI test can assert the
 // flag → nested-path mapping + value coercion that reached the bridge.
 let lastClipPatch: Record<string, unknown> | null = null;
+// S10 (US 7/8) — capture the last POST /clip body so the CLI test can assert the
+// `--track-id` flag reached the bridge as `trackId`.
+let lastClipAdd: Record<string, unknown> | null = null;
+// S10 (US 6/7/8) — capture the last POST /track body so the CLI test can assert
+// the `track add` flags (kind / --after / --label / --language) reached the wire.
+let lastTrackAdd: Record<string, unknown> | null = null;
 // S4 (US 10) — capture the last PUT /comp body so the CLI test can assert the
 // full composition the CLI read from a file / stdin reached the bridge verbatim.
 let lastCompPut: Record<string, unknown> | null = null;
@@ -142,9 +148,32 @@ beforeAll(async () => {
       if (body.track === "envfailnocode") {
         return send(200, { ok: false, error: "envelope failure no code" });
       }
+      lastClipAdd = body;
       const id = `vc_e2e${nextSeq++}`;
       clips.push({ id, trackKind: body.track });
       return send(200, { ok: true, result: { id } });
+    }
+    // S10 (US 6/7/8) — POST /track: mints a lane id; an invalid kind is the
+    // bridge's 400 + code 4 → CLI exit 4 (mirrors the real route).
+    if (req.method === "POST" && url === "/api/bridge/v1/track") {
+      const body = await readBody(req);
+      lastTrackAdd = body;
+      if (body.kind === "bogus") {
+        return send(400, { ok: false, error: "invalid kind", code: 4 });
+      }
+      return send(200, { ok: true, result: { trackId: `trk_seq${nextSeq++}` } });
+    }
+    // S10 (US 6/7/8) — DELETE /track/:id. A known id resolves; `trk_ghost` is the
+    // op's CompositionOpError → 400 + code 4 → CLI exit 4.
+    {
+      const trackMatch = /^\/api\/bridge\/v1\/track\/([^/]+)$/.exec(url ?? "");
+      if (req.method === "DELETE" && trackMatch) {
+        const id = decodeURIComponent(trackMatch[1]);
+        if (id === "trk_ghost") {
+          return send(400, { ok: false, error: "no such track", code: 4 });
+        }
+        return send(200, { ok: true });
+      }
     }
     if (req.method === "DELETE" && url.startsWith("/api/bridge/v1/clip/")) {
       const id = url.split("/").pop()!;
@@ -547,6 +576,86 @@ describe("autoviral CLI — end-to-end", () => {
     expect(r.exitCode).toBe(127);
   });
 
+  // S10 (US 6/7/8) — track add/remove + clip add --track-id + overlay.
+  it("track add --kind audio → prints the minted trackId", async () => {
+    lastTrackAdd = null;
+    const r = await run(["track", "add", "--kind", "audio"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toMatch(/^trk_/);
+    expect(lastTrackAdd).toEqual({ kind: "audio" });
+  });
+
+  it("track add --kind text --after <id> --label L --language en forwards every flag", async () => {
+    lastTrackAdd = null;
+    const r = await run([
+      "track", "add",
+      "--kind", "text",
+      "--after", "trk_v1",
+      "--label", "CC2",
+      "--language", "en",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastTrackAdd).toEqual({
+      kind: "text",
+      afterTrackId: "trk_v1",
+      label: "CC2",
+      language: "en",
+    });
+  });
+
+  it("track add with no --kind → exit 4 (never hits bridge)", async () => {
+    const r = await run(["track", "add"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("track add with an invalid --kind → exit 4 (never hits bridge)", async () => {
+    const r = await run(["track", "add", "--kind", "bogus"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("track remove <trackId> → exit 0", async () => {
+    const r = await run(["track", "remove", "trk_v1"]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  it("track remove with no id → exit 4 (never hits bridge)", async () => {
+    const r = await run(["track", "remove"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("track remove an unknown id → bridge 400 code:4 → exit 4", async () => {
+    const r = await run(["track", "remove", "trk_ghost"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("track unknown subcommand → exit 127", async () => {
+    const r = await run(["track", "frobnicate"]);
+    expect(r.exitCode).toBe(127);
+  });
+
+  it("clip add --track-id <id> forwards trackId on the wire", async () => {
+    lastClipAdd = null;
+    const r = await run([
+      "clip", "add",
+      "--src", "assets/vo.mp3",
+      "--track", "audio",
+      "--track-id", "trk_a2",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipAdd?.track).toBe("audio");
+    expect(lastClipAdd?.trackId).toBe("trk_a2");
+  });
+
+  it("clip add --track overlay --src <path> succeeds (no hard-reject)", async () => {
+    const r = await run([
+      "clip", "add",
+      "--src", "assets/logo.png",
+      "--track", "overlay",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toMatch(/^vc_/); // mock id shape, not load-bearing
+  });
+
   // S11 — `clip set` maps ergonomic flags to canonical nested paths and coerces
   // values (number/bool/JSON) before PATCHing the bridge.
   it("clip set --scale 2 → PATCHes { 'transforms.scale': 2 }", async () => {
@@ -821,18 +930,19 @@ describe("autoviral CLI — end-to-end", () => {
     expect(r.stdout).toMatch(/carousel set-layer/);
   });
 
-  // S1 (US 35/36/37) —止谎: the bridge throws `overlay track not yet
-  // supported` on `clip add --track overlay` (bridge/routes.ts), so the help
-  // must NOT advertise `overlay` as a usable clip-add track. An agent that
-  // trusts the manual and runs it would burn its whole session budget on a
-  // guaranteed runtime error.
-  it("--help does NOT advertise the overlay track for `clip add` (it throws at runtime)", async () => {
+  // S10 (US 6) — overlay is now a first-class clip-add track (the old "not yet
+  // supported in Phase 3" hard-reject is gone; the OverlayClip schema + the
+  // Scene → OverlayTrackRenderer dispatch consume it). The止谎 invariant flips:
+  // the help MUST now advertise `overlay` because `clip add --track overlay`
+  // genuinely works at runtime (proven by the `clip add --track overlay`
+  // success test above). Help truthfully tracks runtime behaviour either way.
+  it("--help advertises the overlay track for `clip add` (now genuinely supported)", async () => {
     const r = await run(["--help"]);
     const clipAddLine = r.stdout
       .split("\n")
       .find((l) => l.includes("clip add"));
     expect(clipAddLine).toBeDefined();
-    expect(clipAddLine).not.toMatch(/overlay/);
+    expect(clipAddLine).toMatch(/overlay/);
   });
 
   it("snapshot → prints the PNG path (exit 0) with no caveat on the faithful path", async () => {

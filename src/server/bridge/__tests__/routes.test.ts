@@ -1946,3 +1946,272 @@ exportPresets: []
     expect(body.code).toBe(4);
   });
 });
+
+// S10 (US 6/7/8) — track add/remove + clip add by trackId + overlay support.
+describe("bridge router — S10 /track + clip trackId + overlay", () => {
+  let workRoot: string;
+  const workId = "w_track";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  // Two audio lanes (A1 with a clip, A2 empty) so we can prove trackId targeting
+  // lands a voiceover on A2 rather than always hitting the first same-kind lane.
+  const TWO_AUDIO_LANE_YAML = `id: c_${workId}
+workId: ${workId}
+fps: 30
+width: 1080
+height: 1920
+duration: 8.0
+aspect: "9:16"
+updatedAt: "2026-05-14T00:00:00.000Z"
+tracks:
+  - id: trk_v1
+    kind: video
+    label: V1
+    muted: false
+    hidden: false
+    clips:
+      - id: c1
+        kind: video
+        src: assets/sample-shot.mp4
+        in: 0
+        out: 4.0
+        trackOffset: 0
+  - id: trk_a1
+    kind: audio
+    label: A1
+    muted: false
+    hidden: false
+    clips:
+      - id: ac1
+        kind: audio
+        src: assets/sample-bgm.mp3
+        in: 0
+        out: 8.0
+        trackOffset: 0
+        type: bgm
+  - id: trk_a2
+    kind: audio
+    label: A2
+    muted: false
+    hidden: false
+    clips: []
+assets: []
+provenance: []
+exportPresets: []
+`;
+
+  beforeAll(async () => {
+    const { mkdtemp, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-track-route-"));
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(
+      join(workRoot, workId, "composition.yaml"),
+      TWO_AUDIO_LANE_YAML,
+      "utf8",
+    );
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  function getComp() {
+    return app
+      .request("/api/bridge/v1/comp", {
+        headers: { "X-AutoViral-Work-Id": workId },
+      })
+      .then((r) => r.json()) as Promise<{
+      result: {
+        tracks: Array<{
+          id: string;
+          kind: string;
+          label: string;
+          clips: Array<{ id: string; kind: string }>;
+        }>;
+      };
+    }>;
+  }
+
+  it("POST /track adds a new audio lane and echoes the minted trackId", async () => {
+    const res = await app.request("/api/bridge/v1/track", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ kind: "audio" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result?: { trackId: string };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.result?.trackId).toMatch(/^trk_/);
+    const comp = await getComp();
+    expect(comp.result.tracks.some((t) => t.id === body.result!.trackId)).toBe(
+      true,
+    );
+  });
+
+  it("POST /clip with an explicit trackId lands the clip on THAT lane (A2, not A1)", async () => {
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/voiceover.mp3",
+        track: "audio",
+        trackId: "trk_a2",
+        offset: 0,
+        duration: 3,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { id: string } };
+    expect(body.ok).toBe(true);
+    const newId = body.result!.id;
+    const comp = await getComp();
+    const a1 = comp.result.tracks.find((t) => t.id === "trk_a1")!;
+    const a2 = comp.result.tracks.find((t) => t.id === "trk_a2")!;
+    expect(a2.clips.some((c) => c.id === newId)).toBe(true); // landed on A2
+    expect(a1.clips.some((c) => c.id === newId)).toBe(false); // NOT on A1
+  });
+
+  it("POST /clip without trackId falls back to the FIRST same-kind lane (A1)", async () => {
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/extra-bgm.mp3",
+        track: "audio",
+        offset: 0,
+        duration: 2,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result: { id: string } };
+    const comp = await getComp();
+    const a1 = comp.result.tracks.find((t) => t.id === "trk_a1")!;
+    expect(a1.clips.some((c) => c.id === body.result.id)).toBe(true);
+  });
+
+  it("POST /clip with a trackId of the wrong kind → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/voiceover.mp3",
+        track: "audio",
+        trackId: "trk_v1", // video lane, not audio
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /clip on an overlay lane succeeds (no more hard-reject)", async () => {
+    // First mint an overlay lane via POST /track, then add an overlay clip to it.
+    const trackRes = await app.request("/api/bridge/v1/track", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ kind: "overlay" }),
+    });
+    const overlayTrackId = (
+      (await trackRes.json()) as { result: { trackId: string } }
+    ).result.trackId;
+
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/logo.png",
+        track: "overlay",
+        trackId: overlayTrackId,
+        offset: 1,
+        duration: 4,
+      }),
+    });
+    expect(res.status).toBe(200); // NOT the old 400 "overlay not supported"
+    const body = (await res.json()) as { ok: boolean; result?: { id: string } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.id).toMatch(/^oc_/);
+    const comp = await getComp();
+    const overlayLane = comp.result.tracks.find((t) => t.id === overlayTrackId)!;
+    const overlayClip = overlayLane.clips.find(
+      (c) => c.id === body.result!.id,
+    )!;
+    expect(overlayClip.kind).toBe("overlay"); // real overlay clip persisted
+  });
+
+  it("DELETE /track/:id removes the lane", async () => {
+    // Add a throwaway lane, then delete it.
+    const add = await app.request("/api/bridge/v1/track", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ kind: "text", label: "scratch" }),
+    });
+    const trackId = ((await add.json()) as { result: { trackId: string } })
+      .result.trackId;
+    const del = await app.request(`/api/bridge/v1/track/${trackId}`, {
+      method: "DELETE",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    expect(del.status).toBe(200);
+    const comp = await getComp();
+    expect(comp.result.tracks.some((t) => t.id === trackId)).toBe(false);
+  });
+
+  it("DELETE /track/:id with an unknown id → 400 + code 4", async () => {
+    const del = await app.request("/api/bridge/v1/track/trk_nope", {
+      method: "DELETE",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    expect(del.status).toBe(400);
+    const body = (await del.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /track with an invalid kind → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/track", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ kind: "bogus" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /track without a work-id header → 400", async () => {
+    const res = await app.request("/api/bridge/v1/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ kind: "audio" }),
+    });
+    expect(res.status).toBe(400);
+  });
+});

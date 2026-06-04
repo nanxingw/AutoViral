@@ -11,7 +11,6 @@ import type {
   Track,
   Transition,
 } from "./types";
-import { newTrackId } from "@shared/composition";
 import { clampHandleDuration } from "@shared/transitions";
 import { addOrReplaceKeyframe, splitKeyframesAtLocal } from "@shared/keyframes";
 // ADR-009 (S6) — shared composition-ops core. splitClip's invariants live here
@@ -936,83 +935,19 @@ export const useComposition = create<CompState>()(
     // commit, never a half-state. (Pitfall #1 reminder: we mutate
     // `displayOrder` only; ids are immutable for the track's lifetime.)
     addTrack: (kind, opts) => {
-      // We mint the id outside the producer so the return value is fixed
-      // even if the immer transaction rolls back (which shouldn't happen
-      // here, but the id stays predictable for tests).
-      const id = newTrackId();
+      // S10 (ADR-009) — placement math + id mint live in `ops.addTrack`, the
+      // SAME implementation the bridge `POST /track` runs, so an agent adding a
+      // lane via the CLI and a human clicking "+ lane" converge. The store only
+      // owns the trackHistory snapshot (the bridge has no undo stack). We mint
+      // the id INSIDE the op; capture it in an outer `let` so the return value
+      // survives the immer transaction.
+      let id = "";
       set((s) => {
         if (!s.comp) return;
         // Snapshot before mutating — even no-op-on-load paths skipped above
         // mean we never push useless history entries.
         pushHistory(s);
-        // Default label: `<KIND><N>` where N is the current count of that
-        // kind + 1 (1-indexed for human friendliness). Audio gets `A2`,
-        // video gets `V2`, text gets `CC2`, overlay gets `O2`. Caller can
-        // override via opts.label.
-        const sameKindCount = s.comp.tracks.filter(
-          (t) => t.kind === kind,
-        ).length;
-        const kindLetter =
-          kind === "video" ? "V" :
-          kind === "audio" ? "A" :
-          kind === "text" ? "CC" :
-          "O";
-        const label = opts?.label ?? `${kindLetter}${sameKindCount + 1}`;
-
-        // Decide insertion displayOrder. Two paths:
-        //  1. Caller passed `afterTrackId` — insert immediately after that
-        //     anchor (anchor.displayOrder + 1, shift everything ≥ that down
-        //     by one before adding the new lane).
-        //  2. Default — insert at the *end of the same-kind block* so a new
-        //     audio lane lands after the last existing audio lane (not after
-        //     the video block). When no track of `kind` exists, fall through
-        //     to "tail of all tracks".
-        let insertOrder: number;
-        if (opts?.afterTrackId) {
-          const anchor = s.comp.tracks.find(
-            (t) => t.id === opts.afterTrackId,
-          );
-          if (!anchor) {
-            // Anchor vanished — degrade to tail-of-kind placement rather
-            // than throw; the caller is presumably out of date.
-            const sameKind = s.comp.tracks.filter((t) => t.kind === kind);
-            insertOrder = sameKind.length
-              ? Math.max(...sameKind.map((t) => t.displayOrder)) + 1
-              : s.comp.tracks.length;
-          } else {
-            insertOrder = anchor.displayOrder + 1;
-          }
-        } else {
-          const sameKind = s.comp.tracks.filter((t) => t.kind === kind);
-          insertOrder = sameKind.length
-            ? Math.max(...sameKind.map((t) => t.displayOrder)) + 1
-            : s.comp.tracks.length;
-        }
-
-        // Shift any existing track with displayOrder ≥ insertOrder down by
-        // one so the new lane can take that slot.
-        for (const t of s.comp.tracks) {
-          if (t.displayOrder >= insertOrder) t.displayOrder += 1;
-        }
-
-        const newTrack: Track = {
-          id,
-          kind,
-          label,
-          displayOrder: insertOrder,
-          volume: 0, // dB gain, unity default (matches TrackSchema.volume)
-          muted: false,
-          hidden: false,
-          clips: [],
-          transitions: [], // #54 — TrackSchema.transitions default [], required on output type
-          ...(opts?.language ? { language: opts.language } : {}),
-        };
-        s.comp.tracks.push(newTrack);
-        // Recompact to guarantee the contiguous-0..N-1 invariant. This is a
-        // belt-and-suspenders pass — the shift logic above should already be
-        // contiguous, but a recompact makes the invariant survive any future
-        // refactor that introduces gaps.
-        recompactDisplayOrder(s.comp.tracks);
+        ({ trackId: id } = ops.addTrack(s.comp, { kind, opts }));
       });
       return id;
     },
@@ -1033,11 +968,14 @@ export const useComposition = create<CompState>()(
         // Re-find inside the draft — the pre-read above used the previous
         // snapshot; another action could have raced in between (unlikely
         // in zustand's synchronous model but defensive).
-        const idx = s.comp.tracks.findIndex((t) => t.id === id);
-        if (idx < 0) return;
+        if (!s.comp.tracks.some((t) => t.id === id)) return;
         pushHistory(s);
-        s.comp.tracks.splice(idx, 1);
-        recompactDisplayOrder(s.comp.tracks);
+        // S10 (ADR-009) — the unconditional splice + displayOrder recompact is
+        // `ops.removeTrack`, the SAME implementation the bridge `DELETE
+        // /track/:id` runs. The two-step has-clips confirm gate stays here in
+        // the store (the bridge has no confirm step). The id is known-present
+        // (we just checked), so the op can't throw on this path.
+        ops.removeTrack(s.comp, { trackId: id });
       });
       return { ok: true };
     },
@@ -1220,17 +1158,4 @@ function reconcileSelection(s: { comp: Composition | null; selection: string | n
     (t.clips as Clip[]).some((c) => c.id === s.selection),
   );
   if (!stillExists) s.selection = null;
-}
-
-// Recompact displayOrder so the array sorted by displayOrder is contiguous
-// 0..N-1. Used after add / remove to guarantee the invariant.
-function recompactDisplayOrder(tracks: Track[]) {
-  // Sort a shallow copy by current displayOrder, then assign fresh 0..N-1
-  // indices in-place. Each track is touched once; ties resolve by current
-  // array position (stable sort), which keeps a deterministic recovery from
-  // any accidental duplicate displayOrder state.
-  const sorted = [...tracks].sort((a, b) => a.displayOrder - b.displayOrder);
-  sorted.forEach((t, i) => {
-    t.displayOrder = i;
-  });
 }

@@ -15,6 +15,7 @@ import { playCommand, pauseCommand } from "./commands/play.js";
 import { toastCommand } from "./commands/toast.js";
 import { progressCommand } from "./commands/progress.js";
 import { clipCommand } from "./commands/clip.js";
+import { trackCommand } from "./commands/track.js";
 import { transitionCommand } from "./commands/transition.js";
 import { carouselCommand } from "./commands/carousel.js";
 import { askCommand } from "./commands/ask.js";
@@ -48,6 +49,7 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   toast: toastCommand,
   progress: progressCommand,
   clip: clipCommand,
+  track: trackCommand,
   transition: transitionCommand,
   carousel: carouselCommand,
   ask: askCommand,
@@ -107,11 +109,17 @@ function usage(): string {
     "  comp put <file|->            Write a WHOLE composition (from file or stdin).",
     "    The universal write path: parses YAML/JSON, validates server-side, and",
     "    atomically replaces composition.yaml. Use for rich edits no verb covers.",
-    "  clip add --src <path> [--track video|audio|text] [--offset s] [--duration s]",
+    "  clip add --src <path> [--track video|audio|text|overlay] [--track-id <trackId>] [--offset s] [--duration s]",
+    "    --track is the KIND; --track-id targets an EXACT lane (e.g. A2) instead of",
+    "    the first same-kind lane. --track overlay adds a picture-in-picture clip.",
     "  clip set <id> [--key value]...",
     "  clip split <id> --at <seconds>",
     "  clip trim <id> [--in <seconds>] [--out <seconds>]",
     "  clip remove <id>",
+    "  track add --kind video|audio|text|overlay [--after <trackId>] [--label L] [--language L]",
+    "    Add a new lane; prints the minted trackId. Default placement is the end of",
+    "    the same-kind block; --after inserts directly below that anchor lane.",
+    "  track remove <trackId>          Remove a lane (its clips go with it).",
     "  transition add --track <trackId> --after <clipId> --preset <name> [--duration <seconds>]",
     "    Add a cut-point transition between two adjacent video clips. Presets come",
     "    from the shared registry (cross-dissolve / wipe-* / push-* / …).",

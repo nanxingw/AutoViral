@@ -582,6 +582,12 @@ bridgeRouter.post("/clip", async (c) => {
     src?: string;
     text?: string;
     track: "video" | "audio" | "overlay" | "text";
+    // S10 (US 7/8) — optional precise lane target. When supplied, the clip
+    // lands on exactly this trackId (404-class reject if it doesn't exist or
+    // its kind ≠ `track`); when omitted, we fall back to the FIRST same-kind
+    // lane (legacy behaviour). This lets an agent add a voiceover to A2 rather
+    // than always hitting A1.
+    trackId?: string;
     offset?: number;
     duration?: number;
     in?: number;
@@ -591,8 +597,20 @@ bridgeRouter.post("/clip", async (c) => {
   let newId = "";
   try {
     await mutateCompositionFor({ workId: g.workId }, (comp) => {
-      const track = comp.tracks.find((t) => t.kind === body.track);
-      if (!track) throw new Error(`No track of kind ${body.track}`);
+      // S10 — precise targeting by trackId, else fall back to first same-kind.
+      let track;
+      if (body.trackId) {
+        track = comp.tracks.find((t) => t.id === body.trackId);
+        if (!track) throw new Error(`No track with id ${body.trackId}`);
+        if (track.kind !== body.track) {
+          throw new Error(
+            `track ${body.trackId} is a ${track.kind} lane, not ${body.track}`,
+          );
+        }
+      } else {
+        track = comp.tracks.find((t) => t.kind === body.track);
+        if (!track) throw new Error(`No track of kind ${body.track}`);
+      }
       const id = newClipId(body.track);
       newId = id;
       const offset = body.offset ?? 0;
@@ -631,7 +649,21 @@ bridgeRouter.post("/clip", async (c) => {
           duration: body.duration ?? 3,
         } as any);
       } else {
-        throw new Error(`overlay track not yet supported in Phase 3`);
+        // S10 (US 6) — overlay is a first-class lane now (the old "not yet
+        // supported in Phase 3" hard-reject is gone). The OverlayClip schema
+        // (composition.ts) and the Scene → OverlayTrackRenderer dispatch both
+        // already consume it, so this is NOT a dead field. Default to a
+        // full-frame box at full opacity; agents reframe via PATCH /clip.
+        if (!body.src) throw new Error("overlay clip requires --src");
+        track.clips.push({
+          id,
+          kind: "overlay",
+          src: body.src,
+          trackOffset: offset,
+          duration: body.duration ?? 5,
+          position: { xPct: 0, yPct: 0, wPct: 100, hPct: 100 },
+          opacity: 1,
+        } as any);
       }
       return comp;
     },
@@ -671,6 +703,90 @@ bridgeRouter.delete("/clip/:id", async (c) => {
     const message = err instanceof Error ? err.message : String(err);
     // S3 (US 18/19) — input/validation rejection carries code:4.
     return c.json({ ok: false, error: message, code: 4 }, 400);
+  }
+  return c.json({ ok: true });
+});
+
+// S10 (US 6/7/8) — POST /track: add a new lane through the shared composition-
+// ops core. Body `{ kind, afterTrackId?, label?, language? }`; the placement
+// math (end-of-same-kind-block default / afterTrackId insert / tail fallback),
+// id mint and auto-label are `ops.addTrack` — the SAME implementation the
+// Studio "+ lane" button runs — so an agent adding an A2 lane via the CLI
+// (`autoviral track add --kind audio`) and a human clicking "+ lane" converge
+// on the same composition. Missing work-id / invalid kind → code:4 → CLI exit 4.
+// We echo the minted trackId so the agent can immediately add clips to it.
+const TRACK_KINDS = ["video", "audio", "text", "overlay"] as const;
+bridgeRouter.post("/track", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    kind?: unknown;
+    afterTrackId?: unknown;
+    label?: unknown;
+    language?: unknown;
+  };
+  if (
+    typeof body.kind !== "string" ||
+    !(TRACK_KINDS as readonly string[]).includes(body.kind)
+  ) {
+    return c.json(
+      { ok: false, error: `invalid kind (expected one of ${TRACK_KINDS.join("/")})`, code: 4 },
+      400,
+    );
+  }
+  const kind = body.kind as (typeof TRACK_KINDS)[number];
+  const opts: { afterTrackId?: string; label?: string; language?: string } = {};
+  if (typeof body.afterTrackId === "string" && body.afterTrackId) {
+    opts.afterTrackId = body.afterTrackId;
+  }
+  if (typeof body.label === "string" && body.label) opts.label = body.label;
+  if (typeof body.language === "string" && body.language) {
+    opts.language = body.language;
+  }
+  let trackId = "";
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ({ trackId } = ops.addTrack(comp, { kind, opts }));
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "track-add" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { trackId } });
+});
+
+// S10 (US 6/7/8) — DELETE /track/:id: remove a lane through the shared
+// composition-ops core. `ops.removeTrack` splices the lane (its clips go with
+// it) + recompacts displayOrder — the SAME implementation the Studio removeTrack
+// action runs once its has-clips confirm gate has passed. The bridge has no
+// confirm step (an agent that asked for a delete means it). Unknown trackId →
+// CompositionOpError{code:4} → HTTP 400 + code:4 → CLI exit 4.
+bridgeRouter.delete("/track/:id", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing track id", code: 4 }, 400);
+  }
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.removeTrack(comp, { trackId: id });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "track-remove" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
   }
   return c.json({ ok: true });
 });
