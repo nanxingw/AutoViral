@@ -143,4 +143,27 @@ describe("VideoTrackRenderer reverse shows an EXPLICIT export-only placeholder (
     expect(v.getAttribute("data-start-from")).toBe("0");
     expect(v.getAttribute("data-end-at")).toBe("120");
   });
+
+  // S19 review fix — the badge MUST NOT lie. The export's timeWarpVideoFilterChain
+  // gives freezeAtSec PRECEDENCE over reverse: when BOTH are set, the export
+  // FREEZES a single frame (forward-frozen) and does NOT reverse. So a
+  // "倒放 · 仅导出生效" (reverse-only-on-export) badge would promise a reverse the
+  // export never performs — a dishonest preview. When freeze is also set, the
+  // reverse-export-only badge must NOT render (freeze is already WYSIWYG; nothing
+  // export-only to warn about, and definitely not a phantom reverse).
+  it("freeze+reverse together → NO reverse-export-only badge (export freezes, doesn't reverse — badge must not lie)", () => {
+    frameRef.current = 30;
+    const { container } = render(
+      <Scene comp={compWithVideo({ reverse: true, freezeAtSec: 1.5 })} />,
+    );
+    // the dishonest reverse badge is suppressed because export won't reverse.
+    expect(
+      container.querySelector("[data-test='reverse-export-only']"),
+    ).toBeNull();
+    // freeze is still WYSIWYG: the <Video> is held at the single freeze frame
+    // (1.5s @30fps = frame 45, one-frame span), exactly as the export bakes.
+    const v = videoLayer(container);
+    expect(v.getAttribute("data-start-from")).toBe("45");
+    expect(v.getAttribute("data-end-at")).toBe("46");
+  });
 });

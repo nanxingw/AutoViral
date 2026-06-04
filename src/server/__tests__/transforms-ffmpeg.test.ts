@@ -1,9 +1,15 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   transformsToFilterChain,
   buildTransformsFilterArgs,
   transformsCacheName,
+  applyTransformsPrePass,
 } from "../transforms-ffmpeg.js";
+import { CompositionSchema } from "../../shared/composition.js";
+import type { Composition, VideoClip } from "../../shared/composition.js";
 
 // S18 (US 27/28) — crop + flip FFMPEG EXPORT CONSUMPTION proof. crop / flipH /
 // flipV are NOT dead schema fields: this asserts the ffmpeg filtergraph the
@@ -127,6 +133,113 @@ describe("transformsToFilterChain crop basis is the SOURCE frame, not the canvas
     expect(oy + oh).toBeLessThanOrEqual(1000);
     expect(ow).toBeGreaterThan(0);
     expect(oh).toBeGreaterThan(0);
+  });
+});
+
+describe("applyTransformsPrePass (S18 — the render-pipeline Stage 0.5 boundary: builds the cache + STRIPS consumed crop/flip so Remotion doesn't re-apply)", () => {
+  // transformsToFilterChain / transformsCacheName are unit-tested above, but the
+  // function actually wired into render-pipeline Stage 0.5 is applyTransformsPrePass
+  // — and its LAST-MILE guarantee (strip crop/flipH/flipV off the clip so the
+  // Remotion stage doesn't crop/mirror a SECOND time → WYSIWYG by construction)
+  // had zero direct coverage. This pins it. We avoid a real ffmpeg by
+  // pre-creating the cache file so the prepass takes the stat() cache-HIT branch.
+  function compWithCropFlipClip(extra: Partial<VideoClip>): Composition {
+    return CompositionSchema.parse({
+      id: "comp1",
+      workId: "w1",
+      fps: 30,
+      width: 1080,
+      height: 1920,
+      duration: 5,
+      aspect: "9:16",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+      tracks: [
+        {
+          id: "trk_v1",
+          kind: "video",
+          label: "Video",
+          displayOrder: 0,
+          clips: [
+            {
+              id: "v1",
+              kind: "video",
+              src: "assets/clip.mp4",
+              in: 0,
+              out: 5,
+              trackOffset: 0,
+              transforms: {
+                scale: 1,
+                x: 0,
+                y: 0,
+                rotation: 0,
+                ...((extra.transforms ?? {}) as object),
+              },
+              filters: { brightness: 0, contrast: 0, saturation: 0 },
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  it("a clip WITH crop+flip → src rewritten to the cache file AND crop/flipH/flipV STRIPPED (Remotion won't double-apply)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "prepass-"));
+    try {
+      const comp = compWithCropFlipClip({
+        transforms: {
+          scale: 1,
+          x: 0,
+          y: 0,
+          rotation: 0,
+          crop: { x: 0.1, y: 0.2, w: 0.5, h: 0.6 },
+          flipH: true,
+          flipV: true,
+        },
+      });
+      const clipIn = comp.tracks[0]!.clips[0]! as VideoClip;
+      // Pre-create the cache file so the prepass takes the cache-HIT branch and
+      // never spawns ffmpeg (the host has none). The name is derived from the
+      // SAME transformsCacheName the prepass uses, proving it resolved a non-empty
+      // crop/flip chain (only crop/flip clips get a cache name).
+      const cacheName = transformsCacheName(clipIn.id, clipIn.transforms);
+      const cachePath = join(dir, cacheName);
+      await writeFile(cachePath, "fake-mp4");
+
+      // probeDims is injectable so no real ffprobe runs.
+      const probeDims = vi.fn(async () => ({ width: 1280, height: 720 }));
+      const out = await applyTransformsPrePass(comp, dir, undefined, probeDims);
+
+      const clipOut = out.tracks[0]!.clips[0]! as VideoClip;
+      // (a) the filtergraph WAS built + baked: src now points at the cache file.
+      expect(clipOut.src).toBe(cachePath);
+      // (b) the LAST-MILE strip: the consumed crop/flip fields are gone, so the
+      // Remotion stage renders the (already cropped/mirrored) cache MP4 once.
+      expect(clipOut.transforms.crop).toBeUndefined();
+      expect(clipOut.transforms.flipH).toBeUndefined();
+      expect(clipOut.transforms.flipV).toBeUndefined();
+      // sibling transform fields survive (only crop/flip are consumed).
+      expect(clipOut.transforms.scale).toBe(1);
+      // the INPUT comp is never mutated (ADR-style: returns a fresh comp).
+      expect(clipIn.transforms.crop).toEqual({ x: 0.1, y: 0.2, w: 0.5, h: 0.6 });
+      expect(clipIn.src).toBe("assets/clip.mp4");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("a clip with NEITHER crop nor flip → left BYTE-IDENTICAL (no probe, no strip, no cache)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "prepass-"));
+    try {
+      const comp = compWithCropFlipClip({});
+      const probeDims = vi.fn(async () => ({ width: 1280, height: 720 }));
+      const out = await applyTransformsPrePass(comp, dir, undefined, probeDims);
+      const clipOut = out.tracks[0]!.clips[0]! as VideoClip;
+      // untouched src; no ffprobe ever fired for a no-op clip.
+      expect(clipOut.src).toBe("assets/clip.mp4");
+      expect(probeDims).not.toHaveBeenCalled();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 });
 

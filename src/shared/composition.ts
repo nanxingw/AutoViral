@@ -25,6 +25,18 @@ const CropSchema = z
   // and aborts the whole export, while the preview's clip-path inset() goes
   // negative and the browser silently clamps it to "no crop". Refusing it at
   // the schema layer (code:4 on write) keeps both consumers honest.
+  // S18 review fix (medium, follow-up) — and a crop must enclose a POSITIVE
+  // area: w==0 / h==0 passes min(0) and the bounds above yet selects nothing —
+  // ffmpeg `crop=0:H:..` is an invalid filter (aborts the encode) and the
+  // preview collapses to an invisible sliver. Require w>0 AND h>0.
+  .refine((c) => c.w > 0, {
+    message: "裁剪宽度必须大于 0 (w > 0)",
+    path: ["w"],
+  })
+  .refine((c) => c.h > 0, {
+    message: "裁剪高度必须大于 0 (h > 0)",
+    path: ["h"],
+  })
   .refine((c) => c.x + c.w <= 1, {
     message: "裁剪区域超出画面右边界 (x + w 必须 <= 1)",
     path: ["w"],

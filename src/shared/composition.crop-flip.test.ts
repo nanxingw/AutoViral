@@ -110,4 +110,29 @@ describe("VideoClip.transforms crop + flip schema (S18)", () => {
     });
     expect(parsed.transforms.crop).toEqual({ x: 0.5, y: 0.4, w: 0.5, h: 0.6 });
   });
+
+  // S18 review fix (medium, follow-up) — a crop window must enclose a POSITIVE
+  // area. A zero-width (w==0) or zero-height (h==0) crop passes every leaf's
+  // min(0) and the x+w<=1 / y+h<=1 bounds, yet selects nothing: ffmpeg
+  // `crop=0:H:...` is an invalid filter (aborts the encode) and the preview's
+  // clip-path inset collapses the clip to an invisible sliver. Reject it.
+  it("rejects a ZERO-WIDTH crop (w==0 selects no pixels)", () => {
+    const clip = bareVideoClip();
+    expect(() =>
+      VideoClipSchema.parse({
+        ...clip,
+        transforms: { ...clip.transforms, crop: { x: 0, y: 0, w: 0, h: 0.5 } },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a ZERO-HEIGHT crop (h==0 selects no pixels)", () => {
+    const clip = bareVideoClip();
+    expect(() =>
+      VideoClipSchema.parse({
+        ...clip,
+        transforms: { ...clip.transforms, crop: { x: 0, y: 0, w: 0.5, h: 0 } },
+      }),
+    ).toThrow();
+  });
 });

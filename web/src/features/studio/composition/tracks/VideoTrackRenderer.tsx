@@ -200,7 +200,15 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // an EXPLICIT placeholder badge over the clip telling the user the reverse
   // only takes effect on export (the real `reverse`/`areverse` ffmpeg pass).
   // freeze, by contrast, IS WYSIWYG (handled above via the 1-frame baseProps).
-  if (!clip.reverse) return body;
+  //
+  // S19 review fix — the badge MUST NOT lie. The export's
+  // timeWarpVideoFilterChain gives `freezeAtSec` PRECEDENCE over `reverse`: when
+  // BOTH are set the export FREEZES one frame (forward-frozen) and does NOT
+  // reverse. So a "倒放 · 仅导出生效" badge would promise a reverse the export
+  // never performs — a dishonest preview. When freeze is also set, suppress the
+  // reverse badge (freeze is already WYSIWYG; there is no export-only reverse to
+  // warn about, and definitely no phantom reverse to advertise).
+  if (!clip.reverse || clip.freezeAtSec != null) return body;
   return (
     <>
       {body}

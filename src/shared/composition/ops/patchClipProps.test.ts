@@ -144,6 +144,49 @@ describe("@shared composition ops — patchClipProps", () => {
     );
   });
 
+  // S19 review fix — freezeAtSec is a clip-LOCAL source time and MUST land
+  // within the clip's own [in,out] span. Without an upper bound an out-of-range
+  // freezeAtSec (e.g. 99s on a 5s clip) reaches the export, where ffmpeg
+  // `trim=start=99:end=99+1/fps` selects ZERO frames → `tpad` has nothing to
+  // clone → the whole render aborts. The chokepoint rejects it (code:4),
+  // exactly like the keyframe op rejects an `atSec` past clip duration (#40).
+  it("REJECTS a freezeAtSec PAST the clip's source duration (out-in) — code:4", () => {
+    const clip = videoClip(); // in:0 out:5 → 5s span
+    let code: number | undefined;
+    try {
+      patchClipProps(clip, { freezeAtSec: 99 });
+    } catch (err) {
+      code = (err as CompositionOpError).code;
+    }
+    expect(code).toBe(4);
+    // and it must NOT have written the bad value
+    expect((clip as any).freezeAtSec).toBeUndefined();
+  });
+
+  it("REJECTS a freezeAtSec relative to a TRIMMED clip's span (in:2 out:7 → max 5s)", () => {
+    const clip = videoClip();
+    (clip as any).in = 2;
+    (clip as any).out = 7; // a 5s span [2,7]
+    // 6 is a valid absolute source time but exceeds the clip's 5s LOCAL span.
+    expect(() => patchClipProps(clip, { freezeAtSec: 6 })).toThrow(
+      CompositionOpError,
+    );
+  });
+
+  it("ACCEPTS a freezeAtSec AT the clip's duration endpoint (boundary is legal)", () => {
+    const clip = videoClip(); // 5s span
+    patchClipProps(clip, { freezeAtSec: 5 });
+    expect((clip as any).freezeAtSec).toBe(5);
+  });
+
+  it("REJECTS a NEGATIVE freezeAtSec via the chokepoint too (code:4, mirrors schema min(0))", () => {
+    const clip = videoClip();
+    expect(() => patchClipProps(clip, { freezeAtSec: -1 })).toThrow(
+      CompositionOpError,
+    );
+    expect((clip as any).freezeAtSec).toBeUndefined();
+  });
+
   it("writes a top-level scalar (audio volume)", () => {
     const clip = audioClip();
     patchClipProps(clip, { volume: 0.3 });

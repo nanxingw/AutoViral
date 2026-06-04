@@ -21,6 +21,10 @@
 import type { Clip } from "../../composition.js";
 import { CompositionOpError } from "./errors.js";
 
+// Floating-point tolerance for the freezeAtSec upper-bound boundary check.
+// Mirrors ATSEC_EPSILON in keyframe.ts (the sibling clip-local-time guard).
+const FREEZE_EPSILON = 1e-6;
+
 // Per-kind whitelist of patchable property paths. A path is either a top-level
 // scalar (`volume`) or a dotted nested path (`transforms.scale`). `id` and
 // `kind` are NEVER patchable on any kind (changing them would corrupt the
@@ -131,6 +135,31 @@ export function patchClipProps(
       throw new CompositionOpError(
         `patchClipProps: '${path}' is not a settable property of a ${clip.kind} clip` +
           ` (allowed: ${allowed.join(", ")})`,
+        4,
+      );
+    }
+  }
+
+  // Phase 1b — value-domain guard for `freezeAtSec` (S19 review fix). The path
+  // whitelist proves freezeAtSec is *settable* on a video clip but says nothing
+  // about its value. freezeAtSec is a CLIP-LOCAL source time and MUST land in
+  // the clip's own span [0, out-in]: a value past the clip duration reaches the
+  // export, where ffmpeg `trim=start=F:end=F+1/fps` selects ZERO frames → `tpad`
+  // has no frame to clone → the whole render aborts. We reject here (code:4),
+  // exactly like the keyframe op rejects an `atSec` past clip duration (#40);
+  // the CLI chokepoint surfaces the authoring error instead of silently snapping.
+  if ("freezeAtSec" in patch && clip.kind === "video") {
+    const v = patch.freezeAtSec;
+    const maxSec = Math.max(0, clip.out - clip.in);
+    if (typeof v !== "number" || !Number.isFinite(v) || v < 0) {
+      throw new CompositionOpError(
+        `patchClipProps: freezeAtSec ${String(v)} must be a finite clip-local time ≥ 0`,
+        4,
+      );
+    }
+    if (v > maxSec + FREEZE_EPSILON) {
+      throw new CompositionOpError(
+        `patchClipProps: freezeAtSec ${v} is past clip ${clip.id}'s duration ${maxSec}s (must be in [0, ${maxSec}])`,
         4,
       );
     }
