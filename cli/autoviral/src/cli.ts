@@ -114,6 +114,8 @@ function usage(): string {
     "  comp validate <file|-> [--json]  Preflight a candidate composition WITHOUT",
     "    writing it. Prints {ok,errors,warnings}; exit 4 on blocking errors. Run",
     "    this before `comp put` to skip the write→400→guess loop.",
+    "  comp aspect <9:16|1:1|16:9|4:5>  Switch the canvas ratio in one shot. Flips",
+    "    width/height and rescales existing clip offsets so content stays in frame.",
     "  clip add --src <path> [--track video|audio|text|overlay] [--track-id <trackId>] [--offset s] [--duration s]",
     "    --track is the KIND; --track-id targets an EXACT lane (e.g. A2) instead of",
     "    the first same-kind lane. --track overlay adds a picture-in-picture clip.",

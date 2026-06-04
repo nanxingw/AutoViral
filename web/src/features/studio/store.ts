@@ -10,6 +10,7 @@ import type {
   Keyframe,
   Track,
   Transition,
+  Aspect,
 } from "./types";
 import { clampHandleDuration } from "@shared/transitions";
 import { splitKeyframesAtLocal } from "@shared/keyframes";
@@ -166,6 +167,11 @@ interface CompState {
   // Phase 6.D — apply a platform export preset. Atomic per D5: updates
   // exportPresets[0] AND aspect/width/height/fps in a single transaction.
   applyPlatformPreset: (preset: ExportPreset) => void;
+  // S17 (US 26) — one-click canvas-ratio switch (9:16 ↔ 1:1 ↔ 16:9). Routes
+  // through the shared `ops.setAspectRatio` (same code the bridge `comp aspect`
+  // verb runs) so the agent CLI and the human UI converge: flips aspect/width/
+  // height and proportionally rescales existing clips' absolute pixel offsets.
+  setAspectRatio: (ratio: Aspect) => void;
   // ─── Phase 8.2.B — keyframe mutations for the Inspector KeyframePanel ──
   // addKeyframe is idempotent on (property, time) collision (D4 — replace
   // existing entry via addOrReplaceKeyframe). All three are no-ops for
@@ -738,6 +744,35 @@ export const useComposition = create<CompState>()(
         s.comp.height = preset.height;
         s.comp.fps = preset.fps as 24 | 25 | 30 | 60;
         s.comp.exportPresets = [preset]; // replace, not append
+        s.comp.updatedAt = new Date().toISOString();
+      }),
+    // ─── S17 (US 26) — one-click aspect-ratio switch ──────────────────────
+    // ADR-009 (S17) — the ratio-flip + clip-adaptation math lives in the shared
+    // composition-ops core (`ops.setAspectRatio`), consumed identically by the
+    // bridge (`POST /comp/aspect`), so a human clicking the aspect control and an
+    // agent running `autoviral comp aspect 1:1` produce the same composition. The
+    // store action is a thin immer wrapper: call the op on the draft (it mutates
+    // `s.comp.width/height/aspect` + rescales clip offsets in place), then bump
+    // updatedAt. The op THROWS CompositionOpError on an invalid ratio; we surface
+    // it as a localized warn toast (same pattern as splitClip) rather than swallow.
+    setAspectRatio: (ratio) =>
+      set((s) => {
+        if (!s.comp) return;
+        try {
+          ops.setAspectRatio(s.comp, { ratio });
+        } catch (err) {
+          if (err instanceof CompositionOpError) {
+            const locale = useLocaleStore.getState().locale;
+            useToastStore.getState().push({
+              variant: "warn",
+              message: MESSAGES[locale].studio.toast.aspectFailed,
+              detail: err.message,
+              ttlMs: 4000,
+            });
+            return;
+          }
+          throw err;
+        }
         s.comp.updatedAt = new Date().toISOString();
       }),
     // ─── Phase 8.2.B — keyframe mutations ─────────────────────────────────

@@ -11,3 +11,4 @@ export { moveClipToTrack } from "./moveClipToTrack.js";
 export { addTransition, removeTransition } from "./transition.js";
 export { addTrack, removeTrack } from "./track.js";
 export { addKeyframe, setKeyframe } from "./keyframe.js";
+export { setAspectRatio } from "./setAspectRatio.js";

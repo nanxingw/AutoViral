@@ -113,9 +113,34 @@ export async function compCommand(args: string[]): Promise<void> {
     if (!verdict.ok) process.exitCode = 4;
     return;
   }
+  if (sub === "aspect") {
+    // S17 (US 26) — one-click canvas-ratio switch. `comp aspect <ratio>` flips
+    // the composition between 9:16 / 1:1 / 16:9 / 4:5 through the bridge, which
+    // runs the SAME shared `ops.setAspectRatio` the Studio aspect control uses
+    // (flip aspect/width/height + proportionally rescale existing clip offsets
+    // so content stays in frame). We validate the ratio locally (exit 4, never
+    // hits the bridge) for a fast obviously-malformed fail; the server owns the
+    // semantic flip + broadcast.
+    const ratio = args[1];
+    if (!ratio || !ASPECT_RATIOS.includes(ratio)) {
+      process.stderr.write(
+        `usage: autoviral comp aspect <${ASPECT_RATIOS.join("|")}>\n`,
+      );
+      process.exit(4);
+    }
+    const ctx = readContext();
+    await bridgeRequest(ctx, "POST", "/comp/aspect", { ratio });
+    process.stdout.write(`switched aspect to ${ratio}\n`);
+    return;
+  }
   process.stderr.write(`autoviral comp: unknown subcommand "${sub}"\n`);
   process.exit(127);
 }
+
+// The four canonical aspect ratios — kept in lockstep with ASPECTS in
+// src/shared/composition.ts (the bridge re-validates, but a local check gives a
+// fast obviously-malformed fail without a round-trip).
+const ASPECT_RATIOS = ["9:16", "1:1", "16:9", "4:5"];
 
 interface PreflightVerdict {
   ok: boolean;

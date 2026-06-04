@@ -40,6 +40,9 @@ let lastCompPut: Record<string, unknown> | null = null;
 // S13 (US 11/12) — capture the last POST /comp/validate body so the CLI test
 // can assert the candidate the CLI read from a file / stdin reached the bridge.
 let lastCompValidate: Record<string, unknown> | null = null;
+// S17 (US 26) — capture the last POST /comp/aspect body so the CLI test can
+// assert `comp aspect <ratio>` reached the bridge as { ratio }.
+let lastCompAspect: Record<string, unknown> | null = null;
 
 async function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
@@ -119,6 +122,13 @@ beforeAll(async () => {
         });
       }
       return send(200, { ok: true, result: { ok: true, errors: [], warnings: [] } });
+    }
+    // S17 (US 26) — POST /comp/aspect. The CLI validates the ratio locally
+    // (exit 4 before the bridge) so only a canonical ratio reaches here; the
+    // mock records the body and echoes the contract { ok, result:{ ratio } }.
+    if (req.method === "POST" && url === "/api/bridge/v1/comp/aspect") {
+      lastCompAspect = await readBody(req);
+      return send(200, { ok: true, result: { ratio: lastCompAspect.ratio } });
     }
     // I08 — carousel write endpoints. Mirror the server's contract: POST
     // /carousel/slide returns { ok, result:{ id } }; POST
@@ -1221,6 +1231,39 @@ describe("autoviral CLI — end-to-end", () => {
     it("--help lists comp validate", async () => {
       const r = await run(["--help"]);
       expect(r.stdout).toMatch(/comp validate/);
+    });
+  });
+
+  // S17 (US 26) — `comp aspect <ratio>` switches the canvas ratio in one shot
+  // through the bridge (which runs the SAME shared op the Studio control uses).
+  // A canonical ratio reaches the bridge as { ratio }; a bogus one fails fast
+  // (exit 4) BEFORE the bridge.
+  describe("comp aspect — one-click canvas-ratio switch", () => {
+    it("comp aspect 16:9 → POSTs { ratio } + exit 0 + prints confirmation", async () => {
+      lastCompAspect = null;
+      const r = await run(["comp", "aspect", "16:9"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastCompAspect).toEqual({ ratio: "16:9" });
+      expect(r.stdout).toMatch(/switched aspect to 16:9/);
+    });
+
+    it("comp aspect with no ratio → exit 4 (never hits bridge)", async () => {
+      lastCompAspect = null;
+      const r = await run(["comp", "aspect"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompAspect).toBeNull();
+    });
+
+    it("comp aspect with a non-canonical ratio → exit 4 (never hits bridge)", async () => {
+      lastCompAspect = null;
+      const r = await run(["comp", "aspect", "21:9"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompAspect).toBeNull();
+    });
+
+    it("--help lists comp aspect", async () => {
+      const r = await run(["--help"]);
+      expect(r.stdout).toMatch(/comp aspect/);
     });
   });
 

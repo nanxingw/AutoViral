@@ -8,6 +8,7 @@ import {
   type TextClip,
 } from "./types";
 import { effectiveClipDuration } from "@shared/speed-ramp";
+import { useToastStore } from "@/stores/toast";
 
 describe("useComposition store", () => {
   beforeEach(() => {
@@ -92,6 +93,62 @@ describe("useComposition store", () => {
     expect(useComposition.getState().selection).toBe("v1");
     useComposition.getState().setSelection(null);
     expect(useComposition.getState().selection).toBeNull();
+  });
+});
+
+// ─── S17 (US 26) — setAspectRatio store action ───────────────────────────────
+// Thin immer wrapper over the shared `ops.setAspectRatio`. Asserts the canvas
+// flips, a video clip's absolute pixel offset adapts proportionally, and an
+// invalid ratio surfaces a warn toast WITHOUT mutating the comp.
+describe("useComposition — setAspectRatio (S17)", () => {
+  beforeEach(() => {
+    useComposition.setState({ comp: null, selection: null, currentFrame: 0, isPlaying: false });
+    useToastStore.getState().clear();
+  });
+
+  function seedWithOffsetClip(): void {
+    const c = makeEmptyComposition({ workId: "w1" }); // 9:16 / 1080×1920
+    useComposition.getState().loadComposition(c);
+    const videoTrackId = c.tracks.find((t) => t.kind === "video")!.id;
+    useComposition.getState().addClip(videoTrackId, {
+      id: "v1",
+      kind: "video",
+      src: "/x.mp4",
+      in: 0,
+      out: 5,
+      trackOffset: 0,
+      fitMode: "cover",
+      transforms: { scale: 1, x: 200, y: 400, rotation: 0 },
+      filters: { brightness: 0, contrast: 0, saturation: 0 },
+    });
+  }
+
+  it("flips comp width/height/aspect to the canonical dims", () => {
+    seedWithOffsetClip();
+    useComposition.getState().setAspectRatio("16:9");
+    const comp = useComposition.getState().comp!;
+    expect(comp.aspect).toBe("16:9");
+    expect(comp.width).toBe(1920);
+    expect(comp.height).toBe(1080);
+  });
+
+  it("rescales a video clip's absolute pixel offset so content stays in frame", () => {
+    seedWithOffsetClip();
+    useComposition.getState().setAspectRatio("16:9");
+    const t = (useComposition.getState().comp!.tracks[0].clips[0] as VideoClip).transforms;
+    expect(t.x).toBeCloseTo(200 * (1920 / 1080), 4);
+    expect(t.y).toBeCloseTo(400 * (1080 / 1920), 4);
+  });
+
+  it("an invalid ratio surfaces a warn toast and leaves the comp untouched", () => {
+    seedWithOffsetClip();
+    // @ts-expect-error — deliberately feed a non-canonical ratio.
+    useComposition.getState().setAspectRatio("21:9");
+    const comp = useComposition.getState().comp!;
+    expect(comp.aspect).toBe("9:16"); // untouched
+    expect(comp.width).toBe(1080);
+    const toasts = useToastStore.getState().entries;
+    expect(toasts.some((e) => e.variant === "warn")).toBe(true);
   });
 });
 

@@ -222,6 +222,10 @@ export const en = {
       splitFailed: "Can't split here",
       transitionFailed: "Can't add transition here",
       keyframeFailed: "Can't add keyframe here",
+      aspectFailed: "Can't switch to that ratio",
+    },
+    preview: {
+      aspectLabel: "Canvas ratio",
     },
     shortcuts: {
       title: "Keyboard shortcuts",
@@ -1072,6 +1076,10 @@ export const zh: DeepShape<Messages> = {
       splitFailed: "无法在此处分割",
       transitionFailed: "无法在此处添加转场",
       keyframeFailed: "无法在此处添加关键帧",
+      aspectFailed: "无法切换到该比例",
+    },
+    preview: {
+      aspectLabel: "画面比例",
     },
     shortcuts: {
       title: "键盘快捷键",

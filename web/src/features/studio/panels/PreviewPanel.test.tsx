@@ -58,6 +58,11 @@ vi.mock("@remotion/player", () => ({
         data-testid="player"
         data-fps={props.fps}
         data-playback-rate={props.playbackRate}
+        // S17 — reflect the canvas dimensions the Player consumes so the
+        // aspect-switch renderer-consumption test can assert comp.width/height
+        // actually flow into <Player compositionWidth/compositionHeight>.
+        data-comp-width={props.compositionWidth}
+        data-comp-height={props.compositionHeight}
       />
     );
   }),
@@ -68,6 +73,54 @@ describe("PreviewPanel", () => {
     useComposition.setState({ comp: makeEmptyComposition({ workId: "w1" }) });
     render(<PreviewPanel />);
     expect(screen.getByTestId("player")).toBeTruthy();
+  });
+
+  // S17 (US 26) — renderer-consumption proof: switching aspect via the store
+  // action (which routes through the shared ops.setAspectRatio) must flow the
+  // new canvas dimensions into the <Player compositionWidth/compositionHeight>
+  // — i.e. the schema field is REALLY consumed by the preview renderer, not a
+  // dead round-trip field. Without this the aspect switch would not change the
+  // visible canvas at all.
+  it("setAspectRatio store action flows new dims into the Player (renderer consumption)", () => {
+    // 9:16 default (1080×1920) → 16:9.
+    useComposition.setState({ comp: makeEmptyComposition({ workId: "w1" }) });
+    const { rerender } = render(<PreviewPanel />);
+    const before = screen.getByTestId("player");
+    expect(before.getAttribute("data-comp-width")).toBe("1080");
+    expect(before.getAttribute("data-comp-height")).toBe("1920");
+
+    // Switch ratio through the real store action (→ shared op).
+    useComposition.getState().setAspectRatio("16:9");
+    rerender(<PreviewPanel />);
+
+    const after = screen.getByTestId("player");
+    expect(after.getAttribute("data-comp-width")).toBe("1920");
+    expect(after.getAttribute("data-comp-height")).toBe("1080");
+    // And the store comp really flipped (single source of truth).
+    expect(useComposition.getState().comp?.aspect).toBe("16:9");
+  });
+
+  it("clicking the header 16:9 aspect button flips the canvas dims the Player consumes (UI → op)", () => {
+    useComposition.setState({ comp: makeEmptyComposition({ workId: "w1" }) });
+    render(<PreviewPanel />);
+    // Default 9:16 → the 9:16 button is active, dims are 1080×1920.
+    expect(screen.getByRole("button", { name: "9:16" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByTestId("player").getAttribute("data-comp-width")).toBe("1080");
+
+    fireEvent.click(screen.getByRole("button", { name: "16:9" }));
+
+    // The op ran: store flipped AND the Player re-rendered with the new dims.
+    expect(useComposition.getState().comp?.aspect).toBe("16:9");
+    const player = screen.getByTestId("player");
+    expect(player.getAttribute("data-comp-width")).toBe("1920");
+    expect(player.getAttribute("data-comp-height")).toBe("1080");
+    expect(screen.getByRole("button", { name: "16:9" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
   });
 
   it("renders transport play/pause button", () => {

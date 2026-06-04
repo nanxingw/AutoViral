@@ -1851,6 +1851,118 @@ describe("bridge router — S4 PUT /comp (full-composition write)", () => {
   });
 });
 
+// ─── S17 (US 26) — POST /comp/aspect (one-click canvas-ratio switch) ─────────
+// Routes through the shared `ops.setAspectRatio` (the SAME code the Studio
+// aspect control runs), so the agent CLI and the human UI converge. A valid
+// ratio flips width/height + broadcasts composition-changed; an invalid ratio
+// is rejected 400 + code:4 with disk untouched (and no broadcast).
+describe("bridge router — S17 POST /comp/aspect", () => {
+  let workRoot: string;
+  const workId = "w_aspect";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-aspect-route-"));
+    const fixtureYaml = (
+      await readFile(
+        join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+        "utf8",
+      )
+    ).replace(/workId: sample-work/, `workId: ${workId}`);
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(join(workRoot, workId, "composition.yaml"), fixtureYaml, "utf8");
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  async function currentComp(): Promise<Record<string, unknown>> {
+    const res = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    return ((await res.json()) as { result: Record<string, unknown> }).result;
+  }
+
+  it("POST /comp/aspect flips aspect/width/height and the next GET reflects it", async () => {
+    const res = await app.request("/api/bridge/v1/comp/aspect", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ ratio: "16:9" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+    const after = await currentComp();
+    expect(after.aspect).toBe("16:9");
+    expect(after.width).toBe(1920);
+    expect(after.height).toBe(1080);
+  });
+
+  it("POST /comp/aspect broadcasts composition-changed after the write lands", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/comp/aspect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AutoViral-Work-Id": workId,
+        },
+        body: JSON.stringify({ ratio: "1:1" }),
+      });
+      expect(res.status).toBe(200);
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  it("POST /comp/aspect with an invalid ratio → 400 + code 4, disk UNCHANGED, no broadcast", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/comp/aspect", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AutoViral-Work-Id": workId,
+        },
+        body: JSON.stringify({ ratio: "21:9" }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { ok: boolean; code?: number };
+      expect(body.ok).toBe(false);
+      expect(body.code).toBe(4);
+      expect(await readFile(target, "utf8")).toBe(before);
+      expect(events).not.toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  it("POST /comp/aspect without the work-id header → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/comp/aspect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ratio: "1:1" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+});
+
 // ─── S13 (US 11/12) — preflight (/comp/validate) + write dry-run ─────────────
 // `/comp/validate` lets the agent check a candidate composition BEFORE it ever
 // touches disk — no write, no broadcast — so it can fix problems up front

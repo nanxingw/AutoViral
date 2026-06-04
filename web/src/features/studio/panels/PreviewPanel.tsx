@@ -1,8 +1,51 @@
 import { Player, type PlayerRef } from "@remotion/player";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Composition } from "../types";
+import type { Aspect, Composition } from "../types";
 import { useComposition } from "../store";
 import { Scene } from "../composition/Scene";
+import { useT } from "@/i18n/useT";
+
+// S17 (US 26) — one-click canvas-ratio toggle. The three everyday ratios
+// (portrait / square / landscape) sit in the preview header; clicking one runs
+// the store's `setAspectRatio` (→ shared op), which flips comp.width/height and
+// is consumed live by <Player compositionWidth/compositionHeight>. The agent CLI
+// (`autoviral comp aspect …`) reaches the identical op through the bridge.
+const ASPECT_OPTIONS: Aspect[] = ["9:16", "1:1", "16:9"];
+
+function AspectSwitch() {
+  const t = useT();
+  const aspect = useComposition((s) => s.comp?.aspect);
+  const setAspectRatio = useComposition((s) => s.setAspectRatio);
+  if (!aspect) return null;
+  return (
+    <div role="group" aria-label={t("studio.preview.aspectLabel")} style={{ display: "flex", gap: 4 }}>
+      {ASPECT_OPTIONS.map((r) => {
+        const active = aspect === r;
+        return (
+          <button
+            key={r}
+            type="button"
+            aria-pressed={active}
+            onClick={() => setAspectRatio(r)}
+            style={{
+              fontSize: 11,
+              fontFamily: "var(--font-mono)",
+              letterSpacing: "0.02em",
+              padding: "3px 8px",
+              borderRadius: "var(--radius-sm)",
+              cursor: "pointer",
+              border: "1px solid var(--glass-border)",
+              color: active ? "var(--accent-hi)" : "var(--text-dimmer)",
+              background: active ? "var(--accent-lo)" : "transparent",
+            }}
+          >
+            {r}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 // R47-fix5 (Codex pick 1) — Hoisted to module scope so the Player props
 // keep referential equality across PreviewPanel re-renders. PreviewPanel
@@ -216,6 +259,7 @@ export function PreviewPanel() {
           {comp.width} × {comp.height} · {fps}FPS · H.264
         </div>
         <div style={{ flex: 1 }} />
+        <AspectSwitch />
       </div>
 
       {/* Viewport */}

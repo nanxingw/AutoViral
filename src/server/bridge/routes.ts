@@ -27,6 +27,7 @@ import {
   diffCompositionFor,
 } from "./composition-ops.js";
 import type { Composition } from "../../shared/composition.js";
+import { ASPECTS } from "../../shared/composition.js";
 import { preflight } from "../../shared/composition/preflight.js";
 import { mutateCarouselFor } from "./carousel-ops.js";
 // ADR-009 (S6) — shared composition-ops core. POST /split delegates the split
@@ -208,6 +209,45 @@ bridgeRouter.post("/comp/validate", async (c) => {
   }
   const verdict = preflight(candidate);
   return c.json({ ok: true, result: verdict });
+});
+
+// S17 (US 26) — POST /comp/aspect: one-click canvas-ratio switch through the
+// shared composition-ops core. Body `{ ratio: "9:16"|"1:1"|"16:9"|"4:5" }`; the
+// ratio→dims flip + clip-offset adaptation are `ops.setAspectRatio` — the SAME
+// implementation the Studio aspect control runs — so an agent switching ratio via
+// the CLI (`autoviral comp aspect 1:1`) and a human clicking the control converge
+// on the same composition. On success we broadcast composition-changed so Studio
+// refetches and the preview canvas re-sizes. Invalid ratio →
+// CompositionOpError{code:4} → HTTP 400 + code:4 → CLI exit 4.
+bridgeRouter.post("/comp/aspect", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as { ratio?: unknown };
+  if (
+    typeof body.ratio !== "string" ||
+    !(ASPECTS as readonly string[]).includes(body.ratio)
+  ) {
+    return c.json(
+      { ok: false, error: `invalid ratio (expected one of ${ASPECTS.join("/")})`, code: 4 },
+      400,
+    );
+  }
+  const ratio = body.ratio as (typeof ASPECTS)[number];
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.setAspectRatio(comp, { ratio });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "comp-aspect" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { ratio } });
 });
 
 // Phase 5 Task 5.4 — unified diff between composition.yaml.previous (the
