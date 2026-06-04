@@ -1,6 +1,6 @@
 {
   "name": "autoviral",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "AutoViral — AI-native 创作者工位 + agent-agnostic 操作协议：终端里任何 CLI agent 都能驱动的本地视频/图文创作工作台",
   "type": "module",
   "main": "desktop/out/main.js",

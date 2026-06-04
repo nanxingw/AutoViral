@@ -7,8 +7,27 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-06-04
+
+**开箱即用与工位体验**（PRD-0003）。两条主线：① 把"装完到处静默坏"的依赖摩擦清零——app 一律从受管位置解析二进制，不再赌用户 shell 的 PATH；② 把工位从"原语齐了 UX 没接上"补成顺手——素材库生成即见/能删/能拖、agent 能"看见"自己的产出、一个 work 能并存多个对话/终端。会话 keying 的 keystone 选择经核验后落 [ADR-008](docs/adr/ADR-008-multi-session-chat-terminal.md)。
+
 ### Added
-- _（待补充）_
+- **依赖自检 + 自举**（PRD §1）— `autoviral doctor`（✓/○/✗ 依赖就绪表 + 解析来源 + 修复指引；核心缺失退非零）/ `autoviral setup [--heavy]`（带进度安装 ffmpeg/ffprobe + TTS venv，重型懒装），用户端 CLI 与 agent-bridge CLI 双就位。桌面端经 electron-builder `extraResources` 装机即带 ffmpeg。Python venv（`edge-tts` + `stable-ts`）首用自动建好；playwright chromium 首用懒装。
+- **Gemini-via-OpenRouter TTS**（PRD §2）— 主力 TTS 改 `google/gemini-3.1-flash-tts-preview`（走 OpenRouter `/v1/audio/speech`），`edge-tts` 退为零 key fallback；翻转 fallback 链为 Gemini→edge，退役 `api.openai.com` 直连。
+- **素材库交互对齐 pro 编辑器**（PRD §3）— 生成图/视频**不刷新即进库**；库内素材**删除**（删盘 + 级联清引用 clip，两步确认）；**库→时间线拖拽**（类型约束：video→video / audio→bgm / image→overlay，非法落点拒绝 + 提示）；**同类型轨道间 clip 拖拽**（专用 grip handle，保留 body-scrub）。
+- **`autoviral snapshot`**（PRD §4）— 截当前画面为 PNG 让 agent 用 Read"看见"产出做视觉自检：video 走 Remotion `renderStill` 当前帧（文字层合成进帧）、carousel 返回当前 slide（base-only 时显式标注 `textLayersComposited:false`）。
+- **多对话 / 多终端会话**（PRD §5，[ADR-008](docs/adr/ADR-008-multi-session-chat-terminal.md)）— 一个 work 内并存多个 Chat / Terminal 会话：新建保留原有、可跳回、刷新恢复；Chat 会话清单走 `.sessions.jsonl` sidecar + 新 `/api/works/:id/sessions` 端点，Terminal 会话客户端 namespaced；终端 pty 跨重连存活 + scrollback 回放 + respawn。
+
+### Changed
+- **ffmpeg/ffprobe 受管解析**（PRD §1）— 新 `src/infra/deps.ts`：解析优先级 env → 受管 `~/.autoviral/bin` → vendored（ffmpeg-static / @ffprobe-installer 绝对路径）→ 系统 PATH。精简 PATH（无 `/opt/homebrew/bin`）下渲染/导出/波形/TTS 转码仍可用；`ensureSpawnPath` 过渡兜底共存。
+- **会话 keying `(workId)` → `(workId, sessionId)`**（[ADR-008](docs/adr/ADR-008-multi-session-chat-terminal.md)）— `WsBridge` 嵌套 `Map<workId, Map<sessionId, WsSession>>`、WS 路由带 sessionId、PtyPool 同改；旧单 `cliSessionId` 懒迁移为首会话。focus（playhead/选中）仍 work-scoped 共享。[ADR-005](docs/adr/ADR-005-dual-chat-entry-layout.md) single-session 范围被本 ADR 在多会话维度收窄。
+- **不变量 #2 成真** — TTS 退役 `api.openai.com` 直连后，外部网关确为 OpenRouter 唯一；CONTEXT.md 措辞同步。
+
+### Fixed
+- **snapshot/export 渲染的相对 src**（PRD §4 E2E）— renderStill / mp4 export 渲染前未把 clip.src 改写成 `http://localhost:<port>/...` 绝对 URL，headless Chromium 无 origin 加载不了视频 → 无限挂起；改写函数还会把已是 `/api/works/...` 的 src 双包裹成 404——一并修复（两路径共享）。
+- **Gemini TTS 只支持 pcm**（PRD §2 E2E）— OpenRouter 该模型拒 `response_format:mp3`；改为请求 pcm 再用受管 ffmpeg 转码 mp3，并补空 body / 非音频 content-type 守卫（失败回落 edge）。
+- **素材库 / 字幕 ASR 自举漏洞** — venv 就绪判定漏 `stable-ts`（edge 有、stable-ts 缺时 ASR 静默 503）+ youtube-ingest ASR 走裸 python3，均修。
+- 生成素材不自动进库（generate.ts 不发事件 + 前端无 `asset-added` case，两端补齐）。
 
 ## [0.1.1] - 2026-06-03
 
