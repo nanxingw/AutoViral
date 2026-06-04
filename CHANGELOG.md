@@ -7,6 +7,30 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-06-05
+
+**把 NLE 接通给 agent**（PRD-0004）。核心命题：任意 CLI agent 经 `autoviral` CLI 驱动剪辑，与人在 UI 操作产出一致——调研坐实"意图级编辑能力是 built-but-human-only"，本版把**写路径**补齐。keystone = [ADR-009](docs/adr/ADR-009-shared-composition-ops-core.md)：意图级 mutation 单一实现放 `@shared/composition/ops`，前端 store（immer draft）与后端 bridge（parsed object）共消费同一份纯函数，永久消除前后端漂移。21 个纵切片，每片切穿 schema→@shared ops→bridge/CLI→UI→test 端到端可验证；命题核心经两轮多纬度浏览器 E2E（agent-CLI 驱动 vs 人-UI 各纬度，截图 + DOM/computed-style 二确）证明。
+
+### Added
+- **意图级动词，CLI / bridge / store 共用同一份 @shared op**（[ADR-009](docs/adr/ADR-009-shared-composition-ops-core.md)）— `clip split`（指定时刻切两段 + keyframe 重基）/ `clip trim`（邻接 cap clamp + 最小时长）/ `clip set --track-id`（跨同 kind 轨移动 + 源轨孤儿 transition prune）/ `clip keyframe add/set`（opacity·scale·position 等可 keyframe，crossfade·Ken Burns 不再必败）/ `transition add/remove`（preset 来自共享 registry，afterClipId 非末位约束）/ `track add/remove` + `clip add --track-id` 精确定位 + overlay 片段真支持。前端 store 切到调 ops，现有 store 测试零断言改写即绿（零行为变化安全网）。
+- **整份回写 + 写前预检** — `comp put <file|-stdin>`（万能逃生口，经 chokepoint zod 校验原子回写）/ `comp validate`（`@shared/composition/preflight` 纯校验返回 `{ok,errors,warnings}` 不落盘）/ 写端点 `--dry-run`（写 chokepoint 一处实现，跑 mutator + 校验但不落盘不广播），砍掉 agent "PUT→400→读 zod dump→猜" 的昂贵循环。
+- **ASR 字幕接通最后一公里** — `captions generate [--language]` 调已有 ASR 把带时间码 segments 写进 text track（**无 text 轨自动建轨**）；Studio 加"生成字幕"按钮触发同流程；改完即刷新。
+- **基础画面操作** — fit-fill 填充模式（cover / contain-letterbox / blur-bg）/ crop + 翻转镜像（`crop{x,y,w,h}` + `flipH/flipV`，Remotion preview + ffmpeg export **双消费**）/ 倒放（ffmpeg 真倒放 + preview 明示"仅导出生效"占位，不造假 WYSIWYG）+ 定格（`freezeAtSec` preview+export 双生效）/ 画布比例一键切换（9:16 ↔ 1:1 ↔ 16:9 ↔ 4:5，按比例适配既有 clip 的 static + keyframe 偏移）。所有新字段均有渲染器/ffmpeg 消费断言（防死字段）。
+- **编辑安全网** — clip 级 undo + Cmd/Ctrl+Z（覆盖 split/trim/move/set/delete/ripple-delete/collapse-gaps）/ agent 可达 `checkpoint list` · `checkpoint restore`（**restore 前自动快照当前态防丢数据**，可逆）。
+- **写路径改完即刷新** — 写 chokepoint `mutateCompositionFor`/`mutateCarouselFor` 成功落盘后经注入式 `onCommitted` 回调广播 `composition-changed`/`carousel-changed`，前端无需 reload 即反映（composition-ops 不耦合 event bus）；**carousel Editor 页接上 bridge 订阅**（此前结构性未接通）。`fs.watch` 降为兜底。
+
+### Changed
+- **错误码契约两端打通** — 所有 4xx 校验错带 `code:4`，`client.ts` 按退出码分支：4xx→exit 4 / 5xx→exit 3 / `ask` timeout→124，agent 可据退出码做控制流。CLI 集成测试接入标准 gate。
+- **平台 preset 真生效** — 尺寸 / 响度 LUFS / 码率下沉 `@shared` 单一事实源（前端 `PlatformPresetSection` 与 `runRenderPipeline` 读同一份）；`/export` 的 `preset` 真被应用，未知 preset → 400。
+- **`carousel set-layer` 改为 PATCH** — deep-merge：只覆盖显式给的字段、保留其余 box/style，对齐 `clip set` 的 patch 语义（此前是 REPLACE，agent 改一字段会清掉全部样式）；新增 `--italic`/`--tracking` flag。
+- **`whoami` 报告真实包版本**（此前硬编码 `BRIDGE_VERSION="0.1.0"`，改为读 package version 单一事实源）。
+
+### Fixed
+- **止谎** — 清掉文档/manual/recipe/CLI help 里照做必败的假承诺（必报 400 的 `clip set --keyframes`、运行时 throw 的 overlay 能力、指向已删脚本/不存在 UI 的假注释）；变量变速 export 静默回 1× 时发 warn；crossfade recipe 回填为真能跑通的 `transition add` 路径。
+- **`clip set` 拒绝静默 strip** — `@shared/composition/patch` deep-merge + per-kind 白名单，解析嵌套路径（`transforms.scale` / `filters.brightness` / `style.color` / `fade.in` / `ducking.ratio` 等），未知/拼错 key 返 400 而非 zod 静默吞；CLI 按字段期望类型解析（`--color 000000` 不再被强转成数字 0）。
+- **`captions generate` 默认路径对真实作品 400**（浏览器 E2E 实证）— 真实 composition 的音频 src 存为 served-URL 形 `/api/works/<id>/assets/...`，resolve 时被 path-traversal 守卫误杀；resolve 前剥前缀（门控在该前缀上，恶意 `../` / 绝对路径仍拒）。同步加固 captions 音频路径 path-traversal（resolve + 前缀校验）。
+- **意图 op 写路径硬伤**（各片对抗复审 + E2E 加固）— `splitClip` 浅拷贝致两段 clip 共享嵌套对象引用（agent split 后 patch 一段会污染另一段）→ 双宿主安全的 read-through cloneDeep；ripple-delete / collapse-gaps 漏进 undo 栈（数据丢失）；`transition` durationSec / `keyframe` atSec / `freezeAtSec` 时长越界未拒；`CompositionOpError` 经 store toast surface 而非静默 no-op。
+
 ## [0.1.2] - 2026-06-04
 
 **开箱即用与工位体验**（PRD-0003）。两条主线：① 把"装完到处静默坏"的依赖摩擦清零——app 一律从受管位置解析二进制，不再赌用户 shell 的 PATH；② 把工位从"原语齐了 UX 没接上"补成顺手——素材库生成即见/能删/能拖、agent 能"看见"自己的产出、一个 work 能并存多个对话/终端。会话 keying 的 keystone 选择经核验后落 [ADR-008](docs/adr/ADR-008-multi-session-chat-terminal.md)。
