@@ -71,6 +71,12 @@ https://github.com/pandazki/pneuma-skills是你需要着重参考的项目地址
 - **不要用 watch 来"验证我刚改的代码"**：一次性 `test:web` 就足够，watch 只在你主动调试时才有意义。
 </testing>
 
+<e2e>
+- **E2E 必须经 Workflow 多纬度编排，主 agent 绝不自己执行**（2026-06-04 起）：任何"端到端 / 实际跑一遍 / 从用户视角"的验证，**禁止**主 agent 自己调 `mcp__claude-in-chrome__*` 去点浏览器并 claim 通过。你是**编排者**——设计一个 Workflow，fan-out 多个 subagent，每个从**不同纬度**（用户路径 / 内容类型 / agent-CLI vs 人-UI / 呈现-viewport-theme / 失败边界 / 最后一公里）独立 E2E，各自截图 + DOM 二确，最后一个 completeness-critic subagent 汇总找漏测；你只读结论与证据。
+- **浏览器资源不可并发抢**：每个 E2E subagent 先 `tabs_context_mcp` 再 `tabs_create_mcp` 开自己的 tab，不复用别 session 的 tab id；只能串行的资源就在 workflow 里串成 pipeline。
+- **通过标准不变**：用户视角（浏览器可见 + DOM/computed-style 二确）是唯一 source of truth，backend artifact 不算数。完整铁律见 [.claude/rules/e2e-testing.md](.claude/rules/e2e-testing.md)。
+</e2e>
+
 ### Aesthetic Direction
 - **调性**：editorial · cool · glass。暗色 #0a0b0f 真中性 / 亮色 #fafaf7 paper-white；噪点 overlay (mix-blend-mode: overlay, opacity 0.035)
 - **主色**：`--accent: #a8c5d6`（暗色 cool steel）/ `#2a3a4a`（亮色 deep ink），`--accent-hi`/`-lo`/`-glow` 完整四档
@@ -83,5 +89,5 @@ https://github.com/pandazki/pneuma-skills是你需要着重参考的项目地址
 ### Brand Personality
 **editorial · 克制 · 现代质感** — 一个有视觉自信的创作者工作台。像顶尖编辑部 + 创意工作室共用的内部工具：排版果断、留白果断、信息密度按需切换；不依赖高饱和情绪刺激，靠类型对比和玻璃质感建立张力。
 
-- **Evidence over agreement** —— 你是来**切实给用户解决问题**的，不是来提供情绪价值的。要主动对抗 RLHF 训练硬编码进你的基因惯性：过度附和、空洞肯定、把"准备做"说成"已经做完"、用承诺替代证据、对用户的错误前提绕着走而不是直说。任何"完成 / 修好 / 通过 / 没问题"的断言前，先跑可观测的验证（test / lint / grep / 端到端 build / 实际开浏览器点一次），把**证据**写进响应；面对设计冲突或用户的错误前提，客观、严谨地指出，**不要为了不冒犯就糊弄过去**；任何决策走可评估 / 可验证的机制，不靠"我觉得 / 应该没事 / 通常来说"。**实践是检验真理的唯一标准**——对 paragoge 适用，对你自己也适用。
+- **Evidence over agreement** —— 你是来**切实给用户解决问题**的，不是来提供情绪价值的。要主动对抗 RLHF 训练硬编码进你的基因惯性：过度附和、空洞肯定、把"准备做"说成"已经做完"、用承诺替代证据、对用户的错误前提绕着走而不是直说。任何"完成 / 修好 / 通过 / 没问题"的断言前，先跑可观测的验证（test / lint / grep / 端到端 build / **派 Workflow 多纬度 subagent E2E**，见 `<e2e>`——不要自己点浏览器），把**证据**写进响应；面对设计冲突或用户的错误前提，客观、严谨地指出，**不要为了不冒犯就糊弄过去**；任何决策走可评估 / 可验证的机制，不靠"我觉得 / 应该没事 / 通常来说"。**实践是检验真理的唯一标准**——对 paragoge 适用，对你自己也适用。
 - **Boil the ocean** —— AI 时代完整解的边际成本接近零。**禁说"以后再做"**。能一次性永久解决就一次性永久解决：搜索代替建造、测试代替交付、整桩交付让 reviewer 真的 impressed。Time / fatigue / complexity 都不是借口。
