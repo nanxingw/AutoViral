@@ -9,7 +9,7 @@ This repo uses three families of agent skill, configured in `docs/agents/`:
 3. **Taste / craft** (sibling skills, not bundled) — bring your own: `editorial-pro`, `viral-hooks-zh`, `lyric-video`, etc.
 
 Key project conventions for these skills:
-- **Issue tracker:** GitHub Issues at https://github.com/nanxingw/AutoViral (`gh` CLI). See [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
+- **Issue tracker:** **docs-only —— issue 一律写在 `docs/` 里（canonical：`docs/prd/NNNN-<slug>-issue-slices.md`，随 PRD 提交），绝不创建 GitHub Issue、绝不 `gh issue create`，不污染 GitHub 网页**（用户 2026-06-04）。See [docs/agents/issue-tracker.md](docs/agents/issue-tracker.md).
 - **Triage labels:** `needs-triage` / `waiting-on-reporter` / `ready-for-agent` / `ready-for-human` / `wontfix`. See [docs/agents/triage-labels.md](docs/agents/triage-labels.md).
 - **Domain docs:** [CONTEXT.md](CONTEXT.md) (domain glossary + invariants) + [docs/adr/](docs/adr/) (architecture decisions). See [docs/agents/domain.md](docs/agents/domain.md).
 - **Index:** [docs/agents/index.md](docs/agents/index.md).

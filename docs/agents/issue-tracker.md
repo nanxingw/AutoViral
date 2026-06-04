@@ -1,31 +1,39 @@
 # Issue tracker · AutoViral
 
-**Type:** GitHub Issues
-**Repo:** https://github.com/nanxingw/AutoViral
-**CLI:** `gh` (authenticated as `nanxingw`, verified 2026-05-15)
+**Type:** 本地 Markdown in `docs/` —— **不是 GitHub Issues**。
+**硬规则（用户 2026-06-04）：issue 一律写在 `docs/` 里，绝不创建 GitHub Issue、绝不 `gh issue create`——不污染 GitHub 网页。**
 
-## Operations
+## Issues 写在哪
 
-| Skill | Command pattern | Notes |
-|---|---|---|
-| `to-prd` | `gh issue create --label ready-for-agent` | Single epic-style issue carrying the PRD body. |
-| `to-issues` | `gh issue create --label ready-for-agent` per tracer-bullet slice | One issue per independently-grabbable slice; each links back to its parent PRD issue. |
-| `triage` | `gh issue list --label needs-triage` → `gh issue edit --add-label <state> --remove-label needs-triage` | Walks the state machine. |
-| `diagnose` / `tdd` | `gh issue view <n>` to read context; `gh issue comment` for findings | Read-mostly. |
+- **Canonical（已提交、随 clone 分发）**：从 PRD 拆出的切片汇总在 **`docs/prd/NNNN-<slug>-issue-slices.md`**（一片一节，每片带完整 body：What / Acceptance criteria / Blocked by），与它的 PRD 一同提交。这是 issue 的事实源。
+- **可选的逐片草稿**：`docs/issues/NNN-slug.md`（一文件一 issue，沿用既有 001–025 的编号习惯），用于不挂 PRD 的独立 bug，或偏好一文件一 issue 时。**注意**：`docs/issues/` 目前被 `.gitignore`（历史上是"待 gh 发布"的临时暂存）；若希望这些逐片文件也版本化共享，从 `.gitignore` 移除 `docs/issues/` 即可。
 
-## Issue body conventions
+## Operations（全部 docs-only，零 gh）
 
-- **First line of body:** `> Parent: #<n>` if derived from a PRD or parent issue.
-- **PRD reference:** if the issue comes from a PRD in `docs/archive/plans/`, link the path explicitly in the body: `Source: docs/archive/plans/<file>.md`.
-- **Acceptance criteria:** a checklist in the body. Each box should be testable.
-- **Code-area hints:** include the deepest directory the issue touches so AFK agents can `cd` directly.
+| Skill | 做法 |
+|---|---|
+| `to-prd` | PRD 写进 `docs/prd/NNNN-*.md`。**不**开 GitHub epic issue。 |
+| `to-issues` | 每个 tracer-bullet 切片落进 `docs/prd/NNNN-*-issue-slices.md`（canonical）或 `docs/issues/NNN-*.md`。**不** `gh issue create`。 |
+| `triage` | triage 状态写在 issue 文件的标题/字段里（不是 GitHub label）。 |
+| `diagnose` / `tdd` | 直接读 `docs/` 下的 issue 文件取上下文。 |
+
+## Triage 状态词汇（仍沿用，写进文件而非 GitHub label）
+
+`needs-triage` / `waiting-on-reporter` / `ready-for-agent` / `ready-for-human` / `wontfix`。详见 [triage-labels.md](triage-labels.md)。AFK 片标 `ready-for-agent`，含人决策的架构契约（HITL）标 `ready-for-human`。
+
+## Issue body 约定
+
+- **Parent**：若派生自 PRD/父 issue，body 首行 `> Parent: <PRD 路径或父片号>`。
+- **Source**：来自 PRD 的标 `Source: docs/prd/<file>.md`。
+- **Acceptance criteria**：可测的 checklist。**E2E 验收项必须经 Workflow 多纬度 subagent 执行**（见 [`/.claude/rules/e2e-testing.md`](../../.claude/rules/e2e-testing.md) Hard rule 0），主 agent 不自己点浏览器。
+- **Code-area hints**：标出最深的目录，方便 AFK agent 直接定位。
 
 ## What goes where
 
-- **PRDs / plans → `docs/archive/plans/`** (canonical source) + a single tracking issue with the `ready-for-agent` label.
-- **Architecture decisions → `docs/adr/`** (immutable). Discussion happens in PRs / issues; the ADR captures the conclusion.
-- **In-flight work → GitHub Issues** (mutable). Issues link out to ADRs and PRDs.
+- **PRD → `docs/prd/`**（canonical）。
+- **Issue 切片 → `docs/prd/NNNN-*-issue-slices.md`**（canonical，已提交）/ 可选 `docs/issues/NNN-*.md`（本地）。
+- **架构决策 → `docs/adr/`**（immutable）。
 
-## No issue templates yet
+## 历史
 
-`.github/ISSUE_TEMPLATE/` does not exist. Agents currently synthesize issue bodies from PRD context. If a template is added later, update this file.
+此前本约定为 GitHub Issues（`gh` as `nanxingw`）。**2026-06-04 用户改为 docs-only**：issue 留在 docs，不上 GitHub。`docs/issues/` 不再是"待 gh 发布"的暂存区。
