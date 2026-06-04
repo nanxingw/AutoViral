@@ -122,6 +122,29 @@ Delete a clip. No confirmation; gate with `autoviral ask` for destructive flows.
 autoviral clip remove vc_s07
 ```
 
+### `autoviral clip keyframe add|set <id> --property <p> --at <sec> --value <v> [--easing <e>]`
+
+Author one keyframe on a numeric clip property (this is how you make a clip
+animate — opacity fades, Ken Burns scale, position drifts). `add` and `set` are
+the same idempotent author-or-replace verb: re-running at the same
+`(--property, --at)` replaces the value, never duplicating.
+
+```bash
+# fade a clip out over its last 0.18s (clip-local time)
+autoviral clip keyframe add vc_s07 --property opacity --at 5    --value 1 --easing easeIn
+autoviral clip keyframe set vc_s07 --property opacity --at 5.18 --value 0
+```
+
+- `--property` — one of `opacity`, `scale`, `x`, `y`, `rotation`, `volume`, `speed`.
+- `--at` — **clip-local** seconds (measured from the clip's own start, not the timeline).
+- `--value` — a number; `speed` must be in `[0.1, 4.0]`.
+- `--easing` — `linear` (default) / `easeIn` / `easeOut` / `easeInOut`.
+
+Text clips carry no keyframes (the bridge returns HTTP 400). For a plain
+cross-fade at a cut between two adjacent video clips, prefer
+`autoviral transition add` (it cross-fades the boundary without hand-authored
+keyframes) — see the *crossfade* recipe.
+
 ## UI control commands
 
 Stateless broadcasts to the Studio React app. None of them touch disk.

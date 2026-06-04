@@ -1041,6 +1041,71 @@ bridgeRouter.delete("/transition/:id", async (c) => {
   return c.json({ ok: true, result: { id } });
 });
 
+// S12 (US 16 / 35-37 backfill) — POST /clip/:id/keyframe: author one keyframe on
+// a numeric clip property through the shared `ops.addKeyframe`, the SAME
+// collision math the Studio KeyframePanel runs, so an agent authoring a
+// crossfade / Ken Burns curve via the CLI (`autoviral clip keyframe add/set`)
+// and a human dragging a keyframe in the UI converge on an identical `keyframes`
+// array. This is the verb that finally makes keyframe edits runnable from the
+// CLI — the old `clip set --keyframes '[...]'` path could only 400 (a scalar flag
+// can't carry a Keyframe[]). Body `{ property, atSec, value, easing? }`. Illegal
+// params (unknown clip, text clip, bad property/easing, negative time, speed out
+// of range) → CompositionOpError{code:4} → HTTP 400 + code:4 → CLI exit 4.
+bridgeRouter.post("/clip/:id/keyframe", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  }
+  const body = (await c.req.json().catch(() => ({}))) as {
+    property?: unknown;
+    atSec?: unknown;
+    value?: unknown;
+    easing?: unknown;
+  };
+  if (typeof body.property !== "string" || !body.property) {
+    return c.json({ ok: false, error: "missing property", code: 4 }, 400);
+  }
+  if (typeof body.atSec !== "number" || !Number.isFinite(body.atSec)) {
+    return c.json({ ok: false, error: "missing/invalid atSec (seconds)", code: 4 }, 400);
+  }
+  if (typeof body.value !== "number" || !Number.isFinite(body.value)) {
+    return c.json({ ok: false, error: "missing/invalid value", code: 4 }, 400);
+  }
+  let easing: string | undefined;
+  if (body.easing !== undefined) {
+    if (typeof body.easing !== "string" || !body.easing) {
+      return c.json({ ok: false, error: "invalid easing", code: 4 }, 400);
+    }
+    easing = body.easing;
+  }
+  const property = body.property;
+  const atSec = body.atSec;
+  const value = body.value;
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.addKeyframe(comp, {
+          clipId: id,
+          property: property as never,
+          atSec,
+          value,
+          easing: easing as never,
+        });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "keyframe-add" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
 // POST /ask blocks the HTTP response until the Studio user clicks
 // YES/NO in the ApprovalPrompt modal — or until timeoutMs elapses.
 // CLI exit codes (per protocol §5): yes=0, no=1, cancelled=2, timeout=124.

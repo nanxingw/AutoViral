@@ -53,21 +53,52 @@ The first two keyframes are the fade-in (paired with A's fade-out). The last two
 
 ## Doing it via CLI
 
-> ⚠️ **Not yet runnable from the CLI.** There is no working CLI command that
-> writes a `keyframes` array onto a clip today. `clip set` flags are parsed as
-> scalars (a single string/number), so `clip set vc_s01 --keyframes '[...]'`
-> sends a *string* where the schema demands a `Keyframe[]` array — the bridge
-> rejects it (HTTP 400) and the on-disk `composition.yaml` is **never touched**.
-> Do **not** run it: it cannot succeed and only burns budget.
->
-> The runnable crossfade path lands with the dedicated transition / keyframe
-> verbs (**S9 `transition add` / S12 keyframe verb**). Until then, the YAML
-> shapes above are the canonical *spec* — author them through whatever direct
-> composition-write surface you have (e.g. editing `composition.yaml` and
-> letting the watcher reload), not through `clip set`.
+There are now two runnable paths. Pick by intent.
 
-When the keyframe verb ships, this section will show its invocation; the YAML
-above is exactly what that verb must produce.
+### Path 1 — the easy crossfade: `transition add` (preferred)
+
+For a plain dissolve at a cut between two **adjacent video clips on the same
+track**, you don't author keyframes at all — add a transition and the renderer
+cross-fades the boundary for you. Pin it to the cut AFTER the first clip:
+
+```bash
+# trk_v = the video track id (from `autoviral comp show`); vc_s01 = the clip the
+# transition fires AFTER. `cross-dissolve` is the fade preset; --duration is the
+# crossfade width in seconds (defaults to the preset's 0.5s, clamped to the
+# adjacent clips' handles so it can never over-consume a clip).
+autoviral transition add --track trk_v --after vc_s01 --preset cross-dissolve --duration 0.18
+```
+
+This prints the new transition id (`tr_…`) and writes `composition.yaml`
+atomically. Remove it (restore a hard cut) with `autoviral transition remove <id>`.
+
+### Path 2 — hand-authored fades via `clip keyframe`
+
+When you need the precise opacity curve above (overlapping clips, asymmetric
+fades, a fade against a non-adjacent clip), author the keyframes one at a time.
+Each call adds **one** keyframe to one property; re-adding at the same
+`(property, --at)` replaces the value (idempotent), so a re-run is safe.
+
+```bash
+# Clip A — fade out over its 5.0→5.18 tail:
+autoviral clip keyframe add vc_s01 --property opacity --at 5    --value 1 --easing easeIn
+autoviral clip keyframe add vc_s01 --property opacity --at 5.18 --value 0 --easing linear
+
+# Clip B — fade in over its first 0.18s (paired with A's fade-out):
+autoviral clip keyframe add vc_s02 --property opacity --at 0    --value 0 --easing linear
+autoviral clip keyframe add vc_s02 --property opacity --at 0.18 --value 1 --easing easeOut
+```
+
+`--at` is **clip-local** seconds (measured from each clip's own start, not the
+timeline). `--property` is one of `opacity / scale / x / y / rotation / volume /
+speed`. `add` and `set` are the same author-or-replace verb — use whichever reads
+better. The bridge rejects (exit 4) a bad property, a text clip (text carries no
+keyframes), a negative time, or a speed value outside `[0.1, 4.0]`; nothing is
+written on rejection.
+
+> The earlier `clip set <id> --keyframes '[...]'` form does NOT work and never
+> did — `clip set` flags are scalars, so a JSON array arrives as a string the
+> schema rejects (HTTP 400, comp untouched). Use `clip keyframe` (above) instead.
 
 ## Verifying
 

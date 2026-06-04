@@ -152,15 +152,19 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     }
   });
 
-  // S1 (US 35/36/37) —止谎. The crossfade recipe used to print a literal
-  // `autoviral clip set <id> --keyframes '<json-array>'` command. That path is
-  // guaranteed to 400: the CLI flag parser sends `keyframes` as a SCALAR
-  // (string), but the bridge's clip-patch schema expects a Keyframe[] array, so
-  // the on-disk comp is never touched. An agent that trusts the manual and runs
-  // it verbatim burns its whole session budget on a command that can't succeed
-  // until the keyframe verb / `transition add` (S9/S12) ships. The recipe must
-  // not advertise the broken command.
-  it("the crossfade recipe never prints a `clip set --keyframes` command (it necessarily 400s pre-S9/S12)", () => {
+  // S1 (US 35/36/37) —止谎 / S12 — the runnable path now exists. The crossfade
+  // recipe used to print a literal `autoviral clip set <id> --keyframes
+  // '<json-array>'` command, which is guaranteed to 400: the CLI flag parser
+  // sends `keyframes` as a SCALAR (string), but the bridge's clip-patch schema
+  // expects a Keyframe[] array, so the on-disk comp is never touched. S1 deleted
+  // that command and gated the recipe behind a "not yet runnable" notice. S12
+  // ships the real verbs (`transition add` for the easy dissolve, `clip keyframe
+  // add/set` for hand-authored fades), so the recipe is rewritten to show those.
+  // This guard now does BOTH: (a) the broken `clip set --keyframes` command must
+  // still never reappear in a runnable fence, and (b) the recipe MUST advertise
+  // at least one of the runnable S9/S12 verbs in a fence (the "not yet runnable"
+  // era is over — leaving the recipe verb-less would re-strand the agent).
+  it("the crossfade recipe never prints a `clip set --keyframes` command but DOES show a runnable verb (S9/S12)", () => {
     const recipe = readFileSync(
       join(
         REPO_ROOT,
@@ -196,8 +200,20 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     );
     expect(
       offendingFence,
-      "a runnable code fence still contains `clip set --keyframes`, which 400s — remove it or gate it behind the S9/S12 verb",
+      "a runnable code fence still contains `clip set --keyframes`, which 400s — use `clip keyframe` / `transition add` instead",
     ).toBeUndefined();
+
+    // S12 — the recipe must now point at a verb that actually works. At least
+    // one fence must carry `transition add` (the easy dissolve) or `clip
+    // keyframe` (hand-authored fades). A recipe with no runnable verb is the
+    // same dead-end the "not yet runnable" notice was — it must not regress to
+    // that state.
+    const runnableVerb = /autoviral (?:transition add|clip keyframe)\b/;
+    const runnableFence = fences.find((f) => runnableVerb.test(f));
+    expect(
+      runnableFence,
+      "the crossfade recipe shows no runnable verb — it must demonstrate `transition add` or `clip keyframe` (S9/S12 shipped them)",
+    ).toBeDefined();
   });
 
   // S1 (US 35/36/37) fix-up —止谎 parity with the cli.test.ts `--help` guard.

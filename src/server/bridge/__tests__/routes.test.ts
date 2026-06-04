@@ -1097,6 +1097,127 @@ describe("bridge router — Phase 3 clip writes", () => {
       off();
     }
   });
+
+  // S12 (US 16 / 35-37) — POST /clip/:id/keyframe delegates to the shared
+  // `ops.addKeyframe`. The fixture's `vc_s01` is a video clip → keyframe-capable;
+  // `tc_hook01` is text → D8 reject. This is the runnable replacement for the
+  // dead `clip set --keyframes` path.
+  it("POST /clip/:id/keyframe authors an opacity keyframe in place + echoes the id", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/keyframe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ property: "opacity", atSec: 2, value: 0.5, easing: "easeOut" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { id: string } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.id).toBe("vc_s01");
+
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: {
+        tracks: Array<{
+          clips: Array<{
+            id: string;
+            keyframes?: Array<{ property: string; time: number; value: number; easing: string }>;
+          }>;
+        }>;
+      };
+    };
+    const clip = compBody.result.tracks
+      .flatMap((t) => t.clips)
+      .find((c) => c.id === "vc_s01");
+    const kf = clip?.keyframes?.find((k) => k.property === "opacity" && k.time === 2);
+    expect(kf?.value).toBe(0.5);
+    expect(kf?.easing).toBe("easeOut");
+  });
+
+  it("POST /clip/:id/keyframe is idempotent on a (property, atSec) collision (D4)", async () => {
+    const headers = { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId };
+    await app.request("/api/bridge/v1/clip/vc_s01/keyframe", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ property: "scale", atSec: 1, value: 1 }),
+    });
+    await app.request("/api/bridge/v1/clip/vc_s01/keyframe", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ property: "scale", atSec: 1, value: 1.5 }),
+    });
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: { tracks: Array<{ clips: Array<{ id: string; keyframes?: Array<{ property: string; time: number; value: number }> }> }> };
+    };
+    const clip = compBody.result.tracks.flatMap((t) => t.clips).find((c) => c.id === "vc_s01");
+    const scaleKfs = (clip?.keyframes ?? []).filter((k) => k.property === "scale" && k.time === 1);
+    expect(scaleKfs).toHaveLength(1);
+    expect(scaleKfs[0].value).toBe(1.5);
+  });
+
+  it("POST /clip/:id/keyframe onto a text clip → 400 + code 4 (D8)", async () => {
+    const res = await app.request("/api/bridge/v1/clip/tc_hook01/keyframe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ property: "opacity", atSec: 1, value: 1 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /clip/:id/keyframe with an unknown property → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/keyframe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ property: "bogus", atSec: 1, value: 1 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /clip/:id/keyframe with an unknown clipId → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/nope/keyframe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ property: "opacity", atSec: 1, value: 1 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /clip/:id/keyframe without a work-id header → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/keyframe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ property: "opacity", atSec: 1, value: 1 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /clip/:id/keyframe broadcasts composition-changed after the write lands", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/clip/vc_s01/keyframe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ property: "x", atSec: 3, value: 10 }),
+      });
+      expect(res.status).toBe(200);
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
 });
 
 describe("bridge router — Phase 3 approval gate", () => {

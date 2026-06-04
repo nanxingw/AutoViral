@@ -149,6 +149,67 @@ export async function clipCommand(args: string[]): Promise<void> {
     return;
   }
 
+  if (sub === "keyframe") {
+    // S12 (US 16 / 35-37 backfill) — `autoviral clip keyframe add|set <id>
+    // --property <p> --at <sec> --value <v> [--easing <e>]`. The bridge runs the
+    // shared `ops.addKeyframe` (the SAME collision math the Studio KeyframePanel
+    // uses), so the agent's keyframe and a human's drag converge on one
+    // composition. THIS is the verb that makes crossfade / Ken Burns curves
+    // runnable from the CLI — the old `clip set --keyframes '[...]'` path could
+    // only 400 (a scalar flag can't carry a Keyframe[]). `add` and `set` are the
+    // same idempotent author-or-replace mutation; both POST the same body. We
+    // validate args locally (exit 4, never hits the bridge) so an obviously-
+    // malformed invocation fails fast; the server owns the semantic validation
+    // (unknown property/clip/easing, text clip, speed range, negative time).
+    const [verb, id, ...flagArgs] = rest;
+    if (verb !== "add" && verb !== "set") {
+      process.stderr.write(
+        "usage: autoviral clip keyframe add|set <id> --property <p> --at <sec> --value <v> [--easing <e>]\n",
+      );
+      process.exit(4);
+    }
+    if (!id || id.startsWith("--")) {
+      process.stderr.write(
+        "usage: autoviral clip keyframe add|set <id> --property <p> --at <sec> --value <v> [--easing <e>]\n",
+      );
+      process.exit(4);
+    }
+    const opts = parseFlags(flagArgs);
+    const property = opts["--property"];
+    if (!property) {
+      process.stderr.write(
+        "autoviral clip keyframe: --property <name> required (opacity/scale/x/y/rotation/volume/speed)\n",
+      );
+      process.exit(4);
+    }
+    const atRaw = opts["--at"];
+    const at = atRaw === undefined ? NaN : Number(atRaw);
+    if (!Number.isFinite(at)) {
+      process.stderr.write("autoviral clip keyframe: --at <seconds> required (number)\n");
+      process.exit(4);
+    }
+    const valueRaw = opts["--value"];
+    // Keyframe values are ALWAYS numeric (opacity / scale / x / y / rotation /
+    // volume / speed). Unlike `clip set` (S11 — path-typed string vs number), a
+    // keyframe `value` has exactly one type, so we coerce to a number and reject
+    // a non-numeric arg up front rather than letting `Number("abc") → NaN` slip
+    // through as a string.
+    const value = valueRaw === undefined ? NaN : Number(valueRaw);
+    if (!Number.isFinite(value)) {
+      process.stderr.write("autoviral clip keyframe: --value <number> required\n");
+      process.exit(4);
+    }
+    const body: Record<string, unknown> = { property, atSec: at, value };
+    if (opts["--easing"] !== undefined) body.easing = opts["--easing"];
+    await bridgeRequest(
+      ctx,
+      "POST",
+      `/clip/${encodeURIComponent(id)}/keyframe`,
+      body,
+    );
+    return;
+  }
+
   if (sub === "set") {
     const id = rest[0];
     if (!id) {

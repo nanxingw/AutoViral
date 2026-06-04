@@ -231,6 +231,29 @@ beforeAll(async () => {
         return send(200, { ok: true, result: { id: clipId } });
       }
     }
+    // S12 (US 16 / 35-37) — POST /clip/:id/keyframe. Mirrors the server
+    // contract: a known clipId authoring a keyframe returns { id }; an unknown
+    // clipId / a text clip / a bad property is the op's CompositionOpError → 400
+    // + code 4 → CLI exit 4. The mock keys "rejectable" inputs off the clipId /
+    // property so the CLI wire format + exit codes are exercised without the op.
+    {
+      const kfMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/keyframe$/.exec(url ?? "");
+      if (req.method === "POST" && kfMatch) {
+        const body = await readBody(req);
+        const clipId = decodeURIComponent(kfMatch[1]);
+        const target = clips.find((c) => c.id === clipId);
+        if (!target) {
+          return send(400, { ok: false, error: "no such clip", code: 4 });
+        }
+        if (target.trackKind === "text") {
+          return send(400, { ok: false, error: "text carries no keyframes", code: 4 });
+        }
+        if (body.property === "bogus") {
+          return send(400, { ok: false, error: "unknown property", code: 4 });
+        }
+        return send(200, { ok: true, result: { id: clipId } });
+      }
+    }
     // S9 (US 4/5/9) — POST /transition. Mirrors the server contract: a known
     // afterClipId + a registry preset mints a transition id; an unknown preset
     // or a last-clip anchor is the op's CompositionOpError → 400 + code 4 → CLI
@@ -574,6 +597,80 @@ describe("autoviral CLI — end-to-end", () => {
   it("transition unknown subcommand → exit 127", async () => {
     const r = await run(["transition", "frobnicate"]);
     expect(r.exitCode).toBe(127);
+  });
+
+  // S12 (US 16 / 35-37) — `autoviral clip keyframe add|set <id> --property --at
+  // --value [--easing]` POSTs to /clip/:id/keyframe; the bridge runs the shared
+  // `ops.addKeyframe`. THIS is the runnable replacement for the dead `clip set
+  // --keyframes '[...]'` path (which could only 400).
+  it("clip keyframe add <id> --property --at --value → exit 0", async () => {
+    const r = await run([
+      "clip", "keyframe", "add", "vc_s01",
+      "--property", "opacity", "--at", "5", "--value", "1",
+    ]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  it("clip keyframe set <id> --property --at --value --easing → exit 0", async () => {
+    const r = await run([
+      "clip", "keyframe", "set", "vc_s01",
+      "--property", "opacity", "--at", "5.18", "--value", "0", "--easing", "linear",
+    ]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  it("clip keyframe with no verb / a bad verb → exit 4 (never hits bridge)", async () => {
+    const r = await run([
+      "clip", "keyframe", "vc_s01", "--property", "opacity", "--at", "5", "--value", "1",
+    ]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip keyframe add with no id → exit 4 (never hits bridge)", async () => {
+    const r = await run([
+      "clip", "keyframe", "add", "--property", "opacity", "--at", "5", "--value", "1",
+    ]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip keyframe add with no --property → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "keyframe", "add", "vc_s01", "--at", "5", "--value", "1"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip keyframe add with no --at → exit 4 (never hits bridge)", async () => {
+    const r = await run([
+      "clip", "keyframe", "add", "vc_s01", "--property", "opacity", "--value", "1",
+    ]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip keyframe add with a non-numeric --value → exit 4 (never hits bridge)", async () => {
+    const r = await run([
+      "clip", "keyframe", "add", "vc_s01", "--property", "opacity", "--at", "5", "--value", "abc",
+    ]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip keyframe add an unknown clip → bridge 400 code:4 → exit 4", async () => {
+    const r = await run([
+      "clip", "keyframe", "add", "nope", "--property", "opacity", "--at", "5", "--value", "1",
+    ]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip keyframe add onto a text clip → bridge 400 code:4 → exit 4 (D8)", async () => {
+    const r = await run([
+      "clip", "keyframe", "add", "tc_hook01", "--property", "opacity", "--at", "1", "--value", "1",
+    ]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip keyframe add with an unknown property → bridge 400 code:4 → exit 4", async () => {
+    const r = await run([
+      "clip", "keyframe", "add", "vc_s01", "--property", "bogus", "--at", "5", "--value", "1",
+    ]);
+    expect(r.exitCode).toBe(4);
   });
 
   // S10 (US 6/7/8) — track add/remove + clip add --track-id + overlay.
