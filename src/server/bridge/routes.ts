@@ -36,6 +36,7 @@ import {
 import { uiEventBus } from "./ui-events.js";
 import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
+import { resolvePlatformPreset } from "../../shared/platform-presets.js";
 import { renderSnapshot } from "../snapshot.js";
 import { ingestYouTubeIntoWork } from "./ingest-youtube.js";
 import {
@@ -667,15 +668,44 @@ bridgeRouter.post("/export", async (c) => {
     variables?: Record<string, string | number | boolean>;
     strictVariables?: boolean;
   };
+  // S15 (US 22/23/24) — resolve `--preset` against the @shared single-source
+  // table BEFORE any work. An unknown name is a caller error: fail loud with
+  // 400 + code:4 (S3 contract) instead of silently rendering the comp's old
+  // settings (the dead-control bug this slice kills). A blank/omitted preset
+  // means "use the comp's own exportPresets[0]" — unchanged legacy behaviour.
+  let preset: ReturnType<typeof resolvePlatformPreset>;
+  if (body.preset != null && String(body.preset).trim().length > 0) {
+    preset = resolvePlatformPreset(body.preset);
+    if (!preset) {
+      return c.json(
+        { ok: false, error: `unknown preset: ${body.preset}`, code: 4 },
+        400,
+      );
+    }
+  }
   try {
     const raw = await readCompositionFor({ workId: g.workId });
     // Resolve variables BEFORE render so the composition reaching Remotion
     // contains concrete values. resolve() is a no-op when raw.variables
     // is absent so existing works are unaffected.
-    const { composition: comp, resolvedValues, issues } = resolveVariables(raw, {
+    const resolved = resolveVariables(raw, {
       overrides: body.variables ?? {},
       strict: body.strictVariables === true,
     });
+    const { resolvedValues, issues } = resolved;
+    // When a preset was supplied, fold its canvas + encode settings into the
+    // composition so render-pipeline's encode stage (reads exportPresets[0])
+    // and canvas dimensions follow the platform. The loudness LUFS is passed
+    // out-of-band to runRenderPipeline (loudnorm stage reads it, not the comp).
+    const comp = preset
+      ? {
+          ...resolved.composition,
+          width: preset.width,
+          height: preset.height,
+          fps: preset.fps as typeof resolved.composition.fps,
+          exportPresets: [preset],
+        }
+      : resolved.composition;
     // Output filename gets a short hash of the override JSON so multiple
     // variants don't clobber each other.
     const overrideHash =
@@ -693,6 +723,11 @@ bridgeRouter.post("/export", async (c) => {
       comp,
       outDir,
       proxy: body.proxy ?? false,
+      // S15 — drive the loudnorm stage from the resolved preset. Without this
+      // the pipeline always fell back to its -14 default, so 微信(-16) etc.
+      // were unreachable via /export (issue #80). Omitted when no preset so
+      // legacy works keep the prior -14 behaviour.
+      loudnessTargetLufs: preset?.loudnessTargetLufs,
       // outputTitle becomes the filename stem; appending the hash keeps
       // variant outputs from clobbering each other.
       outputTitle: overrideHash ? `autoviral-export_${overrideHash}` : undefined,

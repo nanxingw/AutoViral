@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { PlatformPresetSection } from "./PlatformPresetSection";
 import { useComposition } from "../../store";
+import { PLATFORM_PRESETS } from "@shared/platform-presets";
 import {
   makeCompositionWithClips,
   makeVideoClip,
@@ -50,6 +51,18 @@ describe("PlatformPresetSection (Phase 6.D)", () => {
         expect.stringMatching(/YouTube/),
       ]),
     );
+  });
+
+  it("renders exactly the @shared PLATFORM_PRESETS ids (no re-hardcoded copy — S15 single source)", () => {
+    const comp = makeCompositionWithClips([]);
+    useComposition.setState({ comp });
+    render(<PlatformPresetSection workId="w" />);
+    const select = screen.getByLabelText(/platform preset/i) as HTMLSelectElement;
+    // Skip the disabled placeholder ("" value) — compare real option values.
+    const optionValues = Array.from(select.options)
+      .map((o) => o.value)
+      .filter((v) => v.length > 0);
+    expect(optionValues).toEqual(PLATFORM_PRESETS.map((p) => p.id));
   });
 
   it("selecting a preset opens the confirmation dialog", () => {

@@ -91,6 +91,28 @@ describe("runRenderPipeline — minimal pipeline (no ducking, no burn)", () => {
     expect(out).toMatch(/\.mp4$/);
   });
 
+  it("forwards loudnessTargetLufs into normalizeLufs (S15 — preset LUFS really reaches loudnorm, NOT the -14 default)", async () => {
+    // The /export route resolves a platform preset (e.g. 微信/-16) and passes
+    // its loudnessTargetLufs here. This render-consumption assertion guards the
+    // field from going dead again: the loudnorm stage must use it, not -14.
+    await runRenderPipeline({
+      comp: baseComp,
+      outDir: "/tmp/out",
+      loudnessTargetLufs: -16,
+    });
+    const normMock = normalizeLufs as unknown as ReturnType<typeof vi.fn>;
+    expect(normMock).toHaveBeenCalledOnce();
+    const optsArg = normMock.mock.calls[0]![2] as { target: number };
+    expect(optsArg.target).toBe(-16);
+  });
+
+  it("defaults the loudnorm target to -14 when no override is supplied", async () => {
+    await runRenderPipeline({ comp: baseComp, outDir: "/tmp/out" });
+    const normMock = normalizeLufs as unknown as ReturnType<typeof vi.fn>;
+    const optsArg = normMock.mock.calls[0]![2] as { target: number };
+    expect(optsArg.target).toBe(-14);
+  });
+
   it("forwards the AbortSignal into the render call so RENDER can be cancelled mid-flight (#44)", async () => {
     // Before #44 the render stage ignored the signal — cancellation only took
     // effect at the next stage boundary. The pipeline must now hand the signal
