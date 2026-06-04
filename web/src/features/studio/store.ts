@@ -407,7 +407,19 @@ export const useComposition = create<CompState>()(
           mintedId = transitionId;
         } catch (err) {
           if (err instanceof CompositionOpError) {
-            return; // silent no-op contract — leave the composition untouched.
+            // Wave 3a fix-up (finding #5) — SURFACE, don't swallow. The bridge
+            // (POST /transition) rejects an illegal add with code:4; the UI used
+            // to silently no-op, so the CLI and UI error paths diverged. Push a
+            // localized warn toast (same pattern as splitClip) so a human picking
+            // a last-clip anchor / unknown preset learns WHY it landed nowhere.
+            const locale = useLocaleStore.getState().locale;
+            useToastStore.getState().push({
+              variant: "warn",
+              message: MESSAGES[locale].studio.toast.transitionFailed,
+              detail: err.message,
+              ttlMs: 4000,
+            });
+            return; // composition untouched, but the user is told.
           }
           throw err;
         }
@@ -453,7 +465,17 @@ export const useComposition = create<CompState>()(
           ops.removeTransition(s.comp, { transitionId });
         } catch (err) {
           if (err instanceof CompositionOpError) {
-            return; // silent no-op — unknown id leaves the composition untouched.
+            // Wave 3a fix-up (finding #5) — surface, don't swallow. Mirrors the
+            // addTransition path so a remove of an unknown id tells the user
+            // instead of silently no-op'ing (CLI rejects the same op with code:4).
+            const locale = useLocaleStore.getState().locale;
+            useToastStore.getState().push({
+              variant: "warn",
+              message: MESSAGES[locale].studio.toast.transitionFailed,
+              detail: err.message,
+              ttlMs: 4000,
+            });
+            return; // composition untouched, but the user is told.
           }
           throw err;
         }

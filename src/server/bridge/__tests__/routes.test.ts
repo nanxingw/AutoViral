@@ -2121,6 +2121,153 @@ exportPresets: []
     expect(body.code).toBe(4);
   });
 
+  // ── S10 fix-up (finding #1) — `duration` is a RELATIVE clip length, not an
+  // absolute source `out`. `--in 2 --duration 3` must produce in=2 / out=5
+  // (a 3-second clip), NOT in=2 / out=3 (a 1-second clip — the old bug).
+  it("POST /clip video --in 2 --duration 3 → in=2 out=5 (3s clip, duration is relative)", async () => {
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/sample-shot.mp4",
+        track: "video",
+        trackId: "trk_v1",
+        in: 2,
+        duration: 3,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const id = ((await res.json()) as { result: { id: string } }).result.id;
+    const comp = await getComp();
+    const clip = comp.result.tracks
+      .flatMap((t) => t.clips)
+      .find((c) => c.id === id) as
+      | { in: number; out: number }
+      | undefined;
+    expect(clip?.in).toBe(2);
+    expect(clip?.out).toBe(5); // in + duration, NOT duration-as-out
+  });
+
+  it("POST /clip video --duration 3 (no --in) → in=0 out=3", async () => {
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/sample-shot.mp4",
+        track: "video",
+        trackId: "trk_v1",
+        duration: 3,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const id = ((await res.json()) as { result: { id: string } }).result.id;
+    const comp = await getComp();
+    const clip = comp.result.tracks
+      .flatMap((t) => t.clips)
+      .find((c) => c.id === id) as
+      | { in: number; out: number }
+      | undefined;
+    expect(clip?.in).toBe(0);
+    expect(clip?.out).toBe(3);
+  });
+
+  it("POST /clip video --out 5 (explicit out wins over duration semantics)", async () => {
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/sample-shot.mp4",
+        track: "video",
+        trackId: "trk_v1",
+        out: 5,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const id = ((await res.json()) as { result: { id: string } }).result.id;
+    const comp = await getComp();
+    const clip = comp.result.tracks
+      .flatMap((t) => t.clips)
+      .find((c) => c.id === id) as
+      | { in: number; out: number }
+      | undefined;
+    expect(clip?.in).toBe(0);
+    expect(clip?.out).toBe(5);
+  });
+
+  it("POST /clip audio --in 2 --duration 3 → in=2 out=5 (same relative-duration semantics)", async () => {
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/sample-bgm.mp3",
+        track: "audio",
+        trackId: "trk_a2",
+        in: 2,
+        duration: 3,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const id = ((await res.json()) as { result: { id: string } }).result.id;
+    const comp = await getComp();
+    const clip = comp.result.tracks
+      .flatMap((t) => t.clips)
+      .find((c) => c.id === id) as
+      | { in: number; out: number }
+      | undefined;
+    expect(clip?.in).toBe(2);
+    expect(clip?.out).toBe(5);
+  });
+
+  // ── S10 fix-up (finding #2) — an unknown `--track` kind must be an explicit
+  // 400 + code:4 rejection, NOT silently interpreted as an overlay clip (the
+  // `else` branch is reached ONLY for a genuine "overlay" value now).
+  it("POST /clip --track foo → 400 + code 4, disk untouched", async () => {
+    const before = await getComp();
+    const beforeCount = before.result.tracks.reduce(
+      (n, t) => n + t.clips.length,
+      0,
+    );
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/logo.png",
+        track: "foo",
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number; error?: string };
+    expect(body.code).toBe(4);
+    expect(body.error).toMatch(/invalid track kind/);
+    // Disk untouched: no overlay (or any) clip silently appended.
+    const after = await getComp();
+    const afterCount = after.result.tracks.reduce(
+      (n, t) => n + t.clips.length,
+      0,
+    );
+    expect(afterCount).toBe(beforeCount);
+    // And specifically no clip got smuggled in as an overlay.
+    const anyOverlayClip = after.result.tracks.some((t) =>
+      t.clips.some((c) => c.kind === "overlay"),
+    );
+    expect(anyOverlayClip).toBe(false);
+  });
+
   it("POST /clip on an overlay lane succeeds (no more hard-reject)", async () => {
     // First mint an overlay lane via POST /track, then add an overlay clip to it.
     const trackRes = await app.request("/api/bridge/v1/track", {

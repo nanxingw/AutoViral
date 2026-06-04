@@ -594,6 +594,28 @@ bridgeRouter.post("/clip", async (c) => {
     out?: number;
   };
   if (!body.track) return c.json({ ok: false, error: "missing track", code: 4 }, 400);
+  // S10 fix-up — `body.track` is the clip KIND the agent asked for. The kind
+  // dispatch below (if video / else if audio / else if text / else overlay)
+  // treated `overlay` as a catch-all `else`, so any unknown track string would
+  // have been *interpreted* as an overlay kind. The track lookup happens to
+  // throw first (no lane of that kind), but the contract was implicit. Reject an
+  // unknown kind UP FRONT with an explicit 400 + code:4, so the `else` branch is
+  // reached ONLY for a genuine "overlay" value — never as a silent fallback.
+  if (!(TRACK_KINDS as readonly string[]).includes(body.track)) {
+    return c.json(
+      { ok: false, error: `invalid track kind: ${body.track} (expected one of ${TRACK_KINDS.join("/")})`, code: 4 },
+      400,
+    );
+  }
+  // S10 fix-up — `duration` is a RELATIVE clip length, not an absolute source
+  // `out`. For video/audio (source-window clips) the old `out = body.out ??
+  // (body.duration ?? 5)` mis-read `--in 2 --duration 3` as out=3 (a 1s clip)
+  // instead of out=5 (a 3s clip). Compute the source `out` once, here: an
+  // explicit `--out` always wins; else `in + duration`; else `in + 5` default.
+  const inSec = body.in ?? 0;
+  const outSec =
+    body.out ??
+    (body.duration != null ? inSec + body.duration : inSec + 5);
   let newId = "";
   try {
     await mutateCompositionFor({ workId: g.workId }, (comp) => {
@@ -620,8 +642,8 @@ bridgeRouter.post("/clip", async (c) => {
           id,
           kind: "video",
           src: body.src,
-          in: body.in ?? 0,
-          out: body.out ?? (body.duration ?? 5),
+          in: inSec,
+          out: outSec,
           trackOffset: offset,
           transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
           filters: { brightness: 0, contrast: 0, saturation: 0 },
@@ -632,8 +654,8 @@ bridgeRouter.post("/clip", async (c) => {
           id,
           kind: "audio",
           src: body.src,
-          in: body.in ?? 0,
-          out: body.out ?? (body.duration ?? 5),
+          in: inSec,
+          out: outSec,
           trackOffset: offset,
           volume: 1,
           fadeIn: 0,

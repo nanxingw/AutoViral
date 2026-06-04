@@ -69,4 +69,15 @@ describe("clampHandleDuration (#54 handles)", () => {
     // both clips 0 → max half = 0 → would be 0, but floored to 0.05.
     expect(clampHandleDuration(0.5, 0, 0)).toBeCloseTo(0.05, 5);
   });
+
+  it("never exceeds the 5s schema ceiling even with very long adjacent clips (finding #4)", () => {
+    // before=1000s, after=1000s → handle math alone would allow the full
+    // desired 20s, but TransitionSchema caps durationSec at 5, so the clamp
+    // must too — otherwise writeCompositionFor's zod parse rejects a valid add.
+    expect(clampHandleDuration(20, 1000, 1000)).toBeCloseTo(5, 5);
+    // Right at the boundary stays 5 (not clamped down spuriously).
+    expect(clampHandleDuration(5, 1000, 1000)).toBeCloseTo(5, 5);
+    // Below the ceiling passes through unaffected.
+    expect(clampHandleDuration(4, 1000, 1000)).toBeCloseTo(4, 5);
+  });
 });

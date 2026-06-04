@@ -76,15 +76,25 @@ export function getPresetMeta(preset: TransitionPreset): TransitionPresetMeta {
   return TRANSITION_PRESET_META[preset];
 }
 
+// The transition durationSec schema bounds (src/shared/composition.ts
+// TransitionSchema: z.number().min(0.05).max(5)). Mirrored here as the single
+// source of truth for the clamp so the op layer never produces a value zod will
+// reject on write. Keep these in lockstep with TransitionSchema's min/max.
+export const TRANSITION_DURATION_MIN_SEC = 0.05;
+export const TRANSITION_DURATION_MAX_SEC = 5;
+
 /**
  * Clamp a desired transition duration to what the two adjacent clips can
  * physically afford ("handles"). A transition consumes durationSec from BOTH
  * adjacent clips; without this guard the renderer either panics or silently
- * produces a flicker. Returns the clamped duration in seconds (≥ 0.05).
+ * produces a flicker. Returns the clamped duration in seconds, bounded to the
+ * schema's [0.05, 5] range.
  *
  * `desiredSec` = the user's intent. `clipBeforeDur`, `clipAfterDur` = the
  * usable content duration of the clips on either side of the cut. The cap is
- * the lesser of the two halved (each clip contributes half the transition).
+ * the lesser of the two halved (each clip contributes half the transition),
+ * AND never exceeds the schema ceiling (so two very long adjacent clips can't
+ * yield a dur > 5 that the write-path zod parse would then reject).
  */
 export function clampHandleDuration(
   desiredSec: number,
@@ -96,5 +106,11 @@ export function clampHandleDuration(
   const maxHalf = Math.max(0, Math.min(clipBeforeDur, clipAfterDur) / 2);
   const cappedHalf = Math.min(desiredSec / 2, maxHalf);
   const out = cappedHalf * 2;
-  return Math.max(0.05, out); // never zero — schema floor
+  // Bound to the schema's [min, max]: floor at 0.05 (never zero) and cap at the
+  // schema max so an extreme desiredSec on very long clips can't produce a value
+  // zod rejects on writeCompositionFor's parse.
+  return Math.min(
+    TRANSITION_DURATION_MAX_SEC,
+    Math.max(TRANSITION_DURATION_MIN_SEC, out),
+  );
 }

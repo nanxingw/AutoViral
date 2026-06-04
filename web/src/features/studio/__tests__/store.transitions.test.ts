@@ -2,6 +2,9 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { useComposition } from "../store";
 import { CompositionSchema, makeEmptyComposition } from "../types";
 import type { VideoClip } from "../types";
+import { useToastStore } from "@/stores/toast";
+import { useLocaleStore } from "@/i18n/store";
+import { MESSAGES } from "@/i18n/messages";
 
 // #54 Phase 1 — add/update/remove transition store actions, plus the
 // remove-clip-prunes-orphan-transition invariant.
@@ -28,6 +31,9 @@ beforeEach(() => {
   const v1 = videoTrack();
   useComposition.getState().addClip(v1.id, videoClip("c1", 0, 3));
   useComposition.getState().addClip(v1.id, videoClip("c2", 3, 3));
+  // Wave 3a fix-up (finding #5) — clear toasts so the 2s dedupe window in the
+  // toast store can't make a warn from an earlier test mask a later assertion.
+  useToastStore.getState().clear();
 });
 
 describe("addTransition (#54)", () => {
@@ -86,6 +92,69 @@ describe("addTransition (#54)", () => {
         afterClipId: "ghost", preset: "cross-dissolve",
       }),
     ).toBeNull();
+  });
+});
+
+// Wave 3a fix-up (finding #5) — the store used to SILENTLY swallow the op's
+// CompositionOpError on an illegal add/remove, so the CLI (POST /transition
+// rejects with code:4) and the UI diverged on the error path. Both store actions
+// now SURFACE a localized warn toast (same pattern as splitClip). These assert
+// the toast appears AND the composition is still left untouched.
+describe("transition error path surfaces a warn toast (finding #5)", () => {
+  function lastToast() {
+    const entries = useToastStore.getState().entries;
+    return entries[entries.length - 1];
+  }
+
+  it("illegal addTransition (last-clip anchor) pushes a warn toast", () => {
+    const v1 = videoTrack();
+    expect(useToastStore.getState().entries).toHaveLength(0);
+    const id = useComposition.getState().addTransition(v1.id, {
+      afterClipId: "c2", // last clip — no successor → CompositionOpError
+      preset: "cross-dissolve",
+    });
+    expect(id).toBeNull(); // still a no-op (composition untouched)
+    expect(videoTrack().transitions ?? []).toHaveLength(0);
+    const t = lastToast();
+    expect(t).toBeDefined();
+    expect(t.variant).toBe("warn");
+    const locale = useLocaleStore.getState().locale;
+    expect(t.message).toBe(MESSAGES[locale].studio.toast.transitionFailed);
+    // The op's technical message rides along as the detail line.
+    expect(t.detail).toMatch(/last clip/);
+  });
+
+  it("illegal addTransition (unknown preset) pushes a warn toast", () => {
+    const v1 = videoTrack();
+    const id = useComposition.getState().addTransition(v1.id, {
+      afterClipId: "c1",
+      // cast: the store action's preset is typed to the enum, but a misconfigured
+      // caller / stale UI can pass a string the registry doesn't know.
+      preset: "no-such-preset" as never,
+    });
+    expect(id).toBeNull();
+    const t = lastToast();
+    expect(t?.variant).toBe("warn");
+    const locale = useLocaleStore.getState().locale;
+    expect(t.message).toBe(MESSAGES[locale].studio.toast.transitionFailed);
+  });
+
+  it("illegal removeTransition (unknown id) pushes a warn toast", () => {
+    useComposition.getState().removeTransition(videoTrack().id, "tr_ghost");
+    const t = lastToast();
+    expect(t?.variant).toBe("warn");
+    const locale = useLocaleStore.getState().locale;
+    expect(t.message).toBe(MESSAGES[locale].studio.toast.transitionFailed);
+  });
+
+  it("a SUCCESSFUL addTransition does NOT push a toast", () => {
+    const v1 = videoTrack();
+    const id = useComposition.getState().addTransition(v1.id, {
+      afterClipId: "c1",
+      preset: "cross-dissolve",
+    });
+    expect(id).toMatch(/^tr_/);
+    expect(useToastStore.getState().entries).toHaveLength(0);
   });
 });
 
