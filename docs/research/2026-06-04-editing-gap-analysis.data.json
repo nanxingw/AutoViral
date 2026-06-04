@@ -1,0 +1,3255 @@
+{
+  "counts": {
+    "capabilities": 6,
+    "usability": 2,
+    "competitors": 4,
+    "gaps": 103,
+    "codeIssues": 15,
+    "missedGaps": 17,
+    "overclaims": 8
+  },
+  "gaps": {
+    "gaps": [
+      {
+        "feature": "绿幕 / chroma key 抠像（取色 + 强度/阴影微调）",
+        "category": "抠像/绿幕/合成",
+        "autoviralStatus": "missing",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot",
+          "Descript/Veed/Runway",
+          "Premiere/FCP/Resolve(Fusion)"
+        ],
+        "agentAngle": "完全缺失——schema/render/CLI 三层皆无。agent 无论经 CLI 还是 raw HTTP 都无法表达 chroma key，因为 VideoClip schema 根本没有 chroma 字段。要补必须先扩 schema，再扩渲染，再加 CLI verb，才谈得上 agent 可驱动。",
+        "evidence": "全仓 grep chroma|greenscreen|chromakey|colorkey 零命中（已验证）；VideoClip schema 无 chroma 字段。OpenShot 内置 Chroma Key 滤镜，剪映绿幕带吸管，这是中端门槛功能。"
+      },
+      {
+        "feature": "智能抠像 / 自动去背景（无需绿幕，AI rotoscope）",
+        "category": "抠像/绿幕/合成",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Descript",
+          "Veed",
+          "Runway"
+        ],
+        "agentAngle": "AI-native 阵营已把自动抠像列为基本盘；AutoViral 零实现。对 agent 命题尤其痛——'agent 帮我把人抠出来叠到新背景'是自然语言剪辑的高频意图，目前无任何后端可调。",
+        "evidence": "无 rotoscope/segment/matting/去背景实现（grep 无）；OverlayClip 只能整图叠加，无 alpha 抠选。"
+      },
+      {
+        "feature": "蒙版 / mask（线性/圆形/矩形/文字/钢笔等形状，可移动旋转缩放反转）",
+        "category": "抠像/绿幕/合成",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(9形)",
+          "OpenShot",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "clip schema 无 mask 字段、渲染层无 clip-path/mask。agent 无任何途径加蒙版。蒙版是做 reveal 转场、局部调色、二次曝光的基础件，缺它把一大类创意意图锁死。",
+        "evidence": "grep \\bmask\\b 在 studio/shared 仅命中 CaptionsLayer 的字幕逐词 clipPath（已验证，与蒙版功能无关）；VideoTrackRenderer 无 mask/clip-path。"
+      },
+      {
+        "feature": "混合模式 blending mode（叠加/滤色等做多重曝光）",
+        "category": "抠像/绿幕/合成",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "OverlayClip 只有 opacity，无 mix-blend-mode 字段。agent 无法做叠化创意。非基本盘但是质感差异点。",
+        "evidence": "OverlayClip schema(composition.ts:226-244) 仅 src/position/opacity/keyframes，无 blendMode 字段。"
+      },
+      {
+        "feature": "显式裁切 crop（可拖拽手柄的裁剪矩形）",
+        "category": "基础剪辑/画面",
+        "autoviralStatus": "missing",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot(3.4交互式crop)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "TransformsSchema 只有 scale/x/y/rotation，无 crop 矩形；画面只能靠 objectFit:cover+scale 硬填充。agent 无法'裁掉画面左 1/3'这类基础意图。crop 是 NLE 最基本的画面操作之一，缺失属硬伤。",
+        "evidence": "TransformsSchema(composition.ts:8-13) 无 crop 字段；VideoTrackRenderer.tsx:105 用 objectFit:'cover'。"
+      },
+      {
+        "feature": "倒放 reverse",
+        "category": "基础剪辑",
+        "autoviralStatus": "missing",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot(time-mapping)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "speed 下限 0.1×>0，无负速/reverse filter。agent 无法表达倒放。这是消费级剪辑器的基本功能，缺失明显。",
+        "evidence": "SPEED_MIN=0.1(composition.ts:131)，speed-ramp-ffmpeg 只生成 setpts=PTS/k(k>0)，全仓无 ffmpeg reverse filter（已验证 grep）。"
+      },
+      {
+        "feature": "定格 freeze frame",
+        "category": "基础剪辑",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无定格帧能力（无法把某帧冻结成一段静止画）。agent 无任何 schema 字段或命令表达。短视频高频玩法，缺失。",
+        "evidence": "全仓无 freeze/hold-frame 概念；speed schema 不支持 0×。"
+      },
+      {
+        "feature": "Ripple/Roll/Slip/Slide 四种精修 trim",
+        "category": "精密时间线编辑",
+        "autoviralStatus": "partial",
+        "severity": "important",
+        "competitorsWithIt": [
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "store 有 resizeClip(单边 trim+邻接 cap)+rippleDeleteClip，但无 roll/slip/slide 语义；且这些 store action 是 ui-only，agent 经 CLI `clip set` 只能盲设 in/out 无邻接 cap/无 ripple。专业精修肌肉记忆完全缺，agent 更够不着。",
+        "evidence": "store.ts resizeClip 仅单边 trim；无 rollEdit/slipClip/slideClip action；CLI clip set 浅合并无 cap(clip.ts:59-64)。"
+      },
+      {
+        "feature": "Ripple delete（删除并自动合拢空隙）— agent 不可达",
+        "category": "时间线编辑",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "功能 UI 完整(store.rippleDeleteClip+快捷键)，但 agent 唯一的 CLI 删除 `clip remove` 是 plain delete 留空隙，非 ripple。'agent 删掉这段并合拢'无法用一条命令完成，只能手搓整 comp PUT。",
+        "evidence": "rippleDeleteClip(store.ts:418-432) UI/键盘 only；bridge DELETE /clip(routes.ts:604) 为 plain delete 留 gap；无 ripple CLI verb。"
+      },
+      {
+        "feature": "Ripple insert（插入并推开后续片段）",
+        "category": "时间线编辑",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "addClip 只 push 不推邻，添加会静默 overlap。agent '在此处插一段并把后面顺移'无任何途径。三/四点插入编辑(Insert/Overwrite)整套都缺。",
+        "evidence": "addClip(store.ts:237-246) 只 push+grow duration 无 neighbor shift；无 insert-with-push action。"
+      },
+      {
+        "feature": "七种插入编辑（Insert/Overwrite/Replace/Fit-to-Fill/Place-on-Top/Append/Ripple-Overwrite）+ 三/四点编辑",
+        "category": "精密时间线编辑",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "NLE 编辑根基范式整套缺失。agent 只有 addClip(append-ish)。三点/四点 + 源 in/out 是 agent 精准放素材的理想抽象，全无。",
+        "evidence": "store 仅 addClip/moveClip；无 insert/overwrite/replace/fit-fill 模型；无源监视器 in/out 概念。"
+      },
+      {
+        "feature": "嵌套序列 / Compound Clip 复合片段",
+        "category": "时间线/轨道",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Premiere(Nested)",
+          "FCP/Resolve(Compound)"
+        ],
+        "agentAngle": "无 clip 分组/嵌套/复用概念（composition schema 无 group/nest 字段）。agent 无法把一段编辑打包复用。专业进阶项，对 agent 命题非基本盘但能极大简化复杂编辑表达。",
+        "evidence": "grep groupClip/nest/compound 零命中；composition schema 无 group 字段。"
+      },
+      {
+        "feature": "Clip 复制/粘贴/复制(duplicate)",
+        "category": "时间线编辑",
+        "autoviralStatus": "missing",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot(3.4剪贴板)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "全仓无 copyClip/pasteClip/duplicateClip。agent 无 copy-with-all-props 原语（只能 clip add 建空白新 clip，丢失全部样式/transform/keyframe）。复制是最基础的编辑动作之一。",
+        "evidence": "grep copyClip|pasteClip|duplicateClip 仅命中 Chat 附件剪贴板，无时间线实现。"
+      },
+      {
+        "feature": "Clip 分组 / 多选批量变换",
+        "category": "时间线编辑",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot(3.4多选变换)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无 group/多选批量操作。agent 无法'把这几个 clip 一起放大'。非基本盘。",
+        "evidence": "ShortcutsCheatsheet 的 groupClip 是 i18n 节标题非功能；无 group store action。"
+      },
+      {
+        "feature": "时间线 markers / 章节标记（用户可编辑）",
+        "category": "时间线编辑",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "Composition/Track 无 markers 字段（仅有检测到的 beats 用于 snap，不可编辑）。agent 无法打标记做章节/cue。非基本盘但对长视频协作有用。",
+        "evidence": "src/shared/composition.ts 无 markers 字段；'marker' 命中均为 caption marker-sweep 高亮效果(无关)。"
+      },
+      {
+        "feature": "Track solo（独奏）",
+        "category": "轨道/混音",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere(Mixer)",
+          "Resolve(Fairlight)"
+        ],
+        "agentAngle": "全仓无 solo（混音只有 mute）。agent 无法独奏某轨试听。混音基本盘缺一半。",
+        "evidence": "grep 'solo' 在 studio + composition.ts 零命中（已验证）。"
+      },
+      {
+        "feature": "Track lock（锁定轨道）",
+        "category": "轨道",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "OpenShot",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无 track.locked 字段/UI。agent 误改受保护轨无防护。专业项，非基本盘。",
+        "evidence": "无 lockTrack/track.locked；TimelineTrackHeader 仅 mute+hide+rename+volume+delete。"
+      },
+      {
+        "feature": "Track 增删/重排/改名/静音/隐藏/per-track 音量(dB)/语言 — agent 全不可达",
+        "category": "轨道",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "AutoViral UI 端轨道操作非常完整(addTrack/removeTrack/reorder/rename/mute/hide/setVolume/setLanguage 全有 + undo)，但 bridge 根本没有任何 /track 端点，CLI 无 track 动词——agent 想加一条 BGM 轨、给某轨静音、调 lane 增益，全都够不着，只能 GET 整 comp→自己 mint trk_ id→PUT 全量。这是核心命题(agent 经 CLI 驱动剪辑)在轨道层的整片落空。",
+        "evidence": "bridge routes.ts 端点清单(已验证)只有 /clip POST/PATCH/DELETE + /carousel/*，无 /track；CLI commands/ 目录(已验证)无 track.ts；mute/hide 还故意绕过 undo 栈。"
+      },
+      {
+        "feature": "Split 分割 / Trim 双边 / 跨轨移动 / collapse-gaps / in-track reorder — agent 不可达",
+        "category": "时间线编辑",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "AutoViral 浏览器端是真 NLE(splitClip 带 keyframe 重基、双边 resize 带邻接 cap、moveClipToTrack 跨轨、collapseGaps)，全是成熟意图级 store action——但 agent 经 bridge 只有 clip add/set/remove，没有任何 split/trim/move-to-track/collapse 动词。agent 要分割必须自己算两半 keyframe 再 PUT 全 comp，要跨轨移动只能整 comp 重写。'agent 把这段从第 5 秒切开'这种最基本的指令都没有一等命令。",
+        "evidence": "store.ts splitClip(543)/resizeClip(451)/moveClipToTrack(289)/collapseGaps(433) 全 UI/键盘 only；bridge 无对应 verb；clip set PATCH 只在原轨原地改字段，永远无法跨轨(routes.ts:730)。"
+      },
+      {
+        "feature": "Undo/redo（clip 级 + 键盘 Cmd+Z）",
+        "category": "项目管理/编辑",
+        "autoviralStatus": "partial",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "只有 track-op 级 undo 栈，clip 操作(split/trim/move/ripple/add/remove)全部不入栈，且无 Cmd+Z 键位。人改错一个 clip 无法撤销。agent 有自己的 snapshot/comp diff 旁路，但 UI 用户体验缺基本撤销。",
+        "evidence": "undoTrackOp/redoTrackOp(store.ts:1070) 仅快照 tracks 数组；clip 操作注释明示不 pushHistory；useShortcuts 无 Cmd+Z。"
+      },
+      {
+        "feature": "JKL 穿梭播放 + 变速 shuttle",
+        "category": "播放/导览",
+        "autoviralStatus": "partial",
+        "severity": "important",
+        "competitorsWithIt": [
+          "Premiere/FCP/Resolve",
+          "OpenShot(逐帧)"
+        ],
+        "agentAngle": "只有 J/L=±5s 跳转，非真 JKL 倒放/快进/多按加速 shuttle。专业肌肉记忆缺。对 agent 无关(agent 用绝对秒)，但人类剪辑体验弱。",
+        "evidence": "useShortcuts.ts:73-82 J/L 仅 ±5s seek；无 K 暂停 shuttle、无多按加速。"
+      },
+      {
+        "feature": "Skimming 掠览（悬停即预览素材）",
+        "category": "播放/导览",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "FCP",
+          "Resolve(部分)"
+        ],
+        "agentAngle": "无悬停预览。纯人类体验项，与 agent 命题无关。",
+        "evidence": "无 skim/hover-preview 实现。"
+      },
+      {
+        "feature": "逐帧步进（方向键逐帧前后）",
+        "category": "播放/导览",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "OpenShot",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "有 setFrame 但无方向键逐帧步进绑定(只有 J/L ±5s)。精确对位时人类必需。agent 用绝对秒不受影响。",
+        "evidence": "useShortcuts.ts 无逐帧 ←/→ 绑定；仅 J/L ±5s。"
+      },
+      {
+        "feature": "专业调色：一级色轮（Lift/Gamma/Gain）",
+        "category": "滤镜/调色",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "只有 brightness/contrast/saturation 三个 CSS filter 标量。无色轮/三段(阴影/中间/高光)调整。agent 即使经 raw HTTP 也无字段可写。调色是认真剪辑的核心维度。",
+        "evidence": "FiltersSchema(composition.ts:16-22) 仅 brightness/contrast/saturation/lut；无 lift/gamma/gain。"
+      },
+      {
+        "feature": "曲线工具（RGB/Luma 曲线 + Hue-vs-Hue/Sat/Lum）",
+        "category": "滤镜/调色",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无任何曲线调色。专业调色标配，AutoViral 零。agent 无字段。",
+        "evidence": "FiltersSchema 无 curves 字段。"
+      },
+      {
+        "feature": "HSL Qualifier / 二级局部调色",
+        "category": "滤镜/调色",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无按色相/饱和/亮度抠选局部调色。专业进阶，非基本盘。",
+        "evidence": "无 HSL secondary/qualifier 实现。"
+      },
+      {
+        "feature": "LUT 调色（.cube/.3dl 导入应用）",
+        "category": "滤镜/调色",
+        "autoviralStatus": "stub",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot(3.4 Color Map)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "filters.lut 字段在 schema 里但全仓零渲染消费——纯死字段。agent 即使写进 yaml 画面也无变化(虚假可达)。LUT 是风格化调色基本盘，AutoViral 是假实现。",
+        "evidence": "filters.lut(composition.ts:17) 全仓除 schema 外零消费(已确认 grep)；toCssFilter 不读 lut；render-pipeline 不读 lut。"
+      },
+      {
+        "feature": "AI 智能调色 / Color Match（风格一致性自动匹配）",
+        "category": "滤镜/调色",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut"
+        ],
+        "agentAngle": "无 AI 调色/匹配。对 agent 命题本应是强项('agent 帮我统一这组镜头调色')，但后端零实现。",
+        "evidence": "无 color-match/ai-color 实现。"
+      },
+      {
+        "feature": "调节层 adjustment layer（跨多片段统一调色）",
+        "category": "滤镜/调色",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "filters 只能 per-VideoClip，无调节层概念。agent 无法一次性给整段统一调色。专业工作流标配。",
+        "evidence": "filters 仅在 VideoClip(composition.ts:16);无 adjustment-layer/调节层 clip 类型。"
+      },
+      {
+        "feature": "节点式调色图（serial/parallel/layer 节点）",
+        "category": "滤镜/调色",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Resolve"
+        ],
+        "agentAngle": "Resolve 独有范式，非基本盘。AutoViral 无。与 agent 命题无关。",
+        "evidence": "无节点图。"
+      },
+      {
+        "feature": "特效库（Glitch/Blur/3D/像素化/描边/Lens Flare 等数百款）",
+        "category": "特效",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot(3.4新增5个)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无通用特效库(只有 brightness/contrast/sat + transform + 文字动画 + 字幕动画)。agent 无'加故障特效/加模糊/加描边'可调。这是消费级剪辑器基本盘，缺失明显。",
+        "evidence": "FiltersSchema 仅基础三标量；无 blur/glitch/pixelate/outline/lens-flare 字段。"
+      },
+      {
+        "feature": "运动追踪 motion tracking + 跟踪蒙版",
+        "category": "特效",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve(Power Windows)"
+        ],
+        "agentAngle": "无运动追踪。让贴纸/打码跟随主体的能力缺失。专业进阶。",
+        "evidence": "无 motion-track/tracking 实现。"
+      },
+      {
+        "feature": "画面防抖 / 视频稳定 stabilization",
+        "category": "稳定/补帧",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "全仓无 vidstab/deshake。agent 无法'稳定这段抖动素材'。手持拍摄素材的基本清理工序，缺失。",
+        "evidence": "grep stabiliz|deshake|vidstab 零命中（已验证）。"
+      },
+      {
+        "feature": "AI 补帧（光流升帧 / 帧插值）",
+        "category": "稳定/补帧",
+        "autoviralStatus": "stub",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve(optical-flow)"
+        ],
+        "agentAngle": "frame-interpolate post-processor 是 stub(无 RIFE 模型→copyFile 原样返回 stub:true)。端点存在 agent 经 HTTP 可调但无视觉变化。需真实模型才落地。",
+        "evidence": "post-process/interpolate.ts:19-38 无 RIFE_MODEL_PATH→copyFile stub。"
+      },
+      {
+        "feature": "超分 / 画质增强 / upscale（4K 上采样）",
+        "category": "画质增强",
+        "autoviralStatus": "stub",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut(超清)",
+          "Runway(4K upscale)"
+        ],
+        "agentAngle": "super-resolve post-processor 是 stub(无 ESRGAN→copyFile)。端点 agent 可调但无效。",
+        "evidence": "post-process/super-resolve.ts:19-38 无 ESRGAN_MODEL_PATH→copyFile。"
+      },
+      {
+        "feature": "AI 对口型 lip-sync",
+        "category": "AI 功能",
+        "autoviralStatus": "stub",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Captions",
+          "Veed"
+        ],
+        "agentAngle": "lip-sync post-processor 是 stub(无 Wav2Lip→copyFile)。端点 agent 可调但无效。配音翻译刚需配件。",
+        "evidence": "post-process/lip-sync.ts:20-44 无 WAV2LIP_MODEL_PATH→copyFile。"
+      },
+      {
+        "feature": "智能裁切 / Auto Reframe（横转竖自动重构图 + 主体追踪）",
+        "category": "智能裁切",
+        "autoviralStatus": "stub",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Opus Clip(招牌)",
+          "Captions"
+        ],
+        "agentAngle": "端点 POST /api/video/reframe 存在但 smart_crop/saliency.py/crop_9_16.py 已删→运行时一律 501。这是 AutoViral 命题最该有的能力(母片自动出多比例)，但后端死了。agent 调到只拿到错误。补这个对'agent 驱动多平台分发'价值极高。",
+        "evidence": "generate.ts:358-365 脚本已删返回 501 reframe_script_missing(已验证 modules/ 不存在)。"
+      },
+      {
+        "feature": "变速：曲线/可变变速导出保真",
+        "category": "基础剪辑/变速",
+        "autoviralStatus": "partial",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(6预设曲线变速)",
+          "OpenShot(time-mapping)",
+          "Premiere/FCP/Resolve(speed ramp)"
+        ],
+        "agentAngle": "WYSIWYG 在此破裂：可变变速在 preview 里能看到加减速，但 export 时 ffmpeg 静默回落 1×。agent 即使经 comp 写了 speed keyframe，导出结果不保真——这违反 agent 自检前提(snapshot 单帧也看不出 ramp)。剪映有 6 大曲线变速预设。",
+        "evidence": "speed-ramp-ffmpeg.ts:188-196 变量变速→console.warn+原样返回 'rendering at 1×'；render-pipeline 注释 deferred 8.3.5。"
+      },
+      {
+        "feature": "变速：曲线变速预设库（蒙太奇/子弹时间/渐快渐慢等）",
+        "category": "基础剪辑/变速",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut(6预设)"
+        ],
+        "agentAngle": "无一键曲线变速预设。要做变速须逐个 speed keyframe 手写(且导出还不保真)。agent 无预设动词。",
+        "evidence": "KeyframePanel 仅逐条手加 speed keyframe；无 applySpeedPreset。"
+      },
+      {
+        "feature": "通用动画预设库（一键 Ken Burns / 推拉 / 弹跳）",
+        "category": "动画/关键帧",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(入场出场动画)",
+          "OpenShot(预设动画)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无组合关键帧模板，动画须逐帧手写。对 agent 命题尤痛——'agent 给这张图加 Ken Burns'本应一条命令，现在 agent 既无预设也写不进嵌套 keyframes(CLI 坏)，只能手搓整 comp。",
+        "evidence": "无 applyAnimationPreset；KeyframePanel 仅手加(228-365);crossfade 是文档非功能。"
+      },
+      {
+        "feature": "关键帧动画引擎 — agent 经 CLI 不可达",
+        "category": "动画/关键帧",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "AutoViral 有真 bezier 关键帧引擎(7属性 + Newton-Raphson)，但 CLI `clip set --keyframes` 是坏的：flag 解析器只能传扁平 scalar，把 JSON 当字符串发出→PATCH 盲 spread→CompositionSchema 拒绝(期望 array)→HTTP 400。recipe(crossfade-between-clips.md:56-70)明确教 agent 用这条路径，但实际跑必 400。agent 写关键帧的唯一真路径是 raw HTTP PUT 全量 comp(CLI bridgeRequest 硬编码 /api/bridge/v1 够不到 /api/works)。文档承诺与实现矛盾。",
+        "evidence": "clip.ts:59-64 patch[key]=/^-?[\\d.]+$/.test(v)?Number(v):v 无 JSON.parse；routes.ts:736-744 盲 spread；keyframes 期望 array(composition.ts:162);recipe 宣称可用。"
+      },
+      {
+        "feature": "画面变换/滤镜/style/position/fade/ducking 等嵌套字段 — agent 经 CLI 不可达",
+        "category": "composition 写面/agent 可达性",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "所有竞品(这些是其内置可调项)"
+        ],
+        "agentAngle": "agent 改图最常动的字段(transform.scale/filter.brightness/style.color/position.anchor/fade/ducking)全是嵌套对象，但 CLI clip set 是 flat-key 浅合并，碰不到任何一个；flat --scale 2 只写顶层 scale 键被 schema strip。这是核心命题最大落空：agent 能调的只有 in/out/trackOffset/volume/duration/text 几个顶层标量。其余富功能即便 UI 完整也对 agent 不可达。",
+        "evidence": "clip.ts flat 解析；bridge PATCH {...cl,...patch} 浅合并(routes.ts:740);多余/嵌套 key 被 strip 静默丢；transform/filter/style/position 均嵌套(composition.ts)。"
+      },
+      {
+        "feature": "agent 缺意图级命令：split/trim/transition/keyframe/track/scene/variable/move-to-track/reframe",
+        "category": "composition 写面/agent 可达性",
+        "autoviralStatus": "missing",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "AI-native(Captions/Veed/Descript 用自然语言→编辑器执行复杂操作)"
+        ],
+        "agentAngle": "这是'agent 经 CLI 驱动剪辑'命题的根本缺口：bridge 无 /transition /keyframe /track /scene /variable /split /move 端点(已验证只有 /clip+/carousel)，schema 全支持但无意图级写口。agent 要做这些只能手搓整份 composition JSON 走 PUT 全量替换——等于在 prompt 里重新实现 store.ts 的 25 个 action(含 trk_ id mint、transition.afterClipId 同轨非末、speed 范围、keyframe 重基)。竞品 AI-agent 是'下指令→引擎执行'，AutoViral 是'agent 自己当编辑引擎'。",
+        "evidence": "bridge routes.ts 端点清单(已验证)无这些 verb；routes.ts:524 注释承认需 client-side 组合后 POST 整 comp；store.ts 25 个意图级 action 仅 UI。"
+      },
+      {
+        "feature": "schema 感知的 dry-run / validate-patch 预检",
+        "category": "composition 写面/agent 可达性",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "—(agent 工具链特性)"
+        ],
+        "agentAngle": "CLI 的 lint/validate/check 是 Puppeteer a11y/对比度质检，不是 composition schema 校验。agent 无法在写前预检一个 patch 是否合 schema，只能 PUT 后读 400 issues 试错——每次试错一个完整渲染往返，对 agent 命题是效率/可靠性硬伤。",
+        "evidence": "check.ts:58-108 是 a11y/对比度质检；无 schema dry-run 端点；唯一反馈是 PUT 后 zod issues 数组。"
+      },
+      {
+        "feature": "自动字幕 ASR 落时间轴 — 前端零 UI、agent 无 CLI",
+        "category": "字幕(ASR)",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Descript/Opus/Captions/Veed",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "经典 built-not-wired：POST /api/audio/captions 后端完整(托管 venv+stable-ts 真转写返回时间码)，但 fetchCaptions 在前端零非测试消费方(已验证 grep 仅自身定义)——没有任何按钮把字幕落时间轴。agent 也没有 CLI 动词触发。即'一键生成字幕'人和 agent 都不可达。ASR 自动字幕是现代剪辑器绝对基本盘，这是最痛的差距之一。",
+        "evidence": "audio.ts:145-226 端点真实；web/src grep fetchCaptions 仅命中定义(已验证);commands/ 无 caption 动词。"
+      },
+      {
+        "feature": "字幕翻译 / 双语字幕（自动转写+翻译+双轨布局一键流）",
+        "category": "字幕(ASR)",
+        "autoviralStatus": "partial",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(15+语种)",
+          "Captions(100+)",
+          "Veed(130+)"
+        ],
+        "agentAngle": "无一等公民双语字幕功能。只能两条 text 轨叠加或一条 clip 写'zh\\nen'两行；唯一打通的转写+翻译只针对 YouTube 源(ingest)，且产译文轨非双轨。agent 经 clip add 能拼但样式不可控(CLI 改不了嵌套 style)。竞品是非 YouTube 源也能一键双语。",
+        "evidence": "无双语功能；Track.language 字段存在(composition.ts:290);ingest-youtube 是唯一转写+翻译流。"
+      },
+      {
+        "feature": "动态字幕模板 / 关键词高亮 / 自动 emoji / 说话人配色 — 无生成入口",
+        "category": "字幕样式",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Opus Clip(招牌)",
+          "Captions"
+        ],
+        "agentAngle": "AutoViral 有移植自 hyperframes 的高级 kinetic 字幕渲染器(逐词高亮/SVG下划线/burst)，渲染层 full，但无生成入口(同 ASR 死链)、无样式编辑面板，只能手写 YAML/agent 整 PUT 驱动。竞品是自动字幕直接带动画模板+关键词高亮。能力强但完全够不着。",
+        "evidence": "CaptionsLayer.tsx 完整 kinetic 渲染；CaptionGroupStyle schema 无编辑 UI；靠 caption_strategy=overlay 数据驱动无入口。"
+      },
+      {
+        "feature": "字幕导出 burn/sidecar — agent 经 CLI 不可选",
+        "category": "字幕导出",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Premiere/FCP/Resolve",
+          "OpenShot(无,反是AutoViral优势)"
+        ],
+        "agentAngle": "人在 ExportCaptionsDialog 可选每轨 burn/sidecar/drop+多语言 SRT，但 CLI export 无 --captions 标志、/export body 不传 captionTracks，agent 只能走默认(全文字轨经 Remotion 渲染)。agent 无法控制烧录/旁挂策略。",
+        "evidence": "routes.ts:649-655 /export body 仅 preset/proxy/variables；export.ts 无 --captions。"
+      },
+      {
+        "feature": "花字 / 艺术字（渐变填充字 / 描边艺术字 / 文字特效）",
+        "category": "文字",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(文字模板/花字)",
+          "Premiere(Essential Graphics)"
+        ],
+        "agentAngle": "视频与图文两套文字系统都只支持纯色文字(color 单 CSS color)。无渐变字/描边艺术字/霓虹/贴图填充。剪映花字是短视频文字基本盘。agent 无字段。",
+        "evidence": "carousel.ts:36 color 单色；composition.ts TextClip 单色 fill；grep 花字/wordart 零命中。"
+      },
+      {
+        "feature": "文字模板库 / 预设排版样式",
+        "category": "文字",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "FCP(Motion模板)",
+          "Premiere"
+        ],
+        "agentAngle": "无文字模板(预设排版样式)。每个文字层从空白起手动配。agent 无'套用标题模板'动词。短视频文字基本盘。",
+        "evidence": "无 text template 注册表;图文只有 3 layout+5 palette。"
+      },
+      {
+        "feature": "视频字幕真描边（轮廓）+ 独立阴影 + 行距",
+        "category": "文字",
+        "autoviralStatus": "partial",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "UI 叫'描边'实为 textShadow 发光(非 WebkitTextStroke 真轮廓);无独立阴影控件;无 per-clip 行距(CaptionStyle.lineHeight 是孤儿字段)。诚实判 partial:看起来有实则缩水。agent 经 CLI 还改不了这些嵌套 style。",
+        "evidence": "TextTrackRenderer.tsx:86 stroke→textShadow 发光;TextClip schema 无 shadow/lineHeight;CaptionStyle.lineHeight 无 UI 消费。"
+      },
+      {
+        "feature": "视频字幕对齐 text-align",
+        "category": "文字",
+        "autoviralStatus": "partial",
+        "severity": "important",
+        "competitorsWithIt": [
+          "所有竞品"
+        ],
+        "agentAngle": "视频字幕对齐渲染写死 center，schema 根本无 align 字段,UI/CLI/agent 都改不了。基础文字属性缺失。",
+        "evidence": "TextTrackRenderer.tsx:90 textAlign 硬编码 center;TextClipSchema 无 align 字段。"
+      },
+      {
+        "feature": "自定义字体 / 中文花体 / 字体库（仅 3 个品牌字体）",
+        "category": "文字",
+        "autoviralStatus": "partial",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(海量字体)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "全站只加载 3 个字体家族(Inter/Instrument Serif/JetBrains Mono),无字体上传/中文书法字/字体库。短视频文字表现力受限。agent 图文 set-layer 只能选 3 枚举之一。",
+        "evidence": "tokens.css:53-55 仅 3 web 字体;carousel.ts:32 serif/sans/mono 3 枚举;TextClipPanel.tsx:19 仅 3。"
+      },
+      {
+        "feature": "Emoji 选择器 / 内置贴纸素材库",
+        "category": "特效/贴纸",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(贴纸库)",
+          "Descript/Veed/Captions"
+        ],
+        "agentAngle": "无 emoji picker/贴纸库;贴纸只能塞外部图片 src。agent 无内置素材可引用,'加个笑哭 emoji'无法满足。短视频基本盘。",
+        "evidence": "grep emoji|sticker library 仅命中无关 CSS;StickerLayer 只有 src 字段。"
+      },
+      {
+        "feature": "贴纸/PiP overlay — agent 经 CLI 不可加",
+        "category": "特效/画中画",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(PiP)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "OverlayClip 有完整 schema+渲染+keyframe(可当贴纸/画中画),UI 拖拽可加,但 bridge POST /clip 显式拒绝 overlay('not yet supported in Phase 3'),CLI clip add --track overlay 直接报错。agent 加画中画/贴纸只能 raw HTTP PUT 全 comp。命题落空。",
+        "evidence": "routes.ts:592-593 throw 'overlay track not yet supported';UI addAssetToTimeline 可加 overlay。"
+      },
+      {
+        "feature": "在线模板库 / 一键套模板成片",
+        "category": "模板/一键成片",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(海量+每周更新)",
+          "Opus(品牌模板)"
+        ],
+        "agentAngle": "图文只有 3 layout+5 palette 作样式开关,视频无任何模板;无'选模板出整套'。新作从空白起。竞品模板库是消费级核心获客点。agent 无模板动词。",
+        "evidence": "makeEmptyCarousel 产单张空幻灯片;无 template 注册表(grep template 仅无关 CSS)。"
+      },
+      {
+        "feature": "一键成片 / 文字成片（文案/链接→自动配素材+配音+字幕）",
+        "category": "模板/一键成片",
+        "autoviralStatus": "partial",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(招牌)",
+          "Captions(AI Edit)",
+          "Descript(Underlord)"
+        ],
+        "agentAngle": "这本是 AutoViral'agent 驱动'命题的正面战场,但端到端自动成片靠 chat-agent 临时编排,无一键管线;YouTube ingest 是唯一打通的'源→转写→翻译→bootstrap comp'。竞品是粘贴文案 30 秒出成片。agent 理论能编排但无封装动词、无素材自动匹配。",
+        "evidence": "无 auto-compose 管线;ingest-youtube 是唯一 bootstrap 流;BGM/素材自动匹配缺失。"
+      },
+      {
+        "feature": "长视频自动切片找爆点（ClipAnything）+ 病毒潜力评分",
+        "category": "AI 自动切片",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "Opus Clip(招牌)"
+        ],
+        "agentAngle": "无长转短自动切片、无 viral score。这是 AutoViral 名字直指的能力('AutoViral'),但零实现。对 agent 命题极具想象力('agent 把这条 1 小时播客切成 10 条爆款短视频并打分')却完全缺。",
+        "evidence": "无 clip-anything/highlight-detection/viral-score 实现。"
+      },
+      {
+        "feature": "AI B-roll 自动配镜头",
+        "category": "AI 特效/生成",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Opus",
+          "Descript",
+          "Veed",
+          "Captions"
+        ],
+        "agentAngle": "无为口播自动配生成/库存 B-roll。AI-native 正快速变标配。对 agent 命题契合('agent 给这段旁白配画面'),但无后端。",
+        "evidence": "无 b-roll/auto-broll 实现。"
+      },
+      {
+        "feature": "文本驱动剪辑（转录稿即时间轴，改字即改视频）",
+        "category": "文本驱动剪辑",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Descript(招牌)",
+          "Veed(部分)"
+        ],
+        "agentAngle": "无转录稿编辑器范式。Descript 把编辑建在文字稿上。AutoViral 是 comp-schema 范式。与 agent 命题正交但是 AI-native 最具颠覆性的范式,值得参考。",
+        "evidence": "无 transcript-as-timeline 编辑器。"
+      },
+      {
+        "feature": "自动去填充词 / 去静音(remove filler/silence)",
+        "category": "自动清理",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "Descript",
+          "Veed",
+          "Captions"
+        ],
+        "agentAngle": "analyzeAudio 有 silencedetect 测量,但无自动剪除。AI 剪辑器基本盘。对 agent 极契合('agent 把口播里的呃啊和长停顿删掉'),后端只差把 silencedetect 接到 ripple-cut。",
+        "evidence": "audio-tools.ts:107 silencedetect 仅测量;无自动 cut filler/silence 动作。"
+      },
+      {
+        "feature": "声音克隆 / 改字即改音(Overdub)",
+        "category": "AI 配音",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut(音色克隆)",
+          "Descript(Overdub)",
+          "Veed"
+        ],
+        "agentAngle": "TTS 有但无个人音色克隆。区分度高的 AI 配音能力,AutoViral 无。",
+        "evidence": "TTS registry 仅 gemini+edge 预设音色;无 voice-clone。"
+      },
+      {
+        "feature": "BGM / AI 音乐生成",
+        "category": "音频/音乐",
+        "autoviralStatus": "stub",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(百万曲库+AI音乐)",
+          "Captions(生成音乐)",
+          "OpenShot(无,导入为主)"
+        ],
+        "agentAngle": "BGM tab 指向已删的 music_generate.py,emit agent chat 指令但无工作端点。agent'给视频配 BGM'拿到坏路径。无曲库、无 AI 音乐生成。音乐是短视频核心,这是破损路径。",
+        "evidence": "dispatchGeneration.ts:301 指向已删 music_generate.py;无 BGM 生成端点。"
+      },
+      {
+        "feature": "音乐踩点 / Beat Sync / BPM 对齐",
+        "category": "音乐/踩点",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(自动卡点)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "POST /api/audio/beats 返回 410(已删 detect_beats.py)。无任何卡点能力。Reels/Shorts 卡点是刚需。对 agent 契合('agent 把这些片段卡到鼓点')但端点已退役。",
+        "evidence": "audio.ts:132-137 /api/audio/beats 返回 410 beat_endpoint_removed(已验证)。"
+      },
+      {
+        "feature": "人声/伴奏分离（source separation）",
+        "category": "音频处理",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Descript",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无 demucs/spleeter。agent 无法分离人声与背景乐。核心音频模块,AI 剪辑器常见。",
+        "evidence": "grep demucs|spleeter|stem|vocal-removal 零命中（已验证）。"
+      },
+      {
+        "feature": "音频降噪 / 去回声 / 人声增强(Studio Sound)",
+        "category": "音频处理",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Descript(Studio Sound)",
+          "Veed",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "全仓无 denoise(只有 silencedetect 测量)。agent 无法清理嘈杂音频。AI 剪辑器几乎人人有,口播刚需。",
+        "evidence": "grep denoise|noise-reduc 零命中（已验证）;混音链仅 volume/adelay/afade/sidechain。"
+      },
+      {
+        "feature": "音频 EQ / 压缩 / 限制 / 混响等效果链",
+        "category": "音频处理",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve(Fairlight)"
+        ],
+        "agentAngle": "无 EQ/compressor/reverb(只有 volume/delay/fade/sidechain/loudnorm)。agent 无 per-track 音频处理。专业混音标配。",
+        "evidence": "audio-tools.ts:213-263 filter chain 仅 volume/adelay/afade/sidechaincompress（已验证 grep 无 EQ/reverb）。"
+      },
+      {
+        "feature": "变声 / 调音 / pitch shift / autotune",
+        "category": "音频处理",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut"
+        ],
+        "agentAngle": "无 pitch/formant/变声。趣味音频能力缺失。",
+        "evidence": "grep pitch|formant|autotune|变声 零命中（已验证）。"
+      },
+      {
+        "feature": "录音 / 实时配音采集（getUserMedia/MediaRecorder）",
+        "category": "音频/录音",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无应用内录音(配音只能 TTS 或导入)。与 agent 命题正交(agent 不录音),但人类工作流缺一环。",
+        "evidence": "web/src+src 无 getUserMedia/MediaRecorder（已验证 grep）。"
+      },
+      {
+        "feature": "音频提取（从视频分离音轨导出 MP3/WAV）",
+        "category": "音频处理",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无显式'提取音轨导出'功能(虽内部 ffmpeg 能做)。agent 无 extract-audio 动词。常见小工具。",
+        "evidence": "无 extract-audio/导出音轨端点或 CLI。"
+      },
+      {
+        "feature": "混音台 / 混音自动化包络（Read/Latch/Touch/Write）",
+        "category": "音频/混音",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Premiere(Mixer)",
+          "Resolve(Fairlight)",
+          "FCP"
+        ],
+        "agentAngle": "只有逐 clip 音量 + per-track dB + ducking,无总线/submix/混音自动化包络。专业混音进阶。agent 经 keyframe volume 能近似自动化但 CLI 写不进。",
+        "evidence": "无 bus/submix/automation-envelope;混音是 amix 直出。"
+      },
+      {
+        "feature": "音频转场（Constant Power/Gain/Exponential 交叉淡化）",
+        "category": "转场/音频",
+        "autoviralStatus": "partial",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "有 per-clip fadeIn/fadeOut(线性)但无 constant-power 等交叉淡化曲线类型、无音频转场对象。agent 经 clip set 能设 fade(顶层标量可达)但无曲线类型选择。",
+        "evidence": "AudioClip fadeIn/fadeOut 仅线性;无 audio crossfade 曲线类型字段。"
+      },
+      {
+        "feature": "Ducking 闪避 — 触发硬编码 voiceover + attack/release 被丢 + agent 经 CLI 不可设",
+        "category": "音频处理",
+        "autoviralStatus": "partial",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere(Essential Sound)",
+          "Resolve(Fairlight)"
+        ],
+        "agentAngle": "ducking 触发硬编码为'存在 voiceover 类型 clip'才生效;attack/release schema 接受但渲染静默忽略(硬编码 200/1000);CLI flat 解析器写不了嵌套 ducking 对象→agent 只能 raw HTTP PATCH。功能缩水 + agent CLI 不可达。",
+        "evidence": "render-pipeline.ts:299-300 trigger 硬编码 voiceover;audio-tools.ts:268 attack=200:release=1000 硬编码;clip.ts flat 解析。"
+      },
+      {
+        "feature": "GIF / 图片序列(PNG seq) / ProRes 导出",
+        "category": "导出格式",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "OpenShot(image seq + AV1)",
+          "Premiere/FCP/Resolve(ProRes)"
+        ],
+        "agentAngle": "只导出 mp4(h264)+carousel PNG。无 GIF、无 PNG 序列、无 ProRes/无损中间格式、无 WebM/MOV。agent export 容器固定。GIF 是社媒常见交付。h265/vp9/av1 编码路径在 gpu-encoder 存在但零 UI/CLI 暴露。",
+        "evidence": "grep gif/sequence/ProRes 无导出实现（已验证）;remotion 恒 h264 mp4;CODEC_MAP 支持 h265/vp9/av1 但 8 预设全 h264。"
+      },
+      {
+        "feature": "平台预设（8 个）+ preset 选择参数 — agent 完全够不着",
+        "category": "导出/平台预设",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut(多比例)",
+          "OpenShot(400 profile)",
+          "Descript/Opus/Captions(多平台重定向)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "双重断裂:(1)8 个平台预设(douyin/xhs/wechat/bilibili/tiktok/reels/shorts/yt 含尺寸/fps/码率/LUFS/安全区/时长)只硬编码在前端组件常量,agent 没有任何端点拿到或按 id 应用;(2)CLI --preset / bridge body.preset / queue presetId 三处都接收却从不读取,真正生效永远是 comp.exportPresets[0](已验证 render-pipeline:575 只读它)。agent 传 --preset douyin 被静默忽略。'agent 帮我导成抖音规格'这一核心分发意图直接落空。",
+        "evidence": "PlatformPresetSection.tsx 硬编码 8 预设;routes.ts:650 body.preset 声明但从不读;render-pipeline.ts:575 只用 comp.exportPresets[0]（已验证）。"
+      },
+      {
+        "feature": "导出码率 / 编码 codec / 压缩质量档 — agent 不可设",
+        "category": "导出",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(自定义)",
+          "OpenShot(3档+Advanced)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "码率/codec 只来自 exportPresets[0](人在 UI 选预设才写入);无预设时直接 rename 沿用 Remotion 默认。agent 经 /export 无法设码率/选 codec/选质量档。",
+        "evidence": "render-pipeline.ts:337-355 码率仅来自 preset;575-580 无预设直接 rename;无 quality 档 UI。"
+      },
+      {
+        "feature": "响度 LUFS 目标 — agent 经 /export 不可传",
+        "category": "导出/音频",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(响度统一)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "管线支持任意 LUFS 目标(两遍 loudnorm 真跑),但人类 /api/works/:id/render 才从 preset 桥接 loudnessTargetLufs;agent 的 /export body 不接受该参数,永远落 -14 默认。微信(-16)等平台规格 agent 无法达成。",
+        "evidence": "render-pipeline.ts:388 默认 -14;render route 从 preset 桥接(#80);/export body(routes.ts:649-655)不含 loudnessTargetLufs。"
+      },
+      {
+        "feature": "渲染队列 / 取消 / 进度 — agent /export 无队列无 jobId 无取消",
+        "category": "导出/渲染",
+        "autoviralStatus": "partial",
+        "severity": "important",
+        "competitorsWithIt": [
+          "Premiere(Media Encoder队列)",
+          "Resolve(Deliver)"
+        ],
+        "agentAngle": "人类 Studio 经 render-queue(异步 jobId/并发上限/取消/去重);agent 的 /export 是同步阻塞调 runRenderPipeline,不入队列、无 jobId、无并发管控、无 cancel/job 查询 CLI。长渲染 agent 只能干等,无法取消或并行。",
+        "evidence": "worker.ts RenderQueueWorker 是人类路径;/export 同步直调(routes.ts:646);CLI 无 cancel/job 命令。"
+      },
+      {
+        "feature": "批量/多平台预设批量导出",
+        "category": "导出",
+        "autoviralStatus": "partial",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut(多比例)",
+          "Descript/Opus(一片多平台)"
+        ],
+        "agentAngle": "有 --variables-file 变量矩阵批量(agent 可达),但那是'变量替换批量'非'多平台预设批量';agent 无法一条命令把母片导成抖音+小红书+YouTube 三个规格(因 preset 本身够不着)。多平台分发是 AI-native 基本盘。",
+        "evidence": "export.ts:101-142 变量批量真实;但多预设批量依赖 preset 选择(已证够不着)。"
+      },
+      {
+        "feature": "carousel 图文导出 — agent 完全够不着",
+        "category": "导出",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(图文)"
+        ],
+        "agentAngle": "图文'导出全部'是纯浏览器 Konva stage.toDataURL→<a download>,无任何服务端/CLI 入口,agent 完全够不着;且 carousel 无 headless 渲染器,snapshot 只能回退 slide 背景图(文字层不合成,诚实标 textLayersComposited:false)。agent 既导不出图文成品、也无法自检图文文字布局。",
+        "evidence": "useExport.ts:74-137 纯浏览器 toDataURL;snapshot.ts:199-207 carousel 回退背景图 textLayersComposited:false。"
+      },
+      {
+        "feature": "无水印 / 4K 60fps / HDR 导出",
+        "category": "导出",
+        "autoviralStatus": "partial",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut(4K60+HDR+无水印)"
+        ],
+        "agentAngle": "无水印(本就无水印),但分辨率/fps 由 comp.width/height/fps 驱动,4K 理论可设;无 HDR 管线。agent 可经 comp 改尺寸 fps,但无 HDR、无独立导出分辨率下拉。",
+        "evidence": "remotion-renderer.ts:81-87 override comp width/height/fps;无 HDR;fps 联合 24|25|30|60。"
+      },
+      {
+        "feature": "多机位 multicam（波形/时码同步 + 实时切换）",
+        "category": "多机位",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut(专业版)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无多机位。纪实/访谈/直播剪辑标配,AutoViral 无。非 agent 命题基本盘。",
+        "evidence": "无 multicam/multi-angle 实现。"
+      },
+      {
+        "feature": "代理(proxy)媒体工作流（低分代理剪辑→导出回挂原始）",
+        "category": "代理工作流",
+        "autoviralStatus": "partial",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "OpenShot(profile)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "有 --proxy 快速半分辨率导出(agent 可达),但那是'代理导出'非'代理剪辑工作流'(没有低分代理素材替身用于流畅剪辑、导出自动回挂原始)。4K/8K 工作流必需件缺失。",
+        "evidence": "applyProxy(render-pipeline.ts:225)是导出端 proxy;无 editing-proxy 媒体替身机制。"
+      },
+      {
+        "feature": "场景剪切检测（自动按镜头切分单文件）",
+        "category": "素材管理",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Resolve"
+        ],
+        "agentAngle": "无 scene-cut detection。对 agent 命题契合('agent 把这条长素材按镜头自动拆段')但无实现。效率特性。",
+        "evidence": "无 scene-detect/shot-detection 实现。"
+      },
+      {
+        "feature": "素材库元数据 / 关键词 / 标记 / 智能合集",
+        "category": "素材管理",
+        "autoviralStatus": "partial",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "有基础 asset library 但无元数据/关键词/标记/智能合集筛选。素材多时管理弱。agent 检索素材能力受限。",
+        "evidence": "asset library 基础;无 metadata/keyword/smart-collection。"
+      },
+      {
+        "feature": "节点式合成 / 动态图形 / 3D / 粒子（Fusion 级）",
+        "category": "合成/动态图形",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Resolve(Fusion)",
+          "OpenShot(Blender 3D标题)"
+        ],
+        "agentAngle": "无节点合成/3D/粒子/动态图形引擎。独立合成软件级能力,非剪辑基本盘。与 agent 命题正交。",
+        "evidence": "无 fusion/compositing/particle/3D 实现。"
+      },
+      {
+        "feature": "屏幕录制 / 摄像头录制",
+        "category": "录制",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Descript(内置录屏)"
+        ],
+        "agentAngle": "无录屏/录像。Descript 用录屏即时做 B-roll。与 agent 命题正交。",
+        "evidence": "无 screen-record/camera-record。"
+      },
+      {
+        "feature": "版权素材库（stock 视频/音乐/图片）",
+        "category": "素材",
+        "autoviralStatus": "missing",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(百万曲库)",
+          "Descript",
+          "Opus"
+        ],
+        "agentAngle": "无内置版权素材/曲库/图库。agent 无可直接引用的合规素材,'配段背景乐'只能靠用户自带或坏掉的 BGM 生成。AI 剪辑器几乎人人有。",
+        "evidence": "无 stock library 集成;BGM 生成已坏(指向删除脚本)。"
+      },
+      {
+        "feature": "互操作：FCPXML / EDL / 导出到 Premiere·DaVinci",
+        "category": "互操作/交付",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "OpenShot(FCPXML/EDL)",
+          "Opus(导XML到Premiere/DaVinci)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无 FCPXML/EDL 导入导出,无法把 AutoViral 剪辑交接到专业 NLE 精剪。专业协作能力,非 agent 命题基本盘但是 power-user 留存点。",
+        "evidence": "无 fcpxml/edl/xml-export 实现。"
+      },
+      {
+        "feature": "多人实时协作 / 云项目 / 品牌套件",
+        "category": "协作/团队",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Descript(文档式协作)",
+          "Opus(团队workspace+品牌模板)",
+          "Resolve(Blackmagic Cloud)"
+        ],
+        "agentAngle": "无多人协作/云项目/品牌套件。团队特性,非单机 agent 命题基本盘。",
+        "evidence": "无 collaboration/cloud-project/brand-kit。"
+      },
+      {
+        "feature": "API / 集成 / 调度发布",
+        "category": "互操作/分发",
+        "autoviralStatus": "partial",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Opus(API+发布调度)",
+          "Runway(Gen-4 API+Workflows)"
+        ],
+        "agentAngle": "有 bridge HTTP + autoviral CLI(本就是 agent 协议层),但无对外发布调度(直发 TikTok/抖音/YouTube)。'agent 做完直接发布'这最后一公里缺失。research-scheduler 是调研非发布。",
+        "evidence": "有 bridge/CLI 协议;无 publish/post-to-platform 端点。"
+      },
+      {
+        "feature": "AI 视线修正（Eye Contact，读稿时看镜头）",
+        "category": "AI 特效",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Captions",
+          "Descript",
+          "Veed"
+        ],
+        "agentAngle": "无视线修正。mobile-first 口播创作者刚需。AutoViral 无。",
+        "evidence": "无 eye-contact/gaze 实现。"
+      },
+      {
+        "feature": "数字人 / AI Avatar（文本驱动口播）",
+        "category": "AI 功能/数字人",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut(24+23形象)",
+          "Captions(3D Avatar)",
+          "Veed",
+          "Descript"
+        ],
+        "agentAngle": "无数字人/avatar。剪映消费级独有体量。对'打字即出口播视频'的 agent 自动化有想象力,但 AutoViral 零实现。",
+        "evidence": "无 avatar/digital-human/talking-head 实现。"
+      },
+      {
+        "feature": "生成式视频（text/image-to-video，最长60s/4K）+ Motion Brush + inpainting",
+        "category": "AI 特效/生成",
+        "autoviralStatus": "partial",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Runway(Gen-4.5招牌)",
+          "剪映/CapCut",
+          "Veed",
+          "Captions"
+        ],
+        "agentAngle": "有 i2v/t2v 视频生成(Seedance 等 provider,agent 经 /api/providers/:id/generate-video 可达),但无 Motion Brush 区域运动控制、无 inpainting 物体去除/替换、无 Act-One 表情迁移、无 4K/60s 连续生成。生成式精细控制缺失。",
+        "evidence": "有 video provider 生成;无 motion-brush/inpainting/act-one。"
+      },
+      {
+        "feature": "AI 去文字 / 去人 / inpainting 修复",
+        "category": "AI 特效/生成",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Runway(Aleph)"
+        ],
+        "agentAngle": "无 inpainting/去物体。画质修复套件缺失。",
+        "evidence": "无 inpaint/object-removal 实现。"
+      },
+      {
+        "feature": "美颜美体",
+        "category": "AI 特效",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut"
+        ],
+        "agentAngle": "无美颜美体。消费级人像视频常见,非 agent 命题核心。",
+        "evidence": "无 beauty/retouch 实现。"
+      },
+      {
+        "feature": "水印叠加 / 导出体积质量预览",
+        "category": "导出",
+        "autoviralStatus": "missing",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "无水印叠加(品牌 logo)、无导出前体积/质量预估。小工具缺失。",
+        "evidence": "grep watermark/水印 零命中（已验证）;无 size/quality 预估。"
+      },
+      {
+        "feature": "GPU 加速导出（用户可控）",
+        "category": "导出",
+        "autoviralStatus": "has-it",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut(NVIDIA RTX)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "已有自动 GPU 编码器探测(VideoToolbox/NVENC/VAAPI/QSV→软回退),内部自动决策无需控制。这是 AutoViral 已具备的能力(非差距),但仅在有 exportPresets[0] 触发 encode 阶段时才用到——即 agent 不选预设时连 GPU 编码都走不到。",
+        "evidence": "gpu-encoder.ts:109-248 detectAvailableEncoders+pickEncoder;render-pipeline.ts:343 仅 encode 阶段(需 preset)用到。"
+      },
+      {
+        "feature": "风格化转场（light-leak/glitch/domain-warp/grav-lens）— 旁路文件不入时间线",
+        "category": "转场",
+        "autoviralStatus": "partial",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "剪映/CapCut(动感/故障转场)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "有真 ffmpeg 实现且 agent 经 raw HTTP 可调,但产出独立 mp4 旁路文件,不写进 composition 时间线、preview 看不到、主渲染不消费、无 CLI 封装。即这套转场是断头 side-effect,无法成为时间线对象。agent 调了也接不回剪辑。",
+        "evidence": "render/transitions.ts 真 ffmpeg;写 output/ 独立 mp4;非 track.transitions[];bridgeRequest 硬编码 /api/bridge/v1 够不到 /api/transitions。"
+      },
+      {
+        "feature": "转场 alignment 参数（死参数）",
+        "category": "转场",
+        "autoviralStatus": "stub",
+        "severity": "nice-to-have",
+        "competitorsWithIt": [
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "transition.alignment 字段在 schema 但渲染端 VideoTrackRenderer 不读(只读 easing/duration/preset)→死参数。agent 写了无效果。",
+        "evidence": "composition.ts:276-279 有 alignment;VideoTrackRenderer 未读 alignment。"
+      },
+      {
+        "feature": "时间线转场 — agent 经 CLI 不可加",
+        "category": "转场",
+        "autoviralStatus": "ui-only-agent-cant-reach",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "OpenShot(400+)",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "13 个时间线转场 preset schema+渲染+UI 完整(preview/export WYSIWYG),但 bridge 无 /transition 端点、CLI 无 transition 动词;PATCH 只改 clip 不改 track.transitions[]。agent 加转场只能 raw HTTP PUT 全 comp 写 track.transitions[]。'agent 在这两段间加叠化'无一等命令。转场是剪辑基本盘。",
+        "evidence": "transitions.ts 13 preset 完整;bridge routes.ts 无 /transition(已验证端点清单);CLI commands 无 transition.ts(已验证)。"
+      },
+      {
+        "feature": "carousel 删除slide/复制/重排 + 改 palette/layout/effects — agent 经 CLI 部分不可达",
+        "category": "图文编辑/agent 可达性",
+        "autoviralStatus": "partial",
+        "severity": "important",
+        "competitorsWithIt": [
+          "剪映/CapCut(图文)"
+        ],
+        "agentAngle": "图文 agent 写面比视频好(set-layer 整对象写入 4 种 layer)但仍缺命令:删 slide/复制/重排 slides 无 CLI(只能整 PUT);改 globals palette/layout/effects 无 CLI,且 applyLayout/applyPalette 重排重着色逻辑只在前端 store action——agent 整 PUT 改 globals.layout 不会触发重排算法。图文模板/调色对 agent 半失效。",
+        "evidence": "CLI carousel 仅 add-slide;删除/复制/重排无子命令(routes.ts:761 注释走整 PUT);applyLayout/applyPalette 仅 store action。"
+      },
+      {
+        "feature": "非破坏编辑 + 项目版本/快照",
+        "category": "项目管理",
+        "autoviralStatus": "has-it",
+        "severity": "table-stakes",
+        "competitorsWithIt": [
+          "剪映/CapCut",
+          "Premiere/FCP/Resolve"
+        ],
+        "agentAngle": "已有 checkpoint/snapshot(命名+恢复保护已修),agent 经 comp diff + snapshot/restore 有 out-of-band 历史。这是 AutoViral 已具备项(非差距),且对 agent 友好(agent 用它代替 clip 级 undo)。",
+        "evidence": "snapshot.ts;comp diff(routes.ts:125);命名(#90)+恢复保护(#68)已修。"
+      }
+    ]
+  },
+  "codeIssues": {
+    "issues": [
+      {
+        "title": "改完不刷新：所有 composition/carousel 写入端点都不广播 composition-changed，全靠脆弱的 fs.watch",
+        "area": "事件/反馈环 — 最后一公里 (built-not-wired)",
+        "problem": "POST /clip、PATCH /clip/:id、DELETE /clip/:id、POST /carousel/slide、.../layer 这五个写盘端点没有一个调用 broadcast('composition-changed')（grep routes.ts:195-686 的 broadcast 只覆盖 ui-* 和 asset-added）。agent 写完盘后，用户 Studio 是否重渲完全依赖 composition-watcher.ts:34 的 fs.watch；而该 watcher 仅在浏览器 /ws/bridge 连上时启动，且 composition-watcher.ts:46-50 在 work 目录连接时尚不存在就 silently return 且对该 socket 永不重试，macOS 原子 rename 的事件呈现也不稳定。这正是历史上 asset-added 踩过的同一类 bug。写路径自己已经会发 asset-added（routes.ts:506），却独独不发 composition-changed。",
+        "whyBadForAgents": "agent 的核心闭环是『改一下→用户看到→自检→继续』。改落盘了但用户预览不刷新，agent 会误以为成功（HTTP 200），用户却说『我什么都没看到』——直接违反项目 e2e-testing.md『浏览器里看得到才算成功』的硬规则。而且 fs.watch 的竞态让这个失败是间歇性的，最难排查。",
+        "evidence": "src/server/bridge/routes.ts:537,604,730,768,807 (写端点均无 broadcast); src/server/bridge/composition-watcher.ts:46-50 (dir 不存在 silently return 不重试); web/src/features/terminal/useBridgeEvents.ts:107-110 (只在 composition-changed 时 refetch)",
+        "severity": "critical",
+        "suggestedFix": "在 mutateCompositionFor / mutateCarouselFor 成功落盘后，由写端点直接 broadcast(workId,'composition-changed',null)（仿照 routes.ts:506 的 asset-added 模式），把刷新做成写路径的显式契约，而不是寄生在 fs.watch 的文件系统竞态上。fs.watch 可保留作为捕捉 UI 自身保存/外部改动的兜底。"
+      },
+      {
+        "title": "官方 crossfade recipe 教 agent 的 `clip set --keyframes '<json>'` 实测必然失败（文档承诺 vs 实际行为相反）",
+        "area": "CLI 数据模型 — 嵌套字段不可表达 + 文档撒谎",
+        "problem": "crossfade-between-clips.md:56,70 明确教 agent 跑 `autoviral clip set vc_s01 --keyframes \"$new_kfs\"`，但 clip.ts:62 的解析器 `patch[key] = /^-?[\\d.]+$/.test(v) ? Number(v) : v` 对 JSON 数组字符串不匹配数字正则→当作 raw string 透传；PATCH 端点 routes.ts:740-742 做 `{...cl, ...patch}` 浅合并把 keyframes 设成字符串；CompositionSchema 期望 keyframes 是 array（composition.ts:119-125）→ zod 必报错。这是官方文档里唯一被文档化的转场/关键帧/淡入淡出写法，且 speed 变速复用同一 keyframes 通道（composition.ts:111-116），所以变速也一起死。recipe 第 56 行甚至自己写了『schema expects an array』却紧接着做出会产生 string 的操作。",
+        "whyBadForAgents": "agent 高度信任 skill recipe（这是它唯一的操作手册）。照着官方 recipe 一步步做却 100% 失败，且失败信息是底层 zod dump，agent 很难反推『是 CLI 解析器把我的 JSON 当字符串了』。等于把 agent 引到一条死路上，浪费整个会话预算。",
+        "evidence": "skills/autoviral/recipes/video/crossfade-between-clips.md:56,70; cli/autoviral/src/commands/clip.ts:60-63; src/server/bridge/routes.ts:740-742; src/shared/composition.ts:119-125",
+        "severity": "critical",
+        "suggestedFix": "二选一：(a) 给 clip set 加 JSON 感知——对 --keyframes/--transforms/--filters/--position/--style/--ducking 等已知嵌套键做 JSON.parse，失败再退回字符串；(b) 增加 deep-merge 的 PATCH 语义或专用 `autoviral clip keyframe add/set` 动词。在修好之前，立即把 recipe 里的 clip set --keyframes 改成走 `PUT /api/works/:id/composition` 整份回写，并把这条逃生口写进 manual。"
+      },
+      {
+        "title": "错误码契约两端皆破：bridge 写端点不发 code:4，CLI client 又把所有失败塌成 exit 3",
+        "area": "错误处理不结构化",
+        "problem": "contracts/error-codes.md 承诺 validation=exit 4 / protocol=exit 3，且 error-codes.md 给的惯用法是 `case $? in 4) ...`。但实际：①POST/DELETE/PATCH /clip 的 400 响应不带 code:4（routes.ts:599/618/747，对比 carousel routes.ts:796/813/842 带了 code:4）；②即使带了 code:4，client.ts:46-56 的 bridgeRequest 对 !res.ok 和 !json.ok 一律 process.exit(3)，从不读 json.code。所以任何经 bridge 的 clip/carousel 写校验失败，agent 拿到的永远是 exit 3，无法和协议错误区分。",
+        "whyBadForAgents": "agent 想据 $? 分支决策（『是我 patch 不合法 vs 服务挂了』）。契约文档教它 case 4，实际永远拿不到 4，所有按错误码做控制流的 recipe 都失效。agent 只能去解析 stderr 自然语言，脆弱且非确定性，对自动化流程是硬伤。",
+        "evidence": "skills/autoviral/contracts/error-codes.md:11-12,64-72; cli/autoviral/src/client.ts:46-56; src/server/bridge/routes.ts:599,618,747 (无 code:4) vs 796,813,842 (有 code:4)",
+        "severity": "high",
+        "suggestedFix": "client.ts bridgeRequest 在失败分支读取 json.code 并 process.exit(json.code ?? 3)；同时给 /clip 三个端点的 400 补上 code:4，使两端契约一致。HTTP 状态 vs body.code 的映射也固定下来（4xx→4, 5xx→3）。"
+      },
+      {
+        "title": "`clip set` 改任何嵌套视觉属性都是静默无操作（zod strip + 浅合并），HTTP 200 但编辑凭空消失",
+        "area": "数据模型对 agent 不友好 — 静默丢失",
+        "problem": "agent 改图最常动的字段（transforms.scale/x/y/rotation、filters.brightness、style.color/font、position.anchor、keyframes、fade、ducking）全是嵌套对象。clip set 的扁平解析器只能产出顶层键，PATCH 又是浅合并；而 CompositionSchema 没有 .strict()（grep 确认），zod 默认 strip 未知顶层键。结果 `clip set vc1 --scale 2` 写了顶层 scale，被 zod 静默 strip，端点返回 ok:true，但 clip 的真实 transforms.scale 纹丝不动。",
+        "whyBadForAgents": "比报错更糟：agent 收到 200 成功信号，comp diff 看不出变化也可能误判成『值本来就对』，自检通过，但用户画面没变。silent-leak 类 bug 会让 agent 信心满满地交付一个根本没改动的作品。这是 codebase MEMORY 里反复出现的『adapter ?? 0 silent leak / built-not-wired』家族在写路径上的体现。",
+        "evidence": "cli/autoviral/src/commands/clip.ts:59-63; src/server/bridge/routes.ts:736-744 (浅合并); src/shared/composition.ts:8-13 (transforms 嵌套) + 全文件无 .strict() (zod 默认 strip)",
+        "severity": "high",
+        "suggestedFix": "PATCH /clip 至少对未知/被 strip 的键做检测并返回 400（拒绝静默丢弃）；理想是支持点路径或嵌套对象 deep-merge，并对每 kind 做白名单校验。配合 #2 的 JSON 感知解析。"
+      },
+      {
+        "title": "意图级编辑能力（split/trim-ripple/move/transition/keyframe/track-ops/变速/reframe）只有 store.ts 有，agent 经 CLI/bridge 完全够不着",
+        "area": "CLI 覆盖缺口 — 富功能 built-but-human-only",
+        "problem": "Studio store.ts 有 ~25 个成熟的意图级 action（splitClip 会同步切 keyframes、moveClipToTrack kind-guard、addTransition + preset registry、rippleDelete、setTrackVolume、addTrack…），但 bridge 只有 /clip add|set|remove + /carousel + /ui-* + /export/snapshot/quality（grep routes.ts 无任何 /transition /keyframe /track /split /move /scene /variable 路由，routes.ts:524 注释自认『richer mutations compose client-side and POST the full composition』）。agent 唯一能做这些改动的路是 PUT /api/works/:id/composition 整份回写，但它不是 bridge 路由，client.ts:37 硬编码 /api/bridge/v1 前缀够不到，且没有任何 recipe 教这条裸 curl 路径。",
+        "whyBadForAgents": "『任意 CLI agent 经 autoviral CLI 驱动剪辑』这个核心命题在写路径上只覆盖了一小块。要做转场/关键帧/跨轨移动这些最基本的剪辑动作，agent 要么无路可走，要么得手搓整份合法 composition JSON（自己维护 trk_ id、transition.afterClipId 同轨非末、speed 0.1-4.0 等所有 invariant）再 PUT——等于在 prompt 里重新实现 store.ts 的 25 个 action 和 keyframes.ts:splitKeyframesAtLocal 的重基逻辑，极易出错。",
+        "evidence": "web/src/features/studio/store.ts:543(split)/289(moveToTrack)/330(addTransition)/418(ripple)/180(addTrack); src/server/bridge/routes.ts:524 (注释承认); cli/autoviral/src/client.ts:37 (硬编码 /api/bridge/v1 够不到 /api/works)",
+        "severity": "high",
+        "suggestedFix": "至少把『整份 composition 回写』封成一等 CLI 动词（如 `autoviral comp put <file>`，client 允许打到 /api/works）并写进 manual 作为万能逃生口；中期把高频意图（split/move-to-track/transition add）补成 bridge 路由 + CLI 动词，把 store.ts 的语义（含 keyframe 重基/ripple）下沉到 @shared 复用，避免 web 与 server 两套实现漂移。"
+      },
+      {
+        "title": "carousel 文字/形状/贴纸层无服务端合成，agent snapshot 自检看不到自己排的版（最常见路径直接抛错拿不到图）",
+        "area": "事件/反馈环 — 视觉自检盲区 (carousel)",
+        "problem": "snapshotCarousel（snapshot.ts:171-212）只返回：①罕见的已导出页（但前端 exporter 下到用户 Downloads 而非 output/，注释 :186-188 自认 rare），或②slide 背景图且 textLayersComposited:false（文字/形状/贴纸层从不服务端合成）。对最常见的『渐变/纯色背景 + 文字层』图文，两条路都不命中→snapshot.ts:209 直接 throw，agent 拿不到任何图。",
+        "whyBadForAgents": "图文/海报是 AutoViral 两大交付物之一，而文字排版（溢出、位置、对齐）恰恰是图文最关键、最易错的部分。agent 无法 snapshot 看到自己排的文字层，就无法满足 e2e-testing.md『截图里看得到才算成功』，对图文交付几乎等于盲改。",
+        "evidence": "src/server/snapshot.ts:171-212 (textLayersComposited:false / :209 throw); cli/autoviral/src/commands/snapshot.ts:76-79 (warns base-only)",
+        "severity": "high",
+        "suggestedFix": "加一个 headless 渲染器把 Konva 图层服务端合成（复用前端 exportPng 的 stage→PNG 逻辑跑在 node-canvas/Puppeteer 里），让 carousel snapshot 返回文字/形状/贴纸都烧进去的 PNG，与 video snapshot 的保真度对齐。"
+      },
+      {
+        "title": "导出/渲染对 agent 是同步阻塞的单次 HTTP，无 jobId/poll/cancel，进度流根本到不了 CLI",
+        "area": "事件/反馈环 — 长任务无 job 模型",
+        "problem": "bridge POST /export（routes.ts:646-702）同步 await runRenderPipeline 数分钟才返回最终 path；进度只经 ui-render-progress 广播到浏览器（routes.ts:686），CLI 完全收不到（client.ts 阻塞等结果，无 stdout 进度流）。真正的 render-queue（src/server/render-queue/ 有并发上限/AbortController 取消/去重）只服务人类 /api/works/:id/render 路径，没经 bridge 暴露给 agent——agent 不能入队、不能查 job 状态、不能取消。连接一断 agent 就丢失整个渲染结果。",
+        "whyBadForAgents": "agent 在长任务上完全失明：没有进度（用户问『到哪了』agent 答不出）、不能取消跑错的渲染（白烧算力，对应 MEMORY 里 #62/#63 的 render-job-lifecycle 隐患）、连接抖动即丢结果。对自动化批量场景（变量矩阵导出）尤其致命。",
+        "evidence": "src/server/bridge/routes.ts:646-693 (同步 await, 进度只 publish 到 bus); src/server/render-pipeline.ts:385 (单 Promise<string>); src/server/render-queue/ (队列存在但不在 bridge 暴露); cli/autoviral/src/commands/export.ts:156 (阻塞)",
+        "severity": "high",
+        "suggestedFix": "把 render-queue 经 bridge 暴露：POST /export 返回 jobId，加 GET /render/job/:id（状态+进度）和 DELETE /render/job/:id（取消），CLI 加 `autoviral export --watch` 轮询并把进度流到 stdout，以及 `autoviral render cancel <jobId>`。"
+      },
+      {
+        "title": "无 agent 可达的回滚/撤销，尽管服务端每个 chat turn 都在建 checkpoint",
+        "area": "缺 dry-run/校验/回滚",
+        "problem": "checkpoint 在 ws-bridge.ts:1124 每个 chat turn 都创建，checkpoints.ts 完整存在，但 grep 确认 CLI 里零 checkpoint/restore/rollback/undo 命令、bridge routes.ts 里零 checkpoint/restore 路由。restore 只有人能在 UI 点。agent 改坏后唯一补救是手算逆向 mutation（comp show→diff→再编辑），而 comp diff 只给一步可见性、carousel 连 .previous 都没有（carousel-ops.ts 无 diff）。",
+        "whyBadForAgents": "agent 必然会犯错（尤其在上面那些手搓整份 JSON 的场景）。没有协议级 undo，agent 改坏一步就只能靠脆弱的手工逆向，且 carousel 连一步回看都没有。这让 agent 不敢做大胆编辑（违反『boil the ocean』），或一旦做错就把作品越改越烂。",
+        "evidence": "src/ws-bridge.ts:1124 (createCheckpoint 每 turn); cli/autoviral/src/ 无 checkpoint 命令 (grep NONE); src/server/bridge/routes.ts 无 checkpoint 路由 (grep NONE); src/server/bridge/carousel-ops.ts 无 .previous/diff",
+        "severity": "high",
+        "suggestedFix": "暴露 bridge GET /checkpoints + POST /checkpoint/restore + CLI `autoviral checkpoint list|restore <id>`（复用已有 checkpoints.ts，restore 前先 createCheckpoint 当前态——见 MEMORY #68 的数据丢失教训）；给 carousel-ops 也加 .previous + diff。"
+      },
+      {
+        "title": "无『校验这个候选 patch』的 dry-run；lint/inspect/validate 只跑已落盘的 comp，是事后检查不是预检",
+        "area": "缺 dry-run/校验",
+        "problem": "clip/carousel 写端点没有 --dry-run。质检命令 readCompForQuality 读的是 on-disk composition.yaml（routes.ts:309），是 post-write lint。其中 lint 确实是 schema+语义检查（lint.ts:1-31，track-overlap/missing-asset/orphan-clip——注意：不是 a11y），但 inspect/validate 是文字溢出/WCAG 对比度静态近似（inspect.ts/validate.ts 头注释）。没有任何命令能在写前对『我打算提交的这份 patch/comp』做 schema 校验，agent 只能 PUT 后读 400 issues 试错。carousel 侧连 lint 都没有（readCompForQuality 只读 composition.yaml）。",
+        "whyBadForAgents": "agent 想在花算力渲染前确认编辑合法，只能写盘试错；写盘又会污染用户正在看的 composition（配合 #1 刷新竞态更乱）。手搓整份 comp 的场景（#5）尤其需要写前 dry-run，否则每次都是 PUT→400→改→再 PUT 的昂贵循环。",
+        "evidence": "src/server/bridge/routes.ts:309-390 (质检读 on-disk); src/composition/quality/lint.ts:1-31 (schema 检查但 post-write); src/composition/quality/inspect.ts:1-16 / validate.ts:1-11 (静态近似); 写端点无 --dry-run",
+        "severity": "medium",
+        "suggestedFix": "加 POST /api/bridge/v1/comp/validate（body=候选完整 comp，跑 CompositionSchema.safeParse + lint，不落盘，返回 issues）和 CLI `autoviral comp validate <file>`；给 clip/carousel 写端点加 ?dryRun=true 走校验不写盘。carousel 补对应 validate。"
+      },
+      {
+        "title": "preset 选择参数三处接收却从不读取，agent 传 --preset 被静默忽略（dead-control）；变量变速导出静默回落 1× (WYSIWYG 破裂)",
+        "area": "built-not-wired / dead-control",
+        "problem": "①平台预设：CLI export.ts:119/156 传 preset、bridge routes.ts:650 声明 body.preset、render-queue job 有 presetId 字段，但 render-pipeline.ts:575 实际只读 comp.exportPresets?.[0]，从不据 preset/presetId 查表。agent `--preset douyin-9-16` 被静默吞掉，真正生效的永远是 UI 写进 comp 的 exportPresets[0]，且那 8 个预设硬编码在前端 PlatformPresetSection.tsx，agent 根本拿不到。②变量变速：speed-ramp-ffmpeg.ts:12-14 对 variable speed 只 log warning 并保持 src 不变——preview 能看到加减速，export 静默回放 1×。",
+        "whyBadForAgents": "两个都是『agent 设了，系统假装接受，结果不生效』的最坏交互。preset 让 agent 以为切了竖屏/响度其实没切；变量变速让 agent snapshot 预览看到 ramp 就交付，导出却是匀速——agent 的视觉自检反而被骗。dead-control 是这个 codebase 反复出现的家族（#70 sharpen / #74 transport 等），在导出路径上后果是产出错的成品。",
+        "evidence": "cli/autoviral/src/commands/export.ts:119,156; src/server/bridge/routes.ts:650 (声明未用); src/server/render-pipeline.ts:575 (只读 exportPresets[0]); src/server/speed-ramp-ffmpeg.ts:12-14 (variable speed→warn+1×导出)",
+        "severity": "medium",
+        "suggestedFix": "把平台预设表移到 @shared 单一事实源，render-pipeline 按 preset/presetId 查表应用（尺寸/fps/码率/LUFS）；或在 bridge /export 校验未知 preset 直接 400 而非静默吞。变量变速导出要么实现、要么在 export 时检测到 variable speed 直接 warn 给 agent（别静默回落）。"
+      },
+      {
+        "title": "UI 控制命令（select/seek/toast/progress）纯 fire-and-forget，无浏览器连接时静默蒸发且无回放，agent 误以为用户看到了",
+        "area": "事件/反馈环 — 无 readback",
+        "problem": "select/seek/play/pause/toast/progress 全部立即返回 ok（routes.ts:199-243），UiEventBus.publish 在无订阅者时 no-op（ui-events.ts），event-stream.md:134 明说『no buffered replay』。没有任何 Studio tab 打开时，每条 toast/select/progress 都凭空消失，agent 却收到 200。也没有 select 后的 focus readback（虽有 GET /focus 但 recipe 没教 agent round-trip）。",
+        "whyBadForAgents": "agent 用 toast/progress/select 引导用户注意力是它和人协作的主要手段。无连接时全部蒸发又返回成功，agent 会自信地说『我已经把进度条/提示给你了』，而用户什么都没看到——又一处违反 e2e『看得见才算』的盲信号。",
+        "evidence": "src/server/bridge/routes.ts:199-243 (立即 ok); src/server/bridge/ui-events.ts (无订阅者 no-op); skills/autoviral/contracts/event-stream.md:134 (no buffered replay)",
+        "severity": "medium",
+        "suggestedFix": "在响应里回 { delivered: subscriberCount>0 }，让 agent 能判断有没有人在看；或对 UI 命令加短 TTL 的事件缓冲，浏览器连上时回放最近 N 条，至少让 toast/progress 不静默丢。"
+      },
+      {
+        "title": "无乐观并发/版本守卫：agent 与用户同时改同一 comp，last-write-wins 静默互相覆盖，agent 收不到用户并发编辑信号",
+        "area": "数据模型对 agent 不友好 — 并发冲突",
+        "problem": "mutateCompositionFor 是整文件 read-modify-write、last-write-wins，无 version/etag 校验（composition-ops.ts）。composition-changed 事件只发给浏览器（useBridgeEvents.ts:107），agent 没有订阅，无从得知用户刚在 Studio 拖了个 clip。用户拖动 + agent clip set 并发，谁后写谁覆盖，另一方的改动静默丢失。",
+        "whyBadForAgents": "AutoViral 是人机共编工位（命题就是人也能在浏览器直接操作）。agent 基于 5 秒前 comp show 的快照算了个 patch，期间用户改了 comp，agent 一 PUT 整份就把用户的改动抹了，且双方都收不到冲突提示。在『agent + 人同时在场』这个核心场景下数据会无声丢失。",
+        "evidence": "src/server/bridge/composition-ops.ts (read-modify-write last-write-wins, 无 etag); web/src/features/terminal/useBridgeEvents.ts:107 (composition-changed 只到浏览器, agent 不订阅)",
+        "severity": "medium",
+        "suggestedFix": "comp show 返回一个 version/mtime，写端点接受 If-Match 语义，版本不符返 409 让 agent 重读后重试；并给 agent 一条订阅 composition-changed 的通道（SSE/WS）或在写响应里带『自上次读后文件已被改动』标志。"
+      },
+      {
+        "title": "bridge POST /clip 显式拒绝 overlay 轨，且 clip add 只能塞已存在的同 kind 轨——agent 连『建轨再加 clip』都断在第一步",
+        "area": "CLI 覆盖缺口 — 多轨/overlay",
+        "problem": "POST /clip 对 overlay 直接 throw 'overlay track not yet supported in Phase 3'（routes.ts:593），尽管 UI 拖拽能加 overlay clip（贴图/sticker 走 overlay）。且 clip add 用 comp.tracks.find(t=>t.kind===body.track) 取第一条同 kind 轨（routes.ts:553），找不到就抛错；没有 track 写命令（bridge 无 /track 路由）。",
+        "whyBadForAgents": "agent 想新建一条 A2/overlay 轨来放配音或贴纸：CLI 做不到。多轨场景下 agent 也无法指定写到哪条具体轨（A2·VO vs A1·BGM 都是 audio kind，只会命中第一条）。复合动作『新建轨→往里加 clip』在第一步就断，贴纸/叠加这类图文+视频常见需求经 CLI 完全无门。",
+        "evidence": "src/server/bridge/routes.ts:553 (find 第一条同 kind), 592-593 (overlay throw); web/src/features/studio/store.ts:180 (addTrack 仅 UI)",
+        "severity": "medium",
+        "suggestedFix": "POST /clip 支持按 trackId 定位目标轨（不止 kind）并去掉 overlay 的硬拒绝（schema 与渲染都已支持 OverlayClip）；补 `autoviral track add/remove` bridge 路由 + CLI 动词，让多轨编排经 CLI 可达。"
+      },
+      {
+        "title": "自动字幕(ASR)后端完整但前端零消费方、无 CLI 动词——agent 和人都无法『一键生成字幕』(built-not-wired)",
+        "area": "built-not-wired — ASR 字幕",
+        "problem": "POST /api/audio/captions 完整可用（托管 venv + stable-ts transcribe 返回时间码 segments）。但前端 fetchCaptions（captions.ts:13）grep 全仓零非测试调用方，Studio 没有任何按钮把 ASR 字幕落到时间轴；CLI 也没有 captions 动词。CaptionsLayer.tsx 还有一套从 hyperframes 移植的高级 kinetic 字幕渲染器，同样没有生成入口。",
+        "whyBadForAgents": "『给视频自动配字幕』是最高频的剪辑诉求之一，后端能力俱全却没接通任何触发面。agent 经 CLI 无命令、人在 UI 无按钮，整条价值链断在最后一公里。agent 只能退而用 clip add 一条条手敲文本，丢失时间码与样式。",
+        "evidence": "src/server/routes/audio.ts:145-219 (端点完整); web/src/features/studio/services/captions.ts:13 (fetchCaptions 零调用方); cli 无 captions 动词",
+        "severity": "medium",
+        "suggestedFix": "加 `autoviral captions generate` bridge 路由（包 POST /api/audio/captions 并把 segments 写成 text track）+ Studio 一个『生成字幕』按钮调 fetchCaptions 落轨，把已有后端真正接通。"
+      },
+      {
+        "title": "schema invariant 是手搓 JSON 的 agent 的隐形地雷区，且无写前 dry-run 兜底",
+        "area": "schema invariant 坑",
+        "problem": "agent 走整份 PUT 时要自己满足一堆 invariant：track id 必须 ^trk_（migrateLegacyTrackIds 只在 read 路径兜底，写不兜）、transition.afterClipId 必须指向同轨真实 clip 且不能是末 clip（composition.ts:314-350 双 superRefine）、speed keyframe 必须 0.1-4.0（:134-148）、carousel slides .min(1)、变量 id 必须合法标识符。失败时 PUT 返回 zod issues，但没有写前 dry-run（见 #9）。",
+        "whyBadForAgents": "因为富功能逼 agent 手搓整份 comp（#5），这些 invariant 就从『读路径的自动兜底』变成『写路径的硬陷阱』。agent 不读 composition.ts 源码根本不知道这些约束，只能 PUT→读 zod dump→猜→再 PUT，循环昂贵且对 agent 不友好（zod issue path 对 LLM 不总是好定位）。",
+        "evidence": "src/shared/composition.ts:284 (^trk_), 314-350 (transition/speed superRefine), 131-148 (SPEED 范围); src/shared/carousel.ts:134 (slides.min 1)",
+        "severity": "low",
+        "suggestedFix": "在 manual 里集中文档化所有 invariant（trk_ id/transition 不挂末 clip/speed 范围/slides≥1），并提供 newTrackId/newClipId 等 mint helper 经 CLI 暴露；配合 #9 的 dry-run validate 让 agent 写前就拿到结构化 issues 而非渲染后才知道。"
+      }
+    ]
+  },
+  "verify": [
+    {
+      "missedGaps": [
+        "画面填充模式 fit/fill 选择（contain/cover/letterbox/pillarbox + 背景模糊填充）— VideoTrackRenderer.tsx:105 把 objectFit 硬编码为 'cover'，无任何 contain/letterbox/pillarbox 选项，更无'横素材放竖屏时模糊背景填充'（CapCut/剪映把视频放进不同比例画布的核心交互）。竞品 table-stakes：素材比例≠画布比例时用户必须能选 fit/fill/blur-bg，AutoViral 一律强制裁切填满。差距清单的 crop 条只覆盖'裁掉画面'，遗漏了反向的'适配画布的填充模式'这一更高频的基础交互。",
+        "画布比例切换 / 一键改尺寸（aspect-ratio change as first-class edit）— 全仓无 resizeCanvas/changeCanvas/setCompositionSize 类编辑动作（grep 零命中），画布尺寸只能由 comp.width/height 静态决定。竞品全员（剪映/CapCut/Premiere/FCP）把'9:16→1:1→16:9 一键换比例并自动重排内容'作为基础操作；AutoViral 改比例只能手改 comp 数字，且无任何内容自适应/safe-zone 引导。这是与 Auto-Reframe（AI 主体追踪）不同的、更基础的'手动换比例'能力，差距清单仅收录了 AI 智能裁切(reframe stub)，遗漏了手动画布比例切换这个 table-stakes。",
+        "翻转 / 镜像 / 90°旋转（flip horizontal/vertical, mirror, rotate-90）— TransformsSchema 只有连续 rotation，无 flipH/flipV/mirror 字段（grep 在 composition.ts 零命中），UI 也无一键翻转/镜像按钮。这是剪映/CapCut/所有 NLE 的基础画面操作（自拍镜像翻转尤其高频），差距清单的 transform 相关条目（crop/scale/rotation）完全遗漏了 flip/mirror。",
+        "Ken Burns / 入场出场动画 一键预设（缩放推拉位移组合关键帧模板）— 差距清单虽有一条'通用动画预设库 missing'，但低估了其 table-stakes 程度且未单列剪映/CapCut 的'入场动画/出场动画/组合动画'体系（每个 clip 一键选入场+强调+出场三段动画）。剪映把入场/出场动画列为基础剪辑面板的固定 tab，是消费级基本盘而非 nice-to-have；AutoViral 连图片 Ken Burns 这种最低门槛的'图片动起来'都要逐帧手 K。",
+        "局部打码 / 马赛克 / 区域模糊（mosaic / spot-blur / censor，可跟踪）— 全仓 grep mosaic/pixelate/censor/blur-region 零命中。剪映/CapCut 把'马赛克/打码'作为基础隐私工具（遮人脸/车牌/水印），是短视频高频刚需。差距清单的'特效库 missing'笼统提了 pixelate 但未单独点出'局部打码/马赛克'这个独立的消费级基本盘功能（与全屏特效不同，它需要区域+跟踪）。",
+        "AI 脚本 / 标题 / Hook / 文案生成（marketing 文案、爆款标题、章节包装）— 差距清单收录了 carousel 的 text-rewrite（改写已有文案）但遗漏了竞品的'从零生成视频脚本/口播稿/爆款标题/Hook'能力。剪映 AI 脚本、Opus 切片自带 hook+标题包装、Captions AI Edit 都把'生成文案/标题'作为 AI 基本盘。对 AutoViral 的 agent 命题尤其契合（'agent 帮我写个爆款脚本再成片'），但 AutoViral 只有 LLM 改写现有文字、无生成入口。",
+        "说话人识别 / 多说话人字幕配色（speaker diarization → per-speaker color）— 全仓无 diarization/speaker-detection（仅 lip-sync stub 与 YT 翻译 prompt 提及 speaker 一词）。Opus Clip 招牌的'说话人配色'与 Descript/CapCut 的多说话人字幕区分依赖 diarization。差距清单的字幕样式条目（kinetic/关键词高亮/auto-emoji）遗漏了'说话人识别+按说话人配色'这一独立能力，访谈/播客切片场景刚需。",
+        "自动加 Hook / 章节标题包装（auto-hook / auto-chapter packaging on clips）— Opus Clip 切片时自动给每条加 hook 标题与排版包装是其招牌之一。差距清单收录了'长视频自动切片找爆点+病毒评分'，但把'切片后的自动 hook/标题/排版包装'这一独立子能力合并掉了，未单列——这对 AutoViral 名字直指的'自动爆款'命题是缺失的一环。",
+        "Magic Cut / AI 自动精简长片（智能删冗余压短，非单纯去 filler）— Veed Magic Cut（8 分钟→<6 分钟）是'AI 整体重剪压缩'而非差距清单已收录的'去填充词/去静音'。这是更高阶的 AI-native 范式（理解内容重要性后整体重组），差距清单的'自动去填充词/去静音'与'长转短切片'都不覆盖这个'保持单条视频但 AI 删冗余'的中间档能力。",
+        "移动端 / App 形态缺失（无 iOS/Android/PWA，仅 Electron 桌面 + web）— package.json 仅 electron，无 react-native/expo/capacitor。剪映/CapCut/Captions 是 mobile-first，绝大多数短视频创作发生在手机上。差距清单完全没提产品形态层面的移动端缺失——这虽非单个'功能'但对'消费级短视频创作器'是结构性差距，且与 agent 命题（手机上没有 CLI agent 工位）也相关。",
+        "自定义/可保存的导出预设 + 品牌套件（brand kit：logo/字体/配色统一）— 差距清单提了'多人协作/品牌套件 missing'但把品牌套件埋在团队协作条目里。品牌套件（统一 logo 水印/品牌色/品牌字体一键套用）对单机创作者同样是 Opus/CapCut 的高价值功能，且 AutoViral 连'保存我的导出预设/我的样式预设'（savePreset grep 零命中）这种单机非协作的基础能力都没有——应作为独立差距而非协作子项。",
+        "标题卡 / 片头片尾 / 下三分之一（title cards / lower-thirds / intro-outro 模板）— composition.ts/carousel.ts grep lowerThird/titleCard/intro/outro 零命中。FCP Motion 模板、Premiere Essential Graphics、剪映片头片尾模板都把'参数化标题卡/下三分之一字幕条'作为基本盘。差距清单的'文字模板库 missing'偏向社媒花字，遗漏了这类'结构性图形模板'（采访下三分之一、片头标题动画、片尾订阅引导）。"
+      ],
+      "overclaims": [
+        "GPU 加速导出标 has-it，但 agentAngle 自己也承认：仅在 comp.exportPresets[0] 存在触发 encode 阶段时才用到 GPU 编码（render-pipeline.ts:343 pickEncoder 仅在 runEncodeStage 调用，而该 stage 需要 preset，render-pipeline.ts:575-580）。即 agent 不选预设（agent 根本够不着预设）时连 GPU 编码路径都走不到，Stage1 永远是 Remotion h264 软渲染。标 has-it 对 agent 实际是 unreachable——对'agent 驱动'命题这更接近 ui-only 而非干净的 has-it。",
+        "非破坏编辑+快照标 has-it 且'对 agent 友好（agent 用它代替 clip 级 undo）'——但快照/restore 在 agent 侧的可达性未经独立验证。snapshot 经 bridge POST /snapshot 出 PNG（视觉自检），但'创建命名 checkpoint / restore 到某 checkpoint'是否有 agent CLI 动词、还是仅人在 UI 点，能力图未给出 agent-reachable 证据。把它当作'agent 的 undo 替代'是推断而非验证过的能力，存在轻微 overclaim 风险。"
+      ],
+      "assessment": "原差距清单质量极高、覆盖面罕见地完整：chroma key/抠像/蒙版/crop/reverse/freeze、四种精修 trim、七种插入编辑、调色全谱（色轮/曲线/HSL/LUT 死字段）、AI-native 范式（transcript editing/clip-anything+viral score/auto-reframe stub/B-roll/dubbing/Overdub/eye-contact/avatar/Runway 生成式）、音频全谱（denoise/EQ/分离/beat/录音）、导出格式与平台预设 agent 不可达、以及把'agent 经 CLI 不可达'作为一等审查维度逐条标注——这一点做得尤其到位且诚实。我用 grep 复核了 chroma/mask/stabilize/reframe/beats/transcript/B-roll/filler/dubbing/smart-zoom/mosaic/ken-burns/flip 等，绝大多数 missing/stub 断言属实，未发现把 stub/missing 谎报成 has-it 的硬性 overclaim。\\n\\n真正被遗漏的多集中在'基础画面适配类'与'AI 生成入口类'：①画面填充模式(fit/fill/letterbox/blur-bg) 与画布比例切换被 crop 条目掩盖——这是素材比例≠画布比例时的最高频基础交互，VideoTrackRenderer 硬编码 objectFit:cover 证实完全缺失；②flip/mirror/rotate-90 这种 NLE 最基础的画面操作整条没有；③一键入场/出场动画与 Ken Burns 预设被低估为 nice-to-have（实为剪映固定 tab 级基本盘）；④局部打码/马赛克作为隐私刚需未单列；⑤AI 脚本/标题/Hook 生成（区别于已收录的改写）这一与 agent 命题高度契合的能力缺失；⑥说话人识别配色、Magic Cut 中间档、品牌套件(单机维度)、标题卡/下三分之一、以及产品形态层面的移动端缺失。overclaim 仅两处轻微：GPU 导出 has-it 对 agent 实质 unreachable；快照作为'agent undo 替代'缺 agent 可达性证据。整体结论：清单已达可发布水准，补齐上述 ~12 条基础画面适配与 AI 生成入口类差距后即为完备。\""
+    },
+    {
+      "overclaims": [
+        "在能力图『Timeline editing』里，多处把 status 标成 \"full\" —— 这在能力存在性上确实对（store action 是真的、UI 也能点），但全部依赖 agentReachable=\"api\" 注脚来兜底，而该 \"api\" 实际上 autoviral CLI 够不到：client.ts:37 硬编码 url=`http://127.0.0.1:${port}/api/bridge/v1${path}`，bridgeRequest 永远只能打 /api/bridge/v1，而唯一能写整 comp 的 PUT /api/works/:id/composition (works.ts:208) 不在该前缀下。所以这些 \"api\" 对 autoviral agent 实为 none（除非 agent 绕过 CLI 自己发 raw HTTP）。差距清单里 ui-only-agent-cant-reach 的判定才是准确的，能力图的 \"full+api\" 偏乐观。",
+        "能力图 capability『CLI clip set --keyframes/--transforms/--filters』status=\"stub\" 且 agentReachable=\"cli\" —— agentReachable 标 cli 偏乐观。clip.ts:62 是 `patch[key]=/^-?[\\d.]+$/.test(v)?Number(v):v`（无 JSON.parse），把 '[...]' JSON 当字符串发出 → bridge PATCH routes.ts:741 盲 spread `{...cl,...patch}` → CompositionSchema 期望 keyframes 为 array 故 400。命令存在但对嵌套对象/数组功能为 0，真实 agentReachable 应是 none（仅顶层标量 cli 可达）。",
+        "crossfade recipe (skills/autoviral/recipes/video/crossfade-between-clips.md:56 与 :70) 自相矛盾：第 56 行先诚实写『You can't currently express keyframes through a single clip set flag — the schema expects an array』，第 70 行却仍给出 `autoviral clip set vc_s01 --keyframes \"$new_kfs\"` 作为可执行命令。这条命令必 400（见上）。文档示例 overclaim：教 agent 跑一条已知坏掉的命令。",
+        "CLI help (cli.ts:103) 与 clip add 命令 (clip.ts:16) 都把 overlay 列为合法 --track 值（`[--track video|audio|text|overlay]`），但 bridge POST /clip routes.ts:593 对 overlay 直接 `throw 'overlay track not yet supported in Phase 3'`。即 CLI 表面承诺可加 overlay/贴纸/PiP，运行时必报错。差距清单 ui-only-agent-cant-reach 判定准确，但 CLI 自身的 help 文案是 overclaim。",
+        "audio.ts:140 源码注释声称『Studio's caption import button calls this [POST /api/audio/captions] to populate the text track』——这是假承诺。grep 全仓 fetchCaptions 仅 captions.ts:13 一处自身定义，零调用方。不存在任何 caption import button。注释把 built-not-wired 说成 wired（差距清单的 ASR ui-only-agent-cant-reach 判定才对）。",
+        "能力图『非破坏编辑 + 项目版本/快照』status=\"has-it\"（差距清单同标 has-it）总体成立，但其 evidence 顺带把 carousel snapshot 说得过好——实测 snapshot.ts:199-207 carousel 回退到 slide 背景图且 textLayersComposited:false，文字/形状/贴纸层服务端从不合成；agent 无法据 snapshot 自检图文文字布局。这点差距清单别处有诚实标注，但 has-it 的总体乐观度需配合该限制读。"
+      ],
+      "missedGaps": [
+        "dispatchGeneration.ts:302 的 TTS 对话路径仍指向已删的 `modules/assets/scripts/tts_generate.py`（与 BGM 的 music_generate.py 同属已删 modules/，目录 `skills/autoviral/modules/` 实测不存在）。虽然另有一条真实可用的 /api/works/:id/tts 直调路径（GenerationDialog 用它），但 dispatchGeneration 这条 chat-agent 编排路径同样是断头脚本引用，是 BGM stub 的孪生死路，差距清单只点了 BGM 没点这条 TTS-dispatch 死引用。",
+        "agent 经 autoviral CLI 的 raw-HTTP 逃生口在 CLI 层根本不存在：client.ts:37 把所有 bridgeRequest 钉死在 /api/bridge/v1 前缀，CLI 没有任何 `autoviral http` / `autoviral comp put` 之类的整-comp 写命令（dispatch 表 cli.ts:42-55 无）。所以差距清单反复说的『agent 只能 raw HTTP PUT 全量 comp』对一个纯用 autoviral CLI 的 agent 实际是 unreachable——它得自己用 curl/fetch 绕开 CLI。这把『built-but-human-only』在 agent 维度进一步收紧为『连 raw-HTTP 逃生口都不在 CLI 工具箱里』。",
+        "clip add 的轨道选择是 `comp.tracks.find(t=>t.kind===body.track)`（routes.ts:553），永远命中第一条同 kind 轨。多轨场景（如 A1·BGM vs A2·VO，或 V1 vs V2）下 agent 经 CLI 无法指定写到哪条具体轨——这是 clip add 之上一个未被差距清单单列的 agent 精度缺口（差距清单聚焦在 track 操作不可达，但连『往哪条已存在的轨加 clip』都不可选）。",
+        "CompositionSchema PATCH 端点 (routes.ts:741) 盲 spread 后无 per-kind 重新校验时机说明：patch 多余/拼错的 key 会被 zod strip 静默丢弃（mutateCompositionFor 最终 parse 时），agent 写错 key（如 `--scal 2` 拼错）不会报错也不会生效——silent-noop。这比『嵌套写不进』更隐蔽，差距清单未单列此 silent-strip 反馈缺失。",
+        "snapshot 视频路径依赖 host ffmpeg + Remotion headless Chromium（remotion-still.ts），在没有 host ffmpeg 的环境（MEMORY 多次记录 harness 无 ffmpeg）会失败——agent 的核心视觉自检能力 snapshot 在裸环境是脆的，差距清单把 snapshot 标 full/cli 但未提其对 host ffmpeg 的运行时依赖。"
+      ],
+      "assessment": "差距清单与能力图整体诚实度很高，绝大多数 stub/missing/ui-only-agent-cant-reach 判定经源码逐条核对均属实：LUT 死字段（composition.ts:17 唯一出现、零消费）、reframe 501（modules/ 实测不存在）、frame-interpolate/super-resolve/lip-sync 三 copyFile stub、变量变速导出回退 1×（speed-ramp-ffmpeg.ts:190-195）、ducking 触发硬编码 voiceover + attack/release 丢弃（render-pipeline.ts:298 / audio-tools.ts:268）、preset 三处接收从不读取只用 exportPresets[0]（render-pipeline.ts:575）、stroke 渲染成 textShadow 辉光 + textAlign 写死 center（TextTrackRenderer.tsx:86-90）、bridge 仅 /clip+/carousel+/export+/snapshot+/ask 端点（无 track/transition/keyframe/scene/variable）、CLI dispatch 无 track/transition/split 动词、carousel 导出纯浏览器 toDataURL（exportPng.ts:24）、stylized transitions 写 side-file mp4 不入 track.transitions[]、fetchCaptions 零调用方——全部命中。我列的 overclaims 主要是『状态值本身没错但 agentReachable=cli/api 偏乐观』这一类二级偏差（最关键的是 client.ts:37 把 CLI 钉死在 /api/bridge/v1，使大量标 \\\"api\\\" 的逃生口对纯 CLI agent 不可达），以及源码注释/recipe/CLI help 三处文档级假承诺（caption button、crossfade --keyframes、overlay 可加）。核心命题『agent 经 autoviral CLI 驱动剪辑』在数据模型/时间线/轨道/转场/关键帧层的落空是真实且系统性的，差距清单对此的悲观判定是对的，没有把能力说大。诚实优先的结论：这份评估可信，我的修正集中在让 agent 可达性更紧、并补 4 处差距清单未单列的死引用/silent-noop/多轨精度/host-ffmpeg 依赖。"
+    }
+  ],
+  "capabilities": [
+    {
+      "kind": "capability",
+      "area": "Timeline editing (tracks / clips / trim / split / move / ripple / snap / multi-track)",
+      "summary": "The Studio timeline is a genuinely capable NLE in the BROWSER: web/src/features/studio/store.ts implements a full, real (not stubbed) set of clip+track actions — split, two-edge trim with keyframe-aware rebasing, ripple-delete, collapse-gaps, in-track reorder, cross-track move (drag + inspector + DnD), multi-track add/remove/reorder/rename/mute/hide/volume/language — all wired to UI via Timeline panels, Inspector, TimelineTrackHeader, useShortcuts, and pure dnd.ts. Snapping (snapDraggedStartFull) and zoom (Timeline/index.tsx local useState) work. BUT agent reachability is severely truncated: the bridge CLI only exposes `clip add` / `clip set <id> --key value` / `clip remove <id>` (cli/autoviral/src/commands/clip.ts + src/server/bridge/routes.ts:537/604/730) plus `select`/`seek` UI events. There is NO bridge/CLI verb for split, trim-as-edit, ripple, collapse-gaps, cross-track move, or ANY track operation (add/remove/reorder/rename/mute/hide/volume/solo/lock). The only way an agent can reach those is the raw HTTP `PUT /api/works/:id/composition` (src/server/routes/works.ts:208), which validates a full CompositionSchema and overwrites composition.yaml — i.e. the agent must GET /comp, recompute the entire timeline client-side, and PUT it back wholesale. That endpoint is real and works, but it's not a CLI command, not surfaced in the skill manual, and not a per-op verb, so I mark those ops api (raw HTTP, whole-comp replace) rather than cli. Missing entirely from the whole codebase: clip copy/paste/duplicate, clip groups, timeline markers, track solo, track lock, and clip-level undo/redo (only a track-op-scoped undo/redo stack exists, and even mute/hide bypass it). Hard caveat for the CLI path: `clip set` builds its PATCH by shallow-merging arbitrary --key/value pairs onto the clip and stringifies numbers naively, so an agent CAN set trackOffset/in/out/duration via `clip set` to fake a move or a one-sided trim, but cannot create the second clip a split requires, cannot ripple neighbors, and cannot move a clip to a different track (PATCH only edits the clip in place, never relocates it across tracks).",
+      "capabilities": [
+        {
+          "name": "Split clip (blade / Cmd+B / click-to-split)",
+          "status": "full",
+          "evidence": "web/src/features/studio/store.ts:543-606 splitClip (real: partitions keyframes via splitKeyframesAtLocal, mints child B id, video/audio split in/out, text/overlay split duration, boundary/gap no-op); bladeMode + setBladeMode store.ts:539-542; BladeTool.tsx overlay; useShortcuts.ts:114-137 Cmd+B splits selected clip at playhead; B toggles blade",
+          "agentReachable": "api",
+          "notes": "UI-complete + keyboard. NO bridge/CLI verb. An agent can only achieve a split via PUT /api/works/:id/composition (works.ts:208) recomputing both halves itself; `clip set` PATCH cannot create the second clip. So effectively api-only via whole-comp replace, not a primitive."
+        },
+        {
+          "name": "Trim / resize both edges (in & out, keyframe-aware)",
+          "status": "full",
+          "evidence": "store.ts:451-529 resizeClip — left edge bumps in + trackOffset, right edge sets out (cap at next clip via OFFSET_EPSILON), MIN_CLIP_DUR clamp, keyframe rebase via splitKeyframesAtLocal .a/.b; useClipResize.ts hook; Clip.tsx:129-158 onHandleDown wires both resize-left/right handles with pointer capture + Esc cancel",
+          "agentReachable": "api",
+          "notes": "Full drag-resize in UI. Agent CANNOT call resizeClip. Via `clip set <id> --out N` / `--trackOffset N` / `--in N` (bridge PATCH routes.ts:730 shallow-merge) an agent can crudely set in/out/duration/offset, but with NO neighbor cap, NO MIN_CLIP_DUR clamp, and NO keyframe rebasing — those guards live only in the store. Full-fidelity trim only via whole-comp PUT."
+        },
+        {
+          "name": "Ripple delete (close the gap)",
+          "status": "full",
+          "evidence": "store.ts:418-432 rippleDeleteClip → rippleDeleteFromTrack (toolbar/rippleDelete.ts:20-34, shifts later same-track clips left by removed duration); useShortcuts.ts:149-156 Shift+Backspace/Delete",
+          "agentReachable": "api",
+          "notes": "UI + keyboard only. No CLI/bridge verb. `clip remove <id>` (routes.ts:604) does a PLAIN delete that leaves a gap — it is NOT ripple. Ripple only reachable by recomputing offsets and PUTting whole comp."
+        },
+        {
+          "name": "Ripple insert (push neighbors on add)",
+          "status": "missing",
+          "evidence": "addClip store.ts:237-246 only pushes the clip and grows duration; no neighbor shift. Drop path Track.tsx:165-172 addClip at snapped start, also no ripple-insert. No insert-with-push action anywhere",
+          "agentReachable": "none",
+          "notes": "Feature does not exist in any form (UI or agent). Adds overlap silently; no ripple-insert primitive."
+        },
+        {
+          "name": "Magnetic snapping (edges / playhead) during drag & drop",
+          "status": "full",
+          "evidence": "store.ts:781-788 updateDragCandidate calls snapDraggedStartFull (threshold 0.06) + computeRipplePreview; dnd.ts:151-167 resolveDropTime reuses same engine for library/cross-track drops; Timeline/index.tsx:197-212 renders snap-line from dragState.snapTime",
+          "agentReachable": "ui-only",
+          "notes": "Pure interactive affordance — snapping is a drag-time guideline. Agents write exact numeric offsets via comp PUT, so snapping is inherently human-only and there's nothing for an agent to 'reach'."
+        },
+        {
+          "name": "Cross-track drag (move clip to another same-kind lane)",
+          "status": "full",
+          "evidence": "store.ts:289-329 moveClipToTrack (kind guard, preserves trackOffset, prunes orphaned transitions); commitDrag store.ts:803-867 applies targetTrackId; Clip.tsx:78-98 body-drag resolves hovered lane via resolveDragTargetTrack (dnd.ts:253-265); Track.tsx:137-177 native-DnD drop also calls moveClipToTrack; Inspector ClipTrackSelect (per MEMORY #88) provides a dropdown",
+          "agentReachable": "api",
+          "notes": "Three UI paths (body-drag, DnD, inspector select). NO bridge/CLI verb. `clip set` PATCH (routes.ts:730) edits the clip in place inside its current track and can never relocate it across tracks (the map only touches matching ids, keeps them on their track). Cross-track move agent-reachable ONLY via whole-comp PUT."
+        },
+        {
+          "name": "Multi-track stacking (multiple same-kind lanes, overlay)",
+          "status": "full",
+          "evidence": "store.ts:881-961 addTrack (same-kind-block placement, displayOrder recompact, V/A/CC/O auto-labels); Track schema supports N tracks; Timeline/index.tsx:116-168 renders sorted lanes; LaneGapAdd.tsx adds lanes between rows; buildClipFromAsset adds overlay track on demand (per MEMORY #78)",
+          "agentReachable": "api",
+          "notes": "Full multi-track in UI. addTrack/removeTrack are NOT on the bridge — no `autoviral track` command exists in cli.ts dispatch (cli.ts:37-66). Agent must mint a track object and PUT the whole composition (CompositionSchema validates tracks at works.ts:213)."
+        },
+        {
+          "name": "Track add / remove / reorder / rename",
+          "status": "full",
+          "evidence": "store.ts addTrack:881, removeTrack:962 (has-clips confirm gate), reorderTracks:987 (displayOrder rebuild), renameTrack:1019; all push trackHistory; TimelineTrackHeader.tsx exposes rename + ⋯ menu; LaneGapAdd adds; reorder via header DnD",
+          "agentReachable": "api",
+          "notes": "No track CLI/bridge verbs at all. Only reachable by recomputing the tracks array and PUT /api/works/:id/composition. Track-level undo/redo exists for these (store.ts:1070-1087) but is itself UI-only (no agent verb)."
+        },
+        {
+          "name": "Track mute / hide",
+          "status": "full",
+          "evidence": "TimelineTrackHeader.tsx:261-279 toggleMuted/toggleHidden mutate t.muted/t.hidden via useComposition.setState; aria-checked toggles at :374/:434; Track schema has muted/hidden (addTrack defaults store.ts:947-948)",
+          "agentReachable": "api",
+          "notes": "Wired in UI but deliberately bypasses the trackHistory undo stack (comment store/header lines: 'neither mute nor hide are in #32 API, fall back to setState'). No dedicated store action and no CLI verb. Agent reaches it only via whole-comp PUT (muted/hidden are CompositionSchema track fields)."
+        },
+        {
+          "name": "Track solo",
+          "status": "missing",
+          "evidence": "grep for 'solo' across web/src/features/studio + src/shared/composition.ts returns zero hits",
+          "agentReachable": "none",
+          "notes": "Does not exist. Mixing is mute-only."
+        },
+        {
+          "name": "Track lock",
+          "status": "missing",
+          "evidence": "No lockTrack / track.locked / lock affordance in studio (grep 'locked|lockTrack|.lock' only matches unrelated ModelSwitcher/GenerationDialog/comments); TimelineTrackHeader has only mute+hide+rename+volume+delete",
+          "agentReachable": "none",
+          "notes": "No track-lock concept in schema or UI."
+        },
+        {
+          "name": "Per-track volume (audio dB) / language (subtitle)",
+          "status": "full",
+          "evidence": "store.ts setTrackVolume:1051-1069 (audio-only, dB), setTrackLanguage:1028-1050 (text-only); TimelineTrackHeader.tsx:296-300 dB slider on audio lanes (#79); track.volume/language are real schema fields",
+          "agentReachable": "api",
+          "notes": "UI-wired. No CLI verb. Agent sets via whole-comp PUT (volume/language are track fields validated by CompositionSchema)."
+        },
+        {
+          "name": "Timeline zoom (px/second scale)",
+          "status": "full",
+          "evidence": "Timeline/index.tsx:31 const [zoom,setZoom]=useState(1.2); pxPerSecond=50*zoom; +/- buttons :72-100 clamp 0.4..3",
+          "agentReachable": "ui-only",
+          "notes": "Pure local React view state — never persisted to composition, no event, no CLI. Purely a human viewport control; agents operate on absolute seconds so there is nothing to reach."
+        },
+        {
+          "name": "In-track clip reorder (re-pack offsets)",
+          "status": "full",
+          "evidence": "store.ts:269-288 moveClipWithinTrack splices index + re-packs trackOffsets back-to-back",
+          "agentReachable": "api",
+          "notes": "Action exists and is correct, but I found NO UI caller in current code (grep shows only store.ts + tests reference it) — it appears orphaned at the UI layer, superseded by body-drag/offset edits. Agent can only reach the EFFECT via whole-comp PUT. Collapse-gaps is the wired sibling."
+        },
+        {
+          "name": "Collapse gaps on a track",
+          "status": "full",
+          "evidence": "store.ts:433-445 collapseGaps → collapseGapsOnTrack (toolbar/collapseGaps.ts:16-30 repacks from 0 in start order); useShortcuts.ts:85-94 Cmd+Shift+G on selected clip's track",
+          "agentReachable": "api",
+          "notes": "UI + keyboard. No CLI verb. Agent reaches the result only by recomputing offsets and PUTting whole comp."
+        },
+        {
+          "name": "Click-to-seek / scrub playhead on ruler",
+          "status": "full",
+          "evidence": "Ruler.tsx:35-54 pointerdown seeks + pointer-capture drag scrub via setFrame (store.ts:700-709 clamps frame); J/L keyboard ±5s useShortcuts.ts:73-82",
+          "agentReachable": "cli",
+          "notes": "`autoviral seek <seconds>` (cli/.../commands/seek.ts → bridge POST /seek routes.ts:207 → ui-seek event). NOTE prior MEMORY says ui-seek doesn't reliably drive the Player preview, but the timeline frame state IS driven. Selection via `autoviral select clip|track <id>` (select.ts → POST /select routes.ts:199)."
+        },
+        {
+          "name": "Copy / paste / duplicate clip",
+          "status": "missing",
+          "evidence": "grep copyClip|pasteClip|duplicateClip|clipboard across studio finds only Chat attachment clipboard handling; no timeline clip copy/paste/duplicate action in store.ts or any panel",
+          "agentReachable": "none",
+          "notes": "Entirely absent. An agent could approximate duplicate via `clip add` (new clip) but there is no copy-with-all-props primitive."
+        },
+        {
+          "name": "Group / nest clips",
+          "status": "missing",
+          "evidence": "Only hit is ShortcutsCheatsheet.tsx:60 t('studio.shortcuts.groupClip') whose i18n value is literally 'Clip'/'片段' (messages.ts:227/1063) — it is a cheatsheet SECTION HEADING for clip shortcuts, not a grouping feature. No groupClip store action, no group field in composition schema",
+          "agentReachable": "none",
+          "notes": "Misleading cheatsheet label; no grouping capability exists in store or schema."
+        },
+        {
+          "name": "Timeline markers (chapter / cue markers)",
+          "status": "missing",
+          "evidence": "No marker store action / no markers field on Composition or Track in src/shared/composition.ts; 'marker' hits are caption 'marker-sweep' word-highlight effect (CaptionsLayer.tsx:198, composition.ts:461) — unrelated. Beats array exists (store.ts:87 beats) for snap but no user marker CRUD",
+          "agentReachable": "none",
+          "notes": "No timeline marker primitive. Beat snap points exist but are detected audio beats, not editable markers."
+        },
+        {
+          "name": "Undo / redo granularity",
+          "status": "partial",
+          "evidence": "store.ts:1070-1087 undoTrackOp/redoTrackOp + pushHistory:1096-1106 snapshot the FULL tracks array; ONLY track ops push history (addTrack/removeTrack/reorder/rename/setLanguage/setVolume). Clip ops (split/trim/move/ripple/addClip/removeClip/updateClip) explicitly do NOT push history (comments store.ts:54-60,122-124); mute/hide also bypass (header comment lines 255-260)",
+          "agentReachable": "ui-only",
+          "notes": "Real but track-scoped only — there is NO clip-level undo. No keyboard binding for undo/redo found in useShortcuts.ts (Cmd+Z not handled). No CLI verb. Agents have their own out-of-band history via `autoviral comp diff` (routes.ts:125) + snapshot/restore (snapshot.ts), not this store stack."
+        },
+        {
+          "name": "Add clip to timeline (from library / direct)",
+          "status": "full",
+          "evidence": "store.ts:237-246 addClip; Track.tsx:165-172 native DnD library→track drop (buildClipFromAsset dnd.ts/AssetSidebar); tile + button add (MEMORY #78); bridge POST /clip routes.ts:537 builds video/audio/text clips",
+          "agentReachable": "cli",
+          "notes": "`autoviral clip add --src <path> --track video|audio|text [--offset s --duration s --in --out]` (clip.ts:14-40 → bridge routes.ts:537). overlay track NOT supported by the bridge add path (routes.ts:593 throws 'overlay track not yet supported in Phase 3') even though the UI DnD adds overlay clips — agent is blocked from adding overlays via CLI."
+        },
+        {
+          "name": "Remove clip",
+          "status": "full",
+          "evidence": "store.ts:397-412 removeClip (filters clip + prunes orphaned transitions); useShortcuts.ts:159-166 Backspace; bridge DELETE /clip/:id routes.ts:604",
+          "agentReachable": "cli",
+          "notes": "`autoviral clip remove <id>` (clip.ts:42-50 → DELETE /clip/:id). Note: this is the non-ripple delete (leaves a gap); ripple-delete is NOT exposed to the agent."
+        },
+        {
+          "name": "Edit clip properties (offset/in/out/duration/etc.)",
+          "status": "full",
+          "evidence": "store.ts:247-268 updateClip (Object.assign patch, recomputes duration); bridge PATCH /clip/:id routes.ts:730 shallow-merges arbitrary patch; CLI clip set clip.ts:52-66 turns --key value into patch with naive number coercion",
+          "agentReachable": "cli",
+          "notes": "`autoviral clip set <id> --trackOffset N --in N --out N --duration N ...` reaches updateClip-equivalent via PATCH. CAVEAT: bypasses store guards (no neighbor cap, no min-duration, no keyframe rebase) and shallow-merges blindly — agent can write an invalid/overlapping clip; CompositionSchema in the read-modify-write (mutateCompositionFor) is the only gate."
+        }
+      ]
+    },
+    {
+      "kind": "capability",
+      "area": "转场 / 滤镜 / 特效 / 关键帧 / 变速 (transitions / filters / effects / keyframes / speed)",
+      "summary": "这个领域有两条互不相通的\"剪辑能力\"线，状态差异巨大。① 时间线内置剪辑（写进 composition.yaml，preview + export 都消费同一 Remotion `<VideoTrackRenderer>`，WYSIWYG by construction）：13 个时间线转场 preset（dissolve/wipe×6/push×4/flip/hard-cut）有完整的 schema + 渲染 + Inspector UI；关键帧动画支持 7 个属性（scale/x/y/rotation/opacity/volume/speed），有真正的 bezier 插值引擎；基础调色（brightness/contrast/saturation）通过 CSS filter 真渲染；画面变换（scale/x/y/rotation/opacity）真渲染；静态变速通过 ffmpeg setpts/atempo 预处理真导出。② 但 agent 触达这条线非常受限：autoviral CLI 只有 `clip add/set/remove`，且 `clip set` 的 flag 解析器只能传扁平 scalar（`/^-?[\\d.]+$/.test(v)?Number(v):v`），无法表达 transforms/filters/keyframes/transitions 这些嵌套对象/数组——recipe（crossfade-between-clips.md:70）声称 `clip set --keyframes '<json>'` 能用，但实际会把 JSON 当字符串发出去，PATCH 端点盲 spread 后被 CompositionSchema 拒绝（keyframes 期望 array）→ HTTP 400。bridge 也根本没有 transition/keyframe 专用 verb。Agent 真正可写整套效果的路径是 raw HTTP `PUT /api/works/:id/composition`（全量 comp 写入，过完整 schema 校验）或 raw HTTP `PATCH /api/bridge/v1/clip/:id`（接受任意 JSON 对象）——但这两条 CLI 都没封装（client.ts bridgeRequest 硬编码 /api/bridge/v1 前缀，够不到 /api/works）。重大缺口：LUT 字段在 schema 里但零渲染消费（死字段）；reframe（智能裁剪）脚本已删，端点诚实返回 501；frame-interpolate/super-resolve/lip-sync 三个 post-processor 全是 stub（copyFile）；绿幕/抠像/蒙版/稳定/倒放完全不存在。另有一条独立的\"风格化转场\"HTTP 线（light-leak/glitch/domain-warp/grav-lens）是真 ffmpeg 实现且 agent 经 HTTP 可调，但它产出独立 mp4 旁路文件，不写进 composition 时间线、preview 看不到、主渲染管线不消费，且无 CLI 封装。",
+      "capabilities": [
+        {
+          "name": "时间线转场 preset（13 种：cross-dissolve / wipe-left/right/up/down / clock-wipe / iris / push-left/right/up/down / flip / hard-cut）",
+          "status": "full",
+          "evidence": "src/shared/transitions.ts:14-33 (TRANSITION_PRESETS 13 项), :59-73 (每项 family+ffmpegXfade+defaultDuration meta); 渲染 web/src/features/studio/composition/tracks/VideoTrackRenderer.tsx:140-167 (TransitionSeries + presentationFor); schema src/shared/composition.ts:271-280 (TransitionSchema enum 由 registry 派生)",
+          "agentReachable": "api",
+          "notes": "6 大家族里只覆盖 dissolve/wipe/slide/motion/cut 五族（stylize 不在时间线 preset 里）。preview 与 export 同走此 Remotion 组件 → WYSIWYG。agent 触达：只能经 raw HTTP PUT /api/works/:id/composition 写整个 comp 的 track.transitions[]，或 raw PATCH 不行（PATCH 只改 clip 不改 track.transitions）。autoviral CLI 无 transition verb。人在 Inspector TransitionPanel 可点。"
+        },
+        {
+          "name": "转场自定义参数（duration / easing linear|spring|ease-in-out / alignment）",
+          "status": "full",
+          "evidence": "src/shared/composition.ts:276-279 (durationSec 0.05-5, alignment, easing 三选一); easing→Remotion timing 真消费 VideoTrackRenderer.tsx:12-22 (springTiming/linearTiming+Easing.inOut); duration handle 钳制 src/shared/transitions.ts:89-100 (clampHandleDuration); UI TransitionPanel.tsx:153-185",
+          "agentReachable": "api",
+          "notes": "alignment 字段存在并入 schema，但渲染端 VideoTrackRenderer 未读 alignment（只读 easing/durationSec/preset）→ alignment 是当前死参数。"
+        },
+        {
+          "name": "风格化转场 HTTP 线（light-leak / glitch / domain-warp / grav-lens）",
+          "status": "partial",
+          "evidence": "实现 src/server/render/transitions.ts:71-121(light-leak)/233-267(glitch)/302-336(domain-warp)/371-405(grav-lens) 全是真 ffmpeg xfade+geq/lenscorrection; 端点 src/server/routes/render.ts:340-356 (POST /api/transitions/{light-leak,glitch,domain-warp,grav-lens})",
+          "agentReachable": "api",
+          "notes": "真 ffmpeg 渲染但产出独立 output/*.mp4 旁路文件，NOT 写入 composition.yaml 的 track.transitions[] → preview 看不到、主 render-pipeline 不消费、不是时间线对象。需 host ffmpeg。无 CLI 封装（bridgeRequest 硬编码 /api/bridge/v1，够不到 /api/transitions/*），agent 只能 raw HTTP 调。partial 因为'剪辑能力'层面它是断头的 side-effect。"
+        },
+        {
+          "name": "关键帧动画引擎（7 可动属性：scale/x/y/rotation/opacity/volume/speed；4 easing：linear/easeIn/easeOut/easeInOut；cubic-bezier 插值）",
+          "status": "full",
+          "evidence": "属性枚举 src/shared/composition.ts:104-117 (KeyframePropertySchema 含 speed); bezier 插值引擎 src/shared/keyframes.ts:11-115 (interpolateProperty 含 Newton-Raphson+bisection); 渲染消费 VideoTrackRenderer.tsx:42-68 (transform/opacity per-frame) + computeVideoSpeedForFrame; UI KeyframePanel.tsx:25-37 (propertiesForClip 按 clip kind)",
+          "agentReachable": "api",
+          "notes": "可动属性按 clip 种类分：video=scale/x/y/rotation/speed，overlay=scale/x/y/rotation/opacity，audio=volume，text=无(D8)。volume keyframe 在 VideoClip 上被渲染忽略(D5)。agent 触达：CLI clip set --keyframes 表面声称可用(crossfade recipe.md:56-70)但实际坏的(见下条)；真路径=raw HTTP PUT 全量 comp 或 PATCH /api/bridge/v1/clip/:id（接受任意 JSON 对象，可带 keyframes array）。人在 Inspector KeyframePanel 可点。"
+        },
+        {
+          "name": "CLI `clip set --keyframes/--transforms/--filters '<json>'`（recipe 宣称的 agent 写效果路径）",
+          "status": "stub",
+          "evidence": "cli/autoviral/src/commands/clip.ts:59-64 (flag 解析 patch[key]=/^-?[\\d.]+$/.test(v)?Number(v):v — 非数字一律当 raw string，全文件无 JSON.parse); PATCH 端点盲 spread src/server/bridge/routes.ts:736-744 ({...cl,...patch}); schema keyframes 期望 array src/shared/composition.ts:162; recipe 宣称可用 skills/autoviral/recipes/video/crossfade-between-clips.md:56,70,106",
+          "agentReachable": "cli",
+          "notes": "CONTRADICTION: recipe 教 agent `autoviral clip set vc_s01 --keyframes '[...]'`，但 CLI 会把 '[...]' 当字符串发出 → PATCH 把 keyframes 设成字符串 → CompositionSchema.parse 拒绝(期望 array) → HTTP 400 → CLI exit 3。即文档承诺的 agent 写关键帧/变换/滤镜的 CLI 路径实际 broken。扁平数字字段(out/trackOffset/scale 等单值)能过，嵌套对象/数组不能。"
+        },
+        {
+          "name": "基础调色：亮度/对比度/饱和度（brightness / contrast / saturation，范围 -1..1）",
+          "status": "full",
+          "evidence": "schema src/shared/composition.ts:16-22 (FiltersSchema brightness/contrast/saturation min-1 max1); 渲染 web/src/features/studio/composition/filters/cssFilters.ts:6-16 (toCssFilter→CSS brightness()/contrast()/saturate()) 经 VideoTrackRenderer.tsx:73,106; UI StaticPropsPanel.tsx:222-260 (Adjust section 三个 slider)",
+          "agentReachable": "api",
+          "notes": "仅 VideoClip 有 filters 字段(overlay/audio/text 无)。preview+export 同走 toCssFilter → WYSIWYG。agent 触达：CLI clip set 传不进嵌套 filters 对象(同上坏)；真路径 raw HTTP。人在 StaticPropsPanel 可点。"
+        },
+        {
+          "name": "LUT 调色（filters.lut）",
+          "status": "stub",
+          "evidence": "schema 有 src/shared/composition.ts:17 (lut: z.string().optional()); 但全仓除 schema 定义外零消费 —— grep `\\.lut|lut:` 只命中 composition.ts:17，toCssFilter(cssFilters.ts) 不读 lut，render-pipeline/remotion-renderer 不读 lut",
+          "agentReachable": "none",
+          "notes": "纯死字段：可以写进 yaml 但任何渲染/导出都不消费，画面无变化。UI(StaticPropsPanel) 也不暴露 lut 控件。"
+        },
+        {
+          "name": "画面变换：缩放/位置X/位置Y/旋转/不透明度（scale 0.1-5 / x / y / rotation / opacity）",
+          "status": "full",
+          "evidence": "schema TransformsSchema src/shared/composition.ts:8-14 (scale/x/y/rotation) + OverlayClip opacity :238; 渲染 VideoTrackRenderer.tsx:42-56 (computeVideoTransformForFrame→CSS translate/rotate/scale) + :62-68 opacity; UI StaticPropsPanel.tsx:172-281 (Transform section: video=scale/x/y/rotation, overlay=opacity only)",
+          "agentReachable": "api",
+          "notes": "可静态(transforms 字段)或关键帧动态。VideoClip 有完整 transforms；OverlayClip 静态 UI 只暴露 opacity(scale/x/y/rotation 仅 keyframe 路径，StaticPropsPanel.tsx:266-282 注释说明)。无裁切(crop)字段——画面裁切只能靠 objectFit:cover + scale，无显式 crop 矩形。"
+        },
+        {
+          "name": "裁切 / crop（显式裁剪矩形）",
+          "status": "missing",
+          "evidence": "TransformsSchema src/shared/composition.ts:8-13 只有 scale/x/y/rotation，无 crop 字段；VideoClip/OverlayClip schema 无 crop；VideoTrackRenderer.tsx:105 用 objectFit:'cover' 硬填充",
+          "agentReachable": "none",
+          "notes": "唯一相关的'重构图'是 reframe(智能裁剪)端点，但脚本已删(见下条)。无逐 clip 自由裁切矩形能力。"
+        },
+        {
+          "name": "变速：静态线性变速（0.1×–4.0× via speed keyframe，全部同值）",
+          "status": "full",
+          "evidence": "范围 src/shared/composition.ts:131-132 (SPEED_MIN 0.1/MAX 4.0) + refine :134-148; preview playbackRate VideoTrackRenderer.tsx:77,92 (computeVideoSpeedForFrame); export 预处理 src/server/speed-ramp-ffmpeg.ts:170-224 (applySpeedRampPrePass setpts/atempo) 经 render-pipeline.ts:404; isStaticSpeed src/shared/speed-ramp.ts:44-56",
+          "agentReachable": "api",
+          "notes": "静态变速 preview+export 都真生效(export 经 ffmpeg setpts/atempo 真重采样)。effectiveClipDuration(speed-ramp.ts:69-106) 正确收缩/扩展时间线宽度。仅 VideoClip 生效(D1)，AudioClip 接受 speed keyframe 但渲染/导出忽略。UI KeyframePanel speed 属性可加。"
+        },
+        {
+          "name": "变速：曲线/可变变速（speed keyframe 多值非匀速）",
+          "status": "partial",
+          "evidence": "preview 真生效(逐帧 computeVideoSpeedForFrame VideoTrackRenderer.tsx:77); 但 export 不支持 src/server/speed-ramp-ffmpeg.ts:188-196 (variable speed→console.warn+原样返回，'rendering at 1×'); render-pipeline 注释确认 deferred to 8.3.5",
+          "agentReachable": "api",
+          "notes": "重大不一致：可变变速在 preview 里能看到加速/减速效果，但 export 时静默回落到 1× → WYSIWYG 在此处破裂。schema/插值/preview 齐备，缺 export 实现。"
+        },
+        {
+          "name": "变速：倒放 / reverse",
+          "status": "missing",
+          "evidence": "speed clamp 下限 src/shared/composition.ts:131 (SPEED_MIN=0.1>0，不接受负值); speed-ramp-ffmpeg.ts 只生成 setpts=PTS/k(k>0)，无 ffmpeg `reverse` filter; 全仓无 reverse 视频 filter(grep reverse 只命中 logger 数组反转)",
+          "agentReachable": "none",
+          "notes": "speed 最低 0.1×，无负速/倒放概念。"
+        },
+        {
+          "name": "特效后处理：帧插值(frame-interpolate) / 超分(super-resolve) / 对口型(lip-sync)",
+          "status": "stub",
+          "evidence": "src/server/post-process/interpolate.ts:19-38 (无 RIFE_MODEL_PATH→copyFile+stub:true); super-resolve.ts:19-38 (无 ESRGAN_MODEL_PATH→copyFile); lip-sync.ts:20-44 (无 WAV2LIP_MODEL_PATH→copyFile); 端点 src/server/routes/generate.ts:610-668 (POST /api/post-process/:operation)",
+          "agentReachable": "api",
+          "notes": "三个 processor 默认全 stub(模型权重 env 未设→直接 copyFile 原文件，结果标 stub:true)。端点真实存在且 agent 经 HTTP 可调，但无真实模型→无视觉变化。无 CLI 封装。"
+        },
+        {
+          "name": "智能裁剪/重构图 reframe（横转竖等比适配）",
+          "status": "missing",
+          "evidence": "端点存在 src/server/routes/generate.ts:304 (POST /api/video/reframe) 但脚本已删 :358-362 (返回 'Reframe is unavailable... smart_crop/saliency.py, crop_9_16.py were removed', errorCode reframe_script_missing, HTTP 501)",
+          "agentReachable": "api",
+          "notes": "端点诚实返回 501 not-implemented(脚本随 skill modules/ 删除而失效)。agent 调到只会拿到错误。"
+        },
+        {
+          "name": "绿幕 / 抠像 / chroma key / color key",
+          "status": "missing",
+          "evidence": "全仓 grep chroma|green.?screen|chromakey|colorkey 零命中(src/web/cli 全无)；VideoClip schema 无 chroma 字段",
+          "agentReachable": "none",
+          "notes": "完全不存在。"
+        },
+        {
+          "name": "蒙版 / mask / 遮罩",
+          "status": "missing",
+          "evidence": "全仓 grep `\\bmask\\b` 零命中实现；clip schema 无 mask 字段；VideoTrackRenderer 无 mask/clip-path",
+          "agentReachable": "none",
+          "notes": "无任何蒙版/遮罩能力(矩形/形状/路径/亮度蒙版均无)。"
+        },
+        {
+          "name": "贴纸 / 图形叠加（overlay sticker）",
+          "status": "partial",
+          "evidence": "OverlayClip schema src/shared/composition.ts:226-244 (src+position xPct/yPct/wPct/hPct+opacity+keyframes); 但 POST /clip bridge 不支持 overlay src/server/bridge/routes.ts:592-593 ('overlay track not yet supported in Phase 3'); UI 添加 web/src/features/studio/panels/AssetSidebar/addAssetToTimeline.ts (image→overlay track)",
+          "agentReachable": "api",
+          "notes": "OverlayClip(图片/视频叠加)有完整 schema+渲染+keyframe，可当贴纸用。但 bridge POST /clip 显式拒绝 overlay → CLI clip add --track overlay 不行；agent 只能经 raw HTTP PUT 全量 comp 加 overlay。人在 Studio 库拖拽可加。无专门的'贴纸库/emoji/shape'资源。"
+        },
+        {
+          "name": "稳定 / 防抖 / stabilization",
+          "status": "missing",
+          "evidence": "全仓 grep stabiliz|deshake|vidstab 零命中；无 ffmpeg vidstab/deshake filter",
+          "agentReachable": "none",
+          "notes": "完全不存在。"
+        },
+        {
+          "name": "文字动画预设（kinetic-pop / typewriter / slide-up / fade）",
+          "status": "full",
+          "evidence": "schema src/shared/composition.ts:220-222 (animation enum 4 种); 渲染 web/src/features/studio/composition/tracks/TextTrackRenderer.tsx:58(slide-up 等); UI TextClipPanel.tsx:22-24,62-64",
+          "agentReachable": "api",
+          "notes": "TextClip 专属动画预设(非通用 clip)。这是单值 enum 字段，理论上 CLI clip set --animation slide-up 可过(非嵌套)，但 text clip 经 PATCH 改 animation 字段未验证；真路径仍是 raw HTTP/UI。另有字幕级动画(CaptionAnimationSet: entrance/highlight 7 种 marker-sweep/scribble/burst/slam/elastic 等 composition.ts:442-489)更丰富，属字幕渲染域。"
+        },
+        {
+          "name": "通用动画预设库（一键 Ken Burns / 缩放推拉 等组合关键帧模板）",
+          "status": "missing",
+          "evidence": "KeyframePanel.tsx 只提供逐条手加关键帧(AddForm :228-365)，无预设模板；store.ts 无 applyAnimationPreset 类 action；crossfade 是 recipe 文档不是内置功能",
+          "agentReachable": "none",
+          "notes": "无'一键应用 Ken Burns/弹跳/推拉'这类组合关键帧预设。要做动画须逐个关键帧手写(agent 经 raw HTTP comp 写入，或参照 crossfade recipe 手算 opacity 关键帧——但该 recipe 的 CLI 路径本身坏)。"
+        }
+      ]
+    },
+    {
+      "kind": "capability",
+      "area": "Audio editing (音量/淡入淡出/ducking/BGM/波形/混音/配音/ASR 字幕)",
+      "summary": "AutoViral's audio editing is real and largely WYSIWYG, but split across two engines: per-clip volume/fade/keyframe-volume are applied by Remotion in render Stage 1 (web/src/features/studio/composition/tracks/AudioTrackRenderer.tsx), while ducking + EBU-R128 loudness normalization run as ffmpeg post-passes (src/domain/audio-tools.ts mixAudioTracks/normalizeLufs, wired in src/server/render-pipeline.ts Stage 2/4). The full clip-audio surface (volume 0–1.5, fadeIn/fadeOut, type enum, ducking ratio, volume keyframes) is editable in the Inspector StaticPropsPanel and persists in the AudioClip schema. Per-track dB gain + mute have a real Studio UI (TimelineTrackHeader.tsx) and survive in TrackSchema, but have NO bridge/CLI endpoint, so they are UI-only — an agent cannot touch them. Agent reachability for clip-level audio is via the generic `autoviral clip set <id> --volume/--fadeIn/--fadeOut/--type ...` → PATCH /clip/:id (shallow-merge + full-comp zod validation); ducking can only be set as a nested object via raw HTTP PATCH, not the flat CLI flag parser. TTS is fully real and agent-reachable two ways (CLI `autoviral preprocess tts` → bridge /preprocess/tts, and POST /api/audio/tts, both via generateWithFallback Gemini-OpenRouter→edge-tts); the Studio Generate dialog's TTS tab also POSTs /api/works/:id/tts directly. ASR auto-captions exist as a working server endpoint (POST /api/audio/captions via stable-ts/whisper in a managed venv) but the frontend service fetchCaptions has ZERO UI caller — there is no caption-import button in Studio, so for a human it is effectively unreachable; an agent could hit the HTTP endpoint but there is no CLI verb for it. Waveform visualization is real end-to-end (server peaks pre-bake on upload+boot + WebAudio fallback → WaveformBars under audio clips). Multi-track mixing (volume/delay/fade/sidechain-ducking + amix) is real via /api/audio/mix. ENTIRELY ABSENT in active code: denoise/noise-reduction, EQ/equalizer, pitch/voice-change/formant, reverb, recording/voiceover-capture (no getUserMedia/MediaRecorder), source separation (vocal/伴奏 demucs/spleeter), and beat/踩点 alignment (the /api/audio/beats endpoint was removed and returns 410). BGM generation routes through the chat agent referencing a deleted python script (music_generate.py), so it is a broken/stub path.",
+      "capabilities": [
+        {
+          "name": "Per-clip volume (gain)",
+          "status": "full",
+          "evidence": "src/shared/composition.ts:176 (volume z.number().min(0).max(1.5).default(1)); editor web/src/features/studio/panels/Inspector/StaticPropsPanel.tsx:294-303 (updateClip volume); applied at render web/src/features/studio/composition/tracks/AudioTrackRenderer.tsx:49,56 (<Audio volume={v}>)",
+          "agentReachable": "cli",
+          "notes": "Agent: `autoviral clip set <id> --volume 0.5` → PATCH /clip/:id (src/server/bridge/routes.ts:730-750 shallow-merge then full-comp zod). Also reachable via UI slider. Real WYSIWYG (Remotion applies it)."
+        },
+        {
+          "name": "Per-clip fade in / fade out",
+          "status": "full",
+          "evidence": "schema src/shared/composition.ts:177-178 (fadeIn/fadeOut z.number().min(0)); UI StaticPropsPanel.tsx:304-323; render math web/src/features/studio/composition/tracks/AudioTrackRenderer.tsx:17-36 computeAudioVolumeForFrame (linear ramps on top of base/keyframe volume); also ffmpeg afade in mixAudioTracks src/domain/audio-tools.ts:228-236",
+          "agentReachable": "cli",
+          "notes": "`autoviral clip set <id> --fadeIn 1 --fadeOut 2`. Fades ride on top of static volume AND keyframe volume. Applied by Remotion Stage 1 regardless of ducking."
+        },
+        {
+          "name": "Ducking (sidechain 闪避)",
+          "status": "partial",
+          "evidence": "schema src/shared/composition.ts:179-185 (ducking {ratio,attack,release}); ffmpeg impl src/domain/audio-tools.ts:266-269 sidechaincompress; adapter src/server/render-pipeline.ts:269-311 compositionToMixTracks (only forwards ratio; attack/release dropped — hardcoded attack=200:release=1000 at audio-tools.ts:268); pipeline Stage 2 render-pipeline.ts:503-519 runs ONLY when an audio clip has ducking AND a voiceover clip exists (render-pipeline.ts:298 hasVoiceover && type!=='voiceover'); UI StaticPropsPanel.tsx:382-426 (toggle + ratio slider only)",
+          "agentReachable": "api",
+          "notes": "Partial: trigger is hardcoded to 'voiceover' (render-pipeline.ts:299-300) and only fires if a voiceover-type clip is present; attack/release are accepted by schema but silently ignored at render (intentional, see StaticPropsPanel.tsx:328-336). CLI's flat --key parser (clip.ts:60-63) can't express the nested ducking object → reachable only via raw HTTP PATCH /clip/:id with JSON body, NOT via `autoviral clip set`. UI exposes ratio only."
+        },
+        {
+          "name": "Keyframe (animated) clip volume",
+          "status": "full",
+          "evidence": "KeyframeProperty enum includes 'volume' src/shared/composition.ts:110; only offered on audio clips web/src/features/studio/panels/Inspector/KeyframePanel.tsx:33 (propertiesForClip returns ['volume']); render interpolation AudioTrackRenderer.tsx:48-49 (interpolateProperty(keyframes,'volume',localSec) ?? clip.volume)",
+          "agentReachable": "api",
+          "notes": "UI: KeyframePanel add-keyframe form. Agent: keyframes is an array field on the clip; PATCH /clip/:id can set the whole keyframes array via raw HTTP JSON, but `autoviral clip set` flat flags can't build the array → cli=no, api=yes."
+        },
+        {
+          "name": "Per-track volume / lane gain (dB)",
+          "status": "full",
+          "evidence": "schema src/shared/composition.ts:293-300 (track.volume z.number().default(0), dB); store action web/src/features/studio/store.ts:1051-1069 setTrackVolume (audio-only, no-ops on other kinds); UI dB slider web/src/features/studio/panels/Timeline/TimelineTrackHeader.tsx:286-426 (−40…+6 dB); folded into mix render-pipeline.ts:289,293 (clip.volume * dbToLinear(lane.volume))",
+          "agentReachable": "ui-only",
+          "notes": "Works end-to-end for a human, persists round-trip. But there is NO bridge endpoint for track mutations (full endpoint list src/server/bridge/routes.ts has /clip POST/PATCH/DELETE but nothing for /track) and no CLI track verb → agent cannot set lane gain."
+        },
+        {
+          "name": "Track mute",
+          "status": "full",
+          "evidence": "schema src/shared/composition.ts:291 (muted z.boolean().default(false)); renderer honors it AudioTrackRenderer.tsx:63 (if track.muted return null); UI toggle TimelineTrackHeader.tsx:261-266 toggleMuted + menu item :374-391 (no dedicated store action — directly mutates t.muted, comment store.ts-style at TimelineTrackHeader.tsx:250)",
+          "agentReachable": "ui-only",
+          "notes": "Human-only: toggled in the track ⋯ menu by direct comp mutation; no setMuted store action, no bridge/CLI endpoint. Agent cannot mute a track."
+        },
+        {
+          "name": "Multi-track audio mixing (amix + delay)",
+          "status": "full",
+          "evidence": "src/domain/audio-tools.ts:160-314 mixAudioTracks (per-track volume/adelay/afade/sidechain then amix=inputs:duration=first, mux -c:v copy -c:a aac, verifies output has audio); endpoint src/server/routes/audio.ts:56-125 POST /api/audio/mix (path-hardened)",
+          "agentReachable": "api",
+          "notes": "Reachable via HTTP POST /api/audio/mix (workId, videoPath, tracks[], outputFilename). No dedicated `autoviral` CLI verb → api only. Distinct from the render-pipeline auto-ducking pass which reuses the same function."
+        },
+        {
+          "name": "Loudness normalization (EBU R128 / LUFS)",
+          "status": "full",
+          "evidence": "src/domain/audio-tools.ts:370-439 normalizeLufs (two-pass loudnorm, measured values pinned, container-aware mux); pipeline Stage 4 src/server/render-pipeline.ts:552-564 (skips if no audio); target from preset/body render-pipeline.ts:388, render route src/server/routes/render.ts:78-80 (loudnessTargetLufs)",
+          "agentReachable": "api",
+          "notes": "Runs automatically on every export with audio (default −14 LUFS). Per-export target overridable via POST render body loudnessTargetLufs and persisted comp.loudnessTargetLufs (composition.ts:406). Agent reaches it through the export/render API; CLI `autoviral export` doesn't expose a loudness flag (cli/autoviral/src/commands/export.ts)."
+        },
+        {
+          "name": "Waveform visualization",
+          "status": "full",
+          "evidence": "server pre-bake src/server/audio/peaks.ts:147-205 generatePeaks (ffmpeg PCM→per-channel buckets→<src>.peaks.json), triggered on upload src/server/routes/assets.ts:305-306 + boot backfill src/server/audio/peaks-backfill.ts (wired src/server/index.ts:184); client web/src/features/studio/hooks/useWaveform.ts (peaks.json first, WebAudio decode fallback); rendered under audio clips web/src/features/studio/panels/Timeline/Track.tsx:325-340 WaveformBars",
+          "agentReachable": "ui-only",
+          "notes": "Pure visualization for the human in Studio; nothing for an agent to drive (peaks auto-generate server-side). Real end-to-end."
+        },
+        {
+          "name": "TTS (text-to-speech / 配音合成)",
+          "status": "full",
+          "evidence": "providers src/providers/tts/registry.ts:13-78 (geminiTtsProvider via OpenRouter + edgeTtsProvider, generateWithFallback auto Gemini→edge); endpoints src/server/routes/audio.ts:233-265 POST /api/audio/tts + :272-323 POST /api/works/:id/tts (writes assets/audio/, publishes asset-added); bridge src/server/bridge/routes.ts:496-517 POST /preprocess/tts (synthesizeNarration); CLI cli/autoviral/src/commands/preprocess.ts:44-69 `autoviral preprocess tts`; dialog UI web/src/features/studio/generation/GenerationDialog.tsx:319-336 POSTs /api/works/:id/tts directly",
+          "agentReachable": "cli",
+          "notes": "Strongest agent path: `autoviral preprocess tts \"...\" --voice ...`. zh+en supported, zero-key edge-tts fallback. Studio TTS dialog tab also works for humans. Voice list/style passed through."
+        },
+        {
+          "name": "ASR auto-captions (语音转字幕)",
+          "status": "partial",
+          "evidence": "endpoint src/server/routes/audio.ts:145-226 POST /api/audio/captions (auto-provisions managed venv ensureTtsVenv I15, runs stable_whisper.transcribe → segments, 503 PYTHON_DEP_MISSING when missing); frontend service web/src/features/studio/services/captions.ts:13-22 fetchCaptions",
+          "agentReachable": "api",
+          "notes": "Server side is real and works (whisper 'base' model via stable-ts). BUT fetchCaptions has ZERO callers in web/src (grep confirms only the definition) — no caption-import button in Studio, so for a human this feature is unreachable/dead UI. An agent can POST the HTTP endpoint directly but there is no `autoviral` CLI verb. Marked partial: backend full, frontend wiring missing."
+        },
+        {
+          "name": "BGM / music generation",
+          "status": "stub",
+          "evidence": "dialog audio bgm sub-kind routes through web/src/features/studio/generation/dispatchGeneration.ts:301-303 (script 'modules/assets/scripts/music_generate.py') then GenerationDialog.tsx:402 chat.send(notification.message) — the referenced python script was deleted in the agentic-terminal refactor (skills/autoviral/modules/ removed); no server endpoint actually generates BGM",
+          "agentReachable": "none",
+          "notes": "Broken: BGM tab emits an agent chat instruction pointing at a non-existent music_generate.py. No working generation path. (Compare: video gen has a real /api/providers/:id/generate-video endpoint; TTS has /api/works/:id/tts; BGM has neither.)"
+        },
+        {
+          "name": "Beat / 踩点 / BPM alignment",
+          "status": "missing",
+          "evidence": "src/server/routes/audio.ts:127-138 POST /api/audio/beats returns HTTP 410 'Endpoint removed in agentic-terminal refactor' (detect_beats.py preserved only in git tag); no beat/onset/bpm logic anywhere active (grep found only the removal notice)",
+          "agentReachable": "none",
+          "notes": "Explicitly retired. No snapping-to-beat capability in current code."
+        },
+        {
+          "name": "Recording / live voiceover capture (录音)",
+          "status": "missing",
+          "evidence": "no getUserMedia / MediaRecorder anywhere in web/src or src/ (grep returned nothing)",
+          "agentReachable": "none",
+          "notes": "No in-app recording. Voiceover only via TTS synthesis or importing an existing audio file."
+        },
+        {
+          "name": "Audio source separation (人声/伴奏分离)",
+          "status": "missing",
+          "evidence": "no demucs/spleeter/stem-separation/vocal-removal in src/ or web/src (grep returned nothing; only an unrelated subtitle style enum value 'karaoke' at src/domain/audio-tools.ts:531)",
+          "agentReachable": "none",
+          "notes": "Not implemented in any form."
+        },
+        {
+          "name": "Denoise / noise reduction",
+          "status": "missing",
+          "evidence": "grep for denoise/noise-reduc across src/ and web/src returned nothing (only analyzeAudio silencedetect at src/domain/audio-tools.ts:107, which is measurement, not reduction)",
+          "agentReachable": "none",
+          "notes": "No noise-reduction filter wired. analyzeAudio only reports silenceRatio/mean/peak volume."
+        },
+        {
+          "name": "Audio EQ / equalizer / effects (均衡/特效)",
+          "status": "missing",
+          "evidence": "no equalizer/eq/reverb filter in src/ or web/src (grep nothing); mix filter chain src/domain/audio-tools.ts:213-263 only has volume/adelay/afade/sidechaincompress",
+          "agentReachable": "none",
+          "notes": "No EQ, reverb, or general SFX-style audio filters. Only volume, delay, fade, sidechain compression, and loudnorm exist."
+        },
+        {
+          "name": "Pitch shift / voice change (变声/调音)",
+          "status": "missing",
+          "evidence": "no pitch/formant/autotune/voice-change in src/ or web/src (grep nothing)",
+          "agentReachable": "none",
+          "notes": "Not implemented. (Note: speed-ramp exists for video playbackRate but the renderer ignores speed keyframes on AudioClip per composition.ts:113-114, so no audio time/pitch manipulation.)"
+        }
+      ]
+    },
+    {
+      "kind": "capability",
+      "area": "文字 / 字幕 / 图文 / 海报（carousel）剪辑能力",
+      "summary": "两套独立文字系统：(A) 视频 TextClip（src/shared/composition.ts:194-223，Studio Inspector/TextClipPanel.tsx 编辑，Remotion TextTrackRenderer.tsx 渲染）；(B) 图文/海报 Carousel（src/shared/carousel.ts，editor/store.ts + CopyTab/DesignTab 编辑，Konva *LayerNode 渲染）。两者文字样式都覆盖字体/字号/字重/斜体/颜色/对齐/字间距，且都端到端打通（schema→UI→渲染）。差距/陷阱：(1) 行距 line-height 在两套里都没有 per-clip 控件（仅 project-level CaptionStyle.lineHeight 存在但无 UI）；(2) 视频 TextClip 的\"描边 stroke\"在渲染层实际是 textShadow 模糊辉光、不是真正描边轮廓（TextTrackRenderer.tsx:86）；图文 text layer 根本没有 stroke/shadow 字段；(3) 文字动画 4 预设（kinetic-pop/typewriter/slide-up/fade）只在视频侧、且只有人能在 UI 点，agent 经 CLI 完全够不着（POST /clip 建 text clip 不带 style/animation，PATCH /clip 是浅合并 + CLI 解析器只能传扁平字符串，写不了嵌套 style.* 或 animation）；(4) 图文 text layer 样式 agent 可经 `autoviral carousel set-layer` 整对象写入（font/size/weight/color/align，缺 italic/tracking flag）。花字/艺术字（渐变填充字/描边艺术字）完全缺失。贴纸=纯图片图层(src 指向用户图)，没有 emoji/贴纸库。海报背景(渐变/图/纯色)+grain+gradient 全可用，sharpen 是死字段(#70)。模板=图文有 3 个布局模板(centered/left/split)+5 调色板，但都只有 UI 能点、agent 够不着。自动字幕(ASR)后端完整(POST /api/audio/captions + 托管 venv)，但 fetchCaptions 在前端零非测试消费方——没有任何按钮把 ASR 字幕落到时间轴，agent 也没有 CLI 命令触发，是典型 built-not-wired。双语字幕没有专门功能：靠两条 text 轨(track.language 字段存在)叠加渲染、或一条 clip 写 \"zh\\nen\" 两行实现；YouTube ingest 会 transcribe+translate 生成译文轨。导出端字幕 burn/sidecar(多轨分桶+SRT 旁挂)完整。",
+      "capabilities": [
+        {
+          "name": "视频字幕文字样式 — 字体(freeform)/字号/字重/斜体/颜色/字间距 (TextClip)",
+          "status": "full",
+          "evidence": "src/shared/composition.ts:200-212 (style: font/size/weight/italic/tracking/color); web/src/features/studio/panels/Inspector/TextClipPanel.tsx:118-154 (UI 控件); web/src/features/studio/composition/tracks/TextTrackRenderer.tsx:80-91 (渲染消费全部字段)",
+          "agentReachable": "ui-only",
+          "notes": "人在 Studio Inspector 全可编辑且 round-trip。agent 经 CLI `clip add --track text` 只能建文本+offset+duration(bridge routes.ts:583-591 不接 style)；`clip set` 是 PATCH 浅合并(routes.ts:736-744)且 CLI 解析器只能传扁平字符串(clip.ts:60-63)，无法写嵌套 style.font/size/...。所以 agent 改不了视频字幕样式，仅 UI 可达。"
+        },
+        {
+          "name": "视频字幕文字对齐 (TextClip text-align)",
+          "status": "partial",
+          "evidence": "web/src/features/studio/composition/tracks/TextTrackRenderer.tsx:90 (textAlign 硬编码为 'center')；composition.ts TextClipSchema 无 align 字段；TextClipPanel.tsx 无 align 控件",
+          "agentReachable": "none",
+          "notes": "视频字幕对齐写死 center，schema 里根本没有 align 字段，UI/CLI 都无法改。(图文 text layer 才有 align)"
+        },
+        {
+          "name": "视频字幕描边 (stroke)",
+          "status": "partial",
+          "evidence": "src/shared/composition.ts:208-210 (style.stroke {width,color}); TextClipPanel.tsx:194-225 (UI 开关+宽度+色); 但 TextTrackRenderer.tsx:86-88 把 stroke 渲染成 `textShadow: 0 0 {width}px {color}` —— 是模糊辉光/阴影，不是真正描边轮廓",
+          "agentReachable": "ui-only",
+          "notes": "诚实判定 partial：UI 叫'描边'，渲染实为发光阴影。真正的字幕描边(WebkitTextStroke)没实现。仅人 UI 可点；agent CLI 写不了嵌套 style.stroke。"
+        },
+        {
+          "name": "视频字幕阴影 (text-shadow)",
+          "status": "missing",
+          "evidence": "composition.ts TextClipSchema:200-212 无独立 shadow 字段；textShadow 仅由 stroke 字段间接产生(TextTrackRenderer.tsx:86)，无 offset/blur/独立色控件",
+          "agentReachable": "none",
+          "notes": "没有独立的阴影控件/字段；阴影是描边字段的副作用产物。"
+        },
+        {
+          "name": "视频字幕行距 (line-height)",
+          "status": "missing",
+          "evidence": "composition.ts TextClipSchema:200-212 无 lineHeight；CaptionStyleSchema:382 有 lineHeight 默认 1.4 但那是 project 级默认且无任何 UI 消费(grep 无控件)；TextTrackRenderer.tsx 未设 lineHeight",
+          "agentReachable": "none",
+          "notes": "多行字幕行距不可调。CaptionStyle.lineHeight 是孤儿 schema 字段。"
+        },
+        {
+          "name": "视频字幕位置 (anchor top/center/bottom + x%/y%)",
+          "status": "full",
+          "evidence": "composition.ts:213-219 (position.anchor/xPct/yPct); TextClipPanel.tsx:98-107,156-173 (y% + anchor 控件); positionResolve.ts 消费",
+          "agentReachable": "ui-only",
+          "notes": "人 UI 全可调。agent CLI 同样受浅合并限制改不了嵌套 position（POST /clip 也不接 position），仅 UI 可达。"
+        },
+        {
+          "name": "视频字幕动画预设 (kinetic-pop / typewriter / slide-up / fade)",
+          "status": "full",
+          "evidence": "composition.ts:220-222 (animation enum); TextClipPanel.tsx:174-191 (UI select); TextTrackRenderer.tsx:18-71 (4 动画全部真实渲染，spring/interpolate/typewriter 逐字)",
+          "agentReachable": "ui-only",
+          "notes": "渲染真实(kinetic-pop spring 缩放、typewriter 逐字、slide-up 位移、fade 透明度)。但 agent 经 CLI 完全够不着：POST /clip 不写 animation，PATCH 浅合并 + 扁平解析器写不了 enum 到嵌套结构。只有人能在 UI 选。"
+        },
+        {
+          "name": "图文/海报文字层样式 — 字体(serif/sans/mono)/字号/字重/斜体/颜色/对齐/字间距 (Carousel TextLayer)",
+          "status": "full",
+          "evidence": "src/shared/carousel.ts:25-41 (TextLayerSchema.style 7 字段); web/src/features/editor/panels/Inspector/CopyTab.tsx:194-256 (#81 全样式控件); web/src/features/editor/canvas/layers/TextLayerNode.tsx:52-67 (Konva 渲染消费全部)",
+          "agentReachable": "cli",
+          "notes": "人 UI 全可编辑。agent 经 `autoviral carousel set-layer <slide> --kind text --text .. --font/--size/--weight/--color/--align`(carousel.ts CLI:80-92) 整对象写入，bridge LayerSchema.parse 校验(routes.ts:828)。CLI flag 缺 italic/tracking，但 agent 可经 PUT 整 carousel 补全。"
+        },
+        {
+          "name": "图文/海报文字层描边/阴影",
+          "status": "missing",
+          "evidence": "src/shared/carousel.ts:25-41 TextLayerSchema.style 仅 font/size/weight/italic/color/align/tracking，无 stroke/shadow；TextLayerNode.tsx:52-67 渲染无 stroke/shadow",
+          "agentReachable": "none",
+          "notes": "图文文字层连描边/阴影字段都没有(视频侧至少有 stroke→glow)。"
+        },
+        {
+          "name": "花字 / 艺术字 (渐变填充字 / 描边艺术字 / 文字特效)",
+          "status": "missing",
+          "evidence": "carousel.ts TextLayerSchema.style.color 只接单一 CSS color(:36)；无 gradient-fill / 多层描边 / 文字特效字段；composition.ts TextClip 同样只有单色 fill。grep 'wordart/艺术字/花字' 零命中",
+          "agentReachable": "none",
+          "notes": "两套系统都只支持纯色文字。无渐变字、无描边艺术字、无 3D/霓虹/贴图填充等花字。"
+        },
+        {
+          "name": "贴纸图层 (Sticker)",
+          "status": "partial",
+          "evidence": "carousel.ts:67-72 (StickerLayerSchema 仅 box+src); StickerLayerNode.tsx:45-78 (Konva 图片渲染+失败占位); CLI carousel.ts:93-98 (--kind sticker --src)",
+          "agentReachable": "cli",
+          "notes": "贴纸=纯图片图层(指向任意 src 图片)，可拖拽缩放旋转。判 partial 因为没有任何内置贴纸/emoji 素材库——用户/agent 必须自带图片 URL。无 emoji 选择器。"
+        },
+        {
+          "name": "Emoji 选择器 / 内置贴纸素材库",
+          "status": "missing",
+          "evidence": "grep 'emoji|sticker.*library|stickerLibrary' web/src 仅命中无关 CSS；StickerLayer 只有 src 字段(carousel.ts:67-72)，无素材枚举/picker 组件",
+          "agentReachable": "none",
+          "notes": "完全没有 emoji picker 或贴纸库。贴纸只能塞外部图片。"
+        },
+        {
+          "name": "形状图层 (Shape — rect/circle/line, fill/stroke/strokeWidth)",
+          "status": "full",
+          "evidence": "carousel.ts:57-65 (ShapeLayerSchema); web/src/features/editor/canvas/layers/ShapeLayerNode.tsx; CLI carousel.ts:99-110 (--kind shape --shape/--fill/--stroke/--stroke-width)",
+          "agentReachable": "cli",
+          "notes": "形状有真正的 fill+stroke+strokeWidth(不像文字层只有发光)。agent 经 set-layer 可建。"
+        },
+        {
+          "name": "图文多页排版 / 增删/复制/重排幻灯片 (Slides)",
+          "status": "partial",
+          "evidence": "editor/store.ts:69-103 (addSlide/removeSlide/duplicateSlide/reorderSlides); SlideSchema 强制 min 1(carousel.ts:134); CLI carousel.ts:20-42 仅 add-slide",
+          "agentReachable": "cli",
+          "notes": "人 UI: 增/删/复制/重排全有。agent CLI: 只有 `carousel add-slide --at N`(可指定位置)；删除/复制/重排没有 CLI 子命令，agent 只能经 PUT /api/works/:id/carousel 整体重写(routes.ts:761-763 注释明示 reorder 走整体 PUT)。"
+        },
+        {
+          "name": "图文布局模板 (centered / left / split)",
+          "status": "full",
+          "evidence": "carousel.ts:118 (layout enum); editor/store.ts:138-147 applyLayout(重排所有文字层); DesignTab.tsx:85-99 (3 模板按钮); editor/services/layout.ts:11-72 (真实重布局逻辑)",
+          "agentReachable": "ui-only",
+          "notes": "3 个布局模板真实重排每张幻灯片的文字层。仅人 UI 可点；CLI 无 layout 子命令(agent 只能整体 PUT 改 globals.layout，但不会触发重排算法——重排只在前端 store action 里)。"
+        },
+        {
+          "name": "图文调色板 (5 palettes: mono/pastel/neon/earth/noir)",
+          "status": "full",
+          "evidence": "carousel.ts:14-15 PALETTE_IDS; editor/palettes.ts:13-58 (5 个完整调色板); editor/store.ts:158-171 applyPalette(改所有文字色+纯色背景); DesignTab.tsx:51-83",
+          "agentReachable": "ui-only",
+          "notes": "5 调色板真实批量改文字色+纯色背景。仅人 UI；agent 无 CLI palette 命令(整体 PUT 改 globals.palette 不会批量重着色——逻辑只在 store action)。"
+        },
+        {
+          "name": "海报背景 (gradient / image / solid)",
+          "status": "full",
+          "evidence": "carousel.ts:86-91 (SlideBgSchema 判别联合); editor/store.ts:172-177 updateSlideBg; CLI carousel.ts:24-32 (add-slide --bg-type/--bg-value); bridge routes.ts:779-783 (SlideBgSchema.parse 校验)",
+          "agentReachable": "cli",
+          "notes": "agent 经 add-slide --bg-type gradient|image|solid --bg-value 可设新幻灯片背景。改现有幻灯片背景无 CLI(走整体 PUT)。"
+        },
+        {
+          "name": "海报效果 — 噪点 grain / 渐变 gradient",
+          "status": "full",
+          "evidence": "carousel.ts:119-132 (effects.grain/gradient); DesignTab.tsx:101-121 (两个 slider); editor/canvas/EffectsOverlay.tsx + grain.ts(真实渲染叠加)",
+          "agentReachable": "ui-only",
+          "notes": "grain+gradient 真实渲染(EffectsOverlay additive 叠加)。仅人 UI；agent 无 CLI effects 命令。"
+        },
+        {
+          "name": "海报效果 — 锐化 sharpen",
+          "status": "stub",
+          "evidence": "carousel.ts:123-130 (字段保留但注释明示 DEPRECATED/无渲染器消费); DesignTab.tsx:122-129 (滑块已移除，#70); 无任何 renderer 读取 sharpen",
+          "agentReachable": "none",
+          "notes": "死字段。仅为旧文件 round-trip 保留，无渲染、无 UI、无 CLI。"
+        },
+        {
+          "name": "字体选择范围 (可用字体家族)",
+          "status": "partial",
+          "evidence": "视频侧 TextClipPanel.tsx:19 仅 Inter/Instrument Serif/JetBrains Mono 3 个；图文侧 carousel.ts:32 仅 serif/sans/mono 3 枚举(→ TextLayerNode.tsx:9-13 映射同 3 家族); web/src/styles/tokens.css:53-55 仅加载这 3 个 web 字体",
+          "agentReachable": "cli",
+          "notes": "全站只加载 3 个字体家族(品牌字体)。无自定义字体上传、无中文花体/书法字、无字体库。视频 style.font 是 freeform string 但只有这 3 个真正加载。图文侧 agent 经 set-layer --font 可选 3 枚举之一。"
+        },
+        {
+          "name": "自动字幕生成 (ASR / Whisper 转写落时间轴)",
+          "status": "partial",
+          "evidence": "src/server/routes/audio.ts:145-219 (POST /api/audio/captions 完整：托管 venv 自动装 stable-ts + transcribe + 返回时间码 segments); web/src/features/studio/services/captions.ts:13 fetchCaptions —— 但 grep 全仓 fetchCaptions 仅自身定义，零非测试消费方",
+          "agentReachable": "none",
+          "notes": "经典 built-not-wired：ASR 后端完整可用，但前端没有任何按钮调 fetchCaptions 把字幕落到时间轴(零 UI 消费)，agent 也没有 CLI 命令触发 ASR。用户/agent 都无法'一键生成字幕'。"
+        },
+        {
+          "name": "自动字幕样式 (CaptionsLayer kinetic typography — hyperframes 风格)",
+          "status": "partial",
+          "evidence": "web/src/features/studio/composition/captions/CaptionsLayer.tsx (完整 kinetic typography 渲染器：per-word 高亮/下划线/burst/entrance-exit 动画); CaptionGroupStyle schema composition.ts:425-438 (fontFamily/size/weight/color/bg/stroke/textAlign); 但无样式编辑 UI，靠 caption_strategy='overlay' 数据驱动",
+          "agentReachable": "none",
+          "notes": "存在一套移植自 hyperframes 的高级 kinetic 字幕渲染器(逐词高亮/SVG 下划线/burst-lines)，且 CaptionModel schema 共享。但没有生成入口(见 ASR 项)也没有样式编辑面板；CaptionGroupStyle 只能靠手写 YAML/agent 整体 PUT 驱动。渲染层 full，可达性 none。"
+        },
+        {
+          "name": "双语字幕 (中英 zh/en)",
+          "status": "partial",
+          "evidence": "composition.ts:290 (Track.language 可选字段，注释示例 'CC1 zh'/'CC2 en'); TextTrackRenderer 渲染所有 text 轨(render-pipeline.ts:417-419 captionTracks 省略时渲染全部 text 轨叠加); 无专门'双语'功能/按钮",
+          "agentReachable": "cli",
+          "notes": "无一等公民'双语字幕'功能。实现路径：(a) 两条 text 轨各标 language=zh/en，渲染时叠加(legacy 路径渲染所有 text 轨)；(b) 一条 clip text 写 'zh\\nen' 两行(MEMORY 验证过)。agent 能经 CLI clip add 两条/两行文本拼出，但样式不可控(见上)。无自动'转写+翻译+双轨布局'一键流。"
+        },
+        {
+          "name": "YouTube 字幕 ingest (转写+翻译成译文轨)",
+          "status": "full",
+          "evidence": "src/server/bridge/ingest-youtube.ts:4,205-261 (download→ASR transcribe→OpenRouter 逐段翻译→bootstrap composition); cli/autoviral/src/commands/ingest.ts:1,41 (autoviral ingest youtube <url> --lang zh-CN --model)",
+          "agentReachable": "cli",
+          "notes": "唯一打通的'转写+翻译'流，但只针对 YouTube 源、且产出译文轨(非双轨叠加)。agent 经 `autoviral ingest youtube` 可触发。"
+        },
+        {
+          "name": "字幕导出 burn / sidecar (硬烧 / SRT 旁挂, 多轨分桶)",
+          "status": "full",
+          "evidence": "src/server/render-pipeline.ts:141-146,411-437 (captionTracks 三桶分区: burn 进 Stage1 / sidecar 出 .lang.srt / drop); web/src/features/studio/panels/Export/{CaptionTracksSection,ExportCaptionsDialog}.tsx (DaVinci 风格 burn/sidecar 选择 UI)",
+          "agentReachable": "ui-only",
+          "notes": "导出时人 UI 可选每条 text 轨 burn/sidecar/drop + 多语言 SRT 旁挂。agent 经 `autoviral export` 可触发渲染但 CLI export 命令未暴露 captionTracks 选项(走默认: 渲染全部 text 轨)。"
+        },
+        {
+          "name": "图文文字层 AI 重写 (rewrite copy)",
+          "status": "full",
+          "evidence": "web/src/features/editor/panels/Inspector/CopyTab.tsx:52-81 (onRewrite → POST /api/works/:id/text-rewrite); 同步返回 {text} 写回 updateLayer",
+          "agentReachable": "ui-only",
+          "notes": "人在图文 CopyTab 可一键 AI 改写文案。该端点 agent 也能调，但属 LLM 文案而非剪辑能力；无对应 CLI 子命令。"
+        },
+        {
+          "name": "图文模板 / 预设版式库 (整套设计模板)",
+          "status": "missing",
+          "evidence": "无 template 注册表 (grep template 仅命中无关 CSS); makeEmptyCarousel(carousel.ts:159-176) 只产单张空渐变幻灯片; 仅有 3 layout + 5 palette 作为'样式开关'，非整套版式模板",
+          "agentReachable": "none",
+          "notes": "没有'选模板出整套图文'的模板库。只有 layout/palette 两个全局样式维度。新图文从一张空白幻灯片起。"
+        }
+      ]
+    },
+    {
+      "kind": "capability",
+      "area": "渲染 / 导出 / 平台预设",
+      "summary": "AutoViral 的视频导出是一条 5-stage 管线（Remotion render → ducking → loudnorm 两遍 → 字幕烧录 → 最终 ffmpeg 编码），跑在带并发上限/取消/进度的 render-queue worker 上；agent 可经 CLI `autoviral export`（→ bridge POST /export，同步阻塞返回最终路径）触达，人则经 Studio TopBar「导出」按钮（→ POST /api/works/:id/render，异步 jobId + 进度 modal）触达。但二者是两条独立路径，能力不对等：(1) 平台预设（8 个 douyin/xhs/wechat/bilibili/tiktok/reels/shorts/yt，含尺寸/fps/码率/响度 LUFS/安全区/时长）只硬编码在前端 PlatformPresetSection.tsx，agent 完全够不着——CLI 的 `--preset` 和 bridge /export 的 `body.preset`、render-queue 的 `presetId` 三处都接收了该参数却从不读取，真正生效的编码预设永远是 `comp.exportPresets[0]`（只有人在 UI 选预设才会写进 composition.yaml）；(2) 响度 LUFS：管线支持任意 target（render-pipeline.ts:388 默认 -14，两遍 loudnorm 真跑），但 agent 经 /export 无法传 loudnessTargetLufs（只有 /api/works/:id/render 的人类路径会从 preset 桥接，#80 修复）。分辨率/帧率/格式：分辨率+fps 由 comp.width/height/fps 驱动（Remotion override，agent 可经 comp mutate 触达），但容器固定 mp4/h264、无 GIF/序列帧/ProRes/无水印/无独立压缩档/无导出预览选项。GPU 编码器（VideoToolbox/NVENC/VAAPI/QSV→libx264 软回退）自动探测真实可用。封面/静帧：视频 `autoviral snapshot` 经 Remotion renderStill 真出 PNG，agent 可 Read；carousel 静帧无服务端渲染器，只能回退到 slide 背景图（textLayersComposited:false 诚实标注），文字层不合成。批量导出：仅 CLI `--variables-file <dir>` 变量批量（agent 可触达），carousel「导出全部」是浏览器 Konva toDataURL 逐页下载（纯 UI、agent 够不着）。reframe（自动横竖屏重构图）端点存在但 smart-crop Python 脚本已在 skill 重构中删除，运行时一律返回 501 stub。",
+      "capabilities": [
+        {
+          "name": "视频导出管线 (5-stage: render→duck→loudnorm→burn→encode)",
+          "status": "full",
+          "evidence": "src/server/render-pipeline.ts:385-615 runRenderPipeline; stages onP() at 448/509/540/556/569",
+          "agentReachable": "cli",
+          "notes": "agent: CLI `autoviral export`→bridge POST /export (src/server/bridge/routes.ts:646, 同步阻塞返回 {path}). 人: Studio 经 render-queue (异步 jobId). 两条路径并存."
+        },
+        {
+          "name": "导出分辨率 (width/height)",
+          "status": "full",
+          "evidence": "src/server/remotion-renderer.ts:81-87 override composition width/height; render-pipeline.ts:233-241 proxy evenHalf",
+          "agentReachable": "cli",
+          "notes": "由 comp.width/height 驱动，Remotion 显式 override（默认 1080x1920）。agent 可经 comp mutate（bridge PATCH/写 composition.yaml）改尺寸，再 export 即生效。无独立『导出分辨率下拉』。"
+        },
+        {
+          "name": "导出帧率 (fps)",
+          "status": "full",
+          "evidence": "remotion-renderer.ts:85 fps: comp.fps; composition fps 字面联合 24|25|30|60; proxy 钳到 24 (render-pipeline.ts:228)",
+          "agentReachable": "cli",
+          "notes": "由 comp.fps 驱动，agent 可经 comp 改。无独立 fps 选择 UI（随平台预设带）。"
+        },
+        {
+          "name": "导出码率 (videoBitrate/audioBitrate)",
+          "status": "partial",
+          "evidence": "render-pipeline.ts:337-355 runEncodeStage -b:v `${preset.videoBitrate}k` -b:a `${preset.audioBitrate}k`; 仅当 comp.exportPresets[0] 存在 (575-580)",
+          "agentReachable": "ui-only",
+          "notes": "码率只来自 exportPresets[0]（人在 UI 选平台预设才写入）。无预设时直接 rename mp4，沿用 Remotion 默认码率。agent 经 /export 无法设码率/选预设。"
+        },
+        {
+          "name": "导出格式/容器 (固定 mp4/h264 + faststart)",
+          "status": "partial",
+          "evidence": "remotion-renderer.ts:89 codec:\"h264\"; render-pipeline.ts:349-354 -c:a aac -movflags +faststart; CODEC_MAP/pickEncoder 支持 h264/h265/vp9/av1 但 preset.codec 仅 UI 预设全为 h264",
+          "agentReachable": "ui-only",
+          "notes": "Stage1 Remotion 永远 h264 mp4。最终编码 codec 取自 preset.codec，但 8 个预设全是 h264/mp4。h265/vp9/av1 编码路径存在 (gpu-encoder.ts:174-226) 但无任何 UI/CLI 暴露。无 WebM/MOV 输出。"
+        },
+        {
+          "name": "平台预设 (尺寸+fps+码率+LUFS+安全区+时长上限)",
+          "status": "partial",
+          "evidence": "web/.../Tweaks/PlatformPresetSection.tsx:9-128 PRESETS 硬编码 8 个 (douyin/xhs/wechat/bilibili/tiktok/reels/shorts/yt-long), 含 loudnessTargetLufs/safeZonePct/maxDurationSec; store.ts:630-643 applyPlatformPreset 写 exportPresets[0]",
+          "agentReachable": "ui-only",
+          "notes": "预设表只存在于前端组件常量里，仅人在 Studio Tweaks 面板可选。agent 没有任何端点拿到这 8 个预设或按 id 应用。safeZonePct/maxDurationSec 只是元数据，未见在渲染/导出端强制裁切或限时。"
+        },
+        {
+          "name": "preset 选择参数 (--preset / body.preset / presetId)",
+          "status": "stub",
+          "evidence": "CLI export.ts:37 接收 --preset 并 callExport({preset}); bridge routes.ts:650 body.preset?:string 声明却从不读取; render-queue/job.ts:34,49 presetId 字段; render-pipeline.ts:575 只用 comp.exportPresets?.[0]，无 presetId 解析",
+          "agentReachable": "api",
+          "notes": "三处都接收 preset/presetId 但管线从不据此查表选预设——真正生效的永远是 composition.yaml 里已有的 exportPresets[0]。agent 传 `--preset douyin-9-16` 被静默忽略。这是『built-not-wired/dead-control』典型。"
+        },
+        {
+          "name": "响度归一化 (loudnorm 两遍, 目标 LUFS)",
+          "status": "full",
+          "evidence": "render-pipeline.ts:556-563 normalizeLufs(target, truePeak:-1.5, lra:11); hasMeaningfulAudio 探测跳过静音 (31-64); 默认 target -14 (388)",
+          "agentReachable": "ui-only",
+          "notes": "两遍 loudnorm 真跑、静音探测真做。但 LUFS 目标：人类 Studio 路径经 resolveRenderOpts 从 preset 桥接 (services/render.ts #80)；agent 的 /export body 不接受 loudnessTargetLufs，永远落 -14 默认。"
+        },
+        {
+          "name": "GPU 硬件编码器自动探测 (VideoToolbox/NVENC/VAAPI/QSV→软回退)",
+          "status": "full",
+          "evidence": "src/server/render/gpu-encoder.ts:109-143 detectAvailableEncoders (ffmpeg -encoders), 157-248 pickEncoder 优先级+preset 词表翻译; render-pipeline.ts:343 pickEncoder(preset.codec,\"medium\")",
+          "agentReachable": "none",
+          "notes": "内部自动决策，无需也无法由 agent/人控制（按硬件可用性挑）。macOS Apple Silicon 走 h264_videotoolbox。仅在有 exportPresets[0] 触发 encode 阶段时才用到。"
+        },
+        {
+          "name": "字幕烧录 + sidecar SRT 多轨 (Phase H/#35)",
+          "status": "full",
+          "evidence": "render-pipeline.ts:411-437 caption 分桶 burn/sidecar/drop; 533-550 burnSubtitles 烧录(无文字轨抛错); 592-612 textTrackToSrt 写 <out>.<lang>.srt",
+          "agentReachable": "api",
+          "notes": "人: Studio ExportCaptionsDialog→/api/works/:id/render captionTracks. agent: /export body 不传 captionTracks（routes.ts:649-655 仅 preset/proxy/variables），CLI export.ts 也无 --captions 标志→agent 走默认（全部文字轨经 Remotion 渲染）。"
+        },
+        {
+          "name": "封面/静帧导出 — 视频 (autoviral snapshot)",
+          "status": "full",
+          "evidence": "src/server/remotion-still.ts:47-89 renderCompositionStill (renderStill png); snapshot.ts:214-252 snapshotVideo; bridge routes.ts:710-728 POST /snapshot; CLI snapshot.ts",
+          "agentReachable": "cli",
+          "notes": "agent `autoviral snapshot [--at <t>]`→单帧 PNG 绝对路径，可 Read 自检。与 mp4 同 serveUrl/inputProps，帧级保真。这是 agent 的视觉自检核心能力。"
+        },
+        {
+          "name": "封面/静帧导出 — carousel (无服务端渲染器)",
+          "status": "partial",
+          "evidence": "snapshot.ts:171-212 snapshotCarousel; 199-207 回退到 slide.bg 背景图 textLayersComposited:false; CLI snapshot.ts:76-80 stderr 警告",
+          "agentReachable": "cli",
+          "notes": "carousel 无 headless Konva 渲染器：snapshot 只能返回已导出页(罕见)或 slide 背景图(文字/贴纸层不合成)。诚实标 textLayersComposited:false 并 CLI 警告 agent 勿据此判断文字布局。"
+        },
+        {
+          "name": "carousel 图文导出 (逐页 PNG 下载)",
+          "status": "full",
+          "evidence": "web/.../editor/hooks/useExport.ts:74-137 exportAll; services/exportPng.ts:38-60 exportAllPngs 逐页 toDataURL+triggerDownload; pixelRatio:2 png",
+          "agentReachable": "ui-only",
+          "notes": "纯浏览器 Konva stage.toDataURL → <a download> 下载到用户 Downloads。无任何服务端/CLI 入口，agent 完全够不着。无尺寸/格式/质量选项（固定 png @2x）。"
+        },
+        {
+          "name": "批量/变体导出 (--variables-file 目录)",
+          "status": "full",
+          "evidence": "cli/.../commands/export.ts:101-142 批量模式遍历 *.json; bridge /export resolveVariables + overrideHash 文件名 (routes.ts:661-684); --continue-on-error/--strict-variables",
+          "agentReachable": "cli",
+          "notes": "agent 可 `autoviral export --variables-file ./batch/` 跑变量矩阵批量渲染，每变体一个 mp4（hash 防覆盖）。这是真批量。注意：这是『变量替换批量』，不是『多平台预设批量』（后者够不着）。"
+        },
+        {
+          "name": "渲染队列 (并发上限/取消/去重)",
+          "status": "full",
+          "evidence": "render-queue/worker.ts:118-302 RenderQueueWorker (concurrency 默认1/AbortController取消/drain); routes/render.ts:69-72 findActiveRenderJob 去重; #62/#63 防双发与孤儿",
+          "agentReachable": "api",
+          "notes": "队列是人类 Studio 路径 (POST /api/works/:id/render→jobId)；agent 的 /export 是同步阻塞调 runRenderPipeline 不入队列、无 jobId、无并发管控。两套并存。CLI 无 cancel/job 查询命令。"
+        },
+        {
+          "name": "进度反馈 (加权 5 段进度条 + WS/SSE)",
+          "status": "full",
+          "evidence": "worker.ts:21-65 STAGE_BUDGET 加权(render 0.75); aggregateProgress; remotion-renderer.ts:98-105 per-frame onProgress; render-ws.ts; ExportProgress.tsx 进度 modal",
+          "agentReachable": "api",
+          "notes": "人: ExportProgress modal 实时进度+下载/Finder/预览三动作 (ExportProgress.tsx:287-388, R43)。agent: /export 经 ui-render-progress 事件广播到 Studio (routes.ts:685-692)，但 CLI 自身是阻塞等结果，无 stdout 进度流。"
+        },
+        {
+          "name": "代理/快速预览渲染 (--proxy 半分辨率24fps半码率)",
+          "status": "full",
+          "evidence": "render-pipeline.ts:225-243 applyProxy (evenHalf/fps≤24/码率÷2); 387 opts.proxy; CLI export.ts:164-166 render=export --proxy; routes.ts:681",
+          "agentReachable": "cli",
+          "notes": "agent `autoviral render`(=export --proxy) 或 `--proxy`。人: Studio『快速代理导出』菜单 (TopBar.tsx:374)。文件名前缀 proxy- vs final- 区分。"
+        },
+        {
+          "name": "变速/speed-ramp 导出前置 (静态变速真做, 变量变速回退1x)",
+          "status": "partial",
+          "evidence": "src/server/speed-ramp-ffmpeg.ts:1-15 setpts/atempo 预处理静态变速; 12-14 变量变速仅 log 警告+保持 src 不变(预览有、导出1x); render-pipeline.ts:404 applySpeedRampPrePass",
+          "agentReachable": "cli",
+          "notes": "静态非1速度真在导出前用 ffmpeg 重采样；变量速度(D6 v1)仅 Remotion 预览，导出回退 1×。agent 经改 comp 的 speed 字段后 export 即触发，但变量变速导出不保真。"
+        },
+        {
+          "name": "OS 文件浏览器中显示输出 (reveal)",
+          "status": "full",
+          "evidence": "src/server/routes/render.ts:118-193 POST /api/render/reveal (open -R / explorer /select / xdg-open); 非 darwin/win/linux 返回 501",
+          "agentReachable": "ui-only",
+          "notes": "ExportProgress 『在 Finder 显示』按钮。agent 无对应 CLI。路径越界防护到位 (resolveAssetPath)。"
+        },
+        {
+          "name": "reframe 自动横竖屏重构图 (smart-crop)",
+          "status": "stub",
+          "evidence": "src/server/routes/generate.ts:304-365 POST /api/video/reframe; 348-365 saliency.py/crop_9_16.py 已删(commit 29b9e96)→existsSync 失败返回 501 reframe_script_missing; skills/autoviral/modules/ 目录不存在(已验证)",
+          "agentReachable": "none",
+          "notes": "端点+ReframeConfirmDialog UI+并发编排都在，但底层 Python smart-crop 脚本在 skill 重构中删除从未重接，运行时一律 501。人选平台预设触发 reframe 会整体失败(#45 改成事务化不腐化 comp)。agent 无 CLI 入口且后端也死。"
+        },
+        {
+          "name": "ffmpeg 转场端点 (light-leak/glitch/domain-warp/grav-lens)",
+          "status": "full",
+          "evidence": "src/server/routes/render.ts:340-358 4 个 POST /api/transitions/*; render/transitions.ts:1-? apply*Transition; ffprobe 探测尺寸/fps",
+          "agentReachable": "api",
+          "notes": "纯 ffmpeg 两片段交叉转场，写 output/。但 CLI 无对应命令，agent 只能直接 POST HTTP（非 autoviral CLI 一等公民）。注意这与 timeline 内的 @remotion/transitions 转场(随主渲染)是两套。"
+        },
+        {
+          "name": "GIF / 序列帧 / ProRes 导出",
+          "status": "missing",
+          "evidence": "全仓 grep gif/sequence/imageSequence/ProRes/prores 无任何导出实现(仅 _shared.ts:82/125 把 .gif 列为可served MIME, clip-index.ts:32 把 gif 当图片素材)",
+          "agentReachable": "none",
+          "notes": "无 GIF 导出、无 image-sequence(PNG序列)导出、无 ProRes/无损中间格式。仅 mp4(h264) + carousel PNG。"
+        },
+        {
+          "name": "水印 / 压缩档位 / 导出质量预览",
+          "status": "missing",
+          "evidence": "全仓 grep watermark/水印 无命中; 无独立 compression/quality 档位 UI; 无导出前 size/质量预估",
+          "agentReachable": "none",
+          "notes": "无水印叠加、无『高/中/低质量』压缩档(质量隐含在 preset 码率里)、无导出体积/质量预览。"
+        }
+      ]
+    },
+    {
+      "kind": "capability",
+      "area": "Composition 数据模型 & agent 改图心智模型",
+      "summary": "Schema 本身设计成熟、对 agent 友好（src/shared/composition.ts + carousel.ts + content-types/registry.ts）：pneuma 式 asset/provenance 分离、transition preset 单一事实源（enum 从 transitions.ts 派生）、discriminated union per-kind clip、几乎所有字段都给了 zod `.default()` 所以最小对象就能 parse。但「高层意图→低层 patch」的原子抽象只存在于 web 的 Zustand store（store.ts，~25 个 splitClip / moveClipToTrack / addTransition / addKeyframe / setTrackVolume / addTrack 等意图级 action）——这些是真正成熟的抽象，却只能人在浏览器点，agent 经 CLI/API 完全够不着。agent 的实际写面只有两条窄路：(1) CLI `clip add/set/remove` + `carousel add-slide/set-layer` → bridge HTTP（routes.ts:537/604/730），只覆盖 video/audio/text 三种 clip 的顶层增删 + 极有限的 flat-key set；(2) 万能逃生口 `PUT /api/works/:id/composition`（works.ts:208），整份 composition 走 `CompositionSchema.safeParse` 全量校验。这意味着 agent 要做转场/关键帧/变速/场景/变量/跨轨移动/嵌套 transform·style·position 这些改动，没有任何意图级命令可用，必须手搓整个 composition JSON 再 PUT——核心命题「agent 经 CLI 驱动剪辑」在数据模型层只覆盖了一小块，富功能是 built-but-human-only。schema invariant 坑中等：track id 必须 `^trk_`（migrateLegacyTrackIds 只在 read 路径兜底）、speed keyframe 三处 superRefine 范围卡、transition.afterClipId 必须指向同轨真实 clip 且不能是末 clip、carousel slides `.min(1)`、变量 id 必须合法标识符。最大的对 agent 不友好点：(a) `clip set` 是 flat-key 浅合并，碰不到任何嵌套对象（transform/style/position/keyframes/fade/ducking 全失效）；(b) 没有 schema 感知的「dry-run validate this patch」预检——CLI 的 lint/validate/check 是 Puppeteer a11y 质检而非 schema 校验，agent 只能 PUT 后看 400 issues 试错。",
+      "capabilities": [
+        {
+          "name": "Composition schema 设计质量（asset/provenance 分离 + 默认值齐全）",
+          "status": "full",
+          "evidence": "src/shared/composition.ts:32-88 (AssetEntry 仅放物理 metadata，how-it-was-made 字段进 ProvenanceEdge.params)；:8-22,160-162,176-188 clip 字段大量 .default()，最小 clip 对象即可 parse",
+          "agentReachable": "api",
+          "notes": "schema 本身 agent-friendly：纯 zod、@shared 可被 CLI/web/server 同时 import、default 让 agent 不必填全字段（构造最小 clip 不用懂全部字段）。但 agent 触达它只能整份 PUT/parse，不是字段级。pneuma 借鉴的 metadata vs provenance 分离是防 schema drift 的关键规约（注释明写）。"
+        },
+        {
+          "name": "高层意图→低层 patch 原子抽象（split/move-to-track/transitions/keyframes/track-ops）",
+          "status": "full",
+          "evidence": "web/src/features/studio/store.ts:114 splitClip / :125 moveClipToTrack / :132 addTransition / :157 addKeyframe / :180 addTrack / :202 setTrackVolume（~25 意图级 action，82 个 store 成员）",
+          "agentReachable": "ui-only",
+          "notes": "作为抽象本身是 full（成熟、带 ripple/snap/keyframe-rebase 真实语义），但它是 React Zustand action，只能人在浏览器点触发；agent 经 CLI/API 完全够不着。这是本领域最大的 built-but-human-only 缺口。store action 的产物靠浏览器 autosave PUT /api/works/:id/composition 落盘（store.ts:852 注释提到 autosave 400），但 action 本身没有任何 CLI/HTTP 入口。agent 要复刻 splitClip 的 keyframe 重基（keyframes.ts:180 splitKeyframesAtLocal）只能自己实现。"
+        },
+        {
+          "name": "agent 经 CLI 做 composition 改动（clip add/set/remove）",
+          "status": "partial",
+          "evidence": "cli/autoviral/src/commands/clip.ts:14-66 → bridge POST/PATCH/DELETE /clip src/server/bridge/routes.ts:537/604/730；add 只支持 video/audio/text（overlay 抛 'not yet supported' routes.ts:593）",
+          "agentReachable": "cli",
+          "notes": "增删 clip 能用，但能力面极窄：仅 4 种轨道里的 3 种，且只覆盖 clip 顶层增删，无 split/trim/move/transition/keyframe 等意图级动词。新 clip 用 newClipId() 自动生成 id（routes.ts:528），track 用 comp.tracks.find(t=>t.kind===body.track) 取第一条同 kind 轨——多轨场景下 agent 无法指定写到哪条具体轨（如 A2·VO vs A1·BGM）。"
+        },
+        {
+          "name": "clip set 改 clip 属性（含嵌套 transforms/style/position/keyframes/ducking）",
+          "status": "stub",
+          "evidence": "cli/autoviral/src/commands/clip.ts:59-64 把 --key value 扁平成 patch；bridge PATCH 做 {...cl, ...patch} 浅合并 routes.ts:740-742——无法写 transforms.scale/style.color/position.anchor 等嵌套字段，flat --scale 2 只会写顶层 scale 键被 CompositionSchema strip",
+          "agentReachable": "cli",
+          "notes": "命令存在且能改顶层标量（in/out/trackOffset/volume/duration/text），但对 clip 上几乎所有视觉属性（transform/filter/style/position/keyframes/fade/ducking 都是嵌套对象）无效——agent 改图最常要动的字段恰恰碰不到。数值用正则 /^-?[\\d.]+$/ 粗判强转 Number，颜色/字体等字符串原样传。PATCH handler 无 per-kind 校验，多余 key 被 strip 不报错（静默丢）。"
+        },
+        {
+          "name": "agent 写转场/关键帧/变速/场景/变量/跨轨/track 增删",
+          "status": "missing",
+          "evidence": "grep bridge routes.ts 无 /transition /keyframe /track /scene /variable /split /reframe 端点（仅 :524 注释承认这些要 client-side 组合后 POST 整份 comp）；schema 支持（composition.ts:272 Transition / :119 Keyframe / :360 Scene / :540 Variable）但无任何意图级 CLI/HTTP 写口",
+          "agentReachable": "none",
+          "notes": "schema 层完整支持，但 agent 没有任何专用命令；唯一出路是手搓整个 composition JSON 走 PUT 全量替换。按实际运行行为，针对这些能力的 agent 专用入口缺失——这是核心命题（agent 经 CLI 驱动剪辑）在数据模型层的主要落空区。"
+        },
+        {
+          "name": "全量 composition 替换（PUT /api/works/:id/composition）—agent 的逃生口",
+          "status": "full",
+          "evidence": "src/server/routes/works.ts:208-227 CompositionSchema.safeParse(body)，失败返 400+issues，成功 yaml.dump 落盘；bridge composition-ops.ts:83-120 writeCompositionFor 同样 parse→tmpfile→atomic rename",
+          "agentReachable": "api",
+          "notes": "作为「写任意 schema 合法 composition」的能力是 full 且安全（全量 zod 校验 + 原子写 + 校验失败不落盘）。但它不是意图级抽象——agent 必须自己构造整份 JSON、自己维护所有 invariant（trk_ id、transition.afterClipId 同轨非末、speed 范围），等于把 store.ts 的 25 个 action 在 prompt 里重新实现。这是 agent 做富改动的现实通路，也是「必须手搓整个 composition JSON」结论的依据。bridge 侧 mutateCompositionFor 同语义（read-modify-write + parse）。"
+        },
+        {
+          "name": "carousel（图文）写面 add-slide / set-layer",
+          "status": "partial",
+          "evidence": "cli/autoviral/src/commands/carousel.ts:20-121 → bridge POST /carousel/slide routes.ts:768 + /carousel/slide/:id/layer routes.ts:807，LayerSchema.parse 校验单层（carousel.ts:74 discriminated union）",
+          "agentReachable": "cli",
+          "notes": "比 video 侧更完整（覆盖 4 种 layer kind + 部分 style 字段），但仍无删除 slide/layer、重排 slides、改 globals(palette/layout/effects) 的命令——这些只能整份 PUT /api/works/:id/carousel(works.ts:368)。set-layer 同 id 是幂等替换。carousel 的 sharpen 是已知死字段（carousel.ts:123-130 注释明写无 renderer 消费，仅为 round-trip 保留），agent 即使写了也无渲染效果。"
+        },
+        {
+          "name": "schema invariant 数量与 agent 踩坑面（superRefine/正则/必填/min）",
+          "status": "partial",
+          "evidence": "composition.ts:284 track id ^trk_ 正则 / :314-350 双 superRefine(speed 范围 + transition.afterClipId 同轨且非末 clip) / :164 VideoClip speed superRefine / :131-132 SPEED_MIN..MAX；carousel.ts:134 slides.min(1)；composition.ts:540-546 变量 id 标识符正则",
+          "agentReachable": "api",
+          "notes": "invariant 中等且多有合理兜底（migrateLegacyTrackIds 在 read 路径自动重写非 trk_ id，composition.ts:676 黑名单式 #57），但对手搓 JSON 的 agent 是真实陷阱：trk_ id 必须自己 mint(newTrackId composition.ts:620)、transition 不能挂末 clip、speed 必须 0.1-4.0、schemaVersion 用 .optional() 而非 .default() 故无需填。失败时 PUT 返回 zod issues 数组可定位，但无 pre-write dry-run。对 agent 友好：多数字段 optional/有 default。不友好：无 schema 感知预检命令——CLI lint/validate/check(check.ts:58-108) 是 Puppeteer a11y/对比度质检，不校验 composition schema，agent 只能 PUT 后读 400 试错。"
+        }
+      ]
+    }
+  ],
+  "competitors": [
+    {
+      "kind": "competitor",
+      "product": "剪映 / CapCut (ByteDance)",
+      "oneLine": "市占率最高的消费级一体化视频/图文创作器：模板驱动 + 全栈剪辑能力 + 一整套 AI 自动化（智能字幕/文本朗读/数字人/一键成片），定义了当下短视频剪辑器的功能基本盘与 AI 上限。",
+      "standouts": [
+        "一键成片 / 文字成片：粘贴文案或链接 → 智能匹配素材 + 配音 + 字幕，全自动成片（消费级最完整的端到端自动化）",
+        "数字人：24 种 AI 形象 + 23 种实拍形象，文本驱动口播视频；配合音色克隆做个人化数字分身",
+        "智能字幕 ASR：精准识别 + 智能分句，支持 15+ 语种翻译直接生成双语字幕（与 AutoViral 双语字幕管线正面竞争）",
+        "海量在线模板库 + 每周更新的特效/滤镜/转场素材，模板套用即一条成片",
+        "曲线变速 6 大预设（蒙太奇/英雄时刻/子弹时间/跳切/渐快渐慢入）+ 自定义控制点",
+        "全栈调色：HSL/色轮/RGB+Luma 曲线/LUT(.cube/.3dl 导入)/调节层/AI 调色/Color Match",
+        "智能抠像 + 绿幕 chroma key（取色吸管 + 强度/阴影微调）+ 蒙版（线性/圆形/矩形/文字/钢笔等 9 形）+ 混合模式叠化",
+        "AI 补帧（光流升帧）、智能裁切/Auto Reframe 自动横竖屏换比例、画面防抖、人声分离/降噪/响度统一一整套音频清洗"
+      ],
+      "features": [
+        {
+          "category": "时间线/轨道",
+          "feature": "多视频轨 + 多音频轨 + 画中画叠加轨（PiP overlay 层级）",
+          "tableStakes": true,
+          "notes": "专业版多时间线 + 多机位；任意素材可转独立 overlay 轨"
+        },
+        {
+          "category": "时间线/轨道",
+          "feature": "多机位（multi-cam）与多时间线编辑",
+          "tableStakes": false,
+          "notes": "专业版高阶功能，消费级里少见"
+        },
+        {
+          "category": "基础剪辑",
+          "feature": "分割 / 裁剪(trim) / 画面裁切(crop) / 合并",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "基础剪辑",
+          "feature": "变速：常规定速 + 曲线变速（6 预设 + 自定义控制点）",
+          "tableStakes": true,
+          "notes": "0.1x–100x；曲线变速是区分度功能但已普及"
+        },
+        {
+          "category": "基础剪辑",
+          "feature": "倒放(reverse)",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "基础剪辑",
+          "feature": "定格(freeze frame)",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "转场",
+          "feature": "基础转场（叠化/淡入淡出/滑动/缩放）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "转场",
+          "feature": "运镜转场（旋转/推近/拉远/抖动 spin/pull-in/shake）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "转场",
+          "feature": "动感/特效转场（闪光/模糊/故障 glitch/3D/MG/分屏/遮罩转场）",
+          "tableStakes": false,
+          "notes": "遮罩+运动追踪做 reveal 转场属高阶；3D 转场是差异点"
+        },
+        {
+          "category": "滤镜/调色",
+          "feature": "滤镜库（千种热门滤镜，每周更新）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "滤镜/调色",
+          "feature": "专业调色：HSL / 色轮 / RGB+Luma 曲线",
+          "tableStakes": false,
+          "notes": "曲线+色轮属专业级，多数轻量剪辑器没有"
+        },
+        {
+          "category": "滤镜/调色",
+          "feature": "LUT 导入(.cube/.3dl) + 调节层(adjustment layer)",
+          "tableStakes": false,
+          "notes": "调节层跨多片段统一调色，专业工作流标配"
+        },
+        {
+          "category": "滤镜/调色",
+          "feature": "AI 智能调色 / AI Color Correction / Color Match",
+          "tableStakes": false,
+          "notes": "风格一致性自动匹配"
+        },
+        {
+          "category": "特效/贴纸/蒙版",
+          "feature": "特效库（Glitch/Blur/3D 等数百款，每周更新）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "特效/贴纸/蒙版",
+          "feature": "贴纸库 sticker",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "特效/贴纸/蒙版",
+          "feature": "蒙版：线性/圆形/矩形/文字/钢笔等 9 形 + 可移动/旋转/缩放/反转",
+          "tableStakes": true,
+          "notes": "钢笔蒙版属高阶"
+        },
+        {
+          "category": "特效/贴纸/蒙版",
+          "feature": "混合模式(blending mode)做二次/多重曝光",
+          "tableStakes": false,
+          "notes": "配合 PiP 实现叠化创意"
+        },
+        {
+          "category": "文字",
+          "feature": "文字模板 / 花字（预设排版样式）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "文字",
+          "feature": "文字动画 / 入场出场动画字幕",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "文字",
+          "feature": "动态字幕模板（animated caption templates）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "字幕(ASR)",
+          "feature": "智能字幕：语音识别 + 智能分句自动生成字幕",
+          "tableStakes": true,
+          "notes": "已成短视频剪辑器基本盘"
+        },
+        {
+          "category": "字幕(ASR)",
+          "feature": "字幕翻译：15+ 语种，直接生成双语字幕",
+          "tableStakes": false,
+          "notes": "双语字幕是 AutoViral 既有管线的正面对手"
+        },
+        {
+          "category": "字幕(ASR)",
+          "feature": "字幕声音批量自动对齐（对齐助手）",
+          "tableStakes": false,
+          "notes": "长视频口播场景"
+        },
+        {
+          "category": "音频/TTS",
+          "feature": "文本朗读 TTS（多音色多语言，文本/字幕转语音）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "音频/TTS",
+          "feature": "音色克隆（个人音色定制配音）",
+          "tableStakes": false,
+          "notes": "AI 高阶，区分度高"
+        },
+        {
+          "category": "音频/TTS",
+          "feature": "AI 配音 / AI 音效 / AI 音乐生成",
+          "tableStakes": false,
+          "notes": ""
+        },
+        {
+          "category": "音乐/踩点",
+          "feature": "百万级音乐库 + 音效库",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "音乐/踩点",
+          "feature": "音乐踩点 / Beat Sync（自动卡点节拍）",
+          "tableStakes": true,
+          "notes": "Reels/Shorts 卡点刚需"
+        },
+        {
+          "category": "音频处理",
+          "feature": "音频提取（从视频分离音轨，导出 MP3/WAV）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "音频处理",
+          "feature": "人声分离（人声/背景音乐拆轨）",
+          "tableStakes": false,
+          "notes": "核心音频模块"
+        },
+        {
+          "category": "音频处理",
+          "feature": "音频降噪 / 人声美化 / 响度统一(loudness)",
+          "tableStakes": false,
+          "notes": "响度统一与 AutoViral 导出 LUFS 对标"
+        },
+        {
+          "category": "关键帧",
+          "feature": "全属性关键帧动画（位置/缩放/不透明度/所有设置）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "画中画",
+          "feature": "画中画 PiP（任意素材转独立 overlay 层）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "抠像/绿幕",
+          "feature": "智能抠像（一键人物/物体去背，无需绿幕）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "抠像/绿幕",
+          "feature": "绿幕 chroma key（取色吸管 + 强度/阴影参数微调）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "稳定/补帧",
+          "feature": "画面防抖 / 视频稳定",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "稳定/补帧",
+          "feature": "AI 补帧（光流升帧，平滑慢动作）",
+          "tableStakes": false,
+          "notes": "optical-flow 高阶"
+        },
+        {
+          "category": "智能裁切",
+          "feature": "Auto Reframe 智能裁切 / 自动横竖屏换比例",
+          "tableStakes": true,
+          "notes": "含 stabilization + 运镜速度设置"
+        },
+        {
+          "category": "智能裁切",
+          "feature": "运动追踪(motion tracking) + 跟踪蒙版",
+          "tableStakes": false,
+          "notes": "方向/缩放/距离可调"
+        },
+        {
+          "category": "模板/一键成片",
+          "feature": "在线模板库（套模板即成片，每周更新）",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "模板/一键成片",
+          "feature": "一键成片 / 文字成片（粘贴文案或链接 → 自动配素材+配音+字幕）",
+          "tableStakes": false,
+          "notes": "消费级最完整的端到端自动化，AutoViral 直接竞品"
+        },
+        {
+          "category": "模板/一键成片",
+          "feature": "智能剪口播 / 智能解说粗剪 / 一键长转短",
+          "tableStakes": false,
+          "notes": "长视频自动化粗剪"
+        },
+        {
+          "category": "AI 功能",
+          "feature": "AI 脚本 / 智能文案（marketing 文案、营销成片）",
+          "tableStakes": false,
+          "notes": ""
+        },
+        {
+          "category": "AI 功能",
+          "feature": "数字人（24 AI 形象 + 23 实拍形象，文本驱动口播）",
+          "tableStakes": false,
+          "notes": "消费级独有体量的数字人库"
+        },
+        {
+          "category": "AI 功能",
+          "feature": "AI 对口型（lip-sync）",
+          "tableStakes": false,
+          "notes": ""
+        },
+        {
+          "category": "AI 功能",
+          "feature": "AI 视频生成（文/图/关键帧 → 视频）+ AI 图片设计",
+          "tableStakes": false,
+          "notes": ""
+        },
+        {
+          "category": "AI 功能",
+          "feature": "美颜美体 / 超清画质 / 图像放大(upscale) / AI 去文字/去人/inpainting",
+          "tableStakes": false,
+          "notes": "画质增强与修复套件"
+        },
+        {
+          "category": "导出",
+          "feature": "自定义分辨率导出，最高 4K 60fps + HDR + 无水印",
+          "tableStakes": true,
+          "notes": ""
+        },
+        {
+          "category": "导出",
+          "feature": "GPU 加速导出（NVIDIA RTX 加速）",
+          "tableStakes": false,
+          "notes": "专业版桌面端"
+        },
+        {
+          "category": "导出",
+          "feature": "批量导出 / 多比例导出",
+          "tableStakes": false,
+          "notes": "官网未单独高亮，模板批量与多比例为主"
+        }
+      ]
+    },
+    {
+      "kind": "competitor",
+      "product": "OpenShot Video Editor (3.4 / 3.5, 开源跨平台视频剪辑器)",
+      "oneLine": "基于 FFmpeg + Blender 的免费开源跨平台（Linux/Mac/Windows）多轨道视频剪辑器，主打无限轨道时间线、400+ 转场、关键帧动画框架和 Blender 驱动的 3D 动画标题——是衡量开源剪辑器基本盘的标准参照物。",
+      "standouts": [
+        "Blender 驱动的 3D 动画标题（可调反射/斜角/挤出/渲染属性），多数剪辑器没有",
+        "400+ 内置转场 + 重叠两段 clip 自动生成转场，转场的快慢/锐度可用关键帧驱动",
+        "强大的关键帧动画框架：无限关键帧 + 三种插值（贝塞尔二次曲线/线性/常量），几乎所有 clip 属性都可 animate",
+        "400+ 内置视频 profile，编辑/预览/导出共用，一键切换分辨率/帧率/宽高比",
+        "基于 FFmpeg 读写几乎所有格式 + Advanced 导出可直接选任意 FFmpeg codec",
+        "全开源、无水印、无订阅、可商用，项目文件跨操作系统通用"
+      ],
+      "features": [
+        {
+          "category": "时间线/编辑",
+          "feature": "多轨道时间线：无限轨道/图层，支持拖拽、缩放 clip、时间线 zoom in/out、对齐、切片(slice)、磁吸 snapping、轨道上下移动与锁定",
+          "tableStakes": true,
+          "notes": "无限轨道是亮点（很多轻量剪辑器限轨）；上层透明区域透出下层"
+        },
+        {
+          "category": "时间线/编辑",
+          "feature": "帧精度逐帧步进（方向键逐帧前后）",
+          "tableStakes": true
+        },
+        {
+          "category": "时间线/编辑",
+          "feature": "3.4 新增：画布上可拖拽手柄的交互式裁剪(crop)、时间线上可拖拽关键帧并实时预览、多选 clip 同时变换、从系统剪贴板复制/粘贴文件",
+          "tableStakes": false,
+          "notes": "多选批量变换是 3.4 才补齐的"
+        },
+        {
+          "category": "时间线/编辑",
+          "feature": "实验性新时间线模式（Preferences 开启）：更顺滑滚动、更好关键帧渲染与磁吸；官方标注 unstable",
+          "tableStakes": false
+        },
+        {
+          "category": "变速/时间映射",
+          "feature": "Time-mapping 变速：慢放/快放、正放/倒放，3.4 新增 Repeat / Loop / Ping-Pong 时间右键菜单",
+          "tableStakes": true,
+          "notes": "Ping-Pong 往返播放较有辨识度"
+        },
+        {
+          "category": "转场",
+          "feature": "400+ 内置转场（如淡入淡出 fade、各类 mask/wipe 擦除转场）；重叠两段 clip 自动生成转场；转场快慢与锐度可用关键帧曲线驱动",
+          "tableStakes": true,
+          "notes": "数量上远超基本盘；关键帧驱动转场进度是进阶能力"
+        },
+        {
+          "category": "视频特效",
+          "feature": "内置滤镜：Brightness 亮度、Gamma、Hue 色相、Greyscale 灰度、Chroma Key 抠像(蓝/绿幕)、Mask 遮罩、Crop、Pixelate、Blur、Saturation、Negative 等",
+          "tableStakes": true,
+          "notes": "Chroma Key 抠像是中端门槛能力"
+        },
+        {
+          "category": "视频特效",
+          "feature": "3.4 新增 5 个特效：Sharpen 锐化(带 High Pass 模式)、Color Map LUT(支持 .cube 1D/3D 调色)、Spherical Projection 360°/180° 全景投影(含鱼眼)、Lens Flare 镜头光晕、Outline 描边",
+          "tableStakes": false,
+          "notes": "LUT 调色 + 360 全景投影把它推向中高端；这是 v0.1.3 可参考的差异化方向"
+        },
+        {
+          "category": "关键帧动画",
+          "feature": "关键帧动画框架：无限关键帧，支持贝塞尔二次曲线/线性/常量三种插值；可对 X/Y 位置、缩放、旋转、alpha 透明度等属性逐帧 animate；内置预设动画",
+          "tableStakes": false,
+          "notes": "开源里少有的完整关键帧系统；AutoViral 当前 transitions/keyframe 仅 Phase 1，差距明显"
+        },
+        {
+          "category": "音频",
+          "feature": "时间线波形显示、可把波形渲染进导出视频、从视频 clip 分离音频、逐声道独立调节、音频混音/编辑",
+          "tableStakes": true,
+          "notes": "波形烧进画面(可视化)算特色"
+        },
+        {
+          "category": "标题/文字",
+          "feature": "40+ 矢量标题模板，内置标题编辑器可改字体/颜色/文字；可创建自定义 SVG 矢量标题",
+          "tableStakes": true
+        },
+        {
+          "category": "标题/文字",
+          "feature": "Blender 驱动的 3D 动画标题：20+ 动画，可调颜色/尺寸/时长/文字及反射率/斜角/挤出等渲染属性",
+          "tableStakes": false,
+          "notes": "最具辨识度的功能；依赖本机装 Blender"
+        },
+        {
+          "category": "字幕/Caption",
+          "feature": "无原生字幕轨：不能导入/导出 .srt/.vtt，无自动字幕；只能用标题编辑器把每条字幕作为独立 title clip 手动摆上时间线",
+          "tableStakes": false,
+          "notes": "明显短板——CapCut 等有 Auto Caption + SRT 导出；AutoViral 已有双语字幕 pipeline，是相对优势点"
+        },
+        {
+          "category": "导出格式",
+          "feature": "导出容器 mp4/mov/avi/webm；视频 codec libx264(h.264)/mpeg4/libaom-av1；音频 codec aac/mp2/libmp3lame；默认输出 MP4(h.264+AAC)；Simple 三档质量 low/med/high 对应不同码率",
+          "tableStakes": true,
+          "notes": "AV1 编码较前沿"
+        },
+        {
+          "category": "导出格式",
+          "feature": "图片序列导出(如 %05d.png 数字补零)；Advanced 模式可直接选用任意 FFmpeg 格式/codec/码率",
+          "tableStakes": false,
+          "notes": "Advanced FFmpeg 直通是 power user 能力"
+        },
+        {
+          "category": "导出/Profile",
+          "feature": "400+ 视频 profile + 目标预设(Web/YouTube/Vimeo/Facebook 兼容)，含 720p/1080p 竖版 23.98–60fps 全套竖屏预设(社媒)，可自定义 profile 的分辨率/帧率/宽高比/像素比",
+          "tableStakes": true,
+          "notes": "竖屏社媒预设是近年补的；编辑与导出共用 profile"
+        },
+        {
+          "category": "导入格式",
+          "feature": "基于 FFmpeg 读写绝大多数视频/音频/图片格式；3.4 新增动图 GIF 导入(带动画与 alpha)、Apple 设备 H.265 播放改善",
+          "tableStakes": true
+        },
+        {
+          "category": "互操作/交付",
+          "feature": "导入导出 Final Cut Pro XML(v4/v5)、EDL 剪辑决策表；项目文件跨 OS 通用",
+          "tableStakes": false,
+          "notes": "FCPXML/EDL 互通是专业工作流能力，多数消费级剪辑器没有"
+        },
+        {
+          "category": "AI 能力",
+          "feature": "无任何 AI 功能(无自动字幕/无自动剪辑/无文生视频/无 agent 驱动)",
+          "tableStakes": false,
+          "notes": "这是 OpenShot 与 AutoViral(agent 驱动工位)最大的代际差异——OpenShot 是纯手工时间线剪辑器"
+        }
+      ]
+    },
+    {
+      "kind": "competitor",
+      "product": "AI 原生/自动化剪辑工具集 (Descript · Opus Clip · Captions · Veed · Runway)",
+      "oneLine": "这五家是离 AutoViral \"agent 驱动\" 命题最近的对标对象——它们用\"文本驱动剪辑、自动找爆点、自然语言指令编辑、生成式补帧/配音/特效\"取代了传统时间轴上手动拖拽的操作范式。",
+      "standouts": [
+        "文本即时间轴 (Descript)：改文字稿=改视频，删一个词视频自动跟着剪掉，把视频编辑变成像改文档一样——这是对传统时间轴最彻底的范式颠覆",
+        "自然语言 agent 编辑 (Captions Chat-Editor / Veed AI Editing Agent / Descript Underlord)：用对话下指令 '加 B-roll / 加 zoom / 加音效 / 删静音'，agent 跨整条时间轴执行——和 AutoViral 'agent 驱动工位' 的命题完全同源",
+        "自动找爆点切片 (Opus Clip ClipAnything + Viral Score)：把长视频一键切成多条短视频，并用 ML 给每条打 '病毒潜力分' 预测平台表现——把 '选哪段' 这个人类判断也自动化了",
+        "AI 重构图/主体追踪 (Opus Clip AI Reframe / Captions Smart Zoom)：横屏自动转竖屏并用物体追踪始终把说话主体居中，自动 smart-zoom 跟随节奏——构图不再靠手 K 关键帧",
+        "声音克隆 + 改字即改音 (Descript Overdub / Veed Voice Clone)：录 30 分钟样本训练你的声音，之后打字就能用你的声音补录、修口误，还能匹配口型——配音从 '重录' 变成 '改字'",
+        "生成式补内容 (Runway Gen-4.5 / Act-One / Aleph)：text-to-video、image-to-video、把真人表情迁移到 AI 角色、motion brush 指定运动区域、inpainting 去除/替换物体——把 '没拍到的素材' 直接生成出来",
+        "一键 '瑕疵修复' 套件 (Descript Studio Sound / Captions/Descript Eye-Contact / Veed Clean Audio)：自动降噪去回声、自动修正视线让人始终看镜头、自动去填充词去静音——把后期 '清理' 工序全自动化"
+      ],
+      "features": [
+        {
+          "category": "文本驱动剪辑",
+          "feature": "转录稿即时间轴：改/删/重排文字稿，视频自动同步更新",
+          "tableStakes": false,
+          "notes": "Descript 招牌；这是 AI-native 阵营对传统时间轴最核心的范式差异。Veed 也有 transcript-based trimming，但 Descript 把整个编辑器建在文字稿上"
+        },
+        {
+          "category": "文本驱动剪辑",
+          "feature": "自动转录（多语言，~97% 准确）作为编辑基底",
+          "tableStakes": true,
+          "notes": "五家全有；Veed 支持 125+ 语言转录"
+        },
+        {
+          "category": "自动清理",
+          "feature": "一键去填充词（um/uh/like/you know/so/actually）",
+          "tableStakes": true,
+          "notes": "Descript / Veed / Captions 都内置；已是 AI 剪辑器基本盘"
+        },
+        {
+          "category": "自动清理",
+          "feature": "一键去静音/缩短停顿（remove silences）",
+          "tableStakes": true,
+          "notes": "Descript、Veed Magic Tools、Captions AI Edit 都有"
+        },
+        {
+          "category": "自动清理",
+          "feature": "Magic Cut / 自动精简：AI 删冗余把长片压短",
+          "tableStakes": false,
+          "notes": "Veed Magic Cut（8 分钟→<6 分钟，30 秒内完成）；偏整体重剪而非单纯去 filler"
+        },
+        {
+          "category": "自动清理",
+          "feature": "AI 降噪/去回声/人声增强（Studio Sound / Clean Audio）",
+          "tableStakes": true,
+          "notes": "Descript Studio Sound（生成式重建人声）、Veed Clean Audio；几乎人人有"
+        },
+        {
+          "category": "自动字幕",
+          "feature": "自动生成字幕 + 动画样式模板",
+          "tableStakes": true,
+          "notes": "全员标配；Opus 有 10+ 动画字幕模板"
+        },
+        {
+          "category": "自动字幕",
+          "feature": "关键词高亮 / 自动 emoji 插入 / 说话人配色",
+          "tableStakes": false,
+          "notes": "Opus Clip 招牌；卡拉OK式高亮+自动 emoji 是短视频字幕的差异化点"
+        },
+        {
+          "category": "自动字幕",
+          "feature": "字幕翻译/多语言（100~130+ 语言）",
+          "tableStakes": true,
+          "notes": "Captions 100+、Veed 130+ 翻译语言"
+        },
+        {
+          "category": "AI 配音/克隆",
+          "feature": "声音克隆 Overdub：训练后打字即生成你的声线，可修口误",
+          "tableStakes": false,
+          "notes": "Descript Overdub（30 分钟样本）、Veed Voice Clone；'改字即改音' 范式"
+        },
+        {
+          "category": "AI 配音/克隆",
+          "feature": "AI 配音/旁白（TTS 多音色）",
+          "tableStakes": true,
+          "notes": "Veed AI Voice Over 等；TTS 已是基本盘"
+        },
+        {
+          "category": "AI 配音/克隆",
+          "feature": "AI 配音翻译 + 口型同步（dubbing with lip-sync）",
+          "tableStakes": false,
+          "notes": "Captions 29~30+ 语言带口型同步、Veed AI Dubbing 克隆原声说新语言"
+        },
+        {
+          "category": "AI 重构图/追踪",
+          "feature": "自动横转竖（Auto Reframe）+ 物体追踪保持主体居中",
+          "tableStakes": false,
+          "notes": "Opus Clip AI Reframe 招牌；多比例 9:16 / 1:1 / 16:9 输出"
+        },
+        {
+          "category": "AI 重构图/追踪",
+          "feature": "自动 Smart Zoom / 跟节奏推拉镜头",
+          "tableStakes": false,
+          "notes": "Captions Smart Zoom；按语音节奏自动加 zoom"
+        },
+        {
+          "category": "自动切片找爆点",
+          "feature": "ClipAnything：长视频一键切成多条短视频（理解视觉/音频/情绪线索）",
+          "tableStakes": false,
+          "notes": "Opus Clip 核心；跨题材（vlog/游戏/访谈/教学）"
+        },
+        {
+          "category": "自动切片找爆点",
+          "feature": "Viral/病毒潜力评分（ML 预测平台表现）",
+          "tableStakes": false,
+          "notes": "Opus Clip 招牌；把 '选哪段' 的人类判断量化"
+        },
+        {
+          "category": "自动切片找爆点",
+          "feature": "自动加 hook / 标题 / 章节包装",
+          "tableStakes": false,
+          "notes": "Opus 切片自带 hook 与排版包装"
+        },
+        {
+          "category": "AI 特效/生成",
+          "feature": "AI B-roll：为口播自动配生成式或库存补充镜头",
+          "tableStakes": false,
+          "notes": "Opus AI B-Roll、Descript、Veed Magic B-Roll、Captions B-roll；正快速变成标配"
+        },
+        {
+          "category": "AI 特效/生成",
+          "feature": "Text-to-Video / Image-to-Video 生成式视频",
+          "tableStakes": false,
+          "notes": "Runway Gen-4.5 招牌（最长 60s 连续、4K、世界一致性）；Veed/Captions 也有简版"
+        },
+        {
+          "category": "AI 特效/生成",
+          "feature": "表情迁移到 AI 角色（Act-One）/ 动作捕捉（Act-Two）",
+          "tableStakes": false,
+          "notes": "Runway 独有；真人表演驱动生成角色"
+        },
+        {
+          "category": "AI 特效/生成",
+          "feature": "Motion Brush 指定区域运动 + 相机运动控制",
+          "tableStakes": false,
+          "notes": "Runway Motion Brush 3.0；矢量级速度/方向控制"
+        },
+        {
+          "category": "AI 特效/生成",
+          "feature": "Inpainting 物体移除/替换 + 视频对视频转换（Aleph）",
+          "tableStakes": false,
+          "notes": "Runway；生成式编辑而非遮罩 K 帧"
+        },
+        {
+          "category": "AI 特效/生成",
+          "feature": "AI 抠像/去背景（green screen 自动 rotoscope）",
+          "tableStakes": true,
+          "notes": "Descript、Veed、Runway 都有；自动抠像已基本盘"
+        },
+        {
+          "category": "AI 特效/生成",
+          "feature": "AI 视线修正（Eye Contact）：读稿时仍看镜头",
+          "tableStakes": false,
+          "notes": "Captions/Descript/Veed 都有；mobile-first 创作者刚需"
+        },
+        {
+          "category": "AI 特效/生成",
+          "feature": "4K 上采样 / 画质增强",
+          "tableStakes": false,
+          "notes": "Runway 4K upscale"
+        },
+        {
+          "category": "AI 特效/生成",
+          "feature": "AI 生成音乐 / 音效（SFX）",
+          "tableStakes": false,
+          "notes": "Captions 可生成音乐+音效并按指令插入"
+        },
+        {
+          "category": "数字人/Avatar",
+          "feature": "AI Avatar / 数字分身：录一次后打字让分身说",
+          "tableStakes": false,
+          "notes": "Captions 3D Avatar、Veed Custom Avatar、Descript avatar gallery/上传照片"
+        },
+        {
+          "category": "自然语言 Agent 编辑",
+          "feature": "对话式编辑器：用自然语言下指令跨时间轴执行复杂编辑",
+          "tableStakes": false,
+          "notes": "Captions Chat-Editor、Veed AI Editing Agent、Descript Underlord；与 AutoViral 命题最同源"
+        },
+        {
+          "category": "一键自动剪辑",
+          "feature": "AI Edit 一键成片：自动剪场景+加 B-roll+zoom+音效+音乐+转场",
+          "tableStakes": false,
+          "notes": "Captions AI Edit、Descript Underlord 自动化方向"
+        },
+        {
+          "category": "传统时间轴/基础",
+          "feature": "多轨时间轴（音视频多轨）",
+          "tableStakes": true,
+          "notes": "Descript multitrack；基础盘但 AI-native 工具把它降级为辅助层"
+        },
+        {
+          "category": "传统时间轴/基础",
+          "feature": "AI 转场（自动选转场）",
+          "tableStakes": true,
+          "notes": "Veed AI Transitions；具体转场类型偏 cut/淡入淡出/智能匹配"
+        },
+        {
+          "category": "传统时间轴/基础",
+          "feature": "屏幕录制 / 摄像头录制",
+          "tableStakes": true,
+          "notes": "Descript 内置录屏（即时分享或做 B-roll）"
+        },
+        {
+          "category": "传统时间轴/基础",
+          "feature": "版权素材库（stock 视频/音乐/图片）",
+          "tableStakes": true,
+          "notes": "Descript 高阶版无限 stock；几乎人人有"
+        },
+        {
+          "category": "多平台分发",
+          "feature": "一条母片自动适配 TikTok/Reels/Shorts/LinkedIn 比例并导出",
+          "tableStakes": true,
+          "notes": "Descript、Opus、Captions 都有；社媒重定向基本盘"
+        },
+        {
+          "category": "协作/团队",
+          "feature": "团队工作区 + 评论 + 共享编辑（文档式协作）",
+          "tableStakes": false,
+          "notes": "Descript 文档式协作、Opus 团队 workspace+品牌模板+席位"
+        },
+        {
+          "category": "协作/团队",
+          "feature": "品牌模板 / 品牌套件",
+          "tableStakes": false,
+          "notes": "Opus Pro 品牌模板；团队统一风格"
+        },
+        {
+          "category": "互操作",
+          "feature": "导出到专业 NLE（Premiere Pro / DaVinci Resolve）",
+          "tableStakes": false,
+          "notes": "Opus Clip 付费版可导出 XML 到 Premiere/DaVinci 继续精剪"
+        },
+        {
+          "category": "互操作",
+          "feature": "API / 集成 / 调度发布",
+          "tableStakes": false,
+          "notes": "Opus 高阶有 API、集成、发布调度；Runway 有 Gen-4 API 与 Workflows pipeline"
+        }
+      ]
+    },
+    {
+      "kind": "competitor",
+      "product": "专业剪辑器基线 (Premiere Pro / Final Cut Pro / DaVinci Resolve)",
+      "oneLine": "行业级 NLE 三巨头共同定义的\"现代认真剪辑产品\"功能上限：多轨/嵌套时间线 + 精密 trim 编辑 + 节点级调色 + DAW 级混音 + 节点合成/动态图形 + 代理与多人协作——这是 table stakes 的天花板参照，绝大多数项对 agent 驱动的 AutoViral 而言并非基本盘。",
+      "standouts": [
+        "DaVinci Resolve Color 页：serial/parallel/layer 节点图 + 一级色轮 + Custom/Hue-vs-Hue/Lum 曲线 + HSL Qualifier 二级 + Power Windows 跟踪 + LUT (.cube) —— 业界公认最强一体化调色",
+        "Final Cut Pro 磁性时间线 + Clip Connections + Roles(对白/音乐/特效/字幕) —— 无轨道概念却能自动防空隙、保持同步的差异化范式",
+        "DaVinci Fusion 页：真 3D 节点合成 + 动态图形 + 粒子，把独立合成软件级能力内建进 NLE",
+        "Fairlight 页：内建 DAW，最高 1000 条音轨 + 总线 + 自动化包络(Read/Latch/Touch/Write)",
+        "Smart/Dynamic Trim：单一光标按鼠标位置自动在 ripple/roll/slip/slide 间切换，并支持循环播放中动态修剪",
+        "Blackmagic Cloud / 共享存储多人实时协作 + Fusion Connect 跨 NLE(Avid) 协同"
+      ],
+      "features": [
+        {
+          "category": "时间线/轨道",
+          "feature": "多视频+多音频轨道时间线，轨道可任意增减、锁定、显隐、独立启停",
+          "tableStakes": true,
+          "notes": "三家都有；轨道型 NLE 的最基础形态。AutoViral 已有多轨。"
+        },
+        {
+          "category": "时间线/轨道",
+          "feature": "嵌套序列 / Compound Clip / 复合片段：把一段编辑打包成单一片段在主时间线复用，可双击下钻再编辑",
+          "tableStakes": true,
+          "notes": "Premiere=Nested Sequence；FCP/Resolve=Compound Clip。专业项目分解与协作的标配，但对 agent 流程是进阶项。"
+        },
+        {
+          "category": "时间线/轨道",
+          "feature": "磁性时间线 / Clip Connections：删除片段后下游自动吸附补位、连接片段保持同步",
+          "tableStakes": false,
+          "notes": "FCP 独有范式（Resolve 仅 Cut 页有磁性，Edit 页自由）。差异化而非人人有。"
+        },
+        {
+          "category": "时间线/轨道",
+          "feature": "Stacked / Tabbed 多时间线并存，复杂项目多序列同屏管理",
+          "tableStakes": false,
+          "notes": "Resolve 强项；Premiere 通过多序列标签近似。"
+        },
+        {
+          "category": "精密编辑",
+          "feature": "四种精修 trim：Ripple（涟漪，改总长）/ Roll（卷动，不改总长移编辑点）/ Slip（滑动素材内容不移位）/ Slide（滑移片段位置素材不变）",
+          "tableStakes": true,
+          "notes": "专业剪辑的核心肌肉记忆，三家全有。AutoViral 目前只有基础 split/trim/delete，无 ripple/roll/slip/slide。"
+        },
+        {
+          "category": "精密编辑",
+          "feature": "七种插入编辑：Insert / Overwrite / Replace / Fit-to-Fill / Place-on-Top / Append / Ripple-Overwrite",
+          "tableStakes": true,
+          "notes": "以源监视器 in/out + 时间线 in/out 三点/四点编辑驱动。"
+        },
+        {
+          "category": "精密编辑",
+          "feature": "三点/四点编辑 + 源监视器 in/out 标记 + Insert/Overwrite 落点",
+          "tableStakes": true,
+          "notes": "NLE 编辑的根基范式。"
+        },
+        {
+          "category": "精密编辑",
+          "feature": "Smart/Dynamic Trim：单光标按位置自动切换 trim 模式，循环播放中实时修剪",
+          "tableStakes": false,
+          "notes": "Resolve 招牌效率特性，非人人有。"
+        },
+        {
+          "category": "播放/导览",
+          "feature": "JKL 穿梭播放（J 倒放 / K 暂停 / L 快进，多按加速）+ 变速 shuttle",
+          "tableStakes": true,
+          "notes": "跨 NLE 通用肌肉记忆，三家全有。AutoViral 仅有基础 play/seek。"
+        },
+        {
+          "category": "播放/导览",
+          "feature": "Skimming 掠览：鼠标悬停即预览素材内容，无需点击播放",
+          "tableStakes": false,
+          "notes": "FCP 首创并标志性，Resolve 部分支持。"
+        },
+        {
+          "category": "调色",
+          "feature": "一级校色色轮（Lift/Gamma/Gain 或 Shadows/Mid/Highlights）",
+          "tableStakes": true,
+          "notes": "三家全有，含 Premiere Lumetri。基础调色基本盘。"
+        },
+        {
+          "category": "调色",
+          "feature": "曲线工具：RGB/Luma 自定义曲线 + Hue-vs-Hue / Hue-vs-Sat / Lum-vs-Sat 等专业曲线",
+          "tableStakes": true,
+          "notes": "三家全有；Resolve 曲线最全。"
+        },
+        {
+          "category": "调色",
+          "feature": "HSL Qualifier / 二级校色：按色相·饱和·亮度抠选局部颜色单独调整",
+          "tableStakes": true,
+          "notes": "Premiere=HSL Secondary；Resolve=Qualifier。专业局部调色标配。"
+        },
+        {
+          "category": "调色",
+          "feature": "LUT 支持：导入/应用 .cube 等查找表做技术转换或风格化",
+          "tableStakes": true,
+          "notes": "三家全有。AutoViral 无任何调色能力。"
+        },
+        {
+          "category": "调色",
+          "feature": "Power Windows / 蒙版 + 运动跟踪：圆形/方形/多边形/渐变窗口限定校色区域并跟随物体",
+          "tableStakes": false,
+          "notes": "Resolve 最强；专业局部调色进阶项。"
+        },
+        {
+          "category": "调色",
+          "feature": "节点式调色图：serial / parallel / layer / splitter-combiner 节点编排处理顺序",
+          "tableStakes": false,
+          "notes": "Resolve 独有范式，非人人有（Premiere/FCP 是图层/调整层式）。"
+        },
+        {
+          "category": "动画/关键帧",
+          "feature": "任意效果属性关键帧 + 曲线编辑器（Value/Velocity 图，Bezier 缓动，可拉手柄调加减速）",
+          "tableStakes": true,
+          "notes": "三家全有。专业动画的核心。AutoViral 仅有有限的 PIP/dynamic-zoom 类位移。"
+        },
+        {
+          "category": "动画/特效",
+          "feature": "变速/速度坡道（speed ramp）+ 光流(optical flow)/帧混合补帧",
+          "tableStakes": true,
+          "notes": "三家全有；变速是现代剪辑高频需求。"
+        },
+        {
+          "category": "动画/特效",
+          "feature": "内建画面稳定 stabilization + 镜头畸变/运动平滑",
+          "tableStakes": true,
+          "notes": "三家全有。"
+        },
+        {
+          "category": "转场",
+          "feature": "基础视频转场：Cross Dissolve / Dip to Black / Dip to White / 多种 wipe / push / slide",
+          "tableStakes": true,
+          "notes": "三家全有。AutoViral 已有 Phase1 转场 schema+preset。"
+        },
+        {
+          "category": "转场",
+          "feature": "音频转场：Constant Power / Constant Gain / Exponential 交叉淡化",
+          "tableStakes": true,
+          "notes": "三家全有；与视频转场对称。"
+        },
+        {
+          "category": "音频",
+          "feature": "音频混音台 Audio Track Mixer：逐轨音量/声像推子 + 总线(bus/submix) 路由",
+          "tableStakes": true,
+          "notes": "Premiere Audio Track Mixer / Resolve Fairlight / FCP 混音。AutoViral 仅有逐 clip 音量+ducking。"
+        },
+        {
+          "category": "音频",
+          "feature": "混音自动化包络：Off/Read/Latch/Touch/Write 录制并回放音量·声像关键帧",
+          "tableStakes": true,
+          "notes": "三家全有；专业混音标配。"
+        },
+        {
+          "category": "音频",
+          "feature": "音频效果链：EQ / 压缩 / 限制 / 降噪 / 混响等 per-track 插入式处理",
+          "tableStakes": true,
+          "notes": "Resolve Fairlight 最深（DAW 级，最高 1000 轨）。"
+        },
+        {
+          "category": "音频",
+          "feature": "对白增强 / 自动闪避 ducking / 响度归一（loudness normalization）",
+          "tableStakes": true,
+          "notes": "Premiere Essential Sound / FCP / Fairlight。AutoViral 有 ducking + loudness target（但导出曾掉值）。"
+        },
+        {
+          "category": "多机位",
+          "feature": "Multicam：多机位音频波形/时码同步 + 实时切换剪辑（4/9/16/25+ 机位）",
+          "tableStakes": true,
+          "notes": "三家全有；纪实/访谈/直播剪辑标配。AutoViral 无。"
+        },
+        {
+          "category": "代理工作流",
+          "feature": "代理(proxy)媒体：生成低分辨率代理(如 1/8~1/2、ProRes Proxy/H.264) 流畅剪辑，导出自动回挂原始素材",
+          "tableStakes": true,
+          "notes": "三家全有；高码率/4K-8K 工作流的必需。AutoViral 无。"
+        },
+        {
+          "category": "素材管理",
+          "feature": "Bin/Event 媒体库 + 元数据 + 关键词/标记 + 智能合集筛选",
+          "tableStakes": true,
+          "notes": "三家全有。AutoViral 有基础 asset library。"
+        },
+        {
+          "category": "素材管理",
+          "feature": "场景剪切检测 (Scene Cut Detection)：自动分析单文件按镜头切分成多片段",
+          "tableStakes": false,
+          "notes": "Resolve 强项，效率特性而非人人必备。"
+        },
+        {
+          "category": "素材管理",
+          "feature": "Auditions 试镜：同位置打包多个备选 take/调色/特效随时切换比较",
+          "tableStakes": false,
+          "notes": "FCP 独有特性。"
+        },
+        {
+          "category": "合成/动态图形",
+          "feature": "节点式合成与动态图形（Fusion 页：真 3D 空间 + 粒子 + 文字 + keying/抠像/跟踪）",
+          "tableStakes": false,
+          "notes": "Resolve 内建 Fusion；Premiere 靠 After Effects/Dynamic Link。属独立合成软件级，非剪辑基本盘。"
+        },
+        {
+          "category": "合成/动态图形",
+          "feature": "字幕/Title 模板引擎 + 可参数化动态字幕模板",
+          "tableStakes": true,
+          "notes": "三家全有（FCP Motion 模板 / Premiere Essential Graphics / Resolve Text+）。AutoViral 有文字层样式控件。"
+        },
+        {
+          "category": "字幕",
+          "feature": "自动语音转字幕 (speech-to-text) + 字幕轨编辑 + 导出 SRT/烧录",
+          "tableStakes": true,
+          "notes": "已成现代基本盘（三家近年都内建）。AutoViral 有双语字幕 pipeline。"
+        },
+        {
+          "category": "协作",
+          "feature": "多人实时协作 / 云项目 / 共享存储 bin-locking（多剪辑/调色/混音/合成同项目并行）",
+          "tableStakes": false,
+          "notes": "Resolve Blackmagic Cloud + Fusion Connect 跨 Avid；专业团队特性，非单机基本盘。"
+        },
+        {
+          "category": "项目管理",
+          "feature": "非破坏性编辑 + 多级撤销/重做 + 项目版本/快照",
+          "tableStakes": true,
+          "notes": "三家全有。AutoViral 有 checkpoint/snapshot（命名、恢复保护已修）。"
+        },
+        {
+          "category": "导出",
+          "feature": "导出预设/队列 + 多平台规格(分辨率/码率/编码/响度) + 后台批量渲染",
+          "tableStakes": true,
+          "notes": "三家全有（Resolve Deliver 页 / Premiere Media Encoder 队列）。AutoViral 有 export 预设但 loudness 曾掉值。"
+        }
+      ]
+    }
+  ]
+}
