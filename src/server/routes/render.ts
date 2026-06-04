@@ -10,6 +10,7 @@ import { dataDir } from "../../infra/config.js";
 import { join } from "node:path";
 import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
 import { getRenderQueue, findActiveRenderJob } from "./_shared.js";
+import { FFPROBE_BIN } from "../ffmpeg-paths.js";
 
 export const renderRouter = new Hono();
 
@@ -290,7 +291,7 @@ async function runTransitionEndpoint(c: any, applyFn: TransitionApplyFn) {
   let height = 1920;
   let fps = 30;
   try {
-    const { stdout } = await ef("ffprobe", [
+    const { stdout } = await ef(FFPROBE_BIN, [
       "-v", "error",
       "-select_streams", "v:0",
       "-show_entries", "stream=width,height,r_frame_rate",

@@ -20,6 +20,12 @@ vi.mock("node:fs/promises", async (orig) => {
   const real = await orig<typeof import("node:fs/promises")>();
   return { ...real, rename: vi.fn(async () => undefined) };
 });
+// Pin ffmpeg/ffprobe to their bare names. FFMPEG_BIN/FFPROBE_BIN now resolve
+// through src/infra/deps.ts (env → managed → VENDORED absolute path → bare
+// name); under test that yields the vendored node_modules path. These tests
+// assert on the spawn TARGET being literally "ffmpeg", so we pin the names here
+// — path-resolution precedence has its own coverage in src/infra/deps.test.ts.
+vi.mock("./ffmpeg-paths.js", () => ({ FFMPEG_BIN: "ffmpeg", FFPROBE_BIN: "ffprobe" }));
 // Mock node:child_process so runEncodeStage doesn't actually invoke ffmpeg.
 // R46 — also stub execFile so gpu-encoder's detect path is callable
 // (we keep encoder list deterministic via AUTOVIRAL_FAKE_ENCODERS env var
