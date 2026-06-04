@@ -101,14 +101,18 @@ describe("@shared composition ops — addKeyframe", () => {
   });
 
   it("appends a second keyframe for a crossfade fade-out (sorted by time)", () => {
-    const clip = videoClip({ id: "v1" });
+    const clip = videoClip({ id: "v1" }); // in:0 out:5 → clip-local span [0, 5]
     const comp = compWith([clip]);
-    addKeyframe(comp, { clipId: "v1", property: "opacity", atSec: 5, value: 1 });
-    addKeyframe(comp, { clipId: "v1", property: "opacity", atSec: 5.18, value: 0 });
+    // A crossfade fade-out: hold opacity at the head, drop to 0 at the clip's
+    // own end. Both times land within the clip's [0, 5] span (the op rejects a
+    // keyframe past the end — see "throws code:4 for an atSec past the clip's
+    // duration" below).
+    addKeyframe(comp, { clipId: "v1", property: "opacity", atSec: 4.82, value: 1 });
+    addKeyframe(comp, { clipId: "v1", property: "opacity", atSec: 5, value: 0 });
     const written = (comp.tracks[0].clips[0] as { keyframes?: Keyframe[] }).keyframes!;
     expect(written.map((k) => [k.property, k.time, k.value])).toEqual([
-      ["opacity", 5, 1],
-      ["opacity", 5.18, 0],
+      ["opacity", 4.82, 1],
+      ["opacity", 5, 0],
     ]);
   });
 
@@ -187,6 +191,43 @@ describe("@shared composition ops — addKeyframe", () => {
       expect(e).toBeInstanceOf(CompositionOpError);
       expect((e as CompositionOpError).code).toBe(4);
     }
+  });
+
+  it("throws code:4 for an atSec past the clip's duration (5s clip --at 100)", () => {
+    // The clip spans in:0 out:5 → clip-local span [0, 5]. --at 100 is absurdly
+    // past the end; the op rejects it (unlike the UI, which clamps). #40 parity.
+    const comp = compWith([videoClip({ id: "v1" })]);
+    try {
+      addKeyframe(comp, { clipId: "v1", property: "opacity", atSec: 100, value: 1 });
+      throw new Error("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(CompositionOpError);
+      expect((e as CompositionOpError).code).toBe(4);
+    }
+    // The illegal write left no keyframes behind.
+    expect(
+      (comp.tracks[0].clips[0] as { keyframes?: Keyframe[] }).keyframes,
+    ).toBeUndefined();
+  });
+
+  it("throws code:4 for an atSec past an overlay clip's explicit duration", () => {
+    // Overlay clip carries duration:5 → span [0, 5]. atSec 7 is past it.
+    const comp = compWith([overlayClip({ id: "o1" })], "overlay");
+    try {
+      addKeyframe(comp, { clipId: "o1", property: "opacity", atSec: 7, value: 0.5 });
+      throw new Error("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(CompositionOpError);
+      expect((e as CompositionOpError).code).toBe(4);
+    }
+  });
+
+  it("allows a keyframe AT the clip's end boundary (atSec === clipDuration)", () => {
+    // The end is a legal curve endpoint (a fade-out ends here). in:0 out:5 → 5.
+    const comp = compWith([videoClip({ id: "v1" })]);
+    addKeyframe(comp, { clipId: "v1", property: "opacity", atSec: 5, value: 0 });
+    const written = (comp.tracks[0].clips[0] as { keyframes?: Keyframe[] }).keyframes!;
+    expect(written[0].time).toBe(5);
   });
 
   it("throws code:4 for a non-finite value", () => {

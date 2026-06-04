@@ -221,6 +221,7 @@ export const en = {
     toast: {
       splitFailed: "Can't split here",
       transitionFailed: "Can't add transition here",
+      keyframeFailed: "Can't add keyframe here",
     },
     shortcuts: {
       title: "Keyboard shortcuts",
@@ -1070,6 +1071,7 @@ export const zh: DeepShape<Messages> = {
     toast: {
       splitFailed: "无法在此处分割",
       transitionFailed: "无法在此处添加转场",
+      keyframeFailed: "无法在此处添加关键帧",
     },
     shortcuts: {
       title: "键盘快捷键",

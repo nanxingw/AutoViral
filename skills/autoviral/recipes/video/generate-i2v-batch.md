@@ -87,7 +87,7 @@ autoviral seek 0
 
 ## Polishing the batch with crossfades
 
-Right after `clip add` returns, the clips are hard-cut. To add crossfades, see `recipes/video/crossfade-between-clips.md`. The `--out` scalar patch (`clip set <id> --out <s>`) works unchanged. The `--keyframes` patch does **NOT** — `clip set` sends `keyframes` as a scalar string, but the schema demands a `Keyframe[]` array, so the bridge rejects it (HTTP 400) and `composition.yaml` is never touched. The runnable crossfade path lands with the dedicated transition / keyframe verbs (S9 `transition add` / S12); don't run `clip set --keyframes` until then.
+Right after `clip add` returns, the clips are hard-cut. To add crossfades, see `recipes/video/crossfade-between-clips.md`. The `--out` scalar patch (`clip set <id> --out <s>`) works unchanged. The `--keyframes` patch does **NOT** — `clip set` sends `keyframes` as a scalar string, but the schema demands a `Keyframe[]` array, so the bridge rejects it (HTTP 400) and `composition.yaml` is never touched. Use the dedicated verbs instead: `autoviral transition add` for the easy dissolve between adjacent clips, or `autoviral clip keyframe add/set` to hand-author an opacity fade — both write the comp directly. Don't reach for `clip set --keyframes`.
 
 ## Cost / quota awareness
 

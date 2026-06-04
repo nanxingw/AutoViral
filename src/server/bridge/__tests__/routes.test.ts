@@ -1214,10 +1214,16 @@ describe("bridge router — Phase 3 clip writes", () => {
     const events: string[] = [];
     const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
     try {
+      // S12 bound — `atSec` must land within vc_s01's CURRENT clip-local span.
+      // This describe shares ONE on-disk comp across tests (seeded in beforeAll,
+      // not beforeEach), and the earlier split / trim tests shrank vc_s01 from
+      // out:4 down to out:2. So a keyframe at atSec 3 now (correctly) 400s past
+      // the clip's duration; atSec 1 is a legal write inside the current [0, 2]
+      // span and still exercises the broadcast path this test cares about.
       const res = await app.request("/api/bridge/v1/clip/vc_s01/keyframe", {
         method: "POST",
         headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
-        body: JSON.stringify({ property: "x", atSec: 3, value: 10 }),
+        body: JSON.stringify({ property: "x", atSec: 1, value: 10 }),
       });
       expect(res.status).toBe(200);
       expect(events).toContain("composition-changed");

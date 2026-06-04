@@ -12,7 +12,7 @@ import type {
   Transition,
 } from "./types";
 import { clampHandleDuration } from "@shared/transitions";
-import { addOrReplaceKeyframe, splitKeyframesAtLocal } from "@shared/keyframes";
+import { splitKeyframesAtLocal } from "@shared/keyframes";
 // ADR-009 (S6) — shared composition-ops core. splitClip's invariants live here
 // now (single source of truth shared with the bridge); the store action calls
 // `ops.splitClip` on the immer draft.
@@ -741,21 +741,45 @@ export const useComposition = create<CompState>()(
         s.comp.updatedAt = new Date().toISOString();
       }),
     // ─── Phase 8.2.B — keyframe mutations ─────────────────────────────────
-    // Walk every track, find the clip by id, then mutate `keyframes` on the
-    // draft. Skip TextClip (D8) and unknown clipIds (silent no-op). The
-    // (property, time) collision math lives inside `addOrReplaceKeyframe`
-    // (8.2.A) — we just delegate.
+    // `addKeyframe` routes through the shared op (see below). `removeKeyframe` /
+    // `updateKeyframe` still walk every track inline (index-based edits of an
+    // existing array; no shared op needed), skipping TextClip (D8) and unknown
+    // clipIds as silent no-ops.
+    //
+    // ADR-009 (S12) — route through the SAME shared op the bridge `clip keyframe
+    // add` calls (`ops.addKeyframe`), so the unknown-property / negative-time /
+    // past-clip-duration / speed-range guards (the single source of truth) apply
+    // identically whether an agent authors via the CLI or a human via the
+    // KeyframePanel. The store's old inline body delegated only to
+    // `addOrReplaceKeyframe`, bypassing every validation guard — ADR-009's single
+    // source of truth was only half-honoured. The op THROWS CompositionOpError on
+    // an illegal write (unknown clip / text clip — D8 / unknown property / out-of-
+    // range time / speed out of [0.1,4.0]); we SURFACE that as a warn toast
+    // (same pattern as splitClip / addTransition) and leave the UI untouched,
+    // never swallowing it silently.
     addKeyframe: (clipId, kf) =>
       set((s) => {
         if (!s.comp) return;
-        for (const t of s.comp.tracks) {
-          const c = (t.clips as Clip[]).find((c) => c.id === clipId);
-          if (!c) continue;
-          if (c.kind === "text") return; // D8
-          // c is VideoClip | AudioClip | OverlayClip — all have keyframes?: Keyframe[]
-          const target = c as { keyframes?: Keyframe[] };
-          target.keyframes = addOrReplaceKeyframe(target.keyframes, kf);
-          return;
+        try {
+          ops.addKeyframe(s.comp, {
+            clipId,
+            property: kf.property,
+            atSec: kf.time,
+            value: kf.value,
+            easing: kf.easing,
+          });
+        } catch (err) {
+          if (err instanceof CompositionOpError) {
+            const locale = useLocaleStore.getState().locale;
+            useToastStore.getState().push({
+              variant: "warn",
+              message: MESSAGES[locale].studio.toast.keyframeFailed,
+              detail: err.message,
+              ttlMs: 4000,
+            });
+            return; // UI untouched (no partial write), but the user is told.
+          }
+          throw err;
         }
       }),
     removeKeyframe: (clipId, indexInClipArray) =>

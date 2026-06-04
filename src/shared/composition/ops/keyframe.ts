@@ -24,6 +24,25 @@ import { SPEED_MIN, SPEED_MAX } from "../../composition.js";
 import { addOrReplaceKeyframe } from "../../keyframes.js";
 import { CompositionOpError } from "./errors.js";
 
+// Floating-point tolerance for the upper-bound boundary check. Mirrors the
+// OFFSET_EPSILON in splitClip.ts; inlined here so the op stays free of the
+// web-only timeline package (which imports @shared, so the reverse would cycle).
+const ATSEC_EPSILON = 1e-6;
+
+// Upper bound for a keyframe's clip-local time = the clip's own duration. This
+// is the SAME bound the Studio Inspector enforces (web keyframeBounds.ts
+// `clipKeyframeDuration` — #40): video/audio span `out - in`, overlay carries an
+// explicit `duration`. Text clips carry no keyframes (rejected before we get
+// here, D8). The UI *clamps* a dragged time into range silently; this op
+// *rejects* (code:4) because it is the strict CLI chokepoint, where an absurd
+// `--at 100` on a 5s clip is an authoring error to surface, not silently snap.
+function clipKeyframeDuration(clip: Clip): number {
+  if (clip.kind === "video" || clip.kind === "audio") {
+    return Math.max(0, clip.out - clip.in);
+  }
+  return Math.max(0, (clip as { duration: number }).duration);
+}
+
 // The keyframe-property enum (src/shared/composition.ts KeyframePropertySchema).
 // Inlined as a Set so the op stays a pure function with no z.parse — a bad
 // property is a code:4 rejection, not a silently-stored value.
@@ -64,6 +83,9 @@ export interface KeyframeWrite {
  *  - the clip is a text clip (text carries no keyframes — D8), or
  *  - `property` is not a real keyframe property, or
  *  - `atSec` is negative / non-finite (keyframe time is clip-local seconds ≥ 0), or
+ *  - `atSec` exceeds the clip's own duration (a keyframe must land within the
+ *    clip's clip-local span `[0, clipDuration]` — same bound the Studio
+ *    Inspector enforces, #40; an absurd `--at 100` on a 5s clip is rejected), or
  *  - `value` is non-finite, or
  *  - `easing` (when given) is not a real easing, or
  *  - `property === "speed"` and `value` is outside [0.1, 4.0] (D10).
@@ -108,6 +130,18 @@ export function addKeyframe(comp: Composition, p: KeyframeWrite): void {
   if (clip.kind === "text") {
     throw new CompositionOpError(
       `addKeyframe: clip ${clipId} is a text clip — text clips carry no keyframes (D8)`,
+      4,
+    );
+  }
+
+  // Upper-bound: the keyframe time must land within the clip's own clip-local
+  // span. Checked AFTER clip resolution because the bound is the clip's
+  // duration. Endpoints are legal (a keyframe AT 0 or AT clipDuration is a valid
+  // curve endpoint), so we only reject strictly past the end (epsilon-tolerant).
+  const maxAtSec = clipKeyframeDuration(clip);
+  if (atSec > maxAtSec + ATSEC_EPSILON) {
+    throw new CompositionOpError(
+      `addKeyframe: atSec ${atSec} is past clip ${clipId}'s duration ${maxAtSec}s (must be in [0, ${maxAtSec}])`,
       4,
     );
   }

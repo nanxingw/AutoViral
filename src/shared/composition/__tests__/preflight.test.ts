@@ -74,6 +74,39 @@ describe("preflight — pure candidate validator", () => {
     expect(result.warnings.some((w) => w.includes("overlaps"))).toBe(true);
   });
 
+  it("flags a caption group referencing a missing segment id (dangling-segment-id warning)", () => {
+    const candidate = validCandidate() as unknown as Record<string, unknown>;
+    // Attach a caption model with ONE declared segment but a group that
+    // references a segmentId that doesn't exist. The schema accepts this (the
+    // cross-reference is a semantic smell, not a shape error), so `ok` stays
+    // true while the dangling-segment-id rule surfaces a warning.
+    candidate.captions = {
+      modelId: "m_test",
+      segments: [
+        { segmentId: "seg_1", start: 0, end: 1, text: "hi" },
+      ],
+      groups: [
+        {
+          groupId: "g_1",
+          start: 0,
+          end: 1,
+          segmentIds: ["seg_1", "seg_missing"],
+          style: { fontSize: 48 },
+        },
+      ],
+    };
+    const result = preflight(candidate);
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+    expect(
+      result.warnings.some(
+        (w) => w.includes("missing segment id") && w.includes("seg_missing"),
+      ),
+    ).toBe(true);
+    // The legitimately-referenced segment must NOT be flagged.
+    expect(result.warnings.some((w) => w.includes("seg_1\""))).toBe(false);
+  });
+
   it("flags a clip referencing an undeclared asset id (orphan-clip warning)", () => {
     const candidate = validCandidate();
     const videoTrack = candidate.tracks.find((t) => t.kind === "video")!;

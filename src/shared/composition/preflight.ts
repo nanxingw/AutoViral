@@ -13,9 +13,9 @@
 // PURITY CONTRACT (ADR-009): this module is IO-free. No fs / http / event bus.
 // It is the ONE @shared module allowed to call the schema's safeParse, because
 // it IS the validator (the no-parse rule covers mutators, not the validator
-// itself). The fs-bound `missing-asset` lint rule lives in the server's
-// quality/lint.ts and is deliberately NOT mirrored here — preflight reasons
-// about SHAPE + CROSS-REFERENCES only, never about disk state.
+// itself). The fs-bound `missing-asset` lint rule lives in
+// src/composition/quality/lint.ts and is deliberately NOT mirrored here —
+// preflight reasons about SHAPE + CROSS-REFERENCES only, never about disk state.
 //
 // S13 rework — preflight validates against the STRICT CompositionWriteSchema,
 // the SAME schema the write chokepoint (writeCompositionFor) enforces. The
@@ -71,9 +71,10 @@ export function preflight(candidate: unknown): PreflightResult {
 }
 
 /**
- * IO-free semantic checks mirrored from quality/lint.ts (minus the fs-bound
- * `missing-asset` rule). Surfaced as WARNINGS — the write path accepts them,
- * but they're worth flagging so the agent can fix them pre-emptively.
+ * IO-free semantic checks mirrored from src/composition/quality/lint.ts (minus
+ * the fs-bound `missing-asset` rule). Surfaced as WARNINGS — the write path
+ * accepts them, but they're worth flagging so the agent can fix them
+ * pre-emptively.
  */
 function collectWarnings(comp: Composition, warnings: string[]): void {
   // track-overlap — two clips on one track whose timeline ranges intersect.
