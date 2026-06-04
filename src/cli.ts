@@ -166,6 +166,25 @@ export function runCLI(): void {
       });
     });
 
+  program
+    .command("doctor")
+    .description("Show a readiness table for every external dependency")
+    .action(async () => {
+      const { runDoctor } = await import("./infra/dep-doctor.js");
+      const code = await runDoctor();
+      process.exit(code);
+    });
+
+  program
+    .command("setup")
+    .description("Install missing dependencies (ffmpeg/ffprobe, TTS venv, …)")
+    .option("--heavy", "Also install playwright chromium (~150MB) now")
+    .action(async (opts: { heavy?: boolean }) => {
+      const { runSetup } = await import("./infra/dep-doctor.js");
+      const code = await runSetup({ heavy: opts.heavy });
+      process.exit(code);
+    });
+
   const configCmd = program
     .command("config")
     .description("Manage configuration");

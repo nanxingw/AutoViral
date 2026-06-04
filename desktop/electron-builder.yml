@@ -74,6 +74,16 @@ asarUnpack:
 # copies both binaries to a single, arch-correct dir). Chromium + remotion-bundle
 # are likewise staged by ensure-chromium.mjs + bundle-remotion.mjs. Using staged
 # dirs keeps the globs platform-independent (no hardcoded darwin-arm64 path).
+#
+# I14 / PRD-0003 §1 — zero-install render path: this `from: …/ffmpeg → to: ffmpeg`
+# copy is what makes a dmg/nsis install render with NO manual `brew install`.
+# At boot, desktop/main.ts sets FFMPEG_PATH/FFPROBE_PATH to
+# `<resources>/ffmpeg/ffmpeg[.exe]` and `<resources>/ffmpeg/ffprobe[.exe]`;
+# src/infra/deps.ts resolves the env-override tier (1) FIRST, so render / export /
+# waveform / TTS-duration all spawn the bundled binaries regardless of the user's
+# shell PATH. `autoviral doctor` reports this as the "env override" source. The
+# npm-side equivalent (no Electron, no resourcesPath) is `autoviral setup`, which
+# copies the vendored binaries into ~/.autoviral/bin (deps.ts tier 2 "managed").
 extraResources:
   - from: desktop/build-resources/ffmpeg
     to: ffmpeg

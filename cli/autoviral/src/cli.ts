@@ -23,6 +23,8 @@ import { ingestCommand } from "./commands/ingest.js";
 import { preprocessCommand } from "./commands/preprocess.js";
 import { contextCommand } from "./commands/context.js";
 import { trendsCommand, profileCommand } from "./commands/trends.js";
+import { doctorCommand } from "./commands/doctor.js";
+import { setupCommand } from "./commands/setup.js";
 import {
   lintCommand,
   inspectCommand,
@@ -54,6 +56,8 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   context: contextCommand,
   trends: trendsCommand,
   profile: profileCommand,
+  doctor: doctorCommand,
+  setup: setupCommand,
   lint: lintCommand,
   inspect: inspectCommand,
   validate: validateCommand,
@@ -113,6 +117,14 @@ function usage(): string {
     "  ingest youtube <url> [--lang zh-CN] [--model <openrouter-id>]",
     "    Download YouTube → transcribe (Whisper) → translate via OpenRouter",
     "    → bootstrap composition.yaml with overlay captions.",
+    "",
+    "Setup / diagnostics:",
+    "  doctor                        Print a dependency readiness table",
+    "    (ffmpeg/ffprobe, TTS venv, playwright, claude CLI). Non-zero exit if a",
+    "    CORE dep (ffmpeg/ffprobe) is missing. Runs locally — no daemon needed.",
+    "  setup [--heavy]               Install missing deps with progress",
+    "    (managed ffmpeg/ffprobe + TTS venv). --heavy also installs playwright",
+    "    chromium now (else it lazy-installs on first use). No npm postinstall.",
     "",
     "Run `autoviral docs` for the full manual.",
     "",

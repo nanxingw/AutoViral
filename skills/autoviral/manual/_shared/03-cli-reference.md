@@ -241,6 +241,53 @@ Failure surfaces the failing step (`download / probe / transcribe / translate / 
 
 See `recipes/ingest-youtube.md` for the full editorial loop after ingest lands.
 
+## Setup / diagnostics
+
+Unlike every other command, `doctor` and `setup` run **client-side** — they do NOT require `AUTOVIRAL_WORK_ID` / a running daemon. They probe (and install) the external binaries AutoViral's core chain needs, resolving from the **managed location** (`~/.autoviral/bin`, `~/.autoviral/tts-venv`) and the vendored npm packages — never relying on the user's shell PATH (PRD-0003 §1).
+
+### `autoviral doctor`
+
+Print a dependency readiness table and exit. Probes are pure local reads (no install, no daemon):
+
+```
+$ autoviral doctor
+autoviral doctor — dependency readiness
+
+✓ ffmpeg       managed (~/.autoviral/bin)
+    → /Users/me/.autoviral/bin/ffmpeg
+✓ ffprobe      vendored (ffmpeg-static)
+    → /Users/me/.../node_modules/ffmpeg-static/ffmpeg
+○ tts venv     missing edge-tts + stable-ts
+    fix: run `autoviral setup` (creates the venv & pip-installs them)
+○ playwright   chromium not installed
+    note: ~150MB, lazy-installs on first trends scrape (or `autoviral setup --heavy`)
+✓ claude CLI   on PATH
+    → /usr/local/bin/claude
+
+Core dependencies OK.
+```
+
+Each binary shows WHERE it resolves, in precedence order: **env override** (`FFMPEG_PATH`/`FFPROBE_PATH`, set by the packaged desktop app) → **managed** (`~/.autoviral/bin`) → **vendored** (`ffmpeg-static`) → **system PATH** (last resort). `claude` can't be bundled (it's Anthropic's) so it's detected + reported only.
+
+**Exit code: non-zero (1) when a CORE dep — ffmpeg or ffprobe — is missing; 0 otherwise.** A missing TTS venv / playwright / claude is a `○` warning, not a failure (those degrade a feature; `setup` or first-use lazy install handles them).
+
+### `autoviral setup [--heavy]`
+
+Install the missing pieces with streamed progress (no npm postinstall — that's fragile and routinely blocked):
+
+```bash
+autoviral setup            # ffmpeg/ffprobe → ~/.autoviral/bin + TTS venv (edge-tts + stable-ts)
+autoviral setup --heavy    # also installs playwright chromium (~150MB) NOW
+```
+
+- **ffmpeg + ffprobe** — copies the vendored binaries into `~/.autoviral/bin` (the managed location `doctor` reports as `managed`).
+- **TTS venv** — `python3 -m venv ~/.autoviral/tts-venv` then `pip install --upgrade edge-tts stable-ts`, streaming pip output. Needs a host `python3`; if absent it prints a copy-paste install hint and continues (non-fatal).
+- **playwright chromium** — heavy + optional. By DEFAULT left to lazy-install on first trends scrape (printed, not silent); `--heavy` installs it up front.
+
+**Exit code: 1 only if the CORE ffmpeg/ffprobe install failed; 0 otherwise** (a TTS failure is reported but doesn't fail the whole setup). Re-run `autoviral doctor` to verify.
+
+> Desktop (dmg/nsis) users never need `setup` for ffmpeg — the installer ships ffmpeg/ffprobe via electron-builder `extraResources` and the app points `FFMPEG_PATH`/`FFPROBE_PATH` at them at boot, so render/export work with zero manual install.
+
 ## Exit codes
 
 | Code | Meaning |

@@ -13,7 +13,7 @@ import { PACKAGE_ROOT } from "../infra/paths.js";
 import { initProviders } from "../providers/registry.js";
 import { ensureSharedDirs } from "../shared-assets.js";
 import { ensureSpawnPath } from "./spawn-path.js";
-import { ensureManaged } from "../infra/deps.js";
+import { ensureManaged, detect } from "../infra/deps.js";
 import { apiRoutes, setWsBridge, setRenderQueue } from "./api.js";
 import { WsBridge } from "../ws-bridge.js";
 import { attachTerminalWebSocket } from "./terminal/terminal-ws.js";
@@ -44,6 +44,14 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   // vendored absolute path, so a failed/slow copy must never block boot or a
   // render. See PRD-0003 §1 + src/infra/deps.ts.
   void ensureManaged().catch(() => {});
+
+  // First-run guidance (I14, PRD-0003 §1): if a CORE binary (ffmpeg/ffprobe)
+  // resolves ONLY to the bare-name PATH tier — meaning there's no env override,
+  // no managed copy, AND no vendored binary — render/export/waveform/TTS-probe
+  // will later spawn with an opaque ENOENT. Surface a visible, actionable hint
+  // at boot instead of letting the user hit a bare crash mid-render. This is the
+  // only thing standing between the failure and `autoviral setup`.
+  warnIfCoreDepsMissing();
 
   // Expose the bound port so render-pipeline can rewrite relative asset
   // URLs into HTTP URLs the Remotion renderer can fetch.
@@ -186,4 +194,53 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   );
 
   return { server: httpServer };
+}
+
+/**
+ * Boot-time first-run guidance for missing CORE deps (I14, PRD-0003 §1).
+ *
+ * detect() classifies ffmpeg/ffprobe by precedence (env → managed → vendored →
+ * bare PATH). A "path" source means NONE of the reliable tiers resolved — the
+ * daemon would fall back to spawning the bare name against $PATH, which throws
+ * an opaque ENOENT if the binary isn't there. We do a cheap synchronous PATH
+ * sweep (no spawn — never blocks boot) and, only when the binary truly isn't
+ * reachable, print a single visible, actionable line pointing at `autoviral
+ * setup` / `autoviral doctor` instead of letting render/export crash bare later.
+ */
+function warnIfCoreDepsMissing(): void {
+  try {
+    const resolution = detect();
+    const missing: string[] = [];
+    for (const dep of ["ffmpeg", "ffprobe"] as const) {
+      const r = resolution[dep];
+      if (r.source !== "path") continue; // env/managed/vendored → reliably spawnable
+      if (!binaryOnPath(dep)) missing.push(dep);
+    }
+    if (missing.length > 0) {
+      console.warn(
+        `\n[deps] Missing core dependency: ${missing.join(", ")}. ` +
+          `Render / export / waveform / TTS-duration will fail with ENOENT until it's installed.\n` +
+          `[deps] Run \`autoviral setup\` to install it (or \`autoviral doctor\` to see what's missing).\n`,
+      );
+    }
+  } catch {
+    // Guidance is best-effort — a probe failure must never abort startup.
+  }
+}
+
+/** Cheap synchronous check: does `name` resolve on $PATH? No spawn (so boot
+ *  never blocks); mirrors the doctor's PATH sweep. */
+function binaryOnPath(name: string): boolean {
+  const pathEnv = process.env.PATH ?? "";
+  const exts =
+    process.platform === "win32"
+      ? (process.env.PATHEXT ?? ".EXE;.CMD;.BAT").split(";")
+      : [""];
+  for (const dir of pathEnv.split(process.platform === "win32" ? ";" : ":")) {
+    if (!dir) continue;
+    for (const ext of exts) {
+      if (existsSync(join(dir, `${name}${ext}`))) return true;
+    }
+  }
+  return false;
 }
