@@ -4,6 +4,8 @@ import {
   computeVideoTransformForFrame,
 } from "../VideoTrackRenderer";
 import type { VideoClip } from "../../../types";
+import { setAspectRatio } from "@shared/composition/ops";
+import type { Composition } from "@shared/composition";
 
 // Phase 8.2.C — at frame 30 (1s @ 30fps), with keyframes
 //   [{property:"scale",time:0,value:1},{property:"scale",time:2,value:2}],
@@ -46,6 +48,56 @@ describe("computeVideoTransformForFrame", () => {
     expect(out.x).toBe(10);
     expect(out.y).toBe(20);
     expect(out.rotation).toBe(5);
+  });
+
+  // S17 anti-dead-field — proves setAspectRatio's KEYFRAME rescaling is REALLY
+  // consumed by the renderer's transform helper, not just written to schema.
+  // A clip pans via x keyframes (so `interpolateProperty(kfs,"x",…) ?? t.x`
+  // reads the keyframe, never the static t.x). After 9:16 → 16:9, the at-frame
+  // x the renderer applies must be the keyframe value scaled by 1920/1080.
+  it("renders the SCALED x-keyframe after setAspectRatio (op→renderer consumption)", () => {
+    const clip: VideoClip = {
+      ...baseClip,
+      transforms: { scale: 1, x: 999, y: 0, rotation: 0 }, // static x must be ignored
+      keyframes: [
+        { property: "x", time: 0, value: 200, easing: "linear" },
+        { property: "x", time: 2, value: 200, easing: "linear" }, // flat pan → constant 200
+      ],
+    };
+    // Hand-built minimal 9:16 comp carrying this clip on a video track.
+    const comp = {
+      id: "c1",
+      workId: "w1",
+      schemaVersion: 1,
+      fps,
+      width: 1080,
+      height: 1920,
+      duration: 0,
+      aspect: "9:16",
+      tracks: [
+        {
+          id: "trk_v0",
+          kind: "video",
+          label: "V",
+          displayOrder: 0,
+          volume: 0,
+          muted: false,
+          hidden: false,
+          clips: [clip],
+          transitions: [],
+        },
+      ],
+      assets: [],
+      provenance: [],
+    } as unknown as Composition;
+
+    setAspectRatio(comp, { ratio: "16:9" });
+
+    const scaledClip = comp.tracks[0].clips[0] as VideoClip;
+    const out = computeVideoTransformForFrame(scaledClip, 30, fps); // 1s into the flat pan
+    // The renderer reads the (now scaled) keyframe, NOT the static x:999.
+    expect(out.x).toBeCloseTo(200 * (1920 / 1080), 4);
+    expect(out.x).not.toBe(999);
   });
 });
 

@@ -113,6 +113,36 @@ describe("setAspectRatio (S17)", () => {
     expect(Math.abs(t.x)).toBeLessThanOrEqual(comp.width / 2);
   });
 
+  it("rescales x/y KEYFRAMES (not just static transforms) so a panned clip stays in frame", () => {
+    // The renderer reads `interpolateProperty(kfs,\"x\",...) ?? t.x`, so on a clip
+    // that pans via x/y keyframes the STATIC t.x is never read — only the
+    // keyframe values drive position. If the op scales only t.x/t.y, a keyframed
+    // pan animation keeps OLD-canvas absolute pixels and drifts off-frame
+    // (exactly the \"drift off the canvas\" the op promises to prevent). 9:16
+    // (1080×1920) → 16:9 (1920×1080): sx = 1920/1080, sy = 1080/1920.
+    const clip = videoClip(0, 0) as Record<string, unknown>;
+    clip.keyframes = [
+      { property: "x", time: 0, value: 200, easing: "linear" },
+      { property: "x", time: 2, value: -300, easing: "linear" },
+      { property: "y", time: 0, value: 400, easing: "linear" },
+      { property: "scale", time: 0, value: 1, easing: "linear" },
+      { property: "scale", time: 2, value: 1.5, easing: "linear" },
+    ];
+    const comp = compWith([clip]);
+    setAspectRatio(comp, { ratio: "16:9" });
+    const kfs = (comp.tracks[0].clips[0] as { keyframes: { property: string; value: number }[] })
+      .keyframes;
+    const xKfs = kfs.filter((k) => k.property === "x");
+    const yKfs = kfs.filter((k) => k.property === "y");
+    const scaleKfs = kfs.filter((k) => k.property === "scale");
+    expect(xKfs[0].value).toBeCloseTo(200 * (1920 / 1080), 4);
+    expect(xKfs[1].value).toBeCloseTo(-300 * (1920 / 1080), 4);
+    expect(yKfs[0].value).toBeCloseTo(400 * (1080 / 1920), 4);
+    // scale keyframes are dimensionless — must NOT be touched.
+    expect(scaleKfs[0].value).toBe(1);
+    expect(scaleKfs[1].value).toBe(1.5);
+  });
+
   it("leaves percentage-positioned text clips untouched (they adapt automatically)", () => {
     const comp = compWith([textClip()]);
     setAspectRatio(comp, { ratio: "16:9" });

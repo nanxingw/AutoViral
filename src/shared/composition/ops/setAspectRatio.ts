@@ -19,9 +19,16 @@
 // (now differently-sized) canvas. We rescale those offsets proportionally to the
 // dimension change (x by width-ratio, y by height-ratio) so a clip nudged 200px
 // right of centre on a 1080-wide canvas stays proportionally placed when the
-// canvas narrows/widens, never flying out of frame. Text/overlay clips position
-// by PERCENTAGE (xPct/yPct/wPct/hPct) so they adapt automatically — we leave
-// them untouched.
+// canvas narrows/widens, never flying out of frame.
+//
+// CRITICAL: the renderer reads `interpolateProperty(kfs,"x",…) ?? t.x`, so for a
+// clip that PANS via x/y keyframes the static t.x is never read — the keyframe
+// values alone drive position. We therefore scale the clip's x/y KEYFRAMES by
+// the same sx/sy, not just the static transforms; otherwise a keyframed pan
+// would keep old-canvas pixel magnitudes and drift off-frame anyway. scale /
+// rotation / opacity / speed keyframes are dimensionless or relative and are
+// left untouched. Text/overlay clips position by PERCENTAGE
+// (xPct/yPct/wPct/hPct) so they adapt automatically — we leave them untouched.
 
 import { ASPECTS, type Aspect, type Composition } from "../../composition.js";
 import { CompositionOpError } from "./errors.js";
@@ -83,9 +90,25 @@ export function setAspectRatio(
     for (const clip of trk.clips) {
       if (clip.kind !== "video") continue;
       const t = clip.transforms;
-      if (!t) continue;
-      if (typeof t.x === "number") t.x = t.x * sx;
-      if (typeof t.y === "number") t.y = t.y * sy;
+      if (t) {
+        if (typeof t.x === "number") t.x = t.x * sx;
+        if (typeof t.y === "number") t.y = t.y * sy;
+      }
+      // The renderer reads `interpolateProperty(kfs,"x",…) ?? t.x` — on a clip
+      // that pans via x/y KEYFRAMES the static t.x is never read, so scaling
+      // only t.x would leave the keyframed animation at old-canvas pixel
+      // magnitudes and the content would drift off the resized canvas (the very
+      // "drift off the canvas" this op promises to prevent). Scale the position
+      // keyframes by the SAME sx/sy as the static offsets. Other properties
+      // (scale/rotation/opacity/speed) are dimensionless or already relative —
+      // leave them untouched.
+      const kfs = (clip as { keyframes?: { property: string; value: number }[] })
+        .keyframes;
+      if (!kfs) continue;
+      for (const kf of kfs) {
+        if (kf.property === "x") kf.value = kf.value * sx;
+        else if (kf.property === "y") kf.value = kf.value * sy;
+      }
     }
   }
 }
