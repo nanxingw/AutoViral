@@ -90,7 +90,14 @@ export async function clipCommand(args: string[]): Promise<void> {
       // dotted key (`--transforms.scale`) also works. The server's per-kind
       // whitelist rejects anything unknown with exit 4 — never a silent no-op.
       const path = CLIP_SET_FLAG_PATHS[flag] ?? flag;
-      const value = parseFlagValue(v);
+      // S11 fix-up — value coercion must respect the TARGET path's expected type.
+      // A no-`#` hex like `--color 000000` is a STRING field (style.color), but
+      // the bare-number regex would `Number("000000")` it to `0`, silently
+      // destroying the agent's colour. So string-typed leaves skip number/bool
+      // coercion and stay verbatim strings.
+      const value = STRING_VALUED_PATHS.has(path)
+        ? v
+        : parseFlagValue(v);
       // S11 fix-up — the server's per-kind whitelist only lists DOTTED LEAVES
       // (`ducking.ratio`, never a bare `ducking`). So an OBJECT-valued flag
       // (`--ducking '{"ratio":0.4}'`) must be FLATTENED into `{ "ducking.ratio":
@@ -140,12 +147,30 @@ const CLIP_SET_FLAG_PATHS: Record<string, string> = {
   // text, duration, animation) already match their canonical key verbatim.
 };
 
+// S11 fix-up — canonical paths whose schema leaf is a STRING (not a number /
+// bool / object). A value bound for one of these must NOT be number-coerced:
+// `--color 000000` (a no-`#` hex) would otherwise `Number("000000") → 0` and
+// silently throw away the agent's colour. Mirrors the z.string() / z.enum(...)
+// leaves of the clip schemas in src/shared/composition.ts — keep in lockstep.
+const STRING_VALUED_PATHS: ReadonlySet<string> = new Set<string>([
+  "src", // video/audio/overlay src path
+  "text", // text clip body
+  "type", // audio clip type enum (original/bgm/voiceover/sfx)
+  "filters.lut", // video LUT name
+  "style.font", // text font family
+  "style.color", // text fill (hex like `000000`)
+  "style.stroke.color", // text stroke (hex)
+  "position.anchor", // text anchor enum (top/center/bottom)
+  "animation", // text animation preset name
+]);
+
 // S11 — coerce a raw CLI string flag value into the JSON shape the server
 // expects. Numbers and booleans are typed; a value that parses as JSON
 // (object/array/quoted-string) is parsed (so `--ducking '{"ratio":0.4}'` parses
 // to an object, which `flattenInto` then splits into `ducking.ratio` dot-paths
 // the server whitelists); everything else stays a bare string. Mirrors the
-// schema's leaf types.
+// schema's leaf types. (String-valued leaves bypass this entirely — see
+// STRING_VALUED_PATHS — so a numeric-looking colour/name is never coerced.)
 function parseFlagValue(v: string): unknown {
   if (v === undefined) return v;
   if (v === "true") return true;

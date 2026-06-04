@@ -377,35 +377,48 @@ describe("autoviral CLI — end-to-end", () => {
     });
   });
 
-  // S11 fix-up — an OBJECT-valued flag (`--ducking '{"ratio":0.4}'`) must be
-  // FLATTENED into the server's whitelisted dot-paths (`ducking.ratio`). The
-  // server's per-kind whitelist only lists the dotted leaves (ducking.ratio /
-  // .attack / .release); a bare `ducking` key is NOT whitelisted and would be
-  // rejected with code:4 — so sending the raw object would 400 the documented
-  // ergonomic. (The old assertion `{ ducking: { ratio: 0.4 } }` was a mock-only
-  // green: cli.test's PATCH mock blindly stores the body, so it never hit the
-  // real op. The route test in routes.test.ts now proves the dot-path lands.)
-  it("clip set --ducking '{\"ratio\":0.4}' → FLATTENS the object to dot-paths the server whitelists", async () => {
+  // S11 fix-up — an OBJECT-valued flag (`--ducking '{...}'`) must be FLATTENED
+  // into the server's whitelisted dot-paths (`ducking.ratio` / `.attack` /
+  // `.release`); a bare `ducking` key is NOT whitelisted and is rejected with
+  // code:4. We assert the COMPLETE object here because that is the only shape
+  // that survives the REAL server: the `ducking` schema requires all three
+  // leaves, so on a fresh audio clip (ac_bgm01 has no ducking) a partial
+  // `{ratio}` patch would mint `{ratio}` → fail zod → 400 → exit 4. (The old
+  // `--ducking '{"ratio":0.4}'` test asserted exit 0 — a mock-only green: this
+  // cli.test PATCH mock blindly stores the body and returns 200, so it never
+  // ran the real op or zod and falsely claimed a path the server rejects. The
+  // routes.test.ts contract proves a single leaf only lands once ducking
+  // already exists, and that the complete-object patch mints it.)
+  it("clip set --ducking '{\"ratio\":0.4,\"attack\":0.1,\"release\":0.2}' → flattens EVERY object key to its own dot-path (the shape the server accepts on a fresh clip)", async () => {
     lastClipPatch = null;
     const r = await run([
       "clip", "set", "ac_bgm01",
-      "--ducking", '{"ratio":0.4}',
-    ]);
-    expect(r.exitCode).toBe(0);
-    expect(lastClipPatch).toEqual({ "ducking.ratio": 0.4 });
-  });
-
-  it("clip set --ducking '{\"ratio\":0.4,\"attack\":0.1}' → flattens EVERY object key to its own dot-path", async () => {
-    lastClipPatch = null;
-    const r = await run([
-      "clip", "set", "ac_bgm01",
-      "--ducking", '{"ratio":0.4,"attack":0.1}',
+      "--ducking", '{"ratio":0.4,"attack":0.1,"release":0.2}',
     ]);
     expect(r.exitCode).toBe(0);
     expect(lastClipPatch).toEqual({
       "ducking.ratio": 0.4,
       "ducking.attack": 0.1,
+      "ducking.release": 0.2,
     });
+  });
+
+  // S11 fix-up (Finding 1) — a no-`#` hex colour (`--color 000000`) is a STRING
+  // field (style.color). It must reach the bridge as the string "000000", NOT
+  // `Number("000000") === 0` (which would silently destroy the agent's colour).
+  it("clip set --color 000000 → keeps the hex as a string (not coerced to 0)", async () => {
+    lastClipPatch = null;
+    const r = await run(["clip", "set", "tc_hook01", "--color", "000000"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({ "style.color": "000000" });
+  });
+
+  // …while a genuinely numeric field (--scale) is still coerced to a number.
+  it("clip set --scale 2 still coerces to the number 2 (numeric leaf untouched)", async () => {
+    lastClipPatch = null;
+    const r = await run(["clip", "set", "vc_s01", "--scale", "2"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({ "transforms.scale": 2 });
   });
 
   it("clip set with no id → exit 4 (never hits bridge)", async () => {
@@ -474,7 +487,7 @@ describe("autoviral CLI — end-to-end", () => {
       tmpDir = await mkdtemp(join(tmpdir(), "autoviral-comp-put-"));
     });
 
-    it("comp put <file> → PUTs the parsed composition + exit 0", async () => {
+    it("comp put <file> → PUTs the parsed composition + exit 0 + prints a write confirmation", async () => {
       const { writeFile } = await import("node:fs/promises");
       lastCompPut = null;
       const comp = { id: "c_e2e", workId: "w_e2e", duration: 9, tracks: [], assets: [] };
@@ -483,6 +496,23 @@ describe("autoviral CLI — end-to-end", () => {
       const r = await run(["comp", "put", file]);
       expect(r.exitCode).toBe(0);
       expect(lastCompPut).toEqual(comp);
+      // S4 polish — a full-comp overwrite must NOT be silent (sibling write
+      // verbs all print a confirmation).
+      expect(r.stdout).toMatch(/wrote composition from/);
+      expect(r.stdout).toContain(file);
+    });
+
+    // S4 polish (Finding 3a) — `typeof [] === "object"` would let a top-level
+    // YAML/JSON ARRAY slip past the object guard. It is not a composition and
+    // must fail fast (exit 4) BEFORE reaching the bridge.
+    it("comp put a top-level ARRAY → exit 4 (never hits bridge)", async () => {
+      const { writeFile } = await import("node:fs/promises");
+      lastCompPut = null;
+      const file = join(tmpDir, "array.json");
+      await writeFile(file, JSON.stringify([{ id: "c_x" }]), "utf8");
+      const r = await run(["comp", "put", file]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompPut).toBeNull();
     });
 
     it("comp put accepts a YAML file too (parsed → JSON on the wire)", async () => {

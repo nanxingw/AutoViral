@@ -67,7 +67,9 @@ export async function compCommand(args: string[]): Promise<void> {
   if (sub === "put") {
     const source = args[1];
     if (!source) {
-      process.stderr.write("usage: autoviral comp put <file|-stdin>\n");
+      // `-` is the stdin token (matches the actual arg the reader accepts +
+      // the `--help` line in cli.ts); keep this usage string aligned with it.
+      process.stderr.write("usage: autoviral comp put <file|->\n");
       process.exit(4);
     }
     let raw: string;
@@ -95,7 +97,10 @@ export async function compCommand(args: string[]): Promise<void> {
       );
       process.exit(4);
     }
-    if (comp === null || typeof comp !== "object") {
+    // `typeof [] === "object"` and `typeof null === "object"`, so guard both:
+    // a top-level YAML/JSON ARRAY (or null/scalar) is not a composition object
+    // and must fail fast as an input error before it reaches the bridge.
+    if (comp === null || typeof comp !== "object" || Array.isArray(comp)) {
       process.stderr.write(
         `autoviral comp put: ${source === "-" ? "stdin" : source} did not parse to a composition object\n`,
       );
@@ -105,6 +110,13 @@ export async function compCommand(args: string[]): Promise<void> {
     // The bridge re-validates against CompositionSchema; an invalid composition
     // 400s with code:4 → bridgeRequest exits 4 (and disk is left untouched).
     await bridgeRequest(ctx, "PUT", "/comp", comp);
+    // Confirm the write on stdout, in step with the sibling write verbs
+    // (`clip add` / `carousel set-layer` / `checkpoint restore` all print). A
+    // silent success on a full-composition overwrite is the riskiest write to
+    // leave unacknowledged.
+    process.stdout.write(
+      `wrote composition from ${source === "-" ? "stdin" : source}\n`,
+    );
     return;
   }
   process.stderr.write(`autoviral comp: unknown subcommand "${sub}"\n`);
