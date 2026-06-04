@@ -50,6 +50,15 @@ vi.mock("@/features/terminal/TerminalPanel", () => ({
   },
 }));
 
+// Stub SessionStrip (I24) — its own behaviour is covered in SessionStrip.test;
+// here it would fire a real GET /api/works/:id/sessions that MSW (error mode)
+// would flag. The container tests only care about tab switching + mounting.
+vi.mock("./SessionStrip", () => ({
+  SessionStrip: ({ workId }: { workId: string }) => (
+    <div data-testid={`session-strip-${workId}`} />
+  ),
+}));
+
 // Import AFTER mocks so the component picks them up.
 import { RightPane } from "./index";
 

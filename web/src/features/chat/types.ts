@@ -35,6 +35,23 @@ export interface ChatAttachment {
   kind: "image" | "video" | "audio";
 }
 
+/** One chat session in a work's `.sessions.jsonl` sidecar (ADR-008 §5 / I24).
+ *  Mirrors the server's SessionRecord (src/server/sessions/sessions-sidecar.ts)
+ *  for the fields the session strip needs. Returned by GET
+ *  /api/works/:id/sessions and POST /api/works/:id/sessions. */
+export interface ChatSessionRecord {
+  /** Server-minted stable id, e.g. "s_1", "s_2". */
+  id: string;
+  surface: "chat" | "terminal";
+  /** Chat only: claude's `--resume` UUID. */
+  cliSessionId?: string;
+  createdAt: string;
+  lastActive: string;
+  /** First user line / cwd — a human-readable label for the strip. */
+  preview: string;
+  archived: boolean;
+}
+
 export interface StreamBlock {
   id: string;
   type: StreamBlockType;

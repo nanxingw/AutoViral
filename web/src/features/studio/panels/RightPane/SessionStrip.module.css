@@ -1,0 +1,128 @@
+/* Chat session sub-strip (ADR-008 §5 / I24). Sits under the Chat | Terminal
+ * switcher, above the ChatPanel. Editorial · glass tone — mono labels, thin
+ * divider, accent on the active session. Horizontal scroll when sessions
+ * overflow so a busy work never blows the pane width. */
+
+.strip {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 4px 6px;
+  gap: 4px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--glass-border);
+  background: var(--surface-1);
+  scrollbar-width: thin;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-0);
+  border: 1px solid var(--glass-border);
+  overflow: hidden;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.tab:hover {
+  border-color: var(--accent);
+}
+
+.tabActive {
+  border-color: var(--accent);
+  background: var(--accent-glow, var(--surface-2));
+}
+
+.tabButton {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 3px 9px;
+  border: none;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  line-height: 1.2;
+}
+
+.tabActive .tabButton {
+  color: var(--accent);
+}
+
+.tabLabel {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.tabMeta {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--ink-3);
+  letter-spacing: 0.04em;
+}
+
+.deleteBtn,
+.deleteConfirm {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: var(--ink-3);
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+.deleteBtn {
+  width: 18px;
+  font-size: 14px;
+  align-self: stretch;
+}
+
+.deleteBtn:hover {
+  color: var(--status-error, #d4756c);
+}
+
+.deleteConfirm {
+  padding: 0 8px;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  color: var(--status-error, #d4756c);
+}
+
+.newChat {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+  padding: 0 10px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px dashed var(--glass-border);
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  transition: border-color 160ms ease, color 160ms ease;
+}
+
+.newChat:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.newChat:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.newChatLabel {
+  font-size: 11px;
+}

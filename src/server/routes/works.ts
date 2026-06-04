@@ -29,6 +29,7 @@ import {
   synthesiseLegacyAssetsAndProvenance,
   synthesiseLegacyCarousel,
 } from "./_shared.js";
+import { DEFAULT_CHAT_SESSION_ID } from "../../ws-bridge.js";
 
 export const worksRouter = new Hono();
 
@@ -489,6 +490,63 @@ worksRouter.post("/api/works/:id/chat", async (c) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// Multi-session API (ADR-008 §5 / I24) — list / create / delete chat sessions.
+//
+// I23 landed the WsBridge session model (nested Map<workId, Map<sessionId>>,
+// `.sessions.jsonl` sidecar, /ws/browser/{workId}/{sessionId} routing) plus the
+// public listSessions / createNewSession / deleteSession methods, but with NO
+// HTTP surface — the frontend session strip (I24) needs one to drive them. These
+// three routes are that surface. They reuse the SAME WsBridge singleton the
+// server constructs (getWsBridge) so live in-memory sessions and the sidecar
+// stay consistent; they never `new WsBridge()`.
+// ---------------------------------------------------------------------------
+
+// GET /api/works/:id/sessions — list the work's chat sessions (active, not
+// archived/deleted). On a legacy single-session work the bridge lazily migrates
+// the old cliSessionId/chat.jsonl into an `s_1` record before returning.
+worksRouter.get("/api/works/:id/sessions", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId", errorCode: "invalid_work_id" }, 400);
+  const wsBridge = getWsBridge();
+  if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
+  const sessions = await wsBridge.listSessions(id);
+  return c.json({ sessions });
+});
+
+// POST /api/works/:id/sessions — mint a brand-new chat session (next s_N) and
+// persist its sidecar record. Returns the new record so the client can switch
+// to it immediately. Does NOT spawn a CLI — the first message on that session
+// does. 503 if the bridge isn't wired (no sidecar dir → null record).
+worksRouter.post("/api/works/:id/sessions", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId", errorCode: "invalid_work_id" }, 400);
+  const wsBridge = getWsBridge();
+  if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
+  const session = await wsBridge.createNewSession(id);
+  if (!session) return c.json({ error: "Failed to create session", errorCode: "session_create_failed" }, 503);
+  return c.json({ session }, 201);
+});
+
+// DELETE /api/works/:id/sessions/:sessionId — hard-delete a chat session: dispose
+// its in-memory WsSession + CLI, tombstone the sidecar record, and remove its
+// chat-{sessionId}.jsonl. Refuses to delete the default session (s_1) so the work
+// always keeps at least one conversation (it shares the legacy chat.jsonl).
+worksRouter.delete("/api/works/:id/sessions/:sessionId", async (c) => {
+  const id = c.req.param("id");
+  const sessionId = c.req.param("sessionId");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId", errorCode: "invalid_work_id" }, 400);
+  if (!SAFE_ID.test(sessionId)) return c.json({ error: "Invalid sessionId", errorCode: "invalid_session_id" }, 400);
+  if (sessionId === DEFAULT_CHAT_SESSION_ID) {
+    return c.json({ error: "Cannot delete the default session", errorCode: "session_delete_default" }, 400);
+  }
+  const wsBridge = getWsBridge();
+  if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
+  const deleted = await wsBridge.deleteSession(id, sessionId);
+  if (!deleted) return c.json({ error: "Session not found", errorCode: "session_not_found" }, 404);
+  return c.json({ deleted: true });
+});
+
 // ── Module-as-capability invocation ─────────────────────────────────────────
 
 const KNOWN_MODULES = ["research", "planning", "assets", "assembly"] as const;
@@ -565,13 +623,28 @@ worksRouter.all("/api/works/:id/eval/retry", (c) => c.json(D3_GONE_BODY, 410));
 worksRouter.all("/api/works/:id/eval/results/:step", (c) => c.json(D3_GONE_BODY, 410));
 worksRouter.all("/api/works/:id/steps/:step/history", (c) => c.json(D3_GONE_BODY, 410));
 
-// GET /api/works/:id/chat — load full conversation
+// GET /api/works/:id/chat — load full conversation for ONE chat session.
+// The optional `?sessionId=` selects which session's log to read (ADR-008 §4 /
+// I24). Defaults to the legacy default session so single-session callers are
+// unchanged. Making this session-aware keeps the HTTP seed in agreement with
+// the WS `message_history` reseed — without it, a reload of a work whose
+// active session is non-default would briefly show the default session's
+// bubbles (last-writer-wins race between the two seed paths).
 worksRouter.get("/api/works/:id/chat", async (c) => {
   const id = c.req.param("id");
+  const sessionParam = c.req.query("sessionId");
+  const sessionId =
+    sessionParam && SAFE_ID.test(sessionParam) ? sessionParam : DEFAULT_CHAT_SESSION_ID;
   try {
     const { loadWorkChat } = await import("../../domain/work-store.js");
-    const chat = await loadWorkChat(id);
-    if (!chat) return c.json({ error: "No chat history" }, 404);
+    const chat = await loadWorkChat(id, sessionId);
+    // An empty non-default session has no log yet — return [] (not 404) so the
+    // client seed clears any stale blocks and the WS reseed stays authoritative.
+    if (!chat) {
+      return sessionId === DEFAULT_CHAT_SESSION_ID
+        ? c.json({ error: "No chat history" }, 404)
+        : c.json({ blocks: [] });
+    }
     return c.json(chat);
   } catch {
     return c.json({ error: "No chat history" }, 404);

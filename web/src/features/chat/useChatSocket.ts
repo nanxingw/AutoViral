@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ReconnectingWS, type WSState } from "@/lib/ws";
 import { useChatStore } from "./store";
+import { useActiveSessionId, DEFAULT_SESSION_ID } from "./activeSession";
 import type { StreamBlock, StreamBlockType, ViewerAction, ChatAttachment } from "./types";
 import { extractViewerActions } from "./types";
 
@@ -71,12 +72,24 @@ export function useChatSocket(
    * to see new clips/aspect/duration the agent just produced.
    */
   onTurnComplete?: () => void,
+  /**
+   * ADR-008 §5 / I24 — which chat session to connect to. When omitted we
+   * read the work's active session from the activeSession store (set by the
+   * RightPane session strip). The session id is carried in the WS path
+   * (`/ws/browser/{workId}/{sessionId}`); the backend re-seeds that session's
+   * history over the `message_history` frame, so switching sessions = new
+   * socket + reseed, no prop threading through ChatPanel.
+   */
+  sessionId?: string,
 ) {
   const ref = useRef<ReconnectingWS | null>(null);
   const push = useChatStore((s) => s.push);
   const setBlocks = useChatStore((s) => s.setBlocks);
   const setStreaming = useChatStore((s) => s.setStreaming);
   const attachUsage = useChatStore((s) => s.attachLastTurnUsage);
+  // Reactive active session for this work — switching it re-runs the effect.
+  const activeSessionId = useActiveSessionId(workId);
+  const sid = sessionId ?? activeSessionId ?? DEFAULT_SESSION_ID;
   // Keep latest callback in a ref so the WS effect doesn't re-subscribe
   // every time the parent re-renders with a new arrow-function reference.
   const onTurnCompleteRef = useRef(onTurnComplete);
@@ -92,7 +105,12 @@ export function useChatSocket(
       setWsState("connecting");
       return;
     }
-    const ws = new ReconnectingWS<string>(`/ws/browser/${workId}`);
+    // Clear stale bubbles on session switch so a freshly-created (empty)
+    // session doesn't briefly show the previous session's history — the
+    // backend only sends a `message_history` frame when the session HAS
+    // history, so an empty session would otherwise inherit the old blocks.
+    setBlocks([]);
+    const ws = new ReconnectingWS<string>(`/ws/browser/${workId}/${sid}`);
     ref.current = ws;
     setWsState(ws.getState());
     const offState = ws.onState(setWsState);
@@ -226,7 +244,7 @@ export function useChatSocket(
       ws.dispose();
       ref.current = null;
     };
-  }, [workId, push, setBlocks, setStreaming, attachUsage]);
+  }, [workId, sid, push, setBlocks, setStreaming, attachUsage]);
 
   return {
     state: wsState,

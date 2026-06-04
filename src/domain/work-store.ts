@@ -268,23 +268,47 @@ export async function saveWorkChat(id: string, data: unknown): Promise<void> {
   await writeFile(join(workDir(id), "chat.json"), JSON.stringify(data), "utf-8");
 }
 
-/** Load full conversation. Tries chat.json (single-shot snapshot saved by
- *  PUT /api/works/:id/chat) first, falling back to chat.jsonl (the live
- *  stream log appended by ws-bridge.appendToChatLog). Without the jsonl
- *  fallback, refreshing the studio page wiped the entire visible chat
- *  history because no caller actually writes chat.json today — only the
- *  jsonl path is on disk for live work sessions. */
+/** The id of a work's first/legacy chat session. Kept in sync with
+ *  ws-bridge's `DEFAULT_CHAT_SESSION_ID` — inlined (not imported) because
+ *  ws-bridge imports THIS module, so importing it back would form a cycle. */
+const DEFAULT_CHAT_SESSION_ID = "s_1";
+
+/** Resolve the on-disk jsonl log for a (workId, sessionId). Mirrors ws-bridge's
+ *  `chatLogPath`: the default/legacy session keeps `chat.jsonl`; other sessions
+ *  use `chat-{sessionId}.jsonl`. */
+function sessionJsonlPath(id: string, sessionId: string): string {
+  return sessionId === DEFAULT_CHAT_SESSION_ID
+    ? join(workDir(id), "chat.jsonl")
+    : join(workDir(id), `chat-${sessionId}.jsonl`);
+}
+
+/** Load full conversation for a work's chat session. Tries chat.json (single-
+ *  shot snapshot saved by PUT /api/works/:id/chat) first ONLY for the default
+ *  session, falling back to the session's jsonl (the live stream log appended
+ *  by ws-bridge.appendToChatLog). Without the jsonl fallback, refreshing the
+ *  studio page wiped the entire visible chat history because no caller actually
+ *  writes chat.json today — only the jsonl path is on disk for live sessions.
+ *
+ *  `sessionId` defaults to the legacy default session so existing single-
+ *  session callers keep reading chat.jsonl; passing a non-default session
+ *  reads its `chat-{sessionId}.jsonl` instead, so a session-aware HTTP seed
+ *  agrees with the WS `message_history` reseed (ADR-008 §4 / I24). */
 export async function loadWorkChat(
   id: string,
+  sessionId: string = DEFAULT_CHAT_SESSION_ID,
 ): Promise<{ blocks: unknown[] } | null> {
-  try {
-    const raw = await readFile(join(workDir(id), "chat.json"), "utf-8");
-    return JSON.parse(raw) as { blocks: unknown[] };
-  } catch {
-    /* fall through to jsonl */
+  // chat.json is the legacy single-file snapshot — it only ever held the
+  // default session, so non-default sessions skip it and read their jsonl.
+  if (sessionId === DEFAULT_CHAT_SESSION_ID) {
+    try {
+      const raw = await readFile(join(workDir(id), "chat.json"), "utf-8");
+      return JSON.parse(raw) as { blocks: unknown[] };
+    } catch {
+      /* fall through to jsonl */
+    }
   }
   try {
-    const raw = await readFile(join(workDir(id), "chat.jsonl"), "utf-8");
+    const raw = await readFile(sessionJsonlPath(id, sessionId), "utf-8");
     const blocks = raw
       .split("\n")
       .map((l) => l.trim())

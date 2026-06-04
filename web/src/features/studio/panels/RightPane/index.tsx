@@ -26,6 +26,7 @@ import {
 } from "@/stores/focus";
 import type { LocatorData } from "@/features/chat/types";
 import { useActiveSurface, type Surface } from "./useActiveSurface";
+import { SessionStrip } from "./SessionStrip";
 import { useT } from "@/i18n/useT";
 import styles from "./index.module.css";
 
@@ -143,15 +144,27 @@ export function RightPane({
           role="tabpanel"
           aria-hidden={active !== "chat"}
         >
-          {/* The viewer-context envelope (pneuma-style) is automatically
-              prepended to every outgoing user message. ChatPanel calls
-              getViewerContext() right before sending. */}
-          <ChatPanel
-            workId={workId}
-            getViewerContext={getViewerContext}
-            onJumpToLocator={onJumpToLocator}
-            quickActions={quickActions}
-          />
+          {/* Multi-session sub-strip (ADR-008 §5 / I24) — new/switch/jump-back
+              between chat sessions. ChatPanel itself stays single-component;
+              the active session lives in the activeSession store that
+              useChatSocket reads, so a switch reconnects the WS + reseeds
+              history without remounting ChatPanel. */}
+          <SessionStrip workId={workId} />
+          {/* ChatPanel's root is height:100%; the SessionStrip above it is a
+              fixed-height sibling, so we give ChatPanel a flex-fill wrapper
+              (flex:1 / min-height:0) to claim the remaining space without
+              overflowing the surface. */}
+          <div style={{ flex: 1, minHeight: 0 }}>
+            {/* The viewer-context envelope (pneuma-style) is automatically
+                prepended to every outgoing user message. ChatPanel calls
+                getViewerContext() right before sending. */}
+            <ChatPanel
+              workId={workId}
+              getViewerContext={getViewerContext}
+              onJumpToLocator={onJumpToLocator}
+              quickActions={quickActions}
+            />
+          </div>
         </div>
         <div
           data-surface="terminal"

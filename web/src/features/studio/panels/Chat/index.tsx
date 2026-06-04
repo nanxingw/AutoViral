@@ -19,6 +19,7 @@ import { highlightCode } from "./highlight";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { useComposerDraft } from "@/stores/composerDraft";
+import { useActiveSessionId } from "@/features/chat/activeSession";
 import composerStyles from "./Composer.module.css";
 
 /** Clean line icons (feather/lucide geometry) — a consistent SVG family that
@@ -385,16 +386,26 @@ export function ChatPanel({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const t = useT();
+  // Which chat session this work is on (persisted per work). The HTTP seed
+  // MUST read the SAME session as useChatSocket's WS connection, otherwise a
+  // reload of a work whose active session is non-default races: the workId-only
+  // seed reads the default session's log while the WS reseeds the active one
+  // (last-writer-wins → wrong bubbles). Keying the seed effect on this id makes
+  // a session switch / reload seed the RIGHT log (ADR-008 §4 / I24).
+  const activeSessionId = useActiveSessionId(workId);
 
-  // Load chat history on mount / workId change. Without this, switching into a
-  // work showed an empty panel even when chat.json had hundreds of past blocks.
+  // Load chat history on mount / workId or session change. Without this,
+  // switching into a work (or session) showed an empty panel even when the
+  // session's log had hundreds of past blocks.
   useEffect(() => {
     let cancelled = false;
     setLoadingHistory(true);
     setBlocks([]);
     (async () => {
       try {
-        const data = await apiFetch<{ blocks: StreamBlock[] }>(`/api/works/${workId}/chat`);
+        const data = await apiFetch<{ blocks: StreamBlock[] }>(
+          `/api/works/${workId}/chat?sessionId=${encodeURIComponent(activeSessionId)}`,
+        );
         if (cancelled) return;
         const seeded = (data.blocks ?? [])
           .filter((b) => !SKIP_TYPES.has(b.type as string))
@@ -414,7 +425,7 @@ export function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [workId, setBlocks]);
+  }, [workId, activeSessionId, setBlocks]);
 
   // Sticky-scroll: only auto-scroll to the bottom when the user was already
   // near the bottom. If they've scrolled up to read history, the new agent
