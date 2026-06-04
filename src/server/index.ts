@@ -13,6 +13,7 @@ import { PACKAGE_ROOT } from "../infra/paths.js";
 import { initProviders } from "../providers/registry.js";
 import { ensureSharedDirs } from "../shared-assets.js";
 import { ensureSpawnPath } from "./spawn-path.js";
+import { ensureManaged } from "../infra/deps.js";
 import { apiRoutes, setWsBridge, setRenderQueue } from "./api.js";
 import { WsBridge } from "../ws-bridge.js";
 import { attachTerminalWebSocket } from "./terminal/terminal-ws.js";
@@ -36,6 +37,13 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   // outside a login shell lacks /opt/homebrew/bin, making bare-name spawns fail
   // with ENOENT. Idempotent — also called at the CLI entry. See spawn-path.ts.
   ensureSpawnPath();
+
+  // Populate the managed binary location (~/.autoviral/bin) from the vendored
+  // ffmpeg-static / @ffprobe-installer binaries so I14's doctor can detect them
+  // there. Best-effort + fire-and-forget — resolution already falls back to the
+  // vendored absolute path, so a failed/slow copy must never block boot or a
+  // render. See PRD-0003 §1 + src/infra/deps.ts.
+  void ensureManaged().catch(() => {});
 
   // Expose the bound port so render-pipeline can rewrite relative asset
   // URLs into HTTP URLs the Remotion renderer can fetch.
@@ -139,8 +147,10 @@ export async function startServer(port: number): Promise<{ server: Server }> {
 
   // Route HTTP upgrade events.
   // Render-ws goes FIRST so it gets first dibs on /ws/render/jobs/:id; the
-  // wsBridge handles /ws/browser/:workId; terminalWs handles /ws/terminal/:workId;
-  // bridgeWs handles /ws/bridge/:workId; everything else is rejected.
+  // wsBridge handles /ws/browser/:workId[/:sessionId]; terminalWs handles
+  // /ws/terminal/:workId[/:sessionId] (ADR-008 — sessionId optional, defaults
+  // to the work's first session); bridgeWs handles /ws/bridge/:workId;
+  // everything else is rejected.
   httpServer.on("upgrade", (req, socket, head) => {
     if (renderWs.handleUpgrade(req, socket, head)) return;
     if (wsBridge.handleUpgrade(req, socket, head)) return;
@@ -165,6 +175,14 @@ export async function startServer(port: number): Promise<{ server: Server }> {
     backfillPeaks(join(dataDir, "works")).catch((err) =>
       console.warn("[peaks-backfill] startup scan failed:", err),
     ),
+  );
+
+  // 7.C. Idle-TTL session auto-archive sweep (ADR-008 §5). Fire-and-forget —
+  // releases memory pinned by chat sessions idle past SESSION_IDLE_TTL while
+  // keeping their logs on disk (archived sessions stay restorable). Never
+  // blocks startup; per-work failures don't abort the sweep.
+  void wsBridge.sweepAllIdleSessions().catch((err) =>
+    console.warn("[session-sweep] startup archive sweep failed:", err),
   );
 
   return { server: httpServer };

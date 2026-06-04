@@ -10,7 +10,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { mkdir, writeFile, readFile } from "node:fs/promises";
+import { writeFile, readFile, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
@@ -21,12 +21,18 @@ import { appendFile } from "node:fs/promises";
 import { logBridge, logBridgeDebug } from "./infra/logger.js";
 import { loadConfig, dataDir } from "./infra/config.js";
 import { PACKAGE_ROOT } from "./infra/paths.js";
-import { getWork, updateWork, saveWorkChat, loadWorkChat, type Work } from "./domain/work-store.js";
+import { getWork, updateWork, saveWorkChat, loadWorkChat, listWorks, type Work } from "./domain/work-store.js";
 import { getContentType } from "./shared/content-types/registry.js";
 import { createCheckpoint } from "./server/checkpoints.js";
 import { listSharedAssets } from "./shared-assets.js";
 import { MemoryClient } from "./domain/memory.js";
 import { syncMessage } from "./memory-sync.js";
+import {
+  SessionSidecar,
+  SESSION_IDLE_TTL_MS,
+  findIdleSessions,
+  type SessionRecord,
+} from "./server/sessions/sessions-sidecar.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -56,12 +62,34 @@ export interface ChatBlock {
 
 export interface WsSession {
   workId: string;
+  /** Our stable session id within the work (ADR-008) — e.g. "s_1". DISTINCT
+   *  from cliSessionId (claude's --resume UUID). The default/legacy chat
+   *  session is "s_1" and maps to the legacy chat.jsonl on disk. */
+  sessionId: string;
   cliSessionId?: string;
   browserSockets: Set<WebSocket>;
   cliProcess?: ChildProcess;
   idle: boolean;
   messageHistory: ChatBlock[];
   model?: string;
+}
+
+/** The id of a work's first/legacy chat session. A work created before
+ *  multi-session keying has exactly one chat that maps to chat.jsonl. */
+export const DEFAULT_CHAT_SESSION_ID = "s_1";
+
+/**
+ * Resolve the on-disk chat log path for a (workId, sessionId). The legacy
+ * single-session work kept its history in `chat.jsonl`; ADR-008 §4 keeps that
+ * filename for the default session `s_1` (no risky bulk rename) and uses
+ * `chat-{sessionId}.jsonl` for every new session. Exported for the migration +
+ * tests.
+ */
+export function chatLogPath(workId: string, sessionId: string): string {
+  const dir = join(dataDir, "works", workId);
+  return sessionId === DEFAULT_CHAT_SESSION_ID
+    ? join(dir, "chat.jsonl")
+    : join(dir, `chat-${sessionId}.jsonl`);
 }
 
 interface NdjsonMessage {
@@ -131,7 +159,7 @@ Skill('autoviral')
 
 - **图像** — \`POST /api/generate/image\` { workId, prompt, filename, width?, height?, referenceImage? }。OpenRouter，用户在 Settings 配了 OPENROUTER_API_KEY 即启用。
 - **视频** — \`POST /api/generate/video\` { workId, prompt, filename, firstFrame?, lastFrame?, resolution? }。Seedance 2.0，支持 text-to-video 与 image-to-video（first_frame 驱动），~$0.76 / 3 秒。
-- **配音 TTS** — \`POST /api/audio/tts\` { text, voice, output_path, language?, style? }。Edge TTS 内置免费（中文 zh-CN-XiaoxiaoNeural 等、英文 en-US-AriaNeural 等），无 key 时自动 fallback OpenAI。**短视频默认应该有人声**——绝大多数 viral 短视频靠 narration 推进节奏；做完 brief 主动 propose 加旁白。
+- **配音 TTS** — \`POST /api/audio/tts\` { text, voice, output_path, language?, style? }。主力走 Gemini-via-OpenRouter（用户在 Settings 配了 OPENROUTER_API_KEY 即启用），无 key 或失败时自动 fallback 到内置免费的 edge-tts（中文 zh-CN-XiaoxiaoNeural 等、英文 en-US-AriaNeural 等）。**短视频默认应该有人声**——绝大多数 viral 短视频靠 narration 推进节奏；做完 brief 主动 propose 加旁白。
 - **字幕 ASR** — \`POST /api/audio/captions\` { workId, assetPath, language }。stable-whisper 转写出 word-level 时间戳。**抖音 70% 用户静音浏览，任何带音频的视频都该跑 ASR 加字幕**（字幕走 composition 的 \`captionStrategy: overlay\` 渲染，见 \`autoviral docs video/02-composition-schema\`——不要手写 ffmpeg drawtext）。报 PYTHON_DEP_MISSING 就让用户 \`pip install stable-ts\`（注意不是 stable-whisper）。
 - **混音** \`POST /api/audio/mix\`（多轨混音 / 音量平衡）。
 - **过场转场** — 4 个 cinematic 端点，body 都接受 { workId, clipARelative, clipBRelative, outputFilename, clipADuration, transitionDuration? }。**绝不手写 ffmpeg xfade**：
@@ -274,19 +302,27 @@ export const ALLOWED_STREAM_TYPES = ["user", "text", "thinking", "tool_use", "to
 // ── WsBridge ─────────────────────────────────────────────────────────────────
 
 export class WsBridge {
-  private sessions: Map<string, WsSession> = new Map();
+  /** Nested keying (ADR-008): workId → sessionId → WsSession. A work has one
+   *  entry per concurrent chat session; the default/legacy session is `s_1`.
+   *  Trend sessions reuse the sessionKey as the workId slot with a single
+   *  default sub-session — they are ephemeral and never multi-session. */
+  private sessions: Map<string, Map<string, WsSession>> = new Map();
+  /** TTL (ms) after which an idle session is auto-archived on sweep.
+   *  Injectable so tests don't wait 7 days. */
+  private readonly idleTtlMs: number;
   private eventListeners: Map<string, Set<(event: string, data: unknown) => void>> = new Map();
   private browserWss: WebSocketServer;
   /** Backend HTTP port — injected into the agent env as AUTOVIRAL_PORT so the
    *  `autoviral` CLI (and any direct fetch) can reach this daemon. */
   private readonly serverPort: number;
 
-  constructor(serverPort: number) {
+  constructor(serverPort: number, opts?: { idleTtlMs?: number }) {
     this.serverPort = serverPort;
+    this.idleTtlMs = opts?.idleTtlMs ?? SESSION_IDLE_TTL_MS;
     this.browserWss = new WebSocketServer({ noServer: true });
     this.browserWss.on("connection", (ws, req) => {
-      const workId = this.extractWorkId(req.url ?? "");
-      if (workId) this.handleBrowserConnection(workId, ws);
+      const route = this.extractBrowserRoute(req.url ?? "");
+      if (route) this.handleBrowserConnection(route.workId, ws, route.sessionId);
     });
   }
 
@@ -294,6 +330,10 @@ export class WsBridge {
 
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): boolean {
     const url = req.url ?? "";
+    // Accept both /ws/browser/{workId} (legacy, 2-segment) and
+    // /ws/browser/{workId}/{sessionId} (multi-session). The route parse below
+    // defaults the legacy form to the work's first session, so nothing 500s
+    // mid-migration.
     if (url.match(/^\/ws\/browser\/[^/]+/)) {
       this.browserWss.handleUpgrade(req, socket, head, (ws) => {
         this.browserWss.emit("connection", ws, req);
@@ -303,29 +343,71 @@ export class WsBridge {
     return false;
   }
 
+  // ── Session keying helpers ───────────────────────────────────────────────
+
+  /** Resolve the effective sessionId. Trend keys (`trends_…`) and any caller
+   *  that omits sessionId target the default session. */
+  private resolveSessionId(sessionId?: string): string {
+    return sessionId && sessionId.trim() ? sessionId : DEFAULT_CHAT_SESSION_ID;
+  }
+
+  /** Look up a live in-memory session (or undefined). */
+  private getSessionEntry(workId: string, sessionId: string): WsSession | undefined {
+    return this.sessions.get(workId)?.get(sessionId);
+  }
+
+  /** Store a live in-memory session, creating the per-work sub-map on demand. */
+  private setSessionEntry(workId: string, sessionId: string, session: WsSession): void {
+    let perWork = this.sessions.get(workId);
+    if (!perWork) {
+      perWork = new Map();
+      this.sessions.set(workId, perWork);
+    }
+    perWork.set(sessionId, session);
+  }
+
+  /** Drop a live in-memory session; prunes the per-work map when empty. */
+  private deleteSessionEntry(workId: string, sessionId: string): void {
+    const perWork = this.sessions.get(workId);
+    if (!perWork) return;
+    perWork.delete(sessionId);
+    if (perWork.size === 0) this.sessions.delete(workId);
+  }
+
+  /** Sidecar for a work (no-op for ephemeral trend keys). */
+  private sidecarFor(workId: string): SessionSidecar | null {
+    if (workId.startsWith("trends_")) return null;
+    return new SessionSidecar(workId);
+  }
+
   // ── Session management ───────────────────────────────────────────────────
 
-  ensureSession(workId: string): WsSession {
-    let session = this.sessions.get(workId);
+  ensureSession(workId: string, sessionId?: string): WsSession {
+    const sid = this.resolveSessionId(sessionId);
+    let session = this.getSessionEntry(workId, sid);
     if (!session) {
       session = {
         workId,
+        sessionId: sid,
         idle: true,
         browserSockets: new Set(),
         messageHistory: [],
       };
-      this.sessions.set(workId, session);
+      this.setSessionEntry(workId, sid, session);
     }
     return session;
   }
 
   /**
-   * Append a single chat block to the JSONL log on disk.
-   * Fire-and-forget — write failure does not block the main flow.
+   * Append a single chat block to the per-session JSONL log on disk.
+   * Fire-and-forget — write failure does not block the main flow. The default
+   * session `s_1` maps to the legacy `chat.jsonl`; other sessions use
+   * `chat-{sessionId}.jsonl` (ADR-008 §4).
    */
-  private appendToChatLog(workId: string, block: ChatBlock): void {
+  private appendToChatLog(workId: string, block: ChatBlock, sessionId?: string): void {
     if (workId.startsWith("trends_")) return;
-    const chatFile = join(dataDir, "works", workId, "chat.jsonl");
+    const sid = this.resolveSessionId(sessionId);
+    const chatFile = chatLogPath(workId, sid);
     appendFile(chatFile, JSON.stringify(block) + "\n", "utf-8").catch(() => {});
   }
 
@@ -394,26 +476,34 @@ export class WsBridge {
    * Start a new CLI session. Loads work context, builds system prompt,
    * then spawns `claude -p <prompt> --output-format stream-json --verbose`.
    */
-  async createSession(workId: string, initialPrompt: string, model?: string): Promise<WsSession> {
-    logBridge("session_create", workId, { model, promptLen: initialPrompt.length });
-    const existing = this.sessions.get(workId);
+  async createSession(workId: string, initialPrompt: string, model?: string, sessionId?: string): Promise<WsSession> {
+    const sid = this.resolveSessionId(sessionId);
+    logBridge("session_create", workId, { model, promptLen: initialPrompt.length, sessionId: sid });
+    const existing = this.getSessionEntry(workId, sid);
     if (existing?.cliProcess) {
       try { existing.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
     }
 
+    // Lazy legacy migration + sidecar bookkeeping (ADR-008 §4). Ensure a
+    // sidecar record exists for this session BEFORE we spawn, so a refresh
+    // recovers the session list. Restores it if it had been archived.
+    await this.ensureSidecarRecord(workId, sid).catch(() => {});
+
     const session: WsSession = {
       workId,
+      sessionId: sid,
       idle: false,
       browserSockets: existing?.browserSockets ?? new Set(),
       messageHistory: existing?.messageHistory ?? [],
       model,
     };
-    this.sessions.set(workId, session);
+    this.setSessionEntry(workId, sid, session);
 
-    // Load persisted chat history (survives server restart)
-    // Try JSONL first (new format), fall back to JSON (legacy)
+    // Load persisted chat history (survives server restart). The default
+    // session reads the legacy chat.jsonl / chat.json; other sessions read
+    // chat-{sessionId}.jsonl.
     try {
-      const jsonlPath = join(dataDir, "works", session.workId, "chat.jsonl");
+      const jsonlPath = chatLogPath(session.workId, sid);
       const raw = await readFile(jsonlPath, "utf-8");
       const blocks: ChatBlock[] = [];
       for (const line of raw.split("\n")) {
@@ -422,27 +512,35 @@ export class WsBridge {
       }
       if (blocks.length > 0) session.messageHistory = blocks;
     } catch {
-      // No JSONL — try legacy JSON
-      try {
-        const existing = await loadWorkChat(session.workId);
-        if ((existing as any)?.blocks && Array.isArray((existing as any).blocks)) {
-          session.messageHistory = (existing as any).blocks;
-          // Migrate: write as JSONL for future reads
-          const jsonlPath = join(dataDir, "works", session.workId, "chat.jsonl");
-          const jsonlContent = (existing as any).blocks.map((b: ChatBlock) => JSON.stringify(b)).join("\n") + "\n";
-          writeFile(jsonlPath, jsonlContent, "utf-8").catch(() => {});
-        }
-      } catch { /* ignore */ }
+      // No per-session JSONL — for the default session only, fall back to the
+      // legacy chat.json snapshot (new sessions have no legacy snapshot).
+      if (sid === DEFAULT_CHAT_SESSION_ID) {
+        try {
+          const existing = await loadWorkChat(session.workId);
+          if ((existing as any)?.blocks && Array.isArray((existing as any).blocks)) {
+            session.messageHistory = (existing as any).blocks;
+            // Migrate: write as JSONL for future reads
+            const jsonlPath = chatLogPath(session.workId, sid);
+            const jsonlContent = (existing as any).blocks.map((b: ChatBlock) => JSON.stringify(b)).join("\n") + "\n";
+            writeFile(jsonlPath, jsonlContent, "utf-8").catch(() => {});
+          }
+        } catch { /* ignore */ }
+      }
     }
 
-    // Load persisted cliSessionId from work.yaml (survives server restart)
+    // Resolve the cliSessionId to resume. Prefer the sidecar record (per
+    // session); fall back to work.yaml.cliSessionId for the default/legacy
+    // session (which the migration also seeds into the record).
     let savedSessionId: string | undefined;
     try {
-      const work = await getWork(workId);
-      if (work?.cliSessionId) {
-        savedSessionId = work.cliSessionId;
-        session.cliSessionId = savedSessionId;
+      const record = await this.sidecarFor(workId)?.get(sid);
+      if (record?.cliSessionId) {
+        savedSessionId = record.cliSessionId;
+      } else if (sid === DEFAULT_CHAT_SESSION_ID) {
+        const work = await getWork(workId);
+        if (work?.cliSessionId) savedSessionId = work.cliSessionId;
       }
+      if (savedSessionId) session.cliSessionId = savedSessionId;
     } catch { /* ignore */ }
 
     if (savedSessionId) {
@@ -469,19 +567,20 @@ export class WsBridge {
    * Uses sonnet model, auto-kills after 180s, filters CLI events into simplified research events.
    */
   async createTrendSession(sessionKey: string, prompt: string): Promise<WsSession> {
-    const existing = this.sessions.get(sessionKey);
+    const existing = this.getSessionEntry(sessionKey, DEFAULT_CHAT_SESSION_ID);
     if (existing?.cliProcess) {
       try { existing.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
     }
 
     const session: WsSession = {
       workId: sessionKey,
+      sessionId: DEFAULT_CHAT_SESSION_ID,
       idle: false,
       browserSockets: existing?.browserSockets ?? new Set(),
       messageHistory: [],
       model: "sonnet",
     };
-    this.sessions.set(sessionKey, session);
+    this.setSessionEntry(sessionKey, DEFAULT_CHAT_SESSION_ID, session);
 
     this.spawnCli(session, prompt);
 
@@ -518,8 +617,9 @@ export class WsBridge {
    * Used by `/api/works/:id/chat` after `createSession` (which sends the prompt
    * but doesn't push a user block).
    */
-  recordUserMessage(workId: string, text: string): void {
-    const session = this.sessions.get(workId);
+  recordUserMessage(workId: string, text: string, sessionId?: string): void {
+    const sid = this.resolveSessionId(sessionId);
+    const session = this.getSessionEntry(workId, sid);
     if (!session) return;
     // Persist/display the CLEAN user text + structured attachments — the agent
     // already got the full envelope-prefixed wire text at spawn time.
@@ -531,9 +631,13 @@ export class WsBridge {
       timestamp: new Date().toISOString(),
     };
     session.messageHistory.push(userBlock);
-    this.appendToChatLog(workId, userBlock);
-    // Broadcast so any already-connected browser sees it immediately
-    this.broadcastToBrowsers(workId, { event: "block", data: userBlock });
+    this.appendToChatLog(workId, userBlock, sid);
+    // Seed the session preview with the first user line (sidecar bookkeeping).
+    this.bumpSessionActivity(workId, sid, displayText).catch(() => {});
+    // Broadcast so any already-connected browser sees it immediately. The
+    // user echo is per-session state (ADR-008 §3 — only focus is work-scoped),
+    // so route it to THIS session's sockets, not every chat on the work.
+    this.broadcastToSession(workId, sid, { event: "block", data: { ...userBlock, sessionId: sid } });
     if (!workId.startsWith("trends_")) {
       getWork(workId).then(w => {
         if (!w) return;
@@ -542,8 +646,9 @@ export class WsBridge {
     }
   }
 
-  async sendMessage(workId: string, text: string): Promise<boolean> {
-    const session = this.sessions.get(workId);
+  async sendMessage(workId: string, text: string, sessionId?: string): Promise<boolean> {
+    const sid = this.resolveSessionId(sessionId);
+    const session = this.getSessionEntry(workId, sid);
     if (!session) return false;
 
     // Persist/display the CLEAN user text + structured attachments — spawnCli
@@ -556,7 +661,9 @@ export class WsBridge {
       timestamp: new Date().toISOString(),
     };
     session.messageHistory.push(userBlock);
-    this.appendToChatLog(workId, userBlock);
+    this.appendToChatLog(workId, userBlock, sid);
+    // Bump lastActive (and seed preview if empty) in the sidecar.
+    this.bumpSessionActivity(workId, sid, displayText).catch(() => {});
 
     // Real-time memory sync — user message (D3: no pipeline keyed sync)
     if (!workId.startsWith("trends_")) {
@@ -572,15 +679,18 @@ export class WsBridge {
       session.cliProcess = undefined;
     }
 
-    // Try to resume: check in-memory first, then persisted in work.yaml
+    // Try to resume: in-memory cliSessionId → sidecar record → work.yaml.
     let resumeId = session.cliSessionId;
     if (!resumeId) {
       try {
-        const work = await getWork(workId);
-        if (work?.cliSessionId) {
-          resumeId = work.cliSessionId;
-          session.cliSessionId = resumeId;
+        const record = await this.sidecarFor(workId)?.get(sid);
+        if (record?.cliSessionId) {
+          resumeId = record.cliSessionId;
+        } else if (sid === DEFAULT_CHAT_SESSION_ID) {
+          const work = await getWork(workId);
+          if (work?.cliSessionId) resumeId = work.cliSessionId;
         }
+        if (resumeId) session.cliSessionId = resumeId;
       } catch { /* ignore */ }
     }
 
@@ -600,16 +710,19 @@ export class WsBridge {
     }
 
     session.idle = false;
-    this.broadcastToBrowsers(workId, {
+    // Busy-state is per-session, not work-scoped focus (ADR-008 §3) — emitting
+    // it work-wide would bleed s_2's "busy" into s_1's chat.
+    this.broadcastToSession(workId, sid, {
       event: "session_state",
-      data: { idle: false },
+      data: { idle: false, sessionId: sid },
     });
 
     return true;
   }
 
-  killSession(workId: string): boolean {
-    const session = this.sessions.get(workId);
+  killSession(workId: string, sessionId?: string): boolean {
+    const sid = this.resolveSessionId(sessionId);
+    const session = this.getSessionEntry(workId, sid);
     if (!session) return false;
 
     // Kill creator CLI process
@@ -621,13 +734,15 @@ export class WsBridge {
     }
 
     session.idle = true;
-    this.broadcastToBrowsers(workId, { event: "session_killed", data: { workId } });
+    // Kill is per-session lifecycle (ADR-008 §3) — only this session's sockets
+    // should learn its CLI was killed, not every chat on the work.
+    this.broadcastToSession(workId, sid, { event: "session_killed", data: { workId, sessionId: sid } });
     return true;
   }
 
   killTrendSession(sessionKey: string): boolean {
     if (!sessionKey.startsWith("trends_")) return false;
-    const session = this.sessions.get(sessionKey);
+    const session = this.getSessionEntry(sessionKey, DEFAULT_CHAT_SESSION_ID);
     if (!session) return false;
     if (session.cliProcess) {
       try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
@@ -641,8 +756,14 @@ export class WsBridge {
     return true;
   }
 
-  getSession(workId: string): WsSession | undefined {
-    return this.sessions.get(workId);
+  getSession(workId: string, sessionId?: string): WsSession | undefined {
+    return this.getSessionEntry(workId, this.resolveSessionId(sessionId));
+  }
+
+  /** All live in-memory sessions for a work (ADR-008 multi-session). Empty map
+   *  if the work has none in memory. */
+  getWorkSessions(workId: string): Map<string, WsSession> {
+    return this.sessions.get(workId) ?? new Map();
   }
 
   /**
@@ -659,8 +780,16 @@ export class WsBridge {
     };
   }
 
+  /** Flattened view: one entry per work, its DEFAULT session (or any one live
+   *  session if the default isn't in memory). Back-compat shape for callers
+   *  that predate multi-session keying. */
   getAllSessions(): Map<string, WsSession> {
-    return this.sessions;
+    const flat = new Map<string, WsSession>();
+    for (const [workId, perWork] of this.sessions) {
+      const def = perWork.get(DEFAULT_CHAT_SESSION_ID) ?? perWork.values().next().value;
+      if (def) flat.set(workId, def);
+    }
+    return flat;
   }
 
   /**
@@ -710,14 +839,14 @@ export class WsBridge {
       event: "session_closed",
       data: { sessionKey },
     });
-    const session = this.sessions.get(sessionKey);
+    const session = this.getSessionEntry(sessionKey, DEFAULT_CHAT_SESSION_ID);
     if (session) {
       for (const ws of session.browserSockets) {
         try { ws.close(); } catch { /* ignore */ }
       }
     }
     setTimeout(() => {
-      this.sessions.delete(sessionKey);
+      this.deleteSessionEntry(sessionKey, DEFAULT_CHAT_SESSION_ID);
     }, 5000);
   }
 
@@ -788,7 +917,7 @@ export class WsBridge {
               for (const block of msg.message.content as Array<Record<string, unknown>>) {
                 if (block.type === "tool_use" && block.name === "WebSearch") {
                   const input = block.input as Record<string, unknown> | undefined;
-                  this.broadcastToBrowsers(session.workId, {
+                  this.broadcastToSession(session.workId, session.sessionId, {
                     event: "search_query",
                     data: { query: (input?.query as string) ?? "" },
                   });
@@ -806,7 +935,7 @@ export class WsBridge {
                       ? block.content
                       : JSON.stringify(block.content);
                     const summary = resultText.slice(0, 80) || "搜索完成";
-                    this.broadcastToBrowsers(session.workId, {
+                    this.broadcastToSession(session.workId, session.sessionId, {
                       event: "search_result",
                       data: { summary },
                     });
@@ -817,16 +946,27 @@ export class WsBridge {
             }
           }
 
-          // system.init — capture session ID and persist to work.yaml
+          // system.init — capture session ID and persist
           if (msg.type === "system" && msg.subtype === "init") {
             if (msg.session_id) {
               session.cliSessionId = msg.session_id;
-              // Persist so we can --resume after server restart
-              updateWork(session.workId, { cliSessionId: msg.session_id }).catch(() => {});
+              // Persist the cliSessionId into the per-session sidecar record so
+              // we can --resume the RIGHT session after restart. The default
+              // session also mirrors into work.yaml for legacy back-compat.
+              const sidecar = this.sidecarFor(session.workId);
+              if (sidecar) {
+                sidecar.patch(session.sessionId, {
+                  cliSessionId: msg.session_id,
+                  lastActive: new Date().toISOString(),
+                }).catch(() => {});
+              }
+              if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
+                updateWork(session.workId, { cliSessionId: msg.session_id }).catch(() => {});
+              }
             }
-            this.broadcastToBrowsers(session.workId, {
+            this.broadcastToSession(session.workId, session.sessionId, {
               event: "session_ready",
-              data: { workId: session.workId, cliSessionId: session.cliSessionId },
+              data: { workId: session.workId, sessionId: session.sessionId, cliSessionId: session.cliSessionId },
             });
             continue;
           }
@@ -843,7 +983,7 @@ export class WsBridge {
             for (const block of blocks) {
               if (block.type === "text" && block.text) {
                 if (session.workId.startsWith("trends_") && lastEventWasToolResult) {
-                  this.broadcastToBrowsers(session.workId, {
+                  this.broadcastToSession(session.workId, session.sessionId, {
                     event: "analyzing",
                     data: {},
                   });
@@ -853,9 +993,9 @@ export class WsBridge {
                 if (!session.workId.startsWith("trends_")) {
                   const textBlock: ChatBlock = { type: "text", text: block.text as string, timestamp: new Date().toISOString() };
                   session.messageHistory.push(textBlock);
-                  this.appendToChatLog(session.workId, textBlock);
+                  this.appendToChatLog(session.workId, textBlock, session.sessionId);
                 }
-                this.broadcastToBrowsers(session.workId, {
+                this.broadcastToSession(session.workId, session.sessionId, {
                   event: "assistant_text",
                   data: { workId: session.workId, text: block.text },
                 });
@@ -863,9 +1003,9 @@ export class WsBridge {
                 if (!session.workId.startsWith("trends_")) {
                   const thinkBlock: ChatBlock = { type: "thinking", text: block.thinking as string, collapsed: true };
                   session.messageHistory.push(thinkBlock);
-                  this.appendToChatLog(session.workId, thinkBlock);
+                  this.appendToChatLog(session.workId, thinkBlock, session.sessionId);
                 }
-                this.broadcastToBrowsers(session.workId, {
+                this.broadcastToSession(session.workId, session.sessionId, {
                   event: "assistant_thinking",
                   data: { workId: session.workId, text: block.thinking },
                 });
@@ -873,9 +1013,9 @@ export class WsBridge {
                 if (!session.workId.startsWith("trends_")) {
                   const toolBlock: ChatBlock = { type: "tool_use", text: JSON.stringify(block.input), toolName: block.name as string };
                   session.messageHistory.push(toolBlock);
-                  this.appendToChatLog(session.workId, toolBlock);
+                  this.appendToChatLog(session.workId, toolBlock, session.sessionId);
                 }
-                this.broadcastToBrowsers(session.workId, {
+                this.broadcastToSession(session.workId, session.sessionId, {
                   event: "tool_use",
                   data: { workId: session.workId, name: block.name, input: block.input },
                 });
@@ -897,9 +1037,9 @@ export class WsBridge {
                   if (!session.workId.startsWith("trends_")) {
                     const trBlock: ChatBlock = { type: "tool_result", text: resultContent, collapsed: true };
                     session.messageHistory.push(trBlock);
-                    this.appendToChatLog(session.workId, trBlock);
+                    this.appendToChatLog(session.workId, trBlock, session.sessionId);
                   }
-                  this.broadcastToBrowsers(session.workId, {
+                  this.broadcastToSession(session.workId, session.sessionId, {
                     event: "tool_result",
                     data: { workId: session.workId, content: resultContent },
                   });
@@ -921,9 +1061,22 @@ export class WsBridge {
               turnTextLen: turnText.length,
               resultPreview: (resultText || "").slice(0, 150),
             });
-            // Update cliSessionId from result if present
+            // Update cliSessionId from result if present — and persist it the
+            // same way system.init does (sidecar record + work.yaml mirror for
+            // the default session), so a result-only frame can't lose the
+            // --resume id after restart.
             if (msg.session_id) {
               session.cliSessionId = msg.session_id;
+              const sidecar = this.sidecarFor(session.workId);
+              if (sidecar) {
+                sidecar.patch(session.sessionId, {
+                  cliSessionId: msg.session_id,
+                  lastActive: new Date().toISOString(),
+                }).catch(() => {});
+              }
+              if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
+                updateWork(session.workId, { cliSessionId: msg.session_id }).catch(() => {});
+              }
             }
             // Forward Claude CLI's per-turn cost + token usage if present.
             // The CLI's stream-json result frame carries:
@@ -942,7 +1095,7 @@ export class WsBridge {
             const durationMs = (msg as Record<string, unknown>).duration_ms as
               | number
               | undefined;
-            this.broadcastToBrowsers(session.workId, {
+            this.broadcastToSession(session.workId, session.sessionId, {
               event: "turn_complete",
               data: {
                 workId: session.workId,
@@ -955,9 +1108,15 @@ export class WsBridge {
                 usage,
               },
             });
-            // Persist chat to disk (survives server restart)
+            // Persist chat to disk (survives server restart). Only the default
+            // session mirrors into the shared legacy chat.json snapshot — other
+            // sessions live solely in their chat-{sessionId}.jsonl (already
+            // appended block-by-block above), so a non-default turn must NOT
+            // clobber chat.json with the wrong session's history.
             if (!session.workId.startsWith("trends_")) {
-              saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
+              if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
+                saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
+              }
               // Snapshot the deliverable yaml so the user can roll back if
               // this turn made things worse. createCheckpoint dedupes on
               // content hash — turns that didn't touch yaml don't add rows.
@@ -975,7 +1134,7 @@ export class WsBridge {
           }
 
           // Forward everything else
-          this.broadcastToBrowsers(session.workId, {
+          this.broadcastToSession(session.workId, session.sessionId, {
             event: "cli_event",
             data: msg,
           });
@@ -988,7 +1147,7 @@ export class WsBridge {
     proc.stderr?.on("data", (data: Buffer) => {
       const text = data.toString();
       if (text.trim()) {
-        this.broadcastToBrowsers(session.workId, {
+        this.broadcastToSession(session.workId, session.sessionId, {
           event: "cli_stderr",
           data: { text },
         });
@@ -1003,26 +1162,29 @@ export class WsBridge {
         if (code === 0) {
           // Read agent-written files and broadcast report before done event
           this.finalizeTrendData(session.workId).catch(() => {}).finally(() => {
-            this.broadcastToBrowsers(session.workId, {
+            this.broadcastToSession(session.workId, session.sessionId, {
               event: "research_done",
               data: { platform: session.workId.split("_")[1] ?? "unknown" },
             });
             this.cleanupTrendSession(session.workId);
           });
         } else {
-          this.broadcastToBrowsers(session.workId, {
+          this.broadcastToSession(session.workId, session.sessionId, {
             event: "research_error",
             data: { message: `CLI exited with code ${code}` },
           });
           this.cleanupTrendSession(session.workId);
         }
       } else {
-        this.broadcastToBrowsers(session.workId, {
+        this.broadcastToSession(session.workId, session.sessionId, {
           event: "cli_exited",
           data: { workId: session.workId, code, signal },
         });
-        // Persist chat to disk on CLI exit
-        saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
+        // Persist chat to disk on CLI exit — default session only (others live
+        // in their own chat-{sessionId}.jsonl, see turn_complete above).
+        if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
+          saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
+        }
       }
     });
 
@@ -1041,12 +1203,12 @@ export class WsBridge {
         code: (err as NodeJS.ErrnoException).code,
         message: err.message,
       });
-      this.broadcastToBrowsers(session.workId, {
+      this.broadcastToSession(session.workId, session.sessionId, {
         event: "cli_error",
         data: { workId: session.workId, error: message, code: (err as NodeJS.ErrnoException).code },
       });
       if (session.workId.startsWith("trends_")) {
-        this.broadcastToBrowsers(session.workId, {
+        this.broadcastToSession(session.workId, session.sessionId, {
           event: "research_error",
           data: { message },
         });
@@ -1057,26 +1219,48 @@ export class WsBridge {
 
   // ── Browser WebSocket handler ────────────────────────────────────────────
 
-  private async handleBrowserConnection(workId: string, ws: WebSocket): Promise<void> {
-    const session = this.ensureSession(workId);
+  private async handleBrowserConnection(workId: string, ws: WebSocket, sessionId?: string): Promise<void> {
+    const sid = this.resolveSessionId(sessionId);
+    // Lazy legacy migration / sidecar seed so a refresh recovers the list.
+    await this.ensureSidecarRecord(workId, sid).catch(() => {});
+    const session = this.ensureSession(workId, sid);
     session.browserSockets.add(ws);
 
-    // Load persisted chat history from disk if session has no in-memory history
+    // Load persisted chat history from disk if session has no in-memory history.
+    // Reads the per-session log (default session → legacy chat.jsonl).
     if (session.messageHistory.length === 0) {
       try {
-        const persisted = await loadWorkChat(workId);
-        if ((persisted as any)?.blocks && Array.isArray((persisted as any).blocks)) {
-          session.messageHistory = (persisted as any).blocks;
+        const raw = await readFile(chatLogPath(workId, sid), "utf-8");
+        const blocks: ChatBlock[] = [];
+        for (const line of raw.split("\n")) {
+          if (!line.trim()) continue;
+          try { blocks.push(JSON.parse(line)); } catch { /* skip malformed */ }
         }
-      } catch { /* no persisted chat */ }
+        if (blocks.length > 0) session.messageHistory = blocks;
+      } catch {
+        // No per-session JSONL — default session may still have a legacy
+        // chat.json snapshot.
+        if (sid === DEFAULT_CHAT_SESSION_ID) {
+          try {
+            const persisted = await loadWorkChat(workId);
+            if ((persisted as any)?.blocks && Array.isArray((persisted as any).blocks)) {
+              session.messageHistory = (persisted as any).blocks;
+            }
+          } catch { /* no persisted chat */ }
+        }
+      }
     }
 
-    // Load persisted cliSessionId from work.yaml if not already set
+    // Load persisted cliSessionId (sidecar record → work.yaml for default) if
+    // not already set in memory.
     if (!session.cliSessionId) {
       try {
-        const work = await getWork(workId);
-        if (work?.cliSessionId) {
-          session.cliSessionId = work.cliSessionId;
+        const record = await this.sidecarFor(workId)?.get(sid);
+        if (record?.cliSessionId) {
+          session.cliSessionId = record.cliSessionId;
+        } else if (sid === DEFAULT_CHAT_SESSION_ID) {
+          const work = await getWork(workId);
+          if (work?.cliSessionId) session.cliSessionId = work.cliSessionId;
         }
       } catch { /* ignore */ }
     }
@@ -1085,6 +1269,7 @@ export class WsBridge {
       event: "session_state",
       data: {
         workId,
+        sessionId: sid,
         connected: !!session.cliProcess,
         idle: session.idle,
         cliSessionId: session.cliSessionId,
@@ -1105,7 +1290,7 @@ export class WsBridge {
       try {
         const msg = JSON.parse(raw.toString());
         if (msg.action === "send" && typeof msg.text === "string") {
-          await this.sendMessage(workId, msg.text);
+          await this.sendMessage(workId, msg.text, sid);
         }
       } catch { /* invalid JSON */ }
     });
@@ -1127,7 +1312,9 @@ export class WsBridge {
               this.cleanupTrendSession(session.workId);
             } else {
               session.idle = true;
-              this.broadcastToBrowsers(session.workId, { event: "cli_exited", data: { workId: session.workId } });
+              // Grace-timeout abort is per-session lifecycle (ADR-008 §3) — fan
+              // it only to this session's sockets, not every chat on the work.
+              this.broadcastToSession(session.workId, session.sessionId, { event: "cli_exited", data: { workId: session.workId, sessionId: session.sessionId } });
             }
           }
         }, delay);
@@ -1138,18 +1325,24 @@ export class WsBridge {
 
   // ── Helpers ──────────────────────────────────────────────────────────────
 
+  /**
+   * Work-scoped broadcast — fans an event to EVERY session's browser sockets
+   * on the work (ADR-008 §3: focus / playhead / selection stay shared across
+   * sessions). Also notifies in-process event listeners (TestRunner). Used for
+   * cross-session work-level events; per-turn CLI streaming uses
+   * broadcastToSession so two concurrent chats don't cross-contaminate.
+   */
   broadcastToBrowsers(workId: string, payload: { event: string; data: unknown }): void {
-    const session = this.sessions.get(workId);
-    if (!session) return;
-
-    const message = JSON.stringify({
-      ...payload,
-      timestamp: new Date().toISOString(),
-    });
-
-    for (const ws of session.browserSockets) {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(message);
+    const perWork = this.sessions.get(workId);
+    if (perWork) {
+      const message = JSON.stringify({
+        ...payload,
+        timestamp: new Date().toISOString(),
+      });
+      for (const session of perWork.values()) {
+        for (const ws of session.browserSockets) {
+          if (ws.readyState === WebSocket.OPEN) ws.send(message);
+        }
       }
     }
 
@@ -1162,8 +1355,245 @@ export class WsBridge {
     }
   }
 
-  private extractWorkId(url: string): string | null {
-    const match = url.match(/^\/ws\/browser\/([^/?]+)/);
-    return match ? match[1] : null;
+  /**
+   * Session-scoped broadcast — fans an event to the browser sockets of ONE
+   * (workId, sessionId) session only (its own chat stream). Same-session
+   * multi-attach (N tabs on the same session) all receive it. Still notifies
+   * the work-scoped event listeners so TestRunner sees the stream.
+   */
+  private broadcastToSession(
+    workId: string,
+    sessionId: string,
+    payload: { event: string; data: unknown },
+  ): void {
+    const session = this.getSessionEntry(workId, sessionId);
+    if (session) {
+      const message = JSON.stringify({
+        ...payload,
+        timestamp: new Date().toISOString(),
+      });
+      for (const ws of session.browserSockets) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(message);
+      }
+    }
+    const listeners = this.eventListeners.get(workId);
+    if (listeners) {
+      for (const cb of listeners) {
+        try { cb(payload.event, payload.data); } catch { /* listener error shouldn't crash bridge */ }
+      }
+    }
+  }
+
+  // ── Sidecar bookkeeping + legacy migration (ADR-008 §2/§4/§5) ─────────────
+
+  /**
+   * Ensure a sidecar record exists for (workId, sessionId), performing the lazy
+   * legacy migration: a work with no `.sessions.jsonl` and a default session id
+   * synthesizes `s_1` seeded from `work.yaml.cliSessionId` (history stays in the
+   * legacy `chat.jsonl` — no bulk rename). Reopening an archived session
+   * restores it. Returns the record (or null for ephemeral trend keys).
+   */
+  private async ensureSidecarRecord(workId: string, sessionId: string): Promise<SessionRecord | null> {
+    const sidecar = this.sidecarFor(workId);
+    if (!sidecar) return null;
+    const now = new Date().toISOString();
+    const existing = await sidecar.get(sessionId);
+    if (existing) {
+      // Reopening an archived session restores it (memory is re-hydrated by the
+      // caller from chat-{sessionId}.jsonl).
+      if (existing.archived) return (await sidecar.restore(sessionId, now)) ?? existing;
+      return existing;
+    }
+    // No record. For the default session, seed from work.yaml.cliSessionId so
+    // legacy works migrate non-destructively into s_1.
+    let cliSessionId: string | undefined;
+    if (sessionId === DEFAULT_CHAT_SESSION_ID) {
+      try {
+        const work = await getWork(workId);
+        cliSessionId = work?.cliSessionId;
+      } catch { /* ignore */ }
+    }
+    return sidecar.create("chat", { now, id: sessionId, cliSessionId });
+  }
+
+  /** Bump lastActive (+ seed preview on first user line) for a chat session. */
+  private async bumpSessionActivity(workId: string, sessionId: string, firstLine?: string): Promise<void> {
+    const sidecar = this.sidecarFor(workId);
+    if (!sidecar) return;
+    // sendMessage / recordUserMessage can touch a session before any
+    // createSession / handleBrowserConnection created its record. Without this
+    // the touch (and later system.init's cliSessionId patch) would no-op on the
+    // missing record → --resume lost after restart. ensureSidecarRecord is
+    // idempotent (get-then-create), so this is safe to call unconditionally.
+    let record = await sidecar.get(sessionId);
+    if (!record) record = (await this.ensureSidecarRecord(workId, sessionId)) ?? undefined;
+    if (!record) return;
+    const extra = (!record.preview && firstLine)
+      ? { preview: firstLine.slice(0, 80) }
+      : undefined;
+    await sidecar.touch(sessionId, new Date().toISOString(), extra);
+  }
+
+  /** List a work's sessions from the sidecar (back-compat: triggers the lazy
+   *  migration for legacy works so the list is never empty for a work that has
+   *  ever had a chat). Excludes archived sessions unless includeArchived. */
+  async listSessions(workId: string, opts?: { includeArchived?: boolean }): Promise<SessionRecord[]> {
+    const sidecar = this.sidecarFor(workId);
+    if (!sidecar) return [];
+    let records = await sidecar.list();
+    if (records.length === 0) {
+      // Lazy legacy migration — synthesize s_1 if the work has any chat history
+      // or a persisted cliSessionId.
+      const migrated = await this.migrateLegacyWork(workId);
+      if (migrated) records = await sidecar.list();
+    }
+    return opts?.includeArchived ? records : records.filter((r) => !r.archived);
+  }
+
+  /**
+   * Create a brand-new chat session for a work (mints the next id), persisting
+   * its sidecar record. Returns the record. Does NOT spawn a CLI — the next
+   * sendMessage/createSession on that sessionId does.
+   */
+  async createNewSession(workId: string): Promise<SessionRecord | null> {
+    const sidecar = this.sidecarFor(workId);
+    if (!sidecar) return null;
+    // Ensure the default session record (s_1) exists first — both for a legacy
+    // work (migrated from work.yaml/chat.jsonl) and a brand-new one (seeded
+    // unconditionally) — so a "new chat" always mints s_2, never collides on
+    // s_1.
+    await this.migrateLegacyWork(workId).catch(() => {});
+    await this.ensureSidecarRecord(workId, DEFAULT_CHAT_SESSION_ID).catch(() => {});
+    const now = new Date().toISOString();
+    return sidecar.create("chat", { now });
+  }
+
+  /**
+   * Hard-delete a chat session: dispose its in-memory WsSession + CLI, tombstone
+   * the sidecar record, and remove its chat-{sessionId}.jsonl. The legacy
+   * default session keeps chat.jsonl (shared filename) — we still tombstone the
+   * record but leave the legacy file so a re-migration doesn't resurrect it with
+   * stale history; callers should avoid deleting s_1.
+   */
+  async deleteSession(workId: string, sessionId: string): Promise<boolean> {
+    const sidecar = this.sidecarFor(workId);
+    if (!sidecar) return false;
+    const sid = this.resolveSessionId(sessionId);
+    // Dispose live session + CLI.
+    const live = this.getSessionEntry(workId, sid);
+    if (live?.cliProcess) {
+      try { live.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
+      live.cliProcess = undefined;
+    }
+    this.deleteSessionEntry(workId, sid);
+    const ok = await sidecar.delete(sid);
+    // Remove the per-session chat log (never the shared legacy chat.jsonl).
+    if (ok && sid !== DEFAULT_CHAT_SESSION_ID) {
+      await rm(chatLogPath(workId, sid), { force: true }).catch(() => {});
+    }
+    return ok;
+  }
+
+  /**
+   * Idle-TTL auto-archive sweep (ADR-008 §5). For every non-trends work with a
+   * sidecar, archive sessions whose lastActive is older than idleTtlMs: dispose
+   * the in-memory session + CLI (release memory), keep the chat log on disk, and
+   * flag archived=true. Restorable later. Returns the archived (workId,
+   * sessionId) pairs. `nowMs` injectable for tests.
+   */
+  async archiveIdleSessions(workId: string, nowMs: number = Date.now()): Promise<string[]> {
+    const sidecar = this.sidecarFor(workId);
+    if (!sidecar) return [];
+    const records = await sidecar.list();
+    const idle = findIdleSessions(records, nowMs, this.idleTtlMs);
+    const archived: string[] = [];
+    for (const rec of idle) {
+      // Release in-memory state if loaded.
+      const live = this.getSessionEntry(workId, rec.id);
+      if (live?.cliProcess) {
+        try { live.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
+        live.cliProcess = undefined;
+      }
+      this.deleteSessionEntry(workId, rec.id);
+      await sidecar.archive(rec.id);
+      archived.push(rec.id);
+    }
+    return archived;
+  }
+
+  /**
+   * Boot/periodic sweep across ALL works — auto-archives every idle session
+   * (ADR-008 §5). Fire-and-forget at startup; failures on one work don't abort
+   * the rest. Returns the total count archived. `nowMs` injectable for tests.
+   */
+  async sweepAllIdleSessions(nowMs: number = Date.now()): Promise<number> {
+    let total = 0;
+    let works: { id: string }[] = [];
+    try {
+      works = await listWorks();
+    } catch {
+      return 0;
+    }
+    for (const w of works) {
+      try {
+        total += (await this.archiveIdleSessions(w.id, nowMs)).length;
+      } catch { /* keep sweeping */ }
+    }
+    return total;
+  }
+
+  /**
+   * Lazy legacy migration of a single work (ADR-008 §4). If the work has no
+   * `.sessions.jsonl` but has a chat.jsonl / chat.json / work.yaml.cliSessionId,
+   * synthesize the `s_1` chat record (history stays in chat.jsonl). Idempotent —
+   * a no-op when a sidecar already exists. Returns true if a record was written.
+   */
+  async migrateLegacyWork(workId: string): Promise<boolean> {
+    const sidecar = this.sidecarFor(workId);
+    if (!sidecar) return false;
+    const existing = await sidecar.list();
+    if (existing.length > 0) return false;
+
+    let cliSessionId: string | undefined;
+    let preview = "";
+    let hasHistory = false;
+    try {
+      const work = await getWork(workId);
+      cliSessionId = work?.cliSessionId;
+    } catch { /* ignore */ }
+    try {
+      const persisted = await loadWorkChat(workId);
+      const blocks = (persisted as { blocks?: unknown[] } | null)?.blocks;
+      if (Array.isArray(blocks) && blocks.length > 0) {
+        hasHistory = true;
+        const firstUser = blocks.find(
+          (b): b is { type: string; text?: string } =>
+            !!b && typeof b === "object" && (b as { type?: string }).type === "user",
+        );
+        if (firstUser?.text) preview = firstUser.text.slice(0, 80);
+      }
+    } catch { /* ignore */ }
+
+    // Only migrate a work that actually had a chat (history or a cliSessionId);
+    // a never-chatted work gets its s_1 record lazily on first message instead.
+    if (!hasHistory && !cliSessionId) return false;
+
+    const now = new Date().toISOString();
+    await sidecar.create("chat", {
+      now,
+      id: DEFAULT_CHAT_SESSION_ID,
+      cliSessionId,
+      preview,
+    });
+    return true;
+  }
+
+  /** Parse a browser WS route into { workId, sessionId }. Accepts both
+   *  /ws/browser/{workId} (legacy → default session) and
+   *  /ws/browser/{workId}/{sessionId}. Returns null on no match. */
+  private extractBrowserRoute(url: string): { workId: string; sessionId: string } | null {
+    const match = url.match(/^\/ws\/browser\/([^/?]+)(?:\/([^/?]+))?/);
+    if (!match) return null;
+    return { workId: match[1], sessionId: this.resolveSessionId(match[2]) };
   }
 }
