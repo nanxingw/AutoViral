@@ -183,8 +183,10 @@ See `recipes/add-subtitle-overlay.md` for the wire-up.
 
 `autoviral clip set <id> --key value` sends the patch verbatim. Anything in the clip schema is fair game; the server zod-validates before write. Common keys:
 
-- video / overlay: `--in`, `--out`, `--trackOffset`, `--opacity` (overlay only)
+- video: `--in`, `--out`, `--trackOffset`
 - audio: `--volume`, `--fadeIn`, `--fadeOut`
 - text: `--text`, `--duration`, `--trackOffset`
+
+(overlay clips aren't CLI-creatable yet — `clip add --track overlay` throws, HTTP 400 — so there's no overlay clip to `clip set` against.)
 
 `clip set` does **not** currently merge nested objects (transforms/filters/position/style) — patches at those keys would replace the whole sub-tree. To tweak one filter, fetch with `comp show`, mutate locally, and `clip set --filters '{...}'` with the full object.

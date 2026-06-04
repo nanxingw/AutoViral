@@ -81,13 +81,13 @@ autoviral clip add \
 |---|---|---|
 | `--src <path>` | Asset path relative to workspace root | yes (except `--track text`) |
 | `--text <string>` | Text content (only for `--track text`) | yes for text track |
-| `--track <kind>` | `video` (default) `audio` `text` `overlay` | no |
+| `--track <kind>` | `video` (default) `audio` `text` | no |
 | `--offset <s>` | `trackOffset` in seconds (default 0) | no |
 | `--duration <s>` | Sets `out = in + duration` for video/audio; sets `duration` for text/overlay | no |
 | `--in <s>` | Source-time start (video/audio only) | no |
 | `--out <s>` | Source-time end (video/audio only) | no |
 
-Prints the new clip id to stdout. **Phase 3 caveat:** the backend currently writes only `video` clips. Audio/text/overlay flag handling exists but is widened in Phase 5.
+Prints the new clip id to stdout. **Caveat:** `clip add` writes `video`, `audio`, and `text` clips today. `--track overlay` is NOT yet supported — the bridge throws `overlay track not yet supported` and returns HTTP 400, so don't reach for it.
 
 ### `autoviral clip set <id> --key value ...`
 

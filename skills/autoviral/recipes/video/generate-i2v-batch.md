@@ -82,12 +82,12 @@ autoviral seek 0
 
 **Important caveats for Phase 3:**
 
-- `clip add` currently only writes `video` clips. Audio/text/overlay clip-add via the CLI is widened in Phase 5; in the meantime, those tracks must be edited directly.
+- `clip add` writes `video`, `audio`, and `text` clips today. `--track overlay` is NOT yet supported (the bridge throws + returns HTTP 400), so don't use it.
 - The ids are server-generated unless you pre-compute them (the schema accepts `id` in the body but the CLI doesn't expose a `--id` flag yet). After `clip add` prints the new id, capture it if you need to keep mutating.
 
 ## Polishing the batch with crossfades
 
-Right after `clip add` returns, the clips are hard-cut. To add crossfades, see `recipes/video/crossfade-between-clips.md` — the `--out` and `--keyframes` patches apply unchanged.
+Right after `clip add` returns, the clips are hard-cut. To add crossfades, see `recipes/video/crossfade-between-clips.md`. The `--out` scalar patch (`clip set <id> --out <s>`) works unchanged. The `--keyframes` patch does **NOT** — `clip set` sends `keyframes` as a scalar string, but the schema demands a `Keyframe[]` array, so the bridge rejects it (HTTP 400) and `composition.yaml` is never touched. The runnable crossfade path lands with the dedicated transition / keyframe verbs (S9 `transition add` / S12); don't run `clip set --keyframes` until then.
 
 ## Cost / quota awareness
 

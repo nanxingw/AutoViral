@@ -181,12 +181,72 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     const fences = [...recipe.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map(
       (m) => m[1],
     );
+    // S1 fix-up — the original `clip set\b[^\n]*--keyframes` only caught the
+    // broken command when it lived on ONE line. The removed batch snippet used
+    // backslash line-continuation (`clip set "$id" --out "$out" \` then
+    // `--keyframes "$kfs"` on the next line); `[^\n]*` stops at the newline, so
+    // a multi-line reintroduction of the exact deleted pattern slipped the
+    // guard. Collapse backslash-newline continuations within each fence first
+    // so a `clip set ... \<newline>... --keyframes` spread across lines is
+    // treated as the single command it is, then match.
+    const collapseContinuations = (f: string) => f.replace(/\\\n\s*/g, " ");
     const brokenCmd = /clip set\b[^\n]*--keyframes/;
-    const offendingFence = fences.find((f) => brokenCmd.test(f));
+    const offendingFence = fences.find((f) =>
+      brokenCmd.test(collapseContinuations(f)),
+    );
     expect(
       offendingFence,
       "a runnable code fence still contains `clip set --keyframes`, which 400s — remove it or gate it behind the S9/S12 verb",
     ).toBeUndefined();
+  });
+
+  // S1 (US 35/36/37) fix-up —止谎 parity with the cli.test.ts `--help` guard.
+  // S1 removed the overlay false-promise from `cli.ts --help` but left it in
+  // the CLI-REFERENCE MANUAL (the declared single source of truth for
+  // `autoviral docs`) and a sibling recipe. The live bridge writes
+  // video/audio/text and throws ONLY on overlay (routes.ts:595, HTTP 400), so
+  // any manual that advertises `--track overlay` as a usable clip-add value —
+  // or claims audio/text DON'T write — re-introduces the exact lie S1 killed.
+  // Guard the manual chapter's clip-add row + the recipe the same way the CLI
+  // help is guarded, so the two surfaces can't diverge again.
+  it("the CLI-REFERENCE manual's `clip add --track` row does NOT advertise the overlay track (it 400s)", () => {
+    const ref = readFileSync(
+      join(MANUAL_DIR, "_shared", "03-cli-reference.md"),
+      "utf8",
+    );
+    // Find the `--track <kind>` row in the clip-add flag table and assert it
+    // lists no `overlay` value (overlay clip-add throws at the bridge).
+    const trackRow = ref
+      .split("\n")
+      .find((l) => /`--track\b/.test(l) && /\bvideo\b/.test(l));
+    expect(
+      trackRow,
+      "could not find the `--track` flag row in 03-cli-reference.md",
+    ).toBeDefined();
+    expect(
+      trackRow,
+      "the `--track` row still advertises `overlay`, but `clip add --track overlay` 400s — drop it",
+    ).not.toMatch(/overlay/);
+  });
+
+  it("the i2v batch recipe never claims audio/text clip-add is unsupported (they write today)", () => {
+    const recipe = readFileSync(
+      join(
+        REPO_ROOT,
+        "skills",
+        "autoviral",
+        "recipes",
+        "video",
+        "generate-i2v-batch.md",
+      ),
+      "utf8",
+    );
+    // The pre-fix lie: "clip add currently only writes video clips" /
+    // "Audio/text/overlay clip-add ... widened in Phase 5". Audio + text DO
+    // write today (routes.ts handles both); only overlay throws. Assert the
+    // recipe doesn't claim audio/text clip-add is unavailable.
+    expect(recipe).not.toMatch(/only writes `video` clips/i);
+    expect(recipe).not.toMatch(/[Aa]udio\/text\/overlay clip-add/);
   });
 
   it("covers both reference families (docs-slug + file-path) so a new form can't slip the net unnoticed", () => {
