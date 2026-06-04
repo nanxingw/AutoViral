@@ -38,6 +38,7 @@ import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
 import { resolvePlatformPreset } from "../../shared/platform-presets.js";
 import { renderSnapshot } from "../snapshot.js";
+import { listCheckpoints, restoreCheckpoint } from "../checkpoints.js";
 import { ingestYouTubeIntoWork } from "./ingest-youtube.js";
 import {
   read as readFocus,
@@ -771,6 +772,68 @@ bridgeRouter.post("/snapshot", async (c) => {
     });
     return c.json({ ok: true, result });
   } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+// ─── S21 (US 33/34) — agent-reachable checkpoint restore ─────────────────────
+// Checkpoints are taken every agent turn (see ws-bridge per-turn createCheckpoint)
+// but until now the agent had no verb to roll one BACK. These two endpoints give
+// `autoviral checkpoint list|restore` a server surface so the agent can recover
+// from a bad hand-edit safely.
+//
+// GET /checkpoints — list rollback history, newest first, including the optional
+// #90 user label. Pure read.
+bridgeRouter.get("/checkpoints", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  try {
+    const result = await listCheckpoints(g.workId);
+    return c.json({ ok: true, result });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message }, 500);
+  }
+});
+
+// POST /restore — roll the live deliverable back to a checkpoint. Body:
+//   { file: "<ts>__<sha>__<deliverable>" }.
+//
+// CRITICAL (#68): restoreCheckpoint snapshots the CURRENT live state FIRST and
+// only then overwrites it — restore is itself a destructive write, and the
+// autosave path (PUT /composition) does NOT checkpoint, so a user's pending
+// edits live ONLY in the live yaml. Pre-snapshotting makes restore reversible;
+// the primitive throws (rather than swallows) if it can't preserve current
+// state, so we surface that as a 500 instead of destroying data. A bad / unknown
+// `file` returns null → 404 code:4 (input error per contracts/error-codes.md);
+// the live deliverable is left UNTOUCHED. We broadcast composition/carousel
+// "changed" so Studio refetches the rolled-back state without waiting on fs.watch.
+bridgeRouter.post("/restore", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as { file?: unknown };
+  const file = typeof body.file === "string" ? body.file : "";
+  if (!file) {
+    return c.json({ ok: false, error: "restore requires a `file` field", code: 4 }, 400);
+  }
+  try {
+    const result = await restoreCheckpoint(g.workId, file);
+    if (result === null) {
+      // Unknown / malformed filename, or no such snapshot on disk. Input error.
+      return c.json({ ok: false, error: `no such checkpoint: ${file}`, code: 4 }, 404);
+    }
+    // Nudge the right preview to reload the rolled-back deliverable.
+    const reason = "checkpoint-restore";
+    if (result.deliverable === "carousel.yaml") {
+      broadcast(g.workId, "carousel-changed", { reason });
+    } else {
+      broadcast(g.workId, "composition-changed", { reason });
+    }
+    return c.json({ ok: true, result });
+  } catch (err) {
+    // The #68 pre-restore snapshot failed (or copy failed) — we must NOT have
+    // destroyed the live state. Report as a service error, not an input error.
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message }, 500);
   }

@@ -19,6 +19,7 @@ import { carouselCommand } from "./commands/carousel.js";
 import { askCommand } from "./commands/ask.js";
 import { exportCommand, renderCommand } from "./commands/export.js";
 import { snapshotCommand } from "./commands/snapshot.js";
+import { checkpointCommand } from "./commands/checkpoint.js";
 import { ingestCommand } from "./commands/ingest.js";
 import { preprocessCommand } from "./commands/preprocess.js";
 import { contextCommand } from "./commands/context.js";
@@ -51,6 +52,7 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   export: exportCommand,
   render: renderCommand,
   snapshot: snapshotCommand,
+  checkpoint: checkpointCommand,
   ingest: ingestCommand,
   preprocess: preprocessCommand,
   context: contextCommand,
@@ -112,6 +114,10 @@ function usage(): string {
     "  snapshot [--at <time>] [--slide <id>]",
     "    Capture the CURRENT frame (video) or slide (carousel) as a PNG and",
     "    print its path — Read it to visually self-check before delivering.",
+    "  checkpoint list                List rollback history (newest first).",
+    "  checkpoint restore <id>        Roll the deliverable back to checkpoint <id>",
+    "    (its `file` from `checkpoint list`). The CURRENT state is snapshotted",
+    "    FIRST, so a restore never loses your pending edits — it's reversible.",
     "",
     "Ingest:",
     "  ingest youtube <url> [--lang zh-CN] [--model <openrouter-id>]",

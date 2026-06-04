@@ -217,6 +217,19 @@ autoviral snapshot --slide s2           # carousel: a specific slide by id
 
 stdout is a clean absolute path (the caveat, if any, goes to stderr), so `$(autoviral snapshot)` substitution works in a shell.
 
+### `autoviral checkpoint list` / `autoviral checkpoint restore <id>`
+
+Safe rollback. A checkpoint of the deliverable (`composition.yaml` / `carousel.yaml`) is taken automatically every turn; these two verbs let you roll one back after a bad hand-edit.
+
+```bash
+autoviral checkpoint list                # rollback history, newest first
+autoviral checkpoint restore <id>        # roll the deliverable back to checkpoint <id>
+```
+
+- `checkpoint list` prints the history as JSON (each row has `file`, `deliverable`, `ts`, `sha`, `bytes`, optional `label`). The `<id>` you pass to `restore` is a row's `file`.
+- **`restore` is reversible** — the server snapshots the CURRENT live state FIRST, *then* overwrites it. So a restore never silently destroys your pending, never-checkpointed edits: they become a fresh checkpoint you can roll forward to. The CLI prints a one-line note to stderr confirming the pre-restore snapshot.
+- A bad / unknown `<id>` exits 4 (validation error) and leaves the deliverable untouched.
+
 ## Ingest
 
 ### `autoviral ingest youtube <url> [--lang zh-CN] [--model <openrouter-id>]`

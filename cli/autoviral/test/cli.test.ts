@@ -148,6 +148,49 @@ beforeAll(async () => {
         },
       });
     }
+    // S21 (US 33/34) — checkpoint list/restore. GET /checkpoints returns a
+    // newest-first history; POST /restore echoes the restored deliverable plus
+    // the #68 pre-restore snapshot (so the CLI can report reversibility). An
+    // unknown `file` simulates the not-found path: 404 + code:4 → CLI exit 4.
+    if (req.method === "GET" && url === "/api/bridge/v1/checkpoints") {
+      return send(200, {
+        ok: true,
+        result: [
+          {
+            file: "2026-05-09T10-00-00-000Z__bbbbbbbb__carousel.yaml",
+            deliverable: "carousel.yaml",
+            ts: "2026-05-09T10:00:00.000Z",
+            sha: "bbbbbbbb",
+            bytes: 42,
+          },
+          {
+            file: "2026-05-08T10-00-00-000Z__aaaaaaaa__carousel.yaml",
+            deliverable: "carousel.yaml",
+            ts: "2026-05-08T10:00:00.000Z",
+            sha: "aaaaaaaa",
+            bytes: 30,
+            label: "first cut",
+          },
+        ],
+      });
+    }
+    if (req.method === "POST" && url === "/api/bridge/v1/restore") {
+      const body = await readBody(req);
+      if (!body.file || body.file === "nope__nope__carousel.yaml") {
+        return send(404, { ok: false, error: "no such checkpoint", code: 4 });
+      }
+      return send(200, {
+        ok: true,
+        result: {
+          deliverable: "carousel.yaml",
+          // Simulate the #68 pre-restore snapshot being taken.
+          preRestoreSnapshot: {
+            file: "2026-05-10T11-00-00-000Z__cccccccc__carousel.yaml",
+            sha: "cccccccc",
+          },
+        },
+      });
+    }
     if (req.method === "POST" && url === "/api/bridge/v1/ask") {
       const body = await readBody(req);
       // Simulate a timeout when the caller asked for <100ms — covers
@@ -381,6 +424,54 @@ describe("autoviral CLI — end-to-end", () => {
   it("unknown command → exit 127", async () => {
     const r = await run(["definitely-not-a-command"]);
     expect(r.exitCode).toBe(127);
+  });
+
+  // S21 (US 33/34) — agent-reachable checkpoint restore.
+  describe("checkpoint list/restore", () => {
+    it("checkpoint list → JSON array newest-first incl. label (exit 0)", async () => {
+      const r = await run(["checkpoint", "list"]);
+      expect(r.exitCode).toBe(0);
+      const parsed = JSON.parse(r.stdout) as Array<{ file: string; label?: string }>;
+      expect(Array.isArray(parsed)).toBe(true);
+      expect(parsed).toHaveLength(2);
+      // newest first (the mock returns them already sorted)
+      expect(parsed[0].file > parsed[1].file).toBe(true);
+      expect(parsed.find((c) => c.label === "first cut")).toBeDefined();
+    });
+
+    it("checkpoint restore <id> → confirms restore + reports reversibility on stderr", async () => {
+      const r = await run([
+        "checkpoint",
+        "restore",
+        "2026-05-08T10-00-00-000Z__aaaaaaaa__carousel.yaml",
+      ]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout).toMatch(/restored carousel\.yaml/);
+      // #68 — the CLI surfaces that the current state was checkpointed FIRST.
+      expect(r.stderr).toMatch(/checkpointed first/);
+      expect(r.stderr).toMatch(/reversible/);
+    });
+
+    it("checkpoint restore without an id → exit 4 (never hits bridge)", async () => {
+      const r = await run(["checkpoint", "restore"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("checkpoint restore unknown id → bridge 404 code:4 → exit 4", async () => {
+      const r = await run(["checkpoint", "restore", "nope__nope__carousel.yaml"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("checkpoint with no/unknown subcommand → exit 127", async () => {
+      const r = await run(["checkpoint", "frobnicate"]);
+      expect(r.exitCode).toBe(127);
+    });
+
+    it("--help lists checkpoint list/restore", async () => {
+      const r = await run(["--help"]);
+      expect(r.stdout).toMatch(/checkpoint list/);
+      expect(r.stdout).toMatch(/checkpoint restore/);
+    });
   });
 
   // S3 (US 18/19) — error-code contract: the CLI branches its exit code on
