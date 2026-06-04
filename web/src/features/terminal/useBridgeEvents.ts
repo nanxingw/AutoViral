@@ -12,6 +12,7 @@
 // reaching into its internals.
 
 import { useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { useComposition } from "@/features/studio/store";
 import { useToastStore } from "@/stores/toast";
 
@@ -28,6 +29,7 @@ function variantFromKind(kind: string): "info" | "error" | "success" | "warn" {
 }
 
 export function useBridgeEvents(workId: string | undefined): void {
+  const queryClient = useQueryClient();
   useEffect(() => {
     if (!workId) return;
     // jsdom test envs don't ship WebSocket; bail cleanly so render tests
@@ -36,6 +38,22 @@ export function useBridgeEvents(workId: string | undefined): void {
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const url = `${proto}://${window.location.host}/ws/bridge/${workId}`;
     const ws = new WebSocket(url);
+
+    // Re-fetch the composition from disk into the store. Kept as a dynamic
+    // import so this hook stays free of a hard dep on the composition service
+    // (which has its own test surface). Shared by composition-changed and
+    // asset-added (I17) so both refresh the dive canvas / asset registry.
+    const refetchComposition = () => {
+      import("@/features/studio/services/composition")
+        .then(({ loadComposition }) =>
+          loadComposition(workId).then(
+            (found) => found && useComposition.getState().loadComposition(found),
+          ),
+        )
+        .catch(() => {
+          /* swallow — refetch failure is non-fatal */
+        });
+    };
 
     ws.onmessage = (e) => {
       let ev: UiEvent;
@@ -87,18 +105,18 @@ export function useBridgeEvents(workId: string | undefined): void {
           break;
         }
         case "composition-changed":
-          // Phase 3 Task 3.10 — re-fetch from disk. Kept as dynamic import
-          // so this hook stays free of a hard dep on the composition
-          // service (which has its own test surface).
-          import("@/features/studio/services/composition")
-            .then(({ loadComposition }) =>
-              loadComposition(workId).then(
-                (found) => found && useComposition.getState().loadComposition(found),
-              ),
-            )
-            .catch(() => {
-              /* swallow — refetch failure is non-fatal */
-            });
+          // Phase 3 Task 3.10 — re-fetch from disk into the store.
+          refetchComposition();
+          break;
+        case "asset-added":
+          // I17 — a freshly generated image/video (or TTS audio) landed in the
+          // work. The server publishes this from generate.ts / audio.ts. Reuse
+          // the composition-changed refetch (keeps the dive canvas / asset
+          // registry current) AND invalidate the filesystem-driven library
+          // query (["assets", workId]) that LibraryTab renders, so the new
+          // thumbnail appears live without a page reload.
+          refetchComposition();
+          void queryClient.invalidateQueries({ queryKey: ["assets", workId] });
           break;
         default:
           // ui-ask is handled by ApprovalPrompt (Task 3.9) on its own WS.
@@ -119,5 +137,5 @@ export function useBridgeEvents(workId: string | undefined): void {
     return () => {
       ws.close();
     };
-  }, [workId]);
+  }, [workId, queryClient]);
 }

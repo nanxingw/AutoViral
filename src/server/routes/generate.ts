@@ -14,6 +14,7 @@ import { dataDir, repoRoot } from "../../infra/config.js";
 import { getWork } from "../../domain/work-store.js";
 import { getProvider, getDefaultProvider, listProviders } from "../../providers/registry.js";
 import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
+import { uiEventBus } from "../bridge/ui-events.js";
 import { runPythonScript } from "../python-bridge.js";
 import { interpolateProcessor } from "../post-process/interpolate.js";
 import { superResolveProcessor } from "../post-process/super-resolve.js";
@@ -58,6 +59,23 @@ generateRouter.post("/api/generate/image", async (c) => {
       prompt, width, height, workId, filename: safeFilename, referenceImage,
       aspectRatio, imageSize, seed, temperature, model,
     });
+    // I17 — broadcast asset-added so the Studio library refreshes live without
+    // a page reload. Mirrors the audio path's shape (audio.ts:279): same
+    // {type,workId,ts,payload:{kind,uri,origin}}. Only fires on success. The
+    // provider returns an absolute assetPath, so convert it to a work-relative
+    // uri like the video paths do — keeping every asset-added uri consistent.
+    if (result.success && result.assetPath) {
+      const wDirAbs = join(dataDir, "works", workId);
+      const relativeUri = result.assetPath.startsWith(wDirAbs + "/")
+        ? result.assetPath.slice(wDirAbs.length + 1)
+        : result.assetPath;
+      uiEventBus.publish(workId, {
+        type: "asset-added",
+        workId,
+        ts: Date.now(),
+        payload: { kind: "image", uri: relativeUri, origin: "generate" },
+      });
+    }
     return c.json(result);
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
@@ -115,6 +133,14 @@ generateRouter.post("/api/generate/video", async (c) => {
     const relativeUri = result.assetUri.startsWith(wDirAbs + "/")
       ? result.assetUri.slice(wDirAbs.length + 1)
       : result.assetUri;
+    // I17 — same asset-added broadcast as the image path so the library shows
+    // the new clip without a reload. Mirrors audio.ts:279.
+    uiEventBus.publish(workId, {
+      type: "asset-added",
+      workId,
+      ts: Date.now(),
+      payload: { kind: "video", uri: relativeUri, origin: "generate" },
+    });
     return c.json({
       success: true,
       assetPath: result.assetUri,
@@ -550,6 +576,16 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
       // composition.yaml missing or unreadable — skip registration silently.
     }
   }
+
+  // I17 — broadcast asset-added so the library refreshes live. This is the
+  // path the chat agent / generation dialog actually drive; same shape as the
+  // image/video handlers above and audio.ts:279.
+  uiEventBus.publish(body.workId, {
+    type: "asset-added",
+    workId: body.workId,
+    ts: Date.now(),
+    payload: { kind: "video", uri: relativeAssetUri, origin: "generate" },
+  });
 
   return c.json({
     assetId,
