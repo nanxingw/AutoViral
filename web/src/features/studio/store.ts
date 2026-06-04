@@ -336,47 +336,53 @@ export const useComposition = create<CompState>()(
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
         );
       }),
+    // ADR-009 (S8) — the same-kind cross-lane move now lives in the shared
+    // composition-ops core (`ops.moveClipToTrack`), consumed identically by the
+    // bridge (`autoviral clip move <id> --to-track`). The store action is a thin
+    // immer wrapper: snapshot for undo, run the op on the draft (it relocates the
+    // clip in place, preserving trackOffset, and prunes any source-track
+    // transition the clip anchored), and recompute duration. The op THROWS a
+    // typed CompositionOpError on an illegal move (unknown clip / unknown target
+    // / cross-kind); here — unlike splitClip's user-facing toast — we keep the
+    // historical SILENT no-op contract (an invalid drag just lands nowhere, no
+    // toast), so we catch the throw, leave the UI untouched, and never commit
+    // the undo snapshot. The op math matches the old inline body, so the existing
+    // store moveClipToTrack tests pass without touching a single assertion.
     moveClipToTrack: (clipId, targetTrackId) =>
       set((s) => {
         if (!s.comp) return;
-        // Locate the clip + the track it currently lives on.
-        let sourceTrack: (typeof s.comp.tracks)[number] | undefined;
-        let clip: Clip | undefined;
-        for (const tr of s.comp.tracks) {
-          const found = (tr.clips as Clip[]).find((c) => c.id === clipId);
-          if (found) {
-            sourceTrack = tr;
-            clip = found;
-            break;
+        // S20 discipline — a move that doesn't relocate the clip (target IS the
+        // clip's current lane) must not snapshot an identical state (a later
+        // Cmd+Z would appear to no-op). The clip already sits on its current
+        // lane, so bail before the snapshot when target === source.
+        const currentTrackId = s.comp.tracks.find((tr) =>
+          (tr.clips as Clip[]).some((c) => c.id === clipId),
+        )?.id;
+        if (currentTrackId !== undefined && currentTrackId === targetTrackId) {
+          return;
+        }
+        // Snapshot BEFORE mutating so undo restores the pre-move tracks; only
+        // commit it to history if the op actually relocates the clip.
+        const preTracks = snapshotTracks(s.comp.tracks);
+        try {
+          ops.moveClipToTrack(s.comp, { clipId, targetTrackId });
+        } catch (err) {
+          if (err instanceof CompositionOpError) {
+            // Silent no-op contract (#88) — an invalid move just doesn't happen.
+            return; // UI untouched, history NOT committed.
           }
+          throw err;
         }
-        if (!sourceTrack || !clip) return;
-        const target = s.comp.tracks.find((t) => t.id === targetTrackId);
-        if (!target) return;
-        if (target.id === sourceTrack.id) return; // already there
-        // Kind guard: a clip only belongs on a track of its own kind. The
-        // source track kind is authoritative (the clip was validly placed).
-        if (target.kind !== sourceTrack.kind) return;
-        pushClipHistory(s);
-        // Detach from source, attach to target — trackOffset (time) is kept,
-        // so the clip stays at the same horizontal position, just on a new lane.
-        sourceTrack.clips = (sourceTrack.clips as Clip[]).filter(
-          (c) => c.id !== clipId,
-        ) as typeof sourceTrack.clips;
-        // #54 — the moved clip may have anchored a transition on the source
-        // track; once it leaves, that transition's afterClipId is orphaned and
-        // the Track superRefine would reject the next Composition.parse(). Prune
-        // it the same way removeClip does (store.ts removeClip branch).
-        if (sourceTrack.transitions?.length) {
-          sourceTrack.transitions = sourceTrack.transitions.filter(
-            (tr) => tr.afterClipId !== clipId,
-          );
-        }
-        (target.clips as Clip[]).push(clip);
+        // recompute duration — a move can leave a now-empty source lane shorter.
         s.comp.duration = Math.max(
           0,
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
         );
+        s.clipHistory.past.push(preTracks);
+        if (s.clipHistory.past.length > TRACK_HISTORY_LIMIT) {
+          s.clipHistory.past.shift();
+        }
+        s.clipHistory.future = [];
       }),
     addTransition: (trackId, init) => {
       // Validation FIRST (read state pre-mutation), then mint+set.

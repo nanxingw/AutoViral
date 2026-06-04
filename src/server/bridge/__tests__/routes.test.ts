@@ -1559,3 +1559,171 @@ describe("bridge router — S4 PUT /comp (full-composition write)", () => {
     expect(await readFile(target, "utf8")).toBe(before);
   });
 });
+
+// S8 (US 3/9) — POST /clip/:id/move delegates to the shared ops.moveClipToTrack.
+// The seeded composition has TWO video lanes (trk_v1 holds c1 → c2 with a
+// transition pinned after c1; trk_v2 is empty) so a same-kind cross-lane move is
+// possible. The key invariant: moving c1 away from trk_v1 orphans the transition
+// pinned to it — the op must prune it, otherwise writeCompositionFor's
+// CompositionWriteSchema.parse superRefine rejects a valid move with a 400.
+describe("bridge router — S8 POST /clip/:id/move", () => {
+  let workRoot: string;
+  const workId = "w_move";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  const TWO_VIDEO_LANE_YAML = `id: c_${workId}
+workId: ${workId}
+fps: 30
+width: 1080
+height: 1920
+duration: 8.0
+aspect: "9:16"
+updatedAt: "2026-05-14T00:00:00.000Z"
+tracks:
+  - id: trk_v1
+    kind: video
+    label: V1
+    muted: false
+    hidden: false
+    clips:
+      - id: c1
+        kind: video
+        src: assets/sample-shot.mp4
+        in: 0
+        out: 4.0
+        trackOffset: 0
+      - id: c2
+        kind: video
+        src: assets/sample-shot.mp4
+        in: 0
+        out: 4.0
+        trackOffset: 4.0
+    transitions:
+      - id: tr_1
+        afterClipId: c1
+        preset: cross-dissolve
+        durationSec: 0.5
+        alignment: center
+        easing: linear
+  - id: trk_v2
+    kind: video
+    label: V2
+    muted: false
+    hidden: false
+    clips: []
+  - id: trk_a1
+    kind: audio
+    label: BGM
+    muted: false
+    hidden: false
+    clips:
+      - id: ac1
+        kind: audio
+        src: assets/sample-bgm.mp3
+        in: 0
+        out: 8.0
+        trackOffset: 0
+        type: bgm
+assets: []
+provenance: []
+exportPresets: []
+`;
+
+  beforeAll(async () => {
+    const { mkdtemp, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-move-route-"));
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(
+      join(workRoot, workId, "composition.yaml"),
+      TWO_VIDEO_LANE_YAML,
+      "utf8",
+    );
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  function move(id: string, body: unknown) {
+    return app.request(`/api/bridge/v1/clip/${id}/move`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it("moves a clip to another same-kind lane and prunes the source-lane orphan transition", async () => {
+    const res = await move("c1", { toTrackId: "trk_v2" });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { id: string } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.id).toBe("c1");
+
+    // GET reflects: c1 left trk_v1, landed on trk_v2 (keeping trackOffset), and
+    // the now-orphan transition on trk_v1 is gone — a valid write round-trip.
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: {
+        tracks: Array<{
+          id: string;
+          clips: Array<{ id: string; trackOffset: number }>;
+          transitions?: Array<{ afterClipId: string }>;
+        }>;
+      };
+    };
+    const v1 = compBody.result.tracks.find((t) => t.id === "trk_v1")!;
+    const v2 = compBody.result.tracks.find((t) => t.id === "trk_v2")!;
+    expect(v1.clips.some((c) => c.id === "c1")).toBe(false);
+    expect(v1.transitions ?? []).toHaveLength(0); // orphan pruned
+    const moved = v2.clips.find((c) => c.id === "c1");
+    expect(moved).toBeDefined();
+    expect(moved!.trackOffset).toBeCloseTo(0); // time position preserved
+  });
+
+  it("rejects a cross-kind move (video clip → audio lane) → 400 + code 4", async () => {
+    const res = await move("c2", { toTrackId: "trk_a1" });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("rejects an unknown clipId → 400 + code 4", async () => {
+    const res = await move("nope", { toTrackId: "trk_v2" });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("rejects an unknown target track → 400 + code 4", async () => {
+    const res = await move("c2", { toTrackId: "trk_does_not_exist" });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("rejects a missing toTrackId → 400 + code 4", async () => {
+    const res = await move("c2", {});
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("rejects a missing work-id header → 400 + code 4", async () => {
+    const res = await app.request(`/api/bridge/v1/clip/c2/move`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ toTrackId: "trk_v2" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+});

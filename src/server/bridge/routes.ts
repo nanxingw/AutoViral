@@ -770,6 +770,48 @@ bridgeRouter.post("/clip/:id/trim", async (c) => {
   return c.json({ ok: true, result: { id } });
 });
 
+// S8 (US 3/9) — POST /clip/:id/move: relocate a clip to another lane of the
+// SAME kind through the shared composition-ops core. Body `{ toTrackId }`; the
+// same-kind guard, trackOffset preservation and source-track orphan-transition
+// prune are `ops.moveClipToTrack` — the SAME invariants the Studio Inspector
+// lane-select / drag enforces — so an agent moving via the CLI (`autoviral clip
+// move <id> --to-track`) and a human dragging to another lane converge on the
+// same composition. Missing work-id / illegal params (unknown clip, unknown
+// target, cross-kind move) → CompositionOpError{code:4} → HTTP 400 + code:4 →
+// CLI exit 4. (The orphan-transition prune is essential: without it the moved
+// clip's now-dangling transition.afterClipId would fail the Track superRefine
+// on writeCompositionFor's CompositionWriteSchema.parse → a 400 on a valid move.)
+bridgeRouter.post("/clip/:id/move", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  }
+  const body = (await c.req.json().catch(() => ({}))) as {
+    toTrackId?: unknown;
+  };
+  if (typeof body.toTrackId !== "string" || !body.toTrackId) {
+    return c.json({ ok: false, error: "missing toTrackId", code: 4 }, 400);
+  }
+  const toTrackId = body.toTrackId;
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.moveClipToTrack(comp, { clipId: id, targetTrackId: toTrackId });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-move" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
 // POST /ask blocks the HTTP response until the Studio user clicks
 // YES/NO in the ApprovalPrompt modal — or until timeoutMs elapses.
 // CLI exit codes (per protocol §5): yes=0, no=1, cancelled=2, timeout=124.

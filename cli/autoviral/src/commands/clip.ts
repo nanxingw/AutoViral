@@ -1,4 +1,4 @@
-// `autoviral clip add|set|remove|split|trim` — composition.yaml write surface.
+// `autoviral clip add|set|remove|split|trim|move` — composition.yaml write surface.
 //
 // All three sub-verbs round-trip through the bridge so the canonical
 // disk state is always the server's (no local edit-then-push). The
@@ -113,6 +113,33 @@ export async function clipCommand(args: string[]): Promise<void> {
       "POST",
       `/clip/${encodeURIComponent(id)}/trim`,
       body,
+    );
+    return;
+  }
+
+  if (sub === "move") {
+    // S8 (US 3/9) — `autoviral clip move <id> --to-track <trackId>`. The bridge
+    // runs the shared `ops.moveClipToTrack` (same same-kind guard + trackOffset
+    // preservation + source-lane orphan-transition prune the Studio drag
+    // enforces), so the agent's move and a human's drag converge on the same
+    // composition. We validate the args locally (exit 4, never hits the bridge)
+    // so an obviously-malformed invocation fails fast.
+    const id = rest[0];
+    if (!id || id.startsWith("--")) {
+      process.stderr.write("usage: autoviral clip move <id> --to-track <trackId>\n");
+      process.exit(4);
+    }
+    const opts = parseFlags(rest.slice(1));
+    const toTrackId = opts["--to-track"];
+    if (!toTrackId) {
+      process.stderr.write("autoviral clip move: --to-track <trackId> required\n");
+      process.exit(4);
+    }
+    await bridgeRequest(
+      ctx,
+      "POST",
+      `/clip/${encodeURIComponent(id)}/move`,
+      { toTrackId },
     );
     return;
   }

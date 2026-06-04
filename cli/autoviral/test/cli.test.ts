@@ -187,6 +187,21 @@ beforeAll(async () => {
         return send(200, { ok: true, result: { id: clipId } });
       }
     }
+    // S8 (US 3/9) — POST /clip/:id/move. Mirrors the server contract: a known
+    // clipId with a toTrackId relocates it + returns { id }; an unknown clipId
+    // is the op's CompositionOpError → 400 + code 4 → CLI exit 4.
+    {
+      const moveMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/move$/.exec(url ?? "");
+      if (req.method === "POST" && moveMatch) {
+        await readBody(req);
+        const clipId = decodeURIComponent(moveMatch[1]);
+        const target = clips.find((c) => c.id === clipId);
+        if (!target) {
+          return send(400, { ok: false, error: "no such clip", code: 4 });
+        }
+        return send(200, { ok: true, result: { id: clipId } });
+      }
+    }
     if (req.method === "POST" && (
       url === "/api/bridge/v1/select" ||
       url === "/api/bridge/v1/seek" ||
@@ -398,6 +413,29 @@ describe("autoviral CLI — end-to-end", () => {
 
   it("clip trim an unknown clip → bridge 400 code:4 → exit 4", async () => {
     const r = await run(["clip", "trim", "nope", "--out", "2.0"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  // S8 (US 3/9) — `autoviral clip move <id> --to-track <trackId>` POSTs the
+  // target lane to /clip/:id/move; the bridge runs the shared
+  // `ops.moveClipToTrack`.
+  it("clip move <id> --to-track <trackId> → exit 0", async () => {
+    const r = await run(["clip", "move", "vc_s01", "--to-track", "trk_v2"]);
+    expect(r.exitCode).toBe(0);
+  });
+
+  it("clip move with no id → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "move", "--to-track", "trk_v2"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip move with no --to-track → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "move", "vc_s01"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip move an unknown clip → bridge 400 code:4 → exit 4", async () => {
+    const r = await run(["clip", "move", "nope", "--to-track", "trk_v2"]);
     expect(r.exitCode).toBe(4);
   });
 
