@@ -15,6 +15,7 @@ import { TopBar } from "@/features/editor/panels/TopBar";
 import { useExport } from "@/features/editor/hooks/useExport";
 import { CarouselExportProgress } from "@/features/editor/panels/CarouselExportProgress";
 import { RightPane } from "@/features/studio/panels/RightPane";
+import { useBridgeEvents } from "@/features/terminal/useBridgeEvents";
 import { buildEditorViewerContext } from "@/features/editor/services/viewerContext";
 import type { LocatorData } from "@/features/chat/types";
 import { useT } from "@/i18n/useT";
@@ -109,6 +110,16 @@ export function serializeForDirty(car: Carousel): string {
 
 export default function Editor() {
   const { workId } = useParams();
+
+  // v0.1.3 last-mile (S2 / US 17): subscribe the carousel Editor page to the
+  // bridge, exactly as Studio does. useBridgeEvents already handles the
+  // "carousel-changed" frame — broadcast by the carousel write endpoints and by
+  // restore (S21) — refetching carousel.yaml into the editor store so an agent
+  // slide/layer edit (or a checkpoint restore) reflects in the preview/filmstrip
+  // WITHOUT a manual reload. Editor and Studio are distinct routes that never
+  // coexist, so there is no double-subscription.
+  useBridgeEvents(workId);
+
   const loadCar = useEditor((s) => s.loadCarousel);
   const car = useEditor((s) => s.car);
   // Load-time (or last-persisted) snapshot, keyed by workId. autosave fires
