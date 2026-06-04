@@ -100,6 +100,20 @@ export async function mutateCarouselFor(
   }
   const next = mutator(current);
   await writeCarouselFor(ctx, next);
-  onCommitted?.(next);
+  // S2 hardening (symmetric with composition-ops) — the atomic write already
+  // landed; a throwing onCommitted broadcast must NOT turn that successful
+  // write into a rejected mutate (route 400/500 lying about a committed write).
+  // onCommitted MUST NOT throw, but we defend so a future broadcast closure
+  // can't invalidate a committed write.
+  try {
+    onCommitted?.(next);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[carousel-ops] onCommitted broadcast failed (write already landed, non-fatal): ${
+        (err as Error).message
+      }`,
+    );
+  }
   return next;
 }

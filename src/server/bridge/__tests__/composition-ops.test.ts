@@ -137,6 +137,26 @@ describe("writeCompositionFor — atomic + validated", () => {
     expect(await readFile(target, "utf8")).toBe(before);
   });
 
+  // S2 fix-up — a throwing onCommitted (e.g. a future broadcast that fails)
+  // must NOT invalidate a write that already landed on disk. Pre-hardening the
+  // exception propagated out of mutateCompositionFor and surfaced at the route
+  // as a 400/500 — i.e. the response lied about a write that actually succeeded.
+  it("mutateCompositionFor tolerates a throwing onCommitted: the write still lands and it does NOT reject", async () => {
+    const target = join(workRoot, workId, "composition.yaml");
+    const next = await mutateCompositionFor(
+      { workId, worksRoot: workRoot },
+      (comp) => ({ ...comp, duration: 123 }),
+      () => {
+        throw new Error("broadcast blew up");
+      },
+    );
+    // Resolves with the committed composition (no rejection bubbling the
+    // broadcast failure up as a write failure).
+    expect(next.duration).toBe(123);
+    // And the write genuinely landed on disk.
+    expect(await readFile(target, "utf8")).toContain("duration: 123");
+  });
+
   // Phase 5 Task 5.4 — composition.yaml.previous + diffCompositionFor
   it("writeCompositionFor snapshots composition.yaml.previous before each write", async () => {
     // No baseline exists yet — first write must NOT fail (ENOENT swallowed).

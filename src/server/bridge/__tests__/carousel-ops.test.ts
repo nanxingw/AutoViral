@@ -144,4 +144,27 @@ describe("carousel-ops — read / write / mutate", () => {
     expect(called).toBe(false);
     expect(await readFile(target, "utf8")).toBe(before);
   });
+
+  // S2 fix-up — symmetric with composition-ops: a throwing onCommitted (a
+  // broadcast that fails) must NOT invalidate a carousel write that already
+  // landed. Pre-hardening, the exception would propagate out and the route
+  // would 400/500 on a write that actually succeeded.
+  it("mutateCarouselFor tolerates a throwing onCommitted: the write still lands and it does NOT reject", async () => {
+    const target = carouselPathFor({ workId, worksRoot: workRoot });
+    const next = await mutateCarouselFor(
+      { workId, worksRoot: workRoot },
+      (c) => ({
+        ...c,
+        slides: [
+          ...c.slides,
+          { id: "s_committed", bg: { type: "solid", value: "#000" }, layers: [] },
+        ],
+      }),
+      () => {
+        throw new Error("broadcast blew up");
+      },
+    );
+    expect(next.slides.some((s) => s.id === "s_committed")).toBe(true);
+    expect(await readFile(target, "utf8")).toContain("s_committed");
+  });
 });

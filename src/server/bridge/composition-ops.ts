@@ -253,6 +253,21 @@ export async function mutateCompositionFor(
   const current = await readCompositionFor(ctx);
   const next = mutator(current);
   await writeCompositionFor(ctx, next);
-  onCommitted?.(next);
+  // S2 hardening — the write already landed (atomic rename above). onCommitted
+  // is a fire-and-forget broadcast hook; a failure inside it must NEVER turn a
+  // successful on-disk write into a rejected mutate (which would surface as a
+  // 400/500 at the route — a response that lies about a write that succeeded).
+  // onCommitted MUST NOT throw, but we defend anyway so a future broadcast
+  // closure can't invalidate a committed write.
+  try {
+    onCommitted?.(next);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[composition-ops] onCommitted broadcast failed (write already landed, non-fatal): ${
+        (err as Error).message
+      }`,
+    );
+  }
   return next;
 }
