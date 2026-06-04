@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDir } from "../../infra/config.js";
+import { ensureTtsVenv, venvPythonPath, PythonMissingError } from "../../infra/python-env.js";
 import { analyzeAudio, mixAudioTracks } from "../../domain/audio-tools.js";
 import { generateWithFallback } from "../../providers/tts/registry.js";
 import { uiEventBus } from "../bridge/ui-events.js";
@@ -161,6 +162,21 @@ audioRouter.post("/api/audio/captions", async (c) => {
       throw err;
     }
 
+    // Auto-provision the managed venv (I15) so a clean machine has stable-ts
+    // without a manual `pip install`. Idempotent + cheap once provisioned;
+    // throws PythonMissingError when python3 itself is absent, which we surface
+    // as the existing PYTHON_DEP_MISSING 503 contract instead of an opaque 500.
+    try {
+      await ensureTtsVenv();
+    } catch (err) {
+      if (err instanceof PythonMissingError) {
+        return c.json({ success: false, error: err.message, code: "PYTHON_DEP_MISSING" }, 503);
+      }
+      // A venv/pip failure is non-fatal here — stable_whisper may still be
+      // importable under the host python3. Fall through and let the import
+      // probe below report PYTHON_DEP_MISSING if it really is missing.
+    }
+
     // Use caption_generate.py in --transcribe-only mode to emit JSON segments.
     // The script's existing CLI emits ASS by default; use the helper output via
     // a sidecar JSON path. For now, shell out to a small inline python that
@@ -180,7 +196,9 @@ for s in result.segments:
 print(json.dumps({"segments": segs}))
 `;
     try {
-      const { stdout } = await execFileAsync("python3", ["-c", py], { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
+      // Run under the venv interpreter (where ensureTtsVenv installed stable-ts);
+      // venvPythonPath() falls back to bare "python3" when the venv is absent.
+      const { stdout } = await execFileAsync(venvPythonPath(), ["-c", py], { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
       const parsed = JSON.parse(stdout);
       if (parsed.error) {
         return c.json({

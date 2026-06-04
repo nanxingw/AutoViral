@@ -1,5 +1,6 @@
 import { chromium, type Browser } from "playwright";
 import type { Source, RawTrendItem } from "./types.js";
+import { ensurePlaywrightChromium } from "../../infra/python-env.js";
 
 interface DomFeedItem {
   id: string;
@@ -35,6 +36,17 @@ async function scrapeExplore(limit: number, signal?: AbortSignal): Promise<DomFe
   let browser: Browser | null = null;
   const abortHandler = () => { browser?.close().catch(() => {}); };
   try {
+    // Lazy heavy dep (I15): chromium (~150MB) isn't installed at app boot — the
+    // first trends scrape downloads it on demand with progress. Idempotent +
+    // fast no-op once cached. Surfaced as warn lines so a long first-run
+    // download isn't a silent stall (no UI bus is reachable from this leaf
+    // scraper). If the install fails, chromium.launch() below still produces the
+    // canonical "Executable doesn't exist …" error the caller already handles.
+    await ensurePlaywrightChromium({
+      onProgress: (line) => { if (line) console.warn(`[xiaohongshu] ${line}`); },
+    }).catch((e) => {
+      console.warn(`[xiaohongshu] playwright install failed: ${e instanceof Error ? e.message : String(e)}`);
+    });
     browser = await chromium.launch({ headless: true });
     signal?.addEventListener("abort", abortHandler);
     const ctx = await browser.newContext({

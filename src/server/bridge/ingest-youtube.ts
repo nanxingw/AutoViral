@@ -25,6 +25,11 @@ import {
 } from "./composition-ops.js";
 import { loadConfig } from "../../infra/config.js";
 import {
+  ensureTtsVenv,
+  venvPythonPath,
+  PythonMissingError,
+} from "../../infra/python-env.js";
+import {
   type Composition,
   makeEmptyComposition,
   newTrackId,
@@ -309,6 +314,23 @@ async function transcribeWithStableWhisper(audioPath: string): Promise<
   | { language: string; segments: SourceSegment[] }
   | { error: string; code: string }
 > {
+  // Auto-provision the managed venv (I15) so the YouTube-ingest ASR path has
+  // stable-ts without a manual `pip install` — mirrors the captions route
+  // (audio.ts). Idempotent + cheap once provisioned; throws PythonMissingError
+  // when python3 itself is absent, which we surface as the existing
+  // PYTHON_DEP_MISSING failure this function already returns. A venv/pip failure
+  // is non-fatal here — stable_whisper may still be importable under the host
+  // python3 (venvPythonPath() falls back to bare "python3"), so the import probe
+  // below reports PYTHON_DEP_MISSING if it really is missing.
+  try {
+    await ensureTtsVenv();
+  } catch (err) {
+    if (err instanceof PythonMissingError) {
+      return { error: err.message, code: err.errorCode };
+    }
+    // fall through — let the venv/host import probe below decide.
+  }
+
   // Whisper's `model.transcribe()` prints progress chatter ("Detected
   // language: en", a progress bar, etc.) to stdout — we can't json-parse
   // raw stdout. Write the result to a sidecar JSON file instead and
@@ -337,7 +359,9 @@ with open(${JSON.stringify(outPath)}, "w", encoding="utf-8") as f:
     json.dump({"language": language, "segments": segs}, f, ensure_ascii=False)
 `;
   try {
-    await execFileAsync("python3", ["-c", py], {
+    // Run under the venv interpreter (where ensureTtsVenv installed stable-ts);
+    // venvPythonPath() falls back to bare "python3" when the venv is absent.
+    await execFileAsync(venvPythonPath(), ["-c", py], {
       timeout: 900_000,
       maxBuffer: 32 * 1024 * 1024,
     });

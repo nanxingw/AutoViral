@@ -1,24 +1,24 @@
 import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import type { TtsProvider, TtsRequest, TtsResult } from "./types.js";
 import { FFPROBE_BIN } from "../../server/ffmpeg-paths.js";
+import { ensureTtsVenv, venvBinPath, PythonMissingError } from "../../infra/python-env.js";
 
 /**
  * Resolves the edge-tts binary path with this precedence:
  *   1. EDGE_TTS_PATH override (dev machines where pipx put it outside PATH)
  *   2. the managed venv at <dataDir>/tts-venv/bin/edge-tts, if present
+ *      (provisioned by ensureTtsVenv() — I15)
  *   3. bare "edge-tts" (rely on inherited PATH)
  *
- * venvBase = AUTOVIRAL_DATA_DIR ?? ~/.autoviral — same root the rest of the
- * server uses for the data dir.
+ * The venv path is resolved via the shared python-env helper so the layout
+ * (bin/ vs Scripts/, AUTOVIRAL_DATA_DIR root) stays single-sourced with the
+ * bootstrap that creates it.
  */
 export function resolveEdgeTtsBin(): string {
   if (process.env.EDGE_TTS_PATH) return process.env.EDGE_TTS_PATH;
-  const venvBase = process.env.AUTOVIRAL_DATA_DIR ?? join(homedir(), ".autoviral");
-  const venvBin = join(venvBase, "tts-venv", "bin", "edge-tts");
+  const venvBin = venvBinPath("edge-tts");
   if (existsSync(venvBin)) return venvBin;
   return "edge-tts";
 }
@@ -147,6 +147,22 @@ export const edgeTtsProvider: TtsProvider = {
     return existsSync(resolved) || resolved === "edge-tts";
   },
   async generate(req: TtsRequest): Promise<TtsResult> {
+    // Auto-provision the managed venv on a clean machine (I15). Skip when an
+    // EDGE_TTS_PATH override is set (a dev pointing at their own binary) — we
+    // never want to clobber that with a pip install. ensureTtsVenv() is
+    // idempotent + cheap when already provisioned; it throws PythonMissingError
+    // when python3 is absent, which we surface as an actionable hint rather than
+    // an opaque ENOENT from the bare-name spawn below.
+    if (!process.env.EDGE_TTS_PATH) {
+      try {
+        await ensureTtsVenv();
+      } catch (err) {
+        if (err instanceof PythonMissingError) throw err;
+        // A pip/venv failure is non-fatal HERE: edge-tts may still be on PATH
+        // (Homebrew / pipx install). Fall through to the spawn, which will give
+        // a clear ENOENT if it truly isn't available.
+      }
+    }
     const ssml = mapExpressiveTagsToSsml(req.text);
     await runEdgeTtsCli(ssml, req.voice, req.outputPath);
     // Defensive: edge-tts can exit 0 on partial-write / network glitch and
