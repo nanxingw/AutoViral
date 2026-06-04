@@ -45,9 +45,11 @@ export async function bridgeRequest<T>(
   });
   // S3 (US 18/19) — error-code contract. The CLI's exit code is the agent's
   // control-flow signal: 4 = "your input/validation was wrong" (4xx),
-  // 3 = "the service broke" (5xx / malformed response). Fixed timeouts keep
-  // their own code (124) — those never reach here since /ask returns 504 via
-  // this path but with code:124, which we honour below.
+  // 3 = "the service broke" (5xx / malformed response). Fixed-timeout endpoints
+  // like /ask handle their own 124 directly in commands/ask.ts and never reach
+  // bridgeRequest; but any endpoint that DOES come through this path and
+  // returns an explicit numeric `code` (including 124) has that code honoured
+  // below in preference to the status-class fallback.
   if (!res.ok) {
     const txt = await res.text();
     process.stderr.write(`autoviral: bridge ${method} ${path} → ${res.status} ${txt}\n`);

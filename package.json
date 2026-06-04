@@ -40,7 +40,7 @@
     "dev": "tsc --watch",
     "dev:frontend": "vite dev",
     "postinstall": "node scripts/postinstall-guard.mjs",
-    "test": "npm run test:web && npm run test:server",
+    "test": "npm run test:web && npm run test:server && npm run test:cli",
     "pretest:web": "[ -n \"$CI\" ] || pkill -f '[v]itest.*web/vitest.config' || true",
     "test:web": "vitest --config web/vitest.config.ts run",
     "test:web:watch": "vitest --config web/vitest.config.ts",
@@ -51,6 +51,7 @@
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "build:cli": "cd cli/autoviral && npm run build",
+    "test:cli": "npm --prefix cli/autoviral run test",
     "install:cli": "cd cli/autoviral && npm install && npm run build && npm link",
     "prepublishOnly": "npm run build && npm run build:cli"
   },

@@ -15,6 +15,7 @@
   },
   "scripts": {
     "build": "tsup src/cli.ts --format esm --target node20 --no-splitting --minify --out-dir dist",
+    "pretest": "npm run build",
     "test": "vitest run",
     "dev": "tsup src/cli.ts --format esm --target node20 --no-splitting --watch --out-dir dist"
   },

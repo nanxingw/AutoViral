@@ -104,6 +104,26 @@ beforeAll(async () => {
       if (body.track === "boom") {
         return send(500, { ok: false, error: "disk on fire" });
       }
+      // S3 fix-up — exercise the client's defensive JSON.parse(catch) branch:
+      // a 400 with a NON-JSON (HTML/text) body. The CLI must fall back to the
+      // status-class mapping (4xx → exit 4) and NOT crash on the unparseable
+      // body. error-codes.md rule #3.
+      if (body.track === "html400") {
+        res.statusCode = 400;
+        res.setHeader("content-type", "text/html");
+        res.end("<html><body>502 Bad Gateway</body></html>");
+        return;
+      }
+      // S3 fix-up — HTTP 200 with a business-level failure envelope, WITH an
+      // explicit code:4 → CLI must honour it (exit 4). error-codes.md rule #4.
+      if (body.track === "envfail4") {
+        return send(200, { ok: false, error: "validation in 200 envelope", code: 4 });
+      }
+      // S3 fix-up — HTTP 200 {ok:false} with NO code → defaults to exit 3
+      // (treated as a service/protocol error). error-codes.md rule #4.
+      if (body.track === "envfailnocode") {
+        return send(200, { ok: false, error: "envelope failure no code" });
+      }
       const id = `vc_e2e${nextSeq++}`;
       clips.push({ id, trackKind: body.track });
       return send(200, { ok: true, result: { id } });
@@ -488,6 +508,32 @@ describe("autoviral CLI — end-to-end", () => {
     it("bridge 5xx (service error) → exit 3", async () => {
       const r = await run([
         "clip", "add", "--src", "assets/x.mp4", "--track", "boom",
+      ]);
+      expect(r.exitCode).toBe(3);
+    });
+
+    // S3 fix-up — rule #3: a non-JSON error body must NOT crash the CLI; it
+    // falls back to the status-class mapping (4xx → 4). Previously untested:
+    // every existing fixture returned JSON, so JSON.parse never actually threw.
+    it("bridge 400 with a non-JSON (HTML) body → status-class fallback → exit 4 (no crash)", async () => {
+      const r = await run([
+        "clip", "add", "--src", "assets/x.mp4", "--track", "html400",
+      ]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    // S3 fix-up — rule #4: HTTP 200 with a business-level {ok:false} envelope.
+    // An explicit code is honoured (exit 4); a missing code defaults to exit 3.
+    it("HTTP 200 {ok:false, code:4} envelope → honours the code → exit 4", async () => {
+      const r = await run([
+        "clip", "add", "--src", "assets/x.mp4", "--track", "envfail4",
+      ]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("HTTP 200 {ok:false} envelope with no code → defaults to exit 3", async () => {
+      const r = await run([
+        "clip", "add", "--src", "assets/x.mp4", "--track", "envfailnocode",
       ]);
       expect(r.exitCode).toBe(3);
     });
