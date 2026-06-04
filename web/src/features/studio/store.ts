@@ -537,37 +537,38 @@ export const useComposition = create<CompState>()(
           const dur = clipDuration(c);
           const end = start + dur;
           if (edge === "right") {
-            // D2 — right-edge cap at the next clip's start (any neighbour
-            // strictly after `start`, on the same track). Single-clip tracks
-            // have no neighbour → cap = +∞.
-            const next = clips
-              .filter(
-                (x) => x.id !== clipId && x.trackOffset > start + OFFSET_EPSILON,
-              )
-              .sort((x, y) => x.trackOffset - y.trackOffset)[0];
-            const cap = next ? next.trackOffset : Infinity;
-            const clamped = Math.min(
-              cap,
-              Math.max(start + MIN_CLIP_DUR, newTime),
-            );
-            const newDur = clamped - start;
             if (c.kind === "video" || c.kind === "audio") {
-              c.out = c.in + newDur;
+              // ADR-009 (S7) — the right-edge resize of a video/audio clip is a
+              // source-window trim with trackOffset ANCHORED: it sets `out` and
+              // leaves the timeline position put. That is exactly the canonical
+              // intent `ops.trimClip` speaks, so route through the shared op
+              // (the SAME invariants the agent's `autoviral clip trim --out`
+              // runs through the bridge → CLI and Studio edge-drag converge on
+              // one composition, ADR-009). The desired source `out` for a
+              // timeline clip-end at `newTime` is `in + (newTime - start)`; the
+              // op applies the adjacency cap, MIN_CLIP_DUR floor and right-edge
+              // keyframe drop itself. The clip is already located (idx >= 0) and
+              // is video/audio, so the op never throws here.
+              ops.trimClip(s.comp, {
+                clipId,
+                out: c.in + (newTime - start),
+              });
             } else {
-              // text / overlay
-              c.duration = newDur;
-            }
-            // #48 — a right-edge trim shrinks the clip-local window to
-            // [0, newDur). Keyframe time is trackOffset-relative and the left
-            // edge stays anchored, so existing times remain valid; only the
-            // tail past the new end must be dropped/clamped. Reuse the SAME
-            // helper splitClip uses (#46 sibling): splitKeyframesAtLocal's left
-            // half (.a) keeps keyframes before newDur and inserts a boundary at
-            // newDur preserving the curve up to the cut.
-            const rKfs = (c as { keyframes?: Keyframe[] }).keyframes;
-            if (rKfs && rKfs.some((k) => k.time > newDur + OFFSET_EPSILON)) {
-              (c as { keyframes?: Keyframe[] }).keyframes =
-                splitKeyframesAtLocal(rKfs, newDur).a;
+              // text / overlay are duration-based (no in/out source window) and
+              // have no shared op yet → keep the inline duration clamp. D2 cap
+              // at the next clip's start; single-clip tracks → cap = +∞.
+              const next = clips
+                .filter(
+                  (x) =>
+                    x.id !== clipId && x.trackOffset > start + OFFSET_EPSILON,
+                )
+                .sort((x, y) => x.trackOffset - y.trackOffset)[0];
+              const cap = next ? next.trackOffset : Infinity;
+              const clamped = Math.min(
+                cap,
+                Math.max(start + MIN_CLIP_DUR, newTime),
+              );
+              c.duration = clamped - start;
             }
           } else {
             // Left edge: clamp to [0, end - MIN_CLIP_DUR].

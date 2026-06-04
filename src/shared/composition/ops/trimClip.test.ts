@@ -113,6 +113,23 @@ describe("@shared composition ops — trimClip", () => {
     expect(a.trackOffset + (a.out - a.in)).toBeLessThanOrEqual(6 + 1e-6);
   });
 
+  // S7 fix-up (MEDIUM) — both-edges in one call must not let an extend-LEFT of
+  // `in` (which grows clip duration) push the clip-end past the next clip. The
+  // old code capped `out` against the OLD `in`, then shrank `in` afterwards →
+  // clip-end = trackOffset + (out - newIn) ended up larger than the cap.
+  it("both edges: extend-left in after capping out still respects the adjacency cap", () => {
+    // a: timeline 0..4 (in:2 out:6) ; b: timeline 6..10. Ask out=12 (caps to
+    // in+6=8 against b@6) AND in=0 (extend-left, grows duration). Final clip-end
+    // must be <= b.trackOffset (6), never overlap b.
+    const comp = compWith([
+      videoClip({ id: "a", trackOffset: 0, in: 2, out: 6 }),
+      videoClip({ id: "b", trackOffset: 6, in: 0, out: 4 }),
+    ]);
+    trimClip(comp, { clipId: "a", in: 0, out: 12 });
+    const a = (comp.tracks[0].clips as Clip[]).find((x) => x.id === "a") as any;
+    expect(a.trackOffset + (a.out - a.in)).toBeLessThanOrEqual(6 + 1e-6);
+  });
+
   // ── minimum duration floors ──
   it("floors out at in + MIN_CLIP_DUR (0.05) — can't collapse to zero width", () => {
     const comp = compWith([videoClip({ id: "a", trackOffset: 0, in: 2, out: 6 })]);
@@ -159,27 +176,31 @@ describe("@shared composition ops — trimClip", () => {
     expect(times.some((t) => Math.abs(t - 4) < 1e-6)).toBe(true);
   });
 
-  it("rebases keyframes by -delta when moving in forward (.b half)", () => {
-    // clip-local window [0,6]; kf at local 1 and 5. Move in from 0 to 2
-    // (delta=2) ⇒ every kf rebases by -2; kf before 2 dropped, boundary at 0.
+  it("leaves keyframes UNTOUCHED when moving in (trackOffset is the anchor)", () => {
+    // S7 fix-up — keyframe `time` is trackOffset-relative (each renderer mounts
+    // the clip in `<Sequence from={trackOffset*fps}>` and reads useCurrentFrame;
+    // `clip.in` only feeds `<Video startFrom={in*fps}>`). trimClip keeps
+    // trackOffset FIXED and only shifts `in`, so the keyframe time ORIGIN does
+    // not move — keyframes must NOT rebase. (The old code copied the store's
+    // left-edge resize rebase, but that resize ALSO moves trackOffset by the
+    // same delta — which trimClip deliberately does not.)
+    const kfs: Keyframe[] = [
+      { property: "opacity", time: 1, value: 0.2, easing: "linear" },
+      { property: "opacity", time: 5, value: 1, easing: "linear" },
+    ];
     const comp = compWith([
       videoClip({
         id: "a",
         trackOffset: 0,
         in: 0,
         out: 6,
-        keyframes: [
-          { property: "opacity", time: 1, value: 0.2, easing: "linear" },
-          { property: "opacity", time: 5, value: 1, easing: "linear" },
-        ],
+        keyframes: kfs.map((k) => ({ ...k })),
       }),
     ]);
     trimClip(comp, { clipId: "a", in: 2 });
     const a = (comp.tracks[0].clips as Clip[])[0] as any;
-    const times = (a.keyframes as Keyframe[]).map((k) => k.time).sort((x, y) => x - y);
-    // boundary at local 0, and the local-5 kf rebased to 5-2 = 3
-    expect(times[0]).toBeCloseTo(0);
-    expect(times.some((t) => Math.abs(t - 3) < 1e-6)).toBe(true);
+    // IDENTICAL to the input — times, values, easings all preserved.
+    expect(a.keyframes).toEqual(kfs);
   });
 
   // ── illegal params → CompositionOpError{code:4} ──
