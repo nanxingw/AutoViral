@@ -21,9 +21,11 @@ import {
 import { createAsk } from "./approval-gate.js";
 import {
   readCompositionFor,
+  writeCompositionFor,
   mutateCompositionFor,
   diffCompositionFor,
 } from "./composition-ops.js";
+import type { Composition } from "../../shared/composition.js";
 import { mutateCarouselFor } from "./carousel-ops.js";
 // ADR-009 (S6) — shared composition-ops core. POST /split delegates the split
 // math + invariants to `ops.splitClip` (the SAME implementation the studio
@@ -122,6 +124,38 @@ bridgeRouter.get("/comp", async (c) => {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message }, 500);
   }
+});
+
+// S4 (US 10) — PUT /comp: the full-composition write escape hatch. Before the
+// intent-level verbs exist (or for a rich edit no single verb covers), the
+// agent composes the whole composition client-side and PUTs it here. The body
+// is a COMPLETE composition; it goes through the SAME chokepoint as every other
+// write (writeCompositionFor → zod validate → tmpfile → atomic rename), so the
+// "validate before disk touch" + "disk untouched on rejection" invariants hold.
+// On success we broadcast composition-changed (S2) so Studio refetches without
+// waiting on fs.watch. An unparseable body or an invalid composition is an
+// input error → 400 + code:4 (S3 contract) and disk is left untouched.
+bridgeRouter.put("/comp", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  let comp: unknown;
+  try {
+    comp = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: "body must be a JSON composition", code: 4 }, 400);
+  }
+  try {
+    // writeCompositionFor zod-validates BEFORE allocating a tmpfile, so an
+    // invalid composition throws here and leaves composition.yaml untouched.
+    await writeCompositionFor({ workId: g.workId }, comp as Composition);
+    // S2 (US 17) — broadcast only after the atomic write lands.
+    broadcast(g.workId, "composition-changed", { reason: "comp-put" });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // S3 (US 18/19) — a zod/shape rejection is an input error → 400 + code:4.
+    return c.json({ ok: false, error: message, code: 4 }, 400);
+  }
+  return c.json({ ok: true });
 });
 
 // Phase 5 Task 5.4 — unified diff between composition.yaml.previous (the

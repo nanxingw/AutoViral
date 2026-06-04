@@ -28,6 +28,9 @@ let nextSeq = 1;
 // S11 — capture the last PATCH /clip body so the CLI test can assert the
 // flag → nested-path mapping + value coercion that reached the bridge.
 let lastClipPatch: Record<string, unknown> | null = null;
+// S4 (US 10) — capture the last PUT /comp body so the CLI test can assert the
+// full composition the CLI read from a file / stdin reached the bridge verbatim.
+let lastCompPut: Record<string, unknown> | null = null;
 
 async function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
@@ -74,6 +77,18 @@ beforeAll(async () => {
     }
     if (req.method === "GET" && url.startsWith("/api/bridge/v1/clips")) {
       return send(200, { ok: true, result: clips });
+    }
+    // S4 (US 10) — PUT /comp. Mirrors the server contract: a parseable body with
+    // a sentinel `tracks:"reject"` simulates a zod rejection (400 + code:4 → CLI
+    // exit 4); otherwise the body is recorded + 200 {ok:true}. The server's real
+    // validate-before-disk-touch invariant lives in routes.test.ts.
+    if (req.method === "PUT" && url === "/api/bridge/v1/comp") {
+      const body = await readBody(req);
+      if (body.tracks === "reject") {
+        return send(400, { ok: false, error: "invalid composition", code: 4 });
+      }
+      lastCompPut = body;
+      return send(200, { ok: true });
     }
     // I08 — carousel write endpoints. Mirror the server's contract: POST
     // /carousel/slide returns { ok, result:{ id } }; POST
@@ -446,6 +461,90 @@ describe("autoviral CLI — end-to-end", () => {
     expect(r.stdout).toContain("+++ composition.yaml");
     expect(r.stdout).toContain("-duration: 0");
     expect(r.stdout).toContain("+duration: 5");
+  });
+
+  // S4 (US 10) — `comp put <file>` reads a whole composition from a file and
+  // PUTs it through the bridge chokepoint. The CLI must send the parsed JSON
+  // verbatim and exit 0 on the bridge's {ok:true}.
+  describe("comp put — full-composition write escape hatch", () => {
+    let tmpDir: string;
+    beforeAll(async () => {
+      const { mkdtemp } = await import("node:fs/promises");
+      const { tmpdir } = await import("node:os");
+      tmpDir = await mkdtemp(join(tmpdir(), "autoviral-comp-put-"));
+    });
+
+    it("comp put <file> → PUTs the parsed composition + exit 0", async () => {
+      const { writeFile } = await import("node:fs/promises");
+      lastCompPut = null;
+      const comp = { id: "c_e2e", workId: "w_e2e", duration: 9, tracks: [], assets: [] };
+      const file = join(tmpDir, "good.json");
+      await writeFile(file, JSON.stringify(comp), "utf8");
+      const r = await run(["comp", "put", file]);
+      expect(r.exitCode).toBe(0);
+      expect(lastCompPut).toEqual(comp);
+    });
+
+    it("comp put accepts a YAML file too (parsed → JSON on the wire)", async () => {
+      const { writeFile } = await import("node:fs/promises");
+      lastCompPut = null;
+      const file = join(tmpDir, "good.yaml");
+      await writeFile(file, "id: c_yaml\nworkId: w_e2e\nduration: 3\ntracks: []\nassets: []\n", "utf8");
+      const r = await run(["comp", "put", file]);
+      expect(r.exitCode).toBe(0);
+      expect(lastCompPut).toEqual({ id: "c_yaml", workId: "w_e2e", duration: 3, tracks: [], assets: [] });
+    });
+
+    it("comp put - reads the composition from stdin", async () => {
+      lastCompPut = null;
+      const comp = { id: "c_stdin", workId: "w_e2e", duration: 11, tracks: [], assets: [] };
+      const r = await execa("node", [BIN, "comp", "put", "-"], {
+        env: { ...process.env, AUTOVIRAL_WORK_ID: "w_e2e", AUTOVIRAL_PORT: String(port) },
+        input: JSON.stringify(comp),
+        reject: false,
+        timeout: 10_000,
+      });
+      expect(r.exitCode).toBe(0);
+      expect(lastCompPut).toEqual(comp);
+    });
+
+    it("comp put with no file argument → exit 4 (never hits bridge)", async () => {
+      lastCompPut = null;
+      const r = await run(["comp", "put"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompPut).toBeNull();
+    });
+
+    it("comp put <nonexistent-file> → exit 4 (never hits bridge)", async () => {
+      lastCompPut = null;
+      const r = await run(["comp", "put", join(tmpDir, "does-not-exist.json")]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompPut).toBeNull();
+    });
+
+    it("comp put a malformed (unparseable) file → exit 4 (never hits bridge)", async () => {
+      const { writeFile } = await import("node:fs/promises");
+      lastCompPut = null;
+      const file = join(tmpDir, "bad.json");
+      await writeFile(file, "{ this is : not valid json :::", "utf8");
+      const r = await run(["comp", "put", file]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompPut).toBeNull();
+    });
+
+    it("comp put a composition the bridge rejects (400 code:4) → exit 4", async () => {
+      const { writeFile } = await import("node:fs/promises");
+      const file = join(tmpDir, "reject.json");
+      // sentinel `tracks:"reject"` makes the mock bridge return 400 + code:4.
+      await writeFile(file, JSON.stringify({ id: "c_x", tracks: "reject" }), "utf8");
+      const r = await run(["comp", "put", file]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("--help lists comp put", async () => {
+      const r = await run(["--help"]);
+      expect(r.stdout).toMatch(/comp put/);
+    });
   });
 
   it("carousel add-slide → prints new slide id (exit 0)", async () => {

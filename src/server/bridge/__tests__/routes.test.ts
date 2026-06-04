@@ -1223,3 +1223,213 @@ describe("bridge router — H0.3 context channel", () => {
     expect((events[0] as { type: string }).type).toBe("ui-context-inject");
   });
 });
+
+// ─── S4 (US 10) — PUT /comp: the full-composition write escape hatch ─────────
+// The agent's universal write path: a complete composition body goes through
+// the SAME chokepoint as every intent verb (writeCompositionFor → zod validate
+// → tmpfile → atomic rename), then broadcasts composition-changed so Studio
+// refetches. An invalid composition is rejected with 400 + code:4 and the
+// on-disk composition.yaml is left BYTE-FOR-BYTE untouched (validation happens
+// before any tmpfile is allocated).
+describe("bridge router — S4 PUT /comp (full-composition write)", () => {
+  let workRoot: string;
+  const workId = "w_put";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+  let fixtureYaml: string;
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-put-route-"));
+    fixtureYaml = (
+      await readFile(
+        join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+        "utf8",
+      )
+    ).replace(/workId: sample-work/, `workId: ${workId}`);
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(join(workRoot, workId, "composition.yaml"), fixtureYaml, "utf8");
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  // Helper — load the current composition JSON via the GET endpoint so we can
+  // mutate it and PUT a full, valid composition back.
+  async function currentComp(): Promise<Record<string, unknown>> {
+    const res = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    return ((await res.json()) as { result: Record<string, unknown> }).result;
+  }
+
+  it("PUT /comp writes a whole valid composition and the next GET reflects it", async () => {
+    const comp = await currentComp();
+    const next = { ...comp, duration: 42 };
+    const res = await app.request("/api/bridge/v1/comp", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify(next),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean };
+    expect(body.ok).toBe(true);
+
+    const after = await currentComp();
+    expect(after.duration).toBe(42);
+  });
+
+  it("PUT /comp without the work-id header → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/comp", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ duration: 1 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("PUT /comp with an invalid composition → 400 + code 4 and disk is UNCHANGED", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    const comp = await currentComp();
+    // tracks must be an array — a string violates CompositionSchema, so zod
+    // throws in writeCompositionFor BEFORE any tmpfile is allocated.
+    const res = await app.request("/api/bridge/v1/comp", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ ...comp, tracks: "not-an-array" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    // The whole point of the chokepoint: a rejected write leaves disk untouched.
+    expect(await readFile(target, "utf8")).toBe(before);
+  });
+
+  it("PUT /comp with a non-JSON body → 400 + code 4 (never reaches the writer)", async () => {
+    const res = await app.request("/api/bridge/v1/comp", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: "this is not json",
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("PUT /comp broadcasts composition-changed after the write lands", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const comp = await currentComp();
+      const res = await app.request("/api/bridge/v1/comp", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AutoViral-Work-Id": workId,
+        },
+        body: JSON.stringify({ ...comp, duration: 7 }),
+      });
+      expect(res.status).toBe(200);
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  // A REJECTED full-comp write must NOT broadcast — disk is untouched, so a
+  // "changed" event would lie.
+  it("PUT /comp with an invalid composition does NOT broadcast composition-changed", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const comp = await currentComp();
+      const res = await app.request("/api/bridge/v1/comp", {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AutoViral-Work-Id": workId,
+        },
+        body: JSON.stringify({ ...comp, tracks: "not-an-array" }),
+      });
+      expect(res.status).toBe(400);
+      expect(events).not.toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  // S4 (adversarial-review fix) — the silent-strip vector. A typo'd TOP-LEVEL
+  // key (`tracts` for `tracks`, singular `exportPreset` …) must NOT 200 with
+  // the field silently dropped to disk: that's data loss the agent never learns
+  // about. The strict write schema rejects it → 400 + code:4, disk untouched.
+  it("PUT /comp with an unknown top-level key → 400 + code 4, disk UNCHANGED", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    const comp = await currentComp();
+    const res = await app.request("/api/bridge/v1/comp", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      // `tracts` is the canonical typo — lenient zod would silently strip it.
+      body: JSON.stringify({ ...comp, tracts: [] }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    expect(await readFile(target, "utf8")).toBe(before);
+  });
+
+  // S4 — same vector, one level deeper: a typo'd CLIP field must also fail loud
+  // rather than be stripped (parity with the S11 `clip set` whitelist).
+  it("PUT /comp with an unknown clip-level key → 400 + code 4, disk UNCHANGED", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    const comp = await currentComp();
+    const tracks = (comp.tracks as Array<Record<string, unknown>>).map((t, ti) =>
+      ti === 0
+        ? {
+            ...t,
+            clips: (t.clips as Array<Record<string, unknown>>).map((cl, ci) =>
+              ci === 0 ? { ...cl, bogusClipField: 1 } : cl,
+            ),
+          }
+        : t,
+    );
+    const res = await app.request("/api/bridge/v1/comp", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ ...comp, tracks }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    expect(await readFile(target, "utf8")).toBe(before);
+  });
+});

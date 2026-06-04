@@ -30,7 +30,7 @@ export function readContext(): BridgeContext {
 
 export async function bridgeRequest<T>(
   ctx: BridgeContext,
-  method: "GET" | "POST" | "PATCH" | "DELETE",
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
 ): Promise<T> {

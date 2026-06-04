@@ -1,4 +1,4 @@
-// `autoviral comp [show|diff]` — read-only composition introspection.
+// `autoviral comp [show|diff|put]` — composition.yaml read + full-write surface.
 //
 // `show` returns the full composition.yaml as structured data; pipe to jq
 // in agent contexts, scan as YAML in interactive ones.
@@ -8,13 +8,36 @@
 // write) and the current composition.yaml. Exits 0 with `(no changes
 // since last write)` if the two are identical; 0 with a friendly note
 // if no baseline snapshot exists yet (first write of this workspace).
+//
+// `put <file|->` (S4 / US 10) is the full-composition write escape hatch: read
+// a COMPLETE composition from a file (or stdin via `-`), parse it (YAML, which
+// is a superset of JSON, so either input format works), and PUT it through the
+// bridge chokepoint (zod validate → atomic rename + composition-changed
+// broadcast). Before the intent-level verbs exist — or for a rich edit no
+// single verb covers — this is the universal write path the agent reaches for.
 
+import { readFile } from "node:fs/promises";
+import { parse as yamlParse } from "yaml";
 import { bridgeRequest, readContext } from "../client.js";
 import { writeOut } from "../output.js";
 
 interface CompDiffResult {
   diff: string;
   hasBaseline: boolean;
+}
+
+// Read a composition source: `-` means stdin, anything else is a file path.
+// Returns the raw text; the caller parses it. A missing file / unreadable
+// stdin is an input error (exit 4) — we never round-trip a half-read body.
+async function readCompSource(source: string): Promise<string> {
+  if (source === "-") {
+    const chunks: Buffer[] = [];
+    for await (const chunk of process.stdin) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  }
+  return readFile(source, "utf8");
 }
 
 export async function compCommand(args: string[]): Promise<void> {
@@ -39,6 +62,49 @@ export async function compCommand(args: string[]): Promise<void> {
       return;
     }
     process.stdout.write(result.diff);
+    return;
+  }
+  if (sub === "put") {
+    const source = args[1];
+    if (!source) {
+      process.stderr.write("usage: autoviral comp put <file|-stdin>\n");
+      process.exit(4);
+    }
+    let raw: string;
+    try {
+      raw = await readCompSource(source);
+    } catch (err) {
+      // Missing file / unreadable stdin is an input error → exit 4, no bridge.
+      process.stderr.write(
+        `autoviral comp put: cannot read ${source === "-" ? "stdin" : source}: ${
+          (err as Error).message
+        }\n`,
+      );
+      process.exit(4);
+    }
+    let comp: unknown;
+    try {
+      // yaml.parse handles both YAML and JSON (JSON is a YAML subset), so the
+      // agent can pipe either format. A parse failure is an input error.
+      comp = yamlParse(raw);
+    } catch (err) {
+      process.stderr.write(
+        `autoviral comp put: ${source === "-" ? "stdin" : source} is not valid YAML/JSON: ${
+          (err as Error).message
+        }\n`,
+      );
+      process.exit(4);
+    }
+    if (comp === null || typeof comp !== "object") {
+      process.stderr.write(
+        `autoviral comp put: ${source === "-" ? "stdin" : source} did not parse to a composition object\n`,
+      );
+      process.exit(4);
+    }
+    const ctx = readContext();
+    // The bridge re-validates against CompositionSchema; an invalid composition
+    // 400s with code:4 → bridgeRequest exits 4 (and disk is left untouched).
+    await bridgeRequest(ctx, "PUT", "/comp", comp);
     return;
   }
   process.stderr.write(`autoviral comp: unknown subcommand "${sub}"\n`);

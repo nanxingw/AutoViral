@@ -41,7 +41,20 @@ autoviral comp show                  # YAML if interactive, JSON if piped
 autoviral comp show | jq '.tracks[0].clips[].id'
 ```
 
-`autoviral comp diff` is reserved for a future phase; currently exits 4 with a clear message.
+### `autoviral comp diff`
+
+Print the unified diff between `composition.yaml.previous` (the snapshot taken just before the most recent write) and the current `composition.yaml`. Exits 0; prints `(no changes since last write)` when they match, or a friendly note when no baseline snapshot exists yet (first write of this workspace).
+
+### `autoviral comp put <file|->`
+
+The full-composition write escape hatch: read a COMPLETE composition from a file (or stdin via `-`), then PUT it through the bridge so it lands atomically (zod-validate → tmpfile → rename) and broadcasts `composition-changed` so the Studio refetches. Reach for this when no single intent verb covers the edit, or when you've composed the whole composition client-side.
+
+```bash
+autoviral comp show | jq '.duration = 30' | autoviral comp put -   # edit + write back
+autoviral comp put ./my-composition.yaml                            # write a file
+```
+
+**Unknown keys are REJECTED, not silently dropped.** The write path validates against a *strict* schema: a misspelled top-level key (`tracts` for `tracks`, singular `exportPreset`) or a misspelled clip field fails loud with HTTP 400 + exit 4 and the zod issue path, and the on-disk file is left untouched. This is deliberate — a silent strip would lose the field you meant to write with no feedback. Round-tripping a `comp show` body is always safe (it only contains known keys).
 
 ### `autoviral list clips [--track <kind>]`
 

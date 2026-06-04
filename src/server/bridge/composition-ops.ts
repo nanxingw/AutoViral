@@ -26,6 +26,7 @@ import { join, dirname } from "node:path";
 import yaml from "js-yaml";
 import {
   CompositionSchema,
+  CompositionWriteSchema,
   migrateLegacyTrackIds,
   type Composition,
 } from "../../shared/composition.js";
@@ -87,7 +88,15 @@ export async function writeCompositionFor(
   // Validate via schema before writing — zod throws on shape mismatch.
   // We intentionally do this BEFORE allocating tmpfile so an invalid
   // composition leaves zero filesystem traces.
-  const validated = CompositionSchema.parse(comp);
+  //
+  // S4 — use the STRICT write schema (not the lenient read schema). The read
+  // schema silently STRIPS unknown / misspelled keys; on the write path that's
+  // silent data loss: an agent's typo'd top-level key (`tracts`,
+  // `exportPreset`) or clip field would be dropped to disk with a 200 and no
+  // feedback. CompositionWriteSchema rejects unknown keys at the composition,
+  // track, AND clip-union levels so the mistake fails loud (the route turns the
+  // throw into 400 + code:4) and disk is left untouched.
+  const validated = CompositionWriteSchema.parse(comp);
   const target = compositionPathFor(ctx);
   await mkdir(dirname(target), { recursive: true });
 

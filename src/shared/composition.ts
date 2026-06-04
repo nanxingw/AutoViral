@@ -279,75 +279,87 @@ export const TransitionSchema = z.object({
 });
 export type Transition = z.infer<typeof TransitionSchema>;
 
-export const TrackSchema = z
-  .object({
-    id: z.string().regex(TRACK_ID_PREFIX_REGEX, {
-      message: "Track id must start with 'trk_' (Phase D — issue #31)",
-    }),
-    kind: z.enum(["video", "audio", "text", "overlay"]),
-    label: z.string(),
-    displayOrder: z.number().int().nonnegative(),
-    language: z.string().optional(),
-    muted: z.boolean().default(false),
-    hidden: z.boolean().default(false),
-    // Phase G (issue #34) — per-track mix gain in dB. 0 = unity (default).
-    // Semantically only consumed when `kind === "audio"` —
-    // `compositionToMixTracks` adds this on top of each clip's linear volume.
-    // We don't gate the field on the discriminator at the schema layer because
-    // `TrackSchema` is a single object (not a discriminated union over kind);
-    // a default of 0 on text/video/overlay tracks is a safe no-op. The store
-    // action `setTrackVolume` (issue #32) is the canonical writer.
-    volume: z.number().default(0),
-    clips: z.array(
-      z.discriminatedUnion("kind", [
-        VideoClipObjectSchema,
-        AudioClipObjectSchema,
-        TextClipSchema,
-        OverlayClipObjectSchema,
-      ]),
-    ),
-    // #54 Phase 1 — transitions at cut points (only meaningful on video
-    // tracks for Phase 1; defaulting to [] on non-video is a safe no-op,
-    // mirroring the `volume` field's discriminator-free shape).
-    transitions: z.array(TransitionSchema).default([]),
-  })
-  .superRefine((track, ctx) => {
-    track.clips.forEach((clip, ci) => {
-      if (clip.kind === "text") return;
-      const kfs = (clip as { keyframes?: { property: string; value: number }[] })
-        .keyframes;
-      if (!kfs) return;
-      kfs.forEach((kf, ki) => {
-        if (kf.property !== "speed") return;
-        if (kf.value < SPEED_MIN || kf.value > SPEED_MAX) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["clips", ci, "keyframes", ki, "value"],
-            message: `speed keyframe value ${kf.value} out of range [${SPEED_MIN}, ${SPEED_MAX}]`,
-          });
-        }
-      });
-    });
-    // #54 — every transition must pin to a real clip on the same track and the
-    // afterClipId must NOT be the last clip (a transition needs a successor).
-    const ids = new Set(track.clips.map((c) => c.id));
-    const lastId = track.clips[track.clips.length - 1]?.id;
-    (track.transitions ?? []).forEach((tr, ti) => {
-      if (!ids.has(tr.afterClipId)) {
+// Shared track-level refinement (speed-keyframe range + transition integrity).
+// Extracted so both the non-strict TrackSchema (read path) and the strict
+// write-schema variant (S4 — StrictTrackSchema) apply the SAME invariants; a
+// future drift between read and write validation would be a silent correctness
+// hole, so there is exactly one implementation.
+function refineTrack(
+  track: {
+    clips: { kind: string; id: string; keyframes?: { property: string; value: number }[] }[];
+    transitions?: { afterClipId: string }[];
+  },
+  ctx: z.RefinementCtx,
+): void {
+  track.clips.forEach((clip, ci) => {
+    if (clip.kind === "text") return;
+    const kfs = clip.keyframes;
+    if (!kfs) return;
+    kfs.forEach((kf, ki) => {
+      if (kf.property !== "speed") return;
+      if (kf.value < SPEED_MIN || kf.value > SPEED_MAX) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ["transitions", ti, "afterClipId"],
-          message: `transition.afterClipId '${tr.afterClipId}' does not match any clip in this track`,
-        });
-      } else if (tr.afterClipId === lastId) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: ["transitions", ti, "afterClipId"],
-          message: `transition pinned to the last clip has no successor to fade into`,
+          path: ["clips", ci, "keyframes", ki, "value"],
+          message: `speed keyframe value ${kf.value} out of range [${SPEED_MIN}, ${SPEED_MAX}]`,
         });
       }
     });
   });
+  // #54 — every transition must pin to a real clip on the same track and the
+  // afterClipId must NOT be the last clip (a transition needs a successor).
+  const ids = new Set(track.clips.map((c) => c.id));
+  const lastId = track.clips[track.clips.length - 1]?.id;
+  (track.transitions ?? []).forEach((tr, ti) => {
+    if (!ids.has(tr.afterClipId)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["transitions", ti, "afterClipId"],
+        message: `transition.afterClipId '${tr.afterClipId}' does not match any clip in this track`,
+      });
+    } else if (tr.afterClipId === lastId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["transitions", ti, "afterClipId"],
+        message: `transition pinned to the last clip has no successor to fade into`,
+      });
+    }
+  });
+}
+
+const TrackObjectSchema = z.object({
+  id: z.string().regex(TRACK_ID_PREFIX_REGEX, {
+    message: "Track id must start with 'trk_' (Phase D — issue #31)",
+  }),
+  kind: z.enum(["video", "audio", "text", "overlay"]),
+  label: z.string(),
+  displayOrder: z.number().int().nonnegative(),
+  language: z.string().optional(),
+  muted: z.boolean().default(false),
+  hidden: z.boolean().default(false),
+  // Phase G (issue #34) — per-track mix gain in dB. 0 = unity (default).
+  // Semantically only consumed when `kind === "audio"` —
+  // `compositionToMixTracks` adds this on top of each clip's linear volume.
+  // We don't gate the field on the discriminator at the schema layer because
+  // `TrackSchema` is a single object (not a discriminated union over kind);
+  // a default of 0 on text/video/overlay tracks is a safe no-op. The store
+  // action `setTrackVolume` (issue #32) is the canonical writer.
+  volume: z.number().default(0),
+  clips: z.array(
+    z.discriminatedUnion("kind", [
+      VideoClipObjectSchema,
+      AudioClipObjectSchema,
+      TextClipSchema,
+      OverlayClipObjectSchema,
+    ]),
+  ),
+  // #54 Phase 1 — transitions at cut points (only meaningful on video
+  // tracks for Phase 1; defaulting to [] on non-video is a safe no-op,
+  // mirroring the `volume` field's discriminator-free shape).
+  transitions: z.array(TransitionSchema).default([]),
+});
+
+export const TrackSchema = TrackObjectSchema.superRefine(refineTrack);
 export type Track = z.infer<typeof TrackSchema>;
 
 // ─── Scenes ─────────────────────────────────────────────────────────────────
@@ -601,6 +613,49 @@ export const CompositionSchema = z.object({
   variables: z.array(VariableDeclarationSchema).optional(),
 });
 export type Composition = z.infer<typeof CompositionSchema>;
+
+// ─── S4 — strict write schema (reject unknown keys on the write path) ─────────
+// CompositionSchema (and every clip / track sub-schema) is a NON-strict
+// z.object, so zod SILENTLY STRIPS any unknown / misspelled key rather than
+// rejecting it. That's fine on the READ path (forward-compat: an old reader
+// tolerates a field a newer writer added). But on the WRITE path it is the
+// exact silent-data-loss vector S11 closed for `clip set`: an agent that PUTs a
+// full composition with a typo'd top-level key (`tracts`, singular
+// `exportPreset`) or a typo'd clip field gets a 200 while the field is dropped
+// to disk — no '未知 key' feedback, and the agent's intended write is lost.
+//
+// CompositionWriteSchema is the strict mirror used by writeCompositionFor. It is
+// built by `.strict()`-ing the composition, every track, and every clip-union
+// member so a misspelled key at ANY of those levels fails loud (zod
+// `unrecognized_keys`) → the route turns that into 400 + code:4 and the agent
+// learns which key it got wrong. The nested defaults (transforms / filters /
+// style / position …) still fill exactly as before — `.strict()` only forbids
+// EXTRA keys, it does not change required/default behaviour — so a comp that
+// round-trips GET → PUT (defaults already materialised) passes unchanged.
+const StrictVideoClipObjectSchema = VideoClipObjectSchema.strict();
+const StrictAudioClipObjectSchema = AudioClipObjectSchema.strict();
+const StrictTextClipSchema = TextClipSchema.strict();
+const StrictOverlayClipObjectSchema = OverlayClipObjectSchema.strict();
+
+// Strict track: same fields + same refinement as TrackSchema, but `.strict()`
+// so a misspelled track-level OR clip-level key is rejected, not stripped.
+const StrictTrackSchema = TrackObjectSchema.extend({
+  clips: z.array(
+    z.discriminatedUnion("kind", [
+      StrictVideoClipObjectSchema,
+      StrictAudioClipObjectSchema,
+      StrictTextClipSchema,
+      StrictOverlayClipObjectSchema,
+    ]),
+  ),
+})
+  .strict()
+  .superRefine(refineTrack);
+
+export const CompositionWriteSchema = CompositionSchema.extend({
+  tracks: z.array(StrictTrackSchema),
+}).strict();
+export type CompositionWrite = z.infer<typeof CompositionWriteSchema>;
 
 const ASPECT_DIMS: Record<Aspect, [number, number]> = {
   "9:16": [1080, 1920],

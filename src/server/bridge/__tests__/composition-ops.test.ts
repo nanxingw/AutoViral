@@ -83,6 +83,48 @@ describe("writeCompositionFor — atomic + validated", () => {
     expect(after).toBe(before);
   });
 
+  // S4 — the write path must REJECT unknown keys, not silently strip them.
+  // CompositionSchema (read path) is a lenient z.object: a typo'd top-level key
+  // (`tracts`) or a typo'd clip field would be dropped to disk with no feedback
+  // = silent data loss. writeCompositionFor now validates via the STRICT
+  // CompositionWriteSchema so the mistake fails loud and disk is untouched.
+  it("rejects an unknown TOP-LEVEL key (typo) WITHOUT touching disk", async () => {
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    const valid = await readCompositionFor({ workId, worksRoot: workRoot });
+    // `tracts` is the classic typo for `tracks`; the lenient schema would have
+    // silently stripped it (200, but the field never lands).
+    const typo = { ...valid, tracts: [] } as any;
+    await expect(
+      writeCompositionFor({ workId, worksRoot: workRoot }, typo),
+    ).rejects.toThrow();
+    expect(await readFile(target, "utf8")).toBe(before);
+  });
+
+  it("rejects an unknown CLIP-LEVEL key (typo) WITHOUT touching disk", async () => {
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    const valid = await readCompositionFor({ workId, worksRoot: workRoot });
+    // Inject a bogus field on the first clip of the first track — the exact
+    // silent-strip vector S11 closed for `clip set`, now closed for whole-comp
+    // writes too.
+    const tracks = valid.tracks.map((t, ti) =>
+      ti === 0
+        ? {
+            ...t,
+            clips: t.clips.map((cl, ci) =>
+              ci === 0 ? { ...cl, bogusClipField: 1 } : cl,
+            ),
+          }
+        : t,
+    );
+    const tampered = { ...valid, tracks } as any;
+    await expect(
+      writeCompositionFor({ workId, worksRoot: workRoot }, tampered),
+    ).rejects.toThrow();
+    expect(await readFile(target, "utf8")).toBe(before);
+  });
+
   it("mutateCompositionFor applies the mutator and re-reads the result", async () => {
     const next = await mutateCompositionFor(
       { workId, worksRoot: workRoot },
