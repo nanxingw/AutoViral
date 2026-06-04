@@ -1,10 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import {
   timeWarpVideoFilterChain,
   timeWarpAudioFilterChain,
   timeWarpCacheName,
   buildTimeWarpFilterArgs,
+  applyTimeWarpPrePass,
 } from "../transforms-ffmpeg.js";
+import { CompositionSchema } from "../../shared/composition.js";
+import type { Composition } from "../../shared/composition.js";
 
 // S19 (US 29/30) — reverse + freeze FFMPEG EXPORT CONSUMPTION proof. reverse /
 // freezeAtSec are NOT dead schema fields (the LUT-slider lesson): this asserts
@@ -29,6 +32,26 @@ describe("timeWarpVideoFilterChain (S19 reverse + freeze video consumption)", ()
   it("reverse:true → video filtergraph contains 'reverse'", () => {
     const chain = timeWarpVideoFilterChain({ reverse: true }, FPS, OUT_SEC);
     expect(chain).toContain("reverse");
+  });
+
+  it("reverse on a TRIMMED clip (in>0) → trims [in,out] FIRST, THEN reverses that span (not the whole source)", () => {
+    // Review-fix high: a reversed clip whose [in,out] is a sub-region of the
+    // source MUST trim to [in,out] BEFORE `reverse`, otherwise ffmpeg reverses
+    // the whole source and Remotion plays its TAIL, not the user-selected span.
+    const chain = timeWarpVideoFilterChain(
+      { reverse: true, inSec: 2, outSec: 7 },
+      FPS,
+      OUT_SEC,
+    );
+    // the trim must bracket exactly the user-selected [in,out] span...
+    expect(chain).toContain("trim=start=2:end=7");
+    // ...reset PTS so the reversed segment starts at 0...
+    expect(chain).toContain("setpts=PTS-STARTPTS");
+    // ...and reverse must come AFTER the trim (reverse the SPAN, not the source).
+    const trimIdx = chain.indexOf("trim=start=2:end=7");
+    const reverseIdx = chain.indexOf("reverse");
+    expect(trimIdx).toBeGreaterThanOrEqual(0);
+    expect(reverseIdx).toBeGreaterThan(trimIdx);
   });
 
   it("freezeAtSec → freezes ONE source frame and holds it (trim+tpad), no 'reverse'", () => {
@@ -56,7 +79,22 @@ describe("timeWarpAudioFilterChain (S19 reverse audio consumption)", () => {
   });
 
   it("reverse:true → audio filtergraph contains 'areverse' (audio played backwards)", () => {
-    expect(timeWarpAudioFilterChain({ reverse: true })).toBe("areverse");
+    expect(timeWarpAudioFilterChain({ reverse: true })).toContain("areverse");
+  });
+
+  it("reverse on a TRIMMED clip (in>0) → atrims [in,out] FIRST, THEN areverses that span", () => {
+    // Audio must trim the SAME [in,out] span as the video before areversing,
+    // otherwise the reversed audio is offset from the reversed video.
+    const chain = timeWarpAudioFilterChain({
+      reverse: true,
+      inSec: 2,
+      outSec: 7,
+    });
+    expect(chain).toContain("atrim=start=2:end=7");
+    expect(chain).toContain("asetpts=PTS-STARTPTS");
+    const trimIdx = chain.indexOf("atrim=start=2:end=7");
+    const reverseIdx = chain.indexOf("areverse");
+    expect(reverseIdx).toBeGreaterThan(trimIdx);
   });
 
   it("freeze → audio silenced/dropped (a still has no audio) → empty chain", () => {
@@ -74,6 +112,82 @@ describe("timeWarpCacheName (S19 — params hashed so a changed warp re-renders)
     expect(a).toBe(b);
     expect(a).not.toBe(c);
     expect(a).toMatch(/^clip-c1-timewarp-[0-9a-f]+\.mp4$/);
+  });
+});
+
+describe("applyTimeWarpPrePass (S19 — prepass feeds the CLIP SPAN to ffmpeg, not the source tail)", () => {
+  // The renderer-consumption proof at the prepass boundary: a TRIMMED reversed
+  // clip (in=2, out=7) must produce a vChain that trims [2,7] BEFORE reverse and
+  // an aChain that atrims [2,7] before areverse — so the cached MP4 holds the
+  // user-selected span reversed, NOT the source's last (out-in) seconds. The
+  // pre-fix bug returned bare `reverse` (whole source) → Remotion then played the
+  // source tail (in:0/out:5 of a fully-reversed file = source[D, D-5]).
+  function reversedTrimmedComp(): Composition {
+    return CompositionSchema.parse({
+      id: "comp1",
+      workId: "w1",
+      fps: 30,
+      width: 1080,
+      height: 1920,
+      duration: 5,
+      aspect: "9:16",
+      updatedAt: "2026-06-05T00:00:00.000Z",
+      tracks: [
+        {
+          id: "trk_v1",
+          kind: "video",
+          label: "Video",
+          displayOrder: 0,
+          clips: [
+            {
+              id: "v1",
+              kind: "video",
+              src: "assets/clip.mp4",
+              in: 2,
+              out: 7,
+              trackOffset: 0,
+              transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+              filters: { brightness: 0, contrast: 0, saturation: 0 },
+              reverse: true,
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  it("reversed TRIMMED clip → ffmpeg gets a vChain trimming [in,out] then reversing (NOT the source tail)", async () => {
+    const runWarp = vi.fn<
+      (
+        input: string,
+        output: string,
+        vChain: string,
+        aChain: string,
+        signal?: AbortSignal,
+      ) => Promise<void>
+    >(async () => {});
+    const out = await applyTimeWarpPrePass(
+      reversedTrimmedComp(),
+      "/work",
+      undefined,
+      runWarp,
+    );
+    expect(runWarp).toHaveBeenCalledTimes(1);
+    const [, , vChain, aChain] = runWarp.mock.calls[0]!;
+    // video: trim the SOURCE to [2,7] FIRST, then reverse that span.
+    expect(vChain).toContain("trim=start=2:end=7");
+    expect(vChain.indexOf("reverse")).toBeGreaterThan(
+      vChain.indexOf("trim=start=2:end=7"),
+    );
+    // audio: atrim the same span, then areverse.
+    expect(aChain).toContain("atrim=start=2:end=7");
+    expect(aChain.indexOf("areverse")).toBeGreaterThan(
+      aChain.indexOf("atrim=start=2:end=7"),
+    );
+    // the rewritten clip plays the (out-in)=5s cache straight from 0.
+    const clip = (out.tracks[0]!.clips[0]! as { in: number; out: number });
+    expect(clip.in).toBe(0);
+    expect(clip.out).toBe(5);
   });
 });
 

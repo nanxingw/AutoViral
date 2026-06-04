@@ -90,7 +90,9 @@ export function transformsToFilterChain(
 export interface TimeWarp {
   reverse?: boolean;
   freezeAtSec?: number;
-  /** clip play length on the timeline (out - in), so freeze can pad to it. */
+  /** clip play in-point in the SOURCE (seconds), so reverse trims to [in,out]. */
+  inSec?: number;
+  /** clip play out-point in the SOURCE (seconds); also the freeze pad length. */
   outSec?: number;
 }
 
@@ -98,7 +100,14 @@ export interface TimeWarp {
  * Build the ffmpeg VIDEO `-vf` chain for a clip's time-warp.
  *   - freeze (precedence) → `trim=start=F,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=D`
  *       grab the single frame at F and clone-hold it for the clip's duration D.
- *   - reverse → `reverse` (whole clip backwards).
+ *   - reverse → `trim=start=IN:end=OUT,setpts=PTS-STARTPTS,reverse`
+ *       trim to the user-selected [in,out] SPAN of the source FIRST, reset PTS,
+ *       THEN reverse — so the reversed material is the clip's own span, not the
+ *       whole source's tail (review-fix high: bare `reverse` reversed the entire
+ *       source MP4, and applyTimeWarpPrePass then rewrote the clip to in:0/
+ *       out:outSec, so Remotion played the source's LAST outSec reversed — the
+ *       wrong footage for any trimmed clip). When inSec/outSec are absent
+ *       (whole-source reverse) it degrades to bare `reverse`.
  *   - neither → "" (no-op).
  * Freeze takes precedence over reverse (a held still has no direction).
  */
@@ -117,19 +126,44 @@ export function timeWarpVideoFilterChain(
       `tpad=stop_mode=clone:stop_duration=${dur}`
     );
   }
-  if (w.reverse) return "reverse";
+  if (w.reverse) {
+    // Trim the source to the clip's [in,out] span BEFORE reversing so we reverse
+    // the user-selected material, not the whole source. inSec/outSec are absolute
+    // source seconds (NOT the timeline length); fall back to bare `reverse` only
+    // when the span isn't known (whole-source reverse).
+    if (w.inSec != null && w.outSec != null) {
+      return (
+        `trim=start=${w.inSec}:end=${w.outSec},` +
+        `setpts=PTS-STARTPTS,` +
+        `reverse`
+      );
+    }
+    return "reverse";
+  }
   return "";
 }
 
 /**
  * Build the ffmpeg AUDIO `-af` chain for a clip's time-warp.
- *   - reverse → `areverse` (audio played backwards, in lock-step with video).
+ *   - reverse → `atrim=start=IN:end=OUT,asetpts=PTS-STARTPTS,areverse` (audio
+ *       played backwards, trimmed to the SAME [in,out] span as the video so the
+ *       reversed audio stays in lock-step; degrades to bare `areverse` when the
+ *       span isn't known).
  *   - freeze → "" (a held still has no moving audio; the pass silences it -an).
  *   - neither → "".
  */
 export function timeWarpAudioFilterChain(w: TimeWarp): string {
   if (w.freezeAtSec != null) return "";
-  if (w.reverse) return "areverse";
+  if (w.reverse) {
+    if (w.inSec != null && w.outSec != null) {
+      return (
+        `atrim=start=${w.inSec}:end=${w.outSec},` +
+        `asetpts=PTS-STARTPTS,` +
+        `areverse`
+      );
+    }
+    return "areverse";
+  }
   return "";
 }
 
@@ -142,6 +176,11 @@ export function timeWarpCacheName(clipId: string, w: TimeWarp): string {
   const sig = JSON.stringify({
     reverse: !!w.reverse,
     freezeAtSec: w.freezeAtSec ?? null,
+    // inSec is part of the signature: two reversed clips with the same play
+    // length but different source in-points reverse DIFFERENT spans, so they
+    // must NOT share a cache file (review-fix high — the bug that bare-reverse
+    // masked by reversing the whole source regardless of in).
+    inSec: w.inSec ?? null,
     outSec: w.outSec ?? null,
   });
   const hash = createHash("sha1").update(sig).digest("hex").slice(0, 10);
@@ -463,6 +502,16 @@ export async function applyTimeWarpPrePass(
   comp: Composition,
   workDir: string,
   signal?: AbortSignal,
+  // `runWarp` is injectable so tests can assert the EXACT vChain/aChain the
+  // prepass feeds ffmpeg (proving reverse trims [in,out], not the source tail)
+  // without a real ffmpeg on the host; production passes the default.
+  runWarp: (
+    input: string,
+    output: string,
+    vChain: string,
+    aChain: string,
+    signal?: AbortSignal,
+  ) => Promise<void> = runTimeWarpPass,
 ): Promise<Composition> {
   const newTracks: Track[] = await Promise.all(
     comp.tracks.map(async (track) => {
@@ -474,23 +523,31 @@ export async function applyTimeWarpPrePass(
           const hasFreeze = c.freezeAtSec != null;
           const hasReverse = !!c.reverse;
           if (!hasFreeze && !hasReverse) return c; // no warp → no-op
-          const outSec = Math.max(0, c.out - c.in);
+          const playLen = Math.max(0, c.out - c.in);
+          // For REVERSE we trim the SOURCE to [c.in, c.out] before reversing, so
+          // the warp object carries the absolute source in/out (NOT the timeline
+          // length). For FREEZE the pad length is the same play length; we pass it
+          // as outSec and the video-chain branch reads freezeAtSec instead.
           const warp: TimeWarp = {
             reverse: c.reverse,
             freezeAtSec: c.freezeAtSec,
-            outSec,
+            inSec: c.reverse ? c.in : undefined,
+            outSec: c.reverse ? c.out : playLen,
           };
-          const vChain = timeWarpVideoFilterChain(warp, comp.fps, outSec);
+          const vChain = timeWarpVideoFilterChain(warp, comp.fps, playLen);
           const aChain = timeWarpAudioFilterChain(warp);
           if (vChain === "") return c; // defensive (shouldn't happen given guards)
           const cachePath = join(workDir, timeWarpCacheName(c.id, warp));
-          // The warp bakes the whole in..out span into the cached MP4, so the
-          // rewritten clip plays it straight (in=0, the consumed fields gone).
+          // The warp bakes the clip's [in,out] span into the cached MP4 (reverse
+          // trims to [in,out] before reversing; freeze holds the freezeAtSec frame
+          // for the play length), so the cache is exactly `playLen` long and starts
+          // at 0 — the rewritten clip plays it straight (in=0, out=playLen, the
+          // consumed warp fields gone so Remotion doesn't re-apply them).
           const consumed: VideoClip = {
             ...c,
             src: cachePath,
             in: 0,
-            out: outSec,
+            out: playLen,
             reverse: undefined,
             freezeAtSec: undefined,
           };
@@ -500,7 +557,7 @@ export async function applyTimeWarpPrePass(
           } catch {
             /* miss — fall through to ffmpeg */
           }
-          await runTimeWarpPass(c.src, cachePath, vChain, aChain, signal);
+          await runWarp(c.src, cachePath, vChain, aChain, signal);
           return consumed;
         }),
       );
