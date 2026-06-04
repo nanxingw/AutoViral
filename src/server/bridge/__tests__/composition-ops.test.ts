@@ -12,6 +12,7 @@ import {
   readCompositionFor,
   writeCompositionFor,
   mutateCompositionFor,
+  dryRunMutate,
   diffCompositionFor,
   unifiedDiff,
   compositionPreviousPathFor,
@@ -197,6 +198,46 @@ describe("writeCompositionFor — atomic + validated", () => {
     expect(next.duration).toBe(123);
     // And the write genuinely landed on disk.
     expect(await readFile(target, "utf8")).toContain("duration: 123");
+  });
+
+  // S13 (US 11/12) — dry-run preview. The write chokepoint runs the mutator +
+  // validates + preflights but MUST NOT write disk or fire onCommitted.
+  it("dryRunMutate runs the mutator + preflight WITHOUT writing disk or broadcasting", async () => {
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    let broadcastCalled = false;
+    const result = await dryRunMutate(
+      { workId, worksRoot: workRoot },
+      (comp) => ({ ...comp, duration: 555 }),
+      () => {
+        broadcastCalled = true;
+      },
+    );
+    // Verdict reflects the (valid) preview.
+    expect(result.ok).toBe(true);
+    expect(result.errors).toEqual([]);
+    // No broadcast fired.
+    expect(broadcastCalled).toBe(false);
+    // Disk byte-for-byte unchanged (no write, no .previous snapshot churn).
+    expect(await readFile(target, "utf8")).toBe(before);
+  });
+
+  it("dryRunMutate reports schema errors WITHOUT throwing and WITHOUT touching disk", async () => {
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    let broadcastCalled = false;
+    const result = await dryRunMutate(
+      { workId, worksRoot: workRoot },
+      // Drop required fields → CompositionSchema rejects.
+      () => ({ foo: "bar" }) as any,
+      () => {
+        broadcastCalled = true;
+      },
+    );
+    expect(result.ok).toBe(false);
+    expect(result.errors.length).toBeGreaterThan(0);
+    expect(broadcastCalled).toBe(false);
+    expect(await readFile(target, "utf8")).toBe(before);
   });
 
   // Phase 5 Task 5.4 — composition.yaml.previous + diffCompositionFor

@@ -23,9 +23,11 @@ import {
   readCompositionFor,
   writeCompositionFor,
   mutateCompositionFor,
+  dryRunMutate,
   diffCompositionFor,
 } from "./composition-ops.js";
 import type { Composition } from "../../shared/composition.js";
+import { preflight } from "../../shared/composition/preflight.js";
 import { mutateCarouselFor } from "./carousel-ops.js";
 // ADR-009 (S6) — shared composition-ops core. POST /split delegates the split
 // math + invariants to `ops.splitClip` (the SAME implementation the studio
@@ -96,6 +98,15 @@ function workIdOrError(c: Context):
   return { ok: true, workId };
 }
 
+// S13 (US 11/12) — `?dry-run` opts a write into preview mode. Accept the common
+// truthy spellings (`?dry-run`, `?dry-run=true`, `?dry-run=1`); a bare flag with
+// no value (`?dry-run`) reads as "" which we also treat as on.
+function isDryRun(c: Context): boolean {
+  const v = c.req.query("dry-run");
+  if (v === undefined) return false;
+  return v === "" || v === "true" || v === "1";
+}
+
 bridgeRouter.get("/whoami", (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
@@ -144,6 +155,22 @@ bridgeRouter.put("/comp", async (c) => {
   } catch {
     return c.json({ ok: false, error: "body must be a JSON composition", code: 4 }, 400);
   }
+  // S13 (US 11/12) — `?dry-run=true` previews the write WITHOUT touching disk
+  // and WITHOUT broadcasting composition-changed. The mutator here is the
+  // identity (the body IS the candidate), so we route it through the SAME
+  // chokepoint preview (dryRunMutate) every verb uses and return the
+  // {ok,errors,warnings} verdict. The request itself succeeds (200) even when
+  // the candidate is invalid — the verdict carries the "not ok".
+  if (isDryRun(c)) {
+    try {
+      const verdict = await dryRunMutate({ workId: g.workId }, () => comp as Composition);
+      return c.json({ ok: true, result: verdict });
+    } catch (err) {
+      // A read failure (missing work) is a genuine request error, not a verdict.
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ ok: false, error: message, code: 4 }, 400);
+    }
+  }
   try {
     // writeCompositionFor zod-validates BEFORE allocating a tmpfile, so an
     // invalid composition throws here and leaves composition.yaml untouched.
@@ -156,6 +183,30 @@ bridgeRouter.put("/comp", async (c) => {
     return c.json({ ok: false, error: message, code: 4 }, 400);
   }
   return c.json({ ok: true });
+});
+
+// S13 (US 11/12) — POST /comp/validate: PREFLIGHT a candidate composition
+// without writing it. The body is a COMPLETE candidate composition (any shape —
+// the whole point is to tell the agent how far off it is). Runs the PURE
+// `preflight` validator (CompositionSchema.safeParse for errors + IO-free lint
+// rules for warnings) and returns {ok,errors,warnings}. NEVER touches disk,
+// NEVER broadcasts. This kills the expensive "PUT → 400 → read zod dump → guess"
+// loop: the agent validates first and fixes problems before committing.
+//
+// Like dry-run, an INVALID candidate is still a successful REQUEST (200) — the
+// "not ok" lives in result.ok, not the HTTP status. Only a missing/unparseable
+// BODY is a 400 + code:4 (the agent never even submitted a candidate to check).
+bridgeRouter.post("/comp/validate", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  let candidate: unknown;
+  try {
+    candidate = await c.req.json();
+  } catch {
+    return c.json({ ok: false, error: "body must be a JSON composition", code: 4 }, 400);
+  }
+  const verdict = preflight(candidate);
+  return c.json({ ok: true, result: verdict });
 });
 
 // Phase 5 Task 5.4 — unified diff between composition.yaml.previous (the

@@ -37,6 +37,9 @@ let lastTrackAdd: Record<string, unknown> | null = null;
 // S4 (US 10) — capture the last PUT /comp body so the CLI test can assert the
 // full composition the CLI read from a file / stdin reached the bridge verbatim.
 let lastCompPut: Record<string, unknown> | null = null;
+// S13 (US 11/12) — capture the last POST /comp/validate body so the CLI test
+// can assert the candidate the CLI read from a file / stdin reached the bridge.
+let lastCompValidate: Record<string, unknown> | null = null;
 
 async function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
@@ -95,6 +98,27 @@ beforeAll(async () => {
       }
       lastCompPut = body;
       return send(200, { ok: true });
+    }
+    // S13 (US 11/12) — POST /comp/validate. Mirrors the server contract: ALWAYS
+    // 200 with a {ok,errors,warnings} verdict (an invalid candidate is a "not
+    // ok" VERDICT, not an HTTP error). Sentinels: tracks:"reject" → errors;
+    // tracks:"warn" → a warning while staying ok. Anything else → clean.
+    if (req.method === "POST" && url === "/api/bridge/v1/comp/validate") {
+      lastCompValidate = await readBody(req);
+      const t = (lastCompValidate as { tracks?: unknown }).tracks;
+      if (t === "reject") {
+        return send(200, {
+          ok: true,
+          result: { ok: false, errors: ["tracks: expected array"], warnings: [] },
+        });
+      }
+      if (t === "warn") {
+        return send(200, {
+          ok: true,
+          result: { ok: true, errors: [], warnings: ['clip "a" overlaps "b"'] },
+        });
+      }
+      return send(200, { ok: true, result: { ok: true, errors: [], warnings: [] } });
     }
     // I08 — carousel write endpoints. Mirror the server's contract: POST
     // /carousel/slide returns { ok, result:{ id } }; POST
@@ -973,6 +997,85 @@ describe("autoviral CLI — end-to-end", () => {
     it("--help lists comp put", async () => {
       const r = await run(["--help"]);
       expect(r.stdout).toMatch(/comp put/);
+    });
+  });
+
+  // S13 (US 11/12) — `comp validate <file|->` PREFLIGHTS a candidate composition
+  // without writing it: the CLI POSTs the parsed candidate to /comp/validate and
+  // renders the {ok,errors,warnings} verdict. Exit 0 when ok (warnings don't
+  // fail); exit 4 when the candidate has blocking errors.
+  describe("comp validate — write-free preflight", () => {
+    let tmpDir: string;
+    beforeAll(async () => {
+      const { mkdtemp } = await import("node:fs/promises");
+      const { tmpdir } = await import("node:os");
+      tmpDir = await mkdtemp(join(tmpdir(), "autoviral-comp-validate-"));
+    });
+
+    it("comp validate <file> on a clean candidate → exit 0 + prints clean", async () => {
+      const { writeFile } = await import("node:fs/promises");
+      lastCompValidate = null;
+      const comp = { id: "c_e2e", workId: "w_e2e", duration: 9, tracks: [], assets: [] };
+      const file = join(tmpDir, "good.json");
+      await writeFile(file, JSON.stringify(comp), "utf8");
+      const r = await run(["comp", "validate", file]);
+      expect(r.exitCode).toBe(0);
+      expect(lastCompValidate).toEqual(comp);
+      expect(r.stdout).toMatch(/ok|clean/i);
+    });
+
+    it("comp validate a candidate with errors → exit 4 + prints the errors", async () => {
+      const { writeFile } = await import("node:fs/promises");
+      const file = join(tmpDir, "bad.json");
+      // sentinel tracks:"reject" → the mock returns a not-ok verdict with errors.
+      await writeFile(file, JSON.stringify({ id: "c_x", tracks: "reject" }), "utf8");
+      const r = await run(["comp", "validate", file]);
+      expect(r.exitCode).toBe(4);
+      expect(r.stderr + r.stdout).toMatch(/expected array/);
+    });
+
+    it("comp validate a candidate with warnings only → exit 0 + prints the warning", async () => {
+      const { writeFile } = await import("node:fs/promises");
+      const file = join(tmpDir, "warn.json");
+      await writeFile(file, JSON.stringify({ id: "c_x", tracks: "warn" }), "utf8");
+      const r = await run(["comp", "validate", file]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout + r.stderr).toMatch(/overlaps/);
+    });
+
+    it("comp validate - reads the candidate from stdin", async () => {
+      lastCompValidate = null;
+      const comp = { id: "c_stdin", workId: "w_e2e", duration: 11, tracks: [], assets: [] };
+      const r = await execa("node", [BIN, "comp", "validate", "-"], {
+        env: { ...process.env, AUTOVIRAL_WORK_ID: "w_e2e", AUTOVIRAL_PORT: String(port) },
+        input: JSON.stringify(comp),
+        reject: false,
+        timeout: 10_000,
+      });
+      expect(r.exitCode).toBe(0);
+      expect(lastCompValidate).toEqual(comp);
+    });
+
+    it("comp validate with no file argument → exit 4 (never hits bridge)", async () => {
+      lastCompValidate = null;
+      const r = await run(["comp", "validate"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompValidate).toBeNull();
+    });
+
+    it("comp validate a top-level ARRAY → exit 4 (never hits bridge)", async () => {
+      const { writeFile } = await import("node:fs/promises");
+      lastCompValidate = null;
+      const file = join(tmpDir, "array.json");
+      await writeFile(file, JSON.stringify([{ id: "c_x" }]), "utf8");
+      const r = await run(["comp", "validate", file]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompValidate).toBeNull();
+    });
+
+    it("--help lists comp validate", async () => {
+      const r = await run(["--help"]);
+      expect(r.stdout).toMatch(/comp validate/);
     });
   });
 

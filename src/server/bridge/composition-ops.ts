@@ -30,6 +30,7 @@ import {
   migrateLegacyTrackIds,
   type Composition,
 } from "../../shared/composition.js";
+import { preflight, type PreflightResult } from "../../shared/composition/preflight.js";
 
 export interface OpsContext {
   workId: string;
@@ -279,4 +280,28 @@ export async function mutateCompositionFor(
     );
   }
   return next;
+}
+
+// S13 (US 11/12) — dry-run preview at the write chokepoint. Reads the current
+// composition, runs the SAME mutator the live path would, then PREFLIGHTS the
+// result — but deliberately SKIPS writeCompositionFor (no disk touch) AND skips
+// onCommitted (no broadcast). One helper covers every write verb: any route can
+// dry-run by swapping mutateCompositionFor → dryRunMutate. The verdict mirrors
+// the pure `preflight` shape so the CLI/agent gets the same {ok,errors,warnings}
+// whether it validated a hand-built comp (/comp/validate) or previewed a verb.
+//
+// `onCommitted` is accepted only so callers can pass the SAME closure they use
+// for the live path without branching; it is NEVER invoked in dry-run.
+export async function dryRunMutate(
+  ctx: OpsContext,
+  mutator: (comp: Composition) => Composition,
+  _onCommitted?: (next: Composition) => void,
+): Promise<PreflightResult> {
+  const current = await readCompositionFor(ctx);
+  // The mutator may throw (e.g. a CompositionOpError for an invalid op) — let
+  // that propagate; the route maps it to its code, same as the live path.
+  const candidate = mutator(current);
+  // PURE, IO-free verdict. No write, no broadcast. `_onCommitted` is
+  // intentionally untouched in dry-run mode.
+  return preflight(candidate);
 }
