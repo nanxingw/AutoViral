@@ -262,6 +262,13 @@ const CLIP_SET_FLAG_PATHS: Record<string, string> = {
   x: "transforms.x",
   y: "transforms.y",
   rotation: "transforms.rotation",
+  // S18 (US 27/28) — crop sub-region + horizontal/vertical mirror. `--crop`
+  // takes a JSON object ({"x":..,"y":..,"w":..,"h":..}) that flattenInto splits
+  // into transforms.crop.x / .y / .w / .h (the server whitelists the leaves, not
+  // a bare `transforms.crop`). `--flip-h` / `--flip-v` are booleans.
+  crop: "transforms.crop",
+  "flip-h": "transforms.flipH",
+  "flip-v": "transforms.flipV",
   // video filters
   lut: "filters.lut",
   brightness: "filters.brightness",

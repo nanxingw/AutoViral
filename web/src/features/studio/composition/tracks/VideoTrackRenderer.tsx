@@ -84,7 +84,16 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   //   blur    → a blurred enlarged COVER background behind a CONTAIN foreground,
   //            so the letterbox bars become a soft blurred fill of the frame.
   const fitMode = clip.fitMode ?? "cover";
-  const transform = `translate(${x}px, ${y}px) rotate(${rotation}deg) scale(${scale})`;
+  // S18 (US 27/28) — crop + flip CONSUMPTION. flipH/flipV append a mirroring
+  // scaleX(-1)/scaleY(-1) onto the existing transform chain; crop maps the
+  // normalised {x,y,w,h} sub-region to a CSS clip-path inset() so the preview
+  // crops exactly the region the ffmpeg `crop=` filter will. Absent = no-op
+  // (back-compat for every pre-S18 work). These mirror the export filtergraph
+  // in src/server/transforms-ffmpeg.ts (WYSIWYG by construction).
+  const flip = cssFlipSuffix(clip.transforms);
+  const clipPath = cssCropInset(clip.transforms.crop);
+  const transform =
+    `translate(${x}px, ${y}px) rotate(${rotation}deg) scale(${scale})` + flip;
   // Browser-side player uses <Video> (single <video> element backed by
   // browser native playback) instead of <OffthreadVideo>. OffthreadVideo
   // is more accurate for server-side rendering (FFmpeg + worker, used by
@@ -137,6 +146,7 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
             objectFit: "contain",
             filter: filter || undefined,
             transform,
+            clipPath,
           }}
         />
       </div>
@@ -153,10 +163,53 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
         objectFit: fitMode === "contain" ? "contain" : "cover",
         filter: filter || undefined,
         transform,
+        clipPath,
         opacity,
       }}
     />
   );
+}
+
+/**
+ * S18 — build the trailing CSS transform mirror suffix for a clip's transforms.
+ * flipH → " scaleX(-1)", flipV → " scaleY(-1)", both → both. No flip → "".
+ * Pure + exported so the consumption test can assert the exact string the
+ * preview + the ffmpeg `hflip`/`vflip` export agree on.
+ */
+export function cssFlipSuffix(t: {
+  flipH?: boolean;
+  flipV?: boolean;
+}): string {
+  let suffix = "";
+  if (t.flipH) suffix += " scaleX(-1)";
+  if (t.flipV) suffix += " scaleY(-1)";
+  return suffix;
+}
+
+/**
+ * S18 — map a NORMALISED crop {x,y,w,h} (fractions of the source frame) to a
+ * CSS `clip-path: inset(top right bottom left)` so the preview crops exactly
+ * the sub-region the ffmpeg `crop=` filter keeps. Returns undefined when crop
+ * is absent (no clip-path → no crop, back-compat). Mirrors the export math in
+ * src/server/transforms-ffmpeg.ts.
+ */
+export function cssCropInset(crop?: {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}): string | undefined {
+  if (!crop) return undefined;
+  const top = crop.y * 100;
+  const right = (1 - (crop.x + crop.w)) * 100;
+  const bottom = (1 - (crop.y + crop.h)) * 100;
+  const left = crop.x * 100;
+  return `inset(${pct(top)} ${pct(right)} ${pct(bottom)} ${pct(left)})`;
+}
+
+function pct(n: number): string {
+  // Trim trailing zeros so "20" not "20.000000000004"; keep CSS-valid %.
+  return `${Number(n.toFixed(4))}%`;
 }
 
 export function VideoTrackRenderer({ track }: { track: Track }) {

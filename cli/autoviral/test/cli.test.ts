@@ -848,6 +848,42 @@ describe("autoviral CLI — end-to-end", () => {
     expect(lastClipPatch).toEqual({ fitMode: "blur" });
   });
 
+  // S18 (US 27/28) — `--flip-h` / `--flip-v` map the ergonomic flags to the
+  // canonical transforms.flipH / transforms.flipV paths and coerce the value to
+  // a boolean. This makes mirror reachable from the agent CLI (else UI-only =
+  // silent gap).
+  it("clip set --flip-h true → PATCHes { 'transforms.flipH': true }", async () => {
+    lastClipPatch = null;
+    const r = await run(["clip", "set", "vc_s01", "--flip-h", "true"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({ "transforms.flipH": true });
+  });
+
+  it("clip set --flip-v true → PATCHes { 'transforms.flipV': true }", async () => {
+    lastClipPatch = null;
+    const r = await run(["clip", "set", "vc_s01", "--flip-v", "true"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({ "transforms.flipV": true });
+  });
+
+  // S18 — `--crop '{"x":..,"y":..,"w":..,"h":..}'` flattens to the server's
+  // whitelisted dot-paths (transforms.crop.x / .y / .w / .h); a bare `crop`
+  // object key is NOT whitelisted and would 400 (code:4).
+  it("clip set --crop '{...}' → flattens to transforms.crop.* dot-paths", async () => {
+    lastClipPatch = null;
+    const r = await run([
+      "clip", "set", "vc_s01",
+      "--crop", '{"x":0.1,"y":0.2,"w":0.5,"h":0.6}',
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({
+      "transforms.crop.x": 0.1,
+      "transforms.crop.y": 0.2,
+      "transforms.crop.w": 0.5,
+      "transforms.crop.h": 0.6,
+    });
+  });
+
   it("clip set --brightness 0.5 --italic true → maps + coerces both", async () => {
     lastClipPatch = null;
     const r = await run([

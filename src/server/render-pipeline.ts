@@ -3,6 +3,7 @@
 import { renderCompositionToMp4 } from "./remotion-renderer.js";
 import { renderViaStreamingBridge } from "./render/remotion-bridge.js";
 import { applySpeedRampPrePass } from "./speed-ramp-ffmpeg.js";
+import { applyTransformsPrePass } from "./transforms-ffmpeg.js";
 import { pickEncoder } from "./render/gpu-encoder.js";
 import {
   mixAudioTracks,
@@ -401,8 +402,22 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   // Phase 8.3.5). Pre-Remotion lives upstream of every other stage so that
   // ducking / loudnorm / encode all see the resampled audio + video.
   checkAbort();
-  const comp = await applySpeedRampPrePass(
+  const compAfterSpeed = await applySpeedRampPrePass(
     compProxy,
+    opts.outDir,
+    opts.signal,
+  );
+  checkAbort();
+
+  // Stage 0.5 (S18 — US 27/28) — crop + flip pre-pass. For each video clip that
+  // carries transforms.crop / flipH / flipV, run an ffmpeg crop/hflip/vflip
+  // invocation that bakes the transform into a cached MP4 *before* Remotion
+  // composites it, then strip the consumed fields so Remotion doesn't re-apply.
+  // This is the EXPORT consumption of the same crop/flip the preview shows via
+  // CSS clip-path inset() + scaleX(-1)/scaleY(-1) (WYSIWYG by construction).
+  checkAbort();
+  const comp = await applyTransformsPrePass(
+    compAfterSpeed,
     opts.outDir,
     opts.signal,
   );

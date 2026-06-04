@@ -5,11 +5,33 @@ export const FPS_VALUES = [24, 25, 30, 60] as const;
 export const ASPECTS = ["9:16", "1:1", "16:9", "4:5"] as const;
 export type Aspect = (typeof ASPECTS)[number];
 
+// S18 (US 27/28) — crop sub-region of the source frame, expressed as
+// NORMALISED fractions of the source [0,1]: x/y are the top-left origin, w/h
+// the width/height. The renderer (Remotion preview) and the exporter (ffmpeg
+// filtergraph) both consume this — preview as an inset/clip, export as
+// `crop=w*W:h*H:x*W:y*H`. All four leaves are required WHEN crop is present
+// (a half-specified crop is ambiguous), but `crop` itself is optional so a
+// pre-S18 work with no crop key parses unchanged.
+const CropSchema = z.object({
+  x: z.number().min(0).max(1),
+  y: z.number().min(0).max(1),
+  w: z.number().min(0).max(1),
+  h: z.number().min(0).max(1),
+});
+export type Crop = z.infer<typeof CropSchema>;
+
 const TransformsSchema = z.object({
   scale: z.number().min(0.1).max(5).default(1),
   x: z.number().default(0),
   y: z.number().default(0),
   rotation: z.number().default(0),
+  // S18 (US 27/28) — crop + horizontal/vertical mirror. All optional with NO
+  // default so an OLD work (no key) parses identically: the renderer/exporter
+  // treat absent as no-crop / no-flip. flipH → CSS scaleX(-1) / ffmpeg hflip;
+  // flipV → CSS scaleY(-1) / ffmpeg vflip.
+  crop: CropSchema.optional(),
+  flipH: z.boolean().optional(),
+  flipV: z.boolean().optional(),
 });
 export type Transforms = z.infer<typeof TransformsSchema>;
 

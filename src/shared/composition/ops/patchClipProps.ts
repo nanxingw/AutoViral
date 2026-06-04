@@ -38,6 +38,13 @@ const ALLOWED_PATHS: Record<Clip["kind"], readonly string[]> = {
     "transforms.x",
     "transforms.y",
     "transforms.rotation",
+    // S18 (US 27/28) — crop sub-region (normalised {x,y,w,h}) + mirror flags.
+    "transforms.crop.x",
+    "transforms.crop.y",
+    "transforms.crop.w",
+    "transforms.crop.h",
+    "transforms.flipH",
+    "transforms.flipV",
     "filters.lut",
     "filters.brightness",
     "filters.contrast",

@@ -93,6 +93,38 @@ describe("@shared composition ops — patchClipProps", () => {
     );
   });
 
+  it("writes nested transforms.crop.* + transforms.flipH/flipV (S18 — clip set crop/flip reachable)", () => {
+    const clip = videoClip();
+    patchClipProps(clip, {
+      "transforms.crop.x": 0.1,
+      "transforms.crop.y": 0.2,
+      "transforms.crop.w": 0.5,
+      "transforms.crop.h": 0.6,
+      "transforms.flipH": true,
+      "transforms.flipV": true,
+    });
+    expect((clip as any).transforms.crop).toEqual({
+      x: 0.1,
+      y: 0.2,
+      w: 0.5,
+      h: 0.6,
+    });
+    expect((clip as any).transforms.flipH).toBe(true);
+    expect((clip as any).transforms.flipV).toBe(true);
+    // sibling transform fields untouched
+    expect((clip as any).transforms.scale).toBe(1);
+  });
+
+  it("REJECTS crop / flip on a non-video clip (text) — not settable there", () => {
+    const clip = textClip();
+    expect(() =>
+      patchClipProps(clip, { "transforms.crop.x": 0.1 }),
+    ).toThrow(CompositionOpError);
+    expect(() => patchClipProps(clip, { "transforms.flipH": true })).toThrow(
+      CompositionOpError,
+    );
+  });
+
   it("writes a top-level scalar (audio volume)", () => {
     const clip = audioClip();
     patchClipProps(clip, { volume: 0.3 });
