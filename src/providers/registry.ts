@@ -29,7 +29,7 @@ import type {
   VideoGenerateResult,
 } from "./video/types.js";
 import { edgeTtsProvider } from "./tts/edge-tts.js";
-import { openaiTtsProvider } from "./tts/openai-tts.js";
+import { geminiTtsProvider } from "./tts/gemini-tts.js";
 import type { TtsProvider } from "./tts/types.js";
 
 export type Capability = "image" | "video" | "tts";
@@ -205,23 +205,25 @@ function ttsEntry(
 
 /**
  * Register the providers that need no runtime config: video (seedance) and TTS
- * (edge-tts default + openai fallback). These are stateless adapters — a key
- * gates *availability*, not *registration* — so, like the old module-level
- * video array, they register at import time. This makes the registry usable by
- * any module that imports it (e.g. api.ts under test) without a full server
- * boot. Idempotent: re-registering the same key is a harmless overwrite.
+ * (Gemini-via-OpenRouter default + edge-tts fallback — PRD-0003 §2 flipped the
+ * chain from edge→openai-direct to Gemini→edge; openai-direct is retired). These
+ * are stateless adapters — a key gates *availability*, not *registration* — so,
+ * like the old module-level video array, they register at import time. This
+ * makes the registry usable by any module that imports it (e.g. api.ts under
+ * test) without a full server boot. Idempotent: re-registering the same key is a
+ * harmless overwrite.
  */
 function registerStaticProviders(): void {
   if (!getProvider("video", "seedance")) {
     registerProvider(videoEntry(createSeedanceProvider()));
   }
-  if (!getProvider("tts", "edge-tts")) {
+  if (!getProvider("tts", "gemini")) {
     registerProvider(
-      ttsEntry(edgeTtsProvider, { envKey: "EDGE_TTS_PATH", default: true }),
+      ttsEntry(geminiTtsProvider, { envKey: "OPENROUTER_API_KEY", default: true }),
     );
   }
-  if (!getProvider("tts", "openai")) {
-    registerProvider(ttsEntry(openaiTtsProvider, { envKey: "OPENAI_API_KEY" }));
+  if (!getProvider("tts", "edge-tts")) {
+    registerProvider(ttsEntry(edgeTtsProvider, { envKey: "EDGE_TTS_PATH" }));
   }
 }
 

@@ -87,9 +87,23 @@ describe("POST /api/works/:id/tts", () => {
 
   it("500 tts_provider_error when all providers are unavailable (auto)", async () => {
     await withTempDataDir(async () => {
-      // edge-tts unavailable: point at a path that does not exist.
-      process.env.EDGE_TTS_PATH = "/nonexistent/path/to/edge-tts";
-      // openai unavailable: no key in env (cleared in beforeEach).
+      // Deterministically simulate "all providers failed". Env-based disabling
+      // (EDGE_TTS_PATH=nonexistent + no OPENROUTER_API_KEY) is NOT reliable:
+      // edge-tts falls back to the ~/.autoviral/tts-venv binary, and now that
+      // the I13 dependency-manager resolves ffmpeg/ffprobe from a vendored
+      // absolute path, edge-tts can actually succeed on a dev machine with the
+      // venv + network — yielding 200, not the 500 this test asserts. Mock the
+      // registry's generateWithFallback to throw so we exercise the endpoint's
+      // error contract regardless of which binaries the host happens to have.
+      vi.doMock("../../providers/tts/registry.js", async (orig) => {
+        const actual = await orig<typeof import("../../providers/tts/registry.js")>();
+        return {
+          ...actual,
+          generateWithFallback: vi.fn(async () => {
+            throw new Error("all TTS providers unavailable (test)");
+          }),
+        };
+      });
       const { apiRoutes } = await import("../api.js");
       const res = await apiRoutes.fetch(
         jsonReq("POST", "/api/works/w1/tts", {

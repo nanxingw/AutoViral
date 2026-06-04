@@ -42,13 +42,13 @@ describe("unified MediaProvider registry (ADR-007)", () => {
       expect(typeof p?.generateVideo).toBe("function");
     });
 
-    it("tts → edge-tts and openai", () => {
+    it("tts → gemini (primary) and edge-tts (fallback)", () => {
+      const gemini = getProvider("tts", "gemini");
       const edge = getProvider("tts", "edge-tts");
-      const openai = getProvider("tts", "openai");
+      expect(gemini?.capability).toBe("tts");
+      expect(gemini?.tts.id).toBe("gemini");
       expect(edge?.capability).toBe("tts");
       expect(edge?.tts.id).toBe("edge-tts");
-      expect(openai?.capability).toBe("tts");
-      expect(openai?.tts.id).toBe("openai");
     });
 
     it("unknown name → undefined", () => {
@@ -71,9 +71,9 @@ describe("unified MediaProvider registry (ADR-007)", () => {
       expect(getDefaultProvider("video")?.name).toBe("seedance");
     });
 
-    it("tts default is edge-tts (not openai)", () => {
+    it("tts default is gemini (PRD-0003 §2 flipped the chain; edge is fallback)", () => {
       const d = getDefaultProvider("tts");
-      expect(d?.name).toBe("edge-tts");
+      expect(d?.name).toBe("gemini");
       expect(d?.default).toBe(true);
     });
 
@@ -103,8 +103,8 @@ describe("unified MediaProvider registry (ADR-007)", () => {
       expect(getProvider("video", "seedance")?.envKey).toBe("OPENROUTER_API_KEY");
     });
 
-    it("openai tts gates on OPENAI_API_KEY; edge-tts on EDGE_TTS_PATH", () => {
-      expect(getProvider("tts", "openai")?.envKey).toBe("OPENAI_API_KEY");
+    it("gemini tts gates on OPENROUTER_API_KEY; edge-tts on EDGE_TTS_PATH", () => {
+      expect(getProvider("tts", "gemini")?.envKey).toBe("OPENROUTER_API_KEY");
       expect(getProvider("tts", "edge-tts")?.envKey).toBe("EDGE_TTS_PATH");
     });
   });
@@ -123,9 +123,12 @@ describe("unified MediaProvider registry (ADR-007)", () => {
       expect(caps).toEqual(new Set(["image", "video", "tts"]));
     });
 
-    it("edge-tts is always available; openai/seedance availability tracks env", () => {
+    it("edge-tts is always available; gemini/seedance availability tracks env", () => {
       const edge = listProviders("tts").find((p) => p.name === "edge-tts");
       expect(edge?.available).toBe(true); // local binary, no env required
+
+      const gemini = listProviders("tts").find((p) => p.name === "gemini");
+      expect(gemini?.available).toBe(true); // OPENROUTER_API_KEY stubbed in beforeEach
 
       const seedance = listProviders("video").find((p) => p.name === "seedance");
       expect(seedance?.available).toBe(true); // OPENROUTER_API_KEY stubbed in beforeEach
@@ -134,15 +137,15 @@ describe("unified MediaProvider registry (ADR-007)", () => {
     it("provider with missing envKey reports available:false", () => {
       _resetProviders();
       vi.unstubAllEnvs();
-      // no OPENROUTER_API_KEY → image not registered at all; register a keyed
-      // tts provider whose env is absent to exercise the availability branch.
+      // no OPENROUTER_API_KEY → gemini reports unavailable. Register a fresh
+      // keyed tts provider whose env is absent to exercise the branch directly.
       registerProvider({
-        name: "openai",
+        name: "keyed-fallback",
         capability: "tts",
-        envKey: "OPENAI_API_KEY",
-        tts: { id: "openai", name: "O", supportsLanguages: [], voices: [], generate: async () => ({ outputPath: "", duration: 0, sampleRate: 0, channels: 0 }) },
+        envKey: "SOME_ABSENT_KEY",
+        tts: { id: "keyed-fallback", name: "K", supportsLanguages: [], voices: [], generate: async () => ({ outputPath: "", duration: 0, sampleRate: 0, channels: 0 }) },
       });
-      expect(listProviders("tts").find((p) => p.name === "openai")?.available).toBe(false);
+      expect(listProviders("tts").find((p) => p.name === "keyed-fallback")?.available).toBe(false);
     });
   });
 
@@ -152,9 +155,10 @@ describe("unified MediaProvider registry (ADR-007)", () => {
       vi.unstubAllEnvs();
       await initProviders({ openrouter: {} });
       expect(getDefaultProvider("image")).toBeUndefined();
-      // video + tts still register (seedance always; edge-tts/openai always).
+      // video + tts still register (seedance always; gemini/edge-tts always —
+      // registration is key-independent; the key only gates *availability*).
       expect(getDefaultProvider("video")?.name).toBe("seedance");
-      expect(getDefaultProvider("tts")?.name).toBe("edge-tts");
+      expect(getDefaultProvider("tts")?.name).toBe("gemini");
     });
   });
 });

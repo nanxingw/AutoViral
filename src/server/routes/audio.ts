@@ -8,7 +8,7 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDir } from "../../infra/config.js";
 import { analyzeAudio, mixAudioTracks } from "../../domain/audio-tools.js";
-import { pickProvider, generateWithFallback } from "../../providers/tts/registry.js";
+import { generateWithFallback } from "../../providers/tts/registry.js";
 import { uiEventBus } from "../bridge/ui-events.js";
 import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
 import { execFileAsync } from "./_shared.js";
@@ -207,7 +207,11 @@ print(json.dumps({"segments": segs}))
   }
 });
 
-// POST /api/audio/tts — TTS generation via Phase 3.E provider registry
+// POST /api/audio/tts — TTS generation via the unified provider registry.
+// PRD-0003 §2: this agent path used to call pickProvider().generate() directly,
+// which was edge-only with NO fallback — asymmetric with the dialog endpoint
+// below. It now goes through generateWithFallback so the agent shares the same
+// Gemini(OpenRouter)→edge auto-fallback the dialog already had.
 audioRouter.post("/api/audio/tts", async (c) => {
   const body = await c.req.json().catch(() => null);
   if (!body || typeof body !== "object" || !body.text || !body.voice || !body.output_path) {
@@ -216,19 +220,23 @@ audioRouter.post("/api/audio/tts", async (c) => {
       400,
     );
   }
-  const provider = pickProvider({
-    language: typeof body.language === "string" ? body.language : undefined,
-  });
+  const provider: "auto" | "gemini" | "edge-tts" =
+    body.provider === "gemini" || body.provider === "edge-tts" ? body.provider : "auto";
   try {
-    const r = await provider.generate({
-      text: String(body.text),
-      voice: String(body.voice),
-      style: typeof body.style === "string" ? body.style : undefined,
-      outputPath: String(body.output_path),
-    });
+    const r = await generateWithFallback(
+      {
+        text: String(body.text),
+        voice: String(body.voice),
+        language: typeof body.language === "string" ? body.language : undefined,
+        style: typeof body.style === "string" ? body.style : undefined,
+        outputPath: String(body.output_path),
+      },
+      { provider },
+    );
     return c.json({
       ok: true,
       outputPath: r.outputPath,
+      providerId: r.providerId,
       duration: r.duration,
       sampleRate: r.sampleRate,
       channels: r.channels,
@@ -238,10 +246,11 @@ audioRouter.post("/api/audio/tts", async (c) => {
   }
 });
 
-// POST /api/works/:id/tts — work-scoped dual-provider TTS (#3).
+// POST /api/works/:id/tts — work-scoped dual-provider TTS (#3, PRD-0003 §2).
 // Synthesizes narration into the work's assets/audio/ dir, broadcasts an
 // "asset-added" UI event so the Studio library refreshes, then returns.
-// Uses generateWithFallback: edge-tts is tried first, OpenAI is the fallback.
+// Uses generateWithFallback: Gemini (OpenRouter) is tried first, edge-tts is
+// the zero-key fallback.
 audioRouter.post("/api/works/:id/tts", async (c) => {
   const id = c.req.param("id");
   // Guard the work id before it ever touches the filesystem — this endpoint
@@ -259,8 +268,8 @@ audioRouter.post("/api/works/:id/tts", async (c) => {
     return c.json({ error: "TTS request missing required field: voice" }, 400);
   }
   const language = body && typeof body.language === "string" ? body.language : undefined;
-  const provider: "auto" | "edge-tts" | "openai" =
-    body && (body.provider === "edge-tts" || body.provider === "openai")
+  const provider: "auto" | "edge-tts" | "gemini" =
+    body && (body.provider === "edge-tts" || body.provider === "gemini")
       ? body.provider
       : "auto";
 

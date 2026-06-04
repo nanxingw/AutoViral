@@ -2,7 +2,7 @@ import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { edgeTtsProvider } from "./edge-tts.js";
-import { openaiTtsProvider } from "./openai-tts.js";
+import { geminiTtsProvider } from "./gemini-tts.js";
 import type { TtsProvider, TtsRequest, TtsResult } from "./types.js";
 
 export interface ProviderPickOptions {
@@ -11,21 +11,24 @@ export interface ProviderPickOptions {
 }
 
 const ALL_PROVIDERS: TtsProvider[] = [
+  geminiTtsProvider,
   edgeTtsProvider,
-  openaiTtsProvider,
   // elevenLabsProvider — Phase 3.x
   // volcanoTtsProvider — Phase 3.x
 ];
 
 /**
- * Picks a TTS provider for a request. Today only edge-tts is available,
- * so all paths return it. When ElevenLabs/Volcano land, this fans out:
- *   - Chinese + voiceover style → Volcano (best zh prosody)
- *   - English + named-voice → ElevenLabs
- *   - Anything else → edge-tts (zero-cost fallback)
+ * Picks the PRIMARY single-shot TTS provider for a request: Gemini-via-
+ * OpenRouter (PRD-0003 §2). Callers that want automatic edge fallback should
+ * use generateWithFallback({ provider: "auto" }) instead — pickProvider returns
+ * a single provider with no fallback semantics.
+ *
+ * The agent endpoint (/api/audio/tts) historically called pickProvider and got
+ * edge-only with no fallback; it now goes through generateWithFallback for
+ * symmetry with the dialog endpoint.
  */
 export function pickProvider(_opts: ProviderPickOptions = {}): TtsProvider {
-  return edgeTtsProvider;
+  return geminiTtsProvider;
 }
 
 export function getProviderById(id: string): TtsProvider | null {
@@ -44,12 +47,14 @@ async function isProviderAvailable(p: TtsProvider): Promise<boolean> {
 }
 
 /**
- * Generates audio with edge-tts-first fallback semantics:
+ * Generates audio with Gemini-first fallback semantics (PRD-0003 §2 — the chain
+ * flipped from edge→openai to Gemini→edge; the openai-direct path is retired):
  *
- *   - provider:"auto" (default) → try edge-tts; if it is unavailable OR throws,
- *     try openai; if both fail, throw an aggregated error naming both failures.
- *   - provider:"edge-tts" → only edge-tts (no fallback).
- *   - provider:"openai"  → only openai.
+ *   - provider:"auto" (default) → try Gemini (OpenRouter); if it is unavailable
+ *     OR throws, try edge-tts; if both fail, throw an aggregated error naming
+ *     both failures.
+ *   - provider:"gemini"   → only Gemini (no fallback).
+ *   - provider:"edge-tts" → only edge-tts.
  *
  * "available" means the provider's isAvailable() resolves true. An unavailable
  * provider is skipped without invoking generate(); a provider that becomes
@@ -57,20 +62,20 @@ async function isProviderAvailable(p: TtsProvider): Promise<boolean> {
  */
 export async function generateWithFallback(
   req: TtsRequest,
-  opts: { provider?: "auto" | "edge-tts" | "openai" } = {},
+  opts: { provider?: "auto" | "gemini" | "edge-tts" } = {},
 ): Promise<TtsResult & { providerId: string }> {
   const mode = opts.provider ?? "auto";
 
   // Single-provider modes: run exactly that provider, no fallback.
-  if (mode === "edge-tts" || mode === "openai") {
+  if (mode === "gemini" || mode === "edge-tts") {
     const p = getProviderById(mode);
     if (!p) throw new Error(`TTS provider not found: ${mode}`);
     const result = await p.generate(req);
     return { ...result, providerId: p.id };
   }
 
-  // auto: edge-tts first, openai as fallback.
-  const order: TtsProvider[] = [edgeTtsProvider, openaiTtsProvider];
+  // auto: Gemini (OpenRouter) first, edge-tts as the zero-key fallback.
+  const order: TtsProvider[] = [geminiTtsProvider, edgeTtsProvider];
   const failures: string[] = [];
   for (const p of order) {
     if (!(await isProviderAvailable(p))) {
@@ -94,20 +99,20 @@ export const ALL_TTS_PROVIDERS = ALL_PROVIDERS;
 // Bridge-friendly entry point. The bridge preprocess route (and any caller that
 // only has a workDir) wants "synthesize this text into the work's assets/audio/
 // dir and tell me the relative uri + byte size" — it does not want to compute
-// an output path or pick a provider. This wraps generateWithFallback (edge-tts
-// first → openai fallback) with that ergonomics, preserving the H4.1 idempotent
+// an output path or pick a provider. This wraps generateWithFallback (Gemini
+// first → edge fallback) with that ergonomics, preserving the H4.1 idempotent
 // hash-stem so re-synthesising identical input is a no-op-ish overwrite.
 //
 // Replaces the standalone src/providers/tts/index.ts synthesize() retired by
-// ADR-007 — the OpenAI-only synth is now the openai provider behind the
-// fallback chain, so this gains edge-tts as the zero-cost primary for free.
+// ADR-007 — the OpenRouter Gemini synth is now the primary provider behind the
+// fallback chain, so this gains edge-tts as the zero-cost fallback for free.
 
 /** Default edge voice when the caller does not specify one. */
 const DEFAULT_NARRATION_VOICE = "zh-CN-XiaoxiaoNeural";
 
 export interface SynthesizeNarrationOpts {
   text: string;
-  /** Edge voice id (e.g. "zh-CN-XiaoxiaoNeural"); openai fallback maps it. */
+  /** Edge voice id (e.g. "zh-CN-XiaoxiaoNeural"); Gemini fallback maps it. */
   voice?: string;
   language?: string;
   /** Output container; defaults to mp3. Only the extension is honoured. */
@@ -116,8 +121,8 @@ export interface SynthesizeNarrationOpts {
   workDir: string;
   /** Optional override for the output filename stem (defaults to a hash). */
   filenameStem?: string;
-  /** Force a single provider; defaults to "auto" (edge → openai). */
-  provider?: "auto" | "edge-tts" | "openai";
+  /** Force a single provider; defaults to "auto" (Gemini → edge). */
+  provider?: "auto" | "gemini" | "edge-tts";
 }
 
 export interface SynthesizeNarrationResult {
@@ -125,7 +130,7 @@ export interface SynthesizeNarrationResult {
   assetPath: string;
   /** Relative-to-workDir path, suitable for composition.yaml assets[].uri. */
   relativeUri: string;
-  /** Provider that actually produced the audio ("edge-tts" | "openai"). */
+  /** Provider that actually produced the audio ("gemini" | "edge-tts"). */
   providerId: string;
   /** Probed duration in seconds (0 if ffprobe unavailable). */
   duration: number;

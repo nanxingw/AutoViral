@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import { mapExpressiveTagsToSsml, edgeTtsProvider } from "../edge-tts.js";
-import { pickProvider } from "../registry.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stat } from "node:fs/promises";
@@ -39,17 +38,8 @@ describe("mapExpressiveTagsToSsml", () => {
   });
 });
 
-describe("pickProvider", () => {
-  it("picks edge-tts as the default fallback", () => {
-    const p = pickProvider({ language: "zh-CN" });
-    expect(p.id).toBe("edge-tts");
-  });
-
-  it("returns edge-tts for any language (only MVP provider available)", () => {
-    expect(pickProvider({ language: "en-US" }).id).toBe("edge-tts");
-    expect(pickProvider({ language: "ja-JP" }).id).toBe("edge-tts");
-  });
-});
+// pickProvider now returns Gemini (the primary); the edge-as-fallback behaviour
+// is asserted in registry.test.ts via generateWithFallback({ provider: "auto" }).
 
 describe("edgeTtsProvider.generate (smoke)", () => {
   // Opt-in: CI default-skips this binary-dependent test to avoid ENOENT on

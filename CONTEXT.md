@@ -70,7 +70,7 @@ These are constraints that should not be silently violated. If breaking one beco
 
 1. **Remotion is the renderer.** No HTML / GSAP / WebGL composition language. Studio's composition rendering goes through React + Remotion components in `web/src/features/studio/composition/`. *Rationale: [ADR-002](docs/adr/ADR-002-renderer-stays-remotion.md).*
 
-2. **OpenRouter is the only external gateway.** Provider plugins live in `src/providers/<name>/` and register via the single capability-tagged `src/providers/registry.ts` — image, video, and TTS all through one registry, one `MediaProvider` contract, one `envKey` convention. No direct vendor calls (the runway/sora/kling video stubs are dropped — video is OpenRouter-only via seedance). *Rationale: c1c374e commit message + uniform secret management; consolidation decided in [ADR-007](docs/adr/ADR-007-single-media-provider-registry.md), lands in v0.1.1 (W5).*
+2. **OpenRouter is the only external gateway.** Provider plugins live in `src/providers/<name>/` and register via the single capability-tagged `src/providers/registry.ts` — image, video, and TTS all through one registry, one `MediaProvider` contract, one `envKey` convention. No direct vendor calls: the runway/sora/kling video stubs are dropped (video is OpenRouter-only via seedance), and **TTS now genuinely routes through OpenRouter** — the primary provider is `gemini` (`google/gemini-3.1-flash-tts-preview` via OpenRouter's OpenAI-compatible `/v1/audio/speech`, `OPENROUTER_API_KEY`), with the free zero-key local `edge-tts` binary as the automatic fallback. The legacy `api.openai.com` direct TTS path is retired (it had a key-fallback bug: no `OPENAI_API_KEY` fell back to `OPENROUTER_API_KEY` but kept hitting OpenAI, which rejected it). *Rationale: c1c374e commit message + uniform secret management; consolidation decided in [ADR-007](docs/adr/ADR-007-single-media-provider-registry.md), lands in v0.1.1 (W5); TTS gateway alignment in [PRD-0003](docs/prd/0003-v0.1.2-zero-friction-setup.md) §2 (v0.1.2).*
 
 3. **The deliverable yaml is the SSoT for a work.** `composition.yaml` (schema `src/shared/composition.ts`) for `short-video`; `carousel.yaml` (schema `src/shared/carousel.ts` after [ADR-006](docs/adr/ADR-006-content-type-registry.md)) for `image-text`. All mutations go through zod validation + atomic write (tmpfile + rename). No agent should bypass and write the file directly without revalidation — this is why carousel gets server-side CLI commands (W6) instead of blind yaml writes.
 
@@ -101,7 +101,7 @@ src/                        # Backend (Node + TypeScript)
 │   │   ├── routes.ts       # endpoint dispatch
 │   │   └── ingest-youtube.ts  # YouTube → composition pipeline
 │   └── render-pipeline.ts  # Remotion-driven export
-├── providers/              # single capability-tagged registry (ADR-007): registry.ts + video/ (seedance) + tts/ (edge-tts → openai) + nanobanana image
+├── providers/              # single capability-tagged registry (ADR-007): registry.ts + video/ (seedance) + tts/ (gemini-via-openrouter → edge-tts fallback) + nanobanana image
 ├── shared/                 # composition.ts (zod schema), shared types
 ├── trends/sources/         # Multi-platform trend scrapers
 ├── ws-bridge.ts            # chat-agent WS bridge (infra/domain grouping deferred — PRD Open Q)

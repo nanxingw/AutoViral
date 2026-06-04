@@ -1,11 +1,17 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { generateWithFallback, ALL_TTS_PROVIDERS } from "../registry.js";
+import {
+  generateWithFallback,
+  pickProvider,
+  ALL_TTS_PROVIDERS,
+} from "../registry.js";
 import { edgeTtsProvider } from "../edge-tts.js";
-import { openaiTtsProvider } from "../openai-tts.js";
+import { geminiTtsProvider } from "../gemini-tts.js";
 import type { TtsProvider, TtsRequest, TtsResult } from "../types.js";
 
-// The registry holds the concrete edge/openai singletons, so we stub their
-// isAvailable/generate in-place per test. No real binaries are spawned.
+// PRD-0003 §2: the fallback chain flipped from edge→openai-direct to
+// Gemini(OpenRouter)→edge; openai-direct is retired. The registry holds the
+// concrete gemini/edge singletons, so we stub their isAvailable/generate
+// in-place per test. No real binaries are spawned and no network is hit.
 const REQ: TtsRequest = {
   text: "hello",
   voice: "zh-CN-XiaoxiaoNeural",
@@ -24,79 +30,87 @@ function stubAvailable(provider: TtsProvider, value: boolean) {
   vi.spyOn(p, "isAvailable").mockResolvedValue(value);
 }
 
-describe("generateWithFallback", () => {
+describe("pickProvider (primary single-shot provider)", () => {
+  it("returns Gemini (OpenRouter), the new primary — NOT edge", () => {
+    expect(pickProvider().id).toBe("gemini");
+    expect(pickProvider({ language: "zh-CN" }).id).toBe("gemini");
+    expect(pickProvider({ language: "en-US" }).id).toBe("gemini");
+  });
+});
+
+describe("generateWithFallback (Gemini → edge)", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
 
-  it("provider:'edge-tts' only invokes edge-tts (no fallback, no availability gate)", async () => {
+  it("provider:'gemini' only invokes Gemini (no fallback, no availability gate)", async () => {
+    const geminiGen = vi.spyOn(geminiTtsProvider, "generate").mockResolvedValue(fakeResult());
     const edgeGen = vi.spyOn(edgeTtsProvider, "generate").mockResolvedValue(fakeResult());
-    const openaiGen = vi.spyOn(openaiTtsProvider, "generate").mockResolvedValue(fakeResult());
+
+    const res = await generateWithFallback(REQ, { provider: "gemini" });
+
+    expect(res.providerId).toBe("gemini");
+    expect(geminiGen).toHaveBeenCalledOnce();
+    expect(edgeGen).not.toHaveBeenCalled();
+  });
+
+  it("provider:'edge-tts' only invokes edge-tts", async () => {
+    const geminiGen = vi.spyOn(geminiTtsProvider, "generate").mockResolvedValue(fakeResult());
+    const edgeGen = vi.spyOn(edgeTtsProvider, "generate").mockResolvedValue(fakeResult());
 
     const res = await generateWithFallback(REQ, { provider: "edge-tts" });
 
     expect(res.providerId).toBe("edge-tts");
     expect(edgeGen).toHaveBeenCalledOnce();
-    expect(openaiGen).not.toHaveBeenCalled();
+    expect(geminiGen).not.toHaveBeenCalled();
   });
 
-  it("provider:'openai' only invokes openai", async () => {
+  it("auto: uses Gemini when it is available (the new primary)", async () => {
+    stubAvailable(geminiTtsProvider, true);
+    const geminiGen = vi.spyOn(geminiTtsProvider, "generate").mockResolvedValue(fakeResult());
     const edgeGen = vi.spyOn(edgeTtsProvider, "generate").mockResolvedValue(fakeResult());
-    const openaiGen = vi.spyOn(openaiTtsProvider, "generate").mockResolvedValue(fakeResult());
 
-    const res = await generateWithFallback(REQ, { provider: "openai" });
+    const res = await generateWithFallback(REQ, { provider: "auto" });
 
-    expect(res.providerId).toBe("openai");
-    expect(openaiGen).toHaveBeenCalledOnce();
+    expect(res.providerId).toBe("gemini");
+    expect(geminiGen).toHaveBeenCalledOnce();
     expect(edgeGen).not.toHaveBeenCalled();
   });
 
-  it("auto: uses edge-tts when it is available", async () => {
+  it("auto: falls back to edge-tts when Gemini is unavailable (no OpenRouter key)", async () => {
+    stubAvailable(geminiTtsProvider, false);
+    const geminiGen = vi.spyOn(geminiTtsProvider, "generate").mockResolvedValue(fakeResult());
     stubAvailable(edgeTtsProvider, true);
     const edgeGen = vi.spyOn(edgeTtsProvider, "generate").mockResolvedValue(fakeResult());
-    const openaiGen = vi.spyOn(openaiTtsProvider, "generate").mockResolvedValue(fakeResult());
 
     const res = await generateWithFallback(REQ, { provider: "auto" });
 
     expect(res.providerId).toBe("edge-tts");
+    expect(geminiGen).not.toHaveBeenCalled();
     expect(edgeGen).toHaveBeenCalledOnce();
-    expect(openaiGen).not.toHaveBeenCalled();
   });
 
-  it("auto: falls back to openai when edge-tts is unavailable", async () => {
-    stubAvailable(edgeTtsProvider, false);
-    const edgeGen = vi.spyOn(edgeTtsProvider, "generate").mockResolvedValue(fakeResult());
-    stubAvailable(openaiTtsProvider, true);
-    const openaiGen = vi.spyOn(openaiTtsProvider, "generate").mockResolvedValue(fakeResult());
-
-    const res = await generateWithFallback(REQ, { provider: "auto" });
-
-    expect(res.providerId).toBe("openai");
-    expect(edgeGen).not.toHaveBeenCalled();
-    expect(openaiGen).toHaveBeenCalledOnce();
-  });
-
-  it("auto: falls back to openai when edge-tts is available but throws", async () => {
+  it("auto: falls back to edge-tts when Gemini is available but the OpenRouter call throws", async () => {
+    stubAvailable(geminiTtsProvider, true);
+    const geminiGen = vi
+      .spyOn(geminiTtsProvider, "generate")
+      .mockRejectedValue(new Error("Gemini TTS request failed: 500"));
     stubAvailable(edgeTtsProvider, true);
-    const edgeGen = vi
-      .spyOn(edgeTtsProvider, "generate")
-      .mockRejectedValue(new Error("edge-tts CLI exited 1"));
-    stubAvailable(openaiTtsProvider, true);
-    const openaiGen = vi.spyOn(openaiTtsProvider, "generate").mockResolvedValue(fakeResult());
+    const edgeGen = vi.spyOn(edgeTtsProvider, "generate").mockResolvedValue(fakeResult());
 
     const res = await generateWithFallback(REQ, { provider: "auto" });
 
-    expect(res.providerId).toBe("openai");
+    expect(res.providerId).toBe("edge-tts");
+    expect(geminiGen).toHaveBeenCalledOnce();
     expect(edgeGen).toHaveBeenCalledOnce();
-    expect(openaiGen).toHaveBeenCalledOnce();
   });
 
   it("auto: throws an aggregated error naming both failures when both fail", async () => {
+    stubAvailable(geminiTtsProvider, false);
     stubAvailable(edgeTtsProvider, false);
-    stubAvailable(openaiTtsProvider, false);
 
     await expect(generateWithFallback(REQ, { provider: "auto" })).rejects.toThrow(
-      /edge-tts.*openai/s,
+      /gemini.*edge-tts/s,
     );
   });
 });
@@ -104,6 +118,7 @@ describe("generateWithFallback", () => {
 describe("combined voice catalog (zh + en coverage guard)", () => {
   it("ALL_TTS_PROVIDERS expose at least one zh-CN voice", () => {
     const langs = ALL_TTS_PROVIDERS.flatMap((p) => p.voices.map((v) => v.lang));
+    // Gemini reports its voices as "multi"; edge carries explicit zh-CN ids.
     expect(langs).toContain("zh-CN");
   });
 
