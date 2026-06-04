@@ -45,6 +45,89 @@ describe("useTerminalSocket", () => {
     expect(MockWS.instances[0].sent).toContain('{"t":"data","d":"hello"}');
   });
 
+  it("connects to the 3-segment /ws/terminal path with the default session", async () => {
+    renderHook(() => useTerminalSocket("w_test", vi.fn()));
+    await act(() => Promise.resolve());
+    expect(MockWS.instances[0].url).toBe("ws://localhost:3000/ws/terminal/w_test/s_1");
+  });
+
+  it("connects to the explicit sessionId arg in the path", async () => {
+    renderHook(() => useTerminalSocket("w_test", vi.fn(), "s_3"));
+    await act(() => Promise.resolve());
+    expect(MockWS.instances[0].url).toBe("ws://localhost:3000/ws/terminal/w_test/s_3");
+  });
+
+  it("switching the active sessionId tears down the old socket and opens the new path", async () => {
+    let sid = "s_1";
+    const { rerender } = renderHook(() => useTerminalSocket("w_test", vi.fn(), sid));
+    await act(() => Promise.resolve());
+    expect(MockWS.instances).toHaveLength(1);
+    expect(MockWS.instances[0].url).toBe("ws://localhost:3000/ws/terminal/w_test/s_1");
+
+    sid = "s_2";
+    rerender();
+    await act(() => Promise.resolve());
+    // A new socket opened on the s_2 path; the old one was closed (the server
+    // keeps its pty alive across the close — ADR-008 §6).
+    expect(MockWS.instances).toHaveLength(2);
+    expect(MockWS.instances[1].url).toBe("ws://localhost:3000/ws/terminal/w_test/s_2");
+  });
+
+  it("does NOT send a kill frame to the old socket on a session switch (pty survives)", async () => {
+    let sid = "s_1";
+    const { rerender } = renderHook(() => useTerminalSocket("w_test", vi.fn(), sid));
+    await act(() => Promise.resolve());
+    const oldSocket = MockWS.instances[0];
+
+    sid = "s_2";
+    rerender();
+    await act(() => Promise.resolve());
+    // The old socket is closed but never receives a {"t":"kill"} — only an
+    // explicit delete/respawn kills a pty (ADR-008 §6 "new terminal" must NOT
+    // kill the old).
+    expect(oldSocket.sent.some((f) => f.includes('"t":"kill"'))).toBe(false);
+  });
+
+  it("marks status 'exited' on a server exit frame and does NOT auto-reconnect", async () => {
+    vi.useFakeTimers();
+    const onData = vi.fn();
+    const { result } = renderHook(() => useTerminalSocket("w_test", onData));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(result.current.status).toBe("open");
+
+    // Server fans an exit frame, then closes the ws (as terminal-ws.ts does).
+    act(() => {
+      MockWS.instances[0].onmessage?.(new MessageEvent("message", {
+        data: JSON.stringify({ t: "exit", code: 0 }),
+      }));
+      MockWS.instances[0].close();
+    });
+    expect(result.current.status).toBe("exited");
+    // No auto-reconnect scheduled — the user must click respawn.
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(MockWS.instances).toHaveLength(1);
+  });
+
+  it("respawn() reconnects after an exit (mints a fresh shell under the same session)", async () => {
+    vi.useFakeTimers();
+    const { result } = renderHook(() => useTerminalSocket("w_test", vi.fn(), "s_2"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    act(() => {
+      MockWS.instances[0].onmessage?.(new MessageEvent("message", {
+        data: JSON.stringify({ t: "exit", code: 137 }),
+      }));
+      MockWS.instances[0].close();
+    });
+    expect(result.current.status).toBe("exited");
+
+    act(() => result.current.respawn());
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    // A fresh socket opened on the SAME (workId, sessionId) path.
+    expect(MockWS.instances).toHaveLength(2);
+    expect(MockWS.instances[1].url).toBe("ws://localhost:3000/ws/terminal/w_test/s_2");
+    expect(result.current.status).toBe("open");
+  });
+
   it("forwards server data frames to onData callback", async () => {
     const onData = vi.fn();
     renderHook(() => useTerminalSocket("w_test", onData));

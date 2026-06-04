@@ -88,6 +88,16 @@
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
+  position: relative;
+}
+
+/* One pane per terminal session (ADR-008 §6 / I25). All panes stay mounted;
+ * the inactive ones are display:none'd (via .hidden) so their ptys + xterm
+ * canvases survive a session switch. Each fills the inner area. */
+.terminalPane {
+  height: 100%;
+  width: 100%;
+  min-height: 0;
 }
 
 /* Dim agent-context prefix line shown above the terminal canvas when

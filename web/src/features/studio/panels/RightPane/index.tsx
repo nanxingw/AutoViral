@@ -27,6 +27,11 @@ import {
 import type { LocatorData } from "@/features/chat/types";
 import { useActiveSurface, type Surface } from "./useActiveSurface";
 import { SessionStrip } from "./SessionStrip";
+import { TerminalSessionStrip } from "./TerminalSessionStrip";
+import {
+  useTerminalSessionIds,
+  useActiveTerminalSessionId,
+} from "@/features/terminal/terminalSessions";
 import { useT } from "@/i18n/useT";
 import styles from "./index.module.css";
 
@@ -173,8 +178,14 @@ export function RightPane({
           aria-hidden={active !== "terminal"}
         >
           {showTerminalPrefix && <TerminalFocusPrefix />}
+          {/* Multi-terminal sub-strip (ADR-008 §6 / I25) — new/switch/jump-back
+              between terminal sessions. Each session keeps its own mounted
+              TerminalPanel; switching just display:none's the others, so the
+              hidden ptys + xterm canvases survive (the server keeps every
+              session's pty alive across ws teardown). */}
+          <TerminalSessionStrip workId={workId} />
           <div className={styles.terminalInner}>
-            <TerminalPanel workId={workId} />
+            <TerminalSurface workId={workId} />
           </div>
         </div>
       </div>
@@ -224,6 +235,38 @@ function TerminalFocusPrefix() {
     >
       {prefix}
     </div>
+  );
+}
+
+/**
+ * Renders one mounted TerminalPanel per terminal session (ADR-008 §6 / I25).
+ *
+ * Every session's panel stays mounted; only the active one is visible (the
+ * rest are display:none'd via the surface `hidden` class). Keeping the inactive
+ * panels mounted preserves their xterm canvas + the live socket, and the server
+ * keeps the pty alive across the ws teardown a switch causes — so jumping back
+ * to a terminal restores its scrollback (the backend replays its ring-buffer on
+ * re-attach). "New terminal" appends a session id to the store, which mounts a
+ * NEW panel here (new socket → new pty under the new sessionId) without
+ * touching the existing ones.
+ */
+function TerminalSurface({ workId }: { workId: string }) {
+  const ids = useTerminalSessionIds(workId);
+  const activeId = useActiveTerminalSessionId(workId);
+  return (
+    <>
+      {ids.map((id) => (
+        <div
+          key={id}
+          className={`${styles.terminalPane} ${id === activeId ? "" : styles.hidden}`}
+          data-terminal-session={id}
+          data-active={id === activeId}
+          aria-hidden={id !== activeId}
+        >
+          <TerminalPanel workId={workId} sessionId={id} />
+        </div>
+      ))}
+    </>
   );
 }
 

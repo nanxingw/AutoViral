@@ -4,11 +4,18 @@ import { FitAddon } from "@xterm/addon-fit";
 import { ClipboardAddon } from "@xterm/addon-clipboard";
 import "@xterm/xterm/css/xterm.css";
 import { useTerminalSocket } from "./useTerminalSocket";
+import { DEFAULT_TERMINAL_SESSION_ID } from "./terminalSessions";
 import { useTheme, type Theme } from "../../stores/theme";
+import { useT } from "@/i18n/useT";
 import styles from "./TerminalPanel.module.css";
 
 interface Props {
   workId: string;
+  /** ADR-008 §6 / I25 — which terminal session this panel drives. Carried into
+   *  the WS path (`/ws/terminal/{workId}/{sessionId}`); distinct sessions get
+   *  distinct ptys. Defaults to the first/legacy session so existing callers
+   *  (single-terminal surfaces) keep working unchanged. */
+  sessionId?: string;
 }
 
 // Two themes tuned for the editorial cool-steel palette. xterm.js does not
@@ -80,7 +87,8 @@ const pickXtermTheme = (mode: Theme) =>
 // atlas is built with the final font on the first frame.
 const TERMINAL_FONT_FAMILY = '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
 
-export function TerminalPanel({ workId }: Props) {
+export function TerminalPanel({ workId, sessionId = DEFAULT_TERMINAL_SESSION_ID }: Props) {
+  const t = useT();
   const mountRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
@@ -95,7 +103,11 @@ export function TerminalPanel({ workId }: Props) {
     termRef.current?.write(data);
   }, []);
 
-  const { send, resize, status, reconnect } = useTerminalSocket(workId, handleData);
+  const { send, resize, status, reconnect, respawn } = useTerminalSocket(
+    workId,
+    handleData,
+    sessionId,
+  );
 
   // Hot-swap palette when theme changes. xterm.js v5 supports runtime
   // `options.theme = ...` reassignment — it re-paints existing rows.
@@ -223,7 +235,11 @@ export function TerminalPanel({ workId }: Props) {
     <div className={styles.shell} data-area="terminal" data-status={status}>
       <div className={styles.header}>
         <span className={dotClass} aria-hidden />
-        <span>TERMINAL · {workId}</span>
+        <span>
+          {`TERMINAL · ${workId}${
+            sessionId !== DEFAULT_TERMINAL_SESSION_ID ? ` · ${sessionId}` : ""
+          }`}
+        </span>
         {status === "reconnecting" && (
           <span
             className={styles.statusBadge}
@@ -241,6 +257,17 @@ export function TerminalPanel({ workId }: Props) {
             data-testid="terminal-reconnect"
           >
             reconnect
+          </button>
+        )}
+        {status === "exited" && (
+          <button
+            type="button"
+            className={styles.reconnectBtn}
+            onClick={() => respawn()}
+            data-testid="terminal-respawn"
+            aria-label={t("studio.rightPane.terminalSessions.respawnAria")}
+          >
+            {t("studio.rightPane.terminalSessions.respawn")}
           </button>
         )}
         <div className={styles.quickLaunch}>

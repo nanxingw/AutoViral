@@ -59,8 +59,18 @@ vi.mock("./SessionStrip", () => ({
   ),
 }));
 
+// Stub TerminalSessionStrip (I25) — covered in TerminalSessionStrip.test.
+// Stubbing it keeps the container's tab-switch / mount assertions free of the
+// strip's session tabs (which also carry role="tab" once 2+ sessions exist).
+vi.mock("./TerminalSessionStrip", () => ({
+  TerminalSessionStrip: ({ workId }: { workId: string }) => (
+    <div data-testid={`terminal-session-strip-${workId}`} />
+  ),
+}));
+
 // Import AFTER mocks so the component picks them up.
 import { RightPane } from "./index";
+import { useTerminalSessions } from "@/features/terminal/terminalSessions";
 
 function renderRightPane(workId: string) {
   const qc = new QueryClient({
@@ -81,6 +91,10 @@ describe("RightPane (M.5)", () => {
     chatMountCounts.clear();
     terminalMountCounts.clear();
     useToastStore.getState().clear();
+    // Reset the client-side terminal session list so each work resolves to its
+    // single default session (one mounted TerminalPanel) — the mount-count
+    // invariant assumes exactly one terminal per work.
+    useTerminalSessions.setState({ byWork: {} });
   });
 
   it("defaults to chat tab for a brand-new work (ADR-005)", () => {
