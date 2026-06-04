@@ -10,6 +10,7 @@ import type { Clip } from "../types";
  *  - J: seek -5s
  *  - L: seek +5s
  *  - Cmd/Ctrl+S: persist current composition
+ *  - Cmd/Ctrl+Z: undo the last clip op (S20); Cmd/Ctrl+Shift+Z: redo
  *  - Cmd/Ctrl+Shift+G: collapse gaps on the selected clip's track (Phase 4.J)
  *  - Cmd/Ctrl+B: split clip under the playhead on the selected track (Phase 4.J, D4)
  *  - B: toggle blade mode (Phase 4.J — user-overridden binding; pneuma uses S)
@@ -90,6 +91,18 @@ export function useShortcuts(workId: string | null, cbs?: SaveCallbacks) {
           );
           if (track) state.collapseGaps(track.id);
         }
+        return;
+      }
+
+      // Cmd/Ctrl+Z — undo the last clip op (split / trim / move / set /
+      // remove / add); Cmd/Ctrl+Shift+Z — redo. S20 (US 32): clip-level
+      // history lives on the store's clipHistory stack, separate from the
+      // track-op stack. Placed before Cmd+S so the modifier branches read
+      // top-down by key; no conflict (Z is otherwise unbound).
+      if (isMod && (e.key === "z" || e.key === "Z")) {
+        e.preventDefault();
+        if (e.shiftKey) state.redoClipOp();
+        else state.undoClipOp();
         return;
       }
 

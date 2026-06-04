@@ -128,4 +128,46 @@ describe("useShortcuts (Phase 4.J)", () => {
     window.dispatchEvent(key({ key: "Backspace", shiftKey: true }));
     expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(2);
   });
+
+  // S20 (US 32) — clip-level undo via Cmd/Ctrl+Z, redo via Cmd/Ctrl+Shift+Z.
+  it("Cmd+Z undoes the last clip op (a split)", () => {
+    renderHook(() => useShortcuts(null));
+    // Move playhead inside b (5s) and split it → 3 clips.
+    useComposition.setState({ currentFrame: 150 });
+    useComposition.getState().splitClip("b", 5);
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(3);
+    // Cmd+Z → back to 2.
+    window.dispatchEvent(key({ key: "z", metaKey: true }));
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(2);
+  });
+
+  it("Cmd+Shift+Z redoes a previously-undone clip op", () => {
+    renderHook(() => useShortcuts(null));
+    useComposition.setState({ currentFrame: 150 });
+    useComposition.getState().splitClip("b", 5);
+    window.dispatchEvent(key({ key: "z", metaKey: true })); // undo → 2
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(2);
+    window.dispatchEvent(key({ key: "z", metaKey: true, shiftKey: true })); // redo → 3
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(3);
+  });
+
+  it("Ctrl+Z works on non-Mac platforms", () => {
+    renderHook(() => useShortcuts(null));
+    useComposition.setState({ currentFrame: 150 });
+    useComposition.getState().splitClip("b", 5);
+    window.dispatchEvent(key({ key: "z", ctrlKey: true }));
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(2);
+  });
+
+  it("Cmd+Z is ignored while typing in an <input>", () => {
+    renderHook(() => useShortcuts(null));
+    useComposition.getState().splitClip("a", 2);
+    const before = useComposition.getState().comp!.tracks[0].clips.length;
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    input.dispatchEvent(key({ key: "z", metaKey: true }));
+    expect(useComposition.getState().comp!.tracks[0].clips.length).toBe(before);
+    document.body.removeChild(input);
+  });
 });

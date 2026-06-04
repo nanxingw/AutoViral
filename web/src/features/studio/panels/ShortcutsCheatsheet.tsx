@@ -48,6 +48,8 @@ export function ShortcutsCheatsheet({ onClose }: ShortcutsCheatsheetProps) {
         title: t("studio.shortcuts.groupEditing"),
         rows: [
           { desc: t("studio.shortcuts.save"), keys: [MOD, "S"] },
+          { desc: t("studio.shortcuts.undo"), keys: [MOD, "Z"] },
+          { desc: t("studio.shortcuts.redo"), keys: [MOD, "Shift", "Z"] },
           { desc: t("studio.shortcuts.split"), keys: [MOD, "B"] },
           { desc: t("studio.shortcuts.blade"), keys: ["B"] },
           {

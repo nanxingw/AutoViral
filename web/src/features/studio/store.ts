@@ -65,6 +65,15 @@ export interface TrackHistory {
   future: Track[][];
 }
 
+// S20 (US 32) — clip-level undo/redo. The track-op stack above only captures
+// lane mutations; a human who splits / trims / moves / sets / removes / adds a
+// *clip* had no way back (and no Cmd+Z). This is the symmetrical stack scoped
+// to clip mutations. Same `Track[][]` snapshot shape (a clip op only ever
+// touches the tracks array — duration is re-derived on undo), same 50-deep
+// bound. Kept SEPARATE from trackHistory so Cmd+Z over clip edits never
+// resurrects a deleted lane and vice-versa.
+export type ClipHistory = TrackHistory;
+
 // Result type for removeTrack: UI distinguishes "needs confirm" from "done".
 export interface RemoveTrackResult {
   ok: boolean;
@@ -86,9 +95,11 @@ interface CompState {
   isPlaying: boolean;
   beats: number[];
   dragState: DragState | null;
-  // Phase E (issue #32) — track-op undo/redo stack. Separate from any future
-  // clip-level history so the two can be reasoned about independently.
+  // Phase E (issue #32) — track-op undo/redo stack. Separate from the
+  // clip-level history below so the two can be reasoned about independently.
   trackHistory: TrackHistory;
+  // S20 (US 32) — clip-op undo/redo stack (split/trim/move/set/remove/add).
+  clipHistory: ClipHistory;
   loadComposition: (c: Composition | null) => void;
   addClip: (trackId: string, clip: Clip) => void;
   updateClip: (clipId: string, patch: Partial<Clip>) => void;
@@ -200,11 +211,15 @@ interface CompState {
   // type since `Track.volume` doesn't exist on the strict schema yet. Once
   // #34 lands the cast can disappear and round-trip persistence kicks in.
   setTrackVolume: (id: string, db: number) => void;
-  // Undo / redo for the lane stack only — clip-level history is a separate
-  // future slice. `undoTrackOp` is a no-op when past is empty; same for redo
+  // Undo / redo for the lane stack only — clip-level history is the separate
+  // stack below. `undoTrackOp` is a no-op when past is empty; same for redo
   // when future is empty.
   undoTrackOp: () => void;
   redoTrackOp: () => void;
+  // S20 (US 32) — undo / redo for clip mutations only. No-op on an empty
+  // stack. Drives the Cmd+Z / Ctrl+Z keybinding (see useShortcuts).
+  undoClipOp: () => void;
+  redoClipOp: () => void;
 }
 
 // Deep-clone tracks for the history stack. Two paths because the same helper
@@ -230,6 +245,7 @@ export const useComposition = create<CompState>()(
     dragState: null,
     bladeMode: false,
     trackHistory: { past: [], future: [] },
+    clipHistory: { past: [], future: [] },
     loadComposition: (c) =>
       set((s) => {
         s.comp = c;
@@ -239,6 +255,7 @@ export const useComposition = create<CompState>()(
         if (!s.comp) return;
         const t = s.comp.tracks.find((t) => t.id === trackId);
         if (!t) return;
+        pushClipHistory(s);
         // immer-friendly: cast to satisfy union element typing
         (t.clips as Clip[]).push(clip);
         const end = clipEnd(clip);
@@ -251,6 +268,9 @@ export const useComposition = create<CompState>()(
         for (const t of s.comp.tracks) {
           const c = (t.clips as Clip[]).find((c) => c.id === clipId);
           if (c) {
+            // Snapshot the pre-edit tracks ONLY once we know the target exists,
+            // so a set() against an unknown clipId doesn't litter the undo stack.
+            pushClipHistory(s);
             Object.assign(c, patch);
             touched = true;
             break;
@@ -273,6 +293,7 @@ export const useComposition = create<CompState>()(
         if (!t) return;
         const clips = t.clips as Clip[];
         if (fromIndex < 0 || fromIndex >= clips.length || toIndex < 0 || toIndex >= clips.length) return;
+        pushClipHistory(s);
         const [moved] = clips.splice(fromIndex, 1);
         clips.splice(toIndex, 0, moved);
         // Re-pack trackOffsets so visual order matches time order
@@ -307,6 +328,7 @@ export const useComposition = create<CompState>()(
         // Kind guard: a clip only belongs on a track of its own kind. The
         // source track kind is authoritative (the clip was validly placed).
         if (target.kind !== sourceTrack.kind) return;
+        pushClipHistory(s);
         // Detach from source, attach to target — trackOffset (time) is kept,
         // so the clip stays at the same horizontal position, just on a new lane.
         sourceTrack.clips = (sourceTrack.clips as Clip[]).filter(
@@ -397,6 +419,12 @@ export const useComposition = create<CompState>()(
     removeClip: (clipId) =>
       set((s) => {
         if (!s.comp) return;
+        // Only snapshot when the clip actually exists, so a stray remove of an
+        // unknown id doesn't push an identical state onto the undo stack.
+        const exists = s.comp.tracks.some((t) =>
+          (t.clips as Clip[]).some((c) => c.id === clipId),
+        );
+        if (exists) pushClipHistory(s);
         for (const t of s.comp.tracks) {
           t.clips = (t.clips as Clip[]).filter((c) => c.id !== clipId) as typeof t.clips;
           // #54 — drop transitions whose afterClip just vanished (otherwise the
@@ -455,6 +483,7 @@ export const useComposition = create<CompState>()(
           const clips = track.clips as Clip[];
           const idx = clips.findIndex((c) => c.id === clipId);
           if (idx < 0) continue;
+          pushClipHistory(s);
           const c = clips[idx] as Clip;
           const start = c.trackOffset;
           const dur = clipDuration(c);
@@ -556,6 +585,9 @@ export const useComposition = create<CompState>()(
           // zero-width children.
           if (atSec <= start + OFFSET_EPSILON) return;
           if (atSec >= end - OFFSET_EPSILON) return;
+          // Past the D4 no-op guards — a real split is about to happen, so this
+          // is the right moment to snapshot for clip-level undo.
+          pushClipHistory(s);
           const offsetIntoClip = atSec - start;
           const newId = crypto.randomUUID();
           // #46 — partition + rebase keyframes at the clip-local split point so
@@ -1085,6 +1117,35 @@ export const useComposition = create<CompState>()(
         s.trackHistory.past.push(snapshotTracks(s.comp.tracks));
         s.comp.tracks = next as typeof s.comp.tracks;
       }),
+    // ─── S20 (US 32) — clip-op undo / redo ────────────────────────────────
+    // Symmetrical with undo/redoTrackOp but reads from clipHistory. Restoring
+    // tracks can change the timeline length (split adds, removeClip shortens),
+    // so both directions re-derive comp.duration from the restored clips —
+    // unlike the track-op pair, where lane ops never touch clip timing.
+    undoClipOp: () =>
+      set((s) => {
+        if (!s.comp) return;
+        const prev = s.clipHistory.past.pop();
+        if (!prev) return; // empty stack — nothing to undo
+        s.clipHistory.future.push(snapshotTracks(s.comp.tracks));
+        s.comp.tracks = prev as typeof s.comp.tracks;
+        s.comp.duration = Math.max(
+          0,
+          ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
+        );
+      }),
+    redoClipOp: () =>
+      set((s) => {
+        if (!s.comp) return;
+        const next = s.clipHistory.future.pop();
+        if (!next) return;
+        s.clipHistory.past.push(snapshotTracks(s.comp.tracks));
+        s.comp.tracks = next as typeof s.comp.tracks;
+        s.comp.duration = Math.max(
+          0,
+          ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
+        );
+      }),
   })),
 );
 
@@ -1103,6 +1164,21 @@ function pushHistory(s: {
     s.trackHistory.past.shift();
   }
   s.trackHistory.future = [];
+}
+
+// S20 (US 32) — clip-op counterpart of pushHistory. Same snapshot-before +
+// bounded-stack + clear-redo-branch contract, against clipHistory. A fresh
+// clip op always invalidates the clip redo branch (standard editor semantics).
+function pushClipHistory(s: {
+  comp: Composition | null;
+  clipHistory: ClipHistory;
+}) {
+  if (!s.comp) return;
+  s.clipHistory.past.push(snapshotTracks(s.comp.tracks));
+  if (s.clipHistory.past.length > TRACK_HISTORY_LIMIT) {
+    s.clipHistory.past.shift();
+  }
+  s.clipHistory.future = [];
 }
 
 // Recompact displayOrder so the array sorted by displayOrder is contiguous

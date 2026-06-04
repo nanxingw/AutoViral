@@ -25,6 +25,8 @@ describe("<ShortcutsCheatsheet /> (#89)", () => {
       /back 5s/i,
       /forward 5s/i,
       /save/i,
+      /^undo$/i,
+      /^redo$/i,
       /split at playhead/i,
       /toggle blade mode/i,
       /collapse gaps/i,
