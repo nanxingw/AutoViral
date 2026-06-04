@@ -12,6 +12,7 @@ import { loadConfig, dataDir } from "../infra/config.js";
 import { PACKAGE_ROOT } from "../infra/paths.js";
 import { initProviders } from "../providers/registry.js";
 import { ensureSharedDirs } from "../shared-assets.js";
+import { ensureSpawnPath } from "./spawn-path.js";
 import { apiRoutes, setWsBridge, setRenderQueue } from "./api.js";
 import { WsBridge } from "../ws-bridge.js";
 import { attachTerminalWebSocket } from "./terminal/terminal-ws.js";
@@ -31,6 +32,11 @@ const __dirname = dirname(__filename);
 const WEB_DIST = join(__dirname, "..", "..", "web", "dist");
 
 export async function startServer(port: number): Promise<{ server: Server }> {
+  // Repair PATH before initProviders() probes ffmpeg/edge-tts. A daemon started
+  // outside a login shell lacks /opt/homebrew/bin, making bare-name spawns fail
+  // with ENOENT. Idempotent — also called at the CLI entry. See spawn-path.ts.
+  ensureSpawnPath();
+
   // Expose the bound port so render-pipeline can rewrite relative asset
   // URLs into HTTP URLs the Remotion renderer can fetch.
   process.env.AUTOVIRAL_PORT = String(port);

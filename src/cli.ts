@@ -50,7 +50,7 @@ export function runCLI(): void {
   program
     .name("autoviral")
     .description("AutoViral — AI-powered content creation")
-    .version("0.1.0");
+    .version("0.1.1");
 
   program
     .command("start")
