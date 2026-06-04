@@ -25,6 +25,11 @@ import {
   diffCompositionFor,
 } from "./composition-ops.js";
 import { mutateCarouselFor } from "./carousel-ops.js";
+// ADR-009 (S6) — shared composition-ops core. POST /split delegates the split
+// math + invariants to `ops.splitClip` (the SAME implementation the studio
+// store calls), so the agent-driven write path and the UI path can never drift.
+import * as ops from "../../shared/composition/ops/index.js";
+import { CompositionOpError } from "../../shared/composition/ops/index.js";
 import {
   LayerSchema,
   SlideBgSchema,
@@ -634,6 +639,51 @@ bridgeRouter.delete("/clip/:id", async (c) => {
     return c.json({ ok: false, error: message, code: 4 }, 400);
   }
   return c.json({ ok: true });
+});
+
+// S6 (US 1/9) — POST /split: the first intent-level verb that goes through the
+// shared composition-ops core. Body `{ clipId, at }` splits the clip whose
+// time-range contains `at` into two halves, rebasing keyframes. The split math
+// + invariants are `ops.splitClip` — the EXACT implementation the studio store
+// runs — so an agent splitting via the CLI and a human splitting in the UI
+// produce an identical composition. Illegal params (unknown id / out-of-clip /
+// boundary) throw CompositionOpError{code:4} → HTTP 400 + code:4 → CLI exit 4.
+bridgeRouter.post("/split", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    clipId?: unknown;
+    at?: unknown;
+  };
+  if (typeof body.clipId !== "string" || !body.clipId) {
+    return c.json({ ok: false, error: "missing clipId", code: 4 }, 400);
+  }
+  if (typeof body.at !== "number" || !Number.isFinite(body.at)) {
+    return c.json({ ok: false, error: "missing/invalid at (seconds)", code: 4 }, 400);
+  }
+  const clipId = body.clipId;
+  const at = body.at;
+  let newId = "";
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        const { newClipId } = ops.splitClip(comp, { clipId, atSec: at });
+        newId = newClipId;
+        return comp;
+      },
+      // S2 (US 17) — broadcast only after the atomic write lands so Studio
+      // refetches the two new clips without waiting on fs.watch.
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-split" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // CompositionOpError carries its own code (4 for the split guards); fall
+    // back to 4 for any other validation-class throw on this write path.
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id: newId } });
 });
 
 // POST /ask blocks the HTTP response until the Studio user clicks

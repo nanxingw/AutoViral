@@ -14,6 +14,11 @@ import type {
 import { newTrackId } from "@shared/composition";
 import { clampHandleDuration, getPresetMeta } from "@shared/transitions";
 import { addOrReplaceKeyframe, splitKeyframesAtLocal } from "@shared/keyframes";
+// ADR-009 (S6) — shared composition-ops core. splitClip's invariants live here
+// now (single source of truth shared with the bridge); the store action calls
+// `ops.splitClip` on the immer draft.
+import * as ops from "@shared/composition/ops";
+import { CompositionOpError } from "@shared/composition/ops";
 import {
   clipDuration,
   clipEnd,
@@ -609,72 +614,32 @@ export const useComposition = create<CompState>()(
       set((s) => {
         s.bladeMode = on;
       }),
+    // ADR-009 (S6) — the split math + invariants now live in the shared
+    // composition-ops core (`ops.splitClip`), consumed identically by the
+    // bridge. The store action is a thin immer wrapper: snapshot for undo,
+    // call the op on the draft (it mutates `s.comp` in place), and translate
+    // the op's typed CompositionOpError (unknown id / out-of-clip / boundary)
+    // back into this layer's D4 SILENT no-op — so the UI affordance never
+    // surfaces an error for a split that simply landed on a gap. The op math is
+    // unchanged from the old inline body, so the existing store splitClip tests
+    // pass without touching a single assertion (zero-behaviour-change proof).
     splitClip: (clipId, atSec) =>
       set((s) => {
         if (!s.comp) return;
-        for (const track of s.comp.tracks) {
-          const clips = track.clips as Clip[];
-          const idx = clips.findIndex((c) => c.id === clipId);
-          if (idx < 0) continue;
-          const orig = clips[idx];
-          const start = orig.trackOffset;
-          const dur = clipDuration(orig);
-          const end = start + dur;
-          // D4 — split-on-gap (out-of-clip) is a silent no-op. Boundary
-          // equality (within OFFSET_EPSILON) also no-ops to prevent
-          // zero-width children.
-          if (atSec <= start + OFFSET_EPSILON) return;
-          if (atSec >= end - OFFSET_EPSILON) return;
-          // Past the D4 no-op guards — a real split is about to happen, so this
-          // is the right moment to snapshot for clip-level undo.
-          pushClipHistory(s);
-          const offsetIntoClip = atSec - start;
-          const newId = crypto.randomUUID();
-          // #46 — partition + rebase keyframes at the clip-local split point so
-          // each half keeps only its own keyframes (rebased to clip-local 0 for
-          // child B). offsetIntoClip is already the clip-local split time for
-          // every kind (renderers measure keyframe time from trackOffset, not
-          // source `in`). undefined keyframes (text clips, D8) → empty halves.
-          const origKfs = (orig as { keyframes?: Keyframe[] }).keyframes;
-          const { a: kfA, b: kfB } = origKfs
-            ? splitKeyframesAtLocal(origKfs, offsetIntoClip)
-            : { a: undefined, b: undefined };
-          if (orig.kind === "video" || orig.kind === "audio") {
-            const childA = { ...orig, out: orig.in + offsetIntoClip };
-            const childB = {
-              ...orig,
-              id: newId,
-              in: orig.in + offsetIntoClip,
-              trackOffset: atSec,
-            };
-            if (origKfs) {
-              (childA as { keyframes?: Keyframe[] }).keyframes = kfA;
-              (childB as { keyframes?: Keyframe[] }).keyframes = kfB;
-            }
-            (track.clips as Clip[]).splice(idx, 1, childA, childB);
-          } else {
-            // text / overlay — duration-based
-            const childA = { ...orig, duration: offsetIntoClip };
-            const childB = {
-              ...orig,
-              id: newId,
-              trackOffset: atSec,
-              duration: dur - offsetIntoClip,
-            };
-            if (origKfs) {
-              (childA as { keyframes?: Keyframe[] }).keyframes = kfA;
-              (childB as { keyframes?: Keyframe[] }).keyframes = kfB;
-            }
-            (track.clips as Clip[]).splice(idx, 1, childA, childB);
-          }
-          s.comp.duration = Math.max(
-            0,
-            ...s.comp.tracks.flatMap((t) =>
-              (t.clips as Clip[]).map(clipEnd),
-            ),
-          );
-          return;
+        // Snapshot BEFORE mutating so undo restores the pre-split tracks; only
+        // commit the snapshot to history if the op actually splits.
+        const preTracks = snapshotTracks(s.comp.tracks);
+        try {
+          ops.splitClip(s.comp, { clipId, atSec });
+        } catch (err) {
+          if (err instanceof CompositionOpError) return; // D4 silent no-op
+          throw err;
         }
+        s.clipHistory.past.push(preTracks);
+        if (s.clipHistory.past.length > TRACK_HISTORY_LIMIT) {
+          s.clipHistory.past.shift();
+        }
+        s.clipHistory.future = [];
       }),
     rebindClip: (clipId, newAssetId) =>
       set((s) => {

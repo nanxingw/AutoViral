@@ -104,6 +104,7 @@ function usage(): string {
     "Write + tasks:",
     "  clip add --src <path> [--track video|audio|text] [--offset s] [--duration s]",
     "  clip set <id> [--key value]...",
+    "  clip split <id> --at <seconds>",
     "  clip remove <id>",
     "  carousel add-slide [--at N] [--bg-type gradient|image|solid --bg-value V]",
     "  carousel set-layer <slideId> --kind <text|image|shape|sticker> [--id L] [--x N --y N --w N --h N] [...]",

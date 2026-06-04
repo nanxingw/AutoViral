@@ -134,6 +134,19 @@ beforeAll(async () => {
       if (idx >= 0) clips.splice(idx, 1);
       return send(200, { ok: true });
     }
+    // S6 (US 1/9) — POST /split. Mirrors the server contract: a known clipId
+    // appends a new child clip + returns { id }; an unknown clipId is the
+    // op's CompositionOpError → 400 + code 4 → CLI exit 4.
+    if (req.method === "POST" && url === "/api/bridge/v1/split") {
+      const body = await readBody(req);
+      const target = clips.find((c) => c.id === body.clipId);
+      if (!target) {
+        return send(400, { ok: false, error: "no such clip", code: 4 });
+      }
+      const id = `vc_split${nextSeq++}`;
+      clips.push({ id, trackKind: target.trackKind });
+      return send(200, { ok: true, result: { id } });
+    }
     if (req.method === "POST" && (
       url === "/api/bridge/v1/select" ||
       url === "/api/bridge/v1/seek" ||
@@ -284,6 +297,36 @@ describe("autoviral CLI — end-to-end", () => {
     const listAfterRm = await run(["list", "clips"]);
     const idsAfter = (JSON.parse(listAfterRm.stdout) as Array<{ id: string }>).map((c) => c.id);
     expect(idsAfter).not.toContain(newId);
+  });
+
+  it("clip split <id> --at <sec> → prints the new child id, list shows it", async () => {
+    const before = await run(["list", "clips"]);
+    const beforeIds = (JSON.parse(before.stdout) as Array<{ id: string }>).map((c) => c.id);
+
+    const split = await run(["clip", "split", "vc_s01", "--at", "2.0"]);
+    expect(split.exitCode).toBe(0);
+    const newId = split.stdout.trim();
+    expect(newId).toMatch(/^vc_split/);
+
+    const after = await run(["list", "clips"]);
+    const ids = (JSON.parse(after.stdout) as Array<{ id: string }>).map((c) => c.id);
+    expect(ids).toContain(newId);
+    expect(ids.length).toBe(beforeIds.length + 1);
+  });
+
+  it("clip split with no id → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "split", "--at", "2.0"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip split with no --at → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "split", "vc_s01"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip split an unknown clip → bridge 400 code:4 → exit 4", async () => {
+    const r = await run(["clip", "split", "nope", "--at", "2.0"]);
+    expect(r.exitCode).toBe(4);
   });
 
   it("UI commands (select/seek/play/pause/toast/progress) → all exit 0", async () => {

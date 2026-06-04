@@ -1,4 +1,4 @@
-// `autoviral clip add|set|remove` — composition.yaml write surface.
+// `autoviral clip add|set|remove|split` — composition.yaml write surface.
 //
 // All three sub-verbs round-trip through the bridge so the canonical
 // disk state is always the server's (no local edit-then-push). The
@@ -46,6 +46,31 @@ export async function clipCommand(args: string[]): Promise<void> {
       process.exit(4);
     }
     await bridgeRequest(ctx, "DELETE", `/clip/${encodeURIComponent(id)}`, undefined);
+    return;
+  }
+
+  if (sub === "split") {
+    // S6 (US 1/9) — `autoviral clip split <id> --at <sec>`. The bridge runs the
+    // shared `ops.splitClip` (same code the Studio UI uses), so the two paths
+    // produce an identical composition. We validate the args locally (exit 4,
+    // never hits the bridge) so an obviously-malformed invocation fails fast.
+    const id = rest[0];
+    if (!id || id.startsWith("--")) {
+      process.stderr.write("usage: autoviral clip split <id> --at <seconds>\n");
+      process.exit(4);
+    }
+    const opts = parseFlags(rest.slice(1));
+    const atRaw = opts["--at"];
+    const at = atRaw === undefined ? NaN : Number(atRaw);
+    if (!Number.isFinite(at)) {
+      process.stderr.write("autoviral clip split: --at <seconds> required\n");
+      process.exit(4);
+    }
+    const result = await bridgeRequest<{ id: string }>(ctx, "POST", "/split", {
+      clipId: id,
+      at,
+    });
+    process.stdout.write(`${result.id}\n`);
     return;
   }
 

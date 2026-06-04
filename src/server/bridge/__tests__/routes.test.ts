@@ -364,6 +364,122 @@ describe("bridge router — Phase 3 clip writes", () => {
     expect(found?.trackOffset).toBe(15.5);
   });
 
+  // S6 (US 1/9) — POST /split delegates to the shared `ops.splitClip`. The
+  // fixture's `vc_s01` is a video clip in:0 out:4 trackOffset:0 (timeline
+  // 0..4). Splitting at 2.0 → child A keeps the id + out:2, child B is a new
+  // id with in:2 trackOffset:2.
+  it("POST /split cuts a clip into two, rebasing in/out + trackOffset", async () => {
+    const res = await app.request("/api/bridge/v1/split", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ clipId: "vc_s01", at: 2.0 }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { id: string } };
+    expect(body.ok).toBe(true);
+    expect(typeof body.result?.id).toBe("string");
+    const newId = body.result!.id;
+
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: { tracks: Array<{ clips: Array<{ id: string; in?: number; out?: number; trackOffset: number }> }> };
+    };
+    const all = compBody.result.tracks.flatMap((t) => t.clips);
+    const childA = all.find((c) => c.id === "vc_s01");
+    const childB = all.find((c) => c.id === newId);
+    expect(childA?.out).toBeCloseTo(2);
+    expect(childA?.trackOffset).toBeCloseTo(0);
+    expect(childB?.in).toBeCloseTo(2);
+    expect(childB?.trackOffset).toBeCloseTo(2);
+  });
+
+  it("POST /split with an unknown clipId → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/split", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ clipId: "nope", at: 2.0 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /split with an out-of-clip time → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/split", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ clipId: "vc_s01", at: 99 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /split without a work-id header → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/split", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clipId: "vc_s01", at: 2.0 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /split broadcasts composition-changed after the write lands", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      // Add a fresh splittable clip so this test doesn't depend on prior splits.
+      const add = await app.request("/api/bridge/v1/clip", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ src: "assets/sample-shot.mp4", track: "video", offset: 30, duration: 4 }),
+      });
+      const addedId = ((await add.json()) as { result: { id: string } }).result.id;
+      events.length = 0;
+      const res = await app.request("/api/bridge/v1/split", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ clipId: addedId, at: 32 }),
+      });
+      expect(res.status).toBe(200);
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  // A rejected split must NOT broadcast — disk untouched, so a "changed" event
+  // would lie.
+  it("POST /split with an unknown clip does NOT broadcast composition-changed", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/split", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ clipId: "nope", at: 2.0 }),
+      });
+      expect(res.status).toBe(400);
+      expect(events).not.toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
   // S2 (US 17) — a successful clip write broadcasts composition-changed on
   // the uiEventBus right after the atomic write lands, so Studio refetches
   // without depending on fs.watch.
