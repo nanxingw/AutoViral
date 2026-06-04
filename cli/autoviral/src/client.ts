@@ -43,15 +43,31 @@ export async function bridgeRequest<T>(
     },
     body: body == null ? undefined : JSON.stringify(body),
   });
+  // S3 (US 18/19) — error-code contract. The CLI's exit code is the agent's
+  // control-flow signal: 4 = "your input/validation was wrong" (4xx),
+  // 3 = "the service broke" (5xx / malformed response). Fixed timeouts keep
+  // their own code (124) — those never reach here since /ask returns 504 via
+  // this path but with code:124, which we honour below.
   if (!res.ok) {
     const txt = await res.text();
     process.stderr.write(`autoviral: bridge ${method} ${path} → ${res.status} ${txt}\n`);
-    process.exit(3);
+    // Prefer the server-declared code; else map status class (4xx→4, 5xx→3).
+    // The body may not be JSON (proxy/HTML error page), so parse defensively.
+    let code: number | undefined;
+    try {
+      const parsed = JSON.parse(txt) as { code?: unknown };
+      if (typeof parsed.code === "number") code = parsed.code;
+    } catch {
+      // non-JSON body — fall through to status-class mapping.
+    }
+    process.exit(code ?? (res.status >= 400 && res.status < 500 ? 4 : 3));
   }
-  const json = (await res.json()) as { ok: boolean; result?: T; error?: string };
+  const json = (await res.json()) as { ok: boolean; result?: T; error?: string; code?: number };
   if (!json.ok) {
+    // HTTP 200 with a business-level failure envelope. Honour an explicit
+    // code; default to 3 (treated as a service/protocol error).
     process.stderr.write(`autoviral: ${json.error ?? "unknown error"}\n`);
-    process.exit(3);
+    process.exit(json.code ?? 3);
   }
   return json.result as T;
 }

@@ -546,7 +546,7 @@ bridgeRouter.post("/clip", async (c) => {
     in?: number;
     out?: number;
   };
-  if (!body.track) return c.json({ ok: false, error: "missing track" }, 400);
+  if (!body.track) return c.json({ ok: false, error: "missing track", code: 4 }, 400);
   let newId = "";
   try {
     await mutateCompositionFor({ workId: g.workId }, (comp) => {
@@ -602,7 +602,9 @@ bridgeRouter.post("/clip", async (c) => {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return c.json({ ok: false, error: message }, 400);
+    // S3 (US 18/19) — input/validation rejection carries code:4 so the CLI
+    // branches to exit 4 (vs 5xx service errors → exit 3).
+    return c.json({ ok: false, error: message, code: 4 }, 400);
   }
   return c.json({ ok: true, result: { id: newId } });
 });
@@ -626,7 +628,8 @@ bridgeRouter.delete("/clip/:id", async (c) => {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return c.json({ ok: false, error: message }, 400);
+    // S3 (US 18/19) — input/validation rejection carries code:4.
+    return c.json({ ok: false, error: message, code: 4 }, 400);
   }
   return c.json({ ok: true });
 });
@@ -760,7 +763,8 @@ bridgeRouter.patch("/clip/:id", async (c) => {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    return c.json({ ok: false, error: message }, 400);
+    // S3 (US 18/19) — input/validation rejection carries code:4.
+    return c.json({ ok: false, error: message, code: 4 }, 400);
   }
   return c.json({ ok: true });
 });

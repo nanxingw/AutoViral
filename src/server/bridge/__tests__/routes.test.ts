@@ -412,6 +412,73 @@ describe("bridge router — Phase 3 clip writes", () => {
       off();
     }
   });
+
+  // S3 (US 18/19) — every 400 on the clip endpoints carries code:4 so the
+  // CLI (and any raw HTTP caller) can branch "validation error" → exit 4 vs
+  // "service error" (5xx) → exit 3. These mirror the carousel endpoints
+  // which already tagged their 400s; the clip trio had been emitting bare
+  // `{ ok:false, error }` 400s.
+  it("POST /clip missing track → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ src: "assets/sample-shot.mp4", offset: 1.0 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /clip with a rejected mutator (video clip, no src) → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      // video clip without src → mutator throws → caught 400.
+      body: JSON.stringify({ track: "video", offset: 1.0, duration: 2.0 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("PATCH /clip/:id with an invalid patch → 400 + code 4", async () => {
+    // Seed a real clip, then patch it with a field that fails schema
+    // validation on write (trackOffset must be a number).
+    const post = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/sample-shot.mp4",
+        track: "video",
+        offset: 30.0,
+        duration: 2.0,
+      }),
+    });
+    const id = ((await post.json()) as { result: { id: string } }).result.id;
+    const patch = await app.request(`/api/bridge/v1/clip/${id}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ trackOffset: "not-a-number" }),
+    });
+    expect(patch.status).toBe(400);
+    const body = (await patch.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
 });
 
 describe("bridge router — Phase 3 approval gate", () => {

@@ -7,8 +7,8 @@ The `autoviral` CLI exits with one of these codes. Branch on them in shell pipel
 | `0` | Success | All happy paths; `ask` answered **yes** / **ok** |
 | `1` | User said "no" | `ask --yes-no` answered no |
 | `2` | Wrong state | Missing `AUTOVIRAL_WORK_ID` env, or Studio unreachable on `AUTOVIRAL_PORT`; `ask` cancelled |
-| `3` | Protocol error | Malformed bridge response, schema mismatch, network error mid-call |
-| `4` | Validation error | Bad CLI args, missing required flags, bridge returned HTTP 400 with zod issues |
+| `3` | Protocol / service error | Bridge returned `5xx`, malformed/non-JSON response, schema mismatch, network error mid-call |
+| `4` | Validation error | Bad CLI args, missing required flags, bridge returned any HTTP `4xx` (its `400`s carry `code: 4`) |
 | `124` | Timeout | `ask` not answered within `--timeout` (default 30 min) |
 | `127` | Unknown subcommand | Typo: `autoviral whomai`, `autoviral klip`, etc. |
 
@@ -21,6 +21,15 @@ When the bridge rejects a request, the response body is:
 ```
 
 The CLI surfaces `error` on stderr and exits with the `code`. Don't ignore stderr — it carries the actionable message.
+
+How the CLI picks its exit code from a bridge failure:
+
+1. If the response body carries a numeric `code`, the CLI exits with **exactly that** (`4` for validation `400`s, `124` for an `/ask` `504` timeout).
+2. Otherwise it maps the HTTP status class: any **`4xx` → exit 4** (input/validation), any **`5xx` → exit 3** (service).
+3. A non-JSON error body (proxy / HTML error page) is tolerated — it falls back to the status-class mapping, never crashes.
+4. A `200 OK` with `{ ok: false }` (a business-level failure) honours an explicit `code`, else exits `3`.
+
+Every clip + carousel write endpoint emits `code: 4` on its `400`s, so `autoviral clip …` failures branch `4` (your patch was rejected) vs `3` (the bridge broke) reliably.
 
 ## Idioms
 

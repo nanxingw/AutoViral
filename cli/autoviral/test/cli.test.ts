@@ -94,8 +94,18 @@ beforeAll(async () => {
     }
     if (req.method === "POST" && url === "/api/bridge/v1/clip") {
       const body = await readBody(req);
+      // S3 (US 18/19) — error-code contract fixtures. Sentinel track
+      // "reject" is the bridge's validation rejection: HTTP 400 + code:4 →
+      // CLI exit 4. Sentinel track "boom" simulates a service error: HTTP
+      // 500 (no code) → CLI exit 3. Everything else is the happy 200 path.
+      if (body.track === "reject") {
+        return send(400, { ok: false, error: "no track of kind reject", code: 4 });
+      }
+      if (body.track === "boom") {
+        return send(500, { ok: false, error: "disk on fire" });
+      }
       const id = `vc_e2e${nextSeq++}`;
-      clips.push({ id, trackKind: body.track ?? "video" });
+      clips.push({ id, trackKind: body.track });
       return send(200, { ok: true, result: { id } });
     }
     if (req.method === "DELETE" && url.startsWith("/api/bridge/v1/clip/")) {
@@ -357,5 +367,24 @@ describe("autoviral CLI — end-to-end", () => {
   it("unknown command → exit 127", async () => {
     const r = await run(["definitely-not-a-command"]);
     expect(r.exitCode).toBe(127);
+  });
+
+  // S3 (US 18/19) — error-code contract: the CLI branches its exit code on
+  // the bridge's response so a shell agent can tell "my input was wrong"
+  // (exit 4) apart from "the service broke" (exit 3).
+  describe("error-code contract — clip writes branch 4xx→4 vs 5xx→3", () => {
+    it("bridge 400 + code:4 (validation) → exit 4", async () => {
+      const r = await run([
+        "clip", "add", "--src", "assets/x.mp4", "--track", "reject",
+      ]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("bridge 5xx (service error) → exit 3", async () => {
+      const r = await run([
+        "clip", "add", "--src", "assets/x.mp4", "--track", "boom",
+      ]);
+      expect(r.exitCode).toBe(3);
+    });
   });
 });
