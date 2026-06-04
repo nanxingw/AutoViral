@@ -106,10 +106,17 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // producing periodic ~3s playback hitches as the browser LRU-evicts
   // and re-decodes IDR frames. Server render path is unaffected — that
   // goes through Remotion CLI, not this component. (2026-05-08)
+  // S19 (US 29/30) — freeze a single source frame. When freezeAtSec is set the
+  // preview HOLDS one frame: startFrom = round(freezeAtSec*fps), endAt = that+1
+  // (a one-frame span the <Sequence> repeats for the clip duration). This is
+  // the WYSIWYG half — preview freezes on the SAME frame the ffmpeg trim+tpad
+  // pass bakes into the export (transforms-ffmpeg.timeWarpVideoFilterChain).
+  const freezeStart =
+    clip.freezeAtSec != null ? Math.round(clip.freezeAtSec * fps) : null;
   const baseProps = {
     src: clip.src,
-    startFrom: Math.round(clip.in * fps),
-    endAt: Math.round(clip.out * fps),
+    startFrom: freezeStart != null ? freezeStart : Math.round(clip.in * fps),
+    endAt: freezeStart != null ? freezeStart + 1 : Math.round(clip.out * fps),
     playbackRate: speed,
     // R47-fix5 (Codex pick 2) — widen Remotion's hard-seek drift
     // tolerance from the default 0.45s. Below the threshold Remotion
@@ -137,8 +144,9 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // is the SAME (cropped, mirrored) frame the export bakes into its single
   // source MP4 (review fix medium — blur background used to show the un-cropped
   // un-flipped original, diverging from export).
+  let body: React.ReactNode;
   if (fitMode === "blur") {
-    return (
+    body = (
       <div style={{ position: "absolute", inset: 0, opacity, overflow: "hidden" }}>
         <Video
           {...baseProps}
@@ -162,28 +170,60 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
         />
       </div>
     );
+  } else {
+    // cover / contain → a single layer, objectFit driven by fitMode. When crop is
+    // present the layer is zoomed (innerSizing) and must be clipped by an
+    // overflow:hidden window; otherwise it's the legacy bare <Video>.
+    const layer = (
+      <Video
+        {...baseProps}
+        style={{
+          ...innerSizing,
+          objectFit: fitMode === "contain" ? "contain" : "cover",
+          filter: filter || undefined,
+          transform,
+          opacity: zoom ? undefined : opacity,
+        }}
+      />
+    );
+    body = !zoom ? (
+      layer
+    ) : (
+      <div style={{ position: "absolute", inset: 0, overflow: "hidden", opacity }}>
+        {layer}
+      </div>
+    );
   }
 
-  // cover / contain → a single layer, objectFit driven by fitMode. When crop is
-  // present the layer is zoomed (innerSizing) and must be clipped by an
-  // overflow:hidden window; otherwise it's the legacy bare <Video>.
-  const layer = (
-    <Video
-      {...baseProps}
-      style={{
-        ...innerSizing,
-        objectFit: fitMode === "contain" ? "contain" : "cover",
-        filter: filter || undefined,
-        transform,
-        opacity: zoom ? undefined : opacity,
-      }}
-    />
-  );
-  if (!zoom) return layer;
+  // S19 (US 29/30) — reverse is EXPORT-ONLY. A browser <video> can't play
+  // backwards, so we do NOT fake WYSIWYG: the preview plays forward but stamps
+  // an EXPLICIT placeholder badge over the clip telling the user the reverse
+  // only takes effect on export (the real `reverse`/`areverse` ffmpeg pass).
+  // freeze, by contrast, IS WYSIWYG (handled above via the 1-frame baseProps).
+  if (!clip.reverse) return body;
   return (
-    <div style={{ position: "absolute", inset: 0, overflow: "hidden", opacity }}>
-      {layer}
-    </div>
+    <>
+      {body}
+      <div
+        data-test="reverse-export-only"
+        style={{
+          position: "absolute",
+          top: 12,
+          left: 12,
+          zIndex: 2,
+          padding: "4px 10px",
+          borderRadius: 8,
+          background: "rgba(10,11,15,0.72)",
+          color: "#fafaf7",
+          font: "600 13px/1.3 system-ui, sans-serif",
+          letterSpacing: 0.2,
+          backdropFilter: "blur(8px)",
+          pointerEvents: "none",
+        }}
+      >
+        倒放 · 仅导出生效
+      </div>
+    </>
   );
 }
 

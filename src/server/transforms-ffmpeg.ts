@@ -78,6 +78,144 @@ export function transformsToFilterChain(
   return parts.join(",");
 }
 
+// S19 (US 29/30) — time-domain warp (reverse + freeze) ffmpeg builders. These
+// are the EXPORT mirror of the time-domain fields on a VideoClip. Unlike crop/
+// flip (spatial, both preview + export show the same result), reverse is
+// EXPORT-ONLY: a browser <video> can't play backwards, so the preview shows an
+// explicit "export-only" placeholder (VideoTrackRenderer) while THIS builds the
+// real `reverse`/`areverse` filtergraph for the encode. freeze IS shown in both
+// (the preview holds the frame; here we trim+tpad it).
+
+/** The subset of a VideoClip the time-warp pass reads. */
+export interface TimeWarp {
+  reverse?: boolean;
+  freezeAtSec?: number;
+  /** clip play length on the timeline (out - in), so freeze can pad to it. */
+  outSec?: number;
+}
+
+/**
+ * Build the ffmpeg VIDEO `-vf` chain for a clip's time-warp.
+ *   - freeze (precedence) → `trim=start=F,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=D`
+ *       grab the single frame at F and clone-hold it for the clip's duration D.
+ *   - reverse → `reverse` (whole clip backwards).
+ *   - neither → "" (no-op).
+ * Freeze takes precedence over reverse (a held still has no direction).
+ */
+export function timeWarpVideoFilterChain(
+  w: TimeWarp,
+  fps: number,
+  outSec: number,
+): string {
+  if (w.freezeAtSec != null) {
+    const start = w.freezeAtSec;
+    const dur = Math.max(1 / fps, outSec);
+    // trim to one frame at `start`, reset PTS to 0, then clone-hold for `dur`.
+    return (
+      `trim=start=${start}:end=${start + 1 / fps},` +
+      `setpts=PTS-STARTPTS,` +
+      `tpad=stop_mode=clone:stop_duration=${dur}`
+    );
+  }
+  if (w.reverse) return "reverse";
+  return "";
+}
+
+/**
+ * Build the ffmpeg AUDIO `-af` chain for a clip's time-warp.
+ *   - reverse → `areverse` (audio played backwards, in lock-step with video).
+ *   - freeze → "" (a held still has no moving audio; the pass silences it -an).
+ *   - neither → "".
+ */
+export function timeWarpAudioFilterChain(w: TimeWarp): string {
+  if (w.freezeAtSec != null) return "";
+  if (w.reverse) return "areverse";
+  return "";
+}
+
+/**
+ * Cache filename for a clip's time-warp pre-pass output. Params are hashed into
+ * the name (mirrors transformsCacheName) so a changed warp → new name → re-render,
+ * same warp → cache HIT.
+ */
+export function timeWarpCacheName(clipId: string, w: TimeWarp): string {
+  const sig = JSON.stringify({
+    reverse: !!w.reverse,
+    freezeAtSec: w.freezeAtSec ?? null,
+    outSec: w.outSec ?? null,
+  });
+  const hash = createHash("sha1").update(sig).digest("hex").slice(0, 10);
+  return `clip-${clipId}-timewarp-${hash}.mp4`;
+}
+
+/**
+ * Build the ffmpeg argv for a single clip's time-warp pass.
+ *   ffmpeg -y -loglevel error -i {in} -vf {vChain} [-af {aChain} | -an] {out}
+ * When the audio chain is empty (freeze) we pass `-an` so the held still is
+ * silenced rather than carrying stale audio.
+ */
+export function buildTimeWarpFilterArgs(
+  input: string,
+  output: string,
+  vChain: string,
+  aChain: string,
+): string[] {
+  const args = ["-y", "-loglevel", "error", "-i", input, "-vf", vChain];
+  if (aChain) {
+    args.push("-af", aChain);
+  } else {
+    args.push("-an");
+  }
+  args.push(output);
+  return args;
+}
+
+/**
+ * Spawn ffmpeg for the time-warp pass. Mirrors runTransformsPass.
+ */
+export async function runTimeWarpPass(
+  input: string,
+  output: string,
+  vChain: string,
+  aChain: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  const args = buildTimeWarpFilterArgs(input, output, vChain, aChain);
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("runTimeWarpPass: aborted before spawn"));
+      return;
+    }
+    const child = spawn(FFMPEG_BIN, args);
+    let stderr = "";
+    child.stderr?.on("data", (b: Buffer | string) => {
+      stderr += b.toString();
+    });
+    const onAbort = () => {
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        /* ignore */
+      }
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
+    child.on("close", (code: number | null) => {
+      signal?.removeEventListener("abort", onAbort);
+      if (signal?.aborted) {
+        reject(new Error("runTimeWarpPass: aborted"));
+      } else if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`runTimeWarpPass: ffmpeg exit ${code}\n${stderr}`));
+      }
+    });
+    child.on("error", (err) => {
+      signal?.removeEventListener("abort", onAbort);
+      reject(err);
+    });
+  });
+}
+
 /**
  * Cache filename for a clip's crop+flip pre-pass output. The crop/flip PARAMS
  * are hashed into the name (review fix high — the old `clip-{id}-cropflip.mp4`
@@ -296,6 +434,74 @@ export async function applyTransformsPrePass(
           }
           await runTransformsPass(c.src, cachePath, chain, signal);
           return { ...c, src: cachePath, transforms: consumedTransforms };
+        }),
+      );
+      return { ...track, clips: newClips };
+    }),
+  );
+  return { ...comp, tracks: newTracks };
+}
+
+/**
+ * S19 (US 29/30) — pre-Remotion time-warp stage. For each VideoClip carrying
+ * `reverse` and/or `freezeAtSec`, run the ffmpeg reverse/areverse or trim+tpad
+ * freeze pass, rewrite clip.src to the cached output, and STRIP the consumed
+ * time-domain fields so Remotion does NOT re-apply them (the on-disk frames are
+ * already warped). Clips with neither are left untouched.
+ *
+ * This is the EXPORT consumption of the same `reverse`/`freezeAtSec` fields the
+ * preview reads — but with a deliberate asymmetry: freeze IS WYSIWYG (preview
+ * holds the same frame), reverse is EXPORT-ONLY (the preview can't play a
+ * <video> backwards, so it shows an explicit "export-only" placeholder; here is
+ * where the reverse actually happens). Runs BEFORE the crop/flip pre-pass so a
+ * clip can be both reversed AND cropped (crop layers on the warped output).
+ *
+ * Never mutates the input composition; returns a deep-cloned comp with affected
+ * clips rewritten. Mirrors applyTransformsPrePass.
+ */
+export async function applyTimeWarpPrePass(
+  comp: Composition,
+  workDir: string,
+  signal?: AbortSignal,
+): Promise<Composition> {
+  const newTracks: Track[] = await Promise.all(
+    comp.tracks.map(async (track) => {
+      if (track.kind !== "video") return track;
+      const newClips: Clip[] = await Promise.all(
+        track.clips.map(async (clipRaw) => {
+          if (clipRaw.kind !== "video") return clipRaw;
+          const c = clipRaw as VideoClip;
+          const hasFreeze = c.freezeAtSec != null;
+          const hasReverse = !!c.reverse;
+          if (!hasFreeze && !hasReverse) return c; // no warp → no-op
+          const outSec = Math.max(0, c.out - c.in);
+          const warp: TimeWarp = {
+            reverse: c.reverse,
+            freezeAtSec: c.freezeAtSec,
+            outSec,
+          };
+          const vChain = timeWarpVideoFilterChain(warp, comp.fps, outSec);
+          const aChain = timeWarpAudioFilterChain(warp);
+          if (vChain === "") return c; // defensive (shouldn't happen given guards)
+          const cachePath = join(workDir, timeWarpCacheName(c.id, warp));
+          // The warp bakes the whole in..out span into the cached MP4, so the
+          // rewritten clip plays it straight (in=0, the consumed fields gone).
+          const consumed: VideoClip = {
+            ...c,
+            src: cachePath,
+            in: 0,
+            out: outSec,
+            reverse: undefined,
+            freezeAtSec: undefined,
+          };
+          try {
+            await stat(cachePath);
+            return consumed;
+          } catch {
+            /* miss — fall through to ffmpeg */
+          }
+          await runTimeWarpPass(c.src, cachePath, vChain, aChain, signal);
+          return consumed;
         }),
       );
       return { ...track, clips: newClips };

@@ -207,6 +207,16 @@ const VideoClipObjectSchema = z.object({
   //             a contained foreground, so there are no hard bars.
   // optional + default "cover" keeps OLD compositions parsing unchanged.
   fitMode: z.enum(["cover", "contain", "blur"]).optional().default("cover"),
+  // S19 (US 29/30) — time-domain ops on the clip's source.
+  //   freezeAtSec — hold ONE source frame (a still) at this clip-local time;
+  //     preview + export BOTH freeze on it (≥0, optional so pre-S19 works with
+  //     no key parse unchanged — absent = no freeze).
+  //   reverse — export plays the clip (and its audio) backwards (real ffmpeg
+  //     reverse/areverse); the preview can't play a <video> backwards, so it
+  //     shows an EXPLICIT "export-only" placeholder badge rather than faking it.
+  // Both optional with NO default → every existing work still parses.
+  freezeAtSec: z.number().min(0).optional(),
+  reverse: z.boolean().optional(),
   keyframes: z.array(KeyframeSchema).optional(),
 });
 export const VideoClipSchema = VideoClipObjectSchema.superRefine(

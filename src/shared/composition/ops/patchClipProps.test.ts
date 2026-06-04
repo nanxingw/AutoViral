@@ -125,6 +125,25 @@ describe("@shared composition ops — patchClipProps", () => {
     );
   });
 
+  it("writes top-level freezeAtSec + reverse (S19 — clip set freeze/reverse reachable)", () => {
+    const clip = videoClip();
+    patchClipProps(clip, { freezeAtSec: 1.5, reverse: true });
+    expect((clip as any).freezeAtSec).toBe(1.5);
+    expect((clip as any).reverse).toBe(true);
+    // sibling fields untouched
+    expect((clip as any).transforms.scale).toBe(1);
+  });
+
+  it("REJECTS freezeAtSec / reverse on a non-video clip (text) — not settable there", () => {
+    const clip = textClip();
+    expect(() => patchClipProps(clip, { freezeAtSec: 1.5 })).toThrow(
+      CompositionOpError,
+    );
+    expect(() => patchClipProps(clip, { reverse: true })).toThrow(
+      CompositionOpError,
+    );
+  });
+
   it("writes a top-level scalar (audio volume)", () => {
     const clip = audioClip();
     patchClipProps(clip, { volume: 0.3 });

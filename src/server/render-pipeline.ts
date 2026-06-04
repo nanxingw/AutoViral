@@ -3,7 +3,10 @@
 import { renderCompositionToMp4 } from "./remotion-renderer.js";
 import { renderViaStreamingBridge } from "./render/remotion-bridge.js";
 import { applySpeedRampPrePass } from "./speed-ramp-ffmpeg.js";
-import { applyTransformsPrePass } from "./transforms-ffmpeg.js";
+import {
+  applyTransformsPrePass,
+  applyTimeWarpPrePass,
+} from "./transforms-ffmpeg.js";
 import { pickEncoder } from "./render/gpu-encoder.js";
 import {
   mixAudioTracks,
@@ -409,6 +412,22 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   );
   checkAbort();
 
+  // Stage 0.4 (S19 — US 29/30) — time-warp pre-pass. For each video clip that
+  // carries `reverse` and/or `freezeAtSec`, run an ffmpeg reverse/areverse or
+  // trim+tpad freeze invocation that bakes the time-domain op into a cached MP4
+  // *before* Remotion sees it, then strip the consumed fields. freeze is shown
+  // in BOTH preview + export (WYSIWYG); reverse is EXPORT-ONLY (the preview
+  // shows an explicit "export-only" placeholder, never a fake backwards play),
+  // and THIS is where the real reverse happens. Runs upstream of crop/flip so a
+  // clip can be both reversed AND cropped (crop layers on the warped output).
+  checkAbort();
+  const compAfterWarp = await applyTimeWarpPrePass(
+    compAfterSpeed,
+    opts.outDir,
+    opts.signal,
+  );
+  checkAbort();
+
   // Stage 0.5 (S18 — US 27/28) — crop + flip pre-pass. For each video clip that
   // carries transforms.crop / flipH / flipV, run an ffmpeg crop/hflip/vflip
   // invocation that bakes the transform into a cached MP4 *before* Remotion
@@ -417,7 +436,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   // CSS clip-path inset() + scaleX(-1)/scaleY(-1) (WYSIWYG by construction).
   checkAbort();
   const comp = await applyTransformsPrePass(
-    compAfterSpeed,
+    compAfterWarp,
     opts.outDir,
     opts.signal,
   );

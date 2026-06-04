@@ -913,6 +913,24 @@ describe("autoviral CLI — end-to-end", () => {
     });
   });
 
+  // S19 (US 29/30) — `--freeze-at <sec>` / `--reverse` map the ergonomic flags
+  // to the canonical top-level freezeAtSec / reverse paths (freeze is a number,
+  // reverse a boolean). Makes time-domain ops reachable from the agent CLI (else
+  // UI-only = silent gap).
+  it("clip set --freeze-at 1.5 → PATCHes { freezeAtSec: 1.5 } (number, mapped)", async () => {
+    lastClipPatch = null;
+    const r = await run(["clip", "set", "vc_s01", "--freeze-at", "1.5"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({ freezeAtSec: 1.5 });
+  });
+
+  it("clip set --reverse true → PATCHes { reverse: true } (boolean, mapped)", async () => {
+    lastClipPatch = null;
+    const r = await run(["clip", "set", "vc_s01", "--reverse", "true"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({ reverse: true });
+  });
+
   it("clip set --brightness 0.5 --italic true → maps + coerces both", async () => {
     lastClipPatch = null;
     const r = await run([

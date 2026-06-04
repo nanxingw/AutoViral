@@ -45,6 +45,9 @@ const ALLOWED_PATHS: Record<Clip["kind"], readonly string[]> = {
     "transforms.crop.h",
     "transforms.flipH",
     "transforms.flipV",
+    // S19 (US 29/30) — time-domain ops: freeze a frame / reverse the clip.
+    "freezeAtSec",
+    "reverse",
     "filters.lut",
     "filters.brightness",
     "filters.contrast",

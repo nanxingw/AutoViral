@@ -291,6 +291,10 @@ const CLIP_SET_FLAG_PATHS: Record<string, string> = {
   crop: "transforms.crop",
   "flip-h": "transforms.flipH",
   "flip-v": "transforms.flipV",
+  // S19 (US 29/30) — time-domain ops. `--freeze-at <sec>` → freezeAtSec (number),
+  // `--reverse` → reverse (boolean). Both are top-level video fields.
+  "freeze-at": "freezeAtSec",
+  reverse: "reverse",
   // video filters
   lut: "filters.lut",
   brightness: "filters.brightness",
