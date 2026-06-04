@@ -3,6 +3,7 @@ import { useComposition } from "../store";
 import { makeEmptyComposition } from "../types";
 import {
   makeAssetEntry,
+  makeAudioClip,
   makeCompositionWithClips,
   makeVideoClip,
   makeTextClip,
@@ -185,6 +186,94 @@ describe("composition store — drag-preview actions (Phase 4.B)", () => {
       .find((c) => c.id === "b")!;
     expect(a.trackOffset).toBeCloseTo(0);
     expect(b.trackOffset).toBeCloseTo(3);
+  });
+
+  // #3 — the clip BODY now owns cross-track moves. beginDrag seeds
+  // targetTrackId=null; updateDragTarget records a hovered same-kind lane;
+  // commitDrag applies BOTH the horizontal trackOffset AND the lane move.
+  it("beginDrag initialises targetTrackId to null", () => {
+    useComposition.getState().beginDrag("a");
+    expect(useComposition.getState().dragState!.targetTrackId).toBeNull();
+  });
+
+  it("updateDragTarget records / clears the cross-track move target", () => {
+    const s = useComposition.getState();
+    s.beginDrag("a");
+    s.updateDragTarget("t_other");
+    expect(useComposition.getState().dragState!.targetTrackId).toBe("t_other");
+    s.updateDragTarget(null);
+    expect(useComposition.getState().dragState!.targetTrackId).toBeNull();
+  });
+
+  it("updateDragTarget is a no-op when no drag is active", () => {
+    useComposition.getState().updateDragTarget("t_other");
+    expect(useComposition.getState().dragState).toBeNull();
+  });
+
+  it("cancelDrag clears a recorded targetTrackId", () => {
+    const s = useComposition.getState();
+    s.beginDrag("a");
+    s.updateDragTarget("t_other");
+    s.cancelDrag();
+    expect(useComposition.getState().dragState).toBeNull();
+  });
+
+  it("commitDrag with a targetTrackId moves the clip to the lane AND keeps the scrubbed offset", () => {
+    // Two same-kind audio lanes (A1/A2 in makeEmptyComposition) — the exact
+    // same-kind pair moveClipToTrack uses. Seed an audio clip on A1.
+    const c = makeEmptyComposition({ workId: "w" });
+    const audioLanes = c.tracks.filter((t) => t.kind === "audio");
+    const [a1, a2] = audioLanes;
+    a1.clips.push(makeAudioClip({ id: "au", trackOffset: 0, in: 0, out: 4 }));
+    useComposition.setState({
+      comp: c,
+      selection: null,
+      currentFrame: 0,
+      isPlaying: false,
+      beats: [],
+      dragState: null,
+    });
+
+    const s = useComposition.getState();
+    s.beginDrag("au");
+    s.updateDragCandidate(1.5); // scrub right to t=1.5
+    s.updateDragTarget(a2.id); // retarget A2
+    s.commitDrag();
+
+    const after = useComposition.getState();
+    expect(after.dragState).toBeNull();
+    const a1Clips = after.comp!.tracks.find((t) => t.id === a1.id)!.clips;
+    const a2Clips = after.comp!.tracks.find((t) => t.id === a2.id)!.clips;
+    expect(a1Clips).toHaveLength(0); // detached from source
+    expect(a2Clips).toHaveLength(1); // attached to target
+    expect(a2Clips[0].id).toBe("au");
+    expect(a2Clips[0].trackOffset).toBeCloseTo(1.5); // horizontal scrub preserved
+  });
+
+  it("commitDrag re-guards kind: a stale cross-kind targetTrackId never moves the clip", () => {
+    // Audio clip on A1, target a VIDEO lane — the inline kind guard must reject
+    // the move even though targetTrackId is set (defence vs a stale target).
+    const c = makeEmptyComposition({ workId: "w" });
+    const a1 = c.tracks.find((t) => t.kind === "audio")!;
+    const videoLane = c.tracks.find((t) => t.kind === "video")!;
+    a1.clips.push(makeAudioClip({ id: "au", trackOffset: 0, in: 0, out: 4 }));
+    useComposition.setState({
+      comp: c,
+      selection: null,
+      currentFrame: 0,
+      isPlaying: false,
+      beats: [],
+      dragState: null,
+    });
+
+    const s = useComposition.getState();
+    s.beginDrag("au");
+    s.updateDragTarget(videoLane.id);
+    s.commitDrag();
+
+    const after = useComposition.getState();
+    expect(after.comp!.tracks.find((t) => t.id === a1.id)!.clips).toHaveLength(1);
+    expect(after.comp!.tracks.find((t) => t.id === videoLane.id)!.clips).toHaveLength(0);
   });
 });
 

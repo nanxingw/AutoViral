@@ -530,18 +530,26 @@ worksRouter.post("/api/works/:id/sessions", async (c) => {
 
 // DELETE /api/works/:id/sessions/:sessionId — hard-delete a chat session: dispose
 // its in-memory WsSession + CLI, tombstone the sidecar record, and remove its
-// chat-{sessionId}.jsonl. Refuses to delete the default session (s_1) so the work
-// always keeps at least one conversation (it shares the legacy chat.jsonl).
+// chat log. ANY session is deletable (incl. the default s_1) as long as one
+// would remain — we only refuse to delete the LAST session so the work always
+// keeps at least one conversation.
 worksRouter.delete("/api/works/:id/sessions/:sessionId", async (c) => {
   const id = c.req.param("id");
   const sessionId = c.req.param("sessionId");
   if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId", errorCode: "invalid_work_id" }, 400);
   if (!SAFE_ID.test(sessionId)) return c.json({ error: "Invalid sessionId", errorCode: "invalid_session_id" }, 400);
-  if (sessionId === DEFAULT_CHAT_SESSION_ID) {
-    return c.json({ error: "Cannot delete the default session", errorCode: "session_delete_default" }, 400);
-  }
   const wsBridge = getWsBridge();
   if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
+  // Last-session guard: count active sessions (listSessions lazily migrates the
+  // legacy s_1 record on first call) and refuse the delete if removing this one
+  // would leave zero conversations.
+  const sessions = await wsBridge.listSessions(id);
+  if (sessions.some((s) => s.id === sessionId) && sessions.length <= 1) {
+    return c.json(
+      { error: "Cannot delete the last remaining session", errorCode: "session_delete_last" },
+      400,
+    );
+  }
   const deleted = await wsBridge.deleteSession(id, sessionId);
   if (!deleted) return c.json({ error: "Session not found", errorCode: "session_not_found" }, 404);
   return c.json({ deleted: true });

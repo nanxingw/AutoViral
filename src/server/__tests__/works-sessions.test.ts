@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import { mkdir, writeFile, stat } from "node:fs/promises";
+import { join } from "node:path";
 import { withTempDataDir, jsonReq } from "./_helpers.js";
 
 // I24 — HTTP surface for ADR-008 multi-session chat:
@@ -101,18 +103,68 @@ describe("works session HTTP endpoints (I24)", () => {
     });
   });
 
-  it("DELETE refuses to remove the default session s_1", async () => {
-    await withTempDataDir(async () => {
+  it("DELETE refuses to remove the LAST remaining session (s_1 alone)", async () => {
+    await withTempDataDir(async (dir) => {
       const { apiRoutes } = await wireBridge();
       const { createWork } = await import("../../domain/work-store.js");
       const work = await createWork({ title: "T", type: "short-video", platforms: ["douyin"] });
-      await apiRoutes.fetch(jsonReq("POST", `/api/works/${work.id}/sessions`));
+      // Give the work a single session (s_1) by seeding a chat log so the lazy
+      // migration synthesizes exactly one record.
+      await mkdir(join(dir, "works", work.id), { recursive: true });
+      await writeFile(
+        join(dir, "works", work.id, "chat.jsonl"),
+        JSON.stringify({ type: "user", text: "hi" }) + "\n",
+        "utf-8",
+      );
+
+      // Sanity: only s_1 exists.
+      const listed: any = await (await apiRoutes.fetch(jsonReq("GET", `/api/works/${work.id}/sessions`))).json();
+      expect(listed.sessions.map((s: any) => s.id)).toEqual(["s_1"]);
 
       const res = await apiRoutes.fetch(
         jsonReq("DELETE", `/api/works/${work.id}/sessions/s_1`),
       );
       expect(res.status).toBe(400);
-      expect((await res.json()).errorCode).toBe("session_delete_default");
+      expect((await res.json()).errorCode).toBe("session_delete_last");
+    });
+  });
+
+  it("DELETE of s_1 succeeds when another session exists + removes its chat.jsonl", async () => {
+    await withTempDataDir(async (dir) => {
+      const { apiRoutes } = await wireBridge();
+      const { createWork } = await import("../../domain/work-store.js");
+      const work = await createWork({ title: "T", type: "short-video", platforms: ["douyin"] });
+      const workDir = join(dir, "works", work.id);
+      await mkdir(workDir, { recursive: true });
+      // s_1's legacy chat log + the chat.json snapshot it can fall back to.
+      await writeFile(
+        join(workDir, "chat.jsonl"),
+        JSON.stringify({ type: "user", text: "hi" }) + "\n",
+        "utf-8",
+      );
+      await writeFile(
+        join(workDir, "chat.json"),
+        JSON.stringify({ blocks: [{ type: "user", text: "hi" }] }),
+        "utf-8",
+      );
+
+      // Mint s_2 so s_1 is no longer the last session (this also migrates s_1).
+      await apiRoutes.fetch(jsonReq("POST", `/api/works/${work.id}/sessions`));
+
+      const res = await apiRoutes.fetch(
+        jsonReq("DELETE", `/api/works/${work.id}/sessions/s_1`),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ deleted: true });
+
+      // s_1 is gone from the list; s_2 remains.
+      const listed: any = await (await apiRoutes.fetch(jsonReq("GET", `/api/works/${work.id}/sessions`))).json();
+      expect(listed.sessions.map((s: any) => s.id)).toEqual(["s_2"]);
+
+      // Its chat log AND the legacy chat.json snapshot are both removed so no
+      // orphan resurrects stale history.
+      await expect(stat(join(workDir, "chat.jsonl"))).rejects.toMatchObject({ code: "ENOENT" });
+      await expect(stat(join(workDir, "chat.json"))).rejects.toMatchObject({ code: "ENOENT" });
     });
   });
 

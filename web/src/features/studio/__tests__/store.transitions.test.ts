@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useComposition } from "../store";
-import { makeEmptyComposition } from "../types";
+import { CompositionSchema, makeEmptyComposition } from "../types";
 import type { VideoClip } from "../types";
 
 // #54 Phase 1 — add/update/remove transition store actions, plus the
@@ -132,5 +132,64 @@ describe("removeTransition + removeClip prune (#54)", () => {
     expect(videoTrack().transitions).toHaveLength(1);
     useComposition.getState().removeClip("c1");
     expect(videoTrack().transitions ?? []).toHaveLength(0);
+  });
+});
+
+describe("cross-track move prunes orphan transitions (#3 / #54)", () => {
+  // The body-drag (#3) widens the cross-track trigger surface from a 14px grip
+  // to the whole clip body, so moving a transition-anchor video clip to another
+  // video lane is now trivial. Both the Inspector/native-DnD path
+  // (moveClipToTrack, #88) and the body-drag path (commitDrag, #3) must prune
+  // the source-track transition that pinned the departing clip — otherwise its
+  // afterClipId is orphaned and the Track superRefine rejects the next
+  // Composition.parse() (autosave 400 / save round-trip).
+
+  // Add a second video lane (V2) so a same-kind cross-track move is possible.
+  function addVideoLane(): string {
+    return useComposition.getState().addTrack("video");
+  }
+
+  it("moveClipToTrack drops the source-track transition anchored to the moved clip", () => {
+    const v1 = videoTrack();
+    useComposition.getState().addTransition(v1.id, {
+      afterClipId: "c1", preset: "cross-dissolve",
+    });
+    expect(videoTrack().transitions).toHaveLength(1);
+
+    const v2 = addVideoLane();
+    useComposition.getState().moveClipToTrack("c1", v2);
+
+    // Source lane (V1) lost both the clip and its now-orphan transition.
+    const v1After = tracks().find((t) => t.id === v1.id)!;
+    expect(v1After.clips.some((c) => c.id === "c1")).toBe(false);
+    expect(v1After.transitions ?? []).toHaveLength(0);
+    // Composition stays parseable (no dangling afterClipId).
+    expect(() =>
+      CompositionSchema.parse(useComposition.getState().comp),
+    ).not.toThrow();
+  });
+
+  it("commitDrag (body cross-track move) drops the orphan transition too", () => {
+    const v1 = videoTrack();
+    useComposition.getState().addTransition(v1.id, {
+      afterClipId: "c1", preset: "cross-dissolve",
+    });
+    expect(videoTrack().transitions).toHaveLength(1);
+
+    const v2 = addVideoLane();
+    // Mirror the Clip.tsx body-drag sequence: begin → set the resolved
+    // same-kind target → commit. No horizontal scrub, so trackOffset is kept.
+    useComposition.getState().beginDrag("c1");
+    useComposition.getState().updateDragTarget(v2);
+    useComposition.getState().commitDrag();
+
+    const v1After = tracks().find((t) => t.id === v1.id)!;
+    expect(v1After.clips.some((c) => c.id === "c1")).toBe(false);
+    expect(v1After.transitions ?? []).toHaveLength(0);
+    const v2After = tracks().find((t) => t.id === v2)!;
+    expect(v2After.clips.some((c) => c.id === "c1")).toBe(true);
+    expect(() =>
+      CompositionSchema.parse(useComposition.getState().comp),
+    ).not.toThrow();
   });
 });

@@ -76,6 +76,17 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
   // ── I19/I20 — this lane is a native-DnD drop target ──────────────────────
   const [dropPreview, setDropPreview] = useState<DropPreview | null>(null);
 
+  // #3 — destination-lane highlight for the clip-BODY cross-track drag. When a
+  // body-drag (Clip.tsx) retargets this lane via `updateDragTarget`, dragState
+  // .targetTrackId === this lane's id. We subscribe to just that boolean so the
+  // lane re-renders only when it flips into/out of being the active target —
+  // the accent ring is the key "drop here" cue (the dragged clip preview stays
+  // in its source lane). Distinct from the native-DnD `dropPreview` above
+  // (asset import + the legacy drop path).
+  const isCrossTrackTarget = useComposition(
+    (s) => s.dragState?.targetTrackId === track.id,
+  );
+
   // Read the dragged payload, compute the snapped drop time, and update the
   // hover preview. Shared by dragenter/dragover so the indicator tracks the
   // cursor. Returns whether the drop is legal (drives dropEffect).
@@ -202,9 +213,12 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
         </div>
       )}
 
-      {/* Clip lane — also the I19/I20 drop target. */}
+      {/* Clip lane — also the I19/I20 drop target. `data-track-id` lets the
+          #3 clip-body drag resolve which lane the cursor is over via
+          document.elementFromPoint(...).closest('[data-track-id]'). */}
       <div
         data-testid={`track-lane-${track.kind}`}
+        data-track-id={track.id}
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -216,6 +230,11 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
           height,
           // Reject cue: a not-allowed cursor over an illegal target lane.
           cursor: dropPreview && !dropPreview.legal ? "not-allowed" : undefined,
+          // #3 — destination cue for the clip-body cross-track drag: a subtle
+          // accent ring + wash on the lane the dragged clip would land on.
+          boxShadow: isCrossTrackTarget ? "inset 0 0 0 1px var(--accent)" : undefined,
+          background: isCrossTrackTarget ? "var(--accent-glow)" : undefined,
+          transition: "box-shadow 0.12s, background 0.12s",
         }}
       >
         {/* I19/I20 — drop indicator line at the snapped start. Accent when the

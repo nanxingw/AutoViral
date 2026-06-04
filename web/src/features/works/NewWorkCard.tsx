@@ -17,12 +17,12 @@ import styles from "./NewWorkCard.module.css";
 // type means a registry entry + one row here, not a new hand-wired button.
 const TYPE_ICONS: Record<WorkType, ReactNode> = {
   "short-video": (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
       <polygon points="6 4 20 12 6 20 6 4" />
     </svg>
   ),
   "image-text": (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7">
       <rect x="3" y="3" width="18" height="18" rx="2" />
       <circle cx="9" cy="9" r="2" />
       <path d="M21 15l-5-5L5 21" />
@@ -87,78 +87,84 @@ export function NewWorkCard() {
   const locked = create.isPending || navigating;
 
   return (
-    <div className={styles.card}>
-      <div className={styles.title}>+ {t("works.newWork")}</div>
-      <input
-        type="text"
-        value={pendingTitle}
-        onChange={(e) => setPendingTitle(e.target.value)}
-        placeholder={t("works.newWorkTitlePlaceholder")}
-        aria-label={t("works.newWorkTitleAria")}
-        disabled={locked}
-        maxLength={120}
-        className={styles.titleInput}
-        data-bare
-      />
-      <input
-        type="text"
-        value={pendingHint}
-        onChange={(e) => setPendingHint(e.target.value)}
-        placeholder={t("works.topicHintPlaceholder")}
-        aria-label={t("works.topicHintAria")}
-        disabled={locked}
-        maxLength={280}
-        className={styles.titleInput}
-        data-bare
-      />
-      <div className={styles.options}>
+    // The new-work card is a "blank page" creation surface — a dashed frame
+    // sets it apart from the solid-bordered work covers in the grid. Layout is
+    // a strict 3-row grid (head / fields / types) that matches its 3 children
+    // exactly, so the flexible `1fr` types row always lands on the type tiles —
+    // not on a stray input. (The old grid had `auto auto 1fr` for 3 rows but
+    // grew to FOUR children when #65 added the brief input, shoving `.options`
+    // into an implicit row that `aspect-ratio` + `overflow:hidden` then
+    // cropped — that was the "sub-label cut off at the bottom" bug.)
+    <div className={styles.card} data-locked={locked || undefined}>
+      <div className={styles.head}>
+        <span className={styles.plus} aria-hidden>
+          +
+        </span>
+        <span className={styles.eyebrow}>{t("works.newWork")}</span>
+      </div>
+
+      <div className={styles.fields}>
+        {/* Naming a work reads like titling an article — the editorial serif
+            (the brand's display face) makes the field feel like a headline,
+            not a form input. */}
+        <input
+          type="text"
+          value={pendingTitle}
+          onChange={(e) => setPendingTitle(e.target.value)}
+          placeholder={t("works.newWorkTitlePlaceholder")}
+          aria-label={t("works.newWorkTitleAria")}
+          disabled={locked}
+          maxLength={120}
+          className={styles.titleInput}
+          data-bare
+        />
+        <input
+          type="text"
+          value={pendingHint}
+          onChange={(e) => setPendingHint(e.target.value)}
+          placeholder={t("works.topicHintPlaceholder")}
+          aria-label={t("works.topicHintAria")}
+          disabled={locked}
+          maxLength={280}
+          className={styles.hintInput}
+          data-bare
+        />
+      </div>
+
+      <div className={styles.types} role="group" aria-label={t("works.newWork")}>
         {listContentTypes().map((ct) => (
           <button
             key={ct.id}
             type="button"
-            className={styles.opt}
+            className={styles.tile}
             onClick={() => {
               void pick(ct.id);
             }}
             disabled={locked}
-            style={locked ? { opacity: 0.5, cursor: "wait" } : undefined}
           >
-            <div className={styles.ico}>{TYPE_ICONS[ct.id]}</div>
-            <div className={styles.lbl}>{t(ct.labelKey as MessageKey)}</div>
-            <div className={styles.sub}>{t(TYPE_SUB_KEYS[ct.id])}</div>
+            <span className={styles.tileIco} aria-hidden>
+              {TYPE_ICONS[ct.id]}
+            </span>
+            <span className={styles.tileText}>
+              <span className={styles.tileLbl}>{t(ct.labelKey as MessageKey)}</span>
+              <span className={styles.tileSub}>{t(TYPE_SUB_KEYS[ct.id])}</span>
+            </span>
           </button>
         ))}
       </div>
+
+      {/* Status + error are absolutely-positioned footer overlays — they do
+          NOT participate in the 3-row grid, so showing them can never push a
+          row out of the (aspect-ratio-fixed, overflow:hidden) card and clip it.
+          The locked strip is brief (the card unmounts on navigate); the error
+          strip persists until the user retries. */}
       {locked && (
-        <div
-          aria-live="polite"
-          style={{
-            marginTop: 6,
-            padding: "4px 12px 8px",
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            letterSpacing: "0.08em",
-            color: "var(--text-dimmer)",
-          }}
-        >
+        <div className={styles.status} aria-live="polite">
           {t("works.creatingLabel")}
         </div>
       )}
       {createError && (
-        <div
-          role="alert"
-          style={{
-            marginTop: 10,
-            padding: "8px 10px",
-            borderRadius: 6,
-            border: "1px solid var(--status-error, #d4756c)",
-            background: "rgba(212, 117, 108, 0.08)",
-            color: "var(--status-error, #d4756c)",
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            lineHeight: 1.5,
-          }}
-        >
+        <div className={styles.error} role="alert">
           {createError}
         </div>
       )}

@@ -40,6 +40,12 @@ export interface DragState {
   candidateStart: number;
   preview: Map<string, number>;
   snapTime: number | null;
+  // #3 — cross-track body-drag target. While the cursor hovers a *different
+  // same-kind* lane mid-drag this holds that lane's id; null = stay in the
+  // source track (horizontal-only scrub, the pre-#3 behaviour). commitDrag
+  // applies a moveClipToTrack when this is set; the destination lane highlights
+  // itself by reading this from dragState.
+  targetTrackId: string | null;
 }
 
 // Phase E (issue #32) — Track-level undo/redo. No global undo/redo machinery
@@ -158,6 +164,11 @@ interface CompState {
   // Phase 4.B — drag-preview actions (begin → update → commit/cancel)
   beginDrag: (clipId: string) => void;
   updateDragCandidate: (candidateStart: number) => void;
+  // #3 — record the cross-track move target while body-dragging. The caller
+  // (Clip.tsx) resolves the hovered same-kind lane via `resolveDragTargetTrack`
+  // and pushes it here; null clears it (cursor back over the source lane / a
+  // cross-kind lane / outside any lane). commitDrag consumes it.
+  updateDragTarget: (targetTrackId: string | null) => void;
   commitDrag: () => void;
   cancelDrag: () => void;
   // ─── Phase E (issue #32) — multi-track stacking lane actions ──────────
@@ -301,6 +312,15 @@ export const useComposition = create<CompState>()(
         sourceTrack.clips = (sourceTrack.clips as Clip[]).filter(
           (c) => c.id !== clipId,
         ) as typeof sourceTrack.clips;
+        // #54 — the moved clip may have anchored a transition on the source
+        // track; once it leaves, that transition's afterClipId is orphaned and
+        // the Track superRefine would reject the next Composition.parse(). Prune
+        // it the same way removeClip does (store.ts removeClip branch).
+        if (sourceTrack.transitions?.length) {
+          sourceTrack.transitions = sourceTrack.transitions.filter(
+            (tr) => tr.afterClipId !== clipId,
+          );
+        }
         (target.clips as Clip[]).push(clip);
         s.comp.duration = Math.max(
           0,
@@ -739,6 +759,7 @@ export const useComposition = create<CompState>()(
           candidateStart: clip.trackOffset,
           preview: new Map([[clipId, clip.trackOffset]]),
           snapTime: null,
+          targetTrackId: null,
         };
       }),
     updateDragCandidate: (candidateStart) =>
@@ -774,14 +795,68 @@ export const useComposition = create<CompState>()(
         s.dragState.preview = preview;
         s.dragState.snapTime = snap.snapTime;
       }),
+    updateDragTarget: (targetTrackId) =>
+      set((s) => {
+        if (!s.dragState) return;
+        s.dragState.targetTrackId = targetTrackId;
+      }),
     commitDrag: () =>
       set((s) => {
         if (!s.comp || !s.dragState) return;
+        const draggedId = s.dragState.clipId;
+        const targetTrackId = s.dragState.targetTrackId;
         const preview = s.dragState.preview;
+        // 1) Apply the horizontal scrub — the ripple preview's candidate
+        //    trackOffsets land on every previewed clip (the dragged clip plus
+        //    any cascaded same-track neighbours). This writes the dragged
+        //    clip's final trackOffset *before* the lane move below, and
+        //    moveClipToTrack preserves trackOffset, so the offset survives the
+        //    move onto the destination lane.
         for (const t of s.comp.tracks) {
           for (const c of t.clips as Clip[]) {
             const newStart = preview.get(c.id);
             if (newStart !== undefined) c.trackOffset = newStart;
+          }
+        }
+        // 2) #3 — cross-track move. If the cursor settled over a different
+        //    same-kind lane, detach the dragged clip from its source track and
+        //    attach to the target. Re-runs the #88 kind guard inline (the
+        //    target was already validated by resolveDragTargetTrack, but we
+        //    re-check so a stale targetTrackId can never produce an illegal
+        //    placement). Only the dragged clip moves lanes; cascaded neighbours
+        //    keep their (already-applied) offsets on the source track.
+        if (targetTrackId) {
+          let sourceTrack: (typeof s.comp.tracks)[number] | undefined;
+          let dragged: Clip | undefined;
+          for (const tr of s.comp.tracks) {
+            const found = (tr.clips as Clip[]).find((c) => c.id === draggedId);
+            if (found) {
+              sourceTrack = tr;
+              dragged = found;
+              break;
+            }
+          }
+          const target = s.comp.tracks.find((t) => t.id === targetTrackId);
+          if (
+            sourceTrack &&
+            dragged &&
+            target &&
+            target.id !== sourceTrack.id &&
+            target.kind === sourceTrack.kind
+          ) {
+            sourceTrack.clips = (sourceTrack.clips as Clip[]).filter(
+              (c) => c.id !== draggedId,
+            ) as typeof sourceTrack.clips;
+            // #54 — prune any source-track transition that anchored the moved
+            // clip; otherwise its afterClipId is orphaned and the Track
+            // superRefine rejects the next Composition.parse() (autosave 400 /
+            // save round-trip). Mirrors removeClip + moveClipToTrack.
+            if (sourceTrack.transitions?.length) {
+              sourceTrack.transitions = sourceTrack.transitions.filter(
+                (tr) => tr.afterClipId !== draggedId,
+              );
+            }
+            (target.clips as Clip[]).push(dragged);
           }
         }
         s.comp.duration = Math.max(

@@ -111,15 +111,21 @@ export function SessionStrip({ workId }: SessionStripProps) {
   };
 
   const deleteSession = async (id: string) => {
-    if (id === DEFAULT_SESSION_ID) return; // default session is never deletable
+    // Any session is deletable as long as one remains; the × is hidden when
+    // sessions.length <= 1 so this never strands the work with zero conversations.
     try {
       await apiFetch(`/api/works/${workId}/sessions/${id}`, { method: "DELETE" });
     } catch {
       // ignore failure — refetch below reconciles
     }
     setConfirmDelete(null);
-    // If we deleted the active session, fall back to the default one.
-    if (activeId === id) setActive(workId, DEFAULT_SESSION_ID);
+    // If we deleted the active session, fall back to the FIRST REMAINING session
+    // (not always s_1 — s_1 itself may be the one just deleted). Only fall back
+    // to the default id if nothing remains.
+    if (activeId === id) {
+      const remaining = sessions.filter((s) => s.id !== id);
+      setActive(workId, remaining[0]?.id ?? DEFAULT_SESSION_ID);
+    }
     setSessions((prev) => prev.filter((s) => s.id !== id));
   };
 
@@ -165,7 +171,9 @@ export function SessionStrip({ workId }: SessionStripProps) {
                 <span className={styles.tabLabel}>{label}</span>
                 {meta && <span className={styles.tabMeta}>{meta}</span>}
               </button>
-              {s.id !== DEFAULT_SESSION_ID &&
+              {/* Any session is deletable (incl. s_1) as long as 2+ remain;
+                  hide the × only when deleting would leave zero. */}
+              {sessions.length > 1 &&
                 (confirmDelete === s.id ? (
                   <button
                     type="button"

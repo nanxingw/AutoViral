@@ -4,7 +4,7 @@ import { useClipResize } from "./hooks/useClipResize";
 import { ContextMenu } from "@/components/ContextMenu";
 import { useComposerDraft } from "@/stores/composerDraft";
 import { describeClip } from "@/features/chat/describeElement";
-import { writeDragPayload } from "./dnd";
+import { resolveDragTargetTrack } from "./dnd";
 import { useT } from "@/i18n/useT";
 import clsx from "clsx";
 
@@ -27,6 +27,7 @@ export function Clip({
   const dragState = useComposition((s) => s.dragState);
   const beginDrag = useComposition((s) => s.beginDrag);
   const updateDragCandidate = useComposition((s) => s.updateDragCandidate);
+  const updateDragTarget = useComposition((s) => s.updateDragTarget);
   const commitDrag = useComposition((s) => s.commitDrag);
   const cancelDrag = useComposition((s) => s.cancelDrag);
   // Phase 4.F — edge-drag resize hook. The hook is pointer-source agnostic;
@@ -68,10 +69,33 @@ export function Clip({
     beginDrag(clipId);
     const startX = e.clientX;
     const startOffset = clip.trackOffset;
+    // #3 — the clip's source track id, resolved once at drag-start. The
+    // cross-track move target is computed against this on every pointermove.
+    const comp = useComposition.getState().comp;
+    const sourceTrackId =
+      comp?.tracks.find((tr) => tr.clips.some((c) => c.id === clipId))?.id ??
+      null;
     const move = (ev: PointerEvent) => {
       const delta = (ev.clientX - startX) / pxPerSecond;
       const raw = Math.max(0, startOffset + delta);
       updateDragCandidate(raw);
+      // #3 — track-aware: find the lane under the cursor (vertical axis) and
+      // retarget the clip there when it's a different SAME-KIND lane. The lane
+      // div carries `data-track-id` (Track.tsx); hovering the label column or
+      // outside any lane → closest() returns null → no target. The pure
+      // resolver re-applies the #88 kind guard so a cross-kind lane is a no-op.
+      const tracks =
+        useComposition.getState().comp?.tracks.map((tr) => ({
+          id: tr.id,
+          kind: tr.kind,
+        })) ?? [];
+      const under = document.elementFromPoint(ev.clientX, ev.clientY);
+      const hoveredTrackId =
+        under?.closest("[data-track-id]")?.getAttribute("data-track-id") ??
+        null;
+      updateDragTarget(
+        resolveDragTargetTrack(tracks, sourceTrackId, hoveredTrackId),
+      );
     };
     const cleanup = () => {
       window.removeEventListener("pointermove", move);
@@ -242,53 +266,13 @@ export function Clip({
       >
         {label}
       </div>
-      {/* I20 — cross-track drag handle. A dedicated grip is the native
-          HTML5 `draggable` source so it never fights the body's pointer-
-          capture scrub (Phase 4.B) or the edge-resize handles (Phase 4.F):
-          native DnD owns this small region, the pointer pipeline owns the
-          body. `stopPropagation` on its pointerdown keeps the body scrub
-          from also firing. The written payload's clipKind is the *track*
-          kind — authoritative for the cross-track kind guard (matches
-          moveClipToTrack, #88). draggable=false on the body would block the
-          handle's drag bubbling, so the body is left non-draggable and only
-          this grip carries `draggable`. */}
-      <div
-        data-testid="clip-drag-handle"
-        role="button"
-        aria-label={t("studio.timeline.dnd.clipDragHandleAria")}
-        draggable
-        onPointerDown={(e) => e.stopPropagation()}
-        onDragStart={(e) => {
-          writeDragPayload(e.dataTransfer, {
-            source: "clip",
-            clipId,
-            clipKind: trackKind,
-          });
-          e.dataTransfer.effectAllowed = "move";
-        }}
-        style={{
-          position: "absolute",
-          top: 2,
-          right: 2,
-          width: 14,
-          height: 14,
-          display: "grid",
-          placeItems: "center",
-          cursor: "grab",
-          color: fgDim,
-          zIndex: 6,
-        }}
-      >
-        {/* 6-dot grip glyph */}
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-          <circle cx="9" cy="6" r="1.6" />
-          <circle cx="15" cy="6" r="1.6" />
-          <circle cx="9" cy="12" r="1.6" />
-          <circle cx="15" cy="12" r="1.6" />
-          <circle cx="9" cy="18" r="1.6" />
-          <circle cx="15" cy="18" r="1.6" />
-        </svg>
-      </div>
+      {/* #3 — cross-track move now lives on the clip BODY (CapCut/剪映/Premiere
+          style): a vertical body-drag over a different same-kind lane retargets
+          the clip via `resolveDragTargetTrack` + `updateDragTarget`, committed
+          by `commitDrag`. The old dedicated native-DnD grip (I20) was removed —
+          the body owns both horizontal scrub and cross-track move through one
+          pointer pipeline, matching every mainstream NLE. Library→timeline
+          asset DnD still rides native HTML5 DnD via dnd.ts (unchanged). */}
       <div
         data-testid="resize-left"
         onPointerDown={onHandleDown("left")}

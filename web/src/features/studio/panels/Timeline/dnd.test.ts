@@ -8,8 +8,10 @@ import {
   dropTimeFromPointer,
   resolveDropTime,
   resolveDrop,
+  resolveDragTargetTrack,
   type AssetDragPayload,
   type ClipDragPayload,
+  type TrackView,
 } from "./dnd";
 import {
   makeVideoClip,
@@ -191,5 +193,34 @@ describe("resolveDrop — payload + target → store intent", () => {
   });
   it("clip dropped on its own track is a no-op reject", () => {
     expect(resolveDrop(clip("video"), vTrack, 0, "t_video")).toEqual({ type: "reject" });
+  });
+});
+
+describe("resolveDragTargetTrack — #3 clip-body cross-track target", () => {
+  // V1 / V2 (video) + A1 (audio): a same-kind pair + a cross-kind lane.
+  const tracks: TrackView[] = [
+    { id: "t_v1", kind: "video" },
+    { id: "t_v2", kind: "video" },
+    { id: "t_a1", kind: "audio" },
+  ];
+
+  it("returns the hovered lane when it differs from the source AND shares its kind", () => {
+    expect(resolveDragTargetTrack(tracks, "t_v1", "t_v2")).toBe("t_v2");
+  });
+  it("returns null when hovering the clip's own source lane (same track)", () => {
+    expect(resolveDragTargetTrack(tracks, "t_v1", "t_v1")).toBeNull();
+  });
+  it("returns null when hovering a cross-kind lane (audio lane, video source)", () => {
+    expect(resolveDragTargetTrack(tracks, "t_v1", "t_a1")).toBeNull();
+  });
+  it("returns null when no lane is hovered (label column / outside any lane)", () => {
+    expect(resolveDragTargetTrack(tracks, "t_v1", null)).toBeNull();
+  });
+  it("returns null when the source track id is unknown / null", () => {
+    expect(resolveDragTargetTrack(tracks, null, "t_v2")).toBeNull();
+    expect(resolveDragTargetTrack(tracks, "ghost", "t_v2")).toBeNull();
+  });
+  it("returns null when the hovered track id is not in the composition", () => {
+    expect(resolveDragTargetTrack(tracks, "t_v1", "ghost")).toBeNull();
   });
 });

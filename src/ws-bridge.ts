@@ -1471,10 +1471,12 @@ export class WsBridge {
 
   /**
    * Hard-delete a chat session: dispose its in-memory WsSession + CLI, tombstone
-   * the sidecar record, and remove its chat-{sessionId}.jsonl. The legacy
-   * default session keeps chat.jsonl (shared filename) — we still tombstone the
-   * record but leave the legacy file so a re-migration doesn't resurrect it with
-   * stale history; callers should avoid deleting s_1.
+   * the sidecar record, and remove its chat log. ANY session is deletable now
+   * (incl. the default s_1 — callers enforce the "keep at least one" invariant),
+   * so on success we ALWAYS remove the session's chat log (chatLogPath returns
+   * chat.jsonl for s_1, chat-{sid}.jsonl otherwise). When deleting s_1 we also
+   * remove the legacy chat.json snapshot so no orphan file survives to resurrect
+   * stale history via the loadWorkChat fallback.
    */
   async deleteSession(workId: string, sessionId: string): Promise<boolean> {
     const sidecar = this.sidecarFor(workId);
@@ -1488,9 +1490,14 @@ export class WsBridge {
     }
     this.deleteSessionEntry(workId, sid);
     const ok = await sidecar.delete(sid);
-    // Remove the per-session chat log (never the shared legacy chat.jsonl).
-    if (ok && sid !== DEFAULT_CHAT_SESSION_ID) {
+    if (ok) {
+      // Remove the session's chat log (chat.jsonl for s_1, chat-{sid}.jsonl else).
       await rm(chatLogPath(workId, sid), { force: true }).catch(() => {});
+      // s_1 also has a legacy chat.json snapshot (the single-file form loadWorkChat
+      // falls back to) — remove it too so a re-migration can't resurrect it.
+      if (sid === DEFAULT_CHAT_SESSION_ID) {
+        await rm(join(dataDir, "works", workId, "chat.json"), { force: true }).catch(() => {});
+      }
     }
     return ok;
   }

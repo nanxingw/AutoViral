@@ -225,3 +225,41 @@ export function resolveDrop(
   }
   return { type: "move-clip", clipId: payload.clipId, targetTrackId: target.id };
 }
+
+// ── #3 — pointer-drag cross-track target resolution (pure core) ───────────────
+// The clip BODY now owns cross-track moves (CapCut/剪映/Premiere style): a
+// vertical body-drag over a different SAME-KIND lane retargets the clip there.
+// This mirrors dnd.ts's split-the-decision pattern (#59 computeSnap, resolveDrop
+// above) — the Clip pointermove handler stays a thin DOM shim that reads the
+// hovered track id from the DOM, then asks this helper whether that lane is a
+// legal destination. Zero React / DOM coupling so it is unit-testable.
+
+/** A minimal track view the resolver needs — id + kind, from the composition. */
+export interface TrackView {
+  id: string;
+  kind: Track["kind"];
+}
+
+/**
+ * Given the clip currently being body-dragged and the lane the cursor is over,
+ * decide the cross-track move *target* (or null = stay in the source track).
+ *
+ * Returns `hoveredTrackId` ONLY when it is a real lane that (a) differs from the
+ * clip's source track and (b) shares the source track's kind — the exact guard
+ * `moveClipToTrack` (#88) enforces. Same-track hover, cross-kind hover, hovering
+ * the label column / outside any lane (`hoveredTrackId === null`), or an unknown
+ * clip all resolve to null → horizontal-only drag, no lane change.
+ */
+export function resolveDragTargetTrack(
+  tracks: TrackView[],
+  clipSourceTrackId: string | null,
+  hoveredTrackId: string | null,
+): string | null {
+  if (!hoveredTrackId || clipSourceTrackId === null) return null;
+  if (hoveredTrackId === clipSourceTrackId) return null; // same lane — no move
+  const source = tracks.find((t) => t.id === clipSourceTrackId);
+  const hovered = tracks.find((t) => t.id === hoveredTrackId);
+  if (!source || !hovered) return null;
+  if (source.kind !== hovered.kind) return null; // cross-kind — no move
+  return hoveredTrackId;
+}

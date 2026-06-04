@@ -7,7 +7,7 @@ import { Clip } from "./Clip";
 import { LibraryTab } from "../AssetSidebar/LibraryTab";
 import { useComposition } from "../../store";
 import { TIMELINE_DND_MIME, readDragPayload } from "./dnd";
-import { makeEmptyComposition, type VideoClip, type AudioClip } from "../../types";
+import { makeEmptyComposition, type AudioClip } from "../../types";
 import type { AssetGroup, AssetItem } from "@/queries/assets";
 
 // Asset library fixture for the AssetTile drag-source test. Mirrors
@@ -54,9 +54,6 @@ function wrapQuery(ui: ReactNode) {
 // writeDragPayload but never called it). jsdom can't synthesise a real drag
 // image, but a fake DataTransfer with get/setData + fireEvent.drag* is enough
 // to exercise the handlers.
-
-const baseTransform = { scale: 1, x: 0, y: 0, rotation: 0 };
-const baseFilters = { brightness: 0, contrast: 0, saturation: 0 };
 
 /** Minimal stand-in for a DataTransfer that survives jsdom's write-only one. */
 function fakeDataTransfer() {
@@ -115,60 +112,129 @@ describe("AssetTile drag source (I19 seam)", () => {
   });
 });
 
-describe("Clip drag source (I20 seam)", () => {
-  it("dragStart on the grip handle writes a clip payload with the track kind", () => {
+describe("Clip body cross-track drag (#3 seam)", () => {
+  // #3 superseded the I20 grip handle: the clip BODY now owns cross-track moves
+  // (CapCut/剪映/Premiere). There is no more `clip-drag-handle` element; instead
+  // the body pointerdown arms the scrub pipeline AND, on pointermove, retargets
+  // a hovered same-kind lane via document.elementFromPoint + updateDragTarget.
+  // jsdom can't synthesise elementFromPoint hit-testing faithfully, so we stub
+  // it to return the target lane element and assert the wiring end-to-end:
+  // pointermove → dragState.targetTrackId set → pointerup → moveClipToTrack.
+  it("a body-drag onto a different same-kind lane sets dragState.targetTrackId then moves on release", () => {
     const c = useComposition.getState().comp!;
-    const clip: VideoClip = {
-      id: "v1",
-      kind: "video",
-      src: "/x.mp4",
+    const [, a2] = audioTracks();
+    const audioClip: AudioClip = {
+      id: "au1",
+      kind: "audio",
+      src: "/bgm.mp3",
       in: 0,
-      out: 2,
+      out: 4,
       trackOffset: 0,
-      transforms: baseTransform,
-      filters: baseFilters,
+      volume: 1,
+      fadeIn: 0,
+      fadeOut: 0,
+      type: "bgm",
     };
-    videoTrack().clips.push(clip);
+    audioTracks()[0].clips.push(audioClip);
     useComposition.setState({ comp: c });
 
+    // Render the A2 lane so a real element carrying data-track-id={a2.id}
+    // exists in the DOM, plus the dragged clip itself.
     const { getByTestId } = render(
-      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+      <>
+        <Track
+          track={a2}
+          pxPerSecond={50}
+          totalWidth={400}
+          color="var(--accent)"
+          label="VO"
+        />
+      </>,
     );
-    const dt = fakeDataTransfer();
-    fireEvent.dragStart(getByTestId("clip-drag-handle"), { dataTransfer: dt });
+    const a2Lane = getByTestId("track-lane-audio");
+    const { getByTestId: getClip } = render(
+      <Clip clipId="au1" pxPerSecond={50} trackKind="audio" color="var(--accent)" />,
+    );
+    // The clip body is the root element (it has no testid); grab via the lane's
+    // sibling render — the Clip root is the first child of its container.
+    const clipEl = getClip("resize-left").parentElement as HTMLElement;
 
-    expect(dt.getData(TIMELINE_DND_MIME)).not.toBe("");
-    expect(readDragPayload(dt)).toEqual({
-      source: "clip",
-      clipId: "v1",
-      clipKind: "video",
-    });
+    // Stub elementFromPoint to report the A2 lane as the hovered element.
+    const realEFP = document.elementFromPoint;
+    document.elementFromPoint = () => a2Lane;
+    try {
+      fireEvent.pointerDown(clipEl, { button: 0, pointerId: 1, clientX: 0 });
+      expect(useComposition.getState().dragState?.clipId).toBe("au1");
+      fireEvent(window, new PointerEvent("pointermove", { clientX: 10, clientY: 10 }));
+      // The hovered A2 lane (different same-kind track) became the target.
+      expect(useComposition.getState().dragState?.targetTrackId).toBe(a2.id);
+      fireEvent(window, new PointerEvent("pointerup"));
+    } finally {
+      document.elementFromPoint = realEFP;
+    }
+
+    // Committed: clip lives on A2 now, dragState cleared.
+    expect(useComposition.getState().dragState).toBeNull();
+    const a2Clips = useComposition
+      .getState()
+      .comp!.tracks.find((tr) => tr.id === a2.id)!.clips;
+    expect(a2Clips.map((cl) => cl.id)).toContain("au1");
   });
 
-  it("the grip's pointerdown does NOT start the body scrub (no dragState)", () => {
+  it("a body-drag staying in the source lane never sets a target (no cross-track move)", () => {
     const c = useComposition.getState().comp!;
-    videoTrack().clips.push({
-      id: "v1",
-      kind: "video",
-      src: "/x.mp4",
+    const a1 = audioTracks()[0];
+    a1.clips.push({
+      id: "au1",
+      kind: "audio",
+      src: "/bgm.mp3",
       in: 0,
-      out: 2,
+      out: 4,
       trackOffset: 0,
-      transforms: baseTransform,
-      filters: baseFilters,
-    } as VideoClip);
+      volume: 1,
+      fadeIn: 0,
+      fadeOut: 0,
+      type: "bgm",
+    } as AudioClip);
     useComposition.setState({ comp: c });
 
     const { getByTestId } = render(
-      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+      <Track
+        track={a1}
+        pxPerSecond={50}
+        totalWidth={400}
+        color="var(--accent)"
+        label="BGM"
+      />,
     );
-    fireEvent.pointerDown(getByTestId("clip-drag-handle"), {
-      button: 0,
-      pointerId: 1,
-    });
-    // stopPropagation on the grip keeps the Phase 4.B body-scrub pipeline from
-    // arming — so no dragState is begun by touching the handle.
-    expect(useComposition.getState().dragState).toBeNull();
+    const a1Lane = getByTestId("track-lane-audio");
+    // Track(a1) already renders its OWN Clip for au1 (au1 lives on a1), so a
+    // document-wide getByTestId("resize-left") would match twice. Scope the
+    // query to THIS standalone Clip's container to grab the right drag source.
+    const { container: clipContainer } = render(
+      <Clip clipId="au1" pxPerSecond={50} trackKind="audio" color="var(--accent)" />,
+    );
+    const clipEl = clipContainer.querySelector(
+      '[data-testid="resize-left"]',
+    )!.parentElement as HTMLElement;
+
+    const realEFP = document.elementFromPoint;
+    document.elementFromPoint = () => a1Lane; // hovering the SOURCE lane
+    try {
+      fireEvent.pointerDown(clipEl, { button: 0, pointerId: 1, clientX: 0 });
+      fireEvent(window, new PointerEvent("pointermove", { clientX: 10, clientY: 10 }));
+      // Same lane → resolver returns null → no target.
+      expect(useComposition.getState().dragState?.targetTrackId).toBeNull();
+      fireEvent(window, new PointerEvent("pointerup"));
+    } finally {
+      document.elementFromPoint = realEFP;
+    }
+
+    // Clip stayed on A1.
+    const a1Clips = useComposition
+      .getState()
+      .comp!.tracks.find((tr) => tr.id === a1.id)!.clips;
+    expect(a1Clips.map((cl) => cl.id)).toContain("au1");
   });
 });
 

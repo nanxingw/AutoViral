@@ -1,26 +1,84 @@
+/* New-work "blank page" creation surface (#2 redesign).
+   editorial · cool · glass — a dashed frame sets it apart from the solid
+   work-cover cards it shares the grid with. The layout is a strict 3-row grid
+   whose rows map 1:1 to its 3 children (head / fields / types), so the
+   flexible row always lands on the type tiles. The tiles live in the `1fr`
+   row and stretch to absorb any extra height, which is why the sub-labels can
+   no longer be clipped regardless of card size. */
 .card {
-  aspect-ratio: 16/11;
-  border-radius: 14px;
+  position: relative;
+  aspect-ratio: 16 / 11;
+  border-radius: var(--radius-lg);
   border: 1px dashed var(--glass-hi);
-  background: var(--surface-0);
+  /* A whisper of accent in the top-left corner — enough to read as "active /
+     primary", nowhere near the AI-slop full-card gradient. */
+  background:
+    radial-gradient(
+      130% 110% at 0% 0%,
+      color-mix(in oklab, var(--accent) 8%, transparent),
+      transparent 58%
+    ),
+    var(--surface-0);
   display: grid;
   grid-template-rows: auto auto 1fr;
+  gap: 12px;
+  padding: 14px 16px 16px;
   overflow: hidden;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
-/* R101 F406 — inline title input ahead of the mode buttons. Kept
-   visually quiet (no border, dim placeholder) so the card still
-   reads as a creation surface, not a form. The dashed bottom rule
-   echoes the card's dashed border so the input feels integrated. */
-.titleInput {
+.card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 20px 44px -22px var(--accent-glow);
+}
+.card[data-locked] {
+  cursor: wait;
+}
+
+/* ── Head: editorial kicker ───────────────────────────────────────────────── */
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.plus {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1;
+  color: var(--accent);
+  transform: translateY(1px);
+}
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+/* ── Fields: title reads like a headline ──────────────────────────────────── */
+.fields {
+  display: grid;
+  gap: 4px;
+}
+.titleInput,
+.hintInput {
   width: 100%;
-  padding: 8px 16px;
-  font-family: inherit;
-  font-size: 12px;
-  color: var(--text);
   background: transparent;
   border: none;
-  border-bottom: 1px dashed var(--glass-border);
   outline: none;
+  color: var(--text);
+}
+.titleInput {
+  /* The brand's editorial display face — naming a work feels like titling a
+     piece, not filling a form. */
+  font-family: var(--font-editorial);
+  font-size: 19px;
+  line-height: 1.25;
+  letter-spacing: 0.005em;
+  padding: 2px 0 6px;
+  border-bottom: 1px solid var(--divider);
 }
 .titleInput::placeholder {
   color: var(--text-dimmer);
@@ -29,47 +87,136 @@
 .titleInput:focus {
   border-bottom-color: var(--accent);
 }
-.title {
-  padding: 10px 16px 8px;
-  font-family: "JetBrains Mono", monospace;
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+.hintInput {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.4;
   color: var(--text-dim);
-  border-bottom: 1px solid var(--glass-border);
+  padding: 5px 0 2px;
 }
-.options {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1px;
-  padding: 1px;
-  min-height: 0;
+.hintInput::placeholder {
+  color: var(--text-dimmer);
 }
-.opt {
+.hintInput:focus {
+  color: var(--text);
+}
+
+/* ── Type tiles: full-width format rows ───────────────────────────────────── */
+/* Stacked full-width (not 2-up): at a ~296px card width a 2-column split left
+   each sub-label only ~73px but it needs ~95px, so "9:16 竖屏" truncated. A
+   full-width row gives the spec the whole width — label hugs the left, spec
+   sits flush right, nothing is clipped. The two rows split the flexible `1fr`
+   track so they stay substantial without pushing the card past its 16/11 box. */
+.types {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
   gap: 8px;
-  padding: 20px;
-  transition: background 0.15s, color 0.15s;
+  min-height: 0;
+}
+.tile {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  flex: 1; /* the two rows share the 1fr types track equally */
+  min-height: 0;
+  min-width: 0;
+  padding: 0 14px;
+  text-align: left;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  background: var(--surface-1);
   color: var(--text-dim);
   cursor: pointer;
-  text-decoration: none;
-  border: none;
-  background: transparent;
   font: inherit;
+  transition: border-color 0.18s ease, background 0.18s ease,
+    box-shadow 0.18s ease, transform 0.06s ease;
 }
-.opt:hover { background: var(--surface-2); color: var(--text); }
-.ico {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
+.tile:hover {
+  border-color: var(--accent);
   background: var(--surface-2);
-  border: 1px solid var(--glass-border);
+  box-shadow: 0 0 0 1px var(--accent), 0 12px 26px -18px var(--accent-glow);
+}
+.tile:active {
+  transform: translateY(1px);
+}
+.tile:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-glow);
+}
+.tileIco {
+  flex-shrink: 0;
   display: grid;
   place-items: center;
   color: var(--accent);
+  transition: color 0.18s ease, transform 0.18s ease;
 }
-.lbl { font-size: 12px; font-weight: 500; color: var(--text); }
-.sub { font-family: "JetBrains Mono", monospace; font-size: 9px; letter-spacing: 0.08em; color: var(--text-dimmer); }
+.tile:hover .tileIco {
+  color: var(--accent-hi);
+  transform: scale(1.08);
+}
+.tileText {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+.tileLbl {
+  flex-shrink: 0;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+.tileSub {
+  margin-left: auto; /* push the spec flush-right on the same line as the label */
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: var(--text-dimmer);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card[data-locked] .tile {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.card[data-locked] .titleInput,
+.card[data-locked] .hintInput {
+  opacity: 0.5;
+}
+
+/* ── Footer overlays (do not affect the grid height) ──────────────────────── */
+.status,
+.error {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+.status {
+  padding: 7px 16px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dimmer);
+  background: linear-gradient(0deg, var(--surface-1), transparent);
+}
+.error {
+  padding: 9px 14px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--status-error, #d4756c);
+  background: color-mix(
+    in oklab,
+    var(--status-error, #d4756c) 12%,
+    var(--surface-1)
+  );
+  border-top: 1px solid var(--status-error, #d4756c);
+}
