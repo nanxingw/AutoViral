@@ -4,6 +4,7 @@ import { useClipResize } from "./hooks/useClipResize";
 import { ContextMenu } from "@/components/ContextMenu";
 import { useComposerDraft } from "@/stores/composerDraft";
 import { describeClip } from "@/features/chat/describeElement";
+import { writeDragPayload } from "./dnd";
 import { useT } from "@/i18n/useT";
 import clsx from "clsx";
 
@@ -240,6 +241,53 @@ export function Clip({
         }}
       >
         {label}
+      </div>
+      {/* I20 — cross-track drag handle. A dedicated grip is the native
+          HTML5 `draggable` source so it never fights the body's pointer-
+          capture scrub (Phase 4.B) or the edge-resize handles (Phase 4.F):
+          native DnD owns this small region, the pointer pipeline owns the
+          body. `stopPropagation` on its pointerdown keeps the body scrub
+          from also firing. The written payload's clipKind is the *track*
+          kind — authoritative for the cross-track kind guard (matches
+          moveClipToTrack, #88). draggable=false on the body would block the
+          handle's drag bubbling, so the body is left non-draggable and only
+          this grip carries `draggable`. */}
+      <div
+        data-testid="clip-drag-handle"
+        role="button"
+        aria-label={t("studio.timeline.dnd.clipDragHandleAria")}
+        draggable
+        onPointerDown={(e) => e.stopPropagation()}
+        onDragStart={(e) => {
+          writeDragPayload(e.dataTransfer, {
+            source: "clip",
+            clipId,
+            clipKind: trackKind,
+          });
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        style={{
+          position: "absolute",
+          top: 2,
+          right: 2,
+          width: 14,
+          height: 14,
+          display: "grid",
+          placeItems: "center",
+          cursor: "grab",
+          color: fgDim,
+          zIndex: 6,
+        }}
+      >
+        {/* 6-dot grip glyph */}
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+          <circle cx="9" cy="6" r="1.6" />
+          <circle cx="15" cy="6" r="1.6" />
+          <circle cx="9" cy="12" r="1.6" />
+          <circle cx="15" cy="12" r="1.6" />
+          <circle cx="9" cy="18" r="1.6" />
+          <circle cx="15" cy="18" r="1.6" />
+        </svg>
       </div>
       <div
         data-testid="resize-left"

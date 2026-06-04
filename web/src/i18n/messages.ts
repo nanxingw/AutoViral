@@ -292,6 +292,17 @@ export const en = {
         hoursAgo: "{n}h ago",
         daysAgo: "{n}d ago",
       },
+      terminalSessions: {
+        stripAria: "Terminal sessions",
+        sessionLabel: "Terminal {n}",
+        newTerminal: "New terminal",
+        newTerminalAria: "Open a new terminal session",
+        switchAria: "Switch to {label}",
+        deleteAria: "Close {label}",
+        deleteConfirm: "Close?",
+        respawn: "respawn",
+        respawnAria: "Respawn the exited shell",
+      },
     },
     assetPreview: {
       btnClose: "Close preview",
@@ -319,6 +330,13 @@ export const en = {
       trackLabelAudio: "Music",
       trackLabelText: "Subs",
       trackLabelOverlay: "FX",
+      dnd: {
+        // I19/I20 — drag library assets onto tracks + move clips between
+        // same-kind tracks. Mostly aria/title hints; the cue is visual.
+        clipDragHandleAria: "Drag to move this clip to another track",
+        dropHere: "Drop to add here",
+        dropRejected: "Can't drop here — wrong track type",
+      },
       trackHeader: {
         muteAria: "Toggle mute",
         hideAria: "Toggle visibility",
@@ -1110,6 +1128,17 @@ export const zh: DeepShape<Messages> = {
         hoursAgo: "{n} 小时前",
         daysAgo: "{n} 天前",
       },
+      terminalSessions: {
+        stripAria: "终端会话",
+        sessionLabel: "终端 {n}",
+        newTerminal: "新建终端",
+        newTerminalAria: "开启一个新终端会话",
+        switchAria: "切换到 {label}",
+        deleteAria: "关闭 {label}",
+        deleteConfirm: "关闭？",
+        respawn: "重启",
+        respawnAria: "重启已退出的 shell",
+      },
     },
     assetPreview: {
       btnClose: "关闭预览",
@@ -1137,6 +1166,12 @@ export const zh: DeepShape<Messages> = {
       trackLabelAudio: "BGM",
       trackLabelText: "字幕",
       trackLabelOverlay: "覆盖",
+      dnd: {
+        // I19/I20 — 把素材库的素材拖到轨道 + 在同类型轨道间移动片段。
+        clipDragHandleAria: "拖动把此片段移到其它轨道",
+        dropHere: "放下加到这里",
+        dropRejected: "这里放不了——轨道类型不符",
+      },
       trackHeader: {
         muteAria: "切换静音",
         hideAria: "切换显示",

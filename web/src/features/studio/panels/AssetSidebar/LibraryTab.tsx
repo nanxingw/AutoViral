@@ -6,6 +6,7 @@ import { SearchBox } from "./SearchBox";
 import { AssetPreviewModal } from "./AssetPreviewModal";
 import { DeleteAssetConfirm } from "./DeleteAssetConfirm";
 import { useAddAssetToTimeline, isAddableAsset } from "./addAssetToTimeline";
+import { writeDragPayload } from "../Timeline/dnd";
 import {
   useDeleteAsset,
   findClipsReferencingAsset,
@@ -402,6 +403,10 @@ function AssetTile({
     item.url,
     posterEnabled,
   );
+  // I19 — placeable assets (video/audio/image, == those with an `onAdd` ＋
+  // affordance) can be dragged onto a matching-kind timeline track. The ＋
+  // button stays the accessible fallback for keyboard users.
+  const draggable = onAdd !== undefined;
   return (
     <div
       // R43 — tile is now an interactive control. role+tabIndex make it
@@ -411,6 +416,23 @@ function AssetTile({
       role="button"
       tabIndex={0}
       aria-label={`Preview ${item.name}`}
+      // I19 — native HTML5 drag source (matches Chat's file-drop primitive,
+      // zero bundle). Writes a typed payload on the custom MIME so the
+      // timeline lane can type-check the drop. preventDefault is NOT called
+      // so the tile's onClick (open preview) still works on a plain click.
+      draggable={draggable}
+      onDragStart={
+        draggable
+          ? (e) => {
+              writeDragPayload(e.dataTransfer, {
+                source: "asset",
+                assetPath: item.path,
+                assetKind: item.kind,
+              });
+              e.dataTransfer.effectAllowed = "copy";
+            }
+          : undefined
+      }
       onClick={onOpen}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
