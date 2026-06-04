@@ -4,6 +4,7 @@
 
 import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 // S14 (US 20/21) — mock the ASR core so the bridge wire test asserts the
@@ -19,6 +20,14 @@ import { uiEventBus } from "../ui-events.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const FIXTURE_WORKS_ROOT = join(__dirname, "../../../../tests/fixtures");
+// The single source of truth for the version `whoami` reports is the repo's
+// package.json. Pinning the assertion to it (not a loose semver regex) is what
+// catches a hardcoded/stale BRIDGE_VERSION drifting on the next bump.
+const REPO_PKG_VERSION = (
+  JSON.parse(
+    readFileSync(join(__dirname, "../../../../package.json"), "utf-8"),
+  ) as { version: string }
+).version;
 
 const app = new Hono().route("/api/bridge/v1", bridgeRouter);
 
@@ -37,6 +46,9 @@ describe("bridge router — Phase 0", () => {
     expect(body.result?.cwd).toMatch(/\.autoviral\/works\/w_test_001$/);
     expect(typeof body.result?.port).toBe("number");
     expect(body.result?.version).toMatch(/^\d+\.\d+\.\d+$/);
+    // The reported version must be the real package version — not a hardcoded
+    // constant that silently drifts when the package is bumped.
+    expect(body.result?.version).toBe(REPO_PKG_VERSION);
   });
 
   it("GET /whoami without header → 400 with code 4", async () => {

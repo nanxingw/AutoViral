@@ -9,6 +9,7 @@ import { Hono, type Context } from "hono";
 import { homedir } from "node:os";
 import { join, resolve, relative, sep } from "node:path";
 import { PACKAGE_ROOT } from "../../infra/paths.js";
+import { readFileSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import type { WhoAmIResponse } from "./schemas.js";
 import {
@@ -83,7 +84,35 @@ function manualDir(): string {
 
 export const bridgeRouter = new Hono();
 
-const BRIDGE_VERSION = "0.1.0";
+// The version reported by `autoviral whoami` is the package version — the
+// single source of truth is the package.json `version` field. We resolve it by
+// walking up from PACKAGE_ROOT to the nearest package.json that carries a
+// `version`, because PACKAGE_ROOT differs by build:
+//   - packaged daemon: PACKAGE_ROOT = dist/, and scripts/write-dist-pkg.mjs
+//     stamps the real `version` into dist/package.json → found on step 0.
+//   - dev/test: paths.ts lives at src/infra/, so PACKAGE_ROOT = src/ (no
+//     package.json) → we walk up one level to the repo root's package.json.
+// The "0.0.0" fallback only fires if no manifest with a version is reachable —
+// never hardcode a real version here, or `whoami` drifts from the published
+// package on every bump.
+function readPackageVersion(): string {
+  let dir = PACKAGE_ROOT;
+  for (let i = 0; i < 4; i++) {
+    try {
+      const raw = readFileSync(join(dir, "package.json"), "utf-8");
+      const v = (JSON.parse(raw) as { version?: unknown }).version;
+      if (typeof v === "string" && v.length > 0) return v;
+    } catch {
+      // no package.json here (or unparseable) — keep walking up.
+    }
+    const parent = resolve(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return "0.0.0";
+}
+
+const BRIDGE_VERSION = readPackageVersion();
 
 function workIdOrError(c: Context):
   | { ok: true; workId: string }
