@@ -1,10 +1,17 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useWorkAssets, type AssetItem } from "@/queries/assets";
 import { GenerationDialog } from "@/features/studio/generation/GenerationDialog";
 import { useGatedMediaSrc } from "@/features/studio/media/useGatedMediaSrc";
 import { SearchBox } from "./SearchBox";
 import { AssetPreviewModal } from "./AssetPreviewModal";
+import { DeleteAssetConfirm } from "./DeleteAssetConfirm";
 import { useAddAssetToTimeline, isAddableAsset } from "./addAssetToTimeline";
+import {
+  useDeleteAsset,
+  findClipsReferencingAsset,
+  findProvenanceAssetIds,
+} from "./deleteAsset";
+import { useComposition } from "../../store";
 import {
   useUploadAssets,
   ACCEPTED_UPLOAD,
@@ -37,6 +44,52 @@ export function LibraryTab({ workId }: Props) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadMut = useUploadAssets(workId);
   const [sizeError, setSizeError] = useState<string | null>(null);
+
+  // I18 — delete a library asset (file on disk + cascade any referencing clips).
+  const deleteMut = useDeleteAsset(workId);
+  // The asset the user is confirming deletion of. null = no dialog open.
+  const [pendingDelete, setPendingDelete] = useState<AssetItem | null>(null);
+  // How many timeline clips reference `pendingDelete` — drives the warning copy.
+  const referencedClipCount = useMemo(() => {
+    const comp = useComposition.getState().comp;
+    if (!comp || !pendingDelete) return 0;
+    return findClipsReferencingAsset(comp, pendingDelete).length;
+  }, [pendingDelete]);
+
+  const confirmDelete = useCallback(() => {
+    if (!pendingDelete) return;
+    const asset = pendingDelete;
+    deleteMut.mutate(asset, {
+      onSuccess: () => {
+        // WARN-then-cascade: now that the file is gone, prune the composition so
+        // the timeline never points at a missing file. The store write re-runs
+        // zod (invariant #3) and atomically persists composition.yaml.
+        const store = useComposition.getState();
+        const comp = store.comp;
+        if (comp) {
+          for (const clipId of findClipsReferencingAsset(comp, asset)) {
+            store.removeClip(clipId);
+          }
+          // Re-read after the clip removals mutate the comp.
+          const fresh = useComposition.getState().comp;
+          if (fresh) {
+            for (const assetId of findProvenanceAssetIds(fresh, asset)) {
+              store.removeAsset(assetId);
+            }
+          }
+        }
+        // Close the preview if it was showing the just-deleted asset.
+        setPreview((p) => (p?.path === asset.path ? null : p));
+        setPendingDelete(null);
+      },
+    });
+  }, [pendingDelete, deleteMut]);
+
+  const cancelDelete = useCallback(() => {
+    if (deleteMut.isPending) return;
+    deleteMut.reset();
+    setPendingDelete(null);
+  }, [deleteMut]);
 
   function handleFilesPicked(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? []);
@@ -264,6 +317,8 @@ export function LibraryTab({ workId }: Props) {
                     : undefined
                 }
                 addLabel={t("studio.assetSidebar.addToTimeline")}
+                onDelete={() => setPendingDelete(item)}
+                deleteLabel={t("studio.assetSidebar.deleteAria")}
               />
             ))}
           </div>
@@ -286,6 +341,17 @@ export function LibraryTab({ workId }: Props) {
               }
             : undefined
         }
+        onDelete={preview ? () => setPendingDelete(preview) : undefined}
+      />
+      <DeleteAssetConfirm
+        asset={pendingDelete}
+        referencedClipCount={referencedClipCount}
+        deleting={deleteMut.isPending}
+        error={
+          deleteMut.isError ? localizeApiError(deleteMut.error, t) : null
+        }
+        onCancel={cancelDelete}
+        onConfirm={confirmDelete}
       />
     </div>
   );
@@ -297,6 +363,8 @@ function AssetTile({
   onOpen,
   onAdd,
   addLabel,
+  onDelete,
+  deleteLabel,
 }: {
   item: AssetItem;
   index: number;
@@ -305,6 +373,9 @@ function AssetTile({
   // timeline. Undefined for kinds that have no timeline clip (text / other).
   onAdd?: () => void;
   addLabel?: string;
+  // I18 — when set, render a trash affordance that opens the delete confirm.
+  onDelete?: () => void;
+  deleteLabel?: string;
 }) {
   const hue = hueFromString(item.path);
   const fallbackBg = `linear-gradient(145deg, hsl(${hue}, 40%, 25%), hsl(${(hue + 30) % 360}, 30%, 12%))`;
@@ -519,40 +590,80 @@ function AssetTile({
         {(index + 1).toString().padStart(2, "0")}
       </div>
 
-      {/* #78 — top-right "＋" appends this asset to the timeline. stopPropagation
-          so it doesn't also fire the tile's open-preview click. Only rendered
-          for placeable kinds (onAdd set). */}
-      {onAdd && (
-        <button
-          type="button"
-          aria-label={addLabel}
-          title={addLabel}
-          data-bare
-          onClick={(e) => {
-            e.stopPropagation();
-            onAdd();
-          }}
+      {/* Top-right action cluster: "＋" add-to-timeline (#78) + trash delete
+          (I18). Both stopPropagation so they don't also fire the tile's
+          open-preview click. ＋ only renders for placeable kinds (onAdd set);
+          delete renders for every asset (onDelete set). */}
+      {(onAdd || onDelete) && (
+        <div
           style={{
             position: "absolute",
             top: 6,
             right: 6,
-            width: 22,
-            height: 22,
-            display: "grid",
-            placeItems: "center",
-            borderRadius: 6,
-            border: "1px solid rgba(255,255,255,0.35)",
-            background: "rgba(0,0,0,0.5)",
-            color: "white",
-            cursor: "pointer",
-            padding: 0,
-            lineHeight: 0,
+            display: "flex",
+            gap: 4,
           }}
         >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
-        </button>
+          {onAdd && (
+            <button
+              type="button"
+              aria-label={addLabel}
+              title={addLabel}
+              data-bare
+              onClick={(e) => {
+                e.stopPropagation();
+                onAdd();
+              }}
+              style={{
+                width: 22,
+                height: 22,
+                display: "grid",
+                placeItems: "center",
+                borderRadius: 6,
+                border: "1px solid rgba(255,255,255,0.35)",
+                background: "rgba(0,0,0,0.5)",
+                color: "white",
+                cursor: "pointer",
+                padding: 0,
+                lineHeight: 0,
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M12 5v14M5 12h14" />
+              </svg>
+            </button>
+          )}
+          {onDelete && (
+            <button
+              type="button"
+              aria-label={deleteLabel}
+              title={deleteLabel}
+              data-bare
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete();
+              }}
+              style={{
+                width: 22,
+                height: 22,
+                display: "grid",
+                placeItems: "center",
+                borderRadius: 6,
+                border: "1px solid rgba(255,255,255,0.35)",
+                background: "rgba(0,0,0,0.5)",
+                color: "white",
+                cursor: "pointer",
+                padding: 0,
+                lineHeight: 0,
+              }}
+            >
+              {/* trash glyph */}
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M10 11v6M14 11v6" />
+              </svg>
+            </button>
+          )}
+        </div>
       )}
 
       {/* Bottom label */}

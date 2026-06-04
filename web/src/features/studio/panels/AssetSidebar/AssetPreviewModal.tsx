@@ -11,6 +11,9 @@ interface Props {
   // #78 — when set, render an "Add to timeline" action that appends this asset
   // as a clip. Undefined for kinds with no timeline representation.
   onAddToTimeline?: () => void;
+  // I18 — when set, render a "Delete" action that opens the delete confirm
+  // dialog for this asset. Always set for library assets.
+  onDelete?: () => void;
 }
 
 /**
@@ -29,7 +32,7 @@ interface Props {
  * keyboard focus management — same pattern as ReframeConfirmDialog and
  * ExportProgress.
  */
-export function AssetPreviewModal({ asset, onClose, onAddToTimeline }: Props) {
+export function AssetPreviewModal({ asset, onClose, onAddToTimeline, onDelete }: Props) {
   const open = asset !== null;
   const t = useT();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -155,6 +158,36 @@ export function AssetPreviewModal({ asset, onClose, onAddToTimeline }: Props) {
                       <path d="M12 5v14M5 12h14" />
                     </svg>
                     {t("studio.assetPreview.addToTimeline")}
+                  </button>
+                )}
+                {onDelete && (
+                  <button
+                    type="button"
+                    onClick={onDelete}
+                    aria-label={t("studio.assetPreview.delete")}
+                    title={t("studio.assetPreview.delete")}
+                    data-bare
+                    style={{
+                      height: 28,
+                      padding: "0 12px",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      borderRadius: 6,
+                      border: "1px solid var(--glass-border)",
+                      background: "transparent",
+                      color: "var(--status-error, #d4756c)",
+                      cursor: "pointer",
+                      fontSize: 11,
+                      fontFamily: "var(--font-mono)",
+                      letterSpacing: "0.04em",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                    </svg>
+                    {t("studio.assetPreview.delete")}
                   </button>
                 )}
                 <button

@@ -175,6 +175,67 @@ assetsRouter.get("/api/works/:id/assets/*", async (c) => {
   }
 });
 
+// DELETE /api/works/:id/assets/* — delete an on-disk asset file (I18, PRD-0003
+// §3.2). Mirrors the GET wildcard's URL→physical-root mapping and the
+// shared-assets sibling's guard discipline: SAFE_ID on the workId AND
+// resolveAssetPath() on the nested path (rejects traversal / absolute paths).
+// Only assets/ and output/ are reachable — work.yaml / chat.json are NEVER
+// touched, same as the serve route. Idempotent-ish: a missing file is a 404,
+// not a 500. The composition-side cascade (removing clips that referenced this
+// asset) is the frontend's job — the store + zod write stay the SSoT (#3).
+assetsRouter.delete("/api/works/:id/assets/*", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId" }, 400);
+
+  const url = new URL(c.req.url);
+  const prefix = `/api/works/${id}/assets/`;
+  const nestedPath = decodeURIComponent(url.pathname.slice(prefix.length));
+  if (!nestedPath) return c.json({ error: "Asset path required" }, 400);
+
+  // Same URL→root mapping as the GET serve handler above — keep them in lockstep
+  // so a path that serves can also be deleted (and vice versa).
+  let root: "assets" | "output";
+  let rest: string;
+  if (nestedPath.startsWith("output/")) {
+    root = "output";
+    rest = nestedPath.slice("output/".length);
+  } else if (nestedPath.startsWith("assets/")) {
+    root = "assets";
+    rest = nestedPath.slice("assets/".length);
+  } else {
+    root = "assets";
+    rest = nestedPath;
+  }
+  if (!rest) return c.json({ error: "Asset path required" }, 400);
+
+  let filePath: string;
+  try {
+    filePath = resolveAssetPath(id, root, rest);
+  } catch (err) {
+    // UnsafePathError → traversal / absolute / bad root. Reject as a bad
+    // request without revealing the resolved path.
+    if (err instanceof UnsafePathError) return c.json({ error: err.message }, 400);
+    throw err;
+  }
+
+  try {
+    const { unlink } = await import("node:fs/promises");
+    await unlink(filePath);
+    // Best-effort: drop the sibling .peaks.json an audio upload may have left
+    // behind so the library doesn't keep stale waveform data. Missing → ignore.
+    await unlink(`${filePath}.peaks.json`).catch(() => {});
+    return c.json({ deleted: true, path: nestedPath });
+  } catch (e: any) {
+    if (e?.code === "ENOENT") {
+      return c.json({ error: "Asset not found", errorCode: "asset_not_found" }, 404);
+    }
+    if (e?.code === "EISDIR") {
+      return c.json({ error: "Path is a directory, not a file" }, 400);
+    }
+    return c.json({ error: "Delete failed" }, 500);
+  }
+});
+
 // POST /api/works/:id/assets/upload — upload file to work assets
 // #67 — uploadBodyLimit (Content-Length-aware) rejects oversized requests before
 // parseBody buffers them into heap. The in-handler file.size check below is the
