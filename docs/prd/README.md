@@ -40,3 +40,4 @@
 |---|---|---|---|
 | [0001](0001-v0.1.0-release-and-conventions.md) | v0.1.0 发布与工程约定（包改名 `autoviral@0.1.0` / docs 重组 / Electron 桌面壳 / CI+Release / 合 main 打 tag） | Proposed | 2026-06-02 |
 | [0002](0002-v0.1.1-extensibility-foundation-and-cleanup.md) | v0.1.1 可扩展性奠基与结构清债（ContentTypeRegistry / 单一 MediaProvider / carousel skill+CLI / AGENT.md 双轨 / api.ts 拆分 / migrations 骨架） | Draft | 2026-06-03 |
+| [0003](0003-v0.1.2-zero-friction-setup.md) | v0.1.2 一揽子（§1 外部依赖自举 · §2 TTS 网关一致性 Gemini-via-OpenRouter+edge · §3 素材库+时间线交互 对齐 pro 编辑器 · §4 agent 视觉自检 snapshot · §5 多对话/多终端会话 新建+保留+跳回〔需 ADR-008〕） | Active | 2026-06-04 |
