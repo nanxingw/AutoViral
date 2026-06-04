@@ -122,6 +122,36 @@ Delete a clip. No confirmation; gate with `autoviral ask` for destructive flows.
 autoviral clip remove vc_s07
 ```
 
+### `autoviral clip split <id> --at <seconds>`
+
+Cut one clip into two at a point on the timeline. The original id keeps the left
+half `[start, at)`; the right half `[at, end)` gets a freshly-minted id which is
+printed to stdout. Keyframes are partitioned and the right half's are rebased to
+its new local 0.
+
+```bash
+# clip vc_s01 sits at trackOffset 0 and runs to 4.0 on the timeline.
+# split it at the 2.0s mark of the TIMELINE:
+autoviral clip split vc_s01 --at 2.0
+```
+
+- `--at` — **absolute timeline seconds** (measured from the start of the whole
+  timeline, the same axis as `seek`/`snapshot --at`), NOT clip-local. `--at` must
+  fall strictly inside the clip's timeline range `(trackOffset, trackOffset+dur)`;
+  a boundary or out-of-range value is rejected with exit 4.
+  > Contrast: `clip keyframe --at` is **clip-local** (measured from the clip's own
+  > start). `split`/`trim` use the timeline axis; `keyframe` uses the clip axis.
+
+### `autoviral clip trim <id> [--in <seconds>] [--out <seconds>]`
+
+Adjust a video/audio clip's source `in`/`out` window. `--in`/`--out` are
+positions in the clip's SOURCE media (seconds from the start of the underlying
+file), not timeline seconds.
+
+```bash
+autoviral clip trim vc_s01 --in 0.5 --out 3.8
+```
+
 ### `autoviral clip keyframe add|set <id> --property <p> --at <sec> --value <v> [--easing <e>]`
 
 Author one keyframe on a numeric clip property (this is how you make a clip

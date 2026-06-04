@@ -3310,3 +3310,103 @@ describe("bridge router — captions generate auto-creates a text track (Fix B.2
     expect(texts).toContain("first caption");
   });
 });
+
+// E2E regression (2026-06-05) — the default (no --asset) captions entry point
+// must work for a REAL work, whose audio clip stores its `src` as a SERVED-URL
+// (`/api/works/<id>/assets/music/bgm.mp3`, leading slash + encoded segments),
+// NOT the bare relative form the older fixture used. Before the fix the route
+// did `resolve(workDir, "/api/works/...")` → the leading slash made it ABSOLUTE
+// and land outside the work dir → path-traversal guard rejected the default
+// "生成字幕" button for every real work (400 code:4). The fix strips the
+// served-URL prefix back to bare-relative before resolving, while a malicious
+// `../`-laden served-URL is STILL caught by the guard.
+describe("bridge router — captions generate, real served-URL audio src (E2E regression)", () => {
+  let workRoot: string;
+  const workId = "w_captions_servedurl";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+  const mockAsr = vi.mocked(runAsrCaptions);
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-captions-servedurl-"));
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    // Rewrite the audio clip src to the REAL studio-persisted shape: a
+    // page-absolute served-URL with the `/api/works/<id>/assets/` prefix and a
+    // nested subdir, exactly what the preview Player loads.
+    const realShape = fixture
+      .replace(/workId: sample-work/, `workId: ${workId}`)
+      .replace(
+        /src: assets\/sample-bgm\.mp3/,
+        `src: /api/works/${workId}/assets/music/bgm.mp3`,
+      );
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(join(workRoot, workId, "composition.yaml"), realShape, "utf8");
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  it("DEFAULT src (no --asset) resolves a served-URL audio clip → 200 + writes captions", async () => {
+    mockAsr.mockResolvedValueOnce({
+      ok: true,
+      captions: [{ start: 0, end: 1.2, text: "real served url caption" }],
+    });
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ language: "zh" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { written: number } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.written).toBe(1);
+
+    // ASR ran against the on-disk file the served-URL points at — the prefix
+    // was stripped back to a bare-relative path under the work dir, NOT the
+    // literal `/api/works/...` URL (which would have escaped the work dir).
+    expect(mockAsr).toHaveBeenCalledWith(
+      expect.stringContaining(join("music", "bgm.mp3")),
+      "zh",
+    );
+    const calledWith = mockAsr.mock.calls.at(-1)?.[0] as string;
+    expect(calledWith).not.toContain("/api/works/");
+
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: { tracks: Array<{ kind: string; clips: Array<{ text?: string }> }> };
+    };
+    const texts = compBody.result.tracks
+      .filter((t) => t.kind === "text")
+      .flatMap((t) => t.clips)
+      .map((c) => c.text);
+    expect(texts).toContain("real served url caption");
+  });
+
+  // Security: a served-URL-SHAPED src that smuggles `../` segments must still be
+  // rejected after prefix-stripping (the bare-relative `../../../etc/passwd`
+  // escapes the work dir). The fix must not weaken the S14 traversal guard.
+  it("rejects a malicious ../-laden assetPath (served-URL shaped) → 400 code:4", async () => {
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({
+        assetPath: `/api/works/${workId}/assets/../../../etc/passwd`,
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    for (const call of mockAsr.mock.calls) {
+      expect(call[0]).not.toContain("etc/passwd");
+    }
+  });
+});

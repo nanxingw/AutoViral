@@ -96,6 +96,42 @@ async function detectKind(
 }
 
 /**
+ * Convert an asset reference for `workId` into a bare, work-RELATIVE subpath
+ * (e.g. "assets/music/bgm.mp3"), or null if the reference is not an on-disk
+ * same-work asset (a `data:`/`http(s):` URL points at no local file).
+ *
+ * Compositions store an asset src in EITHER form interchangeably:
+ *   • served-URL  — `/api/works/<id>/assets/music/bgm.mp3`  (what the studio
+ *     UI persists for preview, leading slash + per-segment encodeURIComponent)
+ *   • bare-rel    — `assets/music/bgm.mp3`                  (what the agent
+ *     writes via the CLI)
+ * Both must resolve to the SAME on-disk file under the work dir. Callers that
+ * need an absolute path do `resolve(workDir, assetUrlToWorkRel(id, src))` —
+ * the leading slash on the served-URL form is what would otherwise make
+ * `resolve` treat it as an absolute path OUTSIDE the work dir (the captions
+ * `generate` default-src 400, E2E 2026-06-05).
+ */
+export function assetUrlToWorkRel(
+  workId: string,
+  value: string,
+): string | null {
+  const apiPrefix = `/api/works/${workId}/assets/`;
+  if (value.startsWith(apiPrefix)) {
+    // Each path segment is encodeURIComponent'd by the studio writer.
+    return value
+      .slice(apiPrefix.length)
+      .split("/")
+      .map((s) => decodeURIComponent(s))
+      .join("/");
+  }
+  // A data: URL or remote http(s) ref has no on-disk file we can resolve.
+  if (/^(data:|https?:)/i.test(value)) return null;
+  // Otherwise treat it as already work-relative ("assets/images/x.png"),
+  // stripping any leading slash so the result is unambiguously relative.
+  return value.replace(/^\/+/, "");
+}
+
+/**
  * Parse a slide background `bg.value` that points at a per-work asset and
  * return the asset-relative subpath (e.g. "assets/images/s1.png"), or null if
  * the value isn't a same-work asset URL (gradient/solid/external are not files).
@@ -109,20 +145,7 @@ export function bgImageAssetRel(
   bg: Slide["bg"],
 ): string | null {
   if (bg.type !== "image") return null;
-  const value = bg.value;
-  const apiPrefix = `/api/works/${workId}/assets/`;
-  if (value.startsWith(apiPrefix)) {
-    // Each path segment is encodeURIComponent'd by the legacy carousel writer.
-    return value
-      .slice(apiPrefix.length)
-      .split("/")
-      .map((s) => decodeURIComponent(s))
-      .join("/");
-  }
-  // A data: URL or remote http(s) bg has no on-disk file we can hand to Read.
-  if (/^(data:|https?:)/i.test(value)) return null;
-  // Otherwise treat it as already work-relative ("assets/images/x.png").
-  return value.replace(/^\/+/, "");
+  return assetUrlToWorkRel(workId, bg.value);
 }
 
 function pickSlide(carousel: Carousel, slideId?: string): Slide {

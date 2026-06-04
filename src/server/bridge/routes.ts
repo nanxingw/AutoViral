@@ -46,7 +46,7 @@ import { uiEventBus } from "./ui-events.js";
 import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
 import { resolvePlatformPreset } from "../../shared/platform-presets.js";
-import { renderSnapshot } from "../snapshot.js";
+import { renderSnapshot, assetUrlToWorkRel } from "../snapshot.js";
 import { listCheckpoints, restoreCheckpoint } from "../checkpoints.js";
 import { ingestYouTubeIntoWork } from "./ingest-youtube.js";
 import {
@@ -900,7 +900,29 @@ bridgeRouter.post("/captions/generate", async (c) => {
     );
   }
 
-  // Resolve to an absolute path under the work dir. `src` is a work-relative
+  // The default audio src comes straight off the composition's audio clip, and
+  // a real studio-persisted clip stores its src as a SERVED-URL —
+  // `/api/works/<id>/assets/music/bgm.mp3` (leading slash + per-segment
+  // encodeURIComponent), NOT a bare relative path. A naive `resolve(workDir,
+  // "/api/works/...")` treats that leading slash as an ABSOLUTE path and lands
+  // OUTSIDE the work dir, so the traversal guard below would reject the default
+  // "生成字幕" entry point for every real work (E2E 2026-06-05, code:4). Strip
+  // the `/api/works/<id>/assets/` prefix back to bare-relative so it resolves to
+  // the real on-disk file — the SAME normalisation the snapshot path uses.
+  //
+  // ONLY this exact served-URL form for THIS work is rewritten: a malicious
+  // absolute (`/etc/passwd`) or `../`-laden `--asset` does NOT match the
+  // `/api/works/<id>/assets/` prefix, so it is left untouched and still caught
+  // by the guard below (the `/etc/passwd` rejection test must keep passing).
+  const servedPrefix = `/api/works/${g.workId}/assets/`;
+  if (src.startsWith(servedPrefix)) {
+    const rel = assetUrlToWorkRel(g.workId, src);
+    // assetUrlToWorkRel returns the decoded bare-relative for the served-URL
+    // form (never null here — the prefix matched), e.g. "assets/music/bgm.mp3".
+    if (rel !== null) src = rel;
+  }
+
+  // Resolve to an absolute path under the work dir. `src` is now a work-relative
   // path like `assets/voice.mp3`; the shared core takes an absolute path.
   //
   // Fix B.1 — path-traversal guard. `src` is attacker-controllable (an agent or
