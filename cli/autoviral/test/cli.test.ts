@@ -830,6 +830,24 @@ describe("autoviral CLI — end-to-end", () => {
     expect(lastClipPatch).toEqual({ "transforms.scale": 2 });
   });
 
+  // S16 (US 25) — `--fit-mode contain` maps the ergonomic flag to the canonical
+  // top-level `fitMode` path and keeps the enum value as a verbatim STRING (it
+  // must NOT be number-coerced). This is the verb that makes fit-fill reachable
+  // from the agent CLI (otherwise the field is set-only-from-UI = silent gap).
+  it("clip set --fit-mode contain → PATCHes { fitMode: 'contain' } (string, mapped)", async () => {
+    lastClipPatch = null;
+    const r = await run(["clip", "set", "vc_s01", "--fit-mode", "contain"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({ fitMode: "contain" });
+  });
+
+  it("clip set --fit-mode blur → keeps 'blur' as a string", async () => {
+    lastClipPatch = null;
+    const r = await run(["clip", "set", "vc_s01", "--fit-mode", "blur"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({ fitMode: "blur" });
+  });
+
   it("clip set --brightness 0.5 --italic true → maps + coerces both", async () => {
     lastClipPatch = null;
     const r = await run([

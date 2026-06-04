@@ -159,6 +159,17 @@ const VideoClipObjectSchema = z.object({
   trackOffset: z.number().min(0),
   transforms: TransformsSchema.default({}),
   filters: FiltersSchema.default({}),
+  // S16 (US 25) — fit-fill mode. Before S16 the renderer HARDCODED
+  // objectFit:"cover", so a source whose aspect ≠ canvas was always
+  // centre-cropped with no escape valve. `fitMode` lifts that into persisted,
+  // agent-settable intent:
+  //   cover   → crop-to-fill (the legacy default; back-compat for every work
+  //             authored before S16, which has no fitMode key),
+  //   contain → letterbox (objectFit contain, no crop — black bars instead),
+  //   blur    → blurred-fill background (same frame scaled up + blurred) behind
+  //             a contained foreground, so there are no hard bars.
+  // optional + default "cover" keeps OLD compositions parsing unchanged.
+  fitMode: z.enum(["cover", "contain", "blur"]).optional().default("cover"),
   keyframes: z.array(KeyframeSchema).optional(),
 });
 export const VideoClipSchema = VideoClipObjectSchema.superRefine(

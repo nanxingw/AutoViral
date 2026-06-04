@@ -21,6 +21,7 @@ beforeEach(() => {
     in: 0,
     out: 2,
     trackOffset: 0,
+    fitMode: "cover",
     transforms: baseTransform,
     filters: baseFilters,
   };
@@ -31,6 +32,7 @@ beforeEach(() => {
     in: 0,
     out: 3,
     trackOffset: 2,
+    fitMode: "cover",
     transforms: baseTransform,
     filters: baseFilters,
   };
@@ -41,6 +43,7 @@ beforeEach(() => {
     in: 0,
     out: 1,
     trackOffset: 5,
+    fitMode: "cover",
     transforms: baseTransform,
     filters: baseFilters,
   };

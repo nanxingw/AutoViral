@@ -267,6 +267,8 @@ const CLIP_SET_FLAG_PATHS: Record<string, string> = {
   brightness: "filters.brightness",
   contrast: "filters.contrast",
   saturation: "filters.saturation",
+  // S16 (US 25) — fit-fill mode (cover/contain/blur). `--fit-mode` → `fitMode`.
+  "fit-mode": "fitMode",
   // audio
   "fade-in": "fadeIn",
   "fade-out": "fadeOut",
@@ -293,6 +295,7 @@ const STRING_VALUED_PATHS: ReadonlySet<string> = new Set<string>([
   "text", // text clip body
   "type", // audio clip type enum (original/bgm/voiceover/sfx)
   "filters.lut", // video LUT name
+  "fitMode", // S16 — fit-fill enum (cover/contain/blur); never number-coerce
   "style.font", // text font family
   "style.color", // text fill (hex like `000000`)
   "style.stroke.color", // text stroke (hex)

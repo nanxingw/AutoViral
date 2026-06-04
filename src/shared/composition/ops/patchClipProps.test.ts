@@ -78,6 +78,21 @@ describe("@shared composition ops — patchClipProps", () => {
     expect((clip as any).filters.contrast).toBe(0);
   });
 
+  it("writes the top-level video fitMode (S16 — clip set --fit-mode is reachable)", () => {
+    const clip = videoClip();
+    patchClipProps(clip, { fitMode: "contain" });
+    expect((clip as any).fitMode).toBe("contain");
+    // unrelated fields untouched
+    expect((clip as any).transforms.scale).toBe(1);
+  });
+
+  it("REJECTS fitMode on a non-video clip (text) — not a settable property there", () => {
+    const clip = textClip();
+    expect(() => patchClipProps(clip, { fitMode: "contain" })).toThrow(
+      CompositionOpError,
+    );
+  });
+
   it("writes a top-level scalar (audio volume)", () => {
     const clip = audioClip();
     patchClipProps(clip, { volume: 0.3 });

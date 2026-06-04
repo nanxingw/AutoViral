@@ -17,6 +17,7 @@ function videoClip(id: string, trackOffset: number, out = 3): VideoClip {
     in: 0,
     out,
     trackOffset,
+    fitMode: "cover",
     transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
     filters: { brightness: 0, contrast: 0, saturation: 0 },
   };

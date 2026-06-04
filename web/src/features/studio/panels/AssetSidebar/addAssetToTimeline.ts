@@ -52,6 +52,8 @@ export function buildClipFromAsset(
         in: 0,
         out: DEFAULT_ASSET_CLIP_DUR,
         trackOffset,
+        // S16 — default fit-fill mode (crop-to-fill, the legacy behaviour).
+        fitMode: "cover",
         transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
         filters: { brightness: 0, contrast: 0, saturation: 0 },
       };

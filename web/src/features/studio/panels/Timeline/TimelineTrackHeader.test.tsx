@@ -26,6 +26,7 @@ function seed() {
     in: 0,
     out: 2,
     trackOffset: 0,
+    fitMode: "cover",
     transforms: baseTransform,
     filters: baseFilters,
   };

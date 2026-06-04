@@ -106,7 +106,7 @@ describe("resolveCompositionAssets", () => {
       tracks: [
         {
           id: "tv", kind: "video", label: "V", displayOrder: 0, volume: 0, transitions: [], muted: false, hidden: false,
-          clips: [{ id: "c1", kind: "video", src: "assets/videos/a.mp4", in: 0, out: 3, trackOffset: 0, transforms: {} as any, filters: {} as any }],
+          clips: [{ id: "c1", kind: "video", src: "assets/videos/a.mp4", in: 0, out: 3, trackOffset: 0, fitMode: "cover", transforms: {} as any, filters: {} as any }],
         },
         {
           id: "ta", kind: "audio", label: "A", displayOrder: 1, volume: 0, transitions: [], muted: false, hidden: false,
@@ -135,7 +135,7 @@ describe("resolveCompositionAssets", () => {
       ...baseComp(),
       tracks: [{
         id: "t", kind: "video", label: "V", displayOrder: 0, volume: 0, transitions: [], muted: false, hidden: false,
-        clips: [{ id: "c", kind: "video", src: "https://cdn/x.mp4", in: 0, out: 3, trackOffset: 0, transforms: {} as any, filters: {} as any }],
+        clips: [{ id: "c", kind: "video", src: "https://cdn/x.mp4", in: 0, out: 3, trackOffset: 0, fitMode: "cover", transforms: {} as any, filters: {} as any }],
       }],
     };
     const out = resolveCompositionAssets(comp);

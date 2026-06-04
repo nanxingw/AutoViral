@@ -33,6 +33,7 @@ const ALLOWED_PATHS: Record<Clip["kind"], readonly string[]> = {
     "in",
     "out",
     "trackOffset",
+    "fitMode", // S16 (US 25) — fit-fill mode (cover/contain/blur)
     "transforms.scale",
     "transforms.x",
     "transforms.y",

@@ -76,6 +76,15 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // through Remotion's playbackRate prop, NOT the CSS transform (D8).
   const speed = computeVideoSpeedForFrame(clip, frame, fps);
   const opacity = computeVideoOpacityForFrame(clip, frame, fps);
+  // S16 (US 25) — fit-fill mode. The renderer used to hardcode objectFit:"cover"
+  // (always crop). `fitMode` (default "cover" — back-compat for pre-S16 works
+  // with no field) now drives the fill:
+  //   cover   → objectFit cover (crop-to-fill, legacy),
+  //   contain → objectFit contain (letterbox, no crop),
+  //   blur    → a blurred enlarged COVER background behind a CONTAIN foreground,
+  //            so the letterbox bars become a soft blurred fill of the frame.
+  const fitMode = clip.fitMode ?? "cover";
+  const transform = `translate(${x}px, ${y}px) rotate(${rotation}deg) scale(${scale})`;
   // Browser-side player uses <Video> (single <video> element backed by
   // browser native playback) instead of <OffthreadVideo>. OffthreadVideo
   // is more accurate for server-side rendering (FFmpeg + worker, used by
@@ -84,27 +93,66 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // producing periodic ~3s playback hitches as the browser LRU-evicts
   // and re-decodes IDR frames. Server render path is unaffected — that
   // goes through Remotion CLI, not this component. (2026-05-08)
+  const baseProps = {
+    src: clip.src,
+    startFrom: Math.round(clip.in * fps),
+    endAt: Math.round(clip.out * fps),
+    playbackRate: speed,
+    // R47-fix5 (Codex pick 2) — widen Remotion's hard-seek drift
+    // tolerance from the default 0.45s. Below the threshold Remotion
+    // just nudges currentTime; above it does a discrete seek (which
+    // the user perceives as a "rewind"). The default trips on every
+    // long main-thread commit / decoder hiccup; 1.2s lets normal
+    // drift settle on its own. Pairs with `pauseWhenBuffering` so
+    // we don't seek during load events either.
+    acceptableTimeShiftInSeconds: 1.2,
+    pauseWhenBuffering: true,
+  } as const;
+
+  // blur → two stacked layers: a blurred cover fill behind a contained frame.
+  if (fitMode === "blur") {
+    return (
+      <div style={{ position: "absolute", inset: 0, opacity }}>
+        <Video
+          {...baseProps}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            // The blurred background scales slightly past the frame so the blur
+            // has no hard edges, and stacks the clip's own filter chain on top.
+            filter: `blur(48px) ${filter || ""}`.trim(),
+            transform: "scale(1.1)",
+          }}
+        />
+        <Video
+          {...baseProps}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "contain",
+            filter: filter || undefined,
+            transform,
+          }}
+        />
+      </div>
+    );
+  }
+
+  // cover / contain → a single layer, objectFit driven by fitMode.
   return (
     <Video
-      src={clip.src}
-      startFrom={Math.round(clip.in * fps)}
-      endAt={Math.round(clip.out * fps)}
-      playbackRate={speed}
-      // R47-fix5 (Codex pick 2) — widen Remotion's hard-seek drift
-      // tolerance from the default 0.45s. Below the threshold Remotion
-      // just nudges currentTime; above it does a discrete seek (which
-      // the user perceives as a "rewind"). The default trips on every
-      // long main-thread commit / decoder hiccup; 1.2s lets normal
-      // drift settle on its own. Pairs with `pauseWhenBuffering` so
-      // we don't seek during load events either.
-      acceptableTimeShiftInSeconds={1.2}
-      pauseWhenBuffering
+      {...baseProps}
       style={{
         width: "100%",
         height: "100%",
-        objectFit: "cover",
+        objectFit: fitMode === "contain" ? "contain" : "cover",
         filter: filter || undefined,
-        transform: `translate(${x}px, ${y}px) rotate(${rotation}deg) scale(${scale})`,
+        transform,
         opacity,
       }}
     />
