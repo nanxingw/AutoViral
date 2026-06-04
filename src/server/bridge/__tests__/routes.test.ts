@@ -363,6 +363,55 @@ describe("bridge router — Phase 3 clip writes", () => {
       .find((cl) => cl.id === id);
     expect(found?.trackOffset).toBe(15.5);
   });
+
+  // S2 (US 17) — a successful clip write broadcasts composition-changed on
+  // the uiEventBus right after the atomic write lands, so Studio refetches
+  // without depending on fs.watch.
+  it("POST /clip broadcasts composition-changed after the write lands", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/clip", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AutoViral-Work-Id": workId,
+        },
+        body: JSON.stringify({
+          src: "assets/sample-shot.mp4",
+          track: "video",
+          offset: 20.0,
+          duration: 2.0,
+        }),
+      });
+      expect(res.status).toBe(200);
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  // S2 — a REJECTED clip write (no track / bad shape) must NOT broadcast:
+  // disk is untouched, so a "changed" event would be a lie.
+  it("POST /clip with a missing src does NOT broadcast composition-changed", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/clip", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AutoViral-Work-Id": workId,
+        },
+        // video clip with no src → mutator throws → write never happens.
+        body: JSON.stringify({ track: "video", offset: 1.0, duration: 2.0 }),
+      });
+      expect(res.status).toBe(400);
+      expect(events).not.toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
 });
 
 describe("bridge router — Phase 3 approval gate", () => {
@@ -566,6 +615,45 @@ describe("bridge router — I08 carousel writes", () => {
       },
     );
     expect(res.status).toBe(400);
+  });
+
+  // S2 (US 17) — a successful carousel write broadcasts carousel-changed on
+  // the uiEventBus right after the atomic write lands, so the Editor
+  // refetches without depending on fs.watch.
+  it("POST /carousel/slide broadcasts carousel-changed after the write lands", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/carousel/slide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(200);
+      expect(events).toContain("carousel-changed");
+    } finally {
+      off();
+    }
+  });
+
+  // S2 — a REJECTED carousel write must NOT broadcast (disk untouched).
+  it("POST layer with a bogus kind does NOT broadcast carousel-changed", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request(
+        `/api/bridge/v1/carousel/slide/${encodeURIComponent(slideId)}/layer`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+          body: JSON.stringify({ kind: "bogus", box: { x: 0, y: 0, w: 1, h: 1 } }),
+        },
+      );
+      expect(res.status).toBe(400);
+      expect(events).not.toContain("carousel-changed");
+    } finally {
+      off();
+    }
   });
 
   it("POST /carousel/slide without the work-id header → 400", async () => {

@@ -71,9 +71,18 @@ export async function writeCarouselFor(
 
 // Read–modify–write helper. The mutator returns the next carousel; we
 // re-validate (inside writeCarouselFor) and atomically replace.
+//
+// S2 (US 17) — `onCommitted` fires ONLY after the atomic write succeeds (the
+// carousel twin of mutateCompositionFor). On a mutator / validation / IO
+// failure we throw before reaching onCommitted, so a "carousel-changed"
+// broadcast wired to this callback only ever fires when carousel.yaml
+// genuinely changed — the explicit write-path signal that replaces fs.watch.
+// carousel-ops intentionally does NOT import uiEventBus; onCommitted is a
+// plain callback and routes.ts supplies the broadcast closure.
 export async function mutateCarouselFor(
   ctx: CarouselOpsContext,
   mutator: (carousel: Carousel) => Carousel,
+  onCommitted?: (next: Carousel) => void,
 ): Promise<Carousel> {
   // First-write symmetry with composition-ops: a freshly-created image-text
   // work has NO carousel.yaml on disk yet — the Editor holds makeEmptyCarousel
@@ -91,5 +100,6 @@ export async function mutateCarouselFor(
   }
   const next = mutator(current);
   await writeCarouselFor(ctx, next);
+  onCommitted?.(next);
   return next;
 }

@@ -16,6 +16,7 @@ import {
   unifiedDiff,
   compositionPreviousPathFor,
 } from "../composition-ops.js";
+import type { Composition } from "../../../shared/composition.js";
 import { access } from "node:fs/promises";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -97,6 +98,43 @@ describe("writeCompositionFor — atomic + validated", () => {
     );
     const parsed = yaml.load(raw) as any;
     expect(parsed.duration).toBe(99);
+  });
+
+  // S2 — write-path broadcast. The single write chokepoint fires onCommitted
+  // ONLY after the atomic write succeeds, so routes can broadcast
+  // "composition-changed" the instant disk is consistent (replaces fs.watch).
+  it("mutateCompositionFor calls onCommitted exactly once with the new composition on success", async () => {
+    const seen: Composition[] = [];
+    const next = await mutateCompositionFor(
+      { workId, worksRoot: workRoot },
+      (comp) => ({ ...comp, duration: 77 }),
+      (committed) => {
+        seen.push(committed);
+      },
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBe(next);
+    expect(seen[0].duration).toBe(77);
+  });
+
+  it("mutateCompositionFor does NOT call onCommitted when validation fails (disk untouched)", async () => {
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    let called = false;
+    await expect(
+      mutateCompositionFor(
+        { workId, worksRoot: workRoot },
+        // Drop the required tracks/workId so CompositionSchema.parse throws
+        // inside writeCompositionFor — onCommitted must never fire.
+        () => ({ foo: "bar" }) as any,
+        () => {
+          called = true;
+        },
+      ),
+    ).rejects.toThrow();
+    expect(called).toBe(false);
+    // Disk untouched — broadcast would have been a lie.
+    expect(await readFile(target, "utf8")).toBe(before);
   });
 
   // Phase 5 Task 5.4 — composition.yaml.previous + diffCompositionFor

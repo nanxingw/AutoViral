@@ -55,6 +55,27 @@ export function useBridgeEvents(workId: string | undefined): void {
         });
     };
 
+    // S2 (US 17) — carousel twin of refetchComposition. A carousel write
+    // endpoint (add-slide / set-layer) now broadcasts "carousel-changed" right
+    // after the atomic write lands, so the Editor refetches carousel.yaml into
+    // its store and the preview reflects the agent's change WITHOUT a reload —
+    // replacing the fragile fs.watch path. Dynamic import keeps this terminal
+    // hook free of a hard dep on the editor feature.
+    const refetchCarousel = () => {
+      Promise.all([
+        import("@/features/editor/services/carousel"),
+        import("@/features/editor/store"),
+      ])
+        .then(([{ loadCarousel }, { useEditor }]) =>
+          loadCarousel(workId).then(
+            (found) => found && useEditor.getState().loadCarousel(found),
+          ),
+        )
+        .catch(() => {
+          /* swallow — refetch failure is non-fatal */
+        });
+    };
+
     ws.onmessage = (e) => {
       let ev: UiEvent;
       try {
@@ -107,6 +128,11 @@ export function useBridgeEvents(workId: string | undefined): void {
         case "composition-changed":
           // Phase 3 Task 3.10 — re-fetch from disk into the store.
           refetchComposition();
+          break;
+        case "carousel-changed":
+          // S2 (US 17) — re-fetch carousel.yaml into the editor store so the
+          // carousel preview reflects an agent write without a page reload.
+          refetchCarousel();
           break;
         case "asset-added":
           // I17 — a freshly generated image/video (or TTS audio) landed in the

@@ -12,6 +12,20 @@ vi.mock("@/features/studio/services/composition", () => ({
   loadComposition: (workId: string) => loadComposition(workId),
 }));
 
+// S2 (US 17) — carousel-changed refetches the carousel into the editor store.
+// Mock the carousel service + the editor store so we can assert the refetch
+// pushed the new carousel into state without touching the network.
+const loadCarousel = vi.fn(async (_workId?: string) => ({ workId: "w_test", slides: [] }));
+vi.mock("@/features/editor/services/carousel", () => ({
+  loadCarousel: (workId: string) => loadCarousel(workId),
+}));
+const loadCarouselIntoStore = vi.fn();
+vi.mock("@/features/editor/store", () => ({
+  useEditor: {
+    getState: () => ({ loadCarousel: loadCarouselIntoStore }),
+  },
+}));
+
 class MockWS {
   static instances: MockWS[] = [];
   static OPEN = 1;
@@ -108,5 +122,51 @@ describe("useBridgeEvents · asset-added (I17)", () => {
     expect(invalidateSpy).not.toHaveBeenCalledWith({
       queryKey: ["assets", "w_test"],
     });
+  });
+});
+
+describe("useBridgeEvents · carousel-changed (S2 / US 17)", () => {
+  beforeEach(() => {
+    (globalThis as any).WebSocket = MockWS;
+    MockWS.instances = [];
+    loadCarousel.mockClear();
+    loadCarouselIntoStore.mockClear();
+  });
+  afterEach(() => {
+    delete (globalThis as any).WebSocket;
+    vi.restoreAllMocks();
+  });
+
+  it("carousel-changed refetches the carousel and loads it into the editor store", async () => {
+    renderBridge("w_test");
+    act(() => {
+      MockWS.instances[0].emit({
+        type: "carousel-changed",
+        workId: "w_test",
+        ts: Date.now(),
+        payload: { reason: "slide-add" },
+      });
+    });
+    await waitFor(() => expect(loadCarousel).toHaveBeenCalledWith("w_test"));
+    await waitFor(() =>
+      expect(loadCarouselIntoStore).toHaveBeenCalledWith({
+        workId: "w_test",
+        slides: [],
+      }),
+    );
+  });
+
+  it("carousel-changed does NOT trigger the composition refetch", async () => {
+    renderBridge("w_test");
+    act(() => {
+      MockWS.instances[0].emit({
+        type: "carousel-changed",
+        workId: "w_test",
+        ts: Date.now(),
+        payload: {},
+      });
+    });
+    await waitFor(() => expect(loadCarousel).toHaveBeenCalled());
+    expect(loadComposition).not.toHaveBeenCalled();
   });
 });

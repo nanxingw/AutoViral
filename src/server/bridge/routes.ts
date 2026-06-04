@@ -593,7 +593,13 @@ bridgeRouter.post("/clip", async (c) => {
         throw new Error(`overlay track not yet supported in Phase 3`);
       }
       return comp;
-    });
+    },
+    // S2 (US 17) — explicit write-path broadcast. Only fires after the
+    // atomic write lands on disk, so Studio refetches the new composition
+    // without waiting on fs.watch (which is silent on missing dirs and
+    // flaky on macOS rename events). fs.watch is now just a backstop.
+    () => broadcast(g.workId, "composition-changed", { reason: "clip-add" }),
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message }, 400);
@@ -606,13 +612,18 @@ bridgeRouter.delete("/clip/:id", async (c) => {
   if (!g.ok) return g.res;
   const id = c.req.param("id");
   try {
-    await mutateCompositionFor({ workId: g.workId }, (comp) => ({
-      ...comp,
-      tracks: comp.tracks.map((t) => ({
-        ...t,
-        clips: t.clips.filter((cl: any) => cl.id !== id),
-      })),
-    }) as any);
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => ({
+        ...comp,
+        tracks: comp.tracks.map((t) => ({
+          ...t,
+          clips: t.clips.filter((cl: any) => cl.id !== id),
+        })),
+      }) as any,
+      // S2 (US 17) — broadcast only after the atomic write lands.
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-remove" }),
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message }, 400);
@@ -733,15 +744,20 @@ bridgeRouter.patch("/clip/:id", async (c) => {
   const id = c.req.param("id");
   const patch = (await c.req.json()) as Record<string, unknown>;
   try {
-    await mutateCompositionFor({ workId: g.workId }, (comp) => ({
-      ...comp,
-      tracks: comp.tracks.map((t) => ({
-        ...t,
-        clips: t.clips.map((cl: any) =>
-          cl.id === id ? { ...cl, ...patch } : cl,
-        ),
-      })),
-    }) as any);
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => ({
+        ...comp,
+        tracks: comp.tracks.map((t) => ({
+          ...t,
+          clips: t.clips.map((cl: any) =>
+            cl.id === id ? { ...cl, ...patch } : cl,
+          ),
+        })),
+      }) as any,
+      // S2 (US 17) — broadcast only after the atomic write lands.
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-set" }),
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message }, 400);
@@ -790,7 +806,11 @@ bridgeRouter.post("/carousel/slide", async (c) => {
       const slides = [...carousel.slides];
       slides.splice(at, 0, slide);
       return { ...carousel, slides, updatedAt: new Date().toISOString() };
-    });
+    },
+    // S2 (US 17) — broadcast only after the atomic write lands so the
+    // carousel preview refetches without waiting on fs.watch.
+    () => broadcast(g.workId, "carousel-changed", { reason: "slide-add" }),
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message, code: 4 }, 400);
@@ -836,7 +856,10 @@ bridgeRouter.post("/carousel/slide/:slideId/layer", async (c) => {
         i === idx ? { ...s, layers } : s,
       );
       return { ...carousel, slides, updatedAt: new Date().toISOString() };
-    });
+    },
+    // S2 (US 17) — broadcast only after the atomic write lands.
+    () => broadcast(g.workId, "carousel-changed", { reason: "layer-set" }),
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     return c.json({ ok: false, error: message, code: 4 }, 400);

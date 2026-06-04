@@ -100,4 +100,48 @@ describe("carousel-ops — read / write / mutate", () => {
     ).rejects.toThrow();
     expect(await readFile(target, "utf8")).toBe(before);
   });
+
+  // S2 — write-path broadcast. mutateCarouselFor fires onCommitted ONLY after
+  // the atomic write succeeds so routes broadcast "carousel-changed" the
+  // instant disk is consistent (replaces fs.watch).
+  it("mutateCarouselFor calls onCommitted exactly once with the new carousel on success", async () => {
+    const seen: Carousel[] = [];
+    const next = await mutateCarouselFor(
+      { workId, worksRoot: workRoot },
+      (c) => ({
+        ...c,
+        slides: [...c.slides, { id: "s_added", bg: { type: "solid", value: "#000" }, layers: [] }],
+      }),
+      (committed) => {
+        seen.push(committed);
+      },
+    );
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toBe(next);
+    expect(seen[0].slides.some((s) => s.id === "s_added")).toBe(true);
+  });
+
+  it("mutateCarouselFor does NOT call onCommitted when validation fails", async () => {
+    const target = carouselPathFor({ workId, worksRoot: workRoot });
+    const before = await readFile(target, "utf8");
+    let called = false;
+    await expect(
+      mutateCarouselFor(
+        { workId, worksRoot: workRoot },
+        (c) => ({
+          ...c,
+          slides: c.slides.map((s, i) =>
+            i === 0
+              ? { ...s, layers: [{ id: "x", kind: "bogus", box: { x: 0, y: 0, w: 1, h: 1 } } as any] }
+              : s,
+          ),
+        }),
+        () => {
+          called = true;
+        },
+      ),
+    ).rejects.toThrow();
+    expect(called).toBe(false);
+    expect(await readFile(target, "utf8")).toBe(before);
+  });
 });

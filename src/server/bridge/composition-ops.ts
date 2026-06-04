@@ -234,12 +234,25 @@ export function unifiedDiff(
 
 // Read–modify–write helper. The mutator may return a new composition
 // or mutate in place; either way we re-validate and atomically replace.
+//
+// S2 (US 17) — `onCommitted` fires ONLY after the atomic write succeeds.
+// If the mutator or writeCompositionFor throws (validation / IO failure),
+// the disk is left untouched and we never reach onCommitted — so a
+// "composition-changed" broadcast wired to this callback only ever fires
+// when the on-disk state genuinely changed. This is the explicit write-path
+// signal that replaces the fragile fs.watch (silent on missing dirs, flaky
+// on macOS atomic-rename events). composition-ops intentionally does NOT
+// import uiEventBus — onCommitted is a plain callback so this low-level IO
+// module stays decoupled from the event bus; routes.ts supplies the
+// broadcast closure.
 export async function mutateCompositionFor(
   ctx: OpsContext,
   mutator: (comp: Composition) => Composition,
+  onCommitted?: (next: Composition) => void,
 ): Promise<Composition> {
   const current = await readCompositionFor(ctx);
   const next = mutator(current);
   await writeCompositionFor(ctx, next);
+  onCommitted?.(next);
   return next;
 }
