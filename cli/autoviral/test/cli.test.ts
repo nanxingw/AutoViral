@@ -322,6 +322,20 @@ describe("autoviral CLI — end-to-end", () => {
     expect(r.stdout).toMatch(/carousel set-layer/);
   });
 
+  // S1 (US 35/36/37) —止谎: the bridge throws `overlay track not yet
+  // supported` on `clip add --track overlay` (bridge/routes.ts), so the help
+  // must NOT advertise `overlay` as a usable clip-add track. An agent that
+  // trusts the manual and runs it would burn its whole session budget on a
+  // guaranteed runtime error.
+  it("--help does NOT advertise the overlay track for `clip add` (it throws at runtime)", async () => {
+    const r = await run(["--help"]);
+    const clipAddLine = r.stdout
+      .split("\n")
+      .find((l) => l.includes("clip add"));
+    expect(clipAddLine).toBeDefined();
+    expect(clipAddLine).not.toMatch(/overlay/);
+  });
+
   it("snapshot → prints the PNG path (exit 0) with no caveat on the faithful path", async () => {
     const r = await run(["snapshot"]);
     expect(r.exitCode).toBe(0);

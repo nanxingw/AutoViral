@@ -152,6 +152,43 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     }
   });
 
+  // S1 (US 35/36/37) —止谎. The crossfade recipe used to print a literal
+  // `autoviral clip set <id> --keyframes '<json-array>'` command. That path is
+  // guaranteed to 400: the CLI flag parser sends `keyframes` as a SCALAR
+  // (string), but the bridge's clip-patch schema expects a Keyframe[] array, so
+  // the on-disk comp is never touched. An agent that trusts the manual and runs
+  // it verbatim burns its whole session budget on a command that can't succeed
+  // until the keyframe verb / `transition add` (S9/S12) ships. The recipe must
+  // not advertise the broken command.
+  it("the crossfade recipe never prints a `clip set --keyframes` command (it necessarily 400s pre-S9/S12)", () => {
+    const recipe = readFileSync(
+      join(
+        REPO_ROOT,
+        "skills",
+        "autoviral",
+        "recipes",
+        "video",
+        "crossfade-between-clips.md",
+      ),
+      "utf8",
+    );
+    // An agent copy-pastes runnable commands out of ```fenced``` code blocks.
+    // Inline prose / blockquotes documenting the anti-pattern ("do NOT run
+    // `clip set --keyframes`") are fine — those educate. What must NOT survive
+    // is the broken invocation living inside an executable code fence. So we
+    // strip fenced blocks out and assert no fence carries the 400-guaranteed
+    // `clip set ... --keyframes` command.
+    const fences = [...recipe.matchAll(/```[a-z]*\n([\s\S]*?)```/g)].map(
+      (m) => m[1],
+    );
+    const brokenCmd = /clip set\b[^\n]*--keyframes/;
+    const offendingFence = fences.find((f) => brokenCmd.test(f));
+    expect(
+      offendingFence,
+      "a runnable code fence still contains `clip set --keyframes`, which 400s — remove it or gate it behind the S9/S12 verb",
+    ).toBeUndefined();
+  });
+
   it("covers both reference families (docs-slug + file-path) so a new form can't slip the net unnoticed", () => {
     const refs = allRefs();
     const haveDocsSlug = refs.some((r) => r.kind === "docs");

@@ -137,9 +137,11 @@ audioRouter.all("/api/audio/beats", (c) =>
   }, 410),
 );
 
-// POST /api/audio/captions — ASR caption generation via caption_generate.py
-// Studio's caption import button calls this to populate the text track with
-// time-coded captions. Returns:
+// POST /api/audio/captions — ASR caption generation (stable-ts/whisper).
+// NOTE (S1止谎 2026-06-04): there is currently NO "caption import button" in
+// Studio wired to this endpoint — the web client `fetchCaptions`
+// (web/src/features/studio/services/captions.ts) has zero callers. This route
+// exists for direct/agent use; do not document a UI surface that ships. Returns:
 //   { success, captions: [{start, end, text}, ...] } when stable-ts works
 //   503 with install hint when stable-ts/whisper not available
 audioRouter.post("/api/audio/captions", async (c) => {

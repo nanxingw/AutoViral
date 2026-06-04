@@ -53,71 +53,26 @@ The first two keyframes are the fade-in (paired with A's fade-out). The last two
 
 ## Doing it via CLI
 
-You can't currently express keyframes through a single `clip set` flag — the schema expects an array. The path is: `comp show`, mutate the JSON locally, `clip set --keyframes <json-array>`.
+> ⚠️ **Not yet runnable from the CLI.** There is no working CLI command that
+> writes a `keyframes` array onto a clip today. `clip set` flags are parsed as
+> scalars (a single string/number), so `clip set vc_s01 --keyframes '[...]'`
+> sends a *string* where the schema demands a `Keyframe[]` array — the bridge
+> rejects it (HTTP 400) and the on-disk `composition.yaml` is **never touched**.
+> Do **not** run it: it cannot succeed and only burns budget.
+>
+> The runnable crossfade path lands with the dedicated transition / keyframe
+> verbs (**S9 `transition add` / S12 keyframe verb**). Until then, the YAML
+> shapes above are the canonical *spec* — author them through whatever direct
+> composition-write surface you have (e.g. editing `composition.yaml` and
+> letting the watcher reload), not through `clip set`.
 
-```bash
-# Read clip A
-clip_a=$(autoviral comp show --format json \
-  | jq '.tracks[].clips[] | select(.id=="vc_s01")')
-
-# Build the new keyframes array
-new_kfs='[
-  {"property":"opacity","time":5,"value":1,"easing":"easeIn"},
-  {"property":"opacity","time":5.18,"value":0,"easing":"linear"}
-]'
-
-# Patch
-autoviral clip set vc_s01 --keyframes "$new_kfs"
-
-# Repeat for clip B with the 4-keyframe array
-# ...
-```
-
-## Doing it as a batch (the 19-clip pattern)
-
-For a chain of N clips, every clip's `out` must be extended by 0.18s (so there's tail to fade), and consecutive `trackOffset`s must overlap by 0.18s. Pseudo-code:
-
-```bash
-CROSSFADE=0.18
-SEGMENT=5.0       # visible duration of each clip
-
-autoviral progress start "Adding crossfades" --steps $N
-for i in $(seq 0 $((N-1))); do
-  clip_id="vc_s$(printf '%02d' $((i+1)))"
-  track_offset=$(echo "$i * $SEGMENT" | bc)
-  out=$(echo "$SEGMENT + $CROSSFADE" | bc)
-
-  if [ "$i" -eq 0 ]; then
-    # first clip — fade out only
-    kfs='[{"property":"opacity","time":'$SEGMENT',"value":1,"easing":"easeIn"},
-          {"property":"opacity","time":'$out',"value":0,"easing":"linear"}]'
-  elif [ "$i" -eq $((N-1)) ]; then
-    # last clip — fade in only
-    kfs='[{"property":"opacity","time":0,"value":0,"easing":"linear"},
-          {"property":"opacity","time":'$CROSSFADE',"value":1,"easing":"easeOut"}]'
-  else
-    # middle clip — both
-    kfs='[{"property":"opacity","time":0,"value":0,"easing":"linear"},
-          {"property":"opacity","time":'$CROSSFADE',"value":1,"easing":"easeOut"},
-          {"property":"opacity","time":'$SEGMENT',"value":1,"easing":"easeIn"},
-          {"property":"opacity","time":'$out',"value":0,"easing":"linear"}]'
-  fi
-
-  autoviral clip set "$clip_id" --out "$out" --trackOffset "$track_offset" --keyframes "$kfs"
-  autoviral progress step $((i+1))
-done
-autoviral progress done
-autoviral toast "Added 0.18s crossfades to $N clips" --kind success
-```
+When the keyframe verb ships, this section will show its invocation; the YAML
+above is exactly what that verb must produce.
 
 ## Verifying
 
-```bash
-autoviral seek 5s
-autoviral play
-```
-
-Watch the preview at the boundary. If the cut is hard (no blend), one of:
+Once the keyframes are on disk (via S9/S12 or a direct composition write), watch
+the preview at the boundary. If the cut is hard (no blend), one of:
 
 1. `trackOffset` of clip B doesn't actually overlap clip A — check `comp show`
 2. The `out` on clip A isn't extended past `trackOffset` of clip B
@@ -125,14 +80,9 @@ Watch the preview at the boundary. If the cut is hard (no blend), one of:
 
 ## Reverting
 
-The render pipeline writes `composition.yaml.before-crossfade` on first run as a manual safety. To revert:
-
-```bash
-autoviral ask "Revert crossfades?" --yes-no && \
-  cp "$AUTOVIRAL_CWD/composition.yaml.before-crossfade" "$AUTOVIRAL_CWD/composition.yaml"
-```
-
-The composition watcher will pick up the file change automatically.
+If your composition-write surface kept a backup, restore that. (The `before-crossfade`
+auto-backup referenced by older drafts of this recipe is not a guaranteed
+artifact today — verify a backup exists before relying on it.)
 
 ## Why 0.18s specifically
 

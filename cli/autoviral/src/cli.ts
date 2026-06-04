@@ -100,7 +100,7 @@ function usage(): string {
     "  progress start <label> [--steps N] | step <n> | done",
     "",
     "Write + tasks:",
-    "  clip add --src <path> [--track video|audio|text|overlay] [--offset s] [--duration s]",
+    "  clip add --src <path> [--track video|audio|text] [--offset s] [--duration s]",
     "  clip set <id> [--key value]...",
     "  clip remove <id>",
     "  carousel add-slide [--at N] [--bg-type gradient|image|solid --bg-value V]",
