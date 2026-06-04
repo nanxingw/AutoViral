@@ -56,6 +56,7 @@ import {
 } from "../../focus/index.js";
 import { resolve as resolveVariables } from "../../composition/variables/index.js";
 import { synthesizeNarration } from "../../providers/tts/registry.js";
+import { runAsrCaptions } from "../../domain/asr-captions.js";
 import { getContext, getProfile, getTrends } from "../../context/index.js";
 import { lintComposition } from "../../composition/quality/lint.js";
 import { inspectComposition } from "../../composition/quality/inspect.js";
@@ -778,6 +779,112 @@ bridgeRouter.delete("/clip/:id", async (c) => {
     return c.json({ ok: false, error: message, code: 4 }, 400);
   }
   return c.json({ ok: true });
+});
+
+// S14 (US 20/21) — POST /captions/generate: the built-not-wired last mile for
+// ASR captions. The /api/audio/captions endpoint has run stable-ts transcription
+// for ages but had ZERO caller wiring its segments back into the composition —
+// the web `fetchCaptions` service had no callers. This route closes the loop:
+//
+//   1. resolve the work's audio source (body `assetPath`, else auto-pick the
+//      first audio-track clip's `src`),
+//   2. run the SHARED `runAsrCaptions` core (same path /api/audio/captions uses),
+//   3. write each timecoded segment as a TextClip into the text track via the
+//      atomic mutateCompositionFor + broadcast composition-changed (S2), so an
+//      agent (`autoviral captions generate`) and a human (Studio "生成字幕"
+//      button) converge on the same composition.
+//
+// `runAsrCaptions` is the only side-effect; a 503 (PYTHON_DEP_MISSING) / 500
+// (API_ERROR) from ASR is forwarded with its own status so the CLI maps it to a
+// clear exit. The text-clip placement reuses the SAME shape POST /clip writes.
+bridgeRouter.post("/captions/generate", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    assetPath?: string;
+    language?: string;
+    trackId?: string;
+  };
+
+  // Resolve the audio source. Default: the first audio-track clip's `src`. The
+  // caller may override with an explicit `assetPath` (relative to the work).
+  let comp: Composition;
+  try {
+    comp = await readCompositionFor({ workId: g.workId });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message, code: 4 }, 400);
+  }
+  let src = body.assetPath;
+  if (!src) {
+    for (const t of comp.tracks) {
+      if (t.kind !== "audio") continue;
+      const first = t.clips.find((cl) => typeof (cl as { src?: unknown }).src === "string");
+      if (first) {
+        src = (first as { src: string }).src;
+        break;
+      }
+    }
+  }
+  if (!src) {
+    return c.json(
+      { ok: false, error: "no audio source: composition has no audio clip and no --asset given", code: 4 },
+      400,
+    );
+  }
+
+  // Resolve to an absolute path under the work dir. `src` is a work-relative
+  // path like `assets/voice.mp3`; the shared core takes an absolute path.
+  const worksRoot =
+    process.env.AUTOVIRAL_WORKS_ROOT ?? join(homedir(), ".autoviral/works");
+  const absAudioPath = join(worksRoot, g.workId, src);
+
+  const asr = await runAsrCaptions(absAudioPath, body.language);
+  if (!asr.ok) {
+    return c.json({ ok: false, error: asr.error, code: asr.code }, asr.status);
+  }
+
+  // Write the segments as TextClips into the text track. Same atomic
+  // read-modify-write + broadcast the other clip-writes use.
+  let written = 0;
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (draft) => {
+        // Target the explicit trackId when given, else the first text lane.
+        let track;
+        if (body.trackId) {
+          track = draft.tracks.find((t) => t.id === body.trackId);
+          if (!track) throw new Error(`No track with id ${body.trackId}`);
+          if (track.kind !== "text") {
+            throw new Error(`track ${body.trackId} is a ${track.kind} lane, not text`);
+          }
+        } else {
+          track = draft.tracks.find((t) => t.kind === "text");
+          if (!track) throw new Error("No text track to write captions into");
+        }
+        for (const seg of asr.captions) {
+          const duration = Math.max(0, seg.end - seg.start);
+          track.clips.push({
+            id: newClipId("text"),
+            kind: "text",
+            text: seg.text,
+            trackOffset: Math.max(0, seg.start),
+            duration,
+          } as any);
+          written += 1;
+        }
+        return draft;
+      },
+      // S2 (US 17) — broadcast only after the atomic write lands so Studio
+      // refetches the new caption clips without waiting on fs.watch.
+      () => broadcast(g.workId, "composition-changed", { reason: "captions-generate" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message, code: 4 }, 400);
+  }
+  return c.json({ ok: true, result: { written, language: body.language ?? null } });
 });
 
 // S10 (US 6/7/8) — POST /track: add a new lane through the shared composition-

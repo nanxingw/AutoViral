@@ -6,6 +6,13 @@ import { describe, expect, it, beforeAll, afterAll, vi } from "vitest";
 import { Hono } from "hono";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+// S14 (US 20/21) — mock the ASR core so the bridge wire test asserts the
+// caption→text-clip plumbing without a real whisper venv. The real
+// transcription path is covered at DeferredToE2E (needs a venv/audio file).
+vi.mock("../../../domain/asr-captions.js", () => ({
+  runAsrCaptions: vi.fn(),
+}));
+import { runAsrCaptions } from "../../../domain/asr-captions.js";
 import { bridgeRouter } from "../routes.js";
 import { uiEventBus } from "../ui-events.js";
 
@@ -2765,6 +2772,151 @@ exportPresets: []
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ kind: "audio" }),
+    });
+    expect(res.status).toBe(400);
+  });
+});
+
+// S14 (US 20/21) — ASR caption generate. The bridge runs the (mocked) ASR core
+// and writes its segments as TextClips into the text track, atomically +
+// broadcasting composition-changed. Seeded from sample-work each block.
+describe("bridge router — Phase 3 captions generate (S14)", () => {
+  let workRoot: string;
+  const workId = "w_captions";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+  const mockAsr = vi.mocked(runAsrCaptions);
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-captions-route-"));
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(
+      join(workRoot, workId, "composition.yaml"),
+      fixture.replace(/workId: sample-work/, `workId: ${workId}`),
+      "utf8",
+    );
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  async function textClips() {
+    const res = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const body = (await res.json()) as {
+      result: { tracks: Array<{ kind: string; clips: Array<{ kind: string; text?: string; trackOffset: number; duration: number }> }> };
+    };
+    return body.result.tracks
+      .filter((t) => t.kind === "text")
+      .flatMap((t) => t.clips)
+      .filter((cl) => cl.kind === "text");
+  }
+
+  it("runs ASR on the first audio clip + writes each segment as a text clip", async () => {
+    mockAsr.mockResolvedValueOnce({
+      ok: true,
+      captions: [
+        { start: 0, end: 1.5, text: "你好世界" },
+        { start: 1.5, end: 3.0, text: "second line" },
+      ],
+    });
+    const before = (await textClips()).length;
+
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ language: "zh" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { written: number } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.written).toBe(2);
+
+    // ASR ran against the first audio clip's src (assets/sample-bgm.mp3), abs path.
+    expect(mockAsr).toHaveBeenCalledWith(
+      expect.stringContaining("assets/sample-bgm.mp3"),
+      "zh",
+    );
+
+    const after = await textClips();
+    expect(after.length).toBe(before + 2);
+    const texts = after.map((c) => c.text);
+    expect(texts).toContain("你好世界");
+    expect(texts).toContain("second line");
+    // Timecodes landed: the second segment is trackOffset 1.5, duration 1.5.
+    const second = after.find((c) => c.text === "second line")!;
+    expect(second.trackOffset).toBeCloseTo(1.5);
+    expect(second.duration).toBeCloseTo(1.5);
+  });
+
+  it("broadcasts composition-changed after the write lands", async () => {
+    mockAsr.mockResolvedValueOnce({
+      ok: true,
+      captions: [{ start: 0, end: 1, text: "ping" }],
+    });
+    const events: unknown[] = [];
+    const unsub = uiEventBus.subscribe(workId, (e) => events.push(e));
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    unsub();
+    expect(res.status).toBe(200);
+    expect(
+      events.some(
+        (e) =>
+          (e as { type?: string }).type === "composition-changed" &&
+          ((e as { payload?: { reason?: string } }).payload?.reason === "captions-generate"),
+      ),
+    ).toBe(true);
+  });
+
+  it("forwards a 503 PYTHON_DEP_MISSING from the ASR core verbatim", async () => {
+    mockAsr.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      code: "PYTHON_DEP_MISSING",
+      error: "stable-whisper not installed",
+    });
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as { ok: boolean; code?: string };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe("PYTHON_DEP_MISSING");
+  });
+
+  it("accepts an explicit --asset override (assetPath)", async () => {
+    mockAsr.mockResolvedValueOnce({ ok: true, captions: [] });
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ assetPath: "assets/voice.mp3" }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockAsr).toHaveBeenCalledWith(
+      expect.stringContaining("assets/voice.mp3"),
+      undefined,
+    );
+  });
+
+  it("without a work-id header → 400", async () => {
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
   });

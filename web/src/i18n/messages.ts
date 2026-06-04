@@ -259,6 +259,13 @@ export const en = {
       footnotePre: "Sidecar files land as",
       footnotePost: "beside the mp4 (YouTube/FCP convention).",
     },
+    captionsGenerate: {
+      button: "Generate captions",
+      aria: "Generate captions from the work's audio",
+      running: "Transcribing…",
+      success: "{count} caption clips added",
+      failed: "Caption generation failed: {msg}",
+    },
     assetSearch: {
       placeholder: "Search assets…",
       placeholderDisabled: "Semantic search unavailable",
@@ -1100,6 +1107,13 @@ export const zh: DeepShape<Messages> = {
       burnDisabledTooltip: "导出时只能烧录一条轨道",
       footnotePre: "外挂文件将生成为",
       footnotePost: "与 mp4 并列输出（YouTube / FCP 惯例）。",
+    },
+    captionsGenerate: {
+      button: "生成字幕",
+      aria: "从作品音频生成字幕",
+      running: "转写中…",
+      success: "已添加 {count} 条字幕",
+      failed: "字幕生成失败：{msg}",
     },
     assetSearch: {
       placeholder: "搜索素材…",

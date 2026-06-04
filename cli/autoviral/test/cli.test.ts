@@ -302,6 +302,19 @@ beforeAll(async () => {
         return send(200, { ok: true, result: { id } });
       }
     }
+    // S14 (US 20/21) — POST /captions/generate. Mirrors the server contract:
+    // returns { ok, result:{ written, language } } counting the caption clips
+    // written. A sentinel `language:"nodep"` simulates the bridge forwarding the
+    // ASR core's 503 PYTHON_DEP_MISSING (a service/env error → CLI exit 3); an
+    // `assetPath:"assets/missing.mp3"` echoes back written:0.
+    if (req.method === "POST" && url === "/api/bridge/v1/captions/generate") {
+      const body = await readBody(req);
+      if (body.language === "nodep") {
+        return send(503, { ok: false, error: "stable-whisper not installed", code: "PYTHON_DEP_MISSING" });
+      }
+      const written = body.assetPath === "assets/missing.mp3" ? 0 : 3;
+      return send(200, { ok: true, result: { written, language: body.language ?? null } });
+    }
     if (req.method === "POST" && (
       url === "/api/bridge/v1/select" ||
       url === "/api/bridge/v1/seek" ||
@@ -620,6 +633,37 @@ describe("autoviral CLI — end-to-end", () => {
 
   it("transition unknown subcommand → exit 127", async () => {
     const r = await run(["transition", "frobnicate"]);
+    expect(r.exitCode).toBe(127);
+  });
+
+  // S14 (US 20/21) — `autoviral captions generate [--language L] [--asset P]`
+  // POSTs to /captions/generate; the bridge runs ASR + writes text clips, and
+  // the CLI prints the # of clips written.
+  it("captions generate → prints the written count, exit 0", async () => {
+    const r = await run(["captions", "generate"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe("3");
+  });
+
+  it("captions generate --language zh → exit 0 (language forwarded)", async () => {
+    const r = await run(["captions", "generate", "--language", "zh"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe("3");
+  });
+
+  it("captions generate --asset <relpath> → exit 0 (asset override forwarded)", async () => {
+    const r = await run(["captions", "generate", "--asset", "assets/missing.mp3"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe("0");
+  });
+
+  it("captions generate when whisper is missing → bridge 503 → exit 3", async () => {
+    const r = await run(["captions", "generate", "--language", "nodep"]);
+    expect(r.exitCode).toBe(3);
+  });
+
+  it("captions unknown subcommand → exit 127", async () => {
+    const r = await run(["captions", "frobnicate"]);
     expect(r.exitCode).toBe(127);
   });
 

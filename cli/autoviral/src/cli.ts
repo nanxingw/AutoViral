@@ -17,6 +17,7 @@ import { progressCommand } from "./commands/progress.js";
 import { clipCommand } from "./commands/clip.js";
 import { trackCommand } from "./commands/track.js";
 import { transitionCommand } from "./commands/transition.js";
+import { captionsCommand } from "./commands/captions.js";
 import { carouselCommand } from "./commands/carousel.js";
 import { askCommand } from "./commands/ask.js";
 import { exportCommand, renderCommand } from "./commands/export.js";
@@ -51,6 +52,7 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   clip: clipCommand,
   track: trackCommand,
   transition: transitionCommand,
+  captions: captionsCommand,
   carousel: carouselCommand,
   ask: askCommand,
   export: exportCommand,
@@ -127,6 +129,9 @@ function usage(): string {
     "    Add a cut-point transition between two adjacent video clips. Presets come",
     "    from the shared registry (cross-dissolve / wipe-* / push-* / …).",
     "  transition remove <id>          Remove a transition (restore a hard cut).",
+    "  captions generate [--language L] [--asset <relpath>] [--track-id <trackId>]",
+    "    Run ASR on the work's audio (first audio clip by default, or --asset) and",
+    "    write each timecoded segment as a text clip. Prints the # of clips written.",
     "  carousel add-slide [--at N] [--bg-type gradient|image|solid --bg-value V]",
     "  carousel set-layer <slideId> --kind <text|image|shape|sticker> [--id L] [--x N --y N --w N --h N] [...]",
     "    Carousel (图文) write surface. Full schema: `autoviral docs carousel/02-schema`.",

@@ -7,12 +7,11 @@ import { Hono } from "hono";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { dataDir } from "../../infra/config.js";
-import { ensureTtsVenv, venvPythonPath, PythonMissingError } from "../../infra/python-env.js";
 import { analyzeAudio, mixAudioTracks } from "../../domain/audio-tools.js";
+import { runAsrCaptions } from "../../domain/asr-captions.js";
 import { generateWithFallback } from "../../providers/tts/registry.js";
 import { uiEventBus } from "../bridge/ui-events.js";
 import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
-import { execFileAsync } from "./_shared.js";
 
 export const audioRouter = new Hono();
 
@@ -164,64 +163,16 @@ audioRouter.post("/api/audio/captions", async (c) => {
       throw err;
     }
 
-    // Auto-provision the managed venv (I15) so a clean machine has stable-ts
-    // without a manual `pip install`. Idempotent + cheap once provisioned;
-    // throws PythonMissingError when python3 itself is absent, which we surface
-    // as the existing PYTHON_DEP_MISSING 503 contract instead of an opaque 500.
-    try {
-      await ensureTtsVenv();
-    } catch (err) {
-      if (err instanceof PythonMissingError) {
-        return c.json({ success: false, error: err.message, code: "PYTHON_DEP_MISSING" }, 503);
-      }
-      // A venv/pip failure is non-fatal here — stable_whisper may still be
-      // importable under the host python3. Fall through and let the import
-      // probe below report PYTHON_DEP_MISSING if it really is missing.
+    // S14 (US 20/21) — the ASR side-effect now lives in the shared
+    // `runAsrCaptions` core (src/domain/asr-captions.ts) so the bridge
+    // `POST /captions/generate` runs the EXACT same transcription path. This
+    // route just maps the discriminated result onto its `success`/`code`
+    // envelope (unchanged contract: 503 PYTHON_DEP_MISSING / 500 API_ERROR).
+    const result = await runAsrCaptions(fullPath, language);
+    if (!result.ok) {
+      return c.json({ success: false, error: result.error, code: result.code }, result.status);
     }
-
-    // Use caption_generate.py in --transcribe-only mode to emit JSON segments.
-    // The script's existing CLI emits ASS by default; use the helper output via
-    // a sidecar JSON path. For now, shell out to a small inline python that
-    // calls stable_whisper.transcribe and dumps segments.
-    const py = `
-import json, sys
-try:
-    import stable_whisper
-except Exception as e:
-    print(json.dumps({"error": "stable-whisper not installed: " + str(e)}), file=sys.stdout)
-    sys.exit(0)
-model = stable_whisper.load_model("base")
-result = model.transcribe(${JSON.stringify(fullPath)}${language ? `, language=${JSON.stringify(language)}` : ""})
-segs = []
-for s in result.segments:
-    segs.append({"start": float(s.start), "end": float(s.end), "text": s.text.strip()})
-print(json.dumps({"segments": segs}))
-`;
-    try {
-      // Run under the venv interpreter (where ensureTtsVenv installed stable-ts);
-      // venvPythonPath() falls back to bare "python3" when the venv is absent.
-      const { stdout } = await execFileAsync(venvPythonPath(), ["-c", py], { timeout: 180_000, maxBuffer: 16 * 1024 * 1024 });
-      const parsed = JSON.parse(stdout);
-      if (parsed.error) {
-        return c.json({
-          success: false,
-          // R45 — package name on PyPI is `stable-ts` (the import alias is
-          // `stable_whisper` for legacy reasons). The original `pip install
-          // stable-whisper` hint is wrong: that package doesn't exist on
-          // PyPI and pip 404s. Burned ~5 minutes 2026-05-09 chasing this.
-          error: `${parsed.error}. Run \`pip install stable-ts\` to enable ASR (the import is named stable_whisper but the PyPI package is stable-ts).`,
-          code: "PYTHON_DEP_MISSING",
-        }, 503);
-      }
-      const captions = (parsed.segments ?? []).map((s: any) => ({
-        start: Number(s.start),
-        end: Number(s.end),
-        text: String(s.text ?? ""),
-      }));
-      return c.json({ success: true, captions });
-    } catch (err: any) {
-      return c.json({ success: false, error: err?.stderr ?? err?.message ?? "ASR failed", code: "API_ERROR" }, 500);
-    }
+    return c.json({ success: true, captions: result.captions });
   } catch (err: any) {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
   }

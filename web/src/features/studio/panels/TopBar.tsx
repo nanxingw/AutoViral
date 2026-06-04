@@ -12,6 +12,7 @@ import { ExportProgress } from "../render-status/ExportProgress";
 import { CheckpointsMenu } from "@/features/checkpoints/CheckpointsMenu";
 import { ExportCaptionsDialog } from "./Export/ExportCaptionsDialog";
 import type { CaptionTrackOption } from "./Export/CaptionTracksSection";
+import { GenerateCaptionsButton } from "./GenerateCaptionsButton";
 import { ShortcutsCheatsheet } from "./ShortcutsCheatsheet";
 
 export interface TopBarProps {
@@ -297,6 +298,12 @@ export function TopBar({
           </svg>
         </button>
       ) : null}
+
+      {/* S14 (US 20/21) — ASR caption generate. POSTs to the bridge
+          /captions/generate, which transcribes the work's audio and writes the
+          segments as text clips; the composition-changed broadcast refetches
+          the comp so the new captions appear without a reload. */}
+      <GenerateCaptionsButton workId={workId} />
 
       <div style={{ display: "inline-flex", flexShrink: 0 }}>
         <button
