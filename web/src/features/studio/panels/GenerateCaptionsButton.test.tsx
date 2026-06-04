@@ -53,6 +53,20 @@ describe("GenerateCaptionsButton (S14)", () => {
     expect(opts.body).toEqual({ language: "zh" });
   });
 
+  it("sends an empty body (not { language: undefined }) when no language is set", async () => {
+    apiFetch.mockResolvedValueOnce({ ok: true, result: { written: 1, language: null } });
+    render(<GenerateCaptionsButton workId="w_demo" />);
+
+    await userEvent.click(screen.getByTestId("generate-captions"));
+
+    await waitFor(() => expect(apiFetch).toHaveBeenCalledTimes(1));
+    const [, opts] = apiFetch.mock.calls[0] as [string, Record<string, any>];
+    // Auto-detect path: the bridge route treats a bare {} as "detect language";
+    // we must not leak an explicit `language` key (undefined or otherwise).
+    expect(opts.body).toEqual({});
+    expect("language" in opts.body).toBe(false);
+  });
+
   it("renders the count of caption clips written on success", async () => {
     apiFetch.mockResolvedValueOnce({ ok: true, result: { written: 7, language: null } });
     render(<GenerateCaptionsButton workId="w_demo" />);

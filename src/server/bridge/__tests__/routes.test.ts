@@ -2813,6 +2813,20 @@ describe("bridge router — Phase 3 captions generate (S14)", () => {
     else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
   });
 
+  async function trackIdOfKind(kind: string): Promise<string> {
+    // Legacy semantic ids (`text-0` / `audio-0`) are migrated to random `trk_`
+    // ids on read (#31/#57), so a literal id won't match — look the real one up.
+    const res = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const body = (await res.json()) as {
+      result: { tracks: Array<{ id: string; kind: string }> };
+    };
+    const t = body.result.tracks.find((tr) => tr.kind === kind);
+    if (!t) throw new Error(`no ${kind} track in fixture`);
+    return t.id;
+  }
+
   async function textClips() {
     const res = await app.request("/api/bridge/v1/comp", {
       headers: { "X-AutoViral-Work-Id": workId },
@@ -2925,5 +2939,181 @@ describe("bridge router — Phase 3 captions generate (S14)", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
+  });
+
+  // Fix B.1 — path-traversal: a `assetPath` containing `../` must NOT be allowed
+  // to resolve to a file OUTSIDE the work dir. Before the fix the route did a bare
+  // `join(worksRoot, workId, src)` and handed the escaped path straight to ASR.
+  it("rejects an assetPath that escapes the work dir with ../ → 400 code:4", async () => {
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ assetPath: "../../../etc/passwd" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    // The ASR core must never have been invoked with an out-of-work path.
+    for (const call of mockAsr.mock.calls) {
+      expect(call[0]).not.toContain("etc/passwd");
+    }
+  });
+
+  it("rejects an absolute assetPath outside the work dir → 400 code:4", async () => {
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ assetPath: "/etc/passwd" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  // Fix B.4 — explicit trackId target: write into the named text lane, and reject
+  // a non-text lane.
+  it("writes captions into an explicit text trackId when given", async () => {
+    mockAsr.mockResolvedValueOnce({
+      ok: true,
+      captions: [{ start: 0, end: 1, text: "targeted" }],
+    });
+    const textId = await trackIdOfKind("text");
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ trackId: textId }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { written: number } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.written).toBe(1);
+    const after = await textClips();
+    expect(after.map((c) => c.text)).toContain("targeted");
+  });
+
+  it("rejects an explicit trackId that is not a text lane → 400 code:4", async () => {
+    mockAsr.mockResolvedValueOnce({
+      ok: true,
+      captions: [{ start: 0, end: 1, text: "nope" }],
+    });
+    const audioId = await trackIdOfKind("audio");
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ trackId: audioId }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number; error?: string };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    expect(body.error).toMatch(new RegExp(audioId));
+  });
+
+  it("rejects an explicit trackId that does not exist → 400 code:4", async () => {
+    mockAsr.mockResolvedValueOnce({
+      ok: true,
+      captions: [{ start: 0, end: 1, text: "nope" }],
+    });
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ trackId: "trk_does_not_exist" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  // Fix B.3 — zero-segment ASR (silence / no speech) must NOT look like a
+  // silent success: surface an explicit `message` so the agent / UI knows
+  // nothing was written.
+  it("returns an explicit no-speech message when ASR finds zero segments", async () => {
+    mockAsr.mockResolvedValueOnce({ ok: true, captions: [] });
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result?: { written: number; message?: string };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.result?.written).toBe(0);
+    expect(body.result?.message).toMatch(/no speech/i);
+  });
+});
+
+// Fix B.2 — captions generate on a work that has NO text track yet (the most
+// common entry point: a freshly created video work). The route must auto-create
+// a text lane (via the shared addTrack op) and land the caption clips there,
+// instead of hard-400ing "No text track to write captions into".
+describe("bridge router — captions generate auto-creates a text track (Fix B.2)", () => {
+  let workRoot: string;
+  const workId = "w_captions_notext";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+  const mockAsr = vi.mocked(runAsrCaptions);
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-captions-notext-"));
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    // Strip the `text-0` track (its block runs from `- id: text-0` up to the
+    // `assets:` line) so the seeded work has video + audio lanes but NO text lane.
+    const withoutText = fixture
+      .replace(/workId: sample-work/, `workId: ${workId}`)
+      .replace(/  - id: text-0[\s\S]*?(?=assets:)/, "");
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(join(workRoot, workId, "composition.yaml"), withoutText, "utf8");
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  it("auto-creates a text lane and writes the caption clips there (no 400)", async () => {
+    mockAsr.mockResolvedValueOnce({
+      ok: true,
+      captions: [{ start: 0, end: 1.2, text: "first caption" }],
+    });
+
+    // Sanity: the seeded work really has no text lane.
+    const before = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const beforeBody = (await before.json()) as {
+      result: { tracks: Array<{ kind: string }> };
+    };
+    expect(beforeBody.result.tracks.some((t) => t.kind === "text")).toBe(false);
+
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ language: "en" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { written: number } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.written).toBe(1);
+
+    const after = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const afterBody = (await after.json()) as {
+      result: { tracks: Array<{ kind: string; clips: Array<{ kind: string; text?: string }> }> };
+    };
+    const textTracks = afterBody.result.tracks.filter((t) => t.kind === "text");
+    expect(textTracks.length).toBe(1);
+    const texts = textTracks.flatMap((t) => t.clips).map((c) => c.text);
+    expect(texts).toContain("first caption");
   });
 });

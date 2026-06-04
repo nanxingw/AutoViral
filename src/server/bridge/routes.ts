@@ -835,13 +835,44 @@ bridgeRouter.post("/captions/generate", async (c) => {
 
   // Resolve to an absolute path under the work dir. `src` is a work-relative
   // path like `assets/voice.mp3`; the shared core takes an absolute path.
+  //
+  // Fix B.1 — path-traversal guard. `src` is attacker-controllable (an agent or
+  // a compromised caller can put `../` segments or an absolute path in
+  // `--asset`). A bare `join(worksRoot, workId, src)` would happily resolve out
+  // of the work dir and hand ASR an arbitrary file (`../../../etc/passwd`). We
+  // `resolve` the candidate and assert it stays strictly INSIDE the work dir —
+  // same containment check the docs-topic route (above) uses — rejecting any
+  // escape with 400 code:4 BEFORE the file is ever touched.
   const worksRoot =
     process.env.AUTOVIRAL_WORKS_ROOT ?? join(homedir(), ".autoviral/works");
-  const absAudioPath = join(worksRoot, g.workId, src);
+  const workDir = resolve(worksRoot, g.workId);
+  const absAudioPath = resolve(workDir, src);
+  const within = relative(workDir, absAudioPath);
+  if (within.startsWith("..") || within.startsWith(sep) || within === "") {
+    return c.json(
+      { ok: false, error: `audio source escapes the work dir: ${src}`, code: 4 },
+      400,
+    );
+  }
 
   const asr = await runAsrCaptions(absAudioPath, body.language);
   if (!asr.ok) {
     return c.json({ ok: false, error: asr.error, code: asr.code }, asr.status);
+  }
+
+  // Fix B.3 — zero-segment ASR (silence / no detectable speech) must not look
+  // like a silent success. Short-circuit BEFORE touching the composition (no new
+  // empty text lane, no broadcast) and return an explicit signal so the agent /
+  // UI knows nothing was written, rather than reading `written:0` as "done".
+  if (asr.captions.length === 0) {
+    return c.json({
+      ok: true,
+      result: {
+        written: 0,
+        language: body.language ?? null,
+        message: "no speech detected in the audio source",
+      },
+    });
   }
 
   // Write the segments as TextClips into the text track. Same atomic
@@ -861,7 +892,21 @@ bridgeRouter.post("/captions/generate", async (c) => {
           }
         } else {
           track = draft.tracks.find((t) => t.kind === "text");
-          if (!track) throw new Error("No text track to write captions into");
+          // Fix B.2 — no text lane yet (the common case for a freshly created
+          // video work). Rather than hard-400, AUTO-CREATE one via the SHARED
+          // addTrack op (in-place mutate of the immer draft, ADR-009 §1/§2) so
+          // captions for a new work just work. The CLI/UI converge on the same
+          // lane-add math the "+ lane" button runs. An explicit non-text
+          // `body.trackId` still rejects above — auto-create only fires on the
+          // implicit "first text lane" path.
+          if (!track) {
+            const { trackId } = ops.addTrack(draft, {
+              kind: "text",
+              opts: { language: body.language },
+            });
+            track = draft.tracks.find((t) => t.id === trackId);
+            if (!track) throw new Error("failed to create text track for captions");
+          }
         }
         for (const seg of asr.captions) {
           const duration = Math.max(0, seg.end - seg.start);
