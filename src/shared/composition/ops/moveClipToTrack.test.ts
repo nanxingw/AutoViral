@@ -147,6 +147,38 @@ describe("@shared composition ops — moveClipToTrack", () => {
     expect(comp.tracks[0].transitions![0].afterClipId).toBe("c2");
   });
 
+  // S8 fix-up — the orphan-prune must also catch the SECOND failure mode: moving
+  // a clip can make a *different* surviving clip the new LAST clip of the source
+  // track. A transition pinned to that new-last clip then has no successor — the
+  // Track superRefine ('transition pinned to the last clip has no successor')
+  // rejects the next CompositionSchema.parse(). V1: c1 → c2 → c3 with a
+  // transition pinned after c2 (valid, c3 succeeds it). Move c3 to V2 → V1
+  // becomes [c1, c2], c2 is now last, the transition after c2 is orphaned. The
+  // anchor-only prune (afterClipId === moved) would WRONGLY keep it.
+  it("prunes a source-track transition that the move turns into a last-clip orphan", () => {
+    const v1 = videoTrack(
+      "trk_v1",
+      [videoClip("c1", 0), videoClip("c2", 4), videoClip("c3", 8)],
+      [{ id: "tr_2", afterClipId: "c2" }],
+    );
+    const v2 = videoTrack("trk_v2", []);
+    const comp = compWith([v1, v2]);
+    const beforeTransitions = comp.tracks[0].transitions;
+
+    moveClipToTrack(comp, { clipId: "c3", targetTrackId: "trk_v2" });
+
+    // c2 is now the last clip on V1; the transition pinned after it has no
+    // successor and must be pruned (else the next parse superRefine rejects).
+    expect((comp.tracks[0].clips as Clip[]).map((c) => c.id)).toEqual([
+      "c1",
+      "c2",
+    ]);
+    expect(comp.tracks[0].transitions).toHaveLength(0);
+    // in-place: the transitions array reference is preserved.
+    expect(comp.tracks[0].transitions).toBe(beforeTransitions);
+    expect((comp.tracks[1].clips as Clip[]).map((c) => c.id)).toEqual(["c3"]);
+  });
+
   it("throws code:4 for an unknown clipId", () => {
     const comp = compWith([videoTrack("trk_v1", [videoClip("c1", 0)]), videoTrack("trk_v2", [])]);
     try {

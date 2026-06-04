@@ -24,12 +24,17 @@ import { CompositionOpError } from "./errors.js";
  * source track (a clip only belongs on a track of its own kind; the source
  * track kind is authoritative because the clip was validly placed there).
  *
- * Side-effect: if the moved clip was the anchor of a transition on the SOURCE
- * track (`transition.afterClipId === clipId`), that transition is orphaned once
- * the clip leaves — its `afterClipId` no longer matches any clip on the track,
- * which the Track superRefine rejects on the next CompositionSchema.parse()
- * (autosave 400 / save round-trip). We PRUNE such transitions in place so the
- * composition stays parseable (mirrors the store's removeClip pruning).
+ * Side-effect: removing the clip from the source track can orphan a transition
+ * there in TWO ways, and BOTH must be pruned or the next CompositionSchema.parse()
+ * (autosave 400 / save round-trip) fails the Track superRefine:
+ *   (a) the moved clip was the transition anchor (`afterClipId === clipId`) — its
+ *       afterClipId no longer matches any clip on the track; OR
+ *   (b) the clip's departure makes a *different*, surviving clip the new LAST clip
+ *       of the source track, and a transition is pinned to that now-last clip
+ *       (`afterClipId === newLastClipId`). The superRefine rejects a transition
+ *       pinned to the last clip because it has no successor to fade INTO.
+ * We PRUNE both in place so the composition stays parseable (mirrors the store's
+ * removeClip / commitDrag pruning, which share this same family bug).
  *
  * Throws `CompositionOpError{code:4}` when:
  *  - no clip matches `clipId`, or
@@ -87,13 +92,22 @@ export function moveClipToTrack(
   const [clip] = (sourceTrack.clips as Clip[]).splice(clipIdx, 1);
   (target.clips as Clip[]).push(clip);
 
-  // #54 — the moved clip may have anchored a transition on the source track;
-  // once it leaves, that transition's afterClipId is orphaned and the Track
-  // superRefine would reject the next CompositionSchema.parse(). Prune those in
-  // place (filter back onto the SAME array reference) — mirrors removeClip.
+  // #54 / S8 — prune transitions the move just orphaned on the source track, in
+  // place (filter back onto the SAME array reference) — mirrors removeClip. Two
+  // conditions, not one:
+  //  (a) afterClipId === the MOVED clip — its anchor left the track; and
+  //  (b) afterClipId === the now-LAST clip on the source track — that clip has no
+  //      successor after the splice, so a transition pinned to it has nothing to
+  //      fade INTO and the Track superRefine rejects it on the next parse.
+  // Both must go or writeCompositionFor's CompositionWriteSchema.parse throws a
+  // 400 on a VALID move (the exact autosave-400 failure mode this prune exists
+  // to prevent). newLastClipId is read AFTER the splice (the moved clip is gone).
   if (sourceTrack.transitions && sourceTrack.transitions.length > 0) {
+    const srcClips = sourceTrack.clips as Clip[];
+    const newLastClipId = srcClips[srcClips.length - 1]?.id;
     const kept = sourceTrack.transitions.filter(
-      (tr) => tr.afterClipId !== clipId,
+      (tr) =>
+        tr.afterClipId !== clipId && tr.afterClipId !== newLastClipId,
     );
     sourceTrack.transitions.length = 0;
     sourceTrack.transitions.push(...kept);

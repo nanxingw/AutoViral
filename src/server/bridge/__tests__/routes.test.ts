@@ -1687,6 +1687,68 @@ exportPresets: []
     expect(moved!.trackOffset).toBeCloseTo(0); // time position preserved
   });
 
+  // S8 fix-up — second prune failure mode through the full bridge round-trip:
+  // moving the LAST clip (c2) makes c1 the new last clip of trk_v1; the seeded
+  // transition pinned after c1 then has no successor. If the op did not prune
+  // it, writeCompositionFor's CompositionWriteSchema.parse superRefine would
+  // reject this VALID move with a 400. Asserting 200 + write-succeeds proves the
+  // prune is complete. Uses its OWN isolated work-id (the describe block's other
+  // tests mutate the shared YAML in order, so we seed a fresh fixture here to
+  // stay order-independent).
+  it("moves the last clip and prunes the now-last-clip orphan transition (no 400)", async () => {
+    const { mkdtemp, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const isoWorkId = "w_move_last";
+    const isoRoot = await mkdtemp(join(tmpdir(), "autoviral-move-last-"));
+    await mkdir(join(isoRoot, isoWorkId), { recursive: true });
+    const yaml = TWO_VIDEO_LANE_YAML.replace(/w_move/g, isoWorkId);
+    await writeFile(join(isoRoot, isoWorkId, "composition.yaml"), yaml, "utf8");
+    const prev = process.env.AUTOVIRAL_WORKS_ROOT;
+    process.env.AUTOVIRAL_WORKS_ROOT = isoRoot;
+    try {
+      const res = await app.request(`/api/bridge/v1/clip/c2/move`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AutoViral-Work-Id": isoWorkId,
+        },
+        body: JSON.stringify({ toTrackId: "trk_v2" }),
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        result?: { id: string };
+      };
+      expect(body.ok).toBe(true);
+      expect(body.result?.id).toBe("c2");
+
+      const comp = await app.request("/api/bridge/v1/comp", {
+        headers: { "X-AutoViral-Work-Id": isoWorkId },
+      });
+      const compBody = (await comp.json()) as {
+        result: {
+          tracks: Array<{
+            id: string;
+            clips: Array<{ id: string; trackOffset: number }>;
+            transitions?: Array<{ afterClipId: string }>;
+          }>;
+        };
+      };
+      const v1 = compBody.result.tracks.find((t) => t.id === "trk_v1")!;
+      const v2 = compBody.result.tracks.find((t) => t.id === "trk_v2")!;
+      // c1 is now the last clip on trk_v1; the transition pinned after it would
+      // have no successor, so it must be pruned for the write to succeed.
+      expect(v1.clips.map((c) => c.id)).toEqual(["c1"]);
+      expect(v1.transitions ?? []).toHaveLength(0);
+      const moved = v2.clips.find((c) => c.id === "c2");
+      expect(moved).toBeDefined();
+      expect(moved!.trackOffset).toBeCloseTo(4.0); // time position preserved
+    } finally {
+      if (prev === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+      else process.env.AUTOVIRAL_WORKS_ROOT = prev;
+    }
+  });
+
   it("rejects a cross-kind move (video clip → audio lane) → 400 + code 4", async () => {
     const res = await move("c2", { toTrackId: "trk_a1" });
     expect(res.status).toBe(400);

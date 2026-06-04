@@ -133,6 +133,25 @@ describe("removeTransition + removeClip prune (#54)", () => {
     useComposition.getState().removeClip("c1");
     expect(videoTrack().transitions ?? []).toHaveLength(0);
   });
+
+  // S8 fix-up — second prune failure mode: removing a clip can make a SURVIVING
+  // clip the new last clip of the track, and a transition pinned to it then has
+  // no successor (Track superRefine rejects). Seed is [c1, c2] with a transition
+  // after c1 (valid — c2 succeeds it). Removing c2 makes c1 the last clip, so the
+  // transition after c1 is now a last-clip orphan and must be pruned.
+  it("removeClip prunes a transition turned into a last-clip orphan by the removal", () => {
+    const v1 = videoTrack();
+    useComposition.getState().addTransition(v1.id, {
+      afterClipId: "c1", preset: "cross-dissolve",
+    });
+    expect(videoTrack().transitions).toHaveLength(1);
+    useComposition.getState().removeClip("c2"); // c1 becomes the last clip
+    expect(videoTrack().clips.map((c) => c.id)).toEqual(["c1"]);
+    expect(videoTrack().transitions ?? []).toHaveLength(0);
+    expect(() =>
+      CompositionSchema.parse(useComposition.getState().comp),
+    ).not.toThrow();
+  });
 });
 
 describe("cross-track move prunes orphan transitions (#3 / #54)", () => {
@@ -188,6 +207,52 @@ describe("cross-track move prunes orphan transitions (#3 / #54)", () => {
     expect(v1After.transitions ?? []).toHaveLength(0);
     const v2After = tracks().find((t) => t.id === v2)!;
     expect(v2After.clips.some((c) => c.id === "c1")).toBe(true);
+    expect(() =>
+      CompositionSchema.parse(useComposition.getState().comp),
+    ).not.toThrow();
+  });
+
+  // S8 fix-up — the new-last-clip orphan must also be pruned when the move is the
+  // human's drag/Inspector path, not just when the moved clip IS the anchor. Seed
+  // [c1, c2] + transition after c1 (valid). Moving c2 to V2 makes c1 the last clip
+  // on V1, so the transition after c1 is now a last-clip orphan. Both the
+  // Inspector/native-DnD path (moveClipToTrack) and the body-drag path
+  // (commitDrag, now routed through the shared op) must drop it.
+  it("moveClipToTrack prunes a transition turned into a last-clip orphan by the move", () => {
+    const v1 = videoTrack();
+    useComposition.getState().addTransition(v1.id, {
+      afterClipId: "c1", preset: "cross-dissolve",
+    });
+    expect(videoTrack().transitions).toHaveLength(1);
+
+    const v2 = addVideoLane();
+    useComposition.getState().moveClipToTrack("c2", v2); // c1 becomes last on V1
+
+    const v1After = tracks().find((t) => t.id === v1.id)!;
+    expect(v1After.clips.map((c) => c.id)).toEqual(["c1"]);
+    expect(v1After.transitions ?? []).toHaveLength(0);
+    expect(() =>
+      CompositionSchema.parse(useComposition.getState().comp),
+    ).not.toThrow();
+  });
+
+  it("commitDrag (body cross-track move) prunes the new-last-clip orphan too", () => {
+    const v1 = videoTrack();
+    useComposition.getState().addTransition(v1.id, {
+      afterClipId: "c1", preset: "cross-dissolve",
+    });
+    expect(videoTrack().transitions).toHaveLength(1);
+
+    const v2 = addVideoLane();
+    useComposition.getState().beginDrag("c2");
+    useComposition.getState().updateDragTarget(v2);
+    useComposition.getState().commitDrag(); // c1 becomes last on V1
+
+    const v1After = tracks().find((t) => t.id === v1.id)!;
+    expect(v1After.clips.map((c) => c.id)).toEqual(["c1"]);
+    expect(v1After.transitions ?? []).toHaveLength(0);
+    const v2After = tracks().find((t) => t.id === v2)!;
+    expect(v2After.clips.some((c) => c.id === "c2")).toBe(true);
     expect(() =>
       CompositionSchema.parse(useComposition.getState().comp),
     ).not.toThrow();

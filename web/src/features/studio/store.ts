@@ -462,10 +462,19 @@ export const useComposition = create<CompState>()(
         if (exists) pushClipHistory(s);
         for (const t of s.comp.tracks) {
           t.clips = (t.clips as Clip[]).filter((c) => c.id !== clipId) as typeof t.clips;
-          // #54 — drop transitions whose afterClip just vanished (otherwise the
-          // next zod parse rejects on the orphan superRefine).
+          // #54 / S8 — drop transitions the removal just orphaned. TWO conditions
+          // (mirrors ops.moveClipToTrack): (a) the transition's anchor clip just
+          // vanished, OR (b) removing the clip made a surviving clip the new LAST
+          // clip and a transition is pinned to it (a last-clip transition has no
+          // successor → Track superRefine rejects the next parse). newLastClipId
+          // is read AFTER the clip filter above.
           if (t.transitions?.length) {
-            t.transitions = t.transitions.filter((tr) => tr.afterClipId !== clipId);
+            const clips = t.clips as Clip[];
+            const newLastClipId = clips[clips.length - 1]?.id;
+            t.transitions = t.transitions.filter(
+              (tr) =>
+                tr.afterClipId !== clipId && tr.afterClipId !== newLastClipId,
+            );
           }
         }
         s.comp.duration = Math.max(
@@ -877,45 +886,26 @@ export const useComposition = create<CompState>()(
             if (newStart !== undefined) c.trackOffset = newStart;
           }
         }
-        // 2) #3 — cross-track move. If the cursor settled over a different
-        //    same-kind lane, detach the dragged clip from its source track and
-        //    attach to the target. Re-runs the #88 kind guard inline (the
-        //    target was already validated by resolveDragTargetTrack, but we
-        //    re-check so a stale targetTrackId can never produce an illegal
-        //    placement). Only the dragged clip moves lanes; cascaded neighbours
-        //    keep their (already-applied) offsets on the source track.
+        // 2) #3 / S8 — cross-track move. If the cursor settled over a different
+        //    same-kind lane, run the SHARED op so native drag, the Inspector
+        //    lane-select action and the CLI/bridge path all consume ONE
+        //    implementation (ADR-009 convergence) and inherit the same orphan-
+        //    transition prune (anchor AND new-last-clip). The op preserves
+        //    trackOffset, so the dragged clip's final offset (written in step 1
+        //    above) survives the lane move. An illegal target (cross-kind /
+        //    unknown / same lane) throws a typed CompositionOpError, which we
+        //    swallow to keep the historical SILENT no-op contract — a stale
+        //    targetTrackId just lands nowhere. Only the dragged clip moves lanes;
+        //    cascaded neighbours keep their (already-applied) offsets.
         if (targetTrackId) {
-          let sourceTrack: (typeof s.comp.tracks)[number] | undefined;
-          let dragged: Clip | undefined;
-          for (const tr of s.comp.tracks) {
-            const found = (tr.clips as Clip[]).find((c) => c.id === draggedId);
-            if (found) {
-              sourceTrack = tr;
-              dragged = found;
-              break;
-            }
-          }
-          const target = s.comp.tracks.find((t) => t.id === targetTrackId);
-          if (
-            sourceTrack &&
-            dragged &&
-            target &&
-            target.id !== sourceTrack.id &&
-            target.kind === sourceTrack.kind
-          ) {
-            sourceTrack.clips = (sourceTrack.clips as Clip[]).filter(
-              (c) => c.id !== draggedId,
-            ) as typeof sourceTrack.clips;
-            // #54 — prune any source-track transition that anchored the moved
-            // clip; otherwise its afterClipId is orphaned and the Track
-            // superRefine rejects the next Composition.parse() (autosave 400 /
-            // save round-trip). Mirrors removeClip + moveClipToTrack.
-            if (sourceTrack.transitions?.length) {
-              sourceTrack.transitions = sourceTrack.transitions.filter(
-                (tr) => tr.afterClipId !== draggedId,
-              );
-            }
-            (target.clips as Clip[]).push(dragged);
+          try {
+            ops.moveClipToTrack(s.comp, {
+              clipId: draggedId,
+              targetTrackId,
+            });
+          } catch (err) {
+            if (!(err instanceof CompositionOpError)) throw err;
+            // illegal move → no-op (drag lands nowhere on the new lane).
           }
         }
         s.comp.duration = Math.max(
