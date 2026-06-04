@@ -25,6 +25,9 @@ const clips: Array<{ id: string; trackKind: string }> = [
   { id: "tc_hook01", trackKind: "text" },
 ];
 let nextSeq = 1;
+// S11 — capture the last PATCH /clip body so the CLI test can assert the
+// flag → nested-path mapping + value coercion that reached the bridge.
+let lastClipPatch: Record<string, unknown> | null = null;
 
 async function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
@@ -132,6 +135,13 @@ beforeAll(async () => {
       const id = url.split("/").pop()!;
       const idx = clips.findIndex((c) => c.id === id);
       if (idx >= 0) clips.splice(idx, 1);
+      return send(200, { ok: true });
+    }
+    // S11 — PATCH /clip/:id. The mock just records the body the CLI sent so the
+    // test can assert the flag → nested-path mapping + value coercion. (The real
+    // per-kind whitelist / 400-on-unknown lives in the server route tests.)
+    if (req.method === "PATCH" && url.startsWith("/api/bridge/v1/clip/")) {
+      lastClipPatch = await readBody(req);
       return send(200, { ok: true });
     }
     // S6 (US 1/9) — POST /split. Mirrors the server contract: a known clipId
@@ -327,6 +337,67 @@ describe("autoviral CLI — end-to-end", () => {
   it("clip split an unknown clip → bridge 400 code:4 → exit 4", async () => {
     const r = await run(["clip", "split", "nope", "--at", "2.0"]);
     expect(r.exitCode).toBe(4);
+  });
+
+  // S11 — `clip set` maps ergonomic flags to canonical nested paths and coerces
+  // values (number/bool/JSON) before PATCHing the bridge.
+  it("clip set --scale 2 → PATCHes { 'transforms.scale': 2 }", async () => {
+    lastClipPatch = null;
+    const r = await run(["clip", "set", "vc_s01", "--scale", "2"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({ "transforms.scale": 2 });
+  });
+
+  it("clip set --brightness 0.5 --italic true → maps + coerces both", async () => {
+    lastClipPatch = null;
+    const r = await run([
+      "clip", "set", "tc_hook01",
+      "--brightness", "0.5",
+      "--italic", "true",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({
+      "filters.brightness": 0.5,
+      "style.italic": true,
+    });
+  });
+
+  // S11 fix-up — an OBJECT-valued flag (`--ducking '{"ratio":0.4}'`) must be
+  // FLATTENED into the server's whitelisted dot-paths (`ducking.ratio`). The
+  // server's per-kind whitelist only lists the dotted leaves (ducking.ratio /
+  // .attack / .release); a bare `ducking` key is NOT whitelisted and would be
+  // rejected with code:4 — so sending the raw object would 400 the documented
+  // ergonomic. (The old assertion `{ ducking: { ratio: 0.4 } }` was a mock-only
+  // green: cli.test's PATCH mock blindly stores the body, so it never hit the
+  // real op. The route test in routes.test.ts now proves the dot-path lands.)
+  it("clip set --ducking '{\"ratio\":0.4}' → FLATTENS the object to dot-paths the server whitelists", async () => {
+    lastClipPatch = null;
+    const r = await run([
+      "clip", "set", "ac_bgm01",
+      "--ducking", '{"ratio":0.4}',
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({ "ducking.ratio": 0.4 });
+  });
+
+  it("clip set --ducking '{\"ratio\":0.4,\"attack\":0.1}' → flattens EVERY object key to its own dot-path", async () => {
+    lastClipPatch = null;
+    const r = await run([
+      "clip", "set", "ac_bgm01",
+      "--ducking", '{"ratio":0.4,"attack":0.1}',
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastClipPatch).toEqual({
+      "ducking.ratio": 0.4,
+      "ducking.attack": 0.1,
+    });
+  });
+
+  it("clip set with no id → exit 4 (never hits bridge)", async () => {
+    lastClipPatch = null;
+    const r = await run(["clip", "set"]);
+    expect(r.exitCode).toBe(4);
+    expect(lastClipPatch).toBeNull();
   });
 
   it("UI commands (select/seek/play/pause/toast/progress) → all exit 0", async () => {

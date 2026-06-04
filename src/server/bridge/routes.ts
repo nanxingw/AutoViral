@@ -889,6 +889,15 @@ bridgeRouter.post("/restore", async (c) => {
   }
 });
 
+// S11 (US 13/14/15) — PATCH /clip/:id now routes through the shared
+// `ops.patchClipProps` instead of a blind `{ ...clip, ...patch }` shallow
+// merge. The old merge let CompositionSchema (which has NO `.strict()`)
+// SILENTLY STRIP any unknown / misspelled / nested key — `--scal 2` 200-OK'd
+// while changing nothing (PRD-0004 #4, the worst kind of bug: a silent no-op).
+// The op validates every key against a per-kind whitelist, resolves dotted
+// nested paths (transforms.scale / filters.brightness / ducking.ratio / …),
+// and throws CompositionOpError{code:4} on the first unknown key → HTTP 400 +
+// code:4 → CLI exit 4. An unknown clip id is likewise a code:4 rejection.
 bridgeRouter.patch("/clip/:id", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
@@ -897,22 +906,35 @@ bridgeRouter.patch("/clip/:id", async (c) => {
   try {
     await mutateCompositionFor(
       { workId: g.workId },
-      (comp) => ({
-        ...comp,
-        tracks: comp.tracks.map((t) => ({
-          ...t,
-          clips: t.clips.map((cl: any) =>
-            cl.id === id ? { ...cl, ...patch } : cl,
-          ),
-        })),
-      }) as any,
+      (comp) => {
+        let found = false;
+        for (const track of comp.tracks) {
+          const clip = (track.clips as { id: string }[]).find(
+            (cl) => cl.id === id,
+          );
+          if (clip) {
+            // `comp.tracks[*].clips[*]` is a discriminated-union member; the op
+            // narrows on `.kind` internally so a plain cast is enough here.
+            ops.patchClipProps(clip as Parameters<typeof ops.patchClipProps>[0], patch);
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          throw new CompositionOpError(`no clip with id ${id}`, 4);
+        }
+        return comp;
+      },
       // S2 (US 17) — broadcast only after the atomic write lands.
       () => broadcast(g.workId, "composition-changed", { reason: "clip-set" }),
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    // S3 (US 18/19) — input/validation rejection carries code:4.
-    return c.json({ ok: false, error: message, code: 4 }, 400);
+    // S3 (US 18/19) — input/validation rejection carries code:4. The op throws
+    // its own CompositionOpError{code:4}; fall back to 4 for any other
+    // validation-class throw on this write path (e.g. a zod range failure).
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
   }
   return c.json({ ok: true });
 });

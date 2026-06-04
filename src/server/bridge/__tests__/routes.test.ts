@@ -364,6 +364,225 @@ describe("bridge router — Phase 3 clip writes", () => {
     expect(found?.trackOffset).toBe(15.5);
   });
 
+  // S11 (US 13/14/15) — PATCH /clip now routes through ops.patchClipProps so a
+  // NESTED dotted path lands at the right place (not silently stripped by the
+  // non-strict CompositionSchema).
+  it("PATCH /clip/:id writes a nested transforms.scale path", async () => {
+    const post = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/sample-shot.mp4",
+        track: "video",
+        offset: 20.0,
+        duration: 2.0,
+      }),
+    });
+    const id = ((await post.json()) as { result: { id: string } }).result.id;
+    const patch = await app.request(`/api/bridge/v1/clip/${id}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ "transforms.scale": 2 }),
+    });
+    expect(patch.status).toBe(200);
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const body = (await comp.json()) as {
+      result: {
+        tracks: Array<{
+          clips: Array<{ id: string; transforms?: { scale: number } }>;
+        }>;
+      };
+    };
+    const found = body.result.tracks
+      .flatMap((t) => t.clips)
+      .find((cl) => cl.id === id);
+    expect(found?.transforms?.scale).toBe(2);
+  });
+
+  // S11 fix-up — prove the REAL contract behind the CLI's `--ducking '{...}'`
+  // ergonomic: the CLI flattens that object to dotted leaves
+  // (`ducking.ratio` / `.attack` / `.release`), and the server's audio
+  // whitelist accepts EXACTLY those dotted leaves (a bare `ducking` key is NOT
+  // whitelisted). `ac_bgm01` is the fixture's audio clip with NO ducking yet, so
+  // a complete-object patch mints `ducking` from its three leaves and survives
+  // the zod write (which requires all three siblings). This closes the
+  // mock-only-green gap the adversarial review flagged: cli.test's PATCH mock
+  // blindly stored the body, so the documented ergonomic was never exercised
+  // against the real op.
+  it("PATCH /clip/:id writes the flattened ducking.* dotted leaves onto an audio clip", async () => {
+    const patch = await app.request(`/api/bridge/v1/clip/ac_bgm01`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      // What `--ducking '{"ratio":0.4,"attack":0.1,"release":0.2}'` flattens to.
+      body: JSON.stringify({
+        "ducking.ratio": 0.4,
+        "ducking.attack": 0.1,
+        "ducking.release": 0.2,
+      }),
+    });
+    expect(patch.status).toBe(200);
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const body = (await comp.json()) as {
+      result: {
+        tracks: Array<{
+          clips: Array<{
+            id: string;
+            ducking?: { ratio: number; attack: number; release: number };
+          }>;
+        }>;
+      };
+    };
+    const found = body.result.tracks
+      .flatMap((t) => t.clips)
+      .find((cl) => cl.id === "ac_bgm01");
+    expect(found?.ducking?.ratio).toBe(0.4);
+    expect(found?.ducking?.attack).toBe(0.1);
+    expect(found?.ducking?.release).toBe(0.2);
+  });
+
+  // S11 fix-up — and once `ducking` EXISTS, a single dotted leaf deep-merges
+  // (the other two siblings survive). This is the case where patching ONE leaf
+  // alone is valid — proving the dot-path write is a deep-merge, not a replace.
+  it("PATCH /clip/:id deep-merges a single ducking.ratio leaf when ducking already exists", async () => {
+    const patch = await app.request(`/api/bridge/v1/clip/ac_bgm01`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ "ducking.ratio": 0.9 }),
+    });
+    expect(patch.status).toBe(200);
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const body = (await comp.json()) as {
+      result: {
+        tracks: Array<{
+          clips: Array<{
+            id: string;
+            ducking?: { ratio: number; attack: number; release: number };
+          }>;
+        }>;
+      };
+    };
+    const found = body.result.tracks
+      .flatMap((t) => t.clips)
+      .find((cl) => cl.id === "ac_bgm01");
+    expect(found?.ducking?.ratio).toBe(0.9);
+    // siblings from the previous complete-object patch survive the merge.
+    expect(found?.ducking?.attack).toBe(0.1);
+    expect(found?.ducking?.release).toBe(0.2);
+  });
+
+  // S11 fix-up — the inverse: a BARE `ducking` object key (what the CLI used to
+  // send before flattening) is NOT in the audio whitelist, so it must be a 400
+  // code:4. This documents WHY the CLI flattens — sending the raw object would
+  // 400 the documented ergonomic.
+  it("PATCH /clip/:id rejects a bare `ducking` object key with 400 code:4 (only dotted leaves are whitelisted)", async () => {
+    const patch = await app.request(`/api/bridge/v1/clip/ac_bgm01`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ ducking: { ratio: 0.4, attack: 0.1, release: 0.2 } }),
+    });
+    expect(patch.status).toBe(400);
+    const body = (await patch.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  // S11 — an unknown / misspelled key is REJECTED with 400 + code:4, never a
+  // silent no-op (PRD-0004 #4). `transforms.scal` is the canonical typo.
+  it("PATCH /clip/:id rejects an unknown/misspelled key with 400 code:4", async () => {
+    const post = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/sample-shot.mp4",
+        track: "video",
+        offset: 24.0,
+        duration: 2.0,
+      }),
+    });
+    const id = ((await post.json()) as { result: { id: string } }).result.id;
+    const patch = await app.request(`/api/bridge/v1/clip/${id}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ "transforms.scal": 2 }),
+    });
+    expect(patch.status).toBe(400);
+    const body = (await patch.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  // S11 — per-kind whitelist enforced at the route: `volume` is an audio-only
+  // field, so PATCHing it onto a VIDEO clip is a 400 code:4.
+  it("PATCH /clip/:id rejects a wrong-kind field (audio field on a video clip)", async () => {
+    const post = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({
+        src: "assets/sample-shot.mp4",
+        track: "video",
+        offset: 28.0,
+        duration: 2.0,
+      }),
+    });
+    const id = ((await post.json()) as { result: { id: string } }).result.id;
+    const patch = await app.request(`/api/bridge/v1/clip/${id}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ volume: 0.3 }),
+    });
+    expect(patch.status).toBe(400);
+    const body = (await patch.json()) as { ok: boolean; code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  // S11 — an unknown clip id is likewise a code:4 rejection (not a silent 200).
+  it("PATCH /clip/:id rejects an unknown clip id with 400 code:4", async () => {
+    const patch = await app.request(`/api/bridge/v1/clip/nope_does_not_exist`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ trackOffset: 1 }),
+    });
+    expect(patch.status).toBe(400);
+    const body = (await patch.json()) as { ok: boolean; code?: number };
+    expect(body.code).toBe(4);
+  });
+
   // S6 (US 1/9) — POST /split delegates to the shared `ops.splitClip`. The
   // fixture's `vc_s01` is a video clip in:0 out:4 trackOffset:0 (timeline
   // 0..4). Splitting at 2.0 → child A keeps the id + out:2, child B is a new

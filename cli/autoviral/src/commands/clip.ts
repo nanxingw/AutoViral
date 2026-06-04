@@ -83,8 +83,22 @@ export async function clipCommand(args: string[]): Promise<void> {
     const opts = parseFlags(rest.slice(1));
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(opts)) {
-      const key = k.replace(/^--/, "");
-      patch[key] = /^-?[\d.]+$/.test(v) ? Number(v) : v;
+      const flag = k.replace(/^--/, "");
+      // S11 — map ergonomic CLI flags to the canonical nested composition path
+      // (`--scale` → `transforms.scale`, `--brightness` → `filters.brightness`,
+      // …). An unmapped flag falls through verbatim, so a fully-qualified
+      // dotted key (`--transforms.scale`) also works. The server's per-kind
+      // whitelist rejects anything unknown with exit 4 — never a silent no-op.
+      const path = CLIP_SET_FLAG_PATHS[flag] ?? flag;
+      const value = parseFlagValue(v);
+      // S11 fix-up — the server's per-kind whitelist only lists DOTTED LEAVES
+      // (`ducking.ratio`, never a bare `ducking`). So an OBJECT-valued flag
+      // (`--ducking '{"ratio":0.4}'`) must be FLATTENED into `{ "ducking.ratio":
+      // 0.4 }` before it leaves the CLI — otherwise the bare-`ducking` key is
+      // not whitelisted and the bridge 400s the documented ergonomic (code:4).
+      // Flattening also deep-merges (each leaf lands independently) instead of
+      // replacing the whole sub-object and dropping its other fields.
+      flattenInto(patch, path, value);
     }
     await bridgeRequest(ctx, "PATCH", `/clip/${encodeURIComponent(id)}`, patch);
     return;
@@ -92,6 +106,90 @@ export async function clipCommand(args: string[]): Promise<void> {
 
   process.stderr.write(`autoviral clip: unknown subcommand "${sub ?? ""}"\n`);
   process.exit(127);
+}
+
+// S11 — ergonomic short flags → canonical nested composition paths. The server
+// (`ops.patchClipProps`) owns the per-kind whitelist; this map only spares the
+// agent from typing the dotted path for the common cases. Any flag absent here
+// is forwarded verbatim, so `--transforms.scale 2` (fully qualified) is equally
+// valid. Keep this in lockstep with the schema fields in src/shared/composition.
+const CLIP_SET_FLAG_PATHS: Record<string, string> = {
+  // video transforms
+  scale: "transforms.scale",
+  x: "transforms.x",
+  y: "transforms.y",
+  rotation: "transforms.rotation",
+  // video filters
+  lut: "filters.lut",
+  brightness: "filters.brightness",
+  contrast: "filters.contrast",
+  saturation: "filters.saturation",
+  // audio
+  "fade-in": "fadeIn",
+  "fade-out": "fadeOut",
+  // text style
+  font: "style.font",
+  size: "style.size",
+  weight: "style.weight",
+  italic: "style.italic",
+  tracking: "style.tracking",
+  color: "style.color",
+  // text position
+  anchor: "position.anchor",
+  // overlay / shared scalars (src, in, out, trackOffset, volume, opacity, type,
+  // text, duration, animation) already match their canonical key verbatim.
+};
+
+// S11 — coerce a raw CLI string flag value into the JSON shape the server
+// expects. Numbers and booleans are typed; a value that parses as JSON
+// (object/array/quoted-string) is parsed (so `--ducking '{"ratio":0.4}'` parses
+// to an object, which `flattenInto` then splits into `ducking.ratio` dot-paths
+// the server whitelists); everything else stays a bare string. Mirrors the
+// schema's leaf types.
+function parseFlagValue(v: string): unknown {
+  if (v === undefined) return v;
+  if (v === "true") return true;
+  if (v === "false") return false;
+  if (/^-?(?:\d+\.?\d*|\.\d+)$/.test(v)) return Number(v);
+  if (/^[[{]/.test(v)) {
+    try {
+      return JSON.parse(v);
+    } catch {
+      // fall through — treat a malformed JSON literal as a plain string
+    }
+  }
+  return v;
+}
+
+// S11 fix-up — write `value` under `prefix` into `patch`, but if `value` is a
+// plain object, recurse so each leaf becomes its own dot-path key. This keeps
+// the wire format aligned with the server's whitelist (`patchClipProps`), which
+// only accepts dotted leaves (`ducking.ratio`), never a bare object key
+// (`ducking`). `--ducking '{"ratio":0.4,"attack":0.1}'` →
+// `{ "ducking.ratio":0.4, "ducking.attack":0.1 }`. Arrays and scalars are
+// written as-is (a leaf value stays a leaf). Empty objects are dropped — they
+// carry no leaf to whitelist and would otherwise smuggle a bare key through.
+function flattenInto(
+  patch: Record<string, unknown>,
+  prefix: string,
+  value: unknown,
+): void {
+  if (isPlainObject(value)) {
+    for (const [k, v] of Object.entries(value)) {
+      flattenInto(patch, `${prefix}.${k}`, v);
+    }
+    return;
+  }
+  patch[prefix] = value;
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    !Array.isArray(v) &&
+    Object.getPrototypeOf(v) === Object.prototype
+  );
 }
 
 function parseFlags(argv: string[]): Record<string, string> {
