@@ -29,17 +29,15 @@ import {
 import type { Composition } from "../../shared/composition.js";
 import { ASPECTS } from "../../shared/composition.js";
 import { preflight } from "../../shared/composition/preflight.js";
-import { mutateCarouselFor } from "./carousel-ops.js";
+import { mutateCarouselFor, applyLayerPatch } from "./carousel-ops.js";
 // ADR-009 (S6) — shared composition-ops core. POST /split delegates the split
 // math + invariants to `ops.splitClip` (the SAME implementation the studio
 // store calls), so the agent-driven write path and the UI path can never drift.
 import * as ops from "../../shared/composition/ops/index.js";
 import { CompositionOpError } from "../../shared/composition/ops/index.js";
 import {
-  LayerSchema,
   SlideBgSchema,
   makeEmptySlide,
-  genLayerId,
   type Slide,
   type Layer,
 } from "../../shared/carousel.js";
@@ -1655,11 +1653,14 @@ bridgeRouter.post("/carousel/slide", async (c) => {
   return c.json({ ok: true, result: { id: newId } });
 });
 
-// POST /carousel/slide/:slideId/layer — add or replace one layer on a slide.
-// Body is a full Layer object (the discriminated union — { kind:"text"|...,
-// box, ... }). If `id` is present and matches an existing layer it is
-// REPLACED in place; otherwise a fresh id is minted and the layer appended.
-// The layer is validated against LayerSchema (zod fills defaults) before the
+// POST /carousel/slide/:slideId/layer — add or PATCH one layer on a slide.
+// Body is a (possibly partial) Layer object ({ kind:"text"|..., box, ... }).
+// If `id` is present and matches an existing layer the body is DEEP-MERGED
+// onto it (only the supplied fields are overridden; box / style / filters
+// merge per-leaf so a `--text`-only edit preserves the rest) — the carousel
+// twin of S11's `clip set` patch (applyLayerPatch). Otherwise a fresh id is
+// minted and the layer created with per-kind defaults. `kind` is NOT patchable
+// on an existing layer. The result is validated against LayerSchema before the
 // whole carousel is re-validated by writeCarouselFor. Returns { id }.
 bridgeRouter.post("/carousel/slide/:slideId/layer", async (c) => {
   const g = workIdOrError(c);
@@ -1675,14 +1676,10 @@ bridgeRouter.post("/carousel/slide/:slideId/layer", async (c) => {
       const idx = carousel.slides.findIndex((s) => s.id === slideId);
       if (idx === -1) throw new Error(`no slide with id "${slideId}"`);
       const slide = carousel.slides[idx];
-      // Mint an id if none supplied; preserve a supplied id so a re-POST with
-      // the same id is an idempotent replace (not a duplicate append).
-      const incomingId =
-        typeof raw.id === "string" && raw.id.length > 0 ? raw.id : genLayerId();
-      // LayerSchema is the discriminated union — it rejects an unknown `kind`
-      // and fills per-kind style defaults. Parse here so a malformed layer
-      // fails BEFORE we mutate the slide array.
-      const layer: Layer = LayerSchema.parse({ ...raw, id: incomingId });
+      // applyLayerPatch owns the create-vs-patch decision: a matching id
+      // deep-merges (preserving unsupplied fields), a new/absent id creates.
+      // It throws on a malformed layer / kind change BEFORE we mutate.
+      const layer: Layer = applyLayerPatch(slide.layers, raw);
       layerId = layer.id;
       const existing = slide.layers.findIndex((l) => l.id === layer.id);
       const layers =

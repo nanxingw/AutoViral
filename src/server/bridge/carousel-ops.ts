@@ -17,7 +17,14 @@ import { readFile, writeFile, rename, mkdtemp, mkdir } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import yaml from "js-yaml";
-import { CarouselSchema, makeEmptyCarousel, type Carousel } from "../../shared/carousel.js";
+import {
+  CarouselSchema,
+  LayerSchema,
+  genLayerId,
+  makeEmptyCarousel,
+  type Carousel,
+  type Layer,
+} from "../../shared/carousel.js";
 import { migrate } from "../../shared/migrations/index.js";
 
 export interface CarouselOpsContext {
@@ -116,4 +123,103 @@ export async function mutateCarouselFor(
     );
   }
   return next;
+}
+
+// ─── set-layer: PATCH semantics (carousel twin of patchClipProps) ────────────
+//
+// The carousel `set-layer` mutation used to be a REPLACE: it built a brand-new
+// Layer from the request body alone and `LayerSchema.parse` filled every
+// UNSUPPLIED field with its schema default, then the whole layer overwrote the
+// existing one. So an agent that only wanted to change a text layer's `--text`
+// would silently clobber that layer's box / font / size / weight / italic /
+// align / tracking / color back to defaults — exactly the kind of destructive
+// surprise S11's `patchClipProps` (clip set) eliminated for video/audio clips.
+//
+// `applyLayerPatch` aligns the two. When `incoming.id` matches an EXISTING
+// layer it DEEP-MERGES the incoming partial onto that layer (only the fields
+// the caller actually supplied are overridden; nested `box` / `style` /
+// `filters` merge per-leaf), then validates. When there is no match (new id or
+// no id) it mints/creates a fresh layer exactly as before (zod fills defaults).
+//
+// Like patchClipProps, `kind` is NEVER patchable on an existing layer: changing
+// it would discard all kind-specific fields (the whole point of the merge) and
+// corrupt the discriminated union. A kind change on a matched id is rejected.
+
+/** Deep-merge `patch` onto `base`: scalars/arrays overwrite, plain objects
+ *  recurse so a partial nested object (e.g. `style: { color }`) only overrides
+ *  the supplied leaves and preserves the rest. `undefined` patch values are
+ *  skipped (a missing flag must not erase a field). */
+function deepMerge(
+  base: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) continue;
+    const prev = out[k];
+    if (isPlainObject(prev) && isPlainObject(v)) {
+      out[k] = deepMerge(prev, v);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out;
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === "object" && v !== null && !Array.isArray(v);
+}
+
+/**
+ * Resolve a `set-layer` request against a slide's existing layers, returning
+ * the validated Layer to store. Pure (no IO) so the route and unit tests share
+ * one code path.
+ *
+ * - No matching id (or no id) → CREATE: validate `incoming` as a full layer
+ *   (`LayerSchema.parse` fills per-kind defaults), minting an id if absent.
+ * - Matching id → PATCH: deep-merge `incoming` onto the existing layer so
+ *   unsupplied fields are PRESERVED, then re-validate. A kind change on a
+ *   matched id throws (kind is not patchable, mirroring patchClipProps).
+ *
+ * Throws on a malformed layer (unknown kind, missing required field, kind
+ * change) — the caller surfaces it as a 400 + code:4 and the carousel is left
+ * untouched.
+ */
+export function applyLayerPatch(
+  existingLayers: readonly Layer[],
+  incoming: Record<string, unknown>,
+): Layer {
+  const incomingId =
+    typeof incoming.id === "string" && incoming.id.length > 0
+      ? incoming.id
+      : undefined;
+  const existing = incomingId
+    ? existingLayers.find((l) => l.id === incomingId)
+    : undefined;
+
+  if (!existing) {
+    // CREATE — same contract as before: full-layer validate, mint id if absent.
+    return LayerSchema.parse({ ...incoming, id: incomingId ?? genLayerId() });
+  }
+
+  // PATCH — kind is immutable on an existing layer.
+  if (
+    typeof incoming.kind === "string" &&
+    incoming.kind !== existing.kind
+  ) {
+    throw new Error(
+      `set-layer: cannot change layer ${existing.id} kind from "${existing.kind}" to "${incoming.kind}" ` +
+        `(create a new layer instead)`,
+    );
+  }
+  // Deep-merge the incoming partial onto the existing layer, then re-validate.
+  // `kind` and `id` are pinned to the existing layer's (kind is immutable; id
+  // already matched). Unsupplied fields survive the merge untouched.
+  const merged = deepMerge(
+    existing as unknown as Record<string, unknown>,
+    incoming,
+  );
+  merged.id = existing.id;
+  merged.kind = existing.kind;
+  return LayerSchema.parse(merged);
 }

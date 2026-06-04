@@ -11,7 +11,7 @@ invalid shape is rejected (exit 4) instead of bricking the editor with a
 
 ```bash
 autoviral carousel add-slide                    # append an empty slide → prints slide id
-autoviral carousel set-layer <slideId> --kind text --text "标题" ...   # add/replace a layer → prints layer id
+autoviral carousel set-layer <slideId> --kind text --text "标题" ...   # add (new --id) / PATCH (existing --id, deep-merge) → prints layer id
 ```
 
 When in doubt about the live shape, the Studio loads it via
@@ -116,7 +116,7 @@ box:
 
 `text` (the string) is required. `style` and all its keys are optional.
 
-CLI: `autoviral carousel set-layer <slideId> --kind text --text "..." [--x N --y N --w N --h N] [--font sans] [--size 48] [--weight 700] [--color '#111'] [--align center]`
+CLI: `autoviral carousel set-layer <slideId> --kind text --text "..." [--id L] [--x N --y N --w N --h N] [--font sans] [--size 48] [--weight 700] [--italic true|false] [--color '#111'] [--align center] [--tracking 0]`
 
 ### `image` layer
 
@@ -180,5 +180,10 @@ CLI exits **4**, and `carousel.yaml` on disk is left **untouched** (atomic write
 - Canvas is `width × height` (小红书 default 1080×1350, 4:5). Layer `box`
   coordinates are in those canvas pixels, origin top-left.
 - Layers paint in array order — append puts a layer on top. `set-layer` with an
-  existing `--id` replaces in place (idempotent), so re-running a script is safe.
+  existing `--id` **PATCHES in place** (deep-merge): only the fields you pass are
+  changed, the rest of that layer's box / style survive. So
+  `set-layer s1 --id t_x --kind text --text "new"` re-types the copy but keeps
+  its position, font, size, colour, align, italic and tracking. A *new* (or
+  absent) `--id` creates a fresh layer with per-kind defaults. `--kind` is NOT
+  patchable on an existing layer — make a new layer instead.
 - `add-slide --at N` inserts at index N (0-based); default appends at the end.

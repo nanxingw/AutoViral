@@ -52,7 +52,9 @@ violation it 400s and disk is left untouched (same invariant as the CLI).
 **Lever B — per-layer tweaks → `autoviral carousel set-layer`.** When you want to
 restyle the text layers consistently (color, size, weight, alignment) and you
 already know each slide's id and the layer's id, `set-layer` with the existing
-`--id` is an **idempotent replace** — safe to loop:
+`--id` is an **idempotent PATCH** (deep-merge — only the flags you pass change,
+everything else on the layer survives) — safe to loop. You no longer need to
+re-emit `--text` just to restyle; pass only the style flags you're changing:
 
 ```bash
 work="http://127.0.0.1:${AUTOVIRAL_PORT}/api/works/${AUTOVIRAL_WORK_ID}/carousel"
@@ -77,8 +79,9 @@ autoviral progress done
 autoviral toast "Restyled every headline" --kind success
 ```
 
-Because `set-layer --id <existing>` replaces in place, re-running the loop is
-safe and produces the same result.
+Because `set-layer --id <existing>` PATCHES in place (deep-merge), re-running the
+loop is safe and produces the same result — and a partial invocation only
+touches the fields you passed, never resetting the rest of the layer.
 
 ## 3. Gate the destructive version
 

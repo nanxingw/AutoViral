@@ -43,6 +43,10 @@ let lastCompValidate: Record<string, unknown> | null = null;
 // S17 (US 26) — capture the last POST /comp/aspect body so the CLI test can
 // assert `comp aspect <ratio>` reached the bridge as { ratio }.
 let lastCompAspect: Record<string, unknown> | null = null;
+// carousel set-layer patch — capture the last POST /carousel/.../layer body so
+// the CLI test can assert which fields the CLI sent (a patch must send ONLY the
+// supplied flags, incl. the new --italic / --tracking, and a partial box).
+let lastLayerSet: Record<string, unknown> | null = null;
 
 async function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
@@ -144,6 +148,7 @@ beforeAll(async () => {
       /^\/api\/bridge\/v1\/carousel\/slide\/[^/]+\/layer$/.test(url)
     ) {
       const body = await readBody(req);
+      lastLayerSet = body;
       if (body.kind === "bogus") {
         return send(400, { ok: false, error: "invalid layer kind", code: 4 });
       }
@@ -1284,13 +1289,91 @@ describe("autoviral CLI — end-to-end", () => {
     expect(r.stdout.trim()).toMatch(/^t_e2e/);
   });
 
-  it("carousel set-layer with --id is an idempotent replace (echoes the id)", async () => {
+  it("carousel set-layer with --id echoes the id (idempotent target)", async () => {
     const r = await run([
       "carousel", "set-layer", "s_e2e1",
       "--kind", "image", "--id", "t_fixed", "--src", "assets/images/x.png",
     ]);
     expect(r.exitCode).toBe(0);
     expect(r.stdout.trim()).toBe("t_fixed");
+  });
+
+  // set-layer PATCH wire-format: targeting an existing --id and changing only
+  // --text must send ONLY {id, kind, text} — NO box, NO style — so the server's
+  // deep-merge preserves the layer's existing geometry/style instead of the CLI
+  // re-sending defaults that would clobber them.
+  it("carousel set-layer --id --text sends NO box / NO style (lets server preserve them)", async () => {
+    lastLayerSet = null;
+    const r = await run([
+      "carousel", "set-layer", "s_e2e1",
+      "--kind", "text", "--id", "t_keep", "--text", "改后",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastLayerSet).toEqual({ kind: "text", id: "t_keep", text: "改后" });
+    // explicitly: the CLI did NOT smuggle a default box / style onto a patch.
+    expect(lastLayerSet).not.toHaveProperty("box");
+    expect(lastLayerSet).not.toHaveProperty("style");
+  });
+
+  it("carousel set-layer --id with a partial box sends ONLY the given coordinate", async () => {
+    lastLayerSet = null;
+    const r = await run([
+      "carousel", "set-layer", "s_e2e1",
+      "--kind", "text", "--id", "t_keep", "--x", "999",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastLayerSet).toEqual({ kind: "text", id: "t_keep", box: { x: 999 } });
+  });
+
+  // --italic / --tracking were missing from the CLI (schema had the fields but
+  // the agent could not set them — a silent capability gap the critic flagged).
+  it("carousel set-layer --italic / --tracking land in the layer style", async () => {
+    lastLayerSet = null;
+    const r = await run([
+      "carousel", "set-layer", "s_e2e1",
+      "--kind", "text", "--id", "t_keep",
+      "--italic", "true", "--tracking", "-3",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastLayerSet).toEqual({
+      kind: "text",
+      id: "t_keep",
+      style: { italic: true, tracking: -3 },
+    });
+  });
+
+  it("carousel set-layer --italic false turns italic off", async () => {
+    lastLayerSet = null;
+    const r = await run([
+      "carousel", "set-layer", "s_e2e1",
+      "--kind", "text", "--id", "t_keep", "--italic", "false",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect((lastLayerSet as { style?: { italic?: boolean } })?.style?.italic).toBe(false);
+  });
+
+  // A CREATE (no --id) still fills a default box so a minimal invocation
+  // validates server-side — the create path must NOT regress.
+  it("carousel set-layer CREATE (no --id) fills a default box", async () => {
+    lastLayerSet = null;
+    const r = await run([
+      "carousel", "set-layer", "s_e2e1",
+      "--kind", "text", "--text", "新标题",
+    ]);
+    expect(r.exitCode).toBe(0);
+    const box = (lastLayerSet as { box?: Record<string, number> }).box!;
+    expect(box).toMatchObject({ x: 80, y: 80, w: 920, h: 200 });
+  });
+
+  // A text CREATE still requires --text; a text PATCH (--id) does not (the
+  // existing copy survives the merge).
+  it("carousel set-layer text CREATE without --text → exit 4; PATCH without --text → exit 0", async () => {
+    const create = await run(["carousel", "set-layer", "s_e2e1", "--kind", "text"]);
+    expect(create.exitCode).toBe(4);
+    const patch = await run([
+      "carousel", "set-layer", "s_e2e1", "--kind", "text", "--id", "t_keep", "--size", "72",
+    ]);
+    expect(patch.exitCode).toBe(0);
   });
 
   it("carousel set-layer missing --kind → exit 4 (validation, never hits bridge)", async () => {

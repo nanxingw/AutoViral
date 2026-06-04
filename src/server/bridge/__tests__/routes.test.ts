@@ -1436,6 +1436,75 @@ describe("bridge router — I08 carousel writes", () => {
     expect(res.status).toBe(400);
   });
 
+  // set-layer PATCH semantics (the carousel twin of S11 clip-set): re-POSTing
+  // with an EXISTING layer id and only --text must PRESERVE that layer's box +
+  // style, not reset them to schema defaults (the pre-fix REPLACE bug).
+  it("POST layer with an existing id DEEP-MERGES (box + style preserved, only text changes)", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const yamlMod = (await import("js-yaml")).default;
+    const target = join(workRoot, workId, "carousel.yaml");
+
+    // 1. seed a fully-styled text layer with an explicit id.
+    const seedRes = await app.request(
+      `/api/bridge/v1/carousel/slide/${encodeURIComponent(slideId)}/layer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({
+          id: "t_patch",
+          kind: "text",
+          box: { x: 200, y: 300, w: 640, h: 200, rotation: 9 },
+          text: "原始",
+          style: { font: "serif", size: 88, weight: 300, italic: true, color: "#ff0066", align: "right", tracking: 6 },
+        }),
+      },
+    );
+    expect(seedRes.status).toBe(200);
+
+    // 2. patch ONLY the text on that same id.
+    const patchRes = await app.request(
+      `/api/bridge/v1/carousel/slide/${encodeURIComponent(slideId)}/layer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ id: "t_patch", kind: "text", text: "改后" }),
+      },
+    );
+    expect(patchRes.status).toBe(200);
+    expect((await patchRes.json() as { result?: { id: string } }).result?.id).toBe("t_patch");
+
+    // 3. read carousel.yaml off disk and assert the merge.
+    const parsed = yamlMod.load(await readFile(target, "utf8")) as {
+      slides: Array<{ id: string; layers: Array<Record<string, any>> }>;
+    };
+    const slide = parsed.slides.find((s) => s.id === slideId)!;
+    const layer = slide.layers.find((l) => l.id === "t_patch")!;
+    expect(layer.text).toBe("改后"); // changed
+    expect(layer.box).toEqual({ x: 200, y: 300, w: 640, h: 200, rotation: 9 }); // preserved
+    expect(layer.style.font).toBe("serif"); // preserved
+    expect(layer.style.size).toBe(88); // preserved
+    expect(layer.style.weight).toBe(300); // preserved
+    expect(layer.style.italic).toBe(true); // preserved
+    expect(layer.style.color).toBe("#ff0066"); // preserved
+    expect(layer.style.align).toBe("right"); // preserved
+    expect(layer.style.tracking).toBe(6); // preserved
+    // exactly one t_patch layer (patch is in-place, not an append).
+    expect(slide.layers.filter((l) => l.id === "t_patch")).toHaveLength(1);
+  });
+
+  it("POST layer changing the kind of an existing id → 400 (kind not patchable)", async () => {
+    const res = await app.request(
+      `/api/bridge/v1/carousel/slide/${encodeURIComponent(slideId)}/layer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ id: "t_patch", kind: "image", src: "/x.png" }),
+      },
+    );
+    expect(res.status).toBe(400);
+    expect((await res.json() as { code?: number }).code).toBe(4);
+  });
+
   // S2 (US 17) — a successful carousel write broadcasts carousel-changed on
   // the uiEventBus right after the atomic write lands, so the Editor
   // refetches without depending on fs.watch.
