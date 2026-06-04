@@ -123,6 +123,30 @@ describe("PreviewPanel", () => {
     );
   });
 
+  // S17 consistency — the aspect switch in the UI must expose EVERY ratio the
+  // shared op / CLI (comp.ts ASPECT_RATIOS) and the schema accept. It previously
+  // listed only 9:16 / 1:1 / 16:9, so a human could not pick 4:5 in the UI even
+  // though `autoviral comp aspect 4:5` works — UI and agent-CLI diverged.
+  it("exposes all four canonical aspect ratios (incl 4:5) in the header switch", () => {
+    useComposition.setState({ comp: makeEmptyComposition({ workId: "w1" }) });
+    render(<PreviewPanel />);
+    for (const r of ["9:16", "1:1", "16:9", "4:5"]) {
+      expect(screen.getByRole("button", { name: r })).toBeTruthy();
+    }
+  });
+
+  it("clicking 4:5 flips the canvas to 1080×1350 (UI → shared op parity with CLI)", () => {
+    useComposition.setState({ comp: makeEmptyComposition({ workId: "w1" }) });
+    render(<PreviewPanel />);
+    fireEvent.click(screen.getByRole("button", { name: "4:5" }));
+    const next = useComposition.getState().comp!;
+    expect(next.aspect).toBe("4:5");
+    expect(next.width).toBe(1080);
+    expect(next.height).toBe(1350);
+    expect(screen.getByTestId("player").getAttribute("data-comp-width")).toBe("1080");
+    expect(screen.getByTestId("player").getAttribute("data-comp-height")).toBe("1350");
+  });
+
   it("renders transport play/pause button", () => {
     useComposition.setState({ comp: makeEmptyComposition({ workId: "w1" }) });
     render(<PreviewPanel />);

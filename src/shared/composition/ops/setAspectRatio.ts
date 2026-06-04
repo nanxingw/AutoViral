@@ -27,8 +27,18 @@
 // the same sx/sy, not just the static transforms; otherwise a keyframed pan
 // would keep old-canvas pixel magnitudes and drift off-frame anyway. scale /
 // rotation / opacity / speed keyframes are dimensionless or relative and are
-// left untouched. Text/overlay clips position by PERCENTAGE
-// (xPct/yPct/wPct/hPct) so they adapt automatically — we leave them untouched.
+// left untouched.
+//
+// OVERLAY clips: their static placement is PERCENTAGE-based
+// (position.xPct/yPct/wPct/hPct), so the base box adapts automatically and needs
+// no mutation. BUT an overlay clip ALSO carries optional x/y KEYFRAMES that the
+// renderer composes as ABSOLUTE PIXELS on top of that percentage box
+// (`translate(${x}px, ${y}px)`, OverlayTrackRenderer). A keyframed overlay pan is
+// therefore exactly as dimension-dependent as a video pan — if we left it
+// untouched it would drift off a resized canvas. So we rescale overlay x/y
+// keyframes by the same sx/sy too (the percentage `position` block stays
+// untouched). TEXT clips have NO pixel transforms or x/y keyframes — purely
+// percentage — and are left entirely untouched.
 
 import { ASPECTS, type Aspect, type Composition } from "../../composition.js";
 import { CompositionOpError } from "./errors.js";
@@ -71,37 +81,66 @@ export function setAspectRatio(
   const dims = ASPECT_DIMS[ratio];
   const oldWidth = comp.width;
   const oldHeight = comp.height;
-  // Guard a degenerate source (width/height 0 — should never happen on a parsed
-  // comp, but a hand-built fixture might): treat the scale factor as 1 so we
-  // never multiply offsets by NaN/Infinity.
-  const sx = oldWidth > 0 ? dims.width / oldWidth : 1;
-  const sy = oldHeight > 0 ? dims.height / oldHeight : 1;
 
-  // Flip the canvas in place (decision #1 — assign onto the existing object).
+  // Flip the canvas in place (decision #1 — assign onto the existing object),
+  // then rescale clip pixel offsets against the dimension change so content
+  // stays proportionally placed instead of drifting off-frame.
   comp.aspect = ratio;
-  comp.width = dims.width;
-  comp.height = dims.height;
+  rescaleCompositionForResize(comp, oldWidth, oldHeight, dims.width, dims.height);
+}
 
-  // Rescale absolute pixel offsets on video clips so content stays
-  // proportionally placed. Percentage-positioned clips (text/overlay) need no
-  // mutation. Skip when both scale factors are 1 (same ratio re-applied).
+/**
+ * Resize `comp` IN PLACE to `newWidth × newHeight` and proportionally rescale
+ * every clip's ABSOLUTE PIXEL offset (so content stays placed relative to the
+ * canvas centre instead of drifting off-frame). This is the single source of
+ * truth for the "change the canvas dimensions → adapt the clips" math, shared by
+ * `setAspectRatio` (canonical-ratio switch) and the store's `applyPlatformPreset`
+ * (arbitrary platform-preset dimensions) so the human-UI and agent-CLI paths
+ * converge on identical compositions.
+ *
+ * Rescaled (× width-ratio / height-ratio respectively):
+ *   - video clip `transforms.x` / `transforms.y` (static absolute offset),
+ *   - video AND overlay clip x/y KEYFRAMES (the renderer composes these as
+ *     `translate(${x}px,${y}px)` — a keyframed pan is dimension-dependent).
+ * Left untouched: percentage placement (text/overlay `position.*Pct`) and
+ * dimensionless keyframe properties (scale / rotation / opacity / speed).
+ *
+ * ADR-009: no I/O, mutates `comp` in place (never replaces the reference). Guards
+ * a degenerate source (width/height 0 → scale factor 1, never NaN/Infinity).
+ * When both scale factors are 1 (dims unchanged) the walk is inert.
+ */
+export function rescaleCompositionForResize(
+  comp: Composition,
+  oldWidth: number,
+  oldHeight: number,
+  newWidth: number,
+  newHeight: number,
+): void {
+  comp.width = newWidth;
+  comp.height = newHeight;
+
+  const sx = oldWidth > 0 ? newWidth / oldWidth : 1;
+  const sy = oldHeight > 0 ? newHeight / oldHeight : 1;
   if (sx === 1 && sy === 1) return;
+
   for (const trk of comp.tracks) {
     for (const clip of trk.clips) {
-      if (clip.kind !== "video") continue;
-      const t = clip.transforms;
-      if (t) {
-        if (typeof t.x === "number") t.x = t.x * sx;
-        if (typeof t.y === "number") t.y = t.y * sy;
+      // Static absolute offset (video only — overlay positions by percentage).
+      if (clip.kind === "video") {
+        const t = clip.transforms;
+        if (t) {
+          if (typeof t.x === "number") t.x = t.x * sx;
+          if (typeof t.y === "number") t.y = t.y * sy;
+        }
       }
-      // The renderer reads `interpolateProperty(kfs,"x",…) ?? t.x` — on a clip
-      // that pans via x/y KEYFRAMES the static t.x is never read, so scaling
-      // only t.x would leave the keyframed animation at old-canvas pixel
-      // magnitudes and the content would drift off the resized canvas (the very
-      // "drift off the canvas" this op promises to prevent). Scale the position
-      // keyframes by the SAME sx/sy as the static offsets. Other properties
-      // (scale/rotation/opacity/speed) are dimensionless or already relative —
-      // leave them untouched.
+      // x/y position KEYFRAMES are absolute pixels on BOTH video and overlay
+      // clips (the renderer reads `interpolateProperty(kfs,"x",…) ?? t.x` and
+      // composes `translate(${x}px,${y}px)`). On a clip that pans via keyframes
+      // the static t.x is never read, so we MUST scale the keyframes too or the
+      // animation keeps old-canvas pixel magnitudes and drifts off the resized
+      // canvas — the very drift this helper prevents. Other keyframe properties
+      // (scale/rotation/opacity/speed) are dimensionless/relative — untouched.
+      if (clip.kind !== "video" && clip.kind !== "overlay") continue;
       const kfs = (clip as { keyframes?: { property: string; value: number }[] })
         .keyframes;
       if (!kfs) continue;

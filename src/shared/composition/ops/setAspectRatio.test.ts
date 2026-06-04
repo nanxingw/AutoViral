@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Composition } from "../../composition.js";
-import { setAspectRatio } from "./setAspectRatio.js";
+import { setAspectRatio, rescaleCompositionForResize } from "./setAspectRatio.js";
 import { CompositionOpError } from "./errors.js";
 
 // Pure in-place op (ADR-009 decision #2) → no CompositionSchema.parse here. We
@@ -28,6 +28,25 @@ function textClip(): unknown {
     duration: 3,
     style: {},
     position: { anchor: "bottom", xPct: 50, yPct: 85 },
+  };
+}
+
+// An overlay clip placed by PERCENTAGE (position.*Pct) but carrying optional x/y
+// pan KEYFRAMES — which the renderer composes as ABSOLUTE PIXELS
+// (`translate(${x}px,${y}px)`), so they are dimension-dependent just like a
+// video pan and MUST be rescaled on a canvas resize.
+function overlayClipWithKeyframes(
+  kfs: { property: string; time: number; value: number; easing: string }[],
+): unknown {
+  return {
+    id: "o0",
+    kind: "overlay",
+    src: "logo.png",
+    trackOffset: 0,
+    duration: 3,
+    position: { xPct: 50, yPct: 50, wPct: 20, hPct: 20 },
+    opacity: 1,
+    keyframes: kfs,
   };
 }
 
@@ -143,6 +162,40 @@ describe("setAspectRatio (S17)", () => {
     expect(scaleKfs[1].value).toBe(1.5);
   });
 
+  it("rescales an OVERLAY clip's x/y pan KEYFRAMES (renderer composes them as px on top of the %-box)", () => {
+    // The overlay renderer applies `translate(${x}px,${y}px)` from x/y keyframes
+    // ON TOP of the percentage `position` box. A keyframed overlay pan is just as
+    // dimension-dependent as a video pan; if the op skipped overlay clips
+    // entirely the pan would keep old-canvas pixel magnitudes and drift off the
+    // resized canvas. 9:16 (1080×1920) → 16:9 (1920×1080): sx=1920/1080,
+    // sy=1080/1920.
+    const comp = compWith([
+      overlayClipWithKeyframes([
+        { property: "x", time: 0, value: 300, easing: "linear" },
+        { property: "x", time: 2, value: -200, easing: "linear" },
+        { property: "y", time: 0, value: 500, easing: "linear" },
+        { property: "scale", time: 0, value: 1, easing: "linear" },
+        { property: "opacity", time: 0, value: 0.5, easing: "linear" },
+      ]),
+    ]);
+    setAspectRatio(comp, { ratio: "16:9" });
+    const clip = comp.tracks[0].clips[0] as {
+      position: { xPct: number; yPct: number };
+      keyframes: { property: string; value: number }[];
+    };
+    const xKfs = clip.keyframes.filter((k) => k.property === "x");
+    const yKfs = clip.keyframes.filter((k) => k.property === "y");
+    expect(xKfs[0].value).toBeCloseTo(300 * (1920 / 1080), 4);
+    expect(xKfs[1].value).toBeCloseTo(-200 * (1920 / 1080), 4);
+    expect(yKfs[0].value).toBeCloseTo(500 * (1080 / 1920), 4);
+    // scale + opacity keyframes are dimensionless — untouched.
+    expect(clip.keyframes.find((k) => k.property === "scale")!.value).toBe(1);
+    expect(clip.keyframes.find((k) => k.property === "opacity")!.value).toBe(0.5);
+    // The percentage placement box is resolution-independent — untouched.
+    expect(clip.position.xPct).toBe(50);
+    expect(clip.position.yPct).toBe(50);
+  });
+
   it("leaves percentage-positioned text clips untouched (they adapt automatically)", () => {
     const comp = compWith([textClip()]);
     setAspectRatio(comp, { ratio: "16:9" });
@@ -184,5 +237,39 @@ describe("setAspectRatio (S17)", () => {
     // comp left untouched on rejection.
     expect(comp.aspect).toBe("9:16");
     expect(comp.width).toBe(1080);
+  });
+});
+
+describe("rescaleCompositionForResize (shared by applyPlatformPreset)", () => {
+  it("resizes to ARBITRARY (non-canonical) dims and rescales clip offsets proportionally", () => {
+    // A platform preset can carry dims that are not the canonical ASPECT_DIMS
+    // (e.g. Seedance 720×1280). The single-source-of-truth rescale must work for
+    // any new width/height, not just the four canonical ratios.
+    const comp = compWith([videoClip(200, 400)]); // starts 1080×1920
+    rescaleCompositionForResize(comp, 1080, 1920, 720, 1280);
+    expect(comp.width).toBe(720);
+    expect(comp.height).toBe(1280);
+    const t = (comp.tracks[0].clips[0] as { transforms: { x: number; y: number } })
+      .transforms;
+    expect(t.x).toBeCloseTo(200 * (720 / 1080), 4);
+    expect(t.y).toBeCloseTo(400 * (1280 / 1920), 4);
+  });
+
+  it("is inert when dims are unchanged (scale factors 1)", () => {
+    const comp = compWith([videoClip(200, 400)]);
+    rescaleCompositionForResize(comp, 1080, 1920, 1080, 1920);
+    const t = (comp.tracks[0].clips[0] as { transforms: { x: number; y: number } })
+      .transforms;
+    expect(t.x).toBe(200);
+    expect(t.y).toBe(400);
+  });
+
+  it("mutates comp IN PLACE — never replaces the comp / track / clip references", () => {
+    const comp = compWith([videoClip(0, 0)]);
+    const tracksRef = comp.tracks;
+    const clipRef = comp.tracks[0].clips[0];
+    rescaleCompositionForResize(comp, 1080, 1920, 1920, 1080);
+    expect(comp.tracks).toBe(tracksRef);
+    expect(comp.tracks[0].clips[0]).toBe(clipRef);
   });
 });

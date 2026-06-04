@@ -5,12 +5,16 @@ import { useComposition } from "../store";
 import { Scene } from "../composition/Scene";
 import { useT } from "@/i18n/useT";
 
-// S17 (US 26) — one-click canvas-ratio toggle. The three everyday ratios
-// (portrait / square / landscape) sit in the preview header; clicking one runs
-// the store's `setAspectRatio` (→ shared op), which flips comp.width/height and
-// is consumed live by <Player compositionWidth/compositionHeight>. The agent CLI
-// (`autoviral comp aspect …`) reaches the identical op through the bridge.
-const ASPECT_OPTIONS: Aspect[] = ["9:16", "1:1", "16:9"];
+// S17 (US 26) — one-click canvas-ratio toggle. The four canonical ratios
+// (portrait / square / landscape / portrait-4:5) sit in the preview header;
+// clicking one runs the store's `setAspectRatio` (→ shared op), which flips
+// comp.width/height and is consumed live by <Player
+// compositionWidth/compositionHeight>. The agent CLI (`autoviral comp aspect …`)
+// reaches the identical op through the bridge. This list MUST stay in lockstep
+// with the shared op / CLI (comp.ts ASPECT_RATIOS) + schema (ASPECTS) so a human
+// clicking and an agent running the CLI can reach the SAME set of ratios — 4:5
+// was previously UI-unreachable while the CLI accepted it.
+const ASPECT_OPTIONS: Aspect[] = ["9:16", "1:1", "16:9", "4:5"];
 
 function AspectSwitch() {
   const t = useT();

@@ -831,4 +831,78 @@ describe("applyPlatformPreset (Phase 6.D)", () => {
     });
     expect(useComposition.getState().comp!.aspect).toBe("9:16");
   });
+
+  // ADR-009 (S17 consistency fix) — applying a platform preset changes the
+  // canvas dimensions exactly like the aspect switch, so it must run the SAME
+  // clip-adaptation math (via the shared ops.rescaleCompositionForResize) and
+  // proportionally rescale a clip's absolute pixel offset — otherwise a clip
+  // nudged off-centre drifts off the resized canvas. This was the divergence:
+  // applyPlatformPreset used to write width/height inline and leave clips
+  // un-adapted while setAspectRatio adapted them.
+  it("rescales clip pixel offsets when the preset resizes the canvas (converged with setAspectRatio)", () => {
+    // Start 9:16 (1080×1920) with a video clip nudged 200px right / 400px down.
+    const clip = makeVideoClip({
+      id: "vp",
+      transforms: { scale: 1, x: 200, y: 400, rotation: 0 },
+    });
+    const comp = makeCompositionWithClips([clip]);
+    expect(comp.width).toBe(1080);
+    expect(comp.height).toBe(1920);
+    useComposition.setState({ comp });
+    // Apply a 16:9 (1920×1080) preset: sx = 1920/1080, sy = 1080/1920.
+    useComposition.getState().applyPlatformPreset({
+      id: "yt-16-9",
+      label: "YouTube 16:9",
+      platform: "youtube-long",
+      width: 1920,
+      height: 1080,
+      fps: 30,
+      videoBitrate: 12000,
+      audioBitrate: 192,
+      codec: "h264",
+      container: "mp4",
+      loudnessTargetLufs: -14,
+      safeZonePct: 0.05,
+    });
+    const next = useComposition.getState().comp!;
+    expect(next.width).toBe(1920);
+    expect(next.height).toBe(1080);
+    expect(next.aspect).toBe("16:9");
+    const t = (next.tracks[0].clips[0] as {
+      transforms: { x: number; y: number };
+    }).transforms;
+    expect(t.x).toBeCloseTo(200 * (1920 / 1080), 4);
+    expect(t.y).toBeCloseTo(400 * (1080 / 1920), 4);
+  });
+
+  it("keeps a centred (0,0) clip centred and still applies preset dims/fps", () => {
+    const clip = makeVideoClip({
+      id: "vc",
+      transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+    });
+    const comp = makeCompositionWithClips([clip]);
+    useComposition.setState({ comp });
+    useComposition.getState().applyPlatformPreset({
+      id: "ttk",
+      label: "TikTok",
+      platform: "tiktok",
+      width: 1080,
+      height: 1920,
+      fps: 30,
+      videoBitrate: 8000,
+      audioBitrate: 192,
+      codec: "h264",
+      container: "mp4",
+      loudnessTargetLufs: -14,
+      safeZonePct: 0.18,
+    });
+    const next = useComposition.getState().comp!;
+    const t = (next.tracks[0].clips[0] as {
+      transforms: { x: number; y: number };
+    }).transforms;
+    expect(t.x).toBe(0);
+    expect(t.y).toBe(0);
+    expect(next.exportPresets[0].id).toBe("ttk");
+    expect(next.fps).toBe(30);
+  });
 });

@@ -730,6 +730,17 @@ export const useComposition = create<CompState>()(
     // fps all flip together. Aspect is inferred from preset width/height
     // (9:16 / 1:1 / 16:9 / 4:5); non-canonical ratios keep the existing
     // aspect untouched.
+    //
+    // ADR-009 (S17 consistency) — applying a preset CHANGES the canvas dimensions
+    // exactly like the aspect switch does, so it must run the SAME clip-adaptation
+    // math (rescale absolute pixel offsets + x/y keyframes so clips don't drift
+    // off the resized canvas). We route the width/height change through the shared
+    // `ops.rescaleCompositionForResize` — the single source of truth that
+    // `setAspectRatio` also uses — instead of writing width/height inline, so an
+    // agent (`autoviral comp aspect …`) and a human picking a platform preset
+    // never diverge on whether clips get adapted. The preset's own dimensions are
+    // passed through (a preset may carry non-canonical dims, e.g. 720×1280), not
+    // forced to canonical ASPECT_DIMS.
     applyPlatformPreset: (preset) =>
       set((s) => {
         if (!s.comp) return;
@@ -740,8 +751,13 @@ export const useComposition = create<CompState>()(
         else if (Math.abs(ratio - 16 / 9) < 0.01) aspect = "16:9";
         else if (Math.abs(ratio - 4 / 5) < 0.01) aspect = "4:5";
         s.comp.aspect = aspect;
-        s.comp.width = preset.width;
-        s.comp.height = preset.height;
+        ops.rescaleCompositionForResize(
+          s.comp,
+          s.comp.width,
+          s.comp.height,
+          preset.width,
+          preset.height,
+        );
         s.comp.fps = preset.fps as 24 | 25 | 30 | 60;
         s.comp.exportPresets = [preset]; // replace, not append
         s.comp.updatedAt = new Date().toISOString();
