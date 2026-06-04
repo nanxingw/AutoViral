@@ -26,6 +26,7 @@
 | [ADR-002](ADR-002-renderer-stays-remotion.md) | Renderer stays Remotion（渲染层保持 Remotion JSX，不换 HTML+CSS+GSAP） | Accepted | 2026-05-15 |
 | [ADR-003](ADR-003-sibling-skill-split.md) | Sibling skill split — taste vs engineering（taste 与 engineering 两类兄弟 skill 分流） | Accepted | 2026-05-15 |
 | [ADR-004](ADR-004-mattpocock-replaces-superpowers.md) | Adopt mattpocock skills, retire superpowers in this project（本仓用 mattpocock 取代 superpowers） | Accepted | 2026-05-15 |
-| [ADR-005](ADR-005-dual-chat-entry-layout.md) | Studio 右栏用水平 tab 切换器（Chat \| Terminal），默认 Chat | Accepted | 2026-05-17 |
+| [ADR-005](ADR-005-dual-chat-entry-layout.md) | Studio 右栏用水平 tab 切换器（Chat \| Terminal），默认 Chat | Accepted（多会话维度被 ADR-008 收窄）| 2026-05-17 |
 | [ADR-006](ADR-006-content-type-registry.md) | ContentTypeRegistry — 内容类型的中央清单（v0.1.1 深模块 ①） | Accepted | 2026-06-03 |
 | [ADR-007](ADR-007-single-media-provider-registry.md) | Single MediaProvider registry — 能力标签、单一入口（v0.1.1 深模块 ②） | Accepted | 2026-06-03 |
+| [ADR-008](ADR-008-multi-session-chat-terminal.md) | 多会话 Chat + Terminal — `(workId, sessionId)` keying、sidecar 持久化、focus 共享（v0.1.2 §5 keystone） | Accepted | 2026-06-04 |

@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-05-17
 - **Deciders:** nanxingw + AI design partner
-- **Related:** [ADR-001](ADR-001-autoviral-owns-the-editing-layer.md), [ADR-003](ADR-003-sibling-skill-split.md)
+- **Related:** [ADR-001](ADR-001-autoviral-owns-the-editing-layer.md), [ADR-003](ADR-003-sibling-skill-split.md), [ADR-008](ADR-008-multi-session-chat-terminal.md) (narrows the single-session scope clause)
 - **Resolves:** [Issue #6](https://github.com/nanxingw/AutoViral/issues/6) (M.1)
 
 ## Context
@@ -55,6 +55,10 @@ This ADR decides how the two surfaces visually coexist within Studio's right pan
 ### Neutral
 
 - Hotkey-toggle alternative (Option C from the analysis) was rejected — invisibility of mode state is a deal-breaker for non-technical users. A version of it could be revisited later as a power-user opt-in via a settings flag.
+
+### Scope annotation (2026-06-04, superseded in the multi-session dimension by ADR-008)
+
+> Forward-pointer note (original reasoning above left intact per the ADR convention). This ADR's scope clause — *"one work = one Chat + one Terminal", "no multi-tab concurrency"* — is **narrowed by [ADR-008](ADR-008-multi-session-chat-terminal.md)**. The **layout** decision (horizontal Chat | Terminal switcher, default Chat, both surfaces mounted via `display:none`) **remains Accepted and current**. What changes: each surface now also hosts an **intra-surface session sub-strip** (multiple chats / multiple terminals, jump-back) keyed by `(workId, sessionId)`. ADR-005 Status stays Accepted because only the single-session scope clause is superseded, not the layout.
 
 ## Alternatives considered
 
