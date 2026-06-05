@@ -1,0 +1,353 @@
+import { readdir, readFile, writeFile, mkdir, stat, realpath, rm } from "node:fs/promises";
+import { existsSync, type Dirent } from "node:fs";
+import { join, relative, sep } from "node:path";
+
+/**
+ * One canonical "copy the bundled skills/ into ~/.claude/skills/" routine,
+ * shared by BOTH the npm postinstall (src/postinstall.ts) AND the daemon boot
+ * hook (src/server/index.ts). Before this existed the two paths diverged: npm
+ * users got the postinstall copy (with its yaml / permitted_skills.md exemptions)
+ * while DESKTOP users — who never run `npm postinstall` — only got an inline
+ * `rsync -a --delete` at boot that blew away their accumulated skill edits every
+ * launch AND skipped the exemptions. Now both routes call `syncSkills`, so the
+ * external CLI agent's copy of the autoviral skill stays current on both the npm
+ * update path and the Electron desktop update path.
+ *
+ * The copy rule mirrors the original postinstall: overwrite freely, but NEVER
+ * clobber an EXISTING `.yaml` (user data) or `permitted_skills.md` (runtime-
+ * modified allowlist).
+ */
+
+// Files that should NEVER be overwritten when they already exist in the target.
+const NEVER_OVERWRITE_EXTENSIONS = [".yaml"];
+const NEVER_OVERWRITE_FILES = ["permitted_skills.md"];
+
+/** A file the copy rule must never clobber AND the prune must never delete. */
+function isExemptFile(name: string): boolean {
+  return (
+    NEVER_OVERWRITE_EXTENSIONS.some((ext) => name.endsWith(ext)) ||
+    NEVER_OVERWRITE_FILES.includes(name)
+  );
+}
+
+export interface SyncSkillsOptions {
+  /** Absolute path to the bundled skills/ dir (the source of truth). */
+  sourceSkillsDir: string;
+  /** Absolute path to ~/.claude/skills (where CLI agents read skills from). */
+  targetSkillsDir: string;
+  /** The current package version — gates the sync (skip when unchanged). */
+  version: string;
+  /**
+   * Where the "last synced version" marker lives. MUST be OUTSIDE the copied
+   * subtree (a sibling of the per-skill dirs, e.g. a `.json` directly under
+   * targetSkillsDir) so a copy of `autoviral/` never deletes it.
+   */
+  markerPath: string;
+  /** Optional logger; defaults to console. */
+  logger?: { log?: (msg: string) => void; warn?: (msg: string) => void };
+}
+
+export interface SyncSkillsResult {
+  synced: boolean;
+  reason: string;
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+type Logger = { log?: (msg: string) => void; warn?: (msg: string) => void };
+
+/** stat() (DEREFERENCED) → kind, tolerating a dangling symlink. */
+async function resolvedKind(
+  path: string,
+): Promise<"dir" | "file" | "other" | "missing"> {
+  try {
+    const st = await stat(path); // follows symlinks
+    if (st.isDirectory()) return "dir";
+    if (st.isFile()) return "file";
+    return "other";
+  } catch {
+    // Dangling symlink (target gone) or unreadable → treat as missing/skip.
+    return "missing";
+  }
+}
+
+/** True when `child`'s REAL path is inside `rootReal` (an already-realpath'd dir). */
+async function resolvesInside(child: string, rootReal: string): Promise<boolean> {
+  const real = await realpathSafe(child);
+  if (real === rootReal) return true;
+  const rel = relative(rootReal, real);
+  return rel !== "" && !rel.startsWith("..") && !rel.startsWith(sep) && rel !== "..";
+}
+
+/**
+ * Recursive copy with the yaml / permitted_skills.md never-overwrite rule.
+ *
+ * Each entry's REAL kind is resolved via `stat` (which dereferences symlinks),
+ * NOT via the `Dirent` flags from `readdir(withFileTypes)`. A `Dirent` for a
+ * symlink-to-directory reports `isDirectory() === false` (it describes the link,
+ * not its target), so the old code fell into the file branch and `readFile`'d a
+ * directory → EISDIR — which threw before the marker write and broke the version
+ * gate. The real repo `skills/` dir holds 14 such symlink-to-dir siblings of
+ * `autoviral/` (caveman -> ../.agents/skills/caveman, ...). We now:
+ *   (a) resolve each entry's dereferenced kind via `stat`, not the `Dirent` flag;
+ *   (b) SKIP any symlink whose real target escapes the source tree — those
+ *       siblings point at `../.agents/skills/*`, i.e. OTHER skills outside this
+ *       package's `autoviral/` (matt-pocock's territory, git-ignored, dropped
+ *       from the npm tarball). Materialising them would diverge desktop from npm
+ *       and clobber the user's independently-managed skills. Symlinks that
+ *       resolve INSIDE the source (legit internal links) are still followed;
+ *   (c) tolerate a per-entry failure so one bad sibling (e.g. a dangling link)
+ *       can never abort the sync — `autoviral/` + the marker still land.
+ */
+async function copyDir(
+  src: string,
+  dest: string,
+  sourceRootReal: string,
+  logger?: Logger,
+): Promise<void> {
+  const warn = logger?.warn ?? ((m: string) => console.warn(m));
+  await mkdir(dest, { recursive: true });
+  const entries = await readdir(src, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const srcPath = join(src, entry.name);
+    const destPath = join(dest, entry.name);
+
+    try {
+      // A symlink that escapes the package's source tree is NOT ours to copy.
+      if (entry.isSymbolicLink() && !(await resolvesInside(srcPath, sourceRootReal))) {
+        warn(`autoviral: skill sync skipped out-of-tree symlink: ${srcPath}`);
+        continue;
+      }
+      const kind = await resolvedKind(srcPath);
+      if (kind === "dir") {
+        await copyDir(srcPath, destPath, sourceRootReal, logger);
+      } else if (kind === "file") {
+        if (isExemptFile(entry.name) && (await exists(destPath))) {
+          // Never overwrite the user's YAML data or runtime-modified files.
+          continue;
+        }
+        const content = await readFile(srcPath);
+        await writeFile(destPath, content);
+      } else {
+        // Dangling symlink / socket / fifo / etc. — not ours to materialise.
+        warn(`autoviral: skill sync skipped non-file entry: ${srcPath}`);
+      }
+    } catch (err) {
+      // One bad entry must not abort the whole sync (e.g. a dangling sibling
+      // symlink). Warn and keep going so autoviral/ + the marker still land.
+      const message = err instanceof Error ? err.message : String(err);
+      warn(`autoviral: skill sync skipped ${srcPath}: ${message}`);
+    }
+  }
+}
+
+/**
+ * Prune target files inside a MANAGED skill subtree that no longer exist in
+ * source — restoring the delete semantics the old boot path got from
+ * `rsync -a --delete`. Without this, a layout change (v0.1.3 moved
+ * `manual/00-quickstart.md` → `manual/video/…`) leaves the OLD flat files
+ * orphaned alongside the new sharded ones, yielding a self-contradictory manual.
+ *
+ * Scoped to `managedDir` (the real `autoviral/` subtree we copied) so it NEVER
+ * touches the user's independently-installed sibling skills or the sync marker
+ * (both live outside this subtree). Exempt files (.yaml / permitted_skills.md)
+ * are kept even when absent from source — they're user/runtime data, mirroring
+ * the copy rule. Empty directories left behind by a prune are removed too.
+ */
+async function pruneOrphans(srcDir: string, managedDir: string, logger?: Logger): Promise<void> {
+  const warn = logger?.warn ?? ((m: string) => console.warn(m));
+  let entries: Dirent[];
+  try {
+    entries = await readdir(managedDir, { withFileTypes: true });
+  } catch {
+    return; // target subtree doesn't exist → nothing to prune.
+  }
+
+  for (const entry of entries) {
+    const targetPath = join(managedDir, entry.name);
+    const srcPath = join(srcDir, entry.name);
+    try {
+      // Resolve the TARGET's real kind (a stray symlink shouldn't fool us).
+      const targetKind = await resolvedKind(targetPath);
+      if (targetKind === "dir") {
+        const srcKind = await resolvedKind(srcPath);
+        if (srcKind === "dir") {
+          // Recurse, then drop the dir if it became empty.
+          await pruneOrphans(srcPath, targetPath, logger);
+          const remaining = await readdir(targetPath);
+          if (remaining.length === 0) await rm(targetPath, { recursive: true, force: true });
+        } else {
+          // Whole dir gone from source → remove it (still exempting any
+          // protected files nested inside).
+          await pruneDirRespectingExemptions(targetPath, logger);
+        }
+      } else {
+        // A file (or stray non-dir) in target.
+        if (isExemptFile(entry.name)) continue; // user/runtime data — never prune.
+        if (!existsSync(srcPath)) {
+          await rm(targetPath, { force: true });
+        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      warn(`autoviral: skill sync prune skipped ${targetPath}: ${message}`);
+    }
+  }
+}
+
+/** Remove a directory tree but keep any exempt files (and the dirs holding them). */
+async function pruneDirRespectingExemptions(dir: string, logger?: Logger): Promise<void> {
+  const warn = logger?.warn ?? ((m: string) => console.warn(m));
+  let entries: Dirent[];
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const p = join(dir, entry.name);
+    try {
+      const kind = await resolvedKind(p);
+      if (kind === "dir") {
+        await pruneDirRespectingExemptions(p, logger);
+        const remaining = await readdir(p);
+        if (remaining.length === 0) await rm(p, { recursive: true, force: true });
+      } else if (!isExemptFile(entry.name)) {
+        await rm(p, { force: true });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      warn(`autoviral: skill sync prune skipped ${p}: ${message}`);
+    }
+  }
+  // Drop the dir itself if everything inside was pruned.
+  try {
+    if ((await readdir(dir)).length === 0) await rm(dir, { recursive: true, force: true });
+  } catch {
+    /* leave it */
+  }
+}
+
+/** realpath that tolerates a not-yet-existing path (returns the input). */
+async function realpathSafe(p: string): Promise<string> {
+  try {
+    return await realpath(p);
+  } catch {
+    return p;
+  }
+}
+
+async function readMarkerVersion(markerPath: string): Promise<string | null> {
+  try {
+    const raw = JSON.parse(await readFile(markerPath, "utf-8")) as { version?: unknown };
+    return typeof raw.version === "string" ? raw.version : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sync the bundled skills into ~/.claude/skills when needed.
+ *
+ * Syncs when:
+ *   - the target's `autoviral` skill is MISSING (recover it), OR
+ *   - the marker's recorded version differs from `version` (update on bump).
+ * Skips (no copy) when:
+ *   - the marker already records `version` AND the skill is present
+ *     (don't clobber user edits on every boot), OR
+ *   - source and target resolve to the SAME real path, or the target's
+ *     `autoviral` is a symlink back into the source (dev symlink — never
+ *     self-overwrite).
+ */
+export async function syncSkills(opts: SyncSkillsOptions): Promise<SyncSkillsResult> {
+  const { sourceSkillsDir, targetSkillsDir, version, markerPath } = opts;
+  const log = opts.logger?.log ?? ((m: string) => console.log(m));
+  const warn = opts.logger?.warn ?? ((m: string) => console.warn(m));
+
+  if (!existsSync(sourceSkillsDir)) {
+    return { synced: false, reason: `source skills dir not found: ${sourceSkillsDir}` };
+  }
+
+  // ── Symlink / self-copy guard ───────────────────────────────────────────
+  // Dev sets up `~/.claude/skills/autoviral → <repo>/skills/autoviral` (or even
+  // points the whole skills dir at the repo). Copying source over itself would
+  // truncate the repo's own files mid-read. Bail if either the dirs are the same
+  // real path, or the target's `autoviral` entry resolves back inside the source.
+  const sourceReal = await realpathSafe(sourceSkillsDir);
+  const targetReal = await realpathSafe(targetSkillsDir);
+  if (sourceReal === targetReal) {
+    return { synced: false, reason: "symlink guard: source and target are the same path" };
+  }
+  const targetAutoviral = join(targetSkillsDir, "autoviral");
+  if (existsSync(targetAutoviral)) {
+    const targetAutoviralReal = await realpathSafe(targetAutoviral);
+    const sourceAutoviralReal = await realpathSafe(join(sourceSkillsDir, "autoviral"));
+    const within = relative(sourceReal, targetAutoviralReal);
+    const insideSource =
+      targetAutoviralReal === sourceAutoviralReal ||
+      (within !== "" && !within.startsWith("..") && !within.startsWith(sep) && within !== "..");
+    if (insideSource) {
+      return {
+        synced: false,
+        reason: "symlink guard: target skill resolves into the source tree (self-copy)",
+      };
+    }
+  }
+
+  // ── Version gate ────────────────────────────────────────────────────────
+  const skillPresent = existsSync(targetAutoviral);
+  const recorded = await readMarkerVersion(markerPath);
+  if (skillPresent && recorded === version) {
+    return { synced: false, reason: `up-to-date (version ${version})` };
+  }
+
+  // ── Copy ────────────────────────────────────────────────────────────────
+  try {
+    await copyDir(sourceSkillsDir, targetSkillsDir, sourceReal, opts.logger);
+
+    // ── Prune orphans inside each MANAGED skill subtree ────────────────────
+    // copyDir only overwrites/adds; restore the `rsync --delete` delete-side so
+    // a layout change (e.g. manual/00-quickstart.md → manual/video/…) doesn't
+    // leave stale orphan files behind. Scope = each top-level SOURCE entry that
+    // resolves to a real directory (the dirs we actually copied — e.g.
+    // autoviral/). Symlink-to-dir siblings (caveman → ../.agents/skills/…) are
+    // NOT pruned: they were never copied into target, so there's no managed
+    // subtree to clean, and the user's other skills + the marker live outside
+    // any managed subtree and stay untouched.
+    const sourceEntries = await readdir(sourceSkillsDir, { withFileTypes: true });
+    for (const entry of sourceEntries) {
+      const srcChild = join(sourceSkillsDir, entry.name);
+      // Only manage entries whose SOURCE side is a *real* (non-symlink) dir.
+      if (!entry.isDirectory()) continue;
+      const targetChild = join(targetSkillsDir, entry.name);
+      if (existsSync(targetChild)) {
+        await pruneOrphans(srcChild, targetChild, opts.logger);
+      }
+    }
+
+    await mkdir(targetSkillsDir, { recursive: true });
+    await writeFile(
+      markerPath,
+      `${JSON.stringify({ version, syncedAt: new Date().toISOString() }, null, 2)}\n`,
+    );
+    const why = !skillPresent
+      ? "skill missing"
+      : recorded === null
+        ? "no version marker"
+        : `version ${recorded ?? "?"} → ${version}`;
+    log(`autoviral: synced skills to ${targetSkillsDir} (${why})`);
+    return { synced: true, reason: why };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    warn(`autoviral: skill sync failed: ${message}`);
+    throw err;
+  }
+}

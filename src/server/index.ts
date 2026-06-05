@@ -2,14 +2,15 @@ import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { readFile } from "node:fs/promises";
-import { join, dirname } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { execSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import type { Server } from "node:http";
 import { loadConfig, dataDir } from "../infra/config.js";
 import { PACKAGE_ROOT } from "../infra/paths.js";
+import { syncSkills } from "../infra/skill-sync.js";
 import { initProviders } from "../providers/registry.js";
 import { ensureSharedDirs } from "../shared-assets.js";
 import { ensureSpawnPath } from "./spawn-path.js";
@@ -66,19 +67,19 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   // 3. Ensure shared asset directories
   await ensureSharedDirs();
 
-  // 3.5. Sync skills to ~/.claude/skills/ (agent reads from there)
-  // Anchor on PACKAGE_ROOT (not process.cwd()) so the bundled skills/ resolves
-  // inside a packaged Electron app where the working dir is not the repo root.
-  const projectSkills = join(PACKAGE_ROOT, "skills");
-  const installedSkills = join(homedir(), ".claude", "skills");
-  if (existsSync(projectSkills)) {
-    try {
-      execSync(`rsync -a --delete "${projectSkills}/" "${installedSkills}/"`, { stdio: "ignore" });
-      console.log("Skills synced to ~/.claude/skills/");
-    } catch {
-      console.warn("Warning: failed to sync skills to ~/.claude/skills/");
-    }
-  }
+  // 3.5. Sync the bundled skills into ~/.claude/skills/ so the EXTERNAL CLI agent
+  // reads the current autoviral skill. This is the keystone that makes the
+  // DESKTOP update path work: Electron never runs `npm postinstall`, so without a
+  // boot-time sync a desktop user's external agent would read a stale skill
+  // forever. The daemon spawned by `autoviral start` AND the daemon spawned by
+  // the Electron shell are the SAME process, so hooking here covers both routes.
+  //
+  // syncSkills is the SHARED core (also called by src/postinstall.ts): version-
+  // gated (skip when the marker already records this version + the skill is
+  // present), missing-skill recovery, symlink self-copy guard, and the .yaml /
+  // permitted_skills.md never-overwrite rule. Wrapped so a sync failure is logged
+  // but NEVER blocks boot — the daemon must come up even if skill sync can't.
+  await bootSyncSkills();
 
   // 4. Create WsBridge
   const wsBridge = new WsBridge(port);
@@ -194,6 +195,67 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   );
 
   return { server: httpServer };
+}
+
+/**
+ * Boot-time skill sync (covers npm CLI + Electron desktop in one place).
+ *
+ * Resolves the bundled skills/ off PACKAGE_ROOT (so it works inside a packaged
+ * Electron app where cwd ≠ repo root — `dist/` and `skills/` are siblings under
+ * app.asar.unpacked) and the install target as ~/.claude/skills. Delegates to the
+ * SHARED `syncSkills` core (version-gated, missing-skill recovery, symlink guard,
+ * yaml / permitted_skills.md exemption). Wrapped in try/catch: a sync failure is
+ * a `console.warn`, never a boot blocker — the daemon must always come up, even
+ * if skill sync can't (read-only HOME, permission denied, etc.). Runs ONCE per
+ * process (called from startServer), not per request.
+ */
+export async function bootSyncSkills(): Promise<void> {
+  try {
+    // syncSkills itself skips gracefully when the source dir is absent (e.g. a
+    // raw `tsx src/...` dev run where PACKAGE_ROOT=src/ has no bundled skills/),
+    // so we always delegate rather than pre-guarding here.
+    const sourceSkillsDir = join(PACKAGE_ROOT, "skills");
+    const targetSkillsDir = join(homedir(), ".claude", "skills");
+    await syncSkills({
+      sourceSkillsDir,
+      targetSkillsDir,
+      version: readPackageVersion(),
+      // Marker is a sibling of the per-skill dirs (NOT inside autoviral/), so a
+      // copy of autoviral/ can never delete it.
+      markerPath: join(targetSkillsDir, ".autoviral-synced.json"),
+    });
+  } catch (err) {
+    console.warn(
+      "Warning: failed to sync skills to ~/.claude/skills/:",
+      err instanceof Error ? err.message : err,
+    );
+  }
+}
+
+/**
+ * The package version, resolved by walking up from PACKAGE_ROOT to the nearest
+ * package.json with a `version`. Mirrors bridge/routes.ts readPackageVersion:
+ *   - packaged daemon: PACKAGE_ROOT = dist/, write-dist-pkg.mjs stamps the real
+ *     version into dist/package.json → found on step 0.
+ *   - dev/test: PACKAGE_ROOT = src/ (no package.json) → walk up to the repo root.
+ * The "0.0.0" fallback only fires if no manifest is reachable; it still lets the
+ * sync run on a missing-skill / no-marker target.
+ */
+function readPackageVersion(): string {
+  let dir = PACKAGE_ROOT;
+  for (let i = 0; i < 4; i++) {
+    try {
+      const raw = readFileSync(join(dir, "package.json"), "utf-8");
+      const v = (JSON.parse(raw) as { version?: unknown }).version;
+      if (typeof v === "string" && v.length > 0) return v;
+    } catch {
+      // no package.json here (or unparseable) — keep walking up.
+    }
+    const parent = resolve(dir, "..");
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return "0.0.0";
 }
 
 /**

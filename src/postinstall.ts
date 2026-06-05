@@ -1,10 +1,12 @@
 import { readdir, readFile, writeFile, mkdir, stat, rm, chmod } from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
+import { syncSkills } from "./infra/skill-sync.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -14,11 +16,30 @@ const __dirname = dirname(__filename);
 // skills/ is sibling to dist/ in the package
 const SOURCE_SKILLS = join(__dirname, "..", "skills");
 const TARGET_SKILLS = join(homedir(), ".claude", "skills");
+// Marker lives OUTSIDE the copied subtree (sibling of the per-skill dirs) so a
+// copy of autoviral/ never deletes it. Shared with the daemon boot hook.
+const SKILL_SYNC_MARKER = join(TARGET_SKILLS, ".autoviral-synced.json");
 
-// Files that should NEVER be overwritten (user's accumulated data)
+// Files that should NEVER be overwritten (user's accumulated data). Used by the
+// local copyDir below, which now only serves installSkillCreator (the autoviral
+// skill copy moved to the shared syncSkills core).
 const NEVER_OVERWRITE_EXTENSIONS = [".yaml"];
 // Files that should not be overwritten if they already exist (runtime-modified files)
 const NEVER_OVERWRITE_FILES = ["permitted_skills.md"];
+
+/** Read this package's version (dist/package.json sits next to the compiled
+ *  postinstall.js → `..`). Falls back to "0.0.0" if unreadable so the sync still
+ *  runs on a missing-skill target. */
+function readPackageVersion(): string {
+  try {
+    const raw = readFileSync(join(__dirname, "..", "package.json"), "utf-8");
+    const v = (JSON.parse(raw) as { version?: unknown }).version;
+    if (typeof v === "string" && v.length > 0) return v;
+  } catch {
+    // unreadable — fall through to the safe default.
+  }
+  return "0.0.0";
+}
 
 const SKILL_CREATOR_REPO = "https://github.com/anthropics/claude-plugins-official.git";
 const SKILL_CREATOR_PATH = "plugins/skill-creator/skills/skill-creator";
@@ -139,7 +160,16 @@ async function main(): Promise<void> {
     }
 
     console.log("autoviral: installing skills to ~/.claude/skills/");
-    await copyDir(SOURCE_SKILLS, TARGET_SKILLS);
+    // Shared core (also called at daemon boot). On install/update the version
+    // gate forces a copy (recorded marker version differs from this one, or the
+    // skill is freshly missing), preserving the old unconditional-install
+    // behaviour while NEVER clobbering the user's .yaml / permitted_skills.md.
+    await syncSkills({
+      sourceSkillsDir: SOURCE_SKILLS,
+      targetSkillsDir: TARGET_SKILLS,
+      version: readPackageVersion(),
+      markerPath: SKILL_SYNC_MARKER,
+    });
     console.log("autoviral: skills installed successfully");
 
     // Install skill-creator from official repo if not present
