@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import clsx from "clsx";
 import { Link, useLocation } from "react-router-dom";
 import { Glass } from "./Glass";
 import { ThemeToggle } from "./ThemeToggle";
@@ -7,6 +8,23 @@ import { useT, type MessageKey } from "@/i18n/useT";
 import { useSettingsPanelStore } from "@/stores/settings";
 import { SettingsPanel } from "@/features/settings/SettingsPanel";
 import styles from "./TopNav.module.css";
+
+declare global {
+  interface Window {
+    autoviralDesktop?: { isDesktop?: boolean; version?: string; platform?: string };
+  }
+}
+
+// macOS Electron uses titleBarStyle:"hiddenInset" (desktop/main.ts) — a chrome-less
+// window whose ONLY draggable surface must be declared by the renderer via CSS
+// `-webkit-app-region: drag`. We make the TopNav glass bar that handle (.macDrag in
+// TopNav.module.css), gated to mac-desktop so the browser build and Windows (which
+// keeps its native title bar) are untouched. app-region is a pure hit-testing hint —
+// zero visual change to the editorial-glass look.
+const isMacDesktop =
+  typeof window !== "undefined" &&
+  window.autoviralDesktop?.isDesktop === true &&
+  window.autoviralDesktop?.platform === "darwin";
 
 const TABS: Array<{ to: string; key: MessageKey }> = [
   { to: "/", key: "topnav.works" },
@@ -40,7 +58,7 @@ export function TopNav() {
 
   return (
     <>
-      <header className={styles.outer}>
+      <header className={clsx(styles.outer, isMacDesktop && styles.macDrag)}>
         <Glass className={styles.inner}>
           <Link to="/" className={styles.brand}>
             <div className={styles.logo}>A</div>

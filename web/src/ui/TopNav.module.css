@@ -5,6 +5,25 @@
   margin: 12px auto 0;
   max-width: 1280px;
   padding: 0 24px;
+  /* Promote the sticky glass nav to its own compositor layer so its
+     backdrop-filter only re-samples within its own box during scroll, instead
+     of inflating the dirty rect over the works grid below. No visual change. */
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+/* macOS desktop: the chrome-less hiddenInset window (desktop/main.ts) delegates
+   window-drag to the renderer. Make the glass nav bar the drag handle and opt
+   the interactive clusters back out so their clicks still fire. `-webkit-app-region`
+   is a pure hit-testing hint — it changes NOTHING visually. Gated to mac-desktop
+   via the .macDrag class (TopNav.tsx) so the browser build + Windows are untouched. */
+.macDrag .inner {
+  -webkit-app-region: drag;
+}
+.macDrag .brand,
+.macDrag .tabs,
+.macDrag .right {
+  -webkit-app-region: no-drag;
 }
 .inner {
   display: flex;
