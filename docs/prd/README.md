@@ -42,3 +42,5 @@
 | [0002](0002-v0.1.1-extensibility-foundation-and-cleanup.md) | v0.1.1 可扩展性奠基与结构清债（ContentTypeRegistry / 单一 MediaProvider / carousel skill+CLI / AGENT.md 双轨 / api.ts 拆分 / migrations 骨架） | Draft | 2026-06-03 |
 | [0003](0003-v0.1.2-zero-friction-setup.md) | v0.1.2 一揽子（§1 外部依赖自举 · §2 TTS 网关一致性 Gemini-via-OpenRouter+edge · §3 素材库+时间线交互 对齐 pro 编辑器 · §4 agent 视觉自检 snapshot · §5 多对话/多终端会话 新建+保留+跳回〔需 ADR-008〕） | Active | 2026-06-04 |
 | [0004](0004-v0.1.3-wire-the-nle-to-agents.md) | v0.1.3 把 NLE 接通到 Agent（M1 @shared 意图 ops 共享核心〔需 ADR-009〕 · M2-M3 patch+preflight · M4 写路径 broadcast · M5-M7 意图动词+CLI+错误码 · M8 ASR 字幕 · M9 preset 真生效 · M10 止谎 · M11 基础画面操作 crop/fit-fill/比例/翻转/倒放/定格 · M12 undo+checkpoint restore） | Draft | 2026-06-04 |
+| [0005](0005-v0.1.5-bug-backlog-issue-slices.md) | v0.1.5 bug backlog（9 个对抗验证过的真 bug；docs-only tracker，非 PRD 而是 issue 切片直存） | Active | 2026-06-05 |
+| [0006](0006-v0.1.5-inspiration-data-redesign.md) | v0.1.5 诚实的数据 + 有根的教练（灵感 & 数据两页重做：D1 接已有 per-work 数据 · D2 benchmark 带 · D3 洞察诚实护栏 · D4 托管 venv 重建抖音采集器 · D5 持久策略 coach · 删人口卡换诚实空态） | Draft | 2026-06-05 |
