@@ -135,7 +135,13 @@ jobs:
   # ── Publish the npm package (the self-contained "autoviral" form factor) ────
   publish-npm:
     name: publish to npm
-    needs: desktop
+    # MUST list verify-version — `needs.verify-version.outputs.version` is only
+    # readable when verify-version is in THIS job's needs. With `needs: desktop`
+    # alone it resolved to "" → the idempotency check ran `npm view "autoviral@"`
+    # (= latest, which exists) → publish was silently SKIPPED for every release
+    # after 0.1.0 (0.1.1 + 0.1.3 never reached npm). desktop already needs
+    # verify-version, but transitive needs do NOT expose outputs.
+    needs: [verify-version, desktop]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -173,6 +179,14 @@ jobs:
       # here. If autoviral@<version> is already on the registry, skip the publish.
       - name: Publish
         run: |
+          # Defence-in-depth: an EMPTY version must be a loud failure, never a
+          # silent skip. A blank ${VERSION} turns the check into `npm view
+          # "autoviral@"` (= latest, which exists) and skips publish forever —
+          # exactly the bug that kept 0.1.1/0.1.3 off npm.
+          if [ -z "${VERSION}" ]; then
+            echo "::error::VERSION is empty — refusing to publish blindly. Is verify-version in publish-npm's needs?" >&2
+            exit 1
+          fi
           if npm view "autoviral@${VERSION}" version >/dev/null 2>&1; then
             echo "autoviral@${VERSION} already on npm — skipping publish (idempotent re-run)."
           else
