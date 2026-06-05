@@ -12,9 +12,25 @@ html, body {
 
 body {
   min-height: 100vh;
-  background: var(--bg-grad);
-  background-attachment: fixed;
+  /* Solid base only (var(--bg) inherited from the html,body rule above). The
+     ambient gradient moved to body::after — see below. */
   overflow-x: hidden;
+}
+
+/* Ambient corner glows — moved OFF the scrolling body background onto a fixed,
+   own-layer decorative element. `background-attachment: fixed` on a multi-radial
+   gradient forces a viewport-sized repaint on EVERY scroll frame (a known
+   Chromium scroll-perf killer and a prime cause of the Works-list scroll jank).
+   A fixed pseudo-element keeps the IDENTICAL viewport-anchored look (the radials
+   are corner-anchored to the viewport, not the document) on its own compositor
+   layer that scrolling never dirties. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--bg-grad);
 }
 
 /* Ambient grain overlay */
@@ -27,6 +43,9 @@ body::before {
   opacity: 0.035;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence baseFrequency='0.9' seed='3'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
   mix-blend-mode: overlay;
+  /* Promote this fixed full-viewport blend layer to its own compositor layer so
+     it isn't re-rasterized against the scrolling backdrop every frame. */
+  transform: translateZ(0);
 }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }

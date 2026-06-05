@@ -62,9 +62,12 @@ img.thumb, video.thumb { object-fit: cover; }
   font-size: 9px;
   letter-spacing: 0.1em;
   border-radius: 5px;
-  background: rgba(10,11,15,0.55);
+  /* Flat fill over the OPAQUE cover photo — was backdrop-filter: blur(8px),
+     which blurs the photo beneath (not glass) and adds one blur surface PER
+     CARD, multiplying the per-scroll-frame composite cost. Alpha bumped
+     0.55 -> 0.62 to compensate for the lost blur's legibility. */
+  background: rgba(10,11,15,0.62);
   color: rgba(255,255,255,0.85);
   border: 1px solid rgba(255,255,255,0.12);
-  backdrop-filter: blur(8px);
 }
 .badgeDraft { color: var(--accent); border-color: var(--accent); }

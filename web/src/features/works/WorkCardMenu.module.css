@@ -5,8 +5,11 @@
   z-index: 2;
 }
 .trigger {
-  background: var(--surface-1);
-  backdrop-filter: blur(8px);
+  /* Flat fill — was backdrop-filter: blur(8px); removed because WorkCardMenu is
+     mounted for EVERY card, so its blur surface multiplies the per-scroll-frame
+     composite cost. Bumped to the more opaque surface-2 since it sits over the
+     cover photo (not glass); it's opacity:0 until hover anyway. */
+  background: var(--surface-2);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-sm);
   color: var(--text);
