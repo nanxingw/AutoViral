@@ -49,7 +49,15 @@ export function TrendingPanel({
         </div>
       )}
       {list.map((item, idx) => (
-        <div key={item.id} className={styles.row}>
+        // Key by platform+rank, NOT item.id. The youtube/tiktok collectors have
+        // emitted items with DUPLICATE ids (22 youtube items all
+        // "youtube_d1085ffa"; tiktok partially), and React reconciliation breaks
+        // on colliding keys — old rows fail to unmount on platform switch, so the
+        // body got stuck on the previous platform's cards and accumulated stale
+        // rows (the "stuck on tiktok / can't change" report). A ranked snapshot's
+        // stable identity IS its (platform, position); changing platform changes
+        // every key → clean remount, no stale rows, robust to duplicate ids.
+        <div key={`${platform}-${idx}`} className={styles.row}>
           <div className={styles.rank}>{String(idx + 1).padStart(2, "0")}</div>
           <div className={styles.body}>
             {item.analysis && (
