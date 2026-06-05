@@ -7,6 +7,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-06-05
+
+桌面端 bug 修复（用户在 0.1.3 桌面 app 实测发现；经"诊断 → 多纬度浏览器复现 → 验证"三段 Workflow 定位 + DOM/computed-style 二确——静态分析三次误判"无 bug"，浏览器实践揪出真因）。
+
+### Fixed
+- **Explore 热门切换不再锁死** — 切到 YouTube/TikTok 后再切其他平台，热门列表曾卡在旧平台卡片并累积串台（count 漂移 22→43→32→25）。根因：youtube 采集数据 22 个 item **共用同一 id**（tiktok 部分重复），而 `TrendingPanel` 按 `key={item.id}` 渲染 → React 列表协调遇重复 key 崩坏、旧行不卸载。改为 `key={`${platform}-${idx}`}`：排名快照按（平台,位置）键控，切平台整列干净重挂，对**任何**重复-id 数据健壮。
+- **macOS 窗口可拖动** — `titleBarStyle:"hiddenInset"` 的无边框窗口把拖动交给渲染层 `-webkit-app-region: drag`，但前端从未声明拖动区 → 整窗不可拖。补：TopNav 玻璃条加 mac-gated 拖动区 + 交互控件 `no-drag`（经已暴露的 `window.autoviralDesktop.platform` 判定；浏览器/Windows 不受影响，`-webkit-app-region` 是纯命中测试，零视觉改动）。
+- **release.yml npm publish 不再静默跳过** — `publish-npm` 补 `needs: verify-version`：此前 `VERSION` 解析为空 → 幂等检查命中 latest → `npm publish` 自 0.1.0 后每版被静默 skip（0.1.1/0.1.3 从未上 npm）。0.1.4 起恢复正常发布（带 provenance），并加空-VERSION 硬失败守卫。
+
+### Changed
+- **Works 滚动性能** — 作品页滚动卡顿（合成/绘制过载，非 JS）。每卡 `backdrop-filter: blur` 改平涂（盖在不透明封面上近无差，省去 2N 个 blur 面）、环境渐变从 `background-attachment: fixed` 搬到 fixed `body::after` 层、噪点 + sticky 导航 `translateZ(0)` 提层。保留 editorial-glass 观感（computed-style 二确 light+dark + 滚动中）。content-visibility / 虚拟化留待 profiling 后续。
+
 ## [0.1.3] - 2026-06-05
 
 **把 NLE 接通给 agent**（PRD-0004）。核心命题：任意 CLI agent 经 `autoviral` CLI 驱动剪辑，与人在 UI 操作产出一致——调研坐实"意图级编辑能力是 built-but-human-only"，本版把**写路径**补齐。keystone = [ADR-009](docs/adr/ADR-009-shared-composition-ops-core.md)：意图级 mutation 单一实现放 `@shared/composition/ops`，前端 store（immer draft）与后端 bridge（parsed object）共消费同一份纯函数，永久消除前后端漂移。21 个纵切片，每片切穿 schema→@shared ops→bridge/CLI→UI→test 端到端可验证；命题核心经两轮多纬度浏览器 E2E（agent-CLI 驱动 vs 人-UI 各纬度，截图 + DOM/computed-style 二确）证明。
