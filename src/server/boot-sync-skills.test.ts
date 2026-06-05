@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { existsSync } from "node:fs";
 import { PACKAGE_ROOT } from "../infra/paths.js";
 
 // The daemon boot hook must (1) invoke the shared syncSkills core with the
@@ -23,7 +24,7 @@ describe("bootSyncSkills (daemon boot hook)", () => {
     vi.restoreAllMocks();
   });
 
-  it("calls syncSkills with PACKAGE_ROOT/skills source, ~/.claude/skills target, version + sibling marker", async () => {
+  it("points syncSkills at a source dir that ACTUALLY holds the bundled autoviral skill (not a phantom dist/skills)", async () => {
     syncSkillsMock.mockResolvedValue({ synced: true, reason: "skill missing" });
     const { bootSyncSkills } = await import("./index.js");
 
@@ -36,7 +37,18 @@ describe("bootSyncSkills (daemon boot hook)", () => {
       version: string;
       markerPath: string;
     };
-    expect(arg.sourceSkillsDir).toBe(join(PACKAGE_ROOT, "skills"));
+    // BEHAVIOUR — the assertion that catches a wrong source path: the dir the
+    // boot hook points at must REALLY exist and hold the bundled skill. If it
+    // doesn't, syncSkills hits its `!existsSync(sourceSkillsDir)` early return
+    // and silently syncs NOTHING — and boot-sync is the ONLY sync route the
+    // Electron desktop update path has (it never runs npm postinstall).
+    expect(existsSync(arg.sourceSkillsDir)).toBe(true);
+    expect(existsSync(join(arg.sourceSkillsDir, "autoviral", "SKILL.md"))).toBe(true);
+    // Resolves the SAME sibling-of-dist way postinstall does
+    // (postinstall.ts: join(__dirname, "..", "skills")), so the two install
+    // routes can never diverge again. PACKAGE_ROOT === dist/ (packaged) or src/
+    // (dev), and skills/ is its SIBLING, so the source is PACKAGE_ROOT/../skills.
+    expect(arg.sourceSkillsDir).toBe(join(PACKAGE_ROOT, "..", "skills"));
     expect(arg.targetSkillsDir).toBe(join(homedir(), ".claude", "skills"));
     // Marker lives OUTSIDE the copied subtree (sibling of autoviral/).
     expect(arg.markerPath).toBe(

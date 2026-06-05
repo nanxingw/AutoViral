@@ -18,6 +18,7 @@ All notable changes to this project will be documented in this file.
 - **基础画面操作** — fit-fill 填充模式（cover / contain-letterbox / blur-bg）/ crop + 翻转镜像（`crop{x,y,w,h}` + `flipH/flipV`，Remotion preview + ffmpeg export **双消费**）/ 倒放（ffmpeg 真倒放 + preview 明示"仅导出生效"占位，不造假 WYSIWYG）+ 定格（`freezeAtSec` preview+export 双生效）/ 画布比例一键切换（9:16 ↔ 1:1 ↔ 16:9 ↔ 4:5，按比例适配既有 clip 的 static + keyframe 偏移）。所有新字段均有渲染器/ffmpeg 消费断言（防死字段）。
 - **编辑安全网** — clip 级 undo + Cmd/Ctrl+Z（覆盖 split/trim/move/set/delete/ripple-delete/collapse-gaps）/ agent 可达 `checkpoint list` · `checkpoint restore`（**restore 前自动快照当前态防丢数据**，可逆）。
 - **写路径改完即刷新** — 写 chokepoint `mutateCompositionFor`/`mutateCarouselFor` 成功落盘后经注入式 `onCommitted` 回调广播 `composition-changed`/`carousel-changed`，前端无需 reload 即反映（composition-ops 不耦合 event bus）；**carousel Editor 页接上 bridge 订阅**（此前结构性未接通）。`fs.watch` 降为兜底。
+- **CLI agent 的 skill 自动保活** — `~/.claude/skills` 在两条更新路径都同步 bundled skill：npm 安装/更新（postinstall）与 Electron 桌面端更新（daemon boot），共用单一 `syncSkills` 核心（版本门控只在缺失或版本变时动手、缺失自愈、symlink 守卫尊重 dev live-edit、保留用户 `.yaml`/`permitted_skills.md`、裁剪旧布局 orphan）。外部 CLI agent（claude / codex / kimi / aider / gemini）加载的 autoviral 操作手册永远跟随包版本——含本版 `manual/{video,carousel}` 分轨重构。桌面端 boot 路径源目录解析（`skills/` 是 `dist/` 的 sibling，非 `dist/skills`）经真实重启 daemon 端到端验证：marker 写 `0.1.3`、安装态 `diff -rq` 归零。
 
 ### Changed
 - **错误码契约两端打通** — 所有 4xx 校验错带 `code:4`，`client.ts` 按退出码分支：4xx→exit 4 / 5xx→exit 3 / `ask` timeout→124，agent 可据退出码做控制流。CLI 集成测试接入标准 gate。

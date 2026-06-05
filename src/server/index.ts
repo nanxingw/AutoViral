@@ -200,21 +200,24 @@ export async function startServer(port: number): Promise<{ server: Server }> {
 /**
  * Boot-time skill sync (covers npm CLI + Electron desktop in one place).
  *
- * Resolves the bundled skills/ off PACKAGE_ROOT (so it works inside a packaged
- * Electron app where cwd ≠ repo root — `dist/` and `skills/` are siblings under
- * app.asar.unpacked) and the install target as ~/.claude/skills. Delegates to the
- * SHARED `syncSkills` core (version-gated, missing-skill recovery, symlink guard,
- * yaml / permitted_skills.md exemption). Wrapped in try/catch: a sync failure is
- * a `console.warn`, never a boot blocker — the daemon must always come up, even
- * if skill sync can't (read-only HOME, permission denied, etc.). Runs ONCE per
+ * Resolves the bundled skills/ as a SIBLING of PACKAGE_ROOT — `dist/` and
+ * `skills/` sit side by side in the npm tarball (the `files` array ships both as
+ * top-level entries) AND under app.asar.unpacked in the packaged Electron app, so
+ * the source is `PACKAGE_ROOT/../skills`, NOT `PACKAGE_ROOT/skills`. This mirrors
+ * postinstall.ts's `join(__dirname, "..", "skills")` so the npm-install route and
+ * the desktop boot route resolve to the very same directory (boot-sync-skills
+ * test pins this). Install target is ~/.claude/skills. Delegates to the SHARED
+ * `syncSkills` core (version-gated, missing-skill recovery, symlink guard, yaml /
+ * permitted_skills.md exemption). Wrapped in try/catch: a sync failure is a
+ * `console.warn`, never a boot blocker — the daemon must always come up, even if
+ * skill sync can't (read-only HOME, permission denied, etc.). Runs ONCE per
  * process (called from startServer), not per request.
  */
 export async function bootSyncSkills(): Promise<void> {
   try {
-    // syncSkills itself skips gracefully when the source dir is absent (e.g. a
-    // raw `tsx src/...` dev run where PACKAGE_ROOT=src/ has no bundled skills/),
-    // so we always delegate rather than pre-guarding here.
-    const sourceSkillsDir = join(PACKAGE_ROOT, "skills");
+    // skills/ is a SIBLING of dist/ (= PACKAGE_ROOT), so go up one then into
+    // skills/. syncSkills still skips gracefully if the dir is ever absent.
+    const sourceSkillsDir = join(PACKAGE_ROOT, "..", "skills");
     const targetSkillsDir = join(homedir(), ".claude", "skills");
     await syncSkills({
       sourceSkillsDir,
