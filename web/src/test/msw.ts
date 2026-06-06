@@ -70,6 +70,10 @@ export const handlers = [
       delta: null,
     }),
   ),
+  // PRD-0006 S12 — agent insights endpoint (D3-filtered server-side). Default
+  // to empty so the page falls back to the creator-snapshot insights; specific
+  // tests override with `mswServer.use(...)`.
+  http.get("/api/analytics/insights", () => HttpResponse.json({ insights: [] })),
   http.get("/api/memory/profile", () =>
     HttpResponse.json({ tags: ["High-aesthetic sports blogger", "Data-driven storytelling", "Fast-paced editing"] }),
   ),

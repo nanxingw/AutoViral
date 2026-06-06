@@ -10,7 +10,10 @@ import {
   getCreatorHistory,
   collectData,
   isCollectorAvailable,
+  CollectorRunError,
 } from "../../domain/analytics-collector.js";
+import { generateHonestInsights } from "../../domain/generate-insights.js";
+import { runCliBrief } from "../../cli-brief.js";
 
 export const analyticsRouter = new Hono();
 
@@ -51,18 +54,47 @@ analyticsRouter.get("/api/analytics/creator/history", async (c) => {
   return c.json({ history })
 })
 
-// POST /api/analytics/refresh — manually trigger a Douyin data collection
+// GET /api/analytics/insights — PRD-0006 S12. A local agent reads the user's
+// real on-disk works and emits candidate "最新洞察"; the output is filtered
+// through D3 (insight-guardrail) so anything citing a metric AutoViral never
+// measured (retention / 完播 / hook-timing) is rejected. Always 200 with an
+// `insights` array — degrades to [] (honest empty state) on any failure rather
+// than erroring the page.
+analyticsRouter.get("/api/analytics/insights", async (c) => {
+  try {
+    const insights = await generateHonestInsights({
+      getLatestCreatorData,
+      // Cheap one-shot agent call; insight synthesis over <=12 short works is
+      // fast, so a tighter timeout than the trends default is fine.
+      runAgent: (prompt) => runCliBrief(prompt, 60000),
+    });
+    return c.json({ insights });
+  } catch {
+    return c.json({ insights: [] });
+  }
+});
+
+// POST /api/analytics/refresh — manually trigger a real Douyin data collection.
+//
+// PRD-0006 §D4 / slice S5: the collector is RESTORED (managed-venv f2 +
+// browser_cookie3), so this NO LONGER hard-501s. It runs the scrape and maps a
+// structured CollectorError → an HTTP status + an `errorCode` the UI localizes
+// into an ACTIONABLE prompt (e.g. an expired cookie → 401 collector_relogin →
+// "log into douyin.com and close your browser, then retry"), instead of a
+// silent empty page. The browser sessionid cookie is read locally by the Python
+// script and never leaves the machine.
 analyticsRouter.post("/api/analytics/refresh", async (c) => {
-  // #72 — the collector script was removed in the refactor. Tell the client
-  // honestly (501 + retired code) instead of spawning a doomed python3 and
-  // returning a generic "collect_failed" 500 that the UI swallowed silently.
+  // Honest pre-flight: the managed venv (f2 + browser_cookie3) must be
+  // provisioned before a scrape can run. If not, point the user at `autoviral
+  // setup` (503) rather than spawning a doomed python3.
   if (!isCollectorAvailable()) {
     return c.json(
       {
-        error: "Analytics collection was retired in the agentic-terminal refactor.",
-        errorCode: "analytics_collection_retired",
+        error:
+          "Collector dependencies (f2 + browser_cookie3) are not installed. Run `autoviral setup`.",
+        errorCode: "collector_not_ready",
       },
-      501
+      503
     );
   }
   const config = await loadConfig();
@@ -75,17 +107,28 @@ analyticsRouter.post("/api/analytics/refresh", async (c) => {
   }
   try {
     const data = await collectData(douyinUrl);
-    if (!data) {
-      return c.json(
-        { error: "Collection returned no data", errorCode: "collect_failed" },
-        500
-      );
-    }
     return c.json({
       collectedAt: data.collected_at,
       worksCount: data.works.length,
     });
   } catch (err) {
+    // Structured collector failure → actionable, localizable error. Auth/cookie
+    // failures (needsRelogin) get a distinct code + 401 so the UI shows the
+    // "re-login" CTA; everything else is a 500 collect_failed.
+    if (err instanceof CollectorRunError) {
+      const { code, message, needsRelogin } = err.detail;
+      if (needsRelogin) {
+        return c.json(
+          { error: message, errorCode: "collector_relogin", collectorCode: code },
+          401
+        );
+      }
+      const status = code === "DEPENDENCY_ERROR" ? 503 : 500;
+      return c.json(
+        { error: message, errorCode: "collect_failed", collectorCode: code },
+        status
+      );
+    }
     return c.json(
       { error: String(err), errorCode: "collect_failed" },
       500

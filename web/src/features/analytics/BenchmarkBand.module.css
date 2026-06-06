@@ -1,0 +1,70 @@
+/* D2 benchmark band — sits under a KPI number. Editorial · cool · glass:
+   a thin baseline rail with the same-tier band highlighted in accent and a
+   marker for the user's value, plus a mono diagnostic line. Restrained. */
+.band {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 8px;
+  max-width: 220px;
+}
+
+/* The rail: full track is dim, the same-tier band is accent-tinted, and the
+   marker pins the user's value. */
+.rail {
+  position: relative;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: visible;
+}
+.range {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 999px;
+  background: var(--accent-lo, var(--accent));
+  opacity: 0.5;
+}
+.marker {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  margin-left: -3.5px;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--surface-1);
+}
+
+/* Below-band marker reads cooler/quieter; above-band keeps full accent. */
+.band[data-band="below"] .marker { background: var(--text-dim); }
+
+.diagnostic {
+  margin: 0;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  line-height: 1.4;
+  letter-spacing: 0.01em;
+  color: var(--text-dim);
+}
+.reassure {
+  margin: 0;
+  font-family: "Inter", sans-serif;
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--text-dimmer);
+  font-style: italic;
+}
+/* Honesty label: a reference-only band is visibly demoted so it is never read
+   as a same-platform judgement. */
+.reference {
+  margin: 0;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dimmer);
+  opacity: 0.85;
+}

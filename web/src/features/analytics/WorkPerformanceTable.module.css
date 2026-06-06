@@ -1,0 +1,94 @@
+.card {
+  margin: 8px 0 18px;
+  padding: 20px;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-1);
+  border-radius: var(--radius-lg);
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin: 0 0 14px;
+}
+.h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.h2 em {
+  font-family: "Instrument Serif", serif;
+  font-style: italic;
+  color: var(--text);
+  font-size: 15px;
+}
+.count {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-dimmer);
+  text-transform: uppercase;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+}
+.table thead th {
+  text-align: right;
+  padding: 6px 10px;
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dimmer);
+  border-bottom: 1px solid var(--glass-border);
+  white-space: nowrap;
+}
+.table thead th.descCol {
+  text-align: left;
+  width: 100%;
+}
+.sortBtn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.sortBtn:hover { color: var(--text); }
+.sortBtnActive { color: var(--accent); }
+.arrow { margin-left: 4px; opacity: 0.7; }
+.table tbody td {
+  padding: 9px 10px;
+  text-align: right;
+  color: var(--text);
+  border-bottom: 1px solid var(--surface-1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.table tbody tr:last-child td { border-bottom: none; }
+.table tbody tr:hover td { background: var(--surface-2); }
+.desc {
+  text-align: left;
+  color: var(--text-dim);
+  max-width: 0;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: "Inter", sans-serif;
+}
+.rank {
+  font-family: "Instrument Serif", serif;
+  font-style: italic;
+  color: var(--text-dimmer);
+  text-align: left;
+  padding-right: 4px;
+}

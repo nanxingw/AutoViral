@@ -10,7 +10,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { writeFile, readFile, rm } from "node:fs/promises";
+import { writeFile, readFile, rm, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
@@ -33,6 +33,12 @@ import {
   findIdleSessions,
   type SessionRecord,
 } from "./server/sessions/sessions-sidecar.js";
+import {
+  buildCoachSystemPrompt,
+  isCoachKey,
+  COACH_DEFAULT_MODEL,
+} from "./domain/coach-session.js";
+import { assembleCoachContext } from "./domain/coach-context.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -375,10 +381,26 @@ export class WsBridge {
     if (perWork.size === 0) this.sessions.delete(workId);
   }
 
-  /** Sidecar for a work (no-op for ephemeral trend keys). */
+  /**
+   * Sidecar for a session key. Returns null ONLY for ephemeral `trends_` keys
+   * (intentionally history-less). A `coach_` key DOES get a real sidecar — the
+   * research/strategy coach is a PERSISTED session whose history survives reload
+   * (PRD-0006 D5). A normal work id gets one too.
+   */
   private sidecarFor(workId: string): SessionSidecar | null {
     if (workId.startsWith("trends_")) return null;
     return new SessionSidecar(workId);
+  }
+
+  /**
+   * True iff `key` names a real Work (has a work.yaml record + checkpointable
+   * deliverable). False for the two workless session kinds: ephemeral `trends_`
+   * and the persisted `coach_`. Guards the work-record-only side effects
+   * (getWork / syncMessage / createCheckpoint) so a coach turn doesn't try to
+   * checkpoint a non-existent composition or look up a missing work.
+   */
+  private isWorkBound(key: string): boolean {
+    return !key.startsWith("trends_") && !isCoachKey(key);
   }
 
   // ── Session management ───────────────────────────────────────────────────
@@ -409,7 +431,14 @@ export class WsBridge {
     if (workId.startsWith("trends_")) return;
     const sid = this.resolveSessionId(sessionId);
     const chatFile = chatLogPath(workId, sid);
-    appendFile(chatFile, JSON.stringify(block) + "\n", "utf-8").catch(() => {});
+    // Ensure the session dir exists before appending. Work dirs are pre-created,
+    // but a workless persisted coach (`coach_*`) session has no pre-made dir, so
+    // the append would ENOENT and silently drop history. mkdir(recursive) is
+    // idempotent, so this is a no-op for real works.
+    const dir = join(dataDir, "works", workId);
+    void mkdir(dir, { recursive: true })
+      .then(() => appendFile(chatFile, JSON.stringify(block) + "\n", "utf-8"))
+      .catch(() => {});
   }
 
   /**
@@ -610,6 +639,139 @@ export class WsBridge {
   }
 
   /**
+   * Assemble the coach's grounding context (works + selected-platform trends +
+   * interests) from disk, then build the research/strategy system prompt
+   * (D5, PRD-0006). Lazy by construction: the pure builder caps + budgets the
+   * works block, so we never embed the full library every turn. Falls back to a
+   * trends/interests-only prompt if the scrape is missing (honest thin-data).
+   */
+  private async buildCoachPrompt(platform: string): Promise<string> {
+    const { getLatestCreatorData } = await import("./domain/analytics-collector.js");
+    const ctx = await assembleCoachContext(platform, {
+      getLatestCreatorData,
+      getTrendTopics: async (p) => {
+        // Read the on-disk trends artifact for the selected platform and pull
+        // out topic titles (data.json `{topics:[{title}]}` written by the
+        // research agent). Missing/unreadable → [] (honest empty, no fake).
+        try {
+          const file = join(homedir(), ".autoviral", "trends", p, "data.json");
+          const raw = await readFile(file, "utf-8");
+          const data = JSON.parse(raw) as { topics?: Array<{ title?: string }> };
+          return (data.topics ?? [])
+            .map((t) => t?.title)
+            .filter((t): t is string => typeof t === "string" && t.length > 0)
+            .slice(0, 12);
+        } catch {
+          return [];
+        }
+      },
+      getInterests: async () => {
+        try {
+          const cfg = await loadConfig();
+          return cfg.interests ?? [];
+        } catch {
+          return [];
+        }
+      },
+    });
+    return buildCoachSystemPrompt(ctx);
+  }
+
+  /**
+   * Create (or restart) the PERSISTED research/strategy coach session for a
+   * coach key (`coach_*`). Unlike the ephemeral `trends_` session this one is
+   * sidecar-backed (history survives reload). The coach runs on a SESSION-SCOPED
+   * model (`COACH_DEFAULT_MODEL` by default, or `opts.model`) — never the global
+   * `config.model`, so switching the coach's tier can't steal the editing
+   * agent's tier (the bug S6 fixes). `initialPrompt` is the user's first message;
+   * we prepend the grounded coach system prompt on the FIRST turn only (resume
+   * keeps the agent's existing context).
+   */
+  async createCoachSession(
+    coachKey: string,
+    initialPrompt: string,
+    opts: { platform?: string; model?: string } = {},
+  ): Promise<WsSession> {
+    if (!isCoachKey(coachKey)) {
+      throw new Error(`createCoachSession requires a coach_* key, got "${coachKey}"`);
+    }
+    const sid = DEFAULT_CHAT_SESSION_ID;
+    const platform = opts.platform ?? "douyin";
+    const model = opts.model ?? COACH_DEFAULT_MODEL;
+    logBridge("coach_session_create", coachKey, { model, platform, promptLen: initialPrompt.length });
+
+    const existing = this.getSessionEntry(coachKey, sid);
+    if (existing?.cliProcess) {
+      try { existing.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
+    }
+
+    // Persisted: ensure the sidecar record exists BEFORE spawn so a refresh
+    // recovers the coach session (sidecarFor returns a real sidecar for coach_).
+    await this.ensureSidecarRecord(coachKey, sid).catch(() => {});
+
+    const session: WsSession = {
+      workId: coachKey,
+      sessionId: sid,
+      idle: false,
+      browserSockets: existing?.browserSockets ?? new Set(),
+      messageHistory: existing?.messageHistory ?? [],
+      // SESSION-scoped model — bound to THIS session, not config.model.
+      model,
+    };
+    this.setSessionEntry(coachKey, sid, session);
+
+    // Load persisted history (survives restart) from the coach's own chat log.
+    try {
+      const raw = await readFile(chatLogPath(coachKey, sid), "utf-8");
+      const blocks: ChatBlock[] = [];
+      for (const line of raw.split("\n")) {
+        if (!line.trim()) continue;
+        try { blocks.push(JSON.parse(line)); } catch { /* skip malformed */ }
+      }
+      if (blocks.length > 0) session.messageHistory = blocks;
+    } catch { /* no prior history */ }
+
+    // Resume the cliSessionId from the sidecar if we have one; else first turn.
+    let resumeId: string | undefined;
+    try {
+      const record = await this.sidecarFor(coachKey)?.get(sid);
+      if (record?.cliSessionId) resumeId = record.cliSessionId;
+      if (resumeId) session.cliSessionId = resumeId;
+    } catch { /* ignore */ }
+
+    if (resumeId) {
+      this.spawnCli(session, initialPrompt, resumeId);
+    } else {
+      const systemPrompt = await this.buildCoachPrompt(platform);
+      this.spawnCli(session, systemPrompt + "\n\n---\n\n用户消息：" + initialPrompt);
+    }
+    return session;
+  }
+
+  /**
+   * Set the model alias for ONE live session, scoped to that (workId,
+   * sessionId) — the SESSION-scoped model fix (PRD-0006 D5). The old
+   * ModelSwitcher wrote the GLOBAL `config.model`, so changing the coach's tier
+   * also changed the editing agent's tier. This mutates only the in-memory
+   * session; the new tier binds on the session's NEXT spawn (killing the live
+   * CLI forces a respawn). Returns true if the session existed.
+   */
+  setSessionModel(workId: string, model: string, sessionId?: string): boolean {
+    const sid = this.resolveSessionId(sessionId);
+    const session = this.getSessionEntry(workId, sid);
+    if (!session) return false;
+    session.model = model;
+    // Force a respawn on the next turn so the new tier takes effect, without
+    // touching any OTHER session's model (or the global config).
+    if (session.cliProcess) {
+      try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
+      session.cliProcess = undefined;
+      session.idle = true;
+    }
+    return true;
+  }
+
+  /**
    * Send a follow-up message using --resume + new -p.
    * Kills current CLI (if busy) and spawns a new one that resumes the session.
    */
@@ -639,7 +801,7 @@ export class WsBridge {
     // user echo is per-session state (ADR-008 §3 — only focus is work-scoped),
     // so route it to THIS session's sockets, not every chat on the work.
     this.broadcastToSession(workId, sid, { event: "block", data: { ...userBlock, sessionId: sid } });
-    if (!workId.startsWith("trends_")) {
+    if (this.isWorkBound(workId)) {
       getWork(workId).then(w => {
         if (!w) return;
         syncMessage(workId, w.title, "chat", "user", text).catch(() => {});
@@ -666,8 +828,9 @@ export class WsBridge {
     // Bump lastActive (and seed preview if empty) in the sidecar.
     this.bumpSessionActivity(workId, sid, displayText).catch(() => {});
 
-    // Real-time memory sync — user message (D3: no pipeline keyed sync)
-    if (!workId.startsWith("trends_")) {
+    // Real-time memory sync — user message (D3: no pipeline keyed sync).
+    // Coach sessions are workless, so they skip memory sync + checkpointing.
+    if (this.isWorkBound(workId)) {
       getWork(workId).then(w => {
         if (!w) return;
         syncMessage(workId, w.title, "chat", "user", text).catch(() => {});
@@ -1114,18 +1277,19 @@ export class WsBridge {
             // sessions live solely in their chat-{sessionId}.jsonl (already
             // appended block-by-block above), so a non-default turn must NOT
             // clobber chat.json with the wrong session's history.
-            if (!session.workId.startsWith("trends_")) {
+            if (this.isWorkBound(session.workId)) {
               if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
                 saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
               }
               // Snapshot the deliverable yaml so the user can roll back if
               // this turn made things worse. createCheckpoint dedupes on
               // content hash — turns that didn't touch yaml don't add rows.
+              // Coach sessions are workless (no deliverable) so they skip this.
               createCheckpoint(session.workId).catch(() => {});
             }
             // Real-time memory sync — assistant text (complete turn, not fragments).
             // D3: no pipeline — sync against the work title with a generic "chat" key.
-            if (!session.workId.startsWith("trends_") && resultText) {
+            if (this.isWorkBound(session.workId) && resultText) {
               getWork(session.workId).then(w => {
                 if (!w) return;
                 syncMessage(session.workId, w.title, "chat", "assistant", resultText).catch(() => {});

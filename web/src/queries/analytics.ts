@@ -36,7 +36,14 @@ export interface CreatorAnalytics {
     engagementRate: number;
     totalWorks: number;
   };
-  works: { desc: string; play_count: number; digg_count: number; comment_count: number }[];
+  works: {
+    desc: string;
+    play_count: number;
+    digg_count: number;
+    comment_count: number;
+    share_count: number;
+    collect_count: number;
+  }[];
   demographics: {
     age: Record<string, number>;
     gender: { male: number; female: number };
@@ -86,6 +93,8 @@ function adapt(raw: BackendAnalytics): CreatorAnalytics | null {
       play_count: w.play_count ?? 0,
       digg_count: w.digg_count ?? 0,
       comment_count: w.comment_count ?? 0,
+      share_count: w.share_count ?? 0,
+      collect_count: w.collect_count ?? 0,
     })),
     summary: {
       avgLikes: s.avg_digg ?? 0,

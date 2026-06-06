@@ -1,0 +1,124 @@
+.card {
+  padding: 24px 26px;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-1);
+  border-radius: var(--radius-lg);
+  display: grid;
+  grid-template-columns: 1.1fr 1fr;
+  grid-template-areas:
+    "inform sample"
+    "activate sample";
+  gap: 18px 28px;
+  align-items: start;
+}
+
+.inform { grid-area: inform; }
+.activate { grid-area: activate; }
+.sampleWrap { grid-area: sample; align-self: stretch; }
+
+.informTitle {
+  margin: 0 0 8px;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+}
+.informBody { margin: 0; font-size: 13px; line-height: 1.6; color: var(--text-dim); }
+
+.activate {
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--glass-border);
+  background: var(--surface-2);
+}
+.activateTitle {
+  margin: 0 0 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.activateBody { margin: 0; font-size: 13px; line-height: 1.55; color: var(--text); }
+
+/* Inspire — a watermarked sample shape that must NEVER read as real data. */
+.sample {
+  position: relative;
+  height: 100%;
+  min-height: 140px;
+  padding: 18px;
+  border-radius: var(--radius-md);
+  border: 1px dashed var(--glass-hi);
+  background:
+    repeating-linear-gradient(
+      135deg,
+      transparent 0,
+      transparent 9px,
+      var(--surface-2) 9px,
+      var(--surface-2) 10px
+    ),
+    var(--surface-1);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 10px;
+}
+
+.sampleLabel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-dimmer);
+}
+
+/* The watermark badge: loud, mono, diagonal — impossible to mistake for data. */
+.watermark {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 3px 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px solid var(--glass-hi);
+  border-radius: var(--radius-sm);
+  opacity: 0.92;
+}
+
+/* The sample content itself is rendered at low opacity so it visibly reads as
+   a ghost / placeholder rather than a live figure. */
+.sampleContent {
+  opacity: 0.45;
+  filter: grayscale(0.4);
+  pointer-events: none;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.sampleBars { display: flex; flex-direction: column; gap: 7px; }
+.sampleBarRow {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  gap: 10px;
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.sampleTrack { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.sampleFill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent-lo), var(--accent)); }
+
+@media (max-width: 760px) {
+  .card {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "inform"
+      "sample"
+      "activate";
+  }
+}

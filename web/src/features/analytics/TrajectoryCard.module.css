@@ -1,0 +1,143 @@
+.card {
+  margin: 8px 0 18px;
+  padding: 20px;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-1);
+  border-radius: var(--radius-lg);
+}
+.head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 4px;
+}
+.h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+}
+.h2 em {
+  font-family: "Instrument Serif", serif;
+  font-style: italic;
+  color: var(--text);
+  font-size: 15px;
+}
+/* The honesty badge — mono label that marks the projection a TARGET, not a
+   measured/forecast fact. Visually quiet but always present. */
+.targetBadge {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-dimmer);
+  text-transform: uppercase;
+  text-align: right;
+  white-space: nowrap;
+}
+.sub {
+  margin: 0 0 16px;
+  font-size: 12px;
+  color: var(--text-dimmer);
+}
+
+/* Forward-looking milestone goals (followers, reach). */
+.goals {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0 0 18px;
+}
+.goal {
+  display: grid;
+  gap: 8px;
+}
+.goalHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.goalLabel {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--text-dimmer);
+  text-transform: uppercase;
+}
+.fromTo {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-variant-numeric: tabular-nums;
+}
+.from {
+  font-family: "Inter", sans-serif;
+  font-size: 15px;
+  color: var(--text-dim);
+}
+.arrow {
+  color: var(--text-dimmer);
+  font-size: 13px;
+}
+.to {
+  font-family: "Instrument Serif", serif;
+  font-style: italic;
+  font-size: 24px;
+  color: var(--accent);
+}
+.remaining {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.barTrack {
+  position: relative;
+  height: 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.barFill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  height: 100%;
+  border-radius: var(--radius-sm);
+  background: var(--accent-lo, var(--accent));
+  opacity: 0.6;
+}
+
+/* Already-reached signposts row — real, on-disk numbers. */
+.signposts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-top: 14px;
+  border-top: 1px solid var(--glass-border);
+}
+.signpost {
+  display: grid;
+  gap: 2px;
+}
+.signpostVal {
+  font-family: "Instrument Serif", serif;
+  font-style: italic;
+  font-size: 20px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.signpostLbl {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--text-dimmer);
+  text-transform: uppercase;
+}
+.signpostSep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--glass-border);
+  margin: 2px 6px;
+}

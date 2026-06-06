@@ -18,6 +18,7 @@
     "!dist/**/*.js.map",
     "!dist/**/*.d.ts.map",
     "skills/",
+    "python/",
     "web/dist/",
     "!web/dist/**/*.map",
     "cli/autoviral/dist/",

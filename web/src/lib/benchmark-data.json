@@ -1,0 +1,25 @@
+{
+  "_comment": "D2 static creator-engagement baselines (PRD-0006 S3). Engagement = (likes + comments + shares + saves) / plays, expressed as a fraction. The HONESTY rule: only `douyin` carries a platform-correct band (referenceOnly:false) because that is the user's real platform and we have a defensible public range for it. Every other platform's band, and any non-engagement metric, is flagged referenceOnly:true so the UI labels it 「参考性、非你所在平台」 and never makes a silent apples-to-oranges comparison. Ranges are documented short-video engagement-rate bands by follower tier (small accounts engage harder); tiers: nano <1k, micro 1k-10k, mid 10k-100k, macro 100k+.",
+  "engagement": {
+    "douyin": {
+      "referenceOnly": false,
+      "source": "douyin-short-video-engagement-2024",
+      "tiers": {
+        "nano": { "low": 0.06, "median": 0.09, "high": 0.12 },
+        "micro": { "low": 0.035, "median": 0.05, "high": 0.07 },
+        "mid": { "low": 0.02, "median": 0.032, "high": 0.05 },
+        "macro": { "low": 0.012, "median": 0.02, "high": 0.03 }
+      }
+    },
+    "tiktok": {
+      "referenceOnly": true,
+      "source": "tiktok-public-engagement-2024",
+      "tiers": {
+        "nano": { "low": 0.05, "median": 0.08, "high": 0.11 },
+        "micro": { "low": 0.03, "median": 0.045, "high": 0.06 },
+        "mid": { "low": 0.018, "median": 0.03, "high": 0.045 },
+        "macro": { "low": 0.01, "median": 0.018, "high": 0.028 }
+      }
+    }
+  }
+}

@@ -169,32 +169,43 @@ describe("SettingsPanel — OpenRouter section", () => {
   });
 });
 
-describe("SettingsPanel — analytics refresh retired (#72)", () => {
+describe("SettingsPanel — Douyin collector (S5)", () => {
   beforeEach(() => {
     useSettingsPanelStore.setState({ open: true, focusSection: null });
   });
 
-  it("surfaces the honest 'retired' message when refresh returns analytics_collection_retired", async () => {
+  const douyinConfig = {
+    openrouterKey: "",
+    secretMeta: { openrouterKey: { set: false, lastFour: "" } },
+    // douyinUrl must be set or the refresh button is disabled.
+    douyinUrl: "https://www.douyin.com/user/abc",
+    researchEnabled: false,
+    researchCron: "0 9 * * *",
+    model: "sonnet",
+    analyticsLastCollectedAt: null,
+  };
+
+  it("renders the cookie-consent disclosure before refreshing (privacy is explicit)", async () => {
+    mswServer.use(http.get("/api/config", () => HttpResponse.json(douyinConfig)));
+    renderPanel();
+
+    // The consent block names the douyin.com sessionid cookie + local-only promise.
+    const consent = await screen.findByTestId("douyin-cookie-consent");
+    expect(consent.textContent).toMatch(/sessionid|cookie/i);
+    expect(consent.textContent).toMatch(/local|never uploaded|绝不上传|本地/i);
+  });
+
+  it("surfaces an ACTIONABLE re-login prompt when refresh returns collector_relogin (401)", async () => {
     mswServer.use(
-      http.get("/api/config", () =>
-        HttpResponse.json({
-          openrouterKey: "",
-          secretMeta: { openrouterKey: { set: false, lastFour: "" } },
-          // douyinUrl must be set or the refresh button is disabled.
-          douyinUrl: "https://www.douyin.com/user/abc",
-          researchEnabled: false,
-          researchCron: "0 9 * * *",
-          model: "sonnet",
-          analyticsLastCollectedAt: null,
-        }),
-      ),
+      http.get("/api/config", () => HttpResponse.json(douyinConfig)),
       http.post("/api/analytics/refresh", () =>
         HttpResponse.json(
           {
-            error: "Analytics collection was retired in the agentic-terminal refactor.",
-            errorCode: "analytics_collection_retired",
+            error: "Your Douyin session expired.",
+            errorCode: "collector_relogin",
+            collectorCode: "NOT_LOGGED_IN",
           },
-          { status: 501 },
+          { status: 401 },
         ),
       ),
     );
@@ -204,9 +215,33 @@ describe("SettingsPanel — analytics refresh retired (#72)", () => {
     await waitFor(() => expect(refreshBtn).not.toBeDisabled());
     fireEvent.click(refreshBtn);
 
-    // The previously-silent failure now renders a localized honest message
-    // instead of the button quietly no-op'ing.
+    // Not a silent empty page: the user is told to log into douyin.com + close
+    // their browser, then retry.
     const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/retired in the agentic-terminal refactor/i);
+    expect(alert.textContent).toMatch(/douyin\.com/i);
+    expect(alert.textContent).toMatch(/close your browser|重新|登录|close/i);
+  });
+
+  it("surfaces a 'run setup' prompt when the managed venv isn't ready (503)", async () => {
+    mswServer.use(
+      http.get("/api/config", () => HttpResponse.json(douyinConfig)),
+      http.post("/api/analytics/refresh", () =>
+        HttpResponse.json(
+          {
+            error: "Collector dependencies aren't installed yet.",
+            errorCode: "collector_not_ready",
+          },
+          { status: 503 },
+        ),
+      ),
+    );
+    renderPanel();
+
+    const refreshBtn = await screen.findByRole("button", { name: /refresh now|立即同步/i });
+    await waitFor(() => expect(refreshBtn).not.toBeDisabled());
+    fireEvent.click(refreshBtn);
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toMatch(/autoviral setup|安装/i);
   });
 });

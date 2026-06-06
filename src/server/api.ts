@@ -23,6 +23,7 @@ import { analyticsRouter } from "./routes/analytics.js";
 import { generateRouter } from "./routes/generate.js";
 import { audioRouter } from "./routes/audio.js";
 import { trendsRouter } from "./routes/trends.js";
+import { coachRouter } from "./routes/coach.js";
 import { setWsBridge, setRenderQueue } from "./routes/_shared.js";
 
 export const apiRoutes = new Hono();
@@ -45,6 +46,7 @@ apiRoutes.route("/", analyticsRouter);
 apiRoutes.route("/", generateRouter);
 apiRoutes.route("/", audioRouter);
 apiRoutes.route("/", trendsRouter);
+apiRoutes.route("/", coachRouter);
 
 // ── Re-exports — the stable surface other modules import from "./api.js". ────
 // These used to live inline here; I11 moved their bodies into routes/_shared.ts

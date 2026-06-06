@@ -87,6 +87,62 @@ describe("runDoctor — exit code reflects CORE readiness", () => {
   });
 });
 
+describe("runDoctor — Douyin collector venv row (S4, honest present-vs-missing)", () => {
+  /** A detect() that reports the core binaries as vendored (spawnable). */
+  const coreOk = () => ({
+    ffmpeg: res("vendored", "/vendor/ffmpeg"),
+    ffprobe: res("vendored", "/vendor/ffprobe"),
+  });
+
+  it("reports the collector venv as READY (✓) when f2 + browser_cookie3 are present", async () => {
+    const out = vi.fn();
+    const code = await runDoctor({
+      detect: coreOk,
+      ttsVenvReady: () => true,
+      ttsVenvDir: () => "/x/.autoviral/tts-venv",
+      venvBinPath: (n) => `/x/.autoviral/tts-venv/bin/${n}`,
+      binaryOnPath: () => false,
+      chromiumCached: () => true,
+      resolveClaude: () => "/usr/local/bin/claude",
+      collectorVenvReady: () => true,
+      collectorVenvDir: () => "/x/.autoviral/collector-venv",
+      out,
+    });
+    expect(code).toBe(0);
+    const printed = out.mock.calls.map((c) => c[0]).join("\n");
+    // The collector dep is surfaced honestly, with a ✓ when ready.
+    expect(printed).toMatch(/collector/);
+    expect(printed).toMatch(/✓ collector/);
+    expect(printed).toMatch(/f2 \+ browser_cookie3 ready/);
+    expect(printed).toMatch(/collector-venv/);
+  });
+
+  it("reports the collector venv as MISSING (warning, not silent) → still exit 0", async () => {
+    const out = vi.fn();
+    const code = await runDoctor({
+      detect: coreOk,
+      ttsVenvReady: () => true,
+      ttsVenvDir: () => "/x/.autoviral/tts-venv",
+      venvBinPath: (n) => `/x/.autoviral/tts-venv/bin/${n}`,
+      binaryOnPath: () => false,
+      chromiumCached: () => true,
+      resolveClaude: () => "/usr/local/bin/claude",
+      // The collector venv has NOT been provisioned yet.
+      collectorVenvReady: () => false,
+      collectorVenvDir: () => "/x/.autoviral/collector-venv",
+      out,
+    });
+    // A missing collector dep degrades a feature (analytics refresh), not the
+    // core render chain → it is a WARNING (○), never a silent ENOENT, and does
+    // NOT flip the exit code.
+    expect(code).toBe(0);
+    const printed = out.mock.calls.map((c) => c[0]).join("\n");
+    expect(printed).toMatch(/○ collector/);
+    expect(printed).toMatch(/not ready \(missing f2 \+ browser_cookie3\)/);
+    expect(printed).toMatch(/autoviral setup/);
+  });
+});
+
 describe("runSetup — provisioners + exit codes (mocked, nothing real installs)", () => {
   /** A detect() that reports the core binaries as vendored (spawnable). */
   const coreOk = () => ({
@@ -94,9 +150,10 @@ describe("runSetup — provisioners + exit codes (mocked, nothing real installs)
     ffprobe: res("vendored", "/vendor/ffprobe"),
   });
 
-  it("calls ensureManaged + ensureTtsVenv; skips playwright by default; exit 0", async () => {
+  it("calls ensureManaged + ensureTtsVenv + ensureCollectorVenv; skips playwright by default; exit 0", async () => {
     const ensureManaged = vi.fn(async () => {});
     const ensureTtsVenv = vi.fn(async () => {});
+    const ensureCollectorVenv = vi.fn(async () => {});
     const ensurePlaywrightChromium = vi.fn(async () => {});
     const out = vi.fn();
 
@@ -105,6 +162,7 @@ describe("runSetup — provisioners + exit codes (mocked, nothing real installs)
       {
         ensureManaged,
         ensureTtsVenv,
+        ensureCollectorVenv,
         ensurePlaywrightChromium,
         detect: coreOk,
         binaryOnPath: () => false,
@@ -115,6 +173,8 @@ describe("runSetup — provisioners + exit codes (mocked, nothing real installs)
     expect(code).toBe(0);
     expect(ensureManaged).toHaveBeenCalledTimes(1);
     expect(ensureTtsVenv).toHaveBeenCalledTimes(1);
+    // The Douyin-collector deps (f2 + browser_cookie3) self-provision too.
+    expect(ensureCollectorVenv).toHaveBeenCalledTimes(1);
     // Default (no --heavy) → playwright is NOT installed eagerly.
     expect(ensurePlaywrightChromium).not.toHaveBeenCalled();
     // Progress was streamed, not a silent stall.
@@ -132,6 +192,7 @@ describe("runSetup — provisioners + exit codes (mocked, nothing real installs)
       {
         ensureManaged: vi.fn(async () => {}),
         ensureTtsVenv: vi.fn(async () => {}),
+        ensureCollectorVenv: vi.fn(async () => {}),
         ensurePlaywrightChromium,
         detect: coreOk,
         binaryOnPath: () => false,
@@ -155,6 +216,7 @@ describe("runSetup — provisioners + exit codes (mocked, nothing real installs)
       {
         ensureManaged: vi.fn(async () => {}),
         ensureTtsVenv: vi.fn(async () => {}),
+        ensureCollectorVenv: vi.fn(async () => {}),
         ensurePlaywrightChromium: vi.fn(async () => {}),
         // Post-install probe: still only a bare PATH name, not actually on PATH.
         detect: () => ({
@@ -179,6 +241,7 @@ describe("runSetup — provisioners + exit codes (mocked, nothing real installs)
         ensureTtsVenv: vi.fn(async () => {
           throw new Error("python3 not found");
         }),
+        ensureCollectorVenv: vi.fn(async () => {}),
         ensurePlaywrightChromium: vi.fn(async () => {}),
         detect: coreOk,
         binaryOnPath: () => false,
@@ -189,5 +252,27 @@ describe("runSetup — provisioners + exit codes (mocked, nothing real installs)
     const printed = out.mock.calls.map((c) => c[0]).join("\n");
     expect(printed).toMatch(/python3 not found/);
     expect(printed).toMatch(/TTS install failed/);
+  });
+
+  it("collector-venv provisioning failure is a WARNING, not a core failure → exit 0", async () => {
+    const out = vi.fn();
+    const code = await runSetup(
+      {},
+      {
+        ensureManaged: vi.fn(async () => {}),
+        ensureTtsVenv: vi.fn(async () => {}),
+        ensureCollectorVenv: vi.fn(async () => {
+          throw new Error("python3 not found");
+        }),
+        ensurePlaywrightChromium: vi.fn(async () => {}),
+        detect: coreOk,
+        binaryOnPath: () => false,
+        out,
+      },
+    );
+    expect(code).toBe(0);
+    const printed = out.mock.calls.map((c) => c[0]).join("\n");
+    expect(printed).toMatch(/collector/);
+    expect(printed).toMatch(/python3 not found/);
   });
 });

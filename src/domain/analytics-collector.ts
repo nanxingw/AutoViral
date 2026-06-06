@@ -5,37 +5,45 @@ import { readFile, writeFile, mkdir, readdir } from "node:fs/promises"
 import { existsSync } from "node:fs"
 import { join } from "node:path"
 import { homedir } from "node:os"
-import { loadConfig } from "../infra/config.js"
+import { dataDir, loadConfig, repoRoot } from "../infra/config.js"
+import {
+  collectorVenvPythonPath,
+  collectorVenvReady,
+} from "../infra/collector-env.js"
+import {
+  parseCollectorResult,
+  isCollectorError,
+  type CollectorError,
+} from "./collector-parse.js"
+
+export { isCollectorError, type CollectorError } from "./collector-parse.js"
 
 const execFileAsync = promisify(execFile)
-const ANALYTICS_DIR = join(homedir(), ".autoviral", "analytics", "douyin")
+// Honour AUTOVIRAL_DATA_DIR (via dataDir) so tests stay isolated — the old
+// hard-coded homedir() path ignored the override.
+const ANALYTICS_DIR = join(dataDir, "analytics", "douyin")
 const LATEST_FILE = join(ANALYTICS_DIR, "latest.json")
 
-// #72 — the Douyin collector is a Python script that lived under
-// skills/autoviral/modules/research/scripts/. That whole `modules/` tree was
-// deleted in the agentic-terminal refactor (commit 29b9e96, archived in git
-// tag pre-skill-rewrite-snapshot). Without this guard, collectData spawned
-// python3 against a non-existent path on EVERY cron tick — a silent ENOENT
-// loop that froze the analytics page with no explanation and spammed a doomed
-// child process every N minutes. Treat a missing script as "collection
-// retired" and degrade honestly instead.
+// PRD-0006 §D4 / slice S5 — the Douyin collector is RESTORED. The pre-refactor
+// f2 + browser_cookie3 scraper (#72, deleted in commit 29b9e96) now ships as
+// bundled workstation infrastructure at <packageRoot>/python/collector/collect.py
+// and runs under the MANAGED venv (~/.autoviral/collector-venv) that slice S4
+// provisions — NOT the host python3 (which almost never has f2).
+//
+// PATH NOTE: `repoRoot` points at the dir holding this module's build output —
+// `dist/` in prod, `src/` in dev — NOT the package root. `python/` ships as a
+// SIBLING of dist/ (per package.json `files`), so we go up ONE level from
+// repoRoot, exactly like skill-sync resolves `join(PACKAGE_ROOT, "..", "skills")`.
 function collectorScriptPath(): string {
-  return join(
-    homedir(),
-    ".claude",
-    "skills",
-    "autoviral",
-    "modules",
-    "research",
-    "scripts",
-    "creator-analytics",
-    "collect.py",
-  )
+  return join(repoRoot, "..", "python", "collector", "collect.py")
 }
 
-/** True only when the collector script is actually present on disk. */
+/** True when the collector can actually run: BOTH the bundled script exists AND
+ *  the managed venv (f2 + browser_cookie3) is provisioned (S4). When false the
+ *  refresh path returns a structured "run setup" error instead of spawning a
+ *  doomed python3 — no more silent ENOENT (#72). */
 export function isCollectorAvailable(): boolean {
-  return existsSync(collectorScriptPath())
+  return existsSync(collectorScriptPath()) && collectorVenvReady()
 }
 
 let task: cron.ScheduledTask | null = null
@@ -73,33 +81,94 @@ export interface CreatorData {
   }
 }
 
-export async function collectData(douyinUrl: string): Promise<CreatorData | null> {
+/** Throwable wrapper around a structured CollectorError so async callers (the
+ *  refresh route) can `try/catch` and map `.detail.code` → HTTP status + an
+ *  actionable, localized "re-login" prompt. Carries the pure CollectorError as
+ *  `.detail` rather than flattening, so no field is lost across the boundary. */
+export class CollectorRunError extends Error {
+  readonly detail: CollectorError
+  constructor(detail: CollectorError) {
+    super(detail.message)
+    this.name = "CollectorRunError"
+    this.detail = detail
+  }
+}
+
+/**
+ * Run the managed-venv Douyin collector once and persist the result.
+ *
+ * Resolves to the typed CreatorData on success. THROWS a `CollectorRunError`
+ * (carrying a structured CollectorError) on any failure — expired cookie,
+ * not-logged-in, invalid URL, crash, unprovisioned venv — so the caller can
+ * surface an actionable message instead of a silent empty page. The cron path
+ * still calls this with `.catch(() => {})`, so a background failure stays quiet.
+ *
+ * The browser cookie (sessionid) is read by the Python script directly from the
+ * user's own browser via browser_cookie3 and never leaves the machine; this
+ * function only sees the script's JSON stdout.
+ */
+export async function collectData(douyinUrl: string): Promise<CreatorData> {
   const scriptPath = collectorScriptPath()
-  // #72 — bail before spawning python3 if the collector was removed in the
-  // refactor. Returning null here is the same shape callers already handle,
-  // but without the doomed child process + ENOENT log line.
+  // Honest pre-flight: if the bundled script or the managed venv is missing,
+  // tell the caller to run `autoviral setup` rather than spawning a doomed
+  // python3 (the #72 silent-ENOENT trap).
   if (!existsSync(scriptPath)) {
-    console.warn("[analytics] Collector script not found (retired in refactor) — skipping collection")
-    return null
+    throw new CollectorRunError({
+      kind: "collector_error",
+      code: "DEPENDENCY_ERROR",
+      message:
+        "Collector script not found. Reinstall AutoViral or run `autoviral setup`.",
+      needsRelogin: false,
+    })
   }
+  if (!collectorVenvReady()) {
+    throw new CollectorRunError({
+      kind: "collector_error",
+      code: "DEPENDENCY_ERROR",
+      message:
+        "Collector dependencies (f2 + browser_cookie3) are not installed. Run `autoviral setup`.",
+      needsRelogin: false,
+    })
+  }
+
+  await mkdir(ANALYTICS_DIR, { recursive: true })
+
+  let stdout: string
   try {
-    await mkdir(ANALYTICS_DIR, { recursive: true })
-    const { stdout } = await execFileAsync("python3", [
-      scriptPath, "--platform", "douyin", "--url", douyinUrl
-    ], { timeout: 120000 })
-
-    const data = JSON.parse(stdout.trim()) as CreatorData
-    await writeFile(LATEST_FILE, JSON.stringify(data, null, 2), "utf-8")
-
-    const dateStr = new Date().toISOString().slice(0, 10)
-    await writeFile(join(ANALYTICS_DIR, `${dateStr}.json`), JSON.stringify(data, null, 2), "utf-8")
-
-    console.log(`[analytics] Collected data for ${data.account?.nickname ?? "unknown"}: ${data.summary?.total_works_collected ?? 0} works`)
-    return data
+    // Run under the MANAGED venv interpreter (f2 + browser_cookie3 live there),
+    // never the host python3.
+    const res = await execFileAsync(
+      collectorVenvPythonPath(),
+      [scriptPath, "--url", douyinUrl],
+      { timeout: 120000, maxBuffer: 16 * 1024 * 1024 },
+    )
+    stdout = res.stdout
   } catch (err) {
-    console.error("[analytics] Collection failed:", err instanceof Error ? err.message : err)
-    return null
+    // The script emits errors as a structured envelope on stdout + exit 0, so a
+    // non-zero exit here means an unexpected crash (timeout, OOM, segfault).
+    throw new CollectorRunError({
+      kind: "collector_error",
+      code: "API_ERROR",
+      message: `Collector process failed: ${err instanceof Error ? err.message : String(err)}`,
+      needsRelogin: false,
+    })
   }
+
+  // D4 parse boundary: raw f2 JSON → CreatorData | CollectorError.
+  const parsed = parseCollectorResult(stdout)
+  if (isCollectorError(parsed)) {
+    console.warn(`[analytics] Collection failed (${parsed.code}): ${parsed.message}`)
+    throw new CollectorRunError(parsed)
+  }
+
+  await writeFile(LATEST_FILE, JSON.stringify(parsed, null, 2), "utf-8")
+  const dateStr = new Date().toISOString().slice(0, 10)
+  await writeFile(join(ANALYTICS_DIR, `${dateStr}.json`), JSON.stringify(parsed, null, 2), "utf-8")
+
+  console.log(
+    `[analytics] Collected data for ${parsed.account?.nickname ?? "unknown"}: ${parsed.summary?.total_works_collected ?? 0} works`,
+  )
+  return parsed
 }
 
 export async function getLatestCreatorData(): Promise<CreatorData | null> {
@@ -129,11 +198,13 @@ export async function getCreatorHistory(days: number = 30): Promise<Array<{ date
 }
 
 export async function startAnalyticsCollector(): Promise<void> {
-  // #72 — don't schedule a recurring python3 spawn for a script that no
-  // longer exists. This is the core of the silent-failure fix: previously
-  // the cron fired every N minutes, each tick ENOENT-failing invisibly.
+  // Don't schedule a recurring spawn unless the collector can actually run
+  // (bundled script present AND managed venv provisioned). Otherwise every cron
+  // tick would fail — the #72 silent-ENOENT trap. The user still triggers the
+  // first real scrape via the Settings "refresh" button (which surfaces a
+  // structured error if the venv isn't ready yet).
   if (!isCollectorAvailable()) {
-    console.log("[analytics] Collector script retired in refactor — collection disabled, not scheduling")
+    console.log("[analytics] Collector not ready (script or managed venv missing) — not scheduling background collection")
     return
   }
   const config = await loadConfig()

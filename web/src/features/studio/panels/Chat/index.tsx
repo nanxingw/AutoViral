@@ -325,8 +325,40 @@ function jumpToStudioComposition(data: LocatorData) {
   }
 }
 
+/**
+ * PRD-0006 S7 — the workId-decoupling config. ChatPanel was hard-wired to a
+ * work: it HTTP-seeds history from /api/works/:id/chat, uploads attachments to
+ * the work's assets, offers per-turn checkpoint rollback, and switches the
+ * GLOBAL model tier. The grounded inspiration coach is WORKLESS (its own
+ * persisted session), so when `coach` is supplied ChatPanel:
+ *   · seeds history from the WS `message_history` reseed only (no HTTP work seed)
+ *   · routes SEND through `coach.send` (POST /api/coach/message), not the WS frame
+ *   · hides checkpoint rollback + attachment upload (no work to anchor them to)
+ *   · renders `coach.modelSwitcher` (SESSION-scoped) instead of the work ModelSwitcher
+ *   · seeds the empty box with `coach.onboarding` prompts + coach copy
+ * Studio/Editor pass NO `coach` prop → every work-bound behaviour is unchanged.
+ */
+export interface CoachConfig {
+  /** SEND override — routes the wire text through an HTTP endpoint. */
+  send: (wireText: string) => void;
+  /** Session-scoped model switcher node (replaces the work ModelSwitcher). */
+  modelSwitcher?: ReactNode;
+  /** Header title / subtitle copy. */
+  title: string;
+  subtitle?: string;
+  /** Empty-box prompt library: clicking a starter fills the composer. */
+  onboarding: {
+    title: string;
+    sub: string;
+    placeholder: string;
+    prompts: { label: string; prompt: string }[];
+  };
+}
+
 export interface ChatPanelProps {
   workId: string;
+  /** PRD-0006 S7 — when present, run in workless coach mode (see CoachConfig). */
+  coach?: CoachConfig;
   /** Optional shortcut buttons rendered between messages and composer.
    *  No default — the Studio instant-send chips were removed (they fired a
    *  prefilled prompt on a single click with no chance to review). Editors
@@ -353,24 +385,32 @@ export interface ChatPanelProps {
 
 export function ChatPanel({
   workId,
+  coach,
   quickActions,
   onJumpToLocator = jumpToStudioComposition,
   getViewerContext,
   dispatchAction,
   onTurnComplete,
 }: ChatPanelProps) {
+  const coachMode = !!coach;
   const { send, state: wsState } = useChatSocket(
     workId,
     getViewerContext,
     dispatchAction,
     onTurnComplete,
+    undefined,
+    // Coach mode: route the SEND through POST /api/coach/message (decoupled
+    // from the WS frame) — the WS still streams replies + reseeds history.
+    coach?.send,
   );
   // Pull the work's checkpoint list so each assistant text block can render
   // a "rollback to this turn" chip when its turn produced a snapshot. We
   // keep this enabled at all times — the route is cheap and the dropdown
-  // wants the same data, so caching across both is a win.
+  // wants the same data, so caching across both is a win. Coach is WORKLESS:
+  // there's no work to anchor a checkpoint to, so we don't query (a coach_main
+  // id would 404 /api/works/coach_main/checkpoints).
   const { items: checkpointItems, restore: restoreCheckpoint, restoring } =
-    useCheckpoints(workId, true);
+    useCheckpoints(workId, !coachMode);
   const blocks = useChatStore((s) => s.blocks);
   const setBlocks = useChatStore((s) => s.setBlocks);
   const streaming = useChatStore((s) => s.streaming);
@@ -397,7 +437,17 @@ export function ChatPanel({
   // Load chat history on mount / workId or session change. Without this,
   // switching into a work (or session) showed an empty panel even when the
   // session's log had hundreds of past blocks.
+  //
+  // Coach mode (S7) is WORKLESS: there's no /api/works/coach_main/chat log to
+  // HTTP-seed from. Its persisted history is reseeded over the WS
+  // `message_history` frame instead (useChatSocket), which survives reload. So
+  // skip the HTTP seed entirely — calling it would 404 and (harmlessly) clear
+  // the WS-reseeded blocks in the race.
   useEffect(() => {
+    if (coachMode) {
+      setLoadingHistory(false);
+      return;
+    }
     let cancelled = false;
     setLoadingHistory(true);
     setBlocks([]);
@@ -425,7 +475,7 @@ export function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [workId, activeSessionId, setBlocks]);
+  }, [workId, activeSessionId, setBlocks, coachMode]);
 
   // Sticky-scroll: only auto-scroll to the bottom when the user was already
   // near the bottom. If they've scrolled up to read history, the new agent
@@ -618,7 +668,9 @@ export function ChatPanel({
           ✦
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.015em" }}>{t("chat.agentName")}</div>
+          <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.015em" }}>
+            {coach ? coach.title : t("chat.agentName")}
+          </div>
           <div
             style={{
               fontSize: 10,
@@ -627,7 +679,9 @@ export function ChatPanel({
               letterSpacing: "0.06em",
             }}
           >
-            <ModelSwitcher workId={workId} streaming={streaming} />
+            {coach
+              ? coach.modelSwitcher
+              : <ModelSwitcher workId={workId} streaming={streaming} />}
             {streaming ? ` · ${t("chat.streaming")}` : ""}
             <ConnectionStatus state={wsState} />
           </div>

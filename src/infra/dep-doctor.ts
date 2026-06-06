@@ -35,6 +35,11 @@ import {
   ttsVenvReady,
   venvBinPath,
 } from "./python-env.js";
+import {
+  collectorVenvDir,
+  collectorVenvReady,
+  ensureCollectorVenv,
+} from "./collector-env.js";
 
 const OK = "✓";
 const BAD = "✗";
@@ -138,6 +143,10 @@ export interface DoctorDeps {
   binaryOnPath: (name: string) => boolean;
   chromiumCached: () => boolean;
   resolveClaude: () => string | null;
+  /** Whether the managed Douyin-collector venv (f2 + browser_cookie3) is
+   *  provisioned. Injected so the present/missing report is unit-testable. */
+  collectorVenvReady: typeof collectorVenvReady;
+  collectorVenvDir: typeof collectorVenvDir;
   out: Reporter;
 }
 
@@ -149,6 +158,8 @@ const realDoctorDeps: DoctorDeps = {
   binaryOnPath,
   chromiumCached,
   resolveClaude,
+  collectorVenvReady,
+  collectorVenvDir,
   out: stdout,
 };
 
@@ -200,6 +211,17 @@ export async function runDoctor(deps: Partial<DoctorDeps> = {}): Promise<number>
     rows.push("    fix: run `autoviral setup` (creates the venv & pip-installs them)");
   }
 
+  // ── collector venv (f2 + browser_cookie3) — warning, not core ──────────────
+  // The Douyin analytics collector's managed deps. Reported honestly so a missing
+  // dep surfaces here instead of a silent ENOENT when refresh is wired (S5).
+  if (d.collectorVenvReady()) {
+    rows.push(`${OK} ${pad("collector")} f2 + browser_cookie3 ready`);
+    rows.push(`    → ${d.collectorVenvDir()}`);
+  } else {
+    rows.push(`${WARN} ${pad("collector")} not ready (missing f2 + browser_cookie3)`);
+    rows.push("    fix: run `autoviral setup` (creates the venv & pip-installs them)");
+  }
+
   // ── playwright chromium — heavy, lazy-installed on first use ────────────────
   if (d.chromiumCached()) {
     rows.push(`${OK} ${pad("playwright")} chromium cached`);
@@ -242,6 +264,8 @@ export interface SetupOpts {
 export interface SetupDeps {
   ensureManaged: typeof ensureManaged;
   ensureTtsVenv: typeof ensureTtsVenv;
+  /** Provisions the managed Douyin-collector venv (f2 + browser_cookie3). */
+  ensureCollectorVenv: typeof ensureCollectorVenv;
   ensurePlaywrightChromium: typeof ensurePlaywrightChromium;
   /** Post-install readiness probe for the core binaries (mirrors runDoctor). */
   detect: typeof detect;
@@ -252,6 +276,7 @@ export interface SetupDeps {
 const realSetupDeps: SetupDeps = {
   ensureManaged,
   ensureTtsVenv,
+  ensureCollectorVenv,
   ensurePlaywrightChromium,
   detect,
   binaryOnPath,
@@ -261,14 +286,16 @@ const realSetupDeps: SetupDeps = {
 /**
  * Install the missing pieces with streamed progress:
  *   1. ensureManaged() copies the vendored ffmpeg/ffprobe into ~/.autoviral/bin;
- *   2. ensureTtsVenv() provisions the python venv (edge-tts + stable-ts);
- *   3. playwright chromium — lazy by default (just a note), or ensurePlaywright-
+ *   2. ensureTtsVenv() provisions the TTS python venv (edge-tts + stable-ts);
+ *   3. ensureCollectorVenv() provisions the Douyin-collector venv (f2 +
+ *      browser_cookie3);
+ *   4. playwright chromium — lazy by default (just a note), or ensurePlaywright-
  *      Chromium() now with `--heavy`.
  *
  * Returns exit code 1 ONLY when the CORE step (ffmpeg/ffprobe) leaves the
- * binaries unspawnable; a TTS / playwright failure is reported but doesn't fail
- * the whole setup (those degrade a feature, not the core render chain). Mirrors
- * the bridge CLI's setup exit-code semantics.
+ * binaries unspawnable; a TTS / collector / playwright failure is reported but
+ * doesn't fail the whole setup (those degrade a feature, not the core render
+ * chain). Mirrors the bridge CLI's setup exit-code semantics.
  */
 export async function runSetup(
   opts: SetupOpts = {},
@@ -301,7 +328,7 @@ export async function runSetup(
   }
 
   // ── 2. TTS venv: edge-tts + stable-ts ──────────────────────────────────────
-  d.out("[2/3] TTS venv (edge-tts + stable-ts)");
+  d.out("[2/4] TTS venv (edge-tts + stable-ts)");
   let ttsFailed = false;
   try {
     await d.ensureTtsVenv();
@@ -311,9 +338,20 @@ export async function runSetup(
     d.out(`${WARN} tts venv: ${e instanceof Error ? e.message : String(e)}\n`);
   }
 
-  // ── 3. playwright chromium: heavy, lazy by default ─────────────────────────
+  // ── 3. collector venv: f2 + browser_cookie3 ────────────────────────────────
+  d.out("[3/4] collector venv (f2 + browser_cookie3)");
+  let collectorFailed = false;
+  try {
+    await d.ensureCollectorVenv();
+    d.out(`${OK} collector venv: f2 + browser_cookie3 ready\n`);
+  } catch (e) {
+    collectorFailed = true;
+    d.out(`${WARN} collector venv: ${e instanceof Error ? e.message : String(e)}\n`);
+  }
+
+  // ── 4. playwright chromium: heavy, lazy by default ─────────────────────────
   if (opts.heavy) {
-    d.out("[3/3] playwright chromium (--heavy)");
+    d.out("[4/4] playwright chromium (--heavy)");
     try {
       await d.ensurePlaywrightChromium({ onProgress: (l) => d.out(`  ${l}`) });
       d.out(`${OK} chromium: ready\n`);
@@ -321,7 +359,7 @@ export async function runSetup(
       d.out(`${WARN} chromium: ${e instanceof Error ? e.message : String(e)}\n`);
     }
   } else {
-    d.out("[3/3] playwright chromium");
+    d.out("[4/4] playwright chromium");
     d.out(
       `${WARN} chromium: lazy-installs (~150MB) on first trends scrape — pass --heavy to install now\n`,
     );
@@ -333,7 +371,11 @@ export async function runSetup(
     d.out("Re-run `autoviral doctor` to re-check.");
     return 1;
   }
-  const ttsNote = ttsFailed ? " (TTS install failed — see above)" : "";
-  d.out(`Setup complete.${ttsNote} Run \`autoviral doctor\` to verify.`);
+  const notes = [
+    ttsFailed ? "TTS install failed" : null,
+    collectorFailed ? "collector install failed" : null,
+  ].filter(Boolean);
+  const note = notes.length ? ` (${notes.join("; ")} — see above)` : "";
+  d.out(`Setup complete.${note} Run \`autoviral doctor\` to verify.`);
   return 0;
 }

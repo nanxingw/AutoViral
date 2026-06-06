@@ -236,6 +236,14 @@ export function SettingsPanel() {
                     placeholder="https://www.douyin.com/user/..."
                   />
                 </div>
+                {/* S5 — cookie-consent disclosure. The refresh reads the user's
+                    douyin.com sessionid cookie from THIS machine's browser
+                    (browser_cookie3), locally only. Be upfront before they click
+                    Refresh so the privacy trade-off is explicit, not hidden. */}
+                <div className={styles.cookieConsent} data-testid="douyin-cookie-consent">
+                  <p className={styles.cookieConsentTitle}>{t("settings.cookieConsentTitle")}</p>
+                  <p className={styles.cookieConsentBody}>{t("settings.cookieConsent")}</p>
+                </div>
                 <div className={styles.refreshRow}>
                   <button
                     type="button"

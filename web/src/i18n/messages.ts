@@ -39,6 +39,11 @@ export const en = {
     create_work_validation: "Missing required fields (title / type / platforms).",
     create_work_failed: "Couldn't create work: {detail}",
     analytics_collection_retired: "Audience-data collection was retired in the agentic-terminal refactor — the Douyin collector script no longer ships. This panel is inactive.",
+    // S5 — the collector is restored. An auth/cookie failure is actionable:
+    // tell the user exactly how to re-login rather than showing a blank page.
+    collector_relogin: "Your Douyin session expired. Open douyin.com, log in, then FULLY close your browser and click Refresh again.",
+    // S5 — the managed venv (f2 + browser_cookie3) isn't provisioned yet.
+    collector_not_ready: "Collector dependencies aren't installed yet. Run `autoviral setup`, then try again.",
   },
   notFound: {
     code: "404",
@@ -721,10 +726,25 @@ export const en = {
       agentWebsearch: "Agent inference",
       proxy: "Proxy",
     },
+    // PRD-0006 S7 — the grounded research/strategy coach mounted on this page.
+    coach: {
+      title: "Inspiration coach",
+      subtitle: "Grounded in your works, trends & interests",
+      onboardingTitle: "Ask me anything to start",
+      onboardingSub: "or just type your own question",
+      placeholder: "Ask the coach — e.g. what should I post next?",
+      q1Label: "🎯 What to make next",
+      q1Prompt:
+        "Based on my 9 published works and the current trends, what topic should I make next? Give me 3 grounded directions and say why each fits.",
+      q2Label: "📈 My strongest angle",
+      q2Prompt:
+        "Looking only at the real metrics of my published works (plays / likes / comments / shares / saves), which kind of content is my strongest lever, and why?",
+      q3Label: "🔍 Read a trend for me",
+      q3Prompt:
+        "Pick one trend that fits my niche, tell me an honest read on why it's rising, and a hook angle I could realistically pull off.",
+    },
   },
   analytics: {
-    collectionNote: "Channel stats refresh automatically every hour. If they stay empty, your channel may not be connected — check it in Settings.",
-    openSettingsCta: "Open settings",
     heroEyebrow: "CHANNEL HEALTH · LIFETIME",
     audiencePrefix: "Your audience is",
     audienceSuffix: ".",
@@ -735,26 +755,132 @@ export const en = {
     statusOnFire: "on fire",
     followersSuffix: "followers",
     publishedWorksSuffix: "published works",
+    kpiAvgViews: "Avg plays / post",
     kpiAvgLikes: "Avg likes / post",
     kpiAvgComments: "Avg comments / post",
     kpiEngagement: "Engagement rate",
+    worksTableTitle: "Per-work",
+    worksTableTitleEm: "performance",
+    worksColWork: "Work",
+    worksColPlay: "Plays",
+    worksColLikes: "Likes",
+    worksColComments: "Comments",
+    worksColShares: "Shares",
+    worksColCollects: "Saves",
+    worksSortBy: "Sort by {metric}",
+    worksNoDesc: "(no caption)",
     loading: "Loading channel data…",
     empty: "No analytics data yet.",
-    demoAgeTitle: "Age",
-    demoAgeEm: "distribution",
-    demoGenderTitle: "Gender",
-    demoGenderEm: "split",
-    demoRegionsTitle: "Top",
-    demoRegionsEm: "regions",
-    demoMale: "Male",
-    demoFemale: "Female",
-    demoEmptyAge: "No age data yet — waiting for first samples from the background collector.",
-    demoEmptyGender: "No gender data yet — waiting for first samples from the background collector.",
-    demoEmptyRegions: "No regions data yet — waiting for first samples from the background collector.",
     insightsTitle: "Latest research",
     insightsTitleEm: "insights",
     insightsSub: "Curated by AutoViral · ranked by relevance to your channel",
-    insightsEmpty: "Insights appear after you publish a work — AutoViral analyzes your output to spot patterns worth repeating. Nothing yet.",
+    // Honest 3-part empty state (Inform / Inspire / Activate). Replaces the
+    // deleted demographics + insights placeholder cards. PRD-0006 S2.
+    emptyState: {
+      sampleWatermark: "SAMPLE — not your data",
+      demographics: {
+        informTitle: "We can't show your audience demographics — and we won't fake them",
+        informBody:
+          "Age, gender and region are owner-only data, gated behind a platform OAuth connection and a follower threshold (typically 1,000+). Douyin restricts them further to verified business accounts. At your current scale no API returns them, so there is nothing real to collect — a background job would only ever show zeros.",
+        inspireLabel: "What it would look like with real data",
+        activateTitle: "What actually helps right now",
+        activateBody:
+          "Skip the demographics dead-end. Your per-work performance below is real, on-disk data — sort it, find your best post, and lean into what already worked.",
+      },
+      insights: {
+        informTitle: "No automated insights yet",
+        informBody:
+          "Insights are generated locally from your published works — and only from metrics we actually measure (plays, likes, comments, shares, saves). We never invent retention or completion stats we can't see.",
+        inspireLabel: "Example of an honest insight",
+        inspireSample:
+          "Your top post out-played the median by 4× — the travel-vlog angle is your strongest lever. (illustrative shape only)",
+        activateTitle: "Want insights now?",
+        activateBody:
+          "Open the inspiration coach to talk through your 9 works and what to make next — grounded in the real numbers below.",
+      },
+    },
+    // 平台诚实矩阵 — what each platform can and can't give you. PRD-0006 S2.
+    matrix: {
+      title: "Platform",
+      titleEm: "honesty matrix",
+      sub: "What AutoViral can actually pull from each platform — no promises it can't keep.",
+      colPlatform: "Platform",
+      colOwnData: "Your own data",
+      colDemographics: "Audience demographics",
+      colTrendSource: "Trend feed",
+      platformDouyin: "Douyin",
+      platformXiaohongshu: "Xiaohongshu",
+      platformYoutube: "YouTube",
+      platformTiktok: "TikTok",
+      ownYesScrape: "Yes — frozen post metrics on disk",
+      ownNoApi: "No personal API",
+      ownOauthScope: "OAuth — out of scope this version",
+      demoNone: "No — OAuth-only, unobtainable at this scale",
+      trendScraped: "Real — scraped",
+      trendLlm: "LLM-inferred, not real metrics",
+      legendYes: "Available",
+      legendPartial: "Limited / inferred",
+      legendNo: "Not available",
+    },
+    // D2 benchmark band — turns an isolated KPI into a diagnostic statement by
+    // placing it inside a same-tier creator baseline. PRD-0006 S3.
+    benchmark: {
+      diagBelow: "{value} — below the {tier} median ({median}); target band {low}–{high}",
+      diagWithin: "{value} — right in the {tier} band ({low}–{high}); healthy for your size",
+      diagAbove: "{value} — above the {tier} band ({low}–{high}); you're outperforming your tier",
+      noBand: "No trustworthy same-tier baseline for this metric — shown without a benchmark",
+      reassureSmallAccount:
+        "Small accounts engage harder by nature — a number under the band here is expected, not a failure.",
+      referenceNote: "Reference only — not a {platform} baseline",
+      tierNano: "nano",
+      tierMicro: "micro",
+      tierMid: "mid",
+      tierMacro: "macro",
+      ariaLabel: "Benchmark for {metric}",
+      sourceLabel: "vs same-tier creators",
+    },
+    // S10 — content pillars. The 9 works are tagged (deterministic, rule-based)
+    // into a few content pillars and compared, so the user sees which kind of
+    // post actually performs. PRD-0006 S10.
+    pillars: {
+      title: "Content",
+      titleEm: "pillars",
+      sub: "Your works grouped by theme — so you can see which kind of post lands.",
+      methodNote: "Auto-tagged from your captions — directional, not exact.",
+      empty: "Not enough works yet to compare pillars.",
+      colPillar: "Pillar",
+      colWorks: "Works",
+      colAvgPlay: "Avg plays",
+      colEngagement: "Engagement",
+      worksUnit: "{count} works",
+      leadEm: "{multiple}×",
+      leadBody: "Your {top} posts out-play your {bottom} ones — lean into what already works.",
+      ariaLabel: "Content pillar comparison",
+      name: {
+        fashion: "Fashion & style",
+        anime: "Anime & sci-fi",
+        pets: "Pets",
+        lifestyle: "Lifestyle & vlog",
+        other: "Other",
+      },
+    },
+    // S11 — growth trajectory + next milestone. With this few data points a
+    // retrospective chart is meaningless, so the card looks forward: the next
+    // round milestone to aim at (5 → 50 followers) plus the real signposts
+    // already passed. The milestone is a TARGET, never a measured/forecast
+    // fact — the targetBadge says so out loud. PRD-0006 S11.
+    trajectory: {
+      ariaLabel: "Growth trajectory",
+      title: "Growth",
+      titleEm: "trajectory",
+      targetBadge: "Target · not measured",
+      sub: "Too few data points for a chart that looks back — so here's what to aim at next. These are goals, not forecasts.",
+      goalFollowers: "Followers",
+      goalReach: "Total reach",
+      remaining: "{count} to go",
+      signpostPublished: "Works published",
+      signpostBestPlay: "Best post · plays",
+    },
   },
   chat: {
     agentName: "Creative Agent",
@@ -857,6 +983,11 @@ export const en = {
     refresh: "Refresh now",
     refreshing: "Refreshing… (~30s)",
     lastCollected: "Last collected",
+    // S5 — cookie-consent disclosure: be upfront that the refresh reads the
+    // douyin.com sessionid cookie from the user's own browser, locally only.
+    cookieConsentTitle: "Before you refresh",
+    cookieConsent:
+      "AutoViral reads your douyin.com login (sessionid cookie) from this machine's browser to fetch your real numbers. Log in to douyin.com, then FULLY close your browser so the cookie is readable. Your cookie stays local — it is never uploaded.",
     unsavedTitle: "Discard unsaved changes?",
     unsavedBody: "Your changes will be lost.",
     unsavedConfirm: "Discard",
@@ -899,6 +1030,8 @@ export const zh: DeepShape<Messages> = {
     create_work_validation: "缺少必填字段（标题 / 类型 / 平台）。",
     create_work_failed: "创建作品失败：{detail}",
     analytics_collection_retired: "受众数据采集已在 agentic-terminal 重构中下线——抖音采集脚本不再随产品发布，本面板已停用。",
+    collector_relogin: "抖音登录态已过期。请打开 douyin.com 登录，然后「完全关闭」浏览器，再点一次「立即同步」。",
+    collector_not_ready: "采集依赖尚未安装。请先运行 `autoviral setup`，再重试。",
   },
   notFound: {
     code: "404",
@@ -1574,10 +1707,25 @@ export const zh: DeepShape<Messages> = {
       agentWebsearch: "Agent 推理",
       proxy: "代理源",
     },
+    // PRD-0006 S7 —挂在灵感页的研究 / 策略 coach。
+    coach: {
+      title: "灵感 coach",
+      subtitle: "扎根于你的作品、趋势与兴趣",
+      onboardingTitle: "随便问点什么开始",
+      onboardingSub: "或直接输入你自己的问题",
+      placeholder: "问问 coach——比如：我下一个该做什么选题？",
+      q1Label: "🎯 下一个做什么",
+      q1Prompt:
+        "基于我这 9 件已发布作品和当前趋势，下一个该做什么选题？给我 3 个有依据的方向，并说明每个为什么契合我。",
+      q2Label: "📈 我最强的角度",
+      q2Prompt:
+        "只看我已发布作品的真实指标（播放 / 点赞 / 评论 / 分享 / 收藏），我哪类内容是最强的杠杆？为什么？",
+      q3Label: "🔍 帮我读一个趋势",
+      q3Prompt:
+        "挑一个契合我赛道的趋势，诚实地讲讲它为什么在涨，再给一个我现实中能做出来的钩子角度。",
+    },
   },
   analytics: {
-    collectionNote: "频道数据每小时自动刷新。如果长期为空，可能是频道未连接——请到设置中检查。",
-    openSettingsCta: "打开设置",
     heroEyebrow: "频道脉象 · 自有记录以来",
     audiencePrefix: "你的受众",
     audienceSuffix: "。",
@@ -1588,26 +1736,126 @@ export const zh: DeepShape<Messages> = {
     statusOnFire: "正在燃烧",
     followersSuffix: "粉丝",
     publishedWorksSuffix: "件已发布作品",
+    kpiAvgViews: "平均播放 / 篇",
     kpiAvgLikes: "平均点赞 / 篇",
     kpiAvgComments: "平均评论 / 篇",
     kpiEngagement: "互动率",
+    worksTableTitle: "每件作品",
+    worksTableTitleEm: "表现",
+    worksColWork: "作品",
+    worksColPlay: "播放",
+    worksColLikes: "点赞",
+    worksColComments: "评论",
+    worksColShares: "分享",
+    worksColCollects: "收藏",
+    worksSortBy: "按{metric}排序",
+    worksNoDesc: "（无文案）",
     loading: "频道数据加载中…",
     empty: "暂无频道数据。",
-    demoAgeTitle: "年龄",
-    demoAgeEm: "分布",
-    demoGenderTitle: "性别",
-    demoGenderEm: "占比",
-    demoRegionsTitle: "热门",
-    demoRegionsEm: "地域",
-    demoMale: "男",
-    demoFemale: "女",
-    demoEmptyAge: "暂无年龄分布数据——等待后台采集首批样本。",
-    demoEmptyGender: "暂无性别分布数据——等待后台采集首批样本。",
-    demoEmptyRegions: "暂无地域分布数据——等待后台采集首批样本。",
     insightsTitle: "最新调研",
     insightsTitleEm: "洞察",
     insightsSub: "由 AutoViral 整理 · 按与你频道的相关度排序",
-    insightsEmpty: "发布作品后，洞察会自动出现——AutoViral 会分析你的内容并提炼值得复用的模式。暂无洞察。",
+    // 诚实三段式空态（说明 / 示例 / 行动）。替换被删的人口属性卡 + 洞察空卡。PRD-0006 S2。
+    emptyState: {
+      sampleWatermark: "示例 — 非你的真实数据",
+      demographics: {
+        informTitle: "我们无法展示你的受众画像——也不会编造它",
+        informBody:
+          "年龄、性别、地域属于账号主人的私有数据，要拿到必须先完成平台 OAuth 授权、且粉丝量过线（通常 1000+）。抖音更要求企业认证主体。以你当前的规模，没有任何平台 API 会返回这些数据——也就没有任何真实样本可采，后台任务跑出来也永远是 0。",
+        inspireLabel: "如果有真实数据，大概长这样",
+        activateTitle: "现在真正帮得上你的",
+        activateBody:
+          "别在受众画像这条死胡同里耗。下面这张每件作品表现是磁盘上的真实数据——排个序，找出你最能打的那条，把已经奏效的方向做厚。",
+      },
+      insights: {
+        informTitle: "暂无自动洞察",
+        informBody:
+          "洞察是本地基于你已发布作品生成的——而且只引用我们真正测得到的指标（播放 / 点赞 / 评论 / 分享 / 收藏）。我们绝不编造看不到的完播率或留存数据。",
+        inspireLabel: "一条诚实洞察的样子",
+        inspireSample:
+          "你播放最高的那条比中位数高出 4 倍——旅行 vlog 这个角度是你最强的杠杆。（仅为示意形状）",
+        activateTitle: "现在就想要洞察？",
+        activateBody:
+          "打开灵感 coach，围绕你这 9 件作品聊聊下一个该做什么——全部 grounding 在下面这些真实数字上。",
+      },
+    },
+    // 平台诚实矩阵——每个平台到底能给你什么。PRD-0006 S2。
+    matrix: {
+      title: "平台",
+      titleEm: "诚实矩阵",
+      sub: "AutoViral 在每个平台上到底能拿到什么——不开它兑现不了的空头支票。",
+      colPlatform: "平台",
+      colOwnData: "你的自有数据",
+      colDemographics: "受众画像",
+      colTrendSource: "趋势来源",
+      platformDouyin: "抖音",
+      platformXiaohongshu: "小红书",
+      platformYoutube: "YouTube",
+      platformTiktok: "TikTok",
+      ownYesScrape: "可以——磁盘上的冻结作品指标",
+      ownNoApi: "无个人 API",
+      ownOauthScope: "需 OAuth——本版不在范围",
+      demoNone: "不可以——仅 OAuth、此规模拿不到",
+      trendScraped: "真实采集",
+      trendLlm: "LLM 推理，非真实指标",
+      legendYes: "可用",
+      legendPartial: "受限 / 推理",
+      legendNo: "不可用",
+    },
+    // D2 基线带——把孤立 KPI 放进同粉丝层创作者的基线里，变成诊断句。PRD-0006 S3。
+    benchmark: {
+      diagBelow: "{value} — 低于 {tier} 层中位数（{median}）；目标区间 {low}–{high}",
+      diagWithin: "{value} — 正落在 {tier} 层区间内（{low}–{high}）；对你的体量很健康",
+      diagAbove: "{value} — 高于 {tier} 层区间（{low}–{high}）；跑赢了你这个层级",
+      noBand: "该指标没有可信的同层基线——不附基准、只如实展示",
+      reassureSmallAccount: "小账号天然互动更高——在这里低于区间是正常的，不是失败。",
+      referenceNote: "仅供参考——非 {platform} 基线",
+      tierNano: "nano",
+      tierMicro: "micro",
+      tierMid: "mid",
+      tierMacro: "macro",
+      ariaLabel: "{metric} 基线带",
+      sourceLabel: "对比同层创作者",
+    },
+    // S10 —内容支柱。把 9 件作品（确定性、规则化）打上几个内容支柱标签并对比，
+    // 让用户看清到底哪一类作品更能打。PRD-0006 S10。
+    pillars: {
+      title: "内容",
+      titleEm: "支柱",
+      sub: "把你的作品按主题归类——一眼看清哪一类更能打。",
+      methodNote: "基于你的文案自动打标——方向性参考，非精确。",
+      empty: "作品还太少，暂时无法对比支柱。",
+      colPillar: "支柱",
+      colWorks: "作品数",
+      colAvgPlay: "平均播放",
+      colEngagement: "互动率",
+      worksUnit: "{count} 件",
+      leadEm: "{multiple}×",
+      leadBody: "你的「{top}」类播放是「{bottom}」类的 {multiple} 倍——把已经奏效的方向做厚。",
+      ariaLabel: "内容支柱对比",
+      name: {
+        fashion: "穿搭 · 时尚",
+        anime: "二次元 · 科幻",
+        pets: "萌宠",
+        lifestyle: "日常 · vlog",
+        other: "其他",
+      },
+    },
+    // S11 — 成长轨迹 + 下一个里程碑。数据点太少，回顾型图表无意义，所以这张卡
+    // 向前看：下一个可冲的里程碑（5 → 50 关注）+ 已经达成的真实路标。里程碑是
+    // 「目标」，不是实测/预测——targetBadge 把这点说清楚。PRD-0006 S11。
+    trajectory: {
+      ariaLabel: "成长轨迹",
+      title: "成长",
+      titleEm: "轨迹",
+      targetBadge: "目标 · 非实测",
+      sub: "数据点太少，回顾型图表没意义——这里给你下一个该冲的目标。是目标，不是预测。",
+      goalFollowers: "关注者",
+      goalReach: "总播放",
+      remaining: "还差 {count}",
+      signpostPublished: "已发布作品",
+      signpostBestPlay: "最佳单作 · 播放",
+    },
   },
   chat: {
     agentName: "创作代理",
@@ -1710,6 +1958,9 @@ export const zh: DeepShape<Messages> = {
     refresh: "立即同步",
     refreshing: "同步中… 约 30 秒",
     lastCollected: "上次同步",
+    cookieConsentTitle: "同步前须知",
+    cookieConsent:
+      "AutoViral 会读取本机浏览器里你的抖音登录态（sessionid cookie）来拉取真实数据。请先登录 douyin.com，再「完全关闭」浏览器，以便读取 cookie。你的 cookie 只在本地使用，绝不上传。",
     unsavedTitle: "放弃未保存修改？",
     unsavedBody: "你的修改将会丢失。",
     unsavedConfirm: "放弃",

@@ -1,0 +1,64 @@
+.card {
+  padding: 24px 26px;
+  border: 1px solid var(--glass-border);
+  background: var(--surface-1);
+  border-radius: var(--radius-lg);
+}
+.h2 { margin: 0 0 6px; font-size: 18px; font-weight: 500; }
+.h2 em { font-family: "Instrument Serif", serif; font-style: italic; }
+.sub { font-size: 12px; color: var(--text-dim); margin-bottom: 18px; }
+
+.table { width: 100%; border-collapse: collapse; }
+.table thead th {
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dimmer);
+  font-weight: 500;
+  padding: 0 14px 10px 0;
+  border-bottom: 1px solid var(--divider);
+}
+.table tbody td {
+  padding: 13px 14px 13px 0;
+  border-top: 1px solid var(--divider);
+  vertical-align: middle;
+  font-size: 13px;
+}
+.table tbody tr:first-child td { border-top: none; }
+
+.platform { font-weight: 500; white-space: nowrap; }
+
+.cell { display: flex; align-items: center; gap: 9px; color: var(--text-dim); line-height: 1.4; }
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.dotYes { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
+.dotPartial { background: var(--surface-2); border: 1px solid var(--accent); }
+.dotNo { background: transparent; border: 1px solid var(--text-dimmer); }
+
+.legend {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-dimmer);
+}
+.legendItem { display: flex; align-items: center; gap: 7px; }
+
+@media (max-width: 720px) {
+  .table thead { display: none; }
+  .table, .table tbody, .table tr, .table td { display: block; width: 100%; }
+  .table tbody td { border-top: none; padding: 4px 0; }
+  .table tbody tr { padding: 12px 0; border-top: 1px solid var(--divider); }
+  .table tbody tr:first-child { border-top: none; }
+  .platform { font-size: 14px; margin-bottom: 4px; }
+}

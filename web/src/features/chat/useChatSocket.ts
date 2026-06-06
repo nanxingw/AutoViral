@@ -81,6 +81,16 @@ export function useChatSocket(
    * socket + reseed, no prop threading through ChatPanel.
    */
   sessionId?: string,
+  /**
+   * PRD-0006 S7 — decouple the SEND path from the WS frame. The grounded coach
+   * reuses this socket for streaming + history reseed, but its outgoing message
+   * must go through an HTTP endpoint (POST /api/coach/message) rather than the
+   * raw `{action:"send"}` frame, so the first turn spins up the grounded
+   * research session. When provided, `send()` calls this with the WIRE text
+   * (viewer-context + attachments envelopes already prepended) instead of
+   * pushing onto the WS — but still echoes the optimistic user bubble locally.
+   */
+  sendOverride?: (wireText: string, attachments?: ChatAttachment[]) => void,
 ) {
   const ref = useRef<ReconnectingWS | null>(null);
   const push = useChatStore((s) => s.push);
@@ -257,9 +267,15 @@ export function useChatSocket(
       const ctx = getViewerContext?.() ?? null;
       const attachEnv = attachments?.length ? buildAttachmentsEnvelope(attachments) : null;
       const wireText = [ctx, attachEnv, text].filter(Boolean).join("\n\n");
-      // Bridge expects `{ action: "send", text }` — see ws-bridge.ts ws.on
-      // 'message' handler. Sending `{ type: "user", text }` was a no-op.
-      ref.current?.send(JSON.stringify({ action: "send", text: wireText }));
+      if (sendOverride) {
+        // Coach mode (S7): the send goes through an HTTP endpoint, not the WS
+        // frame — but the local echo below still renders the user's bubble.
+        sendOverride(wireText, attachments);
+      } else {
+        // Bridge expects `{ action: "send", text }` — see ws-bridge.ts ws.on
+        // 'message' handler. Sending `{ type: "user", text }` was a no-op.
+        ref.current?.send(JSON.stringify({ action: "send", text: wireText }));
+      }
       // Optimistic local echo: the user's raw text + attachment thumbnails,
       // never the verbose context/attachment envelopes.
       push({ type: "user", text, attachments });

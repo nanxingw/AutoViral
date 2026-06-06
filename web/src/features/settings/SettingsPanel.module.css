@@ -163,6 +163,32 @@
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+/* S5 — cookie-consent disclosure. A quiet glass card making the privacy
+   trade-off explicit before the user runs a real Douyin scrape: the refresh
+   reads their douyin.com sessionid cookie from this machine, locally only.
+   Editorial-glass: subtle surface + accent left rule, no loud warning red. */
+.cookieConsent {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--glass-border);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.cookieConsentTitle {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin: 0 0 4px;
+}
+.cookieConsentBody {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-dimmer);
+  margin: 0;
+}
 .refreshRow {
   display: flex;
   align-items: center;
