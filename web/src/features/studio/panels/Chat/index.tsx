@@ -20,6 +20,7 @@ import { ModelSwitcher } from "./ModelSwitcher";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { useComposerDraft } from "@/stores/composerDraft";
 import { useActiveSessionId } from "@/features/chat/activeSession";
+import { parseCoachIdeas, type CoachIdea } from "@/features/explore/coachSession";
 import composerStyles from "./Composer.module.css";
 
 /** Clean line icons (feather/lucide geometry) — a consistent SVG family that
@@ -353,6 +354,12 @@ export interface CoachConfig {
     placeholder: string;
     prompts: { label: string; prompt: string }[];
   };
+  /** PRD-0006 S8 — one-click coach idea → new work. When the coach emits a
+   *  `<coach-idea .../>` tag, the bubble renders a "用此创作" action; clicking
+   *  it calls this with the parsed idea (the page creates a work seeded with a
+   *  topicHint and navigates to it). The READ-ONLY coach never creates works
+   *  itself — the user hands the idea off to the creation agent here. */
+  onCreateFromIdea?: (idea: CoachIdea) => void;
 }
 
 export interface ChatPanelProps {
@@ -582,6 +589,32 @@ export function ChatPanel({
     requestAnimationFrame(() => composerRef.current?.focus());
   };
 
+  // Empty-box starter prompts. Coach mode (S7) seeds the page-supplied prompt
+  // library (grounded works/trends questions) so the user never faces a blank
+  // box; work-bound chat keeps its built-in planning/assets/research starters.
+  const onboardingCopy = coach
+    ? {
+        title: coach.onboarding.title,
+        sub: coach.onboarding.sub,
+        prompts: coach.onboarding.prompts,
+        placeholder: coach.onboarding.placeholder,
+      }
+    : {
+        title: t("chat.onboardingTitle"),
+        sub: t("chat.onboardingSub"),
+        prompts: (
+          [
+            ["onboardingPlanning", "onboardingPlanningPrompt"],
+            ["onboardingAssets", "onboardingAssetsPrompt"],
+            ["onboardingResearch", "onboardingResearchPrompt"],
+          ] as const
+        ).map(([labelKey, promptKey]) => ({
+          label: t(`chat.${labelKey}` as MessageKey),
+          prompt: t(`chat.${promptKey}` as MessageKey),
+        })),
+        placeholder: t("chat.composerPlaceholder"),
+      };
+
   // #5 — element affordances ("加入聊天上下文" on a clip / canvas layer) inject
   // a reference phrase into THIS composer via the composer-draft store, since
   // the textarea has no external setter. Subscribe to the nonce (not the text)
@@ -671,6 +704,21 @@ export function ChatPanel({
           <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.015em" }}>
             {coach ? coach.title : t("chat.agentName")}
           </div>
+          {coach?.subtitle ? (
+            <div
+              style={{
+                fontSize: 10.5,
+                color: "var(--text-dim)",
+                letterSpacing: "-0.005em",
+                marginTop: 1,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {coach.subtitle}
+            </div>
+          ) : null}
           <div
             style={{
               fontSize: 10,
@@ -753,7 +801,7 @@ export function ChatPanel({
                 textTransform: "uppercase",
               }}
             >
-              ▾ {t("chat.onboardingTitle")}
+              ▾ {onboardingCopy.title}
             </div>
             <div
               style={{
@@ -764,17 +812,11 @@ export function ChatPanel({
                 maxWidth: 280,
               }}
             >
-              {(
-                [
-                  ["onboardingPlanning", "onboardingPlanningPrompt"],
-                  ["onboardingAssets", "onboardingAssetsPrompt"],
-                  ["onboardingResearch", "onboardingResearchPrompt"],
-                ] as const
-              ).map(([labelKey, promptKey]) => (
+              {onboardingCopy.prompts.map(({ label, prompt }) => (
                 <button
-                  key={labelKey}
+                  key={label}
                   type="button"
-                  onClick={() => onboardingPick(t(`chat.${promptKey}` as MessageKey))}
+                  onClick={() => onboardingPick(prompt)}
                   style={{
                     padding: "8px 12px",
                     fontSize: 12,
@@ -796,7 +838,7 @@ export function ChatPanel({
                     e.currentTarget.style.borderColor = "var(--glass-border)";
                   }}
                 >
-                  {t(`chat.${labelKey}` as MessageKey)}
+                  {label}
                 </button>
               ))}
             </div>
@@ -808,7 +850,7 @@ export function ChatPanel({
                 letterSpacing: "0.05em",
               }}
             >
-              {t("chat.onboardingSub")}
+              {onboardingCopy.sub}
             </div>
           </div>
         )}
@@ -821,6 +863,7 @@ export function ChatPanel({
             checkpoints={checkpointItems}
             onRollback={(file) => void restoreCheckpoint(file)}
             restoring={restoring}
+            onCreateFromIdea={coach?.onCreateFromIdea}
           />
         ))}
         {streaming && (
@@ -893,7 +936,7 @@ export function ChatPanel({
                 submit();
               }
             }}
-            placeholder={t("chat.composerPlaceholder")}
+            placeholder={onboardingCopy.placeholder}
             rows={2}
             style={{
               background: "transparent",
@@ -959,6 +1002,7 @@ function ChatBlock({
   checkpoints,
   onRollback,
   restoring,
+  onCreateFromIdea,
 }: {
   block: StreamBlock;
   onJumpToLocator: (data: LocatorData) => void;
@@ -966,8 +1010,21 @@ function ChatBlock({
   checkpoints: Checkpoint[];
   onRollback: (file: string) => void;
   restoring: string | null;
+  /** PRD-0006 S8 — coach mode only: hand a `<coach-idea/>` off to create a work. */
+  onCreateFromIdea?: (idea: CoachIdea) => void;
 }) {
   const { type } = block;
+  // PRD-0006 S8 — in coach mode, pull out any `<coach-idea/>` tags so the
+  // bubble shows clean prose and the idea(s) render as "用此创作" actions. When
+  // there's no handler (work-bound chat) we leave the text untouched. Memoised
+  // so the streaming push loop doesn't re-parse every block on every token.
+  const ideaParse = useMemo(
+    () =>
+      onCreateFromIdea && type === "text"
+        ? parseCoachIdeas(block.text)
+        : { cleaned: block.text, ideas: [] as CoachIdea[] },
+    [onCreateFromIdea, type, block.text],
+  );
   // Find the snapshot that captures this turn's yaml (if any). We only
   // want this on assistant text blocks — user messages and tool chips
   // don't represent agent output.
@@ -1110,7 +1167,7 @@ function ChatBlock({
           wordBreak: "break-word",
         }}
       >
-        {segmentTextWithLocators(block.text).map((seg, i) =>
+        {segmentTextWithLocators(ideaParse.cleaned).map((seg, i) =>
           seg.kind === "markdown" ? (
             <ReactMarkdown
               key={i}
@@ -1130,6 +1187,11 @@ function ChatBlock({
           ),
         )}
       </div>
+      {/* PRD-0006 S8 — one-click "用此创作" actions for each coach-suggested
+          idea. Only in coach mode (onCreateFromIdea present + tags parsed). */}
+      {onCreateFromIdea && ideaParse.ideas.length > 0 ? (
+        <CoachIdeaActions ideas={ideaParse.ideas} onCreate={onCreateFromIdea} />
+      ) : null}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {block.usage ? <UsageBadge usage={block.usage} /> : null}
         {rollbackTarget ? (
@@ -1182,6 +1244,92 @@ function ChatBlock({
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * PRD-0006 S8 — render one "用此创作" action per coach-suggested idea. Each card
+ * shows the idea title and, on click, hands the parsed idea to the page (create
+ * a new work seeded with a topicHint built from the idea, then navigate). This
+ * is the only place the read-only coach's output crosses into work creation —
+ * the user chooses to hand the idea off to the creation agent.
+ */
+function CoachIdeaActions({
+  ideas,
+  onCreate,
+}: {
+  ideas: CoachIdea[];
+  onCreate: (idea: CoachIdea) => void;
+}) {
+  const t = useT();
+  return (
+    <div
+      style={{
+        marginTop: 8,
+        display: "flex",
+        flexDirection: "column",
+        gap: 6,
+        maxWidth: "100%",
+      }}
+    >
+      {ideas.map((idea, i) => (
+        <button
+          key={`${idea.title}_${i}`}
+          type="button"
+          onClick={() => onCreate(idea)}
+          aria-label={t("explore.coach.createFromIdeaAria", { title: idea.title })}
+          title={idea.title}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            padding: "8px 11px",
+            background: "linear-gradient(135deg, var(--accent-glow), rgba(168,197,214,0.06))",
+            border: "1px solid var(--accent)",
+            borderRadius: 10,
+            cursor: "pointer",
+            textAlign: "left",
+            color: "var(--text)",
+            transition: "background 0.12s, border-color 0.12s",
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "var(--accent)";
+            e.currentTarget.style.color = "var(--accent-fg)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background =
+              "linear-gradient(135deg, var(--accent-glow), rgba(168,197,214,0.06))";
+            e.currentTarget.style.color = "var(--text)";
+          }}
+        >
+          <span
+            aria-hidden="true"
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              letterSpacing: "0.06em",
+              textTransform: "uppercase",
+              opacity: 0.85,
+              flexShrink: 0,
+            }}
+          >
+            ✦ {t("explore.coach.createFromIdea")}
+          </span>
+          <span
+            style={{
+              fontSize: 12,
+              fontWeight: 500,
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+              whiteSpace: "nowrap",
+              minWidth: 0,
+            }}
+          >
+            {idea.title}
+          </span>
+        </button>
+      ))}
     </div>
   );
 }

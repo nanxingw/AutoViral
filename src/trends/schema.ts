@@ -3,6 +3,20 @@ import { z } from "zod";
 export const PlatformSchema = z.enum(["youtube", "tiktok", "xiaohongshu", "douyin"]);
 export type Platform = z.infer<typeof PlatformSchema>;
 
+/** The four known platform literals — the canonical allow-list. */
+export const KNOWN_PLATFORMS = PlatformSchema.options;
+
+/**
+ * Narrow an untrusted path segment to a known Platform (B2/B6 guard). This is the
+ * single allow-list every trends route filters its `:platform` / body.platform
+ * through before it ever reaches a filesystem path, defeating both unsupported
+ * platforms and `../`-style path-segment injection (a non-literal value — even
+ * `youtube/../evil` — simply isn't in the enum).
+ */
+export function isKnownPlatform(v: unknown): v is Platform {
+  return typeof v === "string" && (KNOWN_PLATFORMS as readonly string[]).includes(v);
+}
+
 export const ItemSourceSchema = z.enum(["scraper", "rss", "agent_websearch", "proxy"]);
 export type ItemSource = z.infer<typeof ItemSourceSchema>;
 

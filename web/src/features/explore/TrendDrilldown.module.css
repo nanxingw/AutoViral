@@ -1,0 +1,190 @@
+/* S13 trend drill-down — opens beneath a clicked trending row. Editorial
+   glass: hairline frame, mono eyebrows, restrained accent. */
+.drill {
+  margin: 10px 0 4px;
+  padding: 16px 18px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md, 10px);
+  background: var(--surface-2);
+  animation: slideDown 0.22s ease;
+}
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.topRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  flex-wrap: wrap;
+}
+.provenance {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm, 6px);
+  border: 1px solid var(--glass-border);
+  color: var(--accent-hi);
+  background: var(--accent-glow);
+}
+.provenance[data-inferred="true"] {
+  color: rgba(255, 196, 0, 0.95);
+  background: rgba(255, 196, 0, 0.10);
+  border-color: rgba(255, 196, 0, 0.25);
+}
+.urgency {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-weight: 600;
+}
+.urgency[data-level="breakout"] {
+  color: var(--status-error);
+  background: rgba(249, 112, 102, 0.12);
+}
+.urgency[data-level="rising"] {
+  color: var(--status-done);
+  background: rgba(134, 239, 172, 0.12);
+}
+.window {
+  font-weight: 400;
+  opacity: 0.85;
+  letter-spacing: 0.04em;
+  text-transform: none;
+}
+.close {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--text-dimmer);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 4px;
+  border-radius: var(--radius-sm, 6px);
+  transition: color 0.15s, background 0.15s;
+}
+.close:hover { color: var(--text); background: var(--surface-1); }
+
+.section { margin-bottom: 14px; }
+.section:last-child { margin-bottom: 0; }
+.sectionLabel {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-dimmer);
+  margin-bottom: 8px;
+}
+
+/* Heat sparkline — agent-rated 1-5, the one honest velocity signal. */
+.heatLine { display: flex; align-items: flex-end; gap: 4px; }
+.heatBar {
+  width: 6px;
+  border-radius: 2px;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+}
+.heatBar[data-on="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.heatVal {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  align-self: center;
+}
+.metrics {
+  display: flex;
+  gap: 14px;
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-dim);
+}
+.noMetrics {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-dimmer);
+}
+
+.watchLink {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--accent-hi);
+  text-decoration: none;
+  padding: 4px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-glow);
+  transition: background 0.15s, color 0.15s;
+}
+.watchLink:hover { background: var(--accent); color: var(--surface-0); }
+
+.angleList {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.angle {
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text);
+  letter-spacing: -0.005em;
+}
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  color: var(--text-dim);
+}
+
+.report {
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  padding: 12px 14px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--surface-1);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.reportMeta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.02em;
+  color: var(--text-dimmer);
+}

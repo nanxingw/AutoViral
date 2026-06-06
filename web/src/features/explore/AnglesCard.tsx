@@ -1,89 +1,106 @@
 import { useT } from "@/i18n/useT";
+import type { AngleBrief, AngleGrounding } from "@/queries/angleBriefs";
 import styles from "./AnglesCard.module.css";
 
-export interface Angle { num: string; body: string; score: string }
-
 interface Props {
-  angles: Angle[];
-  /** Inline note shown next to the title — typically marks placeholder/static
-   *  data so users don't think the cards reflect real algorithmic output. */
-  note?: string;
-  /** When provided, a "↻ REGENERATE" button is rendered. Omit to drop the
-   *  control entirely (rather than render a no-op button). */
+  /** The real, grounded briefs from useAngleBriefs (S9). */
+  briefs: AngleBrief[];
+  /** Create a new work seeded from this brief, then navigate to it. */
+  onCreate: (brief: AngleBrief) => void;
+  /** True while the feed is being fetched — render an honest loading state. */
+  loading?: boolean;
+  /** True while a create-from-brief is in flight — disable the CTAs. */
+  busy?: boolean;
+  /** When provided, a "↻ REGENERATE" button is rendered. */
   onRegenerate?: () => void;
 }
 
-export function AnglesCard({ angles, note, onRegenerate }: Props) {
+// The honest grounding chip label per brief — what the brief is ACTUALLY
+// grounded in (trend × niche / trend / niche / thin), never an invented
+// "STARTER" placeholder badge.
+const GROUNDING_KEY: Record<AngleGrounding, Parameters<ReturnType<typeof useT>>[0]> = {
+  "trend+interest": "explore.groundingTrendInterest",
+  trend: "explore.groundingTrend",
+  interest: "explore.groundingInterest",
+  thin: "explore.groundingThin",
+};
+
+export function AnglesCard({ briefs, onCreate, loading, busy, onRegenerate }: Props) {
   const t = useT();
-  const isDemo = !!note;
+
   return (
     <section className={styles.card}>
       <div className={styles.head}>
-        <h2 className={styles.h2}>
-          {t("explore.anglesH2")}
-          {isDemo && (
-            <span
-              style={{
-                marginLeft: 12,
-                padding: "2px 8px",
-                fontFamily: "var(--font-mono)",
-                fontSize: 9,
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-                color: "var(--text-dimmer)",
-                border: "1px solid var(--glass-border)",
-                borderRadius: 4,
-                verticalAlign: "middle",
-              }}
-              aria-label={t("explore.anglesNote")}
-            >
-              {t("explore.starterChip")}
-            </span>
-          )}
-        </h2>
+        <h2 className={styles.h2}>{t("explore.anglesH2")}</h2>
         {onRegenerate ? (
           <button type="button" onClick={onRegenerate} className={styles.regen}>↻ REGENERATE</button>
         ) : null}
       </div>
-      {note ? (
+
+      {loading ? (
         <div
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: 10,
+            fontSize: 11,
             letterSpacing: "0.06em",
-            color: "var(--text-dimmer)",
-            marginBottom: 14,
+            color: "var(--text-dim)",
+            padding: "8px 0 4px",
           }}
         >
-          * {note}
+          {t("explore.anglesLoading")}
         </div>
-      ) : null}
-      <div className={styles.list}>
-        {angles.map((a, i) => (
-          <div key={i} className={`${styles.angle}${isDemo ? ` ${styles.angleDemo}` : ""}`}>
-            <div className={styles.num}>{a.num}</div>
-            <div className={styles.body}>{a.body}</div>
-            <div className={styles.foot}>
-              <span
-                className={styles.score}
-                style={isDemo ? { opacity: 0.5, fontStyle: "italic" } : undefined}
-                title={isDemo ? t("explore.sampleScoreTitle") : undefined}
-              >
-                {a.score}{isDemo ? t("explore.sampleSuffix") : ""}
-              </span>
-              <button
-                type="button"
-                disabled={isDemo}
-                className={`${styles.go}${isDemo ? ` ${styles.goDisabled}` : ""}`}
-                title={isDemo ? t("explore.angleGenerateDisabled") : undefined}
-                aria-label={isDemo ? t("explore.angleGenerateDisabled") : undefined}
-              >
-                {t("explore.angleGenerateCta")}
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+      ) : briefs.length === 0 ? (
+        <div
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 11,
+            letterSpacing: "0.04em",
+            color: "var(--text-dimmer)",
+            padding: "8px 0 4px",
+          }}
+        >
+          {t("explore.anglesEmpty")}
+        </div>
+      ) : (
+        <div className={styles.list}>
+          {briefs.map((b, i) => {
+            // A "thin" brief is informational (no trend + no interest) — there
+            // is nothing real to create from, so its CTA stays disabled. Every
+            // other grounding is a real, creatable angle.
+            const creatable = b.grounding !== "thin" && !!b.title.trim();
+            const disabled = !creatable || !!busy;
+            return (
+              <div key={b.id} className={styles.angle}>
+                <div className={styles.num}>{String(i + 1).padStart(2, "0")}</div>
+                <div className={styles.briefTitle}>{b.title}</div>
+                {b.why ? <div className={styles.body}>{b.why}</div> : null}
+                <div className={styles.foot}>
+                  <span
+                    className={styles.score}
+                    title={t(GROUNDING_KEY[b.grounding])}
+                  >
+                    {t(GROUNDING_KEY[b.grounding])}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={creatable && !busy ? () => onCreate(b) : undefined}
+                    className={`${styles.go}${disabled ? ` ${styles.goDisabled}` : ""}`}
+                    title={creatable ? undefined : t("explore.angleThinCtaDisabled")}
+                    aria-label={
+                      creatable
+                        ? `${t("explore.angleCreateCta")} ${b.title}`
+                        : t("explore.angleThinCtaDisabled")
+                    }
+                  >
+                    {busy ? t("explore.angleCreateBusy") : t("explore.angleCreateCta")}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }

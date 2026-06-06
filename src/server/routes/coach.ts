@@ -12,8 +12,15 @@
 //                              and so stole the editing agent's tier).
 
 import { Hono } from "hono";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { getWsBridge } from "./_shared.js";
 import { coachKeyFor, isCoachKey } from "../../domain/coach-session.js";
+import {
+  assembleCoachContext,
+  buildCoachContextSourcesFromDisk,
+} from "../../domain/coach-context.js";
+import { shapeAngleBriefs } from "../../domain/angle-briefs.js";
 
 export const coachRouter = new Hono();
 
@@ -50,6 +57,34 @@ coachRouter.post("/api/coach/message", async (c) => {
     return c.json({ sent: true, coachKey: COACH_KEY });
   } catch (err) {
     return c.json({ error: err instanceof Error ? err.message : "Coach error" }, 500);
+  }
+});
+
+// GET /api/coach/angle-briefs/:platform — the honest replacement for the old
+// hard-coded 3-sample 起手切角 card (PRD-0006 S9). Assembles the SAME grounded
+// context the coach reads (works + selected-platform trends + interests) and
+// runs it through the PURE deterministic shaper. No LLM round-trip on page load
+// (the shaper is pure → instant + free + no fabrication). When the feed is thin
+// (no trends, no interests) the shaper returns ONE honest "no signal yet" brief,
+// not a fake sample — the card honours that grounding instead of inventing data.
+coachRouter.get("/api/coach/angle-briefs/:platform", async (c) => {
+  const platform = c.req.param("platform") || "douyin";
+  try {
+    const { getLatestCreatorData } = await import("../../domain/analytics-collector.js");
+    const { loadConfig } = await import("../../infra/config.js");
+    const sources = buildCoachContextSourcesFromDisk({
+      dataRoot: join(homedir(), ".autoviral"),
+      getLatestCreatorData,
+      loadInterests: async () => {
+        const cfg = await loadConfig();
+        return (cfg.interests ?? []) as string[];
+      },
+    });
+    const ctx = await assembleCoachContext(platform, sources);
+    const briefs = shapeAngleBriefs(ctx);
+    return c.json({ platform, briefs });
+  } catch (err) {
+    return c.json({ error: err instanceof Error ? err.message : "angle-briefs error" }, 500);
   }
 });
 

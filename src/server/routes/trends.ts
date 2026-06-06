@@ -8,24 +8,59 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import yaml from "js-yaml";
 import { loadConfig } from "../../infra/config.js";
+import { isKnownPlatform, type Platform } from "../../trends/schema.js";
+import { rankByInterests } from "../../trends/ranking.js";
 import { getWsBridge, runTrendScript, researchTrends } from "./_shared.js";
 
 export const trendsRouter = new Hono();
 
+// S14/B2 — a row is "stale" once its collectedAt is older than this. The data
+// page S5 collectors are best-effort; serving month-old trends as if they were
+// live current热门 was the entire B2/#82 trust-collapse story. We expose the age
+// honestly so the panel can badge it, never silently pretend it is live.
+const STALE_AFTER_DAYS = 7;
+
+function freshness(collectedAt: string): { collectedAt: string; ageDays: number; stale: boolean } {
+  const at = Date.parse(collectedAt);
+  if (!Number.isFinite(at)) return { collectedAt, ageDays: 0, stale: false };
+  const ageDays = Math.max(0, Math.floor((Date.now() - at) / 86_400_000));
+  return { collectedAt, ageDays, stale: ageDays > STALE_AFTER_DAYS };
+}
+
 // GET /api/trends/:platform — return latest trend data (prefer data.json, fall back to YAML)
 trendsRouter.get("/api/trends/:platform", async (c) => {
   const platform = c.req.param("platform");
+  // B2/B6 — allow-list the path segment BEFORE it ever touches the filesystem.
+  // An unknown / traversal value (`../`, `bogus`) can't be a known Platform, so
+  // it short-circuits to an honest 404 with no disk access.
+  if (!isKnownPlatform(platform)) return c.json({ error: "Unknown platform" }, 404);
   const trendsDir = join(homedir(), ".autoviral", "trends", platform);
   // #49 — normalize legacy `{topics}` payloads to the `{items}` schema the
   // frontend reads, at this single GET exit so every consumer benefits.
   const { normalizeTrendsPayload } = await import("../../trends/normalize.js");
-  const norm = (data: unknown, collectedAtFallback: string) =>
-    normalizeTrendsPayload(data, platform as never, collectedAtFallback);
+
+  // S14 — rank by fit-to-channel (config.interests) and stamp freshness, in one
+  // shared exit so both the data.json and YAML branches stay honest + ranked.
+  const config = await loadConfig();
+  const interests = (config.interests ?? []) as string[];
+  const finalize = (data: unknown, collectedAtFallback: string) => {
+    const norm = normalizeTrendsPayload(data, platform, collectedAtFallback) as {
+      items?: unknown[];
+      collectedAt?: string;
+    };
+    if (norm && Array.isArray(norm.items)) {
+      norm.items = rankByInterests(norm.items as never[], interests);
+    }
+    const fresh = freshness(
+      typeof norm?.collectedAt === "string" ? norm.collectedAt : collectedAtFallback,
+    );
+    return { ...norm, ...fresh };
+  };
 
   // Try data.json first (written by agent)
   try {
     const raw = await readFile(join(trendsDir, "data.json"), "utf-8");
-    return c.json(norm(JSON.parse(raw), new Date().toISOString()) as object);
+    return c.json(finalize(JSON.parse(raw), new Date().toISOString()) as object);
   } catch { /* fall through */ }
 
   // Fall back to dated YAML files. e2e-report F184: skip underscore-prefixed
@@ -49,7 +84,7 @@ trendsRouter.get("/api/trends/:platform", async (c) => {
     const fallbackAt = dateMatch
       ? new Date(`${dateMatch[1]}T00:00:00.000Z`).toISOString()
       : new Date().toISOString();
-    return c.json(norm(data, fallbackAt) as object);
+    return c.json(finalize(data, fallbackAt) as object);
   } catch {
     return c.json({ error: "No trend data available" }, 404);
   }
@@ -58,6 +93,7 @@ trendsRouter.get("/api/trends/:platform", async (c) => {
 // GET /api/trends/:platform/report — return the markdown research report
 trendsRouter.get("/api/trends/:platform/report", async (c) => {
   const platform = c.req.param("platform");
+  if (!isKnownPlatform(platform)) return c.text("", 404);
   try {
     const reportPath = join(homedir(), ".autoviral", "trends", platform, "report.md");
     const report = await readFile(reportPath, "utf-8");
@@ -71,6 +107,7 @@ trendsRouter.get("/api/trends/:platform/report", async (c) => {
 // e2e-report follow-up: real cover images replace the 9:16 placeholder.
 trendsRouter.get("/api/trends/:platform/covers/:id", async (c) => {
   const platform = c.req.param("platform");
+  if (!isKnownPlatform(platform)) return c.body(null, 404);
   const rawId = c.req.param("id");
   const safeId = rawId.replace(/[^a-zA-Z0-9_-]/g, "");
   if (!safeId) return c.body(null, 400);
@@ -99,12 +136,23 @@ trendsRouter.post("/api/trends/refresh", async (c) => {
 
 // POST /api/trends/refresh-stream — streaming trend research via WsBridge
 trendsRouter.post("/api/trends/refresh-stream", async (c) => {
+  const body = await c.req.json<{ platform?: string; interests?: string[]; competitors?: string[] }>().catch(() => ({}));
+  // B6 — the caller-controlled platform is used to build `outputDir` and the
+  // agent prompt's file paths. Validate it against the known-platform allow-list
+  // BEFORE creating any session or path, so an unsupported/`../`-injecting value
+  // can never write a stale directory (which B2's GET would then serve as live).
+  // This guard precedes the wsBridge check so an illegal platform always 400s
+  // (never 503), and nothing is written to disk.
+  const rawPlatform: unknown = (body as any).platform ?? "douyin";
+  if (!isKnownPlatform(rawPlatform)) {
+    return c.json({ error: "Unknown platform" }, 400);
+  }
+  const platform: Platform = rawPlatform;
+
   const wsBridge = getWsBridge();
   if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
 
   try {
-    const body = await c.req.json<{ platform?: string; interests?: string[]; competitors?: string[] }>().catch(() => ({}));
-    const platform = (body as any).platform ?? "douyin";
     const platformLabel = platform === "xiaohongshu" ? "小红书" : platform === "douyin" ? "抖音" : platform;
 
     const sessionKey = `trends_${platform}_${Date.now()}`;

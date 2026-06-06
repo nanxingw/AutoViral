@@ -9,6 +9,8 @@
  * (the prompt then says so) rather than a fabricated stand-in or a thrown error.
  */
 
+import { join } from "node:path";
+import { readFile } from "node:fs/promises";
 import type { CoachWorkInput } from "./coach-session.js";
 import type { CreatorData } from "./analytics-collector.js";
 
@@ -16,6 +18,52 @@ export interface CoachContextSources {
   getLatestCreatorData: () => Promise<CreatorData | null>;
   getTrendTopics: (platform: string) => Promise<string[]>;
   getInterests: () => Promise<string[]>;
+}
+
+/** Injected fs/config deps so the disk-backed sources stay unit-testable. */
+export interface CoachContextDiskDeps {
+  /** Root data dir (e.g. ~/.autoviral) — trends live under `${root}/trends/<p>/data.json`. */
+  dataRoot: string;
+  getLatestCreatorData: () => Promise<CreatorData | null>;
+  loadInterests: () => Promise<string[]>;
+}
+
+/**
+ * Build the disk-backed CoachContextSources — the SINGLE source of truth for the
+ * coach's grounding (works + selected-platform trends + interests). Both the
+ * coach system prompt (ws-bridge) and the S9 angle-brief feed read through this,
+ * so they can never drift to two different "what the user's data is" answers.
+ *
+ * Each source degrades to empty on any failure (honest empty, never fabricated).
+ */
+export function buildCoachContextSourcesFromDisk(
+  deps: CoachContextDiskDeps,
+): CoachContextSources {
+  return {
+    getLatestCreatorData: deps.getLatestCreatorData,
+    getTrendTopics: async (p) => {
+      // Read the on-disk trends artifact for the platform and pull topic titles
+      // (data.json `{topics:[{title}]}` written by the research agent).
+      try {
+        const file = join(deps.dataRoot, "trends", p, "data.json");
+        const raw = await readFile(file, "utf-8");
+        const data = JSON.parse(raw) as { topics?: Array<{ title?: string }> };
+        return (data.topics ?? [])
+          .map((t) => t?.title)
+          .filter((t): t is string => typeof t === "string" && t.length > 0)
+          .slice(0, 12);
+      } catch {
+        return [];
+      }
+    },
+    getInterests: async () => {
+      try {
+        return (await deps.loadInterests()) ?? [];
+      } catch {
+        return [];
+      }
+    },
+  };
 }
 
 export interface AssembledCoachContext {

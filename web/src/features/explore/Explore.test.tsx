@@ -1,8 +1,16 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import type { ReactNode } from "react";
+
+// The Explore page now mounts the grounded coach (S7), which hosts a real
+// ChatPanel → useChatSocket → `new WebSocket` (absent in jsdom). Page tests
+// mock the chat socket (same pattern as Editor.test.tsx / Studio.layout.test).
+vi.mock("@/features/chat/useChatSocket", () => ({
+  useChatSocket: () => ({ send: vi.fn(), state: "open" }),
+}));
+
 import Explore from "@/pages/Explore";
 
 function wrap(ui: ReactNode) {

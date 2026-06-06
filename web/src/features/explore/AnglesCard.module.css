@@ -55,23 +55,32 @@
   min-height: 150px;
 }
 .angle:hover { border-color: var(--accent); transform: translateY(-1px); }
-/* Demo mode: angle is not yet wired to a click handler, so suppress the
-   "clickable" affordance (cursor / hover lift) until the agent hook lands.
-   Keeps the visual layout identical otherwise. */
-.angleDemo { cursor: default; }
-.angleDemo:hover { border-color: var(--glass-border); transform: none; }
 .num { font-family: "Instrument Serif", serif; font-style: italic; font-size: 24px; color: var(--accent); line-height: 1; }
-/* R39: clamp angle body to 5 lines. 3-col grid + flex:1 means a longer
-   body in one card stretches the row, breaking visual alignment. The
-   ellipsis keeps card heights predictable. */
-.body {
-  font-size: 13px;
+/* S9 — the brief's title (the new work's name + lead line). Clamped to 2 lines
+   so a long 兴趣 × 趋势 cross doesn't blow out card height in the 3-col grid. */
+.briefTitle {
+  font-size: 14px;
+  font-weight: 500;
   color: var(--text);
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  word-break: break-word;
+}
+/* R39: clamp the secondary "why" line to keep card heights predictable in the
+   3-col grid + flex layout (a longer why in one card would stretch the row). */
+.body {
+  font-size: 12.5px;
+  color: var(--text-dim);
   line-height: 1.45;
   flex: 1;
   display: -webkit-box;
-  -webkit-line-clamp: 5;
-  line-clamp: 5;
+  -webkit-line-clamp: 4;
+  line-clamp: 4;
   -webkit-box-orient: vertical;
   overflow: hidden;
   text-overflow: ellipsis;

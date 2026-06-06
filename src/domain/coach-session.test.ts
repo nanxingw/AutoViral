@@ -155,6 +155,18 @@ describe("buildCoachSystemPrompt", () => {
     const p = buildCoachSystemPrompt(baseContext());
     expect(p).not.toMatch(/完播率|留存率|retention/i);
   });
+
+  it("teaches the <coach-idea/> tag so a suggested idea gets a one-click 用此创作 action (S8)", () => {
+    const p = buildCoachSystemPrompt(baseContext());
+    // The literal tag name the frontend parser (parseCoachIdeas) keys on.
+    expect(p).toContain("<coach-idea");
+    // and the attributes the topicHint is built from.
+    expect(p).toContain("title=");
+    expect(p).toMatch(/hook=/);
+    expect(p).toMatch(/why=/);
+    // ties the tag to the user-facing 用此创作 affordance.
+    expect(p).toContain("用此创作");
+  });
 });
 
 // ── Token budget guardrail (cost) ──────────────────────────────────────────

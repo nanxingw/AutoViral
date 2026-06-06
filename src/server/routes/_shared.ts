@@ -480,10 +480,14 @@ export async function researchTrends(platforms: string[]): Promise<{ collected: 
   const { writeValidatedTrendsYaml } = await import("../../trends/write.js");
   const { gcOldCovers, coversDir } = await import("../../trends/covers.js");
   const { runCliBrief } = await import("../../cli-brief.js");
+  const { loadConfig } = await import("../../infra/config.js");
   const { homedir } = await import("node:os");
   const collected: string[] = [];
   const errors: string[] = [];
-  const deps = defaultPipelineDeps(runCliBrief);
+  // S14 — feed the user's content interests into the pipeline so collected
+  // trends are ranked by fit-to-channel before they're written to disk.
+  const cfg = await loadConfig();
+  const deps = defaultPipelineDeps(runCliBrief, (cfg.interests ?? []) as string[]);
   for (const platform of platforms) {
     if (!["youtube", "tiktok", "xiaohongshu", "douyin"].includes(platform)) {
       errors.push(`${platform} (unsupported)`);

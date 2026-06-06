@@ -1,4 +1,5 @@
 import { enrichWithAnalysis } from "./enrichment.js";
+import { rankByInterests } from "./ranking.js";
 import { getSource as defaultGetSource } from "./sources/index.js";
 import {
   downloadCover as defaultDownloadCover,
@@ -14,6 +15,13 @@ export interface PipelineDeps {
   coversDir: (platform: string) => string;
   maxRetries?: number;
   limit?: number;
+  /**
+   * S14 — the user's content interests (config.interests). When present the
+   * validated items are reordered by fit-to-channel before they're written to
+   * disk, so the on-disk YAML is already ranked for THIS user's niche. Absent /
+   * empty → no reordering (degrades to the agent's heat-implied order).
+   */
+  interests?: string[];
 }
 
 export async function collectPlatform(
@@ -43,12 +51,22 @@ export async function collectPlatform(
     const path = await deps.downloadCover(item.cover.url, dir, item.id);
     if (path) item.cover.cachedPath = path;
   }));
+  // S14 — rank by fit-to-channel before returning so the persisted order is
+  // already personalized. No-op when interests is empty/undefined.
+  const interests = deps.interests ?? [];
+  if (interests.length > 0) {
+    enriched.items = rankByInterests(enriched.items, interests);
+  }
   return enriched;
 }
 
-export const defaultPipelineDeps = (runCli: (p: string) => Promise<string>): PipelineDeps => ({
+export const defaultPipelineDeps = (
+  runCli: (p: string) => Promise<string>,
+  interests: string[] = [],
+): PipelineDeps => ({
   getSource: defaultGetSource,
   runCli,
   downloadCover: defaultDownloadCover,
   coversDir: defaultCoversDir,
+  interests,
 });

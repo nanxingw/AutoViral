@@ -15,7 +15,8 @@ interface Props {
   note?: string;
   /** #76 — explanatory label for the (disabled) CTA in demo mode. Shown as
    *  title + aria-label so the CTA reads as "not wired yet", not a dead link.
-   *  Mirrors AnglesCard's `explore.angleGenerateDisabled`. */
+   *  (AnglesCard used to share this demo pattern; S9 replaced its samples with
+   *  real grounded briefs, so only this ribbon still carries the demo CTA.) */
   ctaDisabledLabel?: string;
 }
 

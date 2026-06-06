@@ -1,9 +1,11 @@
+import { useState } from "react";
 import clsx from "clsx";
 import {
   type TrendItem, type Platform, SUPPORTED_REFRESH_PLATFORMS,
 } from "@/queries/trends";
 import { compactNumber } from "@/lib/format";
 import { useT } from "@/i18n/useT";
+import { TrendDrilldown } from "./TrendDrilldown";
 import styles from "./TrendingPanel.module.css";
 
 const PLATFORM_LABEL: Record<Platform, string> = {
@@ -18,6 +20,9 @@ export function TrendingPanel({
   items,
   onUse,
   busy = false,
+  stale = false,
+  ageDays = 0,
+  collectedAt = null,
 }: {
   platform: Platform;
   items: TrendItem[];
@@ -26,14 +31,33 @@ export function TrendingPanel({
   // topicHint. Undefined → read-only panel (back-compat).
   onUse?: (item: TrendItem) => void;
   busy?: boolean;
+  // S14/B2 freshness — server-computed. `stale` flips a visible badge so
+  // month-old data can never masquerade as live; `collectedAt` (null when no
+  // data on disk) drives an honest "collected Nd ago" line.
+  stale?: boolean;
+  ageDays?: number;
+  collectedAt?: string | null;
 }) {
   const t = useT();
   const list = items ?? [];
+  const hasData = collectedAt != null;
+  // S13 — which row's drill-down is open. Keyed by row index (stable identity
+  // for a ranked snapshot, same rationale as the React key below). Resets to
+  // null when the list/platform changes because the keys all change → remount.
+  const [openIdx, setOpenIdx] = useState<number | null>(null);
   return (
     <section className={styles.panel}>
       <div className={styles.head}>
         <h2 className={styles.title}>
           {PLATFORM_LABEL[platform]} <em>{t("explore.trendingTitleEm")}</em>
+          {stale && (
+            <span
+              className={styles.staleBadge}
+              title={t("explore.trendStaleTitle", { days: ageDays })}
+            >
+              {t("explore.trendStaleBadge", { days: ageDays })}
+            </span>
+          )}
         </h2>
         <span className={styles.meta}>
           {list.length === 0
@@ -41,6 +65,13 @@ export function TrendingPanel({
             : t("explore.trendingTopMeta", { count: list.length })}
         </span>
       </div>
+      {hasData && (
+        <div className={styles.freshness}>
+          {ageDays <= 0
+            ? t("explore.trendCollectedToday")
+            : t("explore.trendCollectedAt", { days: ageDays })}
+        </div>
+      )}
       {list.length === 0 && (
         <div style={{ padding: "20px 0", color: "var(--text-dimmer)", fontSize: 12 }}>
           {SUPPORTED_REFRESH_PLATFORMS.includes(platform)
@@ -83,15 +114,35 @@ export function TrendingPanel({
                 {t(`explore.sourceBadge.${item.source === "agent_websearch" ? "agentWebsearch" : item.source}`)}
               </span>
             </div>
-            {onUse && (
+            <div className={styles.actions}>
+              {/* S13 — open the drill-down (trendline / example / angles /
+                  report.md / urgency). Toggles inline beneath this row. */}
               <button
                 type="button"
-                className={styles.useBtn}
-                disabled={busy}
-                onClick={() => onUse(item)}
+                className={styles.drillBtn}
+                aria-expanded={openIdx === idx}
+                aria-label={openIdx === idx ? t("explore.collapseTrend") : t("explore.expandTrend")}
+                onClick={() => setOpenIdx(openIdx === idx ? null : idx)}
               >
-                {t("explore.useTrend")}
+                {openIdx === idx ? `${t("explore.collapseTrend")} ▴` : `${t("explore.expandTrend")} ▾`}
               </button>
+              {onUse && (
+                <button
+                  type="button"
+                  className={styles.useBtn}
+                  disabled={busy}
+                  onClick={() => onUse(item)}
+                >
+                  {t("explore.useTrend")}
+                </button>
+              )}
+            </div>
+            {openIdx === idx && (
+              <TrendDrilldown
+                platform={platform}
+                item={item}
+                onClose={() => setOpenIdx(null)}
+              />
             )}
           </div>
         </div>

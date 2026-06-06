@@ -68,3 +68,75 @@ export const COACH_PROMPT_LIBRARY: readonly CoachPrompt[] = [
   { labelKey: "explore.coach.q2Label", promptKey: "explore.coach.q2Prompt" },
   { labelKey: "explore.coach.q3Label", promptKey: "explore.coach.q3Prompt" },
 ] as const;
+
+// ── One-click coach idea → new work (PRD-0006 S8) ────────────────────────────
+//
+// The coach is a READ-ONLY strategy role — it never touches the user's works.
+// When it suggests a concrete angle, it emits a `<coach-idea .../>` tag next to
+// it. The chat layer renders that tag as a "用此创作" action which creates a NEW
+// work seeded with a topicHint and navigates to it — the originating surface is
+// the coach's chat output, not a trend row. This reuses the #65 topicHint
+// plumbing (a trend → work brief) but builds the brief from a coach idea.
+
+/** A concrete selection the coach surfaced, parsed out of a `<coach-idea/>`
+ *  tag. `title` is required (it's what the new work is named + the lead line of
+ *  the brief); `hook` / `why` enrich the topicHint when present. */
+export interface CoachIdea {
+  title: string;
+  hook?: string;
+  why?: string;
+}
+
+/**
+ * Compose a creative brief (topicHint) from a coach idea — the chat-output
+ * sibling of #65's `buildTrendTopicHint`. Joins title + hook + why into a clean
+ * multi-line brief, trimming empty fields so the creation agent gets a tight,
+ * grounded seed (not a tag dump).
+ */
+export function buildCoachIdeaTopicHint(idea: CoachIdea): string {
+  return [idea.title, idea.hook, idea.why]
+    .filter((p): p is string => !!p && p.trim().length > 0)
+    .map((p) => p.trim())
+    .join("\n");
+}
+
+/** Pull one attribute (double- or single-quoted) out of a tag's attr string. */
+function readAttr(attrs: string, name: string): string | undefined {
+  const m = new RegExp(`${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "i").exec(attrs);
+  if (!m) return undefined;
+  const v = (m[1] ?? m[2] ?? "").trim();
+  return v.length > 0 ? v : undefined;
+}
+
+// g-flagged so we can extract EVERY idea tag in document order. The capture is
+// the whole attribute span so individual attrs are read by readAttr (order /
+// presence of hook|why is free-form). Mirrors the <viewer-action/> approach in
+// chat/types.ts but the schema is idea-specific.
+const COACH_IDEA_RX_GLOBAL = /<coach-idea\b([^>]*?)\/?>/gi;
+
+/**
+ * Parse all `<coach-idea/>` tags in an assistant text fragment. Returns the
+ * cleaned text (every tag stripped so the bubble reads naturally) plus the list
+ * of ideas in document order. A tag with a blank/missing title is dropped (an
+ * idea you can't name is nothing to create from) — but its tag is still stripped
+ * so no raw markup leaks into the bubble.
+ */
+export function parseCoachIdeas(text: string): {
+  cleaned: string;
+  ideas: CoachIdea[];
+} {
+  const ideas: CoachIdea[] = [];
+  const cleaned = text.replace(COACH_IDEA_RX_GLOBAL, (_match, attrs: string) => {
+    const title = readAttr(attrs, "title");
+    if (title) {
+      const idea: CoachIdea = { title };
+      const hook = readAttr(attrs, "hook");
+      const why = readAttr(attrs, "why");
+      if (hook) idea.hook = hook;
+      if (why) idea.why = why;
+      ideas.push(idea);
+    }
+    return "";
+  });
+  return { cleaned, ideas };
+}

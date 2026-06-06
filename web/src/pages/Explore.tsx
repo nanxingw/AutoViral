@@ -2,13 +2,25 @@ import { useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { PlatformTabs } from "@/features/explore/PlatformTabs";
-import { AnglesCard, type Angle } from "@/features/explore/AnglesCard";
+import { AnglesCard } from "@/features/explore/AnglesCard";
 import { TrendingPanel } from "@/features/explore/TrendingPanel";
 import { usePlatformTrends, type Platform, type TrendItem, SUPPORTED_REFRESH_PLATFORMS } from "@/queries/trends";
+import { useAngleBriefs, type AngleBrief } from "@/queries/angleBriefs";
 import { useCreateWork } from "@/queries/works";
 import { localizeApiError } from "@/i18n/serverError";
 import { apiFetch } from "@/lib/api";
 import { useT } from "@/i18n/useT";
+import { ChatPanel } from "@/features/studio/panels/Chat";
+import { CoachModelSwitcher } from "@/features/explore/CoachModelSwitcher";
+import {
+  COACH_SESSION_KEY,
+  COACH_PROMPT_LIBRARY,
+  sendCoachMessage,
+  COACH_DEFAULT_PLATFORM,
+  buildCoachIdeaTopicHint,
+  type CoachIdea,
+} from "@/features/explore/coachSession";
+import { useChatStore } from "@/features/chat/store";
 
 // #65 — compose a creative brief (topicHint) from a trend so the agent's
 // research/output is seeded by the trend's title + AI-computed hook, not just
@@ -21,19 +33,6 @@ export function buildTrendTopicHint(item: TrendItem): string {
   ].filter((p): p is string => !!p && p.trim().length > 0);
   return parts.join("\n");
 }
-
-// e2e-report F186: previous score strings were `FIT 94 · 5.2K est. reach`,
-// `FIT 87 · 3.8K est. reach`, `FIT 79 · risky` — fake-precision numbers that
-// imply algorithmic personalization while the algorithm isn't wired yet.
-// R75/F186 flagged this as system-honesty leak. Reframed as direction tags
-// (category labels) so users see what TYPE of angle each card is, without
-// being misled by invented magnitudes. The "STARTER/起手" chip + non-clickable
-// "生成 →" still mark these as hand-curated examples, not personalized output.
-const SAMPLE_ANGLE_META = [
-  { num: "01", scoreKey: "explore.starterScore1", bodyKey: "explore.sampleAngle1Body" },
-  { num: "02", scoreKey: "explore.starterScore2", bodyKey: "explore.sampleAngle2Body" },
-  { num: "03", scoreKey: "explore.starterScore3", bodyKey: "explore.sampleAngle3Body" },
-] as const;
 
 export default function Explore() {
   // e2e-report F134: default to 小红书 (a SUPPORTED_REFRESH_PLATFORMS member)
@@ -66,11 +65,34 @@ export default function Explore() {
       // surfaced inline via createWork.isError below
     }
   }
-  const STATIC_ANGLES: Angle[] = SAMPLE_ANGLE_META.map((a) => ({
-    num: a.num,
-    score: t(a.scoreKey),
-    body: t(a.bodyKey),
-  }));
+  // S8 — the chat-output sibling of useTrend: turn a coach-suggested idea into a
+  // new work seeded with topicHint (reuse the #65 plumbing), then open it. The
+  // originating surface is the coach's chat output, not a trend row. Same domain
+  // default ("short-video") — coach ideas are video angles, not carousels.
+  async function useCoachIdea(idea: CoachIdea) {
+    if (createWork.isPending) return;
+    try {
+      const w = await createWork.mutateAsync({
+        title: idea.title,
+        type: "short-video",
+        topicHint: buildCoachIdeaTopicHint(idea),
+      });
+      navigate(`/studio/${w.id}`);
+    } catch {
+      // surfaced inline via createWork.isError below
+    }
+  }
+  // PRD-0006 S9 — the honest replacement for the old hard-coded 3-sample 起手切角
+  // card. Real grounded briefs (works + selected-platform trends + interests)
+  // shaped server-side by the pure deterministic shaper (instant, no LLM, no
+  // fabrication). Keyed on the same `platform` the trending panel reads.
+  const angleBriefs = useAngleBriefs(platform);
+  // S9 — turn a brief into a new work, reusing the S8 coach-idea plumbing
+  // (#65 topicHint). A brief carries the same {title, hook, why} shape a coach
+  // idea does, so the topicHint is built the same way.
+  function createFromBrief(brief: AngleBrief) {
+    void useCoachIdea({ title: brief.title, hook: brief.hook, why: brief.why });
+  }
   const [collecting, setCollecting] = useState(false);
   // e2e-report F87: collectStatus splits the old single `collectMsg` into a
   // tagged union so the queued case can render as two-channel UI (done badge
@@ -109,6 +131,38 @@ export default function Explore() {
     } finally {
       setCollecting(false);
     }
+  };
+
+  // PRD-0006 S7 — mount the WORKLESS grounded coach on this page. The coach is
+  // not a work: ChatPanel runs in coach mode (CoachConfig), keyed on the stable
+  // COACH_SESSION_KEY so its WS path is /ws/browser/coach_main (streaming +
+  // persisted-history reseed survives reload), but SEND is decoupled to POST
+  // /api/coach/message — that first turn spins up the grounded research session
+  // (reads the user's works + selected-platform trends + interests). The empty
+  // box is seeded with the prompt library (grounded starter questions) so the
+  // user never faces a blank prompt.
+  const coachStreaming = useChatStore((s) => s.streaming);
+  const coachConfig = {
+    send: (wireText: string) => {
+      void sendCoachMessage(wireText, COACH_DEFAULT_PLATFORM);
+    },
+    modelSwitcher: <CoachModelSwitcher streaming={coachStreaming} />,
+    title: t("explore.coach.title"),
+    subtitle: t("explore.coach.subtitle"),
+    onboarding: {
+      title: t("explore.coach.onboardingTitle"),
+      sub: t("explore.coach.onboardingSub"),
+      placeholder: t("explore.coach.placeholder"),
+      prompts: COACH_PROMPT_LIBRARY.map((p) => ({
+        label: t(p.labelKey),
+        prompt: t(p.promptKey),
+      })),
+    },
+    // S8 — a coach-suggested idea (a `<coach-idea/>` tag) renders a "用此创作"
+    // action; clicking it lands here to create + open the new work.
+    onCreateFromIdea: (idea: CoachIdea) => {
+      void useCoachIdea(idea);
+    },
   };
 
   return (
@@ -166,7 +220,31 @@ export default function Explore() {
         </div>
       </section>
 
-      <AnglesCard angles={STATIC_ANGLES} note={t("explore.anglesNote")} />
+      {/* PRD-0006 S7 — the grounded inspiration coach, mounted as the page's
+          hero conversation surface. ChatPanel runs in workless coach mode
+          (coachConfig); the glass shell gives the height:100% panel a frame. */}
+      <section
+        aria-label={t("explore.coach.title")}
+        style={{
+          height: 560,
+          marginBottom: 28,
+          borderRadius: "var(--radius-lg, 16px)",
+          border: "1px solid var(--glass-border)",
+          background: "var(--surface-1)",
+          backdropFilter: "blur(24px) saturate(140%)",
+          WebkitBackdropFilter: "blur(24px) saturate(140%)",
+          overflow: "hidden",
+        }}
+      >
+        <ChatPanel workId={COACH_SESSION_KEY} coach={coachConfig} />
+      </section>
+
+      <AnglesCard
+        briefs={angleBriefs.data ?? []}
+        loading={angleBriefs.isLoading}
+        busy={createWork.isPending}
+        onCreate={createFromBrief}
+      />
 
       <PlatformTabs value={platform} onChange={setPlatform} />
 
@@ -184,6 +262,9 @@ export default function Explore() {
             items={trends.data.items}
             onUse={useTrend}
             busy={createWork.isPending}
+            stale={trends.data.stale}
+            ageDays={trends.data.ageDays}
+            collectedAt={trends.data.collectedAt}
           />
         </>
       ) : (

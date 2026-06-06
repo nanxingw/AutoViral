@@ -70,6 +70,23 @@ export const handlers = [
       delta: null,
     }),
   ),
+  // PRD-0006 S9 — grounded angle briefs (pure shaper, no LLM). Default to one
+  // real-ish trend+interest brief so the Explore page renders a populated card;
+  // specific tests override with `mswServer.use(...)`.
+  http.get("/api/coach/angle-briefs/:platform", ({ params }) =>
+    HttpResponse.json({
+      platform: params.platform,
+      briefs: [
+        {
+          id: "brief-0",
+          title: "机械键盘 × 露营效率",
+          hook: "用你「机械键盘」的视角切入「露营效率」",
+          why: "「露营效率」正在上涨，与你「机械键盘」的赛道高度契合。",
+          grounding: "trend+interest",
+        },
+      ],
+    }),
+  ),
   // PRD-0006 S12 — agent insights endpoint (D3-filtered server-side). Default
   // to empty so the page falls back to the creator-snapshot insights; specific
   // tests override with `mswServer.use(...)`.
