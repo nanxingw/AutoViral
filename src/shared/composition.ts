@@ -433,11 +433,26 @@ export const TrackSchema = TrackObjectSchema.superRefine(refineTrack);
 export type Track = z.infer<typeof TrackSchema>;
 
 // ─── Scenes ─────────────────────────────────────────────────────────────────
-// Scenes are semantic groupings of clip ids — "this is the hook section",
-// "this is the payoff". They have no rendering effect; they're purely a
-// planning + dive-canvas affordance. order is the user's intended sequence,
-// independent of timeline order. memberAssetIds lets a scene reference assets
-// not yet placed (e.g. an unused alt take that belongs to the same scene).
+// v0.1.6 (PRD-0007) — a `scene` is now a FIRST-CLASS planning unit: one
+// 分镜 / 镜头 (storyboard shot). It is the single source of truth that the
+// Studio UI, the `autoviral scene …` CLI, and the generation handoff all
+// consume — an agent adding a shot via the CLI and a human editing a card in
+// the panel converge on the SAME scene record. Scenes still have NO direct
+// rendering effect; they are the planning layer (剧本 = PRD / 分镜 = issue),
+// decoupled from execution (clips on the timeline).
+//
+// `order` is the user's intended shot sequence (independent of timeline order;
+// kept contiguous 0..N-1 by the scene ops). The original 7 fields
+// (id/order/title/prompt/memberClipIds/memberAssetIds/intent) are UNCHANGED.
+// The 8 new fields are all optional / defaulted so 0.1.5 works (no `scenes`
+// key) and pre-v0.1.6 scenes (only id/order/title) round-trip untouched.
+//
+// `shotSize` (景别: 远/全/中/近/特写) and `cameraMovement` (运镜:
+// 推/拉/摇/移/跟/固定) use CODE-FACING enum keys; the UI localises the label.
+// These two enums are the cross-slice contract (S1/S2/S3/S4) — do not change
+// the literals. `generatedAssetIds` / `selectedAssetId` / `status`
+// (planned→generated→stale) carry the generation-handoff state; `mdAnchor`
+// back-links a scene to its heading in plan/script.md.
 
 export const SceneSchema = z.object({
   id: z.string(),
@@ -447,6 +462,17 @@ export const SceneSchema = z.object({
   memberClipIds: z.array(z.string()).default([]),
   memberAssetIds: z.array(z.string()).default([]),
   intent: z.enum(["hook", "build", "payoff", "cta"]).optional(),
+  // ─── New in v0.1.6 (PRD-0007) — all optional / defaulted ────────────────
+  narration: z.string().optional(),
+  durationSec: z.number().optional(),
+  shotSize: z.enum(["long", "full", "medium", "close", "closeup"]).optional(),
+  cameraMovement: z
+    .enum(["push", "pull", "pan", "track", "follow", "static"])
+    .optional(),
+  generatedAssetIds: z.array(z.string()).default([]),
+  selectedAssetId: z.string().optional(),
+  status: z.enum(["planned", "generated", "stale"]).default("planned"),
+  mdAnchor: z.string().optional(),
 });
 export type Scene = z.infer<typeof SceneSchema>;
 
@@ -748,6 +774,17 @@ export function newTrackId(): string {
   // (8 chars) — the canonical uuid format starts with 8 hex digits.
   const uuid = crypto.randomUUID().replace(/-/g, "");
   return `trk_${uuid.slice(0, 8)}`;
+}
+
+/**
+ * Mint a fresh `scn_<uuid8>` id for a scene (分镜 / storyboard shot). Mirrors
+ * {@link newTrackId} so every scene-creation site (scene ops, CLI, bridge)
+ * uses the same shape. 8 hex chars = 32 bits of entropy, ample for the handful
+ * of scenes a single composition holds.
+ */
+export function newSceneId(): string {
+  const uuid = crypto.randomUUID().replace(/-/g, "");
+  return `scn_${uuid.slice(0, 8)}`;
 }
 
 /**

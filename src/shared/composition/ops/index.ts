@@ -10,5 +10,12 @@ export { patchClipProps } from "./patchClipProps.js";
 export { moveClipToTrack } from "./moveClipToTrack.js";
 export { addTransition, removeTransition } from "./transition.js";
 export { addTrack, removeTrack } from "./track.js";
+export {
+  addScene,
+  setSceneProps,
+  reorderScenes,
+  linkSceneAssets,
+  removeScene,
+} from "./scene.js";
 export { addKeyframe, setKeyframe } from "./keyframe.js";
 export { setAspectRatio, rescaleCompositionForResize } from "./setAspectRatio.js";
