@@ -125,3 +125,69 @@ describe("AssetSidebar tabs (Phase 5.B)", () => {
     );
   });
 });
+
+describe("AssetSidebar — Script tab (S3 · PRD-0007)", () => {
+  it("renders all three tabs: Library, Inspector, Script", () => {
+    useComposition.setState({ comp: null, selection: null });
+    wrap(<AssetSidebar workId="w" />);
+    expect(screen.getByRole("tab", { name: /library/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /inspector/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /script/i })).toBeInTheDocument();
+  });
+
+  it("clicking the Script tab activates it and shows the ScriptTab panel", () => {
+    // Empty scenes → ScriptTab renders its onboarding empty state, which is a
+    // user-visible marker that the script panel (not inspector/library) mounted.
+    const comp = makeAssetGraph({ ids: ["solo"] });
+    useComposition.setState({ comp, selection: null });
+    wrap(<AssetSidebar workId="w" />);
+    fireEvent.click(screen.getByRole("tab", { name: /script/i }));
+    expect(screen.getByRole("tab", { name: /script/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    // ScriptTab's empty state is the proof the script panel rendered.
+    expect(screen.getByText(/no storyboard yet/i)).toBeInTheDocument();
+  });
+
+  it("staying on the Script tab is sticky — a new selection does NOT yank to Inspector", () => {
+    const comp = makeAssetGraph({ ids: ["solo"] });
+    comp.tracks[0].clips.push(makeVideoClip({ id: "c", src: "/assets/solo.png" }));
+    useComposition.setState({ comp, selection: null });
+    wrap(<AssetSidebar workId="w" />);
+    // User parks on the Script tab.
+    fireEvent.click(screen.getByRole("tab", { name: /script/i }));
+    // Then a clip becomes selected on the timeline.
+    act(() => {
+      useComposition.setState({ selection: "c" });
+    });
+    // The script tab must remain active — NOT auto-switch to inspector.
+    expect(screen.getByRole("tab", { name: /script/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: /inspector/i })).toHaveAttribute(
+      "aria-selected",
+      "false",
+    );
+  });
+
+  it("library→inspector auto-switch is NOT regressed by the script-sticky guard", () => {
+    // Parked on Library (default), a new selection must still jump to Inspector.
+    const comp = makeAssetGraph({ ids: ["solo"] });
+    comp.tracks[0].clips.push(makeVideoClip({ id: "c", src: "/assets/solo.png" }));
+    useComposition.setState({ comp, selection: null });
+    wrap(<AssetSidebar workId="w" />);
+    expect(screen.getByRole("tab", { name: /library/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    act(() => {
+      useComposition.setState({ selection: "c" });
+    });
+    expect(screen.getByRole("tab", { name: /inspector/i })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+  });
+});

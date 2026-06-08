@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { useComposition } from "@/features/studio/store";
 import { LibraryTab } from "./LibraryTab";
+import { ScriptTab } from "./ScriptTab";
 import { InspectorTab } from "@/features/studio/panels/Inspector/InspectorTab";
 import { useT } from "@/i18n/useT";
 
@@ -9,24 +10,36 @@ interface Props {
   workId: string;
 }
 
-type Tab = "library" | "inspector";
+type Tab = "library" | "inspector" | "script";
 
 /**
- * AssetSidebar — right-column shell for two views:
+ * AssetSidebar — right-column shell for three views:
  *   - Library:   browse the work's asset library (existing behaviour)
  *   - Inspector: per-clip variant switcher + dive entry point (Phase 5.B)
+ *   - Script:    read-only storyboard / 分镜 skeleton (S3 · PRD-0007)
  *
  * Auto-activation (D2): selecting a clip in the timeline switches the active
  * tab to "inspector". The user can override by clicking back to "library";
  * we then keep their choice until selection changes again.
+ *
+ * S3 exception: when the user is parked on the "script" tab, a selection must
+ * NOT yank them away to the inspector — reading the storyboard while clicking
+ * clips on the timeline is a first-class flow. The library→inspector behaviour
+ * is preserved unchanged for the other two tabs.
  */
 export function AssetSidebar({ workId }: Props) {
   const selection = useComposition((s) => s.selection);
   const [tab, setTab] = useState<Tab>("library");
 
-  // D2 auto-activation — when selection arrives, jump to inspector.
+  // D2 auto-activation — when selection arrives, jump to inspector. We read the
+  // current tab from a ref (not the effect's dependency list) so a tab change
+  // alone never re-fires the jump; only a *selection change* does. This keeps
+  // the "script tab stays sticky" guard correct without making the effect
+  // re-run (and re-jump) every time the user manually switches tabs.
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
   useEffect(() => {
-    if (selection) setTab("inspector");
+    if (selection && tabRef.current !== "script") setTab("inspector");
   }, [selection]);
 
   return (
@@ -40,7 +53,13 @@ export function AssetSidebar({ workId }: Props) {
           transition={{ duration: 0.15, ease: [0.32, 0.72, 0, 1] }}
           style={{ height: "100%" }}
         >
-          {tab === "library" ? <LibraryTab workId={workId} /> : <InspectorTab />}
+          {tab === "script" ? (
+            <ScriptTab />
+          ) : tab === "library" ? (
+            <LibraryTab workId={workId} />
+          ) : (
+            <InspectorTab />
+          )}
         </motion.div>
       </div>
     </div>
@@ -64,6 +83,9 @@ function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void }) {
       </TabButton>
       <TabButton active={tab === "inspector"} onClick={() => onChange("inspector")}>
         {t("studio.assetSidebar.tabInspector")}
+      </TabButton>
+      <TabButton active={tab === "script"} onClick={() => onChange("script")}>
+        {t("studio.assetSidebar.tabScript")}
       </TabButton>
     </div>
   );
