@@ -1,11 +1,30 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { withTempDataDir, jsonReq } from "./_helpers.js";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-beforeEach(() => {
+// The cover route resolves its dir from os.homedir() (NOT AUTOVIRAL_DATA_DIR),
+// so withTempDataDir alone does NOT isolate it — this test used to writeFile a
+// yt_test.jpg straight into the REAL ~/.autoviral/trends/youtube/covers/. Mock
+// node:os at the module layer so homedir() resolves to a per-test temp dir.
+// (Same fragility/fix as api.trends.test.ts — see its header note.)
+let fakeHome = "";
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, homedir: () => fakeHome || actual.homedir() };
+});
+
+beforeEach(async () => {
   vi.resetModules();
+  fakeHome = await mkdtemp(join(tmpdir(), "av-home-"));
+});
+
+afterEach(async () => {
+  const used = fakeHome;
+  fakeHome = "";
+  await rm(used, { recursive: true, force: true });
 });
 
 describe("GET /api/trends/:platform/covers/:id", () => {

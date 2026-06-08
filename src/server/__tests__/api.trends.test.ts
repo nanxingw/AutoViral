@@ -7,27 +7,32 @@ import { homedir } from "node:os";
 import yaml from "js-yaml";
 
 // The trends routes resolve their data dir from os.homedir() (production puts
-// trends under ~/.autoviral/trends/<platform>), NOT AUTOVIRAL_DATA_DIR. Override
-// HOME to an isolated tmp dir so tests never read or pollute the real user dir.
-let originalHome: string | undefined;
-let originalUserProfile: string | undefined;
-let fakeHome: string;
+// trends under ~/.autoviral/trends/<platform>). Earlier this test only set
+// process.env.HOME = fakeHome to redirect homedir(), but that was FRAGILE: the
+// routes `import { homedir } from "node:os"` and call it, and depending on
+// platform/module-cache timing homedir() could return the startup-cached real
+// home rather than re-reading $HOME — so a fresh-dated write (new Date()) once
+// escaped isolation and CLOBBERED the real ~/.autoviral/trends/douyin/<today>.yaml
+// with the fixture (title:'t', hook:'hook'). Fix: mock node:os at the module
+// layer so EVERY caller (routes + this file's writeTrendsFile) deterministically
+// gets the per-test fakeHome, regardless of env/cache/timing. (vi.spyOn fails on
+// ESM — node:os named exports are non-configurable getters: "Cannot redefine
+// property". vi.mock with a passthrough factory is the correct mechanism.)
+let fakeHome = "";
+vi.mock("node:os", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:os")>();
+  return { ...actual, homedir: () => fakeHome || actual.homedir() };
+});
 
 beforeEach(async () => {
   vi.resetModules();
-  originalHome = process.env.HOME;
-  originalUserProfile = process.env.USERPROFILE;
   fakeHome = await mkdtemp(join(tmpdir(), "av-home-"));
-  process.env.HOME = fakeHome;
-  process.env.USERPROFILE = fakeHome;
 });
 
 afterEach(async () => {
-  if (originalHome === undefined) delete process.env.HOME;
-  else process.env.HOME = originalHome;
-  if (originalUserProfile === undefined) delete process.env.USERPROFILE;
-  else process.env.USERPROFILE = originalUserProfile;
-  await rm(fakeHome, { recursive: true, force: true });
+  const used = fakeHome;
+  fakeHome = "";
+  await rm(used, { recursive: true, force: true });
 });
 
 const ITEM = (over: Record<string, unknown>) => ({
