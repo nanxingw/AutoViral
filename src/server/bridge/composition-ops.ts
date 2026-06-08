@@ -242,6 +242,69 @@ export function unifiedDiff(
   return lines.join("\n") + "\n";
 }
 
+// S6 (PRD-0007 §4.4) — per-work write serialization.
+//
+// `mutateCompositionFor` is an async read-modify-write (read → mutate → write).
+// WITHOUT serialization, two concurrent writes for the SAME work both
+// `await readCompositionFor` the SAME baseline, each mutate their private copy,
+// then race to write — the second atomic rename clobbers the first (lost
+// update). This is not new to the scene layer: every intent verb and the agent's
+// whole-composition `PUT /comp` share this chokepoint, so all of them inherit
+// the fix. This is HONEST HARDENING — it collapses the race window to near-zero
+// for any writers that go through these helpers. The one in-process writer that
+// historically bypassed the chokepoint — checkpoint restore (an out-of-band
+// `copyFile` onto the live yaml) — is now wrapped in `withWorkLock` at its route
+// too (routes.ts POST /restore), so every IN-PROCESS write for a work serializes.
+// It still does NOT defend against a TRULY external writer (a user editing
+// composition.yaml in a text editor, another process), so we don't claim
+// "structural elimination".
+//
+// Design:
+//  - `writeQueues: Map<workId, Promise>` is a per-work FIFO tail. A new write
+//    chains off the current tail (`.then(fn, fn)` so it runs after the
+//    predecessor SETTLES — success or failure — never starting early on a
+//    predecessor's rejection).
+//  - Different workIds never share a queue → independent works stay parallel.
+//  - The lock is released in a `finally`: it fires whether `fn` resolves OR
+//    throws, so a failing mutator/write can never wedge the queue (deadlock).
+//  - When a run is the CURRENT tail at completion, we delete the Map entry so
+//    the map drains to empty for idle works (no unbounded growth / leak).
+//  - No reentrancy: `withWorkLock` is only ever entered from the top of a write
+//    path (mutateCompositionFor / PUT /comp). It never calls another locked
+//    helper while holding the lock, so there is no self-deadlock.
+const writeQueues = new Map<string, Promise<unknown>>();
+
+export async function withWorkLock<T>(
+  workId: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const prev = writeQueues.get(workId) ?? Promise.resolve();
+  // Run AFTER the predecessor settles. `.then(fn, fn)` ignores the
+  // predecessor's value/reason — this run's correctness must not depend on what
+  // the previous write did (it re-reads disk inside `fn`).
+  const run = prev.then(fn, fn);
+  // The tail we publish is a non-throwing mirror of `run` so a rejected write
+  // never poisons the NEXT writer's `.then(fn, fn)` chain (it already runs `fn`
+  // on rejection, but we also don't want an unhandled-rejection on the stored
+  // tail). The stored tail is identity-comparable so we can detect "am I still
+  // the tail?" at cleanup.
+  const tail = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  writeQueues.set(workId, tail);
+  try {
+    return await run;
+  } finally {
+    // Drain the map entry once this run is the LAST one queued (no newer write
+    // chained off us). If a newer write arrived, it overwrote the tail and owns
+    // cleanup; we must not delete its entry.
+    if (writeQueues.get(workId) === tail) {
+      writeQueues.delete(workId);
+    }
+  }
+}
+
 // Read–modify–write helper. The mutator may return a new composition
 // or mutate in place; either way we re-validate and atomically replace.
 //
@@ -260,26 +323,32 @@ export async function mutateCompositionFor(
   mutator: (comp: Composition) => Composition,
   onCommitted?: (next: Composition) => void,
 ): Promise<Composition> {
-  const current = await readCompositionFor(ctx);
-  const next = mutator(current);
-  await writeCompositionFor(ctx, next);
-  // S2 hardening — the write already landed (atomic rename above). onCommitted
-  // is a fire-and-forget broadcast hook; a failure inside it must NEVER turn a
-  // successful on-disk write into a rejected mutate (which would surface as a
-  // 400/500 at the route — a response that lies about a write that succeeded).
-  // onCommitted MUST NOT throw, but we defend anyway so a future broadcast
-  // closure can't invalidate a committed write.
-  try {
-    onCommitted?.(next);
-  } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[composition-ops] onCommitted broadcast failed (write already landed, non-fatal): ${
-        (err as Error).message
-      }`,
-    );
-  }
-  return next;
+  // S6 — serialize the ENTIRE read-modify-write critical section per work so
+  // a concurrent write for the same work reads THIS write's committed state,
+  // not a stale shared baseline (lost-update fix). Different works run in
+  // parallel (separate queues). dryRunMutate is NOT locked — it never writes.
+  return withWorkLock(ctx.workId, async () => {
+    const current = await readCompositionFor(ctx);
+    const next = mutator(current);
+    await writeCompositionFor(ctx, next);
+    // S2 hardening — the write already landed (atomic rename above). onCommitted
+    // is a fire-and-forget broadcast hook; a failure inside it must NEVER turn a
+    // successful on-disk write into a rejected mutate (which would surface as a
+    // 400/500 at the route — a response that lies about a write that succeeded).
+    // onCommitted MUST NOT throw, but we defend anyway so a future broadcast
+    // closure can't invalidate a committed write.
+    try {
+      onCommitted?.(next);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[composition-ops] onCommitted broadcast failed (write already landed, non-fatal): ${
+          (err as Error).message
+        }`,
+      );
+    }
+    return next;
+  });
 }
 
 // S13 (US 11/12) — dry-run preview at the write chokepoint. Reads the current

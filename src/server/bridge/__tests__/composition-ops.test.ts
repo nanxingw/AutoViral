@@ -19,6 +19,8 @@ import {
 } from "../composition-ops.js";
 import type { Composition } from "../../../shared/composition.js";
 import { access } from "node:fs/promises";
+import { addScene } from "../../../shared/composition/ops/scene.js";
+import { addTrack } from "../../../shared/composition/ops/track.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -303,6 +305,153 @@ describe("writeCompositionFor — atomic + validated", () => {
     const result = await diffCompositionFor({ workId, worksRoot: workRoot });
     expect(result.hasBaseline).toBe(true);
     expect(result.diff).toBe("");
+  });
+});
+
+// S6 (PRD-0007 §4.4) — per-work write serialization. mutateCompositionFor is an
+// async read-modify-write: WITHOUT a lock, two concurrent writes both
+// `await readCompositionFor` the SAME baseline, each mutate their private copy,
+// then race to write — the last writer clobbers the first (lost update). The
+// fix is a per-work async mutex so same-work writes run FIFO (read sees the
+// predecessor's committed state) while different works stay parallel.
+describe("mutateCompositionFor — per-work write serialization (S6)", () => {
+  let workRoot: string;
+  let workId: string;
+
+  beforeEach(async () => {
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-comp-lock-"));
+    workId = "w_lock";
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    const seeded = fixture.replace(/workId: sample-work/, `workId: ${workId}`);
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(join(workRoot, workId, "composition.yaml"), seeded, "utf8");
+  });
+
+  it("serializes two concurrent scene writes — BOTH land, no silent lost-update", async () => {
+    const ctx = { workId, worksRoot: workRoot };
+    // Sanity: fixture starts with zero scenes so the race is observable.
+    const seed = await readCompositionFor(ctx);
+    expect(seed.scenes ?? []).toHaveLength(0);
+
+    // Two concurrent intent writes, both adding a scene. WITHOUT the lock both
+    // read 0 scenes and the second write overwrites the first → only 1 scene
+    // survives. WITH the lock the second runs after the first commits → 2.
+    await Promise.all([
+      mutateCompositionFor(ctx, (c) => {
+        addScene(c, { title: "A" });
+        return c;
+      }),
+      mutateCompositionFor(ctx, (c) => {
+        addScene(c, { title: "B" });
+        return c;
+      }),
+    ]);
+
+    const after = await readCompositionFor(ctx);
+    expect(after.scenes ?? []).toHaveLength(2);
+    const titles = (after.scenes ?? []).map((s) => s.title).sort();
+    expect(titles).toEqual(["A", "B"]);
+    // order must stay contiguous 0..N-1 after both scene ops settle.
+    const orders = (after.scenes ?? []).map((s) => s.order).sort((a, b) => a - b);
+    expect(orders).toEqual([0, 1]);
+  });
+
+  it("serializes a scene write interleaved with a NON-scene write — both survive", async () => {
+    const ctx = { workId, worksRoot: workRoot };
+    const seedTracks = (await readCompositionFor(ctx)).tracks.length;
+
+    await Promise.all([
+      mutateCompositionFor(ctx, (c) => {
+        addScene(c, { title: "scene-write" });
+        return c;
+      }),
+      mutateCompositionFor(ctx, (c) => {
+        addTrack(c, { kind: "audio" });
+        return c;
+      }),
+    ]);
+
+    const after = await readCompositionFor(ctx);
+    // The scene write landed.
+    expect((after.scenes ?? []).map((s) => s.title)).toContain("scene-write");
+    // The non-scene write landed too (one extra audio track).
+    expect(after.tracks.length).toBe(seedTracks + 1);
+  });
+
+  it("serializes N concurrent scene writes — all N land (deeper interleave)", async () => {
+    const ctx = { workId, worksRoot: workRoot };
+    const N = 6;
+    await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        mutateCompositionFor(ctx, (c) => {
+          addScene(c, { title: `S${i}` });
+          return c;
+        }),
+      ),
+    );
+    const after = await readCompositionFor(ctx);
+    expect(after.scenes ?? []).toHaveLength(N);
+    // Contiguous order invariant holds across all N interleaved appends.
+    const orders = (after.scenes ?? []).map((s) => s.order).sort((a, b) => a - b);
+    expect(orders).toEqual(Array.from({ length: N }, (_, i) => i));
+  });
+
+  it("does NOT serialize across different workIds (independent works stay parallel)", async () => {
+    // Seed a second independent work.
+    const workIdB = "w_lock_b";
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    await mkdir(join(workRoot, workIdB), { recursive: true });
+    await writeFile(
+      join(workRoot, workIdB, "composition.yaml"),
+      fixture.replace(/workId: sample-work/, `workId: ${workIdB}`),
+      "utf8",
+    );
+
+    const ctxA = { workId, worksRoot: workRoot };
+    const ctxB = { workId: workIdB, worksRoot: workRoot };
+
+    // Both works mutate concurrently; each is independent so both must succeed
+    // without one blocking the other's correctness.
+    await Promise.all([
+      mutateCompositionFor(ctxA, (c) => {
+        addScene(c, { title: "in-A" });
+        return c;
+      }),
+      mutateCompositionFor(ctxB, (c) => {
+        addScene(c, { title: "in-B" });
+        return c;
+      }),
+    ]);
+
+    const afterA = await readCompositionFor(ctxA);
+    const afterB = await readCompositionFor(ctxB);
+    expect((afterA.scenes ?? []).map((s) => s.title)).toEqual(["in-A"]);
+    expect((afterB.scenes ?? []).map((s) => s.title)).toEqual(["in-B"]);
+  });
+
+  it("releases the lock after a mutator throws — subsequent writes proceed", async () => {
+    const ctx = { workId, worksRoot: workRoot };
+    // A write whose mutator throws must not deadlock the queue: the next write
+    // for the same work must still run (lock released in finally).
+    await expect(
+      mutateCompositionFor(ctx, () => {
+        throw new Error("mutator blew up");
+      }),
+    ).rejects.toThrow("mutator blew up");
+
+    // The queue is not wedged — this write completes.
+    await mutateCompositionFor(ctx, (c) => {
+      addScene(c, { title: "after-throw" });
+      return c;
+    });
+    const after = await readCompositionFor(ctx);
+    expect((after.scenes ?? []).map((s) => s.title)).toEqual(["after-throw"]);
   });
 });
 

@@ -22,10 +22,10 @@ import {
 import { createAsk } from "./approval-gate.js";
 import {
   readCompositionFor,
-  writeCompositionFor,
   mutateCompositionFor,
   dryRunMutate,
   diffCompositionFor,
+  withWorkLock,
 } from "./composition-ops.js";
 import type { Composition } from "../../shared/composition.js";
 import { ASPECTS } from "../../shared/composition.js";
@@ -201,11 +201,20 @@ bridgeRouter.put("/comp", async (c) => {
     }
   }
   try {
-    // writeCompositionFor zod-validates BEFORE allocating a tmpfile, so an
-    // invalid composition throws here and leaves composition.yaml untouched.
-    await writeCompositionFor({ workId: g.workId }, comp as Composition);
-    // S2 (US 17) — broadcast only after the atomic write lands.
-    broadcast(g.workId, "composition-changed", { reason: "comp-put" });
+    // S6 (PRD-0007 §4.4) — route the whole-composition write through the SAME
+    // per-work-locked chokepoint every intent verb uses (mutateCompositionFor),
+    // with an IDENTITY mutator (the body IS the candidate — mirrors the dry-run
+    // branch's `() => comp as Composition`). This serializes /comp PUT against
+    // concurrent intent writes for the same work (lost-update fix) while keeping
+    // the existing invariants: writeCompositionFor still zod-validates BEFORE
+    // allocating a tmpfile, so an invalid composition throws and leaves
+    // composition.yaml untouched, and onCommitted (the broadcast) fires ONLY
+    // after the atomic write lands (S2).
+    await mutateCompositionFor(
+      { workId: g.workId },
+      () => comp as Composition,
+      () => broadcast(g.workId, "composition-changed", { reason: "comp-put" }),
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     // S3 (US 18/19) — a zod/shape rejection is an input error → 400 + code:4.
@@ -1580,7 +1589,16 @@ bridgeRouter.post("/restore", async (c) => {
     return c.json({ ok: false, error: "restore requires a `file` field", code: 4 }, 400);
   }
   try {
-    const result = await restoreCheckpoint(g.workId, file);
+    // S6 — restore is an out-of-band write onto the live deliverable
+    // (createCheckpoint → copyFile composition.yaml). Serialize it through the
+    // SAME per-work lock every intent verb / PUT /comp uses, so a POST /restore
+    // racing an in-flight mutateCompositionFor for this work can't interleave
+    // (the copyFile landing between a mutate's read and its atomic rename).
+    // restoreCheckpoint never re-enters the lock (no mutateCompositionFor call
+    // inside it) → no self-deadlock.
+    const result = await withWorkLock(g.workId, () =>
+      restoreCheckpoint(g.workId, file),
+    );
     if (result === null) {
       // Unknown / malformed filename, or no such snapshot on disk. Input error.
       return c.json({ ok: false, error: `no such checkpoint: ${file}`, code: 4 }, 404);
