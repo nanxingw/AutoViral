@@ -145,6 +145,13 @@ const uid = (p: string) =>
  *  with seed / duplicate ids. (#43 — wiring addLayer to the UI.) */
 export const genLayerId = (): string => uid("t");
 
+/** Public slide-id generator. Shares the module-private `uid` counter so ids
+ *  minted when duplicating a slide can't collide with each other within the
+ *  same millisecond (B5 — duplicateSlide previously derived ids from a bare
+ *  Date.now() with no monotonic counter, so two dups in one ms were
+ *  byte-identical → React key collision + updateLayer/removeLayer cross-hit). */
+export const genSlideId = (): string => uid("s");
+
 export function makeEmptySlide(): Slide {
   return {
     id: uid("s"),

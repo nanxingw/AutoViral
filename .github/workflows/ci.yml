@@ -74,3 +74,12 @@ jobs:
 
       - name: Test (server)
         run: npm run test:server
+
+      # The root `build` step above is build:backend (rootDir ./src) + build:frontend
+      # — it NEVER compiles cli/autoviral/src, so the bundled agent-protocol CLI
+      # (shipped in npm "files" + app.asar) and its ~1936 lines of tests were
+      # ungated: a broken CLI would ship with a green CI. test:cli closes that gap.
+      # Its pretest (`npm run build` inside cli/autoviral = tsup) compiles the CLI,
+      # so this one step covers CLI build + test together.
+      - name: Test (cli)
+        run: npm run test:cli

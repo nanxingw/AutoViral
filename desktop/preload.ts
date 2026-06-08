@@ -5,12 +5,21 @@
  * informational (version + platform) so the Studio UI can show "Desktop vX".
  */
 import { contextBridge } from "electron";
+import { parseDesktopVersion } from "./version.js";
 
 contextBridge.exposeInMainWorld("autoviralDesktop", {
   /** Present + truthy only inside the Electron shell. */
   isDesktop: true,
-  /** App version (injected from package.json via the build). */
-  version: process.env.npm_package_version ?? "0.1.0",
+  /**
+   * Real app version, injected by the main process via
+   * `webPreferences.additionalArguments` (see desktop/main.ts + desktop/version.ts).
+   * The previous `process.env.npm_package_version` was unset in packaged builds,
+   * so the version ALWAYS fell back to a hardcoded "0.1.0" (bug B8). The fallback
+   * here is a clearly-bogus sentinel, never a plausible-looking version, so any
+   * regression is obvious rather than silently shipping a wrong-but-believable
+   * number.
+   */
+  version: parseDesktopVersion(process.argv, "0.0.0-unknown"),
   /** "darwin" | "win32" | "linux". */
   platform: process.platform,
 });

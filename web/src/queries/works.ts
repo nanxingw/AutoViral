@@ -33,12 +33,30 @@ export const worksKey = ["works"] as const;
 
 const DEFAULT_PLATFORMS = ["douyin", "xiaohongshu"];
 
+// B3 — poll cadence while a work is still being built. The status flip
+// (creating → ready) and the agent-attached cover are server-side async with
+// no client-side trigger when the user is parked on the Works grid (the
+// bridge WS in useBridgeEvents is per-work, mounted only in Studio/Editor).
+// So we self-poll, but ONLY while at least one work is `creating` — an idle
+// grid of finished works must not poll forever.
+export const CREATING_REFETCH_MS = 4000;
+
 export function useWorks() {
   return useQuery({
     queryKey: worksKey,
     queryFn: async () => {
       const res = await apiFetch<{ works: WorkSummary[] } | WorkSummary[]>("/api/works");
       return Array.isArray(res) ? res : res.works;
+    },
+    // Returning `false` (no work is creating) disables polling; returning the
+    // interval re-arms it. react-query re-evaluates this after every fetch, so
+    // the grid stops polling the moment the last `creating` work flips.
+    refetchInterval: (query) => {
+      const works = query.state.data;
+      const anyCreating = Array.isArray(works)
+        ? works.some((w) => w.status === "creating")
+        : false;
+      return anyCreating ? CREATING_REFETCH_MS : false;
     },
   });
 }

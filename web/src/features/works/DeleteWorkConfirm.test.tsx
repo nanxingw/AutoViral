@@ -16,6 +16,25 @@ describe("DeleteWorkConfirm", () => {
     expect(screen.getByText(/Sample work/)).toBeInTheDocument();
   });
 
+  // B7 — work.title is user-controlled; String.prototype.replace treats $& / $$ /
+  // $` / $' / $<name> in the *replacement* string as special patterns. A title
+  // like "Cost $$" must render verbatim (not collapse to "Cost $"), and "Save $&"
+  // must NOT re-inject the matched "{title}" placeholder.
+  it("renders titles containing $ special patterns verbatim (no replace-pattern mangling)", () => {
+    const titles = ["Cost $$", "Save $&", "End $'", "Tick $`", "Group $<x>"];
+    for (const title of titles) {
+      const { unmount } = render(
+        <DeleteWorkConfirm open work={{ ...baseWork, title }} onCancel={() => {}} onConfirm={() => {}} pending={false} errored={false} />,
+      );
+      // Heading should contain the exact title substring, unmangled.
+      const heading = screen.getByRole("heading", { level: 3 });
+      expect(heading.textContent).toContain(title);
+      // And it must never leak the placeholder back into the rendered text.
+      expect(heading.textContent).not.toContain("{title}");
+      unmount();
+    }
+  });
+
   it("calls onCancel on Cancel click", () => {
     const onCancel = vi.fn();
     render(<DeleteWorkConfirm open work={baseWork} onCancel={onCancel} onConfirm={() => {}} pending={false} errored={false} />);

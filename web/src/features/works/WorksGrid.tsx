@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import clsx from "clsx";
 import { useDeleteWork, useUpdateWork, type WorkSummary } from "@/queries/works";
@@ -158,6 +158,16 @@ function WorkCover({ work }: { work: WorkSummary }) {
   const cover = work.coverImage ?? null;
   const t = useT();
   const [failed, setFailed] = useState(false);
+  // B4 — reset the error guard whenever the cover URL changes. Without this,
+  // a *transient* 404 (e.g. the agent's first cover URL written to disk a
+  // beat before the bytes land) latched `failed=true` and the early-return
+  // below short-circuited before the <img>/<video> could ever re-mount — so
+  // the card stayed on the grey fallback gradient forever, even after
+  // useWorks refetch attached the real cover. Re-trying on URL change lets
+  // the freshly-attached cover render.
+  useEffect(() => {
+    setFailed(false);
+  }, [cover]);
   // R115 F523 — cover thumbnails carry meaning (title + type + visual
   // mood), so SR users need a real alt instead of decorative "". We
   // build it from the localized type label + the work's title, falling

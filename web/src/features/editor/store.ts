@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type { Carousel, Slide, Layer, PaletteId } from "./types";
-import { makeEmptySlide } from "./types";
+import { makeEmptySlide, genSlideId, genLayerId } from "./types";
 import { applyLayoutToLayer } from "./services/layout";
 import { PALETTES } from "./palettes";
 import type { SnapGuide } from "./canvas/snapping";
@@ -85,12 +85,17 @@ export const useEditor = create<EditorState>()(
         const orig = s.car.slides.find((x) => x.id === id);
         if (!orig) return;
         const copy: Slide = JSON.parse(JSON.stringify(orig));
-        const dupSuffix = Date.now().toString(36);
-        copy.id = `${id}_dup_${dupSuffix}`;
+        // Mint ids from the shared collision-proof generators (monotonic
+        // counter, not a bare Date.now()), so two duplicateSlide calls in the
+        // same millisecond can't produce byte-identical ids. (B5) The old
+        // `${id}_dup_${Date.now()}` scheme collided → React key clash +
+        // updateLayer (find-first) editing the wrong copy + removeLayer
+        // (filter ALL slides) deleting both.
+        copy.id = genSlideId();
         // Regenerate every layer's id — without this, updateLayer (which finds
         // the first matching id across all slides) edited the original slide's
         // layer instead of the duplicate's. (Codex review 2026-04-27)
-        copy.layers = copy.layers.map((l, i) => ({ ...l, id: `${l.id}_dup_${dupSuffix}_${i}` }));
+        copy.layers = copy.layers.map((l) => ({ ...l, id: genLayerId() }));
         const idx = s.car.slides.findIndex((x) => x.id === id);
         s.car.slides.splice(idx + 1, 0, copy);
         s.currentSlideId = copy.id;

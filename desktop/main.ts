@@ -35,6 +35,8 @@ import { request } from "node:http";
 import { autoUpdater } from "electron-updater";
 import log from "electron-log";
 
+import { buildVersionArg } from "./version.js";
+
 // ── Constants ────────────────────────────────────────────────────────────────
 
 /** Fixed port the daemon binds and we health-check. The daemon honors
@@ -403,6 +405,12 @@ function createWindow(port: number): void {
       nodeIntegration: false,
       sandbox: true,
       preload: join(__dirname, "preload.js"),
+      // Hand the REAL app version to the sandboxed preload. app.getVersion()
+      // reads the version electron-builder stamped into the asar's package.json
+      // (correct in dev AND packaged), unlike npm_package_version which is only
+      // set under `npm run` (bug B8). additionalArguments are appended to the
+      // preload's process.argv; desktop/version.ts owns the encode/decode.
+      additionalArguments: [buildVersionArg(app.getVersion())],
     },
   };
   if (process.platform === "darwin") {

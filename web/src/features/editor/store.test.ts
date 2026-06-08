@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { useEditor } from "./store";
 import { makeEmptyCarousel } from "./types";
 import type { Layer } from "./types";
@@ -122,6 +122,57 @@ describe("useEditor store", () => {
     expect(slides).toHaveLength(2);
     expect(slides[0].id).toBe(id);
     expect(slides[1].id).not.toBe(id);
+  });
+
+  it("duplicateSlide mints collision-proof ids even within the same millisecond (B5)", () => {
+    // Freeze Date.now so the bare-Date.now() id scheme would produce
+    // byte-identical ids on two dups. The collision-proof generators must
+    // disambiguate via their monotonic counter.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-06-08T00:00:00.000Z"));
+    try {
+      const c = makeEmptyCarousel("w1");
+      useEditor.getState().loadCarousel(c);
+      const sourceId = c.slides[0].id;
+      // seed one text layer on the source slide so duplicates carry a layer
+      const layer: Layer = {
+        id: "t-seed",
+        kind: "text",
+        box: { x: 0, y: 0, w: 200, h: 60, rotation: 0 },
+        text: "Hi",
+        style: {
+          font: "sans",
+          size: 48,
+          weight: 700,
+          italic: false,
+          color: "#111",
+          align: "center",
+          tracking: 0,
+        },
+      };
+      useEditor.getState().addLayer(layer);
+
+      // two dups of the SAME source slide, same frozen millisecond
+      useEditor.getState().duplicateSlide(sourceId);
+      useEditor.getState().duplicateSlide(sourceId);
+
+      const slides = useEditor.getState().car!.slides;
+      // 2 copies inserted after the source (+ original) = 3 slides
+      const copies = slides.filter((s) => s.id !== sourceId);
+      expect(copies).toHaveLength(2);
+
+      // all 4 ids — 2 copy slide ids + each copy's single layer id — must be
+      // mutually distinct.
+      const ids = [
+        copies[0].id,
+        copies[1].id,
+        copies[0].layers[0].id,
+        copies[1].layers[0].id,
+      ];
+      expect(new Set(ids).size).toBe(4);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("removeSlide refuses to drop the last one", () => {

@@ -39,7 +39,10 @@ function SecretField({ label, value, onChange, showLabel, hideLabel, meta, store
   const id = `secret-${reactId}`;
   const hasStored = !!meta?.set;
   const tail = meta?.lastFour ?? "";
-  const storedHint = hasStored ? storedHintTemplate.replace("{tail}", tail) : "";
+  // Function replacer so a secret's last-4 chars containing $&/$$/$`/$' render
+  // verbatim — String.prototype.replace treats those as special patterns in a
+  // string replacement (same class as bug B7).
+  const storedHint = hasStored ? storedHintTemplate.replace("{tail}", () => tail) : "";
   return (
     <div className={styles.field}>
       <label htmlFor={id} className={styles.fieldLabel}>{label}</label>

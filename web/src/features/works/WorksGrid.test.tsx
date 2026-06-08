@@ -20,6 +20,16 @@ function renderGrid(works: WorkSummary[]) {
   );
 }
 
+const baseWork: WorkSummary = {
+  id: "w1",
+  title: "T",
+  type: "short-video",
+  status: "ready",
+  thumbnail: null,
+  updatedAt: "2026-01-01T00:00:00Z",
+  coverIsVideo: false,
+};
+
 describe("WorksGrid cover priority", () => {
   it("renders an <img> when coverImage is provided and not a video", () => {
     const { container } = renderGrid([
@@ -140,6 +150,70 @@ describe("WorksGrid cover priority", () => {
     // Fallback div has an inline-style gradient background.
     const fallback = container.querySelector('div[style*="linear-gradient"]');
     expect(fallback).not.toBeNull();
+  });
+});
+
+// B4 — a transient 404 on the cover URL set `failed=true` and the card was
+// stuck on the grey fallback gradient forever, because the error guard was
+// never reset when useWorks refetch attached the real cover (new URL). The
+// fix (useEffect resetting `failed` on cover change) must let the new cover
+// re-mount and try to render.
+describe("WorksGrid — cover error recovery (B4)", () => {
+  function rerenderGrid(rerender: ReturnType<typeof renderGrid>["rerender"], works: WorkSummary[]) {
+    const qc = new QueryClient({
+      defaultOptions: { mutations: { retry: false }, queries: { retry: false } },
+    });
+    rerender(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <WorksGrid works={works} filter="all" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+  }
+
+  it("a transient cover 404 then a new cover URL re-attempts the cover (does not stay on fallback)", () => {
+    const { container, rerender } = renderGrid([
+      { ...baseWork, coverImage: "/api/works/w1/assets/cover-pending.png" },
+    ]);
+
+    // The first cover URL 404s before the bytes land → onError latches failed.
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    fireEvent.error(img!);
+
+    // Card falls back to the gradient div, no <img> rendered.
+    expect(container.querySelector("img")).toBeNull();
+    expect(container.querySelector('div[style*="linear-gradient"]')).not.toBeNull();
+
+    // useWorks refetch attaches the real cover (new URL). The card must
+    // re-attempt rendering that cover, not stay stuck on the fallback.
+    rerenderGrid(rerender, [
+      { ...baseWork, coverImage: "/api/works/w1/assets/cover-final.png" },
+    ]);
+
+    const recovered = container.querySelector("img");
+    expect(recovered).not.toBeNull();
+    expect(recovered!.getAttribute("src")).toContain("cover-final.png");
+  });
+
+  it("recovers a video cover after a transient error when the URL changes", () => {
+    const { container, rerender } = renderGrid([
+      { ...baseWork, coverImage: "/api/works/w1/assets/clip-pending.mp4", coverIsVideo: true },
+    ]);
+
+    const video = container.querySelector("video");
+    expect(video).not.toBeNull();
+    fireEvent.error(video!);
+    expect(container.querySelector("video")).toBeNull();
+
+    rerenderGrid(rerender, [
+      { ...baseWork, coverImage: "/api/works/w1/assets/clip-final.mp4", coverIsVideo: true },
+    ]);
+
+    const recovered = container.querySelector("video");
+    expect(recovered).not.toBeNull();
+    expect(recovered!.getAttribute("src")).toContain("clip-final.mp4");
   });
 });
 

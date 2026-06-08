@@ -50,7 +50,10 @@ export function DeleteWorkConfirm({ open, work, pending, errored, onCancel, onCo
   if (!open || !work) return null;
 
   const isCreating = work.status === "creating";
-  const title = t("works.delete.title").replace("{title}", work.title);
+  // Function replacer (not a string replacement) so $&/$$/$`/$'/$<name> in a
+  // user-controlled title render verbatim — String.prototype.replace treats
+  // those as special patterns in a *string* replacement. See bug B7.
+  const title = t("works.delete.title").replace("{title}", () => work.title);
 
   // role="alertdialog" requires explicit user choice (WAI-ARIA APG) — no backdrop dismiss.
   // Esc + Cancel button are the only dismissal paths.

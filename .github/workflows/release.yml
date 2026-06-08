@@ -40,6 +40,14 @@ jobs:
           if [ "$TAG" != "$PKG" ]; then
             echo "tag $TAG != package.json $PKG" && exit 1
           fi
+          # The bundled agent-protocol CLI (cli/autoviral) carries its OWN version
+          # field and is shipped in npm "files" + electron-builder files. The repo
+          # convention is a single version across the whole repo, so a stale CLI
+          # manifest must NOT pass the gate. Mirror the tag-vs-root assert.
+          CLI=$(jq -r .version cli/autoviral/package.json)
+          if [ "$CLI" != "$PKG" ]; then
+            echo "cli/autoviral/package.json $CLI != package.json $PKG" && exit 1
+          fi
           echo "version=$PKG" >> "$GITHUB_OUTPUT"
           echo "Release version: $PKG"
 
