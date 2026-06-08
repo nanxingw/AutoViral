@@ -12,6 +12,7 @@ import {
   SampleDemographicBars,
 } from "@/features/analytics/HonestEmptyState";
 import { PlatformHonestyMatrix } from "@/features/analytics/PlatformHonestyMatrix";
+import { SyncDataButton } from "@/features/analytics/SyncDataButton";
 import { useT, type MessageKey } from "@/i18n/useT";
 
 /**
@@ -91,14 +92,21 @@ export default function Analytics() {
             {account.nickname} · {followersDisplay} {t("analytics.followersSuffix")} · {account.aweme_count} {t("analytics.publishedWorksSuffix")}
           </div>
         </div>
-        <KPIBar
-          avgViews={summary.avgPlay}
-          avgLikes={summary.avgLikes}
-          avgComments={summary.avgComments}
-          engagement={summary.engagementRate}
-          followerCount={account.follower_count}
-          platform="douyin"
-        />
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 14 }}>
+          {/* The honest sync affordance — the same S5 refresh that lives in
+              Settings, surfaced HERE because 数据 is where a creator naturally
+              wants to refresh. On a 401/missing-URL it gives an actionable jump
+              to Settings instead of a bare error. */}
+          <SyncDataButton />
+          <KPIBar
+            avgViews={summary.avgPlay}
+            avgLikes={summary.avgLikes}
+            avgComments={summary.avgComments}
+            engagement={summary.engagementRate}
+            followerCount={account.follower_count}
+            platform="douyin"
+          />
+        </div>
       </section>
 
       <ProfileBar nickname={account.nickname} followers={account.follower_count} tags={m.data?.tags ?? []} />
