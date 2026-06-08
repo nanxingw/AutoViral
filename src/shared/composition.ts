@@ -750,6 +750,15 @@ const StrictTrackSchema = TrackObjectSchema.extend({
 
 export const CompositionWriteSchema = CompositionSchema.extend({
   tracks: z.array(StrictTrackSchema),
+  // ─── S2 (PRD-0007) — strict `scenes` on the write path ──────────────────────
+  // Mirror the track/clip strictness for the v0.1.6 分镜 layer: a misspelled /
+  // extra scene-level key (`narraton`, `shotsize`) must fail loud (zod
+  // `unrecognized_keys` → route 400 + code:4) instead of being SILENTLY STRIPPED
+  // to disk — the exact silent-data-loss vector S11 closed for `clip set`.
+  // `.strict()` only forbids EXTRA keys (required/default behaviour is
+  // unchanged), and `scenes` stays `.optional()`, so an old work with no scenes
+  // — or scenes carrying only known fields — round-trips GET → PUT unchanged.
+  scenes: z.array(SceneSchema.strict()).optional(),
 }).strict();
 export type CompositionWrite = z.infer<typeof CompositionWriteSchema>;
 

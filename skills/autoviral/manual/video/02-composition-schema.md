@@ -115,6 +115,43 @@ That snippet is the **first half of a crossfade** — fade in over 0.18s. See `r
 
 Speed keyframes are special: their `value` must be in `[0.1, 4.0]`. The schema rejects out-of-range values on the clip's superRefine.
 
+## Scenes (storyboard / 分镜)
+
+`scenes: [...]` is the **planning layer** — a storyboard table that sits *beside* the timeline, not on it. A scene is one shot in your intended sequence (剧本=PRD / 分镜=issue). Scenes have **no direct render effect**: they describe a shot, and generating its footage is a downstream handoff to the existing image/video/TTS endpoints + `autoviral clip`. They round-trip on the composition but the renderer ignores them.
+
+Drive scenes with `autoviral scene add/list/set/reorder/link/remove` (never hand-write `scenes[]` — the ops keep `order` contiguous and validate the enums). The narrative overview lives separately in `plan/script.md` (free-text markdown, the作品's "PRD"); `mdAnchor` back-links a scene to its heading there.
+
+```yaml
+scenes:
+  - id: scn_a1b2c3          # minted by `scene add` (^scn_)
+    order: 0                # 0-based shot sequence, kept contiguous by the ops
+    title: 钩子镜            # required
+    intent: hook            # optional: hook | build | payoff | cta
+    prompt: 城市夜景俯拍...   # optional — generation prompt for this shot
+    narration: 你有没有...   # optional — voiceover line
+    durationSec: 3          # optional — intended shot length
+    shotSize: closeup       # optional 景别: long | full | medium | close | closeup
+    cameraMovement: push    # optional 运镜: push | pull | pan | track | follow | static
+    mdAnchor: 第一幕-钩子     # optional — heading in plan/script.md
+    memberClipIds: []       # clips on the timeline that belong to this shot
+    memberAssetIds: []      # assets authored for this shot
+    generatedAssetIds: []   # handoff state — assets produced for this shot
+    selectedAssetId: ...    # the chosen take (set by `scene link --select`)
+    status: planned         # planned | generated | stale
+```
+
+| field | meaning |
+|---|---|
+| `title` | shot label (the only required field) |
+| `intent` | narrative role — `hook` / `build` / `payoff` / `cta` |
+| `shotSize` (景别) | `long`(远) / `full`(全) / `medium`(中) / `close`(近) / `closeup`(特写) |
+| `cameraMovement` (运镜) | `push`(推) / `pull`(拉) / `pan`(摇) / `track`(移) / `follow`(跟) / `static`(固定) |
+| `narration` / `durationSec` / `prompt` | optional shot detail |
+| `mdAnchor` | back-link to a heading in `plan/script.md` |
+| `status` | generation-handoff state: `planned` → `generated` → `stale` |
+
+See `recipes/video/script-to-storyboard.md` for the write-script-then-排-scenes-then-生成 pattern.
+
 ## Assets registry
 
 ```yaml

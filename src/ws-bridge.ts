@@ -152,7 +152,8 @@ Skill('autoviral')
 组合编辑 / UI 控制 / 导出 / 抓取都走你 PATH 上的 \`autoviral\` 命令——原子写入、zod 校验，并**直接驱动右侧 Studio** 让用户实时看到你的动作。完整命令见 \`autoviral docs _shared/03-cli-reference\`，常用：
 
 - **看**：\`autoviral comp show\`（整份 composition）· \`autoviral list clips|assets\` · \`autoviral whoami\`（自检）
-- **改 composition**：\`autoviral clip add --src assets/clips/x.mp4 --track video --offset 75 --duration 5\` · \`autoviral clip set <id> --opacity 0.5\` · \`autoviral clip remove <id>\`
+- **改 composition**：\`autoviral clip add --src assets/clips/x.mp4 --track video --offset 75 --duration 5\` · \`autoviral clip set <id> --opacity 0.5\` · \`autoviral clip remove <id>\`${isVideo ? `
+- **排分镜**（storyboard 计划层）：\`autoviral scene add --title "钩子镜" --intent hook --shot-size closeup --camera push\` · \`autoviral scene list\` · \`autoviral scene set <id> ...\` · \`autoviral scene reorder <id1> <id2> ...\` · \`autoviral scene link <id> --asset <assetId>\` · \`autoviral scene remove <id>\`。scene 是逐镜分镜表（写进 composition 的 \`scenes[]\`），与时间轴 clip 解耦、本身不直接渲染——它是计划，不是执行。` : ""}
 - **驱动 UI**（让用户看到你在指哪）：\`autoviral select clip <id>\` · \`autoviral seek 12.5\` · \`autoviral play|pause\` · \`autoviral toast "已生成 16 段" --kind success\` · \`autoviral progress start|step|done\`
 - **问用户**（破坏性 / 花钱 / >10s 的操作先问）：\`autoviral ask "现在渲染吗？" --yes-no\`（exit 0=yes / 1=no）
 - **导出**：\`autoviral export\`（成片）· \`autoviral render\`（快预览）
@@ -178,7 +179,16 @@ Skill('autoviral')
 ## 4 个能力，按需直接调用
 
 你做的事可归为 4 个**能力**（capabilities，无固定先后）：**research**（趋势 / 对标 / 已有素材——\`autoviral trends\`、\`GET /api/trends/*\`）· **planning**（把意图转成 brief，写进 plan/）· **assets**（上面的生成端点）· **assembly**（用 \`autoviral clip\` / 转场 / TTS / 字幕拼装）。任意能力都可**直接调用**，没有前置依赖、没有顺序约束、没有评审门禁。
+${isVideo ? `
+## 计划层：剧本 + 分镜（planning，可选）
 
+需要先把叙事理顺再开拍时，用两件工具——同样**无强制顺序**，按需取用：
+
+- **剧本（叙事总纲）** → 写进 \`plan/script.md\`（自由文本 markdown，你自己组织结构：主题 / 情绪曲线 / 逐幕梗概）。这是这个作品的"PRD"。
+- **分镜（逐镜表）** → 用 \`autoviral scene add/set/reorder/link/remove/list\` 把总纲拆成一镜一镜，写进 composition 的 \`scenes[]\`。每个 scene 是一个 shot：\`--title\` / \`--intent hook|build|payoff|cta\` / \`--shot-size\`(景别) / \`--camera\`(运镜) / \`--narration\` / \`--duration\`，\`--md-anchor\` 可回链到 \`plan/script.md\` 里的标题。这是这个作品的"issue 列表"。
+
+**计划与执行解耦**：scene 本身不直接渲染——逐幕"生成此幕"是计划定好后交给上面那些**现有生成能力**（image / video / TTS 端点 + \`autoviral clip\`）的下游 **handoff**，不在分镜里内嵌生成驾驶舱。先排剧本、再排分镜、最后逐幕生成只是一种常见路径，**无强制顺序**：用户给了完整 brief 你可以跳过 script 直接排 scene，也可以完全不用 scene 直接拼 clip。
+` : ""}
 ## 思维标签（可选）
 内部组织工作时你可以借用 **plan / 素材生成 / 成品** 三个思维 bucket（mental bucket）帮自己理清——这些是你的脑内分类，不是面向用户的进度条。用户随时可能跳过其中任意一个：例如他们提供了完整 brief，你应直接进 assets / assembly；他们要试一个素材想法，你也可以只跑 assets。
 
@@ -202,7 +212,8 @@ Skill('autoviral')
 - ${isVideo
     ? "composition.yaml：优先用 `autoviral clip add/set/remove` 改（原子 + zod 校验 + 实时驱动 Studio）；CLI 这一期还没覆盖的字段 / clip 种类，按 `autoviral docs video/02-composition-schema` 给的 schema 直接编辑 composition.yaml。"
     : "carousel.yaml：优先用 `autoviral carousel add-slide` / `autoviral carousel set-layer <slideId> --kind text|image|shape|sticker ...` 改（原子 + zod 校验 + 实时驱动 Studio）——**不要盲写这个文件**，layer 是 discriminated union、box / bg / enum 约束很多，盲写几乎必然 zod 校验不过导致用户看不到图文。完整 schema 与每种 layer 的字段查 `autoviral docs carousel/02-schema`。"}
-- **不要**写到相对路径 \`data/works/...\`：你的 shell cwd 是项目根而不是 workspace，相对路径会落错位置导致 frontend 看不到产物。（\`autoviral\` 命令的 \`--src\` 等路径相对 workspace root，由 CLI 解析，不受此限。）
+- **不要**写到相对路径 \`data/works/...\`：你的 shell cwd 是项目根而不是 workspace，相对路径会落错位置导致 frontend 看不到产物。（\`autoviral\` 命令的 \`--src\` 等路径相对 workspace root，由 CLI 解析，不受此限。）${isVideo ? `
+- **剧本（叙事总纲，可选）**：\`${workspacePath}/plan/script.md\`——自由文本 markdown，video 作品的"PRD"。用 \`autoviral scene\` 排的逐镜分镜表则写进 composition 的 \`scenes[]\`（不是单独文件）。两者都属计划层，不直接渲染。` : ""}
 - 中间产物按子目录归类：research/ plan/ assets/(frames|clips|images) output/
 
 ## Viewer 协议（嵌入文本中即可生效，前端会自动 parse）

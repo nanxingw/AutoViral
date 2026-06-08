@@ -1245,6 +1245,393 @@ describe("bridge router — Phase 3 clip writes", () => {
   });
 });
 
+// ─── S2 (PRD-0007) — scene (分镜 / storyboard) write routes ───────────────────
+// The five scene verbs delegate to the SAME `@shared` ops the Studio store runs
+// (ops.addScene/setSceneProps/reorderScenes/linkSceneAssets/removeScene) via
+// mutateCompositionFor + the reused `composition-changed` broadcast — so an
+// agent driving via `autoviral scene …` and a human editing a card converge on
+// one `comp.scenes` record (ADR-009 agent-人一致). Each verb mirrors /split:
+// happy → 200, illegal params (missing title / unknown id / non-array) throw
+// CompositionOpError{code:4} → 400 + code:4, and a rejected write must NOT
+// broadcast (disk untouched). Strict `scenes` write-schema closes the silent-
+// strip vector (a typo'd scene field fails loud instead of being dropped).
+describe("bridge router — S2 scene writes", () => {
+  let workRoot: string;
+  const workId = "w_scene";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-scene-route-"));
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(
+      join(workRoot, workId, "composition.yaml"),
+      fixture.replace(/workId: sample-work/, `workId: ${workId}`),
+      "utf8",
+    );
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  // Helper — read scenes via the GET /comp endpoint (round-trips through disk).
+  async function currentScenes(): Promise<
+    Array<{ id: string; order: number; title: string; intent?: string }>
+  > {
+    const res = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const body = (await res.json()) as {
+      result: { scenes?: Array<{ id: string; order: number; title: string; intent?: string }> };
+    };
+    return body.result.scenes ?? [];
+  }
+
+  // Helper — add a scene and return its minted id.
+  async function addScene(title: string, extra: Record<string, unknown> = {}): Promise<string> {
+    const res = await app.request("/api/bridge/v1/scene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ title, ...extra }),
+    });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { result: { sceneId: string } }).result.sceneId;
+  }
+
+  // ── POST /scene (add) ──────────────────────────────────────────────────────
+  it("POST /scene appends a scene to composition.yaml scenes[] and returns the id", async () => {
+    const res = await app.request("/api/bridge/v1/scene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ title: "开场钩子", intent: "hook" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { sceneId: string } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.sceneId).toMatch(/^scn_/);
+
+    // The scene really landed on disk (read back via GET /comp).
+    const scenes = await currentScenes();
+    const added = scenes.find((s) => s.id === body.result!.sceneId);
+    expect(added).toBeDefined();
+    expect(added?.title).toBe("开场钩子");
+    expect(added?.intent).toBe("hook");
+    // order is auto-assigned by the op (first scene → 0).
+    expect(typeof added?.order).toBe("number");
+  });
+
+  it("POST /scene auto-assigns a contiguous order across adds", async () => {
+    // This block already has ≥1 scene from the prior test; add two more and
+    // assert orders are unique contiguous integers.
+    await addScene("第二镜");
+    await addScene("第三镜");
+    const scenes = await currentScenes();
+    const orders = scenes.map((s) => s.order).sort((a, b) => a - b);
+    expect(orders).toEqual([...orders.keys()]); // 0..N-1 contiguous
+  });
+
+  it("POST /scene without a title → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/scene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ intent: "hook" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /scene with a non-string title → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/scene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ title: 123 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /scene without a work-id header → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/scene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "无 work" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /scene broadcasts composition-changed after the write lands", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/scene", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ title: "广播镜" }),
+      });
+      expect(res.status).toBe(200);
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  // ── PATCH /scene/:id (set) ─────────────────────────────────────────────────
+  it("PATCH /scene/:id patches editable props in place", async () => {
+    const id = await addScene("待改镜");
+    const res = await app.request(`/api/bridge/v1/scene/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ title: "已改镜", narration: "旁白", shotSize: "close" }),
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
+
+    const scenes = (await currentScenes()) as Array<
+      { id: string; title: string; narration?: string; shotSize?: string }
+    >;
+    const after = scenes.find((s) => s.id === id);
+    expect(after?.title).toBe("已改镜");
+    expect(after?.narration).toBe("旁白");
+    expect(after?.shotSize).toBe("close");
+  });
+
+  it("PATCH /scene/:id with an unknown id → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/scene/scn_nope", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ title: "x" }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+  });
+
+  // The bridge does an UNTYPED read-modify-write of agent JSON. The op's runtime
+  // allowlist (setSceneProps, S1) must hold END-TO-END through the route so an
+  // agent can't smuggle order/id/status (owned by reorderScenes / immutable /
+  // linkSceneAssets) through PATCH and break the contiguous-order invariant.
+  it("PATCH /scene/:id ignores order/id/status smuggled in the body (op allowlist holds at the route)", async () => {
+    const fullScene = async (sid: string) => {
+      const res = await app.request("/api/bridge/v1/comp", {
+        headers: { "X-AutoViral-Work-Id": workId },
+      });
+      const body = (await res.json()) as {
+        result: { scenes?: Array<{ id: string; order: number; status?: string; title: string }> };
+      };
+      return (body.result.scenes ?? []).find((s) => s.id === sid);
+    };
+    const id = await addScene("白名单镜");
+    const before = await fullScene(id);
+    expect(before?.status).toBe("planned");
+
+    const res = await app.request(`/api/bridge/v1/scene/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ title: "改了标题", order: 99, status: "generated", id: "scn_hacked" }),
+    });
+    expect(res.status).toBe(200);
+
+    const after = await fullScene(id);
+    // settable key applied…
+    expect(after?.title).toBe("改了标题");
+    // …owned-by-another-op keys rejected: order unchanged, status still planned,
+    // and the scene is STILL findable by its original id (id immutable).
+    expect(after?.order).toBe(before?.order);
+    expect(after?.status).toBe("planned");
+    expect(after?.id).toBe(id);
+  });
+
+  // ── POST /scene/:id/link shape gate ────────────────────────────────────────
+  it("POST /scene/:id/link without assetIds → 400 + code 4 and does NOT broadcast", async () => {
+    const id = await addScene("链接镜");
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request(`/api/bridge/v1/scene/${id}/link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ status: "generated" }), // assetIds missing
+      });
+      expect(res.status).toBe(400);
+      expect(((await res.json()) as { code?: number }).code).toBe(4);
+      // A rejected write must NOT broadcast — disk untouched.
+      expect(events).not.toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  // ── POST /scene/reorder ────────────────────────────────────────────────────
+  it("POST /scene/reorder rewrites order to the requested permutation", async () => {
+    const before = await currentScenes();
+    const ids = before.map((s) => s.id);
+    const reversed = [...ids].reverse();
+    const res = await app.request("/api/bridge/v1/scene/reorder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ orderedSceneIds: reversed }),
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
+
+    const after = await currentScenes();
+    // Sort by order → ids must now match the requested reversed sequence.
+    const byOrder = [...after].sort((a, b) => a.order - b.order).map((s) => s.id);
+    expect(byOrder).toEqual(reversed);
+  });
+
+  it("POST /scene/reorder with a non-array body → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/scene/reorder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ orderedSceneIds: "not-an-array" }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+  });
+
+  it("POST /scene/reorder with an incomplete permutation → 400 + code 4", async () => {
+    const scenes = await currentScenes();
+    // Drop one id → not a complete permutation → op throws code:4.
+    const partial = scenes.slice(1).map((s) => s.id);
+    const res = await app.request("/api/bridge/v1/scene/reorder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ orderedSceneIds: partial }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+  });
+
+  // ── POST /scene/:id/link ───────────────────────────────────────────────────
+  it("POST /scene/:id/link records generated assets + flips status", async () => {
+    const id = await addScene("待链镜");
+    const res = await app.request(`/api/bridge/v1/scene/${id}/link`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ assetIds: ["a1", "a2"], selectedAssetId: "a1" }),
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
+
+    const scenes = (await currentScenes()) as Array<
+      { id: string; generatedAssetIds?: string[]; selectedAssetId?: string; status?: string }
+    >;
+    const after = scenes.find((s) => s.id === id);
+    expect(after?.generatedAssetIds).toEqual(["a1", "a2"]);
+    expect(after?.selectedAssetId).toBe("a1");
+    expect(after?.status).toBe("generated");
+  });
+
+  it("POST /scene/:id/link with an unknown id → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/scene/scn_nope/link", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ assetIds: ["a1"] }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+  });
+
+  // ── DELETE /scene/:id (remove) ─────────────────────────────────────────────
+  it("DELETE /scene/:id removes the scene and recompacts order", async () => {
+    const id = await addScene("待删镜");
+    const del = await app.request(`/api/bridge/v1/scene/${id}`, {
+      method: "DELETE",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    expect(del.status).toBe(200);
+    expect(((await del.json()) as { ok: boolean }).ok).toBe(true);
+
+    const scenes = await currentScenes();
+    expect(scenes.some((s) => s.id === id)).toBe(false);
+    // order stays contiguous 0..N-1 after the remove.
+    const orders = scenes.map((s) => s.order).sort((a, b) => a - b);
+    expect(orders).toEqual([...orders.keys()]);
+  });
+
+  it("DELETE /scene/:id with an unknown id → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/scene/scn_nope", {
+      method: "DELETE",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+  });
+
+  // ── rejected writes must NOT broadcast (disk untouched) ────────────────────
+  it("PATCH /scene/:id rejected (unknown id) does NOT broadcast composition-changed", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/scene/scn_nope", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ title: "x" }),
+      });
+      expect(res.status).toBe(400);
+      expect(events).not.toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  // ── strict `scenes` write-schema (fail-loud, S4 parity) ────────────────────
+  it("PUT /comp with an unknown scene-level key → 400 + code 4, disk UNCHANGED", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    // GET the live comp (it has scenes from the adds above), inject a typo'd
+    // scene field on the first scene, PUT it back. The strict scenes write
+    // schema must reject it (unrecognized_keys) rather than silently strip.
+    const compRes = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const comp = ((await compRes.json()) as { result: Record<string, unknown> }).result;
+    const scenes = (comp.scenes as Array<Record<string, unknown>>).map((s, i) =>
+      i === 0 ? { ...s, bogusSceneField: 1 } : s,
+    );
+    const res = await app.request("/api/bridge/v1/comp", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ ...comp, scenes }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    // Rejected write leaves disk byte-for-byte untouched.
+    expect(await readFile(target, "utf8")).toBe(before);
+  });
+
+  it("PUT /comp round-trips a comp whose scenes carry only known fields (no regression)", async () => {
+    // The live comp's scenes are all op-minted (known fields only); a GET→PUT
+    // round-trip must pass the strict scenes schema unchanged.
+    const compRes = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const comp = ((await compRes.json()) as { result: Record<string, unknown> }).result;
+    const res = await app.request("/api/bridge/v1/comp", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify(comp),
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { ok: boolean }).ok).toBe(true);
+  });
+});
+
 describe("bridge router — Phase 3 approval gate", () => {
   it("POST /ask blocks until an approval-response is delivered (yes)", async () => {
     // Capture the askId from the broadcast ui-ask event, then call

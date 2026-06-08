@@ -175,6 +175,79 @@ cross-fade at a cut between two adjacent video clips, prefer
 `autoviral transition add` (it cross-fades the boundary without hand-authored
 keyframes) — see the *crossfade* recipe.
 
+## Storyboard commands (scenes / 分镜)
+
+Scenes are the **planning layer** — a storyboard table written into the
+composition's `scenes[]`. A scene is one shot in your intended sequence (剧本=PRD
+/ 分镜=issue); it has **no direct render effect** until you hand it off to the
+existing generation endpoints + `autoviral clip`. All five write verbs go through
+the same shared ops the (future) Studio storyboard panel uses, so CLI-driven and
+UI-driven storyboards converge on one `composition.yaml`. Schema + every field:
+`autoviral docs video/02-composition-schema`. Full pattern: the
+*script-to-storyboard* recipe.
+
+### `autoviral scene add --title X [...]`
+
+Add one shot. Prints the minted `scn_…` id. `--title` is the only required flag;
+the enum flags are validated locally (exit 4 on a typo, no round-trip).
+
+```bash
+autoviral scene add --title "钩子镜" --intent hook --shot-size closeup --camera push --duration 3
+autoviral scene add --title "结尾 CTA" --intent cta --narration "点关注看下集" --md-anchor 第三幕-收尾
+```
+
+- `--title` — shot label (**required**).
+- `--intent` — `hook` | `build` | `payoff` | `cta`.
+- `--shot-size` (景别) — `long` | `full` | `medium` | `close` | `closeup`.
+- `--camera` (运镜) — `push` | `pull` | `pan` | `track` | `follow` | `static`.
+- `--prompt` / `--narration` — generation prompt / voiceover line for this shot.
+- `--duration` — intended shot length in seconds.
+- `--md-anchor` — heading in `plan/script.md` this shot expands.
+
+### `autoviral scene list`
+
+Print the storyboard, sorted by `order`. One tab-separated row per scene:
+`order` / `id` / `title` / `intent` / `status`. (This is a READ off
+`autoviral comp show` → `scenes`; for full structured data use `comp show`.)
+
+### `autoviral scene set <id> [...]`
+
+Patch one scene card. Send only the flags you want to change (same flag set as
+`scene add`, all optional). The patch replaces just those fields.
+
+```bash
+autoviral scene set scn_a1b2c3 --shot-size medium --narration "改一句旁白"
+```
+
+### `autoviral scene reorder <id1> <id2> ...`
+
+Reorder the storyboard. The ids ARE the new order and must be a **full
+permutation** of every existing scene id (an incomplete list 400s, exit 4).
+
+```bash
+autoviral scene reorder scn_c3 scn_a1 scn_b2
+```
+
+### `autoviral scene link <id> --asset <assetId> [...]`
+
+Attach generated asset(s) to a scene — the plan→execution handoff state. At least
+one `--asset` is required; `--asset` may repeat. `--select` picks the chosen take
+(defaults to the last asset); `--status` is `planned` | `generated` | `stale`
+(defaults to `generated`).
+
+```bash
+autoviral scene link scn_a1b2c3 --asset img_take1 --asset img_take2 --select img_take2 --status generated
+```
+
+### `autoviral scene remove <id>`
+
+Remove one shot. `order` recompacts to stay contiguous. No confirmation — gate
+destructive flows with `autoviral ask`.
+
+```bash
+autoviral scene remove scn_a1b2c3
+```
+
 ## UI control commands
 
 Stateless broadcasts to the Studio React app. None of them touch disk.

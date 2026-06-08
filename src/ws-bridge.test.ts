@@ -50,6 +50,46 @@ describe("buildSystemPrompt", () => {
     expect(p).not.toMatch(/\/api\/works\/[^/]+\/pipeline\/advance/);
   });
 
+  // S2 (PRD-0007) — the prompt must teach the storyboard (分镜) planning layer:
+  // the `autoviral scene` verbs + the剧本/script narrative artifact + the
+  // plan-vs-execution decoupling. This is video-only (carousel has no scenes).
+  it("teaches the storyboard scene verbs + plan/script.md (video planning layer)", () => {
+    const p = buildSystemPrompt(
+      baseWork({ type: "short-video" }) as any,
+      { port: 3271, workspacePath: "/tmp/autoviral-test/works/w_sb" },
+    );
+    // scene verbs are advertised (at least add + one more).
+    expect(p).toMatch(/autoviral scene add/);
+    expect(p).toMatch(/autoviral scene (list|set|reorder|link|remove)/);
+    // the narrative overview artifact is named in the deliverable contract.
+    expect(p).toMatch(/plan\/script\.md/);
+    // plan↔execution decoupling is narrated (handoff, not an embedded driver).
+    expect(p).toMatch(/解耦|handoff|计划与执行/);
+  });
+
+  // S2 — zero forced ordering: the prompt must NOT phrase script→scene→generate
+  // as a mandatory pipeline (AutoViral is按需调用). It can describe it as a
+  // common path, but not as a required sequence.
+  it("does not impose a forced script-before-scene ordering", () => {
+    const p = buildSystemPrompt(
+      baseWork({ type: "short-video" }) as any,
+      { port: 3271, workspacePath: "/tmp/autoviral-test/works/w_sb" },
+    );
+    expect(p).toMatch(/无强制顺序|无固定先后|不是强制|可选|跳过/);
+    expect(p).not.toMatch(/必须先.{0,8}剧本.{0,8}再.{0,8}分镜/);
+  });
+
+  // S2 — carousel works don't排 scenes; the storyboard narrative must NOT bleed
+  // into the image-text prompt (scenes are a composition-only / video concept).
+  it("does not inject the storyboard scene layer into a carousel (image-text) prompt", () => {
+    const p = buildSystemPrompt(
+      baseWork({ type: "image-text" }) as any,
+      { port: 3271, workspacePath: "/tmp/autoviral-test/works/w_c" },
+    );
+    expect(p).not.toMatch(/autoviral scene add/);
+    expect(p).not.toMatch(/plan\/script\.md/);
+  });
+
   // Migration guard: the prompt must not point the agent at source files or
   // deleted skill dirs/scripts. The skill manual + `autoviral docs` are the
   // schema/command source of truth now — see ws-bridge.ts buildSystemPrompt.

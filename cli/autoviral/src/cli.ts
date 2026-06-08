@@ -16,6 +16,7 @@ import { toastCommand } from "./commands/toast.js";
 import { progressCommand } from "./commands/progress.js";
 import { clipCommand } from "./commands/clip.js";
 import { trackCommand } from "./commands/track.js";
+import { sceneCommand } from "./commands/scene.js";
 import { transitionCommand } from "./commands/transition.js";
 import { captionsCommand } from "./commands/captions.js";
 import { carouselCommand } from "./commands/carousel.js";
@@ -51,6 +52,7 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   progress: progressCommand,
   clip: clipCommand,
   track: trackCommand,
+  scene: sceneCommand,
   transition: transitionCommand,
   captions: captionsCommand,
   carousel: carouselCommand,
@@ -127,6 +129,19 @@ function usage(): string {
     "    Add a new lane; prints the minted trackId. Default placement is the end of",
     "    the same-kind block; --after inserts directly below that anchor lane.",
     "  track remove <trackId>          Remove a lane (its clips go with it).",
+    "  scene add --title X [--intent hook|build|payoff|cta] [--prompt ...] [--narration ...]",
+    "    [--duration N] [--shot-size long|full|medium|close|closeup]",
+    "    [--camera push|pull|pan|track|follow|static] [--md-anchor <heading>]",
+    "    Add one shot to the storyboard (分镜表). Prints the minted sceneId. Scenes",
+    "    are the planning layer (剧本=PRD / 分镜=issue), decoupled from the timeline;",
+    "    they have no direct render effect until you hand a scene off to generation.",
+    "  scene list                      List the storyboard (order / id / title / intent / status).",
+    "  scene set <id> [--title ...] [--intent ...] [--prompt ...] [--narration ...] [--duration N]",
+    "    [--shot-size ...] [--camera ...] [--md-anchor ...]   Patch one scene card.",
+    "  scene reorder <id1> <id2> ...   Reorder the storyboard (a full permutation of scene ids).",
+    "  scene link <id> --asset <assetId> [--asset <id2>...] [--select <id>] [--status planned|generated|stale]",
+    "    Attach generated asset(s) to a scene (the plan→execution handoff state).",
+    "  scene remove <id>               Remove one shot from the storyboard.",
     "  transition add --track <trackId> --after <clipId> --preset <name> [--duration <seconds>]",
     "    Add a cut-point transition between two adjacent video clips. Presets come",
     "    from the shared registry (cross-dissolve / wipe-* / push-* / …).",

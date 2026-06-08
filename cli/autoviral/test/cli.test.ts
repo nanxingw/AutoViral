@@ -25,6 +25,10 @@ const clips: Array<{ id: string; trackKind: string }> = [
   { id: "tc_hook01", trackKind: "text" },
 ];
 let nextSeq = 1;
+// S2 (PRD-0007) — in-memory scenes the mock GET /comp returns + POST /scene
+// appends to, so `scene add` then `scene list` round-trips end-to-end through
+// the CLI's read+write surface (the real ops/broadcast live in routes.test.ts).
+const scenes: Array<{ id: string; order: number; title: string; intent?: string; status?: string }> = [];
 // S11 — capture the last PATCH /clip body so the CLI test can assert the
 // flag → nested-path mapping + value coercion that reached the bridge.
 let lastClipPatch: Record<string, unknown> | null = null;
@@ -47,6 +51,12 @@ let lastCompAspect: Record<string, unknown> | null = null;
 // the CLI test can assert which fields the CLI sent (a patch must send ONLY the
 // supplied flags, incl. the new --italic / --tracking, and a partial box).
 let lastLayerSet: Record<string, unknown> | null = null;
+// S2 (PRD-0007) — capture the last scene write bodies so the CLI test can assert
+// the `scene add/set/reorder/link` flags reached the bridge in the right shape.
+let lastSceneAdd: Record<string, unknown> | null = null;
+let lastSceneSet: Record<string, unknown> | null = null;
+let lastSceneReorder: Record<string, unknown> | null = null;
+let lastSceneLink: Record<string, unknown> | null = null;
 
 async function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
@@ -75,7 +85,7 @@ beforeAll(async () => {
     if (req.method === "GET" && url === "/api/bridge/v1/comp") {
       return send(200, {
         ok: true,
-        result: { workId: "w_e2e", fps: 30, tracks: [], assets: [], duration: 0, width: 1080, height: 1920, aspect: "9:16", id: "c_e2e", updatedAt: "2026-05-14T00:00:00.000Z" },
+        result: { workId: "w_e2e", fps: 30, tracks: [], assets: [], scenes, duration: 0, width: 1080, height: 1920, aspect: "9:16", id: "c_e2e", updatedAt: "2026-05-14T00:00:00.000Z" },
       });
     }
     if (req.method === "GET" && url === "/api/bridge/v1/comp/diff") {
@@ -219,6 +229,76 @@ beforeAll(async () => {
       const idx = clips.findIndex((c) => c.id === id);
       if (idx >= 0) clips.splice(idx, 1);
       return send(200, { ok: true });
+    }
+    // S2 (PRD-0007) — POST /scene. Mirrors the server contract: a string `title`
+    // mints a scene id + appends it (order auto-assigned), and returns
+    // { sceneId }. A missing/non-string title is the route's shape gate → 400 +
+    // code 4 → CLI exit 4 (but the CLI rejects locally first, so this is the
+    // defence-in-depth path). The real op/broadcast lives in routes.test.ts.
+    if (req.method === "POST" && url === "/api/bridge/v1/scene") {
+      const body = await readBody(req);
+      lastSceneAdd = body;
+      if (typeof body.title !== "string" || !body.title) {
+        return send(400, { ok: false, error: "missing title", code: 4 });
+      }
+      const id = `scn_seq${nextSeq++}`;
+      scenes.push({
+        id,
+        order: scenes.length,
+        title: body.title,
+        intent: body.intent,
+        status: "planned",
+      });
+      return send(200, { ok: true, result: { sceneId: id } });
+    }
+    // S2 — POST /scene/reorder. A non-array orderedSceneIds is the route shape
+    // gate → 400 + code 4. An array is recorded + 200.
+    if (req.method === "POST" && url === "/api/bridge/v1/scene/reorder") {
+      const body = await readBody(req);
+      lastSceneReorder = body;
+      if (!Array.isArray(body.orderedSceneIds)) {
+        return send(400, { ok: false, error: "missing/invalid orderedSceneIds", code: 4 });
+      }
+      return send(200, { ok: true });
+    }
+    // S2 — POST /scene/:id/link. A known scene id records the body + 200;
+    // `scn_ghost` is the op's CompositionOpError → 400 + code 4 → CLI exit 4.
+    {
+      const linkMatch = /^\/api\/bridge\/v1\/scene\/([^/]+)\/link$/.exec(url ?? "");
+      if (req.method === "POST" && linkMatch) {
+        const body = await readBody(req);
+        lastSceneLink = body;
+        const id = decodeURIComponent(linkMatch[1]);
+        if (id === "scn_ghost") {
+          return send(400, { ok: false, error: "no such scene", code: 4 });
+        }
+        return send(200, { ok: true });
+      }
+    }
+    // S2 — PATCH /scene/:id (the body IS the props object) + DELETE /scene/:id.
+    // A known id resolves; `scn_ghost` is the op's CompositionOpError → 400 +
+    // code 4 → CLI exit 4.
+    {
+      const sceneMatch = /^\/api\/bridge\/v1\/scene\/([^/]+)$/.exec(url ?? "");
+      if (sceneMatch) {
+        const id = decodeURIComponent(sceneMatch[1]);
+        if (req.method === "PATCH") {
+          const body = await readBody(req);
+          lastSceneSet = body;
+          if (id === "scn_ghost") {
+            return send(400, { ok: false, error: "no such scene", code: 4 });
+          }
+          return send(200, { ok: true });
+        }
+        if (req.method === "DELETE") {
+          if (id === "scn_ghost") {
+            return send(400, { ok: false, error: "no such scene", code: 4 });
+          }
+          const idx = scenes.findIndex((s) => s.id === id);
+          if (idx >= 0) scenes.splice(idx, 1);
+          return send(200, { ok: true });
+        }
+      }
     }
     // S11 — PATCH /clip/:id. The mock just records the body the CLI sent so the
     // test can assert the flag → nested-path mapping + value coercion. (The real
@@ -811,6 +891,209 @@ describe("autoviral CLI — end-to-end", () => {
   it("track unknown subcommand → exit 127", async () => {
     const r = await run(["track", "frobnicate"]);
     expect(r.exitCode).toBe(127);
+  });
+
+  // S2 (PRD-0007) — `autoviral scene add/list/set/reorder/link/remove` drives the
+  // storyboard (分镜) planning layer. Writes round-trip through the bridge's
+  // scene routes (POST /scene, PATCH /scene/:id, POST /scene/reorder, POST
+  // /scene/:id/link, DELETE /scene/:id); `scene list` is a READ off GET /comp.
+  // Enum-typed flags are validated locally (exit 4, never hits the bridge).
+  describe("scene — storyboard write/read surface", () => {
+    it("scene add --title X → prints the minted sceneId + forwards the title", async () => {
+      lastSceneAdd = null;
+      const r = await run(["scene", "add", "--title", "钩子镜"]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toMatch(/^scn_/);
+      expect(lastSceneAdd).toEqual({ title: "钩子镜" });
+    });
+
+    it("scene add forwards every supplied flag (intent / shot-size / camera / duration / prompt / narration / md-anchor)", async () => {
+      lastSceneAdd = null;
+      const r = await run([
+        "scene", "add",
+        "--title", "结尾 CTA",
+        "--intent", "cta",
+        "--shot-size", "closeup",
+        "--camera", "push",
+        "--duration", "3",
+        "--prompt", "城市夜景",
+        "--narration", "点关注",
+        "--md-anchor", "第三幕-收尾",
+      ]);
+      expect(r.exitCode).toBe(0);
+      expect(lastSceneAdd).toEqual({
+        title: "结尾 CTA",
+        intent: "cta",
+        shotSize: "closeup",
+        cameraMovement: "push",
+        durationSec: 3,
+        prompt: "城市夜景",
+        narration: "点关注",
+        mdAnchor: "第三幕-收尾",
+      });
+    });
+
+    it("scene add with no --title → exit 4 (never hits bridge)", async () => {
+      lastSceneAdd = null;
+      const r = await run(["scene", "add", "--intent", "hook"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSceneAdd).toBeNull();
+    });
+
+    it("scene add with an invalid --intent → exit 4 (never hits bridge)", async () => {
+      lastSceneAdd = null;
+      const r = await run(["scene", "add", "--title", "X", "--intent", "bogus"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSceneAdd).toBeNull();
+    });
+
+    it("scene add with an invalid --shot-size → exit 4 (never hits bridge)", async () => {
+      lastSceneAdd = null;
+      const r = await run(["scene", "add", "--title", "X", "--shot-size", "macro"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSceneAdd).toBeNull();
+    });
+
+    it("scene add with an invalid --camera → exit 4 (never hits bridge)", async () => {
+      lastSceneAdd = null;
+      const r = await run(["scene", "add", "--title", "X", "--camera", "zoom"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSceneAdd).toBeNull();
+    });
+
+    it("scene add with a non-numeric --duration → exit 4 (never hits bridge)", async () => {
+      lastSceneAdd = null;
+      const r = await run(["scene", "add", "--title", "X", "--duration", "abc"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSceneAdd).toBeNull();
+    });
+
+    it("scene add → scene list shows the new shot (read off GET /comp)", async () => {
+      const add = await run(["scene", "add", "--title", "可见镜", "--intent", "build"]);
+      expect(add.exitCode).toBe(0);
+      const id = add.stdout.trim();
+      const list = await run(["scene", "list"]);
+      expect(list.exitCode).toBe(0);
+      // tab-separated: order  id  title  intent  status
+      const row = list.stdout.split("\n").find((l) => l.includes(id));
+      expect(row).toBeDefined();
+      expect(row).toContain("可见镜");
+      expect(row).toContain("build");
+    });
+
+    it("scene set <id> --shot-size medium → PATCHes the props object directly", async () => {
+      lastSceneSet = null;
+      const r = await run(["scene", "set", "scn_x1", "--shot-size", "medium", "--narration", "改旁白"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastSceneSet).toEqual({ shotSize: "medium", narration: "改旁白" });
+    });
+
+    it("scene set with no id → exit 4 (never hits bridge)", async () => {
+      lastSceneSet = null;
+      const r = await run(["scene", "set", "--shot-size", "medium"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSceneSet).toBeNull();
+    });
+
+    it("scene set with an invalid --intent → exit 4 (never hits bridge)", async () => {
+      lastSceneSet = null;
+      const r = await run(["scene", "set", "scn_x1", "--intent", "bogus"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSceneSet).toBeNull();
+    });
+
+    it("scene set an unknown id → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["scene", "set", "scn_ghost", "--shot-size", "medium"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("scene reorder <id1> <id2> ... → POSTs { orderedSceneIds }", async () => {
+      lastSceneReorder = null;
+      const r = await run(["scene", "reorder", "scn_c", "scn_a", "scn_b"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastSceneReorder).toEqual({ orderedSceneIds: ["scn_c", "scn_a", "scn_b"] });
+    });
+
+    it("scene reorder with no ids → exit 4 (never hits bridge)", async () => {
+      lastSceneReorder = null;
+      const r = await run(["scene", "reorder"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSceneReorder).toBeNull();
+    });
+
+    it("scene link <id> --asset a --asset b --select b --status generated → forwards all", async () => {
+      lastSceneLink = null;
+      const r = await run([
+        "scene", "link", "scn_a1",
+        "--asset", "img_take1",
+        "--asset", "img_take2",
+        "--select", "img_take2",
+        "--status", "generated",
+      ]);
+      expect(r.exitCode).toBe(0);
+      expect(lastSceneLink).toEqual({
+        assetIds: ["img_take1", "img_take2"],
+        selectedAssetId: "img_take2",
+        status: "generated",
+      });
+    });
+
+    it("scene link with no --asset → exit 4 (never hits bridge)", async () => {
+      lastSceneLink = null;
+      const r = await run(["scene", "link", "scn_a1"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSceneLink).toBeNull();
+    });
+
+    it("scene link with no id → exit 4 (never hits bridge)", async () => {
+      lastSceneLink = null;
+      const r = await run(["scene", "link", "--asset", "img_x"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSceneLink).toBeNull();
+    });
+
+    it("scene link with an invalid --status → exit 4 (never hits bridge)", async () => {
+      lastSceneLink = null;
+      const r = await run(["scene", "link", "scn_a1", "--asset", "img_x", "--status", "bogus"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSceneLink).toBeNull();
+    });
+
+    it("scene link an unknown scene → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["scene", "link", "scn_ghost", "--asset", "img_x"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("scene remove <id> → exit 0", async () => {
+      const add = await run(["scene", "add", "--title", "待删"]);
+      const id = add.stdout.trim();
+      const rm = await run(["scene", "remove", id]);
+      expect(rm.exitCode).toBe(0);
+      const list = await run(["scene", "list"]);
+      expect(list.stdout).not.toContain(id);
+    });
+
+    it("scene remove with no id → exit 4 (never hits bridge)", async () => {
+      const r = await run(["scene", "remove"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("scene remove an unknown id → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["scene", "remove", "scn_ghost"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("scene unknown subcommand → exit 127", async () => {
+      const r = await run(["scene", "frobnicate"]);
+      expect(r.exitCode).toBe(127);
+    });
+
+    it("--help lists scene commands", async () => {
+      const r = await run(["--help"]);
+      expect(r.stdout).toMatch(/scene add/);
+      expect(r.stdout).toMatch(/scene list/);
+      expect(r.stdout).toMatch(/scene reorder/);
+    });
   });
 
   it("clip add --track-id <id> forwards trackId on the wire", async () => {

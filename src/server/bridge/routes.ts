@@ -1114,6 +1114,184 @@ bridgeRouter.delete("/track/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// ─── S2 (PRD-0007) — scene (分镜 / storyboard) write verbs ────────────────────
+// The five scene routes mirror /split exactly: each delegates the mutation to a
+// shared `@shared` scene op (the SAME implementation the Studio store runs), so
+// an agent driving via `autoviral scene …` and a human editing a card in the
+// panel converge on one `comp.scenes` record (ADR-009 agent-人一致). All go
+// through mutateCompositionFor (per-work serialized after S6) + reuse the
+// existing `composition-changed` broadcast so Studio refetches without waiting
+// on fs.watch. Illegal params throw CompositionOpError{code:4} → HTTP 400 +
+// code:4 → CLI exit 4. The op owns `order` / `id` / `status` invariants; the
+// route does only the minimal shape gate the op cannot (a present title / an
+// array of ids) and otherwise passes the body straight through.
+
+// POST /scene — append a new 分镜. Body
+// `{ title(必), intent?, prompt?, narration?, durationSec?, shotSize?,
+//    cameraMovement?, mdAnchor?, memberClipIds?, memberAssetIds? }`.
+// `ops.addScene` mints the `scn_` id + auto-assigns `order`; we echo the
+// minted sceneId so the agent can immediately reference / link the new shot.
+// A missing / non-string title is the one shape gate the op can't express → 400.
+bridgeRouter.post("/scene", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    title?: unknown;
+    [k: string]: unknown;
+  };
+  if (typeof body.title !== "string" || !body.title) {
+    return c.json({ ok: false, error: "missing title", code: 4 }, 400);
+  }
+  let sceneId = "";
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ({ sceneId } = ops.addScene(
+          comp,
+          body as Parameters<typeof ops.addScene>[1],
+        ));
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "scene-add" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { sceneId } });
+});
+
+// PATCH /scene/:id — patch editable scene props. Body is DIRECTLY the props
+// object (mirrors PATCH /clip/:id). `ops.setSceneProps` enforces its own runtime
+// allowlist (it ignores order/id/status/asset-state), so the route does not
+// re-check those. Unknown sceneId → CompositionOpError{code:4} → 400 + code:4.
+bridgeRouter.patch("/scene/:id", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  const props = (await c.req.json().catch(() => ({}))) as Parameters<
+    typeof ops.setSceneProps
+  >[1]["props"];
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.setSceneProps(comp, { sceneId: id, props });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "scene-set" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true });
+});
+
+// POST /scene/reorder — reorder scenes to the exact `orderedSceneIds` sequence.
+// `ops.reorderScenes` requires a complete permutation of existing scene ids and
+// recompacts order to contiguous 0..N-1. A non-array body is the one shape gate
+// the op can't express cleanly → 400. An incomplete / mismatched permutation is
+// the op's own CompositionOpError{code:4} → 400 + code:4.
+bridgeRouter.post("/scene/reorder", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    orderedSceneIds?: unknown;
+  };
+  if (!Array.isArray(body.orderedSceneIds)) {
+    return c.json(
+      { ok: false, error: "missing/invalid orderedSceneIds (expected string[])", code: 4 },
+      400,
+    );
+  }
+  const orderedSceneIds = body.orderedSceneIds as string[];
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.reorderScenes(comp, { orderedSceneIds });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "scene-reorder" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true });
+});
+
+// POST /scene/:id/link — link generated assets onto a scene (the generation-
+// handoff write-back). Body `{ assetIds: string[], selectedAssetId?, status? }`.
+// `ops.linkSceneAssets` dedups assetIds onto generatedAssetIds + flips status.
+// Unknown sceneId → CompositionOpError{code:4} → 400 + code:4.
+bridgeRouter.post("/scene/:id/link", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  const body = (await c.req.json().catch(() => ({}))) as Omit<
+    Parameters<typeof ops.linkSceneAssets>[1],
+    "sceneId"
+  >;
+  // Shape gate the op can't express: `assetIds` must be a non-empty string[].
+  // Without it, a valid sceneId + missing assetIds reaches the op's
+  // `for (const id of p.assetIds)` and throws a raw "undefined is not iterable"
+  // TypeError — the HTTP result is still 400+code:4 (no write, no broadcast),
+  // but the message is opaque. Reject up front with a self-describing error,
+  // mirroring the title / orderedSceneIds gates.
+  if (!Array.isArray(body.assetIds) || body.assetIds.length === 0) {
+    return c.json(
+      { ok: false, error: "missing/invalid assetIds (expected non-empty string[])", code: 4 },
+      400,
+    );
+  }
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.linkSceneAssets(comp, { sceneId: id, ...body });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "scene-link" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true });
+});
+
+// DELETE /scene/:id — remove a 分镜 + recompact order. `ops.removeScene` splices
+// the existing scenes array + recompacts to contiguous 0..N-1. The bridge has no
+// confirm step (an agent that asked for a delete means it). Unknown sceneId →
+// CompositionOpError{code:4} → 400 + code:4.
+bridgeRouter.delete("/scene/:id", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.removeScene(comp, { sceneId: id });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "scene-remove" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true });
+});
+
 // S6 (US 1/9) — POST /split: the first intent-level verb that goes through the
 // shared composition-ops core. Body `{ clipId, at }` splits the clip whose
 // time-range contains `at` into two halves, rebasing keyframes. The split math
