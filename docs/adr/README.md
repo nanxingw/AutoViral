@@ -31,3 +31,5 @@
 | [ADR-007](ADR-007-single-media-provider-registry.md) | Single MediaProvider registry — 能力标签、单一入口（v0.1.1 深模块 ②） | Accepted | 2026-06-03 |
 | [ADR-008](ADR-008-multi-session-chat-terminal.md) | 多会话 Chat + Terminal — `(workId, sessionId)` keying、sidecar 持久化、focus 共享（v0.1.2 §5 keystone） | Accepted | 2026-06-04 |
 | [ADR-009](ADR-009-shared-composition-ops-core.md) | Shared composition-ops core — 意图级 mutation 单一实现、原地 mutate、store + bridge 共消费（v0.1.3 keystone / PRD-0004 M1） | Accepted | 2026-06-04 |
+| [ADR-010](ADR-010-grounded-coach-persona.md) | Grounded coach — 灵感页第二个持久 agent persona（workless `coach_main` 会话、sidecar 持久、session 级 model、复用聊天栈）（v0.1.5 / PRD-0006 S6-S8） | Accepted | 2026-06-08 |
+| [ADR-011](ADR-011-douyin-collector-managed-venv-scrape.md) | Douyin 采集器 — 托管 venv（f2+browser_cookie3）经用户浏览器 session 抓本人数据；人口属性删卡非推迟；本地优先 secrets 明文=接受风险（v0.1.5 / PRD-0006 S4-S5） | Accepted | 2026-06-08 |

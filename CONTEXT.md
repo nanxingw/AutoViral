@@ -64,6 +64,19 @@ A creator workstation for short-form video / image / poster content. Single-user
 | **Seedance** | OpenRouter's `bytedance/seedance-2.0` i2v video generation. ~$0.76/3s. **Gotcha**: durationSec only accepts {3, 5, 10}; output is fixed 720x1280@24 regardless of input aspect (see memory `reference_seedance_i2v_durations.md`). |
 | **Whisper / stable-ts** | Local audio transcription. `pip install stable-ts` (not `stable-whisper`); module imports as `stable_whisper`. Word-level timestamps via `word_timestamps=True`. |
 
+### Inspiration & Analytics vocabulary (v0.1.5, [PRD-0006](docs/prd/0006-v0.1.5-inspiration-data-redesign.md))
+
+| Term | Meaning |
+|---|---|
+| **creator analytics** | The 数据 (Analytics) page's data: the creator's own per-post metrics (play/digg/comment/share/collect) + lifetime averages, derived purely from the on-disk Douyin snapshot. Client adapter `web/src/queries/analytics.ts`; pure derivation core `web/src/lib/creator-analytics.ts` ("D1"). NOT audience demographics — those are unobtainable (see invariant 8 + [ADR-011](docs/adr/ADR-011-douyin-collector-managed-venv-scrape.md)). |
+| **coach** | The grounded research/strategy chat agent on the 灵感 (Explore) page — a **second, persisted agent persona** distinct from the Studio editing agent. Reads the creator's works + selected-platform trends + interests; streams scored 选题 + `<coach-idea>` tags. Workless session keyed `coach_main`, sidecar-persisted, **session-scoped model**. *See [ADR-010](docs/adr/ADR-010-grounded-coach-persona.md).* |
+| **angle brief** | A small push-feed of concrete personalized 选题 on Explore, replacing the old hard-coded "起手切角" card. Pure deterministic shaper `src/domain/angle-briefs.ts` over the same {works, trends, interests} context the coach reads — no LLM on page load, no fabrication. Each carries a `grounding` chip (`trend+interest` / `trend` / `interest` / `thin`). Served by `GET /api/coach/angle-briefs/:platform`. |
+| **benchmark band** | The per-KPI diagnostic band on 数据 that positions a metric against a same-follower-tier cohort ("互动率 2.6% 低于 nano 层中位数，目标区间 X–Y"). Static in-repo JSON + pure positioning fn ("D2", `web/src/lib/benchmark.ts`). Must be platform-correct for the shown platform **or** explicitly labeled 参考性. |
+| **platform-honesty matrix** | The 数据 table stating, per platform, {能否自有数据 / 受众画像+门槛 / 趋势来源 real-vs-LLM}. The honest replacement for the deleted demographics cards. |
+| **insight guardrail** | Pure filter ("D3", `src/domain/insight-guardrail.ts`) that rejects any agent-generated 洞察 citing a metric NOT actually on disk (e.g. retention/完播率). Encodes honesty as a tested gate, not a review habit. |
+| **trend provenance** | The honesty label on each trend row: `实采` (real scrape) vs `Agent 推理` (`source: agent_websearch`, LLM-invented, `metrics: null`). Today only xiaohongshu truly scrapes (Playwright, titles+covers, no engagement numbers); youtube/tiktok/douyin route to `agentFallback`. |
+| **collector** | The Douyin creator-data scraper: `f2` + `browser_cookie3` running in the managed venv at `~/.autoviral/collector-venv`, reading the user's logged-in douyin.com `sessionid` cookie. `POST /api/analytics/refresh` → honest 401 + re-login prompt when no session. *See [ADR-011](docs/adr/ADR-011-douyin-collector-managed-venv-scrape.md).* |
+
 ## Architectural invariants
 
 These are constraints that should not be silently violated. If breaking one becomes attractive, escalate via an ADR.
@@ -81,6 +94,10 @@ These are constraints that should not be silently violated. If breaking one beco
 6. **E2E success = browser screenshot, not backend artifact.** See [`.claude/rules/e2e-testing.md`](.claude/rules/e2e-testing.md). Hard rules 1-5 are non-negotiable.
 
 7. **Vitest worker pools are capped (`maxThreads: 2`, `maxForks: 2`).** Don't lift. Don't run two test sessions concurrently. See `CLAUDE.md` `<testing>` section.
+
+8. **Honesty over a full-looking UI.** Never fabricate data, never promise data the tool cannot obtain. Audience demographics are owner-OAuth-only and unobtainable for the user's platforms at their scale — so the cards were *deleted*, not stubbed with "等待后台采集". Sparse / stale / LLM-inferred data must be labeled as such: benchmark bands flagged 参考性 when not platform-correct; trend rows labeled `实采` vs `Agent 推理`; agent insights pass the **insight guardrail** (D3) that rejects any metric not actually on disk. This is encoded as *tested guardrails* (D2/D3), not a review habit. *Rationale: [PRD-0006](docs/prd/0006-v0.1.5-inspiration-data-redesign.md); [ADR-011](docs/adr/ADR-011-douyin-collector-managed-venv-scrape.md).*
+
+9. **Tests must not write the real `~/.autoviral`.** Routes that resolve their data dir from `os.homedir()` (trends, covers) are NOT isolated by `withTempDataDir` (which only overrides `AUTOVIRAL_DATA_DIR`). Setting `process.env.HOME` is fragile (cached `homedir()`). Isolate by mocking the module: `vi.mock("node:os", … homedir: () => fakeHome)` (not `vi.spyOn` — ESM named exports are non-configurable getters). *Rationale: 2026-06-08 — test fixtures had clobbered the user's real Douyin trends with placeholder data; see `memory/project_test_pollutes_real_home_trends.md`.*
 
 ## Code map (high-level)
 
@@ -112,8 +129,8 @@ web/                        # Frontend (React + Vite + CSS modules)
 │   ├── studio/             # Main editing view (preview, timeline, panels)
 │   ├── terminal/           # xterm.js panel hosting CLI agent
 │   ├── works/              # Works list + creation
-│   ├── analytics/          # Creator profile dashboard
-│   └── explore/            # Trends panel
+│   ├── analytics/          # 数据 page: per-work table + benchmark band + honest empty states + platform-honesty matrix (pure cores in web/src/lib: creator-analytics/benchmark)
+│   └── explore/            # 灵感 page: grounded coach (ADR-010) + angle briefs + trend drill-down/provenance
 └── src/stores/             # Zustand-style client state (toast.ts is the canonical pattern)
 
 cli/autoviral/              # `autoviral` CLI (Node, distributed standalone)
@@ -138,3 +155,4 @@ docs/                       # Long-form project docs
 - **2026-06-03** · I12 (PRD-0002 W7) — grouped flat `src/*.ts` into responsibility dirs: `src/infra/` (config/logger/paths) + `src/domain/` (work-store/memory/analytics-collector/audio-tools). Pure `git mv` + import rewrite; agent bridge files (`ws-bridge.ts`) left at `src/` root per PRD Open Question.
 - **2026-06-03** · I03 (PRD-0002 W2) — added [`AGENT.md`](AGENT.md) as CLAUDE.md's same-role backend counterpart for non-Claude CLI agents (thin pointer + backend deltas); de-drifted README to 0.1.0 reality (provider table collapsed to OpenRouter-only, dead `check_providers.py` / `modules/` paths removed, architecture re-described as bridge HTTP/WS + `autoviral` CLI instead of the stale `/invoke` protocol).
 - **2026-05-17** · Right-pane dual-surface decision — Chat (`claude -p` subprocess) coexists with Terminal (xterm.js) as horizontal-tabbed siblings. Default surface: Chat. Both consume the same focus channel from H0. See [ADR-005](docs/adr/ADR-005-dual-chat-entry-layout.md). Resolves M.1 ([Issue #6](https://github.com/nanxingw/AutoViral/issues/6)).
+- **2026-06-08** · v0.1.5 ([PRD-0006](docs/prd/0006-v0.1.5-inspiration-data-redesign.md), SHIPPED) — 灵感+数据 redesign. Added the **Inspiration & Analytics vocabulary** (creator analytics / coach / angle brief / benchmark band / platform-honesty matrix / insight guardrail / trend provenance / collector) + **invariant 8** (honesty over a full-looking UI) + **invariant 9** (tests must not write real `~/.autoviral`). New decisions: [ADR-010](docs/adr/ADR-010-grounded-coach-persona.md) (grounded coach as a 2nd persisted agent persona) · [ADR-011](docs/adr/ADR-011-douyin-collector-managed-venv-scrape.md) (Douyin collector via managed-venv browser-cookie scrape; demographics deleted-not-deferred; local-first secrets accepted-risk). Also cleared the 0005 9-bug backlog and de-hardcoded the Settings model-version label.
