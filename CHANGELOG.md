@@ -7,6 +7,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-06-08
+
+**诚实的数据 + 有根的教练**（PRD-0006）—— 灵感（Explore）与数据（Analytics）两页重做。核心命题：把"零零散散、对创作者没帮助"的空壳，改造成一条扎根真实磁盘数据的诊断叙事 + 一个读得懂你作品的对话教练。两条铁律贯穿：**绝不展示拿不到的数据、绝不用假承诺骗用户；把已经拥有却藏起来的真实数据和已经建好却睡着的能力唤醒。** 14 个纵切片经串行 TDD 实现（5 个 deep 模块红→绿）+ 2 轮多纬度浏览器 E2E（截图 + DOM/computed-style 二确）全绿验收。
+
+### Added
+- **数据页 · 真实作品表现** — 把早已在磁盘、早已被适配器解析、却从没上屏的 9 件作品真实 per-post 指标（播放/点赞/评论/分享/收藏）渲染成可排序的作品表现表 + 平均播放 KPI（built-not-wired 接线）。
+- **数据页 · benchmark 诊断带** — 每个 KPI 旁附同粉丝层基线带，把"互动率 2.6%"变成"低于 nano 层中位数，目标区间 X–Y"的诊断句（静态基线 JSON，无实时采集；抖音基线 platform-correct 或明确标注参考性）。
+- **数据页 · 内容支柱 + 成长轨迹** — 9 件作品打内容支柱标签并对比各支柱表现；前瞻式成长轨迹 + 下一里程碑卡（在数据点稀少时比回顾图表更有意义）。
+- **数据页 · 同步入口** — 数据页 hero 加"同步数据"按钮（复用 S5 refresh），未登录抖音时给本地化可操作提示 + 一键跳设置。
+- **灵感页 · 有根的策略 coach** — 唤醒已建好却零前端调用的研究 agent，挂成灵感页可对话面板（持久 session + sidecar 历史 + session 级 model 作用域 + 起手提问库）；coach 读用户真实作品 + 趋势 + 兴趣，给打分过的选题，并发 `<coach-idea>` 供一键落成新作品。
+- **灵感页 · 真实个性化选题 brief** — 删掉写死的假"起手切角"占位卡，换成 agent 基于作品+趋势+兴趣生成的真实 brief（纯函数 shaper，诚实 grounding chip，薄数据时坦诚说明不编造）。
+- **灵感页 · 趋势 drill-down** — 趋势行可展开（趋势线 / 可看样例 / 相关切角 / Rising-Breakout 紧迫角标），并亮出此前零 UI 调用的 report.md 研究报告；来源诚实标注（agent 推理 vs 实采）。
+- **抖音创作者数据采集器** — 以托管 Python venv（f2 + browser_cookie3，复用 v0.1.2 doctor/venv 机制）重建被 #72 删除的采集器；读用户已登录浏览器的 sessionid cookie 拉取本人数据。
+
+### Changed
+- **删除做不到的人口属性承诺** — 年龄/性别/地域三张卡读的是 OAuth-only 私有数据（用户平台在其规模下任何 API 都不返回），"等待后台采集"是架构性谎言：删卡，换诚实三段式空态（说明为什么 / 带水印示例 / 真实 CTA）+ 平台诚实矩阵。
+- **趋势按兴趣排序 + 新鲜度** — 把用户声明的兴趣喂进趋势排序路径；加 last-collected 时间戳 + stale 角标，月旧数据不再伪装实时。
+- **`POST /api/analytics/refresh` 从硬 501 改为真刷新** — 未登录时返回诚实的 401 + 可操作的重新登录提示，而非静默死胡同。
+- **设置默认模型不再硬编码版本号** — 下拉框由"Claude Opus · 4.7"改为"Claude Opus"：config 只存别名，claude-cli 运行时解析为该档最新模型，永不再随发版过期。
+
+### Fixed
+- **0005 bug backlog 清零（9 个）** — B1/B9 CI 与 release 门控不再漏构建/测试 bundled `cli/autoviral` 且 verify-version 校验 cli==root==tag；B2/B6 trends 路由 platform allow-list 守卫 + 路径段 sanitize；B3/B4 Works 网格在 creating 时轮询刷新 + WorkCover 封面 URL 变化时重置 failed 态；B5 `duplicateSlide` 改用防碰撞 id 生成器；B7 删除确认弹窗用函数 replacer 防 `$` 注入；B8 桌面版本号取自 `app.getVersion()` 而非硬编码回退。
+- **测试不再污染真实 `~/.autoviral`** — `api.trends` / `api.cover` 测试经 `os.homedir()` 写入用户真实目录（`withTempDataDir` 只隔离 `AUTOVIRAL_DATA_DIR`，对 homedir 无效），曾把抖音热门覆盖成占位 fixture；改用 `vi.mock("node:os")` 模块层隔离，跑全套测试前后真实目录指纹一致（零污染）。
+
+### 已知边界（诚实声明）
+- **抖音真实数据采集需用户在浏览器登录 douyin.com**（采集器读 sessionid cookie）；未登录的 401 诚实路径已验证，真数据成功路径需用户授权后自验。
+- coach / 选题 brief 的服务端生成内容当前为中文，不随界面语言切换（非阻塞，后续修）。
+
 ## [0.1.4] - 2026-06-05
 
 桌面端 bug 修复（用户在 0.1.3 桌面 app 实测发现；经"诊断 → 多纬度浏览器复现 → 验证"三段 Workflow 定位 + DOM/computed-style 二确——静态分析三次误判"无 bug"，浏览器实践揪出真因）。
