@@ -106,15 +106,20 @@ export function addScene(
 // The fields setSceneProps may patch. `id` and `order` are excluded on
 // purpose: `id` is immutable; `order` is owned by reorderScenes. Asset / status
 // state is owned by linkSceneAssets, so it is excluded here too.
+//
+// CLEAR PROTOCOL (PATCH semantics): a key ABSENT (or `undefined`) means "leave
+// this field unchanged"; a key set to `null` means "clear this optional field"
+// (delete it so it round-trips as absent). The optional fields therefore accept
+// `| null`. `title` is required by the schema, so it is NOT clearable.
 export interface SetScenePropsPatch {
   title?: string;
-  intent?: Scene["intent"];
-  prompt?: string;
-  narration?: string;
-  durationSec?: number;
-  shotSize?: Scene["shotSize"];
-  cameraMovement?: Scene["cameraMovement"];
-  mdAnchor?: string;
+  intent?: Scene["intent"] | null;
+  prompt?: string | null;
+  narration?: string | null;
+  durationSec?: number | null;
+  shotSize?: Scene["shotSize"] | null;
+  cameraMovement?: Scene["cameraMovement"] | null;
+  mdAnchor?: string | null;
   memberClipIds?: string[];
   memberAssetIds?: string[];
 }
@@ -159,13 +164,24 @@ export function setSceneProps(
       4,
     );
   }
-  // Assign each provided key in place onto the EXISTING scene object. We guard
-  // against `undefined` (so a sparse patch never clobbers a set field) AND
-  // enforce the runtime allowlist (so an untyped bridge payload can't write
-  // `order`/`id`/`status`/asset-state through this door).
+  // Assign each provided key in place onto the EXISTING scene object, enforcing
+  // the runtime allowlist (so an untyped bridge payload can't write
+  // `order`/`id`/`status`/asset-state through this door). Clear protocol:
+  //  - key absent / `undefined` → leave the field unchanged (sparse patch)
+  //  - key === `null`           → CLEAR the optional field (delete it so it
+  //                               round-trips as absent — what the card's "—" /
+  //                               emptied-input does; JSON keeps null, unlike
+  //                               undefined which serializes away entirely)
+  //  - any other value          → set it
+  // `title` is never deleted even on null (it is schema-required); a null title
+  // is ignored rather than producing an invalid scene.
   for (const [key, value] of Object.entries(p.props)) {
-    if (value === undefined) continue;
     if (!SETTABLE_SCENE_KEYS.has(key)) continue;
+    if (value === undefined) continue;
+    if (value === null) {
+      if (key !== "title") delete (scene as Record<string, unknown>)[key];
+      continue;
+    }
     (scene as Record<string, unknown>)[key] = value;
   }
 }

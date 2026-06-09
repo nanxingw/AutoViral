@@ -233,6 +233,53 @@ describe("ops.setSceneProps", () => {
     // The contiguous invariant is intact (order 99 never landed).
     assertContiguous(comp);
   });
+
+  // Clear protocol: null DELETES an optional field (so it round-trips as
+  // absent), undefined leaves it unchanged. This is what the card's "—" / emptied
+  // input relies on — null (not undefined) because JSON.stringify drops undefined.
+  it("clears an optional field when the prop is null, leaves it when undefined", () => {
+    const comp = compWith([
+      {
+        id: "scn_a",
+        order: 0,
+        title: "A",
+        status: "planned",
+        generatedAssetIds: [],
+        shotSize: "long",
+        durationSec: 5,
+        narration: "keep me",
+      },
+    ]);
+    // null → delete shotSize + durationSec; undefined → leave narration untouched.
+    setSceneProps(comp, {
+      sceneId: "scn_a",
+      props: {
+        shotSize: null,
+        durationSec: null,
+        narration: undefined,
+      },
+    });
+    const s = scenes(comp).find((x) => x.id === "scn_a")!;
+    expect(s.shotSize).toBeUndefined();
+    expect("shotSize" in s).toBe(false); // truly deleted, round-trips as absent
+    expect(s.durationSec).toBeUndefined();
+    expect("durationSec" in s).toBe(false);
+    expect(s.narration).toBe("keep me"); // undefined left it unchanged
+  });
+
+  // title is schema-required: a null title must NOT delete it (would produce an
+  // invalid scene). The op ignores a null title rather than clearing it.
+  it("never deletes the required title on a null patch", () => {
+    const comp = compWith([
+      { id: "scn_a", order: 0, title: "Keep", status: "planned", generatedAssetIds: [] },
+    ]);
+    setSceneProps(comp, {
+      sceneId: "scn_a",
+      props: { title: null as unknown as string },
+    });
+    const s = scenes(comp).find((x) => x.id === "scn_a")!;
+    expect(s.title).toBe("Keep");
+  });
 });
 
 describe("ops.reorderScenes", () => {

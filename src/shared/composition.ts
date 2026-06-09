@@ -464,7 +464,10 @@ export const SceneSchema = z.object({
   intent: z.enum(["hook", "build", "payoff", "cta"]).optional(),
   // ─── New in v0.1.6 (PRD-0007) — all optional / defaulted ────────────────
   narration: z.string().optional(),
-  durationSec: z.number().optional(),
+  // A shot's planned duration in seconds — never negative (a negative/absurd
+  // value from a card input or an agent CLI is a write-path rejection, not a
+  // silent persist; mirrors the #75 BGM-duration clamp class).
+  durationSec: z.number().min(0).optional(),
   shotSize: z.enum(["long", "full", "medium", "close", "closeup"]).optional(),
   cameraMovement: z
     .enum(["push", "pull", "pan", "track", "follow", "static"])

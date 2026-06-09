@@ -1,20 +1,32 @@
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useComposition } from "../../store";
 import type { Scene } from "@shared/composition";
 import { useT } from "@/i18n/useT";
 import type { MessageKey } from "@/i18n/useT";
+import { ApiError } from "@/lib/api";
+import {
+  patchScene,
+  reorderScenesRemote,
+  moveInOrder,
+  type ScenePropsPatch,
+} from "./sceneEdit";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ScriptTab (S3 · PRD-0007) — READ-ONLY view of the work's storyboard skeleton.
+// ScriptTab (S3→S4 · PRD-0007) — the work's storyboard skeleton, now EDITABLE.
 //
-// This is the planning layer made visible: comp.scenes (the 分镜 / shots an
-// agent drafted via `autoviral scene add`, or a human will edit in S4) rendered
-// as a card list so the creator sees the whole film's bones at a glance.
+// comp.scenes (the 分镜 / shots an agent drafted via `autoviral scene add`, or a
+// human edits here) render as a card list — the whole film's bones at a glance.
 //
-// SCOPE: this slice is read-only. No create / edit / reorder here — that is S4,
-// which will add per-card editing actions, and S5, which will mount a `plan/
-// script.md` editor ABOVE this card list (this tab will then be 剧本 md editor
-// + 分镜 card list stacked). For now the tab contains only the card region.
+// S4 makes each card inline-editable AND reorderable. THE INVARIANT (ADR-009
+// agent-人一致): every edit goes through the SAME per-intent bridge route the
+// agent's CLI uses (PATCH /scene/:id, POST /scene/reorder via sceneEdit.ts), NOT
+// the Studio store's 800ms whole-composition autosave. `comp.scenes` in the
+// store is a READ-ONLY mirror — only the `composition-changed` → refetch path
+// (useBridgeEvents) ever rewrites it. We NEVER mutate scenes in the store here,
+// so the unrelated autosave's whole-`PUT /comp` always carries server-fresh
+// scenes and can't clobber a concurrent agent (or another tab) with stale data.
+//
+// S5 will mount a `plan/script.md` editor ABOVE this card list.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Code-facing enum key → i18n message key. Kept in lockstep with SceneSchema's
@@ -50,15 +62,61 @@ const CAMERA_KEY: Record<NonNullable<Scene["cameraMovement"]>, MessageKey> = {
   static: "studio.scriptPanel.cameraStatic",
 };
 
+// Enum-literal option order (the dropdown order). Drives the <select>s; the
+// label is localised, the value is the schema literal sent to the bridge.
+const INTENT_OPTIONS: NonNullable<Scene["intent"]>[] = [
+  "hook",
+  "build",
+  "payoff",
+  "cta",
+];
+const SHOT_OPTIONS: NonNullable<Scene["shotSize"]>[] = [
+  "long",
+  "full",
+  "medium",
+  "close",
+  "closeup",
+];
+const CAMERA_OPTIONS: NonNullable<Scene["cameraMovement"]>[] = [
+  "push",
+  "pull",
+  "pan",
+  "track",
+  "follow",
+  "static",
+];
+
 export function ScriptTab() {
   const scenes = useComposition((s) => s.comp?.scenes);
+  const workId = useComposition((s) => s.comp?.workId ?? "");
   // Read-path only: sort a copy by `order` (the intended shot sequence). The
-  // store array is never mutated here.
+  // store array is never mutated here — edits go over the bridge (sceneEdit.ts).
   const ordered = useMemo(
     () => (scenes ? [...scenes].sort((a, b) => a.order - b.order) : []),
     [scenes],
   );
   const hasScenes = ordered.length > 0;
+
+  // Reorder is a card-level gesture but lives here because it needs the FULL
+  // ordered id list. We reduce a move to (fromIndex, toIndex), compute the new
+  // sequence with the pure `moveInOrder`, and POST the complete order. The
+  // server recompacts; the refetch reflows. We surface failures via a panel-
+  // level error line (a reorder isn't tied to one card's editor).
+  const orderedIds = useMemo(() => ordered.map((s) => s.id), [ordered]);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const moveScene = useCallback(
+    async (fromIndex: number, toIndex: number) => {
+      const next = moveInOrder(orderedIds, fromIndex, toIndex);
+      if (next === orderedIds) return; // no-op / out of bounds
+      setReorderError(null);
+      try {
+        await reorderScenesRemote(workId, next);
+      } catch (err) {
+        setReorderError(errorMessage(err));
+      }
+    },
+    [orderedIds, workId],
+  );
 
   return (
     <div
@@ -93,8 +151,19 @@ export function ScriptTab() {
       <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
         {hasScenes ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {ordered.map((scene) => (
-              <SceneCard key={scene.id} scene={scene} />
+            {reorderError && (
+              <ErrorLine msg={reorderError} />
+            )}
+            {ordered.map((scene, index) => (
+              <SceneCard
+                key={scene.id}
+                scene={scene}
+                workId={workId}
+                index={index}
+                isFirst={index === 0}
+                isLast={index === ordered.length - 1}
+                onMove={moveScene}
+              />
             ))}
           </div>
         ) : (
@@ -150,16 +219,56 @@ const STATUS_FILLED: Record<Scene["status"], boolean> = {
   stale: true, // filled but tinted — needs regen
 };
 
-function SceneCard({ scene }: { scene: Scene }) {
+interface SceneCardProps {
+  scene: Scene;
+  workId: string;
+  index: number;
+  isFirst: boolean;
+  isLast: boolean;
+  onMove: (fromIndex: number, toIndex: number) => void;
+}
+
+function SceneCard({ scene, workId, index, isFirst, isLast, onMove }: SceneCardProps) {
   const t = useT();
   const statusLabel = t(STATUS_KEY[scene.status]);
   const statusColor =
     scene.status === "stale" ? "var(--status-error, #d4756c)" : "var(--accent)";
 
+  // Per-card commit: PATCH only the field(s) that changed, over the bridge. On
+  // failure we keep the error visible (and the user's text in the controlled
+  // input) instead of silently dropping it.
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const commit = useCallback(
+    async (patch: ScenePropsPatch) => {
+      setSaveError(null);
+      try {
+        await patchScene(workId, scene.id, patch);
+      } catch (err) {
+        setSaveError(errorMessage(err));
+      }
+    },
+    [workId, scene.id],
+  );
+
   return (
     <div
       data-testid="scene-card"
       data-scene-id={scene.id}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData("text/plain", String(index));
+        e.dataTransfer.effectAllowed = "move";
+      }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        const raw = e.dataTransfer.getData("text/plain");
+        const from = Number.parseInt(raw, 10);
+        if (Number.isFinite(from) && from !== index) onMove(from, index);
+      }}
       style={{
         border: "1px solid var(--glass-border)",
         borderRadius: 10,
@@ -167,7 +276,7 @@ function SceneCard({ scene }: { scene: Scene }) {
         padding: "10px 12px",
       }}
     >
-      {/* Top row: 镜号 + status dot + intent badge */}
+      {/* Top row: 镜号 + status dot + reorder controls + intent select. */}
       <div
         style={{
           display: "flex",
@@ -201,89 +310,123 @@ function SceneCard({ scene }: { scene: Scene }) {
             border: `1.5px solid ${statusColor}`,
           }}
         />
-        <span
-          style={{
-            flex: 1,
-            fontSize: 13,
-            fontWeight: 500,
-            color: "var(--text)",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
+        {/* Title — inline editable. */}
+        <EditableText
+          value={scene.title}
+          ariaLabel={t("studio.scriptPanel.editTitleAria")}
+          placeholder={t("studio.scriptPanel.editTitlePlaceholder")}
+          multiline={false}
+          onCommit={(next) => {
+            if (next !== scene.title) void commit({ title: next });
           }}
-        >
-          {scene.title}
-        </span>
-        {scene.intent && (
-          <span
-            data-intent={scene.intent}
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 9,
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              padding: "2px 6px",
-              borderRadius: 999,
-              border: "1px solid var(--accent)",
-              color: "var(--accent-hi)",
-              background: "var(--accent-glow)",
-              whiteSpace: "nowrap",
-            }}
-          >
-            {t(INTENT_KEY[scene.intent])}
-          </span>
-        )}
+          style={{ flex: 1, fontSize: 13, fontWeight: 500 }}
+        />
+        {/* Reorder controls — accessible, testable path (drag is a bonus). */}
+        <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+          {!isFirst && (
+            <ReorderButton
+              aria-label={t("studio.scriptPanel.moveUpAria", { n: scene.order + 1 })}
+              onClick={() => onMove(index, index - 1)}
+            >
+              ↑
+            </ReorderButton>
+          )}
+          {!isLast && (
+            <ReorderButton
+              aria-label={t("studio.scriptPanel.moveDownAria", { n: scene.order + 1 })}
+              onClick={() => onMove(index, index + 1)}
+            >
+              ↓
+            </ReorderButton>
+          )}
+        </div>
+        <EnumSelect
+          ariaLabel={t("studio.scriptPanel.editIntentAria")}
+          value={scene.intent}
+          options={INTENT_OPTIONS}
+          labelFor={(v) => t(INTENT_KEY[v])}
+          placeholder={t("studio.scriptPanel.optionNone")}
+          onChange={(v) => {
+            if (v !== (scene.intent ?? null)) void commit({ intent: v });
+          }}
+        />
       </div>
 
-      {/* Prompt — visual description summary. */}
-      {scene.prompt && (
-        <div
-          style={{
-            fontSize: 12,
-            lineHeight: 1.5,
-            color: "var(--text-dim)",
-            marginBottom: 6,
-          }}
-        >
-          {scene.prompt}
-        </div>
-      )}
+      {/* Prompt — visual description, inline editable (textarea). */}
+      <EditableText
+        value={scene.prompt ?? ""}
+        ariaLabel={t("studio.scriptPanel.editPromptAria")}
+        placeholder={t("studio.scriptPanel.editPromptPlaceholder")}
+        multiline
+        onCommit={(next) => {
+          const norm = next.trim() === "" ? null : next;
+          if (norm !== (scene.prompt ?? null)) void commit({ prompt: norm });
+        }}
+        style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 6 }}
+      />
 
-      {/* Narration. */}
-      {scene.narration && (
-        <FieldRow label={t("studio.scriptPanel.narration")} value={scene.narration} />
-      )}
-
-      {/* Meta chips: duration / shot size / camera — each only if present. */}
-      {(scene.durationSec != null || scene.shotSize || scene.cameraMovement) && (
-        <div
-          style={{
-            display: "flex",
-            flexWrap: "wrap",
-            gap: 6,
-            marginTop: 4,
+      {/* Narration — inline editable (textarea). */}
+      <FieldRow label={t("studio.scriptPanel.narration")}>
+        <EditableText
+          value={scene.narration ?? ""}
+          ariaLabel={t("studio.scriptPanel.editNarrationAria")}
+          placeholder={t("studio.scriptPanel.editNarrationPlaceholder")}
+          multiline
+          onCommit={(next) => {
+            const norm = next.trim() === "" ? null : next;
+            if (norm !== (scene.narration ?? null))
+              void commit({ narration: norm });
           }}
-        >
-          {scene.durationSec != null && (
-            <MetaChip
-              label={t("studio.scriptPanel.duration")}
-              value={t("studio.scriptPanel.durationValue", { sec: scene.durationSec })}
-            />
-          )}
-          {scene.shotSize && (
-            <MetaChip
-              label={t("studio.scriptPanel.shotSize")}
-              value={t(SHOT_KEY[scene.shotSize])}
-            />
-          )}
-          {scene.cameraMovement && (
-            <MetaChip
-              label={t("studio.scriptPanel.camera")}
-              value={t(CAMERA_KEY[scene.cameraMovement])}
-            />
-          )}
-        </div>
-      )}
+          style={{ fontSize: 12, lineHeight: 1.5 }}
+        />
+      </FieldRow>
+
+      {/* Meta row: duration / shot size / camera — all editable. */}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 8,
+          marginTop: 6,
+        }}
+      >
+        <MetaField label={t("studio.scriptPanel.duration")}>
+          <DurationInput
+            ariaLabel={t("studio.scriptPanel.editDurationAria")}
+            value={scene.durationSec}
+            onCommit={(next) => {
+              if (next !== (scene.durationSec ?? null))
+                void commit({ durationSec: next });
+            }}
+          />
+        </MetaField>
+        <MetaField label={t("studio.scriptPanel.shotSize")}>
+          <EnumSelect
+            ariaLabel={t("studio.scriptPanel.editShotSizeAria")}
+            value={scene.shotSize}
+            options={SHOT_OPTIONS}
+            labelFor={(v) => t(SHOT_KEY[v])}
+            placeholder={t("studio.scriptPanel.optionNone")}
+            onChange={(v) => {
+              if (v !== (scene.shotSize ?? null)) void commit({ shotSize: v });
+            }}
+          />
+        </MetaField>
+        <MetaField label={t("studio.scriptPanel.camera")}>
+          <EnumSelect
+            ariaLabel={t("studio.scriptPanel.editCameraAria")}
+            value={scene.cameraMovement}
+            options={CAMERA_OPTIONS}
+            labelFor={(v) => t(CAMERA_KEY[v])}
+            placeholder={t("studio.scriptPanel.optionNone")}
+            onChange={(v) => {
+              if (v !== (scene.cameraMovement ?? null))
+                void commit({ cameraMovement: v });
+            }}
+          />
+        </MetaField>
+      </div>
 
       {/* mdAnchor back-link or the "no linked section" note. */}
       {!scene.mdAnchor && (
@@ -300,52 +443,316 @@ function SceneCard({ scene }: { scene: Scene }) {
           {t("studio.scriptPanel.noMdAnchor")}
         </div>
       )}
+
+      {saveError && <ErrorLine msg={saveError} />}
     </div>
   );
 }
 
-function FieldRow({ label, value }: { label: string; value: string }) {
+// ─── Inline-edit primitives ─────────────────────────────────────────────────
+
+interface EditableTextProps {
+  value: string;
+  ariaLabel: string;
+  placeholder: string;
+  multiline: boolean;
+  /** Fired on blur or Enter (single-line). Receives the current text. */
+  onCommit: (next: string) => void;
+  style?: React.CSSProperties;
+}
+
+// Locally-controlled text editor. Seeds from `value`; commits on blur (and on
+// Enter for single-line). Re-syncs to `value` when it changes from outside
+// (a refetch landing) AND the field isn't focused — so an in-flight edit isn't
+// yanked out from under the user, but a server-fresh value reflows.
+function EditableText({
+  value,
+  ariaLabel,
+  placeholder,
+  multiline,
+  onCommit,
+  style,
+}: EditableTextProps) {
+  const [draft, setDraft] = useState(value);
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setDraft(value);
+  }, [value, focused]);
+
+  const shared = {
+    value: draft,
+    "aria-label": ariaLabel,
+    placeholder,
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setDraft(e.target.value),
+    onFocus: () => setFocused(true),
+    onBlur: () => {
+      setFocused(false);
+      onCommit(draft);
+    },
+    style: {
+      width: "100%",
+      background: "transparent",
+      border: "1px solid transparent",
+      borderRadius: 6,
+      color: "var(--text)",
+      padding: "2px 4px",
+      font: "inherit",
+      resize: "none" as const,
+      ...style,
+    },
+  };
+
+  if (multiline) {
+    return (
+      <textarea
+        {...shared}
+        rows={2}
+        style={{ ...shared.style, color: "var(--text-dim)" }}
+      />
+    );
+  }
+  return (
+    <input
+      {...shared}
+      type="text"
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+    />
+  );
+}
+
+interface DurationInputProps {
+  ariaLabel: string;
+  value: number | undefined;
+  /** number when a valid value is entered, null when cleared. */
+  onCommit: (next: number | null) => void;
+}
+
+// Honest number editor: an empty (or non-numeric) field commits `null` (clear),
+// never a fake 0. A negative value is clamped to 0 (matches the schema's
+// min(0); the bridge also rejects negatives, but clamping avoids a needless
+// round-trip error). Commits on blur / Enter.
+function DurationInput({ ariaLabel, value, onCommit }: DurationInputProps) {
+  const [draft, setDraft] = useState(value == null ? "" : String(value));
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setDraft(value == null ? "" : String(value));
+  }, [value, focused]);
+
+  const commit = () => {
+    const trimmed = draft.trim();
+    if (trimmed === "") {
+      onCommit(null);
+      return;
+    }
+    const n = Number(trimmed);
+    if (!Number.isFinite(n)) {
+      onCommit(null);
+      return;
+    }
+    onCommit(Math.max(0, n));
+  };
+
+  return (
+    <input
+      type="number"
+      inputMode="decimal"
+      min={0}
+      step="0.5"
+      aria-label={ariaLabel}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        commit();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      style={{
+        width: 52,
+        background: "transparent",
+        border: "1px solid var(--glass-border)",
+        borderRadius: 6,
+        color: "var(--text-dim)",
+        padding: "2px 4px",
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+      }}
+    />
+  );
+}
+
+interface EnumSelectProps<V extends string> {
+  ariaLabel: string;
+  value: V | undefined;
+  options: V[];
+  labelFor: (v: V) => string;
+  /** placeholder = the "—" (unset) option text. */
+  placeholder: string;
+  /** null when the user picks the "—" option (clear); the literal otherwise. */
+  onChange: (v: V | null) => void;
+}
+
+// Optional-enum select. The empty-string option clears the field. Value is the
+// schema literal; the label is localised.
+function EnumSelect<V extends string>({
+  ariaLabel,
+  value,
+  options,
+  labelFor,
+  placeholder,
+  onChange,
+}: EnumSelectProps<V>) {
+  return (
+    <select
+      aria-label={ariaLabel}
+      value={value ?? ""}
+      onChange={(e) => {
+        const v = e.target.value;
+        onChange(v === "" ? null : (v as V));
+      }}
+      style={{
+        background: "transparent",
+        border: "1px solid var(--glass-border)",
+        borderRadius: 6,
+        color: "var(--text-dim)",
+        padding: "2px 4px",
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        maxWidth: 110,
+      }}
+    >
+      <option value="">{placeholder}</option>
+      {options.map((opt) => (
+        <option key={opt} value={opt}>
+          {labelFor(opt)}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function ReorderButton({
+  children,
+  ...rest
+}: React.ButtonHTMLAttributes<HTMLButtonElement>) {
+  return (
+    <button
+      type="button"
+      data-bare
+      {...rest}
+      style={{
+        width: 22,
+        height: 22,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "transparent",
+        border: "1px solid var(--glass-border)",
+        borderRadius: 6,
+        color: "var(--text-dim)",
+        cursor: "pointer",
+        fontSize: 11,
+        lineHeight: 1,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function FieldRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <div style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 4 }}>
       <span
         style={{
+          display: "block",
           fontFamily: "var(--font-mono)",
           fontSize: 9,
           letterSpacing: "0.06em",
           textTransform: "uppercase",
           color: "var(--text-dimmer)",
-          marginRight: 6,
+          marginBottom: 2,
         }}
       >
         {label}
       </span>
-      <span style={{ color: "var(--text-dim)" }}>{value}</span>
+      {children}
     </div>
   );
 }
 
-function MetaChip({ label, value }: { label: string; value: string }) {
+function MetaField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
   return (
     <span
       style={{
         display: "inline-flex",
-        alignItems: "baseline",
+        alignItems: "center",
         gap: 4,
         fontFamily: "var(--font-mono)",
         fontSize: 10,
         letterSpacing: "0.04em",
-        padding: "2px 8px",
-        borderRadius: 6,
-        border: "1px solid var(--glass-border)",
-        color: "var(--text-dim)",
-        background: "var(--surface-1, transparent)",
-        whiteSpace: "nowrap",
       }}
     >
-      <span style={{ color: "var(--text-dimmer)", textTransform: "uppercase" }}>
+      <span
+        style={{
+          color: "var(--text-dimmer)",
+          textTransform: "uppercase",
+        }}
+      >
         {label}
       </span>
-      <span>{value}</span>
+      {children}
     </span>
   );
+}
+
+function ErrorLine({ msg }: { msg: string }) {
+  const t = useT();
+  return (
+    <div
+      role="alert"
+      style={{
+        marginTop: 6,
+        fontSize: 11,
+        lineHeight: 1.4,
+        color: "var(--status-error, #d4756c)",
+      }}
+    >
+      {t("studio.scriptPanel.saveFailed", { msg })}
+    </div>
+  );
+}
+
+// Pull the server's localized/raw error out of an ApiError body, falling back
+// to the Error message / string form.
+function errorMessage(err: unknown): string {
+  if (err instanceof ApiError) {
+    const b = err.body as { error?: string } | undefined;
+    return b?.error ?? err.message;
+  }
+  if (err instanceof Error) return err.message;
+  return String(err);
 }

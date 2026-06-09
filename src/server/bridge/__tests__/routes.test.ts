@@ -1452,6 +1452,47 @@ describe("bridge router — S2 scene writes", () => {
     expect(after?.id).toBe(id);
   });
 
+  // Clear protocol end-to-end (real JSON + real op + real disk): a null prop
+  // DELETES the optional field so it round-trips as absent. This is the wire
+  // contract the card's "—"/emptied-input depends on — undefined would be
+  // dropped by JSON.stringify and never reach here (the dead-clear bug).
+  it("PATCH /scene/:id with a null prop clears (deletes) that optional field", async () => {
+    const fullScene = async (sid: string) => {
+      const res = await app.request("/api/bridge/v1/comp", {
+        headers: { "X-AutoViral-Work-Id": workId },
+      });
+      const body = (await res.json()) as {
+        result: { scenes?: Array<{ id: string; shotSize?: string }> };
+      };
+      return (body.result.scenes ?? []).find((s) => s.id === sid);
+    };
+    const id = await addScene("有景别镜", { shotSize: "long" });
+    expect((await fullScene(id))?.shotSize).toBe("long");
+
+    const res = await app.request(`/api/bridge/v1/scene/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ shotSize: null }),
+    });
+    expect(res.status).toBe(200);
+    const after = await fullScene(id);
+    expect(after?.shotSize).toBeUndefined();
+    expect("shotSize" in (after ?? {})).toBe(false); // truly absent on disk
+  });
+
+  // A negative durationSec is a write-path rejection (SceneSchema.durationSec
+  // .min(0)) — never silently persisted (the #75 clamp class, server-side).
+  it("PATCH /scene/:id with a negative durationSec → 400 + code 4", async () => {
+    const id = await addScene("时长镜");
+    const res = await app.request(`/api/bridge/v1/scene/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ durationSec: -5 }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+  });
+
   // ── POST /scene/:id/link shape gate ────────────────────────────────────────
   it("POST /scene/:id/link without assetIds → 400 + code 4 and does NOT broadcast", async () => {
     const id = await addScene("链接镜");
