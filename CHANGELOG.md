@@ -7,6 +7,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-06-09
+
+**剧本·分镜规划层**（PRD-0007）—— 在生成之前先排剧本、看分镜、逐镜生成。AutoViral 重定位为电影级 AI-native 万能视频生成器，本版专做 **L1 规划层**：把"生成前先有计划"做成素材区里可写、可改、agent 与人共编的一层。两条命题贯穿：**计划与执行解耦**（生成只是 handoff，规划层不拥有生成引擎、不碰 timeline）+ **agent-人一致**（剧本/分镜的每一次写都经同一份 scene ops，CLI 排镜与 UI 改卡收敛到同一 `composition.yaml`）。9 个纵切片实现，经 per-wave 对抗式 review + 多纬度浏览器 E2E（截图 + DOM/computed-style 二确）验收。
+
+### Added
+- **剧本（plan/script.md）编辑器** — 素材区第三 tab「剧本·分镜」顶部挂一块自由文本叙事总纲（markdown，edit/preview 切换），读写经 `GET|PUT /api/works/:id/plan/script.md`（raw text/markdown），外部编辑经 plan-watcher → `plan-changed` 广播实时回流；空 plan 返回空串不造模板（#73/#83 i18n-as-data 铁律）。剧本与分镜是两个独立面，弱链于 `scene.mdAnchor`，诚实显 drift。
+- **分镜骨架卡片** — `composition.scenes[]` 渲染成按 `order` 排序的卡片列表，逐镜 inline 编辑 intent / 画面描述 / 旁白 / 时长 / 景别 / 运镜 + 上下移/拖拽 reorder；每一次编辑都走 per-intent bridge 路由（不进 800ms 整份 autosave），`comp.scenes` 在 store 里是只读镜像。
+- **生成 handoff「生成此幕」/「重拍」** — 用该镜自身字段（prompt 富化景别/运镜/旁白）调现有生成流程；产物登记为 `composition.assets` 的 `AssetEntry` + 回链该分镜（`generatedAssetIds`/`selectedAssetId`/`status=generated`），**register 与 link 在同一把 per-work 写锁内原子提交 → 永无悬挂引用**；改画面描述后该镜转 `stale`「需重生」，卡片显缩略图与已生成态。产物不自动铺 timeline。
+- **`autoviral scene` CLI** — `add` / `list` / `set` / `reorder` / `link` / `generate` / `remove`，与 UI 共用同一 scene ops；`autoviral script show|edit` 读写剧本。任何 CLI agent 排好的分镜在 UI 里字节级一致地显现。
+- **8 字段 SceneSchema 升级**（`intent`/`prompt`/`narration`/`durationSec`/`shotSize`/`cameraMovement`/`mdAnchor` + 生成态 `generatedAssetIds`/`selectedAssetId`/`status`），向后兼容（旧 work 无 `scenes` 键原样 parse），新建 `newSceneId()` + 共享 `scene.ts` ops（addScene 自动连号 order / setSceneProps 含运行时白名单 + null-clear 协议 / reorder 连号 / linkSceneAssets / removeScene）。
+
+### Changed
+- **每次 composition 写经 per-work 写锁** — `mutateCompositionFor` 用 `withWorkLock` 串行化同一 work 的 read-modify-write 临界区（修 lost-update：并发写读到上一笔已提交状态，不同 work 并行）；整份 `PUT /comp` 与 `POST /restore` 也经 identity-mutator 入锁。
+- **文件 watcher 与路由统一 works-root 解析** — composition-watcher / plan-watcher 改用共享 `getWorksRoot()`（`AUTOVIRAL_WORKS_ROOT` → `<AUTOVIRAL_DATA_DIR>/works` → `~/.autoviral/works`），不再与 REST 路由在非默认配置下分歧。
+
+### Fixed
+- **跨 work 剧本串台** — `scriptStore` 升级为 work-tenant-aware（记 `workId` + 切 work 同步 `reset()` + 编辑器 `isMine` 守卫 + commit 实时门控），A→B 切换不再短暂显示/误提交上一个 work 的剧本。
+- **剧本 mount-load 失败静默吞** — 加载失败从空吞改为 `role=alert` 错误提示（新增 `scriptLoadFailed` zh/en），不再让编辑器停在无信号的空白态。
+- **新建 work 首次 agent 写入 ENOENT**（多纬度 E2E 挖出）— 刚建的 work 还没 `composition.yaml` 时，agent 第一次 `scene add`/`clip add` 会失败，而人在 Studio 靠 autosave 免费拿到该文件——违背 agent-人一致。写/预览 chokepoint（`mutateCompositionFor`/`dryRunMutate`）现对真实 work 惰性 seed 一份最小 composition（经 `getWork()` 门控，typo'd workId 不污染磁盘；只读路径仍 ENOENT→404）。
+
 ## [0.1.5] - 2026-06-08
 
 **诚实的数据 + 有根的教练**（PRD-0006）—— 灵感（Explore）与数据（Analytics）两页重做。核心命题：把"零零散散、对创作者没帮助"的空壳，改造成一条扎根真实磁盘数据的诊断叙事 + 一个读得懂你作品的对话教练。两条铁律贯穿：**绝不展示拿不到的数据、绝不用假承诺骗用户；把已经拥有却藏起来的真实数据和已经建好却睡着的能力唤醒。** 14 个纵切片经串行 TDD 实现（5 个 deep 模块红→绿）+ 2 轮多纬度浏览器 E2E（截图 + DOM/computed-style 二确）全绿验收。
