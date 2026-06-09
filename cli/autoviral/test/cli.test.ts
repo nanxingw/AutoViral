@@ -9,6 +9,7 @@ import { execa } from "execa";
 import { createServer, type Server, type IncomingMessage } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { writeFile, rm } from "node:fs/promises";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -57,6 +58,11 @@ let lastSceneAdd: Record<string, unknown> | null = null;
 let lastSceneSet: Record<string, unknown> | null = null;
 let lastSceneReorder: Record<string, unknown> | null = null;
 let lastSceneLink: Record<string, unknown> | null = null;
+// S5 (PRD-0007) — in-memory 剧本 (plan/script.md) the works-route mock GET
+// returns + PUT records, so `script edit` then `script show` round-trips
+// end-to-end through the CLI's plain-text request path. Starts EMPTY (a work
+// with no script yet returns an empty body, NOT a template).
+let scriptMd = "";
 
 async function readBody(req: IncomingMessage): Promise<any> {
   return new Promise((resolve) => {
@@ -495,6 +501,34 @@ beforeAll(async () => {
         return send(504, { ok: false, error: "timeout", code: 124 });
       }
       return send(200, { ok: true, result: { answer: "yes" } });
+    }
+    // S5 (PRD-0007) — `/api/works/:workId/plan/script.md` is the 剧本 surface
+    // (NOT the bridge envelope). GET returns the raw markdown text (empty body
+    // when nothing written yet — NOT a template). PUT takes the raw markdown
+    // body verbatim, records it, and returns {ok:true} JSON. The real
+    // watcher/broadcast lives in the server tests; here we exercise the CLI's
+    // plain-text request path + exit codes end-to-end.
+    if (url === "/api/works/w_e2e/plan/script.md") {
+      if (req.method === "GET") {
+        res.statusCode = 200;
+        res.setHeader("content-type", "text/markdown; charset=utf-8");
+        res.end(scriptMd);
+        return;
+      }
+      if (req.method === "PUT") {
+        let buf = "";
+        req.on("data", (c) => (buf += c));
+        req.on("end", () => {
+          scriptMd = buf;
+          send(200, { ok: true });
+        });
+        return;
+      }
+    }
+    // A missing work → 404 JSON (mirrors the route's work_not_found gate). Used
+    // to exercise the CLI's exit-4 mapping on the works-route path.
+    if (/^\/api\/works\/[^/]+\/plan\/script\.md$/.test(url)) {
+      return send(404, { error: "Work not found", errorCode: "work_not_found" });
     }
     send(404, { ok: false, error: "not found" });
   });
@@ -1093,6 +1127,97 @@ describe("autoviral CLI — end-to-end", () => {
       expect(r.stdout).toMatch(/scene add/);
       expect(r.stdout).toMatch(/scene list/);
       expect(r.stdout).toMatch(/scene reorder/);
+    });
+  });
+
+  // S5 (PRD-0007) — `autoviral script show|edit` reads + writes the 剧本
+  // (plan/script.md) via the works route `/api/works/:id/plan/script.md` (NOT
+  // the bridge envelope). `edit` reads markdown from --file or stdin and PUTs
+  // it; `show` GETs it and prints verbatim. An empty body is a clean empty plan
+  // (not an error). The real watcher/broadcast lives in the server tests.
+  describe("script — 剧本 (plan/script.md) read/write surface", () => {
+    it("script edit --file → PUTs the markdown, script show prints it back verbatim", async () => {
+      const tmp = join(__dirname, `../dist/.script-fixture-${Date.now()}.md`);
+      const md = "# 主题\n\n一段叙事总纲。\n\n- beat 1\n- beat 2\n";
+      await writeFile(tmp, md, "utf8");
+      try {
+        const edit = await run(["script", "edit", "--file", tmp]);
+        expect(edit.exitCode).toBe(0);
+        // stripFinalNewline:false so we assert the BYTE-EXACT round-trip incl.
+        // the trailing newline (execa trims it by default — that would hide a
+        // verbatim-write regression).
+        const show = await execa("node", [BIN, "script", "show"], {
+          env: { ...process.env, AUTOVIRAL_WORK_ID: "w_e2e", AUTOVIRAL_PORT: String(port) },
+          reject: false,
+          timeout: 10_000,
+          stripFinalNewline: false,
+        });
+        expect(show.exitCode).toBe(0);
+        expect(show.stdout).toBe(md);
+      } finally {
+        await rm(tmp, { force: true });
+      }
+    });
+
+    it("script edit reads markdown from stdin when no --file", async () => {
+      const md = "# from stdin\n\nbody\n";
+      const edit = await execa("node", [BIN, "script", "edit"], {
+        input: md,
+        env: { ...process.env, AUTOVIRAL_WORK_ID: "w_e2e", AUTOVIRAL_PORT: String(port) },
+        reject: false,
+        timeout: 10_000,
+      });
+      expect(edit.exitCode).toBe(0);
+      const show = await execa("node", [BIN, "script", "show"], {
+        env: { ...process.env, AUTOVIRAL_WORK_ID: "w_e2e", AUTOVIRAL_PORT: String(port) },
+        reject: false,
+        timeout: 10_000,
+        stripFinalNewline: false,
+      });
+      expect(show.stdout).toBe(md);
+    });
+
+    it("script show on an empty plan prints nothing (empty, not a template, not an error)", async () => {
+      // Reset the mock's in-memory script to empty by PUTting an empty body.
+      await execa("node", [BIN, "script", "edit"], {
+        input: "",
+        env: { ...process.env, AUTOVIRAL_WORK_ID: "w_e2e", AUTOVIRAL_PORT: String(port) },
+        reject: false,
+        timeout: 10_000,
+      });
+      const show = await run(["script", "show"]);
+      expect(show.exitCode).toBe(0);
+      expect(show.stdout).toBe("");
+    });
+
+    it("script edit --file with a missing path → exit 4 (never hits the server)", async () => {
+      const r = await run(["script", "edit", "--file", "/no/such/file-xyz.md"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("script edit --file with no path argument → exit 4", async () => {
+      const r = await run(["script", "edit", "--file"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("script on a missing work → works route 404 → exit 4", async () => {
+      const r = await execa("node", [BIN, "script", "show"], {
+        env: { ...process.env, AUTOVIRAL_WORK_ID: "w_missing", AUTOVIRAL_PORT: String(port) },
+        reject: false,
+        timeout: 10_000,
+      });
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("script unknown subcommand → exit 127", async () => {
+      const r = await run(["script", "frobnicate"]);
+      expect(r.exitCode).toBe(127);
+    });
+
+    it("--help lists script commands", async () => {
+      const r = await run(["--help"]);
+      expect(r.stdout).toMatch(/script show/);
+      expect(r.stdout).toMatch(/script edit/);
     });
   });
 

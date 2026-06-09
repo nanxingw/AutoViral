@@ -2,6 +2,7 @@ import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useComposition } from "@/features/studio/store";
+import { useScript } from "@/features/studio/scriptStore";
 import { makeEmptyComposition } from "@/features/studio/types";
 import {
   loadComposition,
@@ -118,6 +119,11 @@ export default function Studio() {
   useEffect(() => {
     if (!workId) return;
     loadComp(null);
+    // S5 (PRD-0007) — clear the planning-layer 剧本 store too. It's a single
+    // global instance shared across works; without this synchronous reset the
+    // ScriptTab editor would show (and could commit) the PREVIOUS work's
+    // plan/script.md during B's load window — a cross-work bleed.
+    useScript.getState().reset();
     setSavedAt(null);
     setSaveError(null);
     setLoadError(null);

@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ScriptTab } from "./ScriptTab";
 import { useComposition } from "../../store";
+import { useScript } from "../../scriptStore";
 import { makeEmptyComposition } from "../../types";
 import type { Scene } from "@shared/composition";
 import { useLocaleStore } from "@/i18n/store";
@@ -10,6 +11,8 @@ import { ApiError } from "@/lib/api";
 
 // S4 — mock the bridge transport so we can assert scene edits go through the
 // per-intent route (PATCH/POST /scene/…) and never touch the store/autosave.
+// S5 also routes the 剧本 GET (loadScript) through apiFetch, so the mount-load
+// resolves through this same mock.
 const apiFetch = vi.fn();
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
@@ -55,10 +58,42 @@ const SPARSE_SCENE: Scene = {
   // and no mdAnchor → "no linked section" note must show.
 };
 
+// S5 — the 剧本 read/write (loadScript / saveScript) use raw `fetch` (a plain
+// text/markdown channel, OFF the mocked bridge `apiFetch`). We stub fetch so the
+// ScriptTab mount-load resolves to a controllable markdown body and so we can
+// assert the editor's PUT. The default body is "" (empty plan).
+let scriptFetch: ReturnType<typeof vi.fn>;
+function fakeRes(ct: string, body: string): Partial<Response> {
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    headers: { get: (): string => ct } as unknown as Headers,
+    json: async (): Promise<unknown> => ({ ok: true }),
+    text: async (): Promise<string> => body,
+  };
+}
+function stubScriptFetch(getBody = "") {
+  scriptFetch = vi.fn(async (_url: string, init?: RequestInit) =>
+    init?.method === "PUT"
+      ? fakeRes("application/json", "")
+      : fakeRes("text/markdown; charset=utf-8", getBody),
+  );
+  vi.stubGlobal("fetch", scriptFetch);
+  return scriptFetch;
+}
+
 beforeEach(() => {
   useComposition.setState({ comp: null, selection: null });
+  useScript.getState().reset();
   apiFetch.mockReset();
   apiFetch.mockResolvedValue({ ok: true });
+  stubScriptFetch("");
+  useLocaleStore.setState({ locale: "en" });
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
   useLocaleStore.setState({ locale: "en" });
 });
 
@@ -400,5 +435,263 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
     input.blur();
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/scene gone/i);
+  });
+});
+
+describe("ScriptTab (S5) — 剧本 plan/script.md editor above the cards", () => {
+  // The editor lives ABOVE the storyboard cards (PRD §7). It reads the markdown
+  // from the on-disk plan/script.md (loadScript on mount → useScript store) and
+  // commits edits straight to disk via saveScript (raw text/markdown PUT) — the
+  // SAME write path the agent's `autoviral script edit` CLI uses (ADR-009).
+
+  function lastPut(): RequestInit | undefined {
+    const put = scriptFetch.mock.calls.find(
+      ([, init]) => (init as RequestInit | undefined)?.method === "PUT",
+    );
+    return put?.[1] as RequestInit | undefined;
+  }
+
+  it("seeds the script textarea from the on-disk markdown (loadScript on mount)", async () => {
+    stubScriptFetch("# Theme\n\nThe whole arc.\n");
+    loadScenes([]);
+    render(<ScriptTab />);
+
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
+    expect(ta.value).toBe("# Theme\n\nThe whole arc.\n");
+    // The GET hit the works-route plain-text channel, NOT the bridge apiFetch.
+    const [getUrl] = scriptFetch.mock.calls[0]!;
+    expect(getUrl).toBe("/api/works/w1/plan/script.md");
+  });
+
+  it("editing the script then blurring PUTs the RAW markdown body (not JSON)", async () => {
+    loadScenes([]);
+    render(<ScriptTab />);
+
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
+    await userEvent.clear(ta);
+    await userEvent.type(ta, "# New outline");
+    ta.blur();
+
+    await waitFor(() => expect(lastPut()).toBeDefined());
+    const put = lastPut()!;
+    expect(put.method).toBe("PUT");
+    // RAW string — never JSON.stringify'd (which would quote + break c.req.text()).
+    expect(put.body).toBe("# New outline");
+    const ct = (put.headers as Record<string, string>)["content-type"];
+    expect(ct).toContain("text/markdown");
+    // Targets the works route plain-text channel.
+    const putUrl = scriptFetch.mock.calls.find(
+      ([, init]) => (init as RequestInit)?.method === "PUT",
+    )![0];
+    expect(putUrl).toBe("/api/works/w1/plan/script.md");
+  });
+
+  it("does NOT PUT when the script is blurred unchanged", async () => {
+    stubScriptFetch("# unchanged\n");
+    loadScenes([]);
+    render(<ScriptTab />);
+
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
+    expect(ta.value).toBe("# unchanged\n");
+    ta.focus();
+    ta.blur();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(lastPut()).toBeUndefined();
+  });
+
+  it("toggles between edit (textarea) and react-markdown preview", async () => {
+    stubScriptFetch("# Heading One\n\nbody text here\n");
+    loadScenes([]);
+    render(<ScriptTab />);
+
+    // Starts in edit mode: textarea present.
+    await screen.findByLabelText("Edit script");
+
+    // Switch to preview → textarea gone, rendered markdown shown (the heading
+    // text appears as real HTML, not the raw "# Heading One").
+    await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(screen.queryByLabelText("Edit script")).toBeNull();
+    const preview = screen.getByTestId("script-preview");
+    expect(within(preview).getByText("Heading One")).toBeInTheDocument();
+    // The "#" markdown syntax must NOT survive into the rendered preview.
+    expect(preview.textContent).not.toContain("# Heading One");
+
+    // Switch back to edit → textarea returns, still seeded.
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(
+      (screen.getByLabelText("Edit script") as HTMLTextAreaElement).value,
+    ).toBe("# Heading One\n\nbody text here\n");
+  });
+
+  it("shows a localized placeholder when the script is empty (NOT a hardcoded template)", async () => {
+    stubScriptFetch(""); // empty plan → "" from disk, no template
+    loadScenes([]);
+    render(<ScriptTab />);
+
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
+    // The textarea VALUE is empty — the empty-state copy is a placeholder
+    // ATTRIBUTE, never written into the data (avoids #73/#83).
+    expect(ta.value).toBe("");
+    expect(ta.placeholder.length).toBeGreaterThan(0);
+    expect(ta.placeholder).toMatch(/script|outline|narrative/i);
+    // No PUT was fired just by rendering the empty editor (we never persist a
+    // template).
+    expect(lastPut()).toBeUndefined();
+  });
+
+  it("renders the honest drift notice (剧本与分镜独立维护、可能不同步)", async () => {
+    loadScenes([FULL_SCENE]);
+    render(<ScriptTab />);
+    await screen.findByLabelText("Edit script");
+    // The notice warns the two surfaces are independently maintained.
+    expect(
+      screen.getByText(/independently|may drift|separately/i),
+    ).toBeInTheDocument();
+  });
+
+  it("external plan-changed → store refresh reflows the textarea when NOT focused", async () => {
+    stubScriptFetch("first\n");
+    loadScenes([]);
+    render(<ScriptTab />);
+
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
+    expect(ta.value).toBe("first\n");
+
+    // Simulate the refetchScript path landing a new on-disk value (an external
+    // editor / the agent's CLI wrote plan/script.md → plan-changed → setScript).
+    // The editor is NOT focused, so it must reflow to the fresh value. The
+    // landing is stamped with this work's id (w1) — its rightful tenant.
+    useScript.getState().setScript("w1", "second (external edit)\n");
+    await waitFor(() => expect(ta.value).toBe("second (external edit)\n"));
+  });
+
+  it("external plan-changed does NOT clobber an in-flight edit while focused", async () => {
+    stubScriptFetch("first\n");
+    loadScenes([]);
+    render(<ScriptTab />);
+
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
+    await userEvent.clear(ta);
+    await userEvent.type(ta, "user is typing");
+    expect(document.activeElement).toBe(ta);
+
+    // A store refresh arrives MID-edit. Because the field is focused, the
+    // user's draft must survive (mirror S4 EditableText reflow guard).
+    useScript.getState().setScript("w1", "server overwrote\n");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(ta.value).toBe("user is typing");
+  });
+
+  it("hasScript and hasScenes are independent — no-script + no-scenes shows both states without implying each other", async () => {
+    // Existing work: empty plan AND zero scenes. The editor still renders its
+    // (empty) textarea with placeholder, AND the cards area shows its own
+    // storyboard onboarding — neither fabricates the other.
+    stubScriptFetch("");
+    loadScenes([]);
+    render(<ScriptTab />);
+
+    // Script side: an editable empty textarea (placeholder, no fake content).
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
+    expect(ta.value).toBe("");
+    // Storyboard side: its OWN onboarding, unchanged from S3.
+    expect(screen.getByText(/no storyboard yet/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("scene-card")).toBeNull();
+  });
+
+  it("EN locale renders the editor (incl. placeholder + drift notice + aria) with no Chinese characters", async () => {
+    stubScriptFetch(""); // empty → placeholder shows
+    loadScenes([]);
+    const { container } = render(<ScriptTab />);
+    await screen.findByLabelText("Edit script");
+    // innerHTML (not textContent) so placeholder=… / aria-label=… attributes are
+    // covered too — a Chinese leak in a placeholder would slip past textContent.
+    expect(container.innerHTML).not.toMatch(/[一-鿿]/);
+  });
+
+  it("ZH locale localizes the editor chrome (placeholder + drift notice)", async () => {
+    useLocaleStore.setState({ locale: "zh" });
+    stubScriptFetch("");
+    loadScenes([]);
+    render(<ScriptTab />);
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("编辑剧本");
+    // Placeholder is the ZH copy (Chinese chars present).
+    expect(ta.placeholder).toMatch(/[一-鿿]/);
+    // Drift notice localized.
+    expect(screen.getByText(/独立维护|可能不同步/)).toBeInTheDocument();
+  });
+});
+
+describe("ScriptTab (S5·review fixes) — cross-work tenancy + honest load errors", () => {
+  // Build a comp for an arbitrary workId (the shared loadScenes helper hardcodes
+  // "w1"; these tests need to SWITCH works to prove no bleed).
+  function loadWork(workId: string) {
+    const comp = makeEmptyComposition({ workId });
+    (comp as { scenes?: Scene[] }).scenes = [];
+    useComposition.getState().loadComposition(comp);
+  }
+
+  it("HIGH: switching works clears the previous work's 剧本 (no cross-work bleed)", async () => {
+    // Work w1 loads its own outline.
+    stubScriptFetch("A-only outline\n");
+    loadWork("w1");
+    const { rerender } = render(<ScriptTab />);
+    const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
+    await waitFor(() => expect(ta.value).toBe("A-only outline\n"));
+
+    // Switch to work w2 with a DIFFERENT on-disk script. The editor must reflow
+    // to w2's script — never show w1's — even though useScript is one global store.
+    stubScriptFetch("B-only outline\n");
+    loadWork("w2");
+    rerender(<ScriptTab />);
+
+    const taB = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
+    await waitFor(() => expect(taB.value).toBe("B-only outline\n"));
+    expect(taB.value).not.toContain("A-only");
+  });
+
+  it("HIGH: editor stays read-only with NO foreign content until THIS work's script loads", async () => {
+    // Pre-seed the store as work "wOther"'s, then mount the editor for w1 with a
+    // GET that never resolves. The editor must NOT leak wOther's content and must
+    // be read-only (so a foreign-work draft can never be committed into w1).
+    scriptFetch = vi.fn((_url: string, init?: RequestInit) =>
+      init?.method === "PUT"
+        ? Promise.resolve(fakeRes("application/json", ""))
+        : new Promise<Partial<Response>>(() => {}),
+    ) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal("fetch", scriptFetch);
+    useScript.setState({
+      workId: "wOther",
+      script: "wOther secret outline",
+      loaded: true,
+    });
+    loadWork("w1");
+    render(<ScriptTab />);
+
+    const ta = screen.getByLabelText("Edit script") as HTMLTextAreaElement;
+    expect(ta.value).not.toContain("wOther secret");
+    expect(ta.value).toBe("");
+    expect(ta.readOnly).toBe(true);
+  });
+
+  it("MEDIUM: a mount-load failure surfaces an error (role=alert), not a silent blank editor", async () => {
+    // GET fails (500). Previously the .catch swallowed it and the editor sat
+    // blank with no signal; now it must show a localized load-error alert.
+    scriptFetch = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === "PUT"
+        ? fakeRes("application/json", "")
+        : ({
+            ok: false,
+            status: 500,
+            statusText: "Server Error",
+            headers: { get: (): string => "application/json" } as unknown as Headers,
+            json: async (): Promise<unknown> => ({ error: "disk on fire" }),
+            text: async (): Promise<string> => "",
+          } as Partial<Response>),
+    ) as unknown as ReturnType<typeof vi.fn>;
+    vi.stubGlobal("fetch", scriptFetch);
+    loadWork("w1");
+    render(<ScriptTab />);
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/disk on fire/i);
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -16,14 +16,22 @@ const _defaultAssets = {
     "assets/images/cover.png",
   ],
 };
-vi.mock("@/lib/api", () => ({
-  apiFetch: vi.fn(async (url: string) => {
-    if (url.includes("/api/clip-index/status")) return { stub: true, reason: "no_index" };
-    if (url.includes("/assets/search")) return { stub: false, results: [], searchMs: 1 };
-    if (url.includes("/api/clip-index/build")) return { ok: true, stub: false, assetCount: 0, model: "ViT-B-32", indexedAt: "x", durationMs: 1 };
-    return _defaultAssets;
-  }),
-}));
+// Partial mock — keep the real exports (notably `ApiError`, which ScriptTab's
+// errorMessage() does `instanceof` against on its mount-load failure path) and
+// only stub apiFetch. A bare object mock would drop ApiError → the Script tab's
+// load-error handler would throw on the missing export.
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    apiFetch: vi.fn(async (url: string) => {
+      if (url.includes("/api/clip-index/status")) return { stub: true, reason: "no_index" };
+      if (url.includes("/assets/search")) return { stub: false, results: [], searchMs: 1 };
+      if (url.includes("/api/clip-index/build")) return { ok: true, stub: false, assetCount: 0, model: "ViT-B-32", indexedAt: "x", durationMs: 1 };
+      return _defaultAssets;
+    }),
+  };
+});
 
 vi.mock("@/features/chat/useChatSocket", () => ({
   useChatSocket: () => ({ send: vi.fn() }),
@@ -40,6 +48,24 @@ beforeEach(() => {
   vi.clearAllMocks();
   // Reset selection so existing AssetSidebar tests start on the Library tab.
   useComposition.setState({ comp: null, selection: null });
+  // The Script tab's mount-load reads plan/script.md via raw `fetch` (a plain
+  // text/markdown channel, off the mocked apiFetch). Stub it to a benign empty
+  // plan so activating the Script tab resolves quietly (no load-error path).
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      statusText: "OK",
+      headers: { get: (): string => "text/markdown; charset=utf-8" } as unknown as Headers,
+      text: async (): Promise<string> => "",
+      json: async (): Promise<unknown> => ({ ok: true }),
+    })),
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 describe("AssetSidebar", () => {

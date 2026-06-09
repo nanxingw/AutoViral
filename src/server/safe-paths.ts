@@ -12,9 +12,27 @@ function getDataDir(): string {
   return process.env.AUTOVIRAL_DATA_DIR ?? `${process.env.HOME ?? ""}/.autoviral`;
 }
 
+/**
+ * The directory that holds every work's folder, resolved the SAME way the asset
+ * routes resolve paths (resolveAssetPath joins `resolve(getDataDir(), "works", …)`).
+ * File watchers (composition-watcher / plan-watcher) MUST use this so they never
+ * diverge from the REST routes on a non-default config.
+ *
+ * Priority: explicit AUTOVIRAL_WORKS_ROOT → <AUTOVIRAL_DATA_DIR>/works →
+ * ~/.autoviral/works. In production all three collapse to ~/.autoviral/works;
+ * the divergence only bit tests / custom-DATA_DIR setups (review 2026-06-09).
+ */
+export function getWorksRoot(): string {
+  if (process.env.AUTOVIRAL_WORKS_ROOT) return process.env.AUTOVIRAL_WORKS_ROOT;
+  return resolve(getDataDir(), "works");
+}
+
 export const SAFE_ID = /^[a-zA-Z0-9_-]+$/;
 
-export const ASSET_ROOTS = ["assets", "output"] as const;
+// "plan" (PRD-0007 S5) holds the planning-layer markdown (剧本 plan/script.md).
+// Same traversal guards as assets/output — only a safe single basename
+// (script.md) is ever resolved under it.
+export const ASSET_ROOTS = ["assets", "output", "plan"] as const;
 export type AssetRoot = (typeof ASSET_ROOTS)[number];
 
 export class UnsafePathError extends Error {

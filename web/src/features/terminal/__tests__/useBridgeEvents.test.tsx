@@ -26,6 +26,20 @@ vi.mock("@/features/editor/store", () => ({
   },
 }));
 
+// S5 (PRD-0007) — plan-changed refetches plan/script.md into the script store.
+// Mock the script service + the script store so we can assert the refetch
+// pushed the new markdown into state without touching the network.
+const loadScript = vi.fn(async (_workId?: string) => "# fresh markdown\n");
+vi.mock("@/features/studio/services/script", () => ({
+  loadScript: (workId: string) => loadScript(workId),
+}));
+const setScript = vi.fn();
+vi.mock("@/features/studio/scriptStore", () => ({
+  useScript: {
+    getState: () => ({ setScript }),
+  },
+}));
+
 class MockWS {
   static instances: MockWS[] = [];
   static OPEN = 1;
@@ -167,6 +181,52 @@ describe("useBridgeEvents · carousel-changed (S2 / US 17)", () => {
       });
     });
     await waitFor(() => expect(loadCarousel).toHaveBeenCalled());
+    expect(loadComposition).not.toHaveBeenCalled();
+  });
+});
+
+describe("useBridgeEvents · plan-changed (S5 / PRD-0007)", () => {
+  beforeEach(() => {
+    (globalThis as any).WebSocket = MockWS;
+    MockWS.instances = [];
+    loadScript.mockClear();
+    setScript.mockClear();
+    loadComposition.mockClear();
+  });
+  afterEach(() => {
+    delete (globalThis as any).WebSocket;
+    vi.restoreAllMocks();
+  });
+
+  it("plan-changed refetches plan/script.md and loads it into the script store", async () => {
+    renderBridge("w_test");
+    act(() => {
+      MockWS.instances[0].emit({
+        type: "plan-changed",
+        workId: "w_test",
+        ts: Date.now(),
+        payload: null,
+      });
+    });
+    await waitFor(() => expect(loadScript).toHaveBeenCalledWith("w_test"));
+    // setScript now stamps the owning workId (tenant-aware store) so a
+    // plan-changed for w_test loads under w_test, never bleeds to another work.
+    await waitFor(() =>
+      expect(setScript).toHaveBeenCalledWith("w_test", "# fresh markdown\n"),
+    );
+  });
+
+  it("plan-changed does NOT trigger the composition refetch (scoped to the script)", async () => {
+    renderBridge("w_test");
+    act(() => {
+      MockWS.instances[0].emit({
+        type: "plan-changed",
+        workId: "w_test",
+        ts: Date.now(),
+        payload: null,
+      });
+    });
+    await waitFor(() => expect(loadScript).toHaveBeenCalled());
     expect(loadComposition).not.toHaveBeenCalled();
   });
 });

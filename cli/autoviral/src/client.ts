@@ -73,3 +73,31 @@ export async function bridgeRequest<T>(
   }
   return json.result as T;
 }
+
+// Plain-text request against a `/api/works/:workId/...` route (NOT the bridge
+// `/api/bridge/v1/*` envelope surface). Used by `script show|edit` (S5):
+// GET plan/script.md returns raw markdown, PUT takes raw markdown and returns
+// `{ok:true}` JSON. We send/return the body as text — no {ok,result} envelope.
+//
+// Exit-code contract matches bridgeRequest: 4 = your input/validation was wrong
+// (4xx), 3 = the service broke (5xx / malformed response). The work-relative
+// path is appended after the workId, so the caller passes e.g. "/plan/script.md".
+export async function apiText(
+  ctx: BridgeContext,
+  method: "GET" | "PUT",
+  workPath: string,
+  body?: string,
+): Promise<string> {
+  const url = `http://127.0.0.1:${ctx.port}/api/works/${encodeURIComponent(ctx.workId)}${workPath}`;
+  const res = await fetch(url, {
+    method,
+    headers: body == null ? undefined : { "Content-Type": "text/markdown; charset=utf-8" },
+    body: body == null ? undefined : body,
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    process.stderr.write(`autoviral: api ${method} ${workPath} → ${res.status} ${txt}\n`);
+    process.exit(res.status >= 400 && res.status < 500 ? 4 : 3);
+  }
+  return res.text();
+}

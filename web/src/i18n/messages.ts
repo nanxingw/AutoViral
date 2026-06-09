@@ -351,6 +351,25 @@ export const en = {
       moveUpAria: "Move shot {n} earlier",
       moveDownAria: "Move shot {n} later",
       saveFailed: "Couldn't save: {msg}",
+      // S5 — the plan/script.md narrative editor mounted ABOVE the cards.
+      scriptHeading: "Script",
+      editScriptAria: "Edit script",
+      // Honest drift notice: the 剧本 (narrative) and 分镜 (storyboard) are two
+      // independent surfaces with a weak, drift-tolerant link.
+      driftNotice:
+        "Script and storyboard are maintained independently and may drift apart.",
+      // Empty-state copy is a PLACEHOLDER attribute, never written into the file
+      // (the server returns "" for an unwritten plan — no template in any
+      // language, #73/#83).
+      scriptPlaceholder:
+        "Write the narrative outline — theme, arc, narration, the intent of each beat. Or ask the agent to draft one with `autoviral script edit`.",
+      // Edit ↔ preview toggle.
+      scriptModeEdit: "Edit",
+      scriptModePreview: "Preview",
+      scriptPreviewAria: "Script preview",
+      scriptEmptyPreview: "Nothing written yet.",
+      scriptSaveFailed: "Couldn't save the script: {msg}",
+      scriptLoadFailed: "Couldn't load the script: {msg}",
     },
     rightPane: {
       tabChat: "Chat",
@@ -1417,6 +1436,18 @@ export const zh: DeepShape<Messages> = {
       moveUpAria: "把镜 {n} 上移",
       moveDownAria: "把镜 {n} 下移",
       saveFailed: "保存失败：{msg}",
+      // S5 —分镜卡片上方的 plan/script.md 剧本编辑器
+      scriptHeading: "剧本",
+      editScriptAria: "编辑剧本",
+      driftNotice: "剧本与分镜独立维护、可能不同步。",
+      scriptPlaceholder:
+        "写下叙事总纲——框架、梗概、旁白、每段意图。也可让 agent 用 `autoviral script edit` 起草。",
+      scriptModeEdit: "编辑",
+      scriptModePreview: "预览",
+      scriptPreviewAria: "剧本预览",
+      scriptEmptyPreview: "还没有内容。",
+      scriptSaveFailed: "剧本保存失败：{msg}",
+      scriptLoadFailed: "剧本加载失败：{msg}",
     },
     rightPane: {
       tabChat: "对话",

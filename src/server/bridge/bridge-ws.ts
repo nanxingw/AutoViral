@@ -12,6 +12,7 @@ import type { Duplex } from "node:stream";
 import { uiEventBus, type UiEvent } from "./ui-events.js";
 import { answerAsk } from "./approval-gate.js";
 import { watchCompositionFor } from "./composition-watcher.js";
+import { watchPlanFor } from "./plan-watcher.js";
 import { enforceLoopbackOrigin } from "../ws-origin.js";
 
 export interface BridgeWsHandle {
@@ -68,6 +69,15 @@ export function attachBridgeWebSocket(
       watchCompositionFor(workId);
     } catch {
       /* watcher unavailable — events still flow over WS for in-app writes */
+    }
+
+    // S5 (PRD-0007) — twin watcher for the planning-layer 剧本 (plan/script.md).
+    // External edits (agent via `autoviral script edit`, a text editor) →
+    // plan-changed events → Studio refetches the script via useBridgeEvents.
+    try {
+      watchPlanFor(workId);
+    } catch {
+      /* watcher unavailable — in-app PUT still broadcasts plan-changed directly */
     }
 
     // Inbound: Studio replies to ui-ask events with approval-response frames

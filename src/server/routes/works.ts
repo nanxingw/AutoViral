@@ -5,7 +5,7 @@
 
 import { Hono } from "hono";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import yaml from "js-yaml";
 import { loadConfig, dataDir } from "../../infra/config.js";
 import {
@@ -19,7 +19,8 @@ import {
   CompositionSchema,
   migrateLegacyTrackIds,
 } from "../../shared/composition.js";
-import { SAFE_ID } from "../safe-paths.js";
+import { SAFE_ID, resolveAssetFile, UnsafePathError } from "../safe-paths.js";
+import { uiEventBus } from "../bridge/ui-events.js";
 import { listCheckpoints, restoreCheckpoint, createCheckpoint } from "../checkpoints.js";
 import {
   getWsBridge,
@@ -224,6 +225,68 @@ worksRouter.put("/api/works/:id/composition", async (c) => {
     yaml.dump(parsed.data, { lineWidth: -1 }),
     "utf-8",
   );
+  return c.json({ ok: true });
+});
+
+// GET /api/works/:id/plan/script.md — returns the narrative-outline 剧本
+// (plan/script.md) as raw markdown text.
+//
+// S5 (PRD-0007 §4.5). The 剧本 is the planning-layer PRD: a first-class,
+// read/write, watch-refreshable artifact twinning composition.yaml. When the
+// file does NOT exist yet we return an EMPTY string (200) — we MUST NOT
+// synthesise a starter template in any language: baking a localized template
+// into stored data freezes its language to write-time locale (#73/#83
+// i18n-string-as-data鐵律). The frontend renders its own empty-state copy
+// from an empty body.
+worksRouter.get("/api/works/:id/plan/script.md", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId", errorCode: "work_not_found" }, 404);
+  const w = await getWork(id);
+  if (!w) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
+  let target: string;
+  try {
+    // Single safe basename under the per-work plan/ root — traversal-guarded.
+    target = resolveAssetFile(id, "plan", "script.md");
+  } catch (err) {
+    if (err instanceof UnsafePathError) return c.json({ error: "Invalid path", errorCode: "work_not_found" }, 404);
+    throw err;
+  }
+  try {
+    const raw = await readFile(target, "utf-8");
+    return c.body(raw, 200, { "content-type": "text/markdown; charset=utf-8" });
+  } catch (err: any) {
+    // ENOENT → no script.md written yet → empty body, NOT a template.
+    if (err?.code === "ENOENT") {
+      return c.body("", 200, { "content-type": "text/markdown; charset=utf-8" });
+    }
+    return c.json({ error: `Script unreadable: ${err?.message ?? "unknown"}`, errorCode: "script_unreadable", detail: err?.message }, 500);
+  }
+});
+
+// PUT /api/works/:id/plan/script.md — persists the body (raw markdown) to
+// plan/script.md (mkdir -p plan/) and broadcasts "plan-changed" on the
+// uiEventBus so Studio refetches WITHOUT a reload. The broadcast mirrors the
+// composition write-path signal (the explicit "disk changed" event that
+// supplements the fs.watch path which can miss atomic renames on macOS).
+worksRouter.put("/api/works/:id/plan/script.md", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId", errorCode: "work_not_found" }, 404);
+  const w = await getWork(id);
+  if (!w) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
+  // Body is raw markdown text — read it as text, not JSON.
+  const md = await c.req.text();
+  let target: string;
+  try {
+    target = resolveAssetFile(id, "plan", "script.md");
+  } catch (err) {
+    if (err instanceof UnsafePathError) return c.json({ error: "Invalid path", errorCode: "work_not_found" }, 404);
+    throw err;
+  }
+  await mkdir(dirname(target), { recursive: true });
+  await writeFile(target, md, "utf-8");
+  // Mirror composition's write-path broadcast: announce the on-disk change so
+  // the Studio script editor refetches live (twin of composition-changed).
+  uiEventBus.publish(id, { type: "plan-changed", workId: id, ts: Date.now(), payload: null });
   return c.json({ ok: true });
 });
 

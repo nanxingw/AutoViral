@@ -11,23 +11,18 @@
 // WebSocket doesn't multiply listeners.
 
 import { watch, type FSWatcher } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { uiEventBus } from "./ui-events.js";
 import { compositionPathFor } from "./composition-ops.js";
+import { getWorksRoot } from "../safe-paths.js";
 
 const watchers = new Map<string, FSWatcher>();
 
-function worksRoot(): string {
-  return (
-    process.env.AUTOVIRAL_WORKS_ROOT ??
-    join(homedir(), ".autoviral/works")
-  );
-}
-
 export function watchCompositionFor(workId: string): void {
   if (watchers.has(workId)) return;
-  const fullPath = compositionPathFor({ workId, worksRoot: worksRoot() });
+  // Shared works-root resolver — keeps this watcher, the plan-watcher, and the
+  // REST routes in lockstep on a non-default config (single source of truth).
+  const fullPath = compositionPathFor({ workId, worksRoot: getWorksRoot() });
   const dir = dirname(fullPath);
   let w: FSWatcher;
   try {

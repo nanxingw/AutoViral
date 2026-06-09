@@ -17,6 +17,7 @@ import { progressCommand } from "./commands/progress.js";
 import { clipCommand } from "./commands/clip.js";
 import { trackCommand } from "./commands/track.js";
 import { sceneCommand } from "./commands/scene.js";
+import { scriptCommand } from "./commands/script.js";
 import { transitionCommand } from "./commands/transition.js";
 import { captionsCommand } from "./commands/captions.js";
 import { carouselCommand } from "./commands/carousel.js";
@@ -53,6 +54,7 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   clip: clipCommand,
   track: trackCommand,
   scene: sceneCommand,
+  script: scriptCommand,
   transition: transitionCommand,
   captions: captionsCommand,
   carousel: carouselCommand,
@@ -142,6 +144,10 @@ function usage(): string {
     "  scene link <id> --asset <assetId> [--asset <id2>...] [--select <id>] [--status planned|generated|stale]",
     "    Attach generated asset(s) to a scene (the plan→execution handoff state).",
     "  scene remove <id>               Remove one shot from the storyboard.",
+    "  script show                     Print the 剧本 (plan/script.md) — the narrative",
+    "    outline / 'PRD' of the plan. Empty if no script written yet (not an error).",
+    "  script edit [--file <path>]     Write the 剧本 from a file (or stdin). Persists",
+    "    plan/script.md and refreshes the Studio script editor live.",
     "  transition add --track <trackId> --after <clipId> --preset <name> [--duration <seconds>]",
     "    Add a cut-point transition between two adjacent video clips. Presets come",
     "    from the shared registry (cross-dissolve / wipe-* / push-* / …).",

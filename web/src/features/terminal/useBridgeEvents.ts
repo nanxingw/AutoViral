@@ -76,6 +76,28 @@ export function useBridgeEvents(workId: string | undefined): void {
         });
     };
 
+    // S5 (PRD-0007) — 剧本 twin of refetchComposition. The 剧本
+    // (plan/script.md) write endpoint broadcasts "plan-changed" right after the
+    // markdown lands (and the plan-watcher fires it for external edits), so the
+    // Studio script editor refetches plan/script.md into its store and reflects
+    // the change WITHOUT a reload — agent (`autoviral script edit`) and human
+    // converge on the same on-disk markdown (ADR-009 agent-人一致). Dynamic
+    // import keeps this terminal hook free of a hard dep on the studio feature.
+    const refetchScript = () => {
+      Promise.all([
+        import("@/features/studio/services/script"),
+        import("@/features/studio/scriptStore"),
+      ])
+        .then(([{ loadScript }, { useScript }]) =>
+          // Stamp the owning workId so the script store stays tenant-aware: the
+          // WS is per-work, so this `workId` is the script's rightful owner.
+          loadScript(workId).then((md) => useScript.getState().setScript(workId, md)),
+        )
+        .catch(() => {
+          /* swallow — refetch failure is non-fatal */
+        });
+    };
+
     ws.onmessage = (e) => {
       let ev: UiEvent;
       try {
@@ -133,6 +155,12 @@ export function useBridgeEvents(workId: string | undefined): void {
           // S2 (US 17) — re-fetch carousel.yaml into the editor store so the
           // carousel preview reflects an agent write without a page reload.
           refetchCarousel();
+          break;
+        case "plan-changed":
+          // S5 (PRD-0007) — re-fetch plan/script.md into the script store so the
+          // Studio script editor reflects an agent write (or an external editor
+          // edit caught by the plan-watcher) without a page reload.
+          refetchScript();
           break;
         case "asset-added":
           // I17 — a freshly generated image/video (or TTS audio) landed in the

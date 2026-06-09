@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ReactMarkdown from "react-markdown";
 import { useComposition } from "../../store";
+import { useScript } from "../../scriptStore";
+import { loadScript, saveScript } from "../../services/script";
 import type { Scene } from "@shared/composition";
 import { useT } from "@/i18n/useT";
 import type { MessageKey } from "@/i18n/useT";
@@ -26,7 +29,14 @@ import {
 // so the unrelated autosave's whole-`PUT /comp` always carries server-fresh
 // scenes and can't clobber a concurrent agent (or another tab) with stale data.
 //
-// S5 will mount a `plan/script.md` editor ABOVE this card list.
+// S5 mounts the `plan/script.md` 剧本 (narrative) editor ABOVE this card list
+// (ScriptEditor below). The 剧本 (free-text narrative outline) and the 分镜
+// (structured storyboard cards) are TWO independent surfaces, weakly linked by
+// `scene.mdAnchor` — we render an honest drift notice and let each surface show
+// its own state (`hasScript` / `hasScenes` never imply each other). Edits commit
+// straight to disk via `saveScript` (raw text/markdown PUT) — the SAME write
+// path the agent's `autoviral script edit` CLI uses (ADR-009 agent-人一致) — and
+// the `plan-changed` broadcast → refetchScript keeps every surface convergent.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Code-facing enum key → i18n message key. Kept in lockstep with SceneSchema's
@@ -149,26 +159,32 @@ export function ScriptTab() {
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
-        {hasScenes ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {reorderError && (
-              <ErrorLine msg={reorderError} />
-            )}
-            {ordered.map((scene, index) => (
-              <SceneCard
-                key={scene.id}
-                scene={scene}
-                workId={workId}
-                index={index}
-                isFirst={index === 0}
-                isLast={index === ordered.length - 1}
-                onMove={moveScene}
-              />
-            ))}
-          </div>
-        ) : (
-          <EmptyState />
-        )}
+        {/* S5 — 剧本 (plan/script.md) editor sits ABOVE the storyboard cards.
+            Independent of `hasScenes`: it always renders (empty → placeholder),
+            so a script-less work still gets an editor and a scene-less work
+            still gets its onboarding below. Neither implies the other. */}
+        <ScriptEditor workId={workId} />
+
+        <div style={{ marginTop: 14 }}>
+          {hasScenes ? (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {reorderError && <ErrorLine msg={reorderError} />}
+              {ordered.map((scene, index) => (
+                <SceneCard
+                  key={scene.id}
+                  scene={scene}
+                  workId={workId}
+                  index={index}
+                  isFirst={index === 0}
+                  isLast={index === ordered.length - 1}
+                  onMove={moveScene}
+                />
+              ))}
+            </div>
+          ) : (
+            <EmptyState />
+          )}
+        </div>
       </div>
     </div>
   );
@@ -177,6 +193,301 @@ export function ScriptTab() {
 function ScriptHeading() {
   const t = useT();
   return <>{t("studio.scriptPanel.heading")}</>;
+}
+
+// ─── 剧本 (plan/script.md) markdown editor ──────────────────────────────────
+//
+// The narrative outline that twins the storyboard. Edit (textarea) ↔ preview
+// (react-markdown) toggle; commits the RAW markdown to disk on blur via
+// saveScript (the same write path as `autoviral script edit`). Reads from the
+// `useScript` store, which the bridge's `plan-changed` → refetchScript path
+// also writes — so an external editor or the agent's CLI edit reflows here live.
+//
+// Empty-state is a PLACEHOLDER attribute, NEVER written into the file: the
+// server returns "" for an unwritten plan and we keep it "" (no template in any
+// language — #73/#83 i18n-string-as-data鐵律).
+function ScriptEditor({ workId }: { workId: string }) {
+  const t = useT();
+  const script = useScript((s) => s.script);
+  const loaded = useScript((s) => s.loaded);
+  const storeWorkId = useScript((s) => s.workId);
+  const setScript = useScript((s) => s.setScript);
+  const reset = useScript((s) => s.reset);
+  const [mode, setMode] = useState<"edit" | "preview">("edit");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // TENANCY GUARD (HIGH fix): the store is one global instance shared by every
+  // work. The held script is OURS only when it's stamped with our workId AND a
+  // load has resolved. While the store still holds another work's script (this
+  // editor just mounted, or we're mid A→B route hop) we render empty + read-only
+  // and refuse to commit — never leak/clobber across works.
+  const isMine = storeWorkId === workId && loaded;
+
+  // Mount-load: pull plan/script.md once per work into the store. The bridge's
+  // refetchScript only fires on a CHANGE (plan-changed) — the initial on-disk
+  // value has to be fetched here. Guard with a ref so a re-render / a store
+  // update we caused doesn't re-fetch (and a workId switch re-fetches once).
+  const loadedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!workId) return;
+    if (loadedFor.current === workId) return;
+    loadedFor.current = workId;
+    // If the store still holds a DIFFERENT work's script, clear it synchronously
+    // so this editor never shows (or commits) the previous work's 剧本 during the
+    // async load window. (Studio's workId-reset effect does the same at the page
+    // level for when this tab isn't mounted during the switch.)
+    if (useScript.getState().workId !== workId) reset();
+    setLoadError(null);
+    loadScript(workId)
+      .then((md) => {
+        // A stale load (workId switched again before this resolved) must not
+        // overwrite the now-current work's store.
+        if (loadedFor.current === workId) setScript(workId, md);
+      })
+      .catch((err) => {
+        // No longer swallow: a real load failure (500 / network) must surface,
+        // not leave the editor silently blank with no signal (MEDIUM fix).
+        if (loadedFor.current === workId) setLoadError(errorMessage(err));
+      });
+  }, [workId, reset, setScript]);
+
+  const commit = useCallback(
+    async (next: string) => {
+      // Cross-work guard: only write when the store holds THIS work's freshly
+      // loaded script. During an A→B hop the store is reset (workId≠ours /
+      // !loaded) until ours lands — committing here would PUT stale content into
+      // the wrong work. Read fresh via getState (the callback closure can lag).
+      const st = useScript.getState();
+      if (st.workId !== workId || !st.loaded) return;
+      if (next === st.script) return; // unchanged — no needless write
+      setSaveError(null);
+      // Optimistically reflect the edit in the store so the preview + a sibling
+      // surface see it immediately; the broadcast→refetch reconverges on disk.
+      setScript(workId, next);
+      try {
+        await saveScript(workId, next);
+      } catch (err) {
+        setSaveError(errorMessage(err));
+      }
+    },
+    [workId, setScript],
+  );
+
+  return (
+    <div
+      style={{
+        border: "1px solid var(--glass-border)",
+        borderRadius: 10,
+        background: "var(--surface-0)",
+        padding: "10px 12px",
+        marginBottom: 4,
+      }}
+    >
+      {/* Heading + edit/preview toggle. */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 8,
+          marginBottom: 6,
+        }}
+      >
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "var(--text-dimmer)",
+          }}
+        >
+          {t("studio.scriptPanel.scriptHeading")}
+        </span>
+        <div style={{ display: "flex", gap: 2 }}>
+          <ModeButton
+            active={mode === "edit"}
+            onClick={() => setMode("edit")}
+          >
+            {t("studio.scriptPanel.scriptModeEdit")}
+          </ModeButton>
+          <ModeButton
+            active={mode === "preview"}
+            onClick={() => setMode("preview")}
+          >
+            {t("studio.scriptPanel.scriptModePreview")}
+          </ModeButton>
+        </div>
+      </div>
+
+      {/* Honest drift notice — the 剧本 and 分镜 are independently maintained. */}
+      <div
+        style={{
+          fontSize: 10.5,
+          lineHeight: 1.5,
+          color: "var(--text-dimmer)",
+          fontStyle: "italic",
+          marginBottom: 8,
+        }}
+      >
+        {t("studio.scriptPanel.driftNotice")}
+      </div>
+
+      {mode === "edit" ? (
+        // key={workId} → a work switch REMOUNTS the textarea, discarding any
+        // focused-but-uncommitted draft from the previous work (else a stale
+        // focused draft could survive the switch and commit into the new work).
+        // value/loaded gate on `isMine` so a not-yet-loaded foreign script never
+        // renders here and the field stays read-only until our script lands.
+        <ScriptTextarea
+          key={workId}
+          value={isMine ? script : ""}
+          loaded={isMine}
+          ariaLabel={t("studio.scriptPanel.editScriptAria")}
+          placeholder={t("studio.scriptPanel.scriptPlaceholder")}
+          onCommit={commit}
+        />
+      ) : (
+        <div
+          data-testid="script-preview"
+          aria-label={t("studio.scriptPanel.scriptPreviewAria")}
+          className="script-md-preview"
+          style={{
+            fontSize: 12.5,
+            lineHeight: 1.6,
+            color: "var(--text-dim)",
+            maxHeight: 320,
+            overflowY: "auto",
+          }}
+        >
+          {!isMine || script.trim() === "" ? (
+            <span style={{ fontStyle: "italic", color: "var(--text-dimmer)" }}>
+              {t("studio.scriptPanel.scriptEmptyPreview")}
+            </span>
+          ) : (
+            <ReactMarkdown>{script}</ReactMarkdown>
+          )}
+        </div>
+      )}
+
+      {loadError && (
+        <div
+          role="alert"
+          style={{
+            marginTop: 6,
+            fontSize: 11,
+            lineHeight: 1.4,
+            color: "var(--status-error, #d4756c)",
+          }}
+        >
+          {t("studio.scriptPanel.scriptLoadFailed", { msg: loadError })}
+        </div>
+      )}
+
+      {saveError && (
+        <div
+          role="alert"
+          style={{
+            marginTop: 6,
+            fontSize: 11,
+            lineHeight: 1.4,
+            color: "var(--status-error, #d4756c)",
+          }}
+        >
+          {t("studio.scriptPanel.scriptSaveFailed", { msg: saveError })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Locally-controlled markdown textarea. Seeds from `value`; commits on blur.
+// Reflows to a fresh `value` (a refetchScript landing) ONLY when not focused —
+// so an external edit reflows but an in-flight draft is never yanked from under
+// the user (mirror of EditableText's focus guard, S4).
+function ScriptTextarea({
+  value,
+  loaded,
+  ariaLabel,
+  placeholder,
+  onCommit,
+}: {
+  value: string;
+  loaded: boolean;
+  ariaLabel: string;
+  placeholder: string;
+  onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  const [focused, setFocused] = useState(false);
+  useEffect(() => {
+    if (!focused) setDraft(value);
+  }, [value, focused]);
+
+  return (
+    <textarea
+      aria-label={ariaLabel}
+      placeholder={placeholder}
+      value={draft}
+      // Until the first load resolves we keep the field read-only-ish (still
+      // mounted so its placeholder/aria are testable) — but allow typing once
+      // loaded so a brand-new work is immediately writable.
+      readOnly={!loaded}
+      rows={8}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => {
+        setFocused(false);
+        onCommit(draft);
+      }}
+      style={{
+        width: "100%",
+        minHeight: 140,
+        background: "transparent",
+        border: "1px solid var(--glass-border)",
+        borderRadius: 6,
+        color: "var(--text)",
+        padding: "8px 10px",
+        fontFamily: "var(--font-mono)",
+        fontSize: 12,
+        lineHeight: 1.6,
+        resize: "vertical",
+      }}
+    />
+  );
+}
+
+function ModeButton({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      data-bare
+      onClick={onClick}
+      style={{
+        padding: "2px 8px",
+        fontFamily: "var(--font-mono)",
+        fontSize: 10,
+        letterSpacing: "0.04em",
+        background: "transparent",
+        border: "1px solid var(--glass-border)",
+        borderRadius: 6,
+        color: active ? "var(--accent-hi)" : "var(--text-dimmer)",
+        borderColor: active ? "var(--accent)" : "var(--glass-border)",
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
 }
 
 function EmptyState() {
