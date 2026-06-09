@@ -2,12 +2,22 @@
 // stable fixture under tests/fixtures/sample-work/. If the schema drifts,
 // this test (and the fixture) are the first thing that must move.
 
-import { describe, expect, it, beforeEach } from "vitest";
+import { describe, expect, it, beforeEach, vi } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { mkdtemp, readFile, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import yaml from "js-yaml";
+
+// PRD-0007 fresh-work seed (review 2026-06-09): the write/preview chokepoints
+// gate their lazy-seed on `getWork()` so a typo'd workId never seeds disk. The
+// gate resolves the work via work-store (frozen dataDir), which a temp-worksRoot
+// test can't populate — so mock getWork. The existing tests pre-seed
+// composition.yaml and never reach the seed branch, so the mock is inert there.
+vi.mock("../../../domain/work-store.js", () => ({
+  getWork: vi.fn(),
+}));
+
 import {
   readCompositionFor,
   writeCompositionFor,
@@ -17,10 +27,13 @@ import {
   unifiedDiff,
   compositionPreviousPathFor,
 } from "../composition-ops.js";
+import { getWork } from "../../../domain/work-store.js";
 import type { Composition } from "../../../shared/composition.js";
 import { access } from "node:fs/promises";
 import { addScene } from "../../../shared/composition/ops/scene.js";
 import { addTrack } from "../../../shared/composition/ops/track.js";
+
+const mockGetWork = vi.mocked(getWork);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -452,6 +465,75 @@ describe("mutateCompositionFor — per-work write serialization (S6)", () => {
     });
     const after = await readCompositionFor(ctx);
     expect((after.scenes ?? []).map((s) => s.title)).toEqual(["after-throw"]);
+  });
+});
+
+// PRD-0007 fresh-work seed (review 2026-06-09 — S8 E2E surfaced the agent path
+// gap): an agent's FIRST write to a brand-new work (no composition.yaml yet) used
+// to ENOENT, breaking agent↔human equivalence. mutateCompositionFor/dryRunMutate
+// now lazily seed a minimal composition for a real work, gated on getWork.
+describe("fresh-work lazy seed (mutateCompositionFor / dryRunMutate)", () => {
+  let workRoot: string;
+  const workId = "w_fresh";
+
+  beforeEach(async () => {
+    // A work dir that exists but has NO composition.yaml (the fresh-work state).
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-fresh-seed-"));
+    await mkdir(join(workRoot, workId), { recursive: true });
+    mockGetWork.mockReset();
+  });
+
+  it("mutateCompositionFor seeds a minimal composition for a real work with no composition.yaml, then writes", async () => {
+    mockGetWork.mockResolvedValue({ id: workId, type: "short-video" } as never);
+    const ctx = { workId, worksRoot: workRoot };
+
+    // The very first agent write (scene add) on a never-written work succeeds.
+    const next = await mutateCompositionFor(ctx, (c) => {
+      addScene(c, { title: "first agent scene" });
+      return c;
+    });
+    expect((next.scenes ?? []).map((s) => s.title)).toEqual(["first agent scene"]);
+
+    // It materialized composition.yaml on disk (re-read confirms persistence).
+    const reread = await readCompositionFor(ctx);
+    expect(reread.workId).toBe(workId);
+    expect((reread.scenes ?? []).map((s) => s.title)).toEqual(["first agent scene"]);
+    // Seeded from makeEmptyComposition → the 4 default lanes are present.
+    expect(reread.tracks.length).toBeGreaterThan(0);
+    expect(mockGetWork).toHaveBeenCalledWith(workId);
+  });
+
+  it("mutateCompositionFor does NOT seed (re-throws ENOENT) when the work does not exist (no disk pollution)", async () => {
+    mockGetWork.mockResolvedValue(undefined); // typo'd / nonexistent work
+    const ctx = { workId: "w_ghost", worksRoot: workRoot };
+
+    await expect(
+      mutateCompositionFor(ctx, (c) => {
+        addScene(c, { title: "should never persist" });
+        return c;
+      }),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+
+    // No spurious composition.yaml was written for the nonexistent work.
+    await expect(
+      access(join(workRoot, "w_ghost", "composition.yaml")),
+    ).rejects.toBeTruthy();
+  });
+
+  it("dryRunMutate previews against the seeded empty composition for a fresh real work WITHOUT writing disk", async () => {
+    mockGetWork.mockResolvedValue({ id: workId, type: "short-video" } as never);
+    const ctx = { workId, worksRoot: workRoot };
+
+    const result = await dryRunMutate(ctx, (c) => {
+      addScene(c, { title: "preview only" });
+      return c;
+    });
+    // Preflight ran against the seeded comp (valid).
+    expect(result.ok).toBe(true);
+    // Dry-run never persists — the fresh work still has no composition.yaml.
+    await expect(
+      access(join(workRoot, workId, "composition.yaml")),
+    ).rejects.toBeTruthy();
   });
 });
 

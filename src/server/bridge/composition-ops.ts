@@ -27,10 +27,12 @@ import yaml from "js-yaml";
 import {
   CompositionSchema,
   CompositionWriteSchema,
+  makeEmptyComposition,
   migrateLegacyTrackIds,
   type Composition,
 } from "../../shared/composition.js";
 import { preflight, type PreflightResult } from "../../shared/composition/preflight.js";
+import { getWork } from "../../domain/work-store.js";
 
 export interface OpsContext {
   workId: string;
@@ -61,6 +63,38 @@ export function compositionPathFor(ctx: OpsContext): string {
  */
 export function compositionPreviousPathFor(ctx: OpsContext): string {
   return join(resolveRoot(ctx), ctx.workId, "composition.yaml.previous");
+}
+
+/**
+ * Read the composition for a WRITE / PREVIEW path, lazily seeding a minimal
+ * composition for a real-but-never-written work.
+ *
+ * A work created via the API/CLI (or opened in the Studio before its first
+ * autosave) has NO composition.yaml yet. A bare `readCompositionFor` ENOENTs, so
+ * an agent's FIRST `autoviral scene add` / `clip add` against a brand-new work
+ * used to fail — while a human got the file materialized for free by the
+ * Studio's autosave. That asymmetry broke the agent↔human equivalence the whole
+ * planning layer rests on (PRD-0007). We seed here so the agent's first write
+ * succeeds, exactly as `writeCompositionFor`'s `mkdir` already prepares the dir.
+ *
+ * Gated on `getWork()`: we ONLY seed when the work GENUINELY EXISTS. `workIdOrError`
+ * checks only that the header is present, not that the work exists — without this
+ * guard a typo'd / garbage workId would pollute disk with a spurious
+ * `works/<garbage>/composition.yaml`. A nonexistent work re-throws the ENOENT.
+ *
+ * `readCompositionFor` itself is deliberately UNCHANGED: its GET-route readers
+ * rely on ENOENT meaning "no composition yet" (→ 404). Only the write/preview
+ * chokepoints (mutateCompositionFor / dryRunMutate) seed.
+ */
+async function readOrSeedCompositionFor(ctx: OpsContext): Promise<Composition> {
+  try {
+    return await readCompositionFor(ctx);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
+    const work = await getWork(ctx.workId);
+    if (!work) throw err; // not a real work — surface the ENOENT, never seed
+    return makeEmptyComposition({ workId: ctx.workId });
+  }
 }
 
 export async function readCompositionFor(ctx: OpsContext): Promise<Composition> {
@@ -328,7 +362,10 @@ export async function mutateCompositionFor(
   // not a stale shared baseline (lost-update fix). Different works run in
   // parallel (separate queues). dryRunMutate is NOT locked — it never writes.
   return withWorkLock(ctx.workId, async () => {
-    const current = await readCompositionFor(ctx);
+    // Seed a minimal composition for a real-but-never-written work so an
+    // agent's first write (scene/clip add on a fresh work) succeeds — the
+    // agent↔human equivalence fix (PRD-0007). Reads stay ENOENT→404.
+    const current = await readOrSeedCompositionFor(ctx);
     const next = mutator(current);
     await writeCompositionFor(ctx, next);
     // S2 hardening — the write already landed (atomic rename above). onCommitted
@@ -366,7 +403,10 @@ export async function dryRunMutate(
   mutator: (comp: Composition) => Composition,
   _onCommitted?: (next: Composition) => void,
 ): Promise<PreflightResult> {
-  const current = await readCompositionFor(ctx);
+  // Mirror the live path: preview a verb on a fresh-but-real work against the
+  // seeded empty composition (no disk write here — dry-run never persists), so
+  // a dry-run and the real write agree on a brand-new work.
+  const current = await readOrSeedCompositionFor(ctx);
   // The mutator may throw (e.g. a CompositionOpError for an invalid op) — let
   // that propagate; the route maps it to its code, same as the live path.
   const candidate = mutator(current);
