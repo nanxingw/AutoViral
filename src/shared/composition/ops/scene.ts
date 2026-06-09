@@ -146,6 +146,20 @@ const SETTABLE_SCENE_KEYS: ReadonlySet<string> = new Set([
   "memberAssetIds",
 ]);
 
+// S7 (PRD-0007) — the subset of editable fields that DRIVE the generated pixels.
+// Editing any of these on a scene whose status is "generated" invalidates the
+// rendered asset, so setSceneProps flips status → "stale" (the card then offers
+// a reshoot). `title` / `durationSec` / `mdAnchor` / member* are deliberately
+// excluded: they change metadata/layout, not the prompt the next reshoot feeds
+// the provider. Kept inside the op (not the route) so the bridge PATCH, the CLI
+// `scene set`, and the store all get identical stale semantics (ADR-009).
+const GENERATION_AFFECTING_KEYS = [
+  "prompt",
+  "narration",
+  "shotSize",
+  "cameraMovement",
+] as const;
+
 /**
  * Patch editable fields on the scene `sceneId` in place. `id` / `order` cannot
  * be changed through here (order is reorderScenes' job). Only keys actually
@@ -175,6 +189,15 @@ export function setSceneProps(
   //  - any other value          → set it
   // `title` is never deleted even on null (it is schema-required); a null title
   // is ignored rather than producing an invalid scene.
+  //
+  // S7 stale-on-edit: snapshot the generation-affecting fields BEFORE the patch
+  // loop so we can detect a real value change AFTER (a no-op patch — same value
+  // — must NOT flip).
+  const before: Record<string, unknown> = {};
+  for (const key of GENERATION_AFFECTING_KEYS) {
+    before[key] = (scene as Record<string, unknown>)[key];
+  }
+
   for (const [key, value] of Object.entries(p.props)) {
     if (!SETTABLE_SCENE_KEYS.has(key)) continue;
     if (value === undefined) continue;
@@ -183,6 +206,18 @@ export function setSceneProps(
       continue;
     }
     (scene as Record<string, unknown>)[key] = value;
+  }
+
+  // S7 stale-on-edit: a "generated" scene whose rendered pixels are now stale
+  // (one of the generation-affecting fields actually CHANGED value) flips to
+  // "stale". Only generated→stale — "planned" and "stale" are left untouched,
+  // and a no-op patch (same value) is a no-flip. linkSceneAssets owns the
+  // reverse transition (back to "generated") when the reshoot lands.
+  if (scene.status === "generated") {
+    const changed = GENERATION_AFFECTING_KEYS.some(
+      (key) => (scene as Record<string, unknown>)[key] !== before[key],
+    );
+    if (changed) scene.status = "stale";
   }
 }
 

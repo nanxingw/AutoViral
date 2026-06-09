@@ -188,6 +188,34 @@ export async function sceneCommand(args: string[]): Promise<void> {
     return;
   }
 
+  if (sub === "generate") {
+    // POST /scene/:id/generate — the plan→execution handoff (S7, PRD-0007). Body
+    // is {} (optionally { provider }); the bridge builds the generation prompt
+    // from the scene's OWN fields (prompt/title + 景别/运镜/旁白), generates ONE
+    // image, and ATOMICALLY registers the asset + links it to the scene (so
+    // generatedAssetIds never references an id absent from comp.assets). RESHOOT
+    // is just calling this again — linkSceneAssets appends a new take and moves
+    // selectedAssetId to the newest. We echo the minted assetId (one line, like
+    // `scene add` prints the sceneId at scene.ts:84). Mirrors the `link`
+    // subcommand's id-gate (scene.ts:167-173); `--provider` is forwarded.
+    const id = rest[0];
+    if (!id || id.startsWith("--")) {
+      process.stderr.write("usage: autoviral scene generate <id> [--provider <name>]\n");
+      process.exit(4);
+    }
+    const opts = parseFlags(rest.slice(1));
+    const body: Record<string, unknown> = {};
+    if (opts["--provider"]) body.provider = opts["--provider"];
+    const result = await bridgeRequest<{ assetId: string }>(
+      ctx,
+      "POST",
+      `/scene/${encodeURIComponent(id)}/generate`,
+      body,
+    );
+    process.stdout.write(`${result.assetId}\n`);
+    return;
+  }
+
   if (sub === "remove") {
     const id = rest[0];
     if (!id || id.startsWith("--")) {

@@ -281,6 +281,37 @@ beforeAll(async () => {
         return send(200, { ok: true });
       }
     }
+    // S7 (PRD-0007) — POST /scene/:id/generate. The handoff: builds the prompt
+    // from the scene's OWN fields, generates one image, registers + links it in
+    // one locked mutator, and returns the minted assetId (in `result`, like every
+    // other data-returning bridge route so the CLI's bridgeRequest can unwrap it
+    // — see routes.ts:299/373). A known scene id mints + echoes the assetId; a
+    // scene with no prompt/title is the route's 400 + code 4 (here keyed off
+    // `scn_noprompt`); `scn_ghost` is the unknown-id 400 + code 4 → CLI exit 4.
+    {
+      const genMatch = /^\/api\/bridge\/v1\/scene\/([^/]+)\/generate$/.exec(url ?? "");
+      if (req.method === "POST" && genMatch) {
+        await readBody(req);
+        const id = decodeURIComponent(genMatch[1]);
+        if (id === "scn_ghost") {
+          return send(400, { ok: false, error: "no such scene", code: 4 });
+        }
+        if (id === "scn_noprompt") {
+          return send(400, { ok: false, error: "scene has no prompt to generate from", code: 4 });
+        }
+        const assetId = `gen_e2e${nextSeq++}`;
+        return send(200, {
+          ok: true,
+          result: {
+            assetId,
+            assetUri: `assets/scene_${id}_1.png`,
+            sceneId: id,
+            selectedAssetId: assetId,
+            status: "generated",
+          },
+        });
+      }
+    }
     // S2 — PATCH /scene/:id (the body IS the props object) + DELETE /scene/:id.
     // A known id resolves; `scn_ghost` is the op's CompositionOpError → 400 +
     // code 4 → CLI exit 4.
@@ -1098,6 +1129,37 @@ describe("autoviral CLI — end-to-end", () => {
       expect(r.exitCode).toBe(4);
     });
 
+    // S7 (PRD-0007) — `autoviral scene generate <id>` is the plan→execution
+    // handoff: it POSTs /scene/:id/generate (body {}); the bridge builds the
+    // prompt from the scene's OWN fields, generates one image, and atomically
+    // registers + links it. The CLI prints the minted assetId (one line, like
+    // `scene add` prints the sceneId). RESHOOT is just calling it again.
+    it("scene generate <id> → POSTs /scene/:id/generate, prints the minted assetId", async () => {
+      const r = await run(["scene", "generate", "scn_a1"]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toMatch(/^gen_/);
+    });
+
+    it("scene generate with no id → exit 4 (never hits bridge)", async () => {
+      const r = await run(["scene", "generate"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("scene generate with a flag-shaped id → exit 4 (never hits bridge)", async () => {
+      const r = await run(["scene", "generate", "--provider", "seedance"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("scene generate an unknown scene → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["scene", "generate", "scn_ghost"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("scene generate a scene with no prompt → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["scene", "generate", "scn_noprompt"]);
+      expect(r.exitCode).toBe(4);
+    });
+
     it("scene remove <id> → exit 0", async () => {
       const add = await run(["scene", "add", "--title", "待删"]);
       const id = add.stdout.trim();
@@ -1127,6 +1189,7 @@ describe("autoviral CLI — end-to-end", () => {
       expect(r.stdout).toMatch(/scene add/);
       expect(r.stdout).toMatch(/scene list/);
       expect(r.stdout).toMatch(/scene reorder/);
+      expect(r.stdout).toMatch(/scene generate/);
     });
   });
 

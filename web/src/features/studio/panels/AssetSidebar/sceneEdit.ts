@@ -68,6 +68,31 @@ export function patchScene(
 }
 
 /**
+ * S7 (PRD-0007) — generate (or RESHOOT) a scene's image via the bridge, the
+ * SAME route the agent's `autoviral scene generate <id>` CLI hits (POST
+ * /scene/:id/generate). The server builds the generation prompt from the
+ * scene's OWN fields (prompt/title + shotSize/cameraMovement/narration context)
+ * — we send an empty body, never a prompt. On success the bridge registers the
+ * new AssetEntry, links it onto the scene (appends a take, moves selectedAssetId
+ * to the newest, flips status→generated) and broadcasts `composition-changed`,
+ * which refetches the composition into the store → the card re-renders with the
+ * thumbnail. A reshoot is just calling this again (the link op appends).
+ *
+ * Mirrors patchScene (lines 58-68): awaits + propagates so the card can show a
+ * busy state and surface a failure, instead of silently dropping the request.
+ */
+export function generateScene(
+  workId: string,
+  sceneId: string,
+): Promise<unknown> {
+  return apiFetch(`/api/bridge/v1/scene/${sceneId}/generate`, {
+    method: "POST",
+    headers: BRIDGE_HEADERS(workId),
+    body: {},
+  });
+}
+
+/**
  * Reorder scenes to the EXACT `orderedSceneIds` sequence via the bridge. The op
  * requires a complete permutation of existing scene ids and recompacts `order`
  * to contiguous 0..N-1 server-side, so we always send the full expected order.

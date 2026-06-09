@@ -143,6 +143,8 @@ function usage(): string {
     "  scene reorder <id1> <id2> ...   Reorder the storyboard (a full permutation of scene ids).",
     "  scene link <id> --asset <assetId> [--asset <id2>...] [--select <id>] [--status planned|generated|stale]",
     "    Attach generated asset(s) to a scene (the plan→execution handoff state).",
+    "  scene generate <id> [--provider <name>]   Generate one image from the scene's own",
+    "    fields (the plan→execution handoff); registers it + links it + prints the assetId. Re-run to reshoot.",
     "  scene remove <id>               Remove one shot from the storyboard.",
     "  script show                     Print the 剧本 (plan/script.md) — the narrative",
     "    outline / 'PRD' of the plan. Empty if no script written yet (not an error).",

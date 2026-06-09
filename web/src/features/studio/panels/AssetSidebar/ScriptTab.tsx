@@ -9,10 +9,13 @@ import type { MessageKey } from "@/i18n/useT";
 import { ApiError } from "@/lib/api";
 import {
   patchScene,
+  generateScene,
   reorderScenesRemote,
   moveInOrder,
   type ScenePropsPatch,
 } from "./sceneEdit";
+import { resolveAssetUrl } from "../../composition/resolveAssetUrl";
+import type { AssetEntry } from "@shared/composition";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ScriptTab (S3→S4 · PRD-0007) — the work's storyboard skeleton, now EDITABLE.
@@ -99,6 +102,11 @@ const CAMERA_OPTIONS: NonNullable<Scene["cameraMovement"]>[] = [
 export function ScriptTab() {
   const scenes = useComposition((s) => s.comp?.scenes);
   const workId = useComposition((s) => s.comp?.workId ?? "");
+  // S7 — the asset registry (read-only mirror, like comp.scenes). A generated
+  // scene's `selectedAssetId` is resolved against this to render its thumbnail.
+  // Read at the panel level (one stable selector) and pass down to each card so
+  // a SceneCard never owns its own store subscription.
+  const assets = useComposition((s) => s.comp?.assets);
   // Read-path only: sort a copy by `order` (the intended shot sequence). The
   // store array is never mutated here — edits go over the bridge (sceneEdit.ts).
   const ordered = useMemo(
@@ -174,6 +182,7 @@ export function ScriptTab() {
                   key={scene.id}
                   scene={scene}
                   workId={workId}
+                  assets={assets}
                   index={index}
                   isFirst={index === 0}
                   isLast={index === ordered.length - 1}
@@ -533,13 +542,23 @@ const STATUS_FILLED: Record<Scene["status"], boolean> = {
 interface SceneCardProps {
   scene: Scene;
   workId: string;
+  /** The composition's asset registry — used to resolve the generated thumbnail. */
+  assets: AssetEntry[] | undefined;
   index: number;
   isFirst: boolean;
   isLast: boolean;
   onMove: (fromIndex: number, toIndex: number) => void;
 }
 
-function SceneCard({ scene, workId, index, isFirst, isLast, onMove }: SceneCardProps) {
+function SceneCard({
+  scene,
+  workId,
+  assets,
+  index,
+  isFirst,
+  isLast,
+  onMove,
+}: SceneCardProps) {
   const t = useT();
   const statusLabel = t(STATUS_KEY[scene.status]);
   const statusColor =
@@ -560,6 +579,40 @@ function SceneCard({ scene, workId, index, isFirst, isLast, onMove }: SceneCardP
     },
     [workId, scene.id],
   );
+
+  // S7 — generate / reshoot the scene's image over the SAME per-intent bridge
+  // (generateScene, NOT the store/autosave — the S4 invariant). Generation is
+  // slow, so we disable the button while in flight. On success the bridge
+  // broadcasts composition-changed → refetch → this card re-renders with the
+  // new thumbnail (status flips to generated server-side); no local setState.
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const runGenerate = useCallback(async () => {
+    if (generating) return; // reentrancy guard (slow op)
+    setGenerating(true);
+    setGenerateError(null);
+    try {
+      await generateScene(workId, scene.id);
+    } catch (err) {
+      setGenerateError(errorMessage(err));
+    } finally {
+      setGenerating(false);
+    }
+  }, [workId, scene.id, generating]);
+
+  // Resolve the selected take's AssetEntry from the registry. A `generated`
+  // scene whose selectedAssetId points at a known image asset gets a thumbnail;
+  // anything unresolved (no selection / asset missing / non-image) falls back to
+  // just the status dot — never a broken <img>.
+  const isGenerated = scene.status === "generated";
+  const thumbAsset =
+    isGenerated && scene.selectedAssetId
+      ? assets?.find((a) => a.id === scene.selectedAssetId)
+      : undefined;
+  const thumbSrc =
+    thumbAsset && thumbAsset.kind === "image"
+      ? resolveAssetUrl(thumbAsset.uri, workId)
+      : null;
 
   return (
     <div
@@ -621,6 +674,28 @@ function SceneCard({ scene, workId, index, isFirst, isLast, onMove }: SceneCardP
             border: `1.5px solid ${statusColor}`,
           }}
         />
+        {/* S7 — generated thumbnail (image takes only). Sits next to the status
+            dot. Absent unless the scene is generated AND its selectedAssetId
+            resolves to an image in comp.assets (else just the dot, no broken img). */}
+        {thumbSrc && (
+          <img
+            data-testid="scene-thumb"
+            src={thumbSrc}
+            // The status dot already announces the generated STATE; give the
+            // thumbnail a distinct accessible name (the shot's title) so a
+            // screen reader doesn't hear "Generated" twice and a role=img query
+            // stays unambiguous (review 2026-06-09 a11y).
+            alt={scene.title}
+            style={{
+              width: 28,
+              height: 28,
+              objectFit: "cover",
+              borderRadius: 6,
+              flexShrink: 0,
+              border: "1px solid var(--glass-border)",
+            }}
+          />
+        )}
         {/* Title — inline editable. */}
         <EditableText
           value={scene.title}
@@ -752,6 +827,57 @@ function SceneCard({ scene, workId, index, isFirst, isLast, onMove }: SceneCardP
           }}
         >
           {t("studio.scriptPanel.noMdAnchor")}
+        </div>
+      )}
+
+      {/* S7 — generate / reshoot button row. "生成此幕" for planned|stale, "重拍"
+          once generated. Both go through generateScene (the per-intent bridge),
+          disabled + relabelled while in flight (generation is slow). */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginTop: 8,
+        }}
+      >
+        <button
+          type="button"
+          data-bare
+          onClick={() => void runGenerate()}
+          disabled={generating}
+          style={{
+            padding: "3px 10px",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            letterSpacing: "0.04em",
+            background: "transparent",
+            border: "1px solid var(--glass-border)",
+            borderRadius: 6,
+            color: generating ? "var(--text-dimmer)" : "var(--accent-hi)",
+            borderColor: generating ? "var(--glass-border)" : "var(--accent)",
+            cursor: generating ? "default" : "pointer",
+          }}
+        >
+          {generating
+            ? t("studio.scriptPanel.generating")
+            : isGenerated
+              ? t("studio.scriptPanel.reshoot")
+              : t("studio.scriptPanel.generateScene")}
+        </button>
+      </div>
+
+      {generateError && (
+        <div
+          role="alert"
+          style={{
+            marginTop: 6,
+            fontSize: 11,
+            lineHeight: 1.4,
+            color: "var(--status-error, #d4756c)",
+          }}
+        >
+          {t("studio.scriptPanel.generateFailed", { msg: generateError })}
         </div>
       )}
 

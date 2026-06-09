@@ -1673,6 +1673,339 @@ describe("bridge router — S2 scene writes", () => {
   });
 });
 
+// ─── S7 (PRD-0007) — POST /scene/:id/generate (generation handoff) ──────────
+// The route builds the prompt from the scene's OWN fields, generates ONE image
+// via the provider registry OUTSIDE the lock, then registers the AssetEntry +
+// provenance edge AND links it onto the scene inside ONE locked mutator. The
+// keystone invariant: generatedAssetIds must NEVER reference an id absent from
+// comp.assets (register + link commit atomically). We register a FAKE image
+// provider (default for "image") so the slow generateImage is deterministic; on
+// the failure-path test the fake returns {success:false} and the route must
+// leave the comp untouched (no dangling asset, no link).
+describe("bridge router — S7 scene generate handoff", () => {
+  let workRoot: string;
+  const workId = "w_gen";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+  // Toggled by the failure-path test so the same fake can return {success:false}.
+  let failNext = false;
+  const generateCalls: Array<{ prompt: string; filename: string }> = [];
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const { dataDir } = await import("../../../infra/config.js");
+    const { registerProvider } = await import("../../../providers/registry.js");
+
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-scene-gen-route-"));
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(
+      join(workRoot, workId, "composition.yaml"),
+      fixture.replace(/workId: sample-work/, `workId: ${workId}`),
+      "utf8",
+    );
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+
+    // Register a fake image provider as the default for "image". It writes the
+    // promised PNG under the per-work asset tree (so the route's absolute→work-
+    // relative uri conversion strips a clean prefix) and returns its path. No
+    // key needed: registration is unconditional in the test.
+    registerProvider({
+      name: "fake-image",
+      capability: "image",
+      envKey: "FAKE_IMAGE",
+      default: true,
+      generateImage: async (opts) => {
+        generateCalls.push({ prompt: opts.prompt, filename: opts.filename });
+        if (failNext) {
+          return { success: false, error: "fake provider asked to fail" };
+        }
+        const assetDir = join(dataDir, "works", opts.workId, "assets", "fake-image");
+        await mkdir(assetDir, { recursive: true });
+        const assetPath = join(assetDir, opts.filename);
+        await writeFile(assetPath, "fake-png-bytes", "utf8");
+        return { success: true, assetPath };
+      },
+    });
+  });
+  afterAll(async () => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+    // Best-effort cleanup of the PNGs the fake wrote under the real dataDir.
+    const { rm } = await import("node:fs/promises");
+    const { dataDir } = await import("../../../infra/config.js");
+    await rm(join(dataDir, "works", workId), { recursive: true, force: true }).catch(() => {});
+  });
+
+  type SceneShape = {
+    id: string;
+    status?: string;
+    generatedAssetIds?: string[];
+    selectedAssetId?: string;
+    prompt?: string;
+  };
+  async function currentComp(): Promise<{
+    scenes?: SceneShape[];
+    assets?: Array<{ id: string; uri: string; kind: string }>;
+    provenance?: Array<{ toAssetId: string; operation: { type: string } }>;
+  }> {
+    const res = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    return ((await res.json()) as { result: Awaited<ReturnType<typeof currentComp>> }).result;
+  }
+  async function addScene(title: string, extra: Record<string, unknown> = {}): Promise<string> {
+    const res = await app.request("/api/bridge/v1/scene", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ title, ...extra }),
+    });
+    expect(res.status).toBe(200);
+    return ((await res.json()) as { result: { sceneId: string } }).result.sceneId;
+  }
+
+  it("registers an AssetEntry, links it, flips status — generatedAssetIds[0] ∈ comp.assets (no dangling ref)", async () => {
+    const id = await addScene("开场镜", {
+      prompt: "wide shot of a neon city",
+      shotSize: "long",
+      cameraMovement: "push",
+      narration: "夜幕降临",
+    });
+    const before = generateCalls.length;
+    const res = await app.request(`/api/bridge/v1/scene/${id}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(200);
+    // Bridge envelope `{ ok, result }` (the shape the CLI's bridgeRequest
+    // unwraps) — data lives under `.result`, never flat.
+    const env = (await res.json()) as {
+      ok: boolean;
+      result: {
+        assetId: string;
+        assetUri: string;
+        sceneId: string;
+        selectedAssetId: string;
+        status: string;
+      };
+    };
+    expect(env.ok).toBe(true);
+    const body = env.result;
+    expect(body.assetId).toMatch(/^gen_/);
+    expect(body.sceneId).toBe(id);
+    expect(body.selectedAssetId).toBe(body.assetId);
+    expect(body.status).toBe("generated");
+    // assetUri is work-relative (prefix stripped), not absolute. The filename is
+    // `scene_<id>_<take>_<rand4>.png` (random suffix makes concurrent reshoots
+    // collision-proof) — assert the take-1 prefix + extension, not an exact name.
+    expect(body.assetUri).toMatch(
+      new RegExp(`^assets/fake-image/scene_${id}_1_[0-9a-f]{4}\\.png$`),
+    );
+
+    // The enriched prompt carried the scene's own context lines.
+    const call = generateCalls[before];
+    expect(call.prompt).toContain("wide shot of a neon city");
+    expect(call.prompt).toContain("镜头景别: long");
+    expect(call.prompt).toContain("运镜: push");
+    expect(call.prompt).toContain("旁白: 夜幕降临");
+    // Per-take filename (take 1 + random suffix).
+    expect(call.filename).toMatch(new RegExp(`^scene_${id}_1_[0-9a-f]{4}\\.png$`));
+
+    // THE KEYSTONE: the linked id is present in comp.assets (no dangling ref).
+    const comp = await currentComp();
+    const scene = comp.scenes!.find((s) => s.id === id)!;
+    expect(scene.status).toBe("generated");
+    expect(scene.generatedAssetIds).toEqual([body.assetId]);
+    expect(scene.selectedAssetId).toBe(body.assetId);
+    expect(comp.assets!.some((a) => a.id === scene.generatedAssetIds![0])).toBe(true);
+    const asset = comp.assets!.find((a) => a.id === body.assetId)!;
+    expect(asset.kind).toBe("image");
+    expect(asset.uri).toBe(body.assetUri);
+    // A provenance edge records the generate.
+    expect(
+      comp.provenance!.some(
+        (e) => e.toAssetId === body.assetId && e.operation.type === "generate",
+      ),
+    ).toBe(true);
+  });
+
+  it("reshoot appends a 2nd take + moves selectedAssetId to the newest (same endpoint)", async () => {
+    const id = await addScene("待重拍镜", { prompt: "a calm lake" });
+    // First take.
+    const r1 = await app.request(`/api/bridge/v1/scene/${id}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    const a1 = ((await r1.json()) as { result: { assetId: string } }).result.assetId;
+    // Reshoot = call again.
+    const r2 = await app.request(`/api/bridge/v1/scene/${id}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    expect(r2.status).toBe(200);
+    const b2 = ((await r2.json()) as {
+      result: { assetId: string; assetUri: string; selectedAssetId: string };
+    }).result;
+    expect(b2.assetId).not.toBe(a1);
+    // Per-take filename increments (take 2 + random suffix).
+    expect(b2.assetUri).toMatch(
+      new RegExp(`^assets/fake-image/scene_${id}_2_[0-9a-f]{4}\\.png$`),
+    );
+
+    const comp = await currentComp();
+    const scene = comp.scenes!.find((s) => s.id === id)!;
+    expect(scene.generatedAssetIds).toEqual([a1, b2.assetId]);
+    expect(scene.selectedAssetId).toBe(b2.assetId);
+    // Both takes resolve in comp.assets (no dangling ref after reshoot).
+    expect(comp.assets!.some((a) => a.id === a1)).toBe(true);
+    expect(comp.assets!.some((a) => a.id === b2.assetId)).toBe(true);
+  });
+
+  it("unknown sceneId → 400 + code 4 (no generation attempted)", async () => {
+    const before = generateCalls.length;
+    const res = await app.request("/api/bridge/v1/scene/scn_nope/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+    // The provider was never called (we reject before generating).
+    expect(generateCalls.length).toBe(before);
+  });
+
+  it("a scene with no prompt falls back to its title as the generation base (title-fallback success)", async () => {
+    // The route's "no base → 400 code:4" branch is a DEFENSIVE guard for a
+    // hand-built / legacy scene whose prompt AND title are both blank — it is
+    // unreachable through the add route (title is schema-required + non-empty),
+    // so we don't test the dead branch here. Instead we lock the realistic path:
+    // a scene with NO prompt generates using its title as the base.
+    const id = await addScene("仅标题镜"); // no prompt
+    const before = generateCalls.length;
+    const res = await app.request(`/api/bridge/v1/scene/${id}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    // Title is a valid base, so generation succeeds and uses the title.
+    expect(res.status).toBe(200);
+    expect(generateCalls.length).toBe(before + 1);
+    expect(generateCalls[before].prompt).toContain("仅标题镜");
+  });
+
+  it("a provider failure → 500 + code 4 and leaves the comp UNTOUCHED (no dangling asset, no link)", async () => {
+    const id = await addScene("失败镜", { prompt: "this will fail" });
+    const compBefore = await currentComp();
+    const assetsBefore = compBefore.assets!.length;
+
+    failNext = true;
+    let res: Response;
+    try {
+      res = await app.request(`/api/bridge/v1/scene/${id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({}),
+      });
+    } finally {
+      failNext = false;
+    }
+    expect(res.status).toBe(500);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+
+    // No asset registered, scene still planned with empty generatedAssetIds.
+    const compAfter = await currentComp();
+    expect(compAfter.assets!.length).toBe(assetsBefore);
+    const scene = compAfter.scenes!.find((s) => s.id === id)!;
+    expect(scene.status).toBe("planned");
+    expect(scene.generatedAssetIds ?? []).toEqual([]);
+  });
+
+  it("does NOT broadcast composition-changed on a failed generation", async () => {
+    const id = await addScene("失败广播镜", { prompt: "fail and stay quiet" });
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    failNext = true;
+    try {
+      const res = await app.request(`/api/bridge/v1/scene/${id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(500);
+      expect(events).not.toContain("composition-changed");
+    } finally {
+      failNext = false;
+      off();
+    }
+  });
+
+  it("broadcasts composition-changed after a successful generation", async () => {
+    const id = await addScene("广播镜", { prompt: "broadcast me" });
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request(`/api/bridge/v1/scene/${id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(200);
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  it("editing the prompt after generation flips the scene to stale (stale-on-edit), reshoot re-generates", async () => {
+    const id = await addScene("陈旧镜", { prompt: "v1 prompt" });
+    // Generate → generated.
+    await app.request(`/api/bridge/v1/scene/${id}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    // Edit the prompt via PATCH → status flips to stale (ops.setSceneProps).
+    const patch = await app.request(`/api/bridge/v1/scene/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ prompt: "v2 prompt" }),
+    });
+    expect(patch.status).toBe(200);
+    let comp = await currentComp();
+    let scene = comp.scenes!.find((s) => s.id === id)!;
+    expect(scene.status).toBe("stale");
+    // Reshoot → back to generated, take 2 uses the new prompt.
+    const before = generateCalls.length;
+    const r = await app.request(`/api/bridge/v1/scene/${id}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    expect(r.status).toBe(200);
+    expect(generateCalls[before].prompt).toContain("v2 prompt");
+    comp = await currentComp();
+    scene = comp.scenes!.find((s) => s.id === id)!;
+    expect(scene.status).toBe("generated");
+    expect(scene.generatedAssetIds!.length).toBe(2);
+  });
+
+  it("without a work-id header → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/scene/scn_x/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+  });
+});
+
 describe("bridge router — Phase 3 approval gate", () => {
   it("POST /ask blocks until an approval-response is delivered (yes)", async () => {
     // Capture the askId from the broadcast ui-ask event, then call

@@ -370,6 +370,12 @@ export const en = {
       scriptEmptyPreview: "Nothing written yet.",
       scriptSaveFailed: "Couldn't save the script: {msg}",
       scriptLoadFailed: "Couldn't load the script: {msg}",
+      // S7 — per-scene image generation / reshoot (POST /scene/:id/generate via
+      // the per-intent bridge, the SAME route the agent's CLI uses, ADR-009).
+      generateScene: "Generate this shot",
+      reshoot: "Reshoot",
+      generating: "Generating…",
+      generateFailed: "Generation failed: {msg}",
     },
     rightPane: {
       tabChat: "Chat",
@@ -1448,6 +1454,12 @@ export const zh: DeepShape<Messages> = {
       scriptEmptyPreview: "还没有内容。",
       scriptSaveFailed: "剧本保存失败：{msg}",
       scriptLoadFailed: "剧本加载失败：{msg}",
+      // S7 — 单幕出图 / 重拍（POST /scene/:id/generate，走与 agent CLI 相同的
+      // per-intent bridge，ADR-009 agent-人一致）。
+      generateScene: "生成此幕",
+      reshoot: "重拍",
+      generating: "生成中…",
+      generateFailed: "生成失败：{msg}",
     },
     rightPane: {
       tabChat: "对话",

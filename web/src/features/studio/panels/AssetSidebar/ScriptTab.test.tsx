@@ -438,6 +438,124 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
   });
 });
 
+describe("ScriptTab (S7) — generate / reshoot through the per-intent bridge", () => {
+  // Reuse the S4 helpers: last apiFetch call + per-card label scoping.
+  function lastCall(): [string, { method?: string; headers?: Record<string, string>; body?: any }] {
+    const calls = apiFetch.mock.calls;
+    return calls[calls.length - 1] as any;
+  }
+  function inCard(sceneId: string) {
+    const card = screen
+      .getAllByTestId("scene-card")
+      .find((el) => el.getAttribute("data-scene-id") === sceneId)!;
+    return within(card);
+  }
+
+  it("a planned scene shows '生成此幕' and clicking it POSTs /scene/:id/generate (empty body + work-id header)", async () => {
+    // SPARSE_SCENE (s2) is planned → the generate button (not reshoot).
+    loadScenes([SPARSE_SCENE]);
+    render(<ScriptTab />);
+
+    const btn = inCard("s2").getByRole("button", { name: "Generate this shot" });
+    await userEvent.click(btn);
+
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+    const [path, opts] = lastCall();
+    expect(path).toBe("/api/bridge/v1/scene/s2/generate");
+    expect(opts.method).toBe("POST");
+    expect(opts.headers?.["X-AutoViral-Work-Id"]).toBe("w1");
+    // Prompt is built server-side from the scene's own fields — body is empty.
+    expect(opts.body).toEqual({});
+  });
+
+  it("a GENERATED scene shows '重拍' (reshoot), and clicking it hits the SAME generate route again", async () => {
+    // FULL_SCENE (s1) is generated → reshoot label, not "Generate this shot".
+    loadScenes([FULL_SCENE]);
+    render(<ScriptTab />);
+
+    // The generate label must be absent on a generated scene.
+    expect(
+      screen.queryByRole("button", { name: "Generate this shot" }),
+    ).toBeNull();
+    const reshoot = inCard("s1").getByRole("button", { name: "Reshoot" });
+    await userEvent.click(reshoot);
+
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+    const [path, opts] = lastCall();
+    expect(path).toBe("/api/bridge/v1/scene/s1/generate");
+    expect(opts.method).toBe("POST");
+  });
+
+  it("a generated scene whose selectedAssetId ∈ comp.assets renders the thumbnail <img> with the works-route src", () => {
+    // Build a comp with an image asset and a scene that selects it. The
+    // selectedAssetId resolves to comp.assets → a thumbnail <img> is rendered.
+    const comp = makeEmptyComposition({ workId: "w1" });
+    (comp as any).assets = [
+      { id: "gen_abc", uri: "scene_s1_1.png", kind: "image", status: "ready", metadata: {} },
+    ];
+    (comp as { scenes?: Scene[] }).scenes = [
+      {
+        ...FULL_SCENE,
+        generatedAssetIds: ["gen_abc"],
+        selectedAssetId: "gen_abc",
+        status: "generated",
+      },
+    ];
+    useComposition.getState().loadComposition(comp);
+    render(<ScriptTab />);
+
+    const img = inCard("s1").getByTestId("scene-thumb") as HTMLImageElement;
+    // resolveAssetUrl turns the bare-filename uri into the works-route src.
+    expect(img.getAttribute("src")).toBe("/api/works/w1/assets/scene_s1_1.png");
+  });
+
+  it("a generated scene whose selectedAssetId is NOT in comp.assets shows NO broken <img> (just the dot)", () => {
+    const comp = makeEmptyComposition({ workId: "w1" });
+    (comp as any).assets = []; // registry empty → unresolved
+    (comp as { scenes?: Scene[] }).scenes = [
+      { ...FULL_SCENE, selectedAssetId: "gen_missing", status: "generated" },
+    ];
+    useComposition.getState().loadComposition(comp);
+    render(<ScriptTab />);
+
+    expect(screen.queryByTestId("scene-thumb")).toBeNull();
+    // The status dot still encodes the generated state.
+    expect(screen.getByRole("img", { name: "Generated" })).toBeInTheDocument();
+  });
+
+  it("generate/reshoot goes through apiFetch (the per-intent bridge), NEVER the store/autosave", async () => {
+    loadScenes([SPARSE_SCENE]);
+    // Spy on loadComposition — the ONLY store action that may rewrite scenes.
+    const loadSpy = vi.spyOn(useComposition.getState(), "loadComposition");
+    render(<ScriptTab />);
+
+    await userEvent.click(
+      inCard("s2").getByRole("button", { name: "Generate this shot" }),
+    );
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+
+    // The write rode the bridge…
+    expect(apiFetch.mock.calls[0][0]).toBe("/api/bridge/v1/scene/s2/generate");
+    // …and NOTHING wrote the store locally (no autosave / no loadComposition).
+    expect(loadSpy).not.toHaveBeenCalled();
+    loadSpy.mockRestore();
+  });
+
+  it("surfaces a friendly error (role=alert) when generation fails", async () => {
+    apiFetch.mockReset();
+    apiFetch.mockRejectedValue(
+      new ApiError("500", 500, { error: "provider down" }),
+    );
+    loadScenes([SPARSE_SCENE]);
+    render(<ScriptTab />);
+
+    await userEvent.click(
+      inCard("s2").getByRole("button", { name: "Generate this shot" }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(/provider down/i);
+  });
+});
+
 describe("ScriptTab (S5) — 剧本 plan/script.md editor above the cards", () => {
   // The editor lives ABOVE the storyboard cards (PRD §7). It reads the markdown
   // from the on-disk plan/script.md (loadScript on mount → useScript store) and

@@ -27,8 +27,23 @@ import {
   diffCompositionFor,
   withWorkLock,
 } from "./composition-ops.js";
-import type { Composition } from "../../shared/composition.js";
+import type {
+  Composition,
+  AssetEntry,
+  ProvenanceEdge,
+} from "../../shared/composition.js";
 import { ASPECTS } from "../../shared/composition.js";
+// S7 (PRD-0007) — generation handoff. POST /scene/:id/generate builds the prompt
+// from the scene's own fields, generates ONE image via the same provider
+// registry the /api/generate routes use, then registers + links the asset inside
+// one locked mutator (atomic — no dangling-reference window). See
+// generate.ts:53-71/533-571 for the register/provenance/uri-conversion patterns.
+import {
+  getProvider,
+  getDefaultProvider,
+} from "../../providers/registry.js";
+import { dataDir } from "../../infra/config.js";
+import { randomUUID } from "node:crypto";
 import { preflight } from "../../shared/composition/preflight.js";
 import { mutateCarouselFor, applyLayerPatch } from "./carousel-ops.js";
 // ADR-009 (S6) — shared composition-ops core. POST /split delegates the split
@@ -1265,6 +1280,168 @@ bridgeRouter.post("/scene/:id/link", async (c) => {
     return c.json({ ok: false, error: message, code }, 400);
   }
   return c.json({ ok: true });
+});
+
+// POST /scene/:id/generate — the S7 generation HANDOFF (PRD-0007 §5). Build the
+// image prompt from the SCENE'S OWN fields (prompt/title +景别/运镜/旁白 context),
+// generate ONE image via the provider registry OUTSIDE the lock (it's the slow
+// part), then register the AssetEntry + provenance edge AND link it onto the
+// scene inside ONE locked mutator — so `generatedAssetIds` can never reference an
+// id absent from `comp.assets` (no dangling-reference window). RESHOOT is just
+// calling this again: linkSceneAssets appends a new take + moves selectedAssetId.
+// Body is `{}` (optionally `{ provider }`); we never take a prompt from the body.
+// Unknown sceneId / no prompt → 400 + code:4 (no generation, no write). A
+// provider failure → 500 + code:4 (no dangling asset).
+bridgeRouter.post("/scene/:id/generate", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  const body = (await c.req.json().catch(() => ({}))) as { provider?: string };
+
+  // ── Phase 1: read (unlocked) — build the prompt from the scene's own fields.
+  // An unlocked read is fine here: we only use it to assemble the prompt + a
+  // per-take filename. The authoritative register+link happens under the lock
+  // below (and re-finds the scene there), so a concurrent edit can't corrupt
+  // state — at worst the prompt reflects a slightly older scene snapshot.
+  let comp: Composition;
+  try {
+    comp = await readCompositionFor({ workId: g.workId });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message, code: 4 }, 400);
+  }
+  const scene = comp.scenes?.find((s) => s.id === id);
+  if (!scene) {
+    // Mirror the CompositionOpError→400 mapping the sibling scene routes use
+    // (routes.ts unknown-id paths): unknown sceneId → 400 + code:4.
+    return c.json({ ok: false, error: `no scene with id ${id}`, code: 4 }, 400);
+  }
+
+  // base = prompt, else fall back to title; both empty → nothing to generate.
+  const base = (scene.prompt && scene.prompt.trim()) || (scene.title && scene.title.trim()) || "";
+  if (!base) {
+    return c.json(
+      { ok: false, error: "scene has no prompt to generate from", code: 4 },
+      400,
+    );
+  }
+  // Append the directing context lines when present (景别 / 运镜 / 旁白).
+  const lines = [base];
+  if (scene.shotSize) lines.push(`镜头景别: ${scene.shotSize}`);
+  if (scene.cameraMovement) lines.push(`运镜: ${scene.cameraMovement}`);
+  if (scene.narration) lines.push(`旁白: ${scene.narration}`);
+  const enriched = lines.join("\n");
+
+  // ── Phase 2: generate ONE image OUTSIDE the lock (the slow part). Resolve the
+  // provider the same way generate.ts:53-61 does. filename is unique per take so
+  // a reshoot never overwrites the previous take's file.
+  const provider = body.provider
+    ? getProvider("image", body.provider)
+    : getDefaultProvider("image");
+  if (!provider) {
+    return c.json(
+      { ok: false, error: "No image provider available", code: 4 },
+      500,
+    );
+  }
+  // Per-take filename. `take` is from the UNLOCKED read, so two genuinely
+  // concurrent reshoots of the SAME scene could compute the same take number —
+  // a random suffix makes the on-disk file collision-proof regardless (each
+  // reshoot writes its own bytes; the keystone no-dangling invariant is held by
+  // the locked register+link below either way). (review 2026-06-09 LOW)
+  const take = (scene.generatedAssetIds?.length ?? 0) + 1;
+  const filename = `scene_${id}_${take}_${randomUUID().slice(0, 4)}.png`;
+  let result;
+  try {
+    result = await provider.generateImage({
+      prompt: enriched,
+      workId: g.workId,
+      filename,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json({ ok: false, error: message, code: 4 }, 500);
+  }
+  if (!result.success || !result.assetPath) {
+    // Provider returned a failure — write NOTHING (no dangling asset).
+    return c.json(
+      { ok: false, error: result.error ?? "image generation failed", code: 4 },
+      500,
+    );
+  }
+
+  // Convert the absolute write path → work-relative uri (mirrors
+  // generate.ts:67-71 / 533-536): strip the per-work dir prefix.
+  const wDirAbs = join(dataDir, "works", g.workId);
+  const relativeUri = result.assetPath.startsWith(wDirAbs + "/")
+    ? result.assetPath.slice(wDirAbs.length + 1)
+    : result.assetPath;
+
+  // ── Phase 3: register + link in ONE locked mutator (S6 per-work write lock).
+  // 5b register the AssetEntry, 5c push a provenance edge, 5d link onto the
+  // scene — all atomic, so generatedAssetIds[take-1] is in comp.assets the
+  // instant the write lands. This is the whole point of S7 (no dangling ref).
+  let assetId = "";
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (live) => {
+        assetId = `gen_${randomUUID().slice(0, 8)}`;
+        live.assets ??= [];
+        const newAsset: AssetEntry = {
+          id: assetId,
+          uri: relativeUri,
+          kind: "image",
+          status: "ready",
+          metadata: {},
+        };
+        live.assets.push(newAsset);
+
+        live.provenance ??= [];
+        const newEdge: ProvenanceEdge = {
+          fromAssetId: null,
+          toAssetId: assetId,
+          operation: {
+            type: "generate",
+            actor: "user",
+            timestamp: new Date().toISOString(),
+            params: { providerId: provider.name, prompt: enriched, sceneId: id },
+          },
+        };
+        live.provenance.push(newEdge);
+
+        // linkSceneAssets appends the take + sets selectedAssetId + flips status.
+        ops.linkSceneAssets(live, {
+          sceneId: id,
+          assetIds: [assetId],
+          status: "generated",
+        });
+        return live;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "scene-generate" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+
+  // Wrap the payload in the bridge envelope `{ ok, result }` — the SAME shape
+  // every other data-returning bridge route uses (scene add → routes.ts:1099),
+  // which the CLI's `bridgeRequest` unwraps via `json.result`. A flat body here
+  // would make `autoviral scene generate` read `undefined.assetId` and crash.
+  // (review 2026-06-09 CRITICAL — both reviewers; the frozen contract's flat
+  // shape conflicted with the universal envelope, so the envelope wins.)
+  return c.json({
+    ok: true,
+    result: {
+      assetId,
+      assetUri: relativeUri,
+      sceneId: id,
+      selectedAssetId: assetId,
+      status: "generated",
+    },
+  });
 });
 
 // DELETE /scene/:id — remove a 分镜 + recompact order. `ops.removeScene` splices

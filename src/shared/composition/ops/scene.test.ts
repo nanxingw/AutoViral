@@ -280,6 +280,154 @@ describe("ops.setSceneProps", () => {
     const s = scenes(comp).find((x) => x.id === "scn_a")!;
     expect(s.title).toBe("Keep");
   });
+
+  // ── S7 (PRD-0007) — stale-on-edit. Editing a GENERATION-AFFECTING field
+  // (prompt / narration / shotSize / cameraMovement) on a scene whose status
+  // is "generated" invalidates the rendered pixels → flip status to "stale"
+  // so the card surfaces a "reshoot" affordance. Only generated→stale; a no-op
+  // patch (same value) and non-generation fields (title/duration/…) must NOT
+  // flip; planned/stale are never touched.
+  it("flips a generated scene to stale when prompt actually changes value", () => {
+    const comp = compWith([
+      {
+        id: "scn_a",
+        order: 0,
+        title: "A",
+        status: "generated",
+        generatedAssetIds: ["ast_1"],
+        selectedAssetId: "ast_1",
+        prompt: "wide shot of the city",
+      },
+    ]);
+    setSceneProps(comp, {
+      sceneId: "scn_a",
+      props: { prompt: "close-up of a single face" },
+    });
+    const s = scenes(comp).find((x) => x.id === "scn_a")!;
+    expect(s.prompt).toBe("close-up of a single face");
+    expect(s.status).toBe("stale");
+  });
+
+  it("flips a generated scene to stale on narration / shotSize / cameraMovement changes too", () => {
+    for (const patch of [
+      { narration: "new voiceover" },
+      { shotSize: "closeup" as const },
+      { cameraMovement: "push" as const },
+    ]) {
+      const comp = compWith([
+        {
+          id: "scn_a",
+          order: 0,
+          title: "A",
+          status: "generated",
+          generatedAssetIds: ["ast_1"],
+          selectedAssetId: "ast_1",
+          narration: "old voiceover",
+          shotSize: "long",
+          cameraMovement: "static",
+        },
+      ]);
+      setSceneProps(comp, { sceneId: "scn_a", props: patch });
+      const s = scenes(comp).find((x) => x.id === "scn_a")!;
+      expect(s.status).toBe("stale");
+    }
+  });
+
+  it("does NOT flip when the patch is a no-op (same value)", () => {
+    const comp = compWith([
+      {
+        id: "scn_a",
+        order: 0,
+        title: "A",
+        status: "generated",
+        generatedAssetIds: ["ast_1"],
+        selectedAssetId: "ast_1",
+        prompt: "wide shot of the city",
+      },
+    ]);
+    // Same prompt value — pixels unchanged, must stay generated.
+    setSceneProps(comp, {
+      sceneId: "scn_a",
+      props: { prompt: "wide shot of the city" },
+    });
+    const s = scenes(comp).find((x) => x.id === "scn_a")!;
+    expect(s.status).toBe("generated");
+  });
+
+  it("does NOT flip on title / durationSec / mdAnchor / member changes (they don't change generated pixels)", () => {
+    const comp = compWith([
+      {
+        id: "scn_a",
+        order: 0,
+        title: "A",
+        status: "generated",
+        generatedAssetIds: ["ast_1"],
+        selectedAssetId: "ast_1",
+        prompt: "wide shot of the city",
+        durationSec: 4,
+      },
+    ]);
+    setSceneProps(comp, {
+      sceneId: "scn_a",
+      props: {
+        title: "Renamed",
+        durationSec: 8,
+        mdAnchor: "section-2",
+        memberClipIds: ["clp_1"],
+        memberAssetIds: ["ast_x"],
+      },
+    });
+    const s = scenes(comp).find((x) => x.id === "scn_a")!;
+    expect(s.title).toBe("Renamed");
+    expect(s.durationSec).toBe(8);
+    expect(s.status).toBe("generated");
+  });
+
+  it("leaves a planned scene planned even when a generation field changes (only generated→stale)", () => {
+    const comp = compWith([
+      { id: "scn_a", order: 0, title: "A", status: "planned", generatedAssetIds: [], prompt: "old" },
+    ]);
+    setSceneProps(comp, { sceneId: "scn_a", props: { prompt: "new" } });
+    const s = scenes(comp).find((x) => x.id === "scn_a")!;
+    expect(s.status).toBe("planned");
+  });
+
+  it("leaves an already-stale scene stale (no generated→stale path to re-trigger)", () => {
+    const comp = compWith([
+      {
+        id: "scn_a",
+        order: 0,
+        title: "A",
+        status: "stale",
+        generatedAssetIds: ["ast_1"],
+        selectedAssetId: "ast_1",
+        prompt: "old",
+      },
+    ]);
+    setSceneProps(comp, { sceneId: "scn_a", props: { prompt: "new" } });
+    const s = scenes(comp).find((x) => x.id === "scn_a")!;
+    expect(s.status).toBe("stale");
+  });
+
+  // Clearing a generation field (null → delete) on a generated scene also
+  // changes the prompt the next reshoot would use → that is a value change too.
+  it("flips generated→stale when a generation field is CLEARED (null) and it had a value", () => {
+    const comp = compWith([
+      {
+        id: "scn_a",
+        order: 0,
+        title: "A",
+        status: "generated",
+        generatedAssetIds: ["ast_1"],
+        selectedAssetId: "ast_1",
+        narration: "old voiceover",
+      },
+    ]);
+    setSceneProps(comp, { sceneId: "scn_a", props: { narration: null } });
+    const s = scenes(comp).find((x) => x.id === "scn_a")!;
+    expect(s.narration).toBeUndefined();
+    expect(s.status).toBe("stale");
+  });
 });
 
 describe("ops.reorderScenes", () => {
