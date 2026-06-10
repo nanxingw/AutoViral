@@ -277,7 +277,7 @@ status to `stale` (the Studio card shows a red dot).
 
 ```bash
 autoviral scene generate scn_a1b2c3
-autoviral scene generate scn_a1b2c3 --provider nanobanana   # pick an image provider
+autoviral scene generate scn_a1b2c3 --provider openrouter-image   # pick an image provider
 ```
 
 Do **not** substitute a raw `POST /api/generate/image` + manual `scene link` for

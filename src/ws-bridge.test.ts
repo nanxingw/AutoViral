@@ -101,6 +101,9 @@ describe("buildSystemPrompt", () => {
     const DEAD = [
       "src/shared/composition.ts",
       "src/providers/nanobanana.ts",
+      // renamed from nanobanana.ts — the new path must stay out of the prompt
+      // too (the agent is told to use `autoviral docs`, never src/).
+      "src/providers/openrouter-image.ts",
       "src/server/providers/seedance.ts",
       "src/server/__tests__/carousel.test.ts",
       "autoviral/taste/",

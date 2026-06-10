@@ -28,11 +28,20 @@ describe("unified MediaProvider registry (ADR-007)", () => {
   });
 
   describe("all three capabilities resolve via getProvider(capability, name)", () => {
-    it("image → nanobanana", () => {
-      const p = getProvider("image", "nanobanana");
+    it("image → openrouter-image", () => {
+      const p = getProvider("image", "openrouter-image");
       expect(p?.capability).toBe("image");
-      expect(p?.name).toBe("nanobanana");
+      expect(p?.name).toBe("openrouter-image");
       expect(typeof p?.generateImage).toBe("function");
+    });
+
+    it("historical alias 'nanobanana' resolves to the same image provider", () => {
+      // Old docs / chat history / scripts say `--provider nanobanana`; the
+      // lookup chokepoint normalizes the renamed id so they keep working.
+      const aliased = getProvider("image", "nanobanana");
+      expect(aliased).toBeDefined();
+      expect(aliased).toBe(getProvider("image", "openrouter-image"));
+      expect(aliased?.name).toBe("openrouter-image");
     });
 
     it("video → seedance", () => {
@@ -63,8 +72,8 @@ describe("unified MediaProvider registry (ADR-007)", () => {
   });
 
   describe("getDefaultProvider(capability)", () => {
-    it("image default is nanobanana", () => {
-      expect(getDefaultProvider("image")?.name).toBe("nanobanana");
+    it("image default is openrouter-image", () => {
+      expect(getDefaultProvider("image")?.name).toBe("openrouter-image");
     });
 
     it("video default is seedance", () => {
@@ -99,7 +108,7 @@ describe("unified MediaProvider registry (ADR-007)", () => {
 
   describe("envKey mapping (declarative)", () => {
     it("image + video gate on OPENROUTER_API_KEY", () => {
-      expect(getProvider("image", "nanobanana")?.envKey).toBe("OPENROUTER_API_KEY");
+      expect(getProvider("image", "openrouter-image")?.envKey).toBe("OPENROUTER_API_KEY");
       expect(getProvider("video", "seedance")?.envKey).toBe("OPENROUTER_API_KEY");
     });
 

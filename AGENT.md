@@ -55,7 +55,7 @@ something:
     non-Claude agent, you drive AutoViral from the **Terminal**, not Chat.
 
 - **Provider gateway**: OpenRouter is the **only** external gateway (invariant #2).
-  Image gen (`openai/gpt-5.4-image-2`, aka NanoBanana), video gen
+  Image gen (`openai/gpt-5.4-image-2`, provider id `openrouter-image`), video gen
   (`bytedance/seedance-2.0`), and translation all go through it; TTS uses
   edge-tts → OpenAI fallback. There are no direct vendor calls (no Dreamina /
   Jimeng / Lyria paths). Don't reintroduce a multi-provider table — it breaks

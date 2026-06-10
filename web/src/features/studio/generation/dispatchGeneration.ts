@@ -20,7 +20,7 @@
 // Ported from pandazki/pneuma-skills modes/clipcraft/viewer/generation
 // /dispatchGeneration.ts. Protocol shape preserved; provider mapping is now
 // OpenRouter-only:
-//   - image → openai/gpt-5.4-image-2 (NanoBanana)
+//   - image → openai/gpt-5.4-image-2 (provider id `openrouter-image`)
 //   - video → bytedance/seedance-2.0 (Seedance 2.0)
 //   - TTS  → edge-tts/multilingual
 //   - BGM  → google/lyria-3-pro-preview

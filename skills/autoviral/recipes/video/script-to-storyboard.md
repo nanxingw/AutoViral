@@ -93,7 +93,7 @@ risk. Re-run it to reshoot (appends a take, moves `selectedAssetId`).
 
 ```bash
 autoviral scene generate scn_a1b2c3            # prints the minted asset id
-autoviral scene generate scn_a1b2c3 --provider nanobanana
+autoviral scene generate scn_a1b2c3 --provider openrouter-image
 ```
 
 Do **not** hand-roll this with `POST /api/generate/image` + `scene link` — the

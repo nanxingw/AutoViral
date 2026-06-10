@@ -1,4 +1,4 @@
-// width/height used to be SILENTLY dropped by the NanoBanana provider — the
+// width/height used to be SILENTLY dropped by the image provider — the
 // public /api/generate/image params advertised width?/height? but only
 // aspectRatio/imageSize reached the OpenRouter payload, so every such call
 // fell back to the model's 1024×1024 default ("images can only be square").
@@ -6,7 +6,7 @@
 // the documented params express intent.
 
 import { describe, expect, it, vi, afterEach } from 'vitest'
-import { deriveAspectRatio, NanoBananaProvider } from './nanobanana.js'
+import { deriveAspectRatio, OpenRouterImageProvider } from './openrouter-image.js'
 
 describe('deriveAspectRatio', () => {
   it('maps portrait 1080×1920 to 9:16', () => {
@@ -30,7 +30,7 @@ describe('deriveAspectRatio', () => {
   })
 })
 
-describe('NanoBananaProvider — width/height reach the payload as aspect_ratio', () => {
+describe('OpenRouterImageProvider — width/height reach the payload as aspect_ratio', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
   })
@@ -48,7 +48,7 @@ describe('NanoBananaProvider — width/height reach the payload as aspect_ratio'
 
   it('derives image_config.aspect_ratio from width/height when aspectRatio absent', async () => {
     const calls = captureFetch()
-    const p = new NanoBananaProvider('sk-test')
+    const p = new OpenRouterImageProvider('sk-test')
     await p.generateImage({
       prompt: 'a poster',
       workId: 'w1',
@@ -61,7 +61,7 @@ describe('NanoBananaProvider — width/height reach the payload as aspect_ratio'
 
   it('explicit aspectRatio wins over width/height', async () => {
     const calls = captureFetch()
-    const p = new NanoBananaProvider('sk-test')
+    const p = new OpenRouterImageProvider('sk-test')
     await p.generateImage({
       prompt: 'a poster',
       workId: 'w1',
@@ -75,7 +75,7 @@ describe('NanoBananaProvider — width/height reach the payload as aspect_ratio'
 
   it('no size hints → no image_config (model default)', async () => {
     const calls = captureFetch()
-    const p = new NanoBananaProvider('sk-test')
+    const p = new OpenRouterImageProvider('sk-test')
     await p.generateImage({
       prompt: 'a poster',
       workId: 'w1',

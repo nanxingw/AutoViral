@@ -1,6 +1,7 @@
 # ADR-007: Single MediaProvider registry — capability-tagged, one entry
 
 - **Status:** Accepted
+- **Update (2026-06-10):** the image provider's file/class/registry id were renamed `nanobanana` → `openrouter-image` (`OpenRouterImageProvider`) — the historical product name no longer described what runs (OpenRouter `gpt-5.4-image-2`). "NanoBanana" mentions below reflect the state at decision time; the old id survives as an inbound alias normalized at `getProvider` (`PROVIDER_ID_ALIASES`), and historical `providerId: nanobanana` provenance edges in user compositions are left as-is (audit-only, no reader).
 - **Date:** 2026-06-03
 - **Deciders:** nanxingw + AI design partner (grill-with-docs session)
 - **Related:** [ADR-006](ADR-006-content-type-registry.md)

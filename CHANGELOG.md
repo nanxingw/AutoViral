@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+- **图像 provider 通用化改名 `nanobanana` → `openrouter-image`** — 文件 / 类（`OpenRouterImageProvider`）/ registry id 全部换成如实的通用名（真身一直是 OpenRouter `openai/gpt-5.4-image-2`，旧名是换模型前的历史产品名，极具误导性）。旧 id `nanobanana` 永久保留为入站别名（在 `getProvider` 查找咽喉归一化），旧文档命令 `--provider nanobanana`、旧 work 的 chat 历史、外部脚本零破坏；既有 composition provenance 里的历史 `providerId: nanobanana` 不回写（纯审计字段，无任何代码读回）。文档面（README / AGENT.md / CONTEXT.md 词表 / ADR-007 注记 / CLI 手册 / recipe）同步诚实化。
+
 ## [0.1.7] - 2026-06-10
 
 **折叠镜表（Shot Sheet）**（PRD-0008）—— 「剧本·分镜」tab 交互重设计。用户反馈"按钮很多很杂"：原每张分镜卡常驻 ~12 个裸控件、一屏 ≈72 个可见控件，且人在 UI 里根本不能新建/删除分镜。本版把卡片改成**折叠态一行只读镜头条 + 点击就地展开的卡内 Inspector（手风琴单展开）**，默认视图只剩 ~3 个常驻按钮；设计经多 agent workflow（4 角度提案 × 2 立场评审）选定，全部写路径不变（per-intent bridge + 共享 scene ops，agent-人一致）。

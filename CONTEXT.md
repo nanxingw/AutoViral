@@ -59,8 +59,8 @@ A creator workstation for short-form video / image / poster content. Single-user
 
 | Term | Meaning |
 |---|---|
-| **OpenRouter** | The sole external gateway since `c1c374e` (2026-05-12). Used for image gen (`openai/gpt-5.4-image-2` aka NanoBanana), video gen (`bytedance/seedance-2.0`), translation (`anthropic/claude-sonnet-4.5`). API key from `.env` `OPENROUTER_API_KEY`. |
-| **NanoBanana** | The product name for OpenRouter's `openai/gpt-5.4-image-2` image generation. ~$0.04/image. |
+| **OpenRouter** | The sole external gateway since `c1c374e` (2026-05-12). Used for image gen (`openai/gpt-5.4-image-2`, provider id `openrouter-image`), video gen (`bytedance/seedance-2.0`), translation (`anthropic/claude-sonnet-4.5`). API key from `.env` `OPENROUTER_API_KEY`. |
+| **NanoBanana** | HISTORICAL alias of the image provider id `openrouter-image` (renamed 2026-06-10 — the old product name no longer described what runs: OpenRouter `openai/gpt-5.4-image-2`, ~$0.04/image). Still accepted inbound at `getProvider` so old docs / chat history resolve. |
 | **Seedance** | OpenRouter's `bytedance/seedance-2.0` i2v video generation. ~$0.76/3s. **Gotcha**: durationSec only accepts {3, 5, 10}; output is fixed 720x1280@24 regardless of input aspect (see memory `reference_seedance_i2v_durations.md`). |
 | **Whisper / stable-ts** | Local audio transcription. `pip install stable-ts` (not `stable-whisper`); module imports as `stable_whisper`. Word-level timestamps via `word_timestamps=True`. |
 
@@ -138,7 +138,7 @@ src/                        # Backend (Node + TypeScript)
 │   │   ├── routes.ts       # endpoint dispatch
 │   │   └── ingest-youtube.ts  # YouTube → composition pipeline
 │   └── render-pipeline.ts  # Remotion-driven export
-├── providers/              # single capability-tagged registry (ADR-007): registry.ts + video/ (seedance) + tts/ (gemini-via-openrouter → edge-tts fallback) + nanobanana image
+├── providers/              # single capability-tagged registry (ADR-007): registry.ts + video/ (seedance) + tts/ (gemini-via-openrouter → edge-tts fallback) + openrouter-image image
 ├── shared/                 # composition.ts (zod schema), shared types
 ├── trends/sources/         # Multi-platform trend scrapers
 ├── ws-bridge.ts            # chat-agent WS bridge (infra/domain grouping deferred — PRD Open Q)

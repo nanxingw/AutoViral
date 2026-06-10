@@ -21,7 +21,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { GenerateProvider, ImageOpts, GenerateResult } from "./base.js";
-import { NanoBananaProvider } from "./nanobanana.js";
+import { OpenRouterImageProvider } from "./openrouter-image.js";
 import { createSeedanceProvider } from "./video/seedance.js";
 import type {
   VideoProvider,
@@ -75,8 +75,20 @@ export type MediaProvider =
 // getDefaultProvider's "first registered" tiebreak is deterministic.
 const providers = new Map<string, MediaProvider>();
 
+// Historical inbound aliases. Renamed ids stay resolvable forever because old
+// chat history, recipe docs and external scripts carry the old literal (e.g.
+// `--provider nanobanana`); normalizing at this single lookup chokepoint means
+// no HTTP route / CLI / config reader needs to know the history.
+const PROVIDER_ID_ALIASES: Record<string, string> = {
+  nanobanana: "openrouter-image",
+};
+
+function canonicalName(name: string): string {
+  return PROVIDER_ID_ALIASES[name] ?? name;
+}
+
 function key(capability: Capability, name: string): string {
-  return `${capability}:${name}`;
+  return `${capability}:${canonicalName(name)}`;
 }
 
 export function registerProvider(p: MediaProvider): void {
@@ -175,9 +187,8 @@ function imageEntry(p: GenerateProvider): ImageMediaProvider {
   return {
     name: p.name,
     capability: "image",
-    // The registry id "nanobanana" is historical (the class predates the model
-    // switch); what actually runs is OpenRouter gpt-5.4-image-2. Keep the id
-    // for config/CLI compat, but label it honestly.
+    // displayName tracks the default model, not the gateway id — the id
+    // ("openrouter-image") is stable while DEFAULT_MODEL may move.
     displayName: "GPT Image 2 (via OpenRouter)",
     envKey: "OPENROUTER_API_KEY",
     default: true,
@@ -240,16 +251,16 @@ registerStaticProviders();
 /**
  * Assemble every capability in one place. Video + TTS are registered statically
  * on import (see registerStaticProviders); this adds the keyed image provider
- * (NanoBanana, OpenRouter) once a key is present, and re-asserts the static set
- * so a fresh process / reset has them too.
+ * (OpenRouter gpt-5.4-image-2) once a key is present, and re-asserts the static
+ * set so a fresh process / reset has them too.
  */
 export async function initProviders(config: {
   openrouter?: { apiKey?: string };
 }): Promise<void> {
   registerStaticProviders();
 
-  // image — NanoBanana (OpenRouter gpt-5.4-image-2), default for "image".
-  if (config.openrouter?.apiKey && !getProvider("image", "nanobanana")) {
-    registerProvider(imageEntry(new NanoBananaProvider(config.openrouter.apiKey)));
+  // image — OpenRouter gpt-5.4-image-2, default for "image".
+  if (config.openrouter?.apiKey && !getProvider("image", "openrouter-image")) {
+    registerProvider(imageEntry(new OpenRouterImageProvider(config.openrouter.apiKey)));
   }
 }

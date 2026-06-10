@@ -3,10 +3,12 @@ import { join } from 'node:path'
 import { dataDir } from '../infra/config.js'
 import type { GenerateProvider, ImageOpts, GenerateResult } from './base.js'
 
-// NOTE: the class/registry name "NanoBanana" is HISTORICAL — it predates a
-// model switch. What actually runs today is OpenRouter gpt-5.4-image-2 (see
-// DEFAULT_MODEL). The id stays for config/CLI compat; user-facing labels say
-// "GPT Image 2" (registry.ts imageEntry.displayName).
+// Image generation via the OpenRouter chat-completions gateway; the default
+// model is gpt-5.4-image-2 (see DEFAULT_MODEL), overridable per request. File,
+// class and registry id were renamed from the historical "nanobanana" (a
+// pre-model-switch product name that no longer described what runs);
+// "nanobanana" survives only as an inbound alias at the registry lookup
+// (registry.ts PROVIDER_ID_ALIASES) so old docs / chat history keep working.
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const DEFAULT_MODEL = 'openai/gpt-5.4-image-2'
 
@@ -49,8 +51,8 @@ export function deriveAspectRatio(
   return best
 }
 
-export class NanoBananaProvider implements GenerateProvider {
-  readonly name = 'nanobanana'
+export class OpenRouterImageProvider implements GenerateProvider {
+  readonly name = 'openrouter-image'
 
   private apiKey: string
 
