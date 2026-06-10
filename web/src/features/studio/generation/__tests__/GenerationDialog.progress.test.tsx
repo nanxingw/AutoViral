@@ -177,9 +177,23 @@ describe("GenerationDialog chat side-effect gating", () => {
     expect(sendMock).not.toHaveBeenCalled();
   });
 
-  it("image kind (no provider dispatch) → chat.send still fires", async () => {
-    const fetchMock = vi.fn(async (url: string) => {
-      if (String(url).includes("/api/providers")) {
+  // B3 — image kind used to fall through to the chat death-envelope
+  // (chat.send). It now direct-dispatches to POST /api/generate/image; chat.send
+  // must NOT fire (no agent round-trip), and no /generate-video call happens.
+  it("image kind → POST /api/generate/image fires, chat.send NOT called", async () => {
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      if (u.includes("/api/generate/image") && init?.method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          headers: jsonHeaders(),
+          json: async () => ({ success: true, assetId: "img_1" }),
+          text: async () => "",
+        } as unknown as Response;
+      }
+      if (u.includes("/api/providers")) {
         return {
           ok: true,
           status: 200,
@@ -213,14 +227,22 @@ describe("GenerationDialog chat side-effect gating", () => {
     fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
 
     await waitFor(() => {
-      expect(sendMock).toHaveBeenCalled();
+      const imageCall = fetchMock.mock.calls.find(
+        (c) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).includes("/api/generate/image") &&
+          (c[1] as RequestInit | undefined)?.method === "POST",
+      );
+      expect(imageCall).toBeDefined();
     });
-    // No /generate-video call should have fired for image kind.
-    const dispatchCall = fetchMock.mock.calls.find(
+    // No death-envelope chat.send for image kind anymore.
+    expect(sendMock).not.toHaveBeenCalled();
+    // And definitely no /generate-video call for an image request.
+    const videoCall = fetchMock.mock.calls.find(
       (c) =>
         typeof c[0] === "string" &&
         (c[0] as string).includes("/generate-video"),
     );
-    expect(dispatchCall).toBeUndefined();
+    expect(videoCall).toBeUndefined();
   });
 });

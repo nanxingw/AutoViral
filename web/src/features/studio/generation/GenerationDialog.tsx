@@ -1,22 +1,20 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// GenerationDialog — Phase 2.5
+// GenerationDialog — Phase 2.5 (B3: direct-dispatch, death-envelope retired)
 // ─────────────────────────────────────────────────────────────────────────────
 //
 // Standalone Radix Dialog modal for users to fill out a generation request.
-// On submit, builds a GenerationRequest, passes it through
-// buildGenerationNotification (Phase 2.4), and posts the resulting message
-// via the chat WebSocket bridge (useChatSocket.send). The agent then handles
-// per modules/assets/capabilities/structured-generation.md (Phase 2.6).
+// On submit it DIRECT-DISPATCHES to the matching real HTTP endpoint (see the
+// kind×mode endpoint map in dispatchGeneration.ts). It no longer builds a chat
+// "death-envelope" that told the agent to run since-deleted *.py scripts
+// (retired in PRD-0009 B3).
 //
 // The component is CONTROLLED (open / onOpenChange come from the parent) and
 // supports two modes:
 //   1. CREATE — kind tabs (image | video | audio); audio sub-tabs (bgm | tts)
 //   2. VARIANT — when `source` is provided, kind is fixed by the source asset;
-//      "prompt" textarea becomes "change direction" textarea.
-//
-// NOT MOUNTED in this commit — the parent wiring (AssetSidebar, dive canvas
-// right-click menu, etc.) ships in a follow-up after the user's pending
-// AssetSidebar WIP lands.
+//      "prompt" textarea becomes "change direction" textarea. The source's uri
+//      becomes the derive anchor (referenceImage for image / firstFrameImage
+//      for video) and changeDirection is fused into the prompt.
 //
 // Pure mapping (formStateToRequest) is exported separately so unit tests can
 // exercise the kind-discrimination logic without rendering React.
@@ -26,11 +24,11 @@ import { useState, useMemo, useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
 import {
-  buildGenerationNotification,
+  fuseVariantPrompt,
+  semanticFilename,
   type GenerationRequest,
   type AssetKind,
 } from "./dispatchGeneration";
-import { useChatSocket } from "@/features/chat/useChatSocket";
 import { useT } from "@/i18n/useT";
 import { apiFetch } from "@/lib/api";
 
@@ -77,7 +75,7 @@ export interface FormState {
   style?: string;
   // Video
   duration: string;
-  resolution?: "720p" | "1080p";
+  // image-to-video first-frame anchor (maps to firstFrameImage on dispatch).
   imageUrl?: string;
   // Audio
   audioSubKind: AudioSubKind;
@@ -104,7 +102,6 @@ const VIDEO_ASPECTS = ["9:16", "16:9", "1:1"] as const;
 // a silent server rejection now that the provider passes duration through. Keep
 // the select to a small in-range subset; every value MUST be ∈ 4..15.
 const VIDEO_DURATIONS = ["4", "5", "8", "10", "15"] as const;
-const VIDEO_RESOLUTIONS = ["720p", "1080p"] as const;
 
 export const INITIAL_FORM_STATE: FormState = {
   kind: "image",
@@ -114,7 +111,6 @@ export const INITIAL_FORM_STATE: FormState = {
   height: undefined,
   style: undefined,
   duration: "5",
-  resolution: "720p",
   imageUrl: undefined,
   audioSubKind: "bgm",
   voice: "zh-CN-XiaoxiaoNeural",
@@ -182,7 +178,6 @@ export function formStateToRequest(
             mode === "variant" ? state.changeDirection : undefined,
           duration: state.duration || "5",
           aspectRatio,
-          resolution: state.resolution,
           imageUrl: state.imageUrl,
         },
         source,
@@ -258,6 +253,9 @@ export function GenerationDialog(props: GenerationDialogProps) {
   const [form, setForm] = useState<FormState>(() => ({
     ...INITIAL_FORM_STATE,
     kind: lockedKind ?? INITIAL_FORM_STATE.kind,
+    // B3 — an audio variant carrying a voice is a TTS variant; seed the audio
+    // sub-kind so onGenerate routes it to /api/works/:id/tts (not /generate/bgm).
+    audioSubKind: source?.sourceVoice ? "tts" : INITIAL_FORM_STATE.audioSubKind,
     aspectRatio: source?.sourceAspectRatio ?? INITIAL_FORM_STATE.aspectRatio,
     duration: source?.sourceDuration
       ? String(source.sourceDuration)
@@ -265,7 +263,6 @@ export function GenerationDialog(props: GenerationDialogProps) {
     voice: source?.sourceVoice ?? INITIAL_FORM_STATE.voice,
   }));
 
-  const chat = useChatSocket(workId);
   const queryClient = useQueryClient();
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const t = useT();
@@ -308,27 +305,100 @@ export function GenerationDialog(props: GenerationDialogProps) {
     setForm((s) => ({ ...s, [key]: value }));
   }
 
-  // Phase 8.4 — when generating a video clip with a real provider selected,
-  // call the dispatch endpoint directly so the new asset shows up in the
-  // library without requiring agent round-tripping. Variant mode and non-video
-  // kinds keep the chat-driven flow (no provider parity yet).
+  // B3 — every kind×mode direct-dispatches to a real endpoint now. The video
+  // provider dropdown applies to BOTH create and variant (variant adds the
+  // source.uri as the i2v first-frame anchor). When there's no real provider
+  // selected yet we can't dispatch a video at all.
   const shouldDispatchProvider =
-    !isVariant && form.kind === "video" && !!selectedProviderId;
+    form.kind === "video" && !!selectedProviderId;
 
-  // #3 — TTS gets its own direct-dispatch path (mirrors the video provider
-  // path). The old buildGenerationNotification route for TTS pointed at a
-  // since-deleted python script, so we POST to the work-scoped /tts endpoint
-  // and let the server's edge-tts→OpenAI fallback registry do the work.
+  // TTS direct-dispatch (create + variant) → POST /api/works/:id/tts. The old
+  // buildGenerationNotification route pointed at a since-deleted python script.
   const shouldDispatchTts =
-    !isVariant && form.kind === "audio" && form.audioSubKind === "tts";
+    form.kind === "audio" && form.audioSubKind === "tts";
 
-  async function dispatchTtsGenerate(): Promise<void> {
+  // B3 — image (create + variant) → POST /api/generate/image. Variant adds the
+  // source.uri as referenceImage and fuses changeDirection into the prompt.
+  async function dispatchImageGenerate(req: GenerationRequest): Promise<void> {
+    const p = req.params;
+    if (p.kind !== "image") return;
+    const isVar = req.mode === "variant";
+    // For variants the form's `prompt` carries the source's frozen prompt; fuse
+    // it with the user's changeDirection (the old envelope made the agent do
+    // this in step #2).
+    const prompt = isVar
+      ? fuseVariantPrompt(p.prompt, p.changeDirection)
+      : p.prompt;
+    // The endpoint REQUIRES a filename (it does a raw join + collision-prone
+    // write). The old envelope made the agent pick a semantic id; we derive one
+    // here so two prompts can't clobber the same file.
+    const filename = semanticFilename(prompt, "png");
+    const res = await fetch("/api/generate/image", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workId,
+        prompt,
+        filename,
+        ...(p.aspectRatio ? { aspectRatio: p.aspectRatio } : {}),
+        ...(p.width ? { width: p.width } : {}),
+        ...(p.height ? { height: p.height } : {}),
+        // Variant anchor: route the source asset through the provider's edit
+        // mode so small deltas (text swap, color tweak) preserve the source.
+        ...(isVar && req.source?.uri ? { referenceImage: req.source.uri } : {}),
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`image dispatch failed (${res.status}) ${text}`);
+    }
+    await queryClient.invalidateQueries({ queryKey: ["assets", workId] });
+  }
+
+  // B3 — BGM (create + variant) → POST /api/generate/bgm. The endpoint
+  // validates durationSeconds (5-180) server-side; we forward it when set.
+  async function dispatchBgmGenerate(req: GenerationRequest): Promise<void> {
+    const p = req.params;
+    if (p.kind !== "audio" || p.subKind !== "bgm") return;
+    const isVar = req.mode === "variant";
+    const prompt = isVar
+      ? fuseVariantPrompt(p.prompt, p.changeDirection)
+      : p.prompt;
+    const filename = semanticFilename(prompt, "mp3");
+    const res = await fetch("/api/generate/bgm", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        workId,
+        prompt,
+        filename,
+        ...(p.durationSeconds ? { durationSeconds: p.durationSeconds } : {}),
+      }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`bgm dispatch failed (${res.status}) ${text}`);
+    }
+    await queryClient.invalidateQueries({ queryKey: ["assets", workId] });
+  }
+
+  async function dispatchTtsGenerate(req: GenerationRequest): Promise<void> {
+    const p = req.params;
+    if (p.kind !== "audio" || p.subKind !== "tts") return;
+    const isVar = req.mode === "variant";
+    // For TTS variants the frozen `prompt` holds the source narration; fold the
+    // changeDirection in so the user can tweak wording. Voice comes from the
+    // source if present, else the form field.
+    const text = isVar
+      ? fuseVariantPrompt(p.prompt, p.changeDirection)
+      : p.prompt;
+    const voice = (isVar ? req.source?.sourceVoice : undefined) || form.voice;
     const res = await fetch(`/api/works/${workId}/tts`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        text: form.prompt,
-        voice: form.voice,
+        text,
+        voice,
         provider: form.ttsProvider ?? "auto",
       }),
     });
@@ -339,8 +409,14 @@ export function GenerationDialog(props: GenerationDialogProps) {
     await queryClient.invalidateQueries({ queryKey: ["assets", workId] });
   }
 
-  async function dispatchProviderGenerate(): Promise<void> {
+  async function dispatchProviderGenerate(req: GenerationRequest): Promise<void> {
     if (!selectedProviderId) return;
+    const p = req.params;
+    if (p.kind !== "video") return;
+    const isVar = req.mode === "variant";
+    const prompt = isVar
+      ? fuseVariantPrompt(p.prompt, p.changeDirection)
+      : p.prompt;
     // Only forward aspectRatio when the user picked a real video ratio. A stale
     // image-tab value (e.g. 4:5, which the video <select> can't display) would
     // otherwise reach the seedance gateway as an off-enum value. Omitting it
@@ -352,6 +428,10 @@ export function GenerationDialog(props: GenerationDialogProps) {
       ? form.aspectRatio
       : undefined;
     const durationSec = Number(form.duration) || 5;
+    // Variant anchor: the source clip's uri becomes the i2v first frame. An
+    // explicit imageUrl field (create-mode i2v) takes precedence.
+    const firstFrameImage =
+      p.imageUrl || (isVar ? (req.source?.uri ?? undefined) : undefined);
     const res = await fetch(
       `/api/providers/${selectedProviderId}/generate-video`,
       {
@@ -359,9 +439,10 @@ export function GenerationDialog(props: GenerationDialogProps) {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           workId,
-          prompt: form.prompt,
+          prompt,
           durationSec,
           ...(aspectRatio ? { aspectRatio } : {}),
+          ...(firstFrameImage ? { firstFrameImage } : {}),
         }),
       },
     );
@@ -376,41 +457,36 @@ export function GenerationDialog(props: GenerationDialogProps) {
     if (!isFormReady(form, source)) return;
     setDispatchError(null);
     const request = formStateToRequest(form, source);
-    if (shouldDispatchProvider) {
-      // Provider dispatch is the canonical path for video — skip the chat
-      // notification to avoid duplicate work (the agent would otherwise run
-      // its own pipeline: read SKILL.md, etc.).
-      setIsGenerating(true);
-      try {
-        await dispatchProviderGenerate();
-      } catch (err) {
-        setDispatchError(
-          err instanceof Error ? err.message : t("studio.generationDialog.errFallback"),
-        );
-        setIsGenerating(false);
-        return; // keep dialog open so user sees the error
+    setIsGenerating(true);
+    try {
+      // B3 — every path direct-dispatches; no chat death-envelope.
+      if (shouldDispatchProvider) {
+        await dispatchProviderGenerate(request);
+      } else if (shouldDispatchTts) {
+        await dispatchTtsGenerate(request);
+      } else if (form.kind === "image") {
+        await dispatchImageGenerate(request);
+      } else if (form.kind === "audio" && form.audioSubKind === "bgm") {
+        await dispatchBgmGenerate(request);
+      } else {
+        // Reachable only when kind===video but no real provider is selected
+        // (the dropdown is empty / errored). Surface a clear error instead of
+        // silently doing nothing.
+        throw new Error("no video provider selected");
       }
+    } catch (err) {
+      // The thrown message is raw English server text — show the localized
+      // fallback and keep the technical detail in the console for debugging.
+      console.warn("[generation] dispatch failed:", err);
+      setDispatchError(
+        shouldDispatchTts
+          ? t("studio.generationDialog.ttsErrFallback")
+          : t("studio.generationDialog.errFallback"),
+      );
       setIsGenerating(false);
-    } else if (shouldDispatchTts) {
-      // #3 — TTS direct dispatch. Same try/catch/keep-open flow as video.
-      // No chat notification (the old TTS notification path is dead).
-      setIsGenerating(true);
-      try {
-        await dispatchTtsGenerate();
-      } catch (err) {
-        // The thrown message is raw English server text (e.g. "all providers
-        // failed: edge-tts ENOENT, no OpenAI key") — show the localized
-        // fallback to the user and keep the technical detail in the console.
-        console.warn("[tts] dispatch failed:", err);
-        setDispatchError(t("studio.generationDialog.ttsErrFallback"));
-        setIsGenerating(false);
-        return; // keep dialog open so user sees the error
-      }
-      setIsGenerating(false);
-    } else {
-      const notification = buildGenerationNotification(request);
-      chat.send(notification.message);
+      return; // keep dialog open so user sees the error
     }
+    setIsGenerating(false);
     onOpenChange(false);
   }
 
@@ -448,8 +524,10 @@ export function GenerationDialog(props: GenerationDialogProps) {
             </Dialog.Title>
             <Dialog.Description style={subtitleStyle}>
               {isVariant
-                ? `Variant of ${source?.name ?? "source"} — describe what to change`
-                : "Compose a generation request — the agent will run the script and update composition.yaml"}
+                ? t("studio.generationDialog.subtitleVariant", {
+                    name: source?.name ?? "source",
+                  })
+                : t("studio.generationDialog.subtitleCreate")}
             </Dialog.Description>
           </header>
 
@@ -494,10 +572,11 @@ export function GenerationDialog(props: GenerationDialogProps) {
 
             {/* #92 — the provider list is video-only (all entries are t2v/i2v
                 models; hint literally reads "用于视频生成的服务方"). image/audio
-                generation ignores selectedProviderId entirely (toRequest +
-                dispatchGeneration hardcode the image/audio model), so showing
-                this select on those tabs was a misleading dead control that
-                defaulted to a *video* model. Gate it to the VIDEO tab. Stub
+                generation ignores selectedProviderId entirely — they
+                direct-dispatch to /api/generate/image and /api/generate/bgm,
+                which pick their own provider server-side — so showing this
+                select on those tabs would be a misleading dead control that
+                defaults to a *video* model. Gate it to the VIDEO tab. Stub
                 providers are also disabled so they can't be picked. */}
             {form.kind === "video" && providers.length > 0 && (
               <Field label={t("studio.generationDialog.fieldProvider")} hint={t("studio.generationDialog.fieldProviderHint")}>
@@ -589,7 +668,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
             )}
           </div>
 
-          {isGenerating && (shouldDispatchProvider || shouldDispatchTts) && (
+          {isGenerating && (
             <div
               role="status"
               aria-live="polite"
@@ -599,14 +678,16 @@ export function GenerationDialog(props: GenerationDialogProps) {
               <span style={pulseDotStyle} aria-hidden="true" />
               <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
                 <span style={progressLabelStyle}>
-                  {shouldDispatchTts ? (
-                    t("studio.generationDialog.ttsGenerating")
-                  ) : (
+                  {shouldDispatchProvider ? (
                     <>
                       Generating via {selectedProvider?.displayName ?? "provider"}
                       {" · "}
                       typically 70-180s for Seedance
                     </>
+                  ) : shouldDispatchTts ? (
+                    t("studio.generationDialog.ttsGenerating")
+                  ) : (
+                    t("studio.generationDialog.generatingGeneric")
                   )}
                 </span>
                 <span style={progressTimerStyle}>
@@ -756,6 +837,11 @@ function VideoFields({
             ))}
           </select>
         </Field>
+        {/* B3 — the resolution <select> was a dead control: the dispatch
+            endpoint (/api/providers/:id/generate-video) has no `resolution`
+            parameter (only durationSec / aspectRatio / firstFrameImage), so the
+            value was always silently dropped. Removed rather than left dangling
+            — output dimensions follow the work's canvas + chosen aspectRatio. */}
         <Field label={t("studio.generationDialog.fieldAspectRatio")}>
           <select
             value={form.aspectRatio ?? "9:16"}
@@ -765,21 +851,6 @@ function VideoFields({
             {VIDEO_ASPECTS.map((a) => (
               <option key={a} value={a}>
                 {a}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label={t("studio.generationDialog.fieldResolution")}>
-          <select
-            value={form.resolution ?? "720p"}
-            onChange={(e) =>
-              patch("resolution", e.target.value as "720p" | "1080p")
-            }
-            style={inputStyle}
-          >
-            {VIDEO_RESOLUTIONS.map((r) => (
-              <option key={r} value={r}>
-                {r}
               </option>
             ))}
           </select>

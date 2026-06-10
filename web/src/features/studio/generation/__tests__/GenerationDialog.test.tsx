@@ -9,7 +9,6 @@ const baseState: FormState = {
   height: undefined,
   style: undefined,
   duration: "4",
-  resolution: "720p",
   imageUrl: undefined,
   audioSubKind: "bgm",
   voice: undefined,
@@ -42,7 +41,6 @@ describe("formStateToRequest — video variant", () => {
     prompt: "(unused in variant mode)",
     aspectRatio: "9:16",
     duration: "4",
-    resolution: "720p",
     changeDirection: "slower droop, less aggressive lighting",
   };
   const source: NonNullable<Parameters<typeof formStateToRequest>[1]> = {

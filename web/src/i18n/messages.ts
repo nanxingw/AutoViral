@@ -662,6 +662,9 @@ export const en = {
     generationDialog: {
       headerCreateAsset: "Create asset",
       headerCreateVariant: "Create variant",
+      subtitleCreate: "Describe what you want — generation runs directly, no agent round-trip",
+      subtitleVariant: "Variant of {name} — describe what to change",
+      generatingGeneric: "Generating…",
       btnGenerate: "Generate",
       btnGenerating: "Generating…",
       progressElapsed: "Elapsed {time}",
@@ -1773,6 +1776,9 @@ export const zh: DeepShape<Messages> = {
     generationDialog: {
       headerCreateAsset: "新建素材",
       headerCreateVariant: "新建变体",
+      subtitleCreate: "描述你想要的画面——直接生成，无需经过 agent",
+      subtitleVariant: "{name} 的变体——描述需要改动的地方",
+      generatingGeneric: "生成中…",
       btnGenerate: "生成",
       btnGenerating: "生成中…",
       progressElapsed: "已用时 {time}",

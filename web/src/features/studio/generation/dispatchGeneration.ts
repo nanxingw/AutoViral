@@ -1,30 +1,37 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Structured generation requests — Phase 2.4
+// Generation request shapes + direct-dispatch helpers
 // ─────────────────────────────────────────────────────────────────────────────
 //
-// This module is the bridge between the studio's generation UI (Phase 2.5
-// Generation Dialog + future asset-panel "Create" / dive-canvas "Variant"
-// buttons) and the agent's script-calling machinery. The viewer never calls
-// providers directly — it gathers user intent in a rich form, then dispatches
-// ONE structured chat notification for the agent to act on.
+// History: this module used to build a "death-envelope" chat notification —
+// `buildGenerationNotification` told the agent to `Run the script in
+// modules/assets/scripts/*.py`. Those four scripts (openrouter_generate.py /
+// seedance_generate.py / tts_generate.py / music_generate.py) do NOT exist on
+// disk (server-side dead refs were retired in 6e3693c; the web copy was the
+// last hold-out, shipped in web/dist), so the envelope commanded the agent to
+// run nothing. PRD-0009 B3 retired the script-calling machinery entirely.
 //
-// The notification is dual-purpose:
-//   1. A short human-readable top line that reads well in the chat log
-//   2. A fenced JSON payload the agent parses to get the exact params
-//   3. A brief instruction block telling the agent which script to run and
-//      how to edit composition.yaml
+// The dialog now DIRECT-DISPATCHES to real HTTP endpoints — no chat envelope,
+// no agent round-trip. This module is reduced to the pure request shapes
+// (produced by GenerationDialog.formStateToRequest) plus two small helpers the
+// dialog uses to build endpoint bodies:
+//   - semanticFilename(): a stable, human-readable output name (the old
+//     envelope made the agent pick one; direct-dispatch must supply it).
+//   - fuseVariantPrompt(): folds the variant's `change_direction` into the
+//     source's frozen `prompt` (the old envelope made the agent fuse them).
 //
-// SKILL.md and modules/assets/capabilities/structured-generation.md (Phase 2.6)
-// have the agent-facing handler spec. Don't duplicate that here.
+// Endpoint map (kind × mode → endpoint), wired in GenerationDialog.onGenerate:
+//   image  create  → POST /api/generate/image            {workId,prompt,filename,...}
+//   image  variant → POST /api/generate/image            + referenceImage=source.uri, fused prompt
+//   video  create  → POST /api/providers/:id/generate-video  (already wired pre-B3)
+//   video  variant → POST /api/providers/:id/generate-video  + firstFrameImage=source.uri
+//   audio  tts     → POST /api/works/:id/tts             (create wired pre-B3; variant now too)
+//   audio  bgm     → POST /api/generate/bgm              {workId,prompt,filename?,durationSeconds?}
 //
-// Ported from pandazki/pneuma-skills modes/clipcraft/viewer/generation
-// /dispatchGeneration.ts. Protocol shape preserved; provider mapping is now
-// OpenRouter-only:
-//   - image → openai/gpt-5.4-image-2 (provider id `openrouter-image`)
-//   - video → bytedance/seedance-2.0 (Seedance 2.0)
-//   - TTS  → edge-tts/multilingual
-//   - BGM  → google/lyria-3-pro-preview
-// Jimeng / Dreamina CLI fallbacks removed 2026-05-14.
+// Provenance note: the death-envelope-era variant lineage (`derive` edge,
+// fromAssetId=source.id) was always dead because the scripts it instructed
+// never ran. Direct-dispatch endpoints register a plain `generate` edge
+// (fromAssetId:null); restoring derive lineage is a server-side follow-up, out
+// of scope for B3.
 
 export type AssetKind = "image" | "video" | "audio";
 export type RequestMode = "create" | "variant";
@@ -36,7 +43,7 @@ export interface ImageParams {
    *  the variant lives on `changeDirection`. */
   prompt: string;
   /** Variant-mode only: user's modification direction, e.g. "make the
-   *  character older". Agent fuses this with `prompt`. */
+   *  character older". Fused with `prompt` by fuseVariantPrompt(). */
   changeDirection?: string;
   aspectRatio?: string;
   width?: number;
@@ -52,7 +59,8 @@ export interface VideoParams {
    *  (integers; 3 is not a real value). Caller passes a string like "4" / "10". */
   duration: string;
   aspectRatio?: "16:9" | "9:16" | "1:1" | "3:4" | "4:3" | "21:9" | "9:21";
-  resolution?: "480p" | "720p" | "1080p";
+  /** image-to-video first-frame anchor URL/path. The /generate-video endpoint
+   *  maps this onto `firstFrameImage`. */
   imageUrl?: string;
 }
 
@@ -71,13 +79,11 @@ export type GenerationParams = ImageParams | VideoParams | AudioParams;
 export interface GenerationRequest {
   mode: RequestMode;
   params: GenerationParams;
-  /** Populated when mode === "variant". The new asset's provenance edge will
-   *  carry fromAssetId = source.id and operation.type = "derive".
-   *
-   *  The source envelope is the *read-only identity* of the variant lineage:
-   *  original prompt, model, and format knobs. User feedback flows in as
-   *  `params.changeDirection` (kept separate from the frozen source fields)
-   *  — the agent is responsible for fusing the two per skill guidance. */
+  /** Populated when mode === "variant". The source envelope is the *read-only
+   *  identity* of the variant lineage: original prompt, model, format knobs,
+   *  and the source asset's `uri` (used as the derive anchor — referenceImage
+   *  for image, firstFrameImage for video). User feedback flows in as
+   *  `params.changeDirection`, fused into the final prompt by the dialog. */
   source?: {
     id: string;
     /** Human label / semantic id, e.g. "asset-panda-sad-v2". */
@@ -98,254 +104,47 @@ export interface GenerationRequest {
   };
 }
 
-export interface ViewerNotification {
-  type: string;
-  severity: "info" | "warning";
-  summary: string;
-  message: string;
+// ─── Direct-dispatch helpers ─────────────────────────────────────────────────
+
+/**
+ * Build a stable, human-readable output filename. The death envelope made the
+ * agent pick a "semantic asset id (never a UUID)"; direct-dispatch must supply
+ * the filename to the endpoint itself, so we derive one from the prompt and
+ * stamp it with a short time suffix to avoid clobbering an earlier asset with
+ * the same words.
+ *
+ * @param prompt   The (already-fused for variants) generation prompt.
+ * @param ext      File extension WITHOUT the dot, e.g. "png", "mp3".
+ * @param now      Injectable clock for deterministic tests.
+ */
+export function semanticFilename(
+  prompt: string,
+  ext: string,
+  now: number = Date.now(),
+): string {
+  const slug =
+    prompt
+      .toLowerCase()
+      .replace(/[^a-z0-9一-鿿]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 40) || "asset";
+  return `${slug}-${now.toString(36)}.${ext}`;
 }
 
-const TAG_CREATE = "autoviral:create-asset";
-const TAG_VARIANT = "autoviral:generate-variant";
-
-export function buildGenerationNotification(
-  request: GenerationRequest,
-): ViewerNotification {
-  const tag = request.mode === "variant" ? TAG_VARIANT : TAG_CREATE;
-  const summary = buildSummary(request);
-  const payload = buildPayload(request);
-  const instructions = buildInstructions(request);
-
-  return {
-    type: tag,
-    severity: "warning",
-    summary: `/${tag}`,
-    message: `[${tag}] ${summary}\n\n\`\`\`json\n${JSON.stringify(payload, null, 2)}\n\`\`\`\n\n${instructions}`,
-  };
-}
-
-function buildSummary(req: GenerationRequest): string {
-  const kind = req.params.kind;
-  if (req.mode === "variant" && req.source) {
-    const change = truncate(req.params.changeDirection ?? "", 80);
-    return `Generate a variant of ${req.source.name} (${req.source.id}) — ${kind} — change: "${change}"`;
-  }
-  const promptPreview = truncate(req.params.prompt, 80);
-  return `Create a new asset — ${kind} — "${promptPreview}"`;
-}
-
-interface JsonPayload {
-  mode: RequestMode;
-  kind: AssetKind;
-  sub_kind?: "tts" | "bgm";
-  prompt?: string;
-  change_direction?: string;
-  params: Record<string, unknown>;
-  source?: {
-    asset_id: string;
-    asset_name: string;
-    uri?: string | null;
-    prompt?: string | null;
-    model?: string | null;
-    width?: number | null;
-    height?: number | null;
-    aspect_ratio?: string | null;
-    duration?: number | null;
-    voice?: string | null;
-  };
-  script: string;
-  /** "shell" if `script` is a binary in PATH (run as `<script> [args]`);
-   *  "python" if `script` is a Python module path (run as `python3 <script> [args]`).
-   *  Image/audio scripts are Python wrappers; video uses the `dreamina` CLI binary. */
-  executable_kind: "shell" | "python";
-  script_args: Record<string, string | number>;
-  provenance_hint: {
-    operation_type: "generate" | "derive";
-    from_asset_id: string | null;
-    agent_id: string;
-    label: string;
-    model: string;
-  };
-}
-
-function buildPayload(req: GenerationRequest): JsonPayload {
-  const isVariant = req.mode === "variant";
-  const base: Omit<JsonPayload, "params" | "script" | "executable_kind" | "script_args" | "provenance_hint"> = {
-    mode: req.mode,
-    kind: req.params.kind,
-  };
-  if (isVariant) {
-    base.change_direction = req.params.changeDirection ?? "";
-  } else {
-    base.prompt = req.params.prompt;
-  }
-  if (req.params.kind === "audio") {
-    (base as JsonPayload).sub_kind = req.params.subKind;
-  }
-  if (req.source) {
-    base.source = {
-      asset_id: req.source.id,
-      asset_name: req.source.name,
-      uri: req.source.uri ?? null,
-      prompt: req.source.sourcePrompt ?? null,
-      model: req.source.sourceModel ?? null,
-      width: req.source.sourceWidth ?? null,
-      height: req.source.sourceHeight ?? null,
-      aspect_ratio: req.source.sourceAspectRatio ?? null,
-      duration: req.source.sourceDuration ?? null,
-      voice: req.source.sourceVoice ?? null,
-    };
-  }
-  const r = resolveScriptForRequest(req);
-  return {
-    ...base,
-    params: r.params,
-    script: r.script,
-    executable_kind: r.executableKind,
-    script_args: r.scriptArgs,
-    provenance_hint: r.provenance,
-  };
-}
-
-interface Resolved {
-  params: Record<string, unknown>;
-  script: string;
-  executableKind: "shell" | "python";
-  scriptArgs: Record<string, string | number>;
-  provenance: JsonPayload["provenance_hint"];
-}
-
-function resolveScriptForRequest(req: GenerationRequest): Resolved {
-  const operationType: "generate" | "derive" =
-    req.mode === "variant" ? "derive" : "generate";
-  const fromAssetId = req.mode === "variant" ? (req.source?.id ?? null) : null;
-  const p = req.params;
-
-  switch (p.kind) {
-    case "image": {
-      const aspectRatio = p.aspectRatio ?? "1:1";
-      const args: Record<string, string | number> = { "--prompt": p.prompt };
-      if (p.width && p.height) {
-        args["--image-size"] = `${p.width}x${p.height}`;
-      } else {
-        args["--aspect-ratio"] = aspectRatio;
-      }
-      return {
-        params: {
-          prompt: p.prompt,
-          aspect_ratio: aspectRatio,
-          width: p.width ?? null,
-          height: p.height ?? null,
-          style: p.style ?? null,
-        },
-        script: "modules/assets/scripts/openrouter_generate.py",
-        executableKind: "python",
-        scriptArgs: args,
-        provenance: {
-          operation_type: operationType,
-          from_asset_id: fromAssetId,
-          agent_id: "autoviral-imagegen",
-          label: "openai/gpt-5.4-image-2",
-          model: "openai/gpt-5.4-image-2",
-        },
-      };
-    }
-    case "video": {
-      const isVariant = req.mode === "variant";
-      const autoImageUrl =
-        isVariant && req.source?.uri ? req.source.uri : null;
-      const resolvedImageUrl = p.imageUrl ?? autoImageUrl;
-      const useFromImage = !!resolvedImageUrl;
-      const args: Record<string, string | number> = {
-        "--prompt": p.prompt,
-        "--duration": p.duration,
-      };
-      if (p.aspectRatio) args["--aspect-ratio"] = p.aspectRatio;
-      if (p.resolution) args["--resolution"] = p.resolution;
-      if (useFromImage) args["--image-url"] = resolvedImageUrl as string;
-      const modelId = "bytedance/seedance-2.0";
-      return {
-        params: {
-          prompt: p.prompt,
-          duration: p.duration,
-          aspect_ratio: p.aspectRatio ?? "auto",
-          resolution: p.resolution ?? "720p",
-          image_url: resolvedImageUrl ?? null,
-        },
-        script: "modules/assets/scripts/seedance_generate.py",
-        executableKind: "python",
-        scriptArgs: args,
-        provenance: {
-          operation_type: operationType,
-          from_asset_id: fromAssetId,
-          agent_id: "autoviral-videogen",
-          label: modelId,
-          model: modelId,
-        },
-      };
-    }
-    case "audio": {
-      const isTts = p.subKind === "tts";
-      const args: Record<string, string | number> = isTts
-        ? { "--text": p.prompt }
-        : { "--prompt": p.prompt };
-      if (isTts && p.voice) args["--voice"] = p.voice;
-      if (!isTts && p.durationSeconds) args["--duration"] = p.durationSeconds;
-      return {
-        params: {
-          sub_kind: p.subKind,
-          prompt: p.prompt,
-          voice: p.voice ?? null,
-          duration_seconds: p.durationSeconds ?? null,
-        },
-        script: isTts
-          ? "modules/assets/scripts/tts_generate.py"
-          : "modules/assets/scripts/music_generate.py",
-        executableKind: "python",
-        scriptArgs: args,
-        provenance: {
-          operation_type: operationType,
-          from_asset_id: fromAssetId,
-          agent_id: isTts ? "autoviral-tts" : "autoviral-bgm",
-          label: isTts
-            ? "edge-tts/multilingual"
-            : "google/lyria-3-pro-preview",
-          model: isTts
-            ? "edge-tts/multilingual"
-            : "google/lyria-3-pro-preview",
-        },
-      };
-    }
-  }
-}
-
-function buildInstructions(req: GenerationRequest): string {
-  if (req.mode === "variant") {
-    return [
-      "Handling (variant):",
-      "1. Parse the JSON block above. Note: `source` holds frozen identity (original prompt, model, dimensions, aspect, duration). `change_direction` is the user's delta — NOT a full prompt.",
-      "2. Synthesize the final prompt by fusing `source.prompt` with `change_direction`. Keep subject, setting, lighting, palette identical unless the change direction explicitly demands otherwise.",
-      "3. Honour source format: keep the same `--aspect-ratio` / `--duration` / `--image-size` as the source unless the change direction asks for a different size/length.",
-      "4. For image variants of small deltas (text swap, grain, color tweak), prefer adding `--ref-image <source.uri>` to route through edit mode.",
-      "5. Run the script in `script` with the flags in `script_args`. Append `--output <path>`.",
-      "6. Edit `composition.yaml`: append the new asset to `assets[]` and a `derive` edge to `provenance[]` using `provenance_hint`. `fromAssetId` = source asset id.",
-      "7. DO NOT add a clip to any track — leave timeline placement to the user.",
-      "8. Emit a <viewer-locator/> card pointing to the new asset when you confirm.",
-    ].join("\n");
-  }
-  return [
-    "Handling (create):",
-    "1. Parse the JSON block above.",
-    "2. Pick a semantic asset id (e.g. `asset-panda-intro`) — never a UUID.",
-    "3. Pick a relative output path under `assets/{kind}/`.",
-    "4. Run the script in `script` with the flags in `script_args`. Append `--output <path>`.",
-    "5. Edit `composition.yaml`: append the new asset to `assets[]` and a `generate` edge to `provenance[]` using `provenance_hint`. `fromAssetId` = null.",
-    "6. DO NOT add a clip to any track.",
-    "7. Emit a <viewer-locator/> card pointing to the new asset when you confirm.",
-  ].join("\n");
-}
-
-function truncate(s: string, max: number): string {
-  if (s.length <= max) return s;
-  return s.slice(0, max - 1) + "…";
+/**
+ * Fold a variant's `change_direction` into the source's frozen prompt. The
+ * death envelope's instruction #2 ("Synthesize the final prompt by fusing
+ * source.prompt with change_direction") was the agent's job; direct-dispatch
+ * builds it in the frontend. We keep the source identity first, then append the
+ * delta so the provider sees both.
+ */
+export function fuseVariantPrompt(
+  sourcePrompt: string | null | undefined,
+  changeDirection: string | undefined,
+): string {
+  const base = (sourcePrompt ?? "").trim();
+  const delta = (changeDirection ?? "").trim();
+  if (!base) return delta;
+  if (!delta) return base;
+  return `${base}\n\nChange: ${delta}`;
 }

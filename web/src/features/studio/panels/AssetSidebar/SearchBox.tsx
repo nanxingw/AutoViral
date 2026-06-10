@@ -116,12 +116,15 @@ export function SearchBox({ workId, debounceMs = 300 }: Props) {
             borderRadius: 6,
           }}
         >
-          <div style={{ color: "var(--text-dim)", marginBottom: 2 }}>
+          {/* B3 — the old install hint pointed at a requirements.txt under
+              skills/autoviral/modules/, a path deleted in the agentic-terminal
+              refactor (29b9e96). The dead `pip install -r …` <code> block was
+              removed; the i18n banner stays so the open_clip-missing state is
+              still surfaced honestly (no actionable path until the search
+              feature returns as a sibling skill). */}
+          <div style={{ color: "var(--text-dim)" }}>
             {t("studio.assetSearch.stubInstall")}
           </div>
-          <code style={{ fontSize: 10 }}>
-            pip install -r skills/autoviral/modules/research/scripts/clip_index/requirements.txt
-          </code>
         </div>
       )}
 

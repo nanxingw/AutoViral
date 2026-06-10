@@ -112,7 +112,13 @@ describe("SearchBox", () => {
     });
     wrap(<SearchBox workId="w1" debounceMs={0} />);
     expect(await screen.findByText(/Semantic search unavailable/i)).toBeInTheDocument();
-    expect(screen.getByText(/pip install/i)).toBeInTheDocument();
+    // B3 — the dead `pip install -r skills/autoviral/modules/.../requirements.txt`
+    // <code> block (path deleted in 29b9e96) was removed. The banner still
+    // surfaces the open_clip-missing state and disables the input.
+    expect(screen.queryByText(/pip install/i)).toBeNull();
+    expect(
+      screen.queryByText(/skills\/autoviral\/modules/i),
+    ).toBeNull();
     const input = screen.getByLabelText(/search assets/i) as HTMLInputElement;
     expect(input.disabled).toBe(true);
   });

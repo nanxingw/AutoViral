@@ -99,7 +99,10 @@ describe("Phase 8.1 integration — LibraryTab + SearchBox", () => {
     wrap(<LibraryTab workId="phase8-1-test" />);
 
     expect(await screen.findByText(/Semantic search unavailable/i)).toBeInTheDocument();
-    expect(screen.getByText(/pip install/i)).toBeInTheDocument();
+    // B3 — the dead `pip install -r skills/autoviral/modules/.../requirements.txt`
+    // hint was removed (path deleted in 29b9e96). The banner + disabled input
+    // still mark the stub state.
+    expect(screen.queryByText(/pip install/i)).toBeNull();
     const input = await screen.findByLabelText(/search assets/i);
     expect((input as HTMLInputElement).disabled).toBe(true);
   });
