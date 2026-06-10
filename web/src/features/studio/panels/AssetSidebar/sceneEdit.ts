@@ -93,6 +93,56 @@ export function generateScene(
 }
 
 /**
+ * T1 (PRD-0008) — APPEND a new 分镜 via the bridge, the SAME route the agent's
+ * `autoviral scene add --title …` CLI hits (POST /scene). The body carries the
+ * required `title` (the op mints the `scn_` id + auto-assigns `order`); the
+ * server echoes the minted sceneId in its `{ ok, result: { sceneId } }` envelope
+ * so the caller can immediately expand/focus the brand-new card (T3). On success
+ * the bridge broadcasts `composition-changed`, which refetches the composition
+ * into the store → the list re-renders with the new card from server-fresh data.
+ *
+ * Mirrors patchScene (lines 58-68): awaits + propagates so the caller can surface
+ * a failure (e.g. an empty title → 400) instead of silently dropping the add.
+ * Unlike patchScene it READS the envelope's `result.sceneId` — the one bridge
+ * scene verb that returns data (matching `GenerateCaptionsButton`'s `res.result`
+ * read; `apiFetch` returns the WHOLE `{ ok, result }` envelope, never unwrapping).
+ */
+export async function addSceneRemote(
+  workId: string,
+  init: { title: string },
+): Promise<string> {
+  const res = await apiFetch<{ ok: boolean; result?: { sceneId?: string } }>(
+    `/api/bridge/v1/scene`,
+    {
+      method: "POST",
+      headers: BRIDGE_HEADERS(workId),
+      body: { title: init.title },
+    },
+  );
+  return res.result?.sceneId ?? "";
+}
+
+/**
+ * T1 (PRD-0008) — REMOVE a 分镜 via the bridge, the SAME route the agent's
+ * `autoviral scene remove <id>` CLI hits (DELETE /scene/:id). The id travels in
+ * the path, so there is no body. `ops.removeScene` splices the scene out +
+ * recompacts `order` to contiguous 0..N-1. On success the bridge broadcasts
+ * `composition-changed`, which refetches the composition → the card disappears.
+ *
+ * Mirrors patchScene (lines 58-68): awaits + propagates so the caller can surface
+ * a failure (e.g. an unknown id → 400) instead of silently dropping the delete.
+ */
+export function removeSceneRemote(
+  workId: string,
+  sceneId: string,
+): Promise<unknown> {
+  return apiFetch(`/api/bridge/v1/scene/${sceneId}`, {
+    method: "DELETE",
+    headers: BRIDGE_HEADERS(workId),
+  });
+}
+
+/**
  * Reorder scenes to the EXACT `orderedSceneIds` sequence via the bridge. The op
  * requires a complete permutation of existing scene ids and recompacts `order`
  * to contiguous 0..N-1 server-side, so we always send the full expected order.

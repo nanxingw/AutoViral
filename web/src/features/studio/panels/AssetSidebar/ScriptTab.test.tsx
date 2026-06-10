@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ScriptTab } from "./ScriptTab";
 import { useComposition } from "../../store";
@@ -17,6 +17,23 @@ const apiFetch = vi.fn();
 vi.mock("@/lib/api", async () => {
   const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
   return { ...actual, apiFetch: (...args: unknown[]) => apiFetch(...args) };
+});
+
+// PRD-0008 T1 lands `addSceneRemote` / `removeSceneRemote` in sceneEdit.ts in a
+// SEPARATE slice (another agent). To keep T2/T3 tests independent of that file's
+// state, partially-mock sceneEdit: pass every real function through (patch /
+// generate / reorder / moveInOrder still hit the apiFetch mock) but stub the two
+// add/remove wrappers so we can assert ScriptTab calls them with the right args.
+const addSceneRemote = vi.fn();
+const removeSceneRemote = vi.fn();
+vi.mock("./sceneEdit", async () => {
+  const actual =
+    await vi.importActual<typeof import("./sceneEdit")>("./sceneEdit");
+  return {
+    ...actual,
+    addSceneRemote: (...args: unknown[]) => addSceneRemote(...args),
+    removeSceneRemote: (...args: unknown[]) => removeSceneRemote(...args),
+  };
 });
 
 // S3 (PRD-0007) — ScriptTab renders comp.scenes as a read-only card list,
@@ -88,9 +105,33 @@ beforeEach(() => {
   useScript.getState().reset();
   apiFetch.mockReset();
   apiFetch.mockResolvedValue({ ok: true });
+  addSceneRemote.mockReset();
+  // The real addSceneRemote resolves to the new scene's id (string).
+  addSceneRemote.mockResolvedValue("s_new");
+  removeSceneRemote.mockReset();
+  removeSceneRemote.mockResolvedValue({ ok: true });
   stubScriptFetch("");
   useLocaleStore.setState({ locale: "en" });
+  try {
+    localStorage.removeItem("autoviral.scriptFold.collapsed");
+  } catch {
+    /* jsdom always has localStorage; guard for safety */
+  }
 });
+
+// PRD-0008 — each SceneCard is COLLAPSED by default (a read-only summary row);
+// the editing controls only exist once expanded (accordion). Click the row's
+// expand button to mount the in-card Inspector before asserting on its fields.
+async function expandCard(sceneId: string) {
+  const card = screen
+    .getAllByTestId("scene-card")
+    .find((el) => el.getAttribute("data-scene-id") === sceneId)!;
+  if (card.getAttribute("data-expanded") === "true") return card;
+  // The expand toggle is the row button labelled "Expand shot N".
+  const toggle = within(card).getByRole("button", { name: /expand shot/i });
+  await userEvent.click(toggle);
+  return card;
+}
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -109,35 +150,36 @@ describe("ScriptTab (S3) — read-only storyboard cards", () => {
     expect(cards[1].getAttribute("data-scene-id")).toBe("s2");
   });
 
-  it("seeds the title control and renders a human-friendly shot number (order+1)", () => {
+  it("seeds the title control and renders a human-friendly shot number (order+1)", async () => {
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
-    // S4: title is an editable input now → assert its seeded value.
+    // PRD-0008: the title input lives in the expanded Inspector now.
+    await expandCard("s1");
     expect(
       (screen.getByLabelText("Edit shot title") as HTMLInputElement).value,
     ).toBe("Open on the kitchen");
-    // order 0 → "Shot 1"
+    // order 0 → "Shot 1" (shown in the always-visible summary row).
     expect(screen.getByText(/shot 1/i)).toBeInTheDocument();
   });
 
-  it("renders localised intent / status / shot / camera labels (EN catalog)", () => {
+  it("renders localised intent / status / shot / camera labels (EN catalog)", async () => {
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
-    // intent: hook → "Hook"
+    // intent: hook → "Hook" (summary chip). shotSize: long → "Wide" (summary).
+    // status: generated → "Generated" (dot aria-label/title, in the summary row).
     expect(screen.getByText("Hook")).toBeInTheDocument();
-    // status: generated → "Generated" (on the status dot's aria-label/title)
     expect(screen.getByRole("img", { name: "Generated" })).toBeInTheDocument();
-    // shotSize: long → "Wide"
     expect(screen.getByText("Wide")).toBeInTheDocument();
-    // cameraMovement: push → "Push in"
+    // cameraMovement: push → "Push in" — lives in the Inspector; expand to see.
+    await expandCard("s1");
     expect(screen.getByText("Push in")).toBeInTheDocument();
   });
 
-  it("seeds prompt, narration, and duration controls from the scene", () => {
-    // S4: these are now editable controls, so we assert the seeded VALUE rather
-    // than read-only text. prompt → textarea value, duration → number input.
+  it("seeds prompt, narration, and duration controls from the scene", async () => {
+    // PRD-0008: these editable controls live in the expanded Inspector.
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
     expect(
       (screen.getByLabelText("Edit visual description") as HTMLTextAreaElement)
         .value,
@@ -152,14 +194,14 @@ describe("ScriptTab (S3) — read-only storyboard cards", () => {
     ).toBe("4");
   });
 
-  it("leaves optional controls UNSET on a sparse scene (no leaked defaults)", () => {
-    // S4: the controls are always present (they're how you fill an empty scene),
-    // but on a sparse scene they must read as unset — empty selects / inputs,
-    // never a value leaked from a sibling scene.
+  it("leaves optional controls UNSET on a sparse scene (no leaked defaults)", async () => {
+    // On a sparse scene the Inspector controls must read as unset — empty
+    // selects / inputs, never a value leaked from a sibling scene.
     loadScenes([SPARSE_SCENE]);
     render(<ScriptTab />);
-    // status: planned → hollow dot, aria-label "Planned".
+    // status: planned → hollow dot, aria-label "Planned" (summary row).
     expect(screen.getByRole("img", { name: "Planned" })).toBeInTheDocument();
+    await expandCard("s2");
     // intent / shotSize / camera selects sit on the "—" (empty) option.
     expect((screen.getByLabelText("Set intent") as HTMLSelectElement).value).toBe("");
     expect((screen.getByLabelText("Set shot size") as HTMLSelectElement).value).toBe("");
@@ -176,37 +218,143 @@ describe("ScriptTab (S3) — read-only storyboard cards", () => {
     ).toBe("");
   });
 
-  it("shows the 'no linked script section' note when mdAnchor is missing", () => {
+  it("shows the 'no linked script section' note when mdAnchor is missing", async () => {
     loadScenes([SPARSE_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s2");
     expect(
       screen.getByText(/no linked script section/i),
     ).toBeInTheDocument();
   });
 
-  it("does NOT show the 'no linked' note when mdAnchor is present", () => {
+  it("does NOT show the 'no linked' note when mdAnchor is present", async () => {
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
     expect(screen.queryByText(/no linked script section/i)).toBeNull();
   });
 
-  it("shows the onboarding empty state when the work has no scenes", () => {
-    // Existing work, no scenes key at all.
+  it("shows the onboarding empty state with an add-shot button when the work has no scenes", () => {
+    // Existing work, no scenes. PRD-0008 T3 replaces the dead "autoviral scene
+    // add" copy with a real PRIMARY add button.
     loadScenes([]);
     render(<ScriptTab />);
     expect(screen.getByText(/no storyboard yet/i)).toBeInTheDocument();
-    expect(screen.getByText(/autoviral scene add/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /new shot/i }),
+    ).toBeInTheDocument();
     expect(screen.queryByTestId("scene-card")).toBeNull();
   });
 
-  it("EN locale renders the panel (incl. placeholders + aria) with no Chinese characters", () => {
+  it("EN locale renders the panel (incl. placeholders + aria) with no Chinese characters", async () => {
     // A SPARSE scene leaves prompt/narration/duration empty so their
     // placeholders render — and we assert over innerHTML (not textContent) so
-    // attribute values (placeholder=…, aria-label=…) are covered too. A
-    // textContent-only check would miss a Chinese leak in a placeholder (#73/#83).
+    // attribute values (placeholder=…, aria-label=…) are covered too.
     loadScenes([SPARSE_SCENE, FULL_SCENE]);
     const { container } = render(<ScriptTab />);
+    await expandCard("s2"); // mount the Inspector so its placeholders are checked
     expect(container.innerHTML).not.toMatch(/[一-鿿]/);
+  });
+});
+
+// ── PRD-0008 T2 — collapsed shot-row + accordion expansion ───────────────────
+describe("ScriptTab (T2) — folding shot sheet (collapsed row ↔ inspector)", () => {
+  function inCard(sceneId: string) {
+    const card = screen
+      .getAllByTestId("scene-card")
+      .find((el) => el.getAttribute("data-scene-id") === sceneId)!;
+    return within(card);
+  }
+
+  it("collapsed by default: NO form controls (no textarea / select / edit inputs)", () => {
+    loadScenes([FULL_SCENE, SPARSE_SCENE]);
+    render(<ScriptTab />);
+    // Zero scene-editing controls visible while every card is collapsed.
+    expect(screen.queryByLabelText("Edit shot title")).toBeNull();
+    expect(screen.queryByLabelText("Edit visual description")).toBeNull();
+    expect(screen.queryByLabelText("Set intent")).toBeNull();
+    expect(screen.queryByLabelText("Set shot size")).toBeNull();
+    expect(screen.queryByLabelText("Set camera movement")).toBeNull();
+    expect(screen.queryByLabelText("Edit duration (seconds)")).toBeNull();
+    // No <textarea>/<select> anywhere in the card list (the ScriptEditor's own
+    // textarea lives above; scope the query to the cards).
+    for (const card of screen.getAllByTestId("scene-card")) {
+      expect(card.querySelector("textarea")).toBeNull();
+      expect(card.querySelector("select")).toBeNull();
+      expect(card.querySelector('input[type="text"]')).toBeNull();
+    }
+  });
+
+  it("clicking a row expands its Inspector (the edit controls appear)", async () => {
+    loadScenes([FULL_SCENE]);
+    render(<ScriptTab />);
+    expect(screen.queryByLabelText("Edit shot title")).toBeNull();
+    await expandCard("s1");
+    expect(screen.getByLabelText("Edit shot title")).toBeInTheDocument();
+  });
+
+  it("accordion: opening a second card collapses the first (only one open)", async () => {
+    loadScenes([FULL_SCENE, SPARSE_SCENE]);
+    render(<ScriptTab />);
+
+    await expandCard("s1");
+    expect(inCard("s1").getByLabelText("Edit shot title")).toBeInTheDocument();
+
+    await expandCard("s2");
+    // s2 now open…
+    expect(inCard("s2").getByLabelText("Edit shot title")).toBeInTheDocument();
+    // …and s1 collapsed (its inspector controls gone).
+    expect(inCard("s1").queryByLabelText("Edit shot title")).toBeNull();
+  });
+
+  it("clicking an open row's header collapses it (toggle off)", async () => {
+    loadScenes([FULL_SCENE]);
+    render(<ScriptTab />);
+    const card = await expandCard("s1");
+    expect(within(card).getByLabelText("Edit shot title")).toBeInTheDocument();
+    // Click the (now "Collapse shot 1") header to close.
+    await userEvent.click(
+      within(card).getByRole("button", { name: /collapse shot/i }),
+    );
+    expect(within(card).queryByLabelText("Edit shot title")).toBeNull();
+  });
+
+  it("a stale scene shows a 'Needs regen' TEXT badge (asserted by text, not colour)", () => {
+    loadScenes([{ ...SPARSE_SCENE, status: "stale" }]);
+    render(<ScriptTab />);
+    // The badge is read by its textContent — never by hue (e2e Hard rule 5).
+    expect(screen.getByTestId("stale-badge")).toHaveTextContent(/needs regen/i);
+    // And the status dot's accessible name is "Stale".
+    expect(screen.getByRole("img", { name: "Stale" })).toBeInTheDocument();
+  });
+
+  it("non-stale scenes do NOT show the 'Needs regen' badge", () => {
+    loadScenes([FULL_SCENE, SPARSE_SCENE]); // generated + planned
+    render(<ScriptTab />);
+    expect(screen.queryByTestId("stale-badge")).toBeNull();
+  });
+
+  it("a successful field edit shows the ✓ saved micro-feedback", async () => {
+    loadScenes([FULL_SCENE]);
+    render(<ScriptTab />);
+    await expandCard("s1");
+    const input = screen.getByLabelText("Edit shot title") as HTMLInputElement;
+    await userEvent.clear(input);
+    await userEvent.type(input, "Renamed");
+    input.blur();
+    // After the PATCH resolves, the ✓ saved status appears (we assert presence,
+    // not the fade animation).
+    expect(await screen.findByText(/✓ saved/i)).toBeInTheDocument();
+  });
+
+  it("the collapsed summary row carries the duration / shot / intent at a glance", () => {
+    loadScenes([FULL_SCENE]);
+    render(<ScriptTab />);
+    const card = inCard("s1");
+    // durationSec 4 → "4.0s"
+    expect(card.getByTestId("summary-duration")).toHaveTextContent("4.0s");
+    expect(card.getByTestId("summary-shot")).toHaveTextContent("Wide");
+    expect(card.getByTestId("summary-intent")).toHaveTextContent("Hook");
   });
 });
 
@@ -229,6 +377,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
   it("editing the title → blur PATCHes /scene/:id with {title} + work-id header", async () => {
     loadScenes([FULL_SCENE, SPARSE_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
 
     const input = inCard("s1").getByLabelText("Edit shot title") as HTMLInputElement;
     // jsdom: clear + type, then blur to commit.
@@ -247,6 +396,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
   it("does NOT PATCH when the field is left unchanged (blur with no edit)", async () => {
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
     const input = screen.getByLabelText("Edit shot title") as HTMLInputElement;
     input.focus();
     input.blur();
@@ -258,6 +408,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
   it("changing the intent select PATCHes {intent: <enum literal>}", async () => {
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
     const select = screen.getByLabelText("Set intent") as HTMLSelectElement;
     await userEvent.selectOptions(select, "payoff");
 
@@ -270,6 +421,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
   it("changing shotSize / cameraMovement selects PATCH the enum literal", async () => {
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
 
     await userEvent.selectOptions(
       screen.getByLabelText("Set shot size") as HTMLSelectElement,
@@ -291,6 +443,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
   it("clearing an optional enum (— option) PATCHes the field as null (survives JSON, op deletes it)", async () => {
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
     const select = screen.getByLabelText("Set shot size") as HTMLSelectElement;
     // empty value = the "—" placeholder option = clear. Must travel as null,
     // NOT undefined: JSON.stringify drops undefined keys, so an undefined clear
@@ -304,6 +457,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
   it("editing durationSec → blur PATCHes {durationSec: <number>}", async () => {
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
     const input = screen.getByLabelText("Edit duration (seconds)") as HTMLInputElement;
     await userEvent.clear(input);
     await userEvent.type(input, "3");
@@ -317,6 +471,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
   it("clearing durationSec PATCHes the field as null (no fake 0; survives JSON)", async () => {
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
     const input = screen.getByLabelText("Edit duration (seconds)") as HTMLInputElement;
     await userEvent.clear(input);
     input.blur();
@@ -329,6 +484,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
   it("a negative durationSec is clamped to 0 (never persists a negative)", async () => {
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
     const input = screen.getByLabelText("Edit duration (seconds)") as HTMLInputElement;
     await userEvent.clear(input);
     await userEvent.type(input, "-5");
@@ -343,6 +499,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
     // FULL_SCENE (s1, order 0) + SPARSE_SCENE (s2, order 1).
     loadScenes([FULL_SCENE, SPARSE_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1"); // ↑↓ controls live in the Inspector
 
     const down = screen.getByLabelText("Move shot 1 later");
     await userEvent.click(down);
@@ -358,6 +515,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
   it("move-up on shot 2 POSTs the complete expected sequence", async () => {
     loadScenes([FULL_SCENE, SPARSE_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s2");
 
     const up = screen.getByLabelText("Move shot 2 earlier");
     await userEvent.click(up);
@@ -368,12 +526,14 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
     expect(opts.body).toEqual({ orderedSceneIds: ["s2", "s1"] });
   });
 
-  it("move-up is absent on the first card, move-down absent on the last", () => {
+  it("move-up is absent on the first card, move-down absent on the last (Inspector)", async () => {
     loadScenes([FULL_SCENE, SPARSE_SCENE]);
     render(<ScriptTab />);
-    // first card (s1): no move-up.
+    // first card (s1): no move-up in its Inspector.
+    await expandCard("s1");
     expect(screen.queryByLabelText("Move shot 1 earlier")).toBeNull();
-    // last card (s2): no move-down.
+    // last card (s2): no move-down (expanding s2 collapses s1).
+    await expandCard("s2");
     expect(screen.queryByLabelText("Move shot 2 later")).toBeNull();
   });
 
@@ -386,6 +546,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
     const before = useComposition.getState().comp!.scenes;
 
     render(<ScriptTab />);
+    await expandCard("s1");
     const input = screen.getByLabelText("Edit shot title") as HTMLInputElement;
     await userEvent.clear(input);
     await userEvent.type(input, "Mutated locally?");
@@ -406,6 +567,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
   it("INVARIANT: every scene write targets /api/bridge/v1/scene (never PUT /comp)", async () => {
     loadScenes([FULL_SCENE, SPARSE_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
 
     const input = inCard("s1").getByLabelText("Edit shot title") as HTMLInputElement;
     await userEvent.clear(input);
@@ -428,6 +590,7 @@ describe("ScriptTab (S4) — inline edit goes through the per-intent bridge", ()
     apiFetch.mockRejectedValue(new ApiError("400", 400, { error: "scene gone" }));
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
 
     const input = screen.getByLabelText("Edit shot title") as HTMLInputElement;
     await userEvent.clear(input);
@@ -455,6 +618,7 @@ describe("ScriptTab (S7) — generate / reshoot through the per-intent bridge", 
     // SPARSE_SCENE (s2) is planned → the generate button (not reshoot).
     loadScenes([SPARSE_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s2"); // generate CTA lives in the Inspector
 
     const btn = inCard("s2").getByRole("button", { name: "Generate this shot" });
     await userEvent.click(btn);
@@ -472,6 +636,7 @@ describe("ScriptTab (S7) — generate / reshoot through the per-intent bridge", 
     // FULL_SCENE (s1) is generated → reshoot label, not "Generate this shot".
     loadScenes([FULL_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s1");
 
     // The generate label must be absent on a generated scene.
     expect(
@@ -528,6 +693,7 @@ describe("ScriptTab (S7) — generate / reshoot through the per-intent bridge", 
     // Spy on loadComposition — the ONLY store action that may rewrite scenes.
     const loadSpy = vi.spyOn(useComposition.getState(), "loadComposition");
     render(<ScriptTab />);
+    await expandCard("s2");
 
     await userEvent.click(
       inCard("s2").getByRole("button", { name: "Generate this shot" }),
@@ -548,6 +714,7 @@ describe("ScriptTab (S7) — generate / reshoot through the per-intent bridge", 
     );
     loadScenes([SPARSE_SCENE]);
     render(<ScriptTab />);
+    await expandCard("s2");
 
     await userEvent.click(
       inCard("s2").getByRole("button", { name: "Generate this shot" }),
@@ -811,5 +978,182 @@ describe("ScriptTab (S5·review fixes) — cross-work tenancy + honest load erro
     render(<ScriptTab />);
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/disk on fire/i);
+  });
+});
+
+// ── PRD-0008 T3 — ⋯ menu (reorder/delete) + new/delete shot ──────────────────
+describe("ScriptTab (T3) — ⋯ row menu, add & delete shots", () => {
+  function inCard(sceneId: string) {
+    const card = screen
+      .getAllByTestId("scene-card")
+      .find((el) => el.getAttribute("data-scene-id") === sceneId)!;
+    return within(card);
+  }
+  async function openMenu(sceneId: string) {
+    await userEvent.click(
+      inCard(sceneId).getByRole("button", { name: /shot \d+ actions/i }),
+    );
+  }
+
+  it("the empty-state add button calls addSceneRemote with the localized placeholder title", async () => {
+    loadScenes([]);
+    render(<ScriptTab />);
+    await userEvent.click(screen.getByRole("button", { name: /new shot/i }));
+    await waitFor(() => expect(addSceneRemote).toHaveBeenCalled());
+    expect(addSceneRemote).toHaveBeenCalledWith("w1", { title: "Untitled shot" });
+  });
+
+  it("the footer add button (with existing scenes) also calls addSceneRemote", async () => {
+    loadScenes([FULL_SCENE]);
+    render(<ScriptTab />);
+    // There's exactly one "New shot" button (the footer) when scenes exist.
+    await userEvent.click(screen.getByRole("button", { name: /new shot/i }));
+    await waitFor(() => expect(addSceneRemote).toHaveBeenCalled());
+    expect(addSceneRemote).toHaveBeenCalledWith("w1", { title: "Untitled shot" });
+  });
+
+  it("a freshly-added scene auto-expands once it appears via refetch", async () => {
+    loadScenes([FULL_SCENE]);
+    render(<ScriptTab />);
+    await userEvent.click(screen.getByRole("button", { name: /new shot/i }));
+    await waitFor(() => expect(addSceneRemote).toHaveBeenCalled());
+
+    // Simulate the composition-changed → refetch landing the new scene (the
+    // bridge appended it; the store mirror updates). It carries the placeholder
+    // title the panel sent, so the panel must auto-expand it.
+    const newScene: Scene = {
+      id: "s_new",
+      order: 1,
+      title: "Untitled shot",
+      memberClipIds: [],
+      memberAssetIds: [],
+      generatedAssetIds: [],
+      status: "planned",
+    };
+    act(() => loadScenes([FULL_SCENE, newScene]));
+
+    // The new card's Inspector is open (its title input is mounted + seeded).
+    await waitFor(() =>
+      expect(inCard("s_new").getByLabelText("Edit shot title")).toBeInTheDocument(),
+    );
+  });
+
+  it("a failed add surfaces a role=alert error (does not crash)", async () => {
+    addSceneRemote.mockReset();
+    addSceneRemote.mockRejectedValue(
+      new ApiError("500", 500, { error: "disk full" }),
+    );
+    loadScenes([]);
+    render(<ScriptTab />);
+    await userEvent.click(screen.getByRole("button", { name: /new shot/i }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/disk full/i);
+  });
+
+  it("the ⋯ menu reorder items call onMove (move up / move down) via the bridge", async () => {
+    loadScenes([FULL_SCENE, SPARSE_SCENE]);
+    render(<ScriptTab />);
+    // Open shot 1's menu → only "Move down" (it's first).
+    await openMenu("s1");
+    await userEvent.click(screen.getByRole("menuitem", { name: /move down/i }));
+
+    await waitFor(() => expect(apiFetch).toHaveBeenCalled());
+    const [path, opts] = apiFetch.mock.calls[apiFetch.mock.calls.length - 1] as [
+      string,
+      { body?: any },
+    ];
+    expect(path).toBe("/api/bridge/v1/scene/reorder");
+    expect(opts.body).toEqual({ orderedSceneIds: ["s2", "s1"] });
+  });
+
+  it("delete is a TWO-STEP confirm: first click arms, second click removes", async () => {
+    loadScenes([FULL_SCENE, SPARSE_SCENE]);
+    render(<ScriptTab />);
+    await openMenu("s1");
+
+    // First click: arms confirm — does NOT delete yet.
+    await userEvent.click(screen.getByRole("menuitem", { name: /^delete shot$/i }));
+    expect(removeSceneRemote).not.toHaveBeenCalled();
+    // The item now reads "Confirm delete?".
+    const confirm = screen.getByRole("menuitem", { name: /confirm delete/i });
+    // Second click: actually removes via the bridge.
+    await userEvent.click(confirm);
+    await waitFor(() => expect(removeSceneRemote).toHaveBeenCalledWith("w1", "s1"));
+  });
+
+  it("clicking away (outside the menu) cancels an armed delete — no removal", async () => {
+    loadScenes([FULL_SCENE, SPARSE_SCENE]);
+    render(<ScriptTab />);
+    await openMenu("s1");
+    // Arm confirm.
+    await userEvent.click(screen.getByRole("menuitem", { name: /^delete shot$/i }));
+    expect(screen.getByRole("menuitem", { name: /confirm delete/i })).toBeInTheDocument();
+
+    // Click outside the menu (the panel heading). The menu closes; nothing removed.
+    await userEvent.click(screen.getByText(/script & storyboard/i));
+    expect(removeSceneRemote).not.toHaveBeenCalled();
+    expect(screen.queryByRole("menuitem", { name: /confirm delete/i })).toBeNull();
+  });
+
+  it("a failed delete surfaces a role=alert error", async () => {
+    removeSceneRemote.mockReset();
+    removeSceneRemote.mockRejectedValue(
+      new ApiError("404", 404, { error: "already gone" }),
+    );
+    loadScenes([FULL_SCENE, SPARSE_SCENE]);
+    render(<ScriptTab />);
+    await openMenu("s1");
+    await userEvent.click(screen.getByRole("menuitem", { name: /^delete shot$/i }));
+    await userEvent.click(screen.getByRole("menuitem", { name: /confirm delete/i }));
+    // The wrapper copy must be the DELETE-specific key, not the generic
+    // saveFailed fallback ("Couldn't save…") — a delete failure that claims a
+    // save failure is misleading copy (review MED on PRD-0008).
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/couldn't delete the shot/i);
+    expect(alert).toHaveTextContent(/already gone/i);
+  });
+});
+
+// ── PRD-0008 T4 — script fold toggle ─────────────────────────────────────────
+describe("ScriptTab (T4) — script editor fold toggle", () => {
+  it("the script editor is expanded by default (textarea present) with a collapse toggle", async () => {
+    loadScenes([]);
+    render(<ScriptTab />);
+    // Default = expanded → the editor's textarea is mounted.
+    await screen.findByLabelText("Edit script");
+    // And there's a fold toggle (currently "Collapse script").
+    expect(
+      screen.getByRole("button", { name: /collapse script/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("clicking the fold toggle collapses the editor (textarea gone) and flips the label", async () => {
+    loadScenes([]);
+    render(<ScriptTab />);
+    await screen.findByLabelText("Edit script");
+
+    await userEvent.click(
+      screen.getByRole("button", { name: /collapse script/i }),
+    );
+    // Collapsed: the editor textarea is unmounted; the toggle now says "Expand".
+    expect(screen.queryByLabelText("Edit script")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /expand script/i }),
+    ).toBeInTheDocument();
+
+    // Toggle back → editor returns.
+    await userEvent.click(screen.getByRole("button", { name: /expand script/i }));
+    expect(await screen.findByLabelText("Edit script")).toBeInTheDocument();
+  });
+
+  it("remembers the collapsed state across remounts (localStorage)", async () => {
+    localStorage.setItem("autoviral.scriptFold.collapsed", "1");
+    loadScenes([]);
+    render(<ScriptTab />);
+    // Persisted collapsed → the editor starts collapsed (no textarea) and the
+    // toggle offers to expand.
+    expect(screen.queryByLabelText("Edit script")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: /expand script/i }),
+    ).toBeInTheDocument();
   });
 });

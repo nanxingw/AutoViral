@@ -2,7 +2,7 @@
 // D3: a Work is a content piece with module-as-capability semantics — no
 // stage-coupled fields. The agent owns its own progress tracking via chat.
 
-import { readFile, writeFile, mkdir, readdir, rm, stat } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, rm } from "node:fs/promises";
 import { join, relative } from "node:path";
 import yaml from "js-yaml";
 import { dataDir } from "../infra/config.js";
@@ -96,10 +96,6 @@ function workFilePath(id: string): string {
 
 function assetsDir(id: string): string {
   return join(workDir(id), "assets");
-}
-
-function outputDir(id: string): string {
-  return join(workDir(id), "output");
 }
 
 async function readWorkFile(id: string): Promise<Work | undefined> {

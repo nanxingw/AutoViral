@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { moveInOrder, generateScene } from "./sceneEdit";
+import {
+  moveInOrder,
+  generateScene,
+  addSceneRemote,
+  removeSceneRemote,
+} from "./sceneEdit";
 
 // S7 — generateScene rides the per-intent bridge (apiFetch), so mock the
 // transport and assert path/method/headers/body. The pure moveInOrder tests
@@ -89,5 +94,67 @@ describe("generateScene (S7 — per-intent bridge generate/reshoot)", () => {
   it("propagates (does not swallow) a bridge failure so the card can surface it", async () => {
     apiFetch.mockRejectedValue(new Error("boom"));
     await expect(generateScene("w1", "s1")).rejects.toThrow("boom");
+  });
+});
+
+describe("addSceneRemote (T1 — per-intent bridge scene-add)", () => {
+  beforeEach(() => {
+    apiFetch.mockReset();
+    apiFetch.mockResolvedValue({ ok: true, result: { sceneId: "scn_new" } });
+  });
+
+  it("POSTs /scene with the work-id header and the title in the body", async () => {
+    await addSceneRemote("w1", { title: "Hook" });
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    const [path, opts] = apiFetch.mock.calls[0] as [
+      string,
+      { method?: string; headers?: Record<string, string>; body?: unknown },
+    ];
+    // Same route the agent's `autoviral scene add --title …` CLI hits.
+    expect(path).toBe("/api/bridge/v1/scene");
+    expect(opts.method).toBe("POST");
+    expect(opts.headers?.["X-AutoViral-Work-Id"]).toBe("w1");
+    expect(opts.body).toEqual({ title: "Hook" });
+  });
+
+  it("returns the minted sceneId the bridge echoes (so the card can auto-expand it)", async () => {
+    const id = await addSceneRemote("w1", { title: "Hook" });
+    expect(id).toBe("scn_new");
+  });
+
+  it("propagates (does not swallow) a bridge failure so the caller can surface it", async () => {
+    apiFetch.mockRejectedValue(new Error("missing title"));
+    await expect(addSceneRemote("w1", { title: "" })).rejects.toThrow(
+      "missing title",
+    );
+  });
+});
+
+describe("removeSceneRemote (T1 — per-intent bridge scene-remove)", () => {
+  beforeEach(() => {
+    apiFetch.mockReset();
+    apiFetch.mockResolvedValue({ ok: true });
+  });
+
+  it("DELETEs /scene/:id with the work-id header and no body", async () => {
+    await removeSceneRemote("w1", "s1");
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    const [path, opts] = apiFetch.mock.calls[0] as [
+      string,
+      { method?: string; headers?: Record<string, string>; body?: unknown },
+    ];
+    // Same route the agent's `autoviral scene remove <id>` CLI hits.
+    expect(path).toBe("/api/bridge/v1/scene/s1");
+    expect(opts.method).toBe("DELETE");
+    expect(opts.headers?.["X-AutoViral-Work-Id"]).toBe("w1");
+    // DELETE carries no body — the id is in the path.
+    expect(opts.body).toBeUndefined();
+  });
+
+  it("propagates (does not swallow) a bridge failure so the caller can surface it", async () => {
+    apiFetch.mockRejectedValue(new Error("no scene with id s1"));
+    await expect(removeSceneRemote("w1", "s1")).rejects.toThrow(
+      "no scene with id s1",
+    );
   });
 });

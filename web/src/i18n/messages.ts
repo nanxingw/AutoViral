@@ -376,6 +376,34 @@ export const en = {
       reshoot: "Reshoot",
       generating: "Generating…",
       generateFailed: "Generation failed: {msg}",
+      // ── PRD-0008 · folding shot sheet (T2/T3/T4) ────────────────────────────
+      // Collapsed shot-row → click to expand an in-card Inspector (accordion).
+      expandSceneAria: "Expand shot {n}",
+      collapseSceneAria: "Collapse shot {n}",
+      // stale (needs-regen) text badge — a TEXT label, not a colour-only cue
+      // (e2e Hard rule 5: status must be readable without relying on hue).
+      staleBadge: "Needs regen",
+      // ✓ saved micro-feedback after a successful field PATCH (auto-fades).
+      savedTick: "✓ Saved",
+      // ⋯ row menu: reorder + delete (two-click confirm, per #66 — not a global
+      // Delete key).
+      sceneMenuAria: "Shot {n} actions",
+      sceneMenuMoveUp: "Move up",
+      sceneMenuMoveDown: "Move down",
+      sceneMenuDelete: "Delete shot",
+      sceneMenuDeleteConfirm: "Confirm delete?",
+      // ＋ new shot — persistent footer button + empty-state primary button.
+      addScene: "New shot",
+      addSceneFailed: "Couldn't add a shot: {msg}",
+      removeSceneFailed: "Couldn't delete the shot: {msg}",
+      reorderSceneFailed: "Couldn't reorder the shots: {msg}",
+      // Localized placeholder TITLE for a brand-new shot (a real value, written
+      // to disk — the user renames it; never an i18n-string-as-data trap because
+      // it's the seed of an editable required field, not derived display text).
+      newSceneTitle: "Untitled shot",
+      // T4 — script editor fold toggle (▾ expanded / ▸ collapsed).
+      scriptFoldCollapse: "Collapse script",
+      scriptFoldExpand: "Expand script",
     },
     rightPane: {
       tabChat: "Chat",
@@ -1460,6 +1488,30 @@ export const zh: DeepShape<Messages> = {
       reshoot: "重拍",
       generating: "生成中…",
       generateFailed: "生成失败：{msg}",
+      // ── PRD-0008 · 折叠镜表（T2/T3/T4）────────────────────────────────────
+      expandSceneAria: "展开镜 {n}",
+      collapseSceneAria: "收起镜 {n}",
+      // stale 文字徽章——不靠颜色单编码（e2e Hard rule 5）。
+      staleBadge: "需重生",
+      // ✓ 已存微反馈（PATCH 成功后短暂出现、自动淡出）。
+      savedTick: "✓ 已存",
+      // ⋯ 行菜单：重排 + 删除（两步确认，参照 #66，不抢全局 Delete 键）。
+      sceneMenuAria: "镜 {n} 操作",
+      sceneMenuMoveUp: "上移",
+      sceneMenuMoveDown: "下移",
+      sceneMenuDelete: "删除分镜",
+      sceneMenuDeleteConfirm: "确认删除？",
+      // ＋ 新建分镜——列表底部常驻按钮 + 空状态主按钮。
+      addScene: "新建分镜",
+      addSceneFailed: "新建分镜失败：{msg}",
+      removeSceneFailed: "删除分镜失败：{msg}",
+      reorderSceneFailed: "分镜重排失败：{msg}",
+      // 新建分镜的本地化占位标题（一个真实值，写入磁盘——用户自行改名；
+      // 它是可编辑必填字段的种子值，不是派生展示文本，故不触 i18n-as-data 雷）。
+      newSceneTitle: "未命名分镜",
+      // T4 — 剧本编辑器折叠开关（▾ 展开 / ▸ 收起）。
+      scriptFoldCollapse: "收起剧本",
+      scriptFoldExpand: "展开剧本",
     },
     rightPane: {
       tabChat: "对话",

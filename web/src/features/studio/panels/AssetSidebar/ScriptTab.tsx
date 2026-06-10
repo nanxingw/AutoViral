@@ -12,34 +12,37 @@ import {
   generateScene,
   reorderScenesRemote,
   moveInOrder,
+  addSceneRemote,
+  removeSceneRemote,
   type ScenePropsPatch,
 } from "./sceneEdit";
 import { resolveAssetUrl } from "../../composition/resolveAssetUrl";
 import type { AssetEntry } from "@shared/composition";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ScriptTab (S3→S4 · PRD-0007) — the work's storyboard skeleton, now EDITABLE.
+// ScriptTab — the work's storyboard skeleton (剧本·分镜), PRD-0007 → PRD-0008.
 //
 // comp.scenes (the 分镜 / shots an agent drafted via `autoviral scene add`, or a
 // human edits here) render as a card list — the whole film's bones at a glance.
 //
-// S4 makes each card inline-editable AND reorderable. THE INVARIANT (ADR-009
-// agent-人一致): every edit goes through the SAME per-intent bridge route the
-// agent's CLI uses (PATCH /scene/:id, POST /scene/reorder via sceneEdit.ts), NOT
-// the Studio store's 800ms whole-composition autosave. `comp.scenes` in the
-// store is a READ-ONLY mirror — only the `composition-changed` → refetch path
-// (useBridgeEvents) ever rewrites it. We NEVER mutate scenes in the store here,
-// so the unrelated autosave's whole-`PUT /comp` always carries server-fresh
-// scenes and can't clobber a concurrent agent (or another tab) with stale data.
+// PRD-0008 (折叠镜表 / shot sheet) reshapes the dense per-card control panel into
+// a FOLDING shot sheet: each card is a one-line read-only SUMMARY ROW by default
+// (zero form controls), and clicking it expands an in-card Inspector with the
+// full editing surface (accordion — at most ONE card open at a time, owned by
+// the `expandedSceneId` state here). A hover ⋯ menu carries reorder + delete;
+// a footer ＋ button (and the empty-state primary button) add a shot.
 //
-// S5 mounts the `plan/script.md` 剧本 (narrative) editor ABOVE this card list
-// (ScriptEditor below). The 剧本 (free-text narrative outline) and the 分镜
-// (structured storyboard cards) are TWO independent surfaces, weakly linked by
-// `scene.mdAnchor` — we render an honest drift notice and let each surface show
-// its own state (`hasScript` / `hasScenes` never imply each other). Edits commit
-// straight to disk via `saveScript` (raw text/markdown PUT) — the SAME write
-// path the agent's `autoviral script edit` CLI uses (ADR-009 agent-人一致) — and
-// the `plan-changed` broadcast → refetchScript keeps every surface convergent.
+// THE INVARIANT (ADR-009 / ADR-012 agent-人一致): every write — patch, reorder,
+// generate, ADD, REMOVE — goes through the SAME per-intent bridge route the
+// agent's CLI uses (sceneEdit.ts), NOT the Studio store's 800ms whole-comp
+// autosave. `comp.scenes` in the store is a READ-ONLY mirror — only the
+// `composition-changed` → refetch path (useBridgeEvents) ever rewrites it. We
+// NEVER mutate scenes in the store here.
+//
+// The 剧本 (free-text narrative outline, ScriptEditor) and the 分镜 (structured
+// storyboard cards) are TWO independent surfaces, weakly linked by
+// `scene.mdAnchor`. PRD-0008 T4 wraps ScriptEditor in a ▾/▸ fold so the narrative
+// layer can collapse out of the way, surfacing the execution layer (the cards).
 // ─────────────────────────────────────────────────────────────────────────────
 
 // Code-facing enum key → i18n message key. Kept in lockstep with SceneSchema's
@@ -100,12 +103,11 @@ const CAMERA_OPTIONS: NonNullable<Scene["cameraMovement"]>[] = [
 ];
 
 export function ScriptTab() {
+  const t = useT();
   const scenes = useComposition((s) => s.comp?.scenes);
   const workId = useComposition((s) => s.comp?.workId ?? "");
   // S7 — the asset registry (read-only mirror, like comp.scenes). A generated
   // scene's `selectedAssetId` is resolved against this to render its thumbnail.
-  // Read at the panel level (one stable selector) and pass down to each card so
-  // a SceneCard never owns its own store subscription.
   const assets = useComposition((s) => s.comp?.assets);
   // Read-path only: sort a copy by `order` (the intended shot sequence). The
   // store array is never mutated here — edits go over the bridge (sceneEdit.ts).
@@ -115,11 +117,19 @@ export function ScriptTab() {
   );
   const hasScenes = ordered.length > 0;
 
+  // PRD-0008 — accordion: at most ONE expanded card. Lifted here (not per-card)
+  // so opening one closes the rest. A null = all collapsed.
+  const [expandedSceneId, setExpandedSceneId] = useState<string | null>(null);
+  const toggleExpanded = useCallback(
+    (sceneId: string) =>
+      setExpandedSceneId((cur) => (cur === sceneId ? null : sceneId)),
+    [],
+  );
+
   // Reorder is a card-level gesture but lives here because it needs the FULL
   // ordered id list. We reduce a move to (fromIndex, toIndex), compute the new
   // sequence with the pure `moveInOrder`, and POST the complete order. The
-  // server recompacts; the refetch reflows. We surface failures via a panel-
-  // level error line (a reorder isn't tied to one card's editor).
+  // server recompacts; the refetch reflows.
   const orderedIds = useMemo(() => ordered.map((s) => s.id), [ordered]);
   const [reorderError, setReorderError] = useState<string | null>(null);
   const moveScene = useCallback(
@@ -134,6 +144,58 @@ export function ScriptTab() {
       }
     },
     [orderedIds, workId],
+  );
+
+  // PRD-0008 T3 — add a new shot via the bridge (POST /scene), the SAME route
+  // the agent's `autoviral scene add` CLI hits (ADR-012). The title is a
+  // localized placeholder ("Untitled shot") the user renames. `addSceneRemote`
+  // returns the new scene id; we stash it and auto-expand the card once the
+  // composition-changed refetch lands it (the store mirror, never local
+  // setState — the S4 invariant). If the id ever comes back empty we fall back
+  // to matching the just-sent placeholder title.
+  const [addError, setAddError] = useState<string | null>(null);
+  const pendingExpand = useRef<{ id: string; title: string } | null>(null);
+  const runAdd = useCallback(async () => {
+    const title = t("studio.scriptPanel.newSceneTitle");
+    setAddError(null);
+    try {
+      const newId = await addSceneRemote(workId, { title });
+      pendingExpand.current = { id: newId, title };
+    } catch (err) {
+      setAddError(errorMessage(err));
+    }
+  }, [workId, t]);
+
+  // When a just-added scene appears in the refetched list, auto-expand it —
+  // prefer the returned id, fall back to the placeholder title.
+  useEffect(() => {
+    const pending = pendingExpand.current;
+    if (!pending) return;
+    // Title fallback ONLY when the bridge didn't return an id — with a valid
+    // id, a placeholder-title collision must never match an older card.
+    const match = ordered.find((s) =>
+      pending.id ? s.id === pending.id : s.title === pending.title,
+    );
+    if (match) {
+      setExpandedSceneId(match.id);
+      pendingExpand.current = null;
+    }
+  }, [ordered]);
+
+  // Remove a shot via the bridge (DELETE /scene/:id) — same route as the
+  // agent's `autoviral scene remove`. If the removed card was open, collapse.
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const removeScene = useCallback(
+    async (sceneId: string) => {
+      setRemoveError(null);
+      try {
+        await removeSceneRemote(workId, sceneId);
+        setExpandedSceneId((cur) => (cur === sceneId ? null : cur));
+      } catch (err) {
+        setRemoveError(errorMessage(err));
+      }
+    },
+    [workId],
   );
 
   return (
@@ -167,16 +229,16 @@ export function ScriptTab() {
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: 12 }}>
-        {/* S5 — 剧本 (plan/script.md) editor sits ABOVE the storyboard cards.
-            Independent of `hasScenes`: it always renders (empty → placeholder),
-            so a script-less work still gets an editor and a scene-less work
-            still gets its onboarding below. Neither implies the other. */}
-        <ScriptEditor workId={workId} />
+        {/* T4 — 剧本 (plan/script.md) editor sits ABOVE the storyboard cards,
+            now wrapped in a ▾/▸ fold so the narrative layer can collapse out of
+            the way. Independent of `hasScenes`: it always renders. */}
+        <ScriptEditorFold workId={workId} />
 
         <div style={{ marginTop: 14 }}>
           {hasScenes ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {reorderError && <ErrorLine msg={reorderError} />}
+              {reorderError && <ErrorLine msg={reorderError} kind="reorder" />}
+              {removeError && <ErrorLine msg={removeError} kind="remove" />}
               {ordered.map((scene, index) => (
                 <SceneCard
                   key={scene.id}
@@ -186,12 +248,18 @@ export function ScriptTab() {
                   index={index}
                   isFirst={index === 0}
                   isLast={index === ordered.length - 1}
+                  expanded={expandedSceneId === scene.id}
+                  onToggle={() => toggleExpanded(scene.id)}
                   onMove={moveScene}
+                  onRemove={() => removeScene(scene.id)}
                 />
               ))}
+              {/* ＋ New shot — persistent footer button. */}
+              <AddSceneButton onClick={() => void runAdd()} variant="footer" />
+              {addError && <ErrorLine msg={addError} kind="add" />}
             </div>
           ) : (
-            <EmptyState />
+            <EmptyState onAdd={() => void runAdd()} addError={addError} />
           )}
         </div>
       </div>
@@ -204,6 +272,73 @@ function ScriptHeading() {
   return <>{t("studio.scriptPanel.heading")}</>;
 }
 
+// ─── T4 · script fold ───────────────────────────────────────────────────────
+//
+// Wraps the existing ScriptEditor in a ▾/▸ collapse toggle so the narrative
+// layer can fold out of the way, surfacing the execution layer (the cards).
+// Default = expanded; the state is remembered in localStorage under a single
+// global key (not per-work — a UI affordance preference, not work data).
+const SCRIPT_FOLD_KEY = "autoviral.scriptFold.collapsed";
+
+function ScriptEditorFold({ workId }: { workId: string }) {
+  const t = useT();
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(SCRIPT_FOLD_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const toggle = useCallback(() => {
+    setCollapsed((c) => {
+      const next = !c;
+      try {
+        localStorage.setItem(SCRIPT_FOLD_KEY, next ? "1" : "0");
+      } catch {
+        /* ignore quota / disabled storage */
+      }
+      return next;
+    });
+  }, []);
+
+  return (
+    <div>
+      <button
+        type="button"
+        data-bare
+        aria-expanded={!collapsed}
+        aria-label={t(
+          collapsed
+            ? "studio.scriptPanel.scriptFoldExpand"
+            : "studio.scriptPanel.scriptFoldCollapse",
+        )}
+        onClick={toggle}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          width: "100%",
+          padding: "4px 2px",
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--text-dimmer)",
+        }}
+      >
+        <span aria-hidden style={{ fontSize: 9 }}>
+          {collapsed ? "▸" : "▾"}
+        </span>
+        <span>{t("studio.scriptPanel.scriptHeading")}</span>
+      </button>
+      {!collapsed && <ScriptEditor workId={workId} />}
+    </div>
+  );
+}
+
 // ─── 剧本 (plan/script.md) markdown editor ──────────────────────────────────
 //
 // The narrative outline that twins the storyboard. Edit (textarea) ↔ preview
@@ -211,10 +346,6 @@ function ScriptHeading() {
 // saveScript (the same write path as `autoviral script edit`). Reads from the
 // `useScript` store, which the bridge's `plan-changed` → refetchScript path
 // also writes — so an external editor or the agent's CLI edit reflows here live.
-//
-// Empty-state is a PLACEHOLDER attribute, NEVER written into the file: the
-// server returns "" for an unwritten plan and we keep it "" (no template in any
-// language — #73/#83 i18n-string-as-data鐵律).
 function ScriptEditor({ workId }: { workId: string }) {
   const t = useT();
   const script = useScript((s) => s.script);
@@ -226,53 +357,33 @@ function ScriptEditor({ workId }: { workId: string }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  // TENANCY GUARD (HIGH fix): the store is one global instance shared by every
-  // work. The held script is OURS only when it's stamped with our workId AND a
-  // load has resolved. While the store still holds another work's script (this
-  // editor just mounted, or we're mid A→B route hop) we render empty + read-only
-  // and refuse to commit — never leak/clobber across works.
+  // TENANCY GUARD: the store is one global instance shared by every work. The
+  // held script is OURS only when it's stamped with our workId AND a load has
+  // resolved.
   const isMine = storeWorkId === workId && loaded;
 
-  // Mount-load: pull plan/script.md once per work into the store. The bridge's
-  // refetchScript only fires on a CHANGE (plan-changed) — the initial on-disk
-  // value has to be fetched here. Guard with a ref so a re-render / a store
-  // update we caused doesn't re-fetch (and a workId switch re-fetches once).
   const loadedFor = useRef<string | null>(null);
   useEffect(() => {
     if (!workId) return;
     if (loadedFor.current === workId) return;
     loadedFor.current = workId;
-    // If the store still holds a DIFFERENT work's script, clear it synchronously
-    // so this editor never shows (or commits) the previous work's 剧本 during the
-    // async load window. (Studio's workId-reset effect does the same at the page
-    // level for when this tab isn't mounted during the switch.)
     if (useScript.getState().workId !== workId) reset();
     setLoadError(null);
     loadScript(workId)
       .then((md) => {
-        // A stale load (workId switched again before this resolved) must not
-        // overwrite the now-current work's store.
         if (loadedFor.current === workId) setScript(workId, md);
       })
       .catch((err) => {
-        // No longer swallow: a real load failure (500 / network) must surface,
-        // not leave the editor silently blank with no signal (MEDIUM fix).
         if (loadedFor.current === workId) setLoadError(errorMessage(err));
       });
   }, [workId, reset, setScript]);
 
   const commit = useCallback(
     async (next: string) => {
-      // Cross-work guard: only write when the store holds THIS work's freshly
-      // loaded script. During an A→B hop the store is reset (workId≠ours /
-      // !loaded) until ours lands — committing here would PUT stale content into
-      // the wrong work. Read fresh via getState (the callback closure can lag).
       const st = useScript.getState();
       if (st.workId !== workId || !st.loaded) return;
       if (next === st.script) return; // unchanged — no needless write
       setSaveError(null);
-      // Optimistically reflect the edit in the store so the preview + a sibling
-      // surface see it immediately; the broadcast→refetch reconverges on disk.
       setScript(workId, next);
       try {
         await saveScript(workId, next);
@@ -344,11 +455,6 @@ function ScriptEditor({ workId }: { workId: string }) {
       </div>
 
       {mode === "edit" ? (
-        // key={workId} → a work switch REMOUNTS the textarea, discarding any
-        // focused-but-uncommitted draft from the previous work (else a stale
-        // focused draft could survive the switch and commit into the new work).
-        // value/loaded gate on `isMine` so a not-yet-loaded foreign script never
-        // renders here and the field stays read-only until our script lands.
         <ScriptTextarea
           key={workId}
           value={isMine ? script : ""}
@@ -412,9 +518,7 @@ function ScriptEditor({ workId }: { workId: string }) {
 }
 
 // Locally-controlled markdown textarea. Seeds from `value`; commits on blur.
-// Reflows to a fresh `value` (a refetchScript landing) ONLY when not focused —
-// so an external edit reflows but an in-flight draft is never yanked from under
-// the user (mirror of EditableText's focus guard, S4).
+// Reflows to a fresh `value` (a refetchScript landing) ONLY when not focused.
 function ScriptTextarea({
   value,
   loaded,
@@ -439,9 +543,6 @@ function ScriptTextarea({
       aria-label={ariaLabel}
       placeholder={placeholder}
       value={draft}
-      // Until the first load resolves we keep the field read-only-ish (still
-      // mounted so its placeholder/aria are testable) — but allow typing once
-      // loaded so a brand-new work is immediately writable.
       readOnly={!loaded}
       rows={8}
       onChange={(e) => setDraft(e.target.value)}
@@ -499,7 +600,15 @@ function ModeButton({
   );
 }
 
-function EmptyState() {
+// PRD-0008 — empty state now carries a PRIMARY add button (replaces the
+// "ask the agent / create later" dead copy with a real affordance).
+function EmptyState({
+  onAdd,
+  addError,
+}: {
+  onAdd: () => void;
+  addError: string | null;
+}) {
   const t = useT();
   return (
     <div
@@ -515,21 +624,54 @@ function EmptyState() {
           fontStyle: "italic",
           fontSize: 16,
           color: "var(--text-dim)",
-          marginBottom: 8,
+          marginBottom: 12,
         }}
       >
         {t("studio.scriptPanel.emptyTitle")}
       </div>
-      <div
-        style={{
-          fontSize: 12,
-          lineHeight: 1.6,
-          letterSpacing: "0.01em",
-        }}
-      >
-        {t("studio.scriptPanel.emptyHint")}
-      </div>
+      <AddSceneButton onClick={onAdd} variant="primary" />
+      {addError && <ErrorLine msg={addError} kind="add" />}
     </div>
+  );
+}
+
+// ＋ New shot button — two visual variants (footer / empty-state primary), one
+// behaviour. Both go through the panel's runAdd (the bridge add op).
+function AddSceneButton({
+  onClick,
+  variant,
+}: {
+  onClick: () => void;
+  variant: "footer" | "primary";
+}) {
+  const t = useT();
+  const primary = variant === "primary";
+  return (
+    <button
+      type="button"
+      data-bare
+      onClick={onClick}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        alignSelf: primary ? "center" : "stretch",
+        margin: primary ? "0 auto" : undefined,
+        padding: primary ? "6px 16px" : "6px 10px",
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        letterSpacing: "0.04em",
+        background: "transparent",
+        border: `1px ${primary ? "solid" : "dashed"} var(--accent)`,
+        borderRadius: 8,
+        color: "var(--accent-hi)",
+        cursor: "pointer",
+      }}
+    >
+      <span aria-hidden>＋</span>
+      {t("studio.scriptPanel.addScene")}
+    </button>
   );
 }
 
@@ -547,7 +689,13 @@ interface SceneCardProps {
   index: number;
   isFirst: boolean;
   isLast: boolean;
+  /** Accordion: is THIS the open card? (owned by ScriptTab). */
+  expanded: boolean;
+  /** Toggle this card open/closed (closes any other). */
+  onToggle: () => void;
   onMove: (fromIndex: number, toIndex: number) => void;
+  /** Delete this scene (bridge DELETE /scene/:id). */
+  onRemove: () => void;
 }
 
 function SceneCard({
@@ -557,22 +705,41 @@ function SceneCard({
   index,
   isFirst,
   isLast,
+  expanded,
+  onToggle,
   onMove,
+  onRemove,
 }: SceneCardProps) {
   const t = useT();
   const statusLabel = t(STATUS_KEY[scene.status]);
-  const statusColor =
-    scene.status === "stale" ? "var(--status-error, #d4756c)" : "var(--accent)";
+  // Three-way encoding (e2e Hard rule 5: never colour-ALONE). stale gets the
+  // amber --status-warn token AND a "Needs regen" text badge; generated gets the
+  // accent fill; planned is a hollow outline. The text badge is what tests
+  // assert (textContent, not hue).
+  const isStale = scene.status === "stale";
+  const statusColor = isStale
+    ? "var(--status-warn, #fbbf24)"
+    : "var(--accent)";
 
-  // Per-card commit: PATCH only the field(s) that changed, over the bridge. On
-  // failure we keep the error visible (and the user's text in the controlled
-  // input) instead of silently dropping it.
+  // Per-card commit: PATCH only the field(s) that changed, over the bridge.
   const [saveError, setSaveError] = useState<string | null>(null);
+  // ✓ saved micro-feedback — set on a successful PATCH, auto-fades after ~1.5s.
+  const [savedTick, setSavedTick] = useState(false);
+  const tickTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (tickTimer.current) clearTimeout(tickTimer.current);
+    },
+    [],
+  );
   const commit = useCallback(
     async (patch: ScenePropsPatch) => {
       setSaveError(null);
       try {
         await patchScene(workId, scene.id, patch);
+        setSavedTick(true);
+        if (tickTimer.current) clearTimeout(tickTimer.current);
+        tickTimer.current = setTimeout(() => setSavedTick(false), 1500);
       } catch (err) {
         setSaveError(errorMessage(err));
       }
@@ -580,11 +747,7 @@ function SceneCard({
     [workId, scene.id],
   );
 
-  // S7 — generate / reshoot the scene's image over the SAME per-intent bridge
-  // (generateScene, NOT the store/autosave — the S4 invariant). Generation is
-  // slow, so we disable the button while in flight. On success the bridge
-  // broadcasts composition-changed → refetch → this card re-renders with the
-  // new thumbnail (status flips to generated server-side); no local setState.
+  // S7 — generate / reshoot via the SAME per-intent bridge.
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const runGenerate = useCallback(async () => {
@@ -600,10 +763,7 @@ function SceneCard({
     }
   }, [workId, scene.id, generating]);
 
-  // Resolve the selected take's AssetEntry from the registry. A `generated`
-  // scene whose selectedAssetId points at a known image asset gets a thumbnail;
-  // anything unresolved (no selection / asset missing / non-image) falls back to
-  // just the status dot — never a broken <img>.
+  // Resolve the selected take's AssetEntry from the registry → thumbnail.
   const isGenerated = scene.status === "generated";
   const thumbAsset =
     isGenerated && scene.selectedAssetId
@@ -614,10 +774,15 @@ function SceneCard({
       ? resolveAssetUrl(thumbAsset.uri, workId)
       : null;
 
+  const shotNo = scene.order + 1;
+  const intentLabel = scene.intent ? t(INTENT_KEY[scene.intent]) : "—";
+  const shotSizeLabel = scene.shotSize ? t(SHOT_KEY[scene.shotSize]) : "—";
+
   return (
     <div
       data-testid="scene-card"
       data-scene-id={scene.id}
+      data-expanded={expanded ? "true" : "false"}
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData("text/plain", String(index));
@@ -637,18 +802,349 @@ function SceneCard({
         border: "1px solid var(--glass-border)",
         borderRadius: 10,
         background: "var(--surface-0)",
-        padding: "10px 12px",
+        overflow: "hidden",
       }}
     >
-      {/* Top row: 镜号 + status dot + reorder controls + intent select. */}
-      <div
+      {/* ── Collapsed summary row (always shown — the row header) ─────────────
+          A single button row: 镜号 · status dot+badge · title · duration ·
+          shot size · intent · thumbnail · ⋯ menu. ZERO form controls. Clicking
+          toggles the in-card Inspector below. */}
+      <SceneSummaryRow
+        scene={scene}
+        expanded={expanded}
+        onToggle={onToggle}
+        statusLabel={statusLabel}
+        statusColor={statusColor}
+        statusFilled={STATUS_FILLED[scene.status]}
+        isStale={isStale}
+        intentLabel={intentLabel}
+        shotSizeLabel={shotSizeLabel}
+        thumbSrc={thumbSrc}
+        shotNo={shotNo}
+        isFirst={isFirst}
+        isLast={isLast}
+        index={index}
+        onMove={onMove}
+        onRemove={onRemove}
+      />
+
+      {/* ── Expanded in-card Inspector ───────────────────────────────────────
+          The full editing surface, migrated verbatim from the old always-on
+          card body. Mounts only when this card is the open accordion item. */}
+      {expanded && (
+        <div
+          style={{
+            padding: "4px 12px 12px",
+            borderTop: "1px solid var(--divider)",
+          }}
+        >
+          {/* Title — inline editable. */}
+          <div style={{ marginTop: 8, marginBottom: 6 }}>
+            <EditableText
+              value={scene.title}
+              ariaLabel={t("studio.scriptPanel.editTitleAria")}
+              placeholder={t("studio.scriptPanel.editTitlePlaceholder")}
+              multiline={false}
+              onCommit={(next) => {
+                if (next !== scene.title) void commit({ title: next });
+              }}
+              style={{ fontSize: 13, fontWeight: 500 }}
+            />
+          </div>
+
+          {/* Intent + reorder controls. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginBottom: 6,
+            }}
+          >
+            <EnumSelect
+              ariaLabel={t("studio.scriptPanel.editIntentAria")}
+              value={scene.intent}
+              options={INTENT_OPTIONS}
+              labelFor={(v) => t(INTENT_KEY[v])}
+              placeholder={t("studio.scriptPanel.optionNone")}
+              onChange={(v) => {
+                if (v !== (scene.intent ?? null)) void commit({ intent: v });
+              }}
+            />
+            <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
+              {!isFirst && (
+                <ReorderButton
+                  aria-label={t("studio.scriptPanel.moveUpAria", {
+                    n: shotNo,
+                  })}
+                  onClick={() => onMove(index, index - 1)}
+                >
+                  ↑
+                </ReorderButton>
+              )}
+              {!isLast && (
+                <ReorderButton
+                  aria-label={t("studio.scriptPanel.moveDownAria", {
+                    n: shotNo,
+                  })}
+                  onClick={() => onMove(index, index + 1)}
+                >
+                  ↓
+                </ReorderButton>
+              )}
+            </div>
+          </div>
+
+          {/* Prompt — visual description, inline editable (textarea). */}
+          <EditableText
+            value={scene.prompt ?? ""}
+            ariaLabel={t("studio.scriptPanel.editPromptAria")}
+            placeholder={t("studio.scriptPanel.editPromptPlaceholder")}
+            multiline
+            onCommit={(next) => {
+              const norm = next.trim() === "" ? null : next;
+              if (norm !== (scene.prompt ?? null)) void commit({ prompt: norm });
+            }}
+            style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 6 }}
+          />
+
+          {/* Narration — inline editable (textarea). */}
+          <FieldRow label={t("studio.scriptPanel.narration")}>
+            <EditableText
+              value={scene.narration ?? ""}
+              ariaLabel={t("studio.scriptPanel.editNarrationAria")}
+              placeholder={t("studio.scriptPanel.editNarrationPlaceholder")}
+              multiline
+              onCommit={(next) => {
+                const norm = next.trim() === "" ? null : next;
+                if (norm !== (scene.narration ?? null))
+                  void commit({ narration: norm });
+              }}
+              style={{ fontSize: 12, lineHeight: 1.5 }}
+            />
+          </FieldRow>
+
+          {/* Meta row: duration / shot size / camera — all editable. */}
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              alignItems: "center",
+              gap: 8,
+              marginTop: 6,
+            }}
+          >
+            <MetaField label={t("studio.scriptPanel.duration")}>
+              <DurationInput
+                ariaLabel={t("studio.scriptPanel.editDurationAria")}
+                value={scene.durationSec}
+                onCommit={(next) => {
+                  if (next !== (scene.durationSec ?? null))
+                    void commit({ durationSec: next });
+                }}
+              />
+            </MetaField>
+            <MetaField label={t("studio.scriptPanel.shotSize")}>
+              <EnumSelect
+                ariaLabel={t("studio.scriptPanel.editShotSizeAria")}
+                value={scene.shotSize}
+                options={SHOT_OPTIONS}
+                labelFor={(v) => t(SHOT_KEY[v])}
+                placeholder={t("studio.scriptPanel.optionNone")}
+                onChange={(v) => {
+                  if (v !== (scene.shotSize ?? null)) void commit({ shotSize: v });
+                }}
+              />
+            </MetaField>
+            <MetaField label={t("studio.scriptPanel.camera")}>
+              <EnumSelect
+                ariaLabel={t("studio.scriptPanel.editCameraAria")}
+                value={scene.cameraMovement}
+                options={CAMERA_OPTIONS}
+                labelFor={(v) => t(CAMERA_KEY[v])}
+                placeholder={t("studio.scriptPanel.optionNone")}
+                onChange={(v) => {
+                  if (v !== (scene.cameraMovement ?? null))
+                    void commit({ cameraMovement: v });
+                }}
+              />
+            </MetaField>
+          </div>
+
+          {/* mdAnchor back-link or the "no linked section" note. */}
+          {!scene.mdAnchor && (
+            <div
+              style={{
+                marginTop: 8,
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                letterSpacing: "0.04em",
+                color: "var(--text-dimmer)",
+                fontStyle: "italic",
+              }}
+            >
+              {t("studio.scriptPanel.noMdAnchor")}
+            </div>
+          )}
+
+          {/* S7 — generate / reshoot button + ✓ saved tick. */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              marginTop: 8,
+            }}
+          >
+            <button
+              type="button"
+              data-bare
+              onClick={() => void runGenerate()}
+              disabled={generating}
+              style={{
+                padding: "3px 10px",
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                letterSpacing: "0.04em",
+                background: "transparent",
+                border: "1px solid var(--glass-border)",
+                borderRadius: 6,
+                color: generating ? "var(--text-dimmer)" : "var(--accent-hi)",
+                borderColor: generating ? "var(--glass-border)" : "var(--accent)",
+                cursor: generating ? "default" : "pointer",
+              }}
+            >
+              {generating
+                ? t("studio.scriptPanel.generating")
+                : isGenerated
+                  ? t("studio.scriptPanel.reshoot")
+                  : t("studio.scriptPanel.generateScene")}
+            </button>
+            {savedTick && (
+              // Brief ✓ saved micro-feedback — unmounts after ~1.5s (the
+              // setTimeout in `commit`), giving an appear-then-fade without a
+              // bespoke keyframe.
+              <span
+                role="status"
+                style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 10,
+                  letterSpacing: "0.04em",
+                  color: "var(--accent)",
+                  opacity: 0.9,
+                }}
+              >
+                {t("studio.scriptPanel.savedTick")}
+              </span>
+            )}
+          </div>
+
+          {generateError && (
+            <div
+              role="alert"
+              style={{
+                marginTop: 6,
+                fontSize: 11,
+                lineHeight: 1.4,
+                color: "var(--status-error, #d4756c)",
+              }}
+            >
+              {t("studio.scriptPanel.generateFailed", { msg: generateError })}
+            </div>
+          )}
+
+          {saveError && <ErrorLine msg={saveError} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── PRD-0008 collapsed summary row ──────────────────────────────────────────
+//
+// The clickable header of a SceneCard: a read-only one-line summary plus the
+// hover/focus ⋯ menu. ZERO form controls (the editing surface lives in the
+// expanded Inspector). Clicking the row body toggles the accordion.
+interface SceneSummaryRowProps {
+  scene: Scene;
+  expanded: boolean;
+  onToggle: () => void;
+  statusLabel: string;
+  statusColor: string;
+  statusFilled: boolean;
+  isStale: boolean;
+  intentLabel: string;
+  shotSizeLabel: string;
+  thumbSrc: string | null;
+  shotNo: number;
+  isFirst: boolean;
+  isLast: boolean;
+  index: number;
+  onMove: (fromIndex: number, toIndex: number) => void;
+  onRemove: () => void;
+}
+
+function SceneSummaryRow({
+  scene,
+  expanded,
+  onToggle,
+  statusLabel,
+  statusColor,
+  statusFilled,
+  isStale,
+  intentLabel,
+  shotSizeLabel,
+  thumbSrc,
+  shotNo,
+  isFirst,
+  isLast,
+  index,
+  onMove,
+  onRemove,
+}: SceneSummaryRowProps) {
+  const t = useT();
+  const [hovered, setHovered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  return (
+    <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 8,
+        padding: "8px 10px",
+        position: "relative",
+      }}
+    >
+      {/* The clickable summary — a button so it's keyboard-reachable and
+          announces expand/collapse. */}
+      <button
+        type="button"
+        data-bare
+        aria-expanded={expanded}
+        aria-label={t(
+          expanded
+            ? "studio.scriptPanel.collapseSceneAria"
+            : "studio.scriptPanel.expandSceneAria",
+          { n: shotNo },
+        )}
+        onClick={onToggle}
         style={{
           display: "flex",
           alignItems: "center",
           gap: 8,
-          marginBottom: 6,
+          flex: 1,
+          minWidth: 0,
+          background: "transparent",
+          border: "none",
+          cursor: "pointer",
+          textAlign: "left",
+          padding: 0,
         }}
       >
+        {/* 镜号 */}
         <span
           style={{
             fontFamily: "var(--font-mono)",
@@ -656,10 +1152,12 @@ function SceneCard({
             letterSpacing: "0.06em",
             color: "var(--text-dimmer)",
             whiteSpace: "nowrap",
+            flexShrink: 0,
           }}
         >
-          {t("studio.scriptPanel.shotNumber", { n: scene.order + 1 })}
+          {t("studio.scriptPanel.shotNumber", { n: shotNo })}
         </span>
+        {/* status dot — three-state (hollow / filled accent / filled amber). */}
         <span
           data-status={scene.status}
           role="img"
@@ -670,218 +1168,254 @@ function SceneCard({
             height: 8,
             borderRadius: "50%",
             flexShrink: 0,
-            background: STATUS_FILLED[scene.status] ? statusColor : "transparent",
+            background: statusFilled ? statusColor : "transparent",
             border: `1.5px solid ${statusColor}`,
           }}
         />
-        {/* S7 — generated thumbnail (image takes only). Sits next to the status
-            dot. Absent unless the scene is generated AND its selectedAssetId
-            resolves to an image in comp.assets (else just the dot, no broken img). */}
+        {/* stale text badge — multi-encoding (NOT colour-alone). */}
+        {isStale && (
+          <span
+            data-testid="stale-badge"
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 9,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: "var(--status-warn, #fbbf24)",
+              border: "1px solid var(--status-warn, #fbbf24)",
+              borderRadius: 4,
+              padding: "0 4px",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+            }}
+          >
+            {t("studio.scriptPanel.staleBadge")}
+          </span>
+        )}
+        {/* generated thumbnail (image takes only) — inline-sized. */}
         {thumbSrc && (
           <img
             data-testid="scene-thumb"
             src={thumbSrc}
-            // The status dot already announces the generated STATE; give the
-            // thumbnail a distinct accessible name (the shot's title) so a
-            // screen reader doesn't hear "Generated" twice and a role=img query
-            // stays unambiguous (review 2026-06-09 a11y).
             alt={scene.title}
             style={{
-              width: 28,
-              height: 28,
+              width: 22,
+              height: 22,
               objectFit: "cover",
-              borderRadius: 6,
+              borderRadius: 4,
               flexShrink: 0,
               border: "1px solid var(--glass-border)",
             }}
           />
         )}
-        {/* Title — inline editable. */}
-        <EditableText
-          value={scene.title}
-          ariaLabel={t("studio.scriptPanel.editTitleAria")}
-          placeholder={t("studio.scriptPanel.editTitlePlaceholder")}
-          multiline={false}
-          onCommit={(next) => {
-            if (next !== scene.title) void commit({ title: next });
-          }}
-          style={{ flex: 1, fontSize: 13, fontWeight: 500 }}
-        />
-        {/* Reorder controls — accessible, testable path (drag is a bonus). */}
-        <div style={{ display: "flex", gap: 2, flexShrink: 0 }}>
-          {!isFirst && (
-            <ReorderButton
-              aria-label={t("studio.scriptPanel.moveUpAria", { n: scene.order + 1 })}
-              onClick={() => onMove(index, index - 1)}
-            >
-              ↑
-            </ReorderButton>
-          )}
-          {!isLast && (
-            <ReorderButton
-              aria-label={t("studio.scriptPanel.moveDownAria", { n: scene.order + 1 })}
-              onClick={() => onMove(index, index + 1)}
-            >
-              ↓
-            </ReorderButton>
-          )}
-        </div>
-        <EnumSelect
-          ariaLabel={t("studio.scriptPanel.editIntentAria")}
-          value={scene.intent}
-          options={INTENT_OPTIONS}
-          labelFor={(v) => t(INTENT_KEY[v])}
-          placeholder={t("studio.scriptPanel.optionNone")}
-          onChange={(v) => {
-            if (v !== (scene.intent ?? null)) void commit({ intent: v });
-          }}
-        />
-      </div>
-
-      {/* Prompt — visual description, inline editable (textarea). */}
-      <EditableText
-        value={scene.prompt ?? ""}
-        ariaLabel={t("studio.scriptPanel.editPromptAria")}
-        placeholder={t("studio.scriptPanel.editPromptPlaceholder")}
-        multiline
-        onCommit={(next) => {
-          const norm = next.trim() === "" ? null : next;
-          if (norm !== (scene.prompt ?? null)) void commit({ prompt: norm });
-        }}
-        style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 6 }}
-      />
-
-      {/* Narration — inline editable (textarea). */}
-      <FieldRow label={t("studio.scriptPanel.narration")}>
-        <EditableText
-          value={scene.narration ?? ""}
-          ariaLabel={t("studio.scriptPanel.editNarrationAria")}
-          placeholder={t("studio.scriptPanel.editNarrationPlaceholder")}
-          multiline
-          onCommit={(next) => {
-            const norm = next.trim() === "" ? null : next;
-            if (norm !== (scene.narration ?? null))
-              void commit({ narration: norm });
-          }}
-          style={{ fontSize: 12, lineHeight: 1.5 }}
-        />
-      </FieldRow>
-
-      {/* Meta row: duration / shot size / camera — all editable. */}
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          alignItems: "center",
-          gap: 8,
-          marginTop: 6,
-        }}
-      >
-        <MetaField label={t("studio.scriptPanel.duration")}>
-          <DurationInput
-            ariaLabel={t("studio.scriptPanel.editDurationAria")}
-            value={scene.durationSec}
-            onCommit={(next) => {
-              if (next !== (scene.durationSec ?? null))
-                void commit({ durationSec: next });
-            }}
-          />
-        </MetaField>
-        <MetaField label={t("studio.scriptPanel.shotSize")}>
-          <EnumSelect
-            ariaLabel={t("studio.scriptPanel.editShotSizeAria")}
-            value={scene.shotSize}
-            options={SHOT_OPTIONS}
-            labelFor={(v) => t(SHOT_KEY[v])}
-            placeholder={t("studio.scriptPanel.optionNone")}
-            onChange={(v) => {
-              if (v !== (scene.shotSize ?? null)) void commit({ shotSize: v });
-            }}
-          />
-        </MetaField>
-        <MetaField label={t("studio.scriptPanel.camera")}>
-          <EnumSelect
-            ariaLabel={t("studio.scriptPanel.editCameraAria")}
-            value={scene.cameraMovement}
-            options={CAMERA_OPTIONS}
-            labelFor={(v) => t(CAMERA_KEY[v])}
-            placeholder={t("studio.scriptPanel.optionNone")}
-            onChange={(v) => {
-              if (v !== (scene.cameraMovement ?? null))
-                void commit({ cameraMovement: v });
-            }}
-          />
-        </MetaField>
-      </div>
-
-      {/* mdAnchor back-link or the "no linked section" note. */}
-      {!scene.mdAnchor && (
-        <div
+        {/* title — plain text (NOT an input). */}
+        <span
           style={{
-            marginTop: 8,
-            fontFamily: "var(--font-mono)",
-            fontSize: 9,
-            letterSpacing: "0.04em",
-            color: "var(--text-dimmer)",
-            fontStyle: "italic",
+            fontSize: 13,
+            fontWeight: 500,
+            color: "var(--text)",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+            flex: 1,
+            minWidth: 0,
           }}
         >
-          {t("studio.scriptPanel.noMdAnchor")}
-        </div>
-      )}
+          {scene.title}
+        </span>
+        {/* compact meta — duration / shot size / intent (— for empty). */}
+        <span
+          style={{
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            letterSpacing: "0.03em",
+            color: "var(--text-dimmer)",
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          {scene.durationSec != null && (
+            <span data-testid="summary-duration">
+              {scene.durationSec.toFixed(1)}s
+            </span>
+          )}
+          <span data-testid="summary-shot">{shotSizeLabel}</span>
+          <span data-testid="summary-intent">{intentLabel}</span>
+        </span>
+      </button>
 
-      {/* S7 — generate / reshoot button row. "生成此幕" for planned|stale, "重拍"
-          once generated. Both go through generateScene (the per-intent bridge),
-          disabled + relabelled while in flight (generation is slow). */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginTop: 8,
-        }}
-      >
+      {/* ⋯ menu trigger — appears on hover/focus or while the menu is open. */}
+      <div style={{ position: "relative", flexShrink: 0 }}>
         <button
           type="button"
           data-bare
-          onClick={() => void runGenerate()}
-          disabled={generating}
+          aria-label={t("studio.scriptPanel.sceneMenuAria", { n: shotNo })}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onFocus={() => setHovered(true)}
+          onBlur={() => setHovered(false)}
+          onClick={() => setMenuOpen((o) => !o)}
           style={{
-            padding: "3px 10px",
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            letterSpacing: "0.04em",
+            width: 24,
+            height: 24,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
             background: "transparent",
-            border: "1px solid var(--glass-border)",
+            border: "none",
             borderRadius: 6,
-            color: generating ? "var(--text-dimmer)" : "var(--accent-hi)",
-            borderColor: generating ? "var(--glass-border)" : "var(--accent)",
-            cursor: generating ? "default" : "pointer",
+            color: "var(--text-dim)",
+            cursor: "pointer",
+            fontSize: 14,
+            lineHeight: 1,
+            // Keep it focusable but visually quiet until hovered/open.
+            opacity: hovered || menuOpen ? 1 : 0,
+            transition: "opacity 0.12s",
           }}
         >
-          {generating
-            ? t("studio.scriptPanel.generating")
-            : isGenerated
-              ? t("studio.scriptPanel.reshoot")
-              : t("studio.scriptPanel.generateScene")}
+          ⋯
         </button>
+        {menuOpen && (
+          <SceneRowMenu
+            isFirst={isFirst}
+            isLast={isLast}
+            index={index}
+            onMove={onMove}
+            onRemove={onRemove}
+            onClose={() => setMenuOpen(false)}
+          />
+        )}
       </div>
+    </div>
+  );
+}
 
-      {generateError && (
-        <div
-          role="alert"
-          style={{
-            marginTop: 6,
-            fontSize: 11,
-            lineHeight: 1.4,
-            color: "var(--status-error, #d4756c)",
+// The ⋯ popover menu: move up / move down / delete (two-click confirm). Closes
+// on any action (except the first delete click, which arms confirm) and on an
+// outside click. Two-click delete follows #66 — never a global Delete key.
+function SceneRowMenu({
+  isFirst,
+  isLast,
+  index,
+  onMove,
+  onRemove,
+  onClose,
+}: {
+  isFirst: boolean;
+  isLast: boolean;
+  index: number;
+  onMove: (fromIndex: number, toIndex: number) => void;
+  onRemove: () => void;
+  onClose: () => void;
+}) {
+  const t = useT();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // Outside click resets confirm + closes the menu (so a primed "confirm
+  // delete?" can't linger if the user clicks away — matches #66 reset).
+  // Escape closes too — keyboard users must be able to dismiss without
+  // clicking elsewhere (mirrors the ModelSwitcher menu).
+  useEffect(() => {
+    function onDocPointerDown(e: PointerEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    }
+    function onDocKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    document.addEventListener("pointerdown", onDocPointerDown);
+    document.addEventListener("keydown", onDocKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onDocPointerDown);
+      document.removeEventListener("keydown", onDocKeyDown);
+    };
+  }, [onClose]);
+
+  const itemStyle: React.CSSProperties = {
+    display: "block",
+    width: "100%",
+    textAlign: "left",
+    padding: "5px 12px",
+    fontFamily: "var(--font-mono)",
+    fontSize: 11,
+    letterSpacing: "0.03em",
+    background: "transparent",
+    border: "none",
+    color: "var(--text-dim)",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+  };
+
+  return (
+    <div
+      ref={ref}
+      role="menu"
+      style={{
+        position: "absolute",
+        top: "calc(100% + 4px)",
+        right: 0,
+        zIndex: 20,
+        minWidth: 130,
+        padding: "4px 0",
+        background: "var(--surface-1, var(--surface-0))",
+        border: "1px solid var(--glass-border)",
+        borderRadius: 8,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.18)",
+      }}
+    >
+      {!isFirst && (
+        <button
+          type="button"
+          data-bare
+          role="menuitem"
+          onClick={() => {
+            onMove(index, index - 1);
+            onClose();
           }}
+          style={itemStyle}
         >
-          {t("studio.scriptPanel.generateFailed", { msg: generateError })}
-        </div>
+          ↑ {t("studio.scriptPanel.sceneMenuMoveUp")}
+        </button>
       )}
-
-      {saveError && <ErrorLine msg={saveError} />}
+      {!isLast && (
+        <button
+          type="button"
+          data-bare
+          role="menuitem"
+          onClick={() => {
+            onMove(index, index + 1);
+            onClose();
+          }}
+          style={itemStyle}
+        >
+          ↓ {t("studio.scriptPanel.sceneMenuMoveDown")}
+        </button>
+      )}
+      <button
+        type="button"
+        data-bare
+        role="menuitem"
+        onClick={() => {
+          if (confirmingDelete) {
+            onRemove();
+            setConfirmingDelete(false);
+            onClose();
+          } else {
+            setConfirmingDelete(true);
+          }
+        }}
+        style={{
+          ...itemStyle,
+          color: "var(--status-error, #d4756c)",
+        }}
+      >
+        {confirmingDelete
+          ? t("studio.scriptPanel.sceneMenuDeleteConfirm")
+          : t("studio.scriptPanel.sceneMenuDelete")}
+      </button>
     </div>
   );
 }
@@ -900,8 +1434,7 @@ interface EditableTextProps {
 
 // Locally-controlled text editor. Seeds from `value`; commits on blur (and on
 // Enter for single-line). Re-syncs to `value` when it changes from outside
-// (a refetch landing) AND the field isn't focused — so an in-flight edit isn't
-// yanked out from under the user, but a server-fresh value reflows.
+// (a refetch landing) AND the field isn't focused.
 function EditableText({
   value,
   ariaLabel,
@@ -971,9 +1504,7 @@ interface DurationInputProps {
 }
 
 // Honest number editor: an empty (or non-numeric) field commits `null` (clear),
-// never a fake 0. A negative value is clamped to 0 (matches the schema's
-// min(0); the bridge also rejects negatives, but clamping avoids a needless
-// round-trip error). Commits on blur / Enter.
+// never a fake 0. A negative value is clamped to 0. Commits on blur / Enter.
 function DurationInput({ ariaLabel, value, onCommit }: DurationInputProps) {
   const [draft, setDraft] = useState(value == null ? "" : String(value));
   const [focused, setFocused] = useState(false);
@@ -1166,8 +1697,22 @@ function MetaField({
   );
 }
 
-function ErrorLine({ msg }: { msg: string }) {
+function ErrorLine({
+  msg,
+  kind,
+}: {
+  msg: string;
+  kind?: "add" | "remove" | "reorder";
+}) {
   const t = useT();
+  const key =
+    kind === "add"
+      ? "studio.scriptPanel.addSceneFailed"
+      : kind === "remove"
+        ? "studio.scriptPanel.removeSceneFailed"
+        : kind === "reorder"
+          ? "studio.scriptPanel.reorderSceneFailed"
+          : "studio.scriptPanel.saveFailed";
   return (
     <div
       role="alert"
@@ -1178,7 +1723,7 @@ function ErrorLine({ msg }: { msg: string }) {
         color: "var(--status-error, #d4756c)",
       }}
     >
-      {t("studio.scriptPanel.saveFailed", { msg })}
+      {t(key, { msg })}
     </div>
   );
 }
