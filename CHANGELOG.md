@@ -7,6 +7,25 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-06-10
+
+**折叠镜表（Shot Sheet）**（PRD-0008）—— 「剧本·分镜」tab 交互重设计。用户反馈"按钮很多很杂"：原每张分镜卡常驻 ~12 个裸控件、一屏 ≈72 个可见控件，且人在 UI 里根本不能新建/删除分镜。本版把卡片改成**折叠态一行只读镜头条 + 点击就地展开的卡内 Inspector（手风琴单展开）**，默认视图只剩 ~3 个常驻按钮；设计经多 agent workflow（4 角度提案 × 2 立场评审）选定，全部写路径不变（per-intent bridge + 共享 scene ops，agent-人一致）。
+
+### Added
+- **UI 新建/删除分镜** — 列表底部「＋ 新建分镜」+ 空状态主按钮（替换"去敲 CLI"的死文案）→ `POST /scene`；⋯ 菜单删除（两步确认 + 外点/Escape 取消）→ `DELETE /scene/:id`。与 agent `autoviral scene add/remove` 同一路由同一 ops，新建 scene 记录字节级一致（E2E 经磁盘 yaml 对比证实）。新卡经 refetch 自动展开。
+- **✓ 已存微反馈** — 字段 inline-commit 成功后短暂显示 `role=status`「✓ 已存」，修"离焦即存但无信号"的可发现性缺口。
+- **剧本折叠条** — 剧本编辑器外包 ▾/▸ 折叠开关（默认展开，localStorage 记忆），叙事层与逐镜执行表视觉分层。
+
+### Changed
+- **分镜卡两态化** — 折叠态零表单控件（镜号 / 三态状态点 / 标题 / 时长 / 景别 / 意图 / 已生成缩略图）；展开态才渲染全部编辑控件（标题/画面/旁白/时长/景别/运镜/意图/↑↓/生成 CTA），手风琴同时仅 1 卡展开。既有 inline-commit、focus 防顶掉、null-clear、生成防重入逐项保留。
+- **stale 状态多重编码** — 「需重生」不再只靠 8px 纯色点：实心琥珀点（`--status-warn`，双主题 token）+ mono 文字徽章，三态（◌待生成/●已生成/◍需重生）不靠颜色即可区分（e2e Hard rule 5）。
+- **上移/下移收进 ⋯ 菜单**，整卡拖拽重排保留。
+
+### Fixed
+- **删除失败误报"保存失败"** — `ErrorLine` 未传 kind 时统一落 saveFailed 文案；现删除/重排各有专属错误文案（对抗 review 双 reviewer 同挖）。
+- **新建自动展开可能选错卡** — 占位标题同名时 title 回退会匹配旧卡；现仅在 bridge 未返回 id 时才启用 title 回退。
+- 清理 `work-store.ts` 两处历史遗留 unused 声明（TS6133）。
+
 ## [0.1.6] - 2026-06-09
 
 **剧本·分镜规划层**（PRD-0007）—— 在生成之前先排剧本、看分镜、逐镜生成。AutoViral 重定位为电影级 AI-native 万能视频生成器，本版专做 **L1 规划层**：把"生成前先有计划"做成素材区里可写、可改、agent 与人共编的一层。两条命题贯穿：**计划与执行解耦**（生成只是 handoff，规划层不拥有生成引擎、不碰 timeline）+ **agent-人一致**（剧本/分镜的每一次写都经同一份 scene ops，CLI 排镜与 UI 改卡收敛到同一 `composition.yaml`）。9 个纵切片实现，经 per-wave 对抗式 review + 多纬度浏览器 E2E（截图 + DOM/computed-style 二确）验收。

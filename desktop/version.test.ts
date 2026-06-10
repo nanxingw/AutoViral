@@ -8,7 +8,7 @@ import {
 describe("desktop version injection", () => {
   it("buildVersionArg + parseDesktopVersion round-trips the real app version", () => {
     // main.ts builds the arg from app.getVersion(); preload parses it back.
-    const appVersion = "0.1.6";
+    const appVersion = "0.1.7";
     const argv = ["node", "preload.js", buildVersionArg(appVersion)];
     expect(parseDesktopVersion(argv, "FALLBACK")).toBe(appVersion);
   });
