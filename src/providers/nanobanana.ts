@@ -6,6 +6,45 @@ import type { GenerateProvider, ImageOpts, GenerateResult } from './base.js'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const DEFAULT_MODEL = 'openai/gpt-5.4-image-2'
 
+// Aspect ratios the OpenRouter image_config accepts. Callers that pass raw
+// width/height (the documented public params on /api/generate/image) used to
+// be SILENTLY ignored — the model fell back to its 1024×1024 default and the
+// agent concluded "images can only be square". Derive the closest supported
+// ratio instead so width/height express intent even though the model picks
+// the actual pixel dimensions.
+const SUPPORTED_RATIOS: ReadonlyArray<readonly [string, number]> = [
+  ['1:1', 1],
+  ['9:16', 9 / 16],
+  ['16:9', 16 / 9],
+  ['3:4', 3 / 4],
+  ['4:3', 4 / 3],
+  ['4:5', 4 / 5],
+  ['5:4', 5 / 4],
+  ['2:3', 2 / 3],
+  ['3:2', 3 / 2],
+  ['21:9', 21 / 9],
+]
+
+/** Closest supported aspect-ratio string for a width×height request, or
+ *  undefined when either side is missing/invalid (model default applies). */
+export function deriveAspectRatio(
+  width?: number,
+  height?: number,
+): string | undefined {
+  if (!width || !height || width <= 0 || height <= 0) return undefined
+  const target = width / height
+  let best: string | undefined
+  let bestDist = Infinity
+  for (const [label, ratio] of SUPPORTED_RATIOS) {
+    const dist = Math.abs(Math.log(target / ratio))
+    if (dist < bestDist) {
+      bestDist = dist
+      best = label
+    }
+  }
+  return best
+}
+
 export class NanoBananaProvider implements GenerateProvider {
   readonly name = 'nanobanana'
 
@@ -16,7 +55,10 @@ export class NanoBananaProvider implements GenerateProvider {
   }
 
   async generateImage(opts: ImageOpts): Promise<GenerateResult> {
-    const { prompt, workId, filename, referenceImage, aspectRatio, imageSize, seed, temperature, model } = opts
+    const { prompt, workId, filename, referenceImage, imageSize, seed, temperature, model, width, height } = opts
+    // Explicit aspectRatio wins; otherwise derive it from width/height so
+    // those params are honored as intent rather than silently dropped.
+    const aspectRatio = opts.aspectRatio ?? deriveAspectRatio(width, height)
 
     try {
       // Build message content
