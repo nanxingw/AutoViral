@@ -94,7 +94,15 @@ function writeInject(workId: string, enabled: boolean): void {
 function manualDir(): string {
   // Anchor on PACKAGE_ROOT (not process.cwd()) so `autoviral docs` resolves the
   // bundled manual inside a packaged Electron app; AUTOVIRAL_MANUAL_DIR still wins.
-  return process.env.AUTOVIRAL_MANUAL_DIR ?? join(PACKAGE_ROOT, "skills/autoviral/manual");
+  // skills/autoviral is a SIBLING of dist/ (= PACKAGE_ROOT), not a child — same
+  // invariant as CLI_BIN_DIR and the boot-sync skills sync (server/index.ts:220
+  // join(PACKAGE_ROOT, "..", "skills")). The old child resolution pointed at the
+  // ghost dir dist/skills/autoviral/manual, so `autoviral docs` served nothing
+  // in the dist/packaged layout (B5 same-family fix).
+  return (
+    process.env.AUTOVIRAL_MANUAL_DIR ??
+    join(PACKAGE_ROOT, "..", "skills", "autoviral", "manual")
+  );
 }
 
 export const bridgeRouter = new Hono();

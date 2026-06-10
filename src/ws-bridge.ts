@@ -11,6 +11,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { writeFile, readFile, rm, mkdir } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
@@ -20,7 +21,7 @@ import type { Duplex } from "node:stream";
 import { appendFile } from "node:fs/promises";
 import { logBridge, logBridgeDebug } from "./infra/logger.js";
 import { loadConfig, dataDir } from "./infra/config.js";
-import { PACKAGE_ROOT } from "./infra/paths.js";
+import { PACKAGE_ROOT, CLI_BIN_DIR } from "./infra/paths.js";
 import { getWork, updateWork, saveWorkChat, loadWorkChat, listWorks, type Work } from "./domain/work-store.js";
 import { getContentType } from "./shared/content-types/registry.js";
 import { createCheckpoint } from "./server/checkpoints.js";
@@ -1054,10 +1055,23 @@ export class WsBridge {
     // `command not found`, and even resolved it exits 2 on a missing
     // AUTOVIRAL_WORK_ID. AUTOVIRAL_PORT is already set process-wide in
     // startServer(), but we set it explicitly here to stay self-contained.
-    // Anchor on PACKAGE_ROOT (not process.cwd()) — in a packaged Electron app
-    // the working dir is not the repo checkout, so the repo-contained shim dir
-    // and AUTOVIRAL_PROJECT_DIR must resolve from the bundled package root.
-    const cliBinDir = join(PACKAGE_ROOT, "cli", "autoviral", "bin");
+    // Anchor on the shared CLI_BIN_DIR (PACKAGE_ROOT/../cli/autoviral/bin) — in
+    // a packaged Electron app the working dir is not the repo checkout, so the
+    // repo-contained shim dir and AUTOVIRAL_PROJECT_DIR must resolve from the
+    // bundled package root. cli/autoviral is a SIBLING of dist/, not a child —
+    // see CLI_BIN_DIR's invariant comment (B5 regression in 2a79daf resolved it
+    // as a child → ghost dist/cli/autoviral/bin → `autoviral: command not
+    // found`).
+    const cliBinDir = CLI_BIN_DIR;
+    // Fail-fast: a missing shim dir means the agent will silently get
+    // `command not found` for every `autoviral` call the skill documents. Make
+    // the ghost-path class of regression LOUD in the daemon log instead of
+    // silent — this is exactly the failure mode B5 fixed.
+    if (!existsSync(cliBinDir)) {
+      console.warn(
+        `[ws-bridge] autoviral CLI shim dir not found at ${cliBinDir} — the spawned agent's \`autoviral\` commands will fail (command not found). Expected cli/autoviral/bin beside dist/ (run \`npm run build:cli\`?).`,
+      );
+    }
     const workCwd = join(dataDir, "works", session.workId);
     const proc = spawn("claude", args, {
       cwd: PACKAGE_ROOT,
