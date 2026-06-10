@@ -230,3 +230,66 @@ describe("useBridgeEvents · plan-changed (S5 / PRD-0007)", () => {
     expect(loadComposition).not.toHaveBeenCalled();
   });
 });
+
+describe("useBridgeEvents · reconnect after socket drop", () => {
+  beforeEach(() => {
+    (globalThis as any).WebSocket = MockWS;
+    MockWS.instances = [];
+    loadComposition.mockClear();
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (globalThis as any).WebSocket;
+    vi.restoreAllMocks();
+  });
+
+  it("schedules a reconnect when the server drops the socket", () => {
+    renderBridge("w_test");
+    expect(MockWS.instances.length).toBe(1);
+    act(() => {
+      MockWS.instances[0].onopen?.(new Event("open"));
+      MockWS.instances[0].onclose?.(new CloseEvent("close"));
+    });
+    // Backoff starts at 1s — after it elapses a fresh socket must exist.
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(MockWS.instances.length).toBe(2);
+    expect(MockWS.instances[1].url).toContain("/ws/bridge/w_test");
+  });
+
+  it("runs a full catch-up refetch on RE-connect (missed events have no replay)", () => {
+    const { invalidateSpy } = renderBridge("w_test");
+    act(() => {
+      MockWS.instances[0].onopen?.(new Event("open"));
+    });
+    // First open is NOT a reconnect — no catch-up churn on initial mount.
+    expect(loadComposition).not.toHaveBeenCalled();
+    act(() => {
+      MockWS.instances[0].onclose?.(new CloseEvent("close"));
+      vi.advanceTimersByTime(1000);
+    });
+    act(() => {
+      MockWS.instances[1].onopen?.(new Event("open"));
+    });
+    // Reconnect → composition refetch + assets-library invalidation fire.
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["assets", "w_test"] });
+  });
+
+  it("does NOT reconnect after unmount (disposed guard)", () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    );
+    const { unmount } = renderHook(() => useBridgeEvents("w_test"), { wrapper });
+    expect(MockWS.instances.length).toBe(1);
+    unmount(); // cleanup closes the socket → onclose fires synchronously
+    act(() => {
+      vi.advanceTimersByTime(30_000);
+    });
+    expect(MockWS.instances.length).toBe(1);
+  });
+});

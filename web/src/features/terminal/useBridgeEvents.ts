@@ -37,7 +37,6 @@ export function useBridgeEvents(workId: string | undefined): void {
     if (typeof WebSocket === "undefined") return;
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const url = `${proto}://${window.location.host}/ws/bridge/${workId}`;
-    const ws = new WebSocket(url);
 
     // Re-fetch the composition from disk into the store. Kept as a dynamic
     // import so this hook stays free of a hard dep on the composition service
@@ -98,7 +97,7 @@ export function useBridgeEvents(workId: string | undefined): void {
         });
     };
 
-    ws.onmessage = (e) => {
+    const onMessage = (e: MessageEvent) => {
       let ev: UiEvent;
       try {
         ev = JSON.parse(e.data);
@@ -188,8 +187,47 @@ export function useBridgeEvents(workId: string | undefined): void {
       }
     };
 
+    // ── Connection lifecycle with auto-reconnect ─────────────────────────
+    // A dropped socket (daemon restart, laptop sleep, network blip) used to
+    // leave the page permanently deaf: no composition/plan/asset events ever
+    // arrived again until a manual reload — which read as "generated assets
+    // don't show up until I refresh". Reconnect with capped exponential
+    // backoff, and on every RE-connect run a full catch-up refetch, because
+    // any events published while we were down are gone for good (the bus has
+    // no replay).
+    let ws: WebSocket | null = null;
+    let disposed = false;
+    let retryMs = 1000;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    let hadConnection = false;
+
+    const connect = () => {
+      if (disposed) return;
+      ws = new WebSocket(url);
+      ws.onmessage = onMessage;
+      ws.onopen = () => {
+        retryMs = 1000;
+        if (hadConnection) {
+          // Catch up on everything we may have missed while disconnected.
+          refetchComposition();
+          refetchCarousel();
+          refetchScript();
+          void queryClient.invalidateQueries({ queryKey: ["assets", workId] });
+        }
+        hadConnection = true;
+      };
+      ws.onclose = () => {
+        if (disposed) return;
+        retryTimer = setTimeout(connect, retryMs);
+        retryMs = Math.min(retryMs * 2, 10_000);
+      };
+    };
+    connect();
+
     return () => {
-      ws.close();
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      ws?.close();
     };
   }, [workId, queryClient]);
 }

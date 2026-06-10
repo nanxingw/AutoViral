@@ -13,6 +13,7 @@ import { uiEventBus, type UiEvent } from "./ui-events.js";
 import { answerAsk } from "./approval-gate.js";
 import { watchCompositionFor } from "./composition-watcher.js";
 import { watchPlanFor } from "./plan-watcher.js";
+import { watchAssetsFor } from "./assets-watcher.js";
 import { enforceLoopbackOrigin } from "../ws-origin.js";
 
 export interface BridgeWsHandle {
@@ -78,6 +79,17 @@ export function attachBridgeWebSocket(
       watchPlanFor(workId);
     } catch {
       /* watcher unavailable — in-app PUT still broadcasts plan-changed directly */
+    }
+
+    // Assets-library watcher — ANY file landing in assets/ (agent writing via
+    // Bash/ffmpeg/python, transition/captions/mix outputs, scene generate)
+    // → asset-added → Studio library refetches live. The blessed generation
+    // endpoints still publish their own asset-added; the watcher is the
+    // chokepoint that covers everyone else.
+    try {
+      watchAssetsFor(workId);
+    } catch {
+      /* watcher unavailable — endpoint-published asset-added still flows */
     }
 
     // Inbound: Studio replies to ui-ask events with approval-response frames
