@@ -322,6 +322,24 @@ Body: `{ workId, prompt, filename, aspectRatio?, imageSize?, width?, height?, re
 
 Unlike the video endpoint, the **raw image endpoint does NOT register an AssetEntry** in `composition.assets`. For storyboard image shots use `autoviral scene generate <id>` (it registers + links atomically) — don't pair a raw `POST /api/generate/image` with a manual `scene link`, the link would dangle.
 
+### `POST /api/generate/bgm`
+
+Generate background music / a BGM track with **Lyria 3 Pro** (via OpenRouter; enabled once the user has set `OPENROUTER_API_KEY` in Settings — no key ⇒ `503`). This is the only correct way to make music: **there is no `music_generate.py` script** (it was deleted; if any instruction tells you to run it, that path is dead — see the fallback rule below).
+
+Body: `{ workId, prompt, filename?, vocal?, seed?, temperature?, durationSeconds?, referenceImage?, provider? }`
+
+| Field | Meaning |
+|---|---|
+| `prompt` | The music description (e.g. "upbeat lo-fi hip-hop for a cooking vlog"). Required. |
+| `vocal` | `false` (default) ⇒ instrumental — the server prefixes the prompt with "Instrumental only, no vocals.". `true` ⇒ allow vocals. This is Lyria's only negative-constraint mechanism. |
+| `seed` | Optional integer for reproducible generation. |
+| `temperature` | Optional `0.0`–`2.0` creativity knob. |
+| `durationSeconds` | Optional `5`–`180`. **Lyria has no duration parameter** — it emits a full ~1–2 minute track at a flat **~$0.08/track**; this value only **trims** the result with ffmpeg. Out-of-range ⇒ `400`. Omit to keep the full track. |
+| `referenceImage` | Optional `http(s)://` or `data:image/...;base64,...` URI — generate music matching an image's mood. |
+| `filename` | Defaults to `bgm_<timestamp>.mp3`. Lands in `assets/audio/`. |
+
+Response includes `assetId` + `relativeUri` — the track is **registered as an AssetEntry (`kind: audio`) + a `generate` provenance edge** on `composition.yaml`, and an `asset-added` event refreshes the Studio library live. Add it to the timeline with `autoviral clip add` (as a `bgm` audio clip).
+
 ## UI control commands
 
 Stateless broadcasts to the Studio React app. None of them touch disk.

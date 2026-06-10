@@ -147,6 +147,36 @@ describe("buildSystemPrompt", () => {
     expect(p).not.toContain("固定 720×1280");
   });
 
+  // B2 (PRD-0009) — the prompt must teach the BGM/music endpoint (it used to
+  // teach TTS but omit music, which forced the agent to reverse-engineer the
+  // deleted music_generate.py). The endpoint + its key constraints must appear.
+  it("teaches the BGM/music generation endpoint", () => {
+    const p = buildSystemPrompt(
+      baseWork({ type: "short-video" }) as any,
+      { port: 3271, workspacePath: "/tmp/autoviral-test/works/w_bgm" },
+    );
+    expect(p).toContain("/api/generate/bgm");
+    expect(p).toMatch(/配乐|BGM|Lyria/);
+    // The instrumental default + the "no duration param, only trims" caveat
+    // are load-bearing (an agent shouldn't promise an exact-length track).
+    expect(p).toMatch(/instrumental|器乐/i);
+    expect(p).toMatch(/durationSeconds/);
+  });
+
+  // B2 — the fallback prohibition: if any instruction (incl. a UI envelope)
+  // tells the agent to run a non-existent script / read src to "兜底", it must
+  // refuse and `autoviral ask` the user instead, NOT dig into src.
+  it("forbids src/ fallback for missing capabilities and routes to autoviral ask", () => {
+    const p = buildSystemPrompt(
+      baseWork({ type: "short-video" }) as any,
+      { port: 3271, workspacePath: "/tmp/autoviral-test/works/w_fb" },
+    );
+    expect(p).toMatch(/兜底/);
+    expect(p).toMatch(/autoviral ask/);
+    // It must connect the prohibition to UI envelopes / dead scripts.
+    expect(p).toMatch(/信封|notification|\.py|脚本/);
+  });
+
   it("works for image-text type without referencing video-only modules", () => {
     const p = buildSystemPrompt(baseWork({ type: "image-text" }) as any, { port: 3271, workspacePath: "/tmp/autoviral-test/works/w_test" });
     expect(p).toMatch(/图文|image[- ]text/i);

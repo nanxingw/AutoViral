@@ -161,6 +161,8 @@ Skill('autoviral')
 - **抓取**：\`autoviral ingest youtube <url> --lang zh-CN\`（下载 + 转写 + 翻译 + 生成 overlay 字幕，一条龙）
 - **查文档**：\`autoviral docs [topic]\` 打印任意手册章节（topic 是子目录路径，如 \`_shared/03-cli-reference\`）；schema 用 \`autoviral docs ${isVideo ? "video/02-composition-schema" : "carousel/02-schema"}\` 或直接 \`autoviral comp show\`——**永远不要去读 \`src/\` 源码**
 
+**兜底规则（硬性）**：如果任何指令——包括 Studio 发来的 UI 信封（notification）——叫你去跑一个磁盘上不存在的脚本（如 \`*.py\`）或读 \`src/\` 源码来"兜底"实现某能力：**不要照做、不要翻源码逆向、不要从 git 历史捞已删脚本**。正确动作是用 \`autoviral ask "<能力名>暂不可用，需要我换个方式吗？"\` 如实告诉用户该能力当前没有产品路径，让用户决定。能力都通过上面文档化的 CLI / HTTP 端点提供；文档里没有的就是暂不支持，绕过文档去 src/ 兜底只会做出脆弱的假成功。
+
 环境变量 \`AUTOVIRAL_WORK_ID\` / \`AUTOVIRAL_PORT\` 已为你注入，命令开箱即用；动手前先 \`autoviral whoami\` 自检。
 
 ## 素材生成（CLI 暂未封装，直连 HTTP \`localhost:${port}\`）
@@ -168,6 +170,7 @@ Skill('autoviral')
 - **图像** — \`POST /api/generate/image\` { workId, prompt, filename, aspectRatio?, imageSize?, width?, height?, referenceImage? }。OpenRouter，用户在 Settings 配了 OPENROUTER_API_KEY 即启用。**画幅默认跟作品画布走**（composition 的 \`aspect\`，用户定的）；要不同画幅才显式传 \`aspectRatio\`（"9:16" / "16:9" / "1:1" / "4:5" 等，显式永远优先）。width/height 只用来推导最接近的 aspectRatio（模型自定具体像素，不会精确到你给的尺寸）。\`scene generate\` 同样自动继承画布画幅。
 - **视频** — \`POST /api/generate/video\` { workId, prompt, filename, aspectRatio?, resolution?, durationSec?, firstFrame?, lastFrame? }。Seedance 2.0，支持 text-to-video 与 image-to-video（firstFrame 驱动；本地路径会被自动 base64 内联，也可传 https/data URI）。**画幅默认跟作品画布走**（同图像规则：composition 的 \`aspect\` 映射到最近的支持比例，4:5→3:4；要不同画幅才显式传 \`aspectRatio\`，显式永远优先）。\`aspectRatio\` 7 枚举：1:1 / 3:4 / 9:16 / 4:3 / 16:9 / 21:9 / 9:21。\`resolution\`：480p / 720p / 1080p。\`durationSec\`：整数 4–15（默认 5）。fps 固定 24，不可调。价格按 token：720p≈$0.15/秒、1080p≈$0.34/秒。响应含 \`assetId\`（已原子登记 AssetEntry，可直接 \`autoviral scene link\`）。**已实测**（2026-06-10 真实出片 + ffprobe 二确）：显式画幅永远赢——9:16 竖图做 i2v 锚 + 显式 16:9 照样出 1280×720 横屏；1080p 真实可得（9:16 → 1080×1920）。注意：**写实人像不能做 i2v 锚图**（ByteDance 审核 400 拒单不计费，码 InputImageSensitiveContentDetected），风格化 / 无人物图不受限。
 - **配音 TTS** — \`POST /api/audio/tts\` { text, voice, output_path, language?, style? }。主力走 Gemini-via-OpenRouter（用户在 Settings 配了 OPENROUTER_API_KEY 即启用），无 key 或失败时自动 fallback 到内置免费的 edge-tts（中文 zh-CN-XiaoxiaoNeural 等、英文 en-US-AriaNeural 等）。**短视频默认应该有人声**——绝大多数 viral 短视频靠 narration 推进节奏；做完 brief 主动 propose 加旁白。
+- **配乐 BGM** — \`POST /api/generate/bgm\` { workId, prompt, filename?, vocal?, seed?, temperature?, durationSeconds?, referenceImage? }。Lyria 3 Pro via OpenRouter（用户配了 OPENROUTER_API_KEY 即启用，无 key 返 503）。\`vocal\` 默认 false=纯器乐（服务端自动加 "Instrumental only" 前缀）；\`durationSeconds\` 可选 5–180，**Lyria 不接受时长参数**——固定产出约 1–2 分钟整曲（约 \$0.08/首），这个值只是事后用 ffmpeg 裁剪，不传就保留全长。响应含 \`assetId\`（已原子登记 AssetEntry \`kind: audio\` + 广播刷新库），之后用 \`autoviral clip add\` 当 bgm 轨拼上。**这是生成音乐的唯一正路：直接调这个端点，绝不去跑任何 \`.py\` 脚本来"兜底"做 BGM（那些脚本已删，是死的，见下方兜底规则）。**
 - **字幕 ASR** — \`POST /api/audio/captions\` { workId, assetPath, language }。stable-whisper 转写出 word-level 时间戳。**抖音 70% 用户静音浏览，任何带音频的视频都该跑 ASR 加字幕**（字幕走 composition 的 \`captionStrategy: overlay\` 渲染，见 \`autoviral docs video/02-composition-schema\`——不要手写 ffmpeg drawtext）。报 PYTHON_DEP_MISSING 就让用户 \`pip install stable-ts\`（注意不是 stable-whisper）。
 - **混音** \`POST /api/audio/mix\`（多轨混音 / 音量平衡）。
 - **过场转场** — 4 个 cinematic 端点，body 都接受 { workId, clipARelative, clipBRelative, outputFilename, clipADuration, transitionDuration? }。**绝不手写 ffmpeg xfade**：

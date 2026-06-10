@@ -60,6 +60,13 @@ describe("unified MediaProvider registry (ADR-007)", () => {
       expect(edge?.tts.id).toBe("edge-tts");
     });
 
+    it("music → lyria (B2: BGM/配乐 capability)", () => {
+      const p = getProvider("music", "lyria");
+      expect(p?.capability).toBe("music");
+      expect(p?.name).toBe("lyria");
+      expect(typeof p?.generateMusic).toBe("function");
+    });
+
     it("unknown name → undefined", () => {
       expect(getProvider("video", "runway")).toBeUndefined();
       expect(getProvider("image", "ghost")).toBeUndefined();
@@ -78,6 +85,11 @@ describe("unified MediaProvider registry (ADR-007)", () => {
 
     it("video default is seedance", () => {
       expect(getDefaultProvider("video")?.name).toBe("seedance");
+    });
+
+    it("music default is lyria", () => {
+      expect(getDefaultProvider("music")?.name).toBe("lyria");
+      expect(getDefaultProvider("music")?.default).toBe(true);
     });
 
     it("tts default is gemini (PRD-0003 §2 flipped the chain; edge is fallback)", () => {
@@ -107,9 +119,10 @@ describe("unified MediaProvider registry (ADR-007)", () => {
   });
 
   describe("envKey mapping (declarative)", () => {
-    it("image + video gate on OPENROUTER_API_KEY", () => {
+    it("image + video + music gate on OPENROUTER_API_KEY", () => {
       expect(getProvider("image", "openrouter-image")?.envKey).toBe("OPENROUTER_API_KEY");
       expect(getProvider("video", "seedance")?.envKey).toBe("OPENROUTER_API_KEY");
+      expect(getProvider("music", "lyria")?.envKey).toBe("OPENROUTER_API_KEY");
     });
 
     it("gemini tts gates on OPENROUTER_API_KEY; edge-tts on EDGE_TTS_PATH", () => {
@@ -129,7 +142,11 @@ describe("unified MediaProvider registry (ADR-007)", () => {
 
     it("unfiltered lists every capability in one place", () => {
       const caps = new Set(listProviders().map((p) => p.capability));
-      expect(caps).toEqual(new Set(["image", "video", "tts"]));
+      expect(caps).toEqual(new Set(["image", "video", "tts", "music"]));
+    });
+
+    it("music lists ONLY lyria", () => {
+      expect(listProviders("music").map((p) => p.name)).toEqual(["lyria"]);
     });
 
     it("edge-tts is always available; gemini/seedance availability tracks env", () => {
@@ -164,10 +181,11 @@ describe("unified MediaProvider registry (ADR-007)", () => {
       vi.unstubAllEnvs();
       await initProviders({ openrouter: {} });
       expect(getDefaultProvider("image")).toBeUndefined();
-      // video + tts still register (seedance always; gemini/edge-tts always —
-      // registration is key-independent; the key only gates *availability*).
+      // video + tts + music still register (seedance/lyria always; gemini/edge-tts
+      // always — registration is key-independent; the key only gates *availability*).
       expect(getDefaultProvider("video")?.name).toBe("seedance");
       expect(getDefaultProvider("tts")?.name).toBe("gemini");
+      expect(getDefaultProvider("music")?.name).toBe("lyria");
     });
   });
 });

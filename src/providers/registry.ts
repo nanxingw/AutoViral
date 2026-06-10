@@ -31,8 +31,14 @@ import type {
 import { edgeTtsProvider } from "./tts/edge-tts.js";
 import { geminiTtsProvider } from "./tts/gemini-tts.js";
 import type { TtsProvider } from "./tts/types.js";
+import { createLyriaProvider } from "./audio/lyria.js";
+import type {
+  MusicProvider,
+  MusicGenerateOptions,
+  MusicGenerateResult,
+} from "./audio/types.js";
 
-export type Capability = "image" | "video" | "tts";
+export type Capability = "image" | "video" | "tts" | "music";
 
 interface MediaProviderBase {
   name: string;
@@ -65,10 +71,24 @@ export interface TtsMediaProvider extends MediaProviderBase {
   tts: TtsProvider;
 }
 
+export interface MusicMediaProvider extends MediaProviderBase {
+  capability: "music";
+  /** Human-readable label for the generation dialog (e.g. "Lyria 3 Pro"). */
+  displayName: string;
+  /**
+   * The keyless singleton adapter. The HTTP route constructs its OWN
+   * createLyriaProvider(config.openrouter.apiKey) so the key comes from the
+   * user's config.yaml (not process.env) — this entry exists so music
+   * participates in list/default/availability + provider validation.
+   */
+  generateMusic(opts: MusicGenerateOptions): Promise<MusicGenerateResult>;
+}
+
 export type MediaProvider =
   | ImageMediaProvider
   | VideoMediaProvider
-  | TtsMediaProvider;
+  | TtsMediaProvider
+  | MusicMediaProvider;
 
 // Map keyed by `${capability}:${name}` so the same name could (in theory) exist
 // under two capabilities without collision. Insertion order is preserved, so
@@ -109,6 +129,10 @@ export function getProvider(
   name: string,
 ): TtsMediaProvider | undefined;
 export function getProvider(
+  capability: "music",
+  name: string,
+): MusicMediaProvider | undefined;
+export function getProvider(
   capability: Capability,
   name: string,
 ): MediaProvider | undefined;
@@ -130,6 +154,9 @@ export function getDefaultProvider(
 export function getDefaultProvider(
   capability: "tts",
 ): TtsMediaProvider | undefined;
+export function getDefaultProvider(
+  capability: "music",
+): MusicMediaProvider | undefined;
 export function getDefaultProvider(
   capability: Capability,
 ): MediaProvider | undefined;
@@ -220,6 +247,20 @@ function ttsEntry(
   };
 }
 
+function musicEntry(p: MusicProvider): MusicMediaProvider {
+  return {
+    name: p.id,
+    capability: "music",
+    displayName: p.displayName,
+    // Declarative: doctor / availability gate on OPENROUTER_API_KEY. The HTTP
+    // route injects the key from config.openrouter.apiKey at call time, so this
+    // adapter (env-keyed singleton) is only the list/default/validation handle.
+    envKey: "OPENROUTER_API_KEY",
+    default: true,
+    generateMusic: (opts) => p.generateMusic(opts),
+  };
+}
+
 /**
  * Register the providers that need no runtime config: video (seedance) and TTS
  * (Gemini-via-OpenRouter default + edge-tts fallback — PRD-0003 §2 flipped the
@@ -241,6 +282,11 @@ function registerStaticProviders(): void {
   }
   if (!getProvider("tts", "edge-tts")) {
     registerProvider(ttsEntry(edgeTtsProvider, { envKey: "EDGE_TTS_PATH" }));
+  }
+  if (!getProvider("music", "lyria")) {
+    // Keyless singleton — registration is key-independent; the key gates
+    // availability + is injected per-call by the BGM route from config.yaml.
+    registerProvider(musicEntry(createLyriaProvider(process.env.OPENROUTER_API_KEY ?? "")));
   }
 }
 

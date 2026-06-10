@@ -8,12 +8,14 @@ import { Hono } from "hono";
 import { readFile, writeFile, mkdir, readdir, rename, copyFile } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
 import yaml from "js-yaml";
 import { z } from "zod";
-import { dataDir, repoRoot } from "../../infra/config.js";
+import { dataDir, repoRoot, loadConfig } from "../../infra/config.js";
 import { getWork } from "../../domain/work-store.js";
 import { readCompositionFor } from "../bridge/composition-ops.js";
 import { getProvider, getDefaultProvider, listProviders } from "../../providers/registry.js";
+import { FFMPEG_BIN } from "../ffmpeg-paths.js";
 import {
   closestSupportedRatio,
   SUPPORTED_VIDEO_ASPECT_RATIOS,
@@ -302,6 +304,210 @@ generateRouter.post("/api/generate/video", async (c) => {
     return c.json({
       success: true,
       assetId,
+      assetPath: result.assetUri,
+      previewUrl: `/api/works/${workId}/${relativeUri}`,
+      stub: result.stub,
+      costUsd: result.costUsd,
+    });
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+  }
+});
+
+/**
+ * Register a freshly-generated BGM/music track as an AssetEntry (kind:"audio")
+ * + a "generate" ProvenanceEdge on the work's composition.yaml. Mirrors
+ * registerGeneratedVideoAsset exactly (same shape, best-effort: returns null
+ * without throwing when the work / composition.yaml is missing) so the on-disk
+ * provenance vocabulary stays uniform across video / image / audio.
+ */
+async function registerGeneratedBgmAsset(args: {
+  workId: string;
+  relativeAssetUri: string;
+  providerId: string;
+  prompt: string;
+  costUsd?: number;
+  stub?: boolean;
+  durationSec?: number;
+  extraParams?: Record<string, unknown>;
+}): Promise<string | null> {
+  const { workId, relativeAssetUri, providerId, prompt } = args;
+  const work = await getWork(workId);
+  if (!work) return null;
+  const compYamlPath = join(dataDir, "works", workId, "composition.yaml");
+  try {
+    const compDoc = yaml.load(await readFile(compYamlPath, "utf-8")) as Composition;
+    const { randomUUID } = await import("node:crypto");
+    const assetId = `gen_${randomUUID().slice(0, 8)}`;
+    const newAsset: AssetEntry = {
+      id: assetId,
+      uri: relativeAssetUri,
+      kind: "audio",
+      metadata: { duration: args.durationSec ?? 0 },
+      status: "ready",
+    };
+    const newEdge: ProvenanceEdge = {
+      fromAssetId: null,
+      toAssetId: assetId,
+      operation: {
+        type: "generate",
+        actor: "user",
+        timestamp: new Date().toISOString(),
+        params: {
+          providerId,
+          prompt,
+          costUsd: args.costUsd,
+          stub: args.stub,
+          ...(args.extraParams ?? {}),
+        },
+      },
+    };
+    compDoc.assets = [...(compDoc.assets ?? []), newAsset];
+    compDoc.provenance = [...(compDoc.provenance ?? []), newEdge];
+    await writeFile(compYamlPath, yaml.dump(compDoc), "utf-8");
+    return assetId;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Truncate an mp3 in place to `seconds` via ffmpeg (stream-copy, no re-encode).
+ * Lyria emits a full ~1–2 minute track with no duration parameter; this is how
+ * the endpoint honours a caller's durationSeconds. Best-effort: on any ffmpeg
+ * failure the original (full-length) file is kept rather than failing the job.
+ */
+async function truncateAudio(filePath: string, seconds: number): Promise<void> {
+  const tmpPath = `${filePath}.cut.mp3`;
+  await new Promise<void>((resolve, reject) => {
+    const ff = spawn(
+      FFMPEG_BIN,
+      ["-y", "-loglevel", "error", "-i", filePath, "-t", String(seconds), "-c", "copy", tmpPath],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+    let stderr = "";
+    ff.stderr.on("data", (b: Buffer | string) => { stderr += b.toString(); });
+    ff.on("close", (code) => {
+      if (code === 0) resolve();
+      else reject(new Error(`ffmpeg truncate exit ${code}\n${stderr}`));
+    });
+    ff.on("error", reject);
+  });
+  await rename(tmpPath, filePath);
+}
+
+// POST /api/generate/bgm — Lyria 3 Pro music/BGM generation (B2, PRD-0009).
+// Replaces the deleted music_generate.py death-envelope path. Reads the
+// OpenRouter key from config.openrouter.apiKey (NOT process.env — Settings
+// writes config.yaml; works.ts:758 pattern), so a UI-configured key works even
+// when the daemon's environment lacks OPENROUTER_API_KEY.
+generateRouter.post("/api/generate/bgm", async (c) => {
+  const body = await c.req.json().catch(() => ({} as Record<string, unknown>));
+  const {
+    workId, prompt, filename, vocal, seed, temperature, durationSeconds,
+    provider: providerName, referenceImage,
+  } = body as Record<string, any>;
+
+  if (!workId || !prompt) {
+    return c.json({ success: false, error: "Missing required fields: workId, prompt", code: "INVALID_PARAMS" }, 400);
+  }
+  if (!SAFE_ID.test(String(workId))) {
+    return c.json({ success: false, error: "Invalid workId", code: "INVALID_PARAMS" }, 400);
+  }
+
+  // durationSeconds is OPTIONAL. Lyria has NO duration parameter (it emits a
+  // full ~1–2 min track); when given, the server clamps the value (HTML
+  // min/max is untrusted — #75 lesson) and ffmpeg-truncates the result. Reject
+  // out-of-range values rather than silently snapping, so the caller learns the
+  // bound.
+  if (durationSeconds !== undefined) {
+    if (typeof durationSeconds !== "number" || !Number.isFinite(durationSeconds)
+      || durationSeconds < 5 || durationSeconds > 180) {
+      return c.json({
+        success: false,
+        error: `durationSeconds must be a number in 5-180 (got ${durationSeconds}). Lyria emits a full ~2min track; this only trims it.`,
+        code: "INVALID_PARAMS",
+      }, 400);
+    }
+  }
+
+  // Validate the requested provider exists (lyria is the only music provider).
+  const entry = providerName ? getProvider("music", providerName) : getDefaultProvider("music");
+  if (!entry) {
+    return c.json({ success: false, error: "No music provider available", code: "INVALID_PARAMS" }, 400);
+  }
+
+  // Key from config (Settings-written), NOT process.env. No key → 503.
+  const config = await loadConfig();
+  const apiKey = config.openrouter?.apiKey;
+  if (!apiKey) {
+    return c.json({ success: false, error: "openrouter.apiKey not configured", code: "NO_API_KEY" }, 503);
+  }
+
+  const safeFilename = filename
+    ? String(filename).replace(/[/\\]/g, "_").replace(/^\.+/, "")
+    : `bgm_${Date.now()}.mp3`;
+  const finalFilename = safeFilename || `bgm_${Date.now()}.mp3`;
+
+  const referenceImages: string[] = [];
+  if (typeof referenceImage === "string" && referenceImage.trim()) referenceImages.push(referenceImage.trim());
+
+  const wDirAbs = join(dataDir, "works", workId);
+  const outDirAbs = join(wDirAbs, "assets", "audio");
+
+  try {
+    // Call the registry entry (the keyless lyria singleton in prod; a capturing
+    // fake under test). The config key is injected per-call via opts.apiKey so
+    // the keyless singleton serves the request with the Settings-written key.
+    const result = await entry.generateMusic({
+      prompt: String(prompt),
+      filename: finalFilename,
+      outputAbsoluteDir: outDirAbs,
+      apiKey,
+      ...(vocal !== undefined ? { vocal: Boolean(vocal) } : {}),
+      ...(typeof seed === "number" ? { seed } : {}),
+      ...(typeof temperature === "number" ? { temperature } : {}),
+      ...(referenceImages.length > 0 ? { referenceImages } : {}),
+    });
+
+    // Optional truncate (best-effort) when the caller asked for a shorter clip.
+    if (durationSeconds !== undefined && !result.stub) {
+      try {
+        await truncateAudio(result.assetUri, durationSeconds);
+      } catch (err) {
+        console.warn(`[bgm] truncate failed (keeping full track): ${(err as Error).message}`);
+      }
+    }
+
+    const relativeUri = result.assetUri.startsWith(wDirAbs + "/")
+      ? result.assetUri.slice(wDirAbs.length + 1)
+      : result.assetUri;
+
+    const assetId = await registerGeneratedBgmAsset({
+      workId,
+      relativeAssetUri: relativeUri,
+      providerId: entry.name,
+      prompt: String(prompt),
+      costUsd: result.costUsd,
+      stub: result.stub,
+      durationSec: durationSeconds,
+      extraParams: {
+        vocal: Boolean(vocal),
+        ...(durationSeconds !== undefined ? { durationSeconds } : {}),
+      },
+    });
+
+    uiEventBus.publish(workId, {
+      type: "asset-added",
+      workId,
+      ts: Date.now(),
+      payload: { kind: "audio", uri: relativeUri, origin: "generate" },
+    });
+
+    return c.json({
+      success: true,
+      assetId,
+      relativeUri,
       assetPath: result.assetUri,
       previewUrl: `/api/works/${workId}/${relativeUri}`,
       stub: result.stub,
