@@ -131,36 +131,59 @@ describe("buildSystemPrompt", () => {
     expect(variants[1]).toMatch(/autoviral docs carousel\/02-schema/);
   });
 
-  // v0.1.7 — the video-gen bullet must teach the REAL OpenRouter params after
-  // the input-nesting fix: aspectRatio + integer 4–15 durations. It must NOT
-  // repeat the two debunked claims (the old {3,5,10} duration set and the
-  // "i2v output fixed 720×1280" hard constraint — both were artifacts of the
-  // dropped params, not real limits).
-  it("video prompt teaches aspectRatio + 4–15 durations, drops the debunked 720×1280 / {3,5,10} claims", () => {
+  // B7(c) (PRD-0009) — the asset-generation segment is now a ROSTER (capability
+  // + method/path) plus a stable docs-pointer skeleton; the per-endpoint
+  // PARAMETER TABLES moved OUT of the prompt into the manual (single source of
+  // truth). So the prompt must still name the video endpoint + carry the docs
+  // pointer, but must NOT re-embed the param table (durationSec/aspectRatio
+  // enums) — those live only in `autoviral docs _shared/03-cli-reference`. This
+  // lock prevents the param table from creeping back into the prompt and
+  // re-forking the single source of truth.
+  it("video gen is rostered (endpoint + docs pointer) WITHOUT re-embedding the param table", () => {
     const p = buildSystemPrompt(
       baseWork({ type: "short-video" }) as any,
       { port: 3271, workspacePath: "/tmp/autoviral-test/works/w_vid" },
     );
-    expect(p).toContain("aspectRatio");
-    expect(p).toMatch(/4[–-]15|4-15/);
+    // Roster: the agent must still know the endpoint exists.
+    expect(p).toContain("/api/generate/video");
+    // Skeleton: the stable "params live in docs, query them" pointer.
+    expect(p).toContain("autoviral docs _shared/03-cli-reference");
+    // The param table must NOT be inlined anymore — these are manual-only.
+    expect(p).not.toContain("durationSec");
+    expect(p).not.toContain("1:1 / 3:4 / 9:16");
+    // And the debunked claims never reappear.
     expect(p).not.toContain("只接受 3 / 5 / 10");
     expect(p).not.toContain("固定 720×1280");
   });
 
-  // B2 (PRD-0009) — the prompt must teach the BGM/music endpoint (it used to
-  // teach TTS but omit music, which forced the agent to reverse-engineer the
-  // deleted music_generate.py). The endpoint + its key constraints must appear.
-  it("teaches the BGM/music generation endpoint", () => {
+  // B2/B7(c) (PRD-0009) — the BGM endpoint stays in the roster (the agent must
+  // know music generation exists and is the only correct path; it once had to
+  // reverse-engineer the deleted music_generate.py). But its param table
+  // (durationSeconds / instrumental caveat) moved to the manual under B7(c).
+  it("BGM endpoint is rostered with the no-.py-fallback rule (param table is manual-only)", () => {
     const p = buildSystemPrompt(
       baseWork({ type: "short-video" }) as any,
       { port: 3271, workspacePath: "/tmp/autoviral-test/works/w_bgm" },
     );
     expect(p).toContain("/api/generate/bgm");
     expect(p).toMatch(/配乐|BGM|Lyria/);
-    // The instrumental default + the "no duration param, only trims" caveat
-    // are load-bearing (an agent shouldn't promise an exact-length track).
-    expect(p).toMatch(/instrumental|器乐/i);
-    expect(p).toMatch(/durationSeconds/);
+    // The唯一正路 + no-dead-script rule is stable discipline — it stays in prompt.
+    expect(p).toMatch(/唯一正路/);
+    expect(p).toMatch(/\.py/);
+    // The param-table details (durationSeconds enum) moved to the manual.
+    expect(p).not.toContain("durationSeconds");
+  });
+
+  // B7(c) (PRD-0009) — the stable docs-pointer skeleton sentence must be present
+  // and phrased so the agent现查 docs rather than trusting frozen memory.
+  it("carries the 'params live in docs, query don't recall' skeleton", () => {
+    const p = buildSystemPrompt(
+      baseWork({ type: "short-video" }) as any,
+      { port: 3271, workspacePath: "/tmp/autoviral-test/works/w_skel" },
+    );
+    expect(p).toContain("autoviral docs _shared/03-cli-reference");
+    // The "don't answer from old memory, re-query" instruction.
+    expect(p).toMatch(/现查|不要凭记忆|勿凭记忆/);
   });
 
   // B2 — the fallback prohibition: if any instruction (incl. a UI envelope)

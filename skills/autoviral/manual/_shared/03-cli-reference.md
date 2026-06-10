@@ -371,6 +371,84 @@ Body: `{ workId, prompt, filename?, vocal?, seed?, temperature?, durationSeconds
 
 Response includes `assetId` + `relativeUri` — the track is **registered as an AssetEntry (`kind: audio`) + a `generate` provenance edge** on `composition.yaml`, and an `asset-added` event refreshes the Studio library live. Add it to the timeline with `autoviral clip add` (as a `bgm` audio clip).
 
+### Text-to-speech (TTS) — two endpoints, pick by side effect
+
+There are **two** TTS endpoints with the same provider stack (Gemini-via-OpenRouter primary, auto-fallback to the bundled zero-key edge-tts) but different side effects. Pick by whether you want the file auto-registered into the Studio library:
+
+| Endpoint | Body | What it does | Use when |
+|---|---|---|---|
+| `POST /api/audio/tts` | `{ text, voice, output_path, language?, style?, provider? }` | Synthesizes to **your** `output_path` and returns `{ outputPath, providerId, duration, sampleRate, channels }`. **No** work-asset registration, **no** broadcast. | You want to control the exact output path yourself (e.g. a temp file you'll wire up manually). |
+| `POST /api/works/:id/tts` | `{ text, voice, language?, provider? }` | mkdir-creates `works/:id/assets/audio/`, writes a sha1-named `tts_<hash>.mp3`, then publishes an `asset-added` event so the **Studio library refreshes live**. Returns `{ relativeUri, providerId, durationSec, voice }`. | You want the narration to appear in the Studio asset library automatically — no manual `output_path`. **Preferred for most work** so the user sees the clip immediately. |
+
+- `voice` examples: Chinese `zh-CN-XiaoxiaoNeural`, English `en-US-AriaNeural` (edge-tts voice ids). `provider` is `auto` (default) / `gemini` / `edge-tts`.
+- **Short videos default to having narration** — most viral short videos lean on voice to drive pace. Propose adding it after the brief.
+
+### ASR captions — two endpoints in a layering relationship
+
+Both endpoints run the **same** stable-whisper transcription core (`runAsrCaptions`). They differ only in the "last mile" — whether the result is written back into the composition:
+
+| Endpoint | Body | What it does | Use when |
+|---|---|---|---|
+| `POST /api/audio/captions` | `{ workId, assetPath, language }` | Runs ASR and **returns** `{ captions: [{start, end, text}, …] }`. Does **not** write to disk or the composition. | You only need the raw timecoded segments to inspect or post-process yourself. |
+| `autoviral captions generate` → bridge `POST /api/bridge/v1/captions/generate` | `{ assetPath?, language?, trackId? }` (workId via `AUTOVIRAL_WORK_ID`) | Shares the same ASR core, then writes each segment as a `TextClip` into the text track and broadcasts `composition-changed`. **This is the closed-loop version** — it's where the agent's `autoviral captions generate` and a human clicking Studio's "生成字幕" converge. `assetPath` defaults to the first audio-track clip's `src`. | You want the subtitles actually placed on the timeline and visible in Studio (the common case). |
+
+- 抖音 70% of users browse muted — any audio-bearing video should get captions. Captions render via the composition's `captionStrategy: overlay` (see `autoviral docs video/02-composition-schema`); don't hand-write `ffmpeg drawtext`.
+- A `PYTHON_DEP_MISSING` (503) means the user must `pip install stable-ts` (note: `stable-ts`, not `stable-whisper`).
+
+### `POST /api/audio/mix`
+
+Multi-track audio mixing / volume balancing / ducking, rendered with ffmpeg.
+
+Body: `{ workId, videoPath, tracks, outputFilename }`
+
+| Field | Meaning |
+|---|---|
+| `videoPath` | The base video (workspace-relative; `assets/` or `output/` prefix recognized). |
+| `tracks` | Non-empty array of `{ source, ... }` mix tracks (each `source` is workspace-relative). The mixer also honours `loudnessTargetLufs` on the track when the platform preset sets a loudness target (e.g. WeChat −16, default −14) and ducking parameters where supported. |
+| `outputFilename` | Basename only — written under `output/`. Path separators are stripped. |
+
+Returns `{ assetPath: "output/<name>", previewUrl }`.
+
+### Cinematic transitions — 4 endpoints
+
+All four take the **same** body and never require hand-written `ffmpeg xfade` — the bridge probes clipA's dimensions and renders the blend for you. `autoviral transition add` is the easier dissolve path; reach for these HTTP endpoints when you want a specific cinematic look.
+
+Body (all four): `{ workId, clipARelative, clipBRelative, outputFilename, clipADuration, transitionDuration? }`
+
+| Field | Meaning |
+|---|---|
+| `clipARelative` / `clipBRelative` | The two clips to blend (workspace-relative; `assets/`/`output/` prefix recognized). |
+| `outputFilename` | Basename only, written under `output/`. |
+| `clipADuration` | Length of clipA in **seconds** (must be > 0). |
+| `transitionDuration` | Optional; defaults to `0.8`. Must be `> 0` and `< clipADuration`. |
+
+Returns `{ outputPath, previewUrl }`.
+
+| Endpoint | Look | Good for | Typical duration |
+|---|---|---|---|
+| `POST /api/transitions/light-leak` | Orange sweep + cross-fade, film grain | editorial cuts / montage / flashback | 0.8s tight viral · 1.2–1.5s slow editorial |
+| `POST /api/transitions/glitch` | RGB split + jitter, glitch aesthetic | tech / cyber / beat accent | 0.4–0.6s |
+| `POST /api/transitions/domain-warp` | Waveform pixel displacement | dream / healing / travel vlog | 1.0–1.5s |
+| `POST /api/transitions/grav-lens` | Radial distortion, black-hole effect | dramatic reversal / spatial jump | 1.0–1.4s |
+
+Hard cuts for fast edits, fade or nothing for single-shot voiceover; ≤2 of the same transition per piece (more reads cheap).
+
+### `POST /api/frames/select`
+
+Pick the winning candidate from a batch of generated frames (paired with the internal `/api/generate/image/batch` below). Body: `{ workId, shotId, selectedSeed }`. It promotes the candidate matching `seed-<selectedSeed>` from `assets/frames/candidates/<shotId>/` to `assets/frames/frame-<shotId>.png` and suffixes the rest with `_rejected`. Returns `{ framePath }`. This is **not** a generic "extract a frame from a video for i2v" tool — to drive image-to-video, pass a workspace-relative image path as `firstFrame` to `POST /api/generate/video` (see above).
+
+## Internal endpoints (not for agent use)
+
+These endpoints exist for Studio's own UI flows or have no stable contract. **The agent should not call them** — the canonical paths above cover the same ground without the footguns. Listed here so you recognize them if you stumble on them, not as a menu:
+
+| Endpoint | Why not for agents |
+|---|---|
+| `POST /api/generate/image/batch` | Generates N seed-candidates for a shot into `assets/frames/candidates/<shotId>/` (UI's pick-a-frame flow, paired with `/api/frames/select`). Looping single `POST /api/generate/image` calls covers the same ground; use that. |
+| `POST /api/video/reframe` | UI's platform-preset smart-crop (saliency-based 9:16 re-crop). **Its Python pipeline (`saliency.py`/`crop_9_16.py`) is no longer on disk, so it fails at runtime** — and it overlaps the canvas-follow / explicit `aspectRatio` mental model. Set the canvas aspect or pass `aspectRatio` to `POST /api/generate/video` instead. |
+| `GET /api/providers` + `POST /api/providers/:id/generate-video` | The provider-scoped video path the GenerationDialog (UI) uses. **The agent's canonical video endpoint is `POST /api/generate/video`** — it atomically registers the AssetEntry; the provider-scoped path does NOT, so a clip made through it dangles. Always use `POST /api/generate/video`. |
+| `POST /api/post-process/:operation` | Generic post-processing operators (interpolate / super-resolve / lip-sync) with no stable contract. Power-user only. |
+| `POST /api/bridge/v1/preprocess/tts` | A **third** TTS path (`synthesizeNarration`) that overlaps `POST /api/works/:id/tts`. Slated to be consolidated — do not use it; use one of the two TTS endpoints documented above. |
+
 ## UI control commands
 
 Stateless broadcasts to the Studio React app. None of them touch disk.

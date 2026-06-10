@@ -114,6 +114,54 @@ interface NdjsonMessage {
 // ── System prompt (modules-as-capabilities, D3) ─────────────────────────────
 
 /**
+ * B7(a)-lite (PRD-0009) — incremental teaching for RESUMED sessions.
+ *
+ * A `--resume`d CLI session replays the system prompt it was created with, so an
+ * existing work's agent never sees teaching added after that point (B7 root
+ * cause). We don't re-send the whole prompt (that would lose CLI context and
+ * bust the prefix cache). Instead, when resuming a work whose last-injected
+ * version trails the current PROMPT_VERSION, we `--append-system-prompt` the
+ * concatenation of changelog entries strictly newer than the stored version —
+ * Anthropic's mid-conversation system channel, the cache-safe way to补教学.
+ *
+ * INVARIANT: each entry MUST be a *context statement*, not a command. Opus 4.8
+ * is trained to resist system-channel override phrasing ("忽略之前的…" /
+ * "regardless of…"), so we state the new fact and let the agent act on it —
+ * never an imperative. See claude-api skill → prompt-caching.md §Mid-conversation
+ * system messages / model-migration.md →Opus 4.8.
+ *
+ * To ship a knowledge-面 升级 that resumed sessions should learn: bump
+ * PROMPT_VERSION and add a `[version]: "<context statement>"` row whose key is
+ * the NEW version. Resume injects every row with a key > the session's stored
+ * version, in ascending order.
+ */
+export const PROMPT_VERSION = 2;
+
+/**
+ * version → one short context statement describing what that version newly
+ * teaches. Declarative (context, not commands). The map is the single source of
+ * truth for "what changed since version N" — `promptChangelogSince(n)` walks it.
+ */
+export const PROMPT_CHANGELOG: Record<number, string> = {
+  2:
+    "提示（AutoViral 工位能力更新，仅供参考）：视频生成现支持 durationSec 4–15 的整数与 7 档 aspectRatio，画幅默认跟作品画布走、显式 aspectRatio 永远优先；配乐 BGM 生成端点 POST /api/generate/bgm（Lyria 3 Pro）已可用；TTS 有两条端点（自定 output_path 的 /api/audio/tts 与自动登记刷新库的 /api/works/:id/tts）。所有素材生成端点的完整参数以 `autoviral docs _shared/03-cli-reference` 为准——现查 docs，不要凭旧记忆。",
+};
+
+/**
+ * Concatenate the changelog entries strictly newer than `storedVersion` (in
+ * ascending version order) into one `--append-system-prompt` payload. Returns
+ * an empty string when the session is already current (caller skips the flag).
+ */
+export function promptChangelogSince(storedVersion: number): string {
+  return Object.keys(PROMPT_CHANGELOG)
+    .map((k) => Number.parseInt(k, 10))
+    .filter((v) => v > storedVersion)
+    .sort((a, b) => a - b)
+    .map((v) => PROMPT_CHANGELOG[v])
+    .join("\n\n");
+}
+
+/**
  * Pure builder for the agent system prompt. Modules are capabilities, not
  * stages — the agent picks one based on user intent. The async wrapper on
  * the WsBridge appends dynamic shared-asset / memory context, but this
@@ -166,18 +214,15 @@ Skill('autoviral')
 
 ## 素材生成（CLI 暂未封装，直连 HTTP \`localhost:${port}\`）
 
-- **图像** — \`POST /api/generate/image\` { workId, prompt, filename, aspectRatio?, imageSize?, width?, height?, referenceImage? }。OpenRouter，用户在 Settings 配了 OPENROUTER_API_KEY 即启用。**画幅默认跟作品画布走**（composition 的 \`aspect\`，用户定的）；要不同画幅才显式传 \`aspectRatio\`（"9:16" / "16:9" / "1:1" / "4:5" 等，显式永远优先）。width/height 只用来推导最接近的 aspectRatio（模型自定具体像素，不会精确到你给的尺寸）。\`scene generate\` 同样自动继承画布画幅。
-- **视频** — \`POST /api/generate/video\` { workId, prompt, filename, aspectRatio?, resolution?, durationSec?, firstFrame?, lastFrame? }。Seedance 2.0，支持 text-to-video 与 image-to-video（firstFrame 驱动；本地路径会被自动 base64 内联，也可传 https/data URI）。**画幅默认跟作品画布走**（同图像规则：composition 的 \`aspect\` 映射到最近的支持比例，4:5→3:4；要不同画幅才显式传 \`aspectRatio\`，显式永远优先）。\`aspectRatio\` 7 枚举：1:1 / 3:4 / 9:16 / 4:3 / 16:9 / 21:9 / 9:21。\`resolution\`：480p / 720p / 1080p。\`durationSec\`：整数 4–15（默认 5）。fps 固定 24，不可调。价格按 token：720p≈$0.15/秒、1080p≈$0.34/秒。响应含 \`assetId\`（已原子登记 AssetEntry，可直接 \`autoviral scene link\`）。**已实测**（2026-06-10 真实出片 + ffprobe 二确）：显式画幅永远赢——9:16 竖图做 i2v 锚 + 显式 16:9 照样出 1280×720 横屏；1080p 真实可得（9:16 → 1080×1920）。注意：**写实人像不能做 i2v 锚图**（ByteDance 审核 400 拒单不计费，码 InputImageSensitiveContentDetected），风格化 / 无人物图不受限。
-- **配音 TTS** — \`POST /api/audio/tts\` { text, voice, output_path, language?, style? }。主力走 Gemini-via-OpenRouter（用户在 Settings 配了 OPENROUTER_API_KEY 即启用），无 key 或失败时自动 fallback 到内置免费的 edge-tts（中文 zh-CN-XiaoxiaoNeural 等、英文 en-US-AriaNeural 等）。**短视频默认应该有人声**——绝大多数 viral 短视频靠 narration 推进节奏；做完 brief 主动 propose 加旁白。
-- **配乐 BGM** — \`POST /api/generate/bgm\` { workId, prompt, filename?, vocal?, seed?, temperature?, durationSeconds?, referenceImage? }。Lyria 3 Pro via OpenRouter（用户配了 OPENROUTER_API_KEY 即启用，无 key 返 503）。\`vocal\` 默认 false=纯器乐（服务端自动加 "Instrumental only" 前缀）；\`durationSeconds\` 可选 5–180，**Lyria 不接受时长参数**——固定产出约 1–2 分钟整曲（约 \$0.08/首），这个值只是事后用 ffmpeg 裁剪，不传就保留全长。响应含 \`assetId\`（已原子登记 AssetEntry \`kind: audio\` + 广播刷新库），之后用 \`autoviral clip add\` 当 bgm 轨拼上。**这是生成音乐的唯一正路：直接调这个端点，绝不去跑任何 \`.py\` 脚本来"兜底"做 BGM（那些脚本已删，是死的，见上方兜底规则）。**
-- **字幕 ASR** — \`POST /api/audio/captions\` { workId, assetPath, language }。stable-whisper 转写出 word-level 时间戳。**抖音 70% 用户静音浏览，任何带音频的视频都该跑 ASR 加字幕**（字幕走 composition 的 \`captionStrategy: overlay\` 渲染，见 \`autoviral docs video/02-composition-schema\`——不要手写 ffmpeg drawtext）。报 PYTHON_DEP_MISSING 就让用户 \`pip install stable-ts\`（注意不是 stable-whisper）。
-- **混音** \`POST /api/audio/mix\`（多轨混音 / 音量平衡）。
-- **过场转场** — 4 个 cinematic 端点，body 都接受 { workId, clipARelative, clipBRelative, outputFilename, clipADuration, transitionDuration? }。**绝不手写 ffmpeg xfade**：
-  - \`POST /api/transitions/light-leak\` 橙色扫光 + cross-fade，胶片质感（editorial 切换 / 蒙太奇 / 回忆）。0.8s 紧凑 viral / 1.2-1.5s slow editorial。
-  - \`POST /api/transitions/glitch\` RGB 分离 + jitter 故障美学（科技 / 赛博 / 节拍重音）。0.4-0.6s。
-  - \`POST /api/transitions/domain-warp\` 波形像素位移（梦境 / 治愈 / 旅行 vlog）。1.0-1.5s。
-  - \`POST /api/transitions/grav-lens\` 径向畸变黑洞效应（戏剧反转 / 空间穿越）。1.0-1.4s。
-  - 快剪用直接 cut、口播单镜用 fade 或不加；同种转场每片 ≤2 次，多了显廉价。
+下面是素材生成的**端点名册**（你能做什么 + 走哪个 method/path）。**每个端点的完整参数表、枚举值、画幅规则、价格、实测注意事项都在 manual——以 \`autoviral docs _shared/03-cli-reference\` 为准。参数枚举可能随版本更新，动手前现查 docs，不要凭记忆里的旧参数作答。**
+
+- **图像** — \`POST /api/generate/image\`。OpenRouter 出图；画幅默认跟作品画布走。\`scene generate\` 同样自动继承画布画幅。
+- **视频** — \`POST /api/generate/video\`。Seedance 2.0，支持 text-to-video 与 image-to-video；响应含 \`assetId\`（已原子登记 AssetEntry，可直接 \`autoviral scene link\`）。画幅默认跟画布、显式 \`aspectRatio\` 永远优先。这是 agent 生成视频的**唯一正路**（provider-scoped 端点是 UI 内部用，别走）。
+- **配音 TTS** — 两条端点二选一：\`POST /api/audio/tts\`（你自定 output_path）/ \`POST /api/works/:id/tts\`（自动登记 + 广播刷新 Studio 库，多数情况用这条）。**短视频默认应该有人声**——绝大多数 viral 短视频靠 narration 推进节奏；做完 brief 主动 propose 加旁白。
+- **配乐 BGM** — \`POST /api/generate/bgm\`。Lyria 3 Pro via OpenRouter；响应含 \`assetId\`（已原子登记 + 广播），之后用 \`autoviral clip add\` 当 bgm 轨拼上。**这是生成音乐的唯一正路：直接调这个端点，绝不去跑任何 \`.py\` 脚本来"兜底"做 BGM（那些脚本已删，是死的，见上方兜底规则）。**
+- **字幕 ASR** — \`autoviral captions generate\`（闭环：转写 + 写回 composition text 轨 + 广播）或裸 \`POST /api/audio/captions\`（只返回 segments JSON 不落盘）。**抖音 70% 用户静音浏览，任何带音频的视频都该加字幕**；字幕走 composition 的 \`captionStrategy: overlay\` 渲染，不要手写 ffmpeg drawtext。
+- **混音** — \`POST /api/audio/mix\`（多轨混音 / 音量平衡 / 响度目标 loudnessTargetLufs）。
+- **过场转场** — 4 个 cinematic 端点 \`POST /api/transitions/{light-leak,glitch,domain-warp,grav-lens}\`，外加更简单的 \`autoviral transition add\` 溶解。**绝不手写 ffmpeg xfade**；每种看头、时长建议见 docs。
 
 ## 4 个能力，按需直接调用
 
@@ -593,8 +638,10 @@ export class WsBridge {
     } catch { /* ignore */ }
 
     if (savedSessionId) {
-      // Resume existing conversation — agent keeps full context
-      this.spawnCli(session, initialPrompt, savedSessionId);
+      // Resume existing conversation — agent keeps full context. Inject any
+      // teaching added since this session's stored prompt version (B7(a)-lite).
+      const append = await this.resumePromptAppend(workId, sid);
+      this.spawnCli(session, initialPrompt, savedSessionId, append);
     } else {
       // First time — build system prompt with full context
       let systemPrompt = initialPrompt;
@@ -878,7 +925,10 @@ export class WsBridge {
     }
 
     if (resumeId) {
-      this.spawnCli(session, text, resumeId);
+      // Resume — inject teaching added since this session's stored prompt
+      // version (B7(a)-lite); gated to work-bound sessions inside the helper.
+      const append = await this.resumePromptAppend(workId, sid);
+      this.spawnCli(session, text, resumeId, append);
     } else {
       // No session to resume — build full context prompt so agent knows the project
       let prompt = text;
@@ -1035,7 +1085,54 @@ export class WsBridge {
 
   // ── CLI spawn ────────────────────────────────────────────────────────────
 
-  private spawnCli(session: WsSession, prompt: string, resumeSessionId?: string): void {
+  /**
+   * B7(a)-lite (PRD-0009) — compute the `--append-system-prompt` payload for a
+   * RESUMED session and, when something is injected, persist that this session
+   * is now taught up to the current PROMPT_VERSION.
+   *
+   * Reads the session's `lastInjectedPromptVersion` from its sidecar record
+   * (undefined ⇒ 0, so a legacy/pre-feature session gets the full changelog
+   * once). Returns the concatenated changelog of every version strictly newer
+   * than the stored one, or undefined when already current. Best-effort: any
+   * sidecar read/write failure falls back to NOT injecting (the resume still
+   * works; the session just stays on its old teaching until next time).
+   */
+  private async resumePromptAppend(
+    workId: string,
+    sid: string,
+  ): Promise<string | undefined> {
+    try {
+      // The changelog teaches the EDITING-agent prompt (buildSystemPrompt) only.
+      // Coach (coach_) and trend (trends_) sessions run a different prompt
+      // (buildCoachPrompt / research) and must never receive this teaching.
+      if (!this.isWorkBound(workId)) return undefined;
+      const sidecar = this.sidecarFor(workId);
+      if (!sidecar) return undefined;
+      const record = await sidecar.get(sid);
+      // A record may not exist yet for the legacy default session whose
+      // cliSessionId only lives in work.yaml — treat as version 0 but don't
+      // create a record here (the system.init writeback path owns creation).
+      const stored = record?.lastInjectedPromptVersion ?? 0;
+      if (stored >= PROMPT_VERSION) return undefined;
+      const append = promptChangelogSince(stored);
+      if (!append) return undefined;
+      // Only bump the stored version if there IS a record to patch — patching a
+      // non-existent id is a no-op, and we don't want to mint a record here.
+      if (record) {
+        await sidecar.patch(sid, { lastInjectedPromptVersion: PROMPT_VERSION });
+      }
+      return append;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private spawnCli(
+    session: WsSession,
+    prompt: string,
+    resumeSessionId?: string,
+    appendSystemPrompt?: string,
+  ): void {
     const args = [
       "-p", prompt,
       "--output-format", "stream-json",
@@ -1045,6 +1142,13 @@ export class WsBridge {
 
     if (resumeSessionId) {
       args.push("--resume", resumeSessionId);
+    }
+
+    // B7(a)-lite (PRD-0009) — on resume, inject teaching added since this
+    // session's stored prompt version as a mid-conversation system append
+    // (context, not commands). Only set when resuming a trailing session.
+    if (appendSystemPrompt) {
+      args.push("--append-system-prompt", appendSystemPrompt);
     }
 
     if (session.model) {
@@ -1149,6 +1253,15 @@ export class WsBridge {
                 sidecar.patch(session.sessionId, {
                   cliSessionId: msg.session_id,
                   lastActive: new Date().toISOString(),
+                  // B7(a)-lite — stamp the prompt version this session is taught
+                  // up to. A FRESH session was just built with buildSystemPrompt
+                  // (= current), so it's current; a RESUMED session was already
+                  // bumped to PROMPT_VERSION by resumePromptAppend, so this is
+                  // idempotent. Editing-agent sessions only (coach/trends never
+                  // reach this writeback with a buildSystemPrompt-derived prompt).
+                  ...(this.isWorkBound(session.workId)
+                    ? { lastInjectedPromptVersion: PROMPT_VERSION }
+                    : {}),
                 }).catch(() => {});
               }
               if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
@@ -1263,6 +1376,11 @@ export class WsBridge {
                 sidecar.patch(session.sessionId, {
                   cliSessionId: msg.session_id,
                   lastActive: new Date().toISOString(),
+                  // B7(a)-lite — same prompt-version stamp as the system.init
+                  // writeback above (idempotent on resume; current on fresh).
+                  ...(this.isWorkBound(session.workId)
+                    ? { lastInjectedPromptVersion: PROMPT_VERSION }
+                    : {}),
                 }).catch(() => {});
               }
               if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {

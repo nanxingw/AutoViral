@@ -389,6 +389,119 @@ describe("syncSkills", () => {
     expect(st.isDirectory()).toBe(true);
   });
 
+  // ── B4 (PRD-0009): content-hash gate for same-version manual edits ─────────
+  // The version-only gate froze the manual INSIDE a version: editing a `.md`
+  // without a version bump never reached ~/.claude/skills, so `autoviral docs`
+  // served stale docs (B4 parity break). The gate now also keys on a content
+  // hash of the source autoviral `.md` subtree recorded in the marker — same
+  // version but changed `.md` content still syncs. Legacy markers (no
+  // contentHash) keep the pure-version behaviour so we don't re-clobber edits
+  // on the first boot after this ships.
+  it("re-syncs when the SAME version ships changed manual `.md` content (content-hash gate)", async () => {
+    // First sync at VERSION writes a marker WITH a contentHash.
+    await writeFile(join(source, "autoviral", "SKILL.md"), "# entry\n");
+    await mkdir(join(source, "autoviral", "manual", "_shared"), { recursive: true });
+    await writeFile(
+      join(source, "autoviral", "manual", "_shared", "03-cli-reference.md"),
+      "v1 of the manual\n",
+    );
+
+    const first = await syncSkills({
+      sourceSkillsDir: source,
+      targetSkillsDir: target,
+      version: VERSION,
+      markerPath: markerOf(target),
+    });
+    expect(first.synced).toBe(true);
+    const marker1 = JSON.parse(await readFile(markerOf(target), "utf-8")) as {
+      version: string;
+      contentHash?: string;
+    };
+    expect(typeof marker1.contentHash).toBe("string");
+
+    // Edit the manual WITHOUT bumping the version.
+    await writeFile(
+      join(source, "autoviral", "manual", "_shared", "03-cli-reference.md"),
+      "v2 of the manual — new endpoints documented\n",
+    );
+
+    const second = await syncSkills({
+      sourceSkillsDir: source,
+      targetSkillsDir: target,
+      version: VERSION, // SAME version
+      markerPath: markerOf(target),
+    });
+
+    // Content drifted → it synced despite the matching version.
+    expect(second.synced).toBe(true);
+    expect(second.reason).toMatch(/content/i);
+    expect(
+      await readFile(
+        join(target, "autoviral", "manual", "_shared", "03-cli-reference.md"),
+        "utf-8",
+      ),
+    ).toBe("v2 of the manual — new endpoints documented\n");
+    // The marker's hash advanced to the new content.
+    const marker2 = JSON.parse(await readFile(markerOf(target), "utf-8")) as {
+      contentHash?: string;
+    };
+    expect(marker2.contentHash).not.toBe(marker1.contentHash);
+  });
+
+  it("does NOT re-sync when the same version ships IDENTICAL manual content (hash matches → up-to-date)", async () => {
+    await writeFile(join(source, "autoviral", "SKILL.md"), "# entry\n");
+    await mkdir(join(source, "autoviral", "manual"), { recursive: true });
+    await writeFile(join(source, "autoviral", "manual", "page.md"), "stable\n");
+
+    const first = await syncSkills({
+      sourceSkillsDir: source,
+      targetSkillsDir: target,
+      version: VERSION,
+      markerPath: markerOf(target),
+    });
+    expect(first.synced).toBe(true);
+
+    // Nothing changed in source — second run must skip.
+    const second = await syncSkills({
+      sourceSkillsDir: source,
+      targetSkillsDir: target,
+      version: VERSION,
+      markerPath: markerOf(target),
+    });
+    expect(second.synced).toBe(false);
+    expect(second.reason).toMatch(/up.?to.?date|version/i);
+  });
+
+  it("content gate NEVER clobbers the user's .yaml even when manual content drifts", async () => {
+    // First sync seeds a contentHash + the user's config.
+    await writeFile(join(source, "autoviral", "SKILL.md"), "# entry\n");
+    await mkdir(join(source, "autoviral", "manual"), { recursive: true });
+    await writeFile(join(source, "autoviral", "manual", "page.md"), "v1\n");
+    await writeFile(join(source, "autoviral", "config.yaml"), "from: source\n");
+    await syncSkills({
+      sourceSkillsDir: source,
+      targetSkillsDir: target,
+      version: VERSION,
+      markerPath: markerOf(target),
+    });
+    // User edits their installed .yaml.
+    await writeFile(join(target, "autoviral", "config.yaml"), "user: edits\n");
+
+    // Source ships changed manual content (same version) → content gate fires.
+    await writeFile(join(source, "autoviral", "manual", "page.md"), "v2\n");
+    const res = await syncSkills({
+      sourceSkillsDir: source,
+      targetSkillsDir: target,
+      version: VERSION,
+      markerPath: markerOf(target),
+    });
+    expect(res.synced).toBe(true);
+    // The manual updated…
+    expect(await readFile(join(target, "autoviral", "manual", "page.md"), "utf-8")).toBe("v2\n");
+    // …but the user's .yaml is untouched (never-overwrite still holds).
+    expect(await readFile(join(target, "autoviral", "config.yaml"), "utf-8")).toBe("user: edits\n");
+  });
+
   it("DOES follow a symlink that resolves INSIDE the source tree (legit internal link)", async () => {
     // Internal symlinks (a manual page aliased within autoviral/) are part of our
     // package — they should be followed and copied, not skipped.

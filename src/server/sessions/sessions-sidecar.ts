@@ -35,6 +35,16 @@ export interface SessionRecord {
   surface: SessionSurface;
   /** Chat only: claude's `--resume` UUID. Undefined for terminal sessions. */
   cliSessionId?: string;
+  /**
+   * B7(a)-lite (PRD-0009) — the PROMPT_VERSION the agent of THIS session was
+   * last taught up to. Stored per-session (here, beside cliSessionId) because
+   * ADR-008 gives every session its own CLI lineage, so each one trails
+   * teaching independently. On resume, if this < the current PROMPT_VERSION the
+   * bridge `--append-system-prompt`s the intervening changelog and bumps this.
+   * Fresh sessions record the current version at creation. Undefined on legacy
+   * records ⇒ treated as version 0 (full changelog injected on next resume).
+   */
+  lastInjectedPromptVersion?: number;
   createdAt: string;
   lastActive: string;
   /** First user line / cwd — a human-readable label for the session strip. */

@@ -45,7 +45,16 @@ captions:
 
 ### Step 1 — get the per-word ASR
 
-Run Whisper (or whichever ASR you have access to) against the workspace's audio track, producing per-word timing:
+**Easiest path — `autoviral captions generate`.** If you just want timecoded captions written onto the timeline, run the closed-loop verb: it shares the ASR core, writes each segment as a `TextClip` into the text track, and broadcasts so Studio refreshes — the same path a human's "生成字幕" button takes. By default it transcribes the first audio-track clip; pass `--asset <relativePath>` / `--language <code>` to override. See the "ASR captions" table in `autoviral docs _shared/03-cli-reference`.
+
+```bash
+autoviral captions generate                       # transcribe the first audio clip → text track
+autoviral captions generate --asset assets/audio/voiceover.mp3 --language zh-CN
+```
+
+(The raw `POST /api/audio/captions` endpoint returns the segment JSON *without* writing the composition — use it only when you want to post-process segments yourself before the CaptionModel step below.)
+
+**Manual path (full control over grouping/styling).** Run Whisper directly against the workspace's audio track, producing per-word timing, then chunk + write the `CaptionModel` yourself (Steps 2–3):
 
 ```bash
 # Example with stable-ts / stable_whisper

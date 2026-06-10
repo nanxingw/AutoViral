@@ -118,3 +118,13 @@ artifact today — verify a backup exists before relying on it.)
 ## Why 0.18s specifically
 
 The 0.18s number is from the original onset-aligned i2v pattern — slightly longer than a single video frame (1/24s ≈ 0.042s) but short enough to feel like a hard cut with a softening edge, not a stylized dissolve. For documentary / cinematic feel try 0.4–0.6s; for kinetic / music-video try 0.08–0.12s.
+
+## Path 3 — cinematic blends (light-leak / glitch / domain-warp / grav-lens)
+
+For a *stylized* transition rather than a plain dissolve, the four cinematic
+endpoints render a baked blend clip you then drop on the timeline — never hand-write
+`ffmpeg xfade`. They all take the same body (`{ workId, clipARelative, clipBRelative,
+outputFilename, clipADuration, transitionDuration? }`); see the per-look table and
+duration guidance in `autoviral docs _shared/03-cli-reference` (the "Cinematic
+transitions" section). Use `light-leak` for editorial cuts, `glitch` for tech/beat
+accents, `domain-warp` for dream/travel, `grav-lens` for dramatic reversals.

@@ -1,5 +1,6 @@
 import { readdir, readFile, writeFile, mkdir, stat, realpath, rm } from "node:fs/promises";
 import { existsSync, type Dirent } from "node:fs";
+import { createHash } from "node:crypto";
 import { join, relative, sep } from "node:path";
 
 /**
@@ -245,13 +246,81 @@ async function realpathSafe(p: string): Promise<string> {
   }
 }
 
-async function readMarkerVersion(markerPath: string): Promise<string | null> {
+interface MarkerState {
+  version: string | null;
+  /** B4 (PRD-0009) — content hash of the source autoviral `.md` subtree at the
+   *  last sync. Absent on legacy markers (pre-content-gate) ⇒ null. */
+  contentHash: string | null;
+}
+
+async function readMarkerState(markerPath: string): Promise<MarkerState> {
   try {
-    const raw = JSON.parse(await readFile(markerPath, "utf-8")) as { version?: unknown };
-    return typeof raw.version === "string" ? raw.version : null;
+    const raw = JSON.parse(await readFile(markerPath, "utf-8")) as {
+      version?: unknown;
+      contentHash?: unknown;
+    };
+    return {
+      version: typeof raw.version === "string" ? raw.version : null,
+      contentHash: typeof raw.contentHash === "string" ? raw.contentHash : null,
+    };
   } catch {
-    return null;
+    return { version: null, contentHash: null };
   }
+}
+
+/**
+ * B4 (PRD-0009) — content hash of every `.md` file under the SOURCE autoviral
+ * skill subtree, so a manual edit that ships WITHOUT a version bump still
+ * propagates to the installed copy (the old version-only gate froze the manual
+ * inside one version — the parity-breaking bug B4 fixes). Hashes only `.md`
+ * (the teaching surface); never `.yaml` / `permitted_skills.md` (user/runtime
+ * data — never overwritten anyway, so they must not drive the gate). Path +
+ * content are both folded in so a rename/move counts as a change. Symlinks are
+ * dereferenced via `stat` and out-of-tree links are skipped (mirrors copyDir).
+ * Returns null if the dir is unreadable (caller then can't content-gate).
+ */
+async function hashManagedMarkdown(autoviralDir: string): Promise<string | null> {
+  if (!existsSync(autoviralDir)) return null;
+  const sourceRootReal = await realpathSafe(autoviralDir);
+  const files: { rel: string; content: Buffer }[] = [];
+
+  const walk = async (dir: string, prefix: string): Promise<void> => {
+    let entries: Dirent[];
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      const p = join(dir, entry.name);
+      try {
+        if (entry.isSymbolicLink() && !(await resolvesInside(p, sourceRootReal))) {
+          continue; // out-of-tree link — not part of this package's manual
+        }
+        const kind = await resolvedKind(p);
+        if (kind === "dir") {
+          await walk(p, `${prefix}${entry.name}/`);
+        } else if (kind === "file" && entry.name.endsWith(".md")) {
+          files.push({ rel: `${prefix}${entry.name}`, content: await readFile(p) });
+        }
+      } catch {
+        // one unreadable entry must not abort the whole hash — skip it
+      }
+    }
+  };
+  await walk(autoviralDir, "");
+
+  if (files.length === 0) return null;
+  // Deterministic order so the hash is stable regardless of readdir ordering.
+  files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+  const h = createHash("sha256");
+  for (const f of files) {
+    h.update(f.rel);
+    h.update("\0");
+    h.update(f.content);
+    h.update("\0");
+  }
+  return h.digest("hex");
 }
 
 /**
@@ -302,11 +371,28 @@ export async function syncSkills(opts: SyncSkillsOptions): Promise<SyncSkillsRes
     }
   }
 
-  // ── Version gate ────────────────────────────────────────────────────────
+  // ── Version + content gate ────────────────────────────────────────────────
+  // The version gate alone froze the manual INSIDE a version: editing a `.md`
+  // without a version bump never propagated to ~/.claude/skills, so `autoviral
+  // docs` served a stale manual (B4 parity break, PRD-0009). We now also gate on
+  // a content hash of the source autoviral `.md` subtree — same version but
+  // changed content still syncs. Compatibility: a LEGACY marker has no
+  // `contentHash` (recorded.contentHash === null) → we keep the pure version
+  // behaviour (skip when versions match) so we don't re-clobber a user's edits
+  // on the first boot after this ships; the next real sync writes the hash and
+  // the content gate engages from then on.
   const skillPresent = existsSync(targetAutoviral);
-  const recorded = await readMarkerVersion(markerPath);
-  if (skillPresent && recorded === version) {
-    return { synced: false, reason: `up-to-date (version ${version})` };
+  const recorded = await readMarkerState(markerPath);
+  const sourceAutoviral = join(sourceSkillsDir, "autoviral");
+  const sourceContentHash = await hashManagedMarkdown(sourceAutoviral);
+  if (skillPresent && recorded.version === version) {
+    const contentDrifted =
+      recorded.contentHash !== null &&
+      sourceContentHash !== null &&
+      recorded.contentHash !== sourceContentHash;
+    if (!contentDrifted) {
+      return { synced: false, reason: `up-to-date (version ${version})` };
+    }
   }
 
   // ── Copy ────────────────────────────────────────────────────────────────
@@ -334,15 +420,36 @@ export async function syncSkills(opts: SyncSkillsOptions): Promise<SyncSkillsRes
     }
 
     await mkdir(targetSkillsDir, { recursive: true });
+    // Re-hash AFTER the copy so the marker records the hash of what now lives in
+    // the target (== source content). Falls back to the pre-copy source hash if
+    // a re-hash fails, and omits the field entirely if neither is available.
+    const writtenHash =
+      (await hashManagedMarkdown(join(targetSkillsDir, "autoviral"))) ?? sourceContentHash;
     await writeFile(
       markerPath,
-      `${JSON.stringify({ version, syncedAt: new Date().toISOString() }, null, 2)}\n`,
+      `${JSON.stringify(
+        {
+          version,
+          syncedAt: new Date().toISOString(),
+          ...(writtenHash ? { contentHash: writtenHash } : {}),
+        },
+        null,
+        2,
+      )}\n`,
     );
+    const contentDriftedSameVersion =
+      skillPresent &&
+      recorded.version === version &&
+      recorded.contentHash !== null &&
+      sourceContentHash !== null &&
+      recorded.contentHash !== sourceContentHash;
     const why = !skillPresent
       ? "skill missing"
-      : recorded === null
+      : recorded.version === null
         ? "no version marker"
-        : `version ${recorded ?? "?"} → ${version}`;
+        : contentDriftedSameVersion
+          ? `manual content changed (version ${version})`
+          : `version ${recorded.version ?? "?"} → ${version}`;
     log(`autoviral: synced skills to ${targetSkillsDir} (${why})`);
     return { synced: true, reason: why };
   } catch (err) {
