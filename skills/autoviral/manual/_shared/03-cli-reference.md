@@ -175,15 +175,39 @@ cross-fade at a cut between two adjacent video clips, prefer
 `autoviral transition add` (it cross-fades the boundary without hand-authored
 keyframes) — see the *crossfade* recipe.
 
+## Script commands (剧本 / narrative outline)
+
+The 剧本 is the work's free-text narrative outline at `plan/script.md` (剧本=PRD
+/ 分镜=issue). These verbs round-trip raw markdown through the works route (not
+the bridge envelope); a write broadcasts `plan-changed` so the Studio script
+editor refreshes live. Writing the file directly also works (a watcher picks it
+up), but the CLI write confirms and broadcasts in one step.
+
+### `autoviral script show`
+
+Print `plan/script.md` verbatim. A missing or empty script prints nothing —
+that is a clean empty plan, not an error.
+
+### `autoviral script edit [--file <path>]`
+
+Replace the whole script with markdown read from `--file` (or stdin when the
+flag is absent).
+
+```bash
+autoviral script edit --file /tmp/draft.md
+printf '# 主题\n通勤治愈 30 秒\n' | autoviral script edit
+```
+
 ## Storyboard commands (scenes / 分镜)
 
 Scenes are the **planning layer** — a storyboard table written into the
 composition's `scenes[]`. A scene is one shot in your intended sequence (剧本=PRD
-/ 分镜=issue); it has **no direct render effect** until you hand it off to the
-existing generation endpoints + `autoviral clip`. All five write verbs go through
-the same shared ops the (future) Studio storyboard panel uses, so CLI-driven and
-UI-driven storyboards converge on one `composition.yaml`. Schema + every field:
-`autoviral docs video/02-composition-schema`. Full pattern: the
+/ 分镜=issue); it has **no direct render effect** until you hand it off to
+generation (`scene generate` for image shots, the generation endpoints +
+`scene link` otherwise) and assemble the output with `autoviral clip`. All write
+verbs go through the same shared ops the Studio「剧本·分镜」tab uses, so
+CLI-driven and UI-driven storyboards converge on one `composition.yaml`. Schema +
+every field: `autoviral docs video/02-composition-schema`. Full pattern: the
 *script-to-storyboard* recipe.
 
 ### `autoviral scene add --title X [...]`
@@ -238,6 +262,29 @@ one `--asset` is required; `--asset` may repeat. `--select` picks the chosen tak
 ```bash
 autoviral scene link scn_a1b2c3 --asset img_take1 --asset img_take2 --select img_take2 --status generated
 ```
+
+### `autoviral scene generate <id> [--provider <name>]`
+
+The plan→execution **handoff for an image shot**, in one verb. The bridge builds
+the generation prompt from the scene's OWN fields (`prompt`/`title` + 景别/运镜/
+旁白), generates ONE image via the provider registry, then **atomically**
+registers the AssetEntry and links it onto the scene (`generatedAssetIds` +
+`selectedAssetId` + `status: generated`) — no dangling-reference window, no
+manual `scene link` needed. Prints the minted asset id. Run it again on the same
+scene to **reshoot**: the new take is appended and `selectedAssetId` moves to
+it. Editing a generated scene's generation-affecting fields afterwards flips its
+status to `stale` (the Studio card shows a red dot).
+
+```bash
+autoviral scene generate scn_a1b2c3
+autoviral scene generate scn_a1b2c3 --provider nanobanana   # pick an image provider
+```
+
+Do **not** substitute a raw `POST /api/generate/image` + manual `scene link` for
+this verb — the raw image endpoint does not register an AssetEntry in
+`composition.assets`, so a hand-rolled link dangles. Video / TTS shots have no
+`scene generate` yet: generate via the HTTP endpoints (those DO register the
+asset), then record the handoff with `autoviral scene link`.
 
 ### `autoviral scene remove <id>`
 

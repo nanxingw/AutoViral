@@ -153,7 +153,7 @@ Skill('autoviral')
 
 - **看**：\`autoviral comp show\`（整份 composition）· \`autoviral list clips|assets\` · \`autoviral whoami\`（自检）
 - **改 composition**：\`autoviral clip add --src assets/clips/x.mp4 --track video --offset 75 --duration 5\` · \`autoviral clip set <id> --opacity 0.5\` · \`autoviral clip remove <id>\`${isVideo ? `
-- **排分镜**（storyboard 计划层）：\`autoviral scene add --title "钩子镜" --intent hook --shot-size closeup --camera push\` · \`autoviral scene list\` · \`autoviral scene set <id> ...\` · \`autoviral scene reorder <id1> <id2> ...\` · \`autoviral scene link <id> --asset <assetId>\` · \`autoviral scene remove <id>\`。scene 是逐镜分镜表（写进 composition 的 \`scenes[]\`），与时间轴 clip 解耦、本身不直接渲染——它是计划，不是执行。` : ""}
+- **排分镜**（storyboard 计划层）：\`autoviral scene add --title "钩子镜" --intent hook --shot-size closeup --camera push\` · \`autoviral scene list\` · \`autoviral scene set <id> ...\` · \`autoviral scene reorder <id1> <id2> ...\` · \`autoviral scene link <id> --asset <assetId>\` · \`autoviral scene remove <id>\` · \`autoviral scene generate <id>\`（单镜出图 handoff：原子登记 + 回链，见"计划层"一节）。scene 是逐镜分镜表（写进 composition 的 \`scenes[]\`），与时间轴 clip 解耦、本身不直接渲染——它是计划，不是执行。` : ""}
 - **驱动 UI**（让用户看到你在指哪）：\`autoviral select clip <id>\` · \`autoviral seek 12.5\` · \`autoviral play|pause\` · \`autoviral toast "已生成 16 段" --kind success\` · \`autoviral progress start|step|done\`
 - **问用户**（破坏性 / 花钱 / >10s 的操作先问）：\`autoviral ask "现在渲染吗？" --yes-no\`（exit 0=yes / 1=no）
 - **导出**：\`autoviral export\`（成片）· \`autoviral render\`（快预览）
@@ -184,10 +184,15 @@ ${isVideo ? `
 
 需要先把叙事理顺再开拍时，用两件工具——同样**无强制顺序**，按需取用：
 
-- **剧本（叙事总纲）** → 写进 \`plan/script.md\`（自由文本 markdown，你自己组织结构：主题 / 情绪曲线 / 逐幕梗概）。这是这个作品的"PRD"。
+- **剧本（叙事总纲）** → 写进 \`plan/script.md\`（自由文本 markdown，你自己组织结构：主题 / 情绪曲线 / 逐幕梗概）。用 \`autoviral script show\` 读、\`autoviral script edit --file <md>\`（或 stdin）写——写入会广播让 Studio 剧本编辑器实时刷新；直接写文件也行（有 watcher）。这是这个作品的"PRD"。
 - **分镜（逐镜表）** → 用 \`autoviral scene add/set/reorder/link/remove/list\` 把总纲拆成一镜一镜，写进 composition 的 \`scenes[]\`。每个 scene 是一个 shot：\`--title\` / \`--intent hook|build|payoff|cta\` / \`--shot-size\`(景别) / \`--camera\`(运镜) / \`--narration\` / \`--duration\`，\`--md-anchor\` 可回链到 \`plan/script.md\` 里的标题。这是这个作品的"issue 列表"。
 
-**计划与执行解耦**：scene 本身不直接渲染——逐幕"生成此幕"是计划定好后交给上面那些**现有生成能力**（image / video / TTS 端点 + \`autoviral clip\`）的下游 **handoff**，不在分镜里内嵌生成驾驶舱。先排剧本、再排分镜、最后逐幕生成只是一种常见路径，**无强制顺序**：用户给了完整 brief 你可以跳过 script 直接排 scene，也可以完全不用 scene 直接拼 clip。
+**计划与执行解耦**：scene 本身不直接渲染——计划定好后逐幕产出是下游 **handoff**，不在分镜里内嵌生成驾驶舱：
+- **图像镜头** → \`autoviral scene generate <id>\`（可选 \`--provider\`）：bridge 用 scene 自身字段（prompt/title + 景别/运镜/旁白）组 prompt 生成一张图，并**原子**登记 AssetEntry + 回链到 scene（\`generatedAssetIds\` / \`selectedAssetId\` / \`status: generated\`），不会产生悬挂引用；对同一镜再跑一次 = reshoot 追加新 take。生成后再改该镜的描述字段，status 会自动翻 \`stale\` 提示画面已过时。**不要**用裸 \`POST /api/generate/image\` + 手动 \`scene link\` 替代它——image 裸端点不写 composition.assets，手动回链会留下悬挂引用。
+- **视频 / TTS 镜头**（\`scene generate\` 暂只出图）→ 走上面的生成端点（\`/api/generate/video\` 等会登记 AssetEntry），拿到返回的 asset id 后用 \`autoviral scene link <id> --asset <assetId>\` 记录 handoff 状态。
+- 最后用 \`autoviral clip add\` 把产出素材拼上时间轴（真正渲染的是 clips）。
+
+先排剧本、再排分镜、最后逐幕生成只是一种常见路径，**无强制顺序**：用户给了完整 brief 你可以跳过 script 直接排 scene，也可以完全不用 scene 直接拼 clip。
 ` : ""}
 ## 思维标签（可选）
 内部组织工作时你可以借用 **plan / 素材生成 / 成品** 三个思维 bucket（mental bucket）帮自己理清——这些是你的脑内分类，不是面向用户的进度条。用户随时可能跳过其中任意一个：例如他们提供了完整 brief，你应直接进 assets / assembly；他们要试一个素材想法，你也可以只跑 assets。

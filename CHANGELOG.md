@@ -26,6 +26,7 @@ All notable changes to this project will be documented in this file.
 - **跨 work 剧本串台** — `scriptStore` 升级为 work-tenant-aware（记 `workId` + 切 work 同步 `reset()` + 编辑器 `isMine` 守卫 + commit 实时门控），A→B 切换不再短暂显示/误提交上一个 work 的剧本。
 - **剧本 mount-load 失败静默吞** — 加载失败从空吞改为 `role=alert` 错误提示（新增 `scriptLoadFailed` zh/en），不再让编辑器停在无信号的空白态。
 - **新建 work 首次 agent 写入 ENOENT**（多纬度 E2E 挖出）— 刚建的 work 还没 `composition.yaml` 时，agent 第一次 `scene add`/`clip add` 会失败，而人在 Studio 靠 autosave 免费拿到该文件——违背 agent-人一致。写/预览 chokepoint（`mutateCompositionFor`/`dryRunMutate`）现对真实 work 惰性 seed 一份最小 composition（经 `getWork()` 门控，typo'd workId 不污染磁盘；只读路径仍 ENOENT→404）。
+- **agent 提示词与 skill 手册漂移** — agent 系统提示（`ws-bridge.ts`）与 skill 手册（CLI reference + *script-to-storyboard* recipe）漏教 `autoviral scene generate`（S7）与 `autoviral script show|edit`（S5），且仍把"生成此幕"教成裸 `POST /api/generate/image` + 手动 `scene link` 的旧路径——恰是会制造悬挂引用的写法（image 裸端点不登记 `composition.assets`）。现统一教 handoff 动词（含 image-only 边界、reshoot、stale-on-edit），并修正 "(future) Studio storyboard panel" 等过期措辞。
 
 ## [0.1.5] - 2026-06-08
 

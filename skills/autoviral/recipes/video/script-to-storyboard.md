@@ -36,7 +36,10 @@ cat > "$AUTOVIRAL_CWD/plan/script.md" <<'MD'
 MD
 ```
 
-The headings here become `--md-anchor` back-links in the next step.
+The headings here become `--md-anchor` back-links in the next step. (`cat >`
+works because a watcher syncs the file; `autoviral script edit --file <md>` /
+`autoviral script show` do the same through the works route and broadcast the
+change to the Studio script editor in one step.)
 
 ## 2. 排 the storyboard → one `scene add` per shot
 
@@ -77,15 +80,28 @@ autoviral scene set scn_a1b2c3 --shot-size close      # 改景别
 autoviral scene reorder scn_d4e5f6 scn_a1b2c3 scn_g7h8i9
 ```
 
-## 3. 逐幕生成 — hand each shot off to the existing generation flow
+## 3. 逐幕生成 — hand each shot off to generation
 
 **Planning and execution are decoupled**: a scene describes a shot; producing
-its footage is a downstream handoff to the generation endpoints you already have
-(`POST /api/generate/video` / `/image`, TTS) + `autoviral clip`. There is no
-"generate this scene" button baked into the storyboard — you drive it.
+its footage is a downstream handoff. The storyboard has no embedded generation
+cockpit — the handoff is one verb (or one endpoint call) per shot.
 
-For each shot, generate the asset, then link it back to the scene to record the
-handoff state (`status: planned → generated`):
+**Image shots — one verb.** `scene generate` builds the prompt from the scene's
+own fields, generates one image, and atomically registers + links the asset
+(`status: planned → generated`). No manual `scene link`, no dangling-reference
+risk. Re-run it to reshoot (appends a take, moves `selectedAssetId`).
+
+```bash
+autoviral scene generate scn_a1b2c3            # prints the minted asset id
+autoviral scene generate scn_a1b2c3 --provider nanobanana
+```
+
+Do **not** hand-roll this with `POST /api/generate/image` + `scene link` — the
+raw image endpoint does not register an AssetEntry in `composition.assets`, so
+the link would dangle.
+
+**Video / TTS shots** (no `scene generate` for these yet): generate via the
+endpoint, then link the asset back to record the handoff state:
 
 ```bash
 # generate the shot's footage (image-to-video / text-to-video as the prompt needs)
@@ -99,14 +115,20 @@ curl -s -X POST "http://127.0.0.1:$AUTOVIRAL_PORT/api/generate/video" \
 # generate response, or `autoviral list assets` to look it up. Linking a stem
 # that isn't a real asset id leaves generatedAssetIds pointing at nothing.
 autoviral scene link scn_a1b2c3 --asset <assetId-from-generate-response> --status generated
+```
 
-# then assemble it onto the timeline when you're ready (this is what renders)
+Either way, assemble the produced footage onto the timeline when you're ready
+(this is what renders):
+
+```bash
 autoviral clip add --src assets/clips/scn1.mp4 --track video --offset 0 --duration 3
 ```
 
 Repeat per shot. The storyboard is your checklist; the timeline (`clips[]`) is
 what actually renders. A scene staying `planned` is a shot you haven't produced
-yet — `scene list` shows you the gap at a glance.
+yet — `scene list` shows you the gap at a glance. Editing a `generated` scene's
+generation-affecting fields flips it to `stale` (the Studio card shows a red
+dot) — reshoot with `scene generate` to refresh it.
 
 ## Verifying
 
