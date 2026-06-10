@@ -56,6 +56,20 @@ autoviral comp put ./my-composition.yaml                            # write a fi
 
 **Unknown keys are REJECTED, not silently dropped.** The write path validates against a *strict* schema: a misspelled top-level key (`tracts` for `tracks`, singular `exportPreset`) or a misspelled clip field fails loud with HTTP 400 + exit 4 and the zod issue path, and the on-disk file is left untouched. This is deliberate — a silent strip would lose the field you meant to write with no feedback. Round-tripping a `comp show` body is always safe (it only contains known keys).
 
+### `autoviral comp set --duration <seconds|auto>`
+
+Set — or **shorten** — the overall timeline length (`comp.duration`). This is the **only supported path** to set a specific duration: every clip edit (add / trim / split / move) only ever *grows* `comp.duration` (it tracks the maximum clip end and never shrinks), so cropping a tail of dead time at the end has no other verb.
+
+```bash
+autoviral comp set --duration 30      # set the timeline to exactly 30s
+autoviral comp set --duration auto    # derive it from the furthest clip end
+autoviral comp set --duration 12      # shorten — tail content past 12s won't render
+```
+
+- `--duration <seconds>` — an explicit, finite, non-negative number. Setting a value **shorter than the content end** is allowed (a legitimate crop), but prints a non-blocking warning to stderr and the response flags `truncatesContent: true` — clip content past the new duration will not render.
+- `--duration auto` — derive the length from `max(clip end)` across every track (the same口径 the store grows duration with). An empty composition yields `0`.
+- A malformed value (`abc`, negative) fails fast with exit 4 **before** the bridge.
+
 ### `autoviral list clips [--track <kind>]`
 
 List clip summaries (id, kind, src, in/out, trackOffset, opacity hint). `--track` filters by parent track kind.
@@ -77,6 +91,14 @@ autoviral list assets --kind video
 ## Write commands (composition.yaml)
 
 All writes are atomic (tmpfile + rename), zod-validated. Invalid input → HTTP 400 with the zod issue list, exit 4, on-disk file untouched.
+
+> ### ⚠️ NEVER hand-edit `composition.yaml` directly
+>
+> Always write through the bridge — `comp set` / `comp put` / `clip` / `scene` verbs — **never** open `composition.yaml` in an editor and write it yourself.
+>
+> **Why your direct edit gets silently reverted:** while the Studio editor has this work open, it runs an **800ms debounced auto-save that PUTs its in-memory composition over whatever is on disk.** A disk watcher does refetch your direct edit into the editor first — but the moment the editor's in-memory composition next becomes dirty (any UI nudge), that debounced auto-save writes the editor's memory state back, **overwriting your direct edit.** It's a file-vs-editor-memory race, and the editor wins. (The server itself has no in-memory cache — every read hits disk; the overwrite comes from the *Studio editor*, not the daemon.)
+>
+> Bridge writes have none of this problem: they go through the atomic-rename chokepoint **and broadcast `composition-changed`**, so the editor *refetches* your change instead of clobbering it, and the write is safe whether or not anyone has the work open. **If you catch yourself reaching for `Write composition.yaml`, use `comp put -` (or a narrower verb) instead.**
 
 ### `autoviral clip add`
 
@@ -150,6 +172,15 @@ file), not timeline seconds.
 
 ```bash
 autoviral clip trim vc_s01 --in 0.5 --out 3.8
+```
+
+### `autoviral clip move <id> --to-track <trackId>`
+
+Move a clip to a **different lane** (track), preserving its `trackOffset` (timeline position). The flag is `--to-track` — it takes an exact `trackId` (e.g. `t_v2`), not a kind. The bridge runs the same shared op the Studio drag/Inspector lane-select uses: a **same-kind guard** (a video clip can only move to a video lane — a cross-kind move is rejected with exit 4), `trackOffset` preservation, and source-lane orphan-transition pruning. So an agent's `clip move` and a human dragging the clip converge on the same composition.
+
+```bash
+autoviral list clips                          # find the target lane's trackId
+autoviral clip move vc_s01 --to-track t_v2    # move into the second video lane
 ```
 
 ### `autoviral clip keyframe add|set <id> --property <p> --at <sec> --value <v> [--easing <e>]`

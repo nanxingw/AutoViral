@@ -19,3 +19,4 @@ export {
 } from "./scene.js";
 export { addKeyframe, setKeyframe } from "./keyframe.js";
 export { setAspectRatio, rescaleCompositionForResize } from "./setAspectRatio.js";
+export { setCompositionDuration, compositionContentEnd } from "./setDuration.js";

@@ -313,6 +313,75 @@ bridgeRouter.post("/comp/aspect", async (c) => {
   return c.json({ ok: true, result: { ratio } });
 });
 
+// PRD-0009 B6 — POST /comp/duration: set the top-level comp.duration through the
+// shared `ops.setCompositionDuration` — the ONLY write path for the overall
+// timeline length. Body `{ durationSec }` (explicit finite non-negative) OR
+// `{ auto: true }` (derive from max clip end, the store口径). The Studio store
+// only ever GROWS duration (Math.max guards), so SHORTENING the timeline (e.g.
+// crop a tail of static frames) had no agent path short of `comp put` /
+// hand-editing the yaml — the dead-end chat-s_2 hit. On success we broadcast
+// composition-changed (reason `comp-duration`) so Studio refetches.
+//
+// The response carries `{ duration, contentEnd, truncatesContent }` so the CLI
+// can warn when an explicit duration is SHORTER than content (tail content past
+// the new duration won't render — a legitimate but worth-flagging state).
+// Invalid input → CompositionOpError{code:4} → HTTP 400 + code:4 → CLI exit 4.
+bridgeRouter.post("/comp/duration", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    durationSec?: unknown;
+    auto?: unknown;
+  };
+  // Resolve the op param locally so an obviously-malformed body 400s before the
+  // (locked, disk-touching) mutate. `auto:true` wins; otherwise durationSec must
+  // be a finite non-negative number (the op re-validates as the source of truth).
+  const auto = body.auto === true;
+  if (!auto) {
+    if (
+      typeof body.durationSec !== "number" ||
+      !Number.isFinite(body.durationSec) ||
+      body.durationSec < 0
+    ) {
+      return c.json(
+        {
+          ok: false,
+          error:
+            "invalid duration (expected { durationSec: <finite non-negative number> } or { auto: true })",
+          code: 4,
+        },
+        400,
+      );
+    }
+  }
+  const param = auto
+    ? ({ auto: true } as const)
+    : ({ durationSec: body.durationSec as number } as const);
+  try {
+    const next = await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.setCompositionDuration(comp, param);
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "comp-duration" }),
+    );
+    const contentEnd = ops.compositionContentEnd(next);
+    return c.json({
+      ok: true,
+      result: {
+        duration: next.duration,
+        contentEnd,
+        truncatesContent: next.duration < contentEnd,
+      },
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+});
+
 // Phase 5 Task 5.4 — unified diff between composition.yaml.previous (the
 // snapshot taken just before the most recent write) and the current
 // composition.yaml. Returns `{ diff: string, hasBaseline: boolean }`.

@@ -48,6 +48,9 @@ let lastCompValidate: Record<string, unknown> | null = null;
 // S17 (US 26) — capture the last POST /comp/aspect body so the CLI test can
 // assert `comp aspect <ratio>` reached the bridge as { ratio }.
 let lastCompAspect: Record<string, unknown> | null = null;
+// PRD-0009 B6 — capture the last POST /comp/duration body so the CLI test can
+// assert `comp set --duration <s|auto>` reached the bridge in the right shape.
+let lastCompDuration: Record<string, unknown> | null = null;
 // carousel set-layer patch — capture the last POST /carousel/.../layer body so
 // the CLI test can assert which fields the CLI sent (a patch must send ONLY the
 // supplied flags, incl. the new --italic / --tracking, and a partial box).
@@ -149,6 +152,26 @@ beforeAll(async () => {
     if (req.method === "POST" && url === "/api/bridge/v1/comp/aspect") {
       lastCompAspect = await readBody(req);
       return send(200, { ok: true, result: { ratio: lastCompAspect.ratio } });
+    }
+    // PRD-0009 B6 — POST /comp/duration. The CLI validates the value locally
+    // (exit 4 before the bridge) for a malformed --duration; only a finite
+    // non-negative number or `{auto:true}` reaches here. The mock fixes a content
+    // end of 12 so the CLI's truncatesContent warning path can be exercised:
+    // an explicit duration < 12 echoes truncatesContent:true.
+    if (req.method === "POST" && url === "/api/bridge/v1/comp/duration") {
+      lastCompDuration = await readBody(req);
+      const CONTENT_END = 12;
+      const duration = lastCompDuration.auto === true
+        ? CONTENT_END
+        : (lastCompDuration.durationSec as number);
+      return send(200, {
+        ok: true,
+        result: {
+          duration,
+          contentEnd: CONTENT_END,
+          truncatesContent: duration < CONTENT_END,
+        },
+      });
     }
     // I08 — carousel write endpoints. Mirror the server's contract: POST
     // /carousel/slide returns { ok, result:{ id } }; POST
@@ -1740,6 +1763,66 @@ describe("autoviral CLI — end-to-end", () => {
     it("--help lists comp aspect", async () => {
       const r = await run(["--help"]);
       expect(r.stdout).toMatch(/comp aspect/);
+    });
+  });
+
+  // PRD-0009 B6 — `comp set --duration <seconds|auto>` is the ONLY path to SET
+  // or SHORTEN the overall timeline length (the store only ever grows duration).
+  // A finite number reaches the bridge as { durationSec }; `auto` as { auto:true };
+  // a malformed value fails fast (exit 4) BEFORE the bridge. A duration shorter
+  // than content end prints a non-blocking truncation warning (exit stays 0).
+  describe("comp set --duration — set/shorten overall timeline length", () => {
+    it("comp set --duration 20 → POSTs { durationSec } + exit 0 + prints confirmation", async () => {
+      lastCompDuration = null;
+      const r = await run(["comp", "set", "--duration", "20"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastCompDuration).toEqual({ durationSec: 20 });
+      expect(r.stdout).toMatch(/set duration to 20s/);
+      // 20 >= content end 12 → no truncation warning.
+      expect(r.stderr).not.toMatch(/will not render/);
+    });
+
+    it("comp set --duration auto → POSTs { auto:true } + exit 0", async () => {
+      lastCompDuration = null;
+      const r = await run(["comp", "set", "--duration", "auto"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastCompDuration).toEqual({ auto: true });
+      expect(r.stdout).toMatch(/set duration to 12s/);
+    });
+
+    it("comp set --duration shorter than content end → exit 0 + non-blocking truncation warning", async () => {
+      lastCompDuration = null;
+      const r = await run(["comp", "set", "--duration", "7"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastCompDuration).toEqual({ durationSec: 7 });
+      expect(r.stderr).toMatch(/shorter than the content end/);
+      expect(r.stderr).toMatch(/will not render/);
+    });
+
+    it("comp set with no --duration → exit 4 (never hits bridge)", async () => {
+      lastCompDuration = null;
+      const r = await run(["comp", "set"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompDuration).toBeNull();
+    });
+
+    it("comp set --duration with a non-numeric value → exit 4 (never hits bridge)", async () => {
+      lastCompDuration = null;
+      const r = await run(["comp", "set", "--duration", "abc"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompDuration).toBeNull();
+    });
+
+    it("comp set --duration with a negative value → exit 4 (never hits bridge)", async () => {
+      lastCompDuration = null;
+      const r = await run(["comp", "set", "--duration", "-5"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompDuration).toBeNull();
+    });
+
+    it("--help lists comp set --duration", async () => {
+      const r = await run(["--help"]);
+      expect(r.stdout).toMatch(/comp set --duration/);
     });
   });
 

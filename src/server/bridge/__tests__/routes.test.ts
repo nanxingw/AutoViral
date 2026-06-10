@@ -2808,6 +2808,166 @@ describe("bridge router — S17 POST /comp/aspect", () => {
   });
 });
 
+// ─── PRD-0009 B6 — POST /comp/duration (set/shrink overall timeline length) ──
+// Routes through the shared `ops.setCompositionDuration` — the ONLY write path
+// for the top-level comp.duration (the store only ever GROWS it). Body
+// `{ durationSec }` (explicit) or `{ auto: true }` (derive from max clip end).
+// Response carries { duration, contentEnd, truncatesContent } so the CLI can
+// warn when an explicit duration is shorter than content. Invalid → 400 + code 4.
+// Fixture content end = max(video 4, audio 12, text 3) = 12; duration = 12.
+describe("bridge router — B6 POST /comp/duration", () => {
+  let workRoot: string;
+  const workId = "w_duration";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-duration-route-"));
+    const fixtureYaml = (
+      await readFile(
+        join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+        "utf8",
+      )
+    ).replace(/workId: sample-work/, `workId: ${workId}`);
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(join(workRoot, workId, "composition.yaml"), fixtureYaml, "utf8");
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  async function currentComp(): Promise<Record<string, unknown>> {
+    const res = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    return ((await res.json()) as { result: Record<string, unknown> }).result;
+  }
+
+  it("explicit durationSec writes the duration, GET reflects it, no truncation when >= content", async () => {
+    const res = await app.request("/api/bridge/v1/comp/duration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ durationSec: 20 }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result: { duration: number; contentEnd: number; truncatesContent: boolean };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.result.duration).toBe(20);
+    expect(body.result.contentEnd).toBe(12);
+    expect(body.result.truncatesContent).toBe(false);
+    const after = await currentComp();
+    expect(after.duration).toBe(20);
+  });
+
+  it("shortening below content end is allowed and flags truncatesContent", async () => {
+    const res = await app.request("/api/bridge/v1/comp/duration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ durationSec: 7 }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result: { duration: number; contentEnd: number; truncatesContent: boolean };
+    };
+    expect(body.result.duration).toBe(7);
+    expect(body.result.contentEnd).toBe(12);
+    expect(body.result.truncatesContent).toBe(true);
+  });
+
+  it("auto derives the duration from the max clip end (12)", async () => {
+    // First push it off (to 20) so auto has something to converge back to.
+    await app.request("/api/bridge/v1/comp/duration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ durationSec: 20 }),
+    });
+    const res = await app.request("/api/bridge/v1/comp/duration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ auto: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result: { duration: number; truncatesContent: boolean };
+    };
+    expect(body.result.duration).toBe(12);
+    expect(body.result.truncatesContent).toBe(false);
+    const after = await currentComp();
+    expect(after.duration).toBe(12);
+  });
+
+  it("broadcasts composition-changed after the write lands", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/comp/duration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ durationSec: 15 }),
+      });
+      expect(res.status).toBe(200);
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  it("negative durationSec → 400 + code 4, disk UNCHANGED, no broadcast", async () => {
+    const { readFile } = await import("node:fs/promises");
+    const target = join(workRoot, workId, "composition.yaml");
+    const before = await readFile(target, "utf8");
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+    try {
+      const res = await app.request("/api/bridge/v1/comp/duration", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ durationSec: -5 }),
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { ok: boolean; code?: number };
+      expect(body.ok).toBe(false);
+      expect(body.code).toBe(4);
+      expect(await readFile(target, "utf8")).toBe(before);
+      expect(events).not.toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  it("non-numeric durationSec without auto → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/comp/duration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ durationSec: "lots" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("without the work-id header → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/comp/duration", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ auto: true }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+});
+
 // ─── S13 (US 11/12) — preflight (/comp/validate) + write dry-run ─────────────
 // `/comp/validate` lets the agent check a candidate composition BEFORE it ever
 // touches disk — no write, no broadcast — so it can fix problems up front

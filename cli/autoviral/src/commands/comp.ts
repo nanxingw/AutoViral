@@ -133,8 +133,61 @@ export async function compCommand(args: string[]): Promise<void> {
     process.stdout.write(`switched aspect to ${ratio}\n`);
     return;
   }
+  if (sub === "set") {
+    // PRD-0009 B6 — `comp set --duration <seconds|auto>`. The ONLY supported
+    // path to SET or SHORTEN the overall timeline length. The Studio store only
+    // ever GROWS comp.duration (Math.max guards on every clip mutation), so an
+    // agent had no way to crop a tail of dead time short of overwriting the whole
+    // composition. Routes through the shared `ops.setCompositionDuration` (the
+    // single source of truth the bridge runs). `--duration auto` derives the
+    // length from the max clip end. We validate locally (exit 4, no bridge round-
+    // trip) for an obviously-malformed value; the server owns the write + broadcast.
+    const raw = readFlag(args.slice(1), "--duration");
+    if (raw === undefined) {
+      process.stderr.write("usage: autoviral comp set --duration <seconds|auto>\n");
+      process.exit(4);
+    }
+    let payload: { durationSec: number } | { auto: true };
+    if (raw === "auto") {
+      payload = { auto: true };
+    } else {
+      const durationSec = Number(raw);
+      if (!Number.isFinite(durationSec) || durationSec < 0) {
+        process.stderr.write(
+          `autoviral comp set: --duration must be a finite, non-negative number or "auto" (got "${raw}")\n`,
+        );
+        process.exit(4);
+      }
+      payload = { durationSec };
+    }
+    const ctx = readContext();
+    const result = await bridgeRequest<{
+      duration: number;
+      contentEnd: number;
+      truncatesContent: boolean;
+    }>(ctx, "POST", "/comp/duration", payload);
+    process.stdout.write(`set duration to ${result.duration}s\n`);
+    // A duration SHORTER than the content end is a legitimate intent (crop a
+    // tail), but the agent should know tail content past it will not render.
+    // Non-blocking: it's a warning to stderr, exit stays 0.
+    if (result.truncatesContent) {
+      process.stderr.write(
+        `⚠ duration ${result.duration}s is shorter than the content end ${result.contentEnd}s — clip content past ${result.duration}s will not render\n`,
+      );
+    }
+    return;
+  }
   process.stderr.write(`autoviral comp: unknown subcommand "${sub}"\n`);
   process.exit(127);
+}
+
+// Minimal `--flag <value>` reader for the comp verbs. Returns the value that
+// follows the named flag, or undefined if the flag is absent. (comp.ts has no
+// flag-bag like clip.ts; a single-flag verb needs nothing heavier.)
+function readFlag(args: string[], flag: string): string | undefined {
+  const i = args.indexOf(flag);
+  if (i === -1) return undefined;
+  return args[i + 1];
 }
 
 // The four canonical aspect ratios — kept in lockstep with ASPECTS in
