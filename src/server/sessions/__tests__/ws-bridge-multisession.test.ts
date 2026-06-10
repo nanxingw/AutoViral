@@ -256,11 +256,48 @@ describe("WsBridge — multi-session keying + sidecar + migration + archive", ()
       expect(s2Killed[0].data).toEqual({ workId: work, sessionId: "s_2" });
       expect(s1Killed).toHaveLength(0);
 
-      // (c) s_1's session record is unaffected (still has its process, not idle).
+      // (c) s_1's session record is unaffected — it still holds its CLI process.
       const s1After = bridge.getSession(work, "s_1")!;
       expect(s1After.cliProcess).toBeDefined();
       // s_2's process reference is cleared after the kill.
       expect(bridge.getSession(work, "s_2")!.cliProcess).toBeUndefined();
+    });
+  });
+
+  // B1 regression — the default-session path (single-session work, abort with no
+  // sessionId → killSession(work) with no second arg → resolves to s_1) must
+  // STILL really kill: SIGTERM s_1's CLI + session_killed broadcast to s_1's
+  // socket + return true. Without this, "single-session work 回归不破" rests only
+  // on a route test that mocks killSession away — this exercises the real one.
+  it("killSession(work) with no sessionId defaults to s_1 and really kills it (single-session regression)", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge } = await import("../../../ws-bridge.js");
+      const work = "w_single";
+      await workDir(dir, work);
+      const bridge = new WsBridge(0);
+
+      const s1 = bridge.ensureSession(work, "s_1");
+      const s1Kill = vi.fn();
+      s1.cliProcess = { kill: s1Kill } as unknown as never;
+      const sentToS1: string[] = [];
+      s1.browserSockets.add(
+        ({ readyState: 1 /* WebSocket.OPEN */, send: (m: string) => sentToS1.push(m) } as unknown as never),
+      );
+
+      // No second arg — exactly what the route forwards for a body-less abort.
+      const killed = bridge.killSession(work);
+      expect(killed).toBe(true);
+
+      // s_1's CLI got SIGTERM.
+      expect(s1Kill).toHaveBeenCalledWith("SIGTERM");
+      // session_killed broadcast reached s_1's socket, scoped to s_1.
+      const s1Killed = sentToS1
+        .map((m) => JSON.parse(m))
+        .filter((m) => m.event === "session_killed");
+      expect(s1Killed).toHaveLength(1);
+      expect(s1Killed[0].data).toEqual({ workId: work, sessionId: "s_1" });
+      // s_1's process reference is cleared after the kill.
+      expect(bridge.getSession(work, "s_1")!.cliProcess).toBeUndefined();
     });
   });
 });

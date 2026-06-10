@@ -1,7 +1,13 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { join } from "node:path";
 import { existsSync } from "node:fs";
-import { PACKAGE_ROOT, CLI_BIN_DIR } from "./paths.js";
+import {
+  PACKAGE_ROOT,
+  CLI_BIN_DIR,
+  buildSpawnPath,
+  assertCliBinDir,
+} from "./paths.js";
+import { manualDir } from "../server/bridge/routes.js";
 
 // Regression guard for B5 (PRD-0009): the `autoviral` shim dir injected onto the
 // spawned agent's PATH (ws-bridge.ts spawnCli + terminal-ws.ts pty-pool) must be
@@ -38,17 +44,62 @@ describe("CLI_BIN_DIR", () => {
 // Same child-vs-sibling family: manualDir() in src/server/bridge/routes.ts feeds
 // `autoviral docs` (the manual the agent is told to read). skills/autoviral is a
 // SIBLING of dist/ exactly like cli/, so the manual must resolve via
-// join(PACKAGE_ROOT, "..", "skills", "autoviral", "manual"). manualDir() is
-// module-private (and honours AUTOVIRAL_MANUAL_DIR first), so we pin the
-// underlying sibling path directly here.
-describe("bundled manual dir (manualDir sibling resolution)", () => {
-  it("resolves the manual as a SIBLING of PACKAGE_ROOT and it really exists", () => {
-    const manualDir = join(PACKAGE_ROOT, "..", "skills", "autoviral", "manual");
-    expect(existsSync(manualDir)).toBe(true);
-    // A real manual page must be present (not just the dir) so `autoviral docs`
-    // has content to serve.
-    expect(existsSync(join(manualDir, "_shared", "00-quickstart.md"))).toBe(
-      true,
-    );
+// join(PACKAGE_ROOT, "..", "skills", "autoviral", "manual"). We call the REAL
+// exported function (with AUTOVIRAL_MANUAL_DIR unset) so a child→child
+// regression in routes.ts actually turns this red — a parallel-constructed
+// string would not. (The /docs route suite in routes.test.ts always sets
+// AUTOVIRAL_MANUAL_DIR in beforeEach, so it never reaches this fallback branch.)
+describe("manualDir() sibling resolution (the real exported function)", () => {
+  const prev = process.env.AUTOVIRAL_MANUAL_DIR;
+  afterEach(() => {
+    if (prev === undefined) delete process.env.AUTOVIRAL_MANUAL_DIR;
+    else process.env.AUTOVIRAL_MANUAL_DIR = prev;
+  });
+
+  it("resolves the manual as a SIBLING of PACKAGE_ROOT (no ghost dist/ child)", () => {
+    delete process.env.AUTOVIRAL_MANUAL_DIR; // exercise the fallback branch
+    const dir = manualDir();
+    // Pins the exact sibling resolution: the old child write
+    // (join(PACKAGE_ROOT, "skills", "autoviral", "manual")) fails this.
+    expect(dir).toBe(join(PACKAGE_ROOT, "..", "skills", "autoviral", "manual"));
+    // And it really exists with a real page (so `autoviral docs` serves content).
+    expect(existsSync(dir)).toBe(true);
+    expect(existsSync(join(dir, "_shared", "00-quickstart.md"))).toBe(true);
+  });
+
+  it("honours AUTOVIRAL_MANUAL_DIR override when set", () => {
+    process.env.AUTOVIRAL_MANUAL_DIR = "/tmp/some-override-manual";
+    expect(manualDir()).toBe("/tmp/some-override-manual");
+  });
+});
+
+// B5 second-slice MEDIUM: the AC-named behaviour "agent gets `autoviral` on its
+// PATH" was untested — paths.test.ts only pinned the constant + fs existence,
+// and the two spawn faces wired the PATH string inline. buildSpawnPath is the
+// single helper both faces now call, so pinning it here钉死 the injection shape:
+// CLI_BIN_DIR is PREPENDED. A future "误删 PATH 前缀 / 写成空" regression turns
+// this red instead of silently shipping `command not found`.
+describe("buildSpawnPath (the injected agent PATH)", () => {
+  it("prepends CLI_BIN_DIR to the inherited PATH", () => {
+    expect(buildSpawnPath("/usr/bin:/bin")).toBe(`${CLI_BIN_DIR}:/usr/bin:/bin`);
+  });
+
+  it("starts with CLI_BIN_DIR + ':' so the shim shadows a global autoviral", () => {
+    expect(buildSpawnPath("/usr/bin").startsWith(`${CLI_BIN_DIR}:`)).toBe(true);
+  });
+
+  it("handles an empty inherited PATH (trailing empty segment, never the string 'undefined')", () => {
+    // The `?? ""` guard means a missing PATH yields a bare trailing colon, never
+    // the literal "undefined" — which would silently break command resolution.
+    expect(buildSpawnPath("")).toBe(`${CLI_BIN_DIR}:`);
+    // And an explicit null-ish value coalesces to "" rather than stringifying.
+    expect(buildSpawnPath(undefined as unknown as string)).not.toContain("undefined");
+  });
+});
+
+describe("assertCliBinDir (fail-fast guard shared by both spawn faces)", () => {
+  it("returns true when the shim dir exists (no warn)", () => {
+    // In dev/test PACKAGE_ROOT === src/, so the real committed shim exists.
+    expect(assertCliBinDir("test")).toBe(true);
   });
 });

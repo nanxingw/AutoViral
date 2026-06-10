@@ -91,7 +91,11 @@ function writeInject(workId: string, enabled: boolean): void {
   terminalInjectEnabled.set(workId, enabled);
 }
 
-function manualDir(): string {
+// Exported for the B5 sibling-resolution regression test (paths.test.ts), which
+// calls THIS function with AUTOVIRAL_MANUAL_DIR unset so the fallback branch is
+// actually exercised — a parallel-constructed string in the test would not catch
+// a child→child regression here.
+export function manualDir(): string {
   // Anchor on PACKAGE_ROOT (not process.cwd()) so `autoviral docs` resolves the
   // bundled manual inside a packaged Electron app; AUTOVIRAL_MANUAL_DIR still wins.
   // skills/autoviral is a SIBLING of dist/ (= PACKAGE_ROOT), not a child — same

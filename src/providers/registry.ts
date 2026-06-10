@@ -76,10 +76,11 @@ export interface MusicMediaProvider extends MediaProviderBase {
   /** Human-readable label for the generation dialog (e.g. "Lyria 3 Pro"). */
   displayName: string;
   /**
-   * The keyless singleton adapter. The HTTP route constructs its OWN
-   * createLyriaProvider(config.openrouter.apiKey) so the key comes from the
-   * user's config.yaml (not process.env) — this entry exists so music
-   * participates in list/default/availability + provider validation.
+   * The keyless singleton adapter. The HTTP route reuses THIS registry entry
+   * (entry.generateMusic) and injects config.openrouter.apiKey per-call via
+   * opts.apiKey — it does NOT construct its own provider. The key therefore
+   * comes from the user's config.yaml (not process.env), and this entry lets
+   * music participate in list/default/availability + provider validation.
    */
   generateMusic(opts: MusicGenerateOptions): Promise<MusicGenerateResult>;
 }

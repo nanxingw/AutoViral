@@ -262,11 +262,19 @@ describe("POST /api/generate/bgm · Lyria music generation", () => {
       const asset = (comp.assets ?? []).find((a) => a.id === json.assetId);
       expect(asset).toBeDefined();
       expect(asset?.kind).toBe("audio");
-      expect(
-        (comp.provenance ?? []).some(
-          (e) => e.toAssetId === json.assetId && e.operation.type === "generate",
-        ),
-      ).toBe(true);
+      // Pin the provenance edge's operation.params — the vocabulary that must
+      // stay aligned with f9583b6's video endpoint. A happy-path-only kind/type
+      // assertion would stay green even if providerId/prompt/vocal were dropped
+      // or written wrong, so钉死 them explicitly.
+      const edge = (comp.provenance ?? []).find(
+        (e) => e.toAssetId === json.assetId && e.operation.type === "generate",
+      );
+      expect(edge).toBeDefined();
+      const params = edge!.operation.params as Record<string, unknown>;
+      expect(params.providerId).toBe("lyria");
+      expect(params.prompt).toBe("calm lofi piano");
+      // vocal defaults to false (instrumental) when not requested.
+      expect(params.vocal).toBe(false);
     });
   });
 

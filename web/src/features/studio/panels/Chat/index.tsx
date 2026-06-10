@@ -992,7 +992,7 @@ export function ChatPanel({
             {streaming ? (
               <button
                 onClick={abort}
-                aria-label="Stop"
+                aria-label={t("chat.stopAria")}
                 title={t("chat.stopTitle")}
                 className={`${composerStyles.iconBtn} ${composerStyles.stop} send-btn`}
               >

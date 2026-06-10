@@ -11,7 +11,6 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { writeFile, readFile, rm, mkdir } from "node:fs/promises";
-import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
@@ -21,7 +20,7 @@ import type { Duplex } from "node:stream";
 import { appendFile } from "node:fs/promises";
 import { logBridge, logBridgeDebug } from "./infra/logger.js";
 import { loadConfig, dataDir } from "./infra/config.js";
-import { PACKAGE_ROOT, CLI_BIN_DIR } from "./infra/paths.js";
+import { PACKAGE_ROOT, assertCliBinDir, buildSpawnPath } from "./infra/paths.js";
 import { getWork, updateWork, saveWorkChat, loadWorkChat, listWorks, type Work } from "./domain/work-store.js";
 import { getContentType } from "./shared/content-types/registry.js";
 import { createCheckpoint } from "./server/checkpoints.js";
@@ -170,7 +169,7 @@ Skill('autoviral')
 - **图像** — \`POST /api/generate/image\` { workId, prompt, filename, aspectRatio?, imageSize?, width?, height?, referenceImage? }。OpenRouter，用户在 Settings 配了 OPENROUTER_API_KEY 即启用。**画幅默认跟作品画布走**（composition 的 \`aspect\`，用户定的）；要不同画幅才显式传 \`aspectRatio\`（"9:16" / "16:9" / "1:1" / "4:5" 等，显式永远优先）。width/height 只用来推导最接近的 aspectRatio（模型自定具体像素，不会精确到你给的尺寸）。\`scene generate\` 同样自动继承画布画幅。
 - **视频** — \`POST /api/generate/video\` { workId, prompt, filename, aspectRatio?, resolution?, durationSec?, firstFrame?, lastFrame? }。Seedance 2.0，支持 text-to-video 与 image-to-video（firstFrame 驱动；本地路径会被自动 base64 内联，也可传 https/data URI）。**画幅默认跟作品画布走**（同图像规则：composition 的 \`aspect\` 映射到最近的支持比例，4:5→3:4；要不同画幅才显式传 \`aspectRatio\`，显式永远优先）。\`aspectRatio\` 7 枚举：1:1 / 3:4 / 9:16 / 4:3 / 16:9 / 21:9 / 9:21。\`resolution\`：480p / 720p / 1080p。\`durationSec\`：整数 4–15（默认 5）。fps 固定 24，不可调。价格按 token：720p≈$0.15/秒、1080p≈$0.34/秒。响应含 \`assetId\`（已原子登记 AssetEntry，可直接 \`autoviral scene link\`）。**已实测**（2026-06-10 真实出片 + ffprobe 二确）：显式画幅永远赢——9:16 竖图做 i2v 锚 + 显式 16:9 照样出 1280×720 横屏；1080p 真实可得（9:16 → 1080×1920）。注意：**写实人像不能做 i2v 锚图**（ByteDance 审核 400 拒单不计费，码 InputImageSensitiveContentDetected），风格化 / 无人物图不受限。
 - **配音 TTS** — \`POST /api/audio/tts\` { text, voice, output_path, language?, style? }。主力走 Gemini-via-OpenRouter（用户在 Settings 配了 OPENROUTER_API_KEY 即启用），无 key 或失败时自动 fallback 到内置免费的 edge-tts（中文 zh-CN-XiaoxiaoNeural 等、英文 en-US-AriaNeural 等）。**短视频默认应该有人声**——绝大多数 viral 短视频靠 narration 推进节奏；做完 brief 主动 propose 加旁白。
-- **配乐 BGM** — \`POST /api/generate/bgm\` { workId, prompt, filename?, vocal?, seed?, temperature?, durationSeconds?, referenceImage? }。Lyria 3 Pro via OpenRouter（用户配了 OPENROUTER_API_KEY 即启用，无 key 返 503）。\`vocal\` 默认 false=纯器乐（服务端自动加 "Instrumental only" 前缀）；\`durationSeconds\` 可选 5–180，**Lyria 不接受时长参数**——固定产出约 1–2 分钟整曲（约 \$0.08/首），这个值只是事后用 ffmpeg 裁剪，不传就保留全长。响应含 \`assetId\`（已原子登记 AssetEntry \`kind: audio\` + 广播刷新库），之后用 \`autoviral clip add\` 当 bgm 轨拼上。**这是生成音乐的唯一正路：直接调这个端点，绝不去跑任何 \`.py\` 脚本来"兜底"做 BGM（那些脚本已删，是死的，见下方兜底规则）。**
+- **配乐 BGM** — \`POST /api/generate/bgm\` { workId, prompt, filename?, vocal?, seed?, temperature?, durationSeconds?, referenceImage? }。Lyria 3 Pro via OpenRouter（用户配了 OPENROUTER_API_KEY 即启用，无 key 返 503）。\`vocal\` 默认 false=纯器乐（服务端自动加 "Instrumental only" 前缀）；\`durationSeconds\` 可选 5–180，**Lyria 不接受时长参数**——固定产出约 1–2 分钟整曲（约 \$0.08/首），这个值只是事后用 ffmpeg 裁剪，不传就保留全长。响应含 \`assetId\`（已原子登记 AssetEntry \`kind: audio\` + 广播刷新库），之后用 \`autoviral clip add\` 当 bgm 轨拼上。**这是生成音乐的唯一正路：直接调这个端点，绝不去跑任何 \`.py\` 脚本来"兜底"做 BGM（那些脚本已删，是死的，见上方兜底规则）。**
 - **字幕 ASR** — \`POST /api/audio/captions\` { workId, assetPath, language }。stable-whisper 转写出 word-level 时间戳。**抖音 70% 用户静音浏览，任何带音频的视频都该跑 ASR 加字幕**（字幕走 composition 的 \`captionStrategy: overlay\` 渲染，见 \`autoviral docs video/02-composition-schema\`——不要手写 ffmpeg drawtext）。报 PYTHON_DEP_MISSING 就让用户 \`pip install stable-ts\`（注意不是 stable-whisper）。
 - **混音** \`POST /api/audio/mix\`（多轨混音 / 音量平衡）。
 - **过场转场** — 4 个 cinematic 端点，body 都接受 { workId, clipARelative, clipBRelative, outputFilename, clipADuration, transitionDuration? }。**绝不手写 ffmpeg xfade**：
@@ -1065,23 +1064,18 @@ export class WsBridge {
     // see CLI_BIN_DIR's invariant comment (B5 regression in 2a79daf resolved it
     // as a child → ghost dist/cli/autoviral/bin → `autoviral: command not
     // found`).
-    const cliBinDir = CLI_BIN_DIR;
-    // Fail-fast: a missing shim dir means the agent will silently get
-    // `command not found` for every `autoviral` call the skill documents. Make
-    // the ghost-path class of regression LOUD in the daemon log instead of
-    // silent — this is exactly the failure mode B5 fixed.
-    if (!existsSync(cliBinDir)) {
-      console.warn(
-        `[ws-bridge] autoviral CLI shim dir not found at ${cliBinDir} — the spawned agent's \`autoviral\` commands will fail (command not found). Expected cli/autoviral/bin beside dist/ (run \`npm run build:cli\`?).`,
-      );
-    }
+    // Fail-fast guard (shared with terminal-ws.ts so both spawn faces stay in
+    // lockstep): warn LOUD in the daemon log if the shim dir is missing instead
+    // of letting every `autoviral` call silently `command not found` — the B5
+    // ghost-path failure mode.
+    assertCliBinDir("ws-bridge");
     const workCwd = join(dataDir, "works", session.workId);
     const proc = spawn("claude", args, {
       cwd: PACKAGE_ROOT,
       stdio: ["ignore", "pipe", "pipe"],
       env: {
         ...process.env,
-        PATH: `${cliBinDir}:${process.env.PATH ?? ""}`,
+        PATH: buildSpawnPath(),
         CLAUDE_CODE_ENTRYPOINT: "cli",
         AUTOVIRAL_PROJECT_DIR: PACKAGE_ROOT,
         AUTOVIRAL_WORK_ID: session.workId,

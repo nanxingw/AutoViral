@@ -1045,6 +1045,7 @@ export const en = {
     composerPlaceholder: "ask anything…",
     sendHint: "⌘↵ SEND",
     stopTitle: "Stop running turn",
+    stopAria: "Stop running turn",
     abortNoop: "Nothing was running to stop — the turn may have already finished.",
     abortFailed: "Couldn't stop the turn. Please try again.",
     attach: {
@@ -2148,6 +2149,7 @@ export const zh: DeepShape<Messages> = {
     composerPlaceholder: "问点什么…",
     sendHint: "⌘↵ 发送",
     stopTitle: "停止当前回合",
+    stopAria: "停止当前回合",
     abortNoop: "当前没有正在运行的回合可停止——可能已经结束了。",
     abortFailed: "停止失败，请重试。",
     attach: {

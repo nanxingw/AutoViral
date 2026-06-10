@@ -416,10 +416,10 @@ generateRouter.post("/api/generate/bgm", async (c) => {
   }
 
   // durationSeconds is OPTIONAL. Lyria has NO duration parameter (it emits a
-  // full ~1–2 min track); when given, the server clamps the value (HTML
-  // min/max is untrusted — #75 lesson) and ffmpeg-truncates the result. Reject
-  // out-of-range values rather than silently snapping, so the caller learns the
-  // bound.
+  // full ~1–2 min track); when given, the server VALIDATES the value (HTML
+  // min/max is untrusted — #75 lesson) and ffmpeg-truncates the result. We
+  // REJECT out-of-range values with 400 rather than silently clamping/snapping,
+  // so the caller learns the bound (5–180).
   if (durationSeconds !== undefined) {
     if (typeof durationSeconds !== "number" || !Number.isFinite(durationSeconds)
       || durationSeconds < 5 || durationSeconds > 180) {

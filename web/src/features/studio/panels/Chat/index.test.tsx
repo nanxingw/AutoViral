@@ -134,7 +134,9 @@ describe("ChatPanel", () => {
     // Stop button only renders while streaming.
     act(() => useChatStore.setState({ streaming: true }));
 
-    const stopBtn = await screen.findByLabelText("Stop");
+    // aria-label is now i18n'd (chat.stopAria) — match either locale, mirroring
+    // the placeholder query above.
+    const stopBtn = await screen.findByLabelText(/停止当前回合|Stop running turn/);
     await act(async () => {
       fireEvent.click(stopBtn);
     });
@@ -154,7 +156,9 @@ describe("ChatPanel", () => {
     render(withQueryClient(<ChatPanel workId="w_noop" />));
     act(() => useChatStore.setState({ streaming: true }));
 
-    const stopBtn = await screen.findByLabelText("Stop");
+    // aria-label is now i18n'd (chat.stopAria) — match either locale, mirroring
+    // the placeholder query above.
+    const stopBtn = await screen.findByLabelText(/停止当前回合|Stop running turn/);
     // Override AFTER mount so the /chat + /checkpoints seed calls don't consume
     // the one-shot mock; only the abort call sees aborted:false.
     vi.mocked(apiFetch).mockResolvedValueOnce({ aborted: false });
@@ -178,7 +182,9 @@ describe("ChatPanel", () => {
     render(withQueryClient(<ChatPanel workId="w_throw" />));
     act(() => useChatStore.setState({ streaming: true }));
 
-    const stopBtn = await screen.findByLabelText("Stop");
+    // aria-label is now i18n'd (chat.stopAria) — match either locale, mirroring
+    // the placeholder query above.
+    const stopBtn = await screen.findByLabelText(/停止当前回合|Stop running turn/);
     // Override AFTER mount so only the abort call rejects, not the seed calls.
     vi.mocked(apiFetch).mockRejectedValueOnce(new Error("network down"));
     await act(async () => {

@@ -3,7 +3,7 @@ import type { Server as HttpServer, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { PtyPool } from "./pty-pool.js";
 import { dataDir } from "../../infra/config.js";
-import { CLI_BIN_DIR } from "../../infra/paths.js";
+import { assertCliBinDir, buildSpawnPath } from "../../infra/paths.js";
 import { join } from "node:path";
 import { enforceLoopbackOrigin } from "../ws-origin.js";
 
@@ -92,6 +92,11 @@ export function attachTerminalWebSocket(
 
   function handle(ws: WebSocket, workId: string, sessionId: string): void {
     const cwd = join(dataDir, "works", workId);
+    // Fail-fast guard (shared with ws-bridge.ts so BOTH spawn faces warn on a
+    // missing shim dir instead of one silently `command not found`-ing). This is
+    // the same guard the chat-agent face uses — keeping them in lockstep is the
+    // whole point of sinking it into paths.ts.
+    assertCliBinDir("terminal-ws");
     // Resume primitive — re-attach to the live pty for (workId, sessionId), or
     // spawn one if this is the first attach (or the previous shell exited).
     const session = pool.getOrSpawn({
@@ -105,11 +110,11 @@ export function attachTerminalWebSocket(
         // Prepend the repo-contained `autoviral` shim dir so the command
         // resolves in the Studio terminal panel (pty-pool merges process.env,
         // so this prepends to the inherited PATH). Mirrors the chat-agent
-        // wiring in ws-bridge.ts spawnCli. Anchors on the shared CLI_BIN_DIR
-        // (PACKAGE_ROOT/../cli/autoviral/bin — a SIBLING of dist/, not a child)
-        // so it resolves inside a packaged Electron app. Resolving as a child
-        // was the B5 ghost-path regression (2a79daf).
-        PATH: `${CLI_BIN_DIR}:${process.env.PATH ?? ""}`,
+        // wiring in ws-bridge.ts spawnCli via the shared buildSpawnPath helper
+        // (CLI_BIN_DIR is PACKAGE_ROOT/../cli/autoviral/bin — a SIBLING of dist/,
+        // not a child). Resolving as a child was the B5 ghost-path regression
+        // (2a79daf).
+        PATH: buildSpawnPath(),
         AUTOVIRAL_WORK_ID: workId,
         AUTOVIRAL_PORT: String(port),
         AUTOVIRAL_CWD: cwd,

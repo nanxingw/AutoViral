@@ -125,6 +125,23 @@ describe("createLyriaProvider", () => {
     expect(result.audioBytes).toEqual(Buffer.from([...ID3_CHUNK_A, ...ID3_CHUNK_B]));
   });
 
+  it("silently ignores a non-JSON data: line and [DONE] — neither pollutes the audio bytes nor throws", async () => {
+    // A malformed `data:` line (not valid JSON) and the terminal `data: [DONE]`
+    // must both be skipped: audioBytes must equal EXACTLY the one real chunk,
+    // with no extra bytes and no parse-error escaping out of handleLine.
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        `data: not-json-at-all {oops\n\n`,
+        `data: {"choices":[{"delta":{"audio":{"data":"${b64(ID3_CHUNK_A)}"}}}]}\n\n`,
+        `data: [DONE]\n\n`,
+      ]),
+    );
+    const provider = createLyriaProvider("sk-test", { fetch: fetchMock });
+    const result = await provider.generateMusic({ prompt: "x", filename: "bgm.mp3" });
+    expect(result.stub).toBe(false);
+    expect(result.audioBytes).toEqual(Buffer.from(ID3_CHUNK_A));
+  });
+
   it("falls back to delta.images[].image_url.url data:audio base64 when no delta.audio", async () => {
     const dataUri = `data:audio/mp3;base64,${b64(ID3_CHUNK_A)}`;
     const fetchMock = vi.fn().mockResolvedValue(
