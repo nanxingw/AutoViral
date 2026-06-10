@@ -27,7 +27,7 @@ export const coachRouter = new Hono();
 /** The single canonical coach session key for the inspiration page. */
 const COACH_KEY = coachKeyFor("main");
 
-const COACH_MODEL_ALIASES = ["opus", "sonnet", "haiku"] as const;
+const COACH_MODEL_ALIASES = ["fable", "opus", "sonnet", "haiku"] as const;
 
 // POST /api/coach/message — send a message to the persisted coach. On the first
 // turn it spins up the grounded coach session (works + selected-platform trends

@@ -4,8 +4,8 @@ import { ModelSwitcher } from "../ModelSwitcher";
 
 // The inline chat-header model-tier switcher. It reads the live alias from
 // /api/status on mount and POSTs /api/agent/model on a pick (optimistic badge).
-// It shows ONLY the tier (Opus / Sonnet) — never a version number — and offers
-// exactly those two tiers.
+// It shows ONLY the tier (Fable / Opus / Sonnet) — never a version number — and
+// offers exactly those three tiers.
 
 const jsonHeaders = () => new Headers({ "content-type": "application/json" });
 
@@ -63,7 +63,7 @@ describe("ModelSwitcher", () => {
     expect(trigger().textContent).not.toMatch(/4\.\d/);
   });
 
-  it("offers exactly two tiers (Opus + Sonnet, no Haiku), current one checked", async () => {
+  it("offers exactly three tiers (Fable + Opus + Sonnet, no Haiku), current one checked", async () => {
     const { fetchMock } = makeFetch("sonnet");
     vi.stubGlobal("fetch", fetchMock);
     render(<ModelSwitcher workId="w1" streaming={false} />);
@@ -71,7 +71,8 @@ describe("ModelSwitcher", () => {
     fireEvent.click(trigger());
     expect(screen.getByTestId("model-switch-menu")).toBeInTheDocument();
     const items = screen.getAllByRole("menuitemradio");
-    expect(items).toHaveLength(2);
+    expect(items).toHaveLength(3);
+    expect(screen.getByRole("menuitemradio", { name: /Fable/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitemradio", { name: /Opus/ })).toBeInTheDocument();
     expect(screen.getByRole("menuitemradio", { name: /Sonnet/ })).toHaveAttribute(
       "aria-checked",

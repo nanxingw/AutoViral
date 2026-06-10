@@ -15,7 +15,7 @@ beforeEach(() => {
 // The endpoint persists the bare alias (opus/sonnet/haiku) to config.model; the
 // CLI resolves the alias to the latest version of that family at spawn time.
 describe("POST /api/agent/model", () => {
-  it("400 rejects a non-alias value (only opus/sonnet/haiku allowed)", async () => {
+  it("400 rejects a non-alias value (only fable/opus/sonnet/haiku allowed)", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
       const res = await apiRoutes.fetch(
@@ -24,7 +24,7 @@ describe("POST /api/agent/model", () => {
       expect(res.status).toBe(400);
       const json: any = await res.json();
       expect(json.errorCode).toBe("invalid_model_alias");
-      expect(json.allowed).toEqual(["opus", "sonnet", "haiku"]);
+      expect(json.allowed).toEqual(["fable", "opus", "sonnet", "haiku"]);
     });
   });
 
@@ -57,7 +57,7 @@ describe("POST /api/agent/model", () => {
   it("round-trips opus → haiku → opus, each persisting", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
-      for (const alias of ["opus", "haiku", "opus"]) {
+      for (const alias of ["opus", "fable", "haiku", "opus"]) {
         const res = await apiRoutes.fetch(
           jsonReq("POST", "/api/agent/model", { model: alias }),
         );

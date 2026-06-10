@@ -499,7 +499,7 @@ worksRouter.post("/api/works/:id/session", async (c) => {
 // keeps whatever tier it started with. When a workId is supplied we kill that
 // work's session so the next message respawns on the new tier; the badge in the
 // UI updates immediately and the switch takes effect on the user's next turn.
-const AGENT_MODEL_ALIASES = ["opus", "sonnet", "haiku"] as const;
+const AGENT_MODEL_ALIASES = ["fable", "opus", "sonnet", "haiku"] as const;
 worksRouter.post("/api/agent/model", async (c) => {
   const body = await c.req.json().catch(() => null);
   const model = body && typeof body.model === "string" ? body.model : "";

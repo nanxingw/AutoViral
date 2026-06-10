@@ -289,6 +289,7 @@ export function SettingsPanel() {
                         users know which Claude tier maps to which model line.
                         Versions kept inline (not hover-tooltip) because native
                         <option> title is unreliable across Safari/Chrome. */}
+                    <option value="fable">{t("settings.field.modelOptionFable")}</option>
                     <option value="opus">{t("settings.field.modelOptionOpus")}</option>
                     <option value="sonnet">{t("settings.field.modelOptionSonnet")}</option>
                     <option value="haiku">{t("settings.field.modelOptionHaiku")}</option>

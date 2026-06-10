@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - **UI 新建/删除分镜** — 列表底部「＋ 新建分镜」+ 空状态主按钮（替换"去敲 CLI"的死文案）→ `POST /scene`；⋯ 菜单删除（两步确认 + 外点/Escape 取消）→ `DELETE /scene/:id`。与 agent `autoviral scene add/remove` 同一路由同一 ops，新建 scene 记录字节级一致（E2E 经磁盘 yaml 对比证实）。新卡经 refetch 自动展开。
 - **✓ 已存微反馈** — 字段 inline-commit 成功后短暂显示 `role=status`「✓ 已存」，修"离焦即存但无信号"的可发现性缺口。
 - **剧本折叠条** — 剧本编辑器外包 ▾/▸ 折叠开关（默认展开，localStorage 记忆），叙事层与逐镜执行表视觉分层。
+- **Claude Fable 5 模型档位** — 聊天 agent / Explore 教练 / Settings 三处模型切换器新增 Fable 档（Opus 之上的最强档）。沿用"只存裸别名、CLI 运行时解析最新版"的设计；默认档位保持 Opus 不变。
 
 ### Changed
 - **分镜卡两态化** — 折叠态零表单控件（镜号 / 三态状态点 / 标题 / 时长 / 景别 / 意图 / 已生成缩略图）；展开态才渲染全部编辑控件（标题/画面/旁白/时长/景别/运镜/意图/↑↓/生成 CTA），手风琴同时仅 1 卡展开。既有 inline-commit、focus 防顶掉、null-clear、生成防重入逐项保留。

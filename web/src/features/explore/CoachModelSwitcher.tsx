@@ -12,10 +12,11 @@ import { setCoachModel } from "./coachSession";
 // NO global /api/status on mount — the coach tier is its own session state, so
 // we default optimistically to opus and let the user flip it.
 
-const SELECTABLE_TIERS = ["opus", "sonnet"] as const;
+const SELECTABLE_TIERS = ["fable", "opus", "sonnet"] as const;
 type Tier = (typeof SELECTABLE_TIERS)[number];
 
 const TIER_NAME: Record<string, string> = {
+  fable: "Fable",
   opus: "Opus",
   sonnet: "Sonnet",
   haiku: "Haiku",

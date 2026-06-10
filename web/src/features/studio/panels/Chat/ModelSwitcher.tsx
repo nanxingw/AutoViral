@@ -13,12 +13,13 @@ import { useT } from "@/i18n/useT";
 // Opus"; pinning/showing "4.7" would be a lie that goes stale every release.
 // The user picks a tier and forever rides the latest version of it.
 
-const SELECTABLE_TIERS = ["opus", "sonnet"] as const;
+const SELECTABLE_TIERS = ["fable", "opus", "sonnet"] as const;
 type Tier = (typeof SELECTABLE_TIERS)[number];
 
 // Brand names — identical across locales. `haiku` is not selectable but is kept
 // here so the badge still renders sanely if config.model is ever set to it.
 const TIER_NAME: Record<string, string> = {
+  fable: "Fable",
   opus: "Opus",
   sonnet: "Sonnet",
   haiku: "Haiku",
