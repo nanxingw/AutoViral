@@ -230,6 +230,53 @@ describe("GenerationDialog generate dispatch (Phase 8.4 wiring)", () => {
     expect(typeof body.durationSec).toBe("number");
   });
 
+  it("omits aspectRatio when a stale image-tab value (4:5) is carried into the video dispatch", async () => {
+    // 4:5 is in IMAGE_ASPECTS but NOT in VIDEO_ASPECTS / the seedance enum.
+    // Switching image→video keeps form.aspectRatio, and the video <select>
+    // can't display 4:5 — so the dispatch must drop it (the server then
+    // canvas-follows) rather than forward an off-enum value to the gateway.
+    const fetchMock = dispatchFetchMock();
+    vi.stubGlobal("fetch", fetchMock);
+    wrap(<GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />);
+
+    // On the IMAGE tab (default), pick the video-illegal 4:5 aspect.
+    const imageAspect = screen.getByLabelText(
+      /aspect ratio/i,
+    ) as HTMLSelectElement;
+    fireEvent.change(imageAspect, { target: { value: "4:5" } });
+
+    // Switch to the VIDEO tab — form.aspectRatio is still 4:5 under the hood.
+    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
+    const select = (await screen.findByLabelText(
+      "Provider",
+    )) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
+
+    fireEvent.change(
+      screen.getByPlaceholderText(/panda lazily blinking/i),
+      { target: { value: "a panda eating bamboo at golden hour" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+
+    await waitFor(() => {
+      const dispatchCall = fetchMock.mock.calls.find(
+        (c) =>
+          typeof c[0] === "string" &&
+          (c[0] as string).includes("/generate-video") &&
+          (c[1] as RequestInit | undefined)?.method === "POST",
+      );
+      expect(dispatchCall).toBeDefined();
+    });
+    const dispatchCall = fetchMock.mock.calls.find(
+      (c) =>
+        typeof c[0] === "string" &&
+        (c[0] as string).includes("/generate-video") &&
+        (c[1] as RequestInit | undefined)?.method === "POST",
+    )!;
+    const body = JSON.parse((dispatchCall[1] as RequestInit).body as string);
+    expect(body).not.toHaveProperty("aspectRatio");
+  });
+
   it("invalidates the ['assets', workId] query after a successful 200 response", async () => {
     const fetchMock = dispatchFetchMock();
     vi.stubGlobal("fetch", fetchMock);
@@ -267,5 +314,33 @@ describe("GenerationDialog generate dispatch (Phase 8.4 wiring)", () => {
       });
       expect(matchingCall).toBeDefined();
     });
+  });
+});
+
+// ─── Video duration contract guard ──────────────────────────────────────────
+//
+// Seedance 2.0's authoritative create-videos schema supports
+// supported_durations = 4..15 (integer seconds; 3 does NOT exist). The provider
+// /generate-video endpoint passes duration straight through, so a `3` option
+// would round-trip to a silent server rejection. F155 once locked the select to
+// a stale {3,5,10} note — this guard makes a future edit that reintroduces an
+// out-of-range value fail loudly.
+
+describe("GenerationDialog video duration options (Seedance contract)", () => {
+  it("offers only integer durations in 4..15 — never 3", () => {
+    wrap(<GenerationDialog workId="w1" open={true} onOpenChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /^video$/i }));
+    const durationSelect = screen.getByLabelText(
+      /duration \(s\)/i,
+    ) as HTMLSelectElement;
+    const values = Array.from(durationSelect.options).map((o) => o.value);
+    expect(values.length).toBeGreaterThan(0);
+    expect(values).not.toContain("3");
+    for (const v of values) {
+      const n = Number(v);
+      expect(Number.isInteger(n)).toBe(true);
+      expect(n).toBeGreaterThanOrEqual(4);
+      expect(n).toBeLessThanOrEqual(15);
+    }
   });
 });

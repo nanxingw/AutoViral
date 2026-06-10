@@ -4,6 +4,52 @@ import { mkdir, writeFile, readFile } from "node:fs/promises";
 import yaml from "js-yaml";
 import { withTempDataDir, jsonReq } from "./_helpers.js";
 import type { Composition } from "../../shared/composition.js";
+import type { VideoGenerateOptions } from "../../providers/video/types.js";
+
+const COMP = (workId: string, aspect: Composition["aspect"]): Composition => ({
+  id: `c_${workId}`,
+  workId,
+  fps: 30,
+  width: 1080,
+  height: 1920,
+  duration: 0,
+  aspect,
+  tracks: [],
+  updatedAt: "2026-06-10T00:00:00Z",
+  assets: [],
+  provenance: [],
+  exportPresets: [],
+});
+
+async function writeComposition(
+  dataDir: string,
+  workId: string,
+  aspect: Composition["aspect"],
+): Promise<void> {
+  const wDir = join(dataDir, "works", workId);
+  await mkdir(wDir, { recursive: true });
+  await writeFile(join(wDir, "composition.yaml"), yaml.dump(COMP(workId, aspect)), "utf-8");
+}
+
+/** Register a capturing fake as the default video provider (reusing the
+ *  "seedance" key so it OVERWRITES the real one) to inspect the opts the route
+ *  forwards. Must run AFTER vi.resetModules(). */
+async function setupFakeVideoProvider(): Promise<VideoGenerateOptions[]> {
+  const { registerProvider } = await import("../../providers/registry.js");
+  const calls: VideoGenerateOptions[] = [];
+  registerProvider({
+    name: "seedance",
+    capability: "video",
+    displayName: "Fake Seedance (capture)",
+    envKey: "OPENROUTER_API_KEY",
+    default: true,
+    generateVideo: async (opts: VideoGenerateOptions) => {
+      calls.push(opts);
+      return { assetUri: `${opts.outputAbsoluteDir}/clip.mp4`, stub: true, costUsd: 0 };
+    },
+  });
+  return calls;
+}
 
 const EMPTY_COMP = (workId: string): Composition => ({
   id: `c_${workId}`,
@@ -221,6 +267,93 @@ describe("Phase 8.4 provider endpoints (ADR-007 seedance-only)", () => {
       expect(res.status).toBe(200);
       const json: any = await res.json();
       expect(json).toHaveProperty("costUsd");
+    });
+  });
+
+  // Canvas-follow + enum validation — the human-UI dispatch path must produce
+  // the SAME orientation as the agent /api/generate/video path.
+  it("no explicit aspect → canvas-follow: comp 16:9 → provider gets '16:9'", async () => {
+    await withTempDataDir(async (dataDir) => {
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      const calls = await setupFakeVideoProvider();
+
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      await writeComposition(dataDir, w.id, "16:9");
+
+      await apiRoutes.fetch(
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
+          workId: w.id,
+          prompt: "p",
+          durationSec: 4,
+        }),
+      );
+      expect(calls[0].aspectRatio).toBe("16:9");
+    });
+  });
+
+  it("no explicit aspect → canvas-follow: comp 4:5 → closest supported '3:4'", async () => {
+    await withTempDataDir(async (dataDir) => {
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      const calls = await setupFakeVideoProvider();
+
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      await writeComposition(dataDir, w.id, "4:5");
+
+      await apiRoutes.fetch(
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
+          workId: w.id,
+          prompt: "p",
+          durationSec: 4,
+        }),
+      );
+      expect(calls[0].aspectRatio).toBe("3:4");
+    });
+  });
+
+  it("explicit aspect always wins over the canvas (provider gets '21:9')", async () => {
+    await withTempDataDir(async (dataDir) => {
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      const calls = await setupFakeVideoProvider();
+
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      await writeComposition(dataDir, w.id, "9:16");
+
+      await apiRoutes.fetch(
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
+          workId: w.id,
+          prompt: "p",
+          durationSec: 4,
+          aspectRatio: "21:9",
+        }),
+      );
+      expect(calls[0].aspectRatio).toBe("21:9");
+    });
+  });
+
+  it("off-enum aspect (stale 4:5 from image tab) → 400, never reaches provider", async () => {
+    await withTempDataDir(async (dataDir) => {
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      const calls = await setupFakeVideoProvider();
+
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      await writeComposition(dataDir, w.id, "9:16");
+
+      const res = await apiRoutes.fetch(
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
+          workId: w.id,
+          prompt: "p",
+          durationSec: 4,
+          aspectRatio: "4:5",
+        }),
+      );
+      expect(res.status).toBe(400);
+      const json: any = await res.json();
+      expect(String(json.error)).toContain("4:5");
+      expect(calls).toHaveLength(0);
     });
   });
 });

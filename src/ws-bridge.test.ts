@@ -131,6 +131,22 @@ describe("buildSystemPrompt", () => {
     expect(variants[1]).toMatch(/autoviral docs carousel\/02-schema/);
   });
 
+  // v0.1.7 — the video-gen bullet must teach the REAL OpenRouter params after
+  // the input-nesting fix: aspectRatio + integer 4–15 durations. It must NOT
+  // repeat the two debunked claims (the old {3,5,10} duration set and the
+  // "i2v output fixed 720×1280" hard constraint — both were artifacts of the
+  // dropped params, not real limits).
+  it("video prompt teaches aspectRatio + 4–15 durations, drops the debunked 720×1280 / {3,5,10} claims", () => {
+    const p = buildSystemPrompt(
+      baseWork({ type: "short-video" }) as any,
+      { port: 3271, workspacePath: "/tmp/autoviral-test/works/w_vid" },
+    );
+    expect(p).toContain("aspectRatio");
+    expect(p).toMatch(/4[–-]15|4-15/);
+    expect(p).not.toContain("只接受 3 / 5 / 10");
+    expect(p).not.toContain("固定 720×1280");
+  });
+
   it("works for image-text type without referencing video-only modules", () => {
     const p = buildSystemPrompt(baseWork({ type: "image-text" }) as any, { port: 3271, workspacePath: "/tmp/autoviral-test/works/w_test" });
     expect(p).toMatch(/图文|image[- ]text/i);

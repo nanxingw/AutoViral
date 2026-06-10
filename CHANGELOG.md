@@ -7,6 +7,9 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **视频生成格式终于真的可控（对话 agent + UI 双路径）** — 五层根因一次清算。①真凶：seedance adapter 把 `duration`/`aspect_ratio`/`frame_images` 包进 `input:{}` 发给 OpenRouter，而官方 schema 是**扁平**的——参数从第一天起被网关静默丢弃，请求退化成裸 model+prompt（这正是"竖屏请求返回 16:9""i2v 输出固定 720×1280"的实测假象；所谓 i2v 此前从未真正生效，连锚图都没送达过）。现已扁平化 + `frame_images` 改为官方形状 `{type:"image_url",image_url:{url},frame_type:"first_frame"|"last_frame"}`。②`/api/generate/video` 此前吞参（durationSec 写死 5、resolution 折成二值）——现接受 `aspectRatio`（7 枚举校验）/ `resolution`（480p/720p/1080p）/ `durationSec`（整数 4–15，旧教学的 "3" 上游根本不支持），旧 `resolution:"16:9"` 用法兼容；**画幅默认画布跟随**（comp.aspect 映射最近支持比例，4:5→3:4，与图像端同一规则），agent 路径与 UI 路径（providers 端点）行为一致。③该端点现**原子登记 AssetEntry + provenance 并返回 assetId**——系统提示词里"会登记 AssetEntry"的承诺此前是假的，现在为真，scene handoff 不再悬挂。④i2v 锚图本地路径现自动转 data URI（此前把本地绝对路径当 URL 发出，i2v 必然无效）；lastFrame 补齐与 firstFrame 同级的路径沙箱。⑤轮询上限 5 分钟 → 15 分钟（实测 4s 任务也会超 5 分钟，旧上限白白丢弃已计费任务）。**付费探针实证**（ffprobe 二确，共 $2.57）：t2v 16:9@720p → 1280×720 横屏；9:16@1080p → 1080×1920（1080p 真实可得）；i2v 9:16 竖图锚 + 显式 16:9 → 1280×720（**显式画幅赢，不被输入图锁定**）；全部 24fps；写实人像锚图被 ByteDance 审核 400 拒单（不计费）。Web 生成对话框时长选项 3s（非法值）→ 4/5/8/10/15；图像 tab 残留 4:5 不再泄漏进视频请求（双层防护）。知识面三件套（ws-bridge 提示词 / CLI 手册 / i2v recipe）同步重写为真参数与实测结论。
+
 ### Changed
 - **图像 provider 通用化改名 `nanobanana` → `openrouter-image`** — 文件 / 类（`OpenRouterImageProvider`）/ registry id 全部换成如实的通用名（真身一直是 OpenRouter `openai/gpt-5.4-image-2`，旧名是换模型前的历史产品名，极具误导性）。旧 id `nanobanana` 永久保留为入站别名（在 `getProvider` 查找咽喉归一化），旧文档命令 `--provider nanobanana`、旧 work 的 chat 历史、外部脚本零破坏；既有 composition provenance 里的历史 `providerId: nanobanana` 不回写（纯审计字段，无任何代码读回）。文档面（README / AGENT.md / CONTEXT.md 词表 / ADR-007 注记 / CLI 手册 / recipe）同步诚实化。
 

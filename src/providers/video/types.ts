@@ -1,7 +1,26 @@
 export interface VideoGenerateOptions {
   prompt: string;
   durationSec: number;
-  aspectRatio: string;
+  /**
+   * Output aspect ratio. Optional: when canvas-follow can't resolve a ratio
+   * (no composition / unmappable) we omit it so the OpenRouter gateway applies
+   * its own default rather than getting a bad value. One of the OpenRouter
+   * videos schema's supported_aspect_ratios (1:1 / 3:4 / 9:16 / 4:3 / 16:9 /
+   * 21:9 / 9:21).
+   */
+  aspectRatio?: string;
+  /**
+   * Output resolution — a top-level field of the OpenRouter videos schema
+   * (supported_resolutions: 480p / 720p / 1080p). When omitted the gateway
+   * picks its default. fps is NOT a parameter (the model is fixed at 24).
+   */
+  resolution?: "480p" | "720p" | "1080p";
+  /**
+   * Whether to synthesize an audio track — top-level `generate_audio` boolean
+   * of the OpenRouter videos schema (capability=true, gateway default true).
+   * Omitted ⇒ gateway default.
+   */
+  generateAudio?: boolean;
   /**
    * Absolute filesystem dir for the adapter to write the generated mp4 into.
    * Adapter creates the dir if missing. Server endpoint computes this per-call

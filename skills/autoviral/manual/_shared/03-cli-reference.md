@@ -295,6 +295,33 @@ destructive flows with `autoviral ask`.
 autoviral scene remove scn_a1b2c3
 ```
 
+## Asset generation (HTTP — not yet a CLI verb)
+
+These generation endpoints aren't wrapped by a CLI subcommand yet; call them over HTTP at `http://localhost:$AUTOVIRAL_PORT`.
+
+### `POST /api/generate/video`
+
+Generate a clip with Seedance 2.0 (via OpenRouter; enabled once the user has set `OPENROUTER_API_KEY` in Settings). Supports text-to-video and image-to-video.
+
+Body: `{ workId, prompt, filename, aspectRatio?, resolution?, durationSec?, firstFrame?, lastFrame?, provider? }`
+
+| Field | Meaning |
+|---|---|
+| `aspectRatio` | One of `1:1` / `3:4` / `9:16` / `4:3` / `16:9` / `21:9` / `9:21`. **Omit to follow the work's canvas** — the composition `aspect` maps to the nearest supported ratio (`4:5` → `3:4`). Explicit always wins. |
+| `resolution` | `480p` / `720p` / `1080p`. Omit ⇒ gateway default. |
+| `durationSec` | Integer `4`–`15` (default `5`). fps is fixed at `24`, not a parameter. |
+| `firstFrame` / `lastFrame` | i2v anchors. An `http(s)://` or `data:` URI passes through; a **workspace-relative path** (e.g. `assets/images/anchor.png`) is sandbox-resolved and inlined as a base64 data URI for you. |
+
+Cost (per token, H×W×dur×24): roughly **720p ≈ $0.15/s, 1080p ≈ $0.34/s**.
+
+Response includes `assetId` — the clip is **registered as an AssetEntry + a `generate` provenance edge** on `composition.yaml`, so you can `autoviral scene link <sceneId> --asset <assetId>` directly with no dangling reference. (Contrast the image endpoint below.)
+
+### `POST /api/generate/image`
+
+Body: `{ workId, prompt, filename, aspectRatio?, imageSize?, width?, height?, referenceImage? }`. Like video, the **canvas aspect is followed by default** (omit `aspectRatio`); `width`/`height` only derive the nearest ratio (the model picks exact pixels).
+
+Unlike the video endpoint, the **raw image endpoint does NOT register an AssetEntry** in `composition.assets`. For storyboard image shots use `autoviral scene generate <id>` (it registers + links atomically) — don't pair a raw `POST /api/generate/image` with a manual `scene link`, the link would dangle.
+
 ## UI control commands
 
 Stateless broadcasts to the Studio React app. None of them touch disk.

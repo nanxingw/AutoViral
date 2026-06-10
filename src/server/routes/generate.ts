@@ -14,6 +14,13 @@ import { dataDir, repoRoot } from "../../infra/config.js";
 import { getWork } from "../../domain/work-store.js";
 import { readCompositionFor } from "../bridge/composition-ops.js";
 import { getProvider, getDefaultProvider, listProviders } from "../../providers/registry.js";
+import {
+  closestSupportedRatio,
+  SUPPORTED_VIDEO_ASPECT_RATIOS,
+  SUPPORTED_VIDEO_RESOLUTIONS,
+  SUPPORTED_VIDEO_DURATIONS,
+} from "../../providers/video/seedance.js";
+import type { VideoGenerateResult } from "../../providers/video/types.js";
 import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
 import { uiEventBus } from "../bridge/ui-events.js";
 import { runPythonScript } from "../python-bridge.js";
@@ -33,6 +40,70 @@ export const generateRouter = new Hono();
 // ---------------------------------------------------------------------------
 // Generate API (Provider-based image/video generation)
 // ---------------------------------------------------------------------------
+
+/**
+ * Register a freshly-generated video clip as an AssetEntry + a "generate"
+ * ProvenanceEdge on the work's composition.yaml. Shared by both video-gen
+ * endpoints (POST /api/generate/video and POST /api/providers/:id/generate-video)
+ * so the on-disk shape is identical. Best-effort: returns null (no throw) when
+ * the work / composition.yaml is missing or unreadable, so registration failure
+ * never blocks the adapter response. actor stays "user" to keep the existing
+ * provenance vocabulary unchanged.
+ */
+async function registerGeneratedVideoAsset(args: {
+  workId: string;
+  relativeAssetUri: string;
+  providerId: string;
+  prompt: string;
+  result: VideoGenerateResult;
+  /** Extra provenance params merged into the edge (e.g. aspectRatio/resolution/durationSec). */
+  extraParams?: Record<string, unknown>;
+  /** Duration in seconds for the asset metadata. */
+  durationSec?: number;
+}): Promise<string | null> {
+  const { workId, relativeAssetUri, providerId, prompt, result } = args;
+  const work = await getWork(workId);
+  if (!work) return null;
+  const wDirAbs = join(dataDir, "works", workId);
+  const compYamlPath = join(wDirAbs, "composition.yaml");
+  try {
+    const compRaw = await readFile(compYamlPath, "utf-8");
+    const compDoc = yaml.load(compRaw) as Composition;
+    const { randomUUID } = await import("node:crypto");
+    const assetId = `gen_${randomUUID().slice(0, 8)}`;
+    const newAsset: AssetEntry = {
+      id: assetId,
+      uri: relativeAssetUri,
+      kind: "video",
+      metadata: { duration: args.durationSec ?? 4 },
+      status: "ready",
+    };
+    const newEdge: ProvenanceEdge = {
+      fromAssetId: null,
+      toAssetId: assetId,
+      operation: {
+        type: "generate",
+        actor: "user",
+        timestamp: new Date().toISOString(),
+        params: {
+          providerId,
+          prompt,
+          costUsd: result.costUsd,
+          stub: result.stub,
+          providerJobId: result.providerJobId,
+          ...(args.extraParams ?? {}),
+        },
+      },
+    };
+    compDoc.assets = [...(compDoc.assets ?? []), newAsset];
+    compDoc.provenance = [...(compDoc.provenance ?? []), newEdge];
+    await writeFile(compYamlPath, yaml.dump(compDoc), "utf-8");
+    return assetId;
+  } catch {
+    // composition.yaml missing or unreadable — skip registration silently.
+    return null;
+  }
+}
 
 // POST /api/generate/image
 generateRouter.post("/api/generate/image", async (c) => {
@@ -101,7 +172,11 @@ generateRouter.post("/api/generate/image", async (c) => {
 // POST /api/generate/video
 generateRouter.post("/api/generate/video", async (c) => {
   const body = await c.req.json();
-  const { workId, prompt, firstFrame, lastFrame, resolution, filename, provider: providerName } = body;
+  const {
+    workId, prompt, firstFrame, lastFrame, filename, provider: providerName,
+    durationSec, resolution,
+  } = body;
+  let { aspectRatio } = body;
   if (!workId || !prompt || !filename) {
     return c.json({ success: false, error: "Missing required fields", code: "INVALID_PARAMS" }, 400);
   }
@@ -112,43 +187,110 @@ generateRouter.post("/api/generate/video", async (c) => {
   if (!safeFilename) {
     return c.json({ success: false, error: "Invalid filename", code: "INVALID_PARAMS" }, 400);
   }
-  // firstFrame/lastFrame are also user-controlled paths — sanitize via assets/-rooted resolve
-  const safeFirstFrame = firstFrame
-    ? (() => {
-        try {
-          const cleaned = String(firstFrame).replace(/^\/+/, "");
-          const root = cleaned.startsWith("output/") ? "output" : "assets";
-          const rest = cleaned.startsWith("output/") ? cleaned.slice(7)
-                     : cleaned.startsWith("assets/") ? cleaned.slice(7) : cleaned;
-          return resolveAssetPath(workId, root, rest);
-        } catch { return undefined; }
-      })()
-    : undefined;
-  if (firstFrame && !safeFirstFrame) {
-    return c.json({ success: false, error: "Invalid firstFrame path", code: "INVALID_PATH" }, 400);
+
+  // Legacy compat: older callers passed an aspect like "16:9"/"9:16" via the
+  // `resolution` field (which now means 480p/720p/1080p). When no explicit
+  // aspectRatio is set and `resolution` looks like a ratio, treat it as the
+  // aspectRatio and drop it from the resolution slot.
+  let effectiveResolution = resolution;
+  if (!aspectRatio && typeof resolution === "string" && /^\d+:\d+$/.test(resolution)) {
+    aspectRatio = resolution;
+    effectiveResolution = undefined;
   }
+
+  // Validate against the authoritative OpenRouter videos contract.
+  if (durationSec !== undefined) {
+    if (!Number.isInteger(durationSec) || !(SUPPORTED_VIDEO_DURATIONS as readonly number[]).includes(durationSec)) {
+      return c.json({
+        success: false,
+        error: `durationSec must be an integer in 4-15 (got ${durationSec})`,
+        code: "INVALID_PARAMS",
+      }, 400);
+    }
+  }
+  if (aspectRatio !== undefined && !(SUPPORTED_VIDEO_ASPECT_RATIOS as readonly string[]).includes(aspectRatio)) {
+    return c.json({
+      success: false,
+      error: `aspectRatio must be one of ${SUPPORTED_VIDEO_ASPECT_RATIOS.join(", ")} (got ${aspectRatio})`,
+      code: "INVALID_PARAMS",
+    }, 400);
+  }
+  if (effectiveResolution !== undefined && !(SUPPORTED_VIDEO_RESOLUTIONS as readonly string[]).includes(effectiveResolution)) {
+    return c.json({
+      success: false,
+      error: `resolution must be one of ${SUPPORTED_VIDEO_RESOLUTIONS.join(", ")} (got ${effectiveResolution})`,
+      code: "INVALID_PARAMS",
+    }, 400);
+  }
+
+  // Canvas-follow default (mirrors /api/generate/image): when the caller gives
+  // no explicit aspectRatio, follow the work's OWN composition aspect, mapping
+  // it onto the nearest supported video ratio (4:5 → 3:4). No composition →
+  // don't send anything (gateway default). Explicit always wins.
+  let effectiveAspectRatio = aspectRatio;
+  if (!effectiveAspectRatio) {
+    try {
+      const comp = await readCompositionFor({ workId });
+      effectiveAspectRatio = closestSupportedRatio(comp.aspect);
+    } catch {
+      /* no composition — gateway default applies */
+    }
+  }
+
+  // firstFrame/lastFrame: http(s)/data URIs pass through untouched; local paths
+  // are sandbox-resolved then read + base64-encoded into a data URI — a bare
+  // local path means nothing to OpenRouter, so this is the prerequisite for
+  // i2v to actually work. lastFrame previously bypassed sanitization entirely;
+  // it's now treated identically to firstFrame.
+  let firstFrameImage: string | undefined;
+  let lastFrameImage: string | undefined;
+  try {
+    firstFrameImage = await resolveFrameImage(workId, firstFrame);
+    lastFrameImage = await resolveFrameImage(workId, lastFrame);
+  } catch (err: any) {
+    return c.json({ success: false, error: err.message, code: "INVALID_PATH" }, 400);
+  }
+
   const provider = providerName ? getProvider("video", providerName) : getDefaultProvider("video");
   if (!provider) {
     return c.json({ success: false, error: "No video provider available", code: "INVALID_PARAMS" }, 400);
   }
   try {
-    // Map this route's legacy shape onto the VideoProvider contract (seedance,
-    // OpenRouter). The mp4 lands in the work's assets/<provider>/ tree so the
-    // existing /api/works/:id/assets/* serving picks it up; we convert the
-    // absolute write path back to a work-relative uri for the response.
+    // The mp4 lands in the work's assets/<provider>/ tree so the existing
+    // /api/works/:id/assets/* serving picks it up; we convert the absolute
+    // write path back to a work-relative uri for the response.
     const wDirAbs = join(dataDir, "works", workId);
     const outDirAbs = join(wDirAbs, "assets", provider.name);
+    const effectiveDuration = durationSec ?? 5;
     const result = await provider.generateVideo({
       prompt,
-      durationSec: 5,
-      aspectRatio: resolution === "16:9" ? "16:9" : "9:16",
+      durationSec: effectiveDuration,
       outputAbsoluteDir: outDirAbs,
-      ...(safeFirstFrame ?? firstFrame ? { firstFrameImage: safeFirstFrame ?? firstFrame } : {}),
-      ...(lastFrame ? { lastFrameImage: lastFrame } : {}),
+      ...(effectiveAspectRatio ? { aspectRatio: effectiveAspectRatio } : {}),
+      ...(effectiveResolution ? { resolution: effectiveResolution } : {}),
+      ...(firstFrameImage ? { firstFrameImage } : {}),
+      ...(lastFrameImage ? { lastFrameImage } : {}),
     });
     const relativeUri = result.assetUri.startsWith(wDirAbs + "/")
       ? result.assetUri.slice(wDirAbs.length + 1)
       : result.assetUri;
+
+    // Register the clip as an AssetEntry + provenance edge so the agent can
+    // `autoviral scene link` it directly (handoff promise is real now).
+    const assetId = await registerGeneratedVideoAsset({
+      workId,
+      relativeAssetUri: relativeUri,
+      providerId: provider.name,
+      prompt,
+      result,
+      durationSec: effectiveDuration,
+      extraParams: {
+        ...(effectiveAspectRatio ? { aspectRatio: effectiveAspectRatio } : {}),
+        ...(effectiveResolution ? { resolution: effectiveResolution } : {}),
+        durationSec: effectiveDuration,
+      },
+    });
+
     // I17 — same asset-added broadcast as the image path so the library shows
     // the new clip without a reload. Mirrors audio.ts:279.
     uiEventBus.publish(workId, {
@@ -159,6 +301,7 @@ generateRouter.post("/api/generate/video", async (c) => {
     });
     return c.json({
       success: true,
+      assetId,
       assetPath: result.assetUri,
       previewUrl: `/api/works/${workId}/${relativeUri}`,
       stub: result.stub,
@@ -168,6 +311,41 @@ generateRouter.post("/api/generate/video", async (c) => {
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
   }
 });
+
+const FRAME_MIME: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".webp": "image/webp",
+};
+
+/**
+ * Resolve a frame-image input to something OpenRouter can fetch: http(s)/data
+ * URIs pass through; a workspace-relative local path is sandbox-resolved then
+ * read + base64-encoded into a data URI. Returns undefined for an empty input;
+ * throws when a local path escapes the sandbox or can't be read.
+ */
+async function resolveFrameImage(workId: string, frame: unknown): Promise<string | undefined> {
+  if (!frame) return undefined;
+  const s = String(frame);
+  if (s.startsWith("http://") || s.startsWith("https://") || s.startsWith("data:")) {
+    return s;
+  }
+  let abs: string;
+  try {
+    const cleaned = s.replace(/^\/+/, "");
+    const root = cleaned.startsWith("output/") ? "output" : "assets";
+    const rest = cleaned.startsWith("output/") ? cleaned.slice(7)
+               : cleaned.startsWith("assets/") ? cleaned.slice(7) : cleaned;
+    abs = resolveAssetPath(workId, root, rest);
+  } catch {
+    throw new Error(`Invalid frame image path: ${s}`);
+  }
+  const ext = extname(abs).toLowerCase();
+  const mime = FRAME_MIME[ext] ?? "image/png";
+  const buf = await readFile(abs);
+  return `data:${mime};base64,${buf.toString("base64")}`;
+}
 
 // SAFE_ID imported from ../safe-paths.js — single source of truth
 
@@ -516,8 +694,10 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
   const body = await c.req.json<{
     workId: string;
     prompt: string;
-    durationSec: number;
-    aspectRatio: string;
+    /** Optional — defaults to 4. */
+    durationSec?: number;
+    /** Optional — canvas-follow (comp.aspect → nearest supported ratio) when omitted. */
+    aspectRatio?: string;
     /** R44 — image-to-video first-frame anchor. URL or data URI. Adapters
      *  that don't support i2v ignore this field and fall back to t2v. */
     firstFrameImage?: string;
@@ -535,10 +715,39 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
   // AssetEntry.uri so existing asset-serving keeps working.
   const wDirAbs = join(dataDir, "works", body.workId);
   const seedanceDirAbs = join(wDirAbs, "assets", providerId);
+  const durationSec = body.durationSec ?? 4;
+
+  // Explicit aspectRatio must be a supported ratio — the seedance enum has no
+  // 4:5/auto, and a stale image-tab value (e.g. 4:5) carried into a video
+  // dispatch would otherwise reach the gateway flat and silently fail.
+  if (
+    body.aspectRatio !== undefined &&
+    !(SUPPORTED_VIDEO_ASPECT_RATIOS as readonly string[]).includes(body.aspectRatio)
+  ) {
+    return c.json({
+      error: `aspectRatio must be one of ${SUPPORTED_VIDEO_ASPECT_RATIOS.join(", ")} (got ${body.aspectRatio})`,
+    }, 400);
+  }
+
+  // Canvas-follow default (mirrors /api/generate/video): with no explicit
+  // aspectRatio, follow the work's OWN composition aspect mapped onto the
+  // nearest supported video ratio (4:5 → 3:4). No composition → don't send
+  // anything (gateway default). This keeps the human-UI path and the agent
+  // /api/generate/video path producing identical orientation.
+  let aspectRatio = body.aspectRatio;
+  if (!aspectRatio) {
+    try {
+      const comp = await readCompositionFor({ workId: body.workId });
+      aspectRatio = closestSupportedRatio(comp.aspect);
+    } catch {
+      /* no composition — gateway default applies */
+    }
+  }
+
   const result = await provider.generateVideo({
     prompt: body.prompt,
-    durationSec: body.durationSec ?? 4,
-    aspectRatio: body.aspectRatio ?? "9:16",
+    durationSec,
+    ...(aspectRatio ? { aspectRatio } : {}),
     outputAbsoluteDir: seedanceDirAbs,
     // R44 — i2v anchors. When provided, Seedance switches from text-only
     // to first-frame-driven generation, which is the only way to do
@@ -552,46 +761,17 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
     : result.assetUri;
 
   // Best-effort composition update — if there's no composition.yaml yet (legacy
-  // works) we still return the adapter result so the UI can show it.
-  let assetId: string | null = null;
-  const work = await getWork(body.workId);
-  if (work) {
-    const compYamlPath = join(wDirAbs, "composition.yaml");
-    try {
-      const compRaw = await readFile(compYamlPath, "utf-8");
-      const compDoc = yaml.load(compRaw) as Composition;
-      const { randomUUID } = await import("node:crypto");
-      assetId = `gen_${randomUUID().slice(0, 8)}`;
-      const newAsset: AssetEntry = {
-        id: assetId,
-        uri: relativeAssetUri,
-        kind: "video",
-        metadata: { duration: body.durationSec ?? 4 },
-        status: "ready",
-      };
-      const newEdge: ProvenanceEdge = {
-        fromAssetId: null,
-        toAssetId: assetId,
-        operation: {
-          type: "generate",
-          actor: "user",
-          timestamp: new Date().toISOString(),
-          params: {
-            providerId,
-            prompt: body.prompt,
-            costUsd: result.costUsd,
-            stub: result.stub,
-            providerJobId: result.providerJobId,
-          },
-        },
-      };
-      compDoc.assets = [...(compDoc.assets ?? []), newAsset];
-      compDoc.provenance = [...(compDoc.provenance ?? []), newEdge];
-      await writeFile(compYamlPath, yaml.dump(compDoc), "utf-8");
-    } catch {
-      // composition.yaml missing or unreadable — skip registration silently.
-    }
-  }
+  // works) we still return the adapter result so the UI can show it. Shared with
+  // /api/generate/video so the AssetEntry/provenance shape is identical.
+  const assetId = await registerGeneratedVideoAsset({
+    workId: body.workId,
+    relativeAssetUri,
+    providerId,
+    prompt: body.prompt,
+    result,
+    durationSec,
+    extraParams: { ...(aspectRatio ? { aspectRatio } : {}), durationSec },
+  });
 
   // I17 — broadcast asset-added so the library refreshes live. This is the
   // path the chat agent / generation dialog actually drive; same shape as the

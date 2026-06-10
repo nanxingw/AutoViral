@@ -165,7 +165,7 @@ Skill('autoviral')
 ## 素材生成（CLI 暂未封装，直连 HTTP \`localhost:${port}\`）
 
 - **图像** — \`POST /api/generate/image\` { workId, prompt, filename, aspectRatio?, imageSize?, width?, height?, referenceImage? }。OpenRouter，用户在 Settings 配了 OPENROUTER_API_KEY 即启用。**画幅默认跟作品画布走**（composition 的 \`aspect\`，用户定的）；要不同画幅才显式传 \`aspectRatio\`（"9:16" / "16:9" / "1:1" / "4:5" 等，显式永远优先）。width/height 只用来推导最接近的 aspectRatio（模型自定具体像素，不会精确到你给的尺寸）。\`scene generate\` 同样自动继承画布画幅。
-- **视频** — \`POST /api/generate/video\` { workId, prompt, filename, firstFrame?, lastFrame?, resolution? }。Seedance 2.0，支持 text-to-video 与 image-to-video（first_frame 驱动），~$0.76 / 3 秒。**已实测的硬约束：i2v 不管请求什么分辨率，输出固定 720×1280@24 竖屏**（横屏构图需自行裁切/上采样，或先验证 t2v 是否支持 16:9——详见 \`autoviral docs\` 的 *generate-i2v-batch* recipe）；durationSec 只接受 3 / 5 / 10。
+- **视频** — \`POST /api/generate/video\` { workId, prompt, filename, aspectRatio?, resolution?, durationSec?, firstFrame?, lastFrame? }。Seedance 2.0，支持 text-to-video 与 image-to-video（firstFrame 驱动；本地路径会被自动 base64 内联，也可传 https/data URI）。**画幅默认跟作品画布走**（同图像规则：composition 的 \`aspect\` 映射到最近的支持比例，4:5→3:4；要不同画幅才显式传 \`aspectRatio\`，显式永远优先）。\`aspectRatio\` 7 枚举：1:1 / 3:4 / 9:16 / 4:3 / 16:9 / 21:9 / 9:21。\`resolution\`：480p / 720p / 1080p。\`durationSec\`：整数 4–15（默认 5）。fps 固定 24，不可调。价格按 token：720p≈$0.15/秒、1080p≈$0.34/秒。响应含 \`assetId\`（已原子登记 AssetEntry，可直接 \`autoviral scene link\`）。**已实测**（2026-06-10 真实出片 + ffprobe 二确）：显式画幅永远赢——9:16 竖图做 i2v 锚 + 显式 16:9 照样出 1280×720 横屏；1080p 真实可得（9:16 → 1080×1920）。注意：**写实人像不能做 i2v 锚图**（ByteDance 审核 400 拒单不计费，码 InputImageSensitiveContentDetected），风格化 / 无人物图不受限。
 - **配音 TTS** — \`POST /api/audio/tts\` { text, voice, output_path, language?, style? }。主力走 Gemini-via-OpenRouter（用户在 Settings 配了 OPENROUTER_API_KEY 即启用），无 key 或失败时自动 fallback 到内置免费的 edge-tts（中文 zh-CN-XiaoxiaoNeural 等、英文 en-US-AriaNeural 等）。**短视频默认应该有人声**——绝大多数 viral 短视频靠 narration 推进节奏；做完 brief 主动 propose 加旁白。
 - **字幕 ASR** — \`POST /api/audio/captions\` { workId, assetPath, language }。stable-whisper 转写出 word-level 时间戳。**抖音 70% 用户静音浏览，任何带音频的视频都该跑 ASR 加字幕**（字幕走 composition 的 \`captionStrategy: overlay\` 渲染，见 \`autoviral docs video/02-composition-schema\`——不要手写 ffmpeg drawtext）。报 PYTHON_DEP_MISSING 就让用户 \`pip install stable-ts\`（注意不是 stable-whisper）。
 - **混音** \`POST /api/audio/mix\`（多轨混音 / 音量平衡）。
@@ -189,7 +189,7 @@ ${isVideo ? `
 
 **计划与执行解耦**：scene 本身不直接渲染——计划定好后逐幕产出是下游 **handoff**，不在分镜里内嵌生成驾驶舱：
 - **图像镜头** → \`autoviral scene generate <id>\`（可选 \`--provider\`）：bridge 用 scene 自身字段（prompt/title + 景别/运镜/旁白）组 prompt 生成一张图，并**原子**登记 AssetEntry + 回链到 scene（\`generatedAssetIds\` / \`selectedAssetId\` / \`status: generated\`），不会产生悬挂引用；对同一镜再跑一次 = reshoot 追加新 take。生成后再改该镜的描述字段，status 会自动翻 \`stale\` 提示画面已过时。**不要**用裸 \`POST /api/generate/image\` + 手动 \`scene link\` 替代它——image 裸端点不写 composition.assets，手动回链会留下悬挂引用。
-- **视频 / TTS 镜头**（\`scene generate\` 暂只出图）→ 走上面的生成端点（\`/api/generate/video\` 等会登记 AssetEntry），拿到返回的 asset id 后用 \`autoviral scene link <id> --asset <assetId>\` 记录 handoff 状态。
+- **视频 / TTS 镜头**（\`scene generate\` 暂只出图）→ 走上面的生成端点（\`POST /api/generate/video\` 现在会**原子登记 AssetEntry**），拿响应里的 \`assetId\` 直接 \`autoviral scene link <id> --asset <assetId>\` 记录 handoff 状态——回链不再悬挂。
 - 最后用 \`autoviral clip add\` 把产出素材拼上时间轴（真正渲染的是 clips）。
 
 先排剧本、再排分镜、最后逐幕生成只是一种常见路径，**无强制顺序**：用户给了完整 brief 你可以跳过 script 直接排 scene，也可以完全不用 scene 直接拼 clip。

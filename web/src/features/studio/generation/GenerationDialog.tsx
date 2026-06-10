@@ -98,11 +98,12 @@ const TTS_VOICES: { value: string; label: string }[] = [
 
 const IMAGE_ASPECTS = ["1:1", "9:16", "16:9", "4:5"] as const;
 const VIDEO_ASPECTS = ["9:16", "16:9", "1:1"] as const;
-// F155: Seedance 2.0 i2v API enforces durationSec ∈ {3, 5, 10}. The prior
-// values {4, 6, 8, 10} were a UI-only fabrication that would round-trip
-// to silent API rejection (see memory:reference_seedance_i2v_durations).
-// Locking the select to the real enum so the contract holds at submit.
-const VIDEO_DURATIONS = ["3", "5", "10"] as const;
+// Seedance 2.0's authoritative create-videos schema (GET /api/v1/videos/models)
+// lists supported_durations = 4,5,…,15 (integer seconds; 3 does NOT exist). The
+// earlier F155 lock to {3,5,10} mirrored a stale spec note — `3` round-trips to
+// a silent server rejection now that the provider passes duration through. Keep
+// the select to a small in-range subset; every value MUST be ∈ 4..15.
+const VIDEO_DURATIONS = ["4", "5", "8", "10", "15"] as const;
 const VIDEO_RESOLUTIONS = ["720p", "1080p"] as const;
 
 export const INITIAL_FORM_STATE: FormState = {
@@ -167,10 +168,10 @@ export function formStateToRequest(
         | "16:9"
         | "9:16"
         | "1:1"
-        | "4:5"
         | "3:4"
+        | "4:3"
         | "21:9"
-        | "auto"
+        | "9:21"
         | undefined;
       return {
         mode,
@@ -340,7 +341,16 @@ export function GenerationDialog(props: GenerationDialogProps) {
 
   async function dispatchProviderGenerate(): Promise<void> {
     if (!selectedProviderId) return;
-    const aspectRatio = (form.aspectRatio ?? "9:16") as string;
+    // Only forward aspectRatio when the user picked a real video ratio. A stale
+    // image-tab value (e.g. 4:5, which the video <select> can't display) would
+    // otherwise reach the seedance gateway as an off-enum value. Omitting it
+    // lets the server canvas-follow the work's composition aspect — same default
+    // as the agent /api/generate/video path.
+    const aspectRatio = (VIDEO_ASPECTS as readonly string[]).includes(
+      form.aspectRatio ?? "",
+    )
+      ? form.aspectRatio
+      : undefined;
     const durationSec = Number(form.duration) || 5;
     const res = await fetch(
       `/api/providers/${selectedProviderId}/generate-video`,
@@ -351,7 +361,7 @@ export function GenerationDialog(props: GenerationDialogProps) {
           workId,
           prompt: form.prompt,
           durationSec,
-          aspectRatio,
+          ...(aspectRatio ? { aspectRatio } : {}),
         }),
       },
     );

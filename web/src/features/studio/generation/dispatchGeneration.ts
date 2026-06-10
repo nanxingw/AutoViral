@@ -48,11 +48,11 @@ export interface VideoParams {
   kind: "video";
   prompt: string;
   changeDirection?: string;
-  /** Seedance 2.0 accepts unit-less seconds; spec restricts to {3, 5, 10}.
-   *  Caller passes a string like "3" / "5" / "10". */
+  /** Seedance 2.0 accepts unit-less seconds; supported_durations = 4..15
+   *  (integers; 3 is not a real value). Caller passes a string like "4" / "10". */
   duration: string;
-  aspectRatio?: "16:9" | "9:16" | "1:1" | "4:5" | "3:4" | "21:9" | "auto";
-  resolution?: "720p" | "1080p";
+  aspectRatio?: "16:9" | "9:16" | "1:1" | "3:4" | "4:3" | "21:9" | "9:21";
+  resolution?: "480p" | "720p" | "1080p";
   imageUrl?: string;
 }
 

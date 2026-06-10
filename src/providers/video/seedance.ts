@@ -56,8 +56,53 @@ async function normalizeVideoForBrowser(filePath: string, fps: number): Promise<
   await rename(tmpPath, filePath);
 }
 
-const POLL_INTERVAL_MS = 5_000;
-const MAX_POLL_ATTEMPTS = 60; // ~5min total
+export const POLL_INTERVAL_MS = 5_000;
+// ~15min. A real 4s/720p job was observed to finish just past the old 5min
+// cap (2026-06-10 probe) — the enqueue is billed either way, so giving up
+// early abandons a paid, still-running job with nothing to show for it.
+export const MAX_POLL_ATTEMPTS = 180;
+
+// Authoritative OpenRouter videos contract for bytedance/seedance-2.0, taken
+// from GET /api/v1/videos/models (verified 2026-06-10). These back the route
+// validation + canvas-follow mapping so the schema lives in one place.
+export const SUPPORTED_VIDEO_ASPECT_RATIOS = [
+  "1:1", "3:4", "9:16", "4:3", "16:9", "21:9", "9:21",
+] as const;
+export const SUPPORTED_VIDEO_RESOLUTIONS = ["480p", "720p", "1080p"] as const;
+/** supported_durations: 4..15 integer seconds (no 3 — the old {3,5,10} teaching was wrong). */
+export const SUPPORTED_VIDEO_DURATIONS = [
+  4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
+] as const;
+
+const RATIO_VALUES: ReadonlyArray<readonly [string, number]> =
+  SUPPORTED_VIDEO_ASPECT_RATIOS.map((label) => {
+    const [w, h] = label.split(":").map(Number);
+    return [label, w / h] as const;
+  });
+
+/**
+ * Closest supported aspect-ratio label for a "W:H" string, by log distance, or
+ * undefined when the input is malformed (gateway default then applies). Mirrors
+ * openrouter-image.ts deriveAspectRatio. Anchors: 4:5 → 3:4, 9:16 → 9:16.
+ */
+export function closestSupportedRatio(aspect: string): string | undefined {
+  const m = /^(\d+):(\d+)$/.exec(String(aspect).trim());
+  if (!m) return undefined;
+  const w = Number(m[1]);
+  const h = Number(m[2]);
+  if (!w || !h || w <= 0 || h <= 0) return undefined;
+  const target = w / h;
+  let best: string | undefined;
+  let bestDist = Infinity;
+  for (const [label, ratio] of RATIO_VALUES) {
+    const dist = Math.abs(Math.log(target / ratio));
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = label;
+    }
+  }
+  return best;
+}
 
 export interface SeedanceProviderOptions {
   /** Override OpenRouter base URL (for testing). */
@@ -93,11 +138,23 @@ function hashPrompt(prompt: string): string {
  *
  * Falls back to stub when OPENROUTER_API_KEY is not set.
  *
- * KNOWN ISSUE: aspect_ratio field shape is unverified. We pass through
- * whatever the caller requests as `input.aspect_ratio` (e.g. "9:16"),
- * but empirically the API has been observed to return 16:9 output for
- * portrait requests. Users should iterate the prompt/parameters until
- * the API contract for orientation is confirmed.
+ * Root cause confirmed 2026-06-10: the request schema is FLAT —
+ * model / prompt / duration / aspect_ratio / resolution / generate_audio /
+ * frame_images are all top-level fields (verified against the official
+ * create-videos doc + GET /api/v1/videos/models). The previous code wrapped
+ * everything in `input: {}`, which the gateway silently DROPPED — so portrait
+ * requests came back 16:9 and i2v "never took": the parameters never arrived.
+ * The fix sends them flat; i2v frame entries follow the schema shape
+ * { type: "image_url", image_url: { url }, frame_type: "first_frame" | "last_frame" }.
+ *
+ * Empirically verified via paid probes (2026-06-10, ffprobe-confirmed):
+ *   - t2v aspect_ratio "16:9" @720p → 1280×720 landscape ($0.60/4s)
+ *   - t2v "9:16" @1080p → 1080×1920 ($1.36/4s) — 1080p is real, not doc fiction
+ *   - i2v with a 9:16 input image + explicit "16:9" → 1280×720: the CALLER's
+ *     aspect wins over the input image's own ratio (no crop-to-input lock)
+ *   - all outputs 24fps; ByteDance REJECTS i2v input images that look like a
+ *     real person (InputImageSensitiveContentDetected.PrivacyInformation, 400
+ *     at enqueue, not billed)
  */
 export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): VideoProvider {
   const baseUrl = opts.baseUrl ?? "https://openrouter.ai/api/v1";
@@ -118,16 +175,28 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
 
       // 1) Enqueue
       // R44 — image-to-video. When firstFrameImage / lastFrameImage are
-      // present, OpenRouter Seedance accepts a `frame_images` array under
-      // `input` with entries like { frame_type: "first" | "last", image }.
-      // Without these the call falls back to pure text-to-video, which is
-      // the original Phase-2 behaviour — preserved untouched.
-      const frameImages: Array<{ frame_type: "first" | "last"; image: string }> = [];
+      // present, OpenRouter Seedance accepts a top-level `frame_images` array
+      // with entries shaped { type: "image_url", image_url: { url }, frame_type }
+      // where frame_type ∈ { "first_frame", "last_frame" }. Without these the
+      // call falls back to pure text-to-video.
+      const frameImages: Array<{
+        type: "image_url";
+        image_url: { url: string };
+        frame_type: "first_frame" | "last_frame";
+      }> = [];
       if (req.firstFrameImage) {
-        frameImages.push({ frame_type: "first", image: req.firstFrameImage });
+        frameImages.push({
+          type: "image_url",
+          image_url: { url: req.firstFrameImage },
+          frame_type: "first_frame",
+        });
       }
       if (req.lastFrameImage) {
-        frameImages.push({ frame_type: "last", image: req.lastFrameImage });
+        frameImages.push({
+          type: "image_url",
+          image_url: { url: req.lastFrameImage },
+          frame_type: "last_frame",
+        });
       }
       const enqueueRes = await fetch(`${baseUrl}/videos`, {
         method: "POST",
@@ -135,17 +204,19 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
           Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
         },
+        // FLAT payload — the OpenRouter videos schema has no `input` wrapper;
+        // nesting silently dropped every param. Only send optional fields when
+        // the caller set them so the gateway default applies otherwise.
         body: JSON.stringify({
           model: "bytedance/seedance-2.0",
           prompt: req.prompt,
-          input: {
-            duration: req.durationSec,
-            aspect_ratio: req.aspectRatio,
-            // Only include frame_images when at least one anchor is set —
-            // sending an empty array could be interpreted as "no frames"
-            // and 400 the request on stricter API versions.
-            ...(frameImages.length > 0 ? { frame_images: frameImages } : {}),
-          },
+          duration: req.durationSec,
+          ...(req.aspectRatio ? { aspect_ratio: req.aspectRatio } : {}),
+          ...(req.resolution ? { resolution: req.resolution } : {}),
+          ...(req.generateAudio !== undefined
+            ? { generate_audio: req.generateAudio }
+            : {}),
+          ...(frameImages.length > 0 ? { frame_images: frameImages } : {}),
         }),
       });
       if (!enqueueRes.ok) {

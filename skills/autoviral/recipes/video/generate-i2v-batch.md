@@ -15,7 +15,11 @@ autoviral list clips --track video
 autoviral comp show --format json | jq '{fps, aspect, width, height}'
 ```
 
-For a 9:16 / 30fps composition, request 1080×1920 / 30fps from the i2v API. For 16:9 / 24fps, request 1920×1080 / 24fps. Don't request a resolution the model doesn't support — Seedance 2.0 i2v always outputs 720×1280 / 24fps regardless of what you ask for (then you crop / upscale yourself).
+Match the request to the composition. With AutoViral's `POST /api/generate/video` (Seedance 2.0 via OpenRouter), the parameters are honored: `aspectRatio` (one of `1:1` / `3:4` / `9:16` / `4:3` / `16:9` / `21:9` / `9:21`; omit it and it follows the work's canvas, `4:5` mapping to `3:4`), `resolution` (`480p` / `720p` / `1080p`), `durationSec` (integer `4`–`15`). **fps is fixed at 24** — it isn't a parameter.
+
+> The old observation that "Seedance i2v always outputs 720×1280 / 24fps regardless of what you ask" came from a bug, not a model limit: the adapter wrapped every parameter in an `input:{}` object the OpenRouter gateway silently dropped, so requests degraded to bare model+prompt. That nesting was removed (2026-06-10); aspect/resolution/duration now reach the model.
+>
+> **Probe-verified 2026-06-10** (real generations, ffprobe-confirmed): ① explicit `aspectRatio` always wins — a 9:16 portrait anchor + explicit `16:9` produced a true 1280×720 landscape clip; ② `1080p` is real (9:16 → 1080×1920, ≈$0.34/s vs 720p ≈$0.15/s); ③ every output is 24fps. ④ **Anchor-image gotcha**: ByteDance rejects i2v input images that look like a real person (`InputImageSensitiveContentDetected.PrivacyInformation`, HTTP 400 at enqueue, not billed) — stylized/object/scenery anchors pass. Plan "参考人物" workflows around stylized characters, not photo-real faces.
 
 ## Generation loop (model-agnostic skeleton)
 
@@ -23,28 +27,33 @@ For a 9:16 / 30fps composition, request 1080×1920 / 30fps from the i2v API. For
 IMAGES=($(autoviral list assets --kind image --format json | jq -r '.[].path'))
 TOTAL=${#IMAGES[@]}
 
-# Gate
-autoviral ask "Generate $TOTAL i2v clips? (~\$$(echo "$TOTAL * 0.76" | bc) at Seedance rates)" --yes-no || exit 0
+# Gate — Seedance bills per second: 720p ≈ $0.15/s, 1080p ≈ $0.34/s
+autoviral ask "Generate $TOTAL i2v clips? (~\$$(echo "$TOTAL * 5 * 0.15" | bc) at 720p·5s Seedance rates)" --yes-no || exit 0
 
 autoviral progress start "Generating $TOTAL i2v clips" --steps $TOTAL
 
+: > /tmp/i2v-clips.txt
 i=0
 for img_path in "${IMAGES[@]}"; do
   i=$((i+1))
   # short id from filename: assets/images/s01.png → s01
   base=$(basename "$img_path" | sed -E 's/\.[^.]+$//')
-  out_clip="assets/clips/${base}.mp4"
 
-  # YOUR i2v call here — example using a hypothetical helper
-  your-i2v-tool \
-    --image "$AUTOVIRAL_CWD/$img_path" \
-    --duration 5 \
-    --output "$AUTOVIRAL_CWD/$out_clip"
+  # i2v via the work's own endpoint. firstFrame is a work-relative asset path
+  # (the server converts it to a data URI for the gateway). aspectRatio omitted
+  # = canvas-follow; pass it explicitly only to deviate from the canvas.
+  resp=$(curl -s -X POST "http://localhost:$AUTOVIRAL_PORT/api/generate/video" \
+    -H 'Content-Type: application/json' \
+    -d "$(jq -n --arg w "$AUTOVIRAL_WORK_ID" --arg img "$img_path" --arg f "${base}.mp4" \
+          '{workId:$w, prompt:"<per-shot motion prompt>", filename:$f, firstFrame:$img, durationSec:5}')")
 
-  if [ ! -f "$AUTOVIRAL_CWD/$out_clip" ]; then
-    autoviral toast "i2v failed for $base; skipping" --kind error
+  if [ "$(echo "$resp" | jq -r '.success')" != "true" ]; then
+    autoviral toast "i2v failed for $base: $(echo "$resp" | jq -r '.error // "unknown"')" --kind error
     continue
   fi
+  # Response carries assetId (already registered in composition.assets) and
+  # previewUrl; derive the work-relative clip path for the wiring loop below.
+  echo "$resp" | jq -r --arg w "$AUTOVIRAL_WORK_ID" '.previewUrl | ltrimstr("/api/works/\($w)/")' >> /tmp/i2v-clips.txt
 
   autoviral progress step $i
 done
@@ -59,9 +68,7 @@ After generation, each new `assets/clips/sNN.mp4` needs a `clip add` so the Stud
 ```bash
 SEGMENT=5            # each clip is 5s long on the timeline
 i=0
-for img_path in "${IMAGES[@]}"; do
-  base=$(basename "$img_path" | sed -E 's/\.[^.]+$//')
-  src="assets/clips/${base}.mp4"
+while IFS= read -r src; do
   [ -f "$AUTOVIRAL_CWD/$src" ] || continue
 
   offset=$(echo "$i * $SEGMENT" | bc)
@@ -73,7 +80,7 @@ for img_path in "${IMAGES[@]}"; do
     --duration "$SEGMENT"
 
   i=$((i+1))
-done
+done < /tmp/i2v-clips.txt
 
 autoviral toast "Added $i clips to the timeline" --kind success
 autoviral select clip $(autoviral list clips --track video --format json | jq -r '.[0].id')
@@ -91,7 +98,7 @@ Right after `clip add` returns, the clips are hard-cut. To add crossfades, see `
 
 ## Cost / quota awareness
 
-i2v calls are expensive (~$0.50–$1.00 per clip). For a 16-clip batch, that's $8–$16. Always:
+i2v calls bill by output seconds × resolution: 720p ≈ $0.15/s（5s ≈ $0.75/clip），1080p ≈ $0.34/s（5s ≈ $1.70/clip）。For a 16-clip 5s batch that's ~$12 (720p) to ~$27 (1080p). Always:
 
 1. Gate with `autoviral ask` showing the cost estimate
 2. Use `autoviral progress` so the user can cancel partway by closing the terminal (the CLI calls die with the pty)
