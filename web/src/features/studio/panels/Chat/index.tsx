@@ -19,6 +19,7 @@ import { highlightCode } from "./highlight";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { useComposerDraft } from "@/stores/composerDraft";
+import { useToastStore } from "@/stores/toast";
 import { useActiveSessionId } from "@/features/chat/activeSession";
 import { parseCoachIdeas, type CoachIdea } from "@/features/explore/coachSession";
 import composerStyles from "./Composer.module.css";
@@ -644,9 +645,28 @@ export function ChatPanel({
   const abort = async () => {
     if (!streaming) return;
     try {
-      await apiFetch(`/api/works/${workId}/abort`, { method: "POST" });
+      // B1: forward the ACTIVE session id so the backend kills the session the
+      // user is actually streaming in (e.g. s_2), not the default s_1. Without
+      // this, the stop button was a no-op on every multi-session work.
+      const res = await apiFetch<{ aborted?: boolean }>(`/api/works/${workId}/abort`, {
+        method: "POST",
+        body: { sessionId: activeSessionId },
+      });
+      if (res?.aborted === false) {
+        // The kill found nothing to stop — surface it instead of swallowing.
+        useToastStore.getState().push({
+          variant: "warn",
+          message: t("chat.abortNoop"),
+          ttlMs: 4000,
+        });
+      }
     } catch {
-      // server already gone or restart in progress — ignore
+      // server gone / restart in progress — no longer swallowed silently.
+      useToastStore.getState().push({
+        variant: "error",
+        message: t("chat.abortFailed"),
+        ttlMs: 4000,
+      });
     }
   };
 

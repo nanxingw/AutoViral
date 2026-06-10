@@ -447,12 +447,25 @@ worksRouter.put("/api/works/:id/carousel", async (c) => {
 // Work Chat API (WsBridge)
 // ---------------------------------------------------------------------------
 
-// POST /api/works/:id/abort — abort running task for a work
+// POST /api/works/:id/abort — abort running task for a work.
+// B1: the body MAY carry { sessionId } so the kill targets the caller's ACTIVE
+// session (e.g. s_2), not the default (s_1). Legacy callers send no body — we
+// stay backward-compatible by forwarding `undefined`, which killSession resolves
+// to the default session exactly as the pre-B1 single-arg call did.
 worksRouter.post("/api/works/:id/abort", async (c) => {
   const id = c.req.param("id");
   const wsBridge = getWsBridge();
   if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
-  const killed = wsBridge.killSession(id);
+  let sessionId: string | undefined;
+  try {
+    const body = (await c.req.json()) as { sessionId?: unknown } | null;
+    if (body && typeof body.sessionId === "string" && body.sessionId.trim()) {
+      sessionId = body.sessionId;
+    }
+  } catch {
+    // No body / not JSON — legacy single-session shape. sessionId stays undefined.
+  }
+  const killed = wsBridge.killSession(id, sessionId);
   return c.json({ aborted: killed });
 });
 

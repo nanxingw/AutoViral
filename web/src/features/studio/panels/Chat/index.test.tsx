@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ChatPanel } from "./index";
 import { useChatStore } from "@/features/chat/store";
 import { useComposerDraft } from "@/stores/composerDraft";
 import { useActiveSession } from "@/features/chat/activeSession";
+import { useToastStore } from "@/stores/toast";
+import { apiFetch } from "@/lib/api";
 
 vi.mock("@/features/chat/useChatSocket", () => ({
   useChatSocket: () => ({ send: vi.fn(), state: "open" }),
@@ -12,6 +14,9 @@ vi.mock("@/features/chat/useChatSocket", () => ({
 
 vi.mock("@/lib/api", () => ({
   apiFetch: vi.fn(async (path: string) => {
+    // B1 — abort returns aborted:false when the kill targeted the wrong/empty
+    // session. Tests override the mockResolvedValueOnce per case.
+    if (path.endsWith("/abort")) return { aborted: true };
     // Stub the two endpoints ChatPanel hits on mount: chat history + the
     // checkpoints list (used for the per-turn rollback chips).
     if (path.endsWith("/checkpoints")) return { items: [] };
@@ -38,6 +43,8 @@ vi.mock("@/lib/api", () => ({
 beforeEach(() => {
   useChatStore.setState({ blocks: [], streaming: false });
   useActiveSession.setState({ byWork: {} });
+  useToastStore.setState({ entries: [] });
+  vi.mocked(apiFetch).mockClear();
   localStorage.clear();
 });
 
@@ -117,5 +124,71 @@ describe("ChatPanel", () => {
     act(() => useComposerDraft.getState().inject("叠加(1.0s)"));
     act(() => useComposerDraft.getState().inject("叠加(1.0s)"));
     expect(textarea.value).toBe("叠加(1.0s) 叠加(1.0s) ");
+  });
+
+  // B1 — the stop button must POST /abort WITH the active session id so the
+  // backend kills the session the user is actually streaming in (s_2), not s_1.
+  it("abort POSTs /abort with the active sessionId in the body", async () => {
+    act(() => useActiveSession.getState().set("w_abort", "s_2"));
+    render(withQueryClient(<ChatPanel workId="w_abort" />));
+    // Stop button only renders while streaming.
+    act(() => useChatStore.setState({ streaming: true }));
+
+    const stopBtn = await screen.findByLabelText("Stop");
+    await act(async () => {
+      fireEvent.click(stopBtn);
+    });
+
+    await waitFor(() => {
+      expect(apiFetch).toHaveBeenCalledWith(
+        "/api/works/w_abort/abort",
+        expect.objectContaining({ method: "POST", body: { sessionId: "s_2" } }),
+      );
+    });
+  });
+
+  // B1 — when the kill reports aborted:false (nothing was running / wrong
+  // session), the user must see a visible toast instead of silent nothing.
+  it("renders a visible toast when abort returns aborted:false", async () => {
+    act(() => useActiveSession.getState().set("w_noop", "s_2"));
+    render(withQueryClient(<ChatPanel workId="w_noop" />));
+    act(() => useChatStore.setState({ streaming: true }));
+
+    const stopBtn = await screen.findByLabelText("Stop");
+    // Override AFTER mount so the /chat + /checkpoints seed calls don't consume
+    // the one-shot mock; only the abort call sees aborted:false.
+    vi.mocked(apiFetch).mockResolvedValueOnce({ aborted: false });
+    await act(async () => {
+      fireEvent.click(stopBtn);
+    });
+
+    await waitFor(() => {
+      const entries = useToastStore.getState().entries;
+      expect(entries.length).toBe(1);
+      expect(entries[0].variant).toBe("warn");
+      // Message is the localized abort-failed copy, not an empty/raw string.
+      expect(entries[0].message.length).toBeGreaterThan(0);
+    });
+  });
+
+  // B1 — a thrown request (server gone / network) must also surface a toast,
+  // not be swallowed by the catch.
+  it("renders a visible toast when the abort request throws", async () => {
+    act(() => useActiveSession.getState().set("w_throw", "s_2"));
+    render(withQueryClient(<ChatPanel workId="w_throw" />));
+    act(() => useChatStore.setState({ streaming: true }));
+
+    const stopBtn = await screen.findByLabelText("Stop");
+    // Override AFTER mount so only the abort call rejects, not the seed calls.
+    vi.mocked(apiFetch).mockRejectedValueOnce(new Error("network down"));
+    await act(async () => {
+      fireEvent.click(stopBtn);
+    });
+
+    await waitFor(() => {
+      const entries = useToastStore.getState().entries;
+      expect(entries.length).toBe(1);
+      expect(entries[0].variant).toBe("error");
+    });
   });
 });

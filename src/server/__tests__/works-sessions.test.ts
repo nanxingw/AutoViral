@@ -197,3 +197,41 @@ describe("works session HTTP endpoints (I24)", () => {
     });
   });
 });
+
+// B1 — abort endpoint must forward the caller's sessionId to killSession so the
+// red stop button kills the user's ACTUAL active session (s_2), not the default
+// (s_1). Pre-B1 the route called killSession(id) with no second arg →
+// resolveSessionId(undefined) → always s_1 → multi-session works never stopped.
+describe("works abort HTTP endpoint forwards sessionId (B1)", () => {
+  it("POST /abort with a sessionId body forwards it to killSession(id, sessionId)", async () => {
+    await withTempDataDir(async () => {
+      const { apiRoutes, bridge } = await wireBridge();
+      const spy = vi.spyOn(bridge, "killSession").mockReturnValue(true);
+
+      const res = await apiRoutes.fetch(
+        jsonReq("POST", `/api/works/w_kill/abort`, { sessionId: "s_2" }),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ aborted: true });
+      // The exact session the user was streaming in must be the one killed.
+      expect(spy).toHaveBeenCalledWith("w_kill", "s_2");
+    });
+  });
+
+  it("POST /abort with no body stays backward-compatible (sessionId undefined)", async () => {
+    await withTempDataDir(async () => {
+      const { apiRoutes, bridge } = await wireBridge();
+      const spy = vi.spyOn(bridge, "killSession").mockReturnValue(false);
+
+      // No body at all — the legacy single-session caller shape.
+      const res = await apiRoutes.fetch(
+        new Request(`http://localhost/api/works/w_legacy/abort`, { method: "POST" }),
+      );
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ aborted: false });
+      // Forwarded undefined → killSession resolves it to the default session,
+      // exactly as the pre-B1 single-arg call did. No crash on missing body.
+      expect(spy).toHaveBeenCalledWith("w_legacy", undefined);
+    });
+  });
+});

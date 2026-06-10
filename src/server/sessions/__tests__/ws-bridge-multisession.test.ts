@@ -214,4 +214,53 @@ describe("WsBridge — multi-session keying + sidecar + migration + archive", ()
       expect(s1Blocks).toHaveLength(0);
     });
   });
+
+  // B1 — the red stop button kills the user's ACTIVE session, not s_1. Killing
+  // s_2 must (a) SIGTERM s_2's CLI process, (b) broadcast session_killed ONLY to
+  // s_2's socket, and (c) leave s_1's process + socket completely untouched.
+  it("killSession(work, 's_2') kills only s_2: SIGTERM s_2's CLI, session_killed only to s_2's socket, s_1 untouched", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge } = await import("../../../ws-bridge.js");
+      const work = "w_kill_iso";
+      await workDir(dir, work);
+      const bridge = new WsBridge(0);
+
+      const s1 = bridge.ensureSession(work, "s_1");
+      const s2 = bridge.ensureSession(work, "s_2");
+
+      // Each session has its own fake CLI process + browser socket.
+      const s1Kill = vi.fn();
+      const s2Kill = vi.fn();
+      s1.cliProcess = { kill: s1Kill } as unknown as never;
+      s2.cliProcess = { kill: s2Kill } as unknown as never;
+
+      const sentToS1: string[] = [];
+      const sentToS2: string[] = [];
+      const fakeSocket = (sink: string[]) =>
+        ({ readyState: 1 /* WebSocket.OPEN */, send: (m: string) => sink.push(m) } as unknown as never);
+      s1.browserSockets.add(fakeSocket(sentToS1));
+      s2.browserSockets.add(fakeSocket(sentToS2));
+
+      // User presses stop while streaming in s_2.
+      const killed = bridge.killSession(work, "s_2");
+      expect(killed).toBe(true);
+
+      // (a) s_2's CLI got SIGTERM; s_1's CLI was never touched.
+      expect(s2Kill).toHaveBeenCalledWith("SIGTERM");
+      expect(s1Kill).not.toHaveBeenCalled();
+
+      // (b) session_killed reached ONLY s_2's socket, scoped to s_2.
+      const s2Killed = sentToS2.map((m) => JSON.parse(m)).filter((m) => m.event === "session_killed");
+      const s1Killed = sentToS1.map((m) => JSON.parse(m)).filter((m) => m.event === "session_killed");
+      expect(s2Killed).toHaveLength(1);
+      expect(s2Killed[0].data).toEqual({ workId: work, sessionId: "s_2" });
+      expect(s1Killed).toHaveLength(0);
+
+      // (c) s_1's session record is unaffected (still has its process, not idle).
+      const s1After = bridge.getSession(work, "s_1")!;
+      expect(s1After.cliProcess).toBeDefined();
+      // s_2's process reference is cleared after the kill.
+      expect(bridge.getSession(work, "s_2")!.cliProcess).toBeUndefined();
+    });
+  });
 });
