@@ -12,6 +12,7 @@
 // untouched — that's the only invariant agents can rely on when chaining
 // mutations.
 
+import { getWorksRoot } from "../safe-paths.js";
 import {
   readFile,
   writeFile,
@@ -41,11 +42,12 @@ export interface OpsContext {
 }
 
 function resolveRoot(ctx: OpsContext): string {
-  return (
-    ctx.worksRoot ??
-    process.env.AUTOVIRAL_WORKS_ROOT ??
-    join(homedir(), ".autoviral/works")
-  );
+  // Delegate to the SHARED works-root resolver (AUTOVIRAL_WORKS_ROOT →
+  // <AUTOVIRAL_DATA_DIR>/works → ~/.autoviral/works). This file predated the
+  // S5 unification and skipped the DATA_DIR tier, so bridge composition ops
+  // diverged from the REST routes / watchers under a custom DATA_DIR (the
+  // divergence safe-paths.ts:23 recorded). ctx.worksRoot still overrides.
+  return ctx.worksRoot ?? getWorksRoot();
 }
 
 export function compositionPathFor(ctx: OpsContext): string {

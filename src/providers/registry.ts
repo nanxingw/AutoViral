@@ -45,6 +45,8 @@ interface MediaProviderBase {
 
 export interface ImageMediaProvider extends MediaProviderBase {
   capability: "image";
+  /** Human-readable label. Optional so test fakes stay terse. */
+  displayName?: string;
   generateImage(opts: ImageOpts): Promise<GenerateResult>;
 }
 
@@ -173,6 +175,10 @@ function imageEntry(p: GenerateProvider): ImageMediaProvider {
   return {
     name: p.name,
     capability: "image",
+    // The registry id "nanobanana" is historical (the class predates the model
+    // switch); what actually runs is OpenRouter gpt-5.4-image-2. Keep the id
+    // for config/CLI compat, but label it honestly.
+    displayName: "GPT Image 2 (via OpenRouter)",
     envKey: "OPENROUTER_API_KEY",
     default: true,
     generateImage: (opts) => p.generateImage(opts),

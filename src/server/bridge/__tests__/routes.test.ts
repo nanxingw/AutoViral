@@ -1688,7 +1688,7 @@ describe("bridge router — S7 scene generate handoff", () => {
   const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
   // Toggled by the failure-path test so the same fake can return {success:false}.
   let failNext = false;
-  const generateCalls: Array<{ prompt: string; filename: string }> = [];
+  const generateCalls: Array<{ prompt: string; filename: string; aspectRatio?: string }> = [];
 
   beforeAll(async () => {
     const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
@@ -1719,7 +1719,7 @@ describe("bridge router — S7 scene generate handoff", () => {
       envKey: "FAKE_IMAGE",
       default: true,
       generateImage: async (opts) => {
-        generateCalls.push({ prompt: opts.prompt, filename: opts.filename });
+        generateCalls.push({ prompt: opts.prompt, filename: opts.filename, aspectRatio: opts.aspectRatio });
         if (failNext) {
           return { success: false, error: "fake provider asked to fail" };
         }
@@ -1897,6 +1897,9 @@ describe("bridge router — S7 scene generate handoff", () => {
     expect(res.status).toBe(200);
     expect(generateCalls.length).toBe(before + 1);
     expect(generateCalls[before].prompt).toContain("仅标题镜");
+    // Canvas-follow: the take inherits the composition's own aspect (fixture
+    // composition.yaml says 9:16) — not the model's square default.
+    expect(generateCalls[before].aspectRatio).toBe("9:16");
   });
 
   it("a provider failure → 500 + code 4 and leaves the comp UNTOUCHED (no dangling asset, no link)", async () => {

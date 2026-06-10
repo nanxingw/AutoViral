@@ -3,6 +3,10 @@ import { join } from 'node:path'
 import { dataDir } from '../infra/config.js'
 import type { GenerateProvider, ImageOpts, GenerateResult } from './base.js'
 
+// NOTE: the class/registry name "NanoBanana" is HISTORICAL — it predates a
+// model switch. What actually runs today is OpenRouter gpt-5.4-image-2 (see
+// DEFAULT_MODEL). The id stays for config/CLI compat; user-facing labels say
+// "GPT Image 2" (registry.ts imageEntry.displayName).
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const DEFAULT_MODEL = 'openai/gpt-5.4-image-2'
 

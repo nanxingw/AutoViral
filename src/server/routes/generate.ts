@@ -12,6 +12,7 @@ import yaml from "js-yaml";
 import { z } from "zod";
 import { dataDir, repoRoot } from "../../infra/config.js";
 import { getWork } from "../../domain/work-store.js";
+import { readCompositionFor } from "../bridge/composition-ops.js";
 import { getProvider, getDefaultProvider, listProviders } from "../../providers/registry.js";
 import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
 import { uiEventBus } from "../bridge/ui-events.js";
@@ -54,10 +55,25 @@ generateRouter.post("/api/generate/image", async (c) => {
   if (!provider) {
     return c.json({ success: false, error: "No image provider available", code: "INVALID_PARAMS" }, 400);
   }
+  // Canvas-follow default (user decision 2026-06-10): when the caller gives no
+  // explicit sizing (aspectRatio / width / height), fall back to the work's OWN
+  // composition aspect — the canvas the user picked for this work — instead of
+  // the model's hidden 1024×1024 square. Explicit params always win; works
+  // without a composition.yaml (carousel) keep the model default. No platform
+  // hard-coding anywhere: 抖音 work with a 16:9 canvas generates 16:9.
+  let effectiveAspectRatio = aspectRatio;
+  if (!effectiveAspectRatio && !width && !height) {
+    try {
+      const comp = await readCompositionFor({ workId });
+      effectiveAspectRatio = comp.aspect;
+    } catch {
+      /* no composition — model default applies */
+    }
+  }
   try {
     const result = await provider.generateImage({
       prompt, width, height, workId, filename: safeFilename, referenceImage,
-      aspectRatio, imageSize, seed, temperature, model,
+      aspectRatio: effectiveAspectRatio, imageSize, seed, temperature, model,
     });
     // I17 — broadcast asset-added so the Studio library refreshes live without
     // a page reload. Mirrors the audio path's shape (audio.ts:279): same

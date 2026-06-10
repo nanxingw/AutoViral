@@ -1357,6 +1357,11 @@ bridgeRouter.post("/scene/:id/generate", async (c) => {
       prompt: enriched,
       workId: g.workId,
       filename,
+      // Canvas-follow (user decision 2026-06-10): storyboard takes inherit the
+      // work's OWN composition aspect — the canvas the user picked — instead of
+      // the model's hidden 1024×1024 square. No platform hard-coding: change
+      // comp.aspect and the next take follows.
+      aspectRatio: comp.aspect,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

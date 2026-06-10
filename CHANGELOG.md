@@ -23,6 +23,7 @@ All notable changes to this project will be documented in this file.
 - **上移/下移收进 ⋯ 菜单**，整卡拖拽重排保留。
 
 ### Fixed
+- **生图画幅：用户决定，画布跟随** — 此前 `/api/generate/image` 公开参数 `width/height` 被 provider 静默丢弃（一律落模型 1024×1024 方图默认），且「生成此幕」逐镜出图无条件方图。现在优先级=显式参数（aspectRatio / width/height 推导）> 作品自己的画布 `comp.aspect`（用户定的，9:16/1:1/16:9/4:5）> 模型默认，零平台硬编码——16:9 画布的抖音 work 就出 16:9。真实出图实证 9:16 → 720×1280。顺手统一 composition-ops 的 works-root 解析到共享 `getWorksRoot()`（修自定义 DATA_DIR 下 bridge 与 REST 指向不同目录的遗留分歧），并把图像 provider 的对外名号从历史遗留的 "NanoBanana" 改为如实的 "GPT Image 2 (via OpenRouter)"（内部 id 不变保兼容）。
 - **生成素材要手动刷新才出现**（用户报告）— 复合根因双修：① 只有 5 个 blessed 端点广播 `asset-added`，agent 经 Bash/ffmpeg/python **直接写盘**的素材（以及转场/captions 等输出）没有任何事件——新增 **assets 目录 watcher**（递归监听 `<work>/assets/`，防抖合并、滤 tmp/dotfile/目录事件），任何写入/删除都在 chokepoint 广播，新端点不会再重开缺口；② 前端 bridge WebSocket **没有重连逻辑**，daemon 重启/电脑睡眠断线后页面永久失聪——`useBridgeEvents` 现带上限指数退避自动重连，重连成功后全量补刷（composition/carousel/script/素材库），错过的事件不再丢。浏览器 E2E 双纬度证实：直接写盘 ~5s 内未刷新出现真解码缩略图（删除同步收敛）；杀 daemon 重启后不刷新页面事件流自动恢复。
 - **删除失败误报"保存失败"** — `ErrorLine` 未传 kind 时统一落 saveFailed 文案；现删除/重排各有专属错误文案（对抗 review 双 reviewer 同挖）。
 - **新建自动展开可能选错卡** — 占位标题同名时 title 回退会匹配旧卡；现仅在 bridge 未返回 id 时才启用 title 回退。
