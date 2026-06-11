@@ -222,6 +222,34 @@ export function buildSecretMeta(config: Config): Record<string, { set: boolean; 
   return meta;
 }
 
+// C1.1 (PRD-0009) — the SINGLE redacted shape both GET and PUT /api/config
+// return. Before this, the PUT handler did a raw `c.json(config)` and echoed
+// EVERY plaintext secret straight back (openrouter.apiKey / jimeng.accessKey+
+// secretKey / memory.apiKey) — a credential leak on the write path that the GET
+// handler's #60 strip never covered. Routing both responses through one helper
+// makes "no plaintext secret ever leaves the server" a single-source-of-truth
+// invariant the redaction sweep can pin once and have it hold on both verbs.
+//
+// `extras` carries the flat, NON-secret convenience fields each handler derives
+// (analyticsLastCollectedAt, douyinUrl, …) — they're spread LAST so the helper
+// never has to know about handler-specific computed values.
+export function redactedConfigResponse(
+  config: Config,
+  extras: Record<string, unknown> = {},
+): Record<string, unknown> {
+  const configRest = { ...(config as unknown as Record<string, unknown>) };
+  for (const k of SECRET_BEARING_KEYS) delete configRest[k];
+  return {
+    ...configRest,
+    // The flat `openrouterKey` stays in the shape (always "") so older clients
+    // don't crash on undefined; the real value only ever surfaces as lastFour.
+    openrouterKey: "",
+    secretMeta: buildSecretMeta(config),
+    memorySyncEnabled: config.memory?.syncEnabled ?? false,
+    ...extras,
+  };
+}
+
 // ── Render-job dedup helpers (work delete + render enqueue) ──────────────────
 
 // #63 — cancel a work's in-flight render jobs (queued/running) so the render

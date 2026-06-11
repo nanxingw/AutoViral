@@ -13,7 +13,7 @@ import yaml from "js-yaml";
 import { z } from "zod";
 import { dataDir, repoRoot, loadConfig } from "../../infra/config.js";
 import { getWork } from "../../domain/work-store.js";
-import { readCompositionFor } from "../bridge/composition-ops.js";
+import { readCompositionFor, mutateCompositionFor } from "../bridge/composition-ops.js";
 import { getProvider, getDefaultProvider, listProviders } from "../../providers/registry.js";
 import { FFMPEG_BIN } from "../ffmpeg-paths.js";
 import {
@@ -22,6 +22,7 @@ import {
   SUPPORTED_VIDEO_RESOLUTIONS,
   SUPPORTED_VIDEO_DURATIONS,
 } from "../../providers/video/seedance.js";
+import { SUPPORTED_IMAGE_ASPECT_RATIOS } from "../../providers/openrouter-image.js";
 import type { VideoGenerateResult } from "../../providers/video/types.js";
 import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
 import { uiEventBus } from "../bridge/ui-events.js";
@@ -42,6 +43,34 @@ export const generateRouter = new Hono();
 // ---------------------------------------------------------------------------
 // Generate API (Provider-based image/video generation)
 // ---------------------------------------------------------------------------
+
+// C1.2 (PRD-0009) — outward-facing sanitizer for a provider error string. A
+// failed paid request (e.g. OpenRouter 400) returns a body that leaks internal
+// identifiers — the model id (openai/gpt-5.4-image-2-…) and the account id
+// (user_2x…/org_…). Those must never reach the client; they're an info-leak and
+// useless to the caller anyway. We KEEP the actionable description (the human
+// message + the offending param) and STRIP the identifiers. The redaction is
+// pattern-based (not provider-specific) so any future leaky body is covered:
+//   - model ids:  vendor/slug[-version]   (slash form)
+//   - account/org ids:  user_… / org_… / acct_…
+//   - bearer-ish tokens:  sk-…
+// Anything we can't confidently parse falls back to a generic safe message
+// rather than echoing an unknown blob.
+export function sanitizeProviderError(raw: string | undefined): string {
+  const s = (raw ?? "").trim();
+  if (!s) return "Provider request failed";
+  let out = s;
+  // Strip account / org / project identifiers.
+  out = out.replace(/\b(?:user|org|acct|account|project|proj)_[A-Za-z0-9]+/g, "[redacted]");
+  // Strip an explicit "model":"vendor/slug" pair (drop the whole key/value).
+  out = out.replace(/[,"\s]*"?(?:model|account|org)"?\s*[:=]\s*"[^"]*"/gi, "");
+  // Strip bare vendor/slug model identifiers (e.g. openai/gpt-5.4-image-2-2026…).
+  out = out.replace(/\b[a-z0-9.-]+\/[a-z0-9][a-z0-9.\-]*\b/gi, "[model]");
+  // Strip api-key-shaped tokens just in case one was echoed.
+  out = out.replace(/\b(?:sk|or)-[A-Za-z0-9_-]{6,}/g, "[redacted]");
+  out = out.replace(/\s{2,}/g, " ").trim();
+  return out || "Provider request failed";
+}
 
 /**
  * Register a freshly-generated video clip as an AssetEntry + a "generate"
@@ -66,43 +95,49 @@ async function registerGeneratedVideoAsset(args: {
   const { workId, relativeAssetUri, providerId, prompt, result } = args;
   const work = await getWork(workId);
   if (!work) return null;
-  const wDirAbs = join(dataDir, "works", workId);
-  const compYamlPath = join(wDirAbs, "composition.yaml");
-  try {
-    const compRaw = await readFile(compYamlPath, "utf-8");
-    const compDoc = yaml.load(compRaw) as Composition;
-    const { randomUUID } = await import("node:crypto");
-    const assetId = `gen_${randomUUID().slice(0, 8)}`;
-    const newAsset: AssetEntry = {
-      id: assetId,
-      uri: relativeAssetUri,
-      kind: "video",
-      metadata: { duration: args.durationSec ?? 4 },
-      status: "ready",
-    };
-    const newEdge: ProvenanceEdge = {
-      fromAssetId: null,
-      toAssetId: assetId,
-      operation: {
-        type: "generate",
-        actor: "user",
-        timestamp: new Date().toISOString(),
-        params: {
-          providerId,
-          prompt,
-          costUsd: result.costUsd,
-          stub: result.stub,
-          providerJobId: result.providerJobId,
-          ...(args.extraParams ?? {}),
-        },
+  const { randomUUID } = await import("node:crypto");
+  const assetId = `gen_${randomUUID().slice(0, 8)}`;
+  const newAsset: AssetEntry = {
+    id: assetId,
+    uri: relativeAssetUri,
+    kind: "video",
+    metadata: { duration: args.durationSec ?? 4 },
+    status: "ready",
+  };
+  const newEdge: ProvenanceEdge = {
+    fromAssetId: null,
+    toAssetId: assetId,
+    operation: {
+      type: "generate",
+      actor: "user",
+      timestamp: new Date().toISOString(),
+      params: {
+        providerId,
+        prompt,
+        costUsd: result.costUsd,
+        stub: result.stub,
+        providerJobId: result.providerJobId,
+        ...(args.extraParams ?? {}),
       },
-    };
-    compDoc.assets = [...(compDoc.assets ?? []), newAsset];
-    compDoc.provenance = [...(compDoc.provenance ?? []), newEdge];
-    await writeFile(compYamlPath, yaml.dump(compDoc), "utf-8");
+    },
+  };
+  try {
+    // C1.3 (PRD-0009) — route through mutateCompositionFor so a FRESH work (no
+    // composition.yaml yet) gets a minimal-but-valid composition SEEDED first
+    // (readOrSeedCompositionFor inside the mutate path) instead of the old
+    // readFile-ENOENT → catch{} → assetId:null silent skip. The seed is the
+    // SAME makeEmptyComposition the human autosave / agent first-write path uses,
+    // so there's exactly one default-composition shape. A non-existent work
+    // re-throws ENOENT (we guard getWork above anyway), never polluting disk.
+    await mutateCompositionFor({ workId }, (comp) => ({
+      ...comp,
+      assets: [...(comp.assets ?? []), newAsset],
+      provenance: [...(comp.provenance ?? []), newEdge],
+    }));
     return assetId;
   } catch {
-    // composition.yaml missing or unreadable — skip registration silently.
+    // Registration is best-effort: an unreadable/invalid composition must never
+    // block the adapter response. (A fresh work no longer lands here.)
     return null;
   }
 }
@@ -112,8 +147,16 @@ generateRouter.post("/api/generate/image", async (c) => {
   const body = await c.req.json();
   const { workId, prompt, width, height, filename, provider: providerName, referenceImage,
     aspectRatio, imageSize, seed, temperature, model } = body;
-  if (!workId || !prompt || !filename) {
-    return c.json({ success: false, error: "Missing required fields", code: "INVALID_PARAMS" }, 400);
+  // C1.2 — name the missing fields (parity with BGM's 'Missing required fields:
+  // workId, prompt') so the agent fixes the exact gap instead of guessing.
+  const missing = (
+    [["workId", workId], ["prompt", prompt], ["filename", filename]] as const
+  ).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length > 0) {
+    return c.json(
+      { success: false, error: `Missing required fields: ${missing.join(", ")}`, code: "INVALID_PARAMS" },
+      400,
+    );
   }
   // Sanitize workId + filename — provider does raw join() that would otherwise
   // accept ../ traversal. (Codex round 2: provider files still raw)
@@ -123,6 +166,18 @@ generateRouter.post("/api/generate/image", async (c) => {
   const safeFilename = String(filename).replace(/[/\\]/g, "_").replace(/^\.+/, "");
   if (!safeFilename) {
     return c.json({ success: false, error: "Invalid filename", code: "INVALID_PARAMS" }, 400);
+  }
+  // C1.2 — validate aspectRatio LOCALLY before forwarding to a PAID model. The
+  // video endpoint already does this; the image endpoint used to forward an
+  // illegal ratio straight to OpenRouter, which 400'd with a body leaking the
+  // internal model + account id (which then reached the client). Reject here
+  // with the legal enum so the agent learns the bound and nothing leaks.
+  if (aspectRatio !== undefined && !SUPPORTED_IMAGE_ASPECT_RATIOS.includes(aspectRatio)) {
+    return c.json({
+      success: false,
+      error: `aspectRatio must be one of ${SUPPORTED_IMAGE_ASPECT_RATIOS.join(", ")} (got ${aspectRatio})`,
+      code: "INVALID_PARAMS",
+    }, 400);
   }
   const provider = providerName ? getProvider("image", providerName) : getDefaultProvider("image");
   if (!provider) {
@@ -165,9 +220,17 @@ generateRouter.post("/api/generate/image", async (c) => {
         payload: { kind: "image", uri: relativeUri, origin: "generate" },
       });
     }
+    // C1.2 — when the provider returns a FAILURE, sanitize its error string
+    // before it reaches the client (it can carry the upstream model/account id).
+    // We keep the EXISTING status semantics (the body already carries
+    // success:false; the frontend branches on that) — only the leaky text is
+    // scrubbed, the response shape/status is unchanged.
+    if (!result.success) {
+      return c.json({ ...result, error: sanitizeProviderError(result.error) });
+    }
     return c.json(result);
   } catch (err: any) {
-    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+    return c.json({ success: false, error: sanitizeProviderError(err?.message), code: "API_ERROR" }, 500);
   }
 });
 
@@ -179,8 +242,15 @@ generateRouter.post("/api/generate/video", async (c) => {
     durationSec, resolution,
   } = body;
   let { aspectRatio } = body;
-  if (!workId || !prompt || !filename) {
-    return c.json({ success: false, error: "Missing required fields", code: "INVALID_PARAMS" }, 400);
+  // C1.2 — name the missing fields (parity with image/BGM).
+  const missing = (
+    [["workId", workId], ["prompt", prompt], ["filename", filename]] as const
+  ).filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length > 0) {
+    return c.json(
+      { success: false, error: `Missing required fields: ${missing.join(", ")}`, code: "INVALID_PARAMS" },
+      400,
+    );
   }
   if (!SAFE_ID.test(workId)) {
     return c.json({ success: false, error: "Invalid workId", code: "INVALID_PARAMS" }, 400);
@@ -310,7 +380,9 @@ generateRouter.post("/api/generate/video", async (c) => {
       costUsd: result.costUsd,
     });
   } catch (err: any) {
-    return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
+    // C1.2 — sanitize before returning so an upstream video-provider error
+    // can't leak the internal model/account id to the client.
+    return c.json({ success: false, error: sanitizeProviderError(err?.message), code: "API_ERROR" }, 500);
   }
 });
 
@@ -334,37 +406,42 @@ async function registerGeneratedBgmAsset(args: {
   const { workId, relativeAssetUri, providerId, prompt } = args;
   const work = await getWork(workId);
   if (!work) return null;
-  const compYamlPath = join(dataDir, "works", workId, "composition.yaml");
-  try {
-    const compDoc = yaml.load(await readFile(compYamlPath, "utf-8")) as Composition;
-    const { randomUUID } = await import("node:crypto");
-    const assetId = `gen_${randomUUID().slice(0, 8)}`;
-    const newAsset: AssetEntry = {
-      id: assetId,
-      uri: relativeAssetUri,
-      kind: "audio",
-      metadata: { duration: args.durationSec ?? 0 },
-      status: "ready",
-    };
-    const newEdge: ProvenanceEdge = {
-      fromAssetId: null,
-      toAssetId: assetId,
-      operation: {
-        type: "generate",
-        actor: "user",
-        timestamp: new Date().toISOString(),
-        params: {
-          providerId,
-          prompt,
-          costUsd: args.costUsd,
-          stub: args.stub,
-          ...(args.extraParams ?? {}),
-        },
+  const { randomUUID } = await import("node:crypto");
+  const assetId = `gen_${randomUUID().slice(0, 8)}`;
+  const newAsset: AssetEntry = {
+    id: assetId,
+    uri: relativeAssetUri,
+    kind: "audio",
+    metadata: { duration: args.durationSec ?? 0 },
+    status: "ready",
+  };
+  const newEdge: ProvenanceEdge = {
+    fromAssetId: null,
+    toAssetId: assetId,
+    operation: {
+      type: "generate",
+      actor: "user",
+      timestamp: new Date().toISOString(),
+      params: {
+        providerId,
+        prompt,
+        costUsd: args.costUsd,
+        stub: args.stub,
+        ...(args.extraParams ?? {}),
       },
-    };
-    compDoc.assets = [...(compDoc.assets ?? []), newAsset];
-    compDoc.provenance = [...(compDoc.provenance ?? []), newEdge];
-    await writeFile(compYamlPath, yaml.dump(compDoc), "utf-8");
+    },
+  };
+  try {
+    // C1.3 (PRD-0009) — same fresh-work bootstrap as the video path: a work
+    // with no composition.yaml yet (the冒烟's regression) gets the minimal
+    // composition seeded by the shared mutate chokepoint, so BGM on a fresh
+    // work now returns a real assetId + AssetEntry + provenance instead of the
+    // old silent assetId:null. One seed shape across video/image/audio.
+    await mutateCompositionFor({ workId }, (comp) => ({
+      ...comp,
+      assets: [...(comp.assets ?? []), newAsset],
+      provenance: [...(comp.provenance ?? []), newEdge],
+    }));
     return assetId;
   } catch {
     return null;
@@ -426,6 +503,22 @@ generateRouter.post("/api/generate/bgm", async (c) => {
       return c.json({
         success: false,
         error: `durationSeconds must be a number in 5-180 (got ${durationSeconds}). Lyria emits a full ~2min track; this only trims it.`,
+        code: "INVALID_PARAMS",
+      }, 400);
+    }
+  }
+
+  // C1.4 (PRD-0009) — temperature is documented 0.0–2.0; the value is untrusted
+  // (same #75 lesson as durationSeconds). An out-of-range value (the冒烟 sent 9)
+  // used to pass straight through to the provider, which returned a raw 500.
+  // Reject with 400 BEFORE the paid call so the caller learns the bound,
+  // matching the durationSeconds style.
+  if (temperature !== undefined) {
+    if (typeof temperature !== "number" || !Number.isFinite(temperature)
+      || temperature < 0 || temperature > 2) {
+      return c.json({
+        success: false,
+        error: `temperature must be a number in 0-2 (got ${temperature})`,
         code: "INVALID_PARAMS",
       }, 400);
     }

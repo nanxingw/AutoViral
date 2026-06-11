@@ -238,6 +238,49 @@ describe("POST /api/generate/bgm · Lyria music generation", () => {
     });
   });
 
+  it("rejects temperature out of [0,2] → 400 (untrusted client; doc bound is 0.0–2.0) · C1.4", async () => {
+    await withTempDataDir(async (dataDir) => {
+      await configureKey("sk-test");
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      const calls = await setupFakeMusicProvider();
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      await writeComposition(dataDir, w.id);
+
+      // 9 used to pass straight through to the provider, which 500'd.
+      const tooHigh = await apiRoutes.fetch(
+        jsonReq("POST", "/api/generate/bgm", { workId: w.id, prompt: "x", temperature: 9 }),
+      );
+      expect(tooHigh.status).toBe(400);
+      expect(String((await tooHigh.json()).error)).toMatch(/temperature/i);
+
+      const negative = await apiRoutes.fetch(
+        jsonReq("POST", "/api/generate/bgm", { workId: w.id, prompt: "x", temperature: -1 }),
+      );
+      expect(negative.status).toBe(400);
+
+      // The paid provider was never reached for either invalid request.
+      expect(calls).toHaveLength(0);
+    });
+  });
+
+  it("accepts a temperature within [0,2] · C1.4", async () => {
+    await withTempDataDir(async (dataDir) => {
+      await configureKey("sk-test");
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      const calls = await setupFakeMusicProvider();
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      await writeComposition(dataDir, w.id);
+
+      const res = await apiRoutes.fetch(
+        jsonReq("POST", "/api/generate/bgm", { workId: w.id, prompt: "x", temperature: 1.5 }),
+      );
+      expect(res.status).toBe(200);
+      expect(calls[0].temperature).toBe(1.5);
+    });
+  });
+
   it("success registers an AssetEntry (kind audio) + a generate provenance edge", async () => {
     await withTempDataDir(async (dataDir) => {
       await configureKey("sk-test");

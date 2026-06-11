@@ -14,9 +14,8 @@ import { evaluateWork } from "../../test-evaluator.js";
 import { MemoryClient } from "../../domain/memory.js";
 import { getWork } from "../../domain/work-store.js";
 import {
-  SECRET_BEARING_KEYS,
   SECRET_FIELDS,
-  buildSecretMeta,
+  redactedConfigResponse,
   getWsBridge,
 } from "./_shared.js";
 
@@ -44,25 +43,17 @@ systemRouter.get("/api/config", async (c) => {
     const parsed = JSON.parse(raw);
     analyticsLastCollectedAt = parsed.collected_at ?? null;
   } catch { /* file may not exist; ok */ }
-  // #60 — strip EVERY secret-bearing nested object from the spread so no
-  // plaintext credential escapes via `...configRest`. Previously only
-  // `openrouter` was stripped, leaving jimeng.accessKey/secretKey and
-  // memory.apiKey to leak. The redacted values resurface (set/lastFour only)
-  // through secretMeta below.
-  const configRest = { ...(config as unknown as Record<string, unknown>) };
-  for (const k of SECRET_BEARING_KEYS) delete configRest[k];
-  return c.json({
-    ...configRest,
-    // Secret fields: never returned in plaintext. The flat `openrouterKey`
-    // stays in the shape (always "") so older clients don't crash on undefined.
-    openrouterKey: "",
-    secretMeta: buildSecretMeta(config),
-    douyinUrl: config.analytics?.douyinUrl ?? "",
-    memorySyncEnabled: config.memory?.syncEnabled ?? false,
-    researchEnabled: config.research?.enabled ?? false,
-    researchCron: config.research?.schedule ?? "7 9,21 * * *",
-    analyticsLastCollectedAt,
-  });
+  // #60 + C1.1 — strip EVERY secret-bearing nested object so no plaintext
+  // credential escapes, surfacing redacted {set,lastFour} via secretMeta. The
+  // SAME helper now drives the PUT response (which used to echo raw config).
+  return c.json(
+    redactedConfigResponse(config, {
+      douyinUrl: config.analytics?.douyinUrl ?? "",
+      researchEnabled: config.research?.enabled ?? false,
+      researchCron: config.research?.schedule ?? "7 9,21 * * *",
+      analyticsLastCollectedAt,
+    }),
+  );
 });
 
 // PUT /api/config
@@ -114,7 +105,17 @@ systemRouter.put("/api/config", async (c) => {
   if (body.researchEnabled !== undefined || body.researchCron !== undefined) {
     void restartResearchScheduler();
   }
-  return c.json(config);
+  // C1.1 (PRD-0009) — NEVER echo the raw config back. The previous
+  // `c.json(config)` returned every plaintext secret (openrouter.apiKey /
+  // jimeng.accessKey+secretKey / memory.apiKey) on the write path, a leak the
+  // GET-only #60 strip never covered. Same redacted shape as GET now.
+  return c.json(
+    redactedConfigResponse(config, {
+      douyinUrl: config.analytics?.douyinUrl ?? "",
+      researchEnabled: config.research?.enabled ?? false,
+      researchCron: config.research?.schedule ?? "7 9,21 * * *",
+    }),
+  );
 });
 
 // GET /api/interests — 获取用户兴趣列表

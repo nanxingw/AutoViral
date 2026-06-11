@@ -31,6 +31,15 @@ const SUPPORTED_RATIOS: ReadonlyArray<readonly [string, number]> = [
   ['21:9', 21 / 9],
 ]
 
+// C1.2 (PRD-0009) — the authoritative aspect_ratio enum the OpenRouter
+// image_config accepts. Exported so POST /api/generate/image can reject an
+// illegal aspectRatio LOCALLY (before forwarding to a paid model that 400s with
+// an error body leaking the internal model/account id). Single source of truth:
+// derived from SUPPORTED_RATIOS so the route and the provider can never drift.
+export const SUPPORTED_IMAGE_ASPECT_RATIOS: readonly string[] = SUPPORTED_RATIOS.map(
+  ([label]) => label,
+)
+
 /** Closest supported aspect-ratio string for a width×height request, or
  *  undefined when either side is missing/invalid (model default applies). */
 export function deriveAspectRatio(
