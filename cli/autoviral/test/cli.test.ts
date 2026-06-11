@@ -1341,6 +1341,14 @@ describe("autoviral CLI — end-to-end", () => {
       expect(r.stdout).toMatch(/scene reorder/);
       expect(r.stdout).toMatch(/scene generate/);
     });
+
+    // D3-fixup — the scene list usage line must advertise --format so an agent
+    // probing via --help discovers the json/yaml/table override (parity with the
+    // manual + the checkpoint usage block). Was previously bare "scene list".
+    it("--help advertises scene list --format", async () => {
+      const r = await run(["--help"]);
+      expect(r.stdout).toMatch(/scene list \[--format/);
+    });
   });
 
   // D3 — `autoviral checkpoint create [--label]` is the manual snapshot trigger

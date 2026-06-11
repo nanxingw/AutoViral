@@ -271,18 +271,38 @@ export interface RemotionEntryProbe {
   path: string;
 }
 
+/** Injectable seams for probeRemotionEntry — defaults are the REAL env / fs /
+ *  module-dir so production callers pass nothing. Mirrors the daemon's
+ *  DoctorDeps.remotionEntry DI so BOTH the bundle-env and the missing-source
+ *  branches are unit-testable without spawning a copy of the (non-self-contained)
+ *  bundle into an isolated tree. */
+export interface RemotionEntryProbeDeps {
+  bundleEnv: string | undefined;
+  existsSyncFn: (p: string) => boolean;
+  /** Repo root the web/src source is resolved beneath. Defaults to the real
+   *  three-levels-up-from-dist hop. */
+  repoRoot: string;
+}
+
 /** D1 (PRD-0009 E2E): render/export/snapshot need a Remotion entry — either a
  *  pre-built bundle (AUTOVIRAL_REMOTION_BUNDLE, packaged app) or the repo's
  *  web/src source. Mirrors src/infra/paths.ts REMOTION_ENTRY_POINT: this CLI
  *  bundle lives at cli/autoviral/dist/cli.js, so the repo root is three levels
  *  up and web/src is resolved beneath it (same sibling rule as cli/ + skills/).
  *  Keep in lockstep with that module's doc comment. */
-export function probeRemotionEntry(): RemotionEntryProbe {
-  const prebuilt = process.env.AUTOVIRAL_REMOTION_BUNDLE;
-  if (prebuilt && prebuilt.trim() && existsSync(prebuilt.trim())) {
-    return { ready: true, via: "bundle", path: prebuilt.trim() };
+export function probeRemotionEntry(
+  deps?: Partial<RemotionEntryProbeDeps>,
+): RemotionEntryProbe {
+  const bundleEnv =
+    deps?.bundleEnv !== undefined
+      ? deps.bundleEnv
+      : process.env.AUTOVIRAL_REMOTION_BUNDLE;
+  const existsSyncFn = deps?.existsSyncFn ?? existsSync;
+  const repoRoot = deps?.repoRoot ?? join(cliModuleDir(), "..", "..", "..");
+
+  if (bundleEnv && bundleEnv.trim() && existsSyncFn(bundleEnv.trim())) {
+    return { ready: true, via: "bundle", path: bundleEnv.trim() };
   }
-  const repoRoot = join(cliModuleDir(), "..", "..", "..");
   const entry = join(
     repoRoot,
     "web",
@@ -292,7 +312,7 @@ export function probeRemotionEntry(): RemotionEntryProbe {
     "composition",
     "RemotionRoot.tsx",
   );
-  if (existsSync(entry)) return { ready: true, via: "source", path: entry };
+  if (existsSyncFn(entry)) return { ready: true, via: "source", path: entry };
   return { ready: false, via: null, path: entry };
 }
 

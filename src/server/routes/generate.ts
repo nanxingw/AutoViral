@@ -25,6 +25,7 @@ import {
 import { SUPPORTED_IMAGE_ASPECT_RATIOS } from "../../providers/openrouter-image.js";
 import { isEmptyAudioError } from "../../providers/audio/lyria.js";
 import type { VideoGenerateResult } from "../../providers/video/types.js";
+import type { MusicGenerateResult } from "../../providers/audio/types.js";
 import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
 import { uiEventBus } from "../bridge/ui-events.js";
 import { runPythonScript } from "../python-bridge.js";
@@ -570,7 +571,10 @@ generateRouter.post("/api/generate/bgm", async (c) => {
       ...(typeof temperature === "number" ? { temperature } : {}),
       ...(referenceImages.length > 0 ? { referenceImages } : {}),
     };
-    let result;
+    // D2-fixup — explicit type so result keeps its MusicGenerateResult shape
+    // across the catch boundary (an unannotated `let` degrades to `any` once the
+    // try/catch crosses, dropping type checking on .assetUri/.stub/.costUsd).
+    let result: MusicGenerateResult;
     try {
       result = await entry.generateMusic(musicOpts);
     } catch (firstErr) {

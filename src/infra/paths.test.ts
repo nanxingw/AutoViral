@@ -87,6 +87,13 @@ describe("Remotion source roots (D1 sibling resolution)", () => {
   it("pins WEB_SRC_ROOT / SHARED_SRC_ROOT as SIBLINGS of PACKAGE_ROOT", () => {
     expect(WEB_SRC_ROOT).toBe(join(PACKAGE_ROOT, "..", "web", "src"));
     expect(SHARED_SRC_ROOT).toBe(join(PACKAGE_ROOT, "..", "src", "shared"));
+    // D1-fixup — assert the negative too, so the actual D1 regression form (the
+    // CHILD write join(PACKAGE_ROOT,'web/src') → ghost dist/web/...) also turns
+    // this red. The positive toBe above is otherwise a near-tautology (copies the
+    // production expression); the existsSync guard below + these not.toBe make a
+    // child regression fail on BOTH the structural and the fs-existence axes.
+    expect(WEB_SRC_ROOT).not.toBe(join(PACKAGE_ROOT, "web", "src"));
+    expect(SHARED_SRC_ROOT).not.toBe(join(PACKAGE_ROOT, "src", "shared"));
   });
 
   it("REMOTION_ENTRY_POINT really exists in a source checkout (strongest guard)", () => {

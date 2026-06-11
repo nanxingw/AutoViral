@@ -53,21 +53,38 @@ class DispatchError extends Error {
   }
 }
 
+// D2-fixup — the BGM endpoint emits ONE user-facing Chinese, operator-actionable
+// `error` (the 502 empty-audio retry-exhausted message, code UPSTREAM_EMPTY_AUDIO).
+// Every OTHER non-2xx `error` is raw English (400 "durationSeconds must be a
+// number in 5-180…", 503 "openrouter.apiKey not configured", 500 provider
+// err.message like "model overloaded") — showing those verbatim would LEAK
+// English + machine detail into the user's panel (a localization regression vs
+// the old generic i18n fallback). So we only surface the server string verbatim
+// for codes on this allow-list; all other codes fall back to the localized
+// generic message (the raw English still goes to the console for debugging).
+const USER_FACING_ERROR_CODES = new Set(["UPSTREAM_EMPTY_AUDIO"]);
+
 /**
  * Pull a human-readable error string out of a non-2xx response body. The
  * generation endpoints return `{ success:false, error:"…", code:"…" }`; we
- * surface `error` when it's a non-empty string. A plain-text body is used as a
- * last resort ONLY when it isn't the raw JSON we already failed to parse, so a
- * machine blob never leaks to the user. Returns null when nothing readable is
- * found (caller falls back to the localized generic message).
+ * surface `error` ONLY when its `code` is on the user-facing allow-list (a
+ * localized, operator-actionable message). An English/technical body (or a body
+ * with no recognized code) returns null so the caller falls back to the
+ * localized generic message — no raw English leaks to the user. A plain-text /
+ * non-JSON body also returns null.
  */
 async function readServerMessage(res: Response): Promise<string | null> {
   // The body is consumed here ONCE on the error path (the caller throws right
   // after), so no clone() is needed — and avoiding clone() keeps this working
   // against lightweight test fetch mocks that don't implement it.
   try {
-    const body = (await res.json()) as { error?: unknown };
-    if (typeof body?.error === "string" && body.error.trim()) {
+    const body = (await res.json()) as { error?: unknown; code?: unknown };
+    const code = typeof body?.code === "string" ? body.code : "";
+    if (
+      USER_FACING_ERROR_CODES.has(code) &&
+      typeof body?.error === "string" &&
+      body.error.trim()
+    ) {
       return body.error.trim();
     }
   } catch {
@@ -419,11 +436,11 @@ export function GenerationDialog(props: GenerationDialogProps) {
       }),
     });
     if (!res.ok) {
-      // D2 — the server returns a readable, operator-actionable `error` for the
-      // BGM path (e.g. the 502 UPSTREAM_EMPTY_AUDIO "上游模型临时返空，请稍后重试…").
-      // Attach it to the thrown error so the catch in onGenerate can show it
-      // VERBATIM instead of the泛化 i18n fallback. No usable message → null,
-      // and onGenerate falls back to the generic string.
+      // D2 — the server's ONE localized, operator-actionable `error` is the 502
+      // UPSTREAM_EMPTY_AUDIO "上游模型临时返空，请稍后重试…". readServerMessage
+      // surfaces it VERBATIM only for that code; every other (English/technical)
+      // body returns null so onGenerate falls back to the localized generic
+      // string — no raw English leaks into the panel.
       throw new DispatchError(
         `bgm dispatch failed (${res.status})`,
         await readServerMessage(res),
@@ -528,11 +545,12 @@ export function GenerationDialog(props: GenerationDialogProps) {
         throw new Error("no video provider selected");
       }
     } catch (err) {
-      // D2 — prefer a readable, operator-actionable message the SERVER returned
-      // (the BGM path's 502 "上游模型临时返空，请稍后重试…" / 503 / 400 bodies are
-      // already user-facing Chinese). Only when the server gave us nothing
-      // usable do we fall back to the localized generic string. The raw English
-      // technical detail still goes to the console for debugging.
+      // D2 — prefer the SERVER's localized, operator-actionable message ONLY
+      // when it carries a user-facing code (the BGM 502 "上游模型临时返空，请稍后
+      // 重试…", code UPSTREAM_EMPTY_AUDIO). Every other body (503/400/500, which
+      // are raw English) yields null from readServerMessage, so we fall back to
+      // the localized generic string. The raw English detail still goes to the
+      // console for debugging.
       console.warn("[generation] dispatch failed:", err);
       const serverMessage =
         err instanceof DispatchError ? err.serverMessage : null;

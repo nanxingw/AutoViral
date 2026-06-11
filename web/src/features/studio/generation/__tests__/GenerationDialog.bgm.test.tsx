@@ -121,4 +121,68 @@ describe("GenerationDialog BGM error surfacing (D2)", () => {
       expect(txt).not.toContain("bgm dispatch failed");
     });
   });
+
+  // D2-fixup (MEDIUM) — the server's 503/400/500 bodies carry RAW ENGLISH
+  // `error` strings (code NO_API_KEY / INVALID_PARAMS / API_ERROR). Surfacing
+  // those verbatim leaked English + machine detail into the user's panel (a
+  // localization regression). They must instead fall back to the localized
+  // generic message; only the user-facing UPSTREAM_EMPTY_AUDIO code is shown
+  // verbatim. This case is the one the previous net missed.
+  it("503 NO_API_KEY (English error) → localized fallback, never the English original", async () => {
+    const fetchMock = bgmFetchMock({
+      status: 503,
+      body: {
+        success: false,
+        error: "openrouter.apiKey not configured",
+        code: "NO_API_KEY",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onOpenChange = vi.fn();
+    wrap(
+      <GenerationDialog workId="w1" open={true} onOpenChange={onOpenChange} />,
+    );
+
+    await openBgmAndType("warm cinematic ambient pad, sparse");
+    fireEvent.click(screen.getByRole("button", { name: /^generate|生成$/i }));
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => {
+      const txt = alert.textContent ?? "";
+      // Localized generic message, NOT the raw English server string.
+      expect(txt).toMatch(/生成服务调度失败|Generation provider dispatch failed/);
+    });
+    expect(alert.textContent ?? "").not.toContain(
+      "openrouter.apiKey not configured",
+    );
+  });
+
+  it("400 INVALID_PARAMS (English + value interpolation) → no English / no got-value leak", async () => {
+    const fetchMock = bgmFetchMock({
+      status: 400,
+      body: {
+        success: false,
+        error:
+          "durationSeconds must be a number in 5-180 (got 9999). Lyria emits a full ~2min track; this only trims it.",
+        code: "INVALID_PARAMS",
+      },
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const onOpenChange = vi.fn();
+    wrap(
+      <GenerationDialog workId="w1" open={true} onOpenChange={onOpenChange} />,
+    );
+
+    await openBgmAndType("warm cinematic ambient pad, sparse");
+    fireEvent.click(screen.getByRole("button", { name: /^generate|生成$/i }));
+
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => {
+      const txt = alert.textContent ?? "";
+      expect(txt).toMatch(/生成服务调度失败|Generation provider dispatch failed/);
+    });
+    const txt = alert.textContent ?? "";
+    expect(txt).not.toContain("durationSeconds");
+    expect(txt).not.toContain("got 9999");
+  });
 });

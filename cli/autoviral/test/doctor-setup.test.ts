@@ -89,6 +89,104 @@ describe("autoviral doctor — spawn", () => {
     expect(r.stdout).toMatch(/doctor/);
     expect(r.stdout).toMatch(/setup/);
   });
+
+  // D1-fixup — the core "remotion render entry" check (deps-probe.ts
+  // probeRemotionEntry + doctor.ts coreMissing flip) had ZERO CLI-side coverage:
+  // the "all core present" case above passes through the repo's real web/src
+  // checkout (source branch) PASSIVELY, so a revert of the whole remotion block
+  // left the suite green. This spawn case pins the ✓ pre-built-bundle branch +
+  // exit 0 end-to-end; the ✗ missing-source branch is pinned by the injected
+  // UNIT test below (the bundle isn't self-contained — it imports `yaml` from
+  // node_modules — so copying it into an isolated tree to fake a missing web/src
+  // breaks ESM resolution; DI is the honest seam, mirroring the daemon side).
+  it("remotion: AUTOVIRAL_REMOTION_BUNDLE present → ✓ pre-built bundle, exit 0", async () => {
+    // A real tmp dir stands in as the packaged pre-built bundle.
+    const bundleDir = mkdtempSync(join(tmpdir(), "av-remotion-bundle-"));
+    const r = await execa("node", [BIN, "doctor"], {
+      reject: false,
+      env: {
+        AUTOVIRAL_DATA_DIR: dataDir,
+        FFMPEG_PATH: fakeFfmpeg,
+        FFPROBE_PATH: fakeFfprobe,
+        AUTOVIRAL_REMOTION_BUNDLE: bundleDir,
+      },
+    });
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/✓\s+remotion/);
+    expect(r.stdout).toMatch(/pre-built bundle/);
+    expect(r.stdout).toContain(bundleDir);
+    expect(r.stdout).toMatch(/Core dependencies OK/);
+  });
+});
+
+// ── UNIT: probeRemotionEntry (injected — all three branches) ─────────────────
+// D1-fixup — the daemon side pins both branches via DoctorDeps.remotionEntry DI
+// (dep-doctor.test.ts); the CLI side had none. probeRemotionEntry now takes the
+// same injectable seam so the bundle-env, source-present, and the critical
+// MISSING-source branch (the one that flips doctor's exit code, untestable via
+// spawn because the non-self-contained bundle can't run from an isolated tree)
+// are all pinned here.
+
+describe("probeRemotionEntry — injected branches (D1)", () => {
+  it("AUTOVIRAL_REMOTION_BUNDLE set + exists → ready via=bundle", async () => {
+    const { probeRemotionEntry } = await import("../src/deps-probe.js");
+    const probe = probeRemotionEntry({
+      bundleEnv: "/prebuilt/bundle",
+      existsSyncFn: (p) => p === "/prebuilt/bundle",
+      repoRoot: "/anywhere",
+    });
+    expect(probe.ready).toBe(true);
+    expect(probe.via).toBe("bundle");
+    expect(probe.path).toBe("/prebuilt/bundle");
+  });
+
+  it("no bundle env, web/src present → ready via=source (sibling resolution)", async () => {
+    const { probeRemotionEntry } = await import("../src/deps-probe.js");
+    const entry = join(
+      "/repo",
+      "web",
+      "src",
+      "features",
+      "studio",
+      "composition",
+      "RemotionRoot.tsx",
+    );
+    const probe = probeRemotionEntry({
+      bundleEnv: undefined,
+      existsSyncFn: (p) => p === entry,
+      repoRoot: "/repo",
+    });
+    expect(probe.ready).toBe(true);
+    expect(probe.via).toBe("source");
+    expect(probe.path).toBe(entry);
+  });
+
+  it("no bundle env AND no web/src → NOT ready (the doctor exit-1 trigger)", async () => {
+    const { probeRemotionEntry } = await import("../src/deps-probe.js");
+    const probe = probeRemotionEntry({
+      bundleEnv: undefined,
+      existsSyncFn: () => false, // nothing exists anywhere
+      repoRoot: "/repo",
+    });
+    expect(probe.ready).toBe(false);
+    expect(probe.via).toBe(null);
+    // It reports the SIBLING path it looked for (web/src/.../RemotionRoot.tsx),
+    // never a child of dist — a child regression changes this string.
+    expect(probe.path).toMatch(
+      /web\/src\/features\/studio\/composition\/RemotionRoot\.tsx$/,
+    );
+  });
+
+  it("empty-string bundle env (explicitly cleared) → ignored, falls to source probe", async () => {
+    const { probeRemotionEntry } = await import("../src/deps-probe.js");
+    const probe = probeRemotionEntry({
+      bundleEnv: "", // cleared — must NOT be treated as a valid bundle dir
+      existsSyncFn: () => false,
+      repoRoot: "/repo",
+    });
+    expect(probe.ready).toBe(false);
+    expect(probe.via).toBe(null);
+  });
 });
 
 // ── SPAWN: setup unknown-flag rejection (D3) ─────────────────────────────────

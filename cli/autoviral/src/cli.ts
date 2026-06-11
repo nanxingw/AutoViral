@@ -143,7 +143,7 @@ function usage(): string {
     "    Add one shot to the storyboard (分镜表). Prints the minted sceneId. Scenes",
     "    are the planning layer (剧本=PRD / 分镜=issue), decoupled from the timeline;",
     "    they have no direct render effect until you hand a scene off to generation.",
-    "  scene list                      List the storyboard (order / id / title / intent / status).",
+    "  scene list [--format json|yaml|table]   List the storyboard (order / id / title / intent / status).",
     "  scene set <id> [--title ...] [--intent ...] [--prompt ...] [--narration ...] [--duration N]",
     "    [--shot-size ...] [--camera ...] [--md-anchor ...]   Patch one scene card.",
     "  scene reorder <id1> <id2> ...   Reorder the storyboard (a full permutation of scene ids).",
