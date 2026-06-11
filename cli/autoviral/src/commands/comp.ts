@@ -26,7 +26,7 @@
 import { readFile } from "node:fs/promises";
 import { parse as yamlParse } from "yaml";
 import { bridgeRequest, readContext } from "../client.js";
-import { writeOut } from "../output.js";
+import { parseFormatFlag, writeOut } from "../output.js";
 
 interface CompDiffResult {
   diff: string;
@@ -52,7 +52,8 @@ export async function compCommand(args: string[]): Promise<void> {
   if (sub === "show" || sub === undefined) {
     const ctx = readContext();
     const result = await bridgeRequest<unknown>(ctx, "GET", "/comp");
-    writeOut(result);
+    // `--format json|yaml|table` overrides isTTY (manual §Output format override).
+    writeOut(result, parseFormatFlag(args));
     return;
   }
   if (sub === "diff") {

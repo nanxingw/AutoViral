@@ -89,7 +89,7 @@ autoviral seek 0
 
 **Important caveats for Phase 3:**
 
-- `clip add` writes `video`, `audio`, and `text` clips today. `--track overlay` is NOT yet supported (the bridge throws + returns HTTP 400), so don't use it.
+- `clip add` writes `video`, `audio`, `text`, and `overlay` (picture-in-picture) clips. Overlay needs an overlay *lane* first (`track add --kind overlay`, or target one with `--track-id`) — without one the bridge returns `No track of kind overlay` (HTTP 400).
 - The ids are server-generated unless you pre-compute them (the schema accepts `id` in the body but the CLI doesn't expose a `--id` flag yet). After `clip add` prints the new id, capture it if you need to keep mutating.
 
 ## Polishing the batch with crossfades

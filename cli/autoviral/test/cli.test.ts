@@ -467,6 +467,20 @@ beforeAll(async () => {
       if (body.language === "nodep") {
         return send(503, { ok: false, error: "stable-whisper not installed", code: "PYTHON_DEP_MISSING" });
       }
+      // C3 fix-up — the real bridge 4xx case: no audio source in the work and no
+      // --asset given (routes.ts returns 400 code:4). The CLI must map this to
+      // exit 4 (bad input), NOT the bare-count exit-0 success path.
+      if (body.assetPath === "assets/no-audio.mp3") {
+        return send(400, { ok: false, error: "no audio source", code: 4 });
+      }
+      // C3 fix-up — zero-segment success (silence): HTTP 200 ok:true with
+      // written:0 + an explanatory `message` the CLI must surface on stderr.
+      if (body.assetPath === "assets/silent.mp3") {
+        return send(200, {
+          ok: true,
+          result: { written: 0, language: body.language ?? null, message: "no speech detected in the audio source" },
+        });
+      }
       const written = body.assetPath === "assets/missing.mp3" ? 0 : 3;
       return send(200, { ok: true, result: { written, language: body.language ?? null } });
     }
@@ -620,6 +634,40 @@ describe("autoviral CLI — end-to-end", () => {
     const parsed = JSON.parse(r.stdout);
     expect(Array.isArray(parsed)).toBe(true);
     expect(parsed.length).toBeGreaterThanOrEqual(3);
+  });
+
+  // C3 (PRD-0009 smoke) — the `--format` override must win over isTTY. `run()`
+  // pipes stdout (isTTY === false → JSON auto-default), so a bare `list clips`
+  // is JSON; but `list clips --format table` MUST force the ASCII table even
+  // while piped (manual §Output format override promises the explicit flag works
+  // in either direction). This pins the smoke regression: a piped explicit
+  // `--format table` was silently falling back to JSON.
+  it("list clips --format table (piped) → ASCII table, NOT JSON", async () => {
+    const r = await run(["list", "clips", "--format", "table"]);
+    expect(r.exitCode).toBe(0);
+    // Not JSON (a JSON array would start with `[`).
+    expect(r.stdout.trim().startsWith("[")).toBe(false);
+    const lines = r.stdout.trim().split("\n");
+    // Header row carries the column names; the projection rows have an `id`.
+    expect(lines[0]).toMatch(/\bid\b/);
+    // Second line is the dashed separator (renderTable invariant).
+    expect(lines[1]).toMatch(/^-+(\s+-+)*$/);
+    // A known clip id from the in-memory mock appears in a data row.
+    expect(r.stdout).toMatch(/vc_s01/);
+  });
+
+  it("list clips --format json (piped) → still JSON (explicit matches the default)", async () => {
+    const r = await run(["list", "clips", "--format", "json"]);
+    expect(r.exitCode).toBe(0);
+    expect(Array.isArray(JSON.parse(r.stdout))).toBe(true);
+  });
+
+  it("list clips --format yaml (piped) → YAML, NOT JSON", async () => {
+    const r = await run(["list", "clips", "--format", "yaml"]);
+    expect(r.exitCode).toBe(0);
+    // YAML array items render as `- ` list entries; JSON would start with `[`.
+    expect(r.stdout.trim().startsWith("[")).toBe(false);
+    expect(r.stdout).toMatch(/^- /m);
   });
 
   it("clip add → returns new id, list shows it, remove makes it gone", async () => {
@@ -843,6 +891,27 @@ describe("autoviral CLI — end-to-end", () => {
   it("captions generate when whisper is missing → bridge 503 → exit 3", async () => {
     const r = await run(["captions", "generate", "--language", "nodep"]);
     expect(r.exitCode).toBe(3);
+  });
+
+  // C3 (PRD-0009 smoke) — a 4xx from the bridge (no audio source, 400 code:4)
+  // MUST exit 4 via the shared bridge-error path, never the bare-count exit-0
+  // success print. Pins the regression the smoke flagged ("captions still exit 0
+  // on 4xx") so a future refactor that swallows the error can't slip the gate.
+  it("captions generate when bridge 400s (no audio source) → exit 4 (not 0)", async () => {
+    const r = await run(["captions", "generate", "--asset", "assets/no-audio.mp3"]);
+    expect(r.exitCode).toBe(4);
+    expect(r.stdout.trim()).toBe(""); // no count printed on the error path
+    expect(r.stderr).toMatch(/no audio source/);
+  });
+
+  // C3 — zero-segment success (silence): exit 0, prints the bare count `0` on
+  // stdout AND surfaces the bridge's `message` on stderr so an agent can tell
+  // "wrote nothing" apart from a generic success.
+  it("captions generate on silent audio → exit 0, prints 0, surfaces the no-speech message", async () => {
+    const r = await run(["captions", "generate", "--asset", "assets/silent.mp3"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe("0");
+    expect(r.stderr).toMatch(/no speech detected/);
   });
 
   it("captions unknown subcommand → exit 127", async () => {

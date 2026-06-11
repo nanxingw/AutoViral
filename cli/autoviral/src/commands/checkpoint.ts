@@ -16,7 +16,7 @@
 // that to the operator so they know the undo exists.
 
 import { bridgeRequest, readContext } from "../client.js";
-import { writeOut } from "../output.js";
+import { parseFormatFlag, writeOut } from "../output.js";
 
 interface CheckpointRow {
   file: string;
@@ -34,7 +34,8 @@ export async function checkpointCommand(args: string[]): Promise<void> {
   // checkpoint list — GET the rollback history.
   if (sub === "list") {
     const rows = await bridgeRequest<CheckpointRow[]>(ctx, "GET", "/checkpoints");
-    writeOut(rows);
+    // `--format json|yaml|table` overrides isTTY (manual §Output format override).
+    writeOut(rows, parseFormatFlag(args));
     return;
   }
 

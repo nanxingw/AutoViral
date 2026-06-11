@@ -218,7 +218,7 @@ Skill('autoviral')
 组合编辑 / UI 控制 / 导出 / 抓取都走你 PATH 上的 \`autoviral\` 命令——原子写入、zod 校验，并**直接驱动右侧 Studio** 让用户实时看到你的动作。完整命令见 \`autoviral docs _shared/03-cli-reference\`，常用：
 
 - **看**：\`autoviral comp show\`（整份 composition）· \`autoviral list clips|assets\` · \`autoviral whoami\`（自检）
-- **改 composition**：\`autoviral clip add --src assets/clips/x.mp4 --track video --offset 75 --duration 5\` · \`autoviral clip set <id> --opacity 0.5\` · \`autoviral clip remove <id>\`${isVideo ? `
+- **改 composition**：\`autoviral clip add --src assets/clips/x.mp4 --track video --offset 75 --duration 5\` · \`autoviral clip set <id> --scale 1.2\`（opacity 是 keyframe 属性，走 \`clip keyframe add\`）· \`autoviral clip remove <id>\`${isVideo ? `
 - **排分镜**（storyboard 计划层）：\`autoviral scene add --title "钩子镜" --intent hook --shot-size closeup --camera push\` · \`autoviral scene list\` · \`autoviral scene set <id> ...\` · \`autoviral scene reorder <id1> <id2> ...\` · \`autoviral scene link <id> --asset <assetId>\` · \`autoviral scene remove <id>\` · \`autoviral scene generate <id>\`（单镜出图 handoff：原子登记 + 回链，见"计划层"一节）。scene 是逐镜分镜表（写进 composition 的 \`scenes[]\`），与时间轴 clip 解耦、本身不直接渲染——它是计划，不是执行。` : ""}
 - **驱动 UI**（让用户看到你在指哪）：\`autoviral select clip <id>\` · \`autoviral seek 12.5\` · \`autoviral play|pause\` · \`autoviral toast "已生成 16 段" --kind success\` · \`autoviral progress start|step|done\`
 - **问用户**（破坏性 / 花钱 / >10s 的操作先问）：\`autoviral ask "现在渲染吗？" --yes-no\`（exit 0=yes / 1=no）
@@ -239,7 +239,7 @@ Skill('autoviral')
 - **配音 TTS** — 两条端点二选一：\`POST /api/audio/tts\`（你自定 output_path）/ \`POST /api/works/:id/tts\`（自动登记 + 广播刷新 Studio 库，多数情况用这条）。**短视频默认应该有人声**——绝大多数 viral 短视频靠 narration 推进节奏；做完 brief 主动 propose 加旁白。
 - **配乐 BGM** — \`POST /api/generate/bgm\`。Lyria 3 Pro via OpenRouter；响应含 \`assetId\`（已原子登记 + 广播），之后用 \`autoviral clip add\` 当 bgm 轨拼上。**这是生成音乐的唯一正路：直接调这个端点，绝不去跑任何 \`.py\` 脚本来"兜底"做 BGM（那些脚本已删，是死的，见上方兜底规则）。**
 - **字幕 ASR** — \`autoviral captions generate\`（闭环：转写 + 写回 composition text 轨 + 广播）或裸 \`POST /api/audio/captions\`（只返回 segments JSON 不落盘）。**抖音 70% 用户静音浏览，任何带音频的视频都该加字幕**；字幕走 composition 的 \`captionStrategy: overlay\` 渲染，不要手写 ffmpeg drawtext。
-- **混音** — \`POST /api/audio/mix\`（多轨混音 / 音量平衡 / ducking 闪避）。响度归一化（平台 LUFS 目标）不在这里，是导出时 \`POST /api/render\` 的事。
+- **混音** — \`POST /api/audio/mix\`（多轨混音 / 音量平衡 / ducking 闪避）。响度归一化（平台 LUFS 目标）不在这里，是导出时 \`POST /api/works/:id/render\` 的事（该端点接受可选 \`loudnessTargetLufs\`）。
 - **过场转场** — 4 个 cinematic 端点 \`POST /api/transitions/{light-leak,glitch,domain-warp,grav-lens}\`，外加更简单的 \`autoviral transition add\` 溶解。**绝不手写 ffmpeg xfade**；每种看头、时长建议见 docs。
 
 ## 4 个能力，按需直接调用

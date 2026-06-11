@@ -22,7 +22,7 @@ Always select before mutating. The user sees what's changing.
 ```bash
 autoviral select clip vc_s07
 autoviral seek $(get-clip-start vc_s07)
-autoviral clip set vc_s07 --opacity 0.5
+autoviral clip keyframe add vc_s07 --property opacity --at 0 --value 0.5
 autoviral toast "Faded vc_s07 to 0.5" --kind success
 ```
 
@@ -63,13 +63,13 @@ Don't toast every one. Group them.
 ```bash
 # Bad — five toasts in 200ms
 for clip in vc_s01 vc_s02 vc_s03 vc_s04 vc_s05; do
-  autoviral clip set $clip --opacity 0.8
+  autoviral clip keyframe add $clip --property opacity --at 0 --value 0.8
   autoviral toast "Faded $clip" --kind info
 done
 
 # Good — one summary toast
 for clip in vc_s01 vc_s02 vc_s03 vc_s04 vc_s05; do
-  autoviral clip set $clip --opacity 0.8
+  autoviral clip keyframe add $clip --property opacity --at 0 --value 0.8
 done
 autoviral toast "Faded 5 clips to 0.8 opacity" --kind success
 ```

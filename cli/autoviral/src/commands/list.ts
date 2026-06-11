@@ -6,17 +6,20 @@
 // asset kind. They never apply to both lists.
 
 import { bridgeRequest, readContext } from "../client.js";
-import { writeOut } from "../output.js";
+import { parseFormatFlag, writeOut } from "../output.js";
 
 export async function listCommand(args: string[]): Promise<void> {
   const sub = args[0];
   const ctx = readContext();
+  // `--format json|yaml|table` overrides the isTTY auto-detect (manual §Output
+  // format override) — explicit wins even when stdout is piped.
+  const format = parseFormatFlag(args);
   if (sub === "clips") {
     const trackIdx = args.indexOf("--track");
     const track = trackIdx >= 0 ? args[trackIdx + 1] : undefined;
     const qs = track ? `?track=${encodeURIComponent(track)}` : "";
     const r = await bridgeRequest<unknown[]>(ctx, "GET", `/clips${qs}`);
-    writeOut(r);
+    writeOut(r, format);
     return;
   }
   if (sub === "assets") {
@@ -24,7 +27,7 @@ export async function listCommand(args: string[]): Promise<void> {
     const kind = kindIdx >= 0 ? args[kindIdx + 1] : undefined;
     const qs = kind ? `?kind=${encodeURIComponent(kind)}` : "";
     const r = await bridgeRequest<unknown[]>(ctx, "GET", `/assets${qs}`);
-    writeOut(r);
+    writeOut(r, format);
     return;
   }
   process.stderr.write(

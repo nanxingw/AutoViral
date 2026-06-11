@@ -17,7 +17,7 @@ $ autoviral whoami
 workId: w_20260513_1919_74d
 cwd:    /Users/.../.autoviral/works/w_20260513_1919_74d
 port:   3271
-version: 0.1.0
+version: <current AutoViral version>
 ```
 
 ### `autoviral docs [topic]`
@@ -124,25 +124,27 @@ autoviral clip add \
 |---|---|---|
 | `--src <path>` | Asset path relative to workspace root | yes (except `--track text`) |
 | `--text <string>` | Text content (only for `--track text`) | yes for text track |
-| `--track <kind>` | `video` (default) `audio` `text` | no |
+| `--track <kind>` | `video` (default) `audio` `text` `overlay` | no |
 | `--offset <s>` | `trackOffset` in seconds (default 0) | no |
 | `--duration <s>` | Sets `out = in + duration` for video/audio; sets `duration` for text/overlay | no |
 | `--in <s>` | Source-time start (video/audio only) | no |
 | `--out <s>` | Source-time end (video/audio only) | no |
 
-Prints the new clip id to stdout. **Caveat:** `clip add` writes `video`, `audio`, and `text` clips today. `--track overlay` is NOT yet supported — the bridge throws `overlay track not yet supported` and returns HTTP 400, so don't reach for it.
+Prints the new clip id to stdout. `clip add` writes `video`, `audio`, `text`, and `overlay` (picture-in-picture) clips. **Overlay caveat:** an overlay clip needs an overlay *lane* to land on — none exists by default, so create one first with `track add --kind overlay` (see [`track add`](#autoviral-track-add) below) or target an existing one with `--track-id <overlayTrackId>`. Without an overlay lane the bridge returns `No track of kind overlay` (HTTP 400, exit 4). A fresh overlay clip defaults to a full-frame box at full opacity; reframe it via `clip set <id> --position.xPct ... --opacity ...` (overlay is the one kind whose static `opacity` is a plain `clip set` field).
 
 ### `autoviral clip set <id> --key value ...`
 
 Partial update. Flags become the patch body verbatim. Numeric values are auto-cast to numbers; everything else stays a string.
 
 ```bash
-autoviral clip set vc_s07 --opacity 0.5
+autoviral clip set vc_s07 --scale 1.2
 autoviral clip set vc_s07 --in 0.2 --out 4.8 --trackOffset 12.4
 autoviral clip set ac_bgm --volume 0.65 --fadeOut 1.5
 ```
 
 Nested objects (transforms / filters / position / style) are **replaced wholesale**, not deep-merged. Fetch via `comp show` first if you only want to tweak one field.
+
+> **`opacity` is not a `clip set` property on video/audio/text clips** — it is a *keyframe* property there (an animated curve), so `clip set vc_s07 --opacity 0.5` is rejected (HTTP 400, exit 4). To set/animate opacity on a video clip use `autoviral clip keyframe add vc_s07 --property opacity --at 0 --value 0.5` (see `clip keyframe` below). The one exception is an **overlay** clip, whose static `opacity` *is* a plain `clip set` field.
 
 ### `autoviral clip remove <id>`
 
@@ -151,6 +153,11 @@ Delete a clip. No confirmation; gate with `autoviral ask` for destructive flows.
 ```bash
 autoviral clip remove vc_s07
 ```
+
+**Idempotent:** removing an `id` that doesn't exist returns `{ok:true}` (exit 0),
+not an error — this is deliberate REST-style idempotency (the post-condition
+"that clip is gone" already holds). So a re-run / double-delete is safe and
+silent. (Contrast `track remove`, which **does** reject an unknown `trackId`.)
 
 ### `autoviral clip split <id> --at <seconds>`
 
@@ -213,6 +220,54 @@ Text clips carry no keyframes (the bridge returns HTTP 400). For a plain
 cross-fade at a cut between two adjacent video clips, prefer
 `autoviral transition add` (it cross-fades the boundary without hand-authored
 keyframes) — see the *crossfade* recipe.
+
+## Track commands (lanes / 轨道)
+
+A track is a **lane** — a horizontal strip the timeline stacks clips on. A clip
+always lives on exactly one same-kind lane. When you need a second lane of a
+kind (e.g. an A2 audio lane for music under the voiceover, or an overlay lane to
+land a picture-in-picture clip), build it first with `track add`, then point
+`clip add --track-id <id>` (or `clip move --to-track <id>`) at it. Both verbs
+round-trip through the bridge running the **same** shared op the Studio "+ lane"
+button / lane-remove action use, so an agent and a human converge on one
+composition.
+
+### `autoviral track add`
+
+Add a new lane of a kind; prints the minted `trackId` on stdout (capture it to
+target `clip add --track-id`).
+
+```bash
+TID=$(autoviral track add --kind audio --label "Music")   # new audio lane, end of the audio block
+autoviral track add --kind overlay                        # an overlay lane (needed before overlay clip add)
+autoviral track add --kind audio --after t_a1             # insert directly below lane t_a1
+autoviral clip add --src assets/music/bgm.mp3 --track audio --track-id "$TID"
+```
+
+| Flag | Meaning | Required |
+|---|---|---|
+| `--kind <kind>` | `video` / `audio` / `text` / `overlay` | yes |
+| `--after <trackId>` | Insert the new lane **directly below** this anchor lane; omit to append at the end of the same-kind block | no |
+| `--label <string>` | Human-readable lane label shown in Studio | no |
+| `--language <code>` | Language tag (e.g. `zh-CN`) — mainly for text/caption lanes | no |
+
+An invalid `--kind` is rejected locally with exit 4 (never hits the bridge). The
+server owns the lane-placement math (same-kind block ordering, `displayOrder`
+recompaction).
+
+### `autoviral track remove <trackId>`
+
+Remove a lane **and all clips on it**. Takes the exact `trackId` (from
+`list clips` / `comp show`), not a kind.
+
+```bash
+autoviral track remove t_a2
+```
+
+Unlike `clip remove` (idempotent — see its note), `track remove` is **not**
+idempotent: removing an unknown `trackId` is rejected (HTTP 400, exit 4). There
+is no confirm step at the bridge — an agent that asks for a delete means it; gate
+destructive removes with `autoviral ask` yourself.
 
 ## Script commands (剧本 / narrative outline)
 
@@ -417,7 +472,7 @@ Body: `{ workId, videoPath, tracks, outputFilename }`
 
 Returns `{ assetPath: "output/<name>", previewUrl }`.
 
-> Loudness normalization (the platform LUFS target, e.g. WeChat −16) is **not** a mix-track field — it is applied at **export** by the render queue (`POST /api/render` accepts an optional `loudnessTargetLufs`). The mixer only balances per-track volume/fade/ducking.
+> Loudness normalization (the platform LUFS target, e.g. WeChat −16) is **not** a mix-track field — it is applied at **export** by the render queue (`POST /api/works/:id/render` accepts an optional `loudnessTargetLufs`). The mixer only balances per-track volume/fade/ducking.
 
 ### Cinematic transitions — 4 endpoints
 
@@ -446,6 +501,25 @@ Hard cuts for fast edits, fade or nothing for single-shot voiceover; ≤2 of the
 ### `POST /api/frames/select`
 
 Pick the winning candidate from a batch of generated frames (paired with the internal `/api/generate/image/batch` below). Body: `{ workId, shotId, selectedSeed }`. It promotes the candidate matching `seed-<selectedSeed>` from `assets/frames/candidates/<shotId>/` to `assets/frames/frame-<shotId>.png` and suffixes the rest with `_rejected`. Returns `{ framePath }`. This is **not** a generic "extract a frame from a video for i2v" tool — to drive image-to-video, pass a workspace-relative image path as `firstFrame` to `POST /api/generate/video` (see above).
+
+### `POST /api/works` — create a new work
+
+> **You almost never need this.** The standard agent entrypoint is to drive the
+> work the user already opened (`autoviral whoami` tells you which one — its
+> `workId` is injected as `AUTOVIRAL_WORK_ID`). Creating a work from the CLI is a
+> minority case (e.g. a batch/automation that spawns its own work). Don't create
+> a fresh work just to start editing — operate on the existing one.
+
+Body: `{ type, platforms, title?, contentCategory?, videoSource?, videoSearchQuery?, topicHint? }`. Only `type` and `platforms` are required.
+
+| Field | Meaning |
+|---|---|
+| `type` | **Required.** The work type — one of `short-video` (renders `composition.yaml`) or `image-text` (carousel, renders `carousel.yaml`). Any other value → HTTP 400 `unknown work type`. |
+| `platforms` | **Required.** Non-empty array of target platform ids (e.g. `["douyin"]`). |
+| `title` | Optional. Blank → an empty title; Studio localizes the "未命名/Untitled" placeholder at render time (so the language isn't frozen to creation-time locale). |
+| `topicHint` | Optional seed topic carried into the chat brief. |
+
+Returns the created work object with **HTTP 201**. Missing `type`/`platforms` → 400 `create_work_validation`.
 
 ## Internal endpoints (not for agent use)
 
@@ -667,11 +741,11 @@ See `contracts/error-codes.md` for the canonical table and which conditions map 
 
 ## Output format override
 
-Any read-shaped command takes `--format json|yaml|table`:
+Any read-shaped command (`comp show`, `list clips|assets`, `checkpoint list`) takes `--format json|yaml|table`. An explicit `--format` **wins over the isTTY auto-detect in either direction** — so a piped `--format table` still emits the ASCII table (not the piped-JSON default), and a piped `--format yaml` still emits YAML:
 
 ```bash
 autoviral comp show --format json | jq '.duration'
-autoviral list clips --format table       # ASCII columns
+autoviral list clips --format table | cat   # ASCII columns even though piped
 ```
 
 `docs` and `whoami` ignore `--format` (their shapes are fixed). Write commands print only the new id (clip add) or are silent (clip set / remove / select / seek / toast / progress / ask-response).

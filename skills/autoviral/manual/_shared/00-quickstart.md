@@ -27,8 +27,8 @@ Output is YAML when stdout is a TTY (user reads it), JSON otherwise (you parse w
 # Append a video clip
 autoviral clip add --src assets/clips/s20.mp4 --track video --offset 75.0 --duration 5.0
 
-# Patch a clip in place
-autoviral clip set vc_s07 --opacity 0.5 --in 0.2 --out 4.8
+# Patch a clip in place (opacity is a keyframe property — see `clip keyframe`)
+autoviral clip set vc_s07 --scale 1.2 --in 0.2 --out 4.8
 
 # Delete
 autoviral clip remove vc_s07

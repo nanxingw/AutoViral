@@ -216,22 +216,23 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     ).toBeDefined();
   });
 
-  // S1 (US 35/36/37) fix-up —止谎 parity with the cli.test.ts `--help` guard.
-  // S1 removed the overlay false-promise from `cli.ts --help` but left it in
-  // the CLI-REFERENCE MANUAL (the declared single source of truth for
-  // `autoviral docs`) and a sibling recipe. The live bridge writes
-  // video/audio/text and throws ONLY on overlay (routes.ts:595, HTTP 400), so
-  // any manual that advertises `--track overlay` as a usable clip-add value —
-  // or claims audio/text DON'T write — re-introduces the exact lie S1 killed.
-  // Guard the manual chapter's clip-add row + the recipe the same way the CLI
-  // help is guarded, so the two surfaces can't diverge again.
-  it("the CLI-REFERENCE manual's `clip add --track` row does NOT advertise the overlay track (it 400s)", () => {
+  // S10 (US 6) flip —止谎 parity with the cli.test.ts `--help` guard, now in
+  // the OTHER direction. S1 once removed an overlay FALSE-promise; S10 then made
+  // `clip add --track overlay` genuinely work at runtime (routes.ts:898-913 — the
+  // OverlayClip schema + the Scene→OverlayTrackRenderer dispatch consume it, and
+  // cli.test.ts:1323 proves the success path + cli.test.ts:1975 asserts `--help`
+  // MUST advertise it). The止谎 invariant flips with the runtime: a manual that
+  // says overlay is NOT supported / "400s" is now the lie. The C3 smoke caught
+  // exactly this drift (manual + help + runtime三方矛盾). Guard the manual chapter
+  // the same way `--help` is guarded so the surfaces converge on the TRUTH:
+  // overlay IS a clip-add track (it needs an overlay lane to land on first).
+  it("the CLI-REFERENCE manual's `clip add --track` row advertises the overlay track (it now works)", () => {
     const ref = readFileSync(
       join(MANUAL_DIR, "_shared", "03-cli-reference.md"),
       "utf8",
     );
     // Find the `--track <kind>` row in the clip-add flag table and assert it
-    // lists no `overlay` value (overlay clip-add throws at the bridge).
+    // lists `overlay` (overlay clip-add now succeeds against an overlay lane).
     const trackRow = ref
       .split("\n")
       .find((l) => /`--track\b/.test(l) && /\bvideo\b/.test(l));
@@ -241,8 +242,13 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     ).toBeDefined();
     expect(
       trackRow,
-      "the `--track` row still advertises `overlay`, but `clip add --track overlay` 400s — drop it",
-    ).not.toMatch(/overlay/);
+      "the `--track` row omits `overlay`, but `clip add --track overlay` now works — list it (cli.test.ts proves the runtime)",
+    ).toMatch(/overlay/);
+    // The stale "NOT yet supported / 400s" lie must be gone from the chapter.
+    expect(
+      ref,
+      "manual still claims overlay clip-add is unsupported / 400s — that lie is dead (S10 shipped it)",
+    ).not.toMatch(/overlay (?:track )?(?:is )?NOT yet supported|overlay track not yet supported/i);
   });
 
   it("the i2v batch recipe never claims audio/text clip-add is unsupported (they write today)", () => {
@@ -304,7 +310,11 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     // the sweep about the roster B7(c) coupled to the manual, not about every
     // string that happens to start with `/api/`.
     const NOT_IN_CLI_REF = new Set([
-      "/api/render", // export queue — driven by `autoviral export`, not a raw roster endpoint
+      // `/api/render` (the OLD phantom) is GONE — the prompt now teaches the real
+      // export-queue route `POST /api/works/:id/render` (loudnessTargetLufs lives
+      // there, render.ts:78), which IS documented in the manual, so the sweep
+      // must check it rather than exclude it. Keeping `/api/render` excluded was
+      // the blind spot that let d33cfc9's phantom slip the gate.
       "/api/trends", // research surface — `autoviral trends` / its own docs
       "/api/works", // generic work CRUD / chat transport, not a generation endpoint
       "/api/works/:id/chat",
@@ -316,10 +326,13 @@ describe("docs-drift guard — manual/docs references must resolve to real files
       for (const concrete of expandBraces(m[0])) {
         const clean = concrete.replace(/\/+$/, "");
         // Normalise to the documented prefix for the excluded families.
+        // Carve-outs (`/tts`, `/render`) are REAL roster/export endpoints the
+        // manual documents — they must NOT be collapsed into the excluded
+        // generic `/api/works` family, or the sweep can't catch a drifted one.
         const family =
           clean.startsWith("/api/trends") ? "/api/trends"
           : clean.startsWith("/api/works/") && clean.endsWith("/chat") ? "/api/works/:id/chat"
-          : clean === "/api/works" || clean.startsWith("/api/works/") && !clean.includes("/tts") ? "/api/works"
+          : clean === "/api/works" || (clean.startsWith("/api/works/") && !clean.includes("/tts") && !clean.includes("/render")) ? "/api/works"
           : clean;
         if (NOT_IN_CLI_REF.has(family)) continue;
         endpoints.add(clean);
