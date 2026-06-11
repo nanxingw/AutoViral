@@ -56,9 +56,18 @@ describe("POST /api/generate/bgm · Lyria music generation", () => {
   /** Override the static lyria entry with a capturing fake; returns the
    *  captured opts list. Must run AFTER vi.resetModules(). The fake returns a
    *  success with audioBytes so the route's truncate/register/broadcast path
-   *  runs without network/ffmpeg. */
-  async function setupFakeMusicProvider(): Promise<MusicGenerateOptions[]> {
+   *  runs without network/ffmpeg.
+   *
+   *  `behavior` lets a test inject per-call failures (D2 retry coverage):
+   *  - "empty"   → throw an EmptyAudioError on the FIRST call, then succeed
+   *  - "empty-all" → throw EmptyAudioError on EVERY call
+   *  - "other"   → throw a plain (non-empty-audio) Error on the FIRST call
+   *  Default (undefined) → always succeed. */
+  async function setupFakeMusicProvider(
+    behavior?: "empty" | "empty-all" | "other",
+  ): Promise<MusicGenerateOptions[]> {
     const { registerProvider } = await import("../../providers/registry.js");
+    const { EmptyAudioError } = await import("../../providers/audio/lyria.js");
     const calls: MusicGenerateOptions[] = [];
     registerProvider({
       name: "lyria",
@@ -68,6 +77,16 @@ describe("POST /api/generate/bgm · Lyria music generation", () => {
       default: true,
       generateMusic: async (opts: MusicGenerateOptions): Promise<MusicGenerateResult> => {
         calls.push(opts);
+        const callIndex = calls.length; // 1-based
+        if (behavior === "empty-all") {
+          throw new EmptyAudioError();
+        }
+        if (behavior === "empty" && callIndex === 1) {
+          throw new EmptyAudioError();
+        }
+        if (behavior === "other" && callIndex === 1) {
+          throw new Error("model overloaded");
+        }
         const assetUri = opts.outputAbsoluteDir
           ? join(opts.outputAbsoluteDir, opts.filename)
           : `assets/lyria/${opts.filename}`;
@@ -318,6 +337,77 @@ describe("POST /api/generate/bgm · Lyria music generation", () => {
       expect(params.prompt).toBe("calm lofi piano");
       // vocal defaults to false (instrumental) when not requested.
       expect(params.vocal).toBe(false);
+    });
+  });
+
+  it("D2 — auto-retries ONCE on Lyria empty audio, then succeeds (single retry, 200)", async () => {
+    await withTempDataDir(async (dataDir) => {
+      await configureKey("sk-test");
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      // First call throws EmptyAudioError; second succeeds.
+      const calls = await setupFakeMusicProvider("empty");
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      await writeComposition(dataDir, w.id);
+
+      const res = await apiRoutes.fetch(
+        jsonReq("POST", "/api/generate/bgm", { workId: w.id, prompt: "calm piano" }),
+      );
+      expect(res.status).toBe(200);
+      const json: any = await res.json();
+      expect(json.success).toBe(true);
+      // EXACTLY two paid calls: the empty one + the successful retry (no infinite
+      // loop, no triple-billing).
+      expect(calls).toHaveLength(2);
+    });
+  });
+
+  it("D2 — when BOTH attempts return empty audio → 502 + code UPSTREAM_EMPTY_AUDIO + actionable zh message", async () => {
+    await withTempDataDir(async (dataDir) => {
+      await configureKey("sk-test");
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      const calls = await setupFakeMusicProvider("empty-all");
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      await writeComposition(dataDir, w.id);
+
+      const res = await apiRoutes.fetch(
+        jsonReq("POST", "/api/generate/bgm", { workId: w.id, prompt: "calm piano" }),
+      );
+      // 502 distinguishes an UPSTREAM transient (Lyria returned nothing) from a
+      // 400 param error or a 503 missing-key — the client can branch + retry.
+      expect(res.status).toBe(502);
+      const json: any = await res.json();
+      expect(json.success).toBe(false);
+      expect(json.code).toBe("UPSTREAM_EMPTY_AUDIO");
+      // Operator-actionable Chinese message ("请稍后重试"), not a raw English
+      // stack — this string is shown verbatim to the user.
+      expect(String(json.error)).toMatch(/上游|临时|返空|稍后重试/);
+      // Single retry happened: two paid attempts, both empty.
+      expect(calls).toHaveLength(2);
+    });
+  });
+
+  it("D2 — a NON-empty-audio error is NOT retried (no double-billing) → 500", async () => {
+    await withTempDataDir(async (dataDir) => {
+      await configureKey("sk-test");
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      // First call throws a plain Error (e.g. "model overloaded") — retrying it
+      // would just double-bill, so the route must fail fast.
+      const calls = await setupFakeMusicProvider("other");
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      await writeComposition(dataDir, w.id);
+
+      const res = await apiRoutes.fetch(
+        jsonReq("POST", "/api/generate/bgm", { workId: w.id, prompt: "calm piano" }),
+      );
+      expect(res.status).toBe(500);
+      const json: any = await res.json();
+      expect(json.success).toBe(false);
+      expect(json.code).toBe("API_ERROR");
+      // EXACTLY one paid call — no retry on a non-classified error.
+      expect(calls).toHaveLength(1);
     });
   });
 

@@ -23,6 +23,7 @@ import {
   SUPPORTED_VIDEO_DURATIONS,
 } from "../../providers/video/seedance.js";
 import { SUPPORTED_IMAGE_ASPECT_RATIOS } from "../../providers/openrouter-image.js";
+import { isEmptyAudioError } from "../../providers/audio/lyria.js";
 import type { VideoGenerateResult } from "../../providers/video/types.js";
 import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
 import { uiEventBus } from "../bridge/ui-events.js";
@@ -552,7 +553,14 @@ generateRouter.post("/api/generate/bgm", async (c) => {
     // Call the registry entry (the keyless lyria singleton in prod; a capturing
     // fake under test). The config key is injected per-call via opts.apiKey so
     // the keyless singleton serves the request with the Settings-written key.
-    const result = await entry.generateMusic({
+    //
+    // D2 (PRD-0009) — Lyria intermittently streams a clean 200 with ZERO audio
+    // bytes. The provider throws a discriminable EmptyAudioError (never writes a
+    // 0-byte file). That failure is transient, so retry it ONCE; any OTHER error
+    // (rate-limit, bad-request, network) is NOT retried — retrying would just
+    // double-bill without improving the odds. After the retry still returns
+    // empty we surface a 502 + UPSTREAM_EMPTY_AUDIO below.
+    const musicOpts = {
       prompt: String(prompt),
       filename: finalFilename,
       outputAbsoluteDir: outDirAbs,
@@ -561,7 +569,15 @@ generateRouter.post("/api/generate/bgm", async (c) => {
       ...(typeof seed === "number" ? { seed } : {}),
       ...(typeof temperature === "number" ? { temperature } : {}),
       ...(referenceImages.length > 0 ? { referenceImages } : {}),
-    });
+    };
+    let result;
+    try {
+      result = await entry.generateMusic(musicOpts);
+    } catch (firstErr) {
+      if (!isEmptyAudioError(firstErr)) throw firstErr;
+      console.warn("[bgm] Lyria returned empty audio — retrying once");
+      result = await entry.generateMusic(musicOpts);
+    }
 
     // Optional truncate (best-effort) when the caller asked for a shorter clip.
     if (durationSeconds !== undefined && !result.stub) {
@@ -607,6 +623,21 @@ generateRouter.post("/api/generate/bgm", async (c) => {
       costUsd: result.costUsd,
     });
   } catch (err: any) {
+    // D2 — classify the upstream empty-audio failure (it reaches here only after
+    // the single retry above ALSO returned empty). It's an UPSTREAM transient,
+    // not a caller mistake, so return 502 (not 500) + a discriminable code + an
+    // operator-actionable Chinese message shown verbatim in the UI. Any other
+    // error keeps the existing 500 + API_ERROR contract.
+    if (isEmptyAudioError(err)) {
+      return c.json(
+        {
+          success: false,
+          error: "上游模型临时返空，请稍后重试（音频流为空，已自动重试一次仍未成功）",
+          code: "UPSTREAM_EMPTY_AUDIO",
+        },
+        502,
+      );
+    }
     return c.json({ success: false, error: err.message, code: "API_ERROR" }, 500);
   }
 });

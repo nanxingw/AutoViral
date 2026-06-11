@@ -38,6 +38,33 @@ import { createHash } from "node:crypto";
 export const LYRIA_URL = "https://openrouter.ai/api/v1/chat/completions";
 export const LYRIA_MODEL = "google/lyria-3-pro-preview";
 
+/**
+ * Discriminable error for the "200 SSE but 0 audio bytes" failure (D2,
+ * PRD-0009). Lyria intermittently streams a clean 200 whose chunks carry no
+ * audio bytes; the provider throws rather than writing a silent 0-byte file
+ * (correct — never persist a broken asset). The BGM route catches THIS specific
+ * type to do a single automatic retry + emit a UPSTREAM_EMPTY_AUDIO 502 with an
+ * actionable message. A `.code` tag means the route never has to string-match a
+ * human message (which would silently break if the wording changed).
+ */
+export class EmptyAudioError extends Error {
+  override name = "EmptyAudioError";
+  readonly code = "EMPTY_AUDIO" as const;
+  constructor(message = "Lyria returned empty audio (no audio bytes in stream)") {
+    super(message);
+  }
+}
+
+/** Type-guard the route uses to decide whether to retry (avoids instanceof
+ *  pitfalls across module/realm boundaries — the `.code` tag is canonical). */
+export function isEmptyAudioError(err: unknown): err is EmptyAudioError {
+  return (
+    typeof err === "object" &&
+    err !== null &&
+    (err as { code?: unknown }).code === "EMPTY_AUDIO"
+  );
+}
+
 /** Audio data-URI pattern (shared with the images[] fallback). */
 const AUDIO_DATA_URI = /^data:audio\/[^;]+;base64,(.+)$/s;
 
@@ -190,9 +217,11 @@ export function createLyriaProvider(
 
       const audioBytes = await collectAudioFromStream(res.body);
       // Defensive: a 200 with no audio bytes would otherwise write a 0-byte file
-      // that shows in the library but won't play. Throw instead.
+      // that shows in the library but won't play. Throw a DISCRIMINABLE error
+      // (D2) so the BGM route can single-retry this specific intermittent
+      // failure without string-matching the message.
       if (audioBytes.byteLength === 0) {
-        throw new Error("Lyria returned empty audio (no audio bytes in stream)");
+        throw new EmptyAudioError();
       }
 
       const targetDir = req.outputAbsoluteDir;

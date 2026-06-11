@@ -42,6 +42,40 @@ export interface ProviderListing {
   stub: boolean;
 }
 
+// D2 — a dispatch failure that may carry a readable, user-facing server
+// message. `serverMessage` is the response body's `error` string when the
+// server provided an operator-actionable one (the BGM 502/500 path does); null
+// otherwise, in which case onGenerate falls back to the generic i18n string.
+class DispatchError extends Error {
+  override name = "DispatchError";
+  constructor(message: string, readonly serverMessage: string | null) {
+    super(message);
+  }
+}
+
+/**
+ * Pull a human-readable error string out of a non-2xx response body. The
+ * generation endpoints return `{ success:false, error:"…", code:"…" }`; we
+ * surface `error` when it's a non-empty string. A plain-text body is used as a
+ * last resort ONLY when it isn't the raw JSON we already failed to parse, so a
+ * machine blob never leaks to the user. Returns null when nothing readable is
+ * found (caller falls back to the localized generic message).
+ */
+async function readServerMessage(res: Response): Promise<string | null> {
+  // The body is consumed here ONCE on the error path (the caller throws right
+  // after), so no clone() is needed — and avoiding clone() keeps this working
+  // against lightweight test fetch mocks that don't implement it.
+  try {
+    const body = (await res.json()) as { error?: unknown };
+    if (typeof body?.error === "string" && body.error.trim()) {
+      return body.error.trim();
+    }
+  } catch {
+    /* not JSON / already consumed — generic fallback applies */
+  }
+  return null;
+}
+
 async function fetchProviders(): Promise<ProviderListing[]> {
   // R24: switched from raw fetch to apiFetch so non-2xx surfaces as a thrown
   // ApiError (useQuery sets isError=true) instead of silently degrading to
@@ -385,8 +419,15 @@ export function GenerationDialog(props: GenerationDialogProps) {
       }),
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new Error(`bgm dispatch failed (${res.status}) ${text}`);
+      // D2 — the server returns a readable, operator-actionable `error` for the
+      // BGM path (e.g. the 502 UPSTREAM_EMPTY_AUDIO "上游模型临时返空，请稍后重试…").
+      // Attach it to the thrown error so the catch in onGenerate can show it
+      // VERBATIM instead of the泛化 i18n fallback. No usable message → null,
+      // and onGenerate falls back to the generic string.
+      throw new DispatchError(
+        `bgm dispatch failed (${res.status})`,
+        await readServerMessage(res),
+      );
     }
     await queryClient.invalidateQueries({ queryKey: ["assets", workId] });
   }
@@ -487,13 +528,19 @@ export function GenerationDialog(props: GenerationDialogProps) {
         throw new Error("no video provider selected");
       }
     } catch (err) {
-      // The thrown message is raw English server text — show the localized
-      // fallback and keep the technical detail in the console for debugging.
+      // D2 — prefer a readable, operator-actionable message the SERVER returned
+      // (the BGM path's 502 "上游模型临时返空，请稍后重试…" / 503 / 400 bodies are
+      // already user-facing Chinese). Only when the server gave us nothing
+      // usable do we fall back to the localized generic string. The raw English
+      // technical detail still goes to the console for debugging.
       console.warn("[generation] dispatch failed:", err);
+      const serverMessage =
+        err instanceof DispatchError ? err.serverMessage : null;
       setDispatchError(
-        shouldDispatchTts
-          ? t("studio.generationDialog.ttsErrFallback")
-          : t("studio.generationDialog.errFallback"),
+        serverMessage ??
+          (shouldDispatchTts
+            ? t("studio.generationDialog.ttsErrFallback")
+            : t("studio.generationDialog.errFallback")),
       );
       setIsGenerating(false);
       return; // keep dialog open so user sees the error

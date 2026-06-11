@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { createLyriaProvider } from "./lyria.js";
+import { createLyriaProvider, EmptyAudioError, isEmptyAudioError } from "./lyria.js";
 
 // Helper: build a fetch Response whose body is a ReadableStream that emits the
 // given SSE chunks (already including the trailing "\n\n" framing). Lyria
@@ -203,6 +203,28 @@ describe("createLyriaProvider", () => {
     await expect(
       provider.generateMusic({ prompt: "x", filename: "bgm.mp3" }),
     ).rejects.toThrow(/empty audio|no audio/i);
+  });
+
+  it("the empty-audio throw is a DISCRIMINABLE EmptyAudioError (.code=EMPTY_AUDIO) — D2", async () => {
+    // The BGM route single-retries on THIS specific intermittent failure; it
+    // must not have to string-match the human message. Pin the discriminable
+    // tag so the retry trigger can't silently break if the wording changes.
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse([
+        `data: {"choices":[{"delta":{"content":"[[A0]]"}}]}\n\n`,
+        `data: [DONE]\n\n`,
+      ]),
+    );
+    const provider = createLyriaProvider("sk-test", { fetch: fetchMock });
+    const err = await provider
+      .generateMusic({ prompt: "x", filename: "bgm.mp3" })
+      .then(() => null, (e) => e);
+    expect(err).toBeInstanceOf(EmptyAudioError);
+    expect(isEmptyAudioError(err)).toBe(true);
+    expect((err as EmptyAudioError).code).toBe("EMPTY_AUDIO");
+    // A different error (e.g. an in-stream error envelope) is NOT classified
+    // as empty-audio, so the route won't double-bill on it.
+    expect(isEmptyAudioError(new Error("model overloaded"))).toBe(false);
   });
 
   it("writes the joined bytes to outputAbsoluteDir/filename when given a dir", async () => {
