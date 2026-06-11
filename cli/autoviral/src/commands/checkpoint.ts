@@ -1,21 +1,36 @@
-// `autoviral checkpoint list | restore <id>` — S21 (US 33/34).
+// `autoviral checkpoint create | list | restore <id>` — S21 (US 33/34) + D3.
 //
-// Checkpoints are taken automatically every agent turn, but until now the agent
-// had no verb to roll one BACK after a bad hand-edit. This command gives the
-// agent (and a human typing in the Studio terminal) a safe rollback:
+// SNAPSHOT TRIGGER BOUNDARY (read this — the old教学 said "every agent turn",
+// which is only true for the ws-bridge agent loop, NOT a pure CLI agent):
+//   • ws-bridge agent turn — the Studio's chat agent auto-snapshots on each
+//     turn_complete. A pure CLI agent (claude/codex/… driving `autoviral` on a
+//     PATH) does NOT go through that loop, so it gets NO automatic snapshot.
+//   • HTTP `POST /api/works/:id/checkpoints` — the manual trigger the UI uses.
+//   • `autoviral checkpoint create` (this verb) — the SAME manual trigger,
+//     reachable from a pure CLI agent. Take a snapshot BEFORE a risky edit so
+//     `checkpoint restore` has something to roll back to.
 //
-//   checkpoint list            List rollback history, newest first. JSON when
-//                              piped (agent), YAML when interactive (human).
-//   checkpoint restore <id>    Roll the live deliverable back to checkpoint <id>
-//                              (its `file` name, e.g.
-//                              2026-05-08T12-34-56Z__a1b2c3d4__carousel.yaml).
+// This command gives the agent (and a human typing in the Studio terminal):
+//
+//   checkpoint create [--label]  Snapshot the live deliverable(s) NOW. Idempotent:
+//                                an unchanged yaml writes nothing. Prints the
+//                                snapshot file(s) written (or a no-op note).
+//   checkpoint list              List rollback history, newest first. JSON when
+//                                piped (agent), YAML when interactive (human).
+//   checkpoint restore <id>      Roll the live deliverable back to checkpoint <id>
+//                                (its `file` name, e.g.
+//                                2026-05-08T12-34-56Z__a1b2c3d4__carousel.yaml).
 //
 // SAFETY (#68): the server snapshots the CURRENT live state BEFORE overwriting
 // it, so restore is reversible — a user's pending, never-checkpointed edits are
 // preserved as a fresh checkpoint rather than silently destroyed. We surface
 // that to the operator so they know the undo exists.
+//
+// `create` hits the WORKS route (POST /api/works/:id/checkpoints → bare
+// `{ written }` JSON), not the bridge envelope — that's where the #90 label
+// semantics + createCheckpoint live. `list`/`restore` go through the bridge.
 
-import { bridgeRequest, readContext } from "../client.js";
+import { apiJson, bridgeRequest, readContext } from "../client.js";
 import { parseFormatFlag, writeOut } from "../output.js";
 
 interface CheckpointRow {
@@ -30,6 +45,35 @@ interface CheckpointRow {
 export async function checkpointCommand(args: string[]): Promise<void> {
   const [sub, ...rest] = args;
   const ctx = readContext();
+
+  // checkpoint create [--label <text>] — manual snapshot trigger (D3). Hits the
+  // WORKS route (bare `{ written }` JSON, not the bridge envelope). Idempotent:
+  // an unchanged deliverable yaml writes nothing → we report the no-op instead
+  // of pretending we snapshotted (you can't name a no-op — #90).
+  if (sub === "create") {
+    const label = readLabelFlag(rest);
+    const body = label === undefined ? undefined : { label };
+    const out = await apiJson<{ written: CheckpointRow[] }>(
+      ctx,
+      "POST",
+      "/checkpoints",
+      body,
+    );
+    const written = out.written ?? [];
+    if (written.length === 0) {
+      process.stderr.write(
+        "checkpoint create: no change since the last snapshot — nothing written (the existing checkpoint stands).\n",
+      );
+      return;
+    }
+    // One line per snapshot file written (so `$(autoviral checkpoint create)`
+    // substitution yields the file id you'd hand to `checkpoint restore`).
+    for (const w of written) process.stdout.write(`${w.file}\n`);
+    if (label) {
+      process.stderr.write(`↳ labelled "${label}"\n`);
+    }
+    return;
+  }
 
   // checkpoint list — GET the rollback history.
   if (sub === "list") {
@@ -65,7 +109,24 @@ export async function checkpointCommand(args: string[]): Promise<void> {
   }
 
   process.stderr.write(
-    `autoviral checkpoint: expected "list" or "restore", got "${sub ?? ""}"\n`,
+    `autoviral checkpoint: expected "create", "list" or "restore", got "${sub ?? ""}"\n`,
   );
   process.exit(127);
+}
+
+// Read an optional `--label <text>`. Absent → undefined (an unlabelled
+// snapshot). A bare `--label` with no following value → exit 4 (a typo that
+// would otherwise silently snapshot unlabelled). The server trims/caps the
+// value, so we forward it verbatim.
+function readLabelFlag(argv: string[]): string | undefined {
+  const i = argv.indexOf("--label");
+  if (i < 0) return undefined;
+  const v = argv[i + 1];
+  if (v === undefined || v.startsWith("--")) {
+    process.stderr.write(
+      "usage: autoviral checkpoint create [--label <text>]\n",
+    );
+    process.exit(4);
+  }
+  return v;
 }

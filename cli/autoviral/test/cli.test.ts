@@ -61,6 +61,9 @@ let lastSceneAdd: Record<string, unknown> | null = null;
 let lastSceneSet: Record<string, unknown> | null = null;
 let lastSceneReorder: Record<string, unknown> | null = null;
 let lastSceneLink: Record<string, unknown> | null = null;
+// D3 — capture the last POST /api/works/:id/checkpoints body so the CLI test can
+// assert `checkpoint create --label` reached the works route as { label }.
+let lastCheckpointCreate: Record<string, unknown> | null = null;
 // S5 (PRD-0007) — in-memory 剧本 (plan/script.md) the works-route mock GET
 // returns + PUT records, so `script edit` then `script show` round-trips
 // end-to-end through the CLI's plain-text request path. Starts EMPTY (a work
@@ -516,6 +519,30 @@ beforeAll(async () => {
           kind: isCarousel ? "carousel-slide" : "video-still",
           textLayersComposited: !isCarousel,
         },
+      });
+    }
+    // D3 — `checkpoint create` hits the WORKS route (NOT the bridge envelope):
+    // POST /api/works/:id/checkpoints → bare `{ written: Checkpoint[] }`. Mirror
+    // the server contract: a `label:"noop"` simulates the idempotent no-change
+    // path (empty `written`); otherwise mint one snapshot file, echoing the
+    // label back so the CLI's --label forwarding can be asserted.
+    if (req.method === "POST" && url === "/api/works/w_e2e/checkpoints") {
+      const body = await readBody(req);
+      if (body.label === "noop") {
+        return send(200, { written: [] });
+      }
+      lastCheckpointCreate = body;
+      return send(200, {
+        written: [
+          {
+            file: `2026-05-14T00-00-0${nextSeq++}-000Z__deadbeef__carousel.yaml`,
+            deliverable: "carousel.yaml",
+            ts: "2026-05-14T00:00:00.000Z",
+            sha: "deadbeef",
+            bytes: 64,
+            label: body.label,
+          },
+        ],
       });
     }
     // S21 (US 33/34) — checkpoint list/restore. GET /checkpoints returns a
@@ -1276,12 +1303,97 @@ describe("autoviral CLI — end-to-end", () => {
       expect(r.exitCode).toBe(127);
     });
 
+    // D3 — `scene list --format json` honors the explicit override (was silently
+    // ignored, with a comment pointing at `comp show`). Parity with
+    // `checkpoint list` / `comp show`: the agent can pull structured rows WITHOUT
+    // pivoting. `run()` pipes stdout (isTTY false) so the bare default is TSV;
+    // the explicit flag must force JSON regardless.
+    it("scene list --format json → structured rows (NOT the default TSV)", async () => {
+      // Seed at least one scene so the list is non-empty.
+      const add = await run(["scene", "add", "--title", "格式镜", "--intent", "hook"]);
+      const id = add.stdout.trim();
+      const r = await run(["scene", "list", "--format", "json"]);
+      expect(r.exitCode).toBe(0);
+      const parsed = JSON.parse(r.stdout) as Array<{ id: string; title: string; status: string }>;
+      expect(Array.isArray(parsed)).toBe(true);
+      const row = parsed.find((s) => s.id === id);
+      expect(row).toBeDefined();
+      expect(row!.title).toBe("格式镜");
+      // status defaults to `planned` (never missing in structured output).
+      expect(row!.status).toBe("planned");
+    });
+
+    it("scene list (no --format, piped) → still the tab-separated default", async () => {
+      const r = await run(["scene", "list"]);
+      expect(r.exitCode).toBe(0);
+      // Default is NOT JSON (a JSON array would start with `[`).
+      expect(r.stdout.trim().startsWith("[")).toBe(false);
+      // Rows are tab-separated (order \t id \t title \t …).
+      const firstRow = r.stdout.split("\n").find((l) => l.includes("scn_"));
+      expect(firstRow).toBeDefined();
+      expect(firstRow).toContain("\t");
+    });
+
     it("--help lists scene commands", async () => {
       const r = await run(["--help"]);
       expect(r.stdout).toMatch(/scene add/);
       expect(r.stdout).toMatch(/scene list/);
       expect(r.stdout).toMatch(/scene reorder/);
       expect(r.stdout).toMatch(/scene generate/);
+    });
+  });
+
+  // D3 — `autoviral checkpoint create [--label]` is the manual snapshot trigger
+  // a PURE CLI agent needs (the ws-bridge per-turn auto-snapshot does NOT apply
+  // to it). It hits the WORKS route POST /api/works/:id/checkpoints (bare
+  // `{ written }` JSON), prints the snapshot file(s) written, and is idempotent.
+  describe("checkpoint create — manual snapshot trigger (D3)", () => {
+    it("checkpoint create → prints the written snapshot file id, exit 0", async () => {
+      const r = await run(["checkpoint", "create"]);
+      expect(r.exitCode).toBe(0);
+      // One file id per line written (the id you'd hand to `checkpoint restore`).
+      expect(r.stdout.trim()).toMatch(/__carousel\.yaml$/);
+    });
+
+    it("checkpoint create --label <text> → forwards { label } to the works route", async () => {
+      lastCheckpointCreate = null;
+      const r = await run(["checkpoint", "create", "--label", "裁剪前"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastCheckpointCreate).toEqual({ label: "裁剪前" });
+      // The label is echoed on stderr as a confirmation.
+      expect(r.stderr).toMatch(/裁剪前/);
+    });
+
+    it("checkpoint create on an unchanged deliverable → exit 0 + no-op note, NO file printed", async () => {
+      // `--label noop` drives the mock's idempotent empty-`written` path.
+      const r = await run(["checkpoint", "create", "--label", "noop"]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe(""); // nothing written → no file id
+      expect(r.stderr).toMatch(/no change|nothing written/i);
+    });
+
+    it("checkpoint create --label with no value → exit 4 (never hits the server)", async () => {
+      lastCheckpointCreate = null;
+      const r = await run(["checkpoint", "create", "--label"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCheckpointCreate).toBeNull();
+    });
+
+    it("checkpoint list → JSON history (existing verb still works)", async () => {
+      const r = await run(["checkpoint", "list"]);
+      expect(r.exitCode).toBe(0);
+      const parsed = JSON.parse(r.stdout);
+      expect(Array.isArray(parsed)).toBe(true);
+    });
+
+    it("checkpoint unknown subcommand → exit 127", async () => {
+      const r = await run(["checkpoint", "frobnicate"]);
+      expect(r.exitCode).toBe(127);
+    });
+
+    it("--help lists checkpoint create", async () => {
+      const r = await run(["--help"]);
+      expect(r.stdout).toMatch(/checkpoint create/);
     });
   });
 

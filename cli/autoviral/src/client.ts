@@ -101,3 +101,31 @@ export async function apiText(
   }
   return res.text();
 }
+
+// JSON request against a `/api/works/:workId/...` route (NOT the bridge
+// `/api/bridge/v1/*` envelope). Used by `checkpoint create` (D3): the manual
+// snapshot trigger is `POST /api/works/:id/checkpoints` returning a BARE
+// `{ written: Checkpoint[] }` JSON object (no `{ok,result}` envelope — those
+// works routes predate the bridge surface). Same exit-code contract as
+// bridgeRequest: 4 = your input/validation was wrong (4xx), 3 = the service
+// broke (5xx / malformed response). The work-relative path is appended after
+// the workId, so the caller passes e.g. "/checkpoints".
+export async function apiJson<T>(
+  ctx: BridgeContext,
+  method: "GET" | "POST" | "PUT" | "DELETE",
+  workPath: string,
+  body?: unknown,
+): Promise<T> {
+  const url = `http://127.0.0.1:${ctx.port}/api/works/${encodeURIComponent(ctx.workId)}${workPath}`;
+  const res = await fetch(url, {
+    method,
+    headers: body == null ? undefined : { "Content-Type": "application/json" },
+    body: body == null ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    process.stderr.write(`autoviral: api ${method} ${workPath} → ${res.status} ${txt}\n`);
+    process.exit(res.status >= 400 && res.status < 500 ? 4 : 3);
+  }
+  return (await res.json()) as T;
+}

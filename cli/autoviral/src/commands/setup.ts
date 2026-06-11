@@ -26,6 +26,32 @@ function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
 }
 
+// `setup` runs a REAL install (copies binaries, provisions a venv, runs pip) —
+// so an unknown flag is dangerous, not harmless: previously `setup --check`
+// was SILENTLY accepted and proceeded to install anyway (a bare machine would
+// really `pip install` when the user only wanted a dry probe). Reject unknown
+// flags BEFORE any install runs (exit 4 + usage, mirroring export.ts:54-57),
+// with a pointed hint for `--check` → the read-only probe is `autoviral doctor`.
+const KNOWN_FLAGS = new Set(["--heavy"]);
+
+function rejectUnknownFlags(args: string[]): void {
+  for (const a of args) {
+    if (!a.startsWith("--")) continue;
+    if (KNOWN_FLAGS.has(a)) continue;
+    if (a === "--check") {
+      process.stderr.write(
+        "autoviral setup: unknown flag --check — `setup` always INSTALLS. " +
+          "For a read-only readiness probe (no install), run `autoviral doctor`.\n",
+      );
+    } else {
+      process.stderr.write(
+        `autoviral setup: unknown flag ${a}\nusage: autoviral setup [--heavy]\n`,
+      );
+    }
+    process.exit(4);
+  }
+}
+
 const STATUS_GLYPH: Record<InstallResult["status"], string> = {
   installed: "✓",
   already: "✓",
@@ -34,6 +60,8 @@ const STATUS_GLYPH: Record<InstallResult["status"], string> = {
 };
 
 export async function setupCommand(args: string[]): Promise<void> {
+  // Fail fast on a typo'd / unsupported flag BEFORE we install anything.
+  rejectUnknownFlags(args);
   const heavy = hasFlag(args, "--heavy");
   const report = (line: string) => process.stdout.write(`${line}\n`);
 

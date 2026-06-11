@@ -19,6 +19,7 @@
 // asset validation (unknown id, incomplete permutation → its own 400 code:4).
 
 import { bridgeRequest, readContext } from "../client.js";
+import { parseFormatFlag, writeOut } from "../output.js";
 
 const INTENTS = ["hook", "build", "payoff", "cta"];
 const SHOT_SIZES = ["long", "full", "medium", "close", "closeup"];
@@ -88,11 +89,30 @@ export async function sceneCommand(args: string[]): Promise<void> {
   if (sub === "list") {
     // READ — `scene list` is a projection off GET /comp (result.scenes), the
     // same way the route tests read scenes back. No write route is involved.
-    // Print one line per scene, sorted by `order`: order / id / title / intent /
-    // status. Plain text (not JSON) so a human scanning the storyboard reads it
-    // top-to-bottom; agents that want structured data use `autoviral comp show`.
+    // DEFAULT output is the compact TSV (order / id / title / intent / status),
+    // one line per scene sorted by `order` — a human scanning the storyboard
+    // reads it top-to-bottom. `--format json|yaml|table` (D3) honors the
+    // explicit override so an agent can pull structured rows WITHOUT pivoting to
+    // `comp show` — parity with `checkpoint list` / `comp show` (manual §Output
+    // format override). The override WINS over isTTY in either direction.
     const comp = await bridgeRequest<{ scenes?: SceneRow[] }>(ctx, "GET", "/comp");
     const scenes = [...(comp.scenes ?? [])].sort((a, b) => a.order - b.order);
+    const format = parseFormatFlag(args);
+    if (format) {
+      // Structured: emit the full sorted rows (incl. an explicit `planned`
+      // fallback so the status column is never missing in JSON/YAML/table).
+      writeOut(
+        scenes.map((s) => ({
+          order: s.order,
+          id: s.id,
+          title: s.title,
+          intent: s.intent ?? null,
+          status: s.status ?? "planned",
+        })),
+        format,
+      );
+      return;
+    }
     for (const s of scenes) {
       const intent = s.intent ?? "-";
       const status = s.status ?? "planned";

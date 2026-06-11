@@ -91,6 +91,71 @@ describe("autoviral doctor — spawn", () => {
   });
 });
 
+// ── SPAWN: setup unknown-flag rejection (D3) ─────────────────────────────────
+// `setup` runs a REAL install, so a typo'd / unsupported flag must fail fast
+// BEFORE anything is installed (exit 4 + usage, mirroring `export`). We spawn
+// the built binary so the real `process.exit(4)` path is exercised (it can't be
+// driven in-process — exit would kill the test runner). An isolated data dir +
+// env-override binaries keep these from touching a real managed install.
+
+describe("autoviral setup — unknown flag rejection (spawn)", () => {
+  let dataDir: string;
+  let fakeFfmpeg: string;
+  let fakeFfprobe: string;
+
+  beforeAll(() => {
+    const root = mkdtempSync(join(tmpdir(), "av-setup-flag-"));
+    dataDir = join(root, "data");
+    fakeFfmpeg = join(root, "ffmpeg");
+    fakeFfprobe = join(root, "ffprobe");
+    writeFileSync(fakeFfmpeg, "#!/bin/sh\n");
+    writeFileSync(fakeFfprobe, "#!/bin/sh\n");
+    chmodSync(fakeFfmpeg, 0o755);
+    chmodSync(fakeFfprobe, 0o755);
+  });
+
+  const env = () => ({
+    AUTOVIRAL_DATA_DIR: dataDir,
+    FFMPEG_PATH: fakeFfmpeg,
+    FFPROBE_PATH: fakeFfprobe,
+  });
+
+  it("setup --check → exit 4, points the user at `autoviral doctor`, NEVER installs", async () => {
+    const r = await execa("node", [BIN, "setup", "--check"], { reject: false, env: env() });
+    expect(r.exitCode).toBe(4);
+    expect(r.stderr).toMatch(/doctor/);
+    // It must have bailed BEFORE the install banner ("installing dependencies").
+    expect(r.stdout).not.toMatch(/installing dependencies/);
+  });
+
+  it("setup --bogus → exit 4 + usage, NEVER installs", async () => {
+    const r = await execa("node", [BIN, "setup", "--bogus"], { reject: false, env: env() });
+    expect(r.exitCode).toBe(4);
+    expect(r.stderr).toMatch(/unknown flag --bogus/);
+    expect(r.stderr).toMatch(/usage: autoviral setup/);
+    expect(r.stdout).not.toMatch(/installing dependencies/);
+  });
+
+  it("setup --bogus error names the flag, not --heavy (the known flag is unaffected)", async () => {
+    // Defence-in-depth: the rejection must be specific to the unknown flag and
+    // never swallow the known --heavy. (A full `setup --heavy` install is driven
+    // in-process via the mocked-deps wiring test below, so we don't spawn a real
+    // install here — it would touch pip/playwright.)
+    const r = await execa("node", [BIN, "setup", "--bogus", "--heavy"], {
+      reject: false,
+      env: env(),
+    }).catch((e) => e);
+    expect(r.exitCode).toBe(4);
+    // The "unknown flag" complaint names --bogus, never --heavy (the usage line
+    // may list --heavy as the valid flag — that's the offered alternative, not
+    // the rejected one).
+    expect(r.stderr).toMatch(/unknown flag --bogus/);
+    expect(r.stderr).not.toMatch(/unknown flag --heavy/);
+    // And it bailed before any install ran.
+    expect(r.stdout).not.toMatch(/installing dependencies/);
+  });
+});
+
 // ── UNIT: pure ffmpeg classifier (missing → non-ok) ──────────────────────────
 
 describe("classifyFfmpeg — precedence + missing detection", () => {
