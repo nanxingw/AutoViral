@@ -148,3 +148,32 @@ export function fuseVariantPrompt(
   if (!delta) return base;
   return `${base}\n\nChange: ${delta}`;
 }
+
+/**
+ * Absolutize a derive-anchor image URI before it is sent to a generation
+ * provider. The Studio surfaces asset URIs as SAME-ORIGIN relative paths
+ * (e.g. `/api/works/w1/assets/images/x.png`). But the providers can't use a
+ * relative path:
+ *  - openrouter-image (referenceImage) only forwards a URL that starts with
+ *    `data:` or `http`, silently DROPPING a relative one → variant edit loses
+ *    its anchor and degrades to a no-reference generation.
+ *  - seedance (firstFrameImage) hands the URL to OpenRouter's SERVER-SIDE
+ *    fetch, which can't resolve a path relative to the browser's origin.
+ * So a relative `/...` uri is rewritten to `<origin>/...`. `data:` and absolute
+ * `http(s)://` uris pass through untouched; empty/undefined returns undefined.
+ *
+ * @param uri    The anchor uri (asset uri or user-typed Source-image-URL).
+ * @param origin Injectable origin for deterministic tests (defaults to
+ *               window.location.origin in the browser).
+ */
+export function absolutizeWorkspaceUri(
+  uri: string | null | undefined,
+  origin: string = typeof window !== "undefined" ? window.location.origin : "",
+): string | undefined {
+  const u = (uri ?? "").trim();
+  if (!u) return undefined;
+  if (/^(data:|https?:\/\/)/i.test(u)) return u;
+  if (u.startsWith("/")) return `${origin}${u}`;
+  // A bare relative path (no leading slash) — anchor it under origin/.
+  return origin ? `${origin}/${u}` : u;
+}

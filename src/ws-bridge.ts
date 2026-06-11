@@ -78,6 +78,16 @@ export interface WsSession {
   idle: boolean;
   messageHistory: ChatBlock[];
   model?: string;
+  /** B7(a)-lite (PRD-0009) — the PROMPT_VERSION this session's *current spawn*
+   *  is actually taught up to. A fresh spawn is built with the current
+   *  buildSystemPrompt (= PROMPT_VERSION); a resume that injected the changelog
+   *  is taught to PROMPT_VERSION; a resume that SKIPPED injection (sidecar
+   *  read/write failed, or the legacy default session had no record) stays at
+   *  the version it was actually taught (or undefined when unknown). The
+   *  system.init / result writeback stamps THIS, not an unconditional
+   *  PROMPT_VERSION — otherwise a skipped injection would still record "taught
+   *  to current" and permanently suppress the teaching it never delivered. */
+  taughtPromptVersion?: number;
 }
 
 /** The id of a work's first/legacy chat session. A work created before
@@ -141,6 +151,14 @@ export const PROMPT_VERSION = 2;
  * version → one short context statement describing what that version newly
  * teaches. Declarative (context, not commands). The map is the single source of
  * truth for "what changed since version N" — `promptChangelogSince(n)` walks it.
+ *
+ * NOTE (Wave B review): a changelog entry MAY carry a short factual fragment
+ * (e.g. "durationSec 4–15", "7 档 aspectRatio") as a "here's what changed, go
+ * check docs" nudge to a RESUMED session. That is intentional and is NOT
+ * governed by the single-source-of-truth lock on buildSystemPrompt (the
+ * `not.toContain('durationSec')` guard in ws-bridge.test only inspects
+ * buildSystemPrompt's output — this constant is independent). The full param
+ * tables still live ONLY in the manual; the changelog points the agent there.
  */
 export const PROMPT_CHANGELOG: Record<number, string> = {
   2:
@@ -221,7 +239,7 @@ Skill('autoviral')
 - **配音 TTS** — 两条端点二选一：\`POST /api/audio/tts\`（你自定 output_path）/ \`POST /api/works/:id/tts\`（自动登记 + 广播刷新 Studio 库，多数情况用这条）。**短视频默认应该有人声**——绝大多数 viral 短视频靠 narration 推进节奏；做完 brief 主动 propose 加旁白。
 - **配乐 BGM** — \`POST /api/generate/bgm\`。Lyria 3 Pro via OpenRouter；响应含 \`assetId\`（已原子登记 + 广播），之后用 \`autoviral clip add\` 当 bgm 轨拼上。**这是生成音乐的唯一正路：直接调这个端点，绝不去跑任何 \`.py\` 脚本来"兜底"做 BGM（那些脚本已删，是死的，见上方兜底规则）。**
 - **字幕 ASR** — \`autoviral captions generate\`（闭环：转写 + 写回 composition text 轨 + 广播）或裸 \`POST /api/audio/captions\`（只返回 segments JSON 不落盘）。**抖音 70% 用户静音浏览，任何带音频的视频都该加字幕**；字幕走 composition 的 \`captionStrategy: overlay\` 渲染，不要手写 ffmpeg drawtext。
-- **混音** — \`POST /api/audio/mix\`（多轨混音 / 音量平衡 / 响度目标 loudnessTargetLufs）。
+- **混音** — \`POST /api/audio/mix\`（多轨混音 / 音量平衡 / ducking 闪避）。响度归一化（平台 LUFS 目标）不在这里，是导出时 \`POST /api/render\` 的事。
 - **过场转场** — 4 个 cinematic 端点 \`POST /api/transitions/{light-leak,glitch,domain-warp,grav-lens}\`，外加更简单的 \`autoviral transition add\` 溶解。**绝不手写 ffmpeg xfade**；每种看头、时长建议见 docs。
 
 ## 4 个能力，按需直接调用
@@ -640,10 +658,16 @@ export class WsBridge {
     if (savedSessionId) {
       // Resume existing conversation — agent keeps full context. Inject any
       // teaching added since this session's stored prompt version (B7(a)-lite).
-      const append = await this.resumePromptAppend(workId, sid);
+      // resumePromptAppend stamps session.taughtPromptVersion with the version
+      // it actually delivers, so the writeback only advances the stored version
+      // when injection really happened (see its docstring).
+      const append = await this.resumePromptAppend(session, workId, sid);
       this.spawnCli(session, initialPrompt, savedSessionId, append);
     } else {
-      // First time — build system prompt with full context
+      // First time — build system prompt with full context. A fresh spawn is
+      // built from the CURRENT buildSystemPrompt, so it is taught to
+      // PROMPT_VERSION; the system.init writeback records that.
+      session.taughtPromptVersion = PROMPT_VERSION;
       let systemPrompt = initialPrompt;
       try {
         const work = await getWork(workId);
@@ -1096,8 +1120,23 @@ export class WsBridge {
    * than the stored one, or undefined when already current. Best-effort: any
    * sidecar read/write failure falls back to NOT injecting (the resume still
    * works; the session just stays on its old teaching until next time).
+   *
+   * CRITICAL (review fix, PRD-0009 Wave B): it stamps `session.taughtPromptVersion`
+   * with the version this resume actually delivers — NOT an unconditional
+   * PROMPT_VERSION. The downstream system.init / result writeback reads that
+   * field, so a resume that SKIPPED injection (sidecar read failed, or already
+   * current) does not falsely record "taught to current" and permanently
+   * suppress the teaching it never delivered. Left undefined only when we cannot
+   * know the taught version (read threw before we read `stored`) — the writeback
+   * then leaves `lastInjectedPromptVersion` untouched so the next resume retries.
+   *
+   * (The legacy default session whose cliSessionId only lived in work.yaml is
+   * NOT a no-record case here: createSession calls ensureSidecarRecord before
+   * this runs, which seeds the record from work.yaml — so `record` is present
+   * and the version persists. The `if (record)` guard is defensive only.)
    */
   private async resumePromptAppend(
+    session: WsSession,
     workId: string,
     sid: string,
   ): Promise<string | undefined> {
@@ -1109,20 +1148,30 @@ export class WsBridge {
       const sidecar = this.sidecarFor(workId);
       if (!sidecar) return undefined;
       const record = await sidecar.get(sid);
-      // A record may not exist yet for the legacy default session whose
-      // cliSessionId only lives in work.yaml — treat as version 0 but don't
-      // create a record here (the system.init writeback path owns creation).
       const stored = record?.lastInjectedPromptVersion ?? 0;
-      if (stored >= PROMPT_VERSION) return undefined;
+      if (stored >= PROMPT_VERSION) {
+        // Already current — this spawn is taught to its stored version; the
+        // writeback may safely re-stamp that (idempotent), but NOT advance.
+        session.taughtPromptVersion = stored;
+        return undefined;
+      }
       const append = promptChangelogSince(stored);
-      if (!append) return undefined;
-      // Only bump the stored version if there IS a record to patch — patching a
-      // non-existent id is a no-op, and we don't want to mint a record here.
+      if (!append) {
+        // Nothing newer to teach despite stored < PROMPT_VERSION (no changelog
+        // entries in the gap) — the session is effectively taught to current.
+        session.taughtPromptVersion = PROMPT_VERSION;
+        return undefined;
+      }
+      // We are about to inject the delta → this spawn is taught to current.
+      session.taughtPromptVersion = PROMPT_VERSION;
       if (record) {
         await sidecar.patch(sid, { lastInjectedPromptVersion: PROMPT_VERSION });
       }
       return append;
     } catch {
+      // Read/write threw before we could determine the taught version — leave
+      // session.taughtPromptVersion undefined so the writeback does NOT stamp a
+      // version, and the next resume retries the (still-pending) teaching.
       return undefined;
     }
   }
@@ -1254,13 +1303,17 @@ export class WsBridge {
                   cliSessionId: msg.session_id,
                   lastActive: new Date().toISOString(),
                   // B7(a)-lite — stamp the prompt version this session is taught
-                  // up to. A FRESH session was just built with buildSystemPrompt
-                  // (= current), so it's current; a RESUMED session was already
-                  // bumped to PROMPT_VERSION by resumePromptAppend, so this is
-                  // idempotent. Editing-agent sessions only (coach/trends never
-                  // reach this writeback with a buildSystemPrompt-derived prompt).
-                  ...(this.isWorkBound(session.workId)
-                    ? { lastInjectedPromptVersion: PROMPT_VERSION }
+                  // up to. session.taughtPromptVersion is set authoritatively at
+                  // spawn: PROMPT_VERSION for a fresh session, the actually-
+                  // delivered version for a resume. It is UNDEFINED only when a
+                  // resume skipped injection due to a sidecar read failure — in
+                  // which case we must NOT stamp a version (doing so would record
+                  // "taught to current" for teaching we never delivered, per the
+                  // Wave B review). Editing-agent sessions only (coach/trends run
+                  // a different prompt and never set taughtPromptVersion).
+                  ...(this.isWorkBound(session.workId) &&
+                  session.taughtPromptVersion !== undefined
+                    ? { lastInjectedPromptVersion: session.taughtPromptVersion }
                     : {}),
                 }).catch(() => {});
               }
@@ -1376,10 +1429,13 @@ export class WsBridge {
                 sidecar.patch(session.sessionId, {
                   cliSessionId: msg.session_id,
                   lastActive: new Date().toISOString(),
-                  // B7(a)-lite — same prompt-version stamp as the system.init
-                  // writeback above (idempotent on resume; current on fresh).
-                  ...(this.isWorkBound(session.workId)
-                    ? { lastInjectedPromptVersion: PROMPT_VERSION }
+                  // B7(a)-lite — same conditional prompt-version stamp as the
+                  // system.init writeback above: only stamp the version this
+                  // spawn was actually taught to, never an unconditional
+                  // PROMPT_VERSION (Wave B review fix).
+                  ...(this.isWorkBound(session.workId) &&
+                  session.taughtPromptVersion !== undefined
+                    ? { lastInjectedPromptVersion: session.taughtPromptVersion }
                     : {}),
                 }).catch(() => {});
               }

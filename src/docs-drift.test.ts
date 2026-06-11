@@ -265,6 +265,87 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     expect(recipe).not.toMatch(/[Aa]udio\/text\/overlay clip-add/);
   });
 
+  // B4/B7(c) parity sweep (PRD-0009). B7(c) made the prompt's asset-generation
+  // section a bare ENDPOINT ROSTER ("here are the `/api/...` paths; the full
+  // params live in `autoviral docs _shared/03-cli-reference`"). That makes the
+  // CLI-REFERENCE manual the single source of truth for every endpoint the
+  // prompt advertises — but nothing kept the two in lockstep: deleting the
+  // `/api/audio/mix` row from the manual, or adding a new endpoint to the
+  // prompt roster without documenting it, both stayed green (docs-drift only
+  // swept `autoviral docs <topic>` / `manual/...md` refs, never `/api/...`
+  // paths). This sweep closes that hole: every HTTP endpoint the prompt teaches
+  // an agent to call must be findable in 03-cli-reference.md, the manual the
+  // prompt points the agent at for params. Same SWEEP + non-empty-floor shape
+  // as the ref guard above — no or-fallback lets a miss pass.
+  it("every `/api/...` endpoint the prompt teaches is documented in the CLI-REFERENCE manual (single-source-of-truth parity)", () => {
+    const cliRef = readFileSync(
+      join(MANUAL_DIR, "_shared", "03-cli-reference.md"),
+      "utf8",
+    );
+    // Pull every distinct `/api/...` path out of the prompt. `{a,b,c}` brace
+    // expansion (the transitions roster line) is expanded so each concrete
+    // endpoint is asserted individually — a manual that documents only 3 of the
+    // 4 transitions must still go red. `:param` / `{param}` placeholders are
+    // kept verbatim because the manual writes them the same way.
+    const expandBraces = (path: string): string[] => {
+      const m = path.match(/^(.*)\{([^}]+)\}(.*)$/);
+      if (!m) return [path];
+      return m[2]
+        .split(",")
+        .map((opt) => `${m[1]}${opt}${m[3]}`);
+    };
+    const prompt = buildSystemPrompt(
+      { id: "w_test", type: "short-video", platforms: ["douyin"] } as any,
+      { port: 3271, workspacePath: "/tmp/a/works/w" },
+    );
+    // Endpoints that are NOT part of the asset-generation roster the manual
+    // mirrors — they are documented elsewhere (CLI verbs / chat transport) and
+    // intentionally not in 03-cli-reference's HTTP tables. Excluding them keeps
+    // the sweep about the roster B7(c) coupled to the manual, not about every
+    // string that happens to start with `/api/`.
+    const NOT_IN_CLI_REF = new Set([
+      "/api/render", // export queue — driven by `autoviral export`, not a raw roster endpoint
+      "/api/trends", // research surface — `autoviral trends` / its own docs
+      "/api/works", // generic work CRUD / chat transport, not a generation endpoint
+      "/api/works/:id/chat",
+    ]);
+    const endpoints = new Set<string>();
+    for (const m of prompt.matchAll(/\/api\/[a-z0-9/:{}._,-]+/g)) {
+      // Trim a stray trailing slash so `/api/trends/` and `/api/trends`
+      // collapse, and drop the `:platform`-style trailing segment noise.
+      for (const concrete of expandBraces(m[0])) {
+        const clean = concrete.replace(/\/+$/, "");
+        // Normalise to the documented prefix for the excluded families.
+        const family =
+          clean.startsWith("/api/trends") ? "/api/trends"
+          : clean.startsWith("/api/works/") && clean.endsWith("/chat") ? "/api/works/:id/chat"
+          : clean === "/api/works" || clean.startsWith("/api/works/") && !clean.includes("/tts") ? "/api/works"
+          : clean;
+        if (NOT_IN_CLI_REF.has(family)) continue;
+        endpoints.add(clean);
+      }
+    }
+    // The sweep must actually be finding endpoints — a broken regex would make
+    // this vacuously green.
+    expect(
+      endpoints.size,
+      "the prompt endpoint sweep matched zero `/api/...` paths — regex is broken",
+    ).toBeGreaterThan(0);
+    // Floor: the asset-generation roster (image/video/bgm/tts×2/captions/mix +
+    // 4 transitions = 10 generation endpoints) must all be present. If the
+    // roster shrinks below this the floor catches a silently-dropped endpoint.
+    expect(
+      endpoints.size,
+      `prompt roster shrank to ${endpoints.size} endpoints — expected ≥10 (image/video/bgm/tts×2/captions/mix/4×transitions)`,
+    ).toBeGreaterThanOrEqual(10);
+    for (const ep of endpoints) {
+      expect(
+        cliRef.includes(ep),
+        `prompt teaches \`${ep}\` but 03-cli-reference.md does not document it — the prompt points agents at this manual for params, so the endpoint must appear there`,
+      ).toBe(true);
+    }
+  });
+
   it("covers both reference families (docs-slug + file-path) so a new form can't slip the net unnoticed", () => {
     const refs = allRefs();
     const haveDocsSlug = refs.some((r) => r.kind === "docs");

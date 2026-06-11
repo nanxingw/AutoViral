@@ -65,6 +65,64 @@ function videoClip(p: { id: string; trackOffset: number; in: number; out: number
   } as unknown as Clip;
 }
 
+// A text clip uses `duration` (not in/out) — exercises the non-video/audio
+// branch of clipDuration so the auto口径 isn't quietly video-only.
+function textClip(p: { id: string; trackOffset: number; duration: number }): Clip {
+  return {
+    id: p.id,
+    kind: "text",
+    text: "hi",
+    trackOffset: p.trackOffset,
+    duration: p.duration,
+    transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+  } as unknown as Clip;
+}
+
+// Two-track composition: a video track + a text track. Locks the cross-track
+// flatMap口径 (auto must consider EVERY track, not just the first).
+function multiTrackComp(
+  videoClips: Clip[],
+  textClips: Clip[],
+  duration = 0,
+): Composition {
+  return {
+    id: "c_multi",
+    workId: "test",
+    schemaVersion: 1,
+    fps: 30,
+    width: 1080,
+    height: 1920,
+    duration,
+    aspect: "9:16",
+    tracks: [
+      {
+        id: "trk_v",
+        kind: "video",
+        label: "V1",
+        displayOrder: 0,
+        volume: 0,
+        muted: false,
+        hidden: false,
+        clips: videoClips as never,
+        transitions: [],
+      },
+      {
+        id: "trk_t",
+        kind: "text",
+        label: "T1",
+        displayOrder: 1,
+        volume: 0,
+        muted: false,
+        hidden: false,
+        clips: textClips as never,
+        transitions: [],
+      },
+    ],
+    assets: [],
+    provenance: [],
+  } as unknown as Composition;
+}
+
 describe("@shared composition ops — setCompositionDuration", () => {
   it("sets an explicit duration in place", () => {
     const comp = compWith([videoClip({ id: "a", trackOffset: 0, in: 0, out: 6 })], 6);
@@ -96,6 +154,22 @@ describe("@shared composition ops — setCompositionDuration", () => {
     );
     setCompositionDuration(comp, { auto: true });
     expect(comp.duration).toBe(13);
+  });
+
+  it("auto mode spans EVERY track across mixed clip kinds (video end 6 + text end 10 → 10)", () => {
+    // Track A: a video clip ending at 6 (offset 0, 6s window).
+    // Track B: a TEXT clip ending at 10 (offset 4 + duration 6) — different
+    // track AND different kind (duration-based, not in/out). auto must derive
+    // 10, proving the flatMap walks all tracks and clipDuration handles text.
+    const comp = multiTrackComp(
+      [videoClip({ id: "v", trackOffset: 0, in: 0, out: 6 })],
+      [textClip({ id: "t", trackOffset: 4, duration: 6 })],
+      99,
+    );
+    setCompositionDuration(comp, { auto: true });
+    expect(comp.duration).toBe(10);
+    // And compositionContentEnd reports the same cross-track end.
+    expect(compositionContentEnd(comp)).toBe(10);
   });
 
   it("auto mode yields 0 for an empty composition (no tracks/clips)", () => {

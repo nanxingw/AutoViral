@@ -192,6 +192,57 @@ describe("WsBridge — B7(a)-lite resume prompt-version injection", () => {
     });
   });
 
+  it("system.init writeback stamps the version this resume was TAUGHT to, never an unconditional PROMPT_VERSION (Wave B fix — no downgrade)", async () => {
+    // A session taught by a NEWER build (stored version ahead of this server's
+    // PROMPT_VERSION) must not be clobbered DOWN to PROMPT_VERSION by the
+    // writeback. The pre-fix writeback hard-wrote PROMPT_VERSION on every
+    // work-bound session.init, which would silently regress a future record and
+    // re-trigger teaching on the next newer-server resume. resumePromptAppend
+    // now records the actually-taught version (= the stored one when already
+    // current) and the writeback stamps THAT.
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, DEFAULT_CHAT_SESSION_ID, PROMPT_VERSION } = await import(
+        "../../../ws-bridge.js"
+      );
+      const { SessionSidecar } = await import("../sessions-sidecar.js");
+      const work = "w_future";
+      await mkdir(join(dir, "works", work), { recursive: true });
+
+      const future = PROMPT_VERSION + 5;
+      const sidecar = new SessionSidecar(work, dir);
+      await sidecar.create("chat", {
+        now: new Date().toISOString(),
+        id: DEFAULT_CHAT_SESSION_ID,
+        cliSessionId: "cli-future",
+      });
+      await sidecar.patch(DEFAULT_CHAT_SESSION_ID, {
+        lastInjectedPromptVersion: future,
+      });
+
+      const bridge = new WsBridge(3271);
+      await bridge.createSession(work, "继续", undefined, DEFAULT_CHAT_SESSION_ID);
+
+      // Already (more than) current → no append.
+      expect(appendedSystemPrompt(lastSpawnArgs())).toBeUndefined();
+
+      // Drive a system.init frame so the writeback runs.
+      const session = bridge.getSession(work, DEFAULT_CHAT_SESSION_ID)!;
+      const proc = session.cliProcess as unknown as { stdout: EventEmitter };
+      proc.stdout.emit(
+        "data",
+        Buffer.from(
+          JSON.stringify({ type: "system", subtype: "init", session_id: "cli-future-2" }) + "\n",
+        ),
+      );
+      await new Promise((r) => setTimeout(r, 50));
+
+      const rec = await sidecar.get(DEFAULT_CHAT_SESSION_ID);
+      // The future version is preserved, NOT downgraded to PROMPT_VERSION.
+      expect(rec?.lastInjectedPromptVersion).toBe(future);
+      expect(rec?.cliSessionId).toBe("cli-future-2");
+    });
+  });
+
   it("a legacy resume record with NO stored version (undefined ⇒ 0) gets the full changelog", async () => {
     await withTempDataDir(async (dir) => {
       const { WsBridge, DEFAULT_CHAT_SESSION_ID, promptChangelogSince } = await import(

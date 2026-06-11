@@ -404,10 +404,12 @@ Body: `{ workId, videoPath, tracks, outputFilename }`
 | Field | Meaning |
 |---|---|
 | `videoPath` | The base video (workspace-relative; `assets/` or `output/` prefix recognized). |
-| `tracks` | Non-empty array of `{ source, ... }` mix tracks (each `source` is workspace-relative). The mixer also honours `loudnessTargetLufs` on the track when the platform preset sets a loudness target (e.g. WeChat −16, default −14) and ducking parameters where supported. |
+| `tracks` | Non-empty array of mix tracks. Each track is `{ source, type, volume, delay?, fadeIn?, fadeOut?, ducking? }` (each `source` is workspace-relative). `type` is `original`/`bgm`/`voiceover`/`sfx`; `volume` is `0.0–1.0`; `delay`/`fadeIn`/`fadeOut` are seconds. `ducking` is `{ trigger, ratio, threshold? }` (sidechain-compress this track whenever a `trigger`-type track is loud — e.g. duck the BGM under the voiceover). |
 | `outputFilename` | Basename only — written under `output/`. Path separators are stripped. |
 
 Returns `{ assetPath: "output/<name>", previewUrl }`.
+
+> Loudness normalization (the platform LUFS target, e.g. WeChat −16) is **not** a mix-track field — it is applied at **export** by the render queue (`POST /api/render` accepts an optional `loudnessTargetLufs`). The mixer only balances per-track volume/fade/ducking.
 
 ### Cinematic transitions — 4 endpoints
 

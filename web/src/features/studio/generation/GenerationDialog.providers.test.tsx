@@ -462,7 +462,11 @@ describe("GenerationDialog B3 direct-dispatch wiring", () => {
       expect(findPost(fetchMock, (u) => u.includes("/api/generate/image"))).toBeDefined();
     });
     const body = bodyOf(findPost(fetchMock, (u) => u.includes("/api/generate/image")));
-    expect(body.referenceImage).toBe("/api/works/w1/assets/images/koi-v1.png");
+    // B3 review fix — the same-origin relative source uri is ABSOLUTIZED before
+    // dispatch (openrouter-image silently drops a non-http/data referenceImage).
+    expect(body.referenceImage).toBe(
+      `${window.location.origin}/api/works/w1/assets/images/koi-v1.png`,
+    );
     // Fused: source prompt + change direction.
     expect(body.prompt).toContain("a koi pond at dusk");
     expect(body.prompt).toContain("warmer color grade");
@@ -540,7 +544,12 @@ describe("GenerationDialog B3 direct-dispatch wiring", () => {
     const call = findPost(fetchMock, (u) => u.includes("/generate-video"));
     expect((call![0] as string)).toMatch(/\/api\/providers\/sora\/generate-video$/);
     const body = bodyOf(call);
-    expect(body.firstFrameImage).toBe("/api/works/w1/assets/clips/panda-v1.mp4");
+    // B3 review fix — the source uri is ABSOLUTIZED before dispatch (seedance
+    // hands firstFrameImage to OpenRouter's server-side fetch, which can't
+    // resolve a path relative to the browser origin).
+    expect(body.firstFrameImage).toBe(
+      `${window.location.origin}/api/works/w1/assets/clips/panda-v1.mp4`,
+    );
     expect(body.workId).toBe("w1");
     expect(body.prompt).toContain("panda drooping head");
     expect(body.prompt).toContain("slower droop");

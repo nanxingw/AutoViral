@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   semanticFilename,
   fuseVariantPrompt,
+  absolutizeWorkspaceUri,
 } from "../dispatchGeneration.js";
 
 // B3 — the death-envelope machinery (buildGenerationNotification /
@@ -68,5 +69,43 @@ describe("fuseVariantPrompt", () => {
     expect(fuseVariantPrompt("  base  ", "  delta  ")).toBe(
       "base\n\nChange: delta",
     );
+  });
+});
+
+describe("absolutizeWorkspaceUri (B3 review fix — derive anchor must reach the provider)", () => {
+  const origin = "http://localhost:3271";
+
+  it("prefixes a same-origin relative `/api/...` uri with the origin", () => {
+    // openrouter-image DROPS a non-http/data referenceImage; seedance hands
+    // firstFrameImage to OpenRouter's server-side fetch. A relative path fails
+    // both — so it must become absolute before dispatch.
+    expect(
+      absolutizeWorkspaceUri("/api/works/w1/assets/images/x.png", origin),
+    ).toBe("http://localhost:3271/api/works/w1/assets/images/x.png");
+  });
+
+  it("passes through an already-absolute http(s) url untouched", () => {
+    expect(absolutizeWorkspaceUri("https://cdn.example.com/a.png", origin)).toBe(
+      "https://cdn.example.com/a.png",
+    );
+    expect(absolutizeWorkspaceUri("http://x/y.png", origin)).toBe("http://x/y.png");
+  });
+
+  it("passes through a data: uri untouched", () => {
+    const data = "data:image/png;base64,AAAA";
+    expect(absolutizeWorkspaceUri(data, origin)).toBe(data);
+  });
+
+  it("anchors a bare relative path (no leading slash) under origin/", () => {
+    expect(absolutizeWorkspaceUri("assets/images/x.png", origin)).toBe(
+      "http://localhost:3271/assets/images/x.png",
+    );
+  });
+
+  it("returns undefined for empty / whitespace / nullish input (so dispatch omits the field)", () => {
+    expect(absolutizeWorkspaceUri(undefined, origin)).toBeUndefined();
+    expect(absolutizeWorkspaceUri(null, origin)).toBeUndefined();
+    expect(absolutizeWorkspaceUri("", origin)).toBeUndefined();
+    expect(absolutizeWorkspaceUri("   ", origin)).toBeUndefined();
   });
 });

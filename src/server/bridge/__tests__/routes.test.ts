@@ -2904,9 +2904,17 @@ describe("bridge router — B6 POST /comp/duration", () => {
     expect(after.duration).toBe(12);
   });
 
-  it("broadcasts composition-changed after the write lands", async () => {
-    const events: string[] = [];
-    const off = uiEventBus.subscribe(workId, (e) => events.push(e.type));
+  it("broadcasts composition-changed with reason `comp-duration` after the write lands", async () => {
+    // Capture the full event (not just type) and assert the payload reason, so a
+    // mis-tagged broadcast (e.g. copy-pasted `comp-aspect`) is caught — same
+    // discipline as the captions-generate precedent (routes.test.ts).
+    const events: { type: string; reason?: string }[] = [];
+    const off = uiEventBus.subscribe(workId, (e) =>
+      events.push({
+        type: e.type,
+        reason: (e as { payload?: { reason?: string } }).payload?.reason,
+      }),
+    );
     try {
       const res = await app.request("/api/bridge/v1/comp/duration", {
         method: "POST",
@@ -2914,7 +2922,12 @@ describe("bridge router — B6 POST /comp/duration", () => {
         body: JSON.stringify({ durationSec: 15 }),
       });
       expect(res.status).toBe(200);
-      expect(events).toContain("composition-changed");
+      expect(
+        events.some(
+          (e) => e.type === "composition-changed" && e.reason === "comp-duration",
+        ),
+        "expected a composition-changed event tagged reason=comp-duration",
+      ).toBe(true);
     } finally {
       off();
     }

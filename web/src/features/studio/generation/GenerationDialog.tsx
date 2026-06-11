@@ -26,6 +26,7 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   fuseVariantPrompt,
   semanticFilename,
+  absolutizeWorkspaceUri,
   type GenerationRequest,
   type AssetKind,
 } from "./dispatchGeneration";
@@ -345,7 +346,15 @@ export function GenerationDialog(props: GenerationDialogProps) {
         ...(p.height ? { height: p.height } : {}),
         // Variant anchor: route the source asset through the provider's edit
         // mode so small deltas (text swap, color tweak) preserve the source.
-        ...(isVar && req.source?.uri ? { referenceImage: req.source.uri } : {}),
+        // Absolutize the same-origin relative uri — openrouter-image silently
+        // DROPS a non-http/data referenceImage, so a relative path would lose
+        // the anchor entirely (B3 review fix).
+        ...(isVar && req.source?.uri
+          ? (() => {
+              const ref = absolutizeWorkspaceUri(req.source.uri);
+              return ref ? { referenceImage: ref } : {};
+            })()
+          : {}),
       }),
     });
     if (!res.ok) {
@@ -429,9 +438,12 @@ export function GenerationDialog(props: GenerationDialogProps) {
       : undefined;
     const durationSec = Number(form.duration) || 5;
     // Variant anchor: the source clip's uri becomes the i2v first frame. An
-    // explicit imageUrl field (create-mode i2v) takes precedence.
-    const firstFrameImage =
-      p.imageUrl || (isVar ? (req.source?.uri ?? undefined) : undefined);
+    // explicit imageUrl field (create-mode i2v) takes precedence. Absolutize it
+    // — seedance hands firstFrameImage to OpenRouter's server-side fetch, which
+    // can't resolve a path relative to the browser origin (B3 review fix).
+    const firstFrameImage = absolutizeWorkspaceUri(
+      p.imageUrl || (isVar ? (req.source?.uri ?? undefined) : undefined),
+    );
     const res = await fetch(
       `/api/providers/${selectedProviderId}/generate-video`,
       {
@@ -856,7 +868,10 @@ function VideoFields({
           </select>
         </Field>
       </Row>
-      <Field label="Source image URL (optional)" hint="Routes via image-to-video">
+      <Field
+        label={t("studio.generationDialog.fieldSourceImageUrl")}
+        hint={t("studio.generationDialog.fieldSourceImageUrlHint")}
+      >
         <input
           type="text"
           value={form.imageUrl ?? ""}
@@ -935,7 +950,7 @@ function AudioFields({
           </Field>
         </>
       ) : (
-        <Field label="Duration (seconds)">
+        <Field label={t("studio.generationDialog.fieldBgmDuration")}>
           <input
             type="number"
             value={form.durationSeconds ?? 30}
