@@ -2243,14 +2243,22 @@ bridgeRouter.get("/docs", async (c) => {
   const dir = manualDir();
   try {
     if (topic) {
-      // I08 — subdir-aware topic resolution. A topic may now be a nested
-      // chapter like `carousel/02-schema`; node's `join` resolves the `/`
-      // into a real subdir path. We `resolve` both sides and verify the
-      // target stays INSIDE the manual dir so a crafted `../../secret` topic
-      // can't escape the manual tree.
       const rel = topic.endsWith(".md") ? topic : `${topic}.md`;
-      const file = resolve(dir, rel);
-      const within = relative(resolve(dir), file);
+      // C2 (PRD-0009) — contracts/ + recipes/ are SIBLINGS of manual/ under
+      // skills/autoviral/, not children. The manual散文 references them as
+      // `contracts/error-codes.md` / `recipes/<...>.md`, but the docs anchor is
+      // manual/, so those topics 404'd. Resolve a topic in EITHER sibling
+      // namespace against the skill ROOT (manual's parent) instead. The
+      // AUTOVIRAL_MANUAL_DIR override is honoured: its parent is treated as the
+      // skill root, so an override pointing at a custom manual still finds the
+      // contracts/recipes that sit beside it. Manual topics keep resolving inside
+      // manual/. Each path keeps its OWN containment guard against the dir it
+      // resolves under, so a crafted `contracts/../../secret` (or a manual
+      // `../../secret`) can't escape its tree.
+      const isSibling = rel.startsWith("contracts/") || rel.startsWith("recipes/");
+      const baseDir = isSibling ? resolve(dir, "..") : resolve(dir);
+      const file = resolve(baseDir, rel);
+      const within = relative(baseDir, file);
       if (within.startsWith("..") || within.startsWith(sep) || within === "") {
         return c.json({ ok: false, error: `invalid docs topic: ${topic}` }, 404);
       }

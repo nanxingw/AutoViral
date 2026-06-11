@@ -28,7 +28,15 @@ Print the operator manual. Returns raw markdown (not JSON-wrapped) so agents pip
 autoviral docs                       # full manual concatenated
 autoviral docs _shared/03-cli-reference   # this file
 autoviral docs video/02-composition-schema
+autoviral docs contracts/error-codes      # error-code + event-stream contracts
+autoviral docs recipes/video/crossfade-between-clips   # step-by-step recipe
 ```
+
+Topic namespaces:
+
+- `_shared/…`, `video/…`, `carousel/…` — manual chapters (under `manual/`).
+- `contracts/…` — protocol contracts: `contracts/error-codes`, `contracts/event-stream`.
+- `recipes/…` — task recipes: `recipes/video/<name>`, `recipes/carousel/<name>`.
 
 Unknown topic → exit 3.
 

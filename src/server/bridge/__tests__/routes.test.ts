@@ -2122,6 +2122,46 @@ describe("bridge router — Phase 2 docs", () => {
     );
     expect(res.status).toBe(404);
   });
+
+  // ── C2 (PRD-0009) — contracts/ + recipes/ are SIBLINGS of manual/, not ──────
+  // children. The manual散文 keeps pointing at `contracts/error-codes.md` and
+  // `recipes/<...>.md`, but `manualDir()` anchors at skills/autoviral/manual, so
+  // those topics 404'd. The docs route now resolves a topic that begins with
+  // `contracts/` or `recipes/` against the skill ROOT (manual's parent), with the
+  // SAME containment guard so a `contracts/../../secret` can't escape the skill.
+  it("GET /docs?topic=contracts/error-codes serves the sibling contracts file", async () => {
+    const res = await app.request(
+      "/api/bridge/v1/docs?topic=" + encodeURIComponent("contracts/error-codes"),
+    );
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toMatch(/error/i);
+  });
+
+  it("GET /docs?topic=recipes/video/crossfade-between-clips serves the sibling recipe", async () => {
+    const res = await app.request(
+      "/api/bridge/v1/docs?topic=" +
+        encodeURIComponent("recipes/video/crossfade-between-clips"),
+    );
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toMatch(/crossfade/i);
+  });
+
+  it("GET /docs?topic=contracts/../../package rejects sibling-namespace traversal with 404", async () => {
+    const res = await app.request(
+      "/api/bridge/v1/docs?topic=" +
+        encodeURIComponent("contracts/../../package"),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /docs?topic=recipes/does-not-exist → 404", async () => {
+    const res = await app.request(
+      "/api/bridge/v1/docs?topic=" + encodeURIComponent("recipes/does-not-exist"),
+    );
+    expect(res.status).toBe(404);
+  });
 });
 
 describe("bridge router — I08 carousel writes", () => {

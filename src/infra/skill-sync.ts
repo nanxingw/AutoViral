@@ -253,6 +253,32 @@ interface MarkerState {
   contentHash: string | null;
 }
 
+/**
+ * Write the sync marker — a sibling of the per-skill dirs (NEVER inside the
+ * copied subtree, so a copy of `autoviral/` can't delete it). Records the
+ * version, an ISO timestamp, and (when known) the `contentHash` of the managed
+ * `.md` subtree. Shared by the post-copy write and the C2 legacy-marker backfill
+ * (which writes the hash WITHOUT a copy) so the on-disk shape stays identical.
+ */
+async function writeMarker(
+  markerPath: string,
+  version: string,
+  contentHash: string | null,
+): Promise<void> {
+  await writeFile(
+    markerPath,
+    `${JSON.stringify(
+      {
+        version,
+        syncedAt: new Date().toISOString(),
+        ...(contentHash ? { contentHash } : {}),
+      },
+      null,
+      2,
+    )}\n`,
+  );
+}
+
 async function readMarkerState(markerPath: string): Promise<MarkerState> {
   try {
     const raw = JSON.parse(await readFile(markerPath, "utf-8")) as {
@@ -376,22 +402,50 @@ export async function syncSkills(opts: SyncSkillsOptions): Promise<SyncSkillsRes
   // without a version bump never propagated to ~/.claude/skills, so `autoviral
   // docs` served a stale manual (B4 parity break, PRD-0009). We now also gate on
   // a content hash of the source autoviral `.md` subtree — same version but
-  // changed content still syncs. Compatibility: a LEGACY marker has no
-  // `contentHash` (recorded.contentHash === null) → we keep the pure version
-  // behaviour (skip when versions match) so we don't re-clobber a user's edits
-  // on the first boot after this ships; the next real sync writes the hash and
-  // the content gate engages from then on.
+  // changed content still syncs.
+  //
+  // C2 (PRD-0009) — the LEGACY-marker blind spot. The original B4 code only
+  // engaged the gate when `recorded.contentHash !== null`, so a marker shipped
+  // BEFORE the content field existed (the real 0.1.7 marker: `{ version,
+  // syncedAt }`, no hash) could NEVER detect drift at the matching version. The
+  // installed manual then froze forever — the 03-cli-reference.md 513-vs-669
+  // bug — because a version bump that would have written the first hash never
+  // came. The recorded-hash comparison can't help (there's nothing to compare),
+  // so for a legacy marker we instead hash the INSTALLED (target) `.md` subtree
+  // and compare it to source: if they differ, sync NOW; either way we backfill
+  // the hash so the gate engages from this boot on. The never-overwrite rule
+  // (.yaml / permitted_skills.md) is unaffected — even a forced sync routes
+  // through copyDir, which still exempts those files.
   const skillPresent = existsSync(targetAutoviral);
   const recorded = await readMarkerState(markerPath);
   const sourceAutoviral = join(sourceSkillsDir, "autoviral");
   const sourceContentHash = await hashManagedMarkdown(sourceAutoviral);
+  const legacyMarker = recorded.contentHash === null;
   if (skillPresent && recorded.version === version) {
-    const contentDrifted =
-      recorded.contentHash !== null &&
-      sourceContentHash !== null &&
-      recorded.contentHash !== sourceContentHash;
-    if (!contentDrifted) {
-      return { synced: false, reason: `up-to-date (version ${version})` };
+    if (legacyMarker) {
+      // Legacy marker → no recorded hash. Compare source vs the INSTALLED copy.
+      const targetContentHash = await hashManagedMarkdown(targetAutoviral);
+      const legacyDrifted =
+        sourceContentHash !== null &&
+        targetContentHash !== null &&
+        sourceContentHash !== targetContentHash;
+      if (!legacyDrifted) {
+        // Identical content — don't re-clobber, but BACKFILL the hash so the
+        // gate engages next boot. Use the installed copy's hash (≡ source's when
+        // identical) so the marker reflects what's actually on disk.
+        const backfill = targetContentHash ?? sourceContentHash;
+        if (backfill) {
+          await writeMarker(markerPath, version, backfill);
+        }
+        return { synced: false, reason: `up-to-date (version ${version})` };
+      }
+      // Drifted → fall through to the copy (forced sync for the legacy marker).
+    } else {
+      const contentDrifted =
+        sourceContentHash !== null && recorded.contentHash !== sourceContentHash;
+      if (!contentDrifted) {
+        return { synced: false, reason: `up-to-date (version ${version})` };
+      }
     }
   }
 
@@ -425,24 +479,15 @@ export async function syncSkills(opts: SyncSkillsOptions): Promise<SyncSkillsRes
     // a re-hash fails, and omits the field entirely if neither is available.
     const writtenHash =
       (await hashManagedMarkdown(join(targetSkillsDir, "autoviral"))) ?? sourceContentHash;
-    await writeFile(
-      markerPath,
-      `${JSON.stringify(
-        {
-          version,
-          syncedAt: new Date().toISOString(),
-          ...(writtenHash ? { contentHash: writtenHash } : {}),
-        },
-        null,
-        2,
-      )}\n`,
-    );
+    await writeMarker(markerPath, version, writtenHash);
+    const sameVersion = skillPresent && recorded.version === version;
+    // C2 — a legacy marker (no recorded hash) that reached this copy did so
+    // because the INSTALLED `.md` content drifted from source; a B4 marker
+    // (recorded hash) drifted vs its recorded hash. Either is "content changed".
     const contentDriftedSameVersion =
-      skillPresent &&
-      recorded.version === version &&
-      recorded.contentHash !== null &&
+      sameVersion &&
       sourceContentHash !== null &&
-      recorded.contentHash !== sourceContentHash;
+      (legacyMarker || recorded.contentHash !== sourceContentHash);
     const why = !skillPresent
       ? "skill missing"
       : recorded.version === null

@@ -119,11 +119,18 @@ describe("syncSkills", () => {
     );
   });
 
-  it("skips when the marker already records the current version", async () => {
-    await writeFile(join(source, "autoviral", "SKILL.md"), "source v2\n");
-    // Target already synced at the current version, with a stale user edit.
+  it("skips when the marker already records the current version (no drift)", async () => {
+    // Genuine "nothing changed" case: a LEGACY marker (no contentHash) at the
+    // matching version with IDENTICAL installed `.md` content. The legacy-marker
+    // backfill path (C2) must compute zero drift against the target and skip —
+    // NOT re-clobber a user edit on every boot. (The drifted-legacy case is
+    // covered by the dedicated C2 test below.)
+    await writeFile(join(source, "autoviral", "SKILL.md"), "stable content\n");
+    // Target already synced at the current version, same content.
     await mkdir(join(target, "autoviral"), { recursive: true });
-    await writeFile(join(target, "autoviral", "SKILL.md"), "user kept this\n");
+    await writeFile(join(target, "autoviral", "SKILL.md"), "stable content\n");
+    // A non-md sidecar the user owns — proves "no drift" ignores non-`.md` files.
+    await writeFile(join(target, "autoviral", "notes.txt"), "user kept this\n");
     await writeFile(markerOf(target), JSON.stringify({ version: VERSION }));
 
     const res = await syncSkills({
@@ -135,8 +142,8 @@ describe("syncSkills", () => {
 
     expect(res.synced).toBe(false);
     expect(res.reason).toMatch(/up.?to.?date|version/i);
-    // Same-version → did NOT clobber the user's edit.
-    expect(await readFile(join(target, "autoviral", "SKILL.md"), "utf-8")).toBe("user kept this\n");
+    // Same-version + no drift → did NOT clobber the user's sidecar.
+    expect(await readFile(join(target, "autoviral", "notes.txt"), "utf-8")).toBe("user kept this\n");
   });
 
   it("re-syncs and updates the marker when the recorded version differs", async () => {
@@ -500,6 +507,99 @@ describe("syncSkills", () => {
     expect(await readFile(join(target, "autoviral", "manual", "page.md"), "utf-8")).toBe("v2\n");
     // …but the user's .yaml is untouched (never-overwrite still holds).
     expect(await readFile(join(target, "autoviral", "config.yaml"), "utf-8")).toBe("user: edits\n");
+  });
+
+  // ── C2 (PRD-0009): a LEGACY marker (no contentHash) must not freeze drift ──
+  // The shipped 0.1.7 marker recorded { version, syncedAt } but NO contentHash
+  // (it predates the content gate). The content gate only fired when
+  // `recorded.contentHash !== null`, so a legacy marker at the matching version
+  // could NEVER detect drift → the installed manual froze even after the source
+  // `.md` changed within the version (the real 03-cli-reference.md 513-vs-669
+  // bug). The fix: when the marker is legacy (no recorded hash), compute drift
+  // against the INSTALLED (target) `.md` content; if it differs from source,
+  // sync THIS time, and either way backfill the hash so the gate engages from
+  // here on.
+  it("re-syncs on a LEGACY marker (no contentHash) when same version ships changed manual content", async () => {
+    // Source ships v2 of the manual.
+    await writeFile(join(source, "autoviral", "SKILL.md"), "# entry\n");
+    await mkdir(join(source, "autoviral", "manual", "_shared"), { recursive: true });
+    await writeFile(
+      join(source, "autoviral", "manual", "_shared", "03-cli-reference.md"),
+      "v2 — new Asset generation section\n",
+    );
+
+    // Target is stuck at v1, with a LEGACY marker (matching version, NO hash).
+    await mkdir(join(target, "autoviral", "manual", "_shared"), { recursive: true });
+    await writeFile(join(target, "autoviral", "SKILL.md"), "# entry\n");
+    await writeFile(
+      join(target, "autoviral", "manual", "_shared", "03-cli-reference.md"),
+      "v1 — stale, missing Asset generation\n",
+    );
+    await writeFile(
+      markerOf(target),
+      JSON.stringify({ version: VERSION, syncedAt: "2026-06-10T05:07:23.479Z" }),
+    );
+
+    const res = await syncSkills({
+      sourceSkillsDir: source,
+      targetSkillsDir: target,
+      version: VERSION,
+      markerPath: markerOf(target),
+    });
+
+    // Legacy marker + drifted content → it synced despite the matching version.
+    expect(res.synced).toBe(true);
+    expect(
+      await readFile(
+        join(target, "autoviral", "manual", "_shared", "03-cli-reference.md"),
+        "utf-8",
+      ),
+    ).toBe("v2 — new Asset generation section\n");
+    // The marker now carries a contentHash so the gate engages from here on.
+    const marker = JSON.parse(await readFile(markerOf(target), "utf-8")) as {
+      contentHash?: string;
+    };
+    expect(typeof marker.contentHash).toBe("string");
+  });
+
+  it("backfills the contentHash on a LEGACY marker even when content is identical (gate engages, no clobber)", async () => {
+    // Legacy marker, same version, IDENTICAL installed content (nothing drifted).
+    // We must NOT re-clobber the user's edits, but we MUST backfill the hash so
+    // the content gate works on the NEXT boot.
+    await writeFile(join(source, "autoviral", "SKILL.md"), "# entry\n");
+    await mkdir(join(source, "autoviral", "manual"), { recursive: true });
+    await writeFile(join(source, "autoviral", "manual", "page.md"), "stable\n");
+
+    await mkdir(join(target, "autoviral", "manual"), { recursive: true });
+    await writeFile(join(target, "autoviral", "SKILL.md"), "# entry\n");
+    await writeFile(join(target, "autoviral", "manual", "page.md"), "stable\n");
+    // A user-edited exempt file that the backfill path must NEVER touch.
+    await writeFile(join(target, "autoviral", "config.yaml"), "user: edits\n");
+    await writeFile(
+      markerOf(target),
+      JSON.stringify({ version: VERSION, syncedAt: "2026-06-10T05:07:23.479Z" }),
+    );
+
+    const res = await syncSkills({
+      sourceSkillsDir: source,
+      targetSkillsDir: target,
+      version: VERSION,
+      markerPath: markerOf(target),
+    });
+
+    // Identical content → did NOT re-copy (synced stays false).
+    expect(res.synced).toBe(false);
+    // …but the marker was upgraded with a contentHash so the gate now engages.
+    const marker = JSON.parse(await readFile(markerOf(target), "utf-8")) as {
+      version: string;
+      contentHash?: string;
+    };
+    expect(marker.version).toBe(VERSION);
+    expect(typeof marker.contentHash).toBe("string");
+    // The user's exempt file is untouched by the backfill.
+    expect(await readFile(join(target, "autoviral", "config.yaml"), "utf-8")).toBe(
+      "user: edits\n",
+    );
   });
 
   it("DOES follow a symlink that resolves INSIDE the source tree (legit internal link)", async () => {

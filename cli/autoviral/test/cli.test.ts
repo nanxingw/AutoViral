@@ -1544,6 +1544,17 @@ describe("autoviral CLI — end-to-end", () => {
     expect(r.stdout).toMatch(/toast/);
   });
 
+  // C2 (PRD-0009) — `docs` help must advertise the contracts/ + recipes/
+  // sibling namespaces, not just the manual chapters. The manual散文 points at
+  // those topics (`contracts/error-codes`, `recipes/video/…`) and the route now
+  // serves them, so the help索引 has to surface them or the agent never knows.
+  it("--help advertises the contracts/ and recipes/ docs namespaces", async () => {
+    const r = await run(["--help"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/contracts\//);
+    expect(r.stdout).toMatch(/recipes\//);
+  });
+
   it("comp diff → prints unified diff to stdout (exit 0)", async () => {
     const r = await run(["comp", "diff"]);
     expect(r.exitCode).toBe(0);
