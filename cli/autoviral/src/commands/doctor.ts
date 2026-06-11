@@ -9,8 +9,9 @@
 //   • playwright        — chromium in the per-platform browsers cache
 //   • claude CLI        — presence on $PATH (can't be bundled; report only)
 //
-// EXIT CODES: non-zero when a CORE dep (ffmpeg/ffprobe) is missing, else 0. A
-// missing TTS/playwright/claude is a WARNING (degrades a feature, not the core
+// EXIT CODES: non-zero when a CORE dep (ffmpeg/ffprobe, or the Remotion render
+// entry — pre-built bundle / web/src checkout) is missing, else 0. A missing
+// TTS/playwright/claude is a WARNING (degrades a feature, not the core
 // render/export chain) and does NOT fail the exit code — `autoviral setup` (or
 // first-use lazy install) handles those.
 
@@ -18,6 +19,7 @@ import {
   probeClaude,
   probeFfmpegBoth,
   probePlaywright,
+  probeRemotionEntry,
   probeTts,
   type DepSource,
 } from "../deps-probe.js";
@@ -62,6 +64,30 @@ export async function doctorCommand(_args: string[]): Promise<void> {
     }
   }
 
+  // ── core: Remotion render entry (render/export/snapshot) ──────────────────
+  // D1 (PRD-0009 E2E): a daemon without AUTOVIRAL_REMOTION_BUNDLE and without a
+  // web/src checkout cannot render at all — doctor used to report "Core
+  // dependencies OK" while every render/export/snapshot died on webpack ENOENT.
+  // Core: a miss flips the exit code so doctor and the render faces agree.
+  const remotion = probeRemotionEntry();
+  if (remotion.ready) {
+    rows.push(
+      `${OK} ${pad("remotion")} render entry — ${
+        remotion.via === "bundle"
+          ? "pre-built bundle (AUTOVIRAL_REMOTION_BUNDLE)"
+          : "web/src source checkout"
+      }`,
+    );
+    rows.push(`    → ${remotion.path}`);
+  } else {
+    coreMissing = true;
+    rows.push(`${BAD} ${pad("remotion")} render entry NOT FOUND — render/export/snapshot will fail`);
+    rows.push(`    looked for: ${remotion.path}`);
+    rows.push(
+      "    fix: set AUTOVIRAL_REMOTION_BUNDLE to a pre-built bundle dir, or run the daemon from a checkout containing web/src",
+    );
+  }
+
   // ── TTS venv (edge-tts + stable-ts) — warning, not core ───────────────────
   if (tts.ready) {
     rows.push(`${OK} ${pad("tts venv")} edge-tts + stable-ts ready`);
@@ -99,8 +125,8 @@ export async function doctorCommand(_args: string[]): Promise<void> {
 
   if (coreMissing) {
     process.stdout.write(
-      "Core dependency missing (ffmpeg/ffprobe) — render/export/waveform/TTS-probe will fail.\n" +
-        "Run `autoviral setup` to install it.\n",
+      "Core dependency missing (ffmpeg/ffprobe/remotion entry) — render/export/waveform will fail.\n" +
+        "See the ✗ rows above for the exact fix.\n",
     );
     process.exitCode = 1;
   } else {

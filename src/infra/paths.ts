@@ -43,6 +43,47 @@ export const CLI_BIN_DIR = join(
 );
 
 /**
+ * Repo-root `web/` source tree (Vite/React app), resolved as a SIBLING of dist/.
+ *
+ * INVARIANT — same child-vs-sibling rule as CLI_BIN_DIR / skills/. `web/` lives
+ * at the repo root, BESIDE the compiled daemon, never inside it:
+ *   - dev/test: PACKAGE_ROOT === src/, and web/ is its sibling at the repo root.
+ *   - npm/electron: the daemon ships from dist/, and the Remotion entry's source
+ *     only exists in dev — packaged builds set AUTOVIRAL_REMOTION_BUNDLE to a
+ *     PRE-BUILT bundle dir and never touch this path (see remotion-paths.ts).
+ * Resolving it as a CHILD (join(PACKAGE_ROOT, "web", ...)) yields the ghost path
+ * dist/web/... that never exists — that was the D1 regression: the runtime
+ * webpack bundle() crashed with a bare ENOENT, breaking render/export/snapshot
+ * 100% under a bare dist daemon (no AUTOVIRAL_REMOTION_BUNDLE). Mirrors the B5
+ * cli/ + skills/ sibling fixes — single source of truth for both render faces
+ * (remotion-renderer.ts + render/remotion-bridge.ts via remotion-paths.ts).
+ */
+export const WEB_SRC_ROOT = join(PACKAGE_ROOT, "..", "web", "src");
+
+/**
+ * Repo-root `src/shared/` TypeScript tree — the `@shared/*` alias target webpack
+ * resolves inside the bundled Remotion composition. Same SIBLING-of-dist/ rule
+ * as WEB_SRC_ROOT: the shared source lives at the repo root beside dist/, so the
+ * old child write (join(PACKAGE_ROOT, "src/shared") → dist/src/shared) was a
+ * ghost path that silently broke the bundle's `@shared` imports.
+ */
+export const SHARED_SRC_ROOT = join(PACKAGE_ROOT, "..", "src", "shared");
+
+/**
+ * Absolute path to the Remotion composition entry the runtime webpack bundler
+ * loads (web/src/features/studio/composition/RemotionRoot.tsx), resolved off
+ * WEB_SRC_ROOT so it follows the sibling-of-dist/ invariant. Centralised here so
+ * the path string can't drift and so doctor + remotion-paths share one truth.
+ */
+export const REMOTION_ENTRY_POINT = join(
+  WEB_SRC_ROOT,
+  "features",
+  "studio",
+  "composition",
+  "RemotionRoot.tsx",
+);
+
+/**
  * Build the PATH string injected onto a spawned agent's env so the
  * skill-documented `autoviral` command resolves. CLI_BIN_DIR is *prepended* to
  * the inherited PATH. Both spawn faces (chat-agent in ws-bridge.ts spawnCli +

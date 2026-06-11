@@ -40,6 +40,7 @@ import {
   collectorVenvReady,
   ensureCollectorVenv,
 } from "./collector-env.js";
+import { REMOTION_ENTRY_POINT } from "./paths.js";
 
 const OK = "✓";
 const BAD = "✗";
@@ -117,6 +118,29 @@ function chromiumCached(): boolean {
   }
 }
 
+/** D1 (PRD-0009 E2E): whether the Remotion render entry resolves — either a
+ *  pre-built bundle dir (AUTOVIRAL_REMOTION_BUNDLE, packaged app) or the
+ *  web/src source checkout (sibling of dist/, dev + repo daemon). Without one
+ *  of these, render/export/snapshot fail 100% — doctor used to say "Core
+ *  dependencies OK" while every render job died on a webpack ENOENT. */
+export interface RemotionEntryProbe {
+  ready: boolean;
+  via: "bundle" | "source" | null;
+  /** The path that resolved (ready) or the path we looked for (missing). */
+  path: string;
+}
+
+function probeRemotionEntry(): RemotionEntryProbe {
+  const prebuilt = process.env.AUTOVIRAL_REMOTION_BUNDLE;
+  if (prebuilt && prebuilt.trim() && existsSync(prebuilt.trim())) {
+    return { ready: true, via: "bundle", path: prebuilt.trim() };
+  }
+  if (existsSync(REMOTION_ENTRY_POINT)) {
+    return { ready: true, via: "source", path: REMOTION_ENTRY_POINT };
+  }
+  return { ready: false, via: null, path: REMOTION_ENTRY_POINT };
+}
+
 /** Human label for where a binary resolved (deps.ts DepResolution.source). */
 function sourceLabel(source: string): string {
   switch (source) {
@@ -147,6 +171,9 @@ export interface DoctorDeps {
    *  provisioned. Injected so the present/missing report is unit-testable. */
   collectorVenvReady: typeof collectorVenvReady;
   collectorVenvDir: typeof collectorVenvDir;
+  /** D1: Remotion render-entry probe (bundle env or web/src sibling). Injected
+   *  so the missing-entry → exit-1 case is unit-testable. */
+  remotionEntry: () => RemotionEntryProbe;
   out: Reporter;
 }
 
@@ -160,6 +187,7 @@ const realDoctorDeps: DoctorDeps = {
   resolveClaude,
   collectorVenvReady,
   collectorVenvDir,
+  remotionEntry: probeRemotionEntry,
   out: stdout,
 };
 
@@ -194,6 +222,32 @@ export async function runDoctor(deps: Partial<DoctorDeps> = {}): Promise<number>
       rows.push(`${BAD} ${pad(name)} NOT FOUND on PATH`);
       rows.push("    fix: run `autoviral setup` (installs the vendored binary)");
     }
+  }
+
+  // ── core: Remotion render entry (render/export/snapshot) ───────────────────
+  // D1: a bare dist daemon without AUTOVIRAL_REMOTION_BUNDLE and without a
+  // web/src checkout cannot render AT ALL. Part of the core chain — a miss
+  // flips the exit code, so doctor can never again report "Core dependencies
+  // OK" while every render job fails.
+  const entry = d.remotionEntry();
+  if (entry.ready) {
+    rows.push(
+      `${OK} ${pad("remotion")} render entry — ${
+        entry.via === "bundle"
+          ? "pre-built bundle (AUTOVIRAL_REMOTION_BUNDLE)"
+          : "web/src source checkout"
+      }`,
+    );
+    rows.push(`    → ${entry.path}`);
+  } else {
+    coreMissing = true;
+    rows.push(
+      `${BAD} ${pad("remotion")} render entry NOT FOUND — render/export/snapshot will fail`,
+    );
+    rows.push(`    looked for: ${entry.path}`);
+    rows.push(
+      "    fix: set AUTOVIRAL_REMOTION_BUNDLE to a pre-built bundle dir, or run the daemon from a checkout containing web/src",
+    );
   }
 
   // ── TTS venv (edge-tts + stable-ts) — warning, not core ────────────────────
@@ -244,8 +298,8 @@ export async function runDoctor(deps: Partial<DoctorDeps> = {}): Promise<number>
 
   if (coreMissing) {
     d.out(
-      "Core dependency missing (ffmpeg/ffprobe) — render/export/waveform/TTS-probe will fail.\n" +
-        "Run `autoviral setup` to install it.",
+      "Core dependency missing (ffmpeg/ffprobe/remotion entry) — render/export/waveform will fail.\n" +
+        "See the ✗ rows above for the exact fix.",
     );
     return 1;
   }

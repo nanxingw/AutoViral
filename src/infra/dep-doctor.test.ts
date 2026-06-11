@@ -68,6 +68,62 @@ describe("runDoctor — exit code reflects CORE readiness", () => {
     expect(printed).toMatch(/Core dependency missing/);
   });
 
+  it("D1: missing Remotion render entry is CORE → exit 1 + actionable fix", async () => {
+    const out = vi.fn();
+    const code = await runDoctor({
+      detect: () => ({
+        ffmpeg: res("vendored", "/vendor/ffmpeg"),
+        ffprobe: res("vendored", "/vendor/ffprobe"),
+      }),
+      ttsVenvReady: () => true,
+      ttsVenvDir: () => "/x/.autoviral/tts-venv",
+      venvBinPath: (n) => `/x/.autoviral/tts-venv/bin/${n}`,
+      binaryOnPath: () => false,
+      chromiumCached: () => true,
+      resolveClaude: () => "/usr/local/bin/claude",
+      // The E2E-discovered state: bare dist daemon, no bundle env, no web/src.
+      remotionEntry: () => ({
+        ready: false,
+        via: null,
+        path: "/ghost/web/src/features/studio/composition/RemotionRoot.tsx",
+      }),
+      out,
+    });
+    expect(code).toBe(1); // doctor may never say "OK" while render is 100% broken
+    const printed = out.mock.calls.map((c) => c[0]).join("\n");
+    expect(printed).toMatch(/✗ remotion/);
+    expect(printed).toMatch(/render\/export\/snapshot will fail/);
+    expect(printed).toMatch(/AUTOVIRAL_REMOTION_BUNDLE/); // the actionable fix
+    expect(printed).not.toMatch(/Core dependencies OK/);
+  });
+
+  it("D1: Remotion entry via pre-built bundle reports ✓ with the bundle path", async () => {
+    const out = vi.fn();
+    const code = await runDoctor({
+      detect: () => ({
+        ffmpeg: res("vendored", "/vendor/ffmpeg"),
+        ffprobe: res("vendored", "/vendor/ffprobe"),
+      }),
+      ttsVenvReady: () => true,
+      ttsVenvDir: () => "/x/.autoviral/tts-venv",
+      venvBinPath: (n) => `/x/.autoviral/tts-venv/bin/${n}`,
+      binaryOnPath: () => false,
+      chromiumCached: () => true,
+      resolveClaude: () => "/usr/local/bin/claude",
+      remotionEntry: () => ({
+        ready: true,
+        via: "bundle",
+        path: "/app/remotion-bundle",
+      }),
+      out,
+    });
+    expect(code).toBe(0);
+    const printed = out.mock.calls.map((c) => c[0]).join("\n");
+    expect(printed).toMatch(/✓ remotion/);
+    expect(printed).toMatch(/AUTOVIRAL_REMOTION_BUNDLE/);
+    expect(printed).toMatch(/\/app\/remotion-bundle/);
+  });
+
   it("bare-name ffmpeg that IS on PATH counts as present → exit 0", async () => {
     const out = vi.fn();
     const code = await runDoctor({

@@ -4,6 +4,9 @@ import { existsSync } from "node:fs";
 import {
   PACKAGE_ROOT,
   CLI_BIN_DIR,
+  WEB_SRC_ROOT,
+  SHARED_SRC_ROOT,
+  REMOTION_ENTRY_POINT,
   buildSpawnPath,
   assertCliBinDir,
 } from "./paths.js";
@@ -70,6 +73,42 @@ describe("manualDir() sibling resolution (the real exported function)", () => {
   it("honours AUTOVIRAL_MANUAL_DIR override when set", () => {
     process.env.AUTOVIRAL_MANUAL_DIR = "/tmp/some-override-manual";
     expect(manualDir()).toBe("/tmp/some-override-manual");
+  });
+});
+
+// D1 (PRD-0009 E2E 收尾): the Remotion entry + @shared alias the runtime
+// webpack bundle() loads are the FOURTH member of the child-vs-sibling family.
+// remotion-paths.ts used to resolve them as CHILDREN of PACKAGE_ROOT
+// (join(PACKAGE_ROOT, "web/src/...") → ghost dist/web/... under a bare dist
+// daemon), which broke render/export/snapshot 100% whenever
+// AUTOVIRAL_REMOTION_BUNDLE wasn't set (i.e. everywhere except the packaged
+// Electron app). Same guard pattern as CLI_BIN_DIR above.
+describe("Remotion source roots (D1 sibling resolution)", () => {
+  it("pins WEB_SRC_ROOT / SHARED_SRC_ROOT as SIBLINGS of PACKAGE_ROOT", () => {
+    expect(WEB_SRC_ROOT).toBe(join(PACKAGE_ROOT, "..", "web", "src"));
+    expect(SHARED_SRC_ROOT).toBe(join(PACKAGE_ROOT, "..", "src", "shared"));
+  });
+
+  it("REMOTION_ENTRY_POINT really exists in a source checkout (strongest guard)", () => {
+    // dev/test PACKAGE_ROOT === src/, so the sibling resolution lands on the
+    // real committed web/src/.../RemotionRoot.tsx. The old child write
+    // (src/web/... or dist/web/...) never exists → this turns red.
+    expect(
+      REMOTION_ENTRY_POINT.endsWith(
+        join(
+          "web",
+          "src",
+          "features",
+          "studio",
+          "composition",
+          "RemotionRoot.tsx",
+        ),
+      ),
+    ).toBe(true);
+    expect(existsSync(REMOTION_ENTRY_POINT)).toBe(true);
+    // The @shared alias target must hold the real shared TS tree, or the
+    // bundled composition's `@shared/*` imports silently break.
+    expect(existsSync(join(SHARED_SRC_ROOT, "composition.ts"))).toBe(true);
   });
 });
 

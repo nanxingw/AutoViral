@@ -22,7 +22,8 @@ import { copyFile, mkdir, chmod } from "node:fs/promises";
 import { spawn, type SpawnOptions } from "node:child_process";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
 
@@ -257,6 +258,48 @@ export function probeClaude(): ClaudeProbe {
     }
   }
   return { path: null, present: false };
+}
+
+// ── Remotion render entry (mirrors src/infra/paths.ts REMOTION_ENTRY_POINT) ──
+
+export interface RemotionEntryProbe {
+  ready: boolean;
+  /** "bundle" = AUTOVIRAL_REMOTION_BUNDLE pre-built dir; "source" = the repo's
+   *  web/src checkout (sibling-of-dist invariant). */
+  via: "bundle" | "source" | null;
+  /** The path that resolved (ready) or the path we looked for (missing). */
+  path: string;
+}
+
+/** D1 (PRD-0009 E2E): render/export/snapshot need a Remotion entry — either a
+ *  pre-built bundle (AUTOVIRAL_REMOTION_BUNDLE, packaged app) or the repo's
+ *  web/src source. Mirrors src/infra/paths.ts REMOTION_ENTRY_POINT: this CLI
+ *  bundle lives at cli/autoviral/dist/cli.js, so the repo root is three levels
+ *  up and web/src is resolved beneath it (same sibling rule as cli/ + skills/).
+ *  Keep in lockstep with that module's doc comment. */
+export function probeRemotionEntry(): RemotionEntryProbe {
+  const prebuilt = process.env.AUTOVIRAL_REMOTION_BUNDLE;
+  if (prebuilt && prebuilt.trim() && existsSync(prebuilt.trim())) {
+    return { ready: true, via: "bundle", path: prebuilt.trim() };
+  }
+  const repoRoot = join(cliModuleDir(), "..", "..", "..");
+  const entry = join(
+    repoRoot,
+    "web",
+    "src",
+    "features",
+    "studio",
+    "composition",
+    "RemotionRoot.tsx",
+  );
+  if (existsSync(entry)) return { ready: true, via: "source", path: entry };
+  return { ready: false, via: null, path: entry };
+}
+
+/** Directory of the running CLI bundle (cli/autoviral/dist). Isolated so the
+ *  repo-root hop count above stays explainable in one place. */
+function cliModuleDir(): string {
+  return dirname(fileURLToPath(import.meta.url));
 }
 
 // ── install primitives (used by `autoviral setup`) ───────────────────────────
