@@ -951,7 +951,7 @@ export class WsBridge {
     if (resumeId) {
       // Resume — inject teaching added since this session's stored prompt
       // version (B7(a)-lite); gated to work-bound sessions inside the helper.
-      const append = await this.resumePromptAppend(workId, sid);
+      const append = await this.resumePromptAppend(session, workId, sid);
       this.spawnCli(session, text, resumeId, append);
     } else {
       // No session to resume — build full context prompt so agent knows the project
