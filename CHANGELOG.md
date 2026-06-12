@@ -7,13 +7,17 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-06-12
+
+本版由两批工作组成：**Agent 工作面大修**（PRD-0009 七片 + agent 视角冒烟与多纬度 E2E 揪出的修复簇，先列于下）与 **折叠镜表（Shot Sheet）**（PRD-0008，见本节后半）。Agent 工作面批的主线：聊天暂停键真正可用、BGM 生成从零到一、agent 的 CLI 开箱即用（不再被幽灵路径逼去读源码）、操作手册与实现全面对齐并有自动防漂移测试、旧作品 resume 也能学到新能力、导出成片从 100% 失败修到真实出片。
+
 ### Added
 - **BGM/配乐生成端点从零到一**（0009·B2）— `POST /api/generate/bgm`：Lyria 3 Pro via OpenRouter（chat/completions SSE 流式，约 $0.08/首、整曲约 1–2 分钟），器乐默认（`vocal` 可选）、`durationSeconds` 5–180 可选（服务端校验 + ffmpeg 截断，Lyria 上游无时长参数）、落 assets + AssetEntry/provenance 登记 + `asset-added` 广播（与视频端点同模式）。key 走 `config.openrouter.apiKey` 显式注入（无 key 503 / 无 key 开发态 stub）；registry 新增 `music` capability。**付费探针实证**（$0.08）：SSE `delta.audio.data` 契约未漂移，拼接字节 ffprobe 二确为 mp3（74.4s）。此前用户让 agent "自己生成配乐" 三重无路（无端点 + 提示词漏教 + UI 死信封命 agent 跑已删 .py）——agent 被逼读源码逆向的那张截图就是这条根因。
 - **comp.duration 终于有写入路径**（0009·B6）— 新共享 op `setCompositionDuration` + bridge `POST /comp/duration` + CLI `autoviral comp set --duration <秒|auto>`（`auto` 从全轨 clip end 推导；允许缩短，截断内容时 CLI 给非阻断警告）。此前 duration 只会被 clip 增改单调撑大，缩短只能整份 `comp put` 或直编 yaml——而直编会被 Studio 打开时的 800ms 防抖自动保存覆盖（manual 现已写明该陷阱与"写入必须走 bridge"的原因）。另：clip 跨轨移动经查**已有**全链路（`autoviral clip move <id> --to-track`），0009 该半片为过时前提，本次仅补 manual 文档。
 
 ### Fixed
 - **`PUT /api/config` 响应回显全部明文 secret**（冒烟揪出，CRITICAL）— GET 早已脱敏（#60），PUT 路径漏网：任意配置保存的响应体直接带回 openrouter/jimeng/memory 全家明文 key。现 GET/PUT 共用同一 `redactedConfigResponse`（strip + `{set,lastFour}` meta），sweep matrix 测试循环整个 secret family 双面钉死。
-- **导出成片在裸 dist daemon 下 100% 失败**（E2E 揪出的既存硬伤）— render / export / snapshot 三条路径全断：Remotion 入口被解析成 `PACKAGE_ROOT` 的 child（dist 布局下=幽灵路径 `dist/web/...`），运行时 webpack 撞裸 ENOENT；与 v0.1.8 修复的 spawn PATH 同族的第四处 child-vs-sibling 错配（仅打包 Electron 因预构建 bundle 幸免）。现 sibling 常量统一解析 + 入口缺失时 webpack 之前给出可操作错误（指明设 `AUTOVIRAL_REMOTION_BUNDLE` 或从含 web/src 的检出运行）+ **doctor 新增「remotion 渲染入口」核心检查**——「doctor 全绿但渲染 0%」的自相矛盾从此不可能。
+- **导出成片在裸 dist daemon 下 100% 失败**（E2E 揪出的既存硬伤）— render / export / snapshot 三条路径全断：Remotion 入口被解析成 `PACKAGE_ROOT` 的 child（dist 布局下=幽灵路径 `dist/web/...`），运行时 webpack 撞裸 ENOENT；与本版 B5 修复的 spawn PATH 同族的第四处 child-vs-sibling 错配（仅打包 Electron 因预构建 bundle 幸免）。现 sibling 常量统一解析 + 入口缺失时 webpack 之前给出可操作错误（指明设 `AUTOVIRAL_REMOTION_BUNDLE` 或从含 web/src 的检出运行）+ **doctor 新增「remotion 渲染入口」核心检查**——「doctor 全绿但渲染 0%」的自相矛盾从此不可能。
 - **图像生成端点透传非法参数给付费 provider 并泄露内部 id** — `/api/generate/image` 非法 aspectRatio 不本地校验（video 端点同场景干净），provider 错误体裸露内部 model id 与账户 id。现本地枚举校验（转发前 400 列合法值）+ `sanitizeProviderError` 对外脱敏；image/video/bgm 三端点对 fresh work（尚无 composition.yaml）不再静默跳过 AssetEntry 登记（共享 bootstrap，`assetId` 真返回）。
 - **BGM 上游间歇性空音频无韧性** — Lyria 偶发返回 200 但 0 音频字节，此前一击即 500 且 UI 只有泛化「生成服务调度失败」。现仅对空音频自动重试 1 次（其他错误不重试，防双倍计费），重试仍空返 502 + 中文可操作文案「上游模型临时返空，请稍后重试」，前端按 code 白名单直显（英文内部错误一律走本地化兜底，不漏给用户）。
 - **安装态 skill 手册永久冻结** — skill-sync 的 content-hash 门对 legacy marker（无 hash 字段的旧标记 + 版本未 bump）被旁路，`~/.claude/skills/autoviral` 的 manual 停在旧档、整族新端点教学到不了被动加载的 agent。现 legacy marker 当场强制比对并补写 hash；另 `autoviral docs` 现可服务 `contracts/` 与 `recipes/` 命名空间（此前手册散文指引的 topic 全 404）。
@@ -27,8 +31,6 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - **图像 provider 通用化改名 `nanobanana` → `openrouter-image`** — 文件 / 类（`OpenRouterImageProvider`）/ registry id 全部换成如实的通用名（真身一直是 OpenRouter `openai/gpt-5.4-image-2`，旧名是换模型前的历史产品名，极具误导性）。旧 id `nanobanana` 永久保留为入站别名（在 `getProvider` 查找咽喉归一化），旧文档命令 `--provider nanobanana`、旧 work 的 chat 历史、外部脚本零破坏；既有 composition provenance 里的历史 `providerId: nanobanana` 不回写（纯审计字段，无任何代码读回）。文档面（README / AGENT.md / CONTEXT.md 词表 / ADR-007 注记 / CLI 手册 / recipe）同步诚实化。
-
-## [0.1.7] - 2026-06-10
 
 **折叠镜表（Shot Sheet）**（PRD-0008）—— 「剧本·分镜」tab 交互重设计。用户反馈"按钮很多很杂"：原每张分镜卡常驻 ~12 个裸控件、一屏 ≈72 个可见控件，且人在 UI 里根本不能新建/删除分镜。本版把卡片改成**折叠态一行只读镜头条 + 点击就地展开的卡内 Inspector（手风琴单展开）**，默认视图只剩 ~3 个常驻按钮；设计经多 agent workflow（4 角度提案 × 2 立场评审）选定，全部写路径不变（per-intent bridge + 共享 scene ops，agent-人一致）。
 
