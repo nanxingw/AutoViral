@@ -96,7 +96,21 @@ export interface WsSession {
    *  PROMPT_VERSION — otherwise a skipped injection would still record "taught
    *  to current" and permanently suppress the teaching it never delivered. */
   taughtPromptVersion?: number;
+  /** A2 (PRD-0010) — idempotency window bookkeeping. The clean display text +
+   *  wall-clock ms of the LAST accepted user message on this session. A repeat
+   *  with the same text, arriving while the session is still non-idle (a turn is
+   *  in flight) and within USER_MESSAGE_DEDUP_WINDOW_MS, is a double-send
+   *  artifact (double-click / ReconnectingWS buffer-resend) and is rejected
+   *  before it can double-record or SIGTERM the mid-turn CLI. A repeat sent
+   *  later, or to a settled-idle CLI, is a legitimate resend and passes. */
+  lastUserText?: string;
+  lastUserAt?: number;
 }
+
+/** A2 (PRD-0010) — how long an identical, back-to-back user message is treated
+ *  as a duplicate. Kept short so a user deliberately re-sending the same short
+ *  line (e.g. "继续") is not swallowed. */
+export const USER_MESSAGE_DEDUP_WINDOW_MS = 3000;
 
 /** The id of a work's first/legacy chat session. A work created before
  *  multi-session keying has exactly one chat that maps to chat.jsonl. */
@@ -971,6 +985,35 @@ export class WsBridge {
     // Persist/display the CLEAN user text + structured attachments — spawnCli
     // below still gets the full envelope-prefixed `text` (the agent needs it).
     const { text: displayText, attachments } = splitUserWireText(text, workId);
+
+    // A2 (PRD-0010) — idempotency window. A double-send (a same-tick double
+    // submit that slipped the client ref lock, or a ReconnectingWS
+    // buffer-resend on reconnect) arrives as the SAME text while a turn is
+    // still in flight (session not idle) and within the dedup window. Reject it
+    // BEFORE recordBlock + the mid-turn kill below: this is the single fix for
+    // both "same user block recorded twice on disk" and "the second send
+    // SIGTERMs the CLI that's still producing the first turn's reply". A repeat
+    // sent >window later, or to a settled-idle CLI (turn finished), is a
+    // legitimate resend and falls through. Idle is flipped to false
+    // synchronously here (before the awaits below) so a rapid second call in
+    // the spawn window still sees the turn as in-flight.
+    if (
+      !session.idle &&
+      session.lastUserText === displayText &&
+      session.lastUserAt !== undefined &&
+      Date.now() - session.lastUserAt <= USER_MESSAGE_DEDUP_WINDOW_MS
+    ) {
+      logBridge("send_deduped", workId, {
+        sessionId: sid,
+        withinMs: Date.now() - session.lastUserAt,
+        textLen: displayText.length,
+      });
+      return false;
+    }
+    session.lastUserText = displayText;
+    session.lastUserAt = Date.now();
+    session.idle = false;
+
     const userBlock: ChatBlock = {
       type: "user",
       text: displayText,

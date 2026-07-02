@@ -1061,7 +1061,8 @@ export const en = {
     },
     wsConnecting: "CONNECTING…",
     wsReconnecting: "RECONNECTING…",
-    wsReconnectingTitle: "Connection lost — your message will queue and send when the bridge is back.",
+    wsReconnectingTitle: "Connection lost — send is paused until the bridge is back, so nothing gets sent twice.",
+    sendDisconnected: "Reconnecting to the bridge — send resumes automatically once you're back online.",
     wsConnected: "CONNECTED",
     wsConnectedTitle: "Connected to the creative agent — live.",
     modelSwitch: {
@@ -2170,7 +2171,8 @@ export const zh: DeepShape<Messages> = {
     },
     wsConnecting: "连接中…",
     wsReconnecting: "重连中…",
-    wsReconnectingTitle: "连接已断开——你的消息会暂存，桥接恢复后会自动发送。",
+    wsReconnectingTitle: "连接已断开——发送已暂停，桥接恢复后再发，避免重复发送。",
+    sendDisconnected: "正在重连桥接——恢复在线后即可继续发送。",
     wsConnected: "已连接",
     wsConnectedTitle: "已连接到创作代理 —— 实时在线。",
     modelSwitch: {

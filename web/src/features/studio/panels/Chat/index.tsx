@@ -509,8 +509,26 @@ export function ChatPanel({
   }, [blocks.length]);
 
   const canSend = input.trim().length > 0 || attachments.length > 0;
+  // A2 (PRD-0010) — a dropped bridge WS must NOT accept a send: the old path
+  // buffered the frame in ReconnectingWS and silently resent it on reconnect,
+  // which double-recorded the user message on disk. Coach mode sends over HTTP
+  // (sendOverride), not the WS, so it has no buffer-resend risk → stay enabled.
+  const sendBlockedByConnection = !coachMode && wsState !== "open";
+  // A2 — useRef in-flight lock (the REAL reentrancy guard; #62/#51 lockRef
+  // precedent). `input`/`canSend` are useState, so a same-tick second submit
+  // (double-click / repeated ⌘↵) reads the STALE value and would fire send()
+  // twice; the ref, written synchronously, blocks it. Released on the next
+  // microtask — decoupled from `input` (an attachments-only send never changes
+  // `input`, so an input-keyed release would stay stuck true). Across two real
+  // clicks in separate macrotasks the lock is already released, but by then the
+  // composer is cleared so `canSend`/attachments gate the second click instead.
+  const sendingRef = useRef(false);
   const submit = () => {
-    if (!canSend || uploading) return;
+    if (!canSend || uploading || sendBlockedByConnection || sendingRef.current) return;
+    sendingRef.current = true;
+    queueMicrotask(() => {
+      sendingRef.current = false;
+    });
     send(input, attachments.length ? attachments : undefined);
     setInput("");
     setAttachments([]);
@@ -945,6 +963,20 @@ export function ChatPanel({
               {uploadError}
             </div>
           )}
+          {sendBlockedByConnection && (
+            <div
+              role="status"
+              data-testid="chat-send-disconnected"
+              style={{
+                fontSize: 11,
+                color: "var(--status-warn, #d0a54f)",
+                fontFamily: "var(--font-mono)",
+                lineHeight: 1.4,
+              }}
+            >
+              {t("chat.sendDisconnected")}
+            </div>
+          )}
           <textarea
             ref={composerRef}
             value={input}
@@ -1001,8 +1033,9 @@ export function ChatPanel({
             ) : (
               <button
                 onClick={submit}
-                disabled={!canSend || uploading}
+                disabled={!canSend || uploading || sendBlockedByConnection}
                 aria-label="Send"
+                title={sendBlockedByConnection ? t("chat.sendDisconnected") : undefined}
                 className={`${composerStyles.iconBtn} ${composerStyles.send} send-btn`}
               >
                 <ArrowUpIcon />
