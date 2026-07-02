@@ -183,3 +183,72 @@ describe("WsBridge — C4 setSessionBackend lockout", () => {
     });
   });
 });
+
+describe("WsBridge — C4 sendMessage resume hydrates backend from the sidecar", () => {
+  // C4 review — the createSession spawn path repins session.backend from the
+  // record (ws-bridge.ts ~810), but the sendMessage FOLLOW-UP spawn path did
+  // NOT: it read the record only for cliSessionId. After a daemon restart the
+  // in-memory session is recreated bare by ensureSession/handleBrowserConnection
+  // (backend undefined) and the FIRST follow-up turn resolved
+  // getChatBackend(undefined) → claude, silently spawning the WRONG CLI with a
+  // codex resume id. These two cases lock both sub-paths.
+
+  it("bare in-memory session (no cliSessionId in memory): sendMessage spawns codex, not claude", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, DEFAULT_CHAT_SESSION_ID, PROMPT_VERSION } = await import(
+        "../../../ws-bridge.js"
+      );
+      const { SessionSidecar } = await import("../sessions-sidecar.js");
+      const work = "w_send_resume_codex";
+      await mkdir(join(dir, "works", work), { recursive: true });
+      const sidecar = new SessionSidecar(work, dir);
+      await sidecar.create("chat", {
+        now: new Date().toISOString(),
+        id: DEFAULT_CHAT_SESSION_ID,
+        cliSessionId: "thread-send",
+        backend: "codex",
+      });
+      await sidecar.patch(DEFAULT_CHAT_SESSION_ID, { lastInjectedPromptVersion: PROMPT_VERSION });
+
+      const bridge = new WsBridge(3271);
+      // Bare session, as ensureSession/handleBrowserConnection leaves it after a
+      // restart — backend undefined, cliSessionId not yet in memory.
+      const session = bridge.ensureSession(work, DEFAULT_CHAT_SESSION_ID);
+      expect(session.backend).toBeUndefined();
+
+      const ok = await bridge.sendMessage(work, "继续", DEFAULT_CHAT_SESSION_ID);
+      expect(ok).toBe(true);
+      expect(lastSpawn().cmd).toBe("codex");
+      expect(lastSpawn().args.slice(0, 3)).toEqual(["exec", "resume", "thread-send"]);
+    });
+  });
+
+  it("cliSessionId already hydrated in memory (handleBrowserConnection path), backend still undefined: sendMessage spawns codex", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, DEFAULT_CHAT_SESSION_ID, PROMPT_VERSION } = await import(
+        "../../../ws-bridge.js"
+      );
+      const { SessionSidecar } = await import("../sessions-sidecar.js");
+      const work = "w_send_inmem_codex";
+      await mkdir(join(dir, "works", work), { recursive: true });
+      const sidecar = new SessionSidecar(work, dir);
+      await sidecar.create("chat", {
+        now: new Date().toISOString(),
+        id: DEFAULT_CHAT_SESSION_ID,
+        cliSessionId: "thread-inmem",
+        backend: "codex",
+      });
+      await sidecar.patch(DEFAULT_CHAT_SESSION_ID, { lastInjectedPromptVersion: PROMPT_VERSION });
+
+      const bridge = new WsBridge(3271);
+      const session = bridge.ensureSession(work, DEFAULT_CHAT_SESSION_ID);
+      // Mirror handleBrowserConnection: it hydrates cliSessionId but NOT backend,
+      // which makes sendMessage skip its `!resumeId` record read entirely.
+      session.cliSessionId = "thread-inmem";
+      expect(session.backend).toBeUndefined();
+
+      await bridge.sendMessage(work, "继续", DEFAULT_CHAT_SESSION_ID);
+      expect(lastSpawn().cmd).toBe("codex");
+    });
+  });
+});

@@ -1167,17 +1167,30 @@ export class WsBridge {
     }
 
     // Try to resume: in-memory cliSessionId → sidecar record → work.yaml.
+    // C4 — ALSO hydrate the session's pinned backend from the record when it is
+    // still unknown in memory. A session recreated bare by ensureSession /
+    // handleBrowserConnection (after a daemon restart, or before any
+    // createSession repin) has backend===undefined; spawnCli would then resolve
+    // getChatBackend(undefined) → claude and silently resume a codex thread on
+    // the WRONG CLI. We read the record whenever EITHER the resume id or the
+    // backend is missing — handleBrowserConnection hydrates cliSessionId but not
+    // backend, which would otherwise skip this block and leave backend unset.
     let resumeId = session.cliSessionId;
-    if (!resumeId) {
+    if (!resumeId || session.backend === undefined) {
       try {
         const record = await this.sidecarFor(workId)?.get(sid);
-        if (record?.cliSessionId) {
-          resumeId = record.cliSessionId;
-        } else if (sid === DEFAULT_CHAT_SESSION_ID) {
-          const work = await getWork(workId);
-          if (work?.cliSessionId) resumeId = work.cliSessionId;
+        // Established in-memory pin wins; only fill when unset (legacy/no field
+        // → claude via resolveBackendId).
+        if (session.backend === undefined) session.backend = resolveBackendId(record?.backend);
+        if (!resumeId) {
+          if (record?.cliSessionId) {
+            resumeId = record.cliSessionId;
+          } else if (sid === DEFAULT_CHAT_SESSION_ID) {
+            const work = await getWork(workId);
+            if (work?.cliSessionId) resumeId = work.cliSessionId;
+          }
+          if (resumeId) session.cliSessionId = resumeId;
         }
-        if (resumeId) session.cliSessionId = resumeId;
       } catch { /* ignore */ }
     }
 
