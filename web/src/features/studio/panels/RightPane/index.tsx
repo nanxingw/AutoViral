@@ -33,6 +33,8 @@ import {
   useActiveTerminalSessionId,
 } from "@/features/terminal/terminalSessions";
 import { useT } from "@/i18n/useT";
+import { useQueryClient } from "@tanstack/react-query";
+import { costKey } from "@/queries/cost";
 import styles from "./index.module.css";
 
 export interface RightPaneProps {
@@ -87,6 +89,7 @@ export function RightPane({
   showTerminalPrefix = true,
 }: RightPaneProps) {
   const t = useT();
+  const queryClient = useQueryClient();
   const { active, setActive, toggle } = useActiveSurface(workId);
   const toggleRef = useRef(toggle);
   toggleRef.current = toggle;
@@ -168,6 +171,13 @@ export function RightPane({
               getViewerContext={getViewerContext}
               onJumpToLocator={onJumpToLocator}
               quickActions={quickActions}
+              // B4 (PRD-0010) — a completed agent turn books agent $ to the
+              // ledger even when it writes no asset (which would otherwise fire
+              // asset-added). Refresh the cost badge so 对话完成后 the total
+              // updates without a page reload.
+              onTurnComplete={() =>
+                void queryClient.invalidateQueries({ queryKey: costKey(workId) })
+              }
             />
           </div>
         </div>

@@ -1,10 +1,24 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TopBar } from "./TopBar";
 import { useEditor } from "../store";
 import { makeEmptyCarousel } from "../types";
+
+// B4 (PRD-0010) — the Editor TopBar now hosts the shared CostBadge, which reads
+// GET /api/works/:id/cost via useCostSummary. Mock apiFetch so the badge query
+// resolves without MSW flagging an unhandled request.
+const apiFetch = vi.fn(async (..._args: unknown[]) => ({
+  workId: "w1",
+  totalUsd: 0.05,
+  estimated: false,
+  count: 1,
+  byKind: [{ kind: "image", usd: 0.05, count: 1, estimated: false }],
+}));
+vi.mock("@/lib/api", () => ({
+  apiFetch: (...args: unknown[]) => apiFetch(...args),
+}));
 
 function renderWithProviders(ui: React.ReactElement) {
   const qc = new QueryClient({
@@ -59,5 +73,19 @@ describe("TopBar", () => {
     fireEvent.click(screen.getByText(/Export/));
     fireEvent.click(screen.getByText(/All slides/));
     expect(onAll).toHaveBeenCalled();
+  });
+
+  it("renders the shared cost badge (Editor parity with Studio)", async () => {
+    useEditor.getState().loadCarousel(makeEmptyCarousel("w1"));
+    renderWithProviders(
+      <TopBar
+        workId="w1"
+        savedAt="12:34"
+        onExportCurrent={vi.fn()}
+        onExportAll={vi.fn()}
+      />,
+    );
+    const badge = await screen.findByTestId("cost-badge");
+    await waitFor(() => expect(badge.textContent).toContain("$0.05"));
   });
 });

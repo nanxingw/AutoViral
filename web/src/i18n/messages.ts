@@ -19,6 +19,29 @@ export const en = {
     saveFailed: "SAVE FAILED",
     saveFailedTitle: "Autosave failed: {msg}. Your edits are still in memory; copy them out before reloading.",
   },
+  // B4 (PRD-0010) — per-work cost badge + breakdown panel (Studio + Editor).
+  cost: {
+    badgeLabel: "This work",
+    ariaExpand: "Cost breakdown for this work",
+    panelTitle: "This work's cost",
+    total: "Total",
+    empty: "No cost yet",
+    estimatedTag: "est.",
+    estimatedNote:
+      "Amounts tagged \"est.\" are flat-rate or usage-estimated, not real metered billing.",
+    sinceNote:
+      "Cost tracking started in v0.1.8; earlier history backfills video / BGM only.",
+    agentTokens: "Agent usage",
+    close: "Close",
+    kinds: {
+      agent: "Agent",
+      image: "Image",
+      video: "Video",
+      tts: "Voice",
+      bgm: "Music",
+      translate: "Translate",
+    },
+  },
   // Server-side error codes (snake_case, mirrored in src/server/api.ts).
   // ApiError.errorCode lookup falls back to err.message when key missing,
   // so adding keys is opt-in per error path.
@@ -1173,6 +1196,27 @@ export const zh: DeepShape<Messages> = {
     unsaved: "未保存",
     saveFailed: "保存失败",
     saveFailedTitle: "自动保存失败：{msg}。你的编辑仍在内存中——请先复制出来再刷新。",
+  },
+  // B4 (PRD-0010) — 本片成本徽章 + 明细面板（制作页 / 图文编辑器）。
+  cost: {
+    badgeLabel: "本片",
+    ariaExpand: "本片成本明细",
+    panelTitle: "本片成本",
+    total: "累计",
+    empty: "尚未产生费用",
+    estimatedTag: "估算",
+    estimatedNote: "标注「估算」的为平价或按用量估算，非实际计费金额。",
+    sinceNote: "成本口径自 v0.1.8 起记录；此前历史仅回填视频 / BGM。",
+    agentTokens: "Agent 用量",
+    close: "关闭",
+    kinds: {
+      agent: "Agent",
+      image: "生图",
+      video: "视频",
+      tts: "配音",
+      bgm: "配乐",
+      translate: "翻译",
+    },
   },
   serverErrors: {
     work_not_found: "作品不存在",

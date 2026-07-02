@@ -14,6 +14,7 @@ import { ExportCaptionsDialog } from "./Export/ExportCaptionsDialog";
 import type { CaptionTrackOption } from "./Export/CaptionTracksSection";
 import { GenerateCaptionsButton } from "./GenerateCaptionsButton";
 import { ShortcutsCheatsheet } from "./ShortcutsCheatsheet";
+import { CostBadge } from "./CostBadge";
 
 export interface TopBarProps {
   workId: string;
@@ -234,6 +235,11 @@ export function TopBar({
           {savedAt ? `${t("studio.topBar.saved")} · ${savedAt}` : t("studio.topBar.unsaved")}
         </span>
       )}
+
+      <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
+
+      {/* B4 (PRD-0010) — per-work running cost, click for the kind breakdown. */}
+      <CostBadge workId={workId} />
 
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
 

@@ -170,6 +170,9 @@ export function useBridgeEvents(workId: string | undefined): void {
           // thumbnail appears live without a page reload.
           refetchComposition();
           void queryClient.invalidateQueries({ queryKey: ["assets", workId] });
+          // B4 (PRD-0010) — a generated asset (image/video/tts/bgm) was booked
+          // to the cost ledger (B1/B2), so refresh the per-work cost badge too.
+          void queryClient.invalidateQueries({ queryKey: ["cost", workId] });
           break;
         default:
           // ui-ask is handled by ApprovalPrompt (Task 3.9) on its own WS.
@@ -213,6 +216,7 @@ export function useBridgeEvents(workId: string | undefined): void {
           refetchCarousel();
           refetchScript();
           void queryClient.invalidateQueries({ queryKey: ["assets", workId] });
+          void queryClient.invalidateQueries({ queryKey: ["cost", workId] });
         }
         hadConnection = true;
       };

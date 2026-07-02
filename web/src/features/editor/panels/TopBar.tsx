@@ -5,6 +5,7 @@ import { Button } from "@/ui/Button";
 import { useEditor } from "../store";
 import { useT } from "@/i18n/useT";
 import { CheckpointsMenu } from "@/features/checkpoints/CheckpointsMenu";
+import { CostBadge } from "@/features/studio/panels/CostBadge";
 
 interface TopBarProps {
   workId: string;
@@ -127,6 +128,8 @@ export function TopBar({
           {savedAt ? `${t("common.saved")} · ${savedAt}` : t("common.unsaved")}
         </span>
       )}
+      {/* B4 (PRD-0010) — per-work cost badge, shared with Studio. */}
+      <CostBadge workId={workId} />
       <CheckpointsMenu workId={workId} />
       <Button ref={btnRef} variant="primary" onClick={() => setOpen((v) => !v)}>
         {t("editor.topbar.exportMenu")}

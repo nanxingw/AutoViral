@@ -28,9 +28,14 @@ import { useToastStore } from "@/stores/toast";
 // scroll state. useEffect with empty deps fires once per mount lifecycle.
 const chatMountCounts = new Map<string, number>();
 const terminalMountCounts = new Map<string, number>();
+// B4 (PRD-0010) — capture the onTurnComplete callback RightPane wires so the
+// cost-refresh test can fire it and assert the per-work cost badge query is
+// invalidated (a chat turn costs agent $ even when it writes no asset).
+let capturedOnTurnComplete: (() => void) | undefined;
 
 vi.mock("@/features/studio/panels/Chat", () => ({
-  ChatPanel: ({ workId }: { workId: string }) => {
+  ChatPanel: ({ workId, onTurnComplete }: { workId: string; onTurnComplete?: () => void }) => {
+    capturedOnTurnComplete = onTurnComplete;
     useEffect(() => {
       chatMountCounts.set(workId, (chatMountCounts.get(workId) ?? 0) + 1);
     }, [workId]);
@@ -186,5 +191,30 @@ describe("RightPane (M.5)", () => {
       "aria-selected",
       "true",
     );
+  });
+});
+
+describe("RightPane — B4 cost-badge refresh on turn_complete", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    capturedOnTurnComplete = undefined;
+    useTerminalSessions.setState({ byWork: {} });
+  });
+
+  it("wires ChatPanel.onTurnComplete to invalidate the ['cost', workId] query", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <RightPane workId="w_cost" />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    // RightPane must hand ChatPanel an onTurnComplete callback.
+    expect(typeof capturedOnTurnComplete).toBe("function");
+    // Firing it (as useChatSocket does on turn_complete) refreshes the badge.
+    capturedOnTurnComplete?.();
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["cost", "w_cost"] });
   });
 });

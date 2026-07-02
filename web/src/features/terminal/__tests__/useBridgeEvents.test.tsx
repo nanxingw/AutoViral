@@ -123,6 +123,22 @@ describe("useBridgeEvents · asset-added (I17)", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["assets", "w_test"] });
   });
 
+  // B4 (PRD-0010) — a freshly generated asset costs money (video/image/tts/bgm
+  // instrumentation from B1/B2), so asset-added must also refresh the per-work
+  // cost badge without a page reload.
+  it("asset-added ALSO invalidates the [\"cost\", workId] badge query", async () => {
+    const { invalidateSpy } = renderBridge("w_test");
+    act(() => {
+      MockWS.instances[0].emit({
+        type: "asset-added",
+        workId: "w_test",
+        ts: Date.now(),
+        payload: { kind: "image", uri: "assets/gen/x.png", origin: "generate" },
+      });
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["cost", "w_test"] });
+  });
+
   it("composition-changed does NOT invalidate the assets query (scoped to asset-added)", async () => {
     const { invalidateSpy } = renderBridge("w_test");
     act(() => {
@@ -273,8 +289,10 @@ describe("useBridgeEvents · reconnect after socket drop", () => {
     act(() => {
       MockWS.instances[1].onopen?.(new Event("open"));
     });
-    // Reconnect → composition refetch + assets-library invalidation fire.
+    // Reconnect → composition refetch + assets-library + cost-badge
+    // invalidation fire (events missed while down have no replay).
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["assets", "w_test"] });
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: ["cost", "w_test"] });
   });
 
   it("does NOT reconnect after unmount (disposed guard)", () => {
