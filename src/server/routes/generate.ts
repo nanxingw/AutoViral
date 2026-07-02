@@ -149,6 +149,65 @@ async function registerGeneratedVideoAsset(args: {
   }
 }
 
+/**
+ * Register a freshly-generated image as an AssetEntry (kind:"image") + a
+ * "generate" ProvenanceEdge on the work's composition.yaml. B2 (PRD-0010) —
+ * images previously had NO provenance registration at all: they were written to
+ * disk + broadcast, but never entered the composition's asset/provenance
+ * vocabulary, so the Dive canvas couldn't cluster them (feeds B5/B7/S6). Mirrors
+ * registerGeneratedVideoAsset/BGM exactly (same best-effort contract: returns
+ * null without throwing when the work / composition.yaml is missing). fromAssetId
+ * is null for a text-to-image generation (B7 handles i2v firstFrame back-links).
+ */
+async function registerGeneratedImageAsset(args: {
+  workId: string;
+  relativeAssetUri: string;
+  providerId: string;
+  prompt: string;
+  costUsd?: number;
+  estimated?: boolean;
+  extraParams?: Record<string, unknown>;
+}): Promise<string | null> {
+  const { workId, relativeAssetUri, providerId, prompt } = args;
+  const work = await getWork(workId);
+  if (!work) return null;
+  const { randomUUID } = await import("node:crypto");
+  const assetId = `gen_${randomUUID().slice(0, 8)}`;
+  const newAsset: AssetEntry = {
+    id: assetId,
+    uri: relativeAssetUri,
+    kind: "image",
+    metadata: {},
+    status: "ready",
+  };
+  const newEdge: ProvenanceEdge = {
+    fromAssetId: null,
+    toAssetId: assetId,
+    operation: {
+      type: "generate",
+      actor: "user",
+      timestamp: new Date().toISOString(),
+      params: {
+        providerId,
+        prompt,
+        costUsd: args.costUsd,
+        estimated: args.estimated,
+        ...(args.extraParams ?? {}),
+      },
+    },
+  };
+  try {
+    await mutateCompositionFor({ workId }, (comp) => ({
+      ...comp,
+      assets: [...(comp.assets ?? []), newAsset],
+      provenance: [...(comp.provenance ?? []), newEdge],
+    }));
+    return assetId;
+  } catch {
+    return null;
+  }
+}
+
 // POST /api/generate/image
 generateRouter.post("/api/generate/image", async (c) => {
   const body = await c.req.json();
@@ -210,32 +269,64 @@ generateRouter.post("/api/generate/image", async (c) => {
       prompt, width, height, workId, filename: safeFilename, referenceImage,
       aspectRatio: effectiveAspectRatio, imageSize, seed, temperature, model,
     });
-    // I17 — broadcast asset-added so the Studio library refreshes live without
-    // a page reload. Mirrors the audio path's shape (audio.ts:279): same
-    // {type,workId,ts,payload:{kind,uri,origin}}. Only fires on success. The
-    // provider returns an absolute assetPath, so convert it to a work-relative
-    // uri like the video paths do — keeping every asset-added uri consistent.
-    if (result.success && result.assetPath) {
+    // C1.2 — when the provider returns a FAILURE, sanitize its error string
+    // before it reaches the client (it can carry the upstream model/account id).
+    // We keep the EXISTING status semantics (the body already carries
+    // success:false; the frontend branches on that) — only the leaky text is
+    // scrubbed, the response shape/status is unchanged. A failed generation
+    // registers no asset + books no cost (B2 acceptance: 失败不记).
+    if (!result.success) {
+      return c.json({ ...result, error: sanitizeProviderError(result.error) });
+    }
+
+    // Success path. The provider returns an absolute assetPath, so convert it to
+    // a work-relative uri like the video paths do — keeping every asset-added uri
+    // consistent.
+    let assetId: string | null = null;
+    if (result.assetPath) {
       const wDirAbs = join(dataDir, "works", workId);
       const relativeUri = result.assetPath.startsWith(wDirAbs + "/")
         ? result.assetPath.slice(wDirAbs.length + 1)
         : result.assetPath;
+
+      // B2 (PRD-0010) — register the image as an AssetEntry + "generate"
+      // provenance edge (images had NO provenance before; this feeds the Dive
+      // canvas clustering B5/B7/S6). Best-effort: null on a missing work.
+      assetId = await registerGeneratedImageAsset({
+        workId,
+        relativeAssetUri: relativeUri,
+        providerId: provider.name,
+        prompt,
+        costUsd: result.costUsd,
+        estimated: result.estimated,
+        extraParams: {
+          ...(effectiveAspectRatio ? { aspectRatio: effectiveAspectRatio } : {}),
+        },
+      });
+
+      // I17 — broadcast asset-added so the Studio library refreshes live without
+      // a page reload. Mirrors the audio path's shape (audio.ts:279).
       uiEventBus.publish(workId, {
         type: "asset-added",
         workId,
         ts: Date.now(),
         payload: { kind: "image", uri: relativeUri, origin: "generate" },
       });
+
+      // B2 — cost ledger: image carries OpenRouter's REAL metered usage.cost when
+      // the provider parsed one (estimated:false); otherwise a flat estimate
+      // (estimated:true). Best-effort, never throws — can't break this success.
+      recordCostEvent({
+        workId,
+        kind: "image",
+        provider: provider.name,
+        model: model || undefined,
+        usd: typeof result.costUsd === "number" ? result.costUsd : 0.04,
+        estimated: result.estimated ?? true,
+        meta: { assetId },
+      });
     }
-    // C1.2 — when the provider returns a FAILURE, sanitize its error string
-    // before it reaches the client (it can carry the upstream model/account id).
-    // We keep the EXISTING status semantics (the body already carries
-    // success:false; the frontend branches on that) — only the leaky text is
-    // scrubbed, the response shape/status is unchanged.
-    if (!result.success) {
-      return c.json({ ...result, error: sanitizeProviderError(result.error) });
-    }
-    return c.json(result);
+    return c.json({ ...result, assetId });
   } catch (err: any) {
     return c.json({ success: false, error: sanitizeProviderError(err?.message), code: "API_ERROR" }, 500);
   }

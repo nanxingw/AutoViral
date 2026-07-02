@@ -31,6 +31,17 @@ import {
   synthesiseLegacyCarousel,
 } from "./_shared.js";
 import { DEFAULT_CHAT_SESSION_ID } from "../../ws-bridge.js";
+import { recordCostEvent } from "../cost-ledger/index.js";
+
+// B2 (PRD-0010) — text-rewrite (kind "translate") cost estimate when OpenRouter's
+// response carries no usage.cost. Coarse claude-haiku ballpark from I/O char
+// count; a tiny floor keeps a booked call non-zero. estimated:true always for
+// this branch — an estimate is never presented as a metered charge.
+const REWRITE_USD_PER_CHAR = 0.000004;
+function estimateRewriteUsd(...texts: string[]): number {
+  const chars = texts.reduce((n, t) => n + (t?.length ?? 0), 0);
+  return Math.max(0.0001, Math.round(chars * REWRITE_USD_PER_CHAR * 1e6) / 1e6);
+}
 
 export const worksRouter = new Hono();
 
@@ -794,15 +805,36 @@ worksRouter.post("/api/works/:id/text-rewrite", async (c) => {
         { role: "user", content: usr },
       ],
       temperature: 0.7,
+      // B2 — ask OpenRouter to return the real metered cost in usage.cost.
+      usage: { include: true },
     }),
   });
   if (!res.ok) {
     const errBody = await res.text();
     return c.json({ error: `OpenRouter ${res.status}: ${errBody.slice(0, 300)}` }, 502);
   }
-  const data = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  const data = (await res.json()) as {
+    choices?: Array<{ message?: { content?: string } }>;
+    usage?: { cost?: number };
+  };
   const text = data?.choices?.[0]?.message?.content?.trim();
   if (!text) return c.json({ error: "OpenRouter returned no text" }, 502);
+
+  // B2 (PRD-0010) — cost ledger (kind "translate", covers rewrite/翻译). Prefer
+  // OpenRouter's real usage.cost (estimated:false); when absent, book a char-based
+  // estimate (estimated:true). Only reached on success, so a failed rewrite books
+  // nothing. Best-effort: recordCostEvent never throws.
+  const reportedCost = data?.usage?.cost;
+  const hasRealCost = typeof reportedCost === "number" && Number.isFinite(reportedCost);
+  recordCostEvent({
+    workId: id,
+    kind: "translate",
+    provider: "openrouter",
+    model: "anthropic/claude-haiku-4.5",
+    usd: hasRealCost ? reportedCost : estimateRewriteUsd(current, text),
+    estimated: !hasRealCost,
+    meta: { intent, chars: current.length + text.length },
+  });
   return c.json({ text });
 });
 

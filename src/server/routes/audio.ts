@@ -12,8 +12,18 @@ import { runAsrCaptions } from "../../domain/asr-captions.js";
 import { generateWithFallback } from "../../providers/tts/registry.js";
 import { uiEventBus } from "../bridge/ui-events.js";
 import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
+import { recordCostEvent } from "../cost-ledger/index.js";
 
 export const audioRouter = new Hono();
+
+// B2 (PRD-0010) — Gemini-via-OpenRouter TTS returns no per-call price in the
+// TtsResult, so its cost is ESTIMATED from output length (estimated:true).
+// Coarse rate ≈ $16 / 1M characters; a tiny floor keeps a booked call non-zero.
+// edge-tts is a FREE local binary and is NOT booked at all (免费调用不入账).
+const GEMINI_TTS_USD_PER_CHAR = 0.000016;
+function estimateGeminiTtsUsd(text: string): number {
+  return Math.max(0.0001, Math.round(text.length * GEMINI_TTS_USD_PER_CHAR * 1e6) / 1e6);
+}
 
 // POST /api/audio/analyze — detect audio properties of a clip
 audioRouter.post("/api/audio/analyze", async (c) => {
@@ -262,6 +272,20 @@ audioRouter.post("/api/works/:id/tts", async (c) => {
       ts: Date.now(),
       payload: { kind: "audio", uri: relativeUri, origin: "tts" },
     });
+    // B2 (PRD-0010) — cost ledger. edge-tts is a free local binary → NOT booked
+    // (免费调用不入账). Gemini-via-OpenRouter is paid but returns no per-call price,
+    // so book a length-based estimate flagged estimated:true. Best-effort:
+    // recordCostEvent never throws — a ledger failure can't break this success.
+    if (result.providerId !== "edge-tts") {
+      recordCostEvent({
+        workId: id,
+        kind: "tts",
+        provider: result.providerId,
+        usd: estimateGeminiTtsUsd(text),
+        estimated: true,
+        meta: { chars: text.length, voice },
+      });
+    }
     return c.json({
       ok: true,
       relativeUri,

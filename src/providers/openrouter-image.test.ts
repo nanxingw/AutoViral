@@ -8,6 +8,15 @@
 import { describe, expect, it, vi, afterEach } from 'vitest'
 import { deriveAspectRatio, OpenRouterImageProvider } from './openrouter-image.js'
 
+// B2 (PRD-0010) — the success path writes the decoded image to disk. These are
+// unit tests, so stub the fs writes (we assert the request + the parsed cost,
+// not the on-disk bytes). The deriveAspectRatio / width-height tests
+// short-circuit with ok:false and never reach these.
+vi.mock('node:fs/promises', () => ({
+  mkdir: vi.fn(async () => undefined),
+  writeFile: vi.fn(async () => undefined),
+}))
+
 describe('deriveAspectRatio', () => {
   it('maps portrait 1080×1920 to 9:16', () => {
     expect(deriveAspectRatio(1080, 1920)).toBe('9:16')
@@ -82,5 +91,74 @@ describe('OpenRouterImageProvider — width/height reach the payload as aspect_r
       filename: 'assets/images/x.png',
     } as any)
     expect(calls[0].image_config).toBeUndefined()
+  })
+})
+
+// B2 (PRD-0010) — the image request must ask OpenRouter for usage accounting
+// (usage:{include:true}) so we can book the REAL metered cost. When the response
+// carries usage.cost we book it as-is (estimated:false); when it doesn't, we
+// degrade to a flat estimate flagged estimated:true (honesty discipline).
+describe('OpenRouterImageProvider — usage cost accounting (B2)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  /** Stub a SUCCESS response carrying an inline base64 image, optionally with a
+   *  `usage` block. Returns an accessor for the captured request body. */
+  function stubSuccess(usage?: unknown) {
+    let captured: any
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      captured = JSON.parse(init.body)
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [
+            {
+              message: {
+                images: [{ image_url: { url: 'data:image/png;base64,aGVsbG8=' } }],
+              },
+            },
+          ],
+          ...(usage !== undefined ? { usage } : {}),
+        }),
+      } as any
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return { body: () => captured }
+  }
+
+  it('sends usage.include:true in the request payload', async () => {
+    const cap = stubSuccess({ cost: 0.037 })
+    const p = new OpenRouterImageProvider('sk-test')
+    await p.generateImage({ prompt: 'x', workId: 'w1', filename: 'a.png' } as any)
+    expect(cap.body().usage).toEqual({ include: true })
+  })
+
+  it('parses usage.cost into costUsd with estimated:false', async () => {
+    stubSuccess({ cost: 0.037 })
+    const p = new OpenRouterImageProvider('sk-test')
+    const r = await p.generateImage({ prompt: 'x', workId: 'w1', filename: 'a.png' } as any)
+    expect(r.success).toBe(true)
+    expect(r.costUsd).toBeCloseTo(0.037, 6)
+    expect(r.estimated).toBe(false)
+  })
+
+  it('degrades to a flat estimate (estimated:true) when the response has no cost', async () => {
+    stubSuccess(undefined) // no usage block at all
+    const p = new OpenRouterImageProvider('sk-test')
+    const r = await p.generateImage({ prompt: 'x', workId: 'w1', filename: 'a.png' } as any)
+    expect(r.success).toBe(true)
+    expect(r.estimated).toBe(true)
+    expect(r.costUsd).toBeGreaterThan(0)
+  })
+
+  it('degrades to estimated when usage exists but carries no numeric cost', async () => {
+    stubSuccess({ prompt_tokens: 10, completion_tokens: 0 }) // usage without cost
+    const p = new OpenRouterImageProvider('sk-test')
+    const r = await p.generateImage({ prompt: 'x', workId: 'w1', filename: 'a.png' } as any)
+    expect(r.success).toBe(true)
+    expect(r.estimated).toBe(true)
+    expect(r.costUsd).toBeGreaterThan(0)
   })
 })

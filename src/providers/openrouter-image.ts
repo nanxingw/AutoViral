@@ -12,6 +12,12 @@ import type { GenerateProvider, ImageOpts, GenerateResult } from './base.js'
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions'
 const DEFAULT_MODEL = 'openai/gpt-5.4-image-2'
 
+// B2 (PRD-0010) — flat fallback estimate (USD) when OpenRouter's response does
+// NOT carry a usage.cost figure (e.g. usage accounting off for a model). gpt-5.4
+// image is ~$0.04/image; booked with estimated:true so the ledger never presents
+// this as a metered charge.
+const FLAT_IMAGE_ESTIMATE_USD = 0.04
+
 // Aspect ratios the OpenRouter image_config accepts. Callers that pass raw
 // width/height (the documented public params on /api/generate/image) used to
 // be SILENTLY ignored — the model fell back to its 1024×1024 default and the
@@ -90,11 +96,14 @@ export class OpenRouterImageProvider implements GenerateProvider {
 
       contentParts.push({ type: 'text', text: prompt })
 
-      // Build request payload
+      // Build request payload. usage:{include:true} asks OpenRouter to return the
+      // real metered cost in the response's `usage.cost` field (B2) so it can be
+      // booked into the cost-ledger instead of a guess.
       const payload: any = {
         model: model || DEFAULT_MODEL,
         modalities: ['text', 'image'],
         messages: [{ role: 'user', content: contentParts }],
+        usage: { include: true },
       }
 
       // image_config for aspect ratio and resolution
@@ -140,10 +149,18 @@ export class OpenRouterImageProvider implements GenerateProvider {
       await mkdir(dir, { recursive: true })
       await writeFile(assetPath, buffer)
 
+      // B2 — parse the real metered cost OpenRouter returns under usage.cost
+      // (enabled by usage:{include:true} above). When it's a finite number we
+      // book it as-is (estimated:false); when the model/account didn't return a
+      // cost we degrade to the flat estimate (estimated:true).
+      const reportedCost = data?.usage?.cost
+      const hasRealCost = typeof reportedCost === 'number' && Number.isFinite(reportedCost)
       return {
         success: true,
         assetPath,
         previewUrl: `/api/works/${workId}/assets/images/${filename}`,
+        costUsd: hasRealCost ? reportedCost : FLAT_IMAGE_ESTIMATE_USD,
+        estimated: !hasRealCost,
       }
     } catch (err: any) {
       return { success: false, error: err.message, code: 'API_ERROR' }
