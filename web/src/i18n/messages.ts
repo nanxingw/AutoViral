@@ -666,6 +666,7 @@ export const en = {
       title: "Provenance Dive",
       empty: "No assets yet — generate or upload some, then come back.",
       btnUse: "USE · {id}",
+      unassigned: "Unassigned",
     },
     reframeDialog: {
       title: "Apply {preset}?",
@@ -1810,6 +1811,7 @@ export const zh: DeepShape<Messages> = {
       title: "素材衍生图谱",
       empty: "暂无素材——先生成或上传一些，再回来查看。",
       btnUse: "使用 · {id}",
+      unassigned: "未归属",
     },
     reframeDialog: {
       title: "应用 {preset}？",

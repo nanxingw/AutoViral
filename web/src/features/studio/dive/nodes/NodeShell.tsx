@@ -9,6 +9,8 @@ export const NODE_HEIGHT = 120;
 export interface DiveNodeData extends Record<string, unknown> {
   asset: AssetEntry;
   isCurrent: boolean;
+  /** B5 — this asset is the scene's selected take (scene.selectedAssetId). */
+  isSelectedTake?: boolean;
   onUse: () => void;
 }
 
@@ -17,24 +19,45 @@ export type DiveNode = Node<DiveNodeData>;
 export interface NodeShellProps {
   assetId: string;
   isCurrent: boolean;
+  isSelectedTake?: boolean;
   onUse: () => void;
   children: ReactNode;
 }
 
-export function NodeShell({ assetId, isCurrent, onUse, children }: NodeShellProps) {
+export function NodeShell({
+  assetId,
+  isCurrent,
+  isSelectedTake = false,
+  onUse,
+  children,
+}: NodeShellProps) {
   const t = useT();
+  // Currently-bound (isCurrent) wins the accent border; a selected take that
+  // isn't the bound clip still gets a distinct ring so "chosen take" reads at
+  // a glance on the clustered canvas.
+  const borderColor = isCurrent
+    ? "var(--accent)"
+    : isSelectedTake
+      ? "var(--accent-hi)"
+      : "var(--glass-border)";
+  const boxShadow = isCurrent
+    ? "0 0 12px var(--accent-glow)"
+    : isSelectedTake
+      ? "0 0 0 2px var(--accent-hi)"
+      : "none";
   return (
     <div
       data-testid={`dive-node-${assetId}`}
+      data-selected-take={isSelectedTake ? "true" : undefined}
       style={{
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
         position: "relative",
         borderRadius: 10,
-        border: `1px solid ${isCurrent ? "var(--accent)" : "var(--glass-border)"}`,
+        border: `1px solid ${borderColor}`,
         background: "var(--surface-0)",
         overflow: "hidden",
-        boxShadow: isCurrent ? "0 0 12px var(--accent-glow)" : "none",
+        boxShadow,
       }}
     >
       <Handle type="target" position={Position.Left} style={{ visibility: "hidden" }} />

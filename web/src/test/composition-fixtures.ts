@@ -1,4 +1,4 @@
-import type { AssetEntry, Clip, Composition, ProvenanceEdge, Track, VideoClip, AudioClip, TextClip, OverlayClip } from "../features/studio/types";
+import type { AssetEntry, Clip, Composition, ProvenanceEdge, Scene, Track, VideoClip, AudioClip, TextClip, OverlayClip } from "../features/studio/types";
 import { makeEmptyComposition } from "../features/studio/types";
 
 const baseTransform = { scale: 1, x: 0, y: 0, rotation: 0 };
@@ -99,6 +99,24 @@ export function makeAssetEntry(
     status: "ready",
     ...over,
   };
+}
+
+/**
+ * Build a Scene record with all required (defaulted) fields filled in.
+ * Only `id` + `order` are mandatory; everything else defaults to the empty /
+ * planned shape so callers opt into just the fields a test cares about.
+ */
+export function makeScene(
+  over: Partial<Scene> & Pick<Scene, "id" | "order">,
+): Scene {
+  return {
+    title: `Scene ${over.order}`,
+    memberClipIds: [],
+    memberAssetIds: [],
+    generatedAssetIds: [],
+    status: "planned",
+    ...over,
+  } as Scene;
 }
 
 export function makeProvenanceEdge(

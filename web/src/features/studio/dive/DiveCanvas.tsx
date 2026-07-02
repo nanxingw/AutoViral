@@ -14,11 +14,13 @@ import { useComposition } from "../store";
 import type { AssetEntry, Clip } from "../types";
 import { findAssetByUri } from "./walkProvenance";
 import { resolveAssetUrl } from "../composition/resolveAssetUrl";
-import { computeTreeLayout } from "./useTreeLayout";
+import { computeSceneClusters } from "./useSceneClusters";
+import { computeClusterLayout } from "./clusterLayout";
 import { NODE_WIDTH, NODE_HEIGHT } from "./nodes/NodeShell";
 import { VisualNode } from "./nodes/VisualNode";
 import { AudioNode } from "./nodes/AudioNode";
 import { TextNode } from "./nodes/TextNode";
+import { SceneGroupNode } from "./nodes/SceneGroupNode";
 import { useT } from "@/i18n/useT";
 
 interface Props {
@@ -30,6 +32,7 @@ const nodeTypes = {
   visual: VisualNode,
   audio: AudioNode,
   text: TextNode,
+  sceneGroup: SceneGroupNode,
 };
 
 export function DiveCanvas({ open, onClose }: Props) {
@@ -52,42 +55,77 @@ export function DiveCanvas({ open, onClose }: Props) {
     return null;
   }, [comp, selection]);
 
-  // Build ReactFlow nodes + edges from comp.assets / comp.provenance.
-  // Layout is computed by Dagre via `computeTreeLayout` (LR rankdir).
+  // Build ReactFlow nodes + edges as a SCENE-CLUSTERED compound graph (B5).
+  // Each 分镜 becomes a group node; its member assets become child nodes
+  // positioned relative to the group (xyflow parentId). Provenance edges are
+  // still rendered so derivation lineage stays visible across clusters.
   const { nodes, edges } = useMemo(() => {
     if (!comp) return { nodes: [] as Node[], edges: [] as Edge[] };
-    const assets = comp.assets;
-    const provenance = comp.provenance;
+    const assetById = new Map(comp.assets.map((a) => [a.id, a] as const));
 
-    const layoutInputNodes = assets.map((a) => ({ id: a.id, width: NODE_WIDTH, height: NODE_HEIGHT }));
-    const layoutInputEdges = provenance
+    const clusters = computeSceneClusters(comp);
+    const layoutInputEdges = comp.provenance
       .filter((e) => e.fromAssetId != null)
       .map((e) => ({ source: e.fromAssetId as string, target: e.toAssetId }));
-    const positions = computeTreeLayout(layoutInputNodes, layoutInputEdges);
+    const { groups, children } = computeClusterLayout(
+      clusters,
+      layoutInputEdges,
+      NODE_WIDTH,
+      NODE_HEIGHT,
+    );
 
-    const flowNodes: Node[] = assets.map((asset) => ({
-      id: asset.id,
-      type: kindToNodeType(asset),
-      position: positions.get(asset.id)!,
-      data: {
-        // Override asset.uri with the http-served URL so VisualNode's
-        // <img> tag can actually load. Workspace-relative + shared-asset
-        // paths get translated to /api/works/:id/assets/* and
-        // /api/shared-assets/* respectively. (resolveAssetUrl)
-        asset: { ...asset, uri: resolveAssetUrl(asset.uri, comp.workId) },
-        isCurrent: asset.id === currentAssetId,
-        onUse: () => {
-          if (selection) rebindClip(selection, asset.id);
-        },
-      },
-    }));
+    // Group (parent) nodes MUST precede their children in the array (xyflow).
+    const groupNodes: Node[] = clusters.map((cluster) => {
+      const box = groups.get(cluster.id)!;
+      const title = cluster.scene?.title?.trim();
+      const label =
+        title || (cluster.isUnassigned ? t("studio.diveCanvas.unassigned") : cluster.id);
+      return {
+        id: cluster.id,
+        type: "sceneGroup",
+        position: box.position,
+        data: { label, isUnassigned: cluster.isUnassigned },
+        style: { width: box.width, height: box.height },
+        selectable: false,
+        draggable: false,
+      };
+    });
+
+    const childNodes: Node[] = [];
+    for (const cluster of clusters) {
+      for (const assetId of cluster.assetIds) {
+        const asset = assetById.get(assetId);
+        if (!asset) continue;
+        const placement = children.get(assetId)!;
+        childNodes.push({
+          id: asset.id,
+          type: kindToNodeType(asset),
+          parentId: cluster.id,
+          extent: "parent",
+          position: placement.position,
+          data: {
+            // Override asset.uri with the http-served URL so the <img>/<video>
+            // tag can actually load. Workspace-relative + shared-asset paths
+            // get translated to /api/works/:id/assets/* and
+            // /api/shared-assets/* respectively. (resolveAssetUrl)
+            asset: { ...asset, uri: resolveAssetUrl(asset.uri, comp.workId) },
+            isCurrent: asset.id === currentAssetId,
+            isSelectedTake: cluster.selectedAssetId === asset.id,
+            onUse: () => {
+              if (selection) rebindClip(selection, asset.id);
+            },
+          },
+        });
+      }
+    }
+
     const flowEdges: Edge[] = layoutInputEdges.map((e) => ({
       id: `${e.source}->${e.target}`,
       source: e.source,
       target: e.target,
     }));
-    return { nodes: flowNodes, edges: flowEdges };
-  }, [comp, currentAssetId, selection, rebindClip]);
+    return { nodes: [...groupNodes, ...childNodes], edges: flowEdges };
+  }, [comp, currentAssetId, selection, rebindClip, t]);
 
   // ESC handler
   useEffect(() => {
@@ -191,6 +229,10 @@ export function DiveCanvas({ open, onClose }: Props) {
               edges={edges}
               nodeTypes={nodeTypes}
               fitView
+              // B5 — cull off-screen nodes; a large clustered graph must not
+              // mount every node (pairs with MediaThumb's IntersectionObserver
+              // video-preload gate).
+              onlyRenderVisibleElements
               proOptions={{ hideAttribution: true }}
             >
               <Background gap={24} />
