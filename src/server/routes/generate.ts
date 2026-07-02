@@ -98,6 +98,13 @@ async function registerGeneratedVideoAsset(args: {
   extraParams?: Record<string, unknown>;
   /** Duration in seconds for the asset metadata. */
   durationSec?: number;
+  /** B7 (PRD-0010) — the RAW firstFrame input (path/URL as the caller sent it,
+   *  NOT the resolved data URI). Reverse-looked-up to a source AssetEntry id so
+   *  the "generate" edge carries a real fromAssetId (画布 draws 定妆照 → 视频).
+   *  data:/http(s) inputs are un-lookupable → null (SILENT downgrade). */
+  firstFrame?: unknown;
+  /** B7 — optional scene ownership口子; recorded verbatim into the edge params. */
+  sceneId?: string;
 }): Promise<string | null> {
   const { workId, relativeAssetUri, providerId, prompt, result } = args;
   const work = await getWork(workId);
@@ -111,23 +118,6 @@ async function registerGeneratedVideoAsset(args: {
     metadata: { duration: args.durationSec ?? 4 },
     status: "ready",
   };
-  const newEdge: ProvenanceEdge = {
-    fromAssetId: null,
-    toAssetId: assetId,
-    operation: {
-      type: "generate",
-      actor: "user",
-      timestamp: new Date().toISOString(),
-      params: {
-        providerId,
-        prompt,
-        costUsd: result.costUsd,
-        stub: result.stub,
-        providerJobId: result.providerJobId,
-        ...(args.extraParams ?? {}),
-      },
-    },
-  };
   try {
     // C1.3 (PRD-0009) — route through mutateCompositionFor so a FRESH work (no
     // composition.yaml yet) gets a minimal-but-valid composition SEEDED first
@@ -136,11 +126,37 @@ async function registerGeneratedVideoAsset(args: {
     // SAME makeEmptyComposition the human autosave / agent first-write path uses,
     // so there's exactly one default-composition shape. A non-existent work
     // re-throws ENOENT (we guard getWork above anyway), never polluting disk.
-    await mutateCompositionFor({ workId }, (comp) => ({
-      ...comp,
-      assets: [...(comp.assets ?? []), newAsset],
-      provenance: [...(comp.provenance ?? []), newEdge],
-    }));
+    //
+    // B7 (PRD-0010) — fromAssetId is computed INSIDE the mutator against the same
+    // `comp.assets` being written, so the reverse-lookup + asset/edge append are
+    // one atomic write (ADR-012). A firstFrame that resolves to no known asset
+    // (data URI / external URL /缺链历史) stays null — never blocks the write.
+    await mutateCompositionFor({ workId }, (comp) => {
+      const fromAssetId = findSourceAssetIdByFrame(comp.assets, args.firstFrame);
+      const newEdge: ProvenanceEdge = {
+        fromAssetId,
+        toAssetId: assetId,
+        operation: {
+          type: "generate",
+          actor: "user",
+          timestamp: new Date().toISOString(),
+          params: {
+            providerId,
+            prompt,
+            costUsd: result.costUsd,
+            stub: result.stub,
+            providerJobId: result.providerJobId,
+            ...(args.sceneId ? { sceneId: args.sceneId } : {}),
+            ...(args.extraParams ?? {}),
+          },
+        },
+      };
+      return {
+        ...comp,
+        assets: [...(comp.assets ?? []), newAsset],
+        provenance: [...(comp.provenance ?? []), newEdge],
+      };
+    });
     return assetId;
   } catch {
     // Registration is best-effort: an unreadable/invalid composition must never
@@ -337,7 +353,7 @@ generateRouter.post("/api/generate/video", async (c) => {
   const body = await c.req.json();
   const {
     workId, prompt, firstFrame, lastFrame, filename, provider: providerName,
-    durationSec, resolution,
+    durationSec, resolution, sceneId,
   } = body;
   let { aspectRatio } = body;
   // C1.2 — name the missing fields (parity with image/BGM).
@@ -454,6 +470,10 @@ generateRouter.post("/api/generate/video", async (c) => {
       prompt,
       result,
       durationSec: effectiveDuration,
+      // B7 — the RAW firstFrame (path/URL) drives the provenance reverse-lookup;
+      // sceneId (when the caller supplies it) is recorded into the edge params.
+      firstFrame,
+      ...(typeof sceneId === "string" && sceneId ? { sceneId } : {}),
       extraParams: {
         ...(effectiveAspectRatio ? { aspectRatio: effectiveAspectRatio } : {}),
         ...(effectiveResolution ? { resolution: effectiveResolution } : {}),
@@ -810,6 +830,48 @@ async function resolveFrameImage(workId: string, frame: unknown): Promise<string
 
 // SAFE_ID imported from ../safe-paths.js — single source of truth
 
+/**
+ * B7 (PRD-0010) — normalize an asset URI / frame-input string to a comparable
+ * work-relative path so a firstFrame input can be matched against a stored
+ * AssetEntry.uri regardless of which form it's in. Assets are stored EITHER
+ * work-relative (`assets/images/x.png`, the image/video-gen path) OR with a
+ * `/api/works/<id>/` prefix (reframe / post-process); the caller passes the
+ * bare work-relative path. Stripping the API prefix + leading slashes from both
+ * sides bridges them without loosening to a fuzzy basename match (which would
+ * risk false links).
+ */
+function normalizeAssetUri(uri: string): string {
+  return uri.replace(/^\/?api\/works\/[^/]+\//, "").replace(/^\/+/, "");
+}
+
+/**
+ * B7 (PRD-0010) — reverse-look-up a firstFrame input to the id of the source
+ * AssetEntry it points at, so the i2v "generate" edge can carry a real
+ * fromAssetId (the画布 draws the 定妆照 → 视频 link). Matching is URI-based on the
+ * normalized work-relative path. Best-effort by design:
+ *   - a data:/http(s) input has no local source asset → null (the
+ *     i2v-firstFrame-local gotcha: 远端图本就够不到本地资产). SILENT downgrade.
+ *   - a local path that matches no known asset (缺链历史资产) → null.
+ * Never throws; a null return simply means "no edge" (未归属簇), never a
+ * generation failure.
+ */
+function findSourceAssetIdByFrame(
+  assets: readonly AssetEntry[] | undefined,
+  frame: unknown,
+): string | null {
+  if (!frame) return null;
+  const s = String(frame);
+  if (s.startsWith("data:") || s.startsWith("http://") || s.startsWith("https://")) {
+    return null;
+  }
+  const target = normalizeAssetUri(s);
+  if (!target) return null;
+  for (const a of assets ?? []) {
+    if (normalizeAssetUri(a.uri) === target) return a.id;
+  }
+  return null;
+}
+
 // POST /api/generate/image/batch — generate multiple candidate frames for a shot
 generateRouter.post("/api/generate/image/batch", async (c) => {
   const body = await c.req.json();
@@ -1164,6 +1226,8 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
     firstFrameImage?: string;
     /** R44 — optional last-frame anchor for morph effects. */
     lastFrameImage?: string;
+    /** B7 — optional scene ownership口子; recorded into the generate edge params. */
+    sceneId?: string;
   }>();
   const provider = getProvider("video", providerId);
   if (!provider) return c.json({ error: "unknown provider" }, 404);
@@ -1231,6 +1295,10 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
     prompt: body.prompt,
     result,
     durationSec,
+    // B7 — this path takes the i2v anchor as firstFrameImage (URL/data URI);
+    // it reverse-looks-up when it matches a stored asset, else stays null.
+    firstFrame: body.firstFrameImage,
+    ...(typeof body.sceneId === "string" && body.sceneId ? { sceneId: body.sceneId } : {}),
     extraParams: { ...(aspectRatio ? { aspectRatio } : {}), durationSec },
   });
 

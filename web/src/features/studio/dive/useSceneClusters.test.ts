@@ -145,6 +145,26 @@ describe("computeSceneClusters", () => {
     ]);
   });
 
+  it("B7: an i2v video adopts into its 定妆照's scene via the firstFrame provenance edge", () => {
+    // The concrete B7 scenario: a firstFrame image (定妆照) is a scene member;
+    // the i2v video B7 now writes with fromAssetId = that image has NO direct
+    // scene reference — it must adopt into the image's scene via the ancestor
+    // chain, so the canvas draws the "定妆照 → 视频" link inside one cluster.
+    const comp = makeAssetGraph({
+      ids: ["anchor", "i2vClip"],
+      edges: [["anchor", "i2vClip"]],
+      overrides: {
+        anchor: { kind: "image", uri: "assets/images/anchor.png" },
+        i2vClip: { kind: "video", uri: "assets/seedance/clip.mp4" },
+      },
+    });
+    comp.scenes = [makeScene({ id: "sc1", order: 0, memberAssetIds: ["anchor"] })];
+    const clusters = computeSceneClusters(comp);
+    expect(clusters).toHaveLength(1);
+    expect(clusters[0].id).toBe("sc1");
+    expect(clusters[0].assetIds.sort()).toEqual(["anchor", "i2vClip"]);
+  });
+
   it("omits scenes whose members do not resolve to any real asset", () => {
     const comp = makeAssetGraph({ ids: ["real"] });
     comp.scenes = [
