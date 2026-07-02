@@ -977,6 +977,16 @@ export class WsBridge {
     }
   }
 
+  /**
+   * Resume the session with a new user message. Returns a boolean that the two
+   * HTTP callers (coach.ts, works.ts `/chat`) read to decide 200 vs 500:
+   *   - `false` — the ONLY hard failure: no such session. → 500.
+   *   - `true`  — the message was handled. This INCLUDES an idempotency-window
+   *     reject (A2): a duplicate is already being served by the in-flight turn,
+   *     so it is NOT an error — surfacing it as 500 would show the user a
+   *     spurious "Failed to send message" for a benign double-send (a
+   *     regression from the pre-A2 200). WS callers ignore the return entirely.
+   */
   async sendMessage(workId: string, text: string, sessionId?: string): Promise<boolean> {
     const sid = this.resolveSessionId(sessionId);
     const session = this.getSessionEntry(workId, sid);
@@ -1008,7 +1018,10 @@ export class WsBridge {
         withinMs: Date.now() - session.lastUserAt,
         textLen: displayText.length,
       });
-      return false;
+      // Handled, NOT a failure — the in-flight turn already covers this text.
+      // Returning true keeps the HTTP callers at 200 (see sendMessage docstring);
+      // `false` is reserved for the "no such session" hard failure above.
+      return true;
     }
     session.lastUserText = displayText;
     session.lastUserAt = Date.now();

@@ -11,6 +11,15 @@ import { EventEmitter } from "node:events";
 // >3s later, or to an idle (settled) CLI, is a legitimate resend (e.g. "继续")
 // and must be accepted. The reject path logs.
 //
+// A2 review — the dedup reject returns `true`, not `false`: a duplicate is
+// "already being handled by the in-flight turn", not a hard failure. `false`
+// is RESERVED for the one real failure — the session does not exist. The two
+// HTTP callers (coach.ts, works.ts /chat) map `false` → 500 "Failed to send
+// message"; overloading dedup onto `false` would surface a spurious 500 to the
+// user for a benign double-send (a regression from the pre-A2 200). The
+// idempotency guarantee is proved by the behavioural assertions below (no
+// history entry / no respawn / no mid-turn kill), NOT by the return value.
+//
 // We mock spawn so no real `claude` runs, and capture logBridge calls to prove
 // the reject is logged.
 
@@ -100,7 +109,10 @@ describe("WsBridge — A2 sendMessage idempotency window", () => {
       // Immediate duplicate while the CLI is mid-turn — must be rejected.
       const dupAccepted = await bridge.sendMessage(work, "继续", "s_1");
 
-      expect(dupAccepted).toBe(false);
+      // Returns true: the message is already being handled by the in-flight
+      // turn — a duplicate is not a hard failure, so the HTTP callers return
+      // 200, NOT a spurious 500. (`false` is reserved for "no such session".)
+      expect(dupAccepted).toBe(true);
       // Not recorded (no second落盘 / history entry).
       expect(session.messageHistory.length).toBe(histLen);
       expect(userTexts(session.messageHistory).filter((t) => t === "继续").length).toBe(1);
@@ -162,6 +174,17 @@ describe("WsBridge — A2 sendMessage idempotency window", () => {
       expect(accepted).toBe(true);
       expect(userTexts(session.messageHistory).filter((t) => t === "继续").length).toBe(2);
       expect(session.messageHistory.length).toBeGreaterThan(histLen);
+    });
+  });
+
+  it("returns false ONLY when the session does not exist (the real-failure signal HTTP maps to 500)", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge } = await import("../../../ws-bridge.js");
+      const bridge = new WsBridge(3271);
+      // No createSession → no in-memory session for this key. This is the sole
+      // path that must return false so coach.ts / works.ts /chat can 500.
+      const sent = await bridge.sendMessage("w_never_created", "hi", "s_1");
+      expect(sent).toBe(false);
     });
   });
 
