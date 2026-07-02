@@ -41,6 +41,9 @@ skills-lock.json
 desktop/out/
 desktop/release/
 desktop/build-resources/
+# Competitor codebases cloned for local comparison/research only — never
+# committed. Cloned on demand into docs/竞品/<name>.
+docs/竞品/
 # Local issue tracker stand-in — `to-issues` breakdown of a PRD into
 # tracer-bullet slices, kept as local working files until `gh` is available
 # to publish them as real GitHub Issues. Canonical source is the PRD in
