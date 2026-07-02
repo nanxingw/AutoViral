@@ -41,7 +41,9 @@ backend 存 `SessionRecord.backend`（sidecar round-trip）+ `WsSession.backend`
 
 ### 4. 认证 per-backend 自理，成本诚实（C3/C4）
 
-每个 backend 自带 ENOENT 文案（命名正确的二进制）+ 可选的 spawn 前 `checkAuth`。codex 在 spawn 前探 `<codexHome>/auth.json`（认 `OPENAI_API_KEY` 或 `tokens` 对象），未登录**给「到 Terminal 跑 `codex login`」引导文案**而非把 CLI 的隐晦错误甩给用户（登录是交互式的，daemon 做不了）。claude 不实现 `checkAuth`（claude CLI 自理认证）。**成本诚实**：codex 报 token 但无 per-turn USD，所以 C4 用量徽章对 codex 会话是 **token-only、不做本地价格折算**（不变量 #8 诚实纪律）。
+每个 backend 自带 ENOENT 文案（命名正确的二进制）+ 可选的 spawn 前 `checkAuth`。codex 实现 `checkCodexAuth`——探 `<codexHome>/auth.json`（认 `OPENAI_API_KEY` 或 `tokens` 对象），未登录时返回「到 Terminal 跑 `codex login`」引导文案（登录是交互式的，daemon 做不了）。claude 不实现 `checkAuth`（claude CLI 自理认证）。
+
+> **接线状态（2026-07-03，诚实标注）**：`checkCodexAuth` 探测能力**已落地并有单测覆盖**（`src/server/chat-backends/codex.ts` + `codex.test.ts`），但 WsBridge 的 **spawn-time 登录 gate 尚未接入**——`spawnCli`（`src/ws-bridge.ts`）今天直接 `backend.buildSpawn → spawn`，**从不**调 `checkAuth`。后果：未登录就选 codex 的会话仍会拿到 codex CLI 自身的隐晦报错，而非上面承诺的引导文案。把 gate 接进 `spawnCli`（spawn 前 `const s = await backend.checkAuth?.(); if (s && !s.ok) { 广播引导文案; return; }`）是 C3/C4 后端工作的**后续片**，不在本 ADR 落地的 docs 片（C5）范围内。CONTEXT.md 不变量 #4 与 `ChatBackend.checkAuth` 接口注释均按此现状标注，避免过期承诺。**成本诚实**：codex 报 token 但无 per-turn USD，所以 C4 用量徽章对 codex 会话是 **token-only、不做本地价格折算**（不变量 #8 诚实纪律）。
 
 ### 范围声明
 
@@ -76,4 +78,4 @@ backend 存 `SessionRecord.backend`（sidecar round-trip）+ `WsSession.backend`
 
 ---
 
-> **已采纳（2026-07-03）**：C2（接口抽取+claude 平移，快照零 diff）/ C3（codex spawn+parser+resume+prompt 分支+登录检测）/ C4（per-session 切换+BackendSwitcher+token-only 徽章）已实现并经绿门。多纬度浏览器 E2E（CE）按 PRD-0010 铁律经 Workflow 编排验收。
+> **已采纳（2026-07-03）**：C2（接口抽取+claude 平移，快照零 diff）/ C3（codex spawn+parser+resume+prompt 分支+登录检测能力 `checkCodexAuth`——spawn-time gate 待接线，见 §4）/ C4（per-session 切换+BackendSwitcher+token-only 徽章）已实现并经绿门。多纬度浏览器 E2E（CE）按 PRD-0010 铁律经 Workflow 编排验收。

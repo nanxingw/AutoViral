@@ -126,8 +126,12 @@ export interface ChatBackend {
   buildSpawn(input: ChatSpawnInput): ChatSpawnDescriptor;
   createLineParser(cb: ChatStreamCallbacks): ChatLineParser;
   /** Optional pre-spawn login/auth check. Backends whose CLI needs an
-   *  interactive login (codex) implement this; WsBridge calls it BEFORE spawn
-   *  and, when `ok:false`, surfaces the guidance message instead of spawning.
-   *  claude omits it (auth is handled by the claude CLI itself). */
+   *  interactive login (codex) implement this to probe local auth state.
+   *  INTENDED contract: WsBridge would call it BEFORE spawn and, when
+   *  `ok:false`, surface the guidance message instead of spawning. NOT YET
+   *  WIRED — `spawnCli` (src/ws-bridge.ts) currently spawns without calling
+   *  this, so the method is defined + unit-tested but has no production caller
+   *  (the spawn-time gate is a C3/C4 follow-up; see ADR-013 §4). claude omits it
+   *  (auth is handled by the claude CLI itself). */
   checkAuth?(): Promise<BackendAuthStatus>;
 }
