@@ -28,6 +28,11 @@ import type { VideoGenerateResult } from "../../providers/video/types.js";
 import type { MusicGenerateResult } from "../../providers/audio/types.js";
 import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
 import { uiEventBus } from "../bridge/ui-events.js";
+import {
+  recordCostEvent,
+  getCostLedger,
+  emptyCostSummary,
+} from "../cost-ledger/index.js";
 import { runPythonScript } from "../python-bridge.js";
 import { interpolateProcessor } from "../post-process/interpolate.js";
 import { superResolveProcessor } from "../post-process/super-resolve.js";
@@ -373,6 +378,22 @@ generateRouter.post("/api/generate/video", async (c) => {
       ts: Date.now(),
       payload: { kind: "video", uri: relativeUri, origin: "generate" },
     });
+
+    // B1 (PRD-0010) — cost ledger: video carries the provider's REAL metered
+    // cost (estimated:false). Skip stub runs (no key → placeholder, no charge).
+    // recordCostEvent is best-effort and never throws — a ledger failure can't
+    // break this successful generation.
+    if (!result.stub && typeof result.costUsd === "number") {
+      recordCostEvent({
+        workId,
+        kind: "video",
+        provider: provider.name,
+        usd: result.costUsd,
+        estimated: false,
+        meta: { assetId },
+      });
+    }
+
     return c.json({
       success: true,
       assetId,
@@ -616,6 +637,21 @@ generateRouter.post("/api/generate/bgm", async (c) => {
       ts: Date.now(),
       payload: { kind: "audio", uri: relativeUri, origin: "generate" },
     });
+
+    // B1 (PRD-0010) — cost ledger: BGM is a FLAT-rate charge (Lyria ~$0.08/track,
+    // not usage-metered), so it's booked as estimated:true — honesty discipline,
+    // we never present a flat price as a real metered cost. Skip stub runs.
+    // Best-effort: never throws, can't break this successful generation.
+    if (!result.stub) {
+      recordCostEvent({
+        workId,
+        kind: "bgm",
+        provider: entry.name,
+        usd: typeof result.costUsd === "number" ? result.costUsd : 0.08,
+        estimated: true,
+        meta: { assetId },
+      });
+    }
 
     return c.json({
       success: true,
@@ -1117,6 +1153,21 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
     payload: { kind: "video", uri: relativeAssetUri, origin: "generate" },
   });
 
+  // B1 (PRD-0010) — same video cost booking as /api/generate/video: this is the
+  // provider-scoped path the generation dialog drives, so it must record too or
+  // human-UI generations would be invisible in the ledger. Real metered cost,
+  // estimated:false, stubs skipped, best-effort.
+  if (!result.stub && typeof result.costUsd === "number") {
+    recordCostEvent({
+      workId: body.workId,
+      kind: "video",
+      provider: providerId,
+      usd: result.costUsd,
+      estimated: false,
+      meta: { assetId },
+    });
+  }
+
   return c.json({
     assetId,
     assetUri: relativeAssetUri,
@@ -1124,6 +1175,20 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
     costUsd: result.costUsd,
     stub: result.stub,
   });
+});
+
+// ── B1 (PRD-0010) — per-work cost summary ────────────────────────────────────
+// GET /api/works/:id/cost — total + per-kind breakdown for one work. Reads the
+// process-wide CostLedger singleton; when it's unwired (or the work has no
+// events) we return a zero-state summary rather than 404/500 so the UI badge can
+// render "尚未产生费用" uniformly. Registered here (alongside the generation
+// instrumentation) per the B1 code-area hint; the /assets/* wildcard in
+// assets.ts does not shadow this path.
+generateRouter.get("/api/works/:id/cost", (c) => {
+  const workId = c.req.param("id");
+  const ledger = getCostLedger();
+  const summary = ledger ? ledger.summaryForWork(workId) : emptyCostSummary(workId);
+  return c.json(summary);
 });
 
 // ── Phase 8.5 — Frame Interpolation + Super-Resolution ──────────────────────

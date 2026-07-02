@@ -22,6 +22,7 @@ import { attachBridgeWebSocket } from "./bridge/bridge-ws.js";
 import { startAnalyticsCollector } from "../domain/analytics-collector.js";
 import { startResearchScheduler } from "../research-scheduler.js";
 import { RenderQueue, defaultDbPath } from "./render-queue/index.js";
+import { CostLedger, setCostLedger, defaultCostDbPath } from "./cost-ledger/index.js";
 import { RenderWsRouter } from "./render-ws.js";
 import { runRenderPipeline } from "./render-pipeline.js";
 import { CompositionSchema } from "../shared/composition.js";
@@ -108,6 +109,19 @@ export async function startServer(port: number): Promise<{ server: Server }> {
   });
   setRenderQueue(renderQueue);
   const renderWs = new RenderWsRouter(renderQueue);
+
+  // 4.6. Create the cost ledger (B1, PRD-0010) — a SQLite cost_events store the
+  // generation routes write to best-effort. AUTOVIRAL_COST_DB overrides the path
+  // (mirrors AUTOVIRAL_RENDER_DB). Construction never blocks boot; a failure here
+  // just means recordCostEvent no-ops.
+  try {
+    const costLedger = new CostLedger({
+      dbPath: process.env.AUTOVIRAL_COST_DB ?? defaultCostDbPath(),
+    });
+    setCostLedger(costLedger);
+  } catch (err) {
+    console.warn(`[cost-ledger] init failed (cost tracking disabled): ${(err as Error).message}`);
+  }
 
   const app = new Hono();
 
