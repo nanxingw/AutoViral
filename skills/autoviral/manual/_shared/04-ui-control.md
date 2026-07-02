@@ -106,5 +106,6 @@ The Studio's render progress bar is also driven by the `ui-render-progress` even
 - Open or close other tabs
 - Change the editor theme
 - Trigger a file-system rescan (the Studio's composition watcher handles this automatically)
+- Choose or switch the **Chat backend** (Claude / Codex) — that's a per-session choice the user makes when *creating* a chat, and it's locked once the conversation starts (Claude and Codex resume lineages aren't interchangeable, so a switch means a *new* chat, never a silent context transplant). You are already running as whichever backend the user picked; you can't re-point yourself from the CLI.
 
 If the user asks for any of these, tell them they have to do it manually in the Studio. Don't pretend the CLI has a hidden flag.

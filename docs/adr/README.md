@@ -34,3 +34,4 @@
 | [ADR-010](ADR-010-grounded-coach-persona.md) | Grounded coach — 灵感页第二个持久 agent persona（workless `coach_main` 会话、sidecar 持久、session 级 model、复用聊天栈）（v0.1.5 / PRD-0006 S6-S8） | Accepted | 2026-06-08 |
 | [ADR-011](ADR-011-douyin-collector-managed-venv-scrape.md) | Douyin 采集器 — 托管 venv（f2+browser_cookie3）经用户浏览器 session 抓本人数据；人口属性删卡非推迟；本地优先 secrets 明文=接受风险（v0.1.5 / PRD-0006 S4-S5） | Accepted | 2026-06-08 |
 | [ADR-012](ADR-012-scenes-as-plan-layer.md) | Scenes as the plan layer — 剧本→分镜→生成 handoff（register+link 原子化无悬挂引用）、共享 scene ops、per-work 写锁（v0.1.6 / PRD-0007 S1·S6·S7） | Accepted | 2026-06-09 |
+| [ADR-013](ADR-013-chat-multi-backend.md) | Chat 多后端架构 — ChatBackend 接缝（spawn+parse 归一）、per-session backend 钉定、resume lineage 不互通首轮后不可变、认证自理、codex token-only；coach/trends 保持 claude（v0.1.8 / PRD-0010 C2·C3·C4） | Accepted | 2026-07-03 |
