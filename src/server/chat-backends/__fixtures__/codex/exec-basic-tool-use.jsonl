@@ -1,0 +1,6 @@
+{"type":"thread.started","thread_id":"019f219f-64ea-7fe0-81b1-4a6466e5c21b"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"item_0","type":"command_execution","command":"/bin/zsh -lc ls","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_0","type":"command_execution","command":"/bin/zsh -lc ls","aggregated_output":"alpha.txt\nbeta.md\nexec-basic-tool-use.jsonl\nexec-basic.stderr\ngamma.json\n","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"当前目录有这些文件：\n\n- `alpha.txt`\n- `beta.md`\n- `exec-basic-tool-use.jsonl`\n- `exec-basic.stderr`\n- `gamma.json`"}}
+{"type":"turn.completed","usage":{"input_tokens":29456,"cached_input_tokens":19200,"output_tokens":191,"reasoning_output_tokens":54}}
