@@ -11,13 +11,30 @@ beforeEach(() => {
   vi.resetModules();
 });
 
+// ws-bridge's appendToChatLog is fire-and-forget: a write (mkdir+appendFile) can
+// still be in flight when a test body returns. Tests drain it deterministically
+// with `await bridge.flushChatLogs()`; this rm is the belt-and-suspenders net for
+// any write that slips through — a late mkdir recreating works/<id> just after rm
+// surfaces as ENOTEMPTY under full-suite load, so retry that specific case.
+async function rmWithRetry(dir: string): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await rm(dir, { recursive: true, force: true });
+      return;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "ENOTEMPTY" || attempt >= 10) throw err;
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+}
+
 async function withTempDataDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), "av-ws-ms-"));
   process.env.AUTOVIRAL_DATA_DIR = dir;
   try {
     return await fn(dir);
   } finally {
-    await rm(dir, { recursive: true, force: true });
+    await rmWithRetry(dir);
     delete process.env.AUTOVIRAL_DATA_DIR;
   }
 }
@@ -54,8 +71,8 @@ describe("WsBridge — multi-session keying + sidecar + migration + archive", ()
       expect(chatLogPath(work, DEFAULT_CHAT_SESSION_ID)).toBe(join(dir, "works", work, "chat.jsonl"));
       expect(chatLogPath(work, "s_2")).toBe(join(dir, "works", work, "chat-s_2.jsonl"));
 
-      // appendToChatLog is fire-and-forget — give the awaitable writes a beat.
-      await new Promise((r) => setTimeout(r, 50));
+      // appendToChatLog is fire-and-forget — drain it deterministically.
+      await bridge.flushChatLogs();
       const log1 = await readFile(chatLogPath(work, "s_1"), "utf-8");
       const log2 = await readFile(chatLogPath(work, "s_2"), "utf-8");
       expect(log1).toContain("hello from one");
@@ -173,7 +190,7 @@ describe("WsBridge — multi-session keying + sidecar + migration + archive", ()
       await bridge.createNewSession(work); // ensures s_1, mints s_2
       bridge.ensureSession(work, "s_2");
       bridge.recordUserMessage(work, "msg in two", "s_2");
-      await new Promise((r) => setTimeout(r, 50));
+      await bridge.flushChatLogs();
       const s2log = chatLogPath(work, "s_2");
       expect(await readFile(s2log, "utf-8")).toContain("msg in two");
 
@@ -212,6 +229,10 @@ describe("WsBridge — multi-session keying + sidecar + migration + archive", ()
       expect(s2Blocks[0].data.sessionId).toBe("s_2");
       // The s_1 socket must NOT have received the s_2 echo.
       expect(s1Blocks).toHaveLength(0);
+
+      // recordUserMessage fired a fire-and-forget appendToChatLog; drain it before
+      // the temp-dir rm so a late mkdir can't recreate works/<id> (ENOTEMPTY flake).
+      await bridge.flushChatLogs();
     });
   });
 
@@ -298,6 +319,40 @@ describe("WsBridge — multi-session keying + sidecar + migration + archive", ()
       expect(s1Killed[0].data).toEqual({ workId: work, sessionId: "s_1" });
       // s_1's process reference is cleared after the kill.
       expect(bridge.getSession(work, "s_1")!.cliProcess).toBeUndefined();
+    });
+  });
+
+  // Regression (PRD-0010) — root-cause of the ENOTEMPTY teardown flake:
+  // appendToChatLog is fire-and-forget, so a write scheduled by recordUserMessage
+  // can land AFTER the temp-dir rm and recreate works/<id>, tripping ENOTEMPTY on
+  // the next rm. flushChatLogs() drains every in-flight per-file write tail so
+  // teardown is race-free and callers that need bytes-on-disk have an await point.
+  it("flushChatLogs drains in-flight fire-and-forget appends so teardown can't race a late write", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, chatLogPath } = await import("../../../ws-bridge.js");
+      const work = "w_flush_drain";
+      await workDir(dir, work);
+      const bridge = new WsBridge(0);
+      bridge.ensureSession(work, "s_1");
+
+      // Fire many appends WITHOUT awaiting — exactly the fire-and-forget path.
+      const N = 40;
+      for (let i = 0; i < N; i++) bridge.recordUserMessage(work, `drain line ${i}`, "s_1");
+
+      // Drain: after this resolves every enqueued write has hit disk in call order.
+      await bridge.flushChatLogs();
+      const log = await readFile(chatLogPath(work, "s_1"), "utf-8");
+      const lines = log.trim().split("\n");
+      expect(lines).toHaveLength(N);
+      expect(lines[0]).toContain("drain line 0");
+      expect(lines[N - 1]).toContain(`drain line ${N - 1}`);
+
+      // ...and NOTHING is still in flight: removing the work dir is final — no late
+      // mkdir+appendFile recreates it (the exact ENOTEMPTY mechanism).
+      const wd = join(dir, "works", work);
+      await rm(wd, { recursive: true, force: true });
+      await new Promise((r) => setTimeout(r, 50)); // give any stray write a chance to (wrongly) recreate
+      await expect(readFile(chatLogPath(work, "s_1"), "utf-8")).rejects.toThrow();
     });
   });
 });

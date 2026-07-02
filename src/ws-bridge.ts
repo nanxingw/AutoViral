@@ -636,6 +636,27 @@ export class WsBridge {
     this.chatLogTails.set(chatFile, next);
   }
 
+  /** Drain口 (PRD-0010) — await every in-flight chat-log write to disk.
+   *  appendToChatLog / rewriteChatLog are fire-and-forget (enqueued onto the
+   *  per-file `chatLogTails`); callers that must see the bytes settled before
+   *  proceeding — graceful shutdown, or a test teardown that rm's the data dir —
+   *  await this. It loops until the tail map is STABLE so a write enqueued WHILE
+   *  draining is also awaited: without that, a late mkdir+appendFile could still
+   *  recreate works/<id> just after an rm and trip ENOTEMPTY (the multisession
+   *  teardown flake). Bounded so a pathological write storm can't spin forever. */
+  async flushChatLogs(): Promise<void> {
+    for (let i = 0; i < 100; i++) {
+      const pending = [...this.chatLogTails.values()];
+      if (pending.length === 0) return;
+      await Promise.allSettled(pending);
+      // A new/replaced tail means a write was enqueued during the await; go again.
+      const after = [...this.chatLogTails.values()];
+      const settled =
+        after.length === pending.length && after.every((p, idx) => p === pending[idx]);
+      if (settled) return;
+    }
+  }
+
   private appendToChatLog(workId: string, block: ChatBlock, sessionId?: string): void {
     if (workId.startsWith("trends_")) return;
     const sid = this.resolveSessionId(sessionId);
