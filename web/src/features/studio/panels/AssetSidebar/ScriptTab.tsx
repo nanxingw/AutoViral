@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Markdown } from "@/features/chat/Markdown";
+import { ScriptModal } from "./ScriptModal";
 import { useComposition } from "../../store";
 import { useScript } from "../../scriptStore";
 import { loadScript, saveScript } from "../../services/script";
@@ -385,6 +386,8 @@ function ScriptEditor({ workId }: { workId: string }) {
   }, []);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  // A4 — full-screen read/edit modal (shares this work's store + save path).
+  const [modalOpen, setModalOpen] = useState(false);
 
   // TENANCY GUARD: the store is one global instance shared by every work. The
   // held script is OURS only when it's stamped with our workId AND a load has
@@ -457,7 +460,7 @@ function ScriptEditor({ workId }: { workId: string }) {
         >
           {t("studio.scriptPanel.scriptHeading")}
         </span>
-        <div style={{ display: "flex", gap: 2 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
           <ModeButton active={mode === "edit"} onClick={() => setMode("edit")}>
             {t("studio.scriptPanel.scriptModeEdit")}
           </ModeButton>
@@ -467,6 +470,43 @@ function ScriptEditor({ workId }: { workId: string }) {
           >
             {t("studio.scriptPanel.scriptModePreview")}
           </ModeButton>
+          {/* A4 — open the full-screen reader/editor (portal to body). */}
+          <button
+            type="button"
+            data-bare
+            onClick={() => setModalOpen(true)}
+            aria-label={t("studio.scriptPanel.scriptOpenFull")}
+            title={t("studio.scriptPanel.scriptOpenFull")}
+            style={{
+              marginLeft: 4,
+              width: 24,
+              height: 22,
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              background: "transparent",
+              border: "1px solid var(--glass-border)",
+              borderRadius: 6,
+              color: "var(--text-dimmer)",
+              cursor: "pointer",
+              fontSize: 12,
+              lineHeight: 1,
+            }}
+          >
+            <svg
+              width="12"
+              height="12"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+            >
+              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+            </svg>
+          </button>
         </div>
       </div>
 
@@ -544,6 +584,14 @@ function ScriptEditor({ workId }: { workId: string }) {
           {t("studio.scriptPanel.scriptSaveFailed", { msg: saveError })}
         </div>
       )}
+
+      {/* A4 — full-screen reader/editor. Shares this work's useScript store and
+          the saveScript path, so a save here reflows the inline preview. */}
+      <ScriptModal
+        open={modalOpen}
+        workId={workId}
+        onClose={() => setModalOpen(false)}
+      />
     </div>
   );
 }

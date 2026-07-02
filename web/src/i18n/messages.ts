@@ -404,6 +404,9 @@ export const en = {
       // T4 — script editor fold toggle (▾ expanded / ▸ collapsed).
       scriptFoldCollapse: "Collapse script",
       scriptFoldExpand: "Expand script",
+      // A4 (PRD-0010) — full-screen 剧本 read/edit modal.
+      scriptOpenFull: "Open full screen",
+      scriptModalCloseAria: "Close full-screen script",
     },
     rightPane: {
       tabChat: "Chat",
@@ -1522,6 +1525,9 @@ export const zh: DeepShape<Messages> = {
       // T4 — 剧本编辑器折叠开关（▾ 展开 / ▸ 收起）。
       scriptFoldCollapse: "收起剧本",
       scriptFoldExpand: "展开剧本",
+      // A4 (PRD-0010) — 剧本全屏阅读/编辑 modal。
+      scriptOpenFull: "全屏展开",
+      scriptModalCloseAria: "关闭全屏剧本",
     },
     rightPane: {
       tabChat: "对话",
