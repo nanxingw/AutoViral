@@ -37,6 +37,23 @@ function fmtSavedAt(d: Date, locale: string): string {
   }).format(d);
 }
 
+// A5 (PRD-0010) — panel size constraints as ONE testable source of truth.
+// react-resizable-panels keeps min/max only in internal context (never emitted
+// to the DOM), so we hoist the numbers here: the JSX below consumes them and
+// Studio.layout.test pins them. `aside.maxSize` widened 28 → 40 so the
+// storyboard / asset sidebar can be dragged meaningfully wider (the result is
+// persisted via the PanelGroup autoSaveId). `center.minSize` / `preview.minSize`
+// are the floors that keep the preview from being squeezed to nothing when the
+// side columns expand toward their maxima (chat.max 30 + center.min 30 +
+// aside.max 40 = 100 → all three maxima stay simultaneously satisfiable).
+export const STUDIO_PANELS = {
+  chat: { defaultSize: 18, minSize: 14, maxSize: 30 },
+  center: { defaultSize: 65, minSize: 30 },
+  preview: { defaultSize: 70, minSize: 30 },
+  timeline: { defaultSize: 30, minSize: 15 },
+  aside: { defaultSize: 17, minSize: 14, maxSize: 40 },
+} as const;
+
 // Resize handle styling — slim editorial separator using --glass-border.
 // 4px-wide cool-steel rule that thickens on hover/drag for clear affordance.
 const handleBaseStyle: React.CSSProperties = {
@@ -261,7 +278,13 @@ export default function Studio() {
           autoSaveId="autoviral-studio-v1"
           style={{ height: "100%", gap: 0 }}
         >
-          <Panel id="chat" order={1} defaultSize={18} minSize={14} maxSize={30}>
+          <Panel
+            id="chat"
+            order={1}
+            defaultSize={STUDIO_PANELS.chat.defaultSize}
+            minSize={STUDIO_PANELS.chat.minSize}
+            maxSize={STUDIO_PANELS.chat.maxSize}
+          >
             <div
               data-area="chat"
               className="glass"
@@ -273,9 +296,19 @@ export default function Studio() {
 
           <HResizeHandle id="chat-center" />
 
-          <Panel id="center" order={2} defaultSize={65} minSize={30}>
+          <Panel
+            id="center"
+            order={2}
+            defaultSize={STUDIO_PANELS.center.defaultSize}
+            minSize={STUDIO_PANELS.center.minSize}
+          >
             <PanelGroup direction="vertical" autoSaveId="autoviral-studio-center-v1" style={{ height: "100%" }}>
-              <Panel id="preview" order={1} defaultSize={70} minSize={30}>
+              <Panel
+                id="preview"
+                order={1}
+                defaultSize={STUDIO_PANELS.preview.defaultSize}
+                minSize={STUDIO_PANELS.preview.minSize}
+              >
                 <div
                   data-area="preview"
                   className="glass"
@@ -287,7 +320,12 @@ export default function Studio() {
 
               <VResizeHandle id="preview-timeline" />
 
-              <Panel id="timeline" order={2} defaultSize={30} minSize={15}>
+              <Panel
+                id="timeline"
+                order={2}
+                defaultSize={STUDIO_PANELS.timeline.defaultSize}
+                minSize={STUDIO_PANELS.timeline.minSize}
+              >
                 <div
                   data-area="timeline"
                   className="glass"
@@ -301,7 +339,13 @@ export default function Studio() {
 
           <HResizeHandle id="center-aside" />
 
-          <Panel id="aside" order={3} defaultSize={17} minSize={14} maxSize={28}>
+          <Panel
+            id="aside"
+            order={3}
+            defaultSize={STUDIO_PANELS.aside.defaultSize}
+            minSize={STUDIO_PANELS.aside.minSize}
+            maxSize={STUDIO_PANELS.aside.maxSize}
+          >
             <div
               data-area="aside"
               className="glass"

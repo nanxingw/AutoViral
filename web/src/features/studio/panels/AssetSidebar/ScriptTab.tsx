@@ -103,6 +103,64 @@ const CAMERA_OPTIONS: NonNullable<Scene["cameraMovement"]>[] = [
   "static",
 ];
 
+// ─── A5 · summary-row responsive meta degradation ───────────────────────────
+//
+// The collapsed summary row packs 镜号 · status · title · duration · shot ·
+// intent onto one line. In a narrow sidebar (the aside column can be dragged as
+// slim as ~14% of the viewport) the meta segment would starve the title, which
+// is the one field that MUST stay readable — the meta values remain reachable in
+// the expanded Inspector. So the meta segment sheds fields by priority as the
+// row narrows. Priority (last to drop → first to drop): duration > shot >
+// intent (duration is the most concrete quick-glance datum; intent the most
+// abstract). Thresholds are the row's own measured content width.
+export const META_BREAKPOINTS = {
+  /** below this the intent chip is hidden */
+  intent: 260,
+  /** below this the shot-size chip is hidden too */
+  shot: 220,
+  /** below this even the duration is hidden — the meta segment vanishes */
+  duration: 180,
+} as const;
+
+export interface VisibleMeta {
+  duration: boolean;
+  shot: boolean;
+  intent: boolean;
+}
+
+// Pure decision: given the row's measured width (or null when unmeasured),
+// which meta fields survive. width=null → show all (the SSR / pre-observer
+// default: a row that is never measured must never hide information).
+export function computeVisibleMeta(width: number | null): VisibleMeta {
+  if (width == null) return { duration: true, shot: true, intent: true };
+  return {
+    duration: width >= META_BREAKPOINTS.duration,
+    shot: width >= META_BREAKPOINTS.shot,
+    intent: width >= META_BREAKPOINTS.intent,
+  };
+}
+
+// Observe an element's content width. Returns null until a real (>0) width is
+// reported — a 0 width means "not laid out / hidden", not "genuinely narrow", so
+// we don't let it trigger degradation (and happy-dom, which never fires layout
+// callbacks, keeps the null 'show all' default).
+function useElementWidth(
+  ref: React.RefObject<HTMLElement | null>,
+): number | null {
+  const [width, setWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect?.width;
+      if (typeof w === "number" && w > 0) setWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [ref]);
+  return width;
+}
+
 export function ScriptTab() {
   const t = useT();
   const scenes = useComposition((s) => s.comp?.scenes);
@@ -1163,7 +1221,7 @@ interface SceneSummaryRowProps {
   onRemove: () => void;
 }
 
-function SceneSummaryRow({
+export function SceneSummaryRow({
   scene,
   expanded,
   onToggle,
@@ -1184,9 +1242,19 @@ function SceneSummaryRow({
   const t = useT();
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  // A5 — measure the row so the meta segment can shed fields by priority when
+  // the column is narrow (the title always keeps its space).
+  const rowRef = useRef<HTMLDivElement>(null);
+  const rowWidth = useElementWidth(rowRef);
+  const visibleMeta = computeVisibleMeta(rowWidth);
+  const anyMeta =
+    (scene.durationSec != null && visibleMeta.duration) ||
+    visibleMeta.shot ||
+    visibleMeta.intent;
 
   return (
     <div
+      ref={rowRef}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -1302,28 +1370,37 @@ function SceneSummaryRow({
         >
           {scene.title}
         </span>
-        {/* compact meta — duration / shot size / intent (— for empty). */}
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            letterSpacing: "0.03em",
-            color: "var(--text-dimmer)",
-            whiteSpace: "nowrap",
-            flexShrink: 0,
-            display: "flex",
-            gap: 8,
-            alignItems: "center",
-          }}
-        >
-          {scene.durationSec != null && (
-            <span data-testid="summary-duration">
-              {scene.durationSec.toFixed(1)}s
-            </span>
-          )}
-          <span data-testid="summary-shot">{shotSizeLabel}</span>
-          <span data-testid="summary-intent">{intentLabel}</span>
-        </span>
+        {/* compact meta — duration / shot size / intent (— for empty). A5:
+            the segment sheds fields by priority when the row is narrow so the
+            title keeps its space (the values stay reachable in the Inspector).
+            When nothing survives the whole segment unmounts. */}
+        {anyMeta && (
+          <span
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              letterSpacing: "0.03em",
+              color: "var(--text-dimmer)",
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+            }}
+          >
+            {scene.durationSec != null && visibleMeta.duration && (
+              <span data-testid="summary-duration">
+                {scene.durationSec.toFixed(1)}s
+              </span>
+            )}
+            {visibleMeta.shot && (
+              <span data-testid="summary-shot">{shotSizeLabel}</span>
+            )}
+            {visibleMeta.intent && (
+              <span data-testid="summary-intent">{intentLabel}</span>
+            )}
+          </span>
+        )}
       </button>
 
       {/* ⋯ menu trigger — appears on hover/focus or while the menu is open. */}

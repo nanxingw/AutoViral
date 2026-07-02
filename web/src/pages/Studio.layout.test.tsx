@@ -2,7 +2,7 @@ import { render } from "@testing-library/react";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import Studio from "@/pages/Studio";
+import Studio, { STUDIO_PANELS } from "@/pages/Studio";
 import { useComposition } from "@/features/studio/store";
 import { useTheme } from "@/stores/theme";
 
@@ -97,5 +97,32 @@ describe("Studio layout (Phase 9.1: react-resizable-panels)", () => {
 
   it("mounts without throwing (smoke)", () => {
     expect(() => mount()).not.toThrow();
+  });
+});
+
+// A5 (PRD-0010) — the right (aside) column must be draggable meaningfully wider.
+// react-resizable-panels keeps min/max in internal context (never emitted to the
+// DOM), so the size constraints live in one exported STUDIO_PANELS config that
+// the JSX consumes and this test pins.
+describe("Studio panel size constraints (A5)", () => {
+  it("widens the aside column's max size to 40% (was 28)", () => {
+    expect(STUDIO_PANELS.aside.maxSize).toBe(40);
+  });
+
+  it("keeps a center-preview minSize floor so the preview isn't squeezed to nothing", () => {
+    // 兜底不破: the center column and its preview keep a non-trivial minimum so
+    // dragging the side panels to their maxima can't collapse the preview.
+    expect(STUDIO_PANELS.center.minSize).toBeGreaterThanOrEqual(30);
+    expect(STUDIO_PANELS.preview.minSize).toBeGreaterThanOrEqual(30);
+  });
+
+  it("keeps all three columns' maxima simultaneously satisfiable (sum ≤ 100)", () => {
+    // chat.max + center.min + aside.max must fit in 100% so the aside can
+    // actually reach 40 without violating the others' minima.
+    const sum =
+      STUDIO_PANELS.chat.maxSize +
+      STUDIO_PANELS.center.minSize +
+      STUDIO_PANELS.aside.maxSize;
+    expect(sum).toBeLessThanOrEqual(100);
   });
 });
