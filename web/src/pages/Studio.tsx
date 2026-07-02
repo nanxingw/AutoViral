@@ -15,6 +15,8 @@ import { useBridgeEvents } from "@/features/terminal/useBridgeEvents";
 import { ApprovalPrompt } from "@/features/terminal/ApprovalPrompt";
 import { RenderProgressBar } from "@/features/terminal/RenderProgressBar";
 import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
+import { DiveCanvas } from "@/features/studio/dive/DiveCanvas";
+import { useDive } from "@/features/studio/dive/diveStore";
 import { TopBar } from "@/features/studio/panels/TopBar";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
 import { useShortcuts } from "@/features/studio/hooks/useShortcuts";
@@ -95,6 +97,10 @@ export default function Studio() {
   // instead of the stale time-stamp.
   const [saveError, setSaveError] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // B6 — the Dive canvas is now mounted at the Studio level (always available,
+  // opened from the top bar) rather than trapped inside the Inspector tab.
+  const diveOpen = useDive((s) => s.open);
+  const closeDive = useDive((s) => s.closeCanvas);
 
   // Phase 3 — subscribe to bridge UI command events so `autoviral select/
   // seek/play/pause/toast` mutate Studio state in real time.
@@ -365,6 +371,11 @@ export default function Studio() {
 
       {/* Phase 3 — modal that replies to `autoviral ask` requests. */}
       <ApprovalPrompt workId={workId} />
+
+      {/* B6 — whole-composition Dive canvas (portals to body). Opened from the
+          top bar; a cluster-title click closes it and jumps the sidebar to the
+          matching 分镜 card. */}
+      <DiveCanvas open={diveOpen} onClose={closeDive} />
     </div>
   );
 }

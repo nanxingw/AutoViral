@@ -3,6 +3,7 @@ import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { AssetSidebar } from "../../panels/AssetSidebar";
+import { DiveCanvas } from "../DiveCanvas";
 import { useComposition } from "../../store";
 import {
   makeAssetGraph,
@@ -72,10 +73,10 @@ describe("Phase 5 acceptance criteria", () => {
     comp.tracks[0].clips.push(clip);
     useComposition.setState({ comp, selection: "clip-1" });
 
-    wrap(<AssetSidebar workId="w" />);
-
-    // Open the dive modal from Inspector.
-    fireEvent.click(screen.getByRole("button", { name: /open in dive/i }));
+    // B6 — the canvas is now opened from the top bar and mounted at the Studio
+    // level (driven by the shared diveStore), not from inside the Inspector.
+    // Render it directly in the open state to exercise the same graph + rebind.
+    wrap(<DiveCanvas open onClose={() => {}} />);
 
     // All 3 nodes render.
     expect(screen.getByTestId("dive-node-alpha")).toBeInTheDocument();

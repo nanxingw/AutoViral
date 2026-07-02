@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import type { Node } from "@xyflow/react";
 
 // B5 (PRD-0010) — assert the CLUSTERED graph DiveCanvas hands to ReactFlow,
@@ -19,11 +19,21 @@ vi.mock("@xyflow/react", () => ({
 
 import { DiveCanvas } from "./DiveCanvas";
 import { useComposition } from "../store";
+import { useDive } from "./diveStore";
 import { makeAssetGraph, makeScene } from "../../../test/composition-fixtures";
 
 beforeEach(() => {
   captured.props = null;
   useComposition.setState({ comp: null, selection: null });
+  // B6 — the canvas chrome (view toggle + unassigned fold) lives in a shared
+  // store; reset it so a prior test's toggle never bleeds into the next.
+  useDive.setState({
+    open: true,
+    view: "scene",
+    unassignedCollapsed: true,
+    pendingSceneJump: null,
+    memoWorkId: null,
+  });
 });
 
 function nodesOf(): Node[] {
@@ -64,6 +74,9 @@ describe("DiveCanvas — clustered rendering", () => {
     const comp = makeAssetGraph({ ids: ["a", "b", "loose"] });
     comp.scenes = [makeScene({ id: "sc1", order: 0, memberAssetIds: ["a", "b"] })];
     useComposition.setState({ comp, selection: null });
+    // B6 — the unassigned cluster now starts collapsed; expand it so its
+    // member ("loose") is emitted for this parentId assertion.
+    useDive.setState({ unassignedCollapsed: false });
     render(<DiveCanvas open={true} onClose={() => {}} />);
     const kids = childNodes();
     expect(kids).toHaveLength(3); // a, b, loose
@@ -105,5 +118,74 @@ describe("DiveCanvas — clustered rendering", () => {
     const g1 = nodesOf().find((n) => n.id === "g1");
     expect((g2?.data as { isSelectedTake?: boolean })?.isSelectedTake).toBe(true);
     expect((g1?.data as { isSelectedTake?: boolean })?.isSelectedTake).toBe(false);
+  });
+});
+
+describe("DiveCanvas — B6 chrome (unassigned fold + view toggle)", () => {
+  it("collapses the unassigned cluster by default: its children are hidden, the group stays", () => {
+    const comp = makeAssetGraph({ ids: ["a", "loose1", "loose2"] });
+    comp.scenes = [makeScene({ id: "sc1", order: 0, memberAssetIds: ["a"] })];
+    useComposition.setState({ comp, selection: null });
+    // default unassignedCollapsed = true
+    render(<DiveCanvas open={true} onClose={() => {}} />);
+    // The unassigned group node is present (collapsed) but its members are NOT.
+    const groupIds = groupNodes().map((n) => n.id);
+    expect(groupIds).toContain("__unassigned__");
+    expect(nodesOf().find((n) => n.id === "loose1")).toBeUndefined();
+    expect(nodesOf().find((n) => n.id === "loose2")).toBeUndefined();
+    // The scene cluster's own child is unaffected.
+    expect(nodesOf().find((n) => n.id === "a")?.parentId).toBe("sc1");
+    // The group node carries collapsed + memberCount for the fold affordance.
+    const unassigned = nodesOf().find((n) => n.id === "__unassigned__");
+    expect((unassigned?.data as { collapsed?: boolean })?.collapsed).toBe(true);
+    expect((unassigned?.data as { memberCount?: number })?.memberCount).toBe(2);
+  });
+
+  it("reveals the unassigned members once expanded", () => {
+    const comp = makeAssetGraph({ ids: ["a", "loose1"] });
+    comp.scenes = [makeScene({ id: "sc1", order: 0, memberAssetIds: ["a"] })];
+    useComposition.setState({ comp, selection: null });
+    useDive.setState({ unassignedCollapsed: false });
+    render(<DiveCanvas open={true} onClose={() => {}} />);
+    expect(nodesOf().find((n) => n.id === "loose1")?.parentId).toBe("__unassigned__");
+  });
+
+  it("keeps a sole unassigned cluster expanded even when the collapse flag is set (no scenes → nothing else to show)", () => {
+    const comp = makeAssetGraph({ ids: ["a", "b"] });
+    // No scenes → everything is unassigned; collapsing it would blank the canvas.
+    useComposition.setState({ comp, selection: null });
+    useDive.setState({ unassignedCollapsed: true });
+    render(<DiveCanvas open={true} onClose={() => {}} />);
+    expect(nodesOf().find((n) => n.id === "a")?.parentId).toBe("__unassigned__");
+    expect(nodesOf().find((n) => n.id === "b")?.parentId).toBe("__unassigned__");
+  });
+
+  it("lineage view renders a FLAT provenance graph — no group nodes, no parentId", () => {
+    const comp = makeAssetGraph({ ids: ["a", "b"], edges: [["a", "b"]] });
+    comp.scenes = [makeScene({ id: "sc1", order: 0, memberAssetIds: ["a", "b"] })];
+    useComposition.setState({ comp, selection: null });
+    useDive.setState({ view: "lineage" });
+    render(<DiveCanvas open={true} onClose={() => {}} />);
+    expect(groupNodes()).toHaveLength(0);
+    expect(childNodes()).toHaveLength(0); // nothing has a parentId in lineage view
+    expect(nodesOf().find((n) => n.id === "a")).toBeDefined();
+    expect(nodesOf().find((n) => n.id === "b")).toBeDefined();
+    // Provenance edge survives.
+    expect((captured.props?.edges as { source: string; target: string }[]).some(
+      (e) => e.source === "a" && e.target === "b",
+    )).toBe(true);
+  });
+
+  it("scene view (default) renders group nodes; the header toggle flips the store to lineage", () => {
+    const comp = makeAssetGraph({ ids: ["a"] });
+    comp.scenes = [makeScene({ id: "sc1", order: 0, memberAssetIds: ["a"] })];
+    useComposition.setState({ comp, selection: null });
+    render(<DiveCanvas open={true} onClose={() => {}} />);
+    expect(groupNodes().length).toBeGreaterThan(0);
+    // The lineage toggle is a real control in the canvas header.
+    act(() => {
+      fireEvent.click(screen.getByTestId("dive-view-lineage"));
+    });
+    expect(useDive.getState().view).toBe("lineage");
   });
 });

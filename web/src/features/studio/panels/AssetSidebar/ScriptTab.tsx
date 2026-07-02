@@ -3,10 +3,10 @@ import { Markdown } from "@/features/chat/Markdown";
 import { ScriptModal } from "./ScriptModal";
 import { useComposition } from "../../store";
 import { useScript } from "../../scriptStore";
+import { useDive } from "../../dive/diveStore";
 import { loadScript, saveScript } from "../../services/script";
 import type { Scene } from "@shared/composition";
 import { useT } from "@/i18n/useT";
-import type { MessageKey } from "@/i18n/useT";
 import { ApiError } from "@/lib/api";
 import {
   patchScene,
@@ -19,6 +19,13 @@ import {
 } from "./sceneEdit";
 import { resolveAssetUrl } from "../../composition/resolveAssetUrl";
 import type { AssetEntry } from "@shared/composition";
+import {
+  INTENT_KEY,
+  STATUS_KEY,
+  SHOT_KEY,
+  CAMERA_KEY,
+  STATUS_FILLED,
+} from "../../sceneI18n";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ScriptTab — the work's storyboard skeleton (剧本·分镜), PRD-0007 → PRD-0008.
@@ -46,38 +53,9 @@ import type { AssetEntry } from "@shared/composition";
 // layer can collapse out of the way, surfacing the execution layer (the cards).
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Code-facing enum key → i18n message key. Kept in lockstep with SceneSchema's
-// enum literals (the cross-slice contract). The UI localises; the data stays in
-// stable code-facing keys.
-const INTENT_KEY: Record<NonNullable<Scene["intent"]>, MessageKey> = {
-  hook: "studio.scriptPanel.intentHook",
-  build: "studio.scriptPanel.intentBuild",
-  payoff: "studio.scriptPanel.intentPayoff",
-  cta: "studio.scriptPanel.intentCta",
-};
-
-const STATUS_KEY: Record<Scene["status"], MessageKey> = {
-  planned: "studio.scriptPanel.statusPlanned",
-  generated: "studio.scriptPanel.statusGenerated",
-  stale: "studio.scriptPanel.statusStale",
-};
-
-const SHOT_KEY: Record<NonNullable<Scene["shotSize"]>, MessageKey> = {
-  long: "studio.scriptPanel.shotLong",
-  full: "studio.scriptPanel.shotFull",
-  medium: "studio.scriptPanel.shotMedium",
-  close: "studio.scriptPanel.shotClose",
-  closeup: "studio.scriptPanel.shotCloseup",
-};
-
-const CAMERA_KEY: Record<NonNullable<Scene["cameraMovement"]>, MessageKey> = {
-  push: "studio.scriptPanel.cameraPush",
-  pull: "studio.scriptPanel.cameraPull",
-  pan: "studio.scriptPanel.cameraPan",
-  track: "studio.scriptPanel.cameraTrack",
-  follow: "studio.scriptPanel.cameraFollow",
-  static: "studio.scriptPanel.cameraStatic",
-};
+// INTENT_KEY / STATUS_KEY / SHOT_KEY / CAMERA_KEY / STATUS_FILLED are imported
+// from ../../sceneI18n — the SINGLE source the B6 Dive cluster title bars reuse
+// so scene copy is identical in both surfaces ("同源").
 
 // Enum-literal option order (the dropdown order). Drives the <select>s; the
 // label is localised, the value is the schema literal sent to the bridge.
@@ -256,6 +234,28 @@ export function ScriptTab() {
     },
     [workId],
   );
+
+  // B6 — a Dive cluster-title click asks us to jump to a 分镜 card. AssetSidebar
+  // has already switched to this tab; expand the matching card, scroll it into
+  // view, and consume the request. If the scenes haven't loaded yet the match
+  // fails and we retry when `ordered` next changes (the request stays pending).
+  const pendingSceneJump = useDive((s) => s.pendingSceneJump);
+  const consumeSceneJump = useDive((s) => s.consumeSceneJump);
+  useEffect(() => {
+    if (!pendingSceneJump) return;
+    const match = ordered.find((s) => s.id === pendingSceneJump);
+    if (!match) return;
+    setExpandedSceneId(match.id);
+    consumeSceneJump();
+    requestAnimationFrame(() => {
+      try {
+        const el = document.querySelector(`[data-scene-id="${match.id}"]`);
+        (el as HTMLElement | null)?.scrollIntoView?.({ block: "center" });
+      } catch {
+        /* selector / scroll unsupported in the test env — expansion is enough */
+      }
+    });
+  }, [pendingSceneJump, ordered, consumeSceneJump]);
 
   return (
     <div
@@ -811,12 +811,6 @@ function AddSceneButton({
     </button>
   );
 }
-
-const STATUS_FILLED: Record<Scene["status"], boolean> = {
-  planned: false, // hollow — not yet generated
-  generated: true, // filled — generated
-  stale: true, // filled but tinted — needs regen
-};
 
 interface SceneCardProps {
   scene: Scene;

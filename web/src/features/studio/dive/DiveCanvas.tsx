@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
@@ -15,7 +15,9 @@ import type { AssetEntry, Clip } from "../types";
 import { findAssetByUri } from "./walkProvenance";
 import { resolveAssetUrl } from "../composition/resolveAssetUrl";
 import { computeSceneClusters } from "./useSceneClusters";
-import { computeClusterLayout } from "./clusterLayout";
+import { computeClusterLayout, CLUSTER_HEADER } from "./clusterLayout";
+import { computeTreeLayout } from "./useTreeLayout";
+import { useDive } from "./diveStore";
 import { NODE_WIDTH, NODE_HEIGHT } from "./nodes/NodeShell";
 import { VisualNode } from "./nodes/VisualNode";
 import { AudioNode } from "./nodes/AudioNode";
@@ -40,6 +42,14 @@ export function DiveCanvas({ open, onClose }: Props) {
   const selection = useComposition((s) => s.selection);
   const rebindClip = useComposition((s) => s.rebindClip);
   const t = useT();
+  // B6 — canvas chrome state (view toggle + unassigned fold + cluster-title
+  // jump) lives in the shared diveStore so the top bar can open the canvas and
+  // a cluster title can hand the sidebar a jump target.
+  const view = useDive((s) => s.view);
+  const unassignedCollapsed = useDive((s) => s.unassignedCollapsed);
+  const setView = useDive((s) => s.setView);
+  const jumpToScene = useDive((s) => s.jumpToScene);
+  const toggleUnassignedCollapsed = useDive((s) => s.toggleUnassignedCollapsed);
   // R41: focus management for keyboard users. Dive canvas is a full-
   // screen overlay—focus needs to enter it on open + return on close.
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -55,24 +65,69 @@ export function DiveCanvas({ open, onClose }: Props) {
     return null;
   }, [comp, selection]);
 
-  // Build ReactFlow nodes + edges as a SCENE-CLUSTERED compound graph (B5).
-  // Each 分镜 becomes a group node; its member assets become child nodes
-  // positioned relative to the group (xyflow parentId). Provenance edges are
-  // still rendered so derivation lineage stays visible across clusters.
+  // Build ReactFlow nodes + edges for the active view (B6):
+  //   • "scene"   — SCENE-CLUSTERED compound graph (B5): each 分镜 is a group
+  //     node with member child nodes. The unassigned bucket folds away by
+  //     default (unless it's the ONLY cluster — collapsing it would blank the
+  //     canvas). Cluster titles carry a jump-to-storyboard callback.
+  //   • "lineage" — the flat provenance DAG (the pre-cluster view, preserved):
+  //     every asset is a top-level node laid out by derivation edges.
+  // Provenance edges are rendered in both views; edges touching a hidden
+  // (folded-away) node are dropped so xyflow never dangles them.
   const { nodes, edges } = useMemo(() => {
     if (!comp) return { nodes: [] as Node[], edges: [] as Edge[] };
     const assetById = new Map(comp.assets.map((a) => [a.id, a] as const));
-
-    const clusters = computeSceneClusters(comp);
     const layoutInputEdges = comp.provenance
       .filter((e) => e.fromAssetId != null)
       .map((e) => ({ source: e.fromAssetId as string, target: e.toAssetId }));
+
+    const makeChildData = (asset: AssetEntry, isSelectedTake: boolean) => ({
+      // Override asset.uri with the http-served URL so the <img>/<video> tag
+      // can actually load (workspace-relative + shared-asset paths translated).
+      asset: { ...asset, uri: resolveAssetUrl(asset.uri, comp.workId) },
+      isCurrent: asset.id === currentAssetId,
+      isSelectedTake,
+      onUse: () => {
+        if (selection) rebindClip(selection, asset.id);
+      },
+    });
+
+    // ── Lineage view: flat provenance DAG (no group nodes) ──────────────────
+    if (view === "lineage") {
+      const layoutNodes = comp.assets.map((a) => ({
+        id: a.id,
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+      }));
+      const pos = computeTreeLayout(layoutNodes, layoutInputEdges);
+      const flatNodes: Node[] = comp.assets.map((asset) => ({
+        id: asset.id,
+        type: kindToNodeType(asset),
+        position: pos.get(asset.id) ?? { x: 0, y: 0 },
+        data: makeChildData(asset, false),
+      }));
+      const flowEdges: Edge[] = layoutInputEdges.map((e) => ({
+        id: `${e.source}->${e.target}`,
+        source: e.source,
+        target: e.target,
+      }));
+      return { nodes: flatNodes, edges: flowEdges };
+    }
+
+    // ── Scene view: clustered compound graph ────────────────────────────────
+    const clusters = computeSceneClusters(comp);
+    const hasSceneClusters = clusters.some((c) => !c.isUnassigned);
     const { groups, children } = computeClusterLayout(
       clusters,
       layoutInputEdges,
       NODE_WIDTH,
       NODE_HEIGHT,
     );
+    // The unassigned bucket only collapses when there's something else to look
+    // at — a work with no scenes has ONLY the unassigned cluster, so folding it
+    // would leave the canvas empty.
+    const isFolded = (cluster: (typeof clusters)[number]) =>
+      cluster.isUnassigned && unassignedCollapsed && hasSceneClusters;
 
     // Group (parent) nodes MUST precede their children in the array (xyflow).
     const groupNodes: Node[] = clusters.map((cluster) => {
@@ -80,52 +135,68 @@ export function DiveCanvas({ open, onClose }: Props) {
       const title = cluster.scene?.title?.trim();
       const label =
         title || (cluster.isUnassigned ? t("studio.diveCanvas.unassigned") : cluster.id);
+      const folded = isFolded(cluster);
       return {
         id: cluster.id,
         type: "sceneGroup",
         position: box.position,
-        data: { label, isUnassigned: cluster.isUnassigned },
-        style: { width: box.width, height: box.height },
+        data: {
+          label,
+          isUnassigned: cluster.isUnassigned,
+          scene: cluster.scene,
+          shotNo: cluster.scene ? cluster.scene.order + 1 : null,
+          onJump: cluster.sceneId
+            ? () => jumpToScene(cluster.sceneId as string)
+            : undefined,
+          collapsed: folded,
+          memberCount: cluster.assetIds.length,
+          onToggleCollapse: cluster.isUnassigned
+            ? toggleUnassignedCollapsed
+            : undefined,
+        },
+        // A folded bucket shrinks to just its header bar.
+        style: { width: box.width, height: folded ? CLUSTER_HEADER : box.height },
         selectable: false,
         draggable: false,
       };
     });
 
     const childNodes: Node[] = [];
+    const renderedIds = new Set<string>();
     for (const cluster of clusters) {
+      if (isFolded(cluster)) continue; // hide a folded bucket's members
       for (const assetId of cluster.assetIds) {
         const asset = assetById.get(assetId);
         if (!asset) continue;
         const placement = children.get(assetId)!;
+        renderedIds.add(asset.id);
         childNodes.push({
           id: asset.id,
           type: kindToNodeType(asset),
           parentId: cluster.id,
           extent: "parent",
           position: placement.position,
-          data: {
-            // Override asset.uri with the http-served URL so the <img>/<video>
-            // tag can actually load. Workspace-relative + shared-asset paths
-            // get translated to /api/works/:id/assets/* and
-            // /api/shared-assets/* respectively. (resolveAssetUrl)
-            asset: { ...asset, uri: resolveAssetUrl(asset.uri, comp.workId) },
-            isCurrent: asset.id === currentAssetId,
-            isSelectedTake: cluster.selectedAssetId === asset.id,
-            onUse: () => {
-              if (selection) rebindClip(selection, asset.id);
-            },
-          },
+          data: makeChildData(asset, cluster.selectedAssetId === asset.id),
         });
       }
     }
 
-    const flowEdges: Edge[] = layoutInputEdges.map((e) => ({
-      id: `${e.source}->${e.target}`,
-      source: e.source,
-      target: e.target,
-    }));
+    // Drop edges whose endpoints are hidden inside a folded bucket.
+    const flowEdges: Edge[] = layoutInputEdges
+      .filter((e) => renderedIds.has(e.source) && renderedIds.has(e.target))
+      .map((e) => ({ id: `${e.source}->${e.target}`, source: e.source, target: e.target }));
     return { nodes: [...groupNodes, ...childNodes], edges: flowEdges };
-  }, [comp, currentAssetId, selection, rebindClip, t]);
+  }, [
+    comp,
+    currentAssetId,
+    selection,
+    rebindClip,
+    t,
+    view,
+    unassignedCollapsed,
+    jumpToScene,
+    toggleUnassignedCollapsed,
+  ]);
 
   // ESC handler
   useEffect(() => {
@@ -204,9 +275,37 @@ export function DiveCanvas({ open, onClose }: Props) {
           >
             {t("studio.diveCanvas.title")}
           </h2>
-          <button type="button" onClick={onClose} aria-label="Close" data-bare>
-            ×
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {/* B6 — 按分镜聚簇 / 按衍生链 view toggle. */}
+            <div
+              role="group"
+              aria-label={t("studio.diveCanvas.viewToggleAria")}
+              style={{
+                display: "inline-flex",
+                border: "1px solid var(--glass-border)",
+                borderRadius: 8,
+                overflow: "hidden",
+              }}
+            >
+              <ViewToggleButton
+                active={view === "scene"}
+                testid="dive-view-scene"
+                onClick={() => setView("scene")}
+              >
+                {t("studio.diveCanvas.viewScene")}
+              </ViewToggleButton>
+              <ViewToggleButton
+                active={view === "lineage"}
+                testid="dive-view-lineage"
+                onClick={() => setView("lineage")}
+              >
+                {t("studio.diveCanvas.viewLineage")}
+              </ViewToggleButton>
+            </div>
+            <button type="button" onClick={onClose} aria-label="Close" data-bare>
+              ×
+            </button>
+          </div>
         </header>
         <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
           {empty ? (
@@ -252,4 +351,39 @@ function kindToNodeType(asset: AssetEntry): "visual" | "audio" | "text" {
   if (asset.kind === "image" || asset.kind === "video") return "visual";
   if (asset.kind === "audio") return "audio";
   return "text"; // subtitle
+}
+
+function ViewToggleButton({
+  active,
+  testid,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  testid: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      data-bare
+      data-testid={testid}
+      aria-pressed={active}
+      onClick={onClick}
+      style={{
+        padding: "5px 10px",
+        fontFamily: "var(--font-mono)",
+        fontSize: 10,
+        letterSpacing: "0.06em",
+        textTransform: "uppercase",
+        border: "none",
+        background: active ? "var(--surface-1)" : "transparent",
+        color: active ? "var(--accent-hi)" : "var(--text-dimmer)",
+        cursor: "pointer",
+      }}
+    >
+      {children}
+    </button>
+  );
 }

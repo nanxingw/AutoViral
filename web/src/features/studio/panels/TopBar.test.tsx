@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { TopBar } from "./TopBar";
 import * as renderSvc from "../services/render";
 import { useComposition } from "../store";
+import { useDive } from "../dive/diveStore";
 import { makeEmptyComposition } from "../types";
 
 // Mock only the network calls; keep the real `resolveRenderOpts` (a pure
@@ -113,6 +114,20 @@ describe("TopBar (v4)", () => {
     expect(
       screen.getByRole("dialog", { name: /keyboard shortcuts/i }),
     ).toBeInTheDocument();
+  });
+
+  // B6 (PRD-0010) — the Dive-canvas entry was buried deep in the Inspector tab;
+  // it now lives in the top bar so the whole-composition view is one click away.
+  it("the canvas button opens the Dive canvas (B6 top-bar entry)", () => {
+    useDive.setState({ open: false, memoWorkId: null });
+    render(
+      qcWrap(<MemoryRouter>
+        <TopBar workId="w1" savedAt={null} />
+      </MemoryRouter>),
+    );
+    expect(useDive.getState().open).toBe(false);
+    fireEvent.click(screen.getByTestId("open-canvas"));
+    expect(useDive.getState().open).toBe(true);
   });
 });
 

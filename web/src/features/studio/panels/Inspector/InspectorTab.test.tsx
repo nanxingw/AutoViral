@@ -45,7 +45,9 @@ describe("InspectorTab", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders the 'Open in Dive' button (Phase 5.C trigger)", () => {
+  // B6 (PRD-0010) — the Dive-canvas entry moved out of the Inspector depth up to
+  // the Studio top bar. The Inspector must no longer render its own trigger.
+  it("no longer renders an 'Open in Dive' button (moved to the top bar in B6)", () => {
     const comp = makeAssetGraph({
       ids: ["a", "b"],
       edges: [["a", "b"]],
@@ -54,6 +56,6 @@ describe("InspectorTab", () => {
     comp.tracks[0].clips.push(clip);
     useComposition.setState({ comp, selection: "c" });
     render(<InspectorTab />);
-    expect(screen.getByRole("button", { name: /open in dive/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /open in dive/i })).toBeNull();
   });
 });

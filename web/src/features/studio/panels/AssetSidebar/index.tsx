@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { useComposition } from "@/features/studio/store";
+import { useDive } from "@/features/studio/dive/diveStore";
 import { LibraryTab } from "./LibraryTab";
 import { ScriptTab } from "./ScriptTab";
 import { InspectorTab } from "@/features/studio/panels/Inspector/InspectorTab";
@@ -41,6 +42,15 @@ export function AssetSidebar({ workId }: Props) {
   useEffect(() => {
     if (selection && tabRef.current !== "script") setTab("inspector");
   }, [selection]);
+
+  // B6 — a Dive cluster-title click closes the canvas and requests a jump to the
+  // matching 分镜 card. Switch to the Script tab here; ScriptTab expands the
+  // target card and consumes the request. (The store value stays set until then
+  // so this fires even when the tab was previously library/inspector.)
+  const pendingSceneJump = useDive((s) => s.pendingSceneJump);
+  useEffect(() => {
+    if (pendingSceneJump) setTab("script");
+  }, [pendingSceneJump]);
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>

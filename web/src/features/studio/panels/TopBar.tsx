@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useComposition } from "../store";
+import { useDive } from "../dive/diveStore";
 import { useNavigate } from "react-router-dom";
 import { useT } from "@/i18n/useT";
 import {
@@ -35,6 +36,7 @@ export function TopBar({
 }: TopBarProps) {
   const navigate = useNavigate();
   const comp = useComposition((s) => s.comp);
+  const openCanvas = useDive((s) => s.openCanvas);
   const t = useT();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [lastOpts, setLastOpts] = useState<EnqueueRenderOptions>({
@@ -244,6 +246,43 @@ export function TopBar({
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
 
       <CheckpointsMenu workId={workId} />
+
+      <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
+
+      {/* B6 (PRD-0010) — open the whole-composition Dive canvas. Promoted here
+          from deep inside the Inspector tab so the film's全貌 is one click away. */}
+      <button
+        type="button"
+        data-bare
+        data-testid="open-canvas"
+        onClick={() => openCanvas(workId)}
+        aria-label={t("studio.topBar.openCanvasAria")}
+        title={t("studio.topBar.openCanvasAria")}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 10px",
+          borderRadius: 8,
+          border: "1px solid var(--glass-border)",
+          background: "var(--surface-0)",
+          color: "var(--text-dim)",
+          cursor: "pointer",
+          flexShrink: 0,
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <circle cx="6" cy="6" r="2.5" />
+          <circle cx="18" cy="6" r="2.5" />
+          <circle cx="12" cy="18" r="2.5" />
+          <path d="M7.6 7.7 10.7 15M16.4 7.7 13.3 15" />
+        </svg>
+        {t("studio.topBar.openCanvas")}
+      </button>
 
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
 

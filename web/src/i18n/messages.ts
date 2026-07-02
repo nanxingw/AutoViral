@@ -245,6 +245,8 @@ export const en = {
       quickProxyExport: "Quick proxy export",
       toggleSettings: "Studio tweaks",
       shortcuts: "Keyboard shortcuts",
+      openCanvas: "Canvas",
+      openCanvasAria: "Open the composition canvas",
     },
     toast: {
       splitFailed: "Can't split here",
@@ -667,6 +669,12 @@ export const en = {
       empty: "No assets yet — generate or upload some, then come back.",
       btnUse: "USE · {id}",
       unassigned: "Unassigned",
+      viewScene: "By shot",
+      viewLineage: "By lineage",
+      viewToggleAria: "Canvas grouping",
+      jumpToSceneAria: "Open shot {n} in the storyboard",
+      expandUnassigned: "Show {n}",
+      collapseUnassigned: "Hide",
     },
     reframeDialog: {
       title: "Apply {preset}?",
@@ -1410,6 +1418,8 @@ export const zh: DeepShape<Messages> = {
       quickProxyExport: "快速代理导出",
       toggleSettings: "工作台偏好",
       shortcuts: "键盘快捷键",
+      openCanvas: "全貌",
+      openCanvasAria: "打开作品全貌画布",
     },
     toast: {
       splitFailed: "无法在此处分割",
@@ -1812,6 +1822,12 @@ export const zh: DeepShape<Messages> = {
       empty: "暂无素材——先生成或上传一些，再回来查看。",
       btnUse: "使用 · {id}",
       unassigned: "未归属",
+      viewScene: "按分镜",
+      viewLineage: "按衍生链",
+      viewToggleAria: "画布聚簇方式",
+      jumpToSceneAria: "在分镜表中打开镜 {n}",
+      expandUnassigned: "展开 {n}",
+      collapseUnassigned: "收起",
     },
     reframeDialog: {
       title: "应用 {preset}？",
