@@ -217,6 +217,68 @@ describe("WsBridge — A1 stable ChatBlock id threading", () => {
     });
   });
 
+  it("collapses a pre-A1 double-write: adjacent id-less rows identical on type/text/toolName fold to ONE id (w_20260408_1347_db8 shape)", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, chatLogPath } = await import("../../../ws-bridge.js");
+      const work = "w_legacy_dup";
+      await workDir(dir, work);
+
+      // Real legacy shape (w_20260408_1347_db8 idx 341/342): ONE user line
+      // recorded TWICE — identical type+text, differing ONLY by timestamp — then
+      // a distinct assistant reply. Index-based hist_{i} would give the twins
+      // hist_0 / hist_1 (DIFFERENT ids) so the client's by-id dedup can't fold
+      // them → the doubled bubble survives A1. The twin must collapse here.
+      await writeFile(
+        chatLogPath(work, "s_1"),
+        JSON.stringify({ type: "user", text: "同一句", timestamp: "2026-04-08T06:46:16.335Z" }) +
+          "\n" +
+          JSON.stringify({ type: "user", text: "同一句", timestamp: "2026-04-08T06:46:29.940Z" }) +
+          "\n" +
+          JSON.stringify({ type: "text", text: "reply" }) +
+          "\n",
+        "utf-8",
+      );
+
+      // message_history replay: the doubled user row folds to one id.
+      const bridge = new WsBridge(0);
+      const ids = await captureHistoryIds(bridge, work, "s_1");
+      expect(ids).toEqual(["hist_0", "hist_2"]);
+
+      // createSession's in-memory load path applies the SAME collapse.
+      const b2 = new WsBridge(3271);
+      await b2.createSession(work, "继续", undefined, "s_1");
+      const session = b2.getSession(work, "s_1")!;
+      expect(session.messageHistory.slice(0, 2).map((b) => b.id)).toEqual([
+        "hist_0",
+        "hist_2",
+      ]);
+    });
+  });
+
+  it("does NOT collapse adjacent id-less rows that differ (only true type+text+toolName twins fold)", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, chatLogPath } = await import("../../../ws-bridge.js");
+      const work = "w_legacy_nodup";
+      await workDir(dir, work);
+      await writeFile(
+        chatLogPath(work, "s_1"),
+        JSON.stringify({ type: "user", text: "a" }) +
+          "\n" +
+          JSON.stringify({ type: "user", text: "b" }) +
+          "\n" +
+          // same text, DIFFERENT toolName → distinct block, must be kept
+          JSON.stringify({ type: "tool_use", text: "x", toolName: "Bash" }) +
+          "\n" +
+          JSON.stringify({ type: "tool_use", text: "x", toolName: "Read" }) +
+          "\n",
+        "utf-8",
+      );
+      const bridge = new WsBridge(0);
+      const ids = await captureHistoryIds(bridge, work, "s_1");
+      expect(ids).toEqual(["hist_0", "hist_1", "hist_2", "hist_3"]);
+    });
+  });
+
   it("a new block appended after loading legacy history continues the {sessionId}:{seq} sequence without colliding", async () => {
     await withTempDataDir(async (dir) => {
       const { WsBridge, chatLogPath } = await import("../../../ws-bridge.js");

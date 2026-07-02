@@ -71,7 +71,11 @@ describe("chat store — by-id upsert (PRD-0010 A1)", () => {
     ]);
   });
 
-  it("setBlocks collapses duplicate ids inside the incoming seed (already-doubled legacy log)", () => {
+  // NOTE: this covers the DEFENSIVE same-id dedup only. A real pre-A1 doubled
+  // legacy log has NO ids on either twin, so it never reaches setBlocks doubled —
+  // the twin is folded upstream when fallback ids are synthesized. That AC (e.g.
+  // w_20260408_1347_db8) is covered by work-store.test.ts / ws-bridge-block-id.test.ts.
+  it("setBlocks collapses duplicate ids inside the incoming seed (defensive same-id dedup)", () => {
     useChatStore.getState().setBlocks([
       { id: "s_1:0", ts: 1, type: "user", text: "a" },
       { id: "s_1:0", ts: 1, type: "user", text: "a" }, // duplicate id
@@ -89,5 +93,42 @@ describe("chat store — by-id upsert (PRD-0010 A1)", () => {
     useChatStore.getState().push({ type: "tool_use", text: "cmd", toolName: "Bash" });
     useChatStore.getState().push({ type: "text", text: "same" });
     expect(useChatStore.getState().blocks.map((b) => b.text)).toEqual(["same", "cmd", "same"]);
+  });
+
+  // A1 review — the coach path (POST /api/coach/message → recordUserMessage →
+  // broadcastToSession `block`) re-broadcasts the recorded user block WITH its
+  // stable id back to the SAME tab that already rendered an optimistic id-less
+  // echo (useChatSocket.send always pushes `{type:"user",text}`). Before this fix
+  // the id branch saw no block with that id and appended a SECOND identical
+  // bubble — the exact "message doubling" A1 was meant to kill. The server block
+  // must instead ADOPT the id onto the optimistic echo (upsert in place).
+  it("adopts the optimistic user echo when the server re-broadcasts it WITH a stable id (coach path — no double bubble)", () => {
+    const s = useChatStore.getState();
+    // send() optimistic local echo — the tab can't know its server id yet, so
+    // push() synthesizes a client-local `b_…` id.
+    s.push({ type: "user", text: "hi coach" });
+    expect(useChatStore.getState().blocks).toHaveLength(1);
+    expect(useChatStore.getState().blocks[0].id).toMatch(/^b_/);
+    // recordUserMessage re-broadcasts the recorded block WITH its stable id.
+    s.push({ id: "coach_main:0", type: "user", text: "hi coach" });
+    const blocks = useChatStore.getState().blocks;
+    expect(blocks).toHaveLength(1); // adopted in place, NOT stacked as a 2nd bubble
+    expect(blocks[0].id).toBe("coach_main:0");
+    expect(blocks[0].text).toBe("hi coach");
+  });
+
+  it("only adopts the matching optimistic echo — an unrelated client-local block stays put", () => {
+    const s = useChatStore.getState();
+    s.push({ type: "text", text: "assistant said" }); // unrelated client-local block
+    s.push({ type: "user", text: "my message" }); // the optimistic echo
+    s.push({ id: "s_1:5", type: "user", text: "my message" }); // its server twin
+    const blocks = useChatStore.getState().blocks;
+    expect(blocks).toHaveLength(2); // no false adoption, no double bubble
+    expect(blocks.map((b) => [b.type, b.text])).toEqual([
+      ["text", "assistant said"],
+      ["user", "my message"],
+    ]);
+    expect(blocks[0].id).toMatch(/^b_/); // untouched client-local id
+    expect(blocks[1].id).toBe("s_1:5"); // echo adopted the server id
   });
 });

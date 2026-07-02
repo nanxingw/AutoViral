@@ -136,6 +136,54 @@ describe("work-store — loadWorkChat jsonl-first + id fallback (PRD-0010 A1)", 
     });
   });
 
+  it("collapses a pre-A1 double-write: adjacent id-less twins fold to one id (w_20260408_1347_db8 — HTTP seed lockstep with WS)", async () => {
+    await withTempDataDir(async (dir) => {
+      const { createWork, loadWorkChat } = await import("./work-store.js");
+      const w = await createWork({ title: "T", type: "short-video", platforms: ["douyin"] });
+      // Real legacy shape: one user line recorded twice (identical type+text,
+      // differing only by timestamp). Without a collapse the twins get hist_0 /
+      // hist_1 → the client's by-id dedup can't fold them → double bubble.
+      await writeFile(
+        join(dir, "works", w.id, "chat.jsonl"),
+        jsonl([
+          { type: "user", text: "同一句", timestamp: "2026-04-08T06:46:16.335Z" },
+          { type: "user", text: "同一句", timestamp: "2026-04-08T06:46:29.940Z" },
+          { type: "text", text: "reply" },
+        ]),
+        "utf-8",
+      );
+      const chat = await loadWorkChat(w.id);
+      // Twin folds; the distinct reply keeps its original index (lockstep with
+      // ws-bridge assignFallbackIds → both seed paths agree on the id).
+      expect((chat?.blocks as Block[]).map((b) => b.id)).toEqual(["hist_0", "hist_2"]);
+      expect((chat?.blocks as Block[]).map((b) => b.text)).toEqual(["同一句", "reply"]);
+    });
+  });
+
+  it("does NOT collapse adjacent id-less rows that differ on type/text/toolName", async () => {
+    await withTempDataDir(async (dir) => {
+      const { createWork, loadWorkChat } = await import("./work-store.js");
+      const w = await createWork({ title: "T", type: "short-video", platforms: ["douyin"] });
+      await writeFile(
+        join(dir, "works", w.id, "chat.jsonl"),
+        jsonl([
+          { type: "user", text: "a" },
+          { type: "user", text: "b" },
+          { type: "tool_use", text: "x", toolName: "Bash" },
+          { type: "tool_use", text: "x", toolName: "Read" },
+        ]),
+        "utf-8",
+      );
+      const chat = await loadWorkChat(w.id);
+      expect((chat?.blocks as Block[]).map((b) => b.id)).toEqual([
+        "hist_0",
+        "hist_1",
+        "hist_2",
+        "hist_3",
+      ]);
+    });
+  });
+
   it("returns null when the session has neither a jsonl nor a snapshot", async () => {
     await withTempDataDir(async () => {
       const { createWork, loadWorkChat } = await import("./work-store.js");

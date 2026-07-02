@@ -314,10 +314,37 @@ async function readChatJsonl(path: string): Promise<Record<string, unknown>[] | 
  *  HTTP seed agrees with the WS `message_history` reseed on the same block).
  *  Mirrors ws-bridge's `assignFallbackIds`. */
 function withFallbackIds(blocks: unknown[]): unknown[] {
-  return blocks.map((b, i) => {
-    const rec = (b ?? {}) as Record<string, unknown>;
-    return rec.id ? rec : { ...rec, id: `hist_${i}` };
-  });
+  const out: unknown[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const rec = (blocks[i] ?? {}) as Record<string, unknown>;
+    if (rec.id) {
+      out.push(rec);
+      continue;
+    }
+    // A1 review — collapse a pre-A1 double-write (one user line recorded twice,
+    // identical type/text, differing only by timestamp — e.g. w_20260408_1347_db8).
+    // Index-based hist_{i} would give the twins DIFFERENT ids so the client's
+    // by-id dedup can't fold them → the doubled bubble survives. Drop the adjacent
+    // id-less twin here (same type/text/toolName key as the client heuristic).
+    // Kept in lockstep with ws-bridge's assignFallbackIds so both seed paths agree.
+    if (i > 0) {
+      const prev = (blocks[i - 1] ?? {}) as Record<string, unknown>;
+      if (!prev.id && sameLegacyRow(prev, rec)) continue;
+    }
+    out.push({ ...rec, id: `hist_${i}` });
+  }
+  return out;
+}
+
+/** Content key for the legacy-double-write collapse — mirrors ws-bridge's
+ *  sameLegacyBlock and the client's last-block heuristic (type + text + toolName;
+ *  timestamps ignored, since the real double-write differs only by timestamp). */
+function sameLegacyRow(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  return (
+    a.type === b.type &&
+    a.text === b.text &&
+    (a.toolName ?? null) === (b.toolName ?? null)
+  );
 }
 
 /** Load full conversation for a work's chat session. Reads the session's jsonl

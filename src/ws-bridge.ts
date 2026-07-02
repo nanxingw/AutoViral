@@ -126,7 +126,32 @@ export function chatLogPath(workId: string, sessionId: string): string {
  * of any given legacy block.
  */
 export function assignFallbackIds(blocks: ChatBlock[]): ChatBlock[] {
-  return blocks.map((b, i) => (b.id ? b : { ...b, id: `hist_${i}` }));
+  const out: ChatBlock[] = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i];
+    if (b.id) {
+      out.push(b);
+      continue;
+    }
+    // A1 review — collapse a pre-A1 double-write: a legacy log (e.g.
+    // w_20260408_1347_db8) recorded one user line TWICE (identical type/text,
+    // differing only by timestamp). Index-based hist_{i} would give the twins
+    // DIFFERENT ids, so the client's by-id dedup can't fold them → the doubled
+    // bubble survives A1. Drop the adjacent id-less twin here (same key as the
+    // client's legacy last-block heuristic) BEFORE it earns a distinct id. Kept
+    // in lockstep with work-store's withFallbackIds so both seed paths agree.
+    const prev = blocks[i - 1];
+    if (prev && !prev.id && sameLegacyBlock(prev, b)) continue;
+    out.push({ ...b, id: `hist_${i}` });
+  }
+  return out;
+}
+
+/** Content key for the legacy-double-write collapse — mirrors the client's
+ *  last-block heuristic (type + text + toolName; timestamps are ignored, since
+ *  the real double-write differs only by timestamp). */
+function sameLegacyBlock(a: ChatBlock, b: ChatBlock): boolean {
+  return a.type === b.type && a.text === b.text && (a.toolName ?? null) === (b.toolName ?? null);
 }
 
 interface NdjsonMessage {

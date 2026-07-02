@@ -18,6 +18,13 @@ interface ChatStore {
 let counter = 0;
 const nextId = () => `b_${Date.now()}_${counter++}`;
 
+/** A `b_…` id is client-synthesized (an optimistic echo that hasn't learned its
+ *  server id yet); a null id is a legacy/old-server block. Both are "not yet a
+ *  server id" and so are eligible to ADOPT a stable server id when the same
+ *  block re-arrives on a seed path. Server ids are `{sessionId}:{seq}` /
+ *  `hist_{i}` and never start with `b_`. */
+const isClientLocalId = (id?: string): boolean => id == null || id.startsWith("b_");
+
 /** A1 (PRD-0010) — collapse blocks that share an id, keeping first-seen order.
  *  Guards a history seed against an already-doubled legacy log AND against a
  *  live block the seed also includes. Id-less blocks (legacy / optimistic echo)
@@ -49,6 +56,26 @@ export const useChatStore = create<ChatStore>((set) => ({
       // a legit repeat (two identical tool runs get different seqs → different ids).
       if (b.id != null) {
         if (s.blocks.some((x) => x.id === b.id)) return s; // already present → no-op
+        // A1 review — ADOPT an optimistic echo: the coach path (recordUserMessage
+        // → broadcastToSession `block`) re-broadcasts the recorded user block WITH
+        // its stable id back to the SAME tab that already rendered a client-local
+        // (`b_…`) echo from send(). Without adoption the id branch appended a
+        // SECOND identical bubble — the very "message doubling" A1 targets. Fold
+        // the server id onto the first client-local block that matches this one on
+        // type/text/toolName (fields are equal by construction, so only the id
+        // changes — ts/attachments are preserved).
+        const echoIdx = s.blocks.findIndex(
+          (x) =>
+            isClientLocalId(x.id) &&
+            x.type === b.type &&
+            x.text === b.text &&
+            (x.toolName ?? null) === (b.toolName ?? null),
+        );
+        if (echoIdx !== -1) {
+          const blocks = s.blocks.slice();
+          blocks[echoIdx] = { ...blocks[echoIdx], id: b.id };
+          return { blocks };
+        }
         return { blocks: [...s.blocks, { ts: Date.now(), ...b, id: b.id }] };
       }
       // No server id — old-server compat + the optimistic user echo, which can't
