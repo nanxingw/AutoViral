@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import ReactMarkdown from "react-markdown";
+import { Markdown } from "@/features/chat/Markdown";
 import { useComposition } from "../../store";
 import { useScript } from "../../scriptStore";
 import { loadScript, saveScript } from "../../services/script";
@@ -280,6 +280,19 @@ function ScriptHeading() {
 // global key (not per-work — a UI affordance preference, not work data).
 const SCRIPT_FOLD_KEY = "autoviral.scriptFold.collapsed";
 
+// A3 — remembered edit/preview mode for the 剧本 editor. One global key (a UI
+// preference, not per-work data). Absent → fall back to the content-based
+// default (preview when the script is non-empty).
+const SCRIPT_MODE_KEY = "autoviral.scriptPreview.mode";
+function readScriptMode(): "edit" | "preview" | null {
+  try {
+    const v = localStorage.getItem(SCRIPT_MODE_KEY);
+    return v === "edit" || v === "preview" ? v : null;
+  } catch {
+    return null;
+  }
+}
+
 function ScriptEditorFold({ workId }: { workId: string }) {
   const t = useT();
   const [collapsed, setCollapsed] = useState<boolean>(() => {
@@ -353,7 +366,23 @@ function ScriptEditor({ workId }: { workId: string }) {
   const storeWorkId = useScript((s) => s.workId);
   const setScript = useScript((s) => s.setScript);
   const reset = useScript((s) => s.reset);
-  const [mode, setMode] = useState<"edit" | "preview">("edit");
+  // A3 — the 剧本 opens on the PREVIEW (typeset) by default so the first thing
+  // the user sees is the rendered script, not a raw markdown box. A manual
+  // edit/preview switch is remembered in localStorage under ONE global key
+  // (a UI-affordance preference, not work data — mirrors the T4 script fold).
+  // When there's no manual override we fall back to the content-based default:
+  // preview for a non-empty script, edit for an empty one (nothing to preview).
+  const [manualMode, setManualMode] = useState<"edit" | "preview" | null>(
+    readScriptMode,
+  );
+  const setMode = useCallback((next: "edit" | "preview") => {
+    setManualMode(next);
+    try {
+      localStorage.setItem(SCRIPT_MODE_KEY, next);
+    } catch {
+      /* ignore quota / disabled storage */
+    }
+  }, []);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -361,6 +390,9 @@ function ScriptEditor({ workId }: { workId: string }) {
   // held script is OURS only when it's stamped with our workId AND a load has
   // resolved.
   const isMine = storeWorkId === workId && loaded;
+  // Content-based default: only a non-empty, loaded script is worth previewing.
+  const hasContent = isMine && script.trim() !== "";
+  const mode: "edit" | "preview" = manualMode ?? (hasContent ? "preview" : "edit");
 
   const loadedFor = useRef<string | null>(null);
   useEffect(() => {
@@ -426,10 +458,7 @@ function ScriptEditor({ workId }: { workId: string }) {
           {t("studio.scriptPanel.scriptHeading")}
         </span>
         <div style={{ display: "flex", gap: 2 }}>
-          <ModeButton
-            active={mode === "edit"}
-            onClick={() => setMode("edit")}
-          >
+          <ModeButton active={mode === "edit"} onClick={() => setMode("edit")}>
             {t("studio.scriptPanel.scriptModeEdit")}
           </ModeButton>
           <ModeButton
@@ -467,13 +496,15 @@ function ScriptEditor({ workId }: { workId: string }) {
         <div
           data-testid="script-preview"
           aria-label={t("studio.scriptPanel.scriptPreviewAria")}
-          className="script-md-preview"
+          // A3 — reuse the global editorial `.md-bubble` typography (replaces the
+          // dead `script-md-preview` class that had no CSS). No maxHeight lock:
+          // the preview grows with content and the panel's own scroll area
+          // (flex:1; overflowY:auto) handles overflow.
+          className="md-bubble"
           style={{
             fontSize: 12.5,
             lineHeight: 1.6,
             color: "var(--text-dim)",
-            maxHeight: 320,
-            overflowY: "auto",
           }}
         >
           {!isMine || script.trim() === "" ? (
@@ -481,7 +512,7 @@ function ScriptEditor({ workId }: { workId: string }) {
               {t("studio.scriptPanel.scriptEmptyPreview")}
             </span>
           ) : (
-            <ReactMarkdown>{script}</ReactMarkdown>
+            <Markdown text={script} workId={workId} />
           )}
         </div>
       )}

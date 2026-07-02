@@ -114,6 +114,9 @@ beforeEach(() => {
   useLocaleStore.setState({ locale: "en" });
   try {
     localStorage.removeItem("autoviral.scriptFold.collapsed");
+    // A3 — the 剧本 preview/edit mode preference is remembered here; clear it
+    // so each test starts from the content-based default (preview if non-empty).
+    localStorage.removeItem("autoviral.scriptPreview.mode");
   } catch {
     /* jsdom always has localStorage; guard for safety */
   }
@@ -741,8 +744,10 @@ describe("ScriptTab (S5) — 剧本 plan/script.md editor above the cards", () =
     loadScenes([]);
     render(<ScriptTab />);
 
+    // A3: a non-empty script now opens in PREVIEW; switch to edit to read the seed.
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
-    expect(ta.value).toBe("# Theme\n\nThe whole arc.\n");
+    await waitFor(() => expect(ta.value).toBe("# Theme\n\nThe whole arc.\n"));
     // The GET hit the works-route plain-text channel, NOT the bridge apiFetch.
     const [getUrl] = scriptFetch.mock.calls[0]!;
     expect(getUrl).toBe("/api/works/w1/plan/script.md");
@@ -776,8 +781,10 @@ describe("ScriptTab (S5) — 剧本 plan/script.md editor above the cards", () =
     loadScenes([]);
     render(<ScriptTab />);
 
+    // A3: non-empty → preview default; switch to edit to reach the textarea.
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
-    expect(ta.value).toBe("# unchanged\n");
+    await waitFor(() => expect(ta.value).toBe("# unchanged\n"));
     ta.focus();
     ta.blur();
     await new Promise((r) => setTimeout(r, 0));
@@ -789,23 +796,27 @@ describe("ScriptTab (S5) — 剧本 plan/script.md editor above the cards", () =
     loadScenes([]);
     render(<ScriptTab />);
 
-    // Starts in edit mode: textarea present.
-    await screen.findByLabelText("Edit script");
-
-    // Switch to preview → textarea gone, rendered markdown shown (the heading
-    // text appears as real HTML, not the raw "# Heading One").
-    await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+    // A3: a non-empty script opens in PREVIEW — the heading renders as real
+    // HTML, not the raw "# Heading One", and the textarea is not mounted.
+    const preview = await screen.findByTestId("script-preview");
+    await waitFor(() =>
+      expect(within(preview).getByText("Heading One")).toBeInTheDocument(),
+    );
     expect(screen.queryByLabelText("Edit script")).toBeNull();
-    const preview = screen.getByTestId("script-preview");
-    expect(within(preview).getByText("Heading One")).toBeInTheDocument();
-    // The "#" markdown syntax must NOT survive into the rendered preview.
     expect(preview.textContent).not.toContain("# Heading One");
 
-    // Switch back to edit → textarea returns, still seeded.
+    // Switch to edit → textarea returns, seeded from disk.
     await userEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(
       (screen.getByLabelText("Edit script") as HTMLTextAreaElement).value,
     ).toBe("# Heading One\n\nbody text here\n");
+
+    // Switch back to preview → textarea gone, rendered markdown shown again.
+    await userEvent.click(screen.getByRole("button", { name: "Preview" }));
+    expect(screen.queryByLabelText("Edit script")).toBeNull();
+    expect(
+      within(screen.getByTestId("script-preview")).getByText("Heading One"),
+    ).toBeInTheDocument();
   });
 
   it("shows a localized placeholder when the script is empty (NOT a hardcoded template)", async () => {
@@ -839,8 +850,10 @@ describe("ScriptTab (S5) — 剧本 plan/script.md editor above the cards", () =
     loadScenes([]);
     render(<ScriptTab />);
 
+    // A3: non-empty → preview default; switch to edit to observe the reflow.
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
-    expect(ta.value).toBe("first\n");
+    await waitFor(() => expect(ta.value).toBe("first\n"));
 
     // Simulate the refetchScript path landing a new on-disk value (an external
     // editor / the agent's CLI wrote plan/script.md → plan-changed → setScript).
@@ -855,7 +868,10 @@ describe("ScriptTab (S5) — 剧本 plan/script.md editor above the cards", () =
     loadScenes([]);
     render(<ScriptTab />);
 
+    // A3: non-empty → preview default; switch to edit to type into the textarea.
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
+    await waitFor(() => expect(ta.value).toBe("first\n"));
     await userEvent.clear(ta);
     await userEvent.type(ta, "user is typing");
     expect(document.activeElement).toBe(ta);
@@ -920,6 +936,9 @@ describe("ScriptTab (S5·review fixes) — cross-work tenancy + honest load erro
     stubScriptFetch("A-only outline\n");
     loadWork("w1");
     const { rerender } = render(<ScriptTab />);
+    // A3: non-empty → preview default; switch to edit once (the preference is
+    // remembered, so w2 also opens in edit below).
+    await userEvent.click(await screen.findByRole("button", { name: "Edit" }));
     const ta = await screen.findByLabelText<HTMLTextAreaElement>("Edit script");
     await waitFor(() => expect(ta.value).toBe("A-only outline\n"));
 
@@ -1155,5 +1174,76 @@ describe("ScriptTab (T4) — script editor fold toggle", () => {
     expect(
       screen.getByRole("button", { name: /expand script/i }),
     ).toBeInTheDocument();
+  });
+});
+
+// ── PRD-0010 A3 — 剧本 preview-by-default + shared Markdown component ──────────
+describe("ScriptTab (A3) — preview default + shared markdown", () => {
+  it("a NON-EMPTY script defaults to preview on open (rendered, not the raw textarea)", async () => {
+    stubScriptFetch("# Outline\n\nThe whole arc.\n");
+    loadScenes([]);
+    render(<ScriptTab />);
+    // The preview surface appears once the on-disk script loads (non-empty →
+    // preview is the default). The heading renders as real HTML, not raw "#".
+    const preview = await screen.findByTestId("script-preview");
+    await waitFor(() =>
+      expect(within(preview).getByText("Outline")).toBeInTheDocument(),
+    );
+    expect(preview.textContent).not.toContain("# Outline");
+    // The edit textarea is NOT mounted by default for a non-empty script.
+    expect(screen.queryByLabelText("Edit script")).toBeNull();
+  });
+
+  it("an EMPTY script defaults to edit (textarea present, no preview)", async () => {
+    stubScriptFetch("");
+    loadScenes([]);
+    render(<ScriptTab />);
+    expect(await screen.findByLabelText("Edit script")).toBeInTheDocument();
+    expect(screen.queryByTestId("script-preview")).toBeNull();
+  });
+
+  it("remembers a manual switch to edit across remounts (localStorage) even for non-empty scripts", async () => {
+    stubScriptFetch("# Outline\n");
+    loadScenes([]);
+    const { unmount } = render(<ScriptTab />);
+    // Defaults to preview; the user switches to edit.
+    await screen.findByTestId("script-preview");
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(await screen.findByLabelText("Edit script")).toBeInTheDocument();
+
+    // Remount with the SAME non-empty script — the manual "edit" preference
+    // (persisted in localStorage, one global key like the script fold) wins over
+    // the content-based preview default.
+    unmount();
+    stubScriptFetch("# Outline\n");
+    loadScenes([]);
+    render(<ScriptTab />);
+    expect(await screen.findByLabelText("Edit script")).toBeInTheDocument();
+    expect(screen.queryByTestId("script-preview")).toBeNull();
+  });
+
+  it("preview uses the global .md-bubble editorial style (no dead script-md-preview class)", async () => {
+    stubScriptFetch("# Outline\n");
+    loadScenes([]);
+    render(<ScriptTab />);
+    const preview = await screen.findByTestId("script-preview");
+    expect(preview.className).toContain("md-bubble");
+    expect(preview.className).not.toContain("script-md-preview");
+  });
+
+  it("preview has no 320px max-height inline lock (flex-adaptive)", async () => {
+    stubScriptFetch("# Outline\n");
+    loadScenes([]);
+    render(<ScriptTab />);
+    const preview = await screen.findByTestId("script-preview");
+    expect(preview.style.maxHeight).not.toBe("320px");
+  });
+
+  it("preview renders GFM tables (remarkGfm wired via the shared component)", async () => {
+    stubScriptFetch("| Shot | Beat |\n| --- | --- |\n| 1 | hook |\n");
+    loadScenes([]);
+    render(<ScriptTab />);
+    const preview = await screen.findByTestId("script-preview");
+    await waitFor(() => expect(preview.querySelector("table")).not.toBeNull());
   });
 });

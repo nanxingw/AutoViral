@@ -7,15 +7,16 @@ import { useComposition } from "@/features/studio/store";
 import { apiFetch } from "@/lib/api";
 import { useT, type MessageKey } from "@/i18n/useT";
 import { useEffect, useRef, useState, useMemo, type ReactNode } from "react";
-import ReactMarkdown, { type Components } from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { resolveAssetUrl } from "@/features/studio/composition/resolveAssetUrl";
+import { Markdown } from "@/features/chat/Markdown";
+// A3 — ChatInlineMedia moved into the shared Markdown component; re-export it
+// so existing importers (and the ChatInlineMedia test) keep resolving here.
+export { ChatInlineMedia } from "@/features/chat/Markdown";
 import {
   useCheckpoints,
   findRollbackTarget,
   type Checkpoint,
 } from "@/features/checkpoints/useCheckpoints";
-import { highlightCode } from "./highlight";
 import { ModelSwitcher } from "./ModelSwitcher";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { useComposerDraft } from "@/stores/composerDraft";
@@ -146,124 +147,6 @@ function AttachmentThumbs({
         </div>
       ))}
     </div>
-  );
-}
-
-/** Render an agent-emitted ```yaml block``` with our hand-rolled highlighter.
- *  Only fires for fenced code blocks (where react-markdown sets a className
- *  like `language-yaml`). Inline `code` falls through to the default
- *  rendering. */
-function HighlightedCode({
-  className,
-  children,
-  ...rest
-}: {
-  className?: string;
-  children?: React.ReactNode;
-  [k: string]: unknown;
-}) {
-  const langMatch = /language-(\w+)/.exec(className ?? "");
-  const isBlock = !!langMatch;
-  if (!isBlock) {
-    // inline code — let the parent <pre>/<code> CSS handle it
-    return <code className={className} {...rest}>{children}</code>;
-  }
-  const lang = langMatch![1];
-  const src = String(children ?? "");
-  const tokens = highlightCode(src, lang);
-  return (
-    <code className={`${className} chat-hl chat-hl-${lang}`}>
-      {tokens.map((t, i) =>
-        t[1] ? (
-          <span key={i} className={t[1]}>
-            {t[0]}
-          </span>
-        ) : (
-          t[0]
-        ),
-      )}
-    </code>
-  );
-}
-
-/** Render an `<img>` from agent markdown. If the src ends in a known video
- *  extension, swap to a muted/looping `<video>` so the user can watch
- *  generated clips inline without leaving the chat.
- *
- *  R35: agent-generated URLs can drift between message timestamp and now
- *  (asset GC, regenerated yaml, server restart). Without onError the
- *  user sees a broken icon with no clue what happened. Track failed
- *  state and render an inline alert with the URL so the user can copy
- *  it or click through. */
-export function ChatInlineMedia({
-  src,
-  alt,
-}: {
-  src: string | undefined;
-  alt: string | undefined;
-}) {
-  const [failed, setFailed] = useState(false);
-  if (!src) return null;
-  if (failed) {
-    return (
-      <a
-        href={src}
-        target="_blank"
-        rel="noreferrer"
-        style={{
-          display: "block",
-          margin: "6px 0",
-          padding: "8px 10px",
-          border: "1px dashed var(--status-error, #d4756c)",
-          background: "rgba(212, 117, 108, 0.06)",
-          borderRadius: 8,
-          color: "var(--status-error, #d4756c)",
-          fontFamily: "var(--font-mono)",
-          fontSize: 11,
-          lineHeight: 1.5,
-          textDecoration: "none",
-          wordBreak: "break-all",
-        }}
-      >
-        ⚠ {alt || src}
-      </a>
-    );
-  }
-  const isVideo = /\.(mp4|mov|webm)(?:[?#]|$)/i.test(src);
-  if (isVideo) {
-    return (
-      <video
-        src={src}
-        muted
-        loop
-        playsInline
-        controls
-        preload="metadata"
-        onError={() => setFailed(true)}
-        style={{
-          maxWidth: "100%",
-          maxHeight: 360,
-          borderRadius: 8,
-          display: "block",
-          margin: "6px 0",
-        }}
-      />
-    );
-  }
-  return (
-    <img
-      src={src}
-      alt={alt ?? ""}
-      loading="lazy"
-      onError={() => setFailed(true)}
-      style={{
-        maxWidth: "100%",
-        maxHeight: 360,
-        borderRadius: 8,
-        display: "block",
-        margin: "6px 0",
-      }}
-    />
   );
 }
 
@@ -1085,22 +968,6 @@ function ChatBlock({
     () => (type === "text" ? findRollbackTarget(block.ts, checkpoints) : null),
     [type, block.ts, checkpoints],
   );
-  // Memoise the markdown components so each block doesn't recreate the
-  // closure on every store push (the chat stream pushes a lot).
-  const mdComponents = useMemo(
-    () => ({
-      img: (props: { src?: string; alt?: string }) => (
-        <ChatInlineMedia src={props.src} alt={props.alt} />
-      ),
-      code: HighlightedCode,
-    }),
-    [],
-  );
-  const urlTransform = useMemo(
-    () => (url: string) => resolveAssetUrl(url, workId),
-    [workId],
-  );
-
   // User → right-side bubble
   if (type === "user") {
     return (
@@ -1222,14 +1089,7 @@ function ChatBlock({
       >
         {segmentTextWithLocators(ideaParse.cleaned).map((seg, i) =>
           seg.kind === "markdown" ? (
-            <ReactMarkdown
-              key={i}
-              remarkPlugins={[remarkGfm]}
-              urlTransform={urlTransform}
-              components={mdComponents as Components}
-            >
-              {seg.text}
-            </ReactMarkdown>
+            <Markdown key={i} text={seg.text} workId={workId} />
           ) : (
             <LocatorBlockView
               key={i}
