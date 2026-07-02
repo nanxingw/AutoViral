@@ -1253,7 +1253,7 @@ function CoachIdeaActions({
  * Opus this is the real cost the user is racking up. Updates live as new
  * turn_complete events fold usage into the latest text block.
  */
-function SessionTotals({ blocks }: { blocks: StreamBlock[] }) {
+export function SessionTotals({ blocks }: { blocks: StreamBlock[] }) {
   let cost = 0;
   let inT = 0;
   let outT = 0;

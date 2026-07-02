@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { ReconnectingWS, type WSState } from "@/lib/ws";
 import { useChatStore } from "./store";
 import { useActiveSessionId, DEFAULT_SESSION_ID } from "./activeSession";
-import type { StreamBlock, StreamBlockType, ViewerAction, ChatAttachment } from "./types";
+import type { StreamBlockType, ViewerAction, ChatAttachment } from "./types";
 import { extractViewerActions } from "./types";
+import { seedBlocksFromHistory } from "./seed";
 
 /** Minimal XML attribute escape for the <attachments> envelope. Filenames are
  *  server-sanitised (no slashes) but may still contain quotes / angle brackets. */
@@ -131,25 +132,7 @@ export function useChatSocket(
         switch (frame.event) {
           case "message_history": {
             const blocks = (data.blocks as Array<DataDict>) ?? [];
-            const seeded: StreamBlock[] = blocks.map((b, i) => ({
-              // A1 (PRD-0010) — prefer the server-assigned stable id so this
-              // reseed agrees with the HTTP seed + live blocks (by-id dedup).
-              // Legacy id-less lines synthesize `hist_{i}` by index (the server
-              // now does the same, so this fallback rarely fires).
-              id: (b.id as string) ?? `hist_${i}`,
-              type: ((b.type as StreamBlockType) ?? "text") as StreamBlockType,
-              text: asString(b.text),
-              toolName: b.toolName as string | undefined,
-              // Carry persisted user-message attachments through the WS reseed —
-              // otherwise on reload the message_history frame overwrites the
-              // HTTP-seeded blocks and the bubble thumbnails vanish.
-              attachments: b.attachments as ChatAttachment[] | undefined,
-              ts:
-                typeof b.timestamp === "string"
-                  ? Date.parse(b.timestamp)
-                  : Date.now(),
-            }));
-            setBlocks(seeded);
+            setBlocks(seedBlocksFromHistory(blocks));
             break;
           }
           case "block": {

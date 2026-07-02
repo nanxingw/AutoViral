@@ -22,6 +22,7 @@ import { logBridge, logBridgeDebug } from "./infra/logger.js";
 import { loadConfig, dataDir } from "./infra/config.js";
 import { PACKAGE_ROOT, assertCliBinDir, buildSpawnPath } from "./infra/paths.js";
 import { getWork, updateWork, saveWorkChat, loadWorkChat, listWorks, type Work } from "./domain/work-store.js";
+import { recordCostEvent } from "./server/cost-ledger/index.js";
 import { getContentType } from "./shared/content-types/registry.js";
 import { createCheckpoint } from "./server/checkpoints.js";
 import { listSharedAssets } from "./shared-assets.js";
@@ -52,6 +53,22 @@ export interface ChatBlockAttachment {
   kind: string;
 }
 
+/** B3 (PRD-0010) — a turn's cost + token usage, stamped onto the LAST assistant
+ *  text block of the turn when the CLI's `result` frame arrives. Persisted with
+ *  the block so the chat's session-total badge survives a refresh / restart.
+ *  Field names mirror the browser's TurnUsage (web/src/features/chat/types.ts)
+ *  so the live path (turn_complete → attachLastTurnUsage) and the persisted path
+ *  produce the same store shape. `costUsd` is the PER-TURN charge — see the
+ *  cumulative-delta note in the result handler. */
+export interface ChatBlockUsage {
+  costUsd?: number;
+  durationMs?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheCreationTokens?: number;
+  cacheReadTokens?: number;
+}
+
 export interface ChatBlock {
   /** A1 (PRD-0010) — stable, monotonic id assigned by the server when the block
    *  enters messageHistory: `{sessionId}:{seq}` (seq = history length at push
@@ -69,6 +86,8 @@ export interface ChatBlock {
   source?: "creator" | "evaluator";
   /** Set on user blocks that carried media attachments. */
   attachments?: ChatBlockAttachment[];
+  /** B3 (PRD-0010) — set on the LAST text block of a turn on turn_complete. */
+  usage?: ChatBlockUsage;
   // ─── Locator-specific fields (Phase 2.1) ───
   label?: string;
   data?: { clipId?: string; time?: number; assetId?: string; trackId?: string };
@@ -587,6 +606,19 @@ export class WsBridge {
     return withId;
   }
 
+  /** B3 (PRD-0010) — per-chat-file serialized write tail. Both the block-by-block
+   *  append (appendToChatLog) and the turn-end full rewrite (rewriteChatLog) go
+   *  through this so writes to one file run in CALL order. Without it the
+   *  usage-less append of the last text block could land AFTER the usage-bearing
+   *  rewrite (both are async) and clobber the usage back off disk. */
+  private readonly chatLogTails = new Map<string, Promise<void>>();
+
+  private enqueueChatWrite(chatFile: string, op: () => Promise<void>): void {
+    const prev = this.chatLogTails.get(chatFile) ?? Promise.resolve();
+    const next = prev.catch(() => {}).then(() => op().catch(() => {}));
+    this.chatLogTails.set(chatFile, next);
+  }
+
   private appendToChatLog(workId: string, block: ChatBlock, sessionId?: string): void {
     if (workId.startsWith("trends_")) return;
     const sid = this.resolveSessionId(sessionId);
@@ -596,9 +628,33 @@ export class WsBridge {
     // the append would ENOENT and silently drop history. mkdir(recursive) is
     // idempotent, so this is a no-op for real works.
     const dir = join(dataDir, "works", workId);
-    void mkdir(dir, { recursive: true })
-      .then(() => appendFile(chatFile, JSON.stringify(block) + "\n", "utf-8"))
-      .catch(() => {});
+    const line = JSON.stringify(block) + "\n";
+    this.enqueueChatWrite(chatFile, async () => {
+      await mkdir(dir, { recursive: true });
+      await appendFile(chatFile, line, "utf-8");
+    });
+  }
+
+  /**
+   * B3 (PRD-0010) — rewrite a session's chat log from the in-memory
+   * messageHistory. Blocks are appended usage-less block-by-block during a turn
+   * (appendToChatLog), so once turn_complete stamps `usage` onto the last text
+   * block we must re-persist the WHOLE log for that field to survive a restart
+   * (jsonl is authoritative on reload — A1 seed 收敛). Full-snapshot-on-turn-end
+   * mirrors the chat.json save. Serialized through enqueueChatWrite so it runs
+   * AFTER this turn's appends (no clobber-back race) — content is snapshotted to
+   * a string synchronously at call time.
+   */
+  private rewriteChatLog(workId: string, sessionId: string, blocks: ChatBlock[]): void {
+    if (workId.startsWith("trends_")) return;
+    const chatFile = chatLogPath(workId, sessionId);
+    const dir = join(dataDir, "works", workId);
+    const content =
+      blocks.length > 0 ? blocks.map((b) => JSON.stringify(b)).join("\n") + "\n" : "";
+    this.enqueueChatWrite(chatFile, async () => {
+      await mkdir(dir, { recursive: true });
+      await writeFile(chatFile, content, "utf-8");
+    });
   }
 
   /**
@@ -1567,9 +1623,18 @@ export class WsBridge {
             //   total_cost_usd, duration_ms, duration_api_ms, num_turns,
             //   usage: { input_tokens, output_tokens, cache_creation_input_tokens,
             //            cache_read_input_tokens }
-            // Surfacing these to the browser lets the chat UI badge each
-            // assistant turn with its real cost — pneuma calls this
-            // "modelUsage cumulative" (CLAUDE.md gotcha: use delta per turn).
+            //
+            // B3 (PRD-0010) — CUMULATIVE-DELTA, settled empirically (2026-07-02
+            // live probe, real claude CLI v2.1.198): AutoViral spawns a FRESH
+            // `claude --resume <id> -p` process PER TURN (see sendMessage →
+            // spawnCli), and each such invocation reports num_turns=1 and
+            // total_cost_usd = the cost of THAT turn ONLY (probe: 0.0169 fresh →
+            // 0.0028 resume → 0.0028 resume; a cumulative value would have
+            // grown). So in THIS architecture total_cost_usd is PER-TURN, NOT
+            // cumulative — the pneuma "modelUsage cumulative" gotcha applies only
+            // to a long-lived streaming SDK process (pneuma keeps one). We record
+            // total_cost_usd DIRECTLY; a delta subtraction would UNDER-count.
+            // Locked by ws-bridge-agent-cost.test.ts.
             const usage = (msg as Record<string, unknown>).usage as
               | Record<string, number>
               | undefined;
@@ -1579,6 +1644,39 @@ export class WsBridge {
             const durationMs = (msg as Record<string, unknown>).duration_ms as
               | number
               | undefined;
+            // Stamp the per-turn usage onto the LAST assistant text block so the
+            // session-total badge survives a refresh (all three seed paths read
+            // it back). Done BEFORE persistence below so the snapshot includes it.
+            const turnUsage: ChatBlockUsage | undefined =
+              cost !== undefined || durationMs !== undefined || usage
+                ? {
+                    ...(cost !== undefined ? { costUsd: cost } : {}),
+                    ...(durationMs !== undefined ? { durationMs } : {}),
+                    ...(typeof usage?.input_tokens === "number"
+                      ? { inputTokens: usage.input_tokens }
+                      : {}),
+                    ...(typeof usage?.output_tokens === "number"
+                      ? { outputTokens: usage.output_tokens }
+                      : {}),
+                    ...(typeof usage?.cache_creation_input_tokens === "number"
+                      ? { cacheCreationTokens: usage.cache_creation_input_tokens }
+                      : {}),
+                    ...(typeof usage?.cache_read_input_tokens === "number"
+                      ? { cacheReadTokens: usage.cache_read_input_tokens }
+                      : {}),
+                  }
+                : undefined;
+            if (turnUsage) {
+              for (let i = session.messageHistory.length - 1; i >= 0; i--) {
+                if (session.messageHistory[i].type === "text") {
+                  session.messageHistory[i] = {
+                    ...session.messageHistory[i],
+                    usage: turnUsage,
+                  };
+                  break;
+                }
+              }
+            }
             this.broadcastToSession(session.workId, session.sessionId, {
               event: "turn_complete",
               data: {
@@ -1598,8 +1696,39 @@ export class WsBridge {
             // appended block-by-block above), so a non-default turn must NOT
             // clobber chat.json with the wrong session's history.
             if (this.isWorkBound(session.workId)) {
+              // B3 — rewrite the session's jsonl from messageHistory so the
+              // usage just stamped onto the last text block survives a restart
+              // (jsonl is authoritative on reload). The default session ALSO
+              // mirrors the legacy chat.json snapshot.
+              this.rewriteChatLog(session.workId, session.sessionId, session.messageHistory);
               if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
                 saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
+              }
+              // B3 — record the agent turn cost into the per-work ledger. The
+              // frame's total_cost_usd is the PER-TURN charge (see the delta note
+              // above), so record it DIRECTLY, once per turn, as a real metered
+              // cost (estimated:false). recordCostEvent is best-effort and never
+              // throws, so a ledger failure can't break the chat turn.
+              if (typeof cost === "number" && cost > 0) {
+                recordCostEvent({
+                  workId: session.workId,
+                  kind: "agent",
+                  provider: "claude",
+                  model: session.model,
+                  usd: cost,
+                  estimated: false,
+                  meta: {
+                    sessionId: session.sessionId,
+                    ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+                    ...(durationMs !== undefined ? { durationMs } : {}),
+                    ...(typeof usage?.input_tokens === "number"
+                      ? { inputTokens: usage.input_tokens }
+                      : {}),
+                    ...(typeof usage?.output_tokens === "number"
+                      ? { outputTokens: usage.output_tokens }
+                      : {}),
+                  },
+                });
               }
               // Snapshot the deliverable yaml so the user can roll back if
               // this turn made things worse. createCheckpoint dedupes on
