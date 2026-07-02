@@ -610,9 +610,50 @@ worksRouter.post("/api/works/:id/sessions", async (c) => {
   if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId", errorCode: "invalid_work_id" }, 400);
   const wsBridge = getWsBridge();
   if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
-  const session = await wsBridge.createNewSession(id);
+  // C4 (PRD-0010) — an optional backend pins the new session to a chat CLI
+  // ("claude" | "codex"). Unknown ids resolve to claude at the bridge boundary.
+  const body = await c.req.json().catch(() => null);
+  const backend = body && typeof body.backend === "string" ? body.backend : undefined;
+  const session = await wsBridge.createNewSession(id, backend);
   if (!session) return c.json({ error: "Failed to create session", errorCode: "session_create_failed" }, 503);
   return c.json({ session }, 201);
+});
+
+// POST /api/works/:id/backend — switch a session's chat BACKEND (C4).
+//
+// Backends are NOT resume-compatible (claude vs codex resume ids differ), so
+// this only succeeds on a FRESH session with no cliSessionId / history — the
+// bridge rejects an established one (409). The UI surfaces the "new session"
+// affordance instead. `sessionId` targets a specific chat; omitted → the
+// default (s_1). See WsBridge.setSessionBackend.
+const CHAT_BACKENDS = ["claude", "codex"] as const;
+worksRouter.post("/api/works/:id/backend", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) return c.json({ error: "Invalid workId", errorCode: "invalid_work_id" }, 400);
+  const body = await c.req.json().catch(() => null);
+  const backend = body && typeof body.backend === "string" ? body.backend : "";
+  if (!(CHAT_BACKENDS as readonly string[]).includes(backend)) {
+    return c.json(
+      { error: "Invalid backend", errorCode: "invalid_backend", allowed: CHAT_BACKENDS },
+      400,
+    );
+  }
+  const sessionId = body && typeof body.sessionId === "string" ? body.sessionId : undefined;
+  if (sessionId && !SAFE_ID.test(sessionId)) {
+    return c.json({ error: "Invalid sessionId", errorCode: "invalid_session_id" }, 400);
+  }
+  const wsBridge = getWsBridge();
+  if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
+  const ok = wsBridge.setSessionBackend(id, backend, sessionId);
+  if (!ok) {
+    // Established session (or unknown) — the caller must start a new session to
+    // use another backend. 409 = the request conflicts with the session state.
+    return c.json(
+      { error: "Cannot switch backend on an established session", errorCode: "backend_switch_rejected" },
+      409,
+    );
+  }
+  return c.json({ ok: true, backend });
 });
 
 // DELETE /api/works/:id/sessions/:sessionId — hard-delete a chat session: dispose

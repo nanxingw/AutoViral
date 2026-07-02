@@ -1,6 +1,6 @@
 import { useChatSocket } from "@/features/chat/useChatSocket";
 import { useChatStore } from "@/features/chat/store";
-import type { StreamBlock, LocatorData, TurnUsage, ChatAttachment } from "@/features/chat/types";
+import type { StreamBlock, LocatorData, TurnUsage, ChatAttachment, ChatSessionRecord } from "@/features/chat/types";
 import { uploadAsset, MAX_UPLOAD_BYTES, MAX_UPLOAD_MB, ACCEPTED_UPLOAD } from "@/features/studio/panels/AssetSidebar/uploadAsset";
 import { LocatorBlockView } from "@/features/chat/LocatorBlock";
 import { useComposition } from "@/features/studio/store";
@@ -17,7 +17,7 @@ import {
   findRollbackTarget,
   type Checkpoint,
 } from "@/features/checkpoints/useCheckpoints";
-import { ModelSwitcher } from "./ModelSwitcher";
+import { BackendSwitcher } from "./BackendSwitcher";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { useComposerDraft } from "@/stores/composerDraft";
 import { useToastStore } from "@/stores/toast";
@@ -324,6 +324,26 @@ export function ChatPanel({
   // (last-writer-wins → wrong bubbles). Keying the seed effect on this id makes
   // a session switch / reload seed the RIGHT log (ADR-008 §4 / I24).
   const activeSessionId = useActiveSessionId(workId);
+
+  // C4 — the active session's backend ("claude" | "codex"), read from the
+  // sidecar-backed session list. Drives the header BackendSwitcher badge and the
+  // token-only usage chips for codex. Coach chat is workless + always claude, so
+  // the fetch is skipped there.
+  const [sessionBackend, setSessionBackend] = useState<"claude" | "codex">("claude");
+  useEffect(() => {
+    if (coachMode) return;
+    let cancelled = false;
+    apiFetch<{ sessions: ChatSessionRecord[] }>(`/api/works/${workId}/sessions`)
+      .then((d) => {
+        if (cancelled) return;
+        const rec = d.sessions?.find((s) => s.id === activeSessionId);
+        setSessionBackend(rec?.backend === "codex" ? "codex" : "claude");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [workId, activeSessionId, coachMode]);
 
   // Load chat history on mount / workId or session change. Without this,
   // switching into a work (or session) showed an empty panel even when the
@@ -650,7 +670,16 @@ export function ChatPanel({
           >
             {coach
               ? coach.modelSwitcher
-              : <ModelSwitcher workId={workId} streaming={streaming} />}
+              : (
+                <BackendSwitcher
+                  workId={workId}
+                  sessionId={activeSessionId}
+                  backend={sessionBackend}
+                  established={blocks.length > 0}
+                  streaming={streaming}
+                  onBackendSwitched={setSessionBackend}
+                />
+              )}
             {streaming ? ` · ${t("chat.streaming")}` : ""}
             <ConnectionStatus state={wsState} />
           </div>
@@ -673,7 +702,7 @@ export function ChatPanel({
           >
             {blocks.length} {t("chat.msgCount")}
           </span>
-          <SessionTotals blocks={blocks} />
+          <SessionTotals blocks={blocks} backend={sessionBackend} />
         </div>
       </div>
 
@@ -785,6 +814,7 @@ export function ChatPanel({
             onRollback={(file) => void restoreCheckpoint(file)}
             restoring={restoring}
             onCreateFromIdea={coach?.onCreateFromIdea}
+            backend={sessionBackend}
           />
         ))}
         {streaming && (
@@ -939,6 +969,7 @@ function ChatBlock({
   onRollback,
   restoring,
   onCreateFromIdea,
+  backend,
 }: {
   block: StreamBlock;
   onJumpToLocator: (data: LocatorData) => void;
@@ -948,6 +979,8 @@ function ChatBlock({
   restoring: string | null;
   /** PRD-0006 S8 — coach mode only: hand a `<coach-idea/>` off to create a work. */
   onCreateFromIdea?: (idea: CoachIdea) => void;
+  /** C4 — the session backend, so the per-turn UsageBadge can go token-only for codex. */
+  backend?: string;
 }) {
   const { type } = block;
   // PRD-0006 S8 — in coach mode, pull out any `<coach-idea/>` tags so the
@@ -1106,7 +1139,7 @@ function ChatBlock({
         <CoachIdeaActions ideas={ideaParse.ideas} onCreate={onCreateFromIdea} />
       ) : null}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        {block.usage ? <UsageBadge usage={block.usage} /> : null}
+        {block.usage ? <UsageBadge usage={block.usage} backend={backend} /> : null}
         {rollbackTarget ? (
           <button
             type="button"
@@ -1253,7 +1286,7 @@ function CoachIdeaActions({
  * Opus this is the real cost the user is racking up. Updates live as new
  * turn_complete events fold usage into the latest text block.
  */
-export function SessionTotals({ blocks }: { blocks: StreamBlock[] }) {
+export function SessionTotals({ blocks, backend }: { blocks: StreamBlock[]; backend?: string }) {
   let cost = 0;
   let inT = 0;
   let outT = 0;
@@ -1264,6 +1297,9 @@ export function SessionTotals({ blocks }: { blocks: StreamBlock[] }) {
     outT += b.usage.outputTokens ?? 0;
   }
   if (cost === 0 && inT === 0 && outT === 0) return null;
+  // C4 — codex is TOKEN-ONLY (no $ running total; codex reports no per-turn USD
+  // and we don't guess). claude shows the accumulated cost + tokens.
+  const tokenOnly = backend === "codex";
   return (
     <span
       style={{
@@ -1274,7 +1310,7 @@ export function SessionTotals({ blocks }: { blocks: StreamBlock[] }) {
       }}
       title={`session total: ${inT} in / ${outT} out tokens`}
     >
-      Σ ${cost.toFixed(3)} · {formatTokens(inT + outT)}
+      {tokenOnly ? `Σ ${formatTokens(inT + outT)}` : `Σ $${cost.toFixed(3)} · ${formatTokens(inT + outT)}`}
     </span>
   );
 }
@@ -1423,9 +1459,11 @@ function ToolResultBlock({ text }: { text: string }) {
  * cost. Inspired by pneuma's ChatPanel modelUsage row. Only renders the
  * fields actually present (CLI sometimes omits cost on cached turns).
  */
-function UsageBadge({ usage }: { usage: TurnUsage }) {
+export function UsageBadge({ usage, backend }: { usage: TurnUsage; backend?: string }) {
   const parts: string[] = [];
-  if (typeof usage.costUsd === "number") {
+  // C4 — codex turns are TOKEN-ONLY: codex reports usage but no per-turn USD, so
+  // we never show a $ chip (and never guess a local price). claude keeps its cost.
+  if (backend !== "codex" && typeof usage.costUsd === "number") {
     parts.push(`$${usage.costUsd.toFixed(4)}`);
   }
   if (typeof usage.durationMs === "number") {

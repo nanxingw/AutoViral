@@ -45,6 +45,14 @@ export interface SessionRecord {
    * records ⇒ treated as version 0 (full changelog injected on next resume).
    */
   lastInjectedPromptVersion?: number;
+  /**
+   * C4 (PRD-0010) — which chat CLI drives THIS session ("claude" | "codex").
+   * A per-session property (backends aren't resume-compatible, so it is pinned
+   * at creation and never switched on an established session). Undefined on
+   * legacy records ⇒ resolved to the "claude" default by `resolveBackendId`.
+   * Chat only (terminal sessions carry no backend).
+   */
+  backend?: string;
   createdAt: string;
   lastActive: string;
   /** First user line / cwd — a human-readable label for the session strip. */
@@ -154,13 +162,14 @@ export class SessionSidecar {
    */
   async create(
     surface: SessionSurface,
-    opts: { now: string; preview?: string; cliSessionId?: string; id?: string } ,
+    opts: { now: string; preview?: string; cliSessionId?: string; id?: string; backend?: string } ,
   ): Promise<SessionRecord> {
     const id = opts.id ?? (await this.nextSessionId(surface));
     const record: SessionRecord = {
       id,
       surface,
       ...(opts.cliSessionId ? { cliSessionId: opts.cliSessionId } : {}),
+      ...(opts.backend ? { backend: opts.backend } : {}),
       createdAt: opts.now,
       lastActive: opts.now,
       preview: opts.preview ?? "",

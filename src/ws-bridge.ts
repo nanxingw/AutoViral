@@ -25,7 +25,7 @@ import { getWork, updateWork, saveWorkChat, loadWorkChat, listWorks, type Work }
 import { recordCostEvent } from "./server/cost-ledger/index.js";
 import { getContentType } from "./shared/content-types/registry.js";
 import { createCheckpoint } from "./server/checkpoints.js";
-import { claudeBackend } from "./server/chat-backends/claude.js";
+import { getChatBackend, resolveBackendId, type ChatBackendId } from "./server/chat-backends/registry.js";
 import { listSharedAssets } from "./shared-assets.js";
 import { MemoryClient } from "./domain/memory.js";
 import { syncMessage } from "./memory-sync.js";
@@ -106,6 +106,11 @@ export interface WsSession {
   idle: boolean;
   messageHistory: ChatBlock[];
   model?: string;
+  /** C4 (PRD-0010) — which chat CLI drives this session ("claude" | "codex").
+   *  Pinned at creation (backends aren't resume-compatible); resolved from the
+   *  sidecar record on resume, defaulting to claude for legacy sessions. Drives
+   *  which ChatBackend spawnCli uses for buildSpawn / parser / notFoundMessage. */
+  backend?: ChatBackendId;
   /** B7(a)-lite (PRD-0009) — the PROMPT_VERSION this session's *current spawn*
    *  is actually taught up to. A fresh spawn is built with the current
    *  buildSystemPrompt (= PROMPT_VERSION); a resume that injected the changelog
@@ -734,9 +739,9 @@ export class WsBridge {
    * Start a new CLI session. Loads work context, builds system prompt,
    * then spawns `claude -p <prompt> --output-format stream-json --verbose`.
    */
-  async createSession(workId: string, initialPrompt: string, model?: string, sessionId?: string): Promise<WsSession> {
+  async createSession(workId: string, initialPrompt: string, model?: string, sessionId?: string, backend?: string): Promise<WsSession> {
     const sid = this.resolveSessionId(sessionId);
-    logBridge("session_create", workId, { model, promptLen: initialPrompt.length, sessionId: sid });
+    logBridge("session_create", workId, { model, backend, promptLen: initialPrompt.length, sessionId: sid });
     const existing = this.getSessionEntry(workId, sid);
     if (existing?.cliProcess) {
       try { existing.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
@@ -744,8 +749,11 @@ export class WsBridge {
 
     // Lazy legacy migration + sidecar bookkeeping (ADR-008 §4). Ensure a
     // sidecar record exists for this session BEFORE we spawn, so a refresh
-    // recovers the session list. Restores it if it had been archived.
-    await this.ensureSidecarRecord(workId, sid).catch(() => {});
+    // recovers the session list. Restores it if it had been archived. C4: a
+    // requested backend is seeded onto the record only when it is BRAND NEW —
+    // an existing (established) session keeps its pinned backend, since
+    // backends aren't resume-compatible.
+    await this.ensureSidecarRecord(workId, sid, backend).catch(() => {});
 
     const session: WsSession = {
       workId,
@@ -754,6 +762,9 @@ export class WsBridge {
       browserSockets: existing?.browserSockets ?? new Set(),
       messageHistory: existing?.messageHistory ?? [],
       model,
+      // Provisional — overridden below by the persisted record's backend (an
+      // established session's pin wins over the passed arg).
+      backend: resolveBackendId(backend),
     };
     this.setSessionEntry(workId, sid, session);
 
@@ -792,6 +803,11 @@ export class WsBridge {
     let savedSessionId: string | undefined;
     try {
       const record = await this.sidecarFor(workId)?.get(sid);
+      // C4 — the record is the source of truth for a session's pinned backend.
+      // ensureSidecarRecord seeded a NEW record with the passed backend; an
+      // established record keeps whatever it was created with. Legacy records
+      // (no field) resolve to claude.
+      if (record) session.backend = resolveBackendId(record.backend);
       if (record?.cliSessionId) {
         savedSessionId = record.cliSessionId;
       } else if (sid === DEFAULT_CHAT_SESSION_ID) {
@@ -999,6 +1015,36 @@ export class WsBridge {
     session.model = model;
     // Force a respawn on the next turn so the new tier takes effect, without
     // touching any OTHER session's model (or the global config).
+    if (session.cliProcess) {
+      try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
+      session.cliProcess = undefined;
+      session.idle = true;
+    }
+    return true;
+  }
+
+  /**
+   * C4 (PRD-0010) — switch the chat BACKEND for ONE session, kill+respawn style
+   * (mirrors setSessionModel). Unlike the model tier, a backend can only be set
+   * on a FRESH session: claude and codex resume ids are not interchangeable, so
+   * an ESTABLISHED session (one that already owns a cliSessionId or any recorded
+   * history) can never switch without silently dropping its context. Such a
+   * request is REJECTED (returns false) — the UI must offer a NEW session
+   * instead. A fresh session's backend is repinned in memory + persisted to the
+   * sidecar, and the live CLI (if any) is killed so the next turn rebuilds on
+   * the new backend. Returns false for an unknown session or a rejected switch.
+   */
+  setSessionBackend(workId: string, backend: string, sessionId?: string): boolean {
+    const sid = this.resolveSessionId(sessionId);
+    const session = this.getSessionEntry(workId, sid);
+    if (!session) return false;
+    // Established? Cross-backend resume is incompatible — refuse to switch.
+    if (session.cliSessionId || session.messageHistory.length > 0) return false;
+    const next = resolveBackendId(backend);
+    session.backend = next;
+    // Persist the new pin so a refresh / restart keeps the choice.
+    this.sidecarFor(workId)?.patch(sid, { backend: next }).catch(() => {});
+    // Respawn on the next turn, exactly like setSessionModel.
     if (session.cliProcess) {
       try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
       session.cliProcess = undefined;
@@ -1369,7 +1415,11 @@ export class WsBridge {
     resumeSessionId?: string,
     appendSystemPrompt?: string,
   ): void {
-    const descriptor = claudeBackend.buildSpawn({
+    // C4 — resolve the concrete backend for THIS session (claude default). It
+    // owns buildSpawn / createLineParser / notFoundMessage; every SESSION side
+    // effect below stays backend-agnostic in WsBridge.
+    const backend = getChatBackend(session.backend);
+    const descriptor = backend.buildSpawn({
       prompt,
       resumeId: resumeSessionId,
       appendSystemPrompt,
@@ -1398,7 +1448,7 @@ export class WsBridge {
     // cost ledger / checkpoint / memory sync / trends filtering) stays HERE — the
     // backend only owns arg/env construction (buildSpawn) and frame routing
     // (createLineParser). This is a pure move-over of the old inline dispatch.
-    const parser = claudeBackend.createLineParser({
+    const parser = backend.createLineParser({
       // Pre-dispatch peek. Trend-session WebSearch tool-name matching + the
       // simplified research events stay coupled to claude here, per C2.
       onRawMessage: (msg) => {
@@ -1746,11 +1796,10 @@ export class WsBridge {
       session.cliProcess = undefined;
       session.idle = true;
       const isNotFound = (err as NodeJS.ErrnoException).code === "ENOENT";
-      // Per-backend ENOENT text (C3) — sourced from the backend so the message
-      // names the right binary. ws-bridge drives claude today; C4 wires the
-      // per-session backend and this will read the session's backend instead.
+      // Per-backend ENOENT text (C3/C4) — sourced from the session's backend so
+      // the message names the right binary (`claude` vs `codex`).
       const message = isNotFound
-        ? claudeBackend.notFoundMessage
+        ? backend.notFoundMessage
         : `创作 agent 启动失败：${err.message}`;
       logBridge("cli_spawn_error", session.workId, {
         code: (err as NodeJS.ErrnoException).code,
@@ -1946,14 +1995,15 @@ export class WsBridge {
    * legacy `chat.jsonl` — no bulk rename). Reopening an archived session
    * restores it. Returns the record (or null for ephemeral trend keys).
    */
-  private async ensureSidecarRecord(workId: string, sessionId: string): Promise<SessionRecord | null> {
+  private async ensureSidecarRecord(workId: string, sessionId: string, backend?: string): Promise<SessionRecord | null> {
     const sidecar = this.sidecarFor(workId);
     if (!sidecar) return null;
     const now = new Date().toISOString();
     const existing = await sidecar.get(sessionId);
     if (existing) {
       // Reopening an archived session restores it (memory is re-hydrated by the
-      // caller from chat-{sessionId}.jsonl).
+      // caller from chat-{sessionId}.jsonl). C4: the backend arg is IGNORED for
+      // an existing record — an established session's backend is immutable.
       if (existing.archived) return (await sidecar.restore(sessionId, now)) ?? existing;
       return existing;
     }
@@ -1966,7 +2016,16 @@ export class WsBridge {
         cliSessionId = work?.cliSessionId;
       } catch { /* ignore */ }
     }
-    return sidecar.create("chat", { now, id: sessionId, cliSessionId });
+    // C4 — pin a codex backend on a brand-new record; claude is the default so
+    // we only persist the field when it is explicitly non-default (keeps legacy
+    // records byte-identical and the "absent ⇒ claude" resolver honest).
+    const pinned = resolveBackendId(backend);
+    return sidecar.create("chat", {
+      now,
+      id: sessionId,
+      cliSessionId,
+      ...(pinned !== "claude" ? { backend: pinned } : {}),
+    });
   }
 
   /** Bump lastActive (+ seed preview on first user line) for a chat session. */
@@ -2008,7 +2067,7 @@ export class WsBridge {
    * its sidecar record. Returns the record. Does NOT spawn a CLI — the next
    * sendMessage/createSession on that sessionId does.
    */
-  async createNewSession(workId: string): Promise<SessionRecord | null> {
+  async createNewSession(workId: string, backend?: string): Promise<SessionRecord | null> {
     const sidecar = this.sidecarFor(workId);
     if (!sidecar) return null;
     // Ensure the default session record (s_1) exists first — both for a legacy
@@ -2018,7 +2077,10 @@ export class WsBridge {
     await this.migrateLegacyWork(workId).catch(() => {});
     await this.ensureSidecarRecord(workId, DEFAULT_CHAT_SESSION_ID).catch(() => {});
     const now = new Date().toISOString();
-    return sidecar.create("chat", { now });
+    // C4 — pin the chosen backend on the new session record (claude default
+    // stays unpersisted so legacy/claude records are byte-identical).
+    const pinned = resolveBackendId(backend);
+    return sidecar.create("chat", { now, ...(pinned !== "claude" ? { backend: pinned } : {}) });
   }
 
   /**

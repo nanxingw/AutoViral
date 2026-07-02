@@ -45,6 +45,9 @@ export interface ChatSessionRecord {
   surface: "chat" | "terminal";
   /** Chat only: claude's `--resume` UUID. */
   cliSessionId?: string;
+  /** C4 (PRD-0010) — which chat CLI drives this session ("claude" | "codex").
+   *  Absent on legacy records ⇒ treated as "claude". */
+  backend?: string;
   createdAt: string;
   lastActive: string;
   /** First user line / cwd — a human-readable label for the strip. */
