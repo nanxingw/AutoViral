@@ -278,58 +278,81 @@ function sessionJsonlPath(id: string, sessionId: string): string {
     : join(workDir(id), `chat-${sessionId}.jsonl`);
 }
 
-/** Load full conversation for a work's chat session. Tries chat.json (single-
- *  shot snapshot saved by PUT /api/works/:id/chat) first ONLY for the default
- *  session, falling back to the session's jsonl (the live stream log appended
- *  by ws-bridge.appendToChatLog). Without the jsonl fallback, refreshing the
- *  studio page wiped the entire visible chat history because no caller actually
- *  writes chat.json today — only the jsonl path is on disk for live sessions.
+/** Parse a chat jsonl into blocks, normalizing the ISO timestamp → ms epoch so
+ *  the client's hydration path (which expects `b.ts: number`) shows real times.
+ *  Returns null on missing/empty/unreadable file. */
+async function readChatJsonl(path: string): Promise<Record<string, unknown>[] | null> {
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf-8");
+  } catch {
+    return null;
+  }
+  const blocks = raw
+    .split("\n")
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0)
+    .map((line) => {
+      try {
+        const b = JSON.parse(line) as Record<string, unknown>;
+        if (typeof b.timestamp === "string" && b.ts === undefined) {
+          const t = Date.parse(b.timestamp);
+          if (!Number.isNaN(t)) b.ts = t;
+        }
+        return b;
+      } catch {
+        return null;
+      }
+    })
+    .filter((b): b is Record<string, unknown> => b !== null);
+  return blocks.length === 0 ? null : blocks;
+}
+
+/** A1 (PRD-0010) — every block a seed path returns must carry an id so the client
+ *  can dedup by id. New blocks already have `{sessionId}:{seq}`; id-less legacy
+ *  lines synthesize `hist_{i}` by array index (stable + deterministic, so the
+ *  HTTP seed agrees with the WS `message_history` reseed on the same block).
+ *  Mirrors ws-bridge's `assignFallbackIds`. */
+function withFallbackIds(blocks: unknown[]): unknown[] {
+  return blocks.map((b, i) => {
+    const rec = (b ?? {}) as Record<string, unknown>;
+    return rec.id ? rec : { ...rec, id: `hist_${i}` };
+  });
+}
+
+/** Load full conversation for a work's chat session. Reads the session's jsonl
+ *  (the live per-block append log written by ws-bridge.appendToChatLog) FIRST,
+ *  falling back to the chat.json single-shot snapshot only for the default
+ *  session when no jsonl exists (a pre-jsonl data fork).
+ *
+ *  A1 (PRD-0010 seed 收敛): the snapshot is written only on turn_complete, so
+ *  reading it first made a mid-turn HTTP seed return the LAST turn's history that
+ *  the WS reseed then corrected — the "flashback". The jsonl is always at least
+ *  as fresh, so it is now authoritative and the snapshot is a fallback only.
  *
  *  `sessionId` defaults to the legacy default session so existing single-
- *  session callers keep reading chat.jsonl; passing a non-default session
- *  reads its `chat-{sessionId}.jsonl` instead, so a session-aware HTTP seed
- *  agrees with the WS `message_history` reseed (ADR-008 §4 / I24). */
+ *  session callers keep reading chat.jsonl; a non-default session reads its
+ *  `chat-{sessionId}.jsonl` (which never had a chat.json snapshot). */
 export async function loadWorkChat(
   id: string,
   sessionId: string = DEFAULT_CHAT_SESSION_ID,
 ): Promise<{ blocks: unknown[] } | null> {
-  // chat.json is the legacy single-file snapshot — it only ever held the
-  // default session, so non-default sessions skip it and read their jsonl.
+  const fromJsonl = await readChatJsonl(sessionJsonlPath(id, sessionId));
+  if (fromJsonl) return { blocks: withFallbackIds(fromJsonl) };
+  // Legacy snapshot fallback — the default session only (non-default sessions
+  // never had a chat.json).
   if (sessionId === DEFAULT_CHAT_SESSION_ID) {
     try {
       const raw = await readFile(join(workDir(id), "chat.json"), "utf-8");
-      return JSON.parse(raw) as { blocks: unknown[] };
+      const parsed = JSON.parse(raw) as { blocks?: unknown[] };
+      if (Array.isArray(parsed?.blocks) && parsed.blocks.length > 0) {
+        return { blocks: withFallbackIds(parsed.blocks) };
+      }
     } catch {
-      /* fall through to jsonl */
+      /* no snapshot */
     }
   }
-  try {
-    const raw = await readFile(sessionJsonlPath(id, sessionId), "utf-8");
-    const blocks = raw
-      .split("\n")
-      .map((l) => l.trim())
-      .filter((l) => l.length > 0)
-      .map((line) => {
-        try {
-          const b = JSON.parse(line) as Record<string, unknown>;
-          // Normalize ISO timestamp → ms epoch so the client's hydration
-          // path (which expects b.ts: number) shows real timestamps
-          // instead of fabricated `Date.now() - i*1000` values.
-          if (typeof b.timestamp === "string" && b.ts === undefined) {
-            const t = Date.parse(b.timestamp);
-            if (!Number.isNaN(t)) b.ts = t;
-          }
-          return b;
-        } catch {
-          return null;
-        }
-      })
-      .filter((b): b is Record<string, unknown> => b !== null);
-    if (blocks.length === 0) return null;
-    return { blocks };
-  } catch {
-    return null;
-  }
+  return null;
 }
 
 // Evaluation result helpers were removed in the D3 cleanup — the evaluator was

@@ -132,7 +132,11 @@ export function useChatSocket(
           case "message_history": {
             const blocks = (data.blocks as Array<DataDict>) ?? [];
             const seeded: StreamBlock[] = blocks.map((b, i) => ({
-              id: `hist_${i}_${Date.now()}`,
+              // A1 (PRD-0010) — prefer the server-assigned stable id so this
+              // reseed agrees with the HTTP seed + live blocks (by-id dedup).
+              // Legacy id-less lines synthesize `hist_{i}` by index (the server
+              // now does the same, so this fallback rarely fires).
+              id: (b.id as string) ?? `hist_${i}`,
               type: ((b.type as StreamBlockType) ?? "text") as StreamBlockType,
               text: asString(b.text),
               toolName: b.toolName as string | undefined,
@@ -150,6 +154,9 @@ export function useChatSocket(
           }
           case "block": {
             push({
+              // A1 — carry the server's stable id so this live user echo dedups
+              // against the same block on reload / reconnect.
+              id: data.id as string | undefined,
               type: ((data.type as StreamBlockType) ?? "text") as StreamBlockType,
               text: asString(data.text),
               // Live broadcast of a user message (e.g. a second tab) carries its
@@ -167,15 +174,18 @@ export function useChatSocket(
             for (const a of actions) {
               try { dispatchAction?.(a); } catch { /* swallow handler errors */ }
             }
-            push({ type: "text", text: cleaned });
+            // A1 — carry the server block id so a live stream block dedups
+            // against its reload/reconnect twin (by-id, even non-contiguous).
+            push({ type: "text", text: cleaned, id: data.id as string | undefined });
             break;
           }
           case "assistant_thinking": {
-            push({ type: "thinking", text: asString(data.text) });
+            push({ type: "thinking", text: asString(data.text), id: data.id as string | undefined });
             break;
           }
           case "tool_use": {
             push({
+              id: data.id as string | undefined,
               type: "tool_use",
               text: asString(data.input ?? data.text ?? data),
               toolName:
@@ -188,6 +198,7 @@ export function useChatSocket(
           }
           case "tool_result": {
             push({
+              id: data.id as string | undefined,
               type: "tool_result",
               text: asString(data.text ?? data.output ?? data.content),
             });

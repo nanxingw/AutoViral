@@ -53,6 +53,14 @@ export interface ChatBlockAttachment {
 }
 
 export interface ChatBlock {
+  /** A1 (PRD-0010) — stable, monotonic id assigned by the server when the block
+   *  enters messageHistory: `{sessionId}:{seq}` (seq = history length at push
+   *  time, stable because the log is append-only). Persisted to the chat log and
+   *  carried by all THREE seed paths (HTTP /chat, WS message_history replay, WS
+   *  live block) so the client dedups by id. Legacy id-less lines synthesize
+   *  `hist_{i}` on load (see assignFallbackIds). Optional so old on-disk blocks
+   *  still parse. */
+  id?: string;
   type: "user" | "text" | "thinking" | "tool_use" | "tool_result" | "locator";
   text: string;
   toolName?: string;
@@ -106,6 +114,19 @@ export function chatLogPath(workId: string, sessionId: string): string {
   return sessionId === DEFAULT_CHAT_SESSION_ID
     ? join(dir, "chat.jsonl")
     : join(dir, `chat-${sessionId}.jsonl`);
+}
+
+/**
+ * A1 (PRD-0010) — normalize a freshly-loaded block list so every block has an
+ * id. Blocks written before A1 have none; synthesize `hist_{i}` by array index
+ * (stable + deterministic, so a reconnect / server restart replays the SAME ids
+ * and the client's by-id dedup holds). New blocks already carry
+ * `{sessionId}:{seq}` and pass through untouched. Kept in lockstep with
+ * work-store's `withFallbackIds` so the WS and HTTP seed paths agree on the id
+ * of any given legacy block.
+ */
+export function assignFallbackIds(blocks: ChatBlock[]): ChatBlock[] {
+  return blocks.map((b, i) => (b.id ? b : { ...b, id: `hist_${i}` }));
 }
 
 interface NdjsonMessage {
@@ -509,6 +530,24 @@ export class WsBridge {
    * session `s_1` maps to the legacy `chat.jsonl`; other sessions use
    * `chat-{sessionId}.jsonl` (ADR-008 §4).
    */
+  /**
+   * A1 (PRD-0010) — assign a stable, monotonic id, record the block in the
+   * session's history, and append it to the on-disk log. seq = current history
+   * length, which is stable across reloads because the chat log is append-only:
+   * the block at history index i always has id `{sessionId}:{i}`. Returns the
+   * block WITH its id so the caller broadcasts the SAME id to live browsers (the
+   * third seed path), keeping all three seed paths in agreement. A block that
+   * already has an id (e.g. loaded then re-recorded) passes through unchanged.
+   */
+  private recordBlock(session: WsSession, block: ChatBlock): ChatBlock {
+    const withId: ChatBlock = block.id
+      ? block
+      : { ...block, id: `${session.sessionId}:${session.messageHistory.length}` };
+    session.messageHistory.push(withId);
+    this.appendToChatLog(session.workId, withId, session.sessionId);
+    return withId;
+  }
+
   private appendToChatLog(workId: string, block: ChatBlock, sessionId?: string): void {
     if (workId.startsWith("trends_")) return;
     const sid = this.resolveSessionId(sessionId);
@@ -622,7 +661,7 @@ export class WsBridge {
         if (!line.trim()) continue;
         try { blocks.push(JSON.parse(line)); } catch { /* skip malformed */ }
       }
-      if (blocks.length > 0) session.messageHistory = blocks;
+      if (blocks.length > 0) session.messageHistory = assignFallbackIds(blocks);
     } catch {
       // No per-session JSONL — for the default session only, fall back to the
       // legacy chat.json snapshot (new sessions have no legacy snapshot).
@@ -630,7 +669,7 @@ export class WsBridge {
         try {
           const existing = await loadWorkChat(session.workId);
           if ((existing as any)?.blocks && Array.isArray((existing as any).blocks)) {
-            session.messageHistory = (existing as any).blocks;
+            session.messageHistory = assignFallbackIds((existing as any).blocks);
             // Migrate: write as JSONL for future reads
             const jsonlPath = chatLogPath(session.workId, sid);
             const jsonlContent = (existing as any).blocks.map((b: ChatBlock) => JSON.stringify(b)).join("\n") + "\n";
@@ -818,7 +857,7 @@ export class WsBridge {
         if (!line.trim()) continue;
         try { blocks.push(JSON.parse(line)); } catch { /* skip malformed */ }
       }
-      if (blocks.length > 0) session.messageHistory = blocks;
+      if (blocks.length > 0) session.messageHistory = assignFallbackIds(blocks);
     } catch { /* no prior history */ }
 
     // Resume the cliSessionId from the sidecar if we have one; else first turn.
@@ -883,14 +922,14 @@ export class WsBridge {
       ...(attachments ? { attachments } : {}),
       timestamp: new Date().toISOString(),
     };
-    session.messageHistory.push(userBlock);
-    this.appendToChatLog(workId, userBlock, sid);
+    const recorded = this.recordBlock(session, userBlock);
     // Seed the session preview with the first user line (sidecar bookkeeping).
     this.bumpSessionActivity(workId, sid, displayText).catch(() => {});
     // Broadcast so any already-connected browser sees it immediately. The
     // user echo is per-session state (ADR-008 §3 — only focus is work-scoped),
-    // so route it to THIS session's sockets, not every chat on the work.
-    this.broadcastToSession(workId, sid, { event: "block", data: { ...userBlock, sessionId: sid } });
+    // so route it to THIS session's sockets, not every chat on the work. Carries
+    // the recorded block's stable id so the live seed path agrees with reload.
+    this.broadcastToSession(workId, sid, { event: "block", data: { ...recorded, sessionId: sid } });
     if (this.isWorkBound(workId)) {
       getWork(workId).then(w => {
         if (!w) return;
@@ -913,8 +952,7 @@ export class WsBridge {
       ...(attachments ? { attachments } : {}),
       timestamp: new Date().toISOString(),
     };
-    session.messageHistory.push(userBlock);
-    this.appendToChatLog(workId, userBlock, sid);
+    this.recordBlock(session, userBlock);
     // Bump lastActive (and seed preview if empty) in the sidecar.
     this.bumpSessionActivity(workId, sid, displayText).catch(() => {});
 
@@ -1347,34 +1385,34 @@ export class WsBridge {
                   lastEventWasToolResult = false;
                 }
                 turnText += block.text as string;
+                let blockId: string | undefined;
                 if (!session.workId.startsWith("trends_")) {
-                  const textBlock: ChatBlock = { type: "text", text: block.text as string, timestamp: new Date().toISOString() };
-                  session.messageHistory.push(textBlock);
-                  this.appendToChatLog(session.workId, textBlock, session.sessionId);
+                  const rec = this.recordBlock(session, { type: "text", text: block.text as string, timestamp: new Date().toISOString() });
+                  blockId = rec.id;
                 }
                 this.broadcastToSession(session.workId, session.sessionId, {
                   event: "assistant_text",
-                  data: { workId: session.workId, text: block.text },
+                  data: { workId: session.workId, text: block.text, ...(blockId ? { id: blockId } : {}) },
                 });
               } else if (block.type === "thinking" && block.thinking) {
+                let blockId: string | undefined;
                 if (!session.workId.startsWith("trends_")) {
-                  const thinkBlock: ChatBlock = { type: "thinking", text: block.thinking as string, collapsed: true };
-                  session.messageHistory.push(thinkBlock);
-                  this.appendToChatLog(session.workId, thinkBlock, session.sessionId);
+                  const rec = this.recordBlock(session, { type: "thinking", text: block.thinking as string, collapsed: true });
+                  blockId = rec.id;
                 }
                 this.broadcastToSession(session.workId, session.sessionId, {
                   event: "assistant_thinking",
-                  data: { workId: session.workId, text: block.thinking },
+                  data: { workId: session.workId, text: block.thinking, ...(blockId ? { id: blockId } : {}) },
                 });
               } else if (block.type === "tool_use") {
+                let blockId: string | undefined;
                 if (!session.workId.startsWith("trends_")) {
-                  const toolBlock: ChatBlock = { type: "tool_use", text: JSON.stringify(block.input), toolName: block.name as string };
-                  session.messageHistory.push(toolBlock);
-                  this.appendToChatLog(session.workId, toolBlock, session.sessionId);
+                  const rec = this.recordBlock(session, { type: "tool_use", text: JSON.stringify(block.input), toolName: block.name as string });
+                  blockId = rec.id;
                 }
                 this.broadcastToSession(session.workId, session.sessionId, {
                   event: "tool_use",
-                  data: { workId: session.workId, name: block.name, input: block.input },
+                  data: { workId: session.workId, name: block.name, input: block.input, ...(blockId ? { id: blockId } : {}) },
                 });
               }
             }
@@ -1391,14 +1429,14 @@ export class WsBridge {
                   const resultContent = typeof block.content === "string"
                     ? block.content
                     : JSON.stringify(block.content);
+                  let blockId: string | undefined;
                   if (!session.workId.startsWith("trends_")) {
-                    const trBlock: ChatBlock = { type: "tool_result", text: resultContent, collapsed: true };
-                    session.messageHistory.push(trBlock);
-                    this.appendToChatLog(session.workId, trBlock, session.sessionId);
+                    const rec = this.recordBlock(session, { type: "tool_result", text: resultContent, collapsed: true });
+                    blockId = rec.id;
                   }
                   this.broadcastToSession(session.workId, session.sessionId, {
                     event: "tool_result",
-                    data: { workId: session.workId, content: resultContent },
+                    data: { workId: session.workId, content: resultContent, ...(blockId ? { id: blockId } : {}) },
                   });
                 }
               }
@@ -1602,7 +1640,7 @@ export class WsBridge {
           if (!line.trim()) continue;
           try { blocks.push(JSON.parse(line)); } catch { /* skip malformed */ }
         }
-        if (blocks.length > 0) session.messageHistory = blocks;
+        if (blocks.length > 0) session.messageHistory = assignFallbackIds(blocks);
       } catch {
         // No per-session JSONL — default session may still have a legacy
         // chat.json snapshot.
@@ -1610,7 +1648,7 @@ export class WsBridge {
           try {
             const persisted = await loadWorkChat(workId);
             if ((persisted as any)?.blocks && Array.isArray((persisted as any).blocks)) {
-              session.messageHistory = (persisted as any).blocks;
+              session.messageHistory = assignFallbackIds((persisted as any).blocks);
             }
           } catch { /* no persisted chat */ }
         }
