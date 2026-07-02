@@ -4,6 +4,7 @@ import { GenerationDialog } from "@/features/studio/generation/GenerationDialog"
 import { useGatedMediaSrc } from "@/features/studio/media/useGatedMediaSrc";
 import { SearchBox } from "./SearchBox";
 import { AssetPreviewModal } from "./AssetPreviewModal";
+import { AudioAssetRow } from "./AudioAssetRow";
 import { DeleteAssetConfirm } from "./DeleteAssetConfirm";
 import { useAddAssetToTimeline, isAddableAsset } from "./addAssetToTimeline";
 import { writeDragPayload } from "../Timeline/dnd";
@@ -304,7 +305,29 @@ export function LibraryTab({ workId }: Props) {
             LOADING…
           </div>
         )}
-        {currentGroup && (
+        {/* A6 — AUDIO renders compact waveform rows (the waveform is the
+            visual signature) instead of 9:16 cards, so ≥10 fit on screen. */}
+        {currentGroup && currentGroup.group === "AUDIO" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {currentGroup.items.map((item, i) => (
+              <AudioAssetRow
+                key={item.path}
+                item={item}
+                index={i}
+                onOpen={() => setPreview(item)}
+                onAdd={
+                  isAddableAsset(item)
+                    ? () => addToTimeline(item)
+                    : undefined
+                }
+                addLabel={t("studio.assetSidebar.addToTimeline")}
+                onDelete={() => setPendingDelete(item)}
+                deleteLabel={t("studio.assetSidebar.deleteAria")}
+              />
+            ))}
+          </div>
+        )}
+        {currentGroup && currentGroup.group !== "AUDIO" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {currentGroup.items.map((item, i) => (
               <AssetTile

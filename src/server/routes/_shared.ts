@@ -82,6 +82,10 @@ const MIME_TYPES: Record<string, string> = {
   ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
   ".mp4": "video/mp4", ".webm": "video/webm",
   ".mp3": "audio/mpeg", ".wav": "audio/wav",
+  // A6 (PRD-0010): without these four, getMimeType() falls through to
+  // application/octet-stream, the serve route's `audio/` Range gate never
+  // fires, and <audio> can't seek/scrub m4a/aac/flac/ogg.
+  ".m4a": "audio/mp4", ".aac": "audio/aac", ".flac": "audio/flac", ".ogg": "audio/ogg",
   ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown",
   // Phase B (2026-05-25): serve <audio>.peaks.json with json mime so the
   // frontend useWaveform JSON fast-path sees the correct content-type.

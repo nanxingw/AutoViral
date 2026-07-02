@@ -73,6 +73,67 @@ describe("GET /api/works/:id/assets/* — path normalisation", () => {
 const XSS_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg"><script>document.title="XSSPROBE-EXECUTED"</script></svg>';
 
+// A6 (PRD-0010) — extend the MIME table so m4a/aac/flac/ogg audio serves with
+// an audio/* content-type. Without it getMimeType() returns
+// application/octet-stream, the Range branch (video/|audio/ gate) never fires,
+// and the browser <audio> element can't seek/scrub these formats.
+describe("GET /api/works/:id/assets/* — audio MIME table (A6)", () => {
+  const AUDIO_EXTS = ["m4a", "aac", "flac", "ogg"] as const;
+
+  it.each(AUDIO_EXTS)(
+    "serves .%s with an audio/* content-type",
+    async (ext) => {
+      await withTempDataDir(async (dataDir) => {
+        const { apiRoutes } = await import("../api.js");
+        const { createWork } = await import("../../domain/work-store.js");
+        const w = await createWork({
+          title: `audio ${ext}`,
+          type: "short-video",
+          platforms: ["douyin"],
+        });
+        const wDir = join(dataDir, "works", w.id, "assets");
+        await mkdir(join(wDir, "audio"), { recursive: true });
+        await writeFile(join(wDir, "audio", `bed.${ext}`), "fake-audio-bytes");
+
+        const res = await apiRoutes.fetch(
+          new Request(`http://localhost/api/works/${w.id}/assets/audio/bed.${ext}`),
+        );
+        expect(res.status).toBe(200);
+        expect(res.headers.get("content-type") ?? "").toMatch(/^audio\//);
+      });
+    },
+  );
+
+  it.each(AUDIO_EXTS)(
+    "answers a Range request for .%s with 206 + Content-Range",
+    async (ext) => {
+      await withTempDataDir(async (dataDir) => {
+        const { apiRoutes } = await import("../api.js");
+        const { createWork } = await import("../../domain/work-store.js");
+        const w = await createWork({
+          title: `range ${ext}`,
+          type: "short-video",
+          platforms: ["douyin"],
+        });
+        const wDir = join(dataDir, "works", w.id, "assets");
+        await mkdir(join(wDir, "audio"), { recursive: true });
+        await writeFile(join(wDir, "audio", `bed.${ext}`), "0123456789");
+
+        const res = await apiRoutes.fetch(
+          new Request(
+            `http://localhost/api/works/${w.id}/assets/audio/bed.${ext}`,
+            { headers: { range: "bytes=0-3" } },
+          ),
+        );
+        expect(res.status).toBe(206);
+        expect(res.headers.get("content-range")).toBe("bytes 0-3/10");
+        expect(res.headers.get("accept-ranges")).toBe("bytes");
+        expect(res.headers.get("content-type") ?? "").toMatch(/^audio\//);
+      });
+    },
+  );
+});
+
 describe("GET /api/works/:id/assets/* — security headers (#52)", () => {
   it("serves SVG with nosniff + a script-blocking CSP sandbox", async () => {
     await withTempDataDir(async (dataDir) => {

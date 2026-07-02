@@ -298,6 +298,8 @@ export const en = {
       uploading: "Uploading…",
       uploadTooLarge: "{names} exceeds the {mb}MB limit — skipped.",
       deleteAria: "Delete asset",
+      playAudio: "Play preview",
+      pauseAudio: "Pause preview",
     },
     scriptPanel: {
       heading: "Script & storyboard",
@@ -1438,6 +1440,8 @@ export const zh: DeepShape<Messages> = {
       uploading: "上传中…",
       uploadTooLarge: "{names} 超过 {mb}MB 上限——已跳过。",
       deleteAria: "删除素材",
+      playAudio: "试听",
+      pauseAudio: "暂停试听",
     },
     scriptPanel: {
       heading: "剧本·分镜",

@@ -20,6 +20,7 @@ import { useWaveform } from "../../hooks/useWaveform";
 import { resolveAssetUrl } from "../../composition/resolveAssetUrl";
 import { useComposition } from "../../store";
 import type { AudioClip } from "../../types";
+import { PeaksSvg } from "./PeaksSvg";
 
 interface Props {
   clip: AudioClip;
@@ -108,36 +109,9 @@ export function WaveformBars({ clip, pxPerSecond, height }: Props) {
     Math.ceil((clip.out / sourceDuration) * peaks.length),
   );
   const visible = peaks.slice(startIdx, Math.max(startIdx + 1, endIdx));
-  const barCount = Math.max(1, visible.length);
 
-  return (
-    <svg
-      aria-label="waveform"
-      width={width}
-      height={height}
-      viewBox={`0 0 ${barCount} 100`}
-      preserveAspectRatio="none"
-      style={{
-        position: "absolute",
-        left: 0,
-        top: 0,
-        pointerEvents: "none",
-        opacity: 0.55,
-      }}
-    >
-      {Array.from(visible).map((p, i) => {
-        const h = Math.max(2, p * 100);
-        return (
-          <rect
-            key={i}
-            x={i}
-            y={(100 - h) / 2}
-            width={1}
-            height={h}
-            fill="var(--accent, #a8c5d6)"
-          />
-        );
-      })}
-    </svg>
-  );
+  // Shared renderer (A6): the timeline overlay and the library-row mini
+  // waveform now render through the same PeaksSvg. absolute+opacity 0.55 keep
+  // this call byte-compatible with the pre-extraction markup.
+  return <PeaksSvg peaks={visible} width={width} height={height} absolute opacity={0.55} />;
 }
