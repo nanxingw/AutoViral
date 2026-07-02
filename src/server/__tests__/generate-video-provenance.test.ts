@@ -280,3 +280,149 @@ describe("POST /api/generate/video · B7 firstFrame provenance back-link + scene
     });
   });
 });
+
+// B7 review fix — the UI (GenerationDialog) drives the i2v anchor through
+// /api/providers/:id/generate-video, and absolutizeWorkspaceUri turns the local
+// asset uri into a SAME-ORIGIN absolute URL (http://<origin>/api/works/<id>/
+// assets/...) so OpenRouter's server-side fetch can reach it. Before the fix,
+// findSourceAssetIdByFrame short-circuited on ANY http(s) input → fromAssetId
+// null → the画布 never drew the 定妆照 → 视频 link for the PRIMARY human path. The
+// discriminator is the /api/works/<id>/ path segment: a same-origin workspace
+// URL resolves; a TRULY external host still stays null (no forged links).
+describe("B7 review · same-origin workspace http firstFrame resolves the back-link", () => {
+  beforeEach(() => {
+    process.env.OPENROUTER_API_KEY = "";
+    vi.resetModules();
+  });
+  afterEach(() => {
+    delete process.env.OPENROUTER_API_KEY;
+  });
+
+  async function setupFakeVideoProvider(): Promise<VideoGenerateOptions[]> {
+    const { registerProvider } = await import("../../providers/registry.js");
+    const calls: VideoGenerateOptions[] = [];
+    registerProvider({
+      name: "seedance",
+      capability: "video",
+      displayName: "Fake Seedance (capture)",
+      envKey: "OPENROUTER_API_KEY",
+      default: true,
+      generateVideo: async (opts: VideoGenerateOptions) => {
+        calls.push(opts);
+        return { assetUri: `${opts.outputAbsoluteDir}/clip.mp4`, stub: true, costUsd: 0 };
+      },
+    });
+    return calls;
+  }
+
+  function generateEdge(comp: Composition, toAssetId: string) {
+    return (comp.provenance ?? []).find(
+      (e) => e.toAssetId === toAssetId && e.operation.type === "generate",
+    );
+  }
+
+  it("UI path (/api/providers/:id/generate-video) same-origin workspace firstFrameImage → edge.fromAssetId = source image id", async () => {
+    await withTempDataDir(async (dataDir) => {
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      await setupFakeVideoProvider();
+
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      const anchor: AssetEntry = {
+        id: "img_anchor",
+        uri: "assets/images/anchor.png",
+        kind: "image",
+        metadata: {},
+        status: "ready",
+      };
+      await writeComposition(dataDir, w.id, [anchor]);
+
+      // Exactly what GenerationDialog sends: absolutizeWorkspaceUri(source.uri)
+      // = <origin>/api/works/<id>/assets/images/anchor.png.
+      const res = await apiRoutes.fetch(
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
+          workId: w.id,
+          prompt: "she turns to camera",
+          firstFrameImage: `http://localhost:3271/api/works/${w.id}/assets/images/anchor.png`,
+        }),
+      );
+      expect(res.status).toBe(200);
+      const json: any = await res.json();
+      expect(json.assetId).toBeTruthy();
+
+      const comp = yaml.load(
+        await readFile(join(dataDir, "works", w.id, "composition.yaml"), "utf-8"),
+      ) as Composition;
+      expect(generateEdge(comp, json.assetId)!.fromAssetId).toBe("img_anchor");
+    });
+  });
+
+  it("UI path — truly external host firstFrameImage → fromAssetId null (no forged link)", async () => {
+    await withTempDataDir(async (dataDir) => {
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      await setupFakeVideoProvider();
+
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      // An external CDN URL whose PATH happens to collide with a stored asset uri
+      // must NOT be linked — only /api/works/<id>/ same-origin URLs resolve.
+      const anchor: AssetEntry = {
+        id: "img_anchor",
+        uri: "assets/images/anchor.png",
+        kind: "image",
+        metadata: {},
+        status: "ready",
+      };
+      await writeComposition(dataDir, w.id, [anchor]);
+
+      const res = await apiRoutes.fetch(
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
+          workId: w.id,
+          prompt: "p",
+          firstFrameImage: "https://cdn.example.com/assets/images/anchor.png",
+        }),
+      );
+      expect(res.status).toBe(200);
+      const json: any = await res.json();
+      expect(json.assetId).toBeTruthy();
+      const comp = yaml.load(
+        await readFile(join(dataDir, "works", w.id, "composition.yaml"), "utf-8"),
+      ) as Composition;
+      expect(generateEdge(comp, json.assetId)!.fromAssetId).toBeNull();
+    });
+  });
+
+  it("agent path (/api/generate/video) also resolves a same-origin workspace http firstFrame", async () => {
+    await withTempDataDir(async (dataDir) => {
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      await setupFakeVideoProvider();
+
+      const w = await createWork({ title: "w", type: "short-video", platforms: ["douyin"] });
+      const anchor: AssetEntry = {
+        id: "img_anchor",
+        uri: `/api/works/${w.id}/assets/images/anchor.png`,
+        kind: "image",
+        metadata: {},
+        status: "ready",
+      };
+      await writeComposition(dataDir, w.id, [anchor]);
+      await seedFrameFile(dataDir, w.id, "images/anchor.png");
+
+      const res = await apiRoutes.fetch(
+        jsonReq("POST", "/api/generate/video", {
+          workId: w.id,
+          prompt: "p",
+          filename: "clip.mp4",
+          firstFrame: `http://localhost:3271/api/works/${w.id}/assets/images/anchor.png`,
+        }),
+      );
+      expect(res.status).toBe(200);
+      const json: any = await res.json();
+      const comp = yaml.load(
+        await readFile(join(dataDir, "works", w.id, "composition.yaml"), "utf-8"),
+      ) as Composition;
+      expect(generateEdge(comp, json.assetId)!.fromAssetId).toBe("img_anchor");
+    });
+  });
+});

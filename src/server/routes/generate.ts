@@ -849,11 +849,23 @@ function normalizeAssetUri(uri: string): string {
  * AssetEntry it points at, so the i2v "generate" edge can carry a real
  * fromAssetId (the画布 draws the 定妆照 → 视频 link). Matching is URI-based on the
  * normalized work-relative path. Best-effort by design:
- *   - a data:/http(s) input has no local source asset → null (the
- *     i2v-firstFrame-local gotcha: 远端图本就够不到本地资产). SILENT downgrade.
+ *   - a data: input has no local source asset → null. SILENT downgrade.
  *   - a local path that matches no known asset (缺链历史资产) → null.
  * Never throws; a null return simply means "no edge" (未归属簇), never a
  * generation failure.
+ *
+ * B7 review fix — http(s) is NOT a blanket short-circuit. The PRIMARY human
+ * path (GenerationDialog → /api/providers/:id/generate-video) sends the i2v
+ * anchor through absolutizeWorkspaceUri, which turns a same-origin asset uri
+ * into `http://<origin>/api/works/<id>/assets/...` so OpenRouter's server-side
+ * fetch can reach it. That URL points at a LOCAL workspace asset, not a foreign
+ * host, so blanket-null'ing every http(s) input left every UI-driven i2v (esp.
+ * variants) linkless — contradicting this endpoint's own contract that the
+ * human-UI and agent paths produce identical provenance. The discriminator is
+ * the `/api/works/<id>/` path segment: a URL carrying it is a same-origin
+ * workspace asset (strip scheme+host, then normalize + match); a TRULY external
+ * host (a CDN URL with no such segment, or an unparseable URL) → null, so we
+ * never forge a link to an image that isn't a workspace asset.
  */
 function findSourceAssetIdByFrame(
   assets: readonly AssetEntry[] | undefined,
@@ -861,10 +873,24 @@ function findSourceAssetIdByFrame(
 ): string | null {
   if (!frame) return null;
   const s = String(frame);
-  if (s.startsWith("data:") || s.startsWith("http://") || s.startsWith("https://")) {
-    return null;
+  if (s.startsWith("data:")) return null;
+
+  let candidate = s;
+  if (s.startsWith("http://") || s.startsWith("https://")) {
+    let pathname: string;
+    try {
+      pathname = new URL(s).pathname;
+    } catch {
+      return null; // unparseable URL — treat as external, no link
+    }
+    // Only a same-origin workspace URL (identified by the /api/works/<id>/
+    // segment) is eligible; a foreign CDN URL whose path merely collides with a
+    // stored work-relative uri must NOT be linked.
+    if (!/\/api\/works\/[^/]+\//.test(pathname)) return null;
+    candidate = pathname;
   }
-  const target = normalizeAssetUri(s);
+
+  const target = normalizeAssetUri(candidate);
   if (!target) return null;
   for (const a of assets ?? []) {
     if (normalizeAssetUri(a.uri) === target) return a.id;
