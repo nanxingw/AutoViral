@@ -20,11 +20,12 @@ import type { Duplex } from "node:stream";
 import { appendFile } from "node:fs/promises";
 import { logBridge, logBridgeDebug } from "./infra/logger.js";
 import { loadConfig, dataDir } from "./infra/config.js";
-import { PACKAGE_ROOT, assertCliBinDir, buildSpawnPath } from "./infra/paths.js";
+import { assertCliBinDir } from "./infra/paths.js";
 import { getWork, updateWork, saveWorkChat, loadWorkChat, listWorks, type Work } from "./domain/work-store.js";
 import { recordCostEvent } from "./server/cost-ledger/index.js";
 import { getContentType } from "./shared/content-types/registry.js";
 import { createCheckpoint } from "./server/checkpoints.js";
+import { claudeBackend } from "./server/chat-backends/claude.js";
 import { listSharedAssets } from "./shared-assets.js";
 import { MemoryClient } from "./domain/memory.js";
 import { syncMessage } from "./memory-sync.js";
@@ -187,18 +188,10 @@ function sameLegacyBlock(a: ChatBlock, b: ChatBlock): boolean {
   return a.type === b.type && a.text === b.text && (a.toolName ?? null) === (b.toolName ?? null);
 }
 
-interface NdjsonMessage {
-  type: string;
-  subtype?: string;
-  session_id?: string;
-  content?: unknown;
-  result?: unknown;
-  message?: {
-    content?: Array<{ type: string; text?: string }>;
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
-}
+// (Formerly `NdjsonMessage` — the claude stream-json frame shape moved to the
+// ChatBackend seam as `ChatRawMessage`, see src/server/chat-backends/types.ts.
+// The parsing/dispatch that used it now lives in the claude backend; WsBridge
+// only supplies the unified event callbacks.)
 
 // ── System prompt (modules-as-capabilities, D3) ─────────────────────────────
 
@@ -1357,405 +1350,329 @@ export class WsBridge {
     resumeSessionId?: string,
     appendSystemPrompt?: string,
   ): void {
-    const args = [
-      "-p", prompt,
-      "--output-format", "stream-json",
-      "--verbose",
-      "--dangerously-skip-permissions",
-    ];
-
-    if (resumeSessionId) {
-      args.push("--resume", resumeSessionId);
-    }
-
-    // B7(a)-lite (PRD-0009) — on resume, inject teaching added since this
-    // session's stored prompt version as a mid-conversation system append
-    // (context, not commands). Only set when resuming a trailing session.
-    if (appendSystemPrompt) {
-      args.push("--append-system-prompt", appendSystemPrompt);
-    }
-
-    if (session.model) {
-      args.push("--model", session.model);
-    }
-
-    // Put the `autoviral` CLI on the agent's PATH (repo-contained shim — no
-    // global `npm link`) and inject the per-work env the CLI requires. Without
-    // this the skill documents a CLI the agent can't run: `autoviral` would be
-    // `command not found`, and even resolved it exits 2 on a missing
-    // AUTOVIRAL_WORK_ID. AUTOVIRAL_PORT is already set process-wide in
-    // startServer(), but we set it explicitly here to stay self-contained.
-    // Anchor on the shared CLI_BIN_DIR (PACKAGE_ROOT/../cli/autoviral/bin) — in
-    // a packaged Electron app the working dir is not the repo checkout, so the
-    // repo-contained shim dir and AUTOVIRAL_PROJECT_DIR must resolve from the
-    // bundled package root. cli/autoviral is a SIBLING of dist/, not a child —
-    // see CLI_BIN_DIR's invariant comment (B5 regression in 2a79daf resolved it
-    // as a child → ghost dist/cli/autoviral/bin → `autoviral: command not
-    // found`).
-    // Fail-fast guard (shared with terminal-ws.ts so both spawn faces stay in
-    // lockstep): warn LOUD in the daemon log if the shim dir is missing instead
-    // of letting every `autoviral` call silently `command not found` — the B5
-    // ghost-path failure mode.
-    assertCliBinDir("ws-bridge");
-    const workCwd = join(dataDir, "works", session.workId);
-    const proc = spawn("claude", args, {
-      cwd: PACKAGE_ROOT,
-      stdio: ["ignore", "pipe", "pipe"],
-      env: {
-        ...process.env,
-        PATH: buildSpawnPath(),
-        CLAUDE_CODE_ENTRYPOINT: "cli",
-        AUTOVIRAL_PROJECT_DIR: PACKAGE_ROOT,
-        AUTOVIRAL_WORK_ID: session.workId,
-        AUTOVIRAL_PORT: String(this.serverPort),
-        AUTOVIRAL_CWD: workCwd,
-      },
+    const descriptor = claudeBackend.buildSpawn({
+      prompt,
+      resumeId: resumeSessionId,
+      appendSystemPrompt,
+      model: session.model,
+      workId: session.workId,
+      serverPort: this.serverPort,
     });
+
+    // Fail-fast guard (shared with terminal-ws.ts so both spawn faces stay in
+    // lockstep): warn LOUD in the daemon log if the `autoviral` shim dir is
+    // missing instead of letting every CLI call silently `command not found` —
+    // the B5 ghost-path failure mode. The PATH/cwd/env wiring itself now lives in
+    // the claude ChatBackend (src/server/chat-backends/claude.ts → buildSpawn).
+    assertCliBinDir("ws-bridge");
+    const proc = spawn(descriptor.cmd, descriptor.args, descriptor.options);
 
     session.cliProcess = proc;
 
-    // Accumulate assistant text chunks for this turn
+    // Accumulate assistant text chunks for this turn (also read by the exit
+    // handler below, so these stay in method scope, not inside the parser).
     let turnText = "";
     let lastEventWasToolResult = false;
 
-    // Parse NDJSON from stdout
-    let buffer = "";
-    proc.stdout?.on("data", (data: Buffer) => {
-      buffer += data.toString();
-      const lines = buffer.split("\n");
-      buffer = lines.pop() ?? "";
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const msg: NdjsonMessage = JSON.parse(line);
-
-          // Trend session event filtering
-          if (session.workId.startsWith("trends_")) {
-            if (msg.type === "assistant" && msg.message?.content) {
-              for (const block of msg.message.content as Array<Record<string, unknown>>) {
-                if (block.type === "tool_use" && block.name === "WebSearch") {
-                  const input = block.input as Record<string, unknown> | undefined;
-                  this.broadcastToSession(session.workId, session.sessionId, {
-                    event: "search_query",
-                    data: { query: (input?.query as string) ?? "" },
-                  });
-                  lastEventWasToolResult = false;
-                }
-              }
-            }
-            if (msg.type === "user" && (msg as Record<string, unknown>).message) {
-              const userMsg = (msg as Record<string, unknown>).message as Record<string, unknown>;
-              const content = userMsg.content as Array<Record<string, unknown>> | undefined;
-              if (content) {
-                for (const block of content) {
-                  if (block.type === "tool_result") {
-                    const resultText = typeof block.content === "string"
-                      ? block.content
-                      : JSON.stringify(block.content);
-                    const summary = resultText.slice(0, 80) || "搜索完成";
-                    this.broadcastToSession(session.workId, session.sessionId, {
-                      event: "search_result",
-                      data: { summary },
-                    });
-                  }
-                }
-                lastEventWasToolResult = true;
-              }
-            }
-          }
-
-          // system.init — capture session ID and persist
-          if (msg.type === "system" && msg.subtype === "init") {
-            if (msg.session_id) {
-              session.cliSessionId = msg.session_id;
-              // Persist the cliSessionId into the per-session sidecar record so
-              // we can --resume the RIGHT session after restart. The default
-              // session also mirrors into work.yaml for legacy back-compat.
-              const sidecar = this.sidecarFor(session.workId);
-              if (sidecar) {
-                sidecar.patch(session.sessionId, {
-                  cliSessionId: msg.session_id,
-                  lastActive: new Date().toISOString(),
-                  // B7(a)-lite — stamp the prompt version this session is taught
-                  // up to. session.taughtPromptVersion is set authoritatively at
-                  // spawn: PROMPT_VERSION for a fresh session, the actually-
-                  // delivered version for a resume. It is UNDEFINED only when a
-                  // resume skipped injection due to a sidecar read failure — in
-                  // which case we must NOT stamp a version (doing so would record
-                  // "taught to current" for teaching we never delivered, per the
-                  // Wave B review). Editing-agent sessions only (coach/trends run
-                  // a different prompt and never set taughtPromptVersion).
-                  ...(this.isWorkBound(session.workId) &&
-                  session.taughtPromptVersion !== undefined
-                    ? { lastInjectedPromptVersion: session.taughtPromptVersion }
-                    : {}),
-                }).catch(() => {});
-              }
-              if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
-                updateWork(session.workId, { cliSessionId: msg.session_id }).catch(() => {});
-              }
-            }
-            this.broadcastToSession(session.workId, session.sessionId, {
-              event: "session_ready",
-              data: { workId: session.workId, sessionId: session.sessionId, cliSessionId: session.cliSessionId },
-            });
-            continue;
-          }
-
-          // assistant — forward all content blocks to browsers
+    // Translate the claude stream-json stdout into the unified ChatBackend event
+    // callbacks. Every SESSION side effect (broadcast / recordBlock / sidecar /
+    // cost ledger / checkpoint / memory sync / trends filtering) stays HERE — the
+    // backend only owns arg/env construction (buildSpawn) and frame routing
+    // (createLineParser). This is a pure move-over of the old inline dispatch.
+    const parser = claudeBackend.createLineParser({
+      // Pre-dispatch peek. Trend-session WebSearch tool-name matching + the
+      // simplified research events stay coupled to claude here, per C2.
+      onRawMessage: (msg) => {
+        if (session.workId.startsWith("trends_")) {
           if (msg.type === "assistant" && msg.message?.content) {
-            const blocks = msg.message.content as Array<Record<string, unknown>>;
-            const blockTypes = blocks.map((b: Record<string, unknown>) => b.type).join(",");
-            logBridgeDebug("cli_assistant_message", session.workId, {
-              messageId: msg.message.id,
-              blockTypes,
-              blockCount: blocks.length,
-            });
-            for (const block of blocks) {
-              if (block.type === "text" && block.text) {
-                if (session.workId.startsWith("trends_") && lastEventWasToolResult) {
-                  this.broadcastToSession(session.workId, session.sessionId, {
-                    event: "analyzing",
-                    data: {},
-                  });
-                  lastEventWasToolResult = false;
-                }
-                turnText += block.text as string;
-                let blockId: string | undefined;
-                if (!session.workId.startsWith("trends_")) {
-                  const rec = this.recordBlock(session, { type: "text", text: block.text as string, timestamp: new Date().toISOString() });
-                  blockId = rec.id;
-                }
+            for (const block of msg.message.content as Array<Record<string, unknown>>) {
+              if (block.type === "tool_use" && block.name === "WebSearch") {
+                const input = block.input as Record<string, unknown> | undefined;
                 this.broadcastToSession(session.workId, session.sessionId, {
-                  event: "assistant_text",
-                  data: { workId: session.workId, text: block.text, ...(blockId ? { id: blockId } : {}) },
+                  event: "search_query",
+                  data: { query: (input?.query as string) ?? "" },
                 });
-              } else if (block.type === "thinking" && block.thinking) {
-                let blockId: string | undefined;
-                if (!session.workId.startsWith("trends_")) {
-                  const rec = this.recordBlock(session, { type: "thinking", text: block.thinking as string, collapsed: true });
-                  blockId = rec.id;
-                }
-                this.broadcastToSession(session.workId, session.sessionId, {
-                  event: "assistant_thinking",
-                  data: { workId: session.workId, text: block.thinking, ...(blockId ? { id: blockId } : {}) },
-                });
-              } else if (block.type === "tool_use") {
-                let blockId: string | undefined;
-                if (!session.workId.startsWith("trends_")) {
-                  const rec = this.recordBlock(session, { type: "tool_use", text: JSON.stringify(block.input), toolName: block.name as string });
-                  blockId = rec.id;
-                }
-                this.broadcastToSession(session.workId, session.sessionId, {
-                  event: "tool_use",
-                  data: { workId: session.workId, name: block.name, input: block.input, ...(blockId ? { id: blockId } : {}) },
-                });
+                lastEventWasToolResult = false;
               }
             }
-            continue;
           }
-
-          // user (tool results) — forward to browsers
           if (msg.type === "user" && (msg as Record<string, unknown>).message) {
             const userMsg = (msg as Record<string, unknown>).message as Record<string, unknown>;
             const content = userMsg.content as Array<Record<string, unknown>> | undefined;
             if (content) {
               for (const block of content) {
                 if (block.type === "tool_result") {
-                  const resultContent = typeof block.content === "string"
+                  const resultText = typeof block.content === "string"
                     ? block.content
                     : JSON.stringify(block.content);
-                  let blockId: string | undefined;
-                  if (!session.workId.startsWith("trends_")) {
-                    const rec = this.recordBlock(session, { type: "tool_result", text: resultContent, collapsed: true });
-                    blockId = rec.id;
-                  }
+                  const summary = resultText.slice(0, 80) || "搜索完成";
                   this.broadcastToSession(session.workId, session.sessionId, {
-                    event: "tool_result",
-                    data: { workId: session.workId, content: resultContent, ...(blockId ? { id: blockId } : {}) },
+                    event: "search_result",
+                    data: { summary },
                   });
                 }
               }
+              lastEventWasToolResult = true;
             }
-            continue;
           }
+        }
+      },
 
-          // result — turn complete
-          if (msg.type === "result") {
-            session.idle = true;
-            const resultText = typeof msg.result === "string" && msg.result
-              ? msg.result
-              : turnText;
-            logBridge("turn_complete", session.workId, {
-              hasResult: !!(typeof msg.result === "string" && msg.result),
-              resultLen: typeof msg.result === "string" ? msg.result.length : 0,
-              turnTextLen: turnText.length,
-              resultPreview: (resultText || "").slice(0, 150),
-            });
-            // Update cliSessionId from result if present — and persist it the
-            // same way system.init does (sidecar record + work.yaml mirror for
-            // the default session), so a result-only frame can't lose the
-            // --resume id after restart.
-            if (msg.session_id) {
-              session.cliSessionId = msg.session_id;
-              const sidecar = this.sidecarFor(session.workId);
-              if (sidecar) {
-                sidecar.patch(session.sessionId, {
-                  cliSessionId: msg.session_id,
-                  lastActive: new Date().toISOString(),
-                  // B7(a)-lite — same conditional prompt-version stamp as the
-                  // system.init writeback above: only stamp the version this
-                  // spawn was actually taught to, never an unconditional
-                  // PROMPT_VERSION (Wave B review fix).
-                  ...(this.isWorkBound(session.workId) &&
-                  session.taughtPromptVersion !== undefined
-                    ? { lastInjectedPromptVersion: session.taughtPromptVersion }
-                    : {}),
-                }).catch(() => {});
+      // system.init — capture session ID and persist.
+      onSessionId: (cliSessionId) => {
+        if (cliSessionId) {
+          session.cliSessionId = cliSessionId;
+          // Persist the cliSessionId into the per-session sidecar record so we
+          // can --resume the RIGHT session after restart. The default session
+          // also mirrors into work.yaml for legacy back-compat.
+          const sidecar = this.sidecarFor(session.workId);
+          if (sidecar) {
+            sidecar.patch(session.sessionId, {
+              cliSessionId,
+              lastActive: new Date().toISOString(),
+              // B7(a)-lite — stamp the prompt version this session is taught up
+              // to (session.taughtPromptVersion), ONLY when actually set and only
+              // for work-bound editing sessions (see WsSession docstring).
+              ...(this.isWorkBound(session.workId) &&
+              session.taughtPromptVersion !== undefined
+                ? { lastInjectedPromptVersion: session.taughtPromptVersion }
+                : {}),
+            }).catch(() => {});
+          }
+          if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
+            updateWork(session.workId, { cliSessionId }).catch(() => {});
+          }
+        }
+        this.broadcastToSession(session.workId, session.sessionId, {
+          event: "session_ready",
+          data: { workId: session.workId, sessionId: session.sessionId, cliSessionId: session.cliSessionId },
+        });
+      },
+
+      onAssistantMessage: (msg, blocks) => {
+        const blockTypes = blocks.map((b) => b.type).join(",");
+        logBridgeDebug("cli_assistant_message", session.workId, {
+          messageId: msg.message?.id,
+          blockTypes,
+          blockCount: blocks.length,
+        });
+      },
+
+      onText: (text) => {
+        if (session.workId.startsWith("trends_") && lastEventWasToolResult) {
+          this.broadcastToSession(session.workId, session.sessionId, {
+            event: "analyzing",
+            data: {},
+          });
+          lastEventWasToolResult = false;
+        }
+        turnText += text;
+        let blockId: string | undefined;
+        if (!session.workId.startsWith("trends_")) {
+          const rec = this.recordBlock(session, { type: "text", text, timestamp: new Date().toISOString() });
+          blockId = rec.id;
+        }
+        this.broadcastToSession(session.workId, session.sessionId, {
+          event: "assistant_text",
+          data: { workId: session.workId, text, ...(blockId ? { id: blockId } : {}) },
+        });
+      },
+
+      onThinking: (text) => {
+        let blockId: string | undefined;
+        if (!session.workId.startsWith("trends_")) {
+          const rec = this.recordBlock(session, { type: "thinking", text, collapsed: true });
+          blockId = rec.id;
+        }
+        this.broadcastToSession(session.workId, session.sessionId, {
+          event: "assistant_thinking",
+          data: { workId: session.workId, text, ...(blockId ? { id: blockId } : {}) },
+        });
+      },
+
+      onToolUse: (name, input) => {
+        let blockId: string | undefined;
+        if (!session.workId.startsWith("trends_")) {
+          const rec = this.recordBlock(session, { type: "tool_use", text: JSON.stringify(input), toolName: name });
+          blockId = rec.id;
+        }
+        this.broadcastToSession(session.workId, session.sessionId, {
+          event: "tool_use",
+          data: { workId: session.workId, name, input, ...(blockId ? { id: blockId } : {}) },
+        });
+      },
+
+      onToolResult: (content) => {
+        let blockId: string | undefined;
+        if (!session.workId.startsWith("trends_")) {
+          const rec = this.recordBlock(session, { type: "tool_result", text: content, collapsed: true });
+          blockId = rec.id;
+        }
+        this.broadcastToSession(session.workId, session.sessionId, {
+          event: "tool_result",
+          data: { workId: session.workId, content, ...(blockId ? { id: blockId } : {}) },
+        });
+      },
+
+      // result — turn complete. `tc` is the provider-normalized end-of-turn
+      // summary produced by the backend parser.
+      onTurnComplete: (tc) => {
+        session.idle = true;
+        const resultText = tc.result ?? turnText;
+        logBridge("turn_complete", session.workId, {
+          hasResult: tc.result !== undefined,
+          resultLen: tc.result?.length ?? 0,
+          turnTextLen: turnText.length,
+          resultPreview: (resultText || "").slice(0, 150),
+        });
+        // Update cliSessionId from the result frame if present — persist it the
+        // same way system.init does (sidecar record + work.yaml mirror for the
+        // default session), so a result-only frame can't lose the --resume id
+        // after restart.
+        if (tc.sessionId) {
+          session.cliSessionId = tc.sessionId;
+          const sidecar = this.sidecarFor(session.workId);
+          if (sidecar) {
+            sidecar.patch(session.sessionId, {
+              cliSessionId: tc.sessionId,
+              lastActive: new Date().toISOString(),
+              // B7(a)-lite — same conditional prompt-version stamp as the
+              // system.init writeback above (Wave B review fix — no downgrade).
+              ...(this.isWorkBound(session.workId) &&
+              session.taughtPromptVersion !== undefined
+                ? { lastInjectedPromptVersion: session.taughtPromptVersion }
+                : {}),
+            }).catch(() => {});
+          }
+          if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
+            updateWork(session.workId, { cliSessionId: tc.sessionId }).catch(() => {});
+          }
+        }
+        // B3 (PRD-0010) — CUMULATIVE-DELTA, settled empirically (2026-07-02 live
+        // probe, real claude CLI v2.1.198): AutoViral spawns a FRESH `claude
+        // --resume <id> -p` process PER TURN (see sendMessage → spawnCli), and
+        // each such invocation reports num_turns=1 and total_cost_usd = the cost
+        // of THAT turn ONLY. So in THIS architecture total_cost_usd is PER-TURN,
+        // NOT cumulative — the pneuma "modelUsage cumulative" gotcha applies only
+        // to a long-lived streaming SDK process. We record total_cost_usd
+        // DIRECTLY; a delta subtraction would UNDER-count. The backend parser has
+        // already normalized these onto `tc`. Locked by ws-bridge-agent-cost.test.ts.
+        const usage = tc.usage;
+        const cost = tc.costUsd;
+        const durationMs = tc.durationMs;
+        // Stamp the per-turn usage onto the LAST assistant text block so the
+        // session-total badge survives a refresh (all three seed paths read it
+        // back). Done BEFORE persistence below so the snapshot includes it.
+        const turnUsage: ChatBlockUsage | undefined =
+          cost !== undefined || durationMs !== undefined || usage
+            ? {
+                ...(cost !== undefined ? { costUsd: cost } : {}),
+                ...(durationMs !== undefined ? { durationMs } : {}),
+                ...(typeof usage?.input_tokens === "number"
+                  ? { inputTokens: usage.input_tokens }
+                  : {}),
+                ...(typeof usage?.output_tokens === "number"
+                  ? { outputTokens: usage.output_tokens }
+                  : {}),
+                ...(typeof usage?.cache_creation_input_tokens === "number"
+                  ? { cacheCreationTokens: usage.cache_creation_input_tokens }
+                  : {}),
+                ...(typeof usage?.cache_read_input_tokens === "number"
+                  ? { cacheReadTokens: usage.cache_read_input_tokens }
+                  : {}),
               }
-              if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
-                updateWork(session.workId, { cliSessionId: msg.session_id }).catch(() => {});
-              }
+            : undefined;
+        if (turnUsage) {
+          for (let i = session.messageHistory.length - 1; i >= 0; i--) {
+            if (session.messageHistory[i].type === "text") {
+              session.messageHistory[i] = {
+                ...session.messageHistory[i],
+                usage: turnUsage,
+              };
+              break;
             }
-            // Forward Claude CLI's per-turn cost + token usage if present.
-            // The CLI's stream-json result frame carries:
-            //   total_cost_usd, duration_ms, duration_api_ms, num_turns,
-            //   usage: { input_tokens, output_tokens, cache_creation_input_tokens,
-            //            cache_read_input_tokens }
-            //
-            // B3 (PRD-0010) — CUMULATIVE-DELTA, settled empirically (2026-07-02
-            // live probe, real claude CLI v2.1.198): AutoViral spawns a FRESH
-            // `claude --resume <id> -p` process PER TURN (see sendMessage →
-            // spawnCli), and each such invocation reports num_turns=1 and
-            // total_cost_usd = the cost of THAT turn ONLY (probe: 0.0169 fresh →
-            // 0.0028 resume → 0.0028 resume; a cumulative value would have
-            // grown). So in THIS architecture total_cost_usd is PER-TURN, NOT
-            // cumulative — the pneuma "modelUsage cumulative" gotcha applies only
-            // to a long-lived streaming SDK process (pneuma keeps one). We record
-            // total_cost_usd DIRECTLY; a delta subtraction would UNDER-count.
-            // Locked by ws-bridge-agent-cost.test.ts.
-            const usage = (msg as Record<string, unknown>).usage as
-              | Record<string, number>
-              | undefined;
-            const cost = (msg as Record<string, unknown>).total_cost_usd as
-              | number
-              | undefined;
-            const durationMs = (msg as Record<string, unknown>).duration_ms as
-              | number
-              | undefined;
-            // Stamp the per-turn usage onto the LAST assistant text block so the
-            // session-total badge survives a refresh (all three seed paths read
-            // it back). Done BEFORE persistence below so the snapshot includes it.
-            const turnUsage: ChatBlockUsage | undefined =
-              cost !== undefined || durationMs !== undefined || usage
-                ? {
-                    ...(cost !== undefined ? { costUsd: cost } : {}),
-                    ...(durationMs !== undefined ? { durationMs } : {}),
-                    ...(typeof usage?.input_tokens === "number"
-                      ? { inputTokens: usage.input_tokens }
-                      : {}),
-                    ...(typeof usage?.output_tokens === "number"
-                      ? { outputTokens: usage.output_tokens }
-                      : {}),
-                    ...(typeof usage?.cache_creation_input_tokens === "number"
-                      ? { cacheCreationTokens: usage.cache_creation_input_tokens }
-                      : {}),
-                    ...(typeof usage?.cache_read_input_tokens === "number"
-                      ? { cacheReadTokens: usage.cache_read_input_tokens }
-                      : {}),
-                  }
-                : undefined;
-            if (turnUsage) {
-              for (let i = session.messageHistory.length - 1; i >= 0; i--) {
-                if (session.messageHistory[i].type === "text") {
-                  session.messageHistory[i] = {
-                    ...session.messageHistory[i],
-                    usage: turnUsage,
-                  };
-                  break;
-                }
-              }
-            }
-            this.broadcastToSession(session.workId, session.sessionId, {
-              event: "turn_complete",
-              data: {
-                workId: session.workId,
-                idle: true,
-                result: resultText,
-                sessionId: session.cliSessionId,
-                historyLength: session.messageHistory.length,
-                cost,
-                durationMs,
-                usage,
+          }
+        }
+        this.broadcastToSession(session.workId, session.sessionId, {
+          event: "turn_complete",
+          data: {
+            workId: session.workId,
+            idle: true,
+            result: resultText,
+            sessionId: session.cliSessionId,
+            historyLength: session.messageHistory.length,
+            cost,
+            durationMs,
+            usage,
+          },
+        });
+        // Persist chat to disk (survives server restart). Only the default
+        // session mirrors into the shared legacy chat.json snapshot — other
+        // sessions live solely in their chat-{sessionId}.jsonl (already appended
+        // block-by-block above), so a non-default turn must NOT clobber chat.json
+        // with the wrong session's history.
+        if (this.isWorkBound(session.workId)) {
+          // B3 — rewrite the session's jsonl from messageHistory so the usage
+          // just stamped onto the last text block survives a restart (jsonl is
+          // authoritative on reload). The default session ALSO mirrors the legacy
+          // chat.json snapshot.
+          this.rewriteChatLog(session.workId, session.sessionId, session.messageHistory);
+          if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
+            saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
+          }
+          // B3 — record the agent turn cost into the per-work ledger. The frame's
+          // total_cost_usd is the PER-TURN charge (see the delta note above), so
+          // record it DIRECTLY, once per turn, as a real metered cost
+          // (estimated:false). recordCostEvent is best-effort and never throws.
+          if (typeof cost === "number" && cost > 0) {
+            recordCostEvent({
+              workId: session.workId,
+              kind: "agent",
+              provider: "claude",
+              model: session.model,
+              usd: cost,
+              estimated: false,
+              meta: {
+                sessionId: session.sessionId,
+                ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+                ...(durationMs !== undefined ? { durationMs } : {}),
+                ...(typeof usage?.input_tokens === "number"
+                  ? { inputTokens: usage.input_tokens }
+                  : {}),
+                ...(typeof usage?.output_tokens === "number"
+                  ? { outputTokens: usage.output_tokens }
+                  : {}),
               },
             });
-            // Persist chat to disk (survives server restart). Only the default
-            // session mirrors into the shared legacy chat.json snapshot — other
-            // sessions live solely in their chat-{sessionId}.jsonl (already
-            // appended block-by-block above), so a non-default turn must NOT
-            // clobber chat.json with the wrong session's history.
-            if (this.isWorkBound(session.workId)) {
-              // B3 — rewrite the session's jsonl from messageHistory so the
-              // usage just stamped onto the last text block survives a restart
-              // (jsonl is authoritative on reload). The default session ALSO
-              // mirrors the legacy chat.json snapshot.
-              this.rewriteChatLog(session.workId, session.sessionId, session.messageHistory);
-              if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
-                saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
-              }
-              // B3 — record the agent turn cost into the per-work ledger. The
-              // frame's total_cost_usd is the PER-TURN charge (see the delta note
-              // above), so record it DIRECTLY, once per turn, as a real metered
-              // cost (estimated:false). recordCostEvent is best-effort and never
-              // throws, so a ledger failure can't break the chat turn.
-              if (typeof cost === "number" && cost > 0) {
-                recordCostEvent({
-                  workId: session.workId,
-                  kind: "agent",
-                  provider: "claude",
-                  model: session.model,
-                  usd: cost,
-                  estimated: false,
-                  meta: {
-                    sessionId: session.sessionId,
-                    ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
-                    ...(durationMs !== undefined ? { durationMs } : {}),
-                    ...(typeof usage?.input_tokens === "number"
-                      ? { inputTokens: usage.input_tokens }
-                      : {}),
-                    ...(typeof usage?.output_tokens === "number"
-                      ? { outputTokens: usage.output_tokens }
-                      : {}),
-                  },
-                });
-              }
-              // Snapshot the deliverable yaml so the user can roll back if
-              // this turn made things worse. createCheckpoint dedupes on
-              // content hash — turns that didn't touch yaml don't add rows.
-              // Coach sessions are workless (no deliverable) so they skip this.
-              createCheckpoint(session.workId).catch(() => {});
-            }
-            // Real-time memory sync — assistant text (complete turn, not fragments).
-            // D3: no pipeline — sync against the work title with a generic "chat" key.
-            if (this.isWorkBound(session.workId) && resultText) {
-              getWork(session.workId).then(w => {
-                if (!w) return;
-                syncMessage(session.workId, w.title, "chat", "assistant", resultText).catch(() => {});
-              }).catch(() => {});
-            }
-            continue;
           }
-
-          // Forward everything else
-          this.broadcastToSession(session.workId, session.sessionId, {
-            event: "cli_event",
-            data: msg,
-          });
-        } catch {
-          // Non-JSON line, ignore
+          // Snapshot the deliverable yaml so the user can roll back if this turn
+          // made things worse. createCheckpoint dedupes on content hash — turns
+          // that didn't touch yaml don't add rows. Coach sessions are workless
+          // (no deliverable) so they skip this.
+          createCheckpoint(session.workId).catch(() => {});
         }
-      }
+        // Real-time memory sync — assistant text (complete turn, not fragments).
+        // D3: no pipeline — sync against the work title with a generic "chat" key.
+        if (this.isWorkBound(session.workId) && resultText) {
+          getWork(session.workId).then(w => {
+            if (!w) return;
+            syncMessage(session.workId, w.title, "chat", "assistant", resultText).catch(() => {});
+          }).catch(() => {});
+        }
+      },
+
+      // Forward everything else as a raw cli_event.
+      onOther: (msg) => {
+        this.broadcastToSession(session.workId, session.sessionId, {
+          event: "cli_event",
+          data: msg,
+        });
+      },
+    });
+
+    // Feed the backend line parser from stdout.
+    proc.stdout?.on("data", (data: Buffer) => {
+      parser.push(data.toString());
     });
 
     proc.stderr?.on("data", (data: Buffer) => {
