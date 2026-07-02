@@ -108,10 +108,26 @@ export interface ChatLineParser {
   push(chunk: string): void;
 }
 
+/** Result of a pre-spawn auth probe. `ok:false` carries a user-facing `message`
+ *  that WsBridge surfaces instead of spawning (e.g. "run `codex login`"). */
+export interface BackendAuthStatus {
+  ok: boolean;
+  message?: string;
+}
+
 /** A concrete chat CLI backend. */
 export interface ChatBackend {
   /** Stable id (e.g. "claude", "codex"). */
   readonly id: string;
+  /** Per-backend ENOENT text: what to tell the user when the CLI binary is not
+   *  on PATH (a packaged app inherits a minimal GUI PATH). Sourced from the
+   *  backend so the message names the RIGHT binary. */
+  readonly notFoundMessage: string;
   buildSpawn(input: ChatSpawnInput): ChatSpawnDescriptor;
   createLineParser(cb: ChatStreamCallbacks): ChatLineParser;
+  /** Optional pre-spawn login/auth check. Backends whose CLI needs an
+   *  interactive login (codex) implement this; WsBridge calls it BEFORE spawn
+   *  and, when `ok:false`, surfaces the guidance message instead of spawning.
+   *  claude omits it (auth is handled by the claude CLI itself). */
+  checkAuth?(): Promise<BackendAuthStatus>;
 }

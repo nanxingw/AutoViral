@@ -94,8 +94,17 @@ function dispatch(msg: ChatRawMessage, cb: ChatStreamCallbacks): void {
   cb.onOther(msg);
 }
 
+/** Per-backend ENOENT text — moved verbatim from the old inline ws-bridge
+ *  error handler so a missing `claude` binary still surfaces the same actionable
+ *  message (a packaged Electron app inherits a minimal GUI PATH that often lacks
+ *  the CLI). Sourced from the backend so C3's codex path gets its own wording. */
+export const CLAUDE_NOT_FOUND_MESSAGE =
+  "无法启动创作 agent：找不到 `claude` 命令。请确认 Claude Code CLI 已安装并在 PATH 上（在终端运行 `claude --version` 验证）。";
+
 export const claudeBackend: ChatBackend = {
   id: "claude",
+
+  notFoundMessage: CLAUDE_NOT_FOUND_MESSAGE,
 
   buildSpawn(input: ChatSpawnInput): ChatSpawnDescriptor {
     const args = [

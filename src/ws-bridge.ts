@@ -259,9 +259,9 @@ export function promptChangelogSince(storedVersion: number): string {
  */
 export function buildSystemPrompt(
   work: Pick<Work, "id" | "type" | "platforms">,
-  opts: { port: number; workspacePath: string },
+  opts: { port: number; workspacePath: string; backend?: "claude" | "codex" },
 ): string {
-  const { port, workspacePath } = opts;
+  const { port, workspacePath, backend = "claude" } = opts;
   // I06 / ADR-006 — drive the deliverable + the video-vs-carousel prompt
   // branch off the content-type registry manifest, not a bare type literal.
   const manifest = getContentType(work.type);
@@ -270,10 +270,25 @@ export function buildSystemPrompt(
   const typeLabel = isVideo ? "短视频" : "图文";
   const platforms = work.platforms.join(", ");
   const deliverableAbs = `${workspacePath}/${deliverableFile}`;
+  const schemaTopic = isVideo ? "video/02-composition-schema" : "carousel/02-schema";
 
-  return `你是 AutoViral 的创作 agent，正在协助用户完成一个 ${typeLabel} 作品。目标平台：${platforms}。
+  // C3 (PRD-0010) — the manual is loaded differently per backend: claude has a
+  // `Skill` tool, codex does not. Everything AFTER this section (autoviral CLI,
+  // viewer-action protocol, deliverable contract) is backend-agnostic and shared.
+  const manualLoadSection =
+    backend === "codex"
+      ? `## ⚠️ 第一步：加载 autoviral 操作手册
 
-## ⚠️ 第一步：加载 autoviral 操作手册
+在回复用户第一条消息之前，先运行一次这条命令读操作手册：
+
+\`\`\`
+autoviral docs
+\`\`\`
+
+它打印 agent-agnostic 的工位操作手册索引（按内容类型分层：跨类型核心在 \`_shared/\`，本作品的 deliverable schema 在 ${isVideo ? "\`video/\`" : "\`carousel/\`"}）。用 \`autoviral docs <topic>\` 读具体章节（如 \`autoviral docs _shared/03-cli-reference\`、\`autoviral docs ${schemaTopic}\`），它们告诉你：怎么用 \`autoviral\` CLI 驱动 Studio、${deliverableFile} 的 schema、命名与单位约定。**读完你就拥有 schema 与命令参考，不需要去读项目源码（\`src/...\`）。** 即使用户只说 "hi"，也先扫一眼 docs 再回欢迎语。
+
+审美 / 选题不在手册里：AutoViral 工位本身不评审美，需要品味判断时自带你偏好的标准。`
+      : `## ⚠️ 第一步：加载 autoviral 操作手册
 
 在回复用户第一条消息之前，先调用一次：
 
@@ -283,7 +298,11 @@ Skill('autoviral')
 
 它是 agent-agnostic 的工位操作手册（按内容类型分层：跨类型核心在 manual/_shared/，本作品的 deliverable schema 在 ${isVideo ? "manual/video/" : "manual/carousel/"}），告诉你：怎么用 \`autoviral\` CLI 驱动 Studio、${deliverableFile} 的 schema、命名与单位约定。**加载后你就拥有 schema 与命令参考，不需要去读项目源码（\`src/...\`）。** skill 加载和回复用户不冲突，可以同一轮内完成——即使用户只说 "hi"，也先加载再回欢迎语。
 
-审美 / 选题不在这个 skill 里：AutoViral 工位本身不评审美。需要 taste 时按需加载 sibling skill（\`editorial-pro\` / \`viral-hooks-zh\` / \`lyric-video\` 等）；需要工程协作流程用 \`mattpocock/*\`（\`to-prd\` / \`diagnose\` / \`tdd\` 等），不要用 \`superpowers:*\`。
+审美 / 选题不在这个 skill 里：AutoViral 工位本身不评审美。需要 taste 时按需加载 sibling skill（\`editorial-pro\` / \`viral-hooks-zh\` / \`lyric-video\` 等）；需要工程协作流程用 \`mattpocock/*\`（\`to-prd\` / \`diagnose\` / \`tdd\` 等），不要用 \`superpowers:*\`。`;
+
+  return `你是 AutoViral 的创作 agent，正在协助用户完成一个 ${typeLabel} 作品。目标平台：${platforms}。
+
+${manualLoadSection}
 
 ## 怎么驱动这个工位：autoviral CLI
 
@@ -1727,8 +1746,11 @@ export class WsBridge {
       session.cliProcess = undefined;
       session.idle = true;
       const isNotFound = (err as NodeJS.ErrnoException).code === "ENOENT";
+      // Per-backend ENOENT text (C3) — sourced from the backend so the message
+      // names the right binary. ws-bridge drives claude today; C4 wires the
+      // per-session backend and this will read the session's backend instead.
       const message = isNotFound
-        ? "无法启动创作 agent：找不到 `claude` 命令。请确认 Claude Code CLI 已安装并在 PATH 上（在终端运行 `claude --version` 验证）。"
+        ? claudeBackend.notFoundMessage
         : `创作 agent 启动失败：${err.message}`;
       logBridge("cli_spawn_error", session.workId, {
         code: (err as NodeJS.ErrnoException).code,

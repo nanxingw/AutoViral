@@ -234,6 +234,55 @@ describe("buildSystemPrompt", () => {
       expect(p).not.toMatch(/把产物写入 data\/works\//);
     }
   });
+
+  // C3 (PRD-0010) — codex system-prompt branch. codex has no `Skill` tool and no
+  // --append-system-prompt: the manual is loaded via `autoviral docs`, the
+  // viewer-action protocol章节 is preserved, and NO `Skill('autoviral')` call
+  // survives. The default (claude) branch is unchanged — the assertions above
+  // (which omit `backend`) still lock `Skill('autoviral')`.
+  describe("backend: 'codex' branch", () => {
+    const ws = "/tmp/autoviral-test/works/w_codex";
+    const codex = (type: "short-video" | "image-text" = "short-video") =>
+      buildSystemPrompt(baseWork({ type }) as any, { port: 3271, workspacePath: ws, backend: "codex" });
+
+    it("loads the manual via `autoviral docs`, NOT the claude `Skill('autoviral')` tool", () => {
+      const p = codex();
+      expect(p).not.toMatch(/Skill\('autoviral'\)/);
+      expect(p).not.toContain("Skill(");
+      // The docs-based manual entry replaces the Skill call.
+      expect(p).toMatch(/autoviral docs/);
+      // The stable per-endpoint docs pointer still holds.
+      expect(p).toContain("autoviral docs _shared/03-cli-reference");
+    });
+
+    it("preserves the viewer-action protocol section (drives Studio seek/select)", () => {
+      const p = codex();
+      expect(p).toContain("<viewer-action");
+      expect(p).toMatch(/select-slide/);
+      expect(p).toMatch(/select-clip/);
+      expect(p).toMatch(/set-frame/);
+      // and the viewer-locator / viewer-context vocabulary.
+      expect(p).toContain("<viewer-context");
+      expect(p).toContain("<viewer-locator");
+    });
+
+    it("still teaches the autoviral CLI + carries no stale src/ or dead-script refs", () => {
+      const p = codex();
+      expect(p).toMatch(/autoviral comp show/);
+      expect(p).toMatch(/autoviral clip (add|set|remove)/);
+      // Migration guards apply to the codex variant too.
+      for (const dead of ["src/shared/composition.ts", "superpowers:brainstorming", "music_generate.py"]) {
+        expect(p).not.toContain(dead);
+      }
+      // No forced-ordering / stage vocabulary leaked into the codex branch.
+      for (const w of ["当前步骤", "流水线", "下一步"]) expect(p).not.toContain(w);
+    });
+
+    it("default backend (omitted) is still claude — Skill('autoviral') survives", () => {
+      const claudeVariant = buildSystemPrompt(baseWork() as any, { port: 3271, workspacePath: ws });
+      expect(claudeVariant).toMatch(/Skill\('autoviral'\)/);
+    });
+  });
 });
 
 // The agent gets the full envelope-prefixed wire text, but what we PERSIST +
