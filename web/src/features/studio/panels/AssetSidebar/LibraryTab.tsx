@@ -5,6 +5,7 @@ import { useGatedMediaSrc } from "@/features/studio/media/useGatedMediaSrc";
 import { SearchBox } from "./SearchBox";
 import { AssetPreviewModal } from "./AssetPreviewModal";
 import { AudioAssetRow } from "./AudioAssetRow";
+import { TextAssetRow } from "./TextAssetRow";
 import { DeleteAssetConfirm } from "./DeleteAssetConfirm";
 import { useAddAssetToTimeline, isAddableAsset } from "./addAssetToTimeline";
 import { writeDragPayload } from "../Timeline/dnd";
@@ -327,7 +328,25 @@ export function LibraryTab({ workId }: Props) {
             ))}
           </div>
         )}
-        {currentGroup && currentGroup.group !== "AUDIO" && (
+        {/* A7 — TEXT renders full-width content snippet cards (first ~200
+            chars, mono 3-line clamp + ext badge) so a creator can identify
+            each text asset without opening it. Text has no timeline clip, so
+            no ＋/drag affordance — click opens the full-text preview. */}
+        {currentGroup && currentGroup.group === "TEXT" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {currentGroup.items.map((item, i) => (
+              <TextAssetRow
+                key={item.path}
+                item={item}
+                index={i}
+                onOpen={() => setPreview(item)}
+                onDelete={() => setPendingDelete(item)}
+                deleteLabel={t("studio.assetSidebar.deleteAria")}
+              />
+            ))}
+          </div>
+        )}
+        {currentGroup && currentGroup.group !== "AUDIO" && currentGroup.group !== "TEXT" && (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             {currentGroup.items.map((item, i) => (
               <AssetTile

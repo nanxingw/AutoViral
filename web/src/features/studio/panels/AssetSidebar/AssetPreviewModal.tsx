@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useT } from "@/i18n/useT";
+import { useAssetText, FULL_TEXT_MAX_CHARS } from "../../hooks/useAssetText";
 import type { AssetItem } from "@/queries/assets";
 
 interface Props {
@@ -26,7 +27,9 @@ interface Props {
  *   - image  → fit-to-viewport <img> (object-fit: contain)
  *   - video  → full <video controls> with audio (the sidebar tile mutes)
  *   - audio  → <audio controls> + filename + duration via metadata
- *   - text/other → metadata card with link (no inline preview yet)
+ *   - text   → full document body in a mono <pre> (A7). Falls back to the
+ *              open-in-tab card if the content can't be fetched.
+ *   - other  → metadata card with open-in-tab link (no inline preview)
  *
  * ESC + backdrop click both close. Reuses useModalFocus (R41) for
  * keyboard focus management — same pattern as ReframeConfirmDialog and
@@ -37,6 +40,14 @@ export function AssetPreviewModal({ asset, onClose, onAddToTimeline, onDelete }:
   const t = useT();
   const dialogRef = useRef<HTMLDivElement>(null);
   useModalFocus(open, dialogRef);
+
+  // A7 — for TEXT assets, fetch the full document body for an inline <pre>
+  // preview. Called unconditionally (hooks rule); the null url short-circuits
+  // the fetch for every non-text kind.
+  const textDoc = useAssetText(
+    asset?.kind === "text" ? asset.url : null,
+    FULL_TEXT_MAX_CHARS,
+  );
 
   useEffect(() => {
     if (!open) return;
@@ -314,7 +325,36 @@ export function AssetPreviewModal({ asset, onClose, onAddToTimeline, onDelete }:
                   />
                 </div>
               )}
-              {(asset.kind === "text" || asset.kind === "other") && (
+              {/* A7 — TEXT renders its full body inline (mono, scrollable)
+                  instead of the old dead "no inline preview" card. */}
+              {asset.kind === "text" && !textDoc.failed && (
+                <div
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    overflow: "auto",
+                    padding: 24,
+                    boxSizing: "border-box",
+                  }}
+                >
+                  <pre
+                    data-testid="asset-text-full"
+                    style={{
+                      margin: 0,
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 12.5,
+                      lineHeight: 1.65,
+                      color: "var(--text)",
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {textDoc.loading ? "…" : textDoc.text ?? ""}
+                  </pre>
+                </div>
+              )}
+              {(asset.kind === "other" ||
+                (asset.kind === "text" && textDoc.failed)) && (
                 <div
                   style={{
                     padding: 32,

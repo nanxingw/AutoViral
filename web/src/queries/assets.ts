@@ -33,6 +33,30 @@ function classify(path: string): AssetItem["kind"] {
   return "other";
 }
 
+// A7 (PRD-0010) — files the render/audio pipeline scatters through assets/ +
+// output/ that are NOT creator-facing media. The library filters these out
+// BEFORE classification; otherwise e.g. a per-audio `.peaks.json` waveform
+// cache lands in TEXT and its raw JSON gets rendered as a "content" snippet.
+//
+// This is FRONTEND-ONLY hygiene. The CLI bridge's asset projection
+// (server-side `listAssets`) is deliberately left untouched so agents keep
+// seeing the raw work tree — the filtering is purely a human-UI concern.
+const PIPELINE_INTERNAL: RegExp[] = [
+  /\.peaks\.json$/i, // waveform cache written next to each audio file
+  /(^|\/)concat(-[^/]*)?\.txt$/i, // ffmpeg concat / file list
+  /(^|\/)filelist(-[^/]*)?\.txt$/i, // ffmpeg concat / file list (alt name)
+  /\.labels\.json$/i, // checkpoint label sidecar (#90)
+  /(^|\/)composition\.ya?ml$/i, // the composition document itself
+  /(^|\/)chat(-[^/]*)?\.jsonl?$/i, // agent chat log / per-session log
+  /(^|\/)\.DS_Store$/i, // macOS filesystem cruft
+  /\.(tmp|part|crdownload)$/i, // partial upload / download temp files
+];
+
+/** True for pipeline-internal files that should never appear in the library. */
+export function isPipelineInternal(path: string): boolean {
+  return PIPELINE_INTERNAL.some((re) => re.test(path));
+}
+
 export function useWorkAssets(workId: string | null) {
   return useQuery({
     queryKey: ["assets", workId],
@@ -40,7 +64,9 @@ export function useWorkAssets(workId: string | null) {
     queryFn: async (): Promise<AssetGroup[]> => {
       if (!workId) return [];
       const res = await apiFetch<{ assets: string[] }>(`/api/works/${workId}/assets`);
-      const items: AssetItem[] = res.assets.map((p) => {
+      const items: AssetItem[] = res.assets
+        .filter((p) => !isPipelineInternal(p))
+        .map((p) => {
         const m = p.match(/\.([^.]+)$/);
         const ext = (m?.[1] ?? "").toLowerCase();
         const name = p.split("/").pop() ?? p;
