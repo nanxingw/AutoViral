@@ -30,13 +30,32 @@ export interface BridgeContext {
 // never the opaque `fetch failed`. The default ceiling (10 min) is high enough
 // that real generations complete; AUTOVIRAL_HTTP_TIMEOUT_MS overrides it (tests
 // inject a short value; a user with an unusually slow provider can raise it).
-const DEFAULT_HTTP_TIMEOUT_MS = 600_000; // 10 minutes
+export const DEFAULT_HTTP_TIMEOUT_MS = 600_000; // 10 minutes
 
-export function httpTimeoutMs(): number {
+// BE3-F3 review fix — a SINGLE 10-min ceiling for every route was a regression
+// for `ingest youtube`, whose header contract (commands/ingest.ts) documents
+// that agents "should not timeout client-side under ~15 min for typical 5–10
+// minute YouTube clips" (download + Whisper ASR + translation all block the one
+// HTTP response). Capping it at the generic 10 min would abort a legit long
+// ingest. So the caller passes its own generous per-call budget; ingest uses
+// this one, comfortably above its ~15-min floor. (CAVEAT: undici's own implicit
+// headersTimeout — ~5 min by default in current Node — can still fire earlier
+// for a route that sends NO response bytes until it finishes, which ingest does;
+// raising that further would need a custom undici dispatcher, deliberately out
+// of scope here since this CLI is intentionally dependency-free. This constant
+// removes OUR self-inflicted 10-min cap and keeps the explicit budget aligned
+// with the documented contract.)
+export const INGEST_TIMEOUT_MS = 1_200_000; // 20 minutes
+
+// Resolve the effective request budget. `AUTOVIRAL_HTTP_TIMEOUT_MS`, when set to
+// a positive finite number, is an explicit user override that wins over any
+// per-call fallback; otherwise the caller's `fallbackMs` (default: the generic
+// 10-min ceiling) applies.
+export function httpTimeoutMs(fallbackMs: number = DEFAULT_HTTP_TIMEOUT_MS): number {
   const raw = process.env.AUTOVIRAL_HTTP_TIMEOUT_MS;
-  if (raw === undefined) return DEFAULT_HTTP_TIMEOUT_MS;
+  if (raw === undefined) return fallbackMs;
   const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : DEFAULT_HTTP_TIMEOUT_MS;
+  return Number.isFinite(n) && n > 0 ? n : fallbackMs;
 }
 
 // A timeout-class fetch rejection: our own AbortSignal.timeout (a "TimeoutError"
@@ -72,8 +91,9 @@ async function fetchWithBudget(
   url: string,
   init: RequestInit,
   label: string,
+  fallbackMs: number = DEFAULT_HTTP_TIMEOUT_MS,
 ): Promise<Response> {
-  const budget = httpTimeoutMs();
+  const budget = httpTimeoutMs(fallbackMs);
   try {
     return await fetch(url, { ...init, signal: AbortSignal.timeout(budget) });
   } catch (err) {
@@ -112,6 +132,10 @@ export async function bridgeRequest<T>(
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE",
   path: string,
   body?: unknown,
+  // BE3-F3 review fix — a route with a longer documented SLA than the generic
+  // 10-min ceiling (e.g. `ingest youtube`, ~15 min) passes its own budget here.
+  // AUTOVIRAL_HTTP_TIMEOUT_MS still overrides it (see httpTimeoutMs).
+  opts?: { timeoutMs?: number },
 ): Promise<T> {
   const url = `http://127.0.0.1:${ctx.port}/api/bridge/v1${path}`;
   const res = await fetchWithBudget(
@@ -125,6 +149,7 @@ export async function bridgeRequest<T>(
       body: body == null ? undefined : JSON.stringify(body),
     },
     `bridge ${method} ${path}`,
+    opts?.timeoutMs,
   );
   // S3 (US 18/19) — error-code contract. The CLI's exit code is the agent's
   // control-flow signal: 4 = "your input/validation was wrong" (4xx),

@@ -7,7 +7,7 @@
 // progress strip render live updates; this CLI just blocks on the final
 // HTTP result and prints a one-line summary.
 
-import { bridgeRequest, readContext } from "../client.js";
+import { bridgeRequest, readContext, INGEST_TIMEOUT_MS } from "../client.js";
 
 type IngestSubcommand = "youtube";
 
@@ -36,13 +36,22 @@ async function ingestYouTubeCommand(args: string[]): Promise<void> {
     segmentCount: number;
     language: string;
     targetLanguage: string;
-  }>(ctx, "POST", "/ingest/youtube", {
-    url: flags.url,
-    language: flags.lang ?? "zh-CN",
-    model: flags.model,
-    start: flags.start,
-    end: flags.end,
-  });
+  }>(
+    ctx,
+    "POST",
+    "/ingest/youtube",
+    {
+      url: flags.url,
+      language: flags.lang ?? "zh-CN",
+      model: flags.model,
+      start: flags.start,
+      end: flags.end,
+    },
+    // Long-running ingest gets its own generous budget (see INGEST_TIMEOUT_MS)
+    // instead of the generic 10-min ceiling, honoring the ~15-min contract
+    // documented in this file's header. AUTOVIRAL_HTTP_TIMEOUT_MS still wins.
+    { timeoutMs: INGEST_TIMEOUT_MS },
+  );
   process.stdout.write(
     `${result.sourceClipPath}\nduration ${result.durationSec.toFixed(2)}s · ${result.segmentCount} segments · ${result.language} → ${result.targetLanguage}\n`,
   );
