@@ -187,6 +187,28 @@ describe("seedanceProvider", () => {
     ).rejects.toThrow(/Seedance enqueue failed: 500/);
   });
 
+  it("fails fast with a diagnosable error when enqueue 200 lacks polling_url", async () => {
+    // Regression guard: without the polling_url fail-fast, a malformed 200
+    // enqueue body reaches fetch(job.polling_url) as fetch(undefined) and throws
+    // the opaque "Failed to parse URL from undefined" deep in the poll loop —
+    // exactly the kind of un-attributable failure surfaced during the i2v probe.
+    vi.stubEnv("OPENROUTER_API_KEY", "test-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({ id: "job-no-poll", status: "pending" }), // no polling_url
+    });
+
+    const provider = createSeedanceProvider();
+    await expect(
+      provider.generateVideo({ prompt: "x", durationSec: 5, aspectRatio: "9:16" }),
+    ).rejects.toThrow(/no polling_url/);
+    // The guard must short-circuit before any poll fetch is attempted.
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("throws when poll returns failed status", async () => {
     vi.stubEnv("OPENROUTER_API_KEY", "test-key");
     const fetchMock = vi.fn();

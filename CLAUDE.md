@@ -62,6 +62,7 @@ https://github.com/pandazki/pneuma-skills是你需要着重参考的项目地址
 </rules>
 
 <testing>
+- **测试先行（2026-07-02 起）**：写功能之前先落测试脚本与通过标准，实现完成的唯一定义 = 预设测试全绿 + 既有套件不破；先证红再变绿；补测是辅助不是主要方式。完整规则见 [.claude/rules/test-first.md](.claude/rules/test-first.md)。
 - **默认一次性运行**：验证代码请用 `npm run test:web`（跑完即退出），不要默认 `test:web:watch`。Server 端同理用 `npm run test:server` 而非 `:watch`。
 - **watch 模式仅用于主动调试**：只在反复迭代单个测试文件时短时启用，调完立刻 Ctrl+C，绝不让它常驻后台。
 - **vitest worker 必须封顶（两个 pool 都要）**：`web/vitest.config.ts` 的 `poolOptions.threads.maxThreads = 2`，`vitest.server.config.ts` 的 `poolOptions.forks.maxForks = 2`。本机 8 核默认会开 7 个 worker × ~150 MB ≈ 1 GB 常驻，已经炸过两次内存。修改任一 vitest 配置时不要移除这两个上限。

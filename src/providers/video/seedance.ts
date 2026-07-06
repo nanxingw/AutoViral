@@ -224,6 +224,16 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
         throw new Error(`Seedance enqueue failed: ${enqueueRes.status} ${body}`);
       }
       const job = (await enqueueRes.json()) as EnqueueResponse;
+      // Fail-fast: a 200 enqueue whose body lacks `polling_url` would otherwise
+      // reach `fetch(job.polling_url)` below as fetch(undefined) and throw the
+      // opaque "Failed to parse URL from undefined" deep in the poll loop —
+      // impossible to attribute. Surface the upstream body instead so the
+      // failure is diagnosable at the boundary where it originates.
+      if (!job.polling_url) {
+        throw new Error(
+          `Seedance enqueue returned no polling_url: ${JSON.stringify(job)}`,
+        );
+      }
 
       // 2) Poll
       let final: PollResponse | null = null;

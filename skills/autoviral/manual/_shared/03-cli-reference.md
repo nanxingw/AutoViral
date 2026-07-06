@@ -407,7 +407,7 @@ Body: `{ workId, prompt, filename, aspectRatio?, resolution?, durationSec?, firs
 | `aspectRatio` | One of `1:1` / `3:4` / `9:16` / `4:3` / `16:9` / `21:9` / `9:21`. **Omit to follow the work's canvas** — the composition `aspect` maps to the nearest supported ratio (`4:5` → `3:4`). Explicit always wins. |
 | `resolution` | `480p` / `720p` / `1080p`. Omit ⇒ gateway default. |
 | `durationSec` | Integer `4`–`15` (default `5`). fps is fixed at `24`, not a parameter. |
-| `firstFrame` / `lastFrame` | i2v anchors. An `http(s)://` or `data:` URI passes through; a **workspace-relative path** (e.g. `assets/images/anchor.png`) is sandbox-resolved and inlined as a base64 data URI for you. |
+| `firstFrame` / `lastFrame` | i2v anchors. **Prefer a workspace-relative path** (e.g. `assets/images/anchor.png`) — it's sandbox-resolved and inlined as a base64 `data:` URI for you (probe-verified 2026-06-15: Seedance accepts the inlined `data:`). A `data:` or **publicly downloadable** `https://` URI also passes through. ⚠️ Seedance fetches the anchor **server-side from OpenRouter**, so a `http://localhost…` / private-LAN URL fails with `400 resource download failed` — never hand it a localhost URL; pass the workspace path instead. Stylized/object anchors only — ByteDance rejects photo-real human faces (HTTP 400, not billed). |
 
 Cost (per token, H×W×dur×24): roughly **720p ≈ $0.15/s, 1080p ≈ $0.34/s**.
 

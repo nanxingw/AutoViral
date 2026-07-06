@@ -7,6 +7,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+- **Seedance 轮询层 `polling_url` 缺失时给可诊断错误**（i2v 诊断沉淀）— enqueue 返 200 但响应体无 `polling_url` 时，旧代码会把它当 `fetch(undefined)` 在轮询循环深处抛出无法归因的 `Failed to parse URL from undefined`；现于 enqueue 边界 fail-fast，抛带上游 body 的显式错误（`Seedance enqueue returned no polling_url: …`），并有回归测试钉死「守卫短路于任何 poll fetch 之前」。
+
+### Changed
+- **i2v recipe：`data:` 锚图路径补实证 + 可达性 gotcha**（文档纠偏）— 2026-06-10 探针只发过 http-URL 锚图，`data:` 内联路当时仅代码正确、从未打过真 API；2026-06-15 付费探针实证：work-relative `firstFrame` → 服务端内联 `data:` URI → **OpenRouter Seedance 接受并出片**（64×64 `data:` 锚 + 显式 `16:9` → 真实 864×496/24fps/4s，方形锚未锁画幅）。recipe 同时写明锚图**由 OpenRouter 服务端拉取**：传 work-relative 路径（路由内联 `data:`，首选）或公网可下载 `https://` URL 才可达，**`http://localhost…` 必失败 `400 resource download failed`**。
+
 ## [0.1.7] - 2026-06-12
 
 本版由两批工作组成：**Agent 工作面大修**（PRD-0009 七片 + agent 视角冒烟与多纬度 E2E 揪出的修复簇，先列于下）与 **折叠镜表（Shot Sheet）**（PRD-0008，见本节后半）。Agent 工作面批的主线：聊天暂停键真正可用、BGM 生成从零到一、agent 的 CLI 开箱即用（不再被幽灵路径逼去读源码）、操作手册与实现全面对齐并有自动防漂移测试、旧作品 resume 也能学到新能力、导出成片从 100% 失败修到真实出片。
