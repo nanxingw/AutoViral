@@ -32,6 +32,7 @@ import {
 } from "./dispatchGeneration";
 import { useT } from "@/i18n/useT";
 import { apiFetch } from "@/lib/api";
+import { costKey } from "@/queries/cost";
 
 // ─── Provider listing (Phase 8.4) ────────────────────────────────────────────
 
@@ -563,6 +564,13 @@ export function GenerationDialog(props: GenerationDialogProps) {
       setIsGenerating(false);
       return; // keep dialog open so user sees the error
     }
+    // BE1-F1 (PRD-0010) — a direct-dispatch generate books provider $ to the
+    // cost ledger server-side, so refresh the Studio/Editor cost badge WITHOUT a
+    // page reload (mirrors the agent-chat path: RightPane invalidates the same
+    // ['cost', workId] key on turn_complete). Each dispatch above only
+    // invalidates ['assets', workId]; this single chokepoint covers every
+    // kind×mode uniformly so a future dispatch path can't forget the badge.
+    await queryClient.invalidateQueries({ queryKey: costKey(workId) });
     setIsGenerating(false);
     onOpenChange(false);
   }

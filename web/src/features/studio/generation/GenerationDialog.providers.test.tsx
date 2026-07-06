@@ -605,3 +605,140 @@ describe("GenerationDialog B3 direct-dispatch wiring", () => {
     }
   });
 });
+
+// ─── BE1-F1 (PRD-0010) — cost badge refreshes after a DIRECT-DISPATCH generate ─
+//
+// A UI direct-dispatch (image / bgm / tts / video) books provider $ to the
+// cost ledger server-side, so the Studio/Editor cost badge must refresh
+// WITHOUT a page reload — exactly like the agent-chat path already does on
+// turn_complete (RightPane wires onTurnComplete → invalidate(['cost', workId])).
+// Before the fix each dispatch only invalidated ['assets', workId], leaving the
+// badge stale until a manual reload. Each case asserts the ['cost', workId]
+// query is invalidated after a successful 200.
+describe("GenerationDialog BE1-F1 cost-badge refresh on direct dispatch", () => {
+  function costFetchMock() {
+    return vi.fn(async (url: string, init?: RequestInit) => {
+      const u = String(url);
+      const isPost = init?.method === "POST";
+      const ok200 = (json: unknown) =>
+        ({
+          ok: true,
+          status: 200,
+          statusText: "OK",
+          headers: jsonHeaders(),
+          json: async () => json,
+          text: async () => "",
+        }) as unknown as Response;
+      if (u.includes("/api/generate/image") && isPost)
+        return ok200({ success: true, assetId: "img_1" });
+      if (u.includes("/api/generate/bgm") && isPost)
+        return ok200({ success: true, assetId: "bgm_1" });
+      if (u.includes("/tts") && isPost)
+        return ok200({ ok: true, relativeUri: "assets/audio/tts_x.mp3" });
+      if (u.includes("/generate-video") && isPost)
+        return ok200({ assetId: "vid_1", assetUri: "x.mp4", stub: true });
+      if (u.includes("/api/providers")) return ok200({ providers: PROVIDERS });
+      return {
+        ok: false,
+        status: 404,
+        statusText: "Not Found",
+        headers: jsonHeaders(),
+        json: async () => ({}),
+        text: async () => "",
+      } as unknown as Response;
+    });
+  }
+
+  function renderWithSpy(source?: {
+    id: string;
+    name: string;
+    uri: string;
+    sourcePrompt?: string;
+    sourceVoice?: string;
+    sourceDuration?: number;
+    sourceAspectRatio?: string;
+  }) {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: 0, gcTime: 0 } },
+    });
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
+    render(
+      <QueryClientProvider client={qc}>
+        <GenerationDialog
+          workId="w1"
+          open={true}
+          onOpenChange={() => {}}
+          source={source}
+        />
+      </QueryClientProvider>,
+    );
+    return invalidateSpy;
+  }
+
+  function expectCostInvalidated(invalidateSpy: ReturnType<typeof vi.spyOn>) {
+    return waitFor(() => {
+      const hit = invalidateSpy.mock.calls.find((c) => {
+        const arg = c[0] as { queryKey?: unknown } | undefined;
+        return (
+          Array.isArray(arg?.queryKey) &&
+          (arg!.queryKey as unknown[])[0] === "cost" &&
+          (arg!.queryKey as unknown[])[1] === "w1"
+        );
+      });
+      expect(hit).toBeDefined();
+    });
+  }
+
+  it("image CREATE refreshes the ['cost', workId] query", async () => {
+    vi.stubGlobal("fetch", costFetchMock());
+    const invalidateSpy = renderWithSpy();
+    fireEvent.change(screen.getByPlaceholderText(/panda eating bamboo/i), {
+      target: { value: "a serene koi pond at dusk, editorial grade" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+    await expectCostInvalidated(invalidateSpy);
+  });
+
+  it("BGM CREATE refreshes the ['cost', workId] query", async () => {
+    vi.stubGlobal("fetch", costFetchMock());
+    const invalidateSpy = renderWithSpy();
+    fireEvent.click(screen.getByRole("button", { name: /^audio$/i }));
+    fireEvent.change(
+      screen.getByPlaceholderText(/warm cinematic ambient pad/i),
+      { target: { value: "lofi rainy night, 70 BPM" } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+    await expectCostInvalidated(invalidateSpy);
+  });
+
+  it("TTS CREATE refreshes the ['cost', workId] query", async () => {
+    vi.stubGlobal("fetch", costFetchMock());
+    const invalidateSpy = renderWithSpy();
+    fireEvent.click(screen.getByRole("button", { name: /^audio$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^tts$/i }));
+    fireEvent.change(screen.getByPlaceholderText(/欢迎来到 AutoViral/i), {
+      target: { value: "你好，欢迎来到 AutoViral" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+    await expectCostInvalidated(invalidateSpy);
+  });
+
+  it("video VARIANT refreshes the ['cost', workId] query", async () => {
+    vi.stubGlobal("fetch", costFetchMock());
+    const invalidateSpy = renderWithSpy({
+      id: "asset-panda-v1",
+      name: "Panda v1",
+      uri: "/api/works/w1/assets/clips/panda-v1.mp4",
+      sourcePrompt: "panda drooping head",
+      sourceAspectRatio: "9:16",
+      sourceDuration: 4,
+    });
+    const select = (await screen.findByLabelText("Provider")) as HTMLSelectElement;
+    await waitFor(() => expect(select.options.length).toBeGreaterThan(0));
+    fireEvent.change(screen.getByPlaceholderText(/slower droop/i), {
+      target: { value: "slower droop" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^generate$/i }));
+    await expectCostInvalidated(invalidateSpy);
+  });
+});
