@@ -24,6 +24,8 @@ vi.mock("@/lib/api", () => ({
       "assets/text/publish-text.md",
       "output/concat.txt", // pipeline-internal — filtered
       "assets/tmp/concat_list.txt", // pipeline-internal (underscore variant) — filtered
+      "composition.yaml", // the composition document itself — filtered
+      "carousel.yaml", // AE3-F3: carousel works' twin document — must also be filtered
       "weird.unknown",
     ],
   })),
@@ -50,6 +52,27 @@ describe("isPipelineInternal", () => {
     expect(isPipelineInternal("output/filelist_0.txt")).toBe(true);
     expect(isPipelineInternal("checkpoints/x.labels.json")).toBe(true);
     expect(isPipelineInternal("assets/images/partial.tmp")).toBe(true);
+  });
+
+  it("flags the composition + carousel documents (AE3-F3)", () => {
+    // Both are the work's composition document, not creator text assets —
+    // works.ts writes composition.yaml (video) / carousel.yaml (carousel) the
+    // same way into the work dir. The old filter only knew composition.yaml, so
+    // a carousel work's carousel.yaml leaked its raw YAML into the TEXT group as
+    // a "content" snippet. Symmetric, filename-anchored so creator *.yaml stays.
+    expect(isPipelineInternal("composition.yaml")).toBe(true);
+    expect(isPipelineInternal("composition.yml")).toBe(true);
+    expect(isPipelineInternal("carousel.yaml")).toBe(true);
+    expect(isPipelineInternal("carousel.yml")).toBe(true);
+    expect(isPipelineInternal("output/carousel.yaml")).toBe(true);
+  });
+
+  it("keeps creator-authored *.yaml notes (filename-anchored)", () => {
+    // Only the two reserved document names are pipeline-internal; a creator may
+    // legitimately drop notes.yaml / carousel-ideas.yaml into the tree.
+    expect(isPipelineInternal("assets/text/notes.yaml")).toBe(false);
+    expect(isPipelineInternal("assets/text/carousel-ideas.yaml")).toBe(false);
+    expect(isPipelineInternal("assets/text/composition-notes.yaml")).toBe(false);
   });
 
   it("keeps real creator-facing text assets", () => {
@@ -86,6 +109,9 @@ describe("useWorkAssets", () => {
     expect(allPaths).not.toContain("assets/audio/bgm.mp3.peaks.json");
     expect(allPaths).not.toContain("output/concat.txt");
     expect(allPaths).not.toContain("assets/tmp/concat_list.txt");
+    // AE3-F3 — the composition documents must never surface as TEXT snippets.
+    expect(allPaths).not.toContain("composition.yaml");
+    expect(allPaths).not.toContain("carousel.yaml");
   });
 
   it("keeps real text assets in the TEXT group", async () => {

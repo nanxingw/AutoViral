@@ -48,7 +48,11 @@ const PIPELINE_INTERNAL: RegExp[] = [
   /(^|\/)concat([-_.][^/]*)?\.txt$/i, // ffmpeg concat / file list
   /(^|\/)filelist([-_.][^/]*)?\.txt$/i, // ffmpeg concat / file list (alt name)
   /\.labels\.json$/i, // checkpoint label sidecar (#90)
-  /(^|\/)composition\.ya?ml$/i, // the composition document itself
+  // the work's composition document itself — video works write composition.yaml
+  // and carousel works write carousel.yaml (works.ts), both to the work dir.
+  // Filtered symmetrically so a carousel work's carousel.yaml never renders its
+  // raw YAML as a TEXT "content" snippet (AE3-F3).
+  /(^|\/)(composition|carousel)\.ya?ml$/i,
   /(^|\/)chat(-[^/]*)?\.jsonl?$/i, // agent chat log / per-session log
   /(^|\/)\.DS_Store$/i, // macOS filesystem cruft
   /\.(tmp|part|crdownload)$/i, // partial upload / download temp files
