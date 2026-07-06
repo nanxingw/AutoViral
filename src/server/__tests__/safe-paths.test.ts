@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
-import { resolveAssetPath, resolveAssetFile, resolveAssetSubpath, ASSET_ROOTS, getWorksRoot, UnsafePathError } from "../safe-paths.js";
+import { resolveAssetPath, resolveAssetFile, resolveAssetSubpath, resolveAssetUriToPath, ASSET_ROOTS, getWorksRoot, UnsafePathError } from "../safe-paths.js";
 import { withTempDataDir } from "./_helpers.js";
 
 describe("safe-paths", () => {
@@ -149,6 +149,69 @@ describe("safe-paths", () => {
     it("rejects path separators in basename", async () => {
       await withTempDataDir(async () => {
         expect(() => resolveAssetSubpath("w_test", "assets", "images", "x/y.png")).toThrow(UnsafePathError);
+      });
+    });
+  });
+
+  // PRD-0010 AE E2E — post-process/reframe/lip-sync resolved an AssetEntry.uri
+  // to disk with a naive `uri.replace(/^\/api\/works\/[^/]+\/assets\//,'') +
+  // join(wDir,'assets',rel)`, which (a) double-counted `assets/` for
+  // work-relative uris (→ assets/assets/…) and (b) sent output/ files to
+  // wDir/assets/output/ when the real file lives at wDir/output/. This helper
+  // is the single uri→disk resolver, mirroring the GET serve route's exact
+  // URL→root mapping (assets.ts:106-135).
+  describe("resolveAssetUriToPath (canonical uri→disk, mirrors serve route)", () => {
+    it("maps an /api output URL to workDir/output/ (NOT assets/output/)", async () => {
+      await withTempDataDir(async () => {
+        const r = resolveAssetUriToPath(
+          "w_test",
+          "/api/works/w_test/assets/output/final.mp4",
+        );
+        expect(r.endsWith("/works/w_test/output/final.mp4")).toBe(true);
+        expect(r.includes("/assets/output/")).toBe(false);
+      });
+    });
+
+    it("maps an /api images URL to workDir/assets/images/", async () => {
+      await withTempDataDir(async () => {
+        const r = resolveAssetUriToPath(
+          "w_test",
+          "/api/works/w_test/assets/images/cover.png",
+        );
+        expect(r.endsWith("/works/w_test/assets/images/cover.png")).toBe(true);
+      });
+    });
+
+    it("maps a WORK-RELATIVE assets/ uri without double-counting assets/", async () => {
+      await withTempDataDir(async () => {
+        const r = resolveAssetUriToPath("w_test", "assets/images/parity_agent.png");
+        expect(r.endsWith("/works/w_test/assets/images/parity_agent.png")).toBe(true);
+        expect(r.includes("/assets/assets/")).toBe(false);
+      });
+    });
+
+    it("maps a work-relative output/ uri to workDir/output/", async () => {
+      await withTempDataDir(async () => {
+        const r = resolveAssetUriToPath("w_test", "assets/output/final.mp4");
+        expect(r.endsWith("/works/w_test/output/final.mp4")).toBe(true);
+      });
+    });
+
+    it("handles the legacy double /assets/assets/ URL form", async () => {
+      await withTempDataDir(async () => {
+        const r = resolveAssetUriToPath(
+          "w_test",
+          "/api/works/w_test/assets/assets/music/bgm.mp3",
+        );
+        expect(r.endsWith("/works/w_test/assets/music/bgm.mp3")).toBe(true);
+      });
+    });
+
+    it("still rejects traversal", async () => {
+      await withTempDataDir(async () => {
+        expect(() =>
+          resolveAssetUriToPath("w_test", "assets/../../etc/passwd"),
+        ).toThrow(UnsafePathError);
       });
     });
   });

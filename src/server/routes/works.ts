@@ -14,6 +14,7 @@ import {
   listAssets,
 } from "../../domain/work-store.js";
 import { isWorkType } from "../../shared/content-types/registry.js";
+import { CarouselSchema } from "../../shared/carousel.js";
 import {
   type Composition,
   CompositionSchema,
@@ -443,12 +444,28 @@ worksRouter.put("/api/works/:id/carousel", async (c) => {
   const id = c.req.param("id");
   const w = await getWork(id);
   if (!w) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
-  const body = await c.req.json();
+  const body = await c.req.json().catch(() => null);
+  // Validate BEFORE writing: the CLI/bridge write path (carousel-ops.ts) always
+  // CarouselSchema.parse's, but this REST route used to yaml.dump the body
+  // verbatim. PRD-0010 CE E2E caught an agent PUT of a stray GET error body
+  // corrupting carousel.yaml into an unloadable doc. Reject invalid bodies with
+  // 400 and leave disk untouched (mirrors PUT /comp's preflight discipline).
+  const parsed = CarouselSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(
+      {
+        error: "Invalid carousel document",
+        errorCode: "carousel_invalid",
+        detail: parsed.error.issues[0]?.message ?? "schema validation failed",
+      },
+      400,
+    );
+  }
   const wDir = join(dataDir, "works", id);
   await mkdir(wDir, { recursive: true });
   await writeFile(
     join(wDir, "carousel.yaml"),
-    yaml.dump(body, { lineWidth: -1 }),
+    yaml.dump(parsed.data, { lineWidth: -1 }),
     "utf-8",
   );
   return c.json({ ok: true });

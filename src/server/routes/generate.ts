@@ -26,7 +26,7 @@ import { SUPPORTED_IMAGE_ASPECT_RATIOS } from "../../providers/openrouter-image.
 import { isEmptyAudioError } from "../../providers/audio/lyria.js";
 import type { VideoGenerateResult } from "../../providers/video/types.js";
 import type { MusicGenerateResult } from "../../providers/audio/types.js";
-import { resolveAssetPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
+import { resolveAssetPath, resolveAssetUriToPath, UnsafePathError, SAFE_ID } from "../safe-paths.js";
 import { uiEventBus } from "../bridge/ui-events.js";
 import {
   recordCostEvent,
@@ -1434,11 +1434,13 @@ generateRouter.post("/api/post-process/:operation", async (c) => {
     return c.json({ error: `assetId not found in composition: ${body.assetId}` }, 404);
   }
 
-  // Resolve the on-disk source path; same convention as /api/video/reframe.
-  const rel = sourceAsset.uri.replace(/^\/api\/works\/[^/]+\/assets\//, "");
-  const sourceAbsPath = join(wDir, "assets", rel);
-
-  const sourceExt = extname(rel) || ".mp4";
+  // Resolve the on-disk source path through the canonical uri→disk resolver
+  // (mirrors the asset serve route). The old naive
+  // `uri.replace(/^\/api.../,'') + join(wDir,'assets',rel)` double-counted
+  // `assets/` for work-relative uris and mis-routed output/ videos to
+  // wDir/assets/output/ — PRD-0010 AE E2E ENOENT on super-resolve/lip-sync.
+  const sourceAbsPath = resolveAssetUriToPath(body.workId, sourceAsset.uri);
+  const sourceExt = extname(sourceAbsPath) || ".mp4";
   const safeTitle = safeTitleFromWork(work.title);
   const iso = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const outName = `${safeTitle}__${operation}__${iso}${sourceExt}`;
@@ -1465,11 +1467,7 @@ generateRouter.post("/api/post-process/:operation", async (c) => {
         404,
       );
     }
-    const audioRel = audioAsset.uri.replace(
-      /^\/api\/works\/[^/]+\/assets\//,
-      "",
-    );
-    opts.audioPath = join(wDir, "assets", audioRel);
+    opts.audioPath = resolveAssetUriToPath(body.workId, audioAsset.uri);
   }
   let result: Awaited<ReturnType<PostProcessor["process"]>>;
   try {

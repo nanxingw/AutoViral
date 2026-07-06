@@ -76,6 +76,61 @@ describe("/api/works/:id/carousel", () => {
       expect(res.status).toBe(404);
     });
   });
+
+  // PRD-0010 CE E2E ship-blocker: this route yaml.dump'd the request body
+  // verbatim with NO CarouselSchema.parse (the CLI/bridge write path validates).
+  // An agent PUT of a stray GET error body ({error,errorCode}+width/height) got
+  // written to carousel.yaml, corrupting the deliverable into an unloadable doc.
+  it("PUT rejects an invalid carousel body with 400 and does NOT overwrite disk", async () => {
+    await withTempDataDir(async (dir) => {
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      const w = await createWork({
+        title: "T",
+        type: "image-text",
+        platforms: ["xiaohongshu"],
+      });
+      // First persist a VALID carousel so we can prove disk is untouched.
+      const valid = {
+        id: "carGood",
+        workId: w.id,
+        width: 1080,
+        height: 1350,
+        globals: {
+          headlineFont: "serif",
+          palette: "mono",
+          layout: "centered",
+          effects: { grain: 0.03, gradient: 0.5, sharpen: 0 },
+        },
+        slides: [{ id: "s1", bg: { type: "solid", value: "#fff" }, layers: [] }],
+        updatedAt: "2026-04-25T00:00:00Z",
+      };
+      expect(
+        (await apiRoutes.fetch(jsonReq("PUT", `/api/works/${w.id}/carousel`, valid)))
+          .status,
+      ).toBe(200);
+
+      // Now PUT the exact garbage the CE E2E hit: a GET error response body.
+      const garbage = {
+        error: "Carousel not found",
+        errorCode: "carousel_not_found",
+        width: 1080,
+        height: 1920,
+      };
+      const bad = await apiRoutes.fetch(
+        jsonReq("PUT", `/api/works/${w.id}/carousel`, garbage),
+      );
+      expect(bad.status).toBe(400);
+      const body = (await bad.json()) as { errorCode?: string };
+      expect(body.errorCode).toBe("carousel_invalid");
+
+      // Disk still holds the valid doc — the bad PUT never overwrote it.
+      const { readFile } = await import("node:fs/promises");
+      const raw = await readFile(join(dir, "works", w.id, "carousel.yaml"), "utf-8");
+      expect(raw).toContain("carGood");
+      expect(raw).not.toContain("carousel_not_found");
+    });
+  });
 });
 
 describe("GET /api/works/:id/carousel — legacy synthesise (SV.I)", () => {

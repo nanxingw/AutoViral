@@ -22,7 +22,7 @@ import {
   copyFile,
   access,
 } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import yaml from "js-yaml";
 import {

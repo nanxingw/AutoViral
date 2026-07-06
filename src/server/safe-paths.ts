@@ -99,6 +99,44 @@ export function resolveAssetFile(workId: string, root: AssetRoot, basename: stri
 }
 
 /**
+ * Resolve a stored `AssetEntry.uri` to its on-disk path — the SINGLE source of
+ * truth for uri→disk, mirroring the GET /api/works/:id/assets/* serve route's
+ * URL→physical-root mapping (routes/assets.ts:106-135). Accepts BOTH shapes an
+ * AssetEntry.uri takes:
+ *   - absolute API URL:  /api/works/<id>/assets/output/final.mp4
+ *   - work-relative:     assets/images/cover.png
+ * and reduces them to the same nested path before applying the root rule
+ * (`output/…` → workDir/output/… ; everything else → workDir/assets/…).
+ *
+ * Replaces the ad-hoc `uri.replace(/^\/api\/works\/[^/]+\/assets\//,'') +
+ * join(wDir,'assets',rel)` that post-process/reframe/lip-sync used, which
+ * double-counted `assets/` for work-relative uris and mis-routed output/ files
+ * (PRD-0010 AE E2E — broke super-resolve / frame-interpolate / lip-sync).
+ */
+export function resolveAssetUriToPath(workId: string, uri: string): string {
+  const afterApi = uri.replace(/^\/?api\/works\/[^/]+\//, "").replace(/^\/+/, "");
+  // Drop the leading `assets/` segment to get the nested path the serve route
+  // sees (its `nestedPath` is everything after the first `/assets/`).
+  const nested = afterApi.startsWith("assets/")
+    ? afterApi.slice("assets/".length)
+    : afterApi;
+  let root: AssetRoot;
+  let rest: string;
+  if (nested.startsWith("output/")) {
+    root = "output";
+    rest = nested.slice("output/".length);
+  } else if (nested.startsWith("assets/")) {
+    // legacy /assets/assets/<x> double form
+    root = "assets";
+    rest = nested.slice("assets/".length);
+  } else {
+    root = "assets";
+    rest = nested;
+  }
+  return resolveAssetPath(workId, root, rest);
+}
+
+/**
  * For routes that accept BOTH a subdir AND a basename and need to combine them.
  * Rejects traversal in either piece.
  */

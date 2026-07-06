@@ -18,6 +18,9 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChatPanel } from "@/features/studio/panels/Chat";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
+import { useComposition } from "@/features/studio/store";
+import { useEditor } from "@/features/editor/store";
+import { dispatchViewerAction } from "@/features/chat/dispatchViewerAction";
 import { useToastStore } from "@/stores/toast";
 import {
   useFocusStore,
@@ -171,6 +174,19 @@ export function RightPane({
               getViewerContext={getViewerContext}
               onJumpToLocator={onJumpToLocator}
               quickActions={quickActions}
+              // CE (PRD-0010) — auto-execute the agent's <viewer-action> tags
+              // ("I moved the playhead to 3s / selected the headline"). Without
+              // this the tags were stripped and silently dropped. Routed by type
+              // to the video (composition) + carousel (editor) stores; a getState
+              // read each call always hits the live setters.
+              dispatchAction={(action) =>
+                dispatchViewerAction(action, {
+                  setFrame: useComposition.getState().setFrame,
+                  setClipSelection: useComposition.getState().setSelection,
+                  setCurrentSlide: useEditor.getState().setCurrentSlide,
+                  setLayerSelection: useEditor.getState().setSelectionLayer,
+                })
+              }
               // B4 (PRD-0010) — a completed agent turn books agent $ to the
               // ledger even when it writes no asset (which would otherwise fire
               // asset-added). Refresh the cost badge so 对话完成后 the total
