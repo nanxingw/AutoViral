@@ -79,9 +79,13 @@ const B: AssetItem = {
   name: "b.mp3",
 };
 
-/** The play/pause toggle within a given row (its a11y name flips ▶⇄⏸). */
+/**
+ * The play/pause toggle within a given row (its a11y name flips ▶⇄⏸). Scoped to
+ * `(play|pause) preview` so it never collides with the row's OWN `role="button"`
+ * wrapper (aria-label "Preview <name>"), which also matches a bare /preview/.
+ */
 function toggleBtn(container: HTMLElement): HTMLElement {
-  return within(container).getByRole("button", { name: /preview/i });
+  return within(container).getByRole("button", { name: /(play|pause) preview/i });
 }
 
 describe("AudioAssetRow single-instance audition (AE3-素材卡-F2)", () => {
