@@ -58,6 +58,7 @@ import {
   type Layer,
 } from "../../shared/carousel.js";
 import { uiEventBus } from "./ui-events.js";
+import { recordCostEvent } from "../cost-ledger/index.js";
 import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
 import { resolvePlatformPreset } from "../../shared/platform-presets.js";
@@ -1525,7 +1526,16 @@ bridgeRouter.post("/scene/:id/generate", async (c) => {
             type: "generate",
             actor: "user",
             timestamp: new Date().toISOString(),
-            params: { providerId: provider.name, prompt: enriched, sceneId: id },
+            // B4 (PRD-0010) — carry the provider's cost onto the provenance edge
+            // too, matching the UI path (generate.ts registerGeneratedImageAsset).
+            // Without this the Dive canvas edge shows costUsd=None for agent takes.
+            params: {
+              providerId: provider.name,
+              prompt: enriched,
+              sceneId: id,
+              costUsd: result.costUsd,
+              estimated: result.estimated,
+            },
           },
         };
         live.provenance.push(newEdge);
@@ -1545,6 +1555,23 @@ bridgeRouter.post("/scene/:id/generate", async (c) => {
     const code = err instanceof CompositionOpError ? err.code : 4;
     return c.json({ ok: false, error: message, code }, 400);
   }
+
+  // B4 (PRD-0010) — E2E回流 BE3-F1: book this agent-CLI generation's cost so the
+  // agent's spend shows in the CostBadge, IDENTICAL to the UI path
+  // (generate.ts:335). Before this, `autoviral scene generate` billed a real
+  // image but recorded $0 — agent-driven spend was 100% invisible while the same
+  // work+provider via /api/generate/image recorded correctly. Same kind /
+  // fallback / estimated semantics as the UI row so both paths land identical
+  // ledger entries. Best-effort (never throws) — a ledger hiccup can't break the
+  // already-committed generation above.
+  recordCostEvent({
+    workId: g.workId,
+    kind: "image",
+    provider: provider.name,
+    usd: typeof result.costUsd === "number" ? result.costUsd : 0.04,
+    estimated: result.estimated ?? true,
+    meta: { assetId, sceneId: id },
+  });
 
   // Wrap the payload in the bridge envelope `{ ok, result }` — the SAME shape
   // every other data-returning bridge route uses (scene add → routes.ts:1099),

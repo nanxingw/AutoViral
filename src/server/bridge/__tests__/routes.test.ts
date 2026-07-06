@@ -1727,7 +1727,10 @@ describe("bridge router — S7 scene generate handoff", () => {
         await mkdir(assetDir, { recursive: true });
         const assetPath = join(assetDir, opts.filename);
         await writeFile(assetPath, "fake-png-bytes", "utf8");
-        return { success: true, assetPath };
+        // B4 (PRD-0010) — carry a REAL metered cost so the cost-accounting test
+        // can assert the ledger books the provider's actual figure (estimated:false),
+        // exactly like OpenRouter's usage.cost path in openrouter-image.ts.
+        return { success: true, assetPath, costUsd: 0.13, estimated: false };
       },
     });
   });
@@ -1831,6 +1834,59 @@ describe("bridge router — S7 scene generate handoff", () => {
         (e) => e.toAssetId === body.assetId && e.operation.type === "generate",
       ),
     ).toBe(true);
+  });
+
+  // B4 (PRD-0010) — E2E回流 BE3-F1: the agent-CLI storyboard generate path
+  // (bridge /scene/:id/generate) really bills a paid image but did NOT record a
+  // cost event, so agent-driven spend was 100% invisible in the CostBadge while
+  // the UI path (/api/generate/image) recorded correctly. This locks parity:
+  // after a scene generate, the ledger the CostBadge reads MUST carry an `image`
+  // event attributed to this work + the generated asset, with the provider's
+  // real metered figure (estimated:false) — identical to the UI path's row.
+  it("records an image cost event to the ledger (agent-CLI ↔ UI parity, BE3-F1)", async () => {
+    const { CostLedger, setCostLedger } = await import("../../cost-ledger/index.js");
+    const ledger = new CostLedger({ dbPath: ":memory:" });
+    setCostLedger(ledger);
+    try {
+      // Baseline: a fresh :memory: ledger has NOTHING for this work.
+      const before = ledger.summaryForWork(workId);
+      expect(before.count).toBe(0);
+
+      const id = await addScene("计费镜", { prompt: "bill me for this scene" });
+      const res = await app.request(`/api/bridge/v1/scene/${id}/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(200);
+      const assetId = ((await res.json()) as { result: { assetId: string } }).result.assetId;
+
+      // The CostBadge's data source (summaryForWork → GET /works/:id/cost) now
+      // shows the agent's spend — not $0.
+      const after = ledger.summaryForWork(workId);
+      expect(after.count).toBe(1);
+      expect(after.totalUsd).toBeCloseTo(0.13, 6);
+      const imageGroup = after.byKind.find((g) => g.kind === "image");
+      expect(imageGroup).toBeDefined();
+      expect(imageGroup!.count).toBe(1);
+      expect(imageGroup!.usd).toBeCloseTo(0.13, 6);
+
+      // The raw ledger row is attributed to THIS work, the generated asset, and
+      // the provider — and carries the REAL metered figure (estimated:false),
+      // exactly like generate.ts's UI row.
+      const events = ledger.listForWork(workId);
+      expect(events.length).toBe(1);
+      const ev = events[0];
+      expect(ev.kind).toBe("image");
+      expect(ev.workId).toBe(workId);
+      expect(ev.provider).toBe("fake-image");
+      expect(ev.usd).toBeCloseTo(0.13, 6);
+      expect(ev.estimated).toBe(false);
+      expect((ev.meta as { assetId?: string } | undefined)?.assetId).toBe(assetId);
+    } finally {
+      setCostLedger(null);
+      ledger.shutdown();
+    }
   });
 
   it("reshoot appends a 2nd take + moves selectedAssetId to the newest (same endpoint)", async () => {
