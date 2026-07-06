@@ -24,8 +24,11 @@ import { EventEmitter } from "node:events";
 //   2. the codex frames map to the SAME unified browser-broadcast sequence a
 //      claude turn produces — session_ready / tool_use / tool_result /
 //      assistant_text / turn_complete (收到流式回复).
-//   3. the backend-agnostic turn-complete hook snapshots the deliverable, so a
-//      real checkpoint row appears afterward (checkpoint 新增 + deliverable 快照).
+//   3. the codex turn CHANGES the deliverable (A→B) via its autoviral CLI tool,
+//      and the backend-agnostic turn-complete hook snapshots that change — a
+//      genuinely NEW checkpoint row appears past createCheckpoint's content-hash
+//      dedup, and the snapshot on disk holds the changed yaml (spec C3 ①:
+//      deliverable 变化二确, not mere first-snapshot creation).
 //
 // Spawn-mock + fake-socket + emit() patterns lifted verbatim from
 // ws-bridge-chat-backend.test.ts; the REAL createCheckpoint runs against a real
@@ -106,18 +109,26 @@ describe("WsBridge — C3 codex full turn (真对话) integration lock", () => {
   it("selects codex, streams the reply to the browser, and snapshots the deliverable", async () => {
     await withTempDataDir(async (dir) => {
       const { WsBridge, DEFAULT_CHAT_SESSION_ID } = await import("../../../ws-bridge.js");
-      const { listCheckpoints } = await import("../../checkpoints.js");
+      const { listCheckpoints, createCheckpoint } = await import("../../checkpoints.js");
 
       const work = "w_codex_turn";
       const wDir = join(dir, "works", work);
+      const compositionPath = join(wDir, "composition.yaml");
+      const snapDir = join(wDir, ".snapshots");
       await mkdir(wDir, { recursive: true });
-      // A real deliverable so the backend-agnostic checkpoint hook has something
-      // to snapshot (createCheckpoint only reads/hashes the raw text).
-      await writeFile(
-        join(wDir, "composition.yaml"),
-        "version: 1\ntracks: []\n",
-        "utf-8",
-      );
+      // Seed a real deliverable at a KNOWN pre-turn state (A). This is what the
+      // work looked like before the codex turn touched it.
+      const beforeYaml = "version: 1\ntracks: []\n";
+      await writeFile(compositionPath, beforeYaml, "utf-8");
+      // Baseline snapshot of A BEFORE the turn. Without a prior snapshot the
+      // turn-complete hook would just take a first snapshot regardless of any
+      // change — that only proves "a checkpoint exists", not "the deliverable
+      // CHANGED". With this baseline, createCheckpoint's content-hash dedup
+      // (checkpoints.ts: `if (latest.sha === sha) continue`) means a SECOND row
+      // can only appear if the yaml actually changed — so `length === 2` below
+      // is itself the 变化 proof (spec C3 dimension ①: deliverable 变化二确).
+      await createCheckpoint(work);
+      expect((await listCheckpoints(work)).length).toBe(1);
 
       const bridge = new WsBridge(3271);
       // 1. 选 Codex 后端 — a backend=codex session must spawn the codex CLI.
@@ -133,7 +144,19 @@ describe("WsBridge — C3 codex full turn (真对话) integration lock", () => {
       // codex parser and assert the unified browser-broadcast sequence.
       const proc = session.cliProcess as unknown as { stdout: EventEmitter };
       const lines = readFixtureLines("exec-basic-tool-use.jsonl");
-      for (const line of lines) emitLine(proc, line);
+      // Drive the turn up to (but not including) completion.
+      const tcIdx = lines.findIndex((l) => l.includes('"turn.completed"'));
+      expect(tcIdx).toBeGreaterThan(0);
+      for (let i = 0; i < tcIdx; i++) emitLine(proc, lines[i]);
+
+      // Mid-turn, the codex agent edits the deliverable via its `autoviral` CLI
+      // tool (spec C3 ①: "让它经 autoviral CLI 改一次 work"). spawn is mocked, so
+      // the fixture's command_execution can't touch the real FS — we write the
+      // changed deliverable ourselves to mirror that on-disk side effect (B ≠ A),
+      // then complete the turn so the checkpoint hook snapshots THIS change.
+      const afterYaml = "version: 1\ntracks:\n  - id: t_codex\n    clips: []\n";
+      await writeFile(compositionPath, afterYaml, "utf-8");
+      emitLine(proc, lines[tcIdx]);
       await sleep(60);
 
       const seq = events(sink);
@@ -169,16 +192,28 @@ describe("WsBridge — C3 codex full turn (真对话) integration lock", () => {
       const tc = seq.find((e) => e.event === "turn_complete")!;
       expect(tc.data.idle).toBe(true);
 
-      // 3. checkpoint 新增 / deliverable 快照 — the backend-agnostic
-      // turn-complete hook fired createCheckpoint for the codex turn too.
-      // Poll (the snapshot write is fire-and-forget inside onTurnComplete).
+      // 3. deliverable 变化二确 — the backend-agnostic turn-complete hook fired
+      // createCheckpoint for the codex turn, and because the deliverable ACTUALLY
+      // changed (A→B), a genuinely NEW snapshot row appears past the content-hash
+      // dedup. Poll (the snapshot write is fire-and-forget inside onTurnComplete).
       let cps = await listCheckpoints(work);
-      for (let i = 0; i < 20 && cps.length === 0; i++) {
+      for (let i = 0; i < 20 && cps.length < 2; i++) {
         await sleep(25);
         cps = await listCheckpoints(work);
       }
-      expect(cps.length).toBeGreaterThan(0);
-      expect(cps.some((c) => c.deliverable === "composition.yaml")).toBe(true);
+      // 第一确 (变化): a second row exists. If the codex turn had NOT changed the
+      // deliverable, dedup would keep this at the 1 baseline row — so reaching 2
+      // is exactly the "deliverable changed" signal, not first-snapshot creation.
+      expect(cps.length).toBe(2);
+      expect(cps.every((c) => c.deliverable === "composition.yaml")).toBe(true);
+      // 第二确 (内容): read the snapshots off disk — one holds the pre-turn A, the
+      // other the post-turn B. The turn-complete checkpoint captured the codex
+      // change, not a stale copy.
+      const snapshotContents = cps.map((c) =>
+        readFileSync(join(snapDir, c.file), "utf8"),
+      );
+      expect(snapshotContents).toContain(beforeYaml);
+      expect(snapshotContents).toContain(afterYaml);
     });
   });
 });
