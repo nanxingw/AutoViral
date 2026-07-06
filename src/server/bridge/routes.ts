@@ -154,6 +154,34 @@ function workIdOrError(c: Context):
   return { ok: true, workId };
 }
 
+// Body-POST guard for the whole route family. A missing/non-JSON/shape-invalid
+// body is an INPUT error → 400 + code:4 (CLI exit 4 per protocol §5), never a
+// naked 500. AE E2E (PRD-0010) caught /focus crashing on this; a sibling sweep
+// found six more routes with the same unguarded `.parse(await c.req.json())`.
+async function bodyOrError<S extends z.ZodTypeAny>(
+  c: Context,
+  schema: S,
+): Promise<{ ok: true; body: z.infer<S> } | { ok: false; res: Response }> {
+  const raw: unknown = await c.req.json().catch(() => null);
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    const detail = parsed.error.issues[0];
+    const where = detail?.path.join(".") || "body";
+    return {
+      ok: false,
+      res: c.json(
+        {
+          ok: false,
+          error: `invalid request body: ${where}: ${detail?.message ?? "malformed JSON body"}`,
+          code: 4,
+        },
+        400,
+      ),
+    };
+  }
+  return { ok: true, body: parsed.data as z.infer<S> };
+}
+
 // S13 (US 11/12) — `?dry-run` opts a write into preview mode. Accept the common
 // truthy spellings (`?dry-run`, `?dry-run=true`, `?dry-run=1`); a bare flag with
 // no value (`?dry-run`) reads as "" which we also treat as on.
@@ -464,17 +492,19 @@ function broadcast(workId: string, type: string, payload: unknown): void {
 bridgeRouter.post("/select", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
-  const body = SelectRequestSchema.parse(await c.req.json());
-  broadcast(g.workId, "ui-select", body.target);
-  return c.json({ ok: true, result: { selected: body.target } });
+  const b = await bodyOrError(c, SelectRequestSchema);
+  if (!b.ok) return b.res;
+  broadcast(g.workId, "ui-select", b.body.target);
+  return c.json({ ok: true, result: { selected: b.body.target } });
 });
 
 bridgeRouter.post("/seek", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
-  const body = SeekRequestSchema.parse(await c.req.json());
-  broadcast(g.workId, "ui-seek", { seconds: body.seconds });
-  return c.json({ ok: true, result: { seekedTo: body.seconds } });
+  const b = await bodyOrError(c, SeekRequestSchema);
+  if (!b.ok) return b.res;
+  broadcast(g.workId, "ui-seek", { seconds: b.body.seconds });
+  return c.json({ ok: true, result: { seekedTo: b.body.seconds } });
 });
 
 bridgeRouter.post("/play", (c) => {
@@ -494,16 +524,18 @@ bridgeRouter.post("/pause", (c) => {
 bridgeRouter.post("/toast", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
-  const body = ToastRequestSchema.parse(await c.req.json());
-  broadcast(g.workId, "ui-toast", body);
+  const b = await bodyOrError(c, ToastRequestSchema);
+  if (!b.ok) return b.res;
+  broadcast(g.workId, "ui-toast", b.body);
   return c.json({ ok: true });
 });
 
 bridgeRouter.post("/progress", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
-  const body = ProgressRequestSchema.parse(await c.req.json());
-  broadcast(g.workId, "ui-progress", body);
+  const b = await bodyOrError(c, ProgressRequestSchema);
+  if (!b.ok) return b.res;
+  broadcast(g.workId, "ui-progress", b.body);
   return c.json({ ok: true });
 });
 
@@ -540,21 +572,9 @@ bridgeRouter.get("/focus", (c) => {
 bridgeRouter.post("/focus", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
-  const raw = await c.req.json().catch(() => null);
-  const parsed = FocusPatchSchema.safeParse(raw);
-  if (!parsed.success) {
-    const detail = parsed.error.issues[0];
-    const where = detail?.path.join(".") || "body";
-    return c.json(
-      {
-        ok: false,
-        error: `invalid focus patch: ${where}: ${detail?.message ?? "malformed JSON body"}`,
-        code: 4,
-      },
-      400,
-    );
-  }
-  const next = writeFocus(g.workId, parsed.data);
+  const b = await bodyOrError(c, FocusPatchSchema);
+  if (!b.ok) return b.res;
+  const next = writeFocus(g.workId, b.body);
   broadcast(g.workId, "ui-focus", next);
   return c.json({ ok: true, result: next });
 });
@@ -751,10 +771,11 @@ const InjectToggleSchema = z.object({
 bridgeRouter.post("/context/inject", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
-  const body = InjectToggleSchema.parse(await c.req.json());
-  writeInject(g.workId, body.enabled);
-  broadcast(g.workId, "ui-context-inject", { enabled: body.enabled });
-  return c.json({ ok: true, result: { enabled: body.enabled } });
+  const b = await bodyOrError(c, InjectToggleSchema);
+  if (!b.ok) return b.res;
+  writeInject(g.workId, b.body.enabled);
+  broadcast(g.workId, "ui-context-inject", { enabled: b.body.enabled });
+  return c.json({ ok: true, result: { enabled: b.body.enabled } });
 });
 
 // ─── H4.1 — TTS preprocess ──────────────────────────────────────────────────
@@ -1867,12 +1888,13 @@ bridgeRouter.post("/clip/:id/keyframe", async (c) => {
 bridgeRouter.post("/ask", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
-  const body = AskRequestSchema.parse(await c.req.json());
-  const { askId, promise } = createAsk(g.workId, body.timeoutMs);
+  const b = await bodyOrError(c, AskRequestSchema);
+  if (!b.ok) return b.res;
+  const { askId, promise } = createAsk(g.workId, b.body.timeoutMs);
   broadcast(g.workId, "ui-ask", {
     askId,
-    message: body.message,
-    kind: body.kind,
+    message: b.body.message,
+    kind: b.body.kind,
   });
   const answer = await promise;
   if (answer === "timeout") {

@@ -23,6 +23,7 @@ vi.mock("@/lib/api", () => ({
       "assets/text/subtitles.srt",
       "assets/text/publish-text.md",
       "output/concat.txt", // pipeline-internal — filtered
+      "assets/tmp/concat_list.txt", // pipeline-internal (underscore variant) — filtered
       "weird.unknown",
     ],
   })),
@@ -84,6 +85,7 @@ describe("useWorkAssets", () => {
     const allPaths = result.current.data!.flatMap((g) => g.items).map((i) => i.path);
     expect(allPaths).not.toContain("assets/audio/bgm.mp3.peaks.json");
     expect(allPaths).not.toContain("output/concat.txt");
+    expect(allPaths).not.toContain("assets/tmp/concat_list.txt");
   });
 
   it("keeps real text assets in the TEXT group", async () => {

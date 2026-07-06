@@ -66,7 +66,10 @@ describe("focus store (H0.1 + H0.2)", () => {
       "/api/bridge/v1/focus",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ selectedClipId: "vc_s07" }),
+        // apiFetch stringifies internally — callers MUST pass a plain object.
+        // (A double-stringify here shipped focus sync 100% broken: the server
+        // JSON.parsed to a *string*, Zod expected an object → every POST 400'd.)
+        body: { selectedClipId: "vc_s07" },
       }),
     );
   });
@@ -98,7 +101,7 @@ describe("focus store (H0.1 + H0.2)", () => {
     expect(apiFetchMock).toHaveBeenCalledWith(
       "/api/bridge/v1/focus",
       expect.objectContaining({
-        body: JSON.stringify({ selectedSegmentId: "seg_0023" }),
+        body: { selectedSegmentId: "seg_0023" },
       }),
     );
   });
@@ -110,7 +113,7 @@ describe("focus store (H0.1 + H0.2)", () => {
     expect(apiFetchMock).toHaveBeenCalledWith(
       "/api/bridge/v1/focus",
       expect.objectContaining({
-        body: JSON.stringify({ activePanel: "inspector" }),
+        body: { activePanel: "inspector" },
       }),
     );
   });

@@ -79,7 +79,9 @@ function flushPlayhead(workId: string | null): void {
         "Content-Type": "application/json",
         "X-AutoViral-Work-Id": workId,
       },
-      body: JSON.stringify({ playheadSec: value }),
+      // apiFetch stringifies body itself — passing a pre-stringified string
+      // double-encodes and the bridge rejects it (Zod expects an object).
+      body: { playheadSec: value },
     }).catch(() => {});
   }
 }
@@ -92,7 +94,7 @@ function postPatch(workId: string | null, patch: Partial<FocusSnapshot>): void {
       "Content-Type": "application/json",
       "X-AutoViral-Work-Id": workId,
     },
-    body: JSON.stringify(patch),
+    body: patch,
   }).catch(() => {});
 }
 

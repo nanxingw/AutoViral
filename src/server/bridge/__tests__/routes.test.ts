@@ -2442,19 +2442,6 @@ describe("bridge router — H0.1 focus channel", () => {
     expect(body.result).not.toHaveProperty("futureField");
   });
 
-  it("POST /focus with an empty/non-JSON body is a 400 input error, not a 500", async () => {
-    // AE E2E (PRD-0010) observed naked 500s from this route on Studio load —
-    // an unguarded c.req.json() turned any malformed body into a crash page.
-    const res = await app.request("/api/bridge/v1/focus", {
-      method: "POST",
-      headers: { "X-AutoViral-Work-Id": "w_focus_badbody" },
-    });
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { ok: boolean; code: number };
-    expect(body.ok).toBe(false);
-    expect(body.code).toBe(4);
-  });
-
   it("POST /focus with an invalid activePanel enum is a 400 input error, not a 500", async () => {
     const res = await app.request("/api/bridge/v1/focus", {
       method: "POST",
@@ -2465,9 +2452,10 @@ describe("bridge router — H0.1 focus channel", () => {
       body: JSON.stringify({ activePanel: "chat" }),
     });
     expect(res.status).toBe(400);
-    const body = (await res.json()) as { ok: boolean; code: number };
+    const body = (await res.json()) as { ok: boolean; code: number; error: unknown };
     expect(body.ok).toBe(false);
     expect(body.code).toBe(4);
+    expect(typeof body.error).toBe("string");
   });
 
   it("POST /focus accepts selectedClipId:null to clear", async () => {
@@ -2493,6 +2481,39 @@ describe("bridge router — H0.1 focus channel", () => {
     const body = (await res.json()) as { result: { selectedClipId: string | null } };
     expect(body.result.selectedClipId).toBeNull();
   });
+});
+
+// AE E2E (PRD-0010) surfaced naked 500s from POST /focus on malformed bodies;
+// a codex sibling-sweep then found the same unguarded `.parse(await c.req.json())`
+// pattern on six more body-POST routes. This matrix pins the family contract:
+// a missing/non-JSON body is an INPUT error → 400 + {ok:false, code:4} (CLI
+// exit 4 per protocol §5), never a 500 — and never blocks (e.g. /ask must
+// reject immediately instead of waiting on the approval modal).
+describe("bridge router — malformed-body sweep (400 not 500, whole family)", () => {
+  const BODY_POST_ROUTES = [
+    "/api/bridge/v1/select",
+    "/api/bridge/v1/seek",
+    "/api/bridge/v1/toast",
+    "/api/bridge/v1/progress",
+    "/api/bridge/v1/context/inject",
+    "/api/bridge/v1/ask",
+    "/api/bridge/v1/focus",
+  ];
+
+  it.each(BODY_POST_ROUTES)(
+    "POST %s with an empty/non-JSON body is a 400 input error, not a 500",
+    async (route) => {
+      const res = await app.request(route, {
+        method: "POST",
+        headers: { "X-AutoViral-Work-Id": "w_badbody_sweep" },
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { ok: boolean; code: number; error: unknown };
+      expect(body.ok).toBe(false);
+      expect(body.code).toBe(4);
+      expect(typeof body.error).toBe("string");
+    },
+  );
 });
 
 describe("bridge router — H0.3 context channel", () => {
