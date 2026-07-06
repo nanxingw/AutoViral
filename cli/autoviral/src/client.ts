@@ -15,6 +15,85 @@ export interface BridgeContext {
   cwd: string;
 }
 
+// BE3-F3 (PRD-0010) — every request here hits the local Studio daemon, whose
+// synchronous generation routes (`scene generate` → openrouter-image, i2v, …)
+// can hold the connection open for MINUTES. A bare `fetch` has no explicit
+// ceiling and, when a long generation outlasts undici's implicit timeout or the
+// socket drops, rejects with the opaque `TypeError: fetch failed`. Bubbled
+// through cli.ts's top-level catch that becomes `autoviral: fetch failed`
+// (generic exit 3) — an agent can't tell that apart from a transient service
+// failure, so it retries, and the server (which kept generating) bills twice.
+//
+// So every request gets an EXPLICIT, generous, configurable ceiling; on a
+// client-side timeout / dropped connection we emit a CLEAR, agent-actionable
+// message + the canonical timeout exit code 124 (the same signal `ask` uses),
+// never the opaque `fetch failed`. The default ceiling (10 min) is high enough
+// that real generations complete; AUTOVIRAL_HTTP_TIMEOUT_MS overrides it (tests
+// inject a short value; a user with an unusually slow provider can raise it).
+const DEFAULT_HTTP_TIMEOUT_MS = 600_000; // 10 minutes
+
+export function httpTimeoutMs(): number {
+  const raw = process.env.AUTOVIRAL_HTTP_TIMEOUT_MS;
+  if (raw === undefined) return DEFAULT_HTTP_TIMEOUT_MS;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_HTTP_TIMEOUT_MS;
+}
+
+// A timeout-class fetch rejection: our own AbortSignal.timeout (a "TimeoutError"
+// DOMException) OR undici's implicit headers/body/socket/connect timeouts and a
+// mid-flight reset, which surface as `TypeError: fetch failed` with a coded
+// `.cause`. All mean the same thing to the agent: the request did not complete
+// but the server MAY have — so retrying blindly risks a double charge.
+function isTimeoutish(err: unknown): boolean {
+  if (err && typeof err === "object") {
+    const e = err as { name?: unknown; cause?: { code?: unknown; name?: unknown } };
+    if (e.name === "TimeoutError" || e.name === "AbortError") return true;
+    const code = e.cause?.code;
+    if (
+      code === "UND_ERR_HEADERS_TIMEOUT" ||
+      code === "UND_ERR_BODY_TIMEOUT" ||
+      code === "UND_ERR_SOCKET" ||
+      code === "UND_ERR_CONNECT_TIMEOUT" ||
+      code === "UND_ERR_ABORTED" ||
+      code === "ECONNRESET"
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// fetch with the BE3-F3 explicit ceiling + error reclassification. On a
+// client-side timeout / dropped connection it does NOT return — it prints the
+// clear guidance and exits 124; any other network error exits 3. A normal
+// response (ANY HTTP status) is handed back to the caller for its own status
+// handling, so the {ok,result} / 4xx-vs-5xx exit-code contract is untouched.
+async function fetchWithBudget(
+  url: string,
+  init: RequestInit,
+  label: string,
+): Promise<Response> {
+  const budget = httpTimeoutMs();
+  try {
+    return await fetch(url, { ...init, signal: AbortSignal.timeout(budget) });
+  } catch (err) {
+    if (isTimeoutish(err)) {
+      const dur = budget >= 1000 ? `${Math.round(budget / 1000)}s` : `${budget}ms`;
+      process.stderr.write(
+        `autoviral: ${label} timed out after ${dur} — the Studio may STILL be ` +
+          `generating (and may already have been billed). Do NOT blindly retry: ` +
+          `check the work state first, or raise AUTOVIRAL_HTTP_TIMEOUT_MS if this ` +
+          `generation legitimately needs longer.\n`,
+      );
+      process.exit(124);
+    }
+    process.stderr.write(
+      `autoviral: ${label} failed — ${(err as Error)?.message ?? String(err)}\n`,
+    );
+    process.exit(3);
+  }
+}
+
 export function readContext(): BridgeContext {
   const workId = process.env.AUTOVIRAL_WORK_ID;
   const port = Number(process.env.AUTOVIRAL_PORT ?? 3271);
@@ -35,14 +114,18 @@ export async function bridgeRequest<T>(
   body?: unknown,
 ): Promise<T> {
   const url = `http://127.0.0.1:${ctx.port}/api/bridge/v1${path}`;
-  const res = await fetch(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "X-AutoViral-Work-Id": ctx.workId,
+  const res = await fetchWithBudget(
+    url,
+    {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": ctx.workId,
+      },
+      body: body == null ? undefined : JSON.stringify(body),
     },
-    body: body == null ? undefined : JSON.stringify(body),
-  });
+    `bridge ${method} ${path}`,
+  );
   // S3 (US 18/19) — error-code contract. The CLI's exit code is the agent's
   // control-flow signal: 4 = "your input/validation was wrong" (4xx),
   // 3 = "the service broke" (5xx / malformed response). Fixed-timeout endpoints
@@ -89,11 +172,15 @@ export async function apiText(
   body?: string,
 ): Promise<string> {
   const url = `http://127.0.0.1:${ctx.port}/api/works/${encodeURIComponent(ctx.workId)}${workPath}`;
-  const res = await fetch(url, {
-    method,
-    headers: body == null ? undefined : { "Content-Type": "text/markdown; charset=utf-8" },
-    body: body == null ? undefined : body,
-  });
+  const res = await fetchWithBudget(
+    url,
+    {
+      method,
+      headers: body == null ? undefined : { "Content-Type": "text/markdown; charset=utf-8" },
+      body: body == null ? undefined : body,
+    },
+    `api ${method} ${workPath}`,
+  );
   if (!res.ok) {
     const txt = await res.text();
     process.stderr.write(`autoviral: api ${method} ${workPath} → ${res.status} ${txt}\n`);
@@ -117,11 +204,15 @@ export async function apiJson<T>(
   body?: unknown,
 ): Promise<T> {
   const url = `http://127.0.0.1:${ctx.port}/api/works/${encodeURIComponent(ctx.workId)}${workPath}`;
-  const res = await fetch(url, {
-    method,
-    headers: body == null ? undefined : { "Content-Type": "application/json" },
-    body: body == null ? undefined : JSON.stringify(body),
-  });
+  const res = await fetchWithBudget(
+    url,
+    {
+      method,
+      headers: body == null ? undefined : { "Content-Type": "application/json" },
+      body: body == null ? undefined : JSON.stringify(body),
+    },
+    `api ${method} ${workPath}`,
+  );
   if (!res.ok) {
     const txt = await res.text();
     process.stderr.write(`autoviral: api ${method} ${workPath} → ${res.status} ${txt}\n`);
