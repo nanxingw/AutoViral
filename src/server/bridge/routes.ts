@@ -540,8 +540,21 @@ bridgeRouter.get("/focus", (c) => {
 bridgeRouter.post("/focus", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
-  const body = FocusPatchSchema.parse(await c.req.json());
-  const next = writeFocus(g.workId, body);
+  const raw = await c.req.json().catch(() => null);
+  const parsed = FocusPatchSchema.safeParse(raw);
+  if (!parsed.success) {
+    const detail = parsed.error.issues[0];
+    const where = detail?.path.join(".") || "body";
+    return c.json(
+      {
+        ok: false,
+        error: `invalid focus patch: ${where}: ${detail?.message ?? "malformed JSON body"}`,
+        code: 4,
+      },
+      400,
+    );
+  }
+  const next = writeFocus(g.workId, parsed.data);
   broadcast(g.workId, "ui-focus", next);
   return c.json({ ok: true, result: next });
 });

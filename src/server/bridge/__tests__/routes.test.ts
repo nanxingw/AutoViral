@@ -2442,6 +2442,34 @@ describe("bridge router — H0.1 focus channel", () => {
     expect(body.result).not.toHaveProperty("futureField");
   });
 
+  it("POST /focus with an empty/non-JSON body is a 400 input error, not a 500", async () => {
+    // AE E2E (PRD-0010) observed naked 500s from this route on Studio load —
+    // an unguarded c.req.json() turned any malformed body into a crash page.
+    const res = await app.request("/api/bridge/v1/focus", {
+      method: "POST",
+      headers: { "X-AutoViral-Work-Id": "w_focus_badbody" },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /focus with an invalid activePanel enum is a 400 input error, not a 500", async () => {
+    const res = await app.request("/api/bridge/v1/focus", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_focus_badenum",
+      },
+      body: JSON.stringify({ activePanel: "chat" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
   it("POST /focus accepts selectedClipId:null to clear", async () => {
     await app.request("/api/bridge/v1/focus", {
       method: "POST",

@@ -43,8 +43,10 @@ function classify(path: string): AssetItem["kind"] {
 // seeing the raw work tree — the filtering is purely a human-UI concern.
 const PIPELINE_INTERNAL: RegExp[] = [
   /\.peaks\.json$/i, // waveform cache written next to each audio file
-  /(^|\/)concat(-[^/]*)?\.txt$/i, // ffmpeg concat / file list
-  /(^|\/)filelist(-[^/]*)?\.txt$/i, // ffmpeg concat / file list (alt name)
+  // separator class [-_.] covers concat.txt / concat-0.txt / concat_list.txt /
+  // concat.list.txt without eating creator files like concatenation-notes.txt
+  /(^|\/)concat([-_.][^/]*)?\.txt$/i, // ffmpeg concat / file list
+  /(^|\/)filelist([-_.][^/]*)?\.txt$/i, // ffmpeg concat / file list (alt name)
   /\.labels\.json$/i, // checkpoint label sidecar (#90)
   /(^|\/)composition\.ya?ml$/i, // the composition document itself
   /(^|\/)chat(-[^/]*)?\.jsonl?$/i, // agent chat log / per-session log

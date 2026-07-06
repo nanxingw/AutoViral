@@ -42,6 +42,11 @@ describe("isPipelineInternal", () => {
     expect(isPipelineInternal("assets/audio/bgm.mp3.peaks.json")).toBe(true);
     expect(isPipelineInternal("output/concat.txt")).toBe(true);
     expect(isPipelineInternal("output/concat-0.txt")).toBe(true);
+    // underscore/dot separator variants — ffmpeg pipelines actually emit
+    // concat_list.txt (AE E2E caught it leaking local paths into TEXT cards)
+    expect(isPipelineInternal("assets/tmp/concat_list.txt")).toBe(true);
+    expect(isPipelineInternal("output/concat.list.txt")).toBe(true);
+    expect(isPipelineInternal("output/filelist_0.txt")).toBe(true);
     expect(isPipelineInternal("checkpoints/x.labels.json")).toBe(true);
     expect(isPipelineInternal("assets/images/partial.tmp")).toBe(true);
   });
@@ -49,6 +54,9 @@ describe("isPipelineInternal", () => {
   it("keeps real creator-facing text assets", () => {
     expect(isPipelineInternal("assets/text/subtitles.srt")).toBe(false);
     expect(isPipelineInternal("assets/text/publish-text.md")).toBe(false);
+    // a bare "concat"/"filelist" prefix without a separator is creator content
+    expect(isPipelineInternal("assets/text/concatenation-notes.txt")).toBe(false);
+    expect(isPipelineInternal("assets/text/filelisting-guide.txt")).toBe(false);
     expect(isPipelineInternal("assets/clips/intro.mp4")).toBe(false);
     expect(isPipelineInternal("assets/audio/bgm.mp3")).toBe(false);
   });
