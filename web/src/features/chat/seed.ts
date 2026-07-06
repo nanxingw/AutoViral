@@ -1,4 +1,5 @@
 import type { StreamBlock, StreamBlockType, ChatAttachment, TurnUsage } from "./types";
+import { extractViewerActions } from "./types";
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : JSON.stringify(v);
@@ -16,10 +17,17 @@ function asString(v: unknown): string {
 export function seedBlocksFromHistory(
   blocks: Array<Record<string, unknown>>,
 ): StreamBlock[] {
-  return blocks.map((b, i) => ({
+  return blocks.map((b, i) => {
+    const type = ((b.type as StreamBlockType) ?? "text") as StreamBlockType;
+    const rawText = asString(b.text);
+    // Strip <viewer-action> tags from reseeded PROSE only (the live path strips
+    // via extractViewerActions; do the same here so a reload doesn't surface raw
+    // markup in old assistant bubbles). Tool payloads are data — never rewrite.
+    const text = type === "text" ? extractViewerActions(rawText).cleaned : rawText;
+    return {
     id: (b.id as string) ?? `hist_${i}`,
-    type: ((b.type as StreamBlockType) ?? "text") as StreamBlockType,
-    text: asString(b.text),
+    type,
+    text,
     toolName: b.toolName as string | undefined,
     // Carry persisted user-message attachments through the WS reseed — otherwise
     // on reload the message_history frame overwrites the HTTP-seeded blocks and
@@ -33,5 +41,6 @@ export function seedBlocksFromHistory(
       typeof b.timestamp === "string"
         ? Date.parse(b.timestamp as string)
         : Date.now(),
-  }));
+    };
+  });
 }
