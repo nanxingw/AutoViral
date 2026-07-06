@@ -106,6 +106,10 @@ export const claudeBackend: ChatBackend = {
 
   notFoundMessage: CLAUDE_NOT_FOUND_MESSAGE,
 
+  // `claude --resume <uuid>` against an id missing from the local conversation
+  // store (account switch / store pruned) prints exactly this and exits 1.
+  staleResumePattern: /No conversation found with session ID/i,
+
   buildSpawn(input: ChatSpawnInput): ChatSpawnDescriptor {
     const args = [
       "-p",

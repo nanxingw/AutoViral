@@ -123,6 +123,12 @@ export interface ChatBackend {
    *  on PATH (a packaged app inherits a minimal GUI PATH). Sourced from the
    *  backend so the message names the RIGHT binary. */
   readonly notFoundMessage: string;
+  /** Optional stderr signature of a dead `--resume` target (the stored CLI
+   *  session id no longer exists in the CLI's local conversation store — e.g.
+   *  after an account switch). When a resume spawn exits non-zero with ZERO
+   *  turn text and stderr matches, WsBridge clears the stale id and respawns
+   *  the turn fresh instead of leaving the chat silently dead. */
+  readonly staleResumePattern?: RegExp;
   buildSpawn(input: ChatSpawnInput): ChatSpawnDescriptor;
   createLineParser(cb: ChatStreamCallbacks): ChatLineParser;
   /** Optional pre-spawn login/auth check. Backends whose CLI needs an

@@ -1443,6 +1443,26 @@ export class WsBridge {
     }
   }
 
+  /**
+   * Replay a turn fresh after a stale `--resume` death (see the exit handler in
+   * spawnCli). The original resume spawn carried only the raw user text, so the
+   * fresh spawn rebuilds the full-context system prompt the same way
+   * sendMessage's no-resume branch does; for non-work sessions (coach) getWork
+   * returns nothing and the plain text is sent as-is — a degraded but LIVE
+   * session beats a silently dead one.
+   */
+  private async respawnFreshAfterStaleResume(session: WsSession, userText: string): Promise<void> {
+    let prompt = userText;
+    try {
+      const work = await getWork(session.workId);
+      if (work) {
+        const contextPrompt = await this.buildSystemPromptWithContext(work);
+        prompt = contextPrompt + "\n\n---\n\n用户消息：" + userText;
+      }
+    } catch { /* fall back to plain text */ }
+    this.spawnCli(session, prompt);
+  }
+
   private spawnCli(
     session: WsSession,
     prompt: string,
@@ -1778,9 +1798,16 @@ export class WsBridge {
       parser.push(data.toString());
     });
 
+    // Tail of this spawn's stderr, kept for the exit handler: a dead
+    // `--resume` target is only diagnosable from stderr (exit code 1 alone is
+    // ambiguous), and until PRD-0010 nothing persisted it — "cli_exit code 1,
+    // turnTextLen 0" was a dead end in the daemon log.
+    let stderrTail = "";
     proc.stderr?.on("data", (data: Buffer) => {
       const text = data.toString();
       if (text.trim()) {
+        stderrTail = (stderrTail + text).slice(-2000);
+        logBridge("cli_stderr", session.workId, { text: text.slice(0, 400) });
         this.broadcastToSession(session.workId, session.sessionId, {
           event: "cli_stderr",
           data: { text },
@@ -1792,6 +1819,31 @@ export class WsBridge {
       logBridge("cli_exit", session.workId, { code, signal, turnTextLen: turnText.length });
       session.cliProcess = undefined;
       session.idle = true;
+
+      // Stale-resume fallback: the stored cliSessionId no longer exists in the
+      // CLI's local conversation store (account switch / store pruned) — the
+      // spawn dies instantly with zero output. Clear the dead id (memory +
+      // sidecar) and replay THIS turn fresh. The respawn carries no resumeId,
+      // so a second failure cannot re-trigger this branch (no loop). Durable
+      // chat history is bridge-owned and unaffected; only CLI-side context is
+      // lost, which is exactly the already-true reality of a dead resume id.
+      const staleResume =
+        code !== 0 &&
+        turnText.length === 0 &&
+        resumeSessionId !== undefined &&
+        backend.staleResumePattern?.test(stderrTail) === true;
+      if (staleResume && !session.workId.startsWith("trends_")) {
+        logBridge("cli_stale_resume_fallback", session.workId, {
+          staleId: resumeSessionId,
+          sessionId: session.sessionId,
+        });
+        session.cliSessionId = undefined;
+        this.sidecarFor(session.workId)
+          ?.patch(session.sessionId, { cliSessionId: undefined })
+          .catch(() => {});
+        void this.respawnFreshAfterStaleResume(session, prompt);
+        return;
+      }
       if (session.workId.startsWith("trends_")) {
         if (code === 0) {
           // Read agent-written files and broadcast report before done event
