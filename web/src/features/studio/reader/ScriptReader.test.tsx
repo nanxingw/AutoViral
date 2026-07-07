@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { render, screen, within } from "@testing-library/react";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, screen, within, fireEvent, act } from "@testing-library/react";
 import { ScriptReader } from "./ScriptReader";
 import { useReader } from "./readerStore";
 import { useComposition } from "../store";
@@ -91,5 +91,125 @@ describe("ScriptReader", () => {
     editBtn.click();
     expect(useDive.getState().pendingSceneJump).toBe("sc1");
     expect(useReader.getState().open).toBe(false);
+  });
+
+  // ── regression net (codex review #2) ────────────────────────────────────────
+  // ESC-close, ARIA dialog labelling, focus-trap (the aria-modal contract),
+  // focus restore-on-close, and IntersectionObserver disconnect on unmount.
+
+  it("closes on Escape", () => {
+    seed({
+      script: "# One\nBody.",
+      sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
+    });
+    render(<ScriptReader />);
+    expect(useReader.getState().open).toBe(true);
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(useReader.getState().open).toBe(false);
+  });
+
+  it("marks the dialog aria-modal and labels it via aria-labelledby", () => {
+    seed({
+      script: "# One\nBody.",
+      sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
+    });
+    render(<ScriptReader />);
+    const dialog = screen.getByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAttribute("aria-labelledby", "reader-title");
+    // The label target actually exists and carries the reader's title.
+    expect(document.getElementById("reader-title")?.textContent).toBe(
+      "Read-through",
+    );
+  });
+
+  it("traps Tab focus inside the dialog: forward Tab wraps last→first", () => {
+    seed({
+      script: "# One\nBody.",
+      sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
+    });
+    render(<ScriptReader />);
+    const dialog = screen.getByRole("dialog");
+    const buttons = Array.from(dialog.querySelectorAll("button"));
+    expect(buttons.length).toBeGreaterThan(1);
+    const first = buttons[0];
+    const last = buttons[buttons.length - 1];
+    last.focus();
+    expect(document.activeElement).toBe(last);
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(first);
+  });
+
+  it("traps Tab focus inside the dialog: Shift+Tab wraps first→last", () => {
+    seed({
+      script: "# One\nBody.",
+      sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
+    });
+    render(<ScriptReader />);
+    const dialog = screen.getByRole("dialog");
+    const buttons = Array.from(dialog.querySelectorAll("button"));
+    const first = buttons[0];
+    const last = buttons[buttons.length - 1];
+    first.focus();
+    expect(document.activeElement).toBe(first);
+    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+  });
+
+  it("restores focus to the opener when the reader closes", () => {
+    vi.useFakeTimers();
+    try {
+      seed({
+        script: "# One\nBody.",
+        sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
+      });
+      const opener = document.createElement("button");
+      document.body.appendChild(opener);
+      opener.focus();
+      expect(document.activeElement).toBe(opener);
+
+      render(<ScriptReader />);
+      // useModalFocus moves focus into the modal on a setTimeout(0).
+      act(() => {
+        vi.runOnlyPendingTimers();
+      });
+      expect(document.activeElement).not.toBe(opener);
+
+      act(() => {
+        useReader.setState({ open: false });
+      });
+      expect(document.activeElement).toBe(opener);
+      opener.remove();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("disconnects the IntersectionObserver on unmount", () => {
+    const disconnect = vi.fn();
+    class MockIO {
+      constructor(_cb: IntersectionObserverCallback) {}
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = disconnect;
+      takeRecords = () => [];
+      root = null;
+      rootMargin = "";
+      thresholds = [];
+    }
+    vi.stubGlobal("IntersectionObserver", MockIO as unknown as typeof IntersectionObserver);
+    try {
+      seed({
+        script: "# One\nBody.",
+        sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
+      });
+      const { unmount } = render(<ScriptReader />);
+      unmount();
+      expect(disconnect).toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

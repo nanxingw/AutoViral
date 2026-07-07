@@ -18,21 +18,35 @@ import { useEffect, useRef } from "react";
  *     before. If that element is no longer in the DOM, fall back to
  *     `document.body` so focus doesn't end up on `null`.
  *
- * Tab cycling inside the modal still uses native browser order — this
- * hook doesn't trap. For most modals (1-3 focusable controls) the
- * minor risk of tabbing out is acceptable; the bigger UX gap was
- * "modal opens but keyboard is stuck on background" which this fixes.
+ * Tab cycling inside the modal uses native browser order. By default the
+ * hook does NOT trap: for the small confirm-style modals (1-3 focusable
+ * controls) the minor risk of tabbing out is acceptable, and the bigger
+ * UX gap was "modal opens but keyboard is stuck on background".
+ *
+ * Opt into `{ trap: true }` for fullscreen / `aria-modal="true"` surfaces
+ * (e.g. ScriptReader) where Tab must NOT escape to the fully-obscured
+ * background — otherwise the aria-modal contract is a lie for keyboard
+ * users. Trapping wraps Tab / Shift+Tab around the first↔last focusable
+ * descendant and pulls focus back in if it ever lands outside.
  *
  * Usage:
  *   const containerRef = useRef<HTMLDivElement>(null);
- *   useModalFocus(open, containerRef);
+ *   useModalFocus(open, containerRef);              // no trap
+ *   useModalFocus(open, containerRef, { trap: true }); // aria-modal surfaces
  *
  *   return <div ref={containerRef} role="dialog">…</div>;
  */
+
+// Focusable descendants — shared by the focus-in step and the trap.
+const FOCUSABLE_SELECTOR =
+  'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
 export function useModalFocus(
   open: boolean,
   containerRef: React.RefObject<HTMLElement | null>,
+  options: { trap?: boolean } = {},
 ) {
+  const trap = options.trap ?? false;
   // Snapshot the element that had focus before the modal opened. Stored
   // in a ref (not state) so the effect's cleanup has access to it
   // without re-subscribing on every focus shuffle.
@@ -52,9 +66,7 @@ export function useModalFocus(
     const tid = window.setTimeout(() => {
       const root = containerRef.current;
       if (!root) return;
-      const focusable = root.querySelector<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
-      );
+      const focusable = root.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
       if (focusable) {
         focusable.focus();
       } else {
@@ -78,4 +90,43 @@ export function useModalFocus(
       previousActive.current = null;
     };
   }, [open, containerRef]);
+
+  // Focus trap (opt-in). Wraps Tab / Shift+Tab around the modal's focusable
+  // descendants so keyboard focus can't leave an `aria-modal="true"` surface.
+  // Capture-phase on `document` so it fires wherever focus currently is —
+  // including pulling focus back if it somehow escaped to the background.
+  useEffect(() => {
+    if (!open || !trap) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+      const root = containerRef.current;
+      if (!root) return;
+      const focusables = Array.from(
+        root.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR),
+      );
+      if (focusables.length === 0) {
+        // Nothing focusable inside — keep focus on the container itself.
+        e.preventDefault();
+        root.focus();
+        return;
+      }
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      const active = document.activeElement;
+      const outside = !(active instanceof Node) || !root.contains(active);
+      if (e.shiftKey) {
+        if (active === first || active === root || outside) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (active === last || outside) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [open, trap, containerRef]);
 }

@@ -53,7 +53,9 @@ export function ScriptReader() {
   const scriptText = isMine ? script : "";
 
   const dialogRef = useRef<HTMLDivElement>(null);
-  useModalFocus(open, dialogRef);
+  // Trap focus: this is a fullscreen aria-modal surface — Tab must not escape
+  // to the fully-obscured background (codex review HIGH).
+  useModalFocus(open, dialogRef, { trap: true });
 
   const flow = useMemo(
     () => splitScriptByAnchors(scriptText, scenes ?? []),
