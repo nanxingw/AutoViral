@@ -7,6 +7,7 @@ import { useT } from "@/i18n/useT";
 import type { AssetEntry, Scene } from "@shared/composition";
 import { useComposition } from "../store";
 import { useScript } from "../scriptStore";
+import { loadScript } from "../services/script";
 import { useReader } from "./readerStore";
 import { useDive } from "../dive/diveStore";
 import { splitScriptByAnchors } from "./interleave";
@@ -48,9 +49,51 @@ export function ScriptReader() {
   // load resolved.
   const script = useScript((s) => s.script);
   const loaded = useScript((s) => s.loaded);
+  const loading = useScript((s) => s.loading);
   const storeWorkId = useScript((s) => s.workId);
+  const setScript = useScript((s) => s.setScript);
+  const beginLoad = useScript((s) => s.beginLoad);
+  const endLoad = useScript((s) => s.endLoad);
   const isMine = storeWorkId === workId && loaded;
   const scriptText = isMine ? script : "";
+
+  // F1 — SELF-LOAD. The reader is opened from the Studio top bar, INDEPENDENTLY
+  // of the sidebar's ScriptTab (the only other loadScript caller). Open it from
+  // the LIBRARY tab (ScriptTab never mounted) and the useScript store holds no
+  // script for this work, so `scriptText` is "" and every scene falls into the
+  // trailing 分镜册 bucket — a silent degradation into a non-interleaved view.
+  // So when we open for a work whose script isn't loaded — and no ScriptTab load
+  // is already in flight (dedup on the shared `loading` flag) — fetch it here
+  // through the SAME plain-text service.
+  const [loadError, setLoadError] = useState(false);
+  const loadFiredFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open) {
+      // Re-arm on close so a later reopen re-checks (and a previously-errored
+      // work gets another chance).
+      loadFiredFor.current = null;
+      setLoadError(false);
+      return;
+    }
+    if (!workId) return;
+    if (isMine) return; // already loaded for this work
+    if (loading) return; // a ScriptTab load is already in flight — dedup
+    if (loadFiredFor.current === workId) return; // our own load already fired
+    loadFiredFor.current = workId;
+    setLoadError(false);
+    beginLoad(workId);
+    loadScript(workId)
+      .then((md) => setScript(workId, md))
+      .catch(() => {
+        setLoadError(true);
+        endLoad();
+      });
+  }, [open, workId, isMine, loading, beginLoad, endLoad, setScript]);
+
+  // Loading = we have a work open but its script isn't ours yet and we haven't
+  // errored. Rendered INSTEAD of the flow so the non-interleaved degradation
+  // never shows; on error we fall through to the normal (best-effort) render.
+  const isLoading = !!comp && !isMine && !loadError;
 
   const dialogRef = useRef<HTMLDivElement>(null);
   // Trap focus: this is a fullscreen aria-modal surface — Tab must not escape
@@ -176,7 +219,9 @@ export function ScriptReader() {
             </header>
 
             <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
-              {empty ? (
+              {isLoading ? (
+                <ReaderLoading />
+              ) : empty ? (
                 <ReaderEmpty />
               ) : (
                 <div
@@ -252,8 +297,11 @@ export function ScriptReader() {
                 </div>
               )}
 
-              {/* Right-edge mini-TOC — one 镜号 per scene, in reading order. */}
-              {flowScenes.length > 0 && <MiniToc scenes={flowScenes} t={t} />}
+              {/* Right-edge mini-TOC — one 镜号 per scene, in reading order.
+                  Hidden while loading (the flow it indexes isn't shown yet). */}
+              {!isLoading && flowScenes.length > 0 && (
+                <MiniToc scenes={flowScenes} t={t} />
+              )}
             </div>
           </motion.div>
         </motion.div>
@@ -600,6 +648,36 @@ function MiniToc({
         );
       })}
     </nav>
+  );
+}
+
+// Lightweight in-flight placeholder while the reader self-loads the 剧本 (F1).
+// Deliberately spare — a single mono line, no spinner — matching the editorial
+// restraint of the rest of the reader.
+function ReaderLoading() {
+  const t = useT();
+  return (
+    <div
+      data-testid="reader-loading"
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "grid",
+        placeItems: "center",
+      }}
+    >
+      <div
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          color: "var(--text-dimmer)",
+        }}
+      >
+        {t("studio.scriptReader.loading")}
+      </div>
+    </div>
   );
 }
 

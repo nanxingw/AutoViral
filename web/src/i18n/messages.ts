@@ -691,6 +691,7 @@ export const en = {
     scriptReader: {
       title: "Read-through",
       closeAria: "Close the reader",
+      loading: "Loading script…",
       empty: "No script or shots yet — draft a script and add some shots, then read it all in one flow here.",
       emptyTitle: "Nothing to read yet",
       storyboardSection: "Storyboard",
@@ -1879,6 +1880,7 @@ export const zh: DeepShape<Messages> = {
     scriptReader: {
       title: "剧本通读",
       closeAria: "关闭阅读窗口",
+      loading: "正在加载剧本…",
       empty: "还没有剧本或分镜——先写剧本、加几个分镜，再回来一口气通读全片。",
       emptyTitle: "还没有可读内容",
       storyboardSection: "分镜册",

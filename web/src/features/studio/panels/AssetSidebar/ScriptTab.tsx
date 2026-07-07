@@ -424,7 +424,8 @@ function ScriptEditor({ workId }: { workId: string }) {
   const loaded = useScript((s) => s.loaded);
   const storeWorkId = useScript((s) => s.workId);
   const setScript = useScript((s) => s.setScript);
-  const reset = useScript((s) => s.reset);
+  const beginLoad = useScript((s) => s.beginLoad);
+  const endLoad = useScript((s) => s.endLoad);
   // A3 — the 剧本 opens on the PREVIEW (typeset) by default so the first thing
   // the user sees is the rendered script, not a raw markdown box. A manual
   // edit/preview switch is remembered in localStorage under ONE global key
@@ -460,16 +461,22 @@ function ScriptEditor({ workId }: { workId: string }) {
     if (!workId) return;
     if (loadedFor.current === workId) return;
     loadedFor.current = workId;
-    if (useScript.getState().workId !== workId) reset();
+    // Stamp the store as loading for this work (wiping any FOREIGN work's held
+    // script). This also lets a sibling surface — e.g. the ScriptReader opened
+    // from the top bar — see the in-flight flag and skip a duplicate GET.
+    beginLoad(workId);
     setLoadError(null);
     loadScript(workId)
       .then((md) => {
         if (loadedFor.current === workId) setScript(workId, md);
       })
       .catch((err) => {
-        if (loadedFor.current === workId) setLoadError(errorMessage(err));
+        if (loadedFor.current === workId) {
+          setLoadError(errorMessage(err));
+          endLoad();
+        }
       });
-  }, [workId, reset, setScript]);
+  }, [workId, beginLoad, endLoad, setScript]);
 
   const commit = useCallback(
     async (next: string) => {

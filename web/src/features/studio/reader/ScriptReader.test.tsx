@@ -1,11 +1,21 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, within, fireEvent, act } from "@testing-library/react";
+import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
 import { ScriptReader } from "./ScriptReader";
 import { useReader } from "./readerStore";
 import { useComposition } from "../store";
 import { useScript } from "../scriptStore";
 import { useDive } from "../dive/diveStore";
+import { loadScript } from "../services/script";
 import { makeAssetGraph, makeScene } from "../../../test/composition-fixtures";
+
+// F1 — the reader must load the 剧本 itself when opened from a surface where the
+// SCRIPT tab (the other loadScript caller) was never mounted. Mock the plain-text
+// script service so we can assert the reader fires (or dedups) the fetch.
+vi.mock("../services/script", () => ({
+  loadScript: vi.fn(),
+  saveScript: vi.fn(),
+}));
+const loadScriptMock = vi.mocked(loadScript);
 
 // ScriptReader render contract — under mocked store data, assert the single
 // interleaved flow: prose segment → its anchored scene card, unmatched scenes in
@@ -23,7 +33,9 @@ beforeEach(() => {
   useReader.setState({ open: true });
   useDive.setState({ pendingSceneJump: null, open: false });
   useComposition.setState({ comp: null, selection: null });
-  useScript.setState({ workId: null, script: "", loaded: false });
+  useScript.setState({ workId: null, script: "", loaded: false, loading: false });
+  loadScriptMock.mockReset();
+  loadScriptMock.mockResolvedValue("");
 });
 
 describe("ScriptReader", () => {
@@ -185,6 +197,73 @@ describe("ScriptReader", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // ── F1: self-load when opened from a surface where ScriptTab never mounted ──
+  // Regression: opening READ from the LIBRARY sidebar tab (ScriptTab unmounted)
+  // left the useScript store empty, so scriptText was "" and every scene fell
+  // into the trailing 分镜册 bucket — a silent non-interleaved degradation.
+
+  // Set up the exact broken state: a comp with an anchored scene is present, but
+  // the script store is FRESH (no ScriptTab ever loaded it).
+  function seedUnloaded() {
+    const comp = makeAssetGraph({ ids: ["a1"], workId: "w1" });
+    comp.scenes = [
+      makeScene({ id: "sc1", order: 0, title: "Hook shot", mdAnchor: "Opening" }),
+    ];
+    useComposition.setState({ comp, selection: null });
+    useScript.setState({ workId: null, script: "", loaded: false, loading: false });
+  }
+
+  it("self-loads the script when opened for a work whose script isn't in the store", async () => {
+    loadScriptMock.mockResolvedValue("# Opening\nHook.");
+    seedUnloaded();
+    render(<ScriptReader />);
+    // Fetched through the shared plain-text service, stamped with this work's id.
+    await waitFor(() => expect(loadScriptMock).toHaveBeenCalledWith("w1"));
+    // Once it resolves the prose + anchored card interleave — NOT the degraded
+    // all-trailing 分镜册 view the bug produced.
+    await screen.findByText("Hook shot");
+    expect(screen.queryByTestId("reader-storyboard-section")).toBeNull();
+  });
+
+  it("shows a lightweight loading state while the self-load is in flight (not the degraded view)", async () => {
+    let resolve!: (md: string) => void;
+    loadScriptMock.mockReturnValue(new Promise<string>((r) => (resolve = r)));
+    seedUnloaded();
+    render(<ScriptReader />);
+    // Before the fetch resolves: a loading placeholder, and crucially NOT the
+    // trailing 分镜册 bucket (which is the silent-degradation symptom).
+    expect(await screen.findByTestId("reader-loading")).toBeTruthy();
+    expect(screen.queryByTestId("reader-storyboard-section")).toBeNull();
+    // Resolve → the loading state gives way to the interleaved flow.
+    act(() => resolve("# Opening\nHook."));
+    await screen.findByText("Hook shot");
+    expect(screen.queryByTestId("reader-loading")).toBeNull();
+  });
+
+  it("does NOT re-fetch when the store already holds this work's script (isMine)", async () => {
+    seed({
+      script: "# One\nBody.",
+      sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
+    });
+    render(<ScriptReader />);
+    await screen.findByText("A");
+    expect(loadScriptMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT re-fetch when a load is already in flight (ScriptTab mounted) — dedup", async () => {
+    const comp = makeAssetGraph({ ids: ["a1"], workId: "w1" });
+    comp.scenes = [makeScene({ id: "sc1", order: 0, title: "A" })];
+    useComposition.setState({ comp, selection: null });
+    // ScriptTab already kicked off a load: loading:true, not yet loaded.
+    useScript.setState({ workId: "w1", script: "", loaded: false, loading: true });
+    render(<ScriptReader />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(loadScriptMock).not.toHaveBeenCalled();
+    // While that other load is in flight we still show the loading state, not the
+    // degraded all-trailing flow.
+    expect(screen.getByTestId("reader-loading")).toBeTruthy();
   });
 
   it("disconnects the IntersectionObserver on unmount", () => {

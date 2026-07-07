@@ -26,8 +26,23 @@ interface ScriptState {
   script: string;
   /** True once a load has resolved (so the editor can distinguish "" from "loading"). */
   loaded: boolean;
+  /** True while a load is IN FLIGHT for `workId`. Lets any surface (ScriptTab,
+   *  ScriptReader) dedup: whoever finds `loading` already set does NOT fire a
+   *  second GET for the same work. Cleared by setScript (success) / endLoad
+   *  (error/abort) / reset (work switch). */
+  loading: boolean;
   /** Replace the script text for `workId` (refetchScript + editor mount-load/commit). */
   setScript: (workId: string, md: string) => void;
+  /** Mark a load in flight for `workId`, stamping tenancy so a concurrent surface
+   *  sees `loading` and skips its own fetch. When the held script belongs to a
+   *  DIFFERENT work we also wipe it here (a work switch) so no foreign content
+   *  shows during the load window; when it's the SAME work we only flip `loading`
+   *  and preserve any already-loaded text (a redundant re-fetch must not flash
+   *  the editor empty). */
+  beginLoad: (workId: string) => void;
+  /** Clear the in-flight flag WITHOUT marking loaded — for a failed/aborted load
+   *  so the surface can fall back to its error/empty state instead of spinning. */
+  endLoad: () => void;
   /** Synchronously clear on a work switch — BEFORE the new work's load resolves,
    *  so the editor never shows (or commits) the previous work's script. */
   reset: () => void;
@@ -37,6 +52,14 @@ export const useScript = create<ScriptState>((set) => ({
   workId: null,
   script: "",
   loaded: false,
-  setScript: (workId, md) => set({ workId, script: md, loaded: true }),
-  reset: () => set({ workId: null, script: "", loaded: false }),
+  loading: false,
+  setScript: (workId, md) => set({ workId, script: md, loaded: true, loading: false }),
+  beginLoad: (workId) =>
+    set((s) =>
+      s.workId === workId
+        ? { loading: true }
+        : { workId, script: "", loaded: false, loading: true },
+    ),
+  endLoad: () => set({ loading: false }),
+  reset: () => set({ workId: null, script: "", loaded: false, loading: false }),
 }));
