@@ -675,7 +675,7 @@ describe("GenerationDialog BE1-F1 cost-badge refresh on direct dispatch", () => 
     return invalidateSpy;
   }
 
-  function expectCostInvalidated(invalidateSpy: ReturnType<typeof vi.spyOn>) {
+  function expectCostInvalidated(invalidateSpy: ReturnType<typeof renderWithSpy>) {
     return waitFor(() => {
       const hit = invalidateSpy.mock.calls.find((c) => {
         const arg = c[0] as { queryKey?: unknown } | undefined;
