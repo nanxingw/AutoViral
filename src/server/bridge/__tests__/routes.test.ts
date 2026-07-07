@@ -90,14 +90,20 @@ describe("bridge router — Phase 2 read-only composition", () => {
     expect(res.status).toBe(400);
   });
 
-  it("GET /comp with unknown workId → 500 with file-not-found message", async () => {
+  it("GET /comp with a NONEXISTENT work → structured 404 + code 4 (not a naked 500)", async () => {
+    // C3 F5 (PRD-0010 E2E R2) — a genuinely-missing work (no work.yaml, so
+    // getWork returns undefined) is an input error the CLI can branch on
+    // (exit 4), NOT a service crash (naked 500 → exit 3). `no-such-work` has
+    // neither a composition.yaml under WORKS_ROOT nor a work.yaml under dataDir,
+    // so the read helper throws WorkNotFoundError → 404 + code:4.
     const res = await app.request("/api/bridge/v1/comp", {
       headers: { "X-AutoViral-Work-Id": "no-such-work" },
     });
-    expect(res.status).toBe(500);
-    const body = (await res.json()) as { ok: boolean; error: string };
+    expect(res.status).toBe(404);
+    const body = (await res.json()) as { ok: boolean; error: string; code?: number };
     expect(body.ok).toBe(false);
-    expect(body.error).toMatch(/ENOENT|no such file/i);
+    expect(body.code).toBe(4);
+    expect(body.error).toMatch(/not found|no such work/i);
   });
 
   it("GET /clips returns flattened clip summaries across all tracks", async () => {

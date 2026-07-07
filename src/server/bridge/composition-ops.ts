@@ -111,6 +111,60 @@ export async function readCompositionFor(ctx: OpsContext): Promise<Composition> 
   return CompositionSchema.parse(migrated);
 }
 
+/**
+ * C3 F5 (PRD-0010 E2E R2) — thrown by `readCompositionForView` when a GET
+ * read-projection route (GET /comp, /clips, /assets) is asked for a work that
+ * GENUINELY DOES NOT EXIST (no work.yaml). The route maps it to a structured
+ * 404 + code:4 (an input error the CLI branches on → exit 4), NOT a naked 500
+ * (which the CLI reads as "the service broke" → exit 3). A real-but-unwritten
+ * work is NOT this error — it degrades to the empty composition (see below).
+ */
+export class WorkNotFoundError extends Error {
+  readonly code = 4;
+  constructor(public readonly workId: string) {
+    super(`work not found: ${workId}`);
+    this.name = "WorkNotFoundError";
+  }
+}
+
+/**
+ * C3 F5 (PRD-0010 E2E R2) — the READ counterpart of `readOrSeedCompositionFor`.
+ *
+ * The GET read-projection routes used to call `readCompositionFor` directly, so
+ * a real-but-never-written work (created via API/CLI, or opened in the Studio
+ * before its first autosave) ENOENT'd into a NAKED 500 — the exact边界 codex
+ * exploratory `clips list` hit on a fresh video work. A work with zero content
+ * is not a service failure; it's a valid state that should read as "empty".
+ *
+ * This helper degrades that边界 gracefully, mirroring the write path's seed
+ * gate (getWork) so the read and write halves agree on what "a real work"
+ * means:
+ *   - composition.yaml present            → the parsed composition.
+ *   - real work, no composition.yaml yet  → makeEmptyComposition (IN-MEMORY
+ *     ONLY — NO disk write; GET must stay side-effect-free, the write
+ *     chokepoint still owns materialization). /clips & /assets then project
+ *     to [], /comp to the default 4 lanes.
+ *   - genuinely-missing work (getWork → undefined) → throw WorkNotFoundError
+ *     so the route returns a structured 404, never a naked 500.
+ *   - any non-ENOENT error (parse/IO)     → re-thrown → the route's 500 path
+ *     (a real service failure, honestly surfaced).
+ *
+ * `readCompositionFor` itself stays UNCHANGED — snapshot.ts and other internal
+ * readers still rely on the raw ENOENT.
+ */
+export async function readCompositionForView(
+  ctx: OpsContext,
+): Promise<Composition> {
+  try {
+    return await readCompositionFor(ctx);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
+    const work = await getWork(ctx.workId);
+    if (!work) throw new WorkNotFoundError(ctx.workId);
+    return makeEmptyComposition({ workId: ctx.workId });
+  }
+}
+
 // Atomic write: validate → tmpfile → rename. Rename on the same
 // filesystem is POSIX-atomic, so readers either see the OLD content or
 // the new content, never a partial write. If validation fails (zod

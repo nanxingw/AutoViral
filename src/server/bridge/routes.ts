@@ -22,6 +22,8 @@ import {
 import { createAsk } from "./approval-gate.js";
 import {
   readCompositionFor,
+  readCompositionForView,
+  WorkNotFoundError,
   mutateCompositionFor,
   dryRunMutate,
   diffCompositionFor,
@@ -210,15 +212,29 @@ bridgeRouter.get("/whoami", (c) => {
 // keep a cache because the fixture/dev workflow re-reads on every command
 // and an agent that just wrote (Phase 3) must see fresh state immediately.
 
+// C3 F5 (PRD-0010 E2E R2) — map a read-projection error to the structured
+// response the CLI branches on. A genuinely-missing work is an INPUT error
+// (WorkNotFoundError → 404 + code:4 → CLI exit 4); anything else is a real
+// service failure (500 → CLI exit 3). A real-but-unwritten work never reaches
+// here — readCompositionForView degrades it to the empty composition (200).
+function readViewError(c: Context, err: unknown): Response {
+  if (err instanceof WorkNotFoundError) {
+    return c.json({ ok: false, error: err.message, code: err.code }, 404);
+  }
+  const message = err instanceof Error ? err.message : String(err);
+  return c.json({ ok: false, error: message }, 500);
+}
+
 bridgeRouter.get("/comp", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
   try {
-    const comp = await readCompositionFor({ workId: g.workId });
+    // C3 F5 — a real work with no composition.yaml yet reads as the empty
+    // composition (200), not a naked 500. Only a genuinely-missing work 404s.
+    const comp = await readCompositionForView({ workId: g.workId });
     return c.json({ ok: true, result: comp });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return c.json({ ok: false, error: message }, 500);
+    return readViewError(c, err);
   }
 });
 
@@ -438,7 +454,9 @@ bridgeRouter.get("/clips", async (c) => {
   if (!g.ok) return g.res;
   const trackFilter = c.req.query("track");
   try {
-    const comp = await readCompositionFor({ workId: g.workId });
+    // C3 F5 — a real work with no composition.yaml yet projects to an EMPTY
+    // clip list (200), not a naked 500 (the边界 codex探路 hit on a fresh work).
+    const comp = await readCompositionForView({ workId: g.workId });
     const clips = comp.tracks
       .filter((t) => !trackFilter || t.kind === trackFilter)
       .flatMap((t) =>
@@ -456,8 +474,7 @@ bridgeRouter.get("/clips", async (c) => {
       );
     return c.json({ ok: true, result: clips });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return c.json({ ok: false, error: message }, 500);
+    return readViewError(c, err);
   }
 });
 
@@ -466,12 +483,13 @@ bridgeRouter.get("/assets", async (c) => {
   if (!g.ok) return g.res;
   const kindFilter = c.req.query("kind");
   try {
-    const comp = await readCompositionFor({ workId: g.workId });
+    // C3 F5 — a real work with no composition.yaml yet projects to an EMPTY
+    // asset list (200), not a naked 500.
+    const comp = await readCompositionForView({ workId: g.workId });
     const assets = comp.assets.filter((a) => !kindFilter || a.kind === kindFilter);
     return c.json({ ok: true, result: assets });
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return c.json({ ok: false, error: message }, 500);
+    return readViewError(c, err);
   }
 });
 
