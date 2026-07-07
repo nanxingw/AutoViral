@@ -7,10 +7,40 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-### Fixed
+## [0.1.8] - 2026-07-06
+
+**工作台可信度与全貌升级**（PRD-0010）—— 两条主线：**可信**（消息不再重复、成本有账可查、Chat 后端可选）与**全貌**（剧本可读、素材可辨、分镜聚簇画布）。六个切片经三个 Wave 落地（22 片 tracer-bullet，测试先行），并经**两轮多纬度浏览器 E2E**（截图 + DOM/computed-style 二确）验收：第二轮揪出并**三修**了一个 Dive 画布内簇按钮真鼠标点击全失效的 CRITICAL 回归（根因是 xyflow 的 pane 平移在缺 `nopan` 逃逸时抢占了 pointerdown，前两修只补了 `pointer-events` 漏了这一重）。
+
+### Wave A · 修缮（Chat 可靠性 / 剧本可读 / 素材卡形）
+
+- **Chat 消息重复/闪回根治**（A1/A2）— 给每个消息块发**稳定 id**（server 在块进 messageHistory 时分配 `{sessionId}:{seq}`，chat 日志落盘带 id），HTTP history / WS history 重放 / WS 实时块**三条 seed 路径携带同一 id**，前端 store 改 by-id upsert；旧无 id 日志按行号合成兜底 id。发送侧加 useRef in-flight 锁 + 断线禁发提示 + server ≤3s 幂等窗，把重复从"启发式压制"变为"结构性不可能"，且第二发不再误杀正在流式输出的 CLI。实证：曾同一条 user 消息落盘两份的历史 work 加载后折叠为单气泡；mid-turn reload 不再"闪回旧状态再跳回"。
+- **剧本·分镜可读性**（A3/A4/A5）— 剧本 tab 首屏从"~140px 小框里的裸 markdown"改为**默认渲染排版**（编辑部 `.md-bubble` 样式 + remarkGfm 表格/引用/标题 + 高度自适应，手动切换 localStorage 记忆）；抽出 **Chat 与剧本共用的 Markdown 组件**（含资产 URL 翻译）；新增**全屏阅读/编辑 modal**（~720px 阅读列宽、≥15px 字号，portal 到 body 避开 glass 祖先 backdrop-filter 定位陷阱，保存与 agent `script edit` 同路径）；分镜摘要行窄栏时 meta 按优先级降级保标题可读，右栏可拖宽从 28% 放到 40%（拖动结果持久化）。
+- **素材库 per-kind 卡形分家**（A6/A7）— AUDIO 组从 9:16 竖版大卡换 **~52px 紧凑横条**（迷你波形 + mono 时长 + 就地**单例试听**：同刻只播一个、切 work/卸载即停），一屏音频密度从 2-4 张升到 ≥10 条；TEXT 组换**内容 snippet 卡**（前 ~200 字符 3 行 clamp + 扩展名徽章）+ 预览弹窗全文；**管线内部文件**（`.peaks.json` / `concat.txt` 及下划线/连字符变体等）从素材库过滤出去（纯前端过滤，agent 经 bridge 的文件投影零变化）；MIME 表补 m4a/aac/flac/ogg 使音频 Range/seek 生效。
+
+### Wave B · 成本与画布（Per-work 成本 / Dive 分镜聚簇）
+
+- **Per-work 成本账本 + 徽章**（B1-B4）— 新增 SQLite `cost-ledger` 深模块（`cost_events` 表，单一 `recordCostEvent()` 入口，**best-effort：记账失败绝不阻断生成**）+ per-work 汇总端点；**六路埋点**（视频 / 生图 / BGM / TTS / 翻译 / agent 会话），拿不到真实账单的调用诚实标 `estimated`；生图请求补 `usage:{include:true}` 换 OpenRouter 真实成本并顺带补上图片 provenance 注册。Studio/Editor 顶栏新增「本片 $X」**成本徽章** + 点开的明细面板（按 kind 分解 + 估算徽标 + agent token 用量 + 口径起始日注明）；生成/对话完成后**无刷新更新**。agent 会话花费**跨刷新存活**（从持久化 ChatBlock usage 重建，delta 取值实证防 resume 累计值重复计账）。
+- **Dive 分镜聚簇画布**（B5/B6/B7）— 衍生图谱从平铺 asset DAG 升级为**按分镜聚簇的全貌层**：新增 `useSceneClusters` 纯函数（簇成员 = scene 的素材 ∪ 生成 take，选用 take 高亮，衍生资产沿 provenance 祖先链归簇，无归属者进默认折叠的"未归属"簇），xyflow group node 渲染 + 视口裁剪 + 视口外视频不拉 metadata。簇标题条复用分镜列表 i18n（含"需重生"三重编码）、**点簇标题跳回 ScriptTab 对应分镜卡**；"按分镜聚簇"（默认）/"按衍生链"双视图 toggle；入口从 Inspector tab 深处**提升到 Studio 顶栏**。补上 **i2v firstFrame→视频的 provenance 断链**（反查源图 id 填入 `fromAssetId`，data URI/外链反查不到时静默降级为无边、不阻断生成），定妆照→视频这条主力工作流在画布上终于连线。
+
+### Wave C · Codex Chat 后端（完整 parity）
+
+- **Chat 面板可按会话选择 Claude 或 Codex 驱动**（C1-C5）— 抽 `ChatBackend` 接口（`buildSpawn` + `createLineParser`），claude 实现为现有逻辑**纯平移零行为变化**；codex 实现基于 `codex exec --json`（JSONL 事件，schema 经本机真跑锚定 fixture）+ `codex exec resume`。后端为 **per-session 属性**：新建会话时选择、已有会话禁切（跨后端 resume 不互通，UI 明示"切换即新对话"），切换复刻 model switcher 的 killSession+respawn。**viewer-context / viewer-action / checkpoint 三者本就 backend-agnostic**，codex 会话同等支持读界面焦点、驱动 Studio 跳转、每轮自动打 checkpoint。认证由用户在 Terminal 跑一次 `codex login` 自理，Chat 侧只检测登录态并给引导（未登录不 spawn、给友好文案而非 ENOENT）。codex 用量徽章 **token-only**（无美元、不做本地价格折算——诚实纪律）。新增 [ADR-013](docs/adr/ADR-013-chat-multi-backend.md)（Chat 多后端架构），CONTEXT.md 不变量 #4 的"multi-backend Chat deferred to 0.2.0"更新为已落地。范围：仅 work chat，coach/trends/cli-brief 保持 claude。
+
+### 两轮 E2E 回流修复（用户可感知）
+
+- **直连 UI 生成后成本徽章不刷新不更新**（BE1-F1）— `GenerationDialog` 四条直连 dispatch 只 invalidate `['assets']` 从不 invalidate `['cost']`，叠加 `staleTime:30s` → 直连生成后徽章金额停在旧值；现补 cost invalidation，生成后徽章无刷新即变。
+- **agent 经 CLI 生成的图片成本 100% 隐身**（BE3-F1，CRITICAL）— bridge `scene generate`（CLI/agent `autoviral scene generate` 落点）真实生成并计费一张图却完全不记入 cost-ledger，而 UI 侧正确记账 → agent 花的钱在成本徽章里查不到；现补 `recordCostEvent`，CLI 与 UI 两路径记账一致。
+- **CLI 长同步生成误报 `fetch failed`**（BE3-F3）— openrouter-image 同步出图可达 ~2 分钟，CLI 裸 fetch 无超时调优 → 拿到失败但 server 已生成并计费，agent 无从得知易重复扣费；改为显式超时上限（保留 ~15min 客户端预算）+ 清晰退出码。
+- **viewer-action tag 死链接通**（CE2-F1）— `<viewer-action>` tag 曾被解析剥离进气泡却从不驱动 Studio（`dispatchAction` 全仓零赋值）；现接通死链，claude 与 codex 会话输出的 tag 都真驱动 playhead 跳转/选中 clip/Inspector 展开对应属性；reseed 路径也剥离标签，reload 后气泡不再残留裸 `<viewer-action>`。
+- **空作品 codex 探路裸 500**（CE1-F5）— 空 work 的 bridge `GET /comp`、`/clips`、`/assets` 裸 500，codex 探路命中即报错；转优雅降级（空列表/结构化响应）。
+- **Dive 簇内交互按钮真鼠标点击全失效**（BE2-F1，CRITICAL，三修）— 簇标题跳转 / 未归属折叠 / take 选用三处控件对真实鼠标点击全部失效：`draggable:false` 的簇组节点被 xyflow 置 `pointer-events:none` 且不带 `nopan`，pane 的 d3-zoom 在 pointerdown 时抢去发起画布平移把 click 吃掉。前两修只补 `pointer-events:auto`（重开命中目标）漏了这一重；三修抽 `hitTarget` 原语给三控件同时补 `nopan/nodrag` 逃逸，浏览器复验三条路径真鼠标可用（`elementFromPoint` ⇒ 控件自身而非 `react-flow__pane`）。
+
+### Fixed（其他）
+
 - **Seedance 轮询层 `polling_url` 缺失时给可诊断错误**（i2v 诊断沉淀）— enqueue 返 200 但响应体无 `polling_url` 时，旧代码会把它当 `fetch(undefined)` 在轮询循环深处抛出无法归因的 `Failed to parse URL from undefined`；现于 enqueue 边界 fail-fast，抛带上游 body 的显式错误（`Seedance enqueue returned no polling_url: …`），并有回归测试钉死「守卫短路于任何 poll fetch 之前」。
 
-### Changed
+### Changed（其他）
+
 - **i2v recipe：`data:` 锚图路径补实证 + 可达性 gotcha**（文档纠偏）— 2026-06-10 探针只发过 http-URL 锚图，`data:` 内联路当时仅代码正确、从未打过真 API；2026-06-15 付费探针实证：work-relative `firstFrame` → 服务端内联 `data:` URI → **OpenRouter Seedance 接受并出片**（64×64 `data:` 锚 + 显式 `16:9` → 真实 864×496/24fps/4s，方形锚未锁画幅）。recipe 同时写明锚图**由 OpenRouter 服务端拉取**：传 work-relative 路径（路由内联 `data:`，首选）或公网可下载 `https://` URL 才可达，**`http://localhost…` 必失败 `400 resource download failed`**。
 
 ## [0.1.7] - 2026-06-12
