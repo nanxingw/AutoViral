@@ -7,6 +7,7 @@ import { TopBar } from "./TopBar";
 import * as renderSvc from "../services/render";
 import { useComposition } from "../store";
 import { useDive } from "../dive/diveStore";
+import { useReader } from "../reader/readerStore";
 import { makeEmptyComposition } from "../types";
 
 // Mock only the network calls; keep the real `resolveRenderOpts` (a pure
@@ -128,6 +129,20 @@ describe("TopBar (v4)", () => {
     expect(useDive.getState().open).toBe(false);
     fireEvent.click(screen.getByTestId("open-canvas"));
     expect(useDive.getState().open).toBe(true);
+  });
+
+  // ScriptReader — the buried 12px reader icon is promoted to a top-bar sibling
+  // of the canvas全貌 entry, so the whole-film read-through is one click away.
+  it("the read button opens the ScriptReader (top-bar entry)", () => {
+    useReader.setState({ open: false });
+    render(
+      qcWrap(<MemoryRouter>
+        <TopBar workId="w1" savedAt={null} />
+      </MemoryRouter>),
+    );
+    expect(useReader.getState().open).toBe(false);
+    fireEvent.click(screen.getByTestId("open-reader"));
+    expect(useReader.getState().open).toBe(true);
   });
 });
 

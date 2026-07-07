@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { useComposition } from "../store";
 import { useDive } from "../dive/diveStore";
+import { useReader } from "../reader/readerStore";
 import { useNavigate } from "react-router-dom";
 import { useT } from "@/i18n/useT";
 import {
@@ -37,6 +38,7 @@ export function TopBar({
   const navigate = useNavigate();
   const comp = useComposition((s) => s.comp);
   const openCanvas = useDive((s) => s.openCanvas);
+  const openReader = useReader((s) => s.openReader);
   const t = useT();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [lastOpts, setLastOpts] = useState<EnqueueRenderOptions>({
@@ -282,6 +284,39 @@ export function TopBar({
           <path d="M7.6 7.7 10.7 15M16.4 7.7 13.3 15" />
         </svg>
         {t("studio.topBar.openCanvas")}
+      </button>
+
+      {/* ScriptReader — full-screen single-column read-through of the 剧本 +
+          分镜, sibling to the canvas全貌 entry. Fixes the buried 12px reader
+          icon: the whole film reads in one flow, one click away. */}
+      <button
+        type="button"
+        data-bare
+        data-testid="open-reader"
+        onClick={() => openReader(workId)}
+        aria-label={t("studio.topBar.openReaderAria")}
+        title={t("studio.topBar.openReaderAria")}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 10px",
+          borderRadius: 8,
+          border: "1px solid var(--glass-border)",
+          background: "var(--surface-0)",
+          color: "var(--text-dim)",
+          cursor: "pointer",
+          flexShrink: 0,
+          fontFamily: "var(--font-mono)",
+          fontSize: 11,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H12v16H6.5A2.5 2.5 0 0 0 4 21.5zM20 5.5A2.5 2.5 0 0 0 17.5 3H12v16h5.5a2.5 2.5 0 0 1 2.5 2.5z" />
+        </svg>
+        {t("studio.topBar.openReader")}
       </button>
 
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />

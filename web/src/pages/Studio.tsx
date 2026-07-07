@@ -17,6 +17,7 @@ import { RenderProgressBar } from "@/features/terminal/RenderProgressBar";
 import { AssetSidebar } from "@/features/studio/panels/AssetSidebar";
 import { DiveCanvas } from "@/features/studio/dive/DiveCanvas";
 import { useDive } from "@/features/studio/dive/diveStore";
+import { ScriptReader } from "@/features/studio/reader/ScriptReader";
 import { TopBar } from "@/features/studio/panels/TopBar";
 import { TweaksPanel } from "@/features/studio/panels/Tweaks";
 import { useShortcuts } from "@/features/studio/hooks/useShortcuts";
@@ -376,6 +377,11 @@ export default function Studio() {
           top bar; a cluster-title click closes it and jumps the sidebar to the
           matching 分镜 card. */}
       <DiveCanvas open={diveOpen} onClose={closeDive} />
+
+      {/* ScriptReader — full-screen single-column read-through of the 剧本 +
+          分镜 (portals to body). Opened from the top bar; a card's "edit" jump
+          hands off to the sidebar ScriptTab via diveStore.jumpToScene. */}
+      <ScriptReader />
     </div>
   );
 }
