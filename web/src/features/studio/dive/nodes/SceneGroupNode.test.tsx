@@ -184,6 +184,15 @@ describe("SceneGroupNode — pointer-events escape hatch (E2E R2: BE2-画布聚�
     const wrapper = container.querySelector<HTMLElement>('.react-flow__node[data-id="sc1"]');
     expect(wrapper).not.toBeNull();
     expect(wrapper!.style.pointerEvents).toBe("none");
+    // …and because the group node is draggable:false, xyflow does NOT put the
+    // `nopan` class on the wrapper (it only adds it to draggable wrappers — see
+    // @xyflow/react NodeWrapper `[noPanClassName]: isDraggable`). So the pane's
+    // pan/zoom filter (@xyflow/system createFilter) will START A CANVAS PAN on a
+    // pointerdown anywhere in this subtree unless the control opts out itself.
+    // This is the second half of the bug both prior fixes (ab2599a, 90c0300)
+    // missed: pointer-events:auto alone re-opens the hit target, but the ensuing
+    // pointerdown still gets hijacked into a pan that eats the click.
+    expect(wrapper!.classList.contains("nopan")).toBe(false);
   });
 
   it("the scene cluster title re-opens itself as a hit target under that wrapper", () => {
@@ -202,6 +211,13 @@ describe("SceneGroupNode — pointer-events escape hatch (E2E R2: BE2-画布聚�
     // …and the control inside overrides it back to auto.
     expect(title).not.toBeNull();
     expect(title!.style.pointerEvents).toBe("auto");
+    // …AND opts out of the pane's pan + node-drag so a real pointerdown reaches
+    // it instead of starting a canvas pan that swallows the click. (This is the
+    // constraint browser E2E BE2-画布聚簇-F1 proves at the hit-test level; here
+    // we lock the two classes the fix must carry — nopan/nodrag are what
+    // @xyflow/system createFilter + NodeWrapper check for.)
+    expect(title!.classList.contains("nopan")).toBe(true);
+    expect(title!.classList.contains("nodrag")).toBe(true);
   });
 
   it("the unassigned fold toggle re-opens itself as a hit target under that wrapper", () => {
@@ -221,5 +237,8 @@ describe("SceneGroupNode — pointer-events escape hatch (E2E R2: BE2-画布聚�
     expect(wrapper!.style.pointerEvents).toBe("none");
     expect(toggle).not.toBeNull();
     expect(toggle!.style.pointerEvents).toBe("auto");
+    // Same pan/drag opt-out as the scene title.
+    expect(toggle!.classList.contains("nopan")).toBe(true);
+    expect(toggle!.classList.contains("nodrag")).toBe(true);
   });
 });

@@ -2,6 +2,7 @@ import { Handle, Position, type Node } from "@xyflow/react";
 import type { ReactNode } from "react";
 import type { AssetEntry } from "../../types";
 import { useT } from "@/i18n/useT";
+import { HIT_TARGET_CLASS, HIT_TARGET_STYLE } from "./hitTarget";
 
 export const NODE_WIDTH = 180;
 export const NODE_HEIGHT = 120;
@@ -65,6 +66,7 @@ export function NodeShell({
       <button
         type="button"
         data-testid={`dive-use-${assetId}`}
+        className={HIT_TARGET_CLASS}
         onClick={onUse}
         disabled={isCurrent}
         style={{
@@ -82,6 +84,12 @@ export function NodeShell({
           borderRadius: 3,
           cursor: isCurrent ? "default" : "pointer",
           opacity: isCurrent ? 0.6 : 1,
+          // A dive node can be non-interactive (pointer-events:none, no nopan
+          // wrapper); the USE button must re-open itself + opt out of pan/drag so
+          // a real click selects the take instead of panning the canvas. Self-
+          // sufficient regardless of the enclosing node's draggable flag.
+          // (See ./hitTarget — E2E R2 BE2-画布聚簇-F1.)
+          ...HIT_TARGET_STYLE,
         }}
       >
         {isCurrent ? "CURRENT" : t("studio.diveCanvas.btnUse", { id: assetId })}

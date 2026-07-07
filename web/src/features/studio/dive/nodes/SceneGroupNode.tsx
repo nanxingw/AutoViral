@@ -2,6 +2,7 @@ import type { Node, NodeProps } from "@xyflow/react";
 import type { Scene } from "@shared/composition";
 import { useT } from "@/i18n/useT";
 import { STATUS_KEY, INTENT_KEY, SHOT_KEY, STATUS_FILLED } from "../../sceneI18n";
+import { HIT_TARGET_CLASS, HIT_TARGET_STYLE } from "./hitTarget";
 
 // B6 (PRD-0010) — the container behind a scene cluster, now carrying a rich
 // title bar: 镜号 · title · intent · shot · status. The status/intent/shot copy
@@ -24,11 +25,13 @@ import { STATUS_KEY, INTENT_KEY, SHOT_KEY, STATUS_FILLED } from "../../sceneI18n
 //
 // The model we WANT is: the non-interactive box background stays pass-through (so
 // dragging an empty part of a cluster still pans the canvas), while each genuinely
-// interactive control re-opens itself as a hit target. Hoisting `pointer-events`
-// to the whole group container would trap those background pans, so instead every
-// interactive control inside a group node spreads GROUP_NODE_HIT_TARGET. Any
-// control added here in the future must do the same. (E2E R2 BE2-画布聚簇-F1.)
-export const GROUP_NODE_HIT_TARGET = { pointerEvents: "auto" } as const;
+// interactive control re-opens itself as a hit target AND opts out of the pane's
+// pan/drag so its pointerdown isn't hijacked into a canvas pan that swallows the
+// click. Hoisting this to the whole group container would trap those background
+// pans, so instead every interactive control inside a group node spreads
+// HIT_TARGET_STYLE + HIT_TARGET_CLASS (see ./hitTarget for the two-mechanism
+// rationale). Any control added here in the future must do the same.
+// (E2E R2 BE2-画布聚簇-F1.)
 
 export interface SceneGroupNodeData extends Record<string, unknown> {
   isUnassigned: boolean;
@@ -110,6 +113,7 @@ function SceneHeader({
     <button
       type="button"
       data-testid="dive-cluster-title"
+      className={HIT_TARGET_CLASS}
       onClick={onJump}
       aria-label={t("studio.diveCanvas.jumpToSceneAria", { n: shotNo ?? 0 })}
       style={{
@@ -124,9 +128,10 @@ function SceneHeader({
         cursor: "pointer",
         textAlign: "left",
         minWidth: 0,
-        // Re-open this control as a hit target under the group node's
-        // pointer-events:none wrapper (see GROUP_NODE_HIT_TARGET above).
-        ...GROUP_NODE_HIT_TARGET,
+        // Re-open this control as a hit target + opt out of pane pan/drag under
+        // the group node's pointer-events:none, nopan-less wrapper (see
+        // ./hitTarget for why both halves are required).
+        ...HIT_TARGET_STYLE,
       }}
     >
       {/* 镜号 */}
@@ -238,6 +243,7 @@ function UnassignedHeader({
     <button
       type="button"
       data-testid="dive-unassigned-toggle"
+      className={HIT_TARGET_CLASS}
       aria-expanded={!collapsed}
       onClick={onToggleCollapse}
       style={{
@@ -256,8 +262,8 @@ function UnassignedHeader({
         letterSpacing: "0.06em",
         textTransform: "uppercase",
         color: "var(--text-dimmer)",
-        // Same escape hatch as the scene title (see GROUP_NODE_HIT_TARGET above).
-        ...GROUP_NODE_HIT_TARGET,
+        // Same escape hatch as the scene title (see ./hitTarget above).
+        ...HIT_TARGET_STYLE,
       }}
     >
       <span aria-hidden style={{ fontSize: 9 }}>
