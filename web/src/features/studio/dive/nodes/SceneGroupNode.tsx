@@ -11,6 +11,25 @@ import { STATUS_KEY, INTENT_KEY, SHOT_KEY, STATUS_FILLED } from "../../sceneI18n
 // scene title jumps back to its storyboard card; the unassigned bucket instead
 // shows a fold toggle (its members default collapsed to reduce canvas noise).
 
+// ── Interaction model ────────────────────────────────────────────────────────
+// A scene-cluster group node is handed to xyflow with `selectable:false,
+// draggable:false` and NO node-level mouse handler (DiveCanvas). xyflow's
+// NodeWrapper then computes `hasPointerEvents = isSelectable || isDraggable ||
+// onClick || onMouseEnter|Move|Leave === false` and stamps `pointer-events:none`
+// INLINE on the `.react-flow__node` wrapper — every descendant inherits it, so a
+// REAL mouse click on an inner control falls straight through to the
+// react-flow__pane (z=1) and does nothing (fireEvent.click bypasses hit-testing,
+// which is why handler unit tests still pass — see the real-ReactFlow contract
+// test in SceneGroupNode.test.tsx).
+//
+// The model we WANT is: the non-interactive box background stays pass-through (so
+// dragging an empty part of a cluster still pans the canvas), while each genuinely
+// interactive control re-opens itself as a hit target. Hoisting `pointer-events`
+// to the whole group container would trap those background pans, so instead every
+// interactive control inside a group node spreads GROUP_NODE_HIT_TARGET. Any
+// control added here in the future must do the same. (E2E R2 BE2-画布聚簇-F1.)
+export const GROUP_NODE_HIT_TARGET = { pointerEvents: "auto" } as const;
+
 export interface SceneGroupNodeData extends Record<string, unknown> {
   isUnassigned: boolean;
   /** Fallback label — the unassigned bucket name, or a scene with no title. */
@@ -105,11 +124,9 @@ function SceneHeader({
         cursor: "pointer",
         textAlign: "left",
         minWidth: 0,
-        // xyflow stamps `pointer-events: none` on this node's `.react-flow__node`
-        // wrapper (group nodes are selectable:false/draggable:false); re-open the
-        // button as a hit target so a REAL mouse click reaches onJump instead of
-        // falling through to the react-flow__pane. (E2E R2 BE2-画布聚簇-F1.)
-        pointerEvents: "auto",
+        // Re-open this control as a hit target under the group node's
+        // pointer-events:none wrapper (see GROUP_NODE_HIT_TARGET above).
+        ...GROUP_NODE_HIT_TARGET,
       }}
     >
       {/* 镜号 */}
@@ -239,10 +256,8 @@ function UnassignedHeader({
         letterSpacing: "0.06em",
         textTransform: "uppercase",
         color: "var(--text-dimmer)",
-        // Same escape hatch as the scene title: the unassigned group node's
-        // `.react-flow__node` wrapper is pointer-events:none, so the fold toggle
-        // must re-open itself as a hit target. (E2E R2 BE2-画布聚簇-F1.)
-        pointerEvents: "auto",
+        // Same escape hatch as the scene title (see GROUP_NODE_HIT_TARGET above).
+        ...GROUP_NODE_HIT_TARGET,
       }}
     >
       <span aria-hidden style={{ fontSize: 9 }}>

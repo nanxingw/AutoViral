@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import { ReactFlow, type Node } from "@xyflow/react";
 import { SceneGroupNode, type SceneGroupNodeData } from "./SceneGroupNode";
 import { useLocaleStore } from "@/i18n/store";
 import { MESSAGES } from "@/i18n/messages";
@@ -110,28 +111,101 @@ describe("SceneGroupNode — cluster title bar (B6)", () => {
   });
 });
 
+// ── pointer-events escape hatch (E2E R2: BE2-画布聚簇-F1) ─────────────────────
+// This is the CONTRACT test behind that fix, and it deliberately does NOT stub
+// xyflow. It mounts a REAL <ReactFlow> holding a `sceneGroup` node configured
+// exactly as DiveCanvas configures it (selectable:false, draggable:false, no
+// node-level mouse handler) and then asserts BOTH halves of the chain:
+//
+//   1. PREMISE — the actual `.react-flow__node` wrapper xyflow renders around
+//      our node gets inline `pointer-events: none`. This is not our own style;
+//      it is xyflow's NodeWrapper reacting to our node config. If someone made
+//      the group node selectable, or xyflow changed this behaviour, THIS
+//      assertion (and the reason the escape hatch exists) breaks — so the test
+//      is not tautological, it verifies the condition the fix responds to.
+//   2. FIX — the interactive control inside (cluster title / unassigned toggle)
+//      carries `pointer-events: auto`, re-opening itself as a hit target under
+//      the pointer-events:none wrapper. Drop GROUP_NODE_HIT_TARGET and this goes
+//      red.
+//
+// The one thing we CANNOT assert here is that a real mouse click physically
+// lands on the button rather than falling through to the react-flow__pane —
+// happy-dom has no layout or hit-testing (getComputedStyle does not even resolve
+// inherited pointer-events). That final "the click reaches the button" proof is
+// browser-only and lives in the E2E dimension BE2-画布聚簇-F1.
+
+// xyflow measures nodes with a ResizeObserver that happy-dom lacks.
+class MockResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+function renderGroupInReactFlow(data: SceneGroupNodeData): HTMLElement {
+  const node: Node = {
+    id: data.scene?.id ?? "__unassigned__",
+    type: "sceneGroup",
+    position: { x: 0, y: 0 },
+    data,
+    // The exact non-interactive config DiveCanvas hands group nodes.
+    selectable: false,
+    draggable: false,
+    style: { width: 320, height: 120 },
+  };
+  const { container } = render(
+    <div style={{ width: 800, height: 600 }}>
+      <ReactFlow nodes={[node]} edges={[]} nodeTypes={{ sceneGroup: SceneGroupNode }} />
+    </div>,
+  );
+  return container as HTMLElement;
+}
+
 describe("SceneGroupNode — pointer-events escape hatch (E2E R2: BE2-画布聚簇-F1)", () => {
-  // xyflow's NodeWrapper computes `hasPointerEvents = isSelectable ||
-  // isDraggable || onClick || onMouseEnter | Move | Leave` and, when false,
-  // stamps `pointer-events: none` INLINE on the `.react-flow__node` div. Our
-  // group nodes are created with `selectable:false, draggable:false` and pass
-  // NO node-level mouse handler, so their wrapper is pointer-events:none and
-  // every descendant inherits it. A real mouse click on the cluster title / the
-  // unassigned fold toggle then falls straight through the (pointer-events:none)
-  // viewport layer to the react-flow__pane (z=1) and does nothing — even though
-  // fireEvent.click (which bypasses hit-testing) makes the handler tests above
-  // pass. The ONLY way an interactive descendant re-opens itself as a hit target
-  // under a pointer-events:none ancestor is to set `pointer-events: auto` on
-  // itself (CSS: a descendant may override an ancestor's `none`). These are the
-  // style contract that guards that fix.
-  it("the scene cluster title button re-enables pointer-events:auto", () => {
-    const scene = makeScene({ id: "sc1", order: 0, title: "Tap me", status: "planned" });
-    renderNode({ isUnassigned: false, label: "Tap me", scene, shotNo: 1, onJump: vi.fn() });
-    expect(screen.getByTestId("dive-cluster-title").style.pointerEvents).toBe("auto");
+  let realRO: typeof ResizeObserver | undefined;
+  beforeEach(() => {
+    realRO = globalThis.ResizeObserver;
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
+      MockResizeObserver as unknown as typeof ResizeObserver;
+  });
+  afterEach(() => {
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
+      realRO as unknown as typeof ResizeObserver;
   });
 
-  it("the unassigned fold toggle button re-enables pointer-events:auto", () => {
-    renderNode({
+  it("xyflow really stamps pointer-events:none on the group node wrapper (the premise)", () => {
+    const scene = makeScene({ id: "sc1", order: 0, title: "Tap me", status: "planned" });
+    const container = renderGroupInReactFlow({
+      isUnassigned: false,
+      label: "Tap me",
+      scene,
+      shotNo: 1,
+      onJump: vi.fn(),
+    });
+    const wrapper = container.querySelector<HTMLElement>('.react-flow__node[data-id="sc1"]');
+    expect(wrapper).not.toBeNull();
+    expect(wrapper!.style.pointerEvents).toBe("none");
+  });
+
+  it("the scene cluster title re-opens itself as a hit target under that wrapper", () => {
+    const scene = makeScene({ id: "sc1", order: 0, title: "Tap me", status: "planned" });
+    const container = renderGroupInReactFlow({
+      isUnassigned: false,
+      label: "Tap me",
+      scene,
+      shotNo: 1,
+      onJump: vi.fn(),
+    });
+    const wrapper = container.querySelector<HTMLElement>('.react-flow__node[data-id="sc1"]');
+    const title = container.querySelector<HTMLElement>('[data-testid="dive-cluster-title"]');
+    // Guard the whole chain, not the style line in isolation: wrapper is none…
+    expect(wrapper!.style.pointerEvents).toBe("none");
+    // …and the control inside overrides it back to auto.
+    expect(title).not.toBeNull();
+    expect(title!.style.pointerEvents).toBe("auto");
+  });
+
+  it("the unassigned fold toggle re-opens itself as a hit target under that wrapper", () => {
+    const container = renderGroupInReactFlow({
       isUnassigned: true,
       label: "Unassigned",
       scene: null,
@@ -140,6 +214,12 @@ describe("SceneGroupNode — pointer-events escape hatch (E2E R2: BE2-画布聚�
       memberCount: 3,
       onToggleCollapse: vi.fn(),
     });
-    expect(screen.getByTestId("dive-unassigned-toggle").style.pointerEvents).toBe("auto");
+    const wrapper = container.querySelector<HTMLElement>(
+      '.react-flow__node[data-id="__unassigned__"]',
+    );
+    const toggle = container.querySelector<HTMLElement>('[data-testid="dive-unassigned-toggle"]');
+    expect(wrapper!.style.pointerEvents).toBe("none");
+    expect(toggle).not.toBeNull();
+    expect(toggle!.style.pointerEvents).toBe("auto");
   });
 });
