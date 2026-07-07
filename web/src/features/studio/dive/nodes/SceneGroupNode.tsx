@@ -64,11 +64,15 @@ export function SceneGroupNode({ id, data }: NodeProps<SceneGroupNode>) {
       style={{
         width: "100%",
         height: "100%",
-        borderRadius: 14,
+        borderRadius: "var(--radius-lg)",
         border: `1px ${isUnassigned ? "dashed" : "solid"} var(--glass-border)`,
+        // Solid-ish tinted fill (NO backdrop-filter inside the canvas — see
+        // DESIGN.md "Glass with discipline"); the faint top-down falloff keeps
+        // the title bar reading as the cluster's chrome.
         background: isUnassigned
-          ? "rgba(255,255,255,0.015)"
-          : "rgba(255,255,255,0.03)",
+          ? "var(--surface-0)"
+          : "linear-gradient(180deg, var(--surface-1), var(--surface-0) 96px)",
+        boxShadow: "inset 0 1px 0 var(--glass-hi)",
         boxSizing: "border-box",
       }}
     >
@@ -121,32 +125,42 @@ function SceneHeader({
         alignItems: "center",
         gap: 8,
         width: "100%",
-        padding: "9px 12px",
+        height: 44, // == clusterLayout.CLUSTER_HEADER
+        padding: "0 12px",
         background: "transparent",
         border: "none",
-        borderRadius: "14px 14px 0 0",
+        borderBottom: "1px solid var(--divider)",
+        borderRadius: "var(--radius-lg) var(--radius-lg) 0 0",
         cursor: "pointer",
         textAlign: "left",
         minWidth: 0,
+        boxSizing: "border-box",
         // Re-open this control as a hit target + opt out of pane pan/drag under
         // the group node's pointer-events:none, nopan-less wrapper (see
         // ./hitTarget for why both halves are required).
         ...HIT_TARGET_STYLE,
       }}
     >
-      {/* 镜号 */}
+      {/* 镜号 — the one place product UI wears the editorial serif: a numeric
+          badge (CLAUDE.md "Instrument Serif italic · 数字徽章"). Semantics for
+          screen readers live on the button's jumpToSceneAria label. */}
       {shotNo != null && (
         <span
+          data-testid="dive-cluster-shotno"
+          aria-hidden
           style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: 10,
-            letterSpacing: "0.06em",
-            color: "var(--text-dimmer)",
+            fontFamily: "var(--font-editorial)",
+            fontStyle: "italic",
+            fontSize: 19,
+            lineHeight: 1,
+            color: "var(--accent)",
             whiteSpace: "nowrap",
             flexShrink: 0,
+            minWidth: 24,
+            fontFeatureSettings: '"tnum"',
           }}
         >
-          {t("studio.scriptPanel.shotNumber", { n: shotNo })}
+          {String(shotNo).padStart(2, "0")}
         </span>
       )}
       {/* status dot — filled (generated/stale) or hollow (planned); state also
@@ -251,12 +265,15 @@ function UnassignedHeader({
         alignItems: "center",
         gap: 8,
         width: "100%",
-        padding: "9px 12px",
+        height: 44, // == clusterLayout.CLUSTER_HEADER
+        padding: "0 12px",
         background: "transparent",
         border: "none",
-        borderRadius: "14px 14px 0 0",
+        borderBottom: collapsed ? "none" : "1px solid var(--divider)",
+        borderRadius: "var(--radius-lg) var(--radius-lg) 0 0",
         cursor: "pointer",
         textAlign: "left",
+        boxSizing: "border-box",
         fontFamily: "var(--font-mono)",
         fontSize: 11,
         letterSpacing: "0.06em",

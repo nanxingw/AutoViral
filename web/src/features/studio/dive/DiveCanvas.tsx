@@ -5,11 +5,17 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   ReactFlow,
   Background,
-  Controls,
+  BackgroundVariant,
+  MiniMap,
+  Panel,
+  MarkerType,
+  useReactFlow,
+  useViewport,
   type Edge,
   type Node,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import "./dive.css";
 import { useComposition } from "../store";
 import type { AssetEntry, Clip } from "../types";
 import { findAssetByUri } from "./walkProvenance";
@@ -310,32 +316,90 @@ export function DiveCanvas({ open, onClose }: Props) {
         <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
           {empty ? (
             <div
+              data-testid="dive-empty"
               style={{
                 position: "absolute",
                 inset: 0,
                 display: "grid",
                 placeItems: "center",
-                color: "var(--text-dimmer)",
-                fontFamily: "var(--font-mono)",
-                fontSize: 12,
               }}
             >
-              {t("studio.diveCanvas.empty")}
+              <div style={{ textAlign: "center", maxWidth: 360 }}>
+                <div
+                  aria-hidden
+                  style={{
+                    fontFamily: "var(--font-editorial)",
+                    fontStyle: "italic",
+                    fontSize: 44,
+                    lineHeight: 1,
+                    color: "var(--text-dimmer)",
+                    marginBottom: 14,
+                  }}
+                >
+                  ∅
+                </div>
+                <div
+                  style={{
+                    fontFamily: "var(--font-editorial)",
+                    fontStyle: "italic",
+                    fontSize: 20,
+                    letterSpacing: "-0.01em",
+                    color: "var(--text-dim)",
+                    marginBottom: 8,
+                  }}
+                >
+                  {t("studio.diveCanvas.emptyTitle")}
+                </div>
+                <div
+                  style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11,
+                    lineHeight: 1.7,
+                    color: "var(--text-dimmer)",
+                  }}
+                >
+                  {t("studio.diveCanvas.empty")}
+                </div>
+              </div>
             </div>
           ) : (
             <ReactFlow
+              className="dive-flow"
               nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}
               fitView
+              fitViewOptions={{ padding: 0.12 }}
+              // The whole point of the canvas is seeing detail AND the whole
+              // film: 4× in to read a thumbnail, 0.15× out to see every 分镜.
+              minZoom={0.15}
+              maxZoom={4}
+              // Provenance direction (source → derivative) carries meaning;
+              // smoothstep + arrowhead reads better than the default bezier
+              // on a lane-based horizontal layout. Colors live in dive.css.
+              defaultEdgeOptions={{
+                type: "smoothstep",
+                markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
+              }}
               // B5 — cull off-screen nodes; a large clustered graph must not
               // mount every node (pairs with MediaThumb's IntersectionObserver
               // video-preload gate).
               onlyRenderVisibleElements
               proOptions={{ hideAttribution: true }}
             >
-              <Background gap={24} />
-              <Controls showInteractive={false} />
+              <Background
+                variant={BackgroundVariant.Dots}
+                gap={28}
+                size={1.5}
+              />
+              <MiniMap
+                pannable
+                zoomable
+                ariaLabel={t("studio.diveCanvas.title")}
+              />
+              <Panel position="bottom-left">
+                <ZoomBar />
+              </Panel>
             </ReactFlow>
           )}
         </div>
@@ -351,6 +415,52 @@ function kindToNodeType(asset: AssetEntry): "visual" | "audio" | "text" {
   if (asset.kind === "image" || asset.kind === "video") return "visual";
   if (asset.kind === "audio") return "audio";
   return "text"; // subtitle
+}
+
+/** Custom zoom chrome replacing the library-default white <Controls>. Lives
+ *  inside <ReactFlow> (Panel), so the flow hooks are in context. The readout
+ *  re-renders on every zoom tick, but the subtree is four small elements —
+ *  cheaper than mispricing the whole canvas. */
+function ZoomBar() {
+  const t = useT();
+  const { zoomIn, zoomOut, fitView } = useReactFlow();
+  const { zoom } = useViewport();
+  return (
+    <div className="dive-zoombar" data-testid="dive-zoombar">
+      <button
+        type="button"
+        data-bare
+        data-testid="dive-zoom-out"
+        aria-label={t("studio.diveCanvas.zoomOutAria")}
+        onClick={() => zoomOut({ duration: 120 })}
+      >
+        −
+      </button>
+      <span className="dive-zoom-readout" data-testid="dive-zoom-readout" aria-live="off">
+        {Math.round(zoom * 100)}%
+      </span>
+      <button
+        type="button"
+        data-bare
+        data-testid="dive-zoom-in"
+        aria-label={t("studio.diveCanvas.zoomInAria")}
+        onClick={() => zoomIn({ duration: 120 })}
+      >
+        +
+      </button>
+      <span className="dive-zoombar-divider" aria-hidden />
+      <button
+        type="button"
+        data-bare
+        data-testid="dive-zoom-fit"
+        className="dive-zoom-fit"
+        aria-label={t("studio.diveCanvas.zoomFitAria")}
+        onClick={() => fitView({ padding: 0.12, duration: 220 })}
+      >
+        {t("studio.diveCanvas.zoomFit")}
+      </button>
+    </div>
+  );
 }
 
 function ViewToggleButton({

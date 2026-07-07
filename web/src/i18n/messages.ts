@@ -667,6 +667,7 @@ export const en = {
     diveCanvas: {
       title: "Provenance Dive",
       empty: "No assets yet — generate or upload some, then come back.",
+      emptyTitle: "Nothing to map yet",
       btnUse: "USE · {id}",
       unassigned: "Unassigned",
       viewScene: "By shot",
@@ -675,6 +676,10 @@ export const en = {
       jumpToSceneAria: "Open shot {n} in the storyboard",
       expandUnassigned: "Show {n}",
       collapseUnassigned: "Hide",
+      zoomInAria: "Zoom in",
+      zoomOutAria: "Zoom out",
+      zoomFit: "FIT",
+      zoomFitAria: "Fit the whole canvas in view",
     },
     reframeDialog: {
       title: "Apply {preset}?",
@@ -1830,6 +1835,7 @@ export const zh: DeepShape<Messages> = {
     diveCanvas: {
       title: "素材衍生图谱",
       empty: "暂无素材——先生成或上传一些，再回来查看。",
+      emptyTitle: "图谱还是空的",
       btnUse: "使用 · {id}",
       unassigned: "未归属",
       viewScene: "按分镜",
@@ -1838,6 +1844,10 @@ export const zh: DeepShape<Messages> = {
       jumpToSceneAria: "在分镜表中打开镜 {n}",
       expandUnassigned: "展开 {n}",
       collapseUnassigned: "收起",
+      zoomInAria: "放大",
+      zoomOutAria: "缩小",
+      zoomFit: "全览",
+      zoomFitAria: "缩放至完整画布",
     },
     reframeDialog: {
       title: "应用 {preset}？",

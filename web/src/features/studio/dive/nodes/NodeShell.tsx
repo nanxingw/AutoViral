@@ -54,15 +54,30 @@ export function NodeShell({
         width: NODE_WIDTH,
         height: NODE_HEIGHT,
         position: "relative",
-        borderRadius: 10,
+        borderRadius: "var(--radius-md)",
         border: `1px solid ${borderColor}`,
-        background: "var(--surface-0)",
+        background: "var(--surface-1)",
         overflow: "hidden",
         boxShadow,
+        transition: "border-color 0.15s, box-shadow 0.15s",
       }}
     >
       <Handle type="target" position={Position.Left} style={{ visibility: "hidden" }} />
       {children}
+      {/* Bottom scrim so the USE pill stays legible over bright thumbnails
+          without boxing the whole card. */}
+      <div
+        aria-hidden
+        style={{
+          position: "absolute",
+          left: 0,
+          right: 0,
+          bottom: 0,
+          height: 44,
+          background: "linear-gradient(180deg, transparent, rgba(10,11,15,0.72))",
+          pointerEvents: "none",
+        }}
+      />
       <button
         type="button"
         data-testid={`dive-use-${assetId}`}
@@ -71,19 +86,23 @@ export function NodeShell({
         disabled={isCurrent}
         style={{
           position: "absolute",
-          bottom: 6,
-          left: 6,
-          right: 6,
-          padding: "3px 6px",
+          bottom: 8,
+          left: 8,
+          right: 8,
+          padding: "4px 8px",
           fontSize: 9,
           fontFamily: "var(--font-mono)",
-          letterSpacing: "0.06em",
-          border: "1px solid var(--accent)",
-          background: isCurrent ? "var(--accent-glow)" : "rgba(0,0,0,0.55)",
-          color: "var(--accent-hi)",
-          borderRadius: 3,
+          letterSpacing: "0.08em",
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          border: `1px solid ${isCurrent ? "var(--accent)" : "var(--glass-hi)"}`,
+          background: isCurrent ? "var(--accent-glow)" : "rgba(10,11,15,0.6)",
+          color: isCurrent ? "var(--accent-hi)" : "var(--text-dim)",
+          borderRadius: 999,
           cursor: isCurrent ? "default" : "pointer",
-          opacity: isCurrent ? 0.6 : 1,
+          transition: "border-color 0.15s, color 0.15s, background 0.15s",
           // A dive node can be non-interactive (pointer-events:none, no nopan
           // wrapper); the USE button must re-open itself + opt out of pan/drag so
           // a real click selects the take instead of panning the canvas. Self-

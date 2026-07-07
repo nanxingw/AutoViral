@@ -12,7 +12,13 @@ vi.mock("@xyflow/react", () => ({
     return <div data-testid="rf-mock" />;
   },
   Background: () => null,
+  BackgroundVariant: { Dots: "dots", Lines: "lines", Cross: "cross" },
   Controls: () => null,
+  MiniMap: () => null,
+  Panel: () => null,
+  MarkerType: { Arrow: "arrow", ArrowClosed: "arrowclosed" },
+  useReactFlow: () => ({ zoomIn: () => {}, zoomOut: () => {}, fitView: () => {} }),
+  useViewport: () => ({ x: 0, y: 0, zoom: 1 }),
   Handle: () => null,
   Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
 }));

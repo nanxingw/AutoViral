@@ -41,8 +41,9 @@ describe("SceneGroupNode — cluster title bar (B6)", () => {
     });
 
     const en = MESSAGES.en;
-    // 镜号 (shot number) — same shotNumber key ScriptTab uses.
-    expect(screen.getByText(/Shot 3/)).toBeInTheDocument();
+    // 镜号 — the zero-padded editorial numeric badge (visual); screen-reader
+    // semantics live on the title button's jumpToSceneAria label instead.
+    expect(screen.getByTestId("dive-cluster-shotno").textContent).toBe("03");
     expect(screen.getByText("The reveal")).toBeInTheDocument();
     // status / intent / shot copy is the EXACT ScriptTab-sourced string.
     const walk = (k: string) =>

@@ -1,0 +1,153 @@
+/* dive.css — Dive canvas chrome. Everything react-flow renders internally
+ * (edges, background pattern, minimap, attribution) can only be themed via
+ * global CSS, so those overrides live here, scoped under .dive-flow.
+ * Node/cluster visuals stay inline in their components (project convention).
+ *
+ * NOTE: no backdrop-filter anywhere inside the canvas — it's a high-frequency
+ * repaint surface (DESIGN.md "Glass with discipline"). Chrome floating above
+ * the canvas (zoom bar, minimap) uses solid --surface-* fills instead.
+ */
+
+/* ── Edges: provenance flows source → derivative ─────────────────────────── */
+.dive-flow .react-flow__edge-path {
+  stroke: var(--accent-lo);
+  stroke-width: 1.5;
+  opacity: 0.75;
+}
+.dive-flow .react-flow__edge.selected .react-flow__edge-path,
+.dive-flow .react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--accent);
+  opacity: 1;
+}
+/* Arrowheads are SVG presentation attributes; CSS wins over them, which is
+ * the only way to keep the marker on-token across theme switches. */
+.dive-flow .react-flow__arrowhead polyline,
+.dive-flow .react-flow__arrowhead path {
+  fill: var(--accent-lo);
+  stroke: var(--accent-lo);
+}
+
+/* ── Background dot grid — barely-there editorial graph paper ────────────── */
+.dive-flow .react-flow__background circle {
+  fill: var(--glass-hi);
+}
+
+/* ── Canvas entrance: one composed reveal, no per-node stagger.
+ * (onlyRenderVisibleElements remounts nodes on pan/zoom; per-node entrance
+ * animation would replay on every remount and read as flicker.) */
+.dive-flow .react-flow__viewport {
+  animation: dive-viewport-in 0.32s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+@keyframes dive-viewport-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dive-flow .react-flow__viewport {
+    animation: none;
+  }
+}
+
+/* ── MiniMap: token-native, never the library default white ──────────────── */
+.dive-flow .react-flow__minimap {
+  background: var(--surface-1);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin: 14px;
+}
+.dive-flow .react-flow__minimap-mask {
+  fill: var(--accent-glow);
+  stroke: var(--accent-lo);
+  stroke-width: 1.5;
+}
+.dive-flow .react-flow__minimap-node {
+  fill: var(--glass-hi);
+  stroke: none;
+}
+
+/* ── Zoom bar (custom Panel chrome; replaces the default white Controls) ── */
+.dive-zoombar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 14px;
+  padding: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
+}
+.dive-zoombar button {
+  /* Escape the .studio-shell pill fallback: compact square icon buttons. */
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: calc(var(--radius-md) - 3px);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.dive-zoombar button:hover {
+  background: var(--surface-0);
+  color: var(--text);
+}
+.dive-zoombar button:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: 1px;
+}
+.dive-zoombar .dive-zoom-readout {
+  min-width: 44px;
+  padding: 0 4px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-dimmer);
+  font-feature-settings: "zero", "tnum";
+  user-select: none;
+}
+.dive-zoombar .dive-zoom-fit {
+  width: auto;
+  padding: 0 9px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.dive-zoombar .dive-zoombar-divider {
+  width: 1px;
+  height: 14px;
+  margin: 0 3px;
+  background: var(--divider);
+}
+
+/* ── Hover states for canvas-internal controls (inline styles can't :hover;
+ * the stable data-testid doubles as the styling hook by project convention
+ * for dive controls). */
+.dive-flow [data-testid^="dive-use-"]:hover:not(:disabled) {
+  border-color: var(--accent) !important;
+  color: var(--accent-hi) !important;
+  background: rgba(10, 11, 15, 0.8) !important;
+}
+.dive-flow [data-testid="dive-cluster-title"]:hover,
+.dive-flow [data-testid="dive-unassigned-toggle"]:hover {
+  background: var(--surface-2) !important;
+}
+.dive-flow [data-testid="dive-cluster-title"]:focus-visible,
+.dive-flow [data-testid="dive-unassigned-toggle"]:focus-visible,
+.dive-flow [data-testid^="dive-use-"]:focus-visible {
+  outline: 1.5px solid var(--accent);
+  outline-offset: -1.5px;
+}
