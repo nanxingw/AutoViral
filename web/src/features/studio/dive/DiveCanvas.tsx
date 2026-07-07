@@ -379,7 +379,16 @@ export function DiveCanvas({ open, onClose }: Props) {
               // on a lane-based horizontal layout. Colors live in dive.css.
               defaultEdgeOptions={{
                 type: "smoothstep",
-                markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14 },
+                markerEnd: {
+                  type: MarkerType.ArrowClosed,
+                  width: 14,
+                  height: 14,
+                  // xyflow paints the marker color as an INLINE style on the
+                  // <polyline>, which beats any stylesheet selector — the token
+                  // must ride the marker itself (CSS var in inline style keeps
+                  // it theme-reactive).
+                  color: "var(--accent-lo)",
+                },
               }}
               // B5 — cull off-screen nodes; a large clustered graph must not
               // mount every node (pairs with MediaThumb's IntersectionObserver

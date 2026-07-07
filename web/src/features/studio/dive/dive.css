@@ -19,13 +19,10 @@
   stroke: var(--accent);
   opacity: 1;
 }
-/* Arrowheads are SVG presentation attributes; CSS wins over them, which is
- * the only way to keep the marker on-token across theme switches. */
-.dive-flow .react-flow__arrowhead polyline,
-.dive-flow .react-flow__arrowhead path {
-  fill: var(--accent-lo);
-  stroke: var(--accent-lo);
-}
+/* Arrowhead color is NOT themeable from here: xyflow's ArrowClosedSymbol
+ * paints `color` as an inline style (stroke+fill) on the <polyline>, which
+ * beats any stylesheet selector. The token rides defaultEdgeOptions.markerEnd
+ * .color in DiveCanvas.tsx instead. */
 
 /* ── Background dot grid — barely-there editorial graph paper ────────────── */
 .dive-flow .react-flow__background circle {
