@@ -21,7 +21,11 @@ import type { AssetEntry, Clip } from "../types";
 import { findAssetByUri } from "./walkProvenance";
 import { resolveAssetUrl } from "../composition/resolveAssetUrl";
 import { computeSceneClusters } from "./useSceneClusters";
-import { computeClusterLayout, CLUSTER_HEADER } from "./clusterLayout";
+import {
+  computeClusterLayout,
+  CLUSTER_FOLDED_WIDTH,
+  CLUSTER_FOLDED_HEIGHT,
+} from "./clusterLayout";
 import { computeTreeLayout } from "./useTreeLayout";
 import { useDive } from "./diveStore";
 import { NODE_WIDTH, NODE_HEIGHT } from "./nodes/NodeShell";
@@ -29,6 +33,8 @@ import { VisualNode } from "./nodes/VisualNode";
 import { AudioNode } from "./nodes/AudioNode";
 import { TextNode } from "./nodes/TextNode";
 import { SceneGroupNode } from "./nodes/SceneGroupNode";
+import { DiveEdge } from "./nodes/DiveEdge";
+import { miniMapNodeColor } from "./miniMapColor";
 import { useT } from "@/i18n/useT";
 
 interface Props {
@@ -43,6 +49,12 @@ const nodeTypes = {
   sceneGroup: SceneGroupNode,
 };
 
+// Item 3 — provenance edges use the custom three-piece DiveEdge (bezier + wide
+// hit path + hover/selected glow + optional marching-ants).
+const edgeTypes = {
+  dive: DiveEdge,
+};
+
 export function DiveCanvas({ open, onClose }: Props) {
   const comp = useComposition((s) => s.comp);
   const selection = useComposition((s) => s.selection);
@@ -53,6 +65,7 @@ export function DiveCanvas({ open, onClose }: Props) {
   // a cluster title can hand the sidebar a jump target.
   const view = useDive((s) => s.view);
   const unassignedCollapsed = useDive((s) => s.unassignedCollapsed);
+  const lastExpandAt = useDive((s) => s.lastExpandAt);
   const setView = useDive((s) => s.setView);
   const jumpToScene = useDive((s) => s.jumpToScene);
   const toggleUnassignedCollapsed = useDive((s) => s.toggleUnassignedCollapsed);
@@ -87,12 +100,19 @@ export function DiveCanvas({ open, onClose }: Props) {
       .filter((e) => e.fromAssetId != null)
       .map((e) => ({ source: e.fromAssetId as string, target: e.toAssetId }));
 
-    const makeChildData = (asset: AssetEntry, isSelectedTake: boolean) => ({
+    const makeChildData = (
+      asset: AssetEntry,
+      isSelectedTake: boolean,
+      enter?: { ts: number; index: number },
+    ) => ({
       // Override asset.uri with the http-served URL so the <img>/<video> tag
       // can actually load (workspace-relative + shared-asset paths translated).
       asset: { ...asset, uri: resolveAssetUrl(asset.uri, comp.workId) },
       isCurrent: asset.id === currentAssetId,
       isSelectedTake,
+      // Item 4 — entrance window + stagger index (unassigned members only).
+      enterTs: enter?.ts,
+      enterIndex: enter?.index,
       onUse: () => {
         if (selection) rebindClip(selection, asset.id);
       },
@@ -142,6 +162,25 @@ export function DiveCanvas({ open, onClose }: Props) {
       const label =
         title || (cluster.isUnassigned ? t("studio.diveCanvas.unassigned") : cluster.id);
       const folded = isFolded(cluster);
+      // Item 1 — a folded bucket renders a poker-fan preview: the first member's
+      // resolved thumbnail as the top card + the member count.
+      let stackPreview:
+        | { asset: { id: string; kind: AssetEntry["kind"]; uri: string; name?: string }; count: number }
+        | undefined;
+      if (folded && cluster.assetIds.length > 0) {
+        const firstAsset = assetById.get(cluster.assetIds[0]);
+        if (firstAsset) {
+          stackPreview = {
+            asset: {
+              id: firstAsset.id,
+              kind: firstAsset.kind,
+              uri: resolveAssetUrl(firstAsset.uri, comp.workId),
+              name: firstAsset.name,
+            },
+            count: cluster.assetIds.length,
+          };
+        }
+      }
       return {
         id: cluster.id,
         type: "sceneGroup",
@@ -159,9 +198,13 @@ export function DiveCanvas({ open, onClose }: Props) {
           onToggleCollapse: cluster.isUnassigned
             ? toggleUnassignedCollapsed
             : undefined,
+          stackPreview,
         },
-        // A folded bucket shrinks to just its header bar.
-        style: { width: box.width, height: folded ? CLUSTER_HEADER : box.height },
+        // A folded bucket shrinks to a compact card-sized box holding the fan.
+        style: {
+          width: folded ? CLUSTER_FOLDED_WIDTH : box.width,
+          height: folded ? CLUSTER_FOLDED_HEIGHT : box.height,
+        },
         selectable: false,
         draggable: false,
       };
@@ -171,19 +214,28 @@ export function DiveCanvas({ open, onClose }: Props) {
     const renderedIds = new Set<string>();
     for (const cluster of clusters) {
       if (isFolded(cluster)) continue; // hide a folded bucket's members
+      // Item 4 — only the unassigned bucket folds/expands, so only its members
+      // play the staggered entrance (scene clusters are always on-screen and
+      // must not replay it on every pan/zoom remount).
+      let memberIdx = 0;
       for (const assetId of cluster.assetIds) {
         const asset = assetById.get(assetId);
         if (!asset) continue;
         const placement = children.get(assetId)!;
         renderedIds.add(asset.id);
+        const enter =
+          cluster.isUnassigned && lastExpandAt > 0
+            ? { ts: lastExpandAt, index: memberIdx }
+            : undefined;
         childNodes.push({
           id: asset.id,
           type: kindToNodeType(asset),
           parentId: cluster.id,
           extent: "parent",
           position: placement.position,
-          data: makeChildData(asset, cluster.selectedAssetId === asset.id),
+          data: makeChildData(asset, cluster.selectedAssetId === asset.id, enter),
         });
+        memberIdx++;
       }
     }
 
@@ -200,6 +252,7 @@ export function DiveCanvas({ open, onClose }: Props) {
     t,
     view,
     unassignedCollapsed,
+    lastExpandAt,
     jumpToScene,
     toggleUnassignedCollapsed,
   ]);
@@ -368,17 +421,19 @@ export function DiveCanvas({ open, onClose }: Props) {
               nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
               fitView
               fitViewOptions={{ padding: 0.12 }}
               // The whole point of the canvas is seeing detail AND the whole
               // film: 4× in to read a thumbnail, 0.15× out to see every 分镜.
               minZoom={0.15}
               maxZoom={4}
-              // Provenance direction (source → derivative) carries meaning;
-              // smoothstep + arrowhead reads better than the default bezier
-              // on a lane-based horizontal layout. Colors live in dive.css.
+              // Provenance direction (source → derivative) carries meaning; the
+              // custom DiveEdge (Item 3) draws a bezier + wide hit path + glow.
+              // The arrowhead marker COLOUR rides markerEnd (xyflow paints it as
+              // an inline style that beats any stylesheet selector).
               defaultEdgeOptions={{
-                type: "smoothstep",
+                type: "dive",
                 markerEnd: {
                   type: MarkerType.ArrowClosed,
                   width: 14,
@@ -396,14 +451,13 @@ export function DiveCanvas({ open, onClose }: Props) {
               onlyRenderVisibleElements
               proOptions={{ hideAttribution: true }}
             >
-              <Background
-                variant={BackgroundVariant.Dots}
-                gap={28}
-                size={1.5}
-              />
+              <AdaptiveBackground />
               <MiniMap
                 pannable
                 zoomable
+                // Item 6 — tint minimap nodes by type so the map reads as a
+                // legend, not a grey blob. Tokens resolve theme-reactively.
+                nodeColor={miniMapNodeColor}
                 ariaLabel={t("studio.diveCanvas.title")}
               />
               <Panel position="bottom-left">
@@ -417,6 +471,21 @@ export function DiveCanvas({ open, onClose }: Props) {
       )}
     </AnimatePresence>,
     document.body,
+  );
+}
+
+/** Item 6 — the dot grid, but the dots shrink at very low zoom so a fully
+ *  zoomed-out canvas (0.15×) reads as a whisper of texture rather than a heavy
+ *  stipple. Isolated in its own component so reading `zoom` only re-renders THIS
+ *  subtree on every viewport tick, not the whole canvas. */
+function AdaptiveBackground() {
+  const { zoom } = useViewport();
+  return (
+    <Background
+      variant={BackgroundVariant.Dots}
+      gap={28}
+      size={zoom < 0.12 ? 0.8 : 1.5}
+    />
   );
 }
 

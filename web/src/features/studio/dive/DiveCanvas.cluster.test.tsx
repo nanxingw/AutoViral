@@ -21,11 +21,17 @@ vi.mock("@xyflow/react", () => ({
   useViewport: () => ({ x: 0, y: 0, zoom: 1 }),
   Handle: () => null,
   Position: { Left: "left", Right: "right", Top: "top", Bottom: "bottom" },
+  // Item 3 — DiveEdge (imported via edgeTypes) pulls getBezierPath; the mocked
+  // ReactFlow never renders edges so it's never called, but the import binding
+  // must resolve.
+  getBezierPath: () => ["M0 0", 0, 0],
+  BaseEdge: () => null,
 }));
 
 import { DiveCanvas } from "./DiveCanvas";
 import { useComposition } from "../store";
 import { useDive } from "./diveStore";
+import { CLUSTER_FOLDED_HEIGHT, CLUSTER_FOLDED_WIDTH } from "./clusterLayout";
 import { makeAssetGraph, makeScene } from "../../../test/composition-fixtures";
 
 beforeEach(() => {
@@ -193,5 +199,61 @@ describe("DiveCanvas — B6 chrome (unassigned fold + view toggle)", () => {
       fireEvent.click(screen.getByTestId("dive-view-lineage"));
     });
     expect(useDive.getState().view).toBe("lineage");
+  });
+});
+
+describe("DiveCanvas — Item 1 folded poker-fan + Item 3 custom edge", () => {
+  it("a folded unassigned cluster takes the compact folded box + a stackPreview (first member + count)", () => {
+    const comp = makeAssetGraph({ ids: ["a", "loose1", "loose2", "loose3"] });
+    comp.scenes = [makeScene({ id: "sc1", order: 0, memberAssetIds: ["a"] })];
+    useComposition.setState({ comp, selection: null });
+    // default unassignedCollapsed = true → folded
+    render(<DiveCanvas open={true} onClose={() => {}} />);
+    const unassigned = nodesOf().find((n) => n.id === "__unassigned__")!;
+    // Folded box is the compact fixed size, not the (wide) expanded layout box.
+    expect((unassigned.style as { width?: number }).width).toBe(CLUSTER_FOLDED_WIDTH);
+    expect((unassigned.style as { height?: number }).height).toBe(CLUSTER_FOLDED_HEIGHT);
+    // Preview carries the FIRST member as the fan's top card + total count.
+    const preview = (unassigned.data as { stackPreview?: { asset: { id: string }; count: number } })
+      .stackPreview;
+    expect(preview).toBeDefined();
+    expect(preview!.asset.id).toBe("loose1");
+    expect(preview!.count).toBe(3); // loose1, loose2, loose3
+  });
+
+  it("an EXPANDED unassigned cluster carries no stackPreview and uses its full layout box", () => {
+    const comp = makeAssetGraph({ ids: ["a", "loose1"] });
+    comp.scenes = [makeScene({ id: "sc1", order: 0, memberAssetIds: ["a"] })];
+    useComposition.setState({ comp, selection: null });
+    useDive.setState({ unassignedCollapsed: false });
+    render(<DiveCanvas open={true} onClose={() => {}} />);
+    const unassigned = nodesOf().find((n) => n.id === "__unassigned__")!;
+    expect((unassigned.data as { stackPreview?: unknown }).stackPreview).toBeUndefined();
+    expect((unassigned.style as { width?: number }).width).not.toBe(CLUSTER_FOLDED_WIDTH);
+  });
+
+  it("registers the custom edge type and defaults provenance edges to it", () => {
+    const comp = makeAssetGraph({ ids: ["a"] });
+    useComposition.setState({ comp, selection: null });
+    render(<DiveCanvas open={true} onClose={() => {}} />);
+    const edgeTypes = captured.props?.edgeTypes as Record<string, unknown>;
+    expect(edgeTypes).toBeDefined();
+    expect(edgeTypes.dive).toBeDefined();
+    const def = captured.props?.defaultEdgeOptions as { type?: string };
+    expect(def.type).toBe("dive");
+  });
+
+  it("passes the entrance window to unassigned members after an expand", () => {
+    const comp = makeAssetGraph({ ids: ["a", "loose1"] });
+    comp.scenes = [makeScene({ id: "sc1", order: 0, memberAssetIds: ["a"] })];
+    useComposition.setState({ comp, selection: null });
+    // Simulate an expand: bucket open + a recent expand timestamp.
+    useDive.setState({ unassignedCollapsed: false, lastExpandAt: Date.now() });
+    render(<DiveCanvas open={true} onClose={() => {}} />);
+    const loose = nodesOf().find((n) => n.id === "loose1");
+    expect((loose?.data as { enterTs?: number }).enterTs).toBeGreaterThan(0);
+    // A scene-cluster member never gets an entrance (always on-screen).
+    const sceneChild = nodesOf().find((n) => n.id === "a");
+    expect((sceneChild?.data as { enterTs?: number }).enterTs).toBeUndefined();
   });
 });

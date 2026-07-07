@@ -113,6 +113,9 @@
   letter-spacing: 0.04em;
   color: var(--text-dimmer);
   font-feature-settings: "zero", "tnum";
+  /* Item 6 — belt-and-braces tabular figures so the readout never jitters
+     width as the digits change (e.g. 100% → 15%). */
+  font-variant-numeric: tabular-nums;
   user-select: none;
 }
 .dive-zoombar .dive-zoom-fit {
@@ -147,4 +150,91 @@
 .dive-flow [data-testid^="dive-use-"]:focus-visible {
   outline: 1.5px solid var(--accent);
   outline-offset: -1.5px;
+}
+
+/* ── Item 2: frameless (media) nodes — the image is the subject ───────────────
+ * No idle border/fill; hovering a frameless node reveals an accent ring so it
+ * still reads as pickable. (Inline style sets border:transparent; !important
+ * beats the non-important inline rule on hover.) */
+.dive-flow [data-frameless="true"]:hover {
+  border-color: var(--accent-hi) !important;
+  box-shadow: 0 0 0 1px var(--accent-hi), 0 0 14px var(--accent-glow) !important;
+}
+
+/* ── Item 3: custom provenance edge (DiveEdge) ────────────────────────────────
+ * The visible line is thin + low-contrast at rest; the wide invisible sibling
+ * hit path in front (source order: hit BEFORE line) drives hover via the
+ * adjacent-sibling selector, so the whole curve is grabbable. */
+.dive-flow .dive-edge-line {
+  stroke: var(--accent-lo);
+  stroke-width: 1.5;
+  opacity: 0.75;
+  transition: stroke 0.15s, opacity 0.15s, filter 0.15s;
+}
+.dive-flow .dive-edge-hit:hover + .dive-edge-line,
+.dive-flow .dive-edge-line.selected {
+  stroke: var(--accent);
+  opacity: 1;
+  filter: drop-shadow(0 0 8px var(--accent-glow));
+}
+/* marching-ants while an upstream derivation is still generating */
+.dive-flow .dive-edge-line.generating {
+  stroke: var(--accent);
+  opacity: 1;
+  stroke-dasharray: 5 5;
+  animation: dive-edge-flow 0.6s linear infinite;
+}
+@keyframes dive-edge-flow {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+/* ── Item 4: member entrance on expand (applied inline, gated to an 800ms
+ * post-expand window in JS; reduced-motion is handled there too). The 72%
+ * overshoot gives it a signature spring. */
+@keyframes dive-child-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  72% {
+    opacity: 1;
+    transform: translateY(0) scale(1.015) rotate(-1deg);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(0);
+  }
+}
+
+/* ── Item 1: folded poker-fan drifts a few px on cluster hover (整叠微移) ─────── */
+.dive-flow [data-testid^="dive-cluster-"][data-unassigned] .dive-stack-fan {
+  transition: transform 0.25s cubic-bezier(0.32, 0.72, 0, 1);
+}
+.dive-flow [data-testid^="dive-cluster-"][data-unassigned]:hover .dive-stack-fan {
+  transform: translateX(6px);
+}
+
+/* ── Item 5: the generating status dot breathes ──────────────────────────────── */
+.dive-generating-dot {
+  animation: dive-pulse-dot 1.4s ease-in-out infinite;
+}
+@keyframes dive-pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dive-flow .dive-edge-line.generating,
+  .dive-generating-dot,
+  .dive-flow [data-testid^="dive-cluster-"][data-unassigned] .dive-stack-fan {
+    animation: none;
+    transition: none;
+  }
 }
