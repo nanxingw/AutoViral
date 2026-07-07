@@ -1,8 +1,17 @@
 import type { Node, NodeProps } from "@xyflow/react";
 import type { Scene } from "@shared/composition";
+import type { AssetEntry } from "../../types";
 import { useT } from "@/i18n/useT";
 import { STATUS_KEY, INTENT_KEY, SHOT_KEY, STATUS_FILLED } from "../../sceneI18n";
 import { HIT_TARGET_CLASS, HIT_TARGET_STYLE } from "./hitTarget";
+import { MediaThumb } from "./MediaThumb";
+
+/** Item 1 — the resolved thumbnail asset shown as the top card of the folded
+ *  poker-fan stack. */
+export type StackPreview = {
+  asset: Pick<AssetEntry, "id" | "kind" | "uri" | "name">;
+  count: number;
+};
 
 // B6 (PRD-0010) — the container behind a scene cluster, now carrying a rich
 // title bar: 镜号 · title · intent · shot · status. The status/intent/shot copy
@@ -49,6 +58,9 @@ export interface SceneGroupNodeData extends Record<string, unknown> {
   memberCount?: number;
   /** Unassigned only — toggle the fold. */
   onToggleCollapse?: () => void;
+  /** Item 1 — the folded poker-fan preview (first member + count). Present only
+   *  on a COLLAPSED unassigned cluster that has at least one member. */
+  stackPreview?: StackPreview;
 }
 
 export type SceneGroupNode = Node<SceneGroupNodeData>;
@@ -77,12 +89,18 @@ export function SceneGroupNode({ id, data }: NodeProps<SceneGroupNode>) {
       }}
     >
       {isUnassigned ? (
-        <UnassignedHeader
-          label={data.label}
-          collapsed={data.collapsed ?? false}
-          memberCount={data.memberCount ?? 0}
-          onToggleCollapse={data.onToggleCollapse}
-        />
+        <>
+          <UnassignedHeader
+            label={data.label}
+            collapsed={data.collapsed ?? false}
+            memberCount={data.memberCount ?? 0}
+            onToggleCollapse={data.onToggleCollapse}
+          />
+          {/* Item 1 — folded bucket reads as a poker-fan of stacked cards. */}
+          {(data.collapsed ?? false) && data.stackPreview && (
+            <StackFan preview={data.stackPreview} />
+          )}
+        </>
       ) : (
         <SceneHeader scene={scene} shotNo={data.shotNo} label={data.label} onJump={data.onJump} t={t} />
       )}
@@ -302,5 +320,99 @@ function UnassignedHeader({
           : t("studio.diveCanvas.collapseUnassigned")}
       </span>
     </button>
+  );
+}
+
+// ── Item 1: folded poker-fan stack ───────────────────────────────────────────
+// A collapsed bucket shows its first member as the top card with up to 4 ghost
+// cards fanned behind it (translate + rotate, deep soft shadow, descending
+// zIndex). The ghosts are PURE DECORATION — aria-hidden + pointer-events:none —
+// so the only interactive surface is still the header toggle above. The whole
+// fan drifts a few px on cluster hover (dive.css `.dive-stack-fan`).
+
+const STACK_W = 152;
+const STACK_H = 98;
+const MAX_GHOSTS = 4;
+
+function StackFan({ preview }: { preview: StackPreview }) {
+  const ghosts = Math.min(Math.max(preview.count - 1, 0), MAX_GHOSTS);
+  return (
+    <div
+      data-testid="dive-stack-fan"
+      className="dive-stack-fan"
+      style={{
+        position: "relative",
+        width: STACK_W,
+        height: STACK_H,
+        margin: "12px 0 0 14px",
+      }}
+    >
+      {/* ghost cards behind — decorative only */}
+      {Array.from({ length: ghosts }).map((_, i) => (
+        <div
+          key={i}
+          aria-hidden
+          data-testid="dive-stack-ghost"
+          className="dive-stack-ghost"
+          style={{
+            position: "absolute",
+            inset: 0,
+            borderRadius: "var(--radius-md)",
+            background:
+              "linear-gradient(135deg, var(--surface-2), var(--surface-0))",
+            border: "1px solid var(--glass-border)",
+            boxShadow: "0 14px 34px rgba(0, 0, 0, 0.4)",
+            transform: `translate(${(i + 1) * 18}px, ${(i + 1) * 10}px) rotate(${(i + 1) * 4}deg)`,
+            pointerEvents: "none",
+            zIndex: -(i + 1),
+          }}
+        />
+      ))}
+      {/* top card — the first member's thumbnail */}
+      <div
+        data-testid="dive-stack-main"
+        style={{
+          position: "absolute",
+          inset: 0,
+          borderRadius: "var(--radius-md)",
+          overflow: "hidden",
+          border: "1px solid var(--glass-hi)",
+          boxShadow: "0 14px 34px rgba(0, 0, 0, 0.4)",
+          background: "var(--surface-1)",
+          zIndex: 1,
+        }}
+      >
+        <MediaThumb asset={preview.asset} />
+      </div>
+      {/* count pill */}
+      <span
+        data-testid="dive-stack-count"
+        aria-hidden
+        style={{
+          position: "absolute",
+          top: -7,
+          right: -7,
+          zIndex: 2,
+          minWidth: 20,
+          height: 20,
+          padding: "0 6px",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          borderRadius: 999,
+          // surface-2 fill + accent-hi text reads in BOTH themes (accent bg
+          // would clash — accent-hi is light in dark theme, so light-on-light).
+          background: "var(--surface-2)",
+          color: "var(--accent-hi)",
+          border: "1px solid var(--accent-lo)",
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          fontVariantNumeric: "tabular-nums",
+          boxShadow: "0 4px 12px rgba(0, 0, 0, 0.35)",
+        }}
+      >
+        {preview.count}
+      </span>
+    </div>
   );
 }

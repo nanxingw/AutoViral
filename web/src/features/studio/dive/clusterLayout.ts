@@ -18,6 +18,12 @@ import type { SceneCluster } from "./useSceneClusters";
 
 /** Space reserved at the top of each group for a B6 title bar. */
 export const CLUSTER_HEADER = 44;
+/** Folded (unassigned) cluster box — compact enough to read as a single stacked
+ *  card, tall enough to hold the poker-fan preview under the header (Item 1).
+ *  DiveCanvas overrides a folded group node's inline width/height to these
+ *  (the expanded box from computeClusterLayout is only used when unfolded). */
+export const CLUSTER_FOLDED_WIDTH = 264;
+export const CLUSTER_FOLDED_HEIGHT = 200;
 /** Inner padding around the member nodes inside a group. */
 export const CLUSTER_PADDING = 24;
 /** Gap between clusters — horizontal along the timeline row, and vertical

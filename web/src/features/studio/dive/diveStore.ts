@@ -22,6 +22,10 @@ export interface DiveState {
   view: ClusterView;
   /** Whether the "未归属" cluster is folded (default true when scene clusters exist). */
   unassignedCollapsed: boolean;
+  /** Item 4 — timestamp (ms) of the last EXPAND action. Newly-mounted member
+   *  nodes play the entrance animation only within a short window after this, so
+   *  onlyRenderVisibleElements remounts (pan/zoom) don't replay it as flicker. */
+  lastExpandAt: number;
   /** Scene id the sidebar should jump to + expand; null = nothing pending. */
   pendingSceneJump: string | null;
   /** Tenancy — which work the view/fold memory belongs to. */
@@ -41,6 +45,7 @@ export const useDive = create<DiveState>((set) => ({
   open: false,
   view: DEFAULT_VIEW,
   unassignedCollapsed: DEFAULT_UNASSIGNED_COLLAPSED,
+  lastExpandAt: 0,
   pendingSceneJump: null,
   memoWorkId: null,
 
@@ -58,7 +63,14 @@ export const useDive = create<DiveState>((set) => ({
   closeCanvas: () => set({ open: false }),
   setView: (view) => set({ view }),
   toggleUnassignedCollapsed: () =>
-    set((s) => ({ unassignedCollapsed: !s.unassignedCollapsed })),
+    set((s) => {
+      const next = !s.unassignedCollapsed;
+      // Only stamp the entrance window on EXPAND (collapse has nothing to
+      // animate in); collapsing leaves the last timestamp untouched.
+      return next
+        ? { unassignedCollapsed: next }
+        : { unassignedCollapsed: next, lastExpandAt: Date.now() };
+    }),
   jumpToScene: (sceneId) => set({ open: false, pendingSceneJump: sceneId }),
   consumeSceneJump: () => set({ pendingSceneJump: null }),
 }));

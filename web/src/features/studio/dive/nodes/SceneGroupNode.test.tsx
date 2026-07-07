@@ -112,6 +112,71 @@ describe("SceneGroupNode — cluster title bar (B6)", () => {
   });
 });
 
+describe("SceneGroupNode — Item 1 folded poker-fan stack", () => {
+  const preview = (count: number) => ({
+    asset: { id: "loose1", kind: "image" as const, uri: "images/p.png", name: "pic" },
+    count,
+  });
+
+  it("renders the top card + count pill + up to 4 fanned ghost cards when collapsed", () => {
+    renderNode({
+      isUnassigned: true,
+      label: "Unassigned",
+      scene: null,
+      shotNo: null,
+      collapsed: true,
+      memberCount: 6,
+      stackPreview: preview(6),
+    });
+    expect(screen.getByTestId("dive-stack-fan")).toBeInTheDocument();
+    // Top card shows the first member's thumbnail.
+    const main = screen.getByTestId("dive-stack-main");
+    expect(main.querySelector("img")?.getAttribute("src")).toBe("images/p.png");
+    // Count pill shows the member total.
+    expect(screen.getByTestId("dive-stack-count").textContent).toBe("6");
+    // Ghosts cap at 4 (6 members → 5 behind, clamped to 4).
+    const ghosts = screen.getAllByTestId("dive-stack-ghost");
+    expect(ghosts).toHaveLength(4);
+    // Ghosts are pure decoration — aria-hidden + pointer-events:none.
+    for (const g of ghosts) {
+      expect(g.getAttribute("aria-hidden")).toBe("true");
+      expect(g.style.pointerEvents).toBe("none");
+    }
+  });
+
+  it("fans exactly (count-1) ghosts below the cap", () => {
+    renderNode({
+      isUnassigned: true,
+      label: "Unassigned",
+      scene: null,
+      shotNo: null,
+      collapsed: true,
+      memberCount: 2,
+      stackPreview: preview(2),
+    });
+    expect(screen.getAllByTestId("dive-stack-ghost")).toHaveLength(1);
+  });
+
+  it("shows NO fan when the bucket is expanded", () => {
+    renderNode({
+      isUnassigned: true,
+      label: "Unassigned",
+      scene: null,
+      shotNo: null,
+      collapsed: false,
+      memberCount: 3,
+      stackPreview: preview(3),
+    });
+    expect(screen.queryByTestId("dive-stack-fan")).toBeNull();
+  });
+
+  it("never shows a fan for a real scene cluster", () => {
+    const scene = makeScene({ id: "sc1", order: 0, title: "Shot", status: "planned" });
+    renderNode({ isUnassigned: false, label: "Shot", scene, shotNo: 1, onJump: vi.fn() });
+    expect(screen.queryByTestId("dive-stack-fan")).toBeNull();
+  });
+});
+
 // ── pointer-events escape hatch (E2E R2: BE2-画布聚簇-F1) ─────────────────────
 // This is the CONTRACT test behind that fix, and it deliberately does NOT stub
 // xyflow. It mounts a REAL <ReactFlow> holding a `sceneGroup` node configured

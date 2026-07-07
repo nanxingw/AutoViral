@@ -680,6 +680,11 @@ export const en = {
       zoomOutAria: "Zoom out",
       zoomFit: "FIT",
       zoomFitAria: "Fit the whole canvas in view",
+      generatingAria: "Generating this asset",
+      generating0: "Composing the frame",
+      generating1: "Almost there",
+      generating2: "Hold tight",
+      generating3: "Refining the details",
     },
     reframeDialog: {
       title: "Apply {preset}?",
@@ -1848,6 +1853,11 @@ export const zh: DeepShape<Messages> = {
       zoomOutAria: "缩小",
       zoomFit: "全览",
       zoomFitAria: "缩放至完整画布",
+      generatingAria: "该素材生成中",
+      generating0: "正在构图",
+      generating1: "马上就好",
+      generating2: "再等一下",
+      generating3: "正在雕琢细节",
     },
     reframeDialog: {
       title: "应用 {preset}？",

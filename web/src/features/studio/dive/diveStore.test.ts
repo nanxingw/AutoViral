@@ -14,6 +14,7 @@ function reset() {
     open: false,
     view: "scene",
     unassignedCollapsed: true,
+    lastExpandAt: 0,
     pendingSceneJump: null,
     memoWorkId: null,
   });
@@ -60,6 +61,17 @@ describe("diveStore", () => {
     useDive.getState().openCanvas("w2");
     expect(useDive.getState().view).toBe("scene");
     expect(useDive.getState().unassignedCollapsed).toBe(true);
+  });
+
+  it("stamps lastExpandAt on EXPAND only, never on collapse (Item 4 entrance window)", () => {
+    expect(useDive.getState().lastExpandAt).toBe(0);
+    const before = Date.now();
+    useDive.getState().toggleUnassignedCollapsed(); // collapsed(true) → expanded(false)
+    const afterExpand = useDive.getState().lastExpandAt;
+    expect(afterExpand).toBeGreaterThanOrEqual(before);
+    // Collapsing again must NOT refresh the window (nothing enters on collapse).
+    useDive.getState().toggleUnassignedCollapsed(); // expanded(false) → collapsed(true)
+    expect(useDive.getState().lastExpandAt).toBe(afterExpand);
   });
 
   it("jumpToScene closes the canvas and records the pending jump", () => {

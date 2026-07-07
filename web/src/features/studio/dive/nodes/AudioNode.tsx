@@ -3,7 +3,13 @@ import { NodeShell, type DiveNode } from "./NodeShell";
 
 export function AudioNode({ data }: NodeProps<DiveNode>) {
   return (
-    <NodeShell assetId={data.asset.id} isCurrent={data.isCurrent} onUse={data.onUse}>
+    <NodeShell
+      assetId={data.asset.id}
+      isCurrent={data.isCurrent}
+      enterTs={data.enterTs}
+      enterIndex={data.enterIndex}
+      onUse={data.onUse}
+    >
       <div
         style={{
           position: "absolute",

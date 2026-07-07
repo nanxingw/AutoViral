@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { ReactFlow, type Node, type NodeProps } from "@xyflow/react";
 import { NodeShell } from "./NodeShell";
 import { useLocaleStore } from "@/i18n/store";
@@ -77,5 +78,86 @@ describe("NodeShell — take USE button pan/drag escape hatch (E2E R2: BE2-画�
     expect(useBtn!.style.pointerEvents).toBe("auto");
     expect(useBtn!.classList.contains("nopan")).toBe(true);
     expect(useBtn!.classList.contains("nodrag")).toBe(true);
+  });
+});
+
+// ── Item 2: frameless media nodes + Item 5: busy (generating) nodes ──────────
+// NodeShell renders an xyflow <Handle>, which needs ReactFlow store context, so
+// (like the escape-hatch test above) we mount each variant as a real node.
+function renderShellVariant(
+  props: Omit<ComponentProps<typeof NodeShell>, "children">,
+): HTMLElement {
+  function Variant() {
+    return (
+      <NodeShell {...props}>
+        <div />
+      </NodeShell>
+    );
+  }
+  const node: Node = {
+    id: props.assetId,
+    type: "variant",
+    position: { x: 0, y: 0 },
+    data: {},
+    style: { width: 180, height: 120 },
+  };
+  const { container } = render(
+    <div style={{ width: 800, height: 600 }}>
+      <ReactFlow nodes={[node]} edges={[]} nodeTypes={{ variant: Variant }} />
+    </div>,
+  );
+  return container as HTMLElement;
+}
+
+describe("NodeShell — frameless media + busy state", () => {
+  let realRO: typeof ResizeObserver | undefined;
+  beforeEach(() => {
+    useLocaleStore.setState({ locale: "en" });
+    realRO = globalThis.ResizeObserver;
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
+      MockResizeObserver as unknown as typeof ResizeObserver;
+  });
+  afterEach(() => {
+    (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver =
+      realRO as unknown as typeof ResizeObserver;
+  });
+
+  it("a frameless idle node has NO border/fill (the image is the subject) + a paint-containment guard", () => {
+    const container = renderShellVariant({ assetId: "v1", isCurrent: false, frameless: true, onUse: vi.fn() });
+    const shell = container.querySelector<HTMLElement>('[data-testid="dive-node-v1"]')!;
+    expect(shell.getAttribute("data-frameless")).toBe("true");
+    expect(shell.style.border).toContain("transparent");
+    expect(shell.style.background).toBe("transparent");
+    expect(shell.style.contain).toBe("layout");
+  });
+
+  it("a NON-frameless (audio/text) node keeps its glass frame + surface fill", () => {
+    // (happy-dom drops var() colours from the `border` shorthand, so we test the
+    // OBSERVABLE difference: a non-frameless idle border is a solid glass line,
+    // NOT transparent, and the card carries the surface fill.)
+    const container = renderShellVariant({ assetId: "a1", isCurrent: false, onUse: vi.fn() });
+    const shell = container.querySelector<HTMLElement>('[data-testid="dive-node-a1"]')!;
+    expect(shell.getAttribute("data-frameless")).toBeNull();
+    expect(shell.style.border).not.toContain("transparent");
+    expect(shell.style.background).toBe("var(--surface-1)");
+  });
+
+  it("a frameless node still gets the accent ring (glow) when it is the current take", () => {
+    const container = renderShellVariant({ assetId: "v2", isCurrent: true, frameless: true, onUse: vi.fn() });
+    const shell = container.querySelector<HTMLElement>('[data-testid="dive-node-v2"]')!;
+    // The accent glow (a longhand box-shadow — var() survives) is the ring signal;
+    // a current node is no longer transparent-bordered.
+    expect(shell.style.boxShadow).toContain("var(--accent-glow)");
+    expect(shell.style.border).not.toContain("transparent");
+  });
+
+  it("a busy (generating) node hides the USE pill — there is no take to use yet", () => {
+    const container = renderShellVariant({ assetId: "v3", isCurrent: false, frameless: true, busy: true, onUse: vi.fn() });
+    expect(container.querySelector('[data-testid="dive-use-v3"]')).toBeNull();
+  });
+
+  it("a non-busy node shows the USE pill", () => {
+    const container = renderShellVariant({ assetId: "v4", isCurrent: false, frameless: true, onUse: vi.fn() });
+    expect(container.querySelector('[data-testid="dive-use-v4"]')).not.toBeNull();
   });
 });
