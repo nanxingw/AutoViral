@@ -130,6 +130,15 @@ export function DiveCanvas({ open, onClose }: Props) {
         id: asset.id,
         type: kindToNodeType(asset),
         position: pos.get(asset.id) ?? { x: 0, y: 0 },
+        // 画布-F2 — the MiniMap draws a rect per node ONLY when the user node
+        // carries a dimension (measured?.w ?? width ?? initialWidth). We hand
+        // ReactFlow a controlled `nodes` prop with no onNodesChange, so the
+        // dims xyflow measures land on the internal nodeLookup (bounds stay
+        // correct) but never flow back onto the user node — leaving the minimap
+        // with dimensionless nodes and zero rects. Seed the fixed NodeShell size
+        // as an initial dimension so the minimap sizes each rect immediately.
+        initialWidth: NODE_WIDTH,
+        initialHeight: NODE_HEIGHT,
         data: makeChildData(asset, false),
       }));
       const flowEdges: Edge[] = layoutInputEdges.map((e) => ({
@@ -200,6 +209,11 @@ export function DiveCanvas({ open, onClose }: Props) {
             : undefined,
           stackPreview,
         },
+        // 画布-F2 — feed the minimap an initial dimension (see the flat-node
+        // note above): a controlled node's measured size never reaches the user
+        // node, so without this the group draws no minimap rect.
+        initialWidth: folded ? CLUSTER_FOLDED_WIDTH : box.width,
+        initialHeight: folded ? CLUSTER_FOLDED_HEIGHT : box.height,
         // A folded bucket shrinks to a compact card-sized box holding the fan.
         style: {
           width: folded ? CLUSTER_FOLDED_WIDTH : box.width,
@@ -233,6 +247,10 @@ export function DiveCanvas({ open, onClose }: Props) {
           parentId: cluster.id,
           extent: "parent",
           position: placement.position,
+          // 画布-F2 — initial dimension so the minimap draws this child's rect
+          // (see the flat-node note above for the controlled-node root cause).
+          initialWidth: NODE_WIDTH,
+          initialHeight: NODE_HEIGHT,
           data: makeChildData(asset, cluster.selectedAssetId === asset.id, enter),
         });
         memberIdx++;

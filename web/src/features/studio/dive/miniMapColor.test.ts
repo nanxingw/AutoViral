@@ -25,4 +25,15 @@ describe("miniMapNodeColor", () => {
     ]);
     expect(colors.size).toBe(3);
   });
+
+  it("every type (and undefined) returns a non-empty colour string", () => {
+    // 画布-F2 — xyflow's MiniMap rect fill resolves as `color || background ||
+    // backgroundColor`; an empty / undefined return would silently drop the
+    // per-type tint. Lock the contract: never falsy, always a fillable string.
+    for (const type of ["visual", "audio", "text", "sceneGroup", "mystery", undefined]) {
+      const c = miniMapNodeColor({ type });
+      expect(typeof c).toBe("string");
+      expect(c.length).toBeGreaterThan(0);
+    }
+  });
 });
