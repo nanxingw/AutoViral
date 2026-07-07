@@ -109,3 +109,37 @@ describe("SceneGroupNode — cluster title bar (B6)", () => {
     expect(onToggleCollapse).toHaveBeenCalledOnce();
   });
 });
+
+describe("SceneGroupNode — pointer-events escape hatch (E2E R2: BE2-画布聚簇-F1)", () => {
+  // xyflow's NodeWrapper computes `hasPointerEvents = isSelectable ||
+  // isDraggable || onClick || onMouseEnter | Move | Leave` and, when false,
+  // stamps `pointer-events: none` INLINE on the `.react-flow__node` div. Our
+  // group nodes are created with `selectable:false, draggable:false` and pass
+  // NO node-level mouse handler, so their wrapper is pointer-events:none and
+  // every descendant inherits it. A real mouse click on the cluster title / the
+  // unassigned fold toggle then falls straight through the (pointer-events:none)
+  // viewport layer to the react-flow__pane (z=1) and does nothing — even though
+  // fireEvent.click (which bypasses hit-testing) makes the handler tests above
+  // pass. The ONLY way an interactive descendant re-opens itself as a hit target
+  // under a pointer-events:none ancestor is to set `pointer-events: auto` on
+  // itself (CSS: a descendant may override an ancestor's `none`). These are the
+  // style contract that guards that fix.
+  it("the scene cluster title button re-enables pointer-events:auto", () => {
+    const scene = makeScene({ id: "sc1", order: 0, title: "Tap me", status: "planned" });
+    renderNode({ isUnassigned: false, label: "Tap me", scene, shotNo: 1, onJump: vi.fn() });
+    expect(screen.getByTestId("dive-cluster-title").style.pointerEvents).toBe("auto");
+  });
+
+  it("the unassigned fold toggle button re-enables pointer-events:auto", () => {
+    renderNode({
+      isUnassigned: true,
+      label: "Unassigned",
+      scene: null,
+      shotNo: null,
+      collapsed: true,
+      memberCount: 3,
+      onToggleCollapse: vi.fn(),
+    });
+    expect(screen.getByTestId("dive-unassigned-toggle").style.pointerEvents).toBe("auto");
+  });
+});

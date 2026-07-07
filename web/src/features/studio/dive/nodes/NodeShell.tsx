@@ -82,6 +82,11 @@ export function NodeShell({
           borderRadius: 3,
           cursor: isCurrent ? "default" : "pointer",
           opacity: isCurrent ? 0.6 : 1,
+          // If this dive node is ever handed to xyflow non-interactive
+          // (selectable:false/draggable:false → `.react-flow__node`
+          // pointer-events:none), the USE button must still be a hit target so a
+          // real click selects the take. (E2E R2 BE2-画布聚簇-F1.)
+          pointerEvents: "auto",
         }}
       >
         {isCurrent ? "CURRENT" : t("studio.diveCanvas.btnUse", { id: assetId })}

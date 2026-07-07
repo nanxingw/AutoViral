@@ -105,6 +105,11 @@ function SceneHeader({
         cursor: "pointer",
         textAlign: "left",
         minWidth: 0,
+        // xyflow stamps `pointer-events: none` on this node's `.react-flow__node`
+        // wrapper (group nodes are selectable:false/draggable:false); re-open the
+        // button as a hit target so a REAL mouse click reaches onJump instead of
+        // falling through to the react-flow__pane. (E2E R2 BE2-画布聚簇-F1.)
+        pointerEvents: "auto",
       }}
     >
       {/* 镜号 */}
@@ -234,6 +239,10 @@ function UnassignedHeader({
         letterSpacing: "0.06em",
         textTransform: "uppercase",
         color: "var(--text-dimmer)",
+        // Same escape hatch as the scene title: the unassigned group node's
+        // `.react-flow__node` wrapper is pointer-events:none, so the fold toggle
+        // must re-open itself as a hit target. (E2E R2 BE2-画布聚簇-F1.)
+        pointerEvents: "auto",
       }}
     >
       <span aria-hidden style={{ fontSize: 9 }}>
