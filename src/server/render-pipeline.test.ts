@@ -67,7 +67,7 @@ const baseComp: Composition = {
   tracks: [], assets: [], provenance: [], exportPresets: [],
 };
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.clearAllMocks();
   // R46 — force software-encoder fallback in tests so we keep asserting
   // on stable codec names like `libx264`. Without this, tests would
@@ -75,11 +75,45 @@ beforeEach(() => {
   // fail in CI (or vice-versa). AUTOVIRAL_FAKE_ENCODERS is a backdoor
   // gpu-encoder reads instead of probing ffmpeg.
   process.env.AUTOVIRAL_FAKE_ENCODERS = "libx264,libx265,libvpx-vp9,libaom-av1";
-  // Reset cached detection between tests so the env var takes effect.
-  void import("./render/gpu-encoder.js").then((m) =>
-    m._resetEncoderCacheForTests(),
-  );
+  // Reset cached detection between tests so the env var takes effect. Await it
+  // — a fire-and-forget import could land the reset mid-test on a slow runner.
+  const gpu = await import("./render/gpu-encoder.js");
+  gpu._resetEncoderCacheForTests();
 });
+
+// Drive every spawned (mock) ffmpeg child to a clean exit until the pipeline
+// promise settles. The pipeline awaits each ffmpeg call inline, but stages are
+// separated by REAL async work (fs I/O — only `rename` is mocked above), so a
+// FIXED number of drain rounds is a latency bet: on a loaded CI runner one fs
+// callback landing after the last round leaves the next spawned child without
+// a "close" forever → the pipeline hangs → 15s vitest timeout (chronic main-CI
+// flake, victim test random within this file; reproduced locally by shrinking
+// the old 8-round loop to 1). Draining UNTIL SETTLED is correct by
+// construction: every event-loop turn closes whatever new children appeared,
+// so the pipeline always progresses no matter how many turns real I/O takes.
+// The round cap is a hang backstop far above anything real; vitest's timeout
+// remains the final net.
+async function drainSpawnsUntilSettled(
+  spawnMock: ReturnType<typeof vi.fn>,
+  promise: Promise<unknown>,
+): Promise<void> {
+  let settled = false;
+  const tracked = promise.then(
+    () => { settled = true; },
+    () => { settled = true; }, // rejection is the caller's to assert
+  );
+  for (let i = 0; i < 100_000 && !settled; i++) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    for (const r of spawnMock.mock.results) {
+      const proc = r.value;
+      if (proc && !proc._closed) {
+        proc._closed = true;
+        proc.emit("close", 0);
+      }
+    }
+  }
+  await tracked;
+}
 
 describe("runRenderPipeline — minimal pipeline (no ducking, no burn)", () => {
   it("calls renderCompositionToMp4 then normalizeLufs (default -14)", async () => {
@@ -305,16 +339,7 @@ describe("runRenderPipeline — encode stage wiring", () => {
     _spawn.mockClear();
     const compWithPreset: Composition = { ...baseComp, exportPresets: [douyin] };
     const promise = runRenderPipeline({ comp: compWithPreset, outDir: "/tmp/out" });
-    // Drive every spawned ffmpeg child to a clean exit. Multi-tick drain
-    // because the loudnorm-stage audio probe adds an await before the
-    // encode-stage spawn, so a single setImmediate isn't enough.
-    for (let i = 0; i < 8; i++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      for (const r of _spawn.mock.results) {
-        const proc = r.value;
-        if (!proc._closed) { proc._closed = true; proc.emit("close", 0); }
-      }
-    }
+    await drainSpawnsUntilSettled(_spawn, promise);
     await promise;
     expect(_spawn).toHaveBeenCalled();
     const encodeCall = _spawn.mock.calls.find((c) =>
@@ -336,22 +361,10 @@ describe("runRenderPipeline — encode stage wiring", () => {
 // `atempo` BEFORE Remotion renders. Variable-speed clips emit a warning and
 // are not pre-passed.
 describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
-  // Drive every spawn child to a clean exit on the next tick. The pipeline
-  // awaits each ffmpeg call inline, so we close children as soon as they're
-  // spawned via setImmediate batches.
-  async function drainSpawnsToClose(): Promise<void> {
-    // Multiple drain rounds because each await boundary may trigger a fresh
-    // spawn that wasn't visible on the previous tick.
-    for (let i = 0; i < 8; i++) {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      for (const r of _spawn.mock.results) {
-        const proc = r.value;
-        if (!proc._closed) {
-          proc._closed = true;
-          proc.emit("close", 0);
-        }
-      }
-    }
+  // Per-test alias over the settled-drain (see drainSpawnsUntilSettled above —
+  // fixed-round draining was the chronic CI-timeout flake in this file).
+  function drainSpawnsToClose(promise: Promise<unknown>): Promise<void> {
+    return drainSpawnsUntilSettled(_spawn, promise);
   }
 
   function makeVideoCompWithSpeed(
@@ -404,7 +417,7 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
     _spawn.mockClear();
     const comp = makeVideoCompWithSpeed("clip-1", 2.0);
     const promise = runRenderPipeline({ comp, outDir: "/tmp/out-speed-2" });
-    await drainSpawnsToClose();
+    await drainSpawnsToClose(promise);
     await promise;
     // First spawn call IS the speed pre-pass (Stage 0), before any other
     // ffmpeg-invoking stage.
@@ -426,7 +439,7 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
     _spawn.mockClear();
     const comp = makeVideoCompWithSpeed("clip-1", 0.5);
     const promise = runRenderPipeline({ comp, outDir: "/tmp/out-speed-0_5" });
-    await drainSpawnsToClose();
+    await drainSpawnsToClose(promise);
     await promise;
     const args = _spawn.mock.calls[0][1] as string[];
     const filterIdx = args.indexOf("-filter_complex");
@@ -440,7 +453,7 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
     _spawn.mockClear();
     const comp = makeVideoCompWithSpeed("clip-1", 4.0);
     const promise = runRenderPipeline({ comp, outDir: "/tmp/out-speed-4" });
-    await drainSpawnsToClose();
+    await drainSpawnsToClose(promise);
     await promise;
     const args = _spawn.mock.calls[0][1] as string[];
     const filter = args[args.indexOf("-filter_complex") + 1];
@@ -458,7 +471,7 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
       { time: 4, value: 2.0 },
     ]);
     const promise = runRenderPipeline({ comp, outDir: "/tmp/out-var" });
-    await drainSpawnsToClose();
+    await drainSpawnsToClose(promise);
     await promise;
     // None of the spawned ffmpeg invocations should be a speed pass —
     // i.e. their filter_complex args don't mention setpts=PTS/.
