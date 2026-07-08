@@ -4,6 +4,7 @@ import { ScriptModal } from "./ScriptModal";
 import { useComposition } from "../../store";
 import { useScript } from "../../scriptStore";
 import { useDive } from "../../dive/diveStore";
+import { useReader } from "../../reader/readerStore";
 import { loadScript, saveScript } from "../../services/script";
 import type { Scene } from "@shared/composition";
 import { useT } from "@/i18n/useT";
@@ -354,6 +355,7 @@ function readScriptMode(): "edit" | "preview" | null {
 
 function ScriptEditorFold({ workId }: { workId: string }) {
   const t = useT();
+  const openReader = useReader((s) => s.openReader);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     try {
       return localStorage.getItem(SCRIPT_FOLD_KEY) === "1";
@@ -375,37 +377,78 @@ function ScriptEditorFold({ workId }: { workId: string }) {
 
   return (
     <div>
-      <button
-        type="button"
-        data-bare
-        aria-expanded={!collapsed}
-        aria-label={t(
-          collapsed
-            ? "studio.scriptPanel.scriptFoldExpand"
-            : "studio.scriptPanel.scriptFoldCollapse",
-        )}
-        onClick={toggle}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 6,
-          width: "100%",
-          padding: "4px 2px",
-          background: "transparent",
-          border: "none",
-          cursor: "pointer",
-          fontFamily: "var(--font-mono)",
-          fontSize: 10,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          color: "var(--text-dimmer)",
-        }}
-      >
-        <span aria-hidden style={{ fontSize: 9 }}>
-          {collapsed ? "▸" : "▾"}
-        </span>
-        <span>{t("studio.scriptPanel.scriptHeading")}</span>
-      </button>
+      {/* Fold toggle + ⤢ read entry share one header row — the read button is
+          a SIBLING (nested buttons are invalid HTML) and stays reachable even
+          while the narrative layer is folded away. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        <button
+          type="button"
+          data-bare
+          aria-expanded={!collapsed}
+          aria-label={t(
+            collapsed
+              ? "studio.scriptPanel.scriptFoldExpand"
+              : "studio.scriptPanel.scriptFoldCollapse",
+          )}
+          onClick={toggle}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 6,
+            flex: 1,
+            minWidth: 0,
+            padding: "4px 2px",
+            background: "transparent",
+            border: "none",
+            cursor: "pointer",
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "var(--text-dimmer)",
+          }}
+        >
+          <span aria-hidden style={{ fontSize: 9 }}>
+            {collapsed ? "▸" : "▾"}
+          </span>
+          <span>{t("studio.scriptPanel.scriptHeading")}</span>
+        </button>
+        <button
+          type="button"
+          data-bare
+          data-testid="script-open-reader"
+          aria-label={t("studio.scriptPanel.scriptOpenReader")}
+          title={t("studio.scriptPanel.scriptOpenReader")}
+          onClick={() => openReader(workId)}
+          style={{
+            width: 24,
+            height: 22,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "transparent",
+            border: "none",
+            borderRadius: 6,
+            color: "var(--text-dimmer)",
+            cursor: "pointer",
+            flexShrink: 0,
+          }}
+        >
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden
+          >
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+          </svg>
+        </button>
+      </div>
       {!collapsed && <ScriptEditor workId={workId} />}
     </div>
   );
@@ -697,17 +740,23 @@ function ScriptTextarea({
       }}
       style={{
         width: "100%",
-        minHeight: 140,
+        minHeight: 160,
+        // Auto-grow with the markdown (field-sizing, Chromium) so drafting a
+        // 剧本 isn't squeezed into a fixed 8-row slit; capped so a long script
+        // scrolls instead of swallowing the whole panel.
+        fieldSizing: "content",
+        maxHeight: 480,
+        overflowY: "auto",
         background: "transparent",
         border: "1px solid var(--glass-border)",
         borderRadius: 6,
         color: "var(--text)",
         padding: "8px 10px",
         fontFamily: "var(--font-mono)",
-        fontSize: 12,
+        fontSize: 12.5,
         lineHeight: 1.6,
         resize: "vertical",
-      }}
+      } as React.CSSProperties}
     />
   );
 }
@@ -916,6 +965,14 @@ function SceneCard({
   const intentLabel = scene.intent ? t(INTENT_KEY[scene.intent]) : "—";
   const shotSizeLabel = scene.shotSize ? t(SHOT_KEY[scene.shotSize]) : "—";
 
+  // ⤢ — expand this shot into the center-docked reading panel. The sidebar is
+  // the navigator; the reader scrolls to (and flashes) the named card.
+  const openReader = useReader((s) => s.openReader);
+  const onOpenReader = useCallback(
+    () => openReader(workId, { focusSceneId: scene.id }),
+    [openReader, workId, scene.id],
+  );
+
   return (
     <div
       data-testid="scene-card"
@@ -964,6 +1021,7 @@ function SceneCard({
         index={index}
         onMove={onMove}
         onRemove={onRemove}
+        onOpenReader={onOpenReader}
       />
 
       {/* ── Expanded in-card Inspector ───────────────────────────────────────
@@ -1043,7 +1101,7 @@ function SceneCard({
               const norm = next.trim() === "" ? null : next;
               if (norm !== (scene.prompt ?? null)) void commit({ prompt: norm });
             }}
-            style={{ fontSize: 12, lineHeight: 1.5, marginBottom: 6 }}
+            style={{ fontSize: 12.5, lineHeight: 1.6, marginBottom: 6 }}
           />
 
           {/* Narration — inline editable (textarea). */}
@@ -1058,7 +1116,7 @@ function SceneCard({
                 if (norm !== (scene.narration ?? null))
                   void commit({ narration: norm });
               }}
-              style={{ fontSize: 12, lineHeight: 1.5 }}
+              style={{ fontSize: 12.5, lineHeight: 1.6 }}
             />
           </FieldRow>
 
@@ -1220,6 +1278,8 @@ interface SceneSummaryRowProps {
   index: number;
   onMove: (fromIndex: number, toIndex: number) => void;
   onRemove: () => void;
+  /** ⤢ — open the center-docked reading panel focused on this shot. */
+  onOpenReader: () => void;
 }
 
 export function SceneSummaryRow({
@@ -1239,6 +1299,7 @@ export function SceneSummaryRow({
   index,
   onMove,
   onRemove,
+  onOpenReader,
 }: SceneSummaryRowProps) {
   const t = useT();
   const [hovered, setHovered] = useState(false);
@@ -1402,6 +1463,49 @@ export function SceneSummaryRow({
             )}
           </span>
         )}
+      </button>
+
+      {/* ⤢ — expand into the center reading panel. Appears on hover/focus like
+          the ⋯ menu; a SIBLING of the accordion toggle so clicking it never
+          expands the in-card Inspector. */}
+      <button
+        type="button"
+        data-bare
+        data-testid="scene-open-reader"
+        aria-label={t("studio.scriptPanel.openInReaderAria", { n: shotNo })}
+        title={t("studio.scriptPanel.openInReaderAria", { n: shotNo })}
+        onFocus={() => setHovered(true)}
+        onBlur={() => setHovered(false)}
+        onClick={onOpenReader}
+        style={{
+          width: 24,
+          height: 24,
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          background: "transparent",
+          border: "none",
+          borderRadius: 6,
+          color: "var(--text-dim)",
+          cursor: "pointer",
+          flexShrink: 0,
+          opacity: hovered || menuOpen ? 1 : 0,
+          transition: "opacity 0.12s",
+        }}
+      >
+        <svg
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden
+        >
+          <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+        </svg>
       </button>
 
       {/* ⋯ menu trigger — appears on hover/focus or while the menu is open. */}
@@ -1634,8 +1738,18 @@ function EditableText({
     return (
       <textarea
         {...shared}
-        rows={2}
-        style={{ ...shared.style, color: "var(--text-dim)" }}
+        rows={3}
+        style={{
+          ...shared.style,
+          color: "var(--text-dim)",
+          // Auto-grow with content (Chromium's field-sizing; the rows=3 floor
+          // is the fallback elsewhere) so prompt/narration prose is READABLE
+          // in place instead of scrolling inside a two-line slit.
+          fieldSizing: "content",
+          minHeight: 56,
+          maxHeight: 320,
+          overflowY: "auto",
+        } as React.CSSProperties}
       />
     );
   }

@@ -1,8 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { Markdown } from "@/features/chat/Markdown";
-import { useModalFocus } from "@/hooks/useModalFocus";
 import { useT } from "@/i18n/useT";
 import type { AssetEntry, Scene } from "@shared/composition";
 import { useComposition } from "../store";
@@ -15,28 +13,37 @@ import { resolveAssetUrl } from "../composition/resolveAssetUrl";
 import { STATUS_KEY, INTENT_KEY, SHOT_KEY, STATUS_FILLED } from "../sceneI18n";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ScriptReader — full-screen SINGLE-COLUMN interleaved reading flow.
+// ScriptReader — center-column DOCKED reading panel (剧本 + 分镜 interleaved).
 //
-// The pain it fixes: the 剧本 was only readable through a cramped ~140px sidebar
-// box (the full-screen reader hid behind a 12px icon), and the 分镜 were a
-// one-at-a-time accordion of forms — nowhere to READ the whole film continuously.
+// Was a fullscreen modal; now a docked panel that covers the preview/timeline
+// column ONLY, so the chat (left) and the SCRIPT sidebar (right) stay visible
+// and interactive. That turns the sidebar into a NAVIGATOR: a card's ⤢ opens
+// the panel scrolled to that shot (readerStore.focusSceneId), a card's "edit"
+// jump expands the sidebar Inspector while the reading surface stays put —
+// read in the center, edit on the right, both at once.
 //
-// This overlay reads the 剧本 markdown top-to-bottom in a ~720px editorial column
-// and threads each 分镜 as a READ-ONLY card right after the heading its
-// `mdAnchor` matches (splitScriptByAnchors, the pure kernel). Unmatched scenes
-// collect in a 分镜册 section after the prose. A right-edge mini-TOC of 镜号 jumps
-// to any card; a card's "edit" button hands off to the sidebar's ScriptTab via
-// the shared diveStore.jumpToScene (the SAME jump mechanism the Dive canvas uses)
-// and closes the reader.
+// It reads the 剧本 markdown top-to-bottom in a ~720px editorial column and
+// threads each 分镜 as a READ-ONLY card right after the heading its `mdAnchor`
+// matches (splitScriptByAnchors, the pure kernel). Unmatched scenes collect in
+// a 分镜册 section after the prose. A right-edge mini-TOC of 镜号 jumps to any
+// card.
 //
-// Portal to body + backdrop-filter glass chrome is fine here — this is a MODAL
-// layer, not the Dive CANVAS (where backdrop-filter is banned, DESIGN.md).
+// NON-modal contract: no backdrop, no aria-modal, no focus trap — a labelled
+// region. ESC closes, EXCEPT while focus sits in an editable field (the
+// sidebar edit surface is live alongside; ESC there means "leave the field",
+// not "tear down my reading position").
+//
+// Background is the OPAQUE --canvas-bg plane (glass/backdrop-filter is banned
+// in scroll-heavy content areas, DESIGN.md) — the Remotion preview underneath
+// must never ghost through the prose.
 // ─────────────────────────────────────────────────────────────────────────────
 
 export function ScriptReader() {
   const t = useT();
   const open = useReader((s) => s.open);
   const closeReader = useReader((s) => s.closeReader);
+  const focusSceneId = useReader((s) => s.focusSceneId);
+  const consumeFocus = useReader((s) => s.consumeFocus);
   const jumpToScene = useDive((s) => s.jumpToScene);
 
   const comp = useComposition((s) => s.comp);
@@ -95,11 +102,6 @@ export function ScriptReader() {
   // never shows; on error we fall through to the normal (best-effort) render.
   const isLoading = !!comp && !isMine && !loadError;
 
-  const dialogRef = useRef<HTMLDivElement>(null);
-  // Trap focus: this is a fullscreen aria-modal surface — Tab must not escape
-  // to the fully-obscured background (codex review HIGH).
-  useModalFocus(open, dialogRef, { trap: true });
-
   const flow = useMemo(
     () => splitScriptByAnchors(scriptText, scenes ?? []),
     [scriptText, scenes],
@@ -111,203 +113,232 @@ export function ScriptReader() {
     [flow],
   );
 
-  // ESC closes (mirrors DiveCanvas / ScriptModal).
+  // ESC closes — UNLESS the user is typing in an editable field. The panel is
+  // non-modal: the sidebar's inputs are live alongside, and ESC inside one
+  // means "leave this field", never "collapse my reading position".
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") closeReader();
+      if (e.key !== "Escape") return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el) {
+        const tag = el.tagName;
+        if (
+          tag === "INPUT" ||
+          tag === "TEXTAREA" ||
+          tag === "SELECT" ||
+          el.isContentEditable
+        )
+          return;
+      }
+      closeReader();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, closeReader]);
 
+  // Focus-scene deep link (sidebar ⤢ hand-off): scroll the named card into
+  // view, flash it, then consume the request. If the card isn't rendered yet
+  // (scenes still loading) the request stays pending and we retry when the
+  // flow reflows — mirrors the ScriptTab pendingSceneJump pattern.
+  const [flashId, setFlashId] = useState<string | null>(null);
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (flashTimer.current) clearTimeout(flashTimer.current);
+    },
+    [],
+  );
+  useEffect(() => {
+    if (!open || !focusSceneId || isLoading) return;
+    const el = document.getElementById(`reader-scene-${focusSceneId}`);
+    if (!el) return; // not in the flow yet — retry on the next reflow
+    let reduced = false;
+    try {
+      reduced =
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    } catch {
+      /* matchMedia unavailable in the test DOM — default to smooth */
+    }
+    el.scrollIntoView?.({
+      behavior: reduced ? "auto" : "smooth",
+      block: "start",
+    });
+    setFlashId(focusSceneId);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashId(null), 1600);
+    consumeFocus();
+  }, [open, focusSceneId, isLoading, flowScenes, consumeFocus]);
+
   const onEditScene = (sceneId: string) => {
-    // Hand the sidebar the jump target (switch to Script tab + expand the card),
-    // then close the reader so the sidebar edit surface is unobscured.
+    // Hand the sidebar the jump target (switch to Script tab + expand the card).
+    // The reader STAYS open — reading center + editing right is the whole point
+    // of the docked layout.
     jumpToScene(sceneId);
-    closeReader();
   };
 
   const empty = !comp || (scriptText.trim() === "" && (scenes?.length ?? 0) === 0);
 
-  return createPortal(
+  return (
     <AnimatePresence>
       {open && (
-        <motion.div
-          key="reader-backdrop"
-          data-testid="reader-backdrop"
-          onClick={closeReader}
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+        <motion.section
+          key="reader-panel"
+          data-testid="reader-panel"
+          role="region"
+          aria-labelledby="reader-title"
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 12 }}
+          transition={{ duration: 0.2, ease: [0.32, 0.72, 0, 1] }}
           style={{
-            position: "fixed",
+            position: "absolute",
             inset: 0,
-            background: "rgba(10, 11, 15, 0.85)",
-            backdropFilter: "blur(8px)",
-            zIndex: 1000,
-            display: "grid",
-            placeItems: "stretch",
+            zIndex: 5,
+            display: "flex",
+            flexDirection: "column",
+            background: "var(--canvas-bg)",
+            border: "1px solid var(--glass-border)",
+            borderRadius: "var(--radius-lg)",
+            overflow: "hidden",
           }}
         >
-          <motion.div
-            ref={dialogRef}
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="reader-title"
-            initial={{ opacity: 0, scale: 0.96 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.96 }}
-            transition={{ duration: 0.18, ease: [0.32, 0.72, 0, 1] }}
+          <header
             style={{
-              position: "absolute",
-              inset: 40,
-              borderRadius: 16,
-              border: "1px solid var(--glass-border)",
-              background: "var(--surface-0)",
-              overflow: "hidden",
+              padding: "12px 18px",
+              borderBottom: "1px solid var(--divider)",
               display: "flex",
-              flexDirection: "column",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexShrink: 0,
             }}
           >
-            <header
+            <h2
+              id="reader-title"
               style={{
-                padding: "14px 18px",
-                borderBottom: "1px solid var(--divider)",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                flexShrink: 0,
+                margin: 0,
+                fontFamily: "var(--font-editorial)",
+                fontStyle: "italic",
+                fontSize: 20,
+                letterSpacing: "-0.015em",
+                color: "var(--text)",
               }}
             >
-              <h2
-                id="reader-title"
-                style={{
-                  margin: 0,
-                  fontFamily: "var(--font-editorial)",
-                  fontStyle: "italic",
-                  fontSize: 22,
-                  letterSpacing: "-0.015em",
-                  color: "var(--text)",
-                }}
-              >
-                {t("studio.scriptReader.title")}
-              </h2>
-              <button
-                type="button"
-                onClick={closeReader}
-                aria-label={t("studio.scriptReader.closeAria")}
-                title={t("studio.scriptReader.closeAria")}
-                data-bare
-                style={{
-                  width: 28,
-                  height: 28,
-                  display: "grid",
-                  placeItems: "center",
-                  borderRadius: 6,
-                  border: "1px solid var(--glass-border)",
-                  background: "transparent",
-                  color: "var(--text-dim)",
-                  cursor: "pointer",
-                  fontSize: 16,
-                }}
-              >
-                ×
-              </button>
-            </header>
+              {t("studio.scriptReader.title")}
+            </h2>
+            <button
+              type="button"
+              onClick={closeReader}
+              aria-label={t("studio.scriptReader.closeAria")}
+              title={t("studio.scriptReader.closeAria")}
+              data-bare
+              style={{
+                width: 28,
+                height: 28,
+                display: "grid",
+                placeItems: "center",
+                borderRadius: 6,
+                border: "1px solid var(--glass-border)",
+                background: "transparent",
+                color: "var(--text-dim)",
+                cursor: "pointer",
+                fontSize: 16,
+              }}
+            >
+              ×
+            </button>
+          </header>
 
-            <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
-              {isLoading ? (
-                <ReaderLoading />
-              ) : empty ? (
-                <ReaderEmpty />
-              ) : (
+          <div style={{ flex: 1, position: "relative", minHeight: 0 }}>
+            {isLoading ? (
+              <ReaderLoading />
+            ) : empty ? (
+              <ReaderEmpty />
+            ) : (
+              <div
+                data-testid="reader-scroll"
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  overflowY: "auto",
+                }}
+              >
                 <div
-                  data-testid="reader-scroll"
                   style={{
-                    position: "absolute",
-                    inset: 0,
-                    overflowY: "auto",
-                    background: "var(--surface-0)",
+                    maxWidth: 720,
+                    margin: "0 auto",
+                    padding: "36px 28px 96px",
                   }}
                 >
-                  <div
-                    style={{
-                      maxWidth: 720,
-                      margin: "0 auto",
-                      padding: "40px 28px 96px",
-                    }}
-                  >
-                    {/* Interleaved prose + anchored scene cards. */}
-                    {flow.segments.map((seg, i) => (
-                      <Fragment key={i}>
-                        {seg.markdown.trim() !== "" && (
-                          <div
-                            className="md-bubble"
-                            style={{
-                              fontSize: 16,
-                              lineHeight: 1.75,
-                              color: "var(--text)",
-                            }}
-                          >
-                            <Markdown text={seg.markdown} workId={workId} />
-                          </div>
-                        )}
-                        {seg.scenes.map((scene) => (
-                          <ReaderSceneCard
-                            key={scene.id}
-                            scene={scene}
-                            workId={workId}
-                            assets={assets}
-                            onEdit={() => onEditScene(scene.id)}
-                          />
-                        ))}
-                      </Fragment>
-                    ))}
-
-                    {/* 分镜册 — scenes with no matching heading anchor. */}
-                    {flow.trailing.length > 0 && (
-                      <section data-testid="reader-storyboard-section">
-                        <h3
+                  {/* Interleaved prose + anchored scene cards. */}
+                  {flow.segments.map((seg, i) => (
+                    <Fragment key={i}>
+                      {seg.markdown.trim() !== "" && (
+                        <div
+                          className="md-bubble"
                           style={{
-                            margin: "36px 0 12px",
-                            fontFamily: "var(--font-mono)",
-                            fontSize: 11,
-                            letterSpacing: "0.08em",
-                            textTransform: "uppercase",
-                            color: "var(--text-dimmer)",
+                            fontSize: 16,
+                            lineHeight: 1.75,
+                            color: "var(--text)",
                           }}
                         >
-                          {t("studio.scriptReader.storyboardSection")}
-                        </h3>
-                        {flow.trailing.map((scene) => (
-                          <ReaderSceneCard
-                            key={scene.id}
-                            scene={scene}
-                            workId={workId}
-                            assets={assets}
-                            onEdit={() => onEditScene(scene.id)}
-                          />
-                        ))}
-                      </section>
-                    )}
-                  </div>
-                </div>
-              )}
+                          <Markdown text={seg.markdown} workId={workId} />
+                        </div>
+                      )}
+                      {seg.scenes.map((scene) => (
+                        <ReaderSceneCard
+                          key={scene.id}
+                          scene={scene}
+                          workId={workId}
+                          assets={assets}
+                          highlight={flashId === scene.id}
+                          onEdit={() => onEditScene(scene.id)}
+                        />
+                      ))}
+                    </Fragment>
+                  ))}
 
-              {/* Right-edge mini-TOC — one 镜号 per scene, in reading order.
-                  Hidden while loading (the flow it indexes isn't shown yet). */}
-              {!isLoading && flowScenes.length > 0 && (
-                <MiniToc scenes={flowScenes} t={t} />
-              )}
-            </div>
-          </motion.div>
-        </motion.div>
+                  {/* 分镜册 — scenes with no matching heading anchor. */}
+                  {flow.trailing.length > 0 && (
+                    <section data-testid="reader-storyboard-section">
+                      <h3
+                        style={{
+                          margin: "36px 0 12px",
+                          fontFamily: "var(--font-mono)",
+                          fontSize: 11,
+                          letterSpacing: "0.08em",
+                          textTransform: "uppercase",
+                          color: "var(--text-dimmer)",
+                        }}
+                      >
+                        {t("studio.scriptReader.storyboardSection")}
+                      </h3>
+                      {flow.trailing.map((scene) => (
+                        <ReaderSceneCard
+                          key={scene.id}
+                          scene={scene}
+                          workId={workId}
+                          assets={assets}
+                          highlight={flashId === scene.id}
+                          onEdit={() => onEditScene(scene.id)}
+                        />
+                      ))}
+                    </section>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Right-edge mini-TOC — one 镜号 per scene, in reading order.
+                Hidden while loading (the flow it indexes isn't shown yet). */}
+            {!isLoading && flowScenes.length > 0 && (
+              <MiniToc scenes={flowScenes} t={t} />
+            )}
+          </div>
+        </motion.section>
       )}
-    </AnimatePresence>,
-    document.body,
+    </AnimatePresence>
   );
 }
 
@@ -321,11 +352,14 @@ function ReaderSceneCard({
   scene,
   workId,
   assets,
+  highlight,
   onEdit,
 }: {
   scene: Scene;
   workId: string;
   assets: AssetEntry[] | undefined;
+  /** Brief ring after a ⤢ deep-link lands on this card. */
+  highlight: boolean;
   onEdit: () => void;
 }) {
   const t = useT();
@@ -359,6 +393,8 @@ function ReaderSceneCard({
         padding: "14px 16px",
         margin: "18px 0",
         scrollMarginTop: 24,
+        boxShadow: highlight ? "0 0 0 2px var(--accent-hi)" : "none",
+        transition: "box-shadow 400ms ease",
       }}
     >
       {/* Title row: 镜号 · status · stale · title · edit. */}

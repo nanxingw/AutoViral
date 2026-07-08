@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, screen, within, act, waitFor } from "@testing-library/react";
 import { ScriptReader } from "./ScriptReader";
 import { useReader } from "./readerStore";
 import { useComposition } from "../store";
@@ -30,12 +30,19 @@ function seed(opts: { script: string; sceneIds?: Parameters<typeof makeScene>[0]
 }
 
 beforeEach(() => {
-  useReader.setState({ open: true });
+  useReader.setState({ open: true, focusSceneId: null });
   useDive.setState({ pendingSceneJump: null, open: false });
   useComposition.setState({ comp: null, selection: null });
   useScript.setState({ workId: null, script: "", loaded: false, loading: false });
   loadScriptMock.mockReset();
   loadScriptMock.mockResolvedValue("");
+});
+
+// The focus-scroll tests stub Element.prototype.scrollIntoView — restore the
+// original (possibly undefined in this DOM) so other suites aren't polluted.
+const origScrollIntoView = Element.prototype.scrollIntoView;
+afterEach(() => {
+  Element.prototype.scrollIntoView = origScrollIntoView;
 });
 
 describe("ScriptReader", () => {
@@ -93,7 +100,7 @@ describe("ScriptReader", () => {
     expect(screen.queryByTestId("reader-scene-card")).toBeNull();
   });
 
-  it("the per-card edit button jumps the sidebar to that scene and closes the reader", () => {
+  it("the per-card edit button jumps the sidebar to that scene and KEEPS the reader open", () => {
     seed({
       script: "# One\nBody.",
       sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
@@ -102,12 +109,16 @@ describe("ScriptReader", () => {
     const editBtn = screen.getByTestId("reader-edit-scene");
     editBtn.click();
     expect(useDive.getState().pendingSceneJump).toBe("sc1");
-    expect(useReader.getState().open).toBe(false);
+    // Docked panel: sidebar editing and center reading COEXIST — the jump must
+    // not tear down the reading surface the user is standing in.
+    expect(useReader.getState().open).toBe(true);
   });
 
-  // ── regression net (codex review #2) ────────────────────────────────────────
-  // ESC-close, ARIA dialog labelling, focus-trap (the aria-modal contract),
-  // focus restore-on-close, and IntersectionObserver disconnect on unmount.
+  // ── docked-panel contract ────────────────────────────────────────────────────
+  // The reader is a center-column DOCKED panel now, not a fullscreen modal: no
+  // backdrop, no aria-modal, no focus trap. It's a labelled region so assistive
+  // tech can land on it, and ESC still closes — except while the user is typing
+  // in an editable field (the sidebar edit surface stays live alongside).
 
   it("closes on Escape", () => {
     seed({
@@ -122,81 +133,100 @@ describe("ScriptReader", () => {
     expect(useReader.getState().open).toBe(false);
   });
 
-  it("marks the dialog aria-modal and labels it via aria-labelledby", () => {
+  it("closes on Escape bubbled from a focused BUTTON (E2E false-positive net)", () => {
+    // E2E R1 reported "ESC ignored while the theme-toggle button is focused";
+    // source audit found NO stopPropagation anywhere on that path, pointing to
+    // an occluded-tab focus-theft artifact. This pins the contract at the unit
+    // level: a keydown dispatched ON a focused non-editable button must bubble
+    // to the window listener and close the panel.
     seed({
       script: "# One\nBody.",
       sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
     });
     render(<ScriptReader />);
-    const dialog = screen.getByRole("dialog");
-    expect(dialog).toHaveAttribute("aria-modal", "true");
-    expect(dialog).toHaveAttribute("aria-labelledby", "reader-title");
-    // The label target actually exists and carries the reader's title.
-    expect(document.getElementById("reader-title")?.textContent).toBe(
-      "Read-through",
-    );
+    const btn = document.createElement("button");
+    btn.setAttribute("aria-label", "Switch to light theme");
+    document.body.appendChild(btn);
+    btn.focus();
+    act(() => {
+      btn.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+    });
+    expect(useReader.getState().open).toBe(false);
+    btn.remove();
   });
 
-  it("traps Tab focus inside the dialog: forward Tab wraps last→first", () => {
+  it("does NOT close on Escape while focus is in an editable field", () => {
     seed({
       script: "# One\nBody.",
       sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
     });
     render(<ScriptReader />);
-    const dialog = screen.getByRole("dialog");
-    const buttons = Array.from(dialog.querySelectorAll("button"));
-    expect(buttons.length).toBeGreaterThan(1);
-    const first = buttons[0];
-    const last = buttons[buttons.length - 1];
-    last.focus();
-    expect(document.activeElement).toBe(last);
-    fireEvent.keyDown(last, { key: "Tab" });
-    expect(document.activeElement).toBe(first);
+    const input = document.createElement("input");
+    document.body.appendChild(input);
+    input.focus();
+    act(() => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+    expect(useReader.getState().open).toBe(true);
+    input.remove();
   });
 
-  it("traps Tab focus inside the dialog: Shift+Tab wraps first→last", () => {
+  it("renders as a non-modal labelled region — no backdrop, no aria-modal, no dialog role", () => {
     seed({
       script: "# One\nBody.",
       sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
     });
     render(<ScriptReader />);
-    const dialog = screen.getByRole("dialog");
-    const buttons = Array.from(dialog.querySelectorAll("button"));
-    const first = buttons[0];
-    const last = buttons[buttons.length - 1];
-    first.focus();
-    expect(document.activeElement).toBe(first);
-    fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
-    expect(document.activeElement).toBe(last);
+    expect(screen.queryByTestId("reader-backdrop")).toBeNull();
+    expect(document.querySelector("[aria-modal]")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // A labelled region whose accessible name is the reader title.
+    const region = screen.getByRole("region", { name: "Read-through" });
+    expect(region).toBeTruthy();
   });
 
-  it("restores focus to the opener when the reader closes", () => {
-    vi.useFakeTimers();
-    try {
-      seed({
-        script: "# One\nBody.",
-        sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
-      });
-      const opener = document.createElement("button");
-      document.body.appendChild(opener);
-      opener.focus();
-      expect(document.activeElement).toBe(opener);
+  // ── focus-scene deep link (sidebar ⤢ → docked panel) ───────────────────────
+  // Opening from a scene card carries focusSceneId; the reader scrolls that
+  // card into view and consumes the request. A second ⤢ while already open
+  // must scroll again (the panel follows the sidebar).
 
-      render(<ScriptReader />);
-      // useModalFocus moves focus into the modal on a setTimeout(0).
-      act(() => {
-        vi.runOnlyPendingTimers();
-      });
-      expect(document.activeElement).not.toBe(opener);
+  it("scrolls the focused card into view on open and consumes the focus request", async () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    seed({
+      script: "# One\nBody.",
+      sceneIds: [
+        { id: "sc1", order: 0, title: "A", mdAnchor: "One" },
+        { id: "sc2", order: 1, title: "B" },
+      ],
+    });
+    useReader.setState({ open: true, focusSceneId: "sc2" });
+    render(<ScriptReader />);
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalled());
+    expect(useReader.getState().focusSceneId).toBeNull();
+  });
 
-      act(() => {
-        useReader.setState({ open: false });
-      });
-      expect(document.activeElement).toBe(opener);
-      opener.remove();
-    } finally {
-      vi.useRealTimers();
-    }
+  it("a new focus target arriving while already open scrolls again", async () => {
+    const scrollSpy = vi.fn();
+    Element.prototype.scrollIntoView = scrollSpy;
+    seed({
+      script: "# One\nBody.",
+      sceneIds: [
+        { id: "sc1", order: 0, title: "A", mdAnchor: "One" },
+        { id: "sc2", order: 1, title: "B" },
+      ],
+    });
+    render(<ScriptReader />);
+    act(() => {
+      useReader.getState().openReader("w1", { focusSceneId: "sc1" });
+    });
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalledTimes(1));
+    act(() => {
+      useReader.getState().openReader("w1", { focusSceneId: "sc2" });
+    });
+    await waitFor(() => expect(scrollSpy).toHaveBeenCalledTimes(2));
   });
 
   // ── F1: self-load when opened from a surface where ScriptTab never mounted ──

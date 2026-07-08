@@ -50,6 +50,7 @@ function renderRow() {
       index={0}
       onMove={() => {}}
       onRemove={() => {}}
+      onOpenReader={() => {}}
     />,
   );
 }

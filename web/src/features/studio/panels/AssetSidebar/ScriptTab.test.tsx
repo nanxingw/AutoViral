@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { ScriptTab } from "./ScriptTab";
 import { useComposition } from "../../store";
 import { useScript } from "../../scriptStore";
+import { useReader } from "../../reader/readerStore";
 import { makeEmptyComposition } from "../../types";
 import type { Scene } from "@shared/composition";
 import { useLocaleStore } from "@/i18n/store";
@@ -1245,5 +1246,54 @@ describe("ScriptTab (A3) — preview default + shared markdown", () => {
     render(<ScriptTab />);
     const preview = await screen.findByTestId("script-preview");
     await waitFor(() => expect(preview.querySelector("table")).not.toBeNull());
+  });
+});
+
+// ─── expand-to-center-reader entry points ────────────────────────────────────
+// The sidebar is a NAVIGATOR: its 剧本/分镜 content must be expandable into the
+// center docked reading panel (useReader). Two entry points: a per-card ⤢
+// button (opens focused on that scene, without toggling the accordion) and a
+// read button on the 剧本 fold header (opens unfocused, top of the flow).
+describe("ScriptTab — expand to the center reading panel", () => {
+  beforeEach(() => {
+    useReader.setState({ open: false, focusSceneId: null });
+  });
+
+  it("the summary row ⤢ opens the reader focused on that scene WITHOUT expanding the card", async () => {
+    loadScenes([FULL_SCENE, SPARSE_SCENE]);
+    render(<ScriptTab />);
+    const btn = await screen.findByRole("button", {
+      name: "Read shot 1 in the center panel",
+    });
+    await userEvent.click(btn);
+    expect(useReader.getState().open).toBe(true);
+    expect(useReader.getState().focusSceneId).toBe("s1");
+    // The ⤢ is a sibling of the accordion toggle — clicking it must not
+    // expand the in-card Inspector.
+    const card = screen
+      .getAllByTestId("scene-card")
+      .find((el) => el.getAttribute("data-scene-id") === "s1")!;
+    expect(card.getAttribute("data-expanded")).toBe("false");
+  });
+
+  it("each card gets its own ⤢ with the right shot number", async () => {
+    loadScenes([FULL_SCENE, SPARSE_SCENE]);
+    render(<ScriptTab />);
+    const btn2 = await screen.findByRole("button", {
+      name: "Read shot 2 in the center panel",
+    });
+    await userEvent.click(btn2);
+    expect(useReader.getState().focusSceneId).toBe("s2");
+  });
+
+  it("the 剧本 fold header read button opens the reader with no scene focus", async () => {
+    loadScenes([FULL_SCENE]);
+    render(<ScriptTab />);
+    const btn = await screen.findByRole("button", {
+      name: "Open the read-through panel",
+    });
+    await userEvent.click(btn);
+    expect(useReader.getState().open).toBe(true);
+    expect(useReader.getState().focusSceneId).toBeNull();
   });
 });

@@ -437,6 +437,9 @@ export const en = {
       // A4 (PRD-0010) — full-screen 剧本 read/edit modal.
       scriptOpenFull: "Open full screen",
       scriptModalCloseAria: "Close full-screen script",
+      // Center-docked reading panel entry points (sidebar → reader hand-off).
+      openInReaderAria: "Read shot {n} in the center panel",
+      scriptOpenReader: "Open the read-through panel",
     },
     rightPane: {
       tabChat: "Chat",
@@ -1627,6 +1630,9 @@ export const zh: DeepShape<Messages> = {
       // A4 (PRD-0010) — 剧本全屏阅读/编辑 modal。
       scriptOpenFull: "全屏展开",
       scriptModalCloseAria: "关闭全屏剧本",
+      // 中央停靠阅读面板入口（侧栏 → 阅读器交接）。
+      openInReaderAria: "在中央面板阅读镜 {n}",
+      scriptOpenReader: "打开剧本通读面板",
     },
     rightPane: {
       tabChat: "对话",

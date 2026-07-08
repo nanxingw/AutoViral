@@ -309,39 +309,51 @@ export default function Studio() {
             defaultSize={STUDIO_PANELS.center.defaultSize}
             minSize={STUDIO_PANELS.center.minSize}
           >
-            <PanelGroup direction="vertical" autoSaveId="autoviral-studio-center-v1" style={{ height: "100%" }}>
-              <Panel
-                id="preview"
-                order={1}
-                defaultSize={STUDIO_PANELS.preview.defaultSize}
-                minSize={STUDIO_PANELS.preview.minSize}
-              >
-                <div
-                  data-area="preview"
-                  className="glass"
-                  style={{ height: "100%", overflow: "hidden", minHeight: 0 }}
+            {/* Relative wrapper: the ScriptReader docks OVER this column only
+                (preview + timeline), leaving the chat and the asset sidebar
+                visible and interactive — the sidebar is the reader's navigator
+                (⤢ on a scene card scrolls the docked panel to that shot). */}
+            <div style={{ position: "relative", height: "100%" }}>
+              <PanelGroup direction="vertical" autoSaveId="autoviral-studio-center-v1" style={{ height: "100%" }}>
+                <Panel
+                  id="preview"
+                  order={1}
+                  defaultSize={STUDIO_PANELS.preview.defaultSize}
+                  minSize={STUDIO_PANELS.preview.minSize}
                 >
-                  <PreviewPanel />
-                </div>
-              </Panel>
+                  <div
+                    data-area="preview"
+                    className="glass"
+                    style={{ height: "100%", overflow: "hidden", minHeight: 0 }}
+                  >
+                    <PreviewPanel />
+                  </div>
+                </Panel>
 
-              <VResizeHandle id="preview-timeline" />
+                <VResizeHandle id="preview-timeline" />
 
-              <Panel
-                id="timeline"
-                order={2}
-                defaultSize={STUDIO_PANELS.timeline.defaultSize}
-                minSize={STUDIO_PANELS.timeline.minSize}
-              >
-                <div
-                  data-area="timeline"
-                  className="glass"
-                  style={{ height: "100%", overflow: "hidden", minHeight: 0 }}
+                <Panel
+                  id="timeline"
+                  order={2}
+                  defaultSize={STUDIO_PANELS.timeline.defaultSize}
+                  minSize={STUDIO_PANELS.timeline.minSize}
                 >
-                  <Timeline />
-                </div>
-              </Panel>
-            </PanelGroup>
+                  <div
+                    data-area="timeline"
+                    className="glass"
+                    style={{ height: "100%", overflow: "hidden", minHeight: 0 }}
+                  >
+                    <Timeline />
+                  </div>
+                </Panel>
+              </PanelGroup>
+
+              {/* ScriptReader — center-docked reading panel for the 剧本 + 分镜
+                  interleave. Opened from the top bar READ button or a sidebar
+                  card's ⤢; a card's "edit" jump expands the sidebar ScriptTab
+                  while the panel stays open (read center, edit right). */}
+              <ScriptReader />
+            </div>
           </Panel>
 
           <HResizeHandle id="center-aside" />
@@ -377,11 +389,6 @@ export default function Studio() {
           top bar; a cluster-title click closes it and jumps the sidebar to the
           matching 分镜 card. */}
       <DiveCanvas open={diveOpen} onClose={closeDive} />
-
-      {/* ScriptReader — full-screen single-column read-through of the 剧本 +
-          分镜 (portals to body). Opened from the top bar; a card's "edit" jump
-          hands off to the sidebar ScriptTab via diveStore.jumpToScene. */}
-      <ScriptReader />
     </div>
   );
 }
