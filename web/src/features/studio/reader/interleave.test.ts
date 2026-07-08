@@ -118,3 +118,58 @@ describe("splitScriptByAnchors — scene anchoring", () => {
     expect(trailing.map((s) => s.id)).toEqual(["y", "x", "z"]);
   });
 });
+
+// ─── tolerant anchoring (E2E regression 2026-07-07) ─────────────────────────
+//
+// Real agent-drafted works title their headings with duration/beat suffixes —
+// `## 开场 · Hook（0–8s）` — while the scene's mdAnchor carries just the beat
+// name `开场 · Hook`. Strict equality dumped EVERY scene of the E2E work into
+// the trailing 分镜册, silently killing the interleave. Anchoring must accept a
+// prefix drift in either direction while keeping exact match the winner.
+describe("splitScriptByAnchors — tolerant anchoring (heading/anchor prefix drift)", () => {
+  it("anchors when the heading extends the anchor with a suffix (real-work shape)", () => {
+    const md = [
+      "# 三分钟看懂拿铁拉花",
+      "导语。",
+      "## 开场 · Hook（0–8s）",
+      "奶泡倾泻。",
+      "## 主体 · Build（8–24s）",
+      "三步演示。",
+    ].join("\n");
+    const scenes = [
+      makeScene({ id: "s1", order: 0, mdAnchor: "开场 · Hook" }),
+      makeScene({ id: "s2", order: 1, mdAnchor: "主体 · Build" }),
+    ];
+    const { segments, trailing } = splitScriptByAnchors(md, scenes);
+    expect(trailing).toHaveLength(0);
+    expect(segments[1].heading).toBe("开场 · Hook（0–8s）");
+    expect(segments[1].scenes.map((s) => s.id)).toEqual(["s1"]);
+    expect(segments[2].scenes.map((s) => s.id)).toEqual(["s2"]);
+  });
+
+  it("anchors when the anchor extends the heading (script trimmed after drafting)", () => {
+    const md = "# Opening\nBody.";
+    const scenes = [
+      makeScene({ id: "s1", order: 0, mdAnchor: "Opening (draft v2)" }),
+    ];
+    const { segments, trailing } = splitScriptByAnchors(md, scenes);
+    expect(trailing).toHaveLength(0);
+    expect(segments[0].scenes.map((s) => s.id)).toEqual(["s1"]);
+  });
+
+  it("an EXACT heading match beats an earlier prefix match", () => {
+    const md = ["# Hook（0–8s）", "One.", "# Hook", "Two."].join("\n");
+    const scenes = [makeScene({ id: "s1", order: 0, mdAnchor: "Hook" })];
+    const { segments } = splitScriptByAnchors(md, scenes);
+    // Segment 0 would prefix-match, but segment 1 is the exact anchor — it wins.
+    expect(segments[0].scenes).toHaveLength(0);
+    expect(segments[1].scenes.map((s) => s.id)).toEqual(["s1"]);
+  });
+
+  it("unrelated headings still fall to trailing (prefix tolerance ≠ fuzzy match)", () => {
+    const md = "# 收尾 · Payoff\nBody.";
+    const scenes = [makeScene({ id: "s1", order: 0, mdAnchor: "开场 · Hook" })];
+    const { trailing } = splitScriptByAnchors(md, scenes);
+    expect(trailing.map((s) => s.id)).toEqual(["s1"]);
+  });
+});

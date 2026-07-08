@@ -16,9 +16,14 @@ import type { Scene } from "@shared/composition";
 // next heading. Text before the first heading becomes a heading-less preamble
 // segment (dropped when it's only whitespace).
 //
-// Matching is trimmed-string equality; a scene anchors to the FIRST segment whose
-// heading equals its anchor (deterministic under duplicate headings). Multiple
-// scenes may share one anchor — they all thread under that heading, order-sorted.
+// Matching: a scene anchors to the FIRST segment whose heading EQUALS its
+// anchor (trimmed); when no exact match exists, to the FIRST segment where one
+// side prefix-extends the other (`开场 · Hook` ↔ `开场 · Hook（0–8s）`) — real
+// agent-drafted scripts suffix their headings with duration/beat notes, and
+// strict equality silently dumped every scene into 分镜册 (E2E 2026-07-07).
+// Exact stays the winner so duplicate-ish headings remain deterministic.
+// Multiple scenes may share one anchor — they all thread under that heading,
+// order-sorted.
 //
 // This is the test-first主对象 — every branch is a contract case in
 // interleave.test.ts, so the component can trust the returned shape.
@@ -105,13 +110,21 @@ export function splitScriptByAnchors(
     });
   });
 
-  // Anchor each scene to the FIRST segment whose heading matches; else trailing.
+  // Anchor each scene: exact heading match first, then prefix drift in either
+  // direction (heading extends anchor, or anchor extends heading); else trailing.
   const trailing: Scene[] = [];
   for (const scene of ordered) {
     const anchor = scene.mdAnchor?.trim();
-    const seg = anchor
-      ? segments.find((s) => s.heading !== null && s.heading === anchor)
-      : undefined;
+    let seg: ScriptSegment | undefined;
+    if (anchor) {
+      seg =
+        segments.find((s) => s.heading !== null && s.heading === anchor) ??
+        segments.find(
+          (s) =>
+            s.heading !== null &&
+            (s.heading.startsWith(anchor) || anchor.startsWith(s.heading)),
+        );
+    }
     if (seg) seg.scenes.push(scene);
     else trailing.push(scene);
   }
