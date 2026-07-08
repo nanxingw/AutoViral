@@ -3,9 +3,10 @@
  * global CSS, so those overrides live here, scoped under .dive-flow.
  * Node/cluster visuals stay inline in their components (project convention).
  *
- * NOTE: no backdrop-filter anywhere inside the canvas — it's a high-frequency
- * repaint surface (DESIGN.md "Glass with discipline"). Chrome floating above
- * the canvas (zoom bar, minimap) uses solid --surface-* fills instead.
+ * NOTE: the canvas is a SOLID plane (画布去玻璃) — no backdrop-filter and no
+ * translucent --surface-* glass anywhere inside it. Every fill uses the
+ * opaque --canvas-* tokens (near-black dark / warm-paper light, locked as
+ * opaque hex by tokens.contrast.test.ts).
  */
 
 /* ── Edges: provenance flows source → derivative ─────────────────────────── */
@@ -26,7 +27,7 @@
 
 /* ── Background dot grid — barely-there editorial graph paper ────────────── */
 .dive-flow .react-flow__background circle {
-  fill: var(--glass-hi);
+  fill: var(--canvas-border);
 }
 
 /* ── Canvas entrance: one composed reveal, no per-node stagger.
@@ -52,8 +53,8 @@
 
 /* ── MiniMap: token-native, never the library default white ──────────────── */
 .dive-flow .react-flow__minimap {
-  background: var(--surface-1);
-  border: 1px solid var(--glass-border);
+  background: var(--canvas-surface);
+  border: 1px solid var(--canvas-border);
   border-radius: var(--radius-md);
   overflow: hidden;
   margin: 14px;
@@ -64,7 +65,7 @@
   stroke-width: 1.5;
 }
 .dive-flow .react-flow__minimap-node {
-  fill: var(--glass-hi);
+  fill: var(--canvas-border);
   stroke: none;
 }
 
@@ -75,8 +76,8 @@
   gap: 2px;
   margin: 14px;
   padding: 3px;
-  background: var(--surface-2);
-  border: 1px solid var(--glass-border);
+  background: var(--canvas-surface-hi);
+  border: 1px solid var(--canvas-border);
   border-radius: var(--radius-md);
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.25);
 }
@@ -97,7 +98,7 @@
   transition: background 0.15s, color 0.15s;
 }
 .dive-zoombar button:hover {
-  background: var(--surface-0);
+  background: var(--canvas-surface);
   color: var(--text);
 }
 .dive-zoombar button:focus-visible {
@@ -143,7 +144,7 @@
 }
 .dive-flow [data-testid="dive-cluster-title"]:hover,
 .dive-flow [data-testid="dive-unassigned-toggle"]:hover {
-  background: var(--surface-2) !important;
+  background: var(--canvas-surface-hi) !important;
 }
 .dive-flow [data-testid="dive-cluster-title"]:focus-visible,
 .dive-flow [data-testid="dive-unassigned-toggle"]:focus-visible,

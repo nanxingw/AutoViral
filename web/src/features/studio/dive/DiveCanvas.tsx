@@ -324,7 +324,7 @@ export function DiveCanvas({ open, onClose }: Props) {
               inset: 40,
               borderRadius: 16,
               border: "1px solid var(--glass-border)",
-              background: "var(--surface-0)",
+              background: "var(--canvas-bg)",
               overflow: "hidden",
               display: "flex",
               flexDirection: "column",
@@ -584,7 +584,7 @@ function ViewToggleButton({
         letterSpacing: "0.06em",
         textTransform: "uppercase",
         border: "none",
-        background: active ? "var(--surface-1)" : "transparent",
+        background: active ? "var(--canvas-surface-hi)" : "transparent",
         color: active ? "var(--accent-hi)" : "var(--text-dimmer)",
         cursor: "pointer",
       }}

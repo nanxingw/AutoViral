@@ -91,7 +91,7 @@ export function NodeShell({
       ? "var(--accent-hi)"
       : frameless
         ? "transparent"
-        : "var(--glass-border)";
+        : "var(--canvas-border)";
   const boxShadow = isCurrent
     ? "0 0 12px var(--accent-glow)"
     : isSelectedTake
@@ -108,7 +108,7 @@ export function NodeShell({
         position: "relative",
         borderRadius: "var(--radius-md)",
         border: `1px solid ${borderColor}`,
-        background: frameless ? "transparent" : "var(--surface-1)",
+        background: frameless ? "transparent" : "var(--canvas-surface-hi)",
         overflow: "hidden",
         boxShadow,
         transition: "border-color 0.15s, box-shadow 0.15s",
@@ -156,7 +156,7 @@ export function NodeShell({
           whiteSpace: "nowrap",
           overflow: "hidden",
           textOverflow: "ellipsis",
-          border: `1px solid ${isCurrent ? "var(--accent)" : "var(--glass-hi)"}`,
+          border: `1px solid ${isCurrent ? "var(--accent)" : "var(--canvas-border)"}`,
           background: isCurrent ? "var(--accent-glow)" : "rgba(10,11,15,0.6)",
           color: isCurrent ? "var(--accent-hi)" : "var(--text-dim)",
           borderRadius: 999,

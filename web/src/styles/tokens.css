@@ -59,6 +59,16 @@
   --border: var(--divider);
   --text-soft: var(--text-dim);
   --surface-glass: var(--surface-1);
+
+  /* Canvas solid plane (画布去玻璃) — the Dive canvas uses OPAQUE fills, never
+     the translucent --surface-* glass: stacked rgba panels bleed into each
+     other and drift contrast on a big canvas. Near-black plane in dark; the
+     tokens.contrast.test.ts "opaque hex" contract locks these against rgba
+     regressions. */
+  --canvas-bg: #0b0c10;
+  --canvas-surface: #121419;
+  --canvas-surface-hi: #1b1e24;
+  --canvas-border: #2a2e38;
 }
 
 [data-theme="light"] {
@@ -84,9 +94,11 @@
   --text: #0f1822;
   --text-dim: #545c66;
   /* R121 F571 — was #8c929a (ratio 3.02 vs --bg #fafaf7, WCAG AA normal text 4.5 FAIL).
-     Lowered to #6a7079 (ratio ≈ 4.8 vs --bg) for filter pill counts / metric labels /
-     eyebrow text in light theme to satisfy WCAG 2.1 SC 1.4.3 AA. */
-  --text-dimmer: #6a7079;
+     Lowered to #6a7079 (ratio ≈ 4.8 vs --bg), then one notch further to #656b74 so it
+     also clears AA on the WARMER canvas plane (--canvas-bg #f4f2ed, ratio ≈ 4.7 —
+     #6a7079 sat at 4.46 there). Covers filter pill counts / metric labels / eyebrow
+     text per WCAG 2.1 SC 1.4.3 AA. */
+  --text-dimmer: #656b74;
   /* R127 F624 — was #b8bcc2 (ratio 1.75 vs --bg #fafaf7, double-FAIL AA + AA Large).
      This token surfaces disabled placeholder + archived-meta text; at 1.75 it was
      illegible to low-vision users. Darkened to #5d636c (ratio ≈ 6.3) — comfortably
@@ -105,6 +117,14 @@
   /* R121 F572 — was undefined in light theme. Amber-700 ratio ≈ 4.95 vs --bg #fafaf7
      (AA normal text), matches the dark-theme counterpart semantically. */
   --status-warn: #b45309;
+
+  /* Canvas solid plane (画布去玻璃) — light theme goes warm paper (米色, the
+     stone family the infinite-canvas reference uses) instead of translucent
+     white glass. All four are opaque hex by contract (tokens.contrast.test.ts). */
+  --canvas-bg: #f4f2ed;
+  --canvas-surface: #faf8f3;
+  --canvas-surface-hi: #ffffff;
+  --canvas-border: #ddd8cc;
 }
 
 /* Accent variants — opt-in via [data-accent] */

@@ -48,7 +48,7 @@ export function GeneratingOverlay() {
         position: "absolute",
         inset: 0,
         overflow: "hidden",
-        background: "var(--surface-1)",
+        background: "var(--canvas-surface)",
       }}
     >
       {/* dot-matrix backdrop, faded to the corner by an elliptical mask */}
@@ -120,7 +120,7 @@ export function GeneratingOverlay() {
           style={{
             height: 6,
             borderRadius: 999,
-            background: "var(--surface-2)",
+            background: "var(--canvas-surface-hi)",
             overflow: "hidden",
           }}
         >

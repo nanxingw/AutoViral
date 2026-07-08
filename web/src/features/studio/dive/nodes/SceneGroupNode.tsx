@@ -77,14 +77,11 @@ export function SceneGroupNode({ id, data }: NodeProps<SceneGroupNode>) {
         width: "100%",
         height: "100%",
         borderRadius: "var(--radius-lg)",
-        border: `1px ${isUnassigned ? "dashed" : "solid"} var(--glass-border)`,
-        // Solid-ish tinted fill (NO backdrop-filter inside the canvas — see
-        // DESIGN.md "Glass with discipline"); the faint top-down falloff keeps
-        // the title bar reading as the cluster's chrome.
-        background: isUnassigned
-          ? "var(--surface-0)"
-          : "linear-gradient(180deg, var(--surface-1), var(--surface-0) 96px)",
-        boxShadow: "inset 0 1px 0 var(--glass-hi)",
+        border: `1px ${isUnassigned ? "dashed" : "solid"} var(--canvas-border)`,
+        // SOLID plane (画布去玻璃): opaque fills only — translucent rgba panels
+        // stacked on the canvas bleed into each other and read cheap. The
+        // canvas-* tokens are opaque-hex by contract (tokens.contrast.test.ts).
+        background: "var(--canvas-surface)",
         boxSizing: "border-box",
       }}
     >
@@ -308,8 +305,8 @@ function UnassignedHeader({
       <span
         style={{
           marginLeft: "auto",
-          background: "var(--surface-1)",
-          border: "1px solid var(--glass-border)",
+          background: "var(--canvas-surface-hi)",
+          border: "1px solid var(--canvas-border)",
           borderRadius: 999,
           padding: "0 7px",
           fontSize: 10,
@@ -359,8 +356,8 @@ function StackFan({ preview }: { preview: StackPreview }) {
             inset: 0,
             borderRadius: "var(--radius-md)",
             background:
-              "linear-gradient(135deg, var(--surface-2), var(--surface-0))",
-            border: "1px solid var(--glass-border)",
+              "linear-gradient(135deg, var(--canvas-surface-hi), var(--canvas-surface))",
+            border: "1px solid var(--canvas-border)",
             boxShadow: "0 14px 34px rgba(0, 0, 0, 0.4)",
             transform: `translate(${(i + 1) * 18}px, ${(i + 1) * 10}px) rotate(${(i + 1) * 4}deg)`,
             pointerEvents: "none",
@@ -376,9 +373,9 @@ function StackFan({ preview }: { preview: StackPreview }) {
           inset: 0,
           borderRadius: "var(--radius-md)",
           overflow: "hidden",
-          border: "1px solid var(--glass-hi)",
+          border: "1px solid var(--canvas-border)",
           boxShadow: "0 14px 34px rgba(0, 0, 0, 0.4)",
-          background: "var(--surface-1)",
+          background: "var(--canvas-surface-hi)",
           zIndex: 1,
         }}
       >
@@ -400,9 +397,9 @@ function StackFan({ preview }: { preview: StackPreview }) {
           alignItems: "center",
           justifyContent: "center",
           borderRadius: 999,
-          // surface-2 fill + accent-hi text reads in BOTH themes (accent bg
+          // solid raised fill + accent-hi text reads in BOTH themes (accent bg
           // would clash — accent-hi is light in dark theme, so light-on-light).
-          background: "var(--surface-2)",
+          background: "var(--canvas-surface-hi)",
           color: "var(--accent-hi)",
           border: "1px solid var(--accent-lo)",
           fontFamily: "var(--font-mono)",

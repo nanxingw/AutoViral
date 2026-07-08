@@ -131,15 +131,17 @@ describe("NodeShell — frameless media + busy state", () => {
     expect(shell.style.contain).toBe("layout");
   });
 
-  it("a NON-frameless (audio/text) node keeps its glass frame + surface fill", () => {
+  it("a NON-frameless (audio/text) node keeps its frame + SOLID canvas fill", () => {
     // (happy-dom drops var() colours from the `border` shorthand, so we test the
-    // OBSERVABLE difference: a non-frameless idle border is a solid glass line,
-    // NOT transparent, and the card carries the surface fill.)
+    // OBSERVABLE difference: a non-frameless idle border is a visible line, NOT
+    // transparent, and the card carries the OPAQUE canvas plane fill — the
+    // translucent --surface-* glass is banned on the canvas, see
+    // tokens.contrast.test.ts "canvas solid tokens".)
     const container = renderShellVariant({ assetId: "a1", isCurrent: false, onUse: vi.fn() });
     const shell = container.querySelector<HTMLElement>('[data-testid="dive-node-a1"]')!;
     expect(shell.getAttribute("data-frameless")).toBeNull();
     expect(shell.style.border).not.toContain("transparent");
-    expect(shell.style.background).toBe("var(--surface-1)");
+    expect(shell.style.background).toBe("var(--canvas-surface-hi)");
   });
 
   it("a frameless node still gets the accent ring (glow) when it is the current take", () => {

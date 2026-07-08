@@ -157,3 +157,51 @@ describe("tokens.css contrast (R121 F571/F572 + R127 F622/F624 — full text+sta
     });
   }
 });
+
+describe("canvas solid tokens (画布去玻璃 — 纯色黑/米)", () => {
+  // The Dive canvas dropped its translucent glass surfaces for SOLID fills:
+  // near-black in dark, warm paper (米色) in light. Translucent rgba panels
+  // stacked on a canvas bleed into each other and drift contrast — these four
+  // tokens are the canvas's own opaque plane.
+  const CANVAS_TOKENS = [
+    "--canvas-bg",
+    "--canvas-surface",
+    "--canvas-surface-hi",
+    "--canvas-border",
+  ] as const;
+
+  for (const tok of CANVAS_TOKENS) {
+    it(`${tok} is defined in both themes`, () => {
+      expect(dark[tok], `dark ${tok}`).toBeTruthy();
+      expect(light[tok], `light ${tok}`).toBeTruthy();
+    });
+    // The whole point of the change: SOLID color. An rgba()/hsla() value here
+    // reintroduces the glass look this plane exists to remove.
+    it(`${tok} is an opaque hex (no rgba translucency) in both themes`, () => {
+      expect(dark[tok], `dark ${tok}`).toMatch(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+      expect(light[tok], `light ${tok}`).toMatch(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+    });
+  }
+
+  // Text that actually sits on canvas planes must stay AA-legible. --text-dimmer
+  // carries the mono eyebrow/meta labels on cluster headers (--canvas-surface);
+  // --text-dim carries node-card icons/labels up to the raised plane.
+  for (const theme of ["dark", "light"] as const) {
+    const T = theme === "dark" ? dark : light;
+    it(`${theme}: text tiers ≥ AA vs --canvas-bg`, () => {
+      expect(contrast(T["--text"], T["--canvas-bg"])).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(T["--text-dim"], T["--canvas-bg"])).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(T["--text-dimmer"], T["--canvas-bg"])).toBeGreaterThanOrEqual(4.5);
+    });
+    it(`${theme}: --text-dimmer ≥ AA vs --canvas-surface (cluster header labels)`, () => {
+      expect(contrast(T["--text-dimmer"], T["--canvas-surface"])).toBeGreaterThanOrEqual(4.5);
+    });
+    it(`${theme}: --text & --text-dim ≥ AA vs --canvas-surface-hi (node cards)`, () => {
+      expect(contrast(T["--text"], T["--canvas-surface-hi"])).toBeGreaterThanOrEqual(4.5);
+      expect(contrast(T["--text-dim"], T["--canvas-surface-hi"])).toBeGreaterThanOrEqual(4.5);
+    });
+    it(`${theme}: --canvas-border ≥ 1.2 vs --canvas-bg (visible separation)`, () => {
+      expect(contrast(T["--canvas-border"], T["--canvas-bg"])).toBeGreaterThanOrEqual(1.2);
+    });
+  }
+});
