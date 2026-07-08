@@ -7,6 +7,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-07-07
+
+**画布全貌与剧本通读升级** —— 两条主线：**Dive 画布 editorial 重设计**（横向时间轴、缩放系统、去玻璃纯色化、扇叠/边/入场的高级感细节）与 **ScriptReader 剧本通读**（剧本 + 分镜交织成一条阅读流，从全屏 modal 进化为**中央停靠面板**：左对话、中阅读、右编辑三区并存）。全程测试先行（预设测试证红→转绿），多轮多纬度浏览器 E2E（截图 + DOM/computed-style 二确）验收。
+
+### Dive 画布 · editorial 重设计
+
+- **横向时间轴布局 + 缩放系统**（`clusterLayout` 纯函数）— 分镜簇沿横轴按镜号排布如一条胶片；缩放档位驱动信息密度（低缩放降级渲染、视口外裁剪），MiniMap 按资产类型上色。
+- **高级感六项**（借鉴 infinite-canvas 技法）— 簇内素材**扇形叠卡**（hover 整叠微移）、节点**去框**（内容自身即形状）、**签名入场 stagger**、生成中态 **GeneratingOverlay**（渐近进度曲线，等待后端发射 pending 即点亮）、**DiveEdge 三件套**（选中 marching-ants 流动虚线 + hover 辉光 + 16px 隐形命中路径）、背景低缩放降级。
+- **画布去玻璃** — 画布平面全面改用不透明 `--canvas-*` token（暗 `#0b0c10` 真黑 / 亮 `#f4f2ed` 暖米），半透明 glass surface 退出高频重绘区；文字对比度由 token 级 WCAG 契约测试锁死。
+
+### ScriptReader 剧本通读 · 中央停靠面板
+
+- **交织阅读流**（`splitScriptByAnchors` 纯核）— 剧本 markdown 按 ATX 标题切段，每个分镜卡按 `mdAnchor` 插到对应标题之后（无锚点者归尾部「分镜册」），~720px 编辑部阅读列 + 右缘镜号 mini-TOC 跳转 + 卡上「编辑」直达侧栏编辑面。顶栏「剧本」一键进入。
+- **中央停靠面板（非 modal）** — 阅读面板只覆盖中央列（预览 + 时间轴），左侧对话与右侧分镜列表**保持可见可交互**：侧栏分镜卡 hover ⤢ 打开面板并平滑定位该镜（短暂高亮 ring）、剧本折叠头 ⤢ 从头通读；面板内「编辑」跳转侧栏展开时**面板保持打开**（中读右改同屏）；ESC 关闭但焦点在输入框时豁免；背景为不透明 `--canvas-bg`，下层预览不透出。
+- **编辑区文字空间** — 侧栏画面描述 / 旁白 / 剧本输入框改 `field-sizing: content` 随内容自动增高（封顶后内滚），字号 12.5px / 行高 1.6，长文案不再挤在两行小缝里。
+
+### Fixed
+
+- **交织锚点前缀容错** — agent 起草的剧本标题带时长后缀（如「开场 · Hook（0–8s）」）而分镜 `mdAnchor` 只存节拍名时，旧严格全等匹配整批失配、所有分镜静默掉进「分镜册」（浏览器 E2E 抓获）；现先全等（保持重复标题下的确定性）、无命中再做双向前缀匹配。
+- **ScriptReader 自加载剧本** — 从 LIBRARY tab（ScriptTab 未挂载）打开阅读器时 script store 为空，整批分镜劣化成非交织视图；现由阅读器自行经同一纯文本服务拉取（与 ScriptTab 在飞加载去重）。
+- **Dive MiniMap 零节点** — 受控 nodes 无 `onNodesChange` 时 xyflow 不回写 measured 尺寸，MiniMap 画不出任何节点矩形；补 `initialWidth/Height` 修复。
+- **Dive 箭头颜色被 xyflow inline style 压制** — token 色改走 `markerEnd.color` inline 注入。
+
 ## [0.1.8] - 2026-07-06
 
 **工作台可信度与全貌升级**（PRD-0010）—— 两条主线：**可信**（消息不再重复、成本有账可查、Chat 后端可选）与**全貌**（剧本可读、素材可辨、分镜聚簇画布）。六个切片经三个 Wave 落地（22 片 tracer-bullet，测试先行），并经**两轮多纬度浏览器 E2E**（截图 + DOM/computed-style 二确）验收：第二轮揪出并**三修**了一个 Dive 画布内簇按钮真鼠标点击全失效的 CRITICAL 回归（根因是 xyflow 的 pane 平移在缺 `nopan` 逃逸时抢占了 pointerdown，前两修只补了 `pointer-events` 漏了这一重）。
