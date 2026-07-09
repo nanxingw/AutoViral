@@ -99,11 +99,20 @@ export function isPipelineInternal(path: string): boolean {
   return PIPELINE_INTERNAL.some((re) => re.test(path));
 }
 
-// #027 — a finished deliverable's on-disk name IS its type + timestamp:
-// `output/final-<epoch-ms>.mp4` (full export) or `output/proxy-<epoch-ms>.mp4`
-// (Phase 7.C half-res review proxy). Both come from render-pipeline.ts's
-// Stage 5 filename (`${filePrefix}-${Date.now()}.mp4`).
-const EXPORT_RE = /^output\/(final|proxy)-(\d+)\.mp4$/i;
+// #027 — a finished deliverable's on-disk name IS its type + a stem:
+// `output/final-<stem>.mp4` (full export) or `output/proxy-<stem>.mp4`
+// (Phase 7.C half-res review proxy). render-pipeline.ts's Stage 5 always
+// writes `${filePrefix}-${Date.now()}.mp4` (an epoch-ms stem), but E2E gap 3
+// (2026-07-09) found the stem-restricted-to-digits regex missed hand-renamed
+// or historical deliverables (e.g. `final-30fps.mp4`) — those fell out of
+// EXPORTS and drowned in CLIPS with source clips. The `final-`/`proxy-`
+// prefix alone already disambiguates from render-pipeline intermediates:
+// autoviral-export-*, *-ducked/-burned/-normalized never start with that
+// prefix (render-pipeline.ts's filePrefix/Date.now() naming), so the stem
+// can be any non-empty non-numeric string too. classifyExport() below
+// already degrades exportedAt to undefined when the stem doesn't parse as a
+// number — that's the "no timestamp badge" fallback, not a new code path.
+const EXPORT_RE = /^output\/(final|proxy)-([^/]+)\.mp4$/i;
 
 export interface ExportClassification {
   isExport: boolean;

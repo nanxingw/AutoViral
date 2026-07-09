@@ -190,6 +190,38 @@ describe("classifyExport (S4 / #027)", () => {
   it("does not classify output/final.webm (no timestamp, wrong ext) as an export", () => {
     expect(classifyExport("output/final.webm").isExport).toBe(false);
   });
+
+  // E2E gap 3 (2026-07-09) — EXPORT_RE required a purely-numeric epoch-ms
+  // suffix, so a hand-renamed/historical deliverable like `final-30fps.mp4`
+  // fell out of EXPORTS and drowned in CLIPS with source clips. The prefix
+  // (`final-`/`proxy-`) already disambiguates from render-pipeline
+  // intermediates (autoviral-export-*, *-ducked/-burned/-normalized never
+  // start with final-/proxy- — render-pipeline.ts:631-632), so the suffix
+  // can be any non-numeric stem too.
+  it("classifies output/final-<non-numeric-stem>.mp4 (hand-named export) as an export with no timestamp", () => {
+    expect(classifyExport("output/final-30fps.mp4")).toEqual({
+      isExport: true,
+      isProxyExport: false,
+      exportedAt: undefined,
+    });
+  });
+
+  it("classifies output/proxy-<non-numeric-stem>.mp4 as a proxy export with no timestamp", () => {
+    expect(classifyExport("output/proxy-review-cut.mp4")).toEqual({
+      isExport: true,
+      isProxyExport: true,
+      exportedAt: undefined,
+    });
+  });
+
+  // Regression — the relaxed suffix must NOT swallow render-pipeline
+  // intermediates, which are filtered upstream by isPipelineInternal() and
+  // never start with the final-/proxy- prefix in the first place.
+  it("still does not classify an autoviral-export-*-ducked.mp4 intermediate as an export", () => {
+    expect(
+      classifyExport("output/autoviral-export-2026-07-09-00-00-00-ducked.mp4").isExport,
+    ).toBe(false);
+  });
 });
 
 describe("formatExportedAt (S4 / #027)", () => {
@@ -288,6 +320,31 @@ describe("useWorkAssets", () => {
       // render-pipeline intermediates never reach any group.
       expect(allItems).toHaveLength(1);
       expect(allItems[0].path).toBe("output/final-1717000000000.mp4");
+    });
+
+    // E2E gap 3 (2026-07-09) — a hand-named/historical deliverable
+    // (`final-30fps.mp4`) must still land in EXPORTS, not CLIPS, and must
+    // not blow up on a missing timestamp.
+    it("groups a hand-named output/final-30fps.mp4 into EXPORTS without a timestamp badge", async () => {
+      (apiFetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        assets: [
+          "assets/clips/intro.mp4",
+          "output/final-30fps.mp4",
+          "output/autoviral-export-2026-07-09-00-00-00-ducked.mp4",
+        ],
+      });
+      const { result } = renderHook(() => useWorkAssets("w1"), { wrapper });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      const groups = result.current.data!;
+      const byKey = Object.fromEntries(groups.map((g) => [g.group, g]));
+
+      expect(byKey.CLIPS.count).toBe(1);
+      expect(byKey.EXPORTS.count).toBe(1);
+      const item = byKey.EXPORTS.items[0];
+      expect(item.path).toBe("output/final-30fps.mp4");
+      expect(item.isExport).toBe(true);
+      expect(item.isProxyExport).toBe(false);
+      expect(item.exportedAt).toBeUndefined();
     });
 
     it("hides the EXPORTS group entirely when there are no deliverables yet (empty-group hiding, matches existing groups)", async () => {
