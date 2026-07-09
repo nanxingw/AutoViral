@@ -20,3 +20,5 @@ export {
 export { addKeyframe, setKeyframe } from "./keyframe.js";
 export { setAspectRatio, rescaleCompositionForResize } from "./setAspectRatio.js";
 export { setCompositionDuration, compositionContentEnd } from "./setDuration.js";
+export { setFps } from "./setFps.js";
+export type { Fps } from "./setFps.js";
