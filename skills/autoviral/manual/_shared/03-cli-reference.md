@@ -78,6 +78,19 @@ autoviral comp set --duration 12      # shorten — tail content past 12s won't 
 - `--duration auto` — derive the length from `max(clip end)` across every track (the same口径 the store grows duration with). An empty composition yields `0`.
 - A malformed value (`abc`, negative) fails fast with exit 4 **before** the bridge.
 
+### `autoviral comp fps <24|25|30|60>`
+
+Switch the canvas's playback/render frame rate (`comp.fps`) in one shot, through the SAME shared `ops.setFps` the Studio TweaksPanel fps control uses (agent CLI and human UI converge on the same composition, `POST /comp/fps` on the bridge — mirrors `comp aspect`'s per-intent route).
+
+```bash
+autoviral comp fps 24                 # 24 recommended — Seedance (the primary generation source) is a constant 24fps
+autoviral comp fps 30
+```
+
+- Only the four canonical values `24 | 25 | 30 | 60` are accepted; anything else fails fast with exit 4 **before** the bridge (mirrors `comp aspect`'s local pre-check).
+- Because every clip/keyframe/caption time field is stored in **seconds** (see [`05-conventions`](05-conventions.md#time-is-in-seconds-not-frames)), switching fps is **lossless** — it never touches `scenes` / `assets` / `tracks` / `clips`, and no asset goes stale. Re-applying the current value is a harmless no-op.
+- Applying a platform preset (`comp aspect` / TweaksPanel platform switch) does **not** change `fps` — fps is decoupled from presets and only moves via this verb or the TweaksPanel fps control.
+
 ### `autoviral list clips [--track <kind>]`
 
 List clip summaries (id, kind, src, in/out, trackOffset, opacity hint). `--track` filters by parent track kind.

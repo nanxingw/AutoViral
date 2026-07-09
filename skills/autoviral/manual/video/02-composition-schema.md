@@ -7,7 +7,7 @@
 ```yaml
 id: comp_w_20260513_1919_74d_v2
 workId: w_20260513_1919_74d
-fps: 24                    # one of 24 | 25 | 30 | 60 (locked at create-time)
+fps: 24                    # one of 24 | 25 | 30 | 60 — change any time with `autoviral comp fps <value>`
 width: 1280                # pixels
 height: 720
 duration: 81.40282         # seconds — derived from the longest track

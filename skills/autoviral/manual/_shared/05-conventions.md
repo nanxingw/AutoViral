@@ -4,7 +4,7 @@ The things you'll get wrong on the first try. Skim this once; refer back when so
 
 ## Time is in seconds, not frames
 
-Every time-shaped field (`in`, `out`, `trackOffset`, `duration`, keyframe `time`, `fadeIn`, `fadeOut`) is **seconds, float**. The composition's `fps` is locked at create-time and used only by the render pipeline. Don't multiply by fps anywhere.
+Every time-shaped field (`in`, `out`, `trackOffset`, `duration`, keyframe `time`, `fadeIn`, `fadeOut`) is **seconds, float**. `fps` (one of `24 | 25 | 30 | 60`) is only the playback/render clock — switch it any time with `autoviral comp fps <24|25|30|60>` (see [`03-cli-reference`](03-cli-reference.md)). Because every time field is already seconds, changing `fps` is lossless: it never touches scenes/assets/tracks/clips or any time-shaped field. Don't multiply by fps anywhere.
 
 Bare seconds and `Ns` / `MmNs` are interchangeable in `autoviral seek`:
 
