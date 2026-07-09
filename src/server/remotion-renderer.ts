@@ -34,6 +34,16 @@ export function buildSafeOutputFilename(
  * Remotion encodes in batches; for a smooth UI bar we want the leading
  * edge.
  */
+// S2 (PRD-0012) — the render path now uses <OffthreadVideo> (see
+// VideoTrackRenderer.tsx), which keeps a per-clip ffmpeg-extracted-frame
+// cache. Remotion's default cache size auto-scales off available system
+// memory, which is fine on a dev machine but unbounded on a small/shared
+// render host with many concurrent jobs. Pin a conservative 512MB ceiling
+// so a big composition (many video clips / long duration) can't balloon
+// memory during export; large enough that a single clip's LRU window
+// doesn't thrash on typical multi-clip timelines.
+const OFFTHREAD_VIDEO_CACHE_SIZE_BYTES = 512 * 1024 * 1024;
+
 export interface RenderToMp4Options {
   /** 0..1 fraction of frames rendered. Called every ~250ms by Remotion. */
   onProgress?: (fraction: number) => void;
@@ -90,6 +100,7 @@ export async function renderCompositionToMp4(
       outputLocation: outFile,
       inputProps: { comp },
       browserExecutable: remotionBrowserExecutable(),
+      offthreadVideoCacheSizeInBytes: OFFTHREAD_VIDEO_CACHE_SIZE_BYTES,
       cancelSignal: cancelBridge?.cancelSignal,
       // R46 #2.5 — surface per-frame progress so the pipeline progress
       // budget (worker.ts STAGE_BUDGET.render = 0.75) advances smoothly

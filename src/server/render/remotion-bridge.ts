@@ -30,6 +30,12 @@ import {
   remotionBrowserExecutable,
 } from "../remotion-paths.js";
 
+// S2 (PRD-0012) — same rationale as remotion-renderer.ts's constant of the
+// same name: this bridge also renders via headless Chromium against the
+// <OffthreadVideo>-branched <Scene> tree, so it shares the conservative
+// memory ceiling.
+const OFFTHREAD_VIDEO_CACHE_SIZE_BYTES = 512 * 1024 * 1024;
+
 export interface RenderViaStreamingBridgeOptions {
   /** 0..1 fraction of frames rendered. Called as renderFrames advances. */
   onProgress?: (fraction: number) => void;
@@ -145,6 +151,7 @@ export async function renderViaStreamingBridge(
     serveUrl: bundleLocation,
     inputProps: { comp },
     browserExecutable: remotionBrowserExecutable(),
+    offthreadVideoCacheSizeInBytes: OFFTHREAD_VIDEO_CACHE_SIZE_BYTES,
     cancelSignal: cancelBridge?.cancelSignal,
     imageFormat: "jpeg",
     // outputDir: null means "don't write frames to disk" — we pull

@@ -50,6 +50,16 @@ vi.mock("remotion", async (orig) => {
       props: {},
       id: "main",
     }),
+    // S2 (PRD-0012) — VideoTrackRenderer now branches on
+    // getRemotionEnvironment().isRendering; this test exercises the browser
+    // preview path (<Video>), so isRendering stays false.
+    getRemotionEnvironment: () => ({
+      isStudio: false,
+      isRendering: false,
+      isPlayer: true,
+      isReadOnlyStudio: false,
+      isClientSideRendering: false,
+    }),
   };
 });
 

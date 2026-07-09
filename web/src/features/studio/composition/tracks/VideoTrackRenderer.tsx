@@ -1,4 +1,12 @@
-import { Sequence, Video, useVideoConfig, useCurrentFrame, Easing } from "remotion";
+import {
+  Sequence,
+  Video,
+  OffthreadVideo,
+  useVideoConfig,
+  useCurrentFrame,
+  Easing,
+  getRemotionEnvironment,
+} from "remotion";
 import { TransitionSeries, linearTiming, springTiming } from "@remotion/transitions";
 import { groupChains } from "../transitions/groupChains";
 import { presentationFor } from "../transitions/presentations";
@@ -98,14 +106,30 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   const zoom = cssCropZoom(clip.transforms.crop);
   const transform =
     `translate(${x}px, ${y}px) rotate(${rotation}deg) scale(${scale})` + flip;
-  // Browser-side player uses <Video> (single <video> element backed by
-  // browser native playback) instead of <OffthreadVideo>. OffthreadVideo
-  // is more accurate for server-side rendering (FFmpeg + worker, used by
-  // render-pipeline.ts), but in the player it spawns a chunk pool of ~16
-  // hidden <video> tags that exhaust Chrome's hardware decoder budget,
-  // producing periodic ~3s playback hitches as the browser LRU-evicts
-  // and re-decodes IDR frames. Server render path is unaffected — that
-  // goes through Remotion CLI, not this component. (2026-05-08)
+  // S2 (PRD-0012 / issue 026) — render-environment branch. This SAME
+  // component tree is used by BOTH the browser preview AND server-side
+  // export (headless Chromium runs renderMedia/renderFrames against the
+  // exact <Scene>/<VideoTrackRenderer> the player uses — there is no
+  // separate "server render path"). Each side needs a different <video>
+  // primitive:
+  //   - Browser preview (isRendering=false): <Video> (single native
+  //     <video> element, browser-native decode/seek). Kept because
+  //     <OffthreadVideo> in the player spawns a chunk pool of ~16 hidden
+  //     <video> tags that exhaust Chrome's hardware decoder budget,
+  //     producing periodic ~3s playback hitches as the browser LRU-evicts
+  //     and re-decodes IDR frames. (2026-05-08 decision — do not revert.)
+  //   - Server render (isRendering=true): <OffthreadVideo> (ffmpeg frame
+  //     extraction). Native <video>.currentTime seeks are NOT frame-exact —
+  //     they snap to the nearest keyframe of the source's GOP — which is
+  //     exactly what baked periodic backward-jump jitter into every export
+  //     (docs/issues/026-export-backward-frame-jitter.md). OffthreadVideo
+  //     extracts the requested frame directly via ffmpeg, so it is exact.
+  // `isRendering` has no decoder-budget concern in headless render (no
+  // player UI, no "~16 hidden video tags" competing for hardware decoders),
+  // so OffthreadVideo is safe there and is Remotion's own recommendation for
+  // server rendering.
+  const { isRendering } = getRemotionEnvironment();
+  const VideoEl = isRendering ? OffthreadVideo : Video;
   // S19 (US 29/30) — freeze a single source frame. When freezeAtSec is set the
   // preview HOLDS one frame: startFrom = round(freezeAtSec*fps), endAt = that+1
   // (a one-frame span the <Sequence> repeats for the clip duration). This is
@@ -113,21 +137,34 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // pass bakes into the export (transforms-ffmpeg.timeWarpVideoFilterChain).
   const freezeStart =
     clip.freezeAtSec != null ? Math.round(clip.freezeAtSec * fps) : null;
+  // Shared across BOTH branches — src/trim/speed are identical for preview
+  // and export (WYSIWYG by construction).
   const baseProps = {
     src: clip.src,
     startFrom: freezeStart != null ? freezeStart : Math.round(clip.in * fps),
     endAt: freezeStart != null ? freezeStart + 1 : Math.round(clip.out * fps),
     playbackRate: speed,
-    // R47-fix5 (Codex pick 2) — widen Remotion's hard-seek drift
-    // tolerance from the default 0.45s. Below the threshold Remotion
-    // just nudges currentTime; above it does a discrete seek (which
-    // the user perceives as a "rewind"). The default trips on every
-    // long main-thread commit / decoder hiccup; 1.2s lets normal
-    // drift settle on its own. Pairs with `pauseWhenBuffering` so
-    // we don't seek during load events either.
-    acceptableTimeShiftInSeconds: 1.2,
-    pauseWhenBuffering: true,
   } as const;
+  // Preview-ONLY props. <Video>'s native <video> element does discrete
+  // browser seeks under decoder/main-thread pressure, which the user
+  // perceives as a "rewind"; these two props smooth that out. They are
+  // meaningless (and unsupported) on <OffthreadVideo> — ffmpeg frame
+  // extraction has no buffering/seek-drift concept — so they must NOT be
+  // forwarded on the render branch (S2 fix; previously always-on, which let
+  // the export silently tolerate up to 1.2s of uncorrected seek drift).
+  //
+  // R47-fix5 (Codex pick 2) — widen Remotion's hard-seek drift tolerance
+  // from the default 0.45s. Below the threshold Remotion just nudges
+  // currentTime; above it does a discrete seek (which the user perceives as
+  // a "rewind"). The default trips on every long main-thread commit /
+  // decoder hiccup; 1.2s lets normal drift settle on its own. Pairs with
+  // `pauseWhenBuffering` so we don't seek during load events either.
+  const previewOnlyProps = isRendering
+    ? {}
+    : ({
+        acceptableTimeShiftInSeconds: 1.2,
+        pauseWhenBuffering: true,
+      } as const);
 
   // S18 review fix (critical/medium) — the crop-zoom geometry lives on the
   // inner <Video> (position:absolute width/height/left/top from `zoom`); the
@@ -148,8 +185,9 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   if (fitMode === "blur") {
     body = (
       <div style={{ position: "absolute", inset: 0, opacity, overflow: "hidden" }}>
-        <Video
+        <VideoEl
           {...baseProps}
+          {...previewOnlyProps}
           style={{
             ...innerSizing,
             objectFit: "cover",
@@ -159,8 +197,9 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
             transform: `${transform} scale(1.1)`,
           }}
         />
-        <Video
+        <VideoEl
           {...baseProps}
+          {...previewOnlyProps}
           style={{
             ...innerSizing,
             objectFit: "contain",
@@ -173,10 +212,11 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   } else {
     // cover / contain → a single layer, objectFit driven by fitMode. When crop is
     // present the layer is zoomed (innerSizing) and must be clipped by an
-    // overflow:hidden window; otherwise it's the legacy bare <Video>.
+    // overflow:hidden window; otherwise it's the legacy bare <Video>/<OffthreadVideo>.
     const layer = (
-      <Video
+      <VideoEl
         {...baseProps}
+        {...previewOnlyProps}
         style={{
           ...innerSizing,
           objectFit: fitMode === "contain" ? "contain" : "cover",
