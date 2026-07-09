@@ -87,7 +87,12 @@ describe("Studio integration", () => {
   it("mounts with empty composition and renders Player", async () => {
     const { findByTestId } = mount();
     const player = await findByTestId("player");
-    expect(player.getAttribute("data-fps")).toBe("30");
+    // PRD-0011 F5 (994854e review-fix) — Studio's no-yaml fresh-work seed
+    // now routes through the short-video content-type registry's
+    // seedFactory (fps:24, Seedance's ffprobe-confirmed native rate)
+    // instead of the bare makeEmptyComposition ?? 30 default. See also
+    // the dedicated Studio.freshSeed.test.tsx regression coverage.
+    expect(player.getAttribute("data-fps")).toBe("24");
   });
 
   it("adding a clip surfaces it on the timeline", async () => {
