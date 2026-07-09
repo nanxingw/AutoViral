@@ -16,7 +16,7 @@ import {
   type MixTrack,
 } from "../domain/audio-tools.js";
 import { join } from "node:path";
-import { rename, stat as fsStat, writeFile } from "node:fs/promises";
+import { rename, stat as fsStat, writeFile, unlink } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { FFMPEG_BIN } from "./ffmpeg-paths.js";
 import type { Composition, ExportPreset } from "../shared/composition.js";
@@ -534,6 +534,13 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   onP("render", 1);
   checkAbort();
 
+  // S5 (issue #027) — every mp4 the pipeline derives from here on (Stage 1's
+  // raw render + each stage's -ducked/-burned/-normalized output) is a
+  // candidate for cleanup once the export finishes successfully. We track
+  // them explicitly rather than globbing outDir on a timer so cleanup never
+  // touches a file this render didn't itself produce.
+  const intermediatePaths: string[] = [workingPath];
+
   // Stage 2: ducking (optional, only if any audio clip has ducking)
   const audioClips = comp.tracks
     .filter((t) => t.kind === "audio")
@@ -548,6 +555,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
       outputPath: ducked,
     });
     workingPath = ducked;
+    intermediatePaths.push(ducked);
     onP("duck", 1);
     checkAbort();
   }
@@ -579,6 +587,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
       outputVideo: burned,
     });
     workingPath = burned;
+    intermediatePaths.push(burned);
     onP("burn", 1);
     checkAbort();
   }
@@ -593,6 +602,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
     const normalized = workingPath.replace(/\.mp4$/, "-normalized.mp4");
     await normalizeLufs(workingPath, normalized, { target, truePeak: -1.5, lra: 11 });
     workingPath = normalized;
+    intermediatePaths.push(normalized);
   }
   onP("loudnorm", 1);
   checkAbort();
@@ -608,9 +618,15 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   const finalPath = join(opts.outDir, `${filePrefix}-${Date.now()}.mp4`);
   const preset = comp.exportPresets?.[0];
   if (preset) {
+    // runEncodeStage reads workingPath but does not delete it — it stays in
+    // intermediatePaths for the cleanup pass below.
     await runEncodeStage(workingPath, finalPath, preset, opts.signal);
   } else {
     await rename(workingPath, finalPath);
+    // rename() already MOVED (== deleted) the source at workingPath onto
+    // finalPath — drop it from the cleanup list so we don't attempt a
+    // doomed unlink on a path the OS just removed out from under us.
+    intermediatePaths.pop();
   }
   onP("encode", 1);
 
@@ -640,6 +656,28 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
             `[render] sidecar SRT write failed for ${srtPath}:`,
             err,
           );
+        }
+      }),
+    );
+  }
+
+  // S5 (issue #027) — the export has now fully succeeded (every stage above
+  // resolved without throwing; a rejecting stage would have already
+  // propagated the error out of this function and skipped everything below,
+  // preserving the full crime scene for diagnosis). Delete whatever derived
+  // intermediates remain so a single export leaves output/ with just the
+  // deliverable(s) — not the ~200MB of Stage-1/-ducked/-burned/-normalized
+  // scratch files the asset library (S4) then has to filter back out.
+  // Best-effort: a failed unlink only warns — it must never turn an already-
+  // successful export into a reported failure.
+  if (intermediatePaths.length > 0) {
+    await Promise.all(
+      intermediatePaths.map(async (p) => {
+        try {
+          await unlink(p);
+        } catch (err) {
+          // eslint-disable-next-line no-console
+          console.warn(`[render] failed to remove intermediate file ${p}:`, err);
         }
       }),
     );

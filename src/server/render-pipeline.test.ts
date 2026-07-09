@@ -16,9 +16,16 @@ vi.mock("../domain/audio-tools.js", async (orig) => {
 });
 // Mock rename so the pipeline's final stage doesn't ENOENT on the synthetic
 // upstream path (no actual files exist when upstream stages are mocked).
+// S5 (issue #027) — also mock unlink so the post-export intermediate cleanup
+// doesn't ENOENT on the same synthetic paths; everything else (stat, etc.)
+// stays real so hasMeaningfulAudio's ENOENT-catch-true fallback still fires.
 vi.mock("node:fs/promises", async (orig) => {
   const real = await orig<typeof import("node:fs/promises")>();
-  return { ...real, rename: vi.fn(async () => undefined) };
+  return {
+    ...real,
+    rename: vi.fn(async () => undefined),
+    unlink: vi.fn(async () => undefined),
+  };
 });
 // Pin ffmpeg/ffprobe to their bare names. FFMPEG_BIN/FFPROBE_BIN now resolve
 // through src/infra/deps.ts (env → managed → VENDORED absolute path → bare
@@ -50,6 +57,7 @@ vi.mock("node:child_process", () => {
 });
 
 import { spawn } from "node:child_process";
+import { unlink } from "node:fs/promises";
 import {
   runRenderPipeline,
   runEncodeStage,
@@ -60,6 +68,7 @@ import { mixAudioTracks, normalizeLufs, burnSubtitles } from "../domain/audio-to
 import type { Composition, ExportPreset } from "../shared/composition.js";
 
 const _spawn = spawn as unknown as ReturnType<typeof vi.fn>;
+const _unlink = unlink as unknown as ReturnType<typeof vi.fn>;
 
 const baseComp: Composition = {
   id: "c", workId: "w", fps: 30, width: 1080, height: 1920,
@@ -353,6 +362,62 @@ describe("runRenderPipeline — encode stage wiring", () => {
     await runRenderPipeline({ comp: baseComp, outDir: "/tmp/out" });
     // baseComp has exportPresets: [], so spawn must NOT be called.
     expect(_spawn).not.toHaveBeenCalled();
+  });
+});
+
+// S5 (issue #027) — a successful export must not litter output/ with the
+// derived intermediate mp4s (Stage 1 raw render + -ducked/-burned/-normalized)
+// the asset library then has to filter back out (S4). Cleanup is best-effort
+// and only ever runs on the success path — any stage that rejects above
+// leaves the whole crime scene on disk for diagnosis, by construction (the
+// cleanup code sits after every stage has already resolved).
+describe("runRenderPipeline — intermediate cleanup (S5 / issue #027)", () => {
+  it("unlinks the Stage-1 output on a minimal rename-passthrough export, but NOT the intermediate rename() already consumed, nor the final path", async () => {
+    const out = await runRenderPipeline({ comp: baseComp, outDir: "/tmp/out-cleanup-1" });
+    // Minimal pipeline = Stage 1 render + loudnorm (hasMeaningfulAudio probes
+    // a nonexistent file → ENOENT → treated as "has audio", see the fn's
+    // doc comment), then rename() straight to finalPath (no preset).
+    // rename() already moved the pre-rename intermediate (…-normalized.mp4)
+    // away, so only the Stage-1 raw output remains to be cleaned up.
+    expect(_unlink).toHaveBeenCalledTimes(1);
+    expect(_unlink).toHaveBeenCalledWith("/tmp/out-cleanup-1/render-intermediate.mp4");
+    const unlinked = _unlink.mock.calls.map((c) => c[0]);
+    expect(unlinked).not.toContain(out);
+    expect(unlinked).not.toContain(
+      "/tmp/out-cleanup-1/render-intermediate-normalized.mp4",
+    );
+  });
+
+  it("unlinks BOTH the Stage-1 output and the pre-encode intermediate when a preset triggers ffmpeg re-encode (encode does not consume/delete its input)", async () => {
+    _spawn.mockClear();
+    const compWithPreset: Composition = { ...baseComp, exportPresets: [douyin] };
+    const promise = runRenderPipeline({ comp: compWithPreset, outDir: "/tmp/out-cleanup-2" });
+    await drainSpawnsUntilSettled(_spawn, promise);
+    const out = await promise;
+    const unlinked = _unlink.mock.calls.map((c) => c[0]);
+    expect(unlinked).toContain("/tmp/out-cleanup-2/render-intermediate.mp4");
+    expect(unlinked).toContain(
+      "/tmp/out-cleanup-2/render-intermediate-normalized.mp4",
+    );
+    expect(unlinked).not.toContain(out);
+  });
+
+  it("performs zero cleanup when a stage rejects — the failure preserves every intermediate for diagnosis", async () => {
+    const normMock = normalizeLufs as unknown as ReturnType<typeof vi.fn>;
+    normMock.mockRejectedValueOnce(new Error("loudnorm boom"));
+    await expect(
+      runRenderPipeline({ comp: baseComp, outDir: "/tmp/out-cleanup-3" }),
+    ).rejects.toThrow(/loudnorm boom/);
+    expect(_unlink).not.toHaveBeenCalled();
+  });
+
+  it("swallows an unlink failure — best-effort cleanup never flips a successful export into a reported failure", async () => {
+    _unlink.mockRejectedValueOnce(new Error("EACCES: permission denied"));
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const out = await runRenderPipeline({ comp: baseComp, outDir: "/tmp/out-cleanup-4" });
+    expect(out).toMatch(/^\/tmp\/out-cleanup-4\/final-\d+\.mp4$/);
+    expect(warnSpy).toHaveBeenCalled();
+    warnSpy.mockRestore();
   });
 });
 
