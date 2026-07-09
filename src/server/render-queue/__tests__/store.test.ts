@@ -76,6 +76,51 @@ describe("RenderQueueStore — schema + insert + read", () => {
     expect(row.finishedAt).toBeDefined();
   });
 
+  // E2E gap 2 (2026-07-09) — the bridge's POST /export runs
+  // runRenderPipeline directly, bypassing the queue's insert→running→done
+  // lifecycle entirely, so an agent-driven export never left a row for the
+  // UI's export-history menu to find. recordExternal() lets a caller that
+  // already ran the pipeline itself (bridge routes) record a fully-formed
+  // terminal row in one shot — no transient "queued"/"running" state, since
+  // by the time this is called the render already finished.
+  it("recordExternal writes a fully-formed done row (status/output_path/preset_id/timestamps) in one shot", () => {
+    const job = store.recordExternal({
+      workId: "w-bridge",
+      type: "full",
+      presetId: "douyin-9-16",
+      status: "done",
+      outputPath: "/tmp/out/final-999.mp4",
+      startedAt: "2026-07-09T00:00:00.000Z",
+      finishedAt: "2026-07-09T00:00:05.000Z",
+    });
+    expect(job.workId).toBe("w-bridge");
+    expect(job.type).toBe("full");
+    expect(job.presetId).toBe("douyin-9-16");
+    expect(job.status).toBe("done");
+    expect(job.outputPath).toBe("/tmp/out/final-999.mp4");
+    expect(job.startedAt).toBe("2026-07-09T00:00:00.000Z");
+    expect(job.finishedAt).toBe("2026-07-09T00:00:05.000Z");
+    expect(job.createdAt).toBeDefined();
+
+    const round = store.get(job.id);
+    expect(round).toEqual(job);
+    // Must show up in the per-work history list the UI's export-history
+    // menu reads (GET /api/works/:id/render/jobs).
+    expect(store.list("w-bridge").map((j) => j.id)).toContain(job.id);
+  });
+
+  it("recordExternal writes a failed row with the error message when the caller's render failed", () => {
+    const job = store.recordExternal({
+      workId: "w-bridge",
+      type: "proxy",
+      status: "failed",
+      error: "ffmpeg exited 1",
+    });
+    expect(job.status).toBe("failed");
+    expect(job.error).toBe("ffmpeg exited 1");
+    expect(job.outputPath).toBeUndefined();
+  });
+
   it("appendLog adds entries; persisted rows preserve log order", () => {
     const job = store.insert({ workId: "w-1", type: "full" });
     store.appendLog(job.id, {

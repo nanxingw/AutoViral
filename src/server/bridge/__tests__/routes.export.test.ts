@@ -8,6 +8,8 @@
 import { describe, expect, it, beforeAll, afterAll, vi, beforeEach } from "vitest";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { RenderQueue } from "../../render-queue/index.js";
+import { setRenderQueue } from "../../routes/_shared.js";
 
 // vi.mock is hoisted above imports, so the factory may not close over a
 // module-scope const. vi.hoisted lifts the spy alongside it.
@@ -188,5 +190,124 @@ describe("POST /export — F4 preset never overrides comp.fps (canvas-owned)", (
     expect(opts.comp.exportPresets[0].id).toBe("douyin-9-16");
     // ...but fps stays the CANVAS value (24), never preset.fps (30).
     expect(opts.comp.fps).toBe(24);
+  });
+});
+
+// E2E gap 2 (2026-07-09) — agent-人平权缺口. The UI's export path
+// (enqueueRender → POST /api/render/jobs) inserts a row into the
+// render-queue store, which is what GET /api/works/:id/render/jobs (the
+// export-history menu's data source) reads. Bridge's POST /export calls
+// runRenderPipeline directly and never touched that store, so an
+// agent-driven export never showed up in export history. The fix records a
+// terminal (done/failed) row via RenderQueue.recordExternal() after the
+// pipeline call resolves/rejects — same store, same list() the UI reads.
+describe("POST /export records render-queue history (E2E gap 2 — bridge/UI parity)", () => {
+  let queue: InstanceType<typeof RenderQueue>;
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  beforeAll(() => {
+    process.env.AUTOVIRAL_WORKS_ROOT = FIXTURE_WORKS_ROOT;
+    queue = new RenderQueue({
+      dbPath: ":memory:",
+      // The worker's own runRenderPipeline must NEVER run for a bridge
+      // export — bridge calls the pipeline itself, recordExternal only
+      // writes the already-known result straight into the store.
+      runRenderPipeline: async () => {
+        throw new Error("render-queue worker path must not run for bridge /export");
+      },
+      loadComposition: async () => {
+        throw new Error("render-queue worker path must not run for bridge /export");
+      },
+      outDirFor: () => "/tmp",
+    });
+    setRenderQueue(queue);
+  });
+  afterAll(() => {
+    setRenderQueue(null);
+    queue.shutdown();
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+  beforeEach(() => {
+    runRenderPipeline.mockClear();
+    runRenderPipeline.mockResolvedValue("/tmp/out/final-123.mp4");
+  });
+
+  function newRows(before: Set<string>) {
+    return queue.list("sample-work").filter((j) => !before.has(j.id));
+  }
+
+  it("a successful export records a done job with output_path + preset_id, findable via list()", async () => {
+    const before = new Set(queue.list("sample-work").map((j) => j.id));
+    const res = await app.request("/api/bridge/v1/export", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "sample-work",
+      },
+      body: JSON.stringify({ preset: "douyin-9-16" }),
+    });
+    expect(res.status).toBe(200);
+    const added = newRows(before);
+    expect(added).toHaveLength(1);
+    const job = added[0]!;
+    expect(job.workId).toBe("sample-work");
+    expect(job.status).toBe("done");
+    expect(job.outputPath).toBe("/tmp/out/final-123.mp4");
+    expect(job.presetId).toBe("douyin-9-16");
+    expect(job.finishedAt).toBeDefined();
+  });
+
+  it("a failed export (runRenderPipeline throws) records a failed job with the error", async () => {
+    runRenderPipeline.mockRejectedValueOnce(new Error("ffmpeg exited 1"));
+    const before = new Set(queue.list("sample-work").map((j) => j.id));
+    const res = await app.request("/api/bridge/v1/export", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "sample-work",
+      },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(500);
+    const added = newRows(before);
+    expect(added).toHaveLength(1);
+    const job = added[0]!;
+    expect(job.status).toBe("failed");
+    expect(job.error).toMatch(/ffmpeg exited 1/);
+    expect(job.outputPath).toBeUndefined();
+  });
+
+  it("proxy export records type: proxy", async () => {
+    const before = new Set(queue.list("sample-work").map((j) => j.id));
+    const res = await app.request("/api/bridge/v1/export", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "sample-work",
+      },
+      body: JSON.stringify({ proxy: true }),
+    });
+    expect(res.status).toBe(200);
+    const added = newRows(before);
+    expect(added).toHaveLength(1);
+    expect(added[0]!.type).toBe("proxy");
+  });
+
+  it("when RenderQueue is unavailable (null), /export still succeeds — history recording is best-effort", async () => {
+    setRenderQueue(null);
+    try {
+      const res = await app.request("/api/bridge/v1/export", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AutoViral-Work-Id": "sample-work",
+        },
+        body: JSON.stringify({}),
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      setRenderQueue(queue);
+    }
   });
 });

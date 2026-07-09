@@ -74,6 +74,13 @@ export class RenderQueue {
     this.worker.cancel(jobId);
   }
 
+  /** E2E gap 2 — see RenderQueueStore.recordExternal's doc comment. */
+  recordExternal(
+    opts: Parameters<RenderQueueStore["recordExternal"]>[0],
+  ): RenderJob {
+    return this.store.recordExternal(opts);
+  }
+
   get(jobId: string): RenderJob | null {
     return this.store.get(jobId);
   }

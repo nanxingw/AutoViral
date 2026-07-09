@@ -64,6 +64,7 @@ import { recordCostEvent } from "../cost-ledger/index.js";
 import { randomBytes } from "node:crypto";
 import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
 import { resolvePlatformPreset } from "../../shared/platform-presets.js";
+import { getRenderQueue } from "../routes/_shared.js";
 import { renderSnapshot, assetUrlToWorkRel } from "../snapshot.js";
 import { listCheckpoints, restoreCheckpoint } from "../checkpoints.js";
 import { ingestYouTubeIntoWork } from "./ingest-youtube.js";
@@ -2015,6 +2016,36 @@ bridgeRouter.post("/export", async (c) => {
       );
     }
   }
+  // E2E gap 2 (2026-07-09) — the UI's export path (enqueueRender → POST
+  // /api/render/jobs) inserts a row into the render-queue store, which is
+  // what GET /api/works/:id/render/jobs (the export-history menu's data
+  // source) reads. This route calls runRenderPipeline directly and never
+  // touched that store, so an agent-driven export never showed up in export
+  // history — captured here so both the success and failure branches below
+  // can record a matching row via RenderQueue.recordExternal().
+  const jobType: "full" | "proxy" = body.proxy ? "proxy" : "full";
+  const startedAt = new Date().toISOString();
+  const recordHistory = (
+    result:
+      | { status: "done"; outputPath: string }
+      | { status: "failed"; error: string },
+  ) => {
+    // Best-effort: a history-write hiccup (or renderQueue not initialized,
+    // e.g. some embedded/test contexts) must never change the response the
+    // caller already earned by actually running (or failing) the render.
+    try {
+      getRenderQueue()?.recordExternal({
+        workId: g.workId,
+        type: jobType,
+        presetId: preset?.id,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        ...result,
+      });
+    } catch {
+      /* history recording is best-effort */
+    }
+  };
   try {
     const raw = await readCompositionFor({ workId: g.workId });
     // Resolve variables BEFORE render so the composition reaching Remotion
@@ -2078,12 +2109,14 @@ bridgeRouter.post("/export", async (c) => {
         });
       },
     });
+    recordHistory({ status: "done", outputPath: finalPath });
     return c.json({
       ok: true,
       result: { path: finalPath, resolvedValues, issues },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
+    recordHistory({ status: "failed", error: message });
     return c.json({ ok: false, error: message }, 500);
   }
 });

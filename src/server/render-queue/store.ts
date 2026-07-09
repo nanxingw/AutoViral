@@ -186,6 +186,57 @@ export class RenderQueueStore {
       .run(...values);
   }
 
+  /**
+   * E2E gap 2 (2026-07-09) — write a fully-formed TERMINAL row in one shot,
+   * for a caller that already ran the render itself outside this store's own
+   * queued→running→done lifecycle (bridge's POST /export calls
+   * runRenderPipeline directly, not via RenderQueueWorker). There is no
+   * transient "queued"/"running" state to pass through — by the time this is
+   * called the render has already finished (or failed), so createdAt/
+   * startedAt/finishedAt all default to "now" unless the caller supplies
+   * more accurate historical timestamps it captured around its own
+   * runRenderPipeline call.
+   */
+  recordExternal(opts: {
+    workId: string;
+    type: RenderJobOptions["type"];
+    presetId?: string;
+    status: "done" | "failed";
+    outputPath?: string;
+    error?: string;
+    createdAt?: string;
+    startedAt?: string;
+    finishedAt?: string;
+  }): RenderJob {
+    const id = genJobId();
+    const now = new Date().toISOString();
+    const createdAt = opts.createdAt ?? now;
+    const startedAt = opts.startedAt ?? createdAt;
+    const finishedAt = opts.finishedAt ?? now;
+    this.db
+      .prepare(
+        `INSERT INTO render_jobs(id, work_id, type, preset_id, status, progress, log, output_path, error, created_at, started_at, finished_at)
+         VALUES (?, ?, ?, ?, ?, ?, '[]', ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        id,
+        opts.workId,
+        opts.type,
+        opts.presetId ?? null,
+        opts.status,
+        opts.status === "done" ? 1 : 0,
+        opts.outputPath ?? null,
+        opts.error ?? null,
+        createdAt,
+        startedAt,
+        finishedAt,
+      );
+    const row = this.get(id);
+    if (!row)
+      throw new Error("RenderQueueStore.recordExternal: row missing after insert");
+    return row;
+  }
+
   appendLog(id: string, entry: RenderJobLogEntry): void {
     const cur = this.db
       .prepare("SELECT log FROM render_jobs WHERE id = ?")
