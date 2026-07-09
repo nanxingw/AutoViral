@@ -27,6 +27,11 @@ describe("ContentTypeRegistry — shipped manifests", () => {
     const seed = m.seedFactory("w123");
     expect(() => m.schema.parse(seed)).not.toThrow();
     expect((seed as { workId: string }).workId).toBe("w123");
+    // PRD-0011 F5 — video seeds default to 24fps (Seedance's constant native
+    // frame rate, ffprobe-confirmed at the provider layer), NOT the bare
+    // `makeEmptyComposition` factory default of 30. Explicit-fps callers
+    // (YouTube ingest, `comp put`, the shared factory itself) are untouched.
+    expect((seed as { fps: number }).fps).toBe(24);
   });
 
   it("image-text manifest carries the carousel contract", () => {
@@ -38,6 +43,9 @@ describe("ContentTypeRegistry — shipped manifests", () => {
     expect(m.routePath("w999")).toBe("/editor/w999");
     const seed = m.seedFactory("w999");
     expect(() => m.schema.parse(seed)).not.toThrow();
+    // PRD-0011 F5 — carousel (image-text) has no fps concept; the F5 default
+    // change is scoped to video only.
+    expect((seed as { fps?: unknown }).fps).toBeUndefined();
     expect((seed as { workId: string }).workId).toBe("w999");
   });
 

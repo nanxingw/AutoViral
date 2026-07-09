@@ -79,7 +79,14 @@ export const CONTENT_TYPES = {
     deliverableFile: "composition.yaml",
     routePath: (workId: string) => `/studio/${workId}`,
     schema: CompositionSchema,
-    seedFactory: (workId: string) => makeEmptyComposition({ workId }),
+    // PRD-0011 F5 — video seeds default to 24fps: Seedance (the video
+    // provider) is a CONSTANT 24fps at the source (ffprobe-confirmed), so a
+    // fresh video work's canvas should match its footage from the start
+    // instead of drifting at the bare factory default of 30. This is an
+    // EXPLICIT value passed to `makeEmptyComposition`, not a change to the
+    // factory's own default (that stays 30 for back-compat — YouTube ingest
+    // and other explicit callers are unaffected).
+    seedFactory: (workId: string) => makeEmptyComposition({ workId, fps: 24 }),
   },
   "image-text": {
     id: "image-text",
