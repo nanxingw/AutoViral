@@ -108,15 +108,28 @@ vi.mock("remotion", async (orig) => {
 // already covered by groupChains.test.ts + the shared preset visual mapping).
 // Stub it to a plain sequential passthrough so VideoClipRenderer still runs
 // for both chained clips without needing the full Remotion runtime.
+//
+// codex review (S2 finding, medium) — the passthrough fakes used to be bare
+// `<>{children}</>` fragments, so a transition-chain test asserting only
+// "video/offthread-video nodes exist" would pass identically whether or not
+// VideoTrackRenderer actually routed through <TransitionSeries> at all — it
+// couldn't distinguish "used TransitionSeries" from "rendered the two clips
+// directly". Both fakes now leave a queryable `data-test` marker DOM node so
+// tests can assert the marker exists AND the video layers are its
+// descendants — proof the TransitionSeries path, not just its children, ran.
 vi.mock("@remotion/transitions", async (orig) => {
   const actual = (await orig()) as Record<string, unknown>;
-  const Passthrough = ({ children }: { children?: React.ReactNode }) => (
-    <>{children}</>
+  const TransitionSeriesMock = Object.assign(
+    ({ children }: { children?: React.ReactNode }) => (
+      <div data-test="transition-series">{children}</div>
+    ),
+    {
+      Sequence: ({ children }: { children?: React.ReactNode }) => (
+        <div data-test="transition-series-sequence">{children}</div>
+      ),
+      Transition: () => null,
+    },
   );
-  const TransitionSeriesMock = Object.assign(Passthrough, {
-    Sequence: Passthrough,
-    Transition: () => null,
-  });
   return { ...actual, TransitionSeries: TransitionSeriesMock };
 });
 
@@ -262,6 +275,10 @@ describe("VideoTrackRenderer render-environment branch (S2, PRD-0012 / issue 026
     const { container } = render(<Scene comp={compWithVideo()} />);
     expect(videoLayers(container).length).toBe(1);
     expect(offthreadLayers(container).length).toBe(0);
+    // codex review (S2 finding, medium) — a single-clip chain must take the
+    // plain <Sequence> path, NOT <TransitionSeries>; this is the negative
+    // control for the transition-chain marker check below.
+    expect(container.querySelector('[data-test="transition-series"]')).toBeNull();
   });
 
   it("isRendering=false (preview) → carries acceptableTimeShiftInSeconds + pauseWhenBuffering", () => {
@@ -370,5 +387,27 @@ describe("VideoTrackRenderer render-environment branch (S2, PRD-0012 / issue 026
     );
     expect(renderSrcs).toContain("/api/works/w-branch-transition/assets/chain-a.mp4");
     expect(renderSrcs).toContain("/api/works/w-branch-transition/assets/chain-b.mp4");
+
+    // codex review (S2 finding, medium) — the assertions above only prove two
+    // video layers with the right srcs exist; they'd pass identically even if
+    // VideoTrackRenderer bypassed <TransitionSeries> entirely and rendered the
+    // two clips as plain siblings. Pin the ACTUAL path: the marker must exist,
+    // and every video/offthread-video layer must be a DESCENDANT of it (not a
+    // sibling rendered outside the chain).
+    const previewMarker = previewContainer.querySelector(
+      '[data-test="transition-series"]',
+    );
+    expect(previewMarker).not.toBeNull();
+    for (const layer of videoLayers(previewContainer)) {
+      expect(previewMarker!.contains(layer)).toBe(true);
+    }
+
+    const renderMarker = renderContainer.querySelector(
+      '[data-test="transition-series"]',
+    );
+    expect(renderMarker).not.toBeNull();
+    for (const layer of offthreadLayers(renderContainer)) {
+      expect(renderMarker!.contains(layer)).toBe(true);
+    }
   });
 });
