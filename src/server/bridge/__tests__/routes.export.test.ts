@@ -30,7 +30,12 @@ const FIXTURE_WORKS_ROOT = join(__dirname, "../../../../tests/fixtures");
 const app = new Hono().route("/api/bridge/v1", bridgeRouter);
 
 type PipelineOpts = {
-  comp: { width: number; height: number; exportPresets: Array<{ id: string }> };
+  comp: {
+    width: number;
+    height: number;
+    fps: number;
+    exportPresets: Array<{ id: string }>;
+  };
   loudnessTargetLufs?: number;
 };
 
@@ -127,5 +132,61 @@ describe("POST /export — platform preset really takes effect (S15)", () => {
     // sample-work fixture has exportPresets: [] and 1080×1920 — untouched.
     expect(opts.comp.exportPresets).toHaveLength(0);
     expect(opts.loudnessTargetLufs).toBeUndefined();
+  });
+});
+
+// PRD-0011 F4 — the preset↔fps decoupling trap fix. Before this slice /export
+// folded `preset.fps` into the comp handed to runRenderPipeline, so exporting
+// a 24fps canvas with a (30fps-recorded) platform preset silently re-encoded
+// at 30fps — the render frame rate must ALWAYS follow the canvas (`comp.fps`),
+// never the preset table's recorded value. Uses a dedicated temp work (fps:24)
+// so the assertion is decisive even though every shipped preset happens to
+// record fps:30 (mirrors the F2 route test's mkdtemp fixture pattern).
+describe("POST /export — F4 preset never overrides comp.fps (canvas-owned)", () => {
+  let workRoot: string;
+  const workId = "w_export_fps24";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-export-fps-"));
+    const fixtureYaml = (
+      await readFile(
+        join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+        "utf8",
+      )
+    )
+      .replace(/workId: sample-work/, `workId: ${workId}`)
+      .replace(/^fps: 30$/m, "fps: 24");
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(join(workRoot, workId, "composition.yaml"), fixtureYaml, "utf8");
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+  beforeEach(() => {
+    runRenderPipeline.mockClear();
+  });
+
+  it("--preset douyin-9-16 (fps:30 recorded) still renders at the canvas's own fps (24)", async () => {
+    const res = await app.request("/api/bridge/v1/export", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: JSON.stringify({ preset: "douyin-9-16" }),
+    });
+    expect(res.status).toBe(200);
+    const opts = lastCall();
+    // Canvas dims + exportPresets[0] still flip to the preset...
+    expect(opts.comp.width).toBe(1080);
+    expect(opts.comp.height).toBe(1920);
+    expect(opts.comp.exportPresets[0].id).toBe("douyin-9-16");
+    // ...but fps stays the CANVAS value (24), never preset.fps (30).
+    expect(opts.comp.fps).toBe(24);
   });
 });

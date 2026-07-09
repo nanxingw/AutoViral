@@ -726,10 +726,18 @@ export const useComposition = create<CompState>()(
         // clipId not found → silent no-op
       }),
     // ─── Phase 6.D — applyPlatformPreset (D5 atomic) ──────────────────────
-    // One zustand transaction: exportPresets[0] + aspect + width + height +
-    // fps all flip together. Aspect is inferred from preset width/height
+    // One zustand transaction: exportPresets[0] + aspect + width + height
+    // flip together. Aspect is inferred from preset width/height
     // (9:16 / 1:1 / 16:9 / 4:5); non-canonical ratios keep the existing
     // aspect untouched.
+    //
+    // PRD-0011 F4 (trap fix) — fps is deliberately NOT part of this atomic
+    // flip. fps is a playback/render frame-clock parameter owned by the
+    // canvas control (TweaksPanel「画布帧率」/ `autoviral comp fps`), not by
+    // the platform preset table — a preset's `fps` field is a RECORD value
+    // only (kept in the schema for reference / /export display), never
+    // written into comp.fps. Applying "抖音" to a 24fps canvas must leave it
+    // at 24fps.
     //
     // ADR-009 (S17 consistency) — applying a preset CHANGES the canvas dimensions
     // exactly like the aspect switch does, so it must run the SAME clip-adaptation
@@ -758,7 +766,6 @@ export const useComposition = create<CompState>()(
           preset.width,
           preset.height,
         );
-        s.comp.fps = preset.fps as 24 | 25 | 30 | 60;
         s.comp.exportPresets = [preset]; // replace, not append
         s.comp.updatedAt = new Date().toISOString();
       }),

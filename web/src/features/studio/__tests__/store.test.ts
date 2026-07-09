@@ -742,12 +742,12 @@ describe("rebindClip", () => {
 });
 
 describe("applyPlatformPreset (Phase 6.D)", () => {
-  it("D5: updates exportPresets[0] AND aspect/width/height/fps atomically", () => {
+  it("D5: updates exportPresets[0] AND aspect/width/height atomically", () => {
     const comp = makeCompositionWithClips([]);
     comp.aspect = "16:9";
     comp.width = 1920;
     comp.height = 1080;
-    comp.fps = 30;
+    comp.fps = 24;
     comp.exportPresets = [];
     useComposition.setState({ comp });
     useComposition.getState().applyPlatformPreset({
@@ -769,9 +769,36 @@ describe("applyPlatformPreset (Phase 6.D)", () => {
     expect(next.aspect).toBe("9:16");
     expect(next.width).toBe(1080);
     expect(next.height).toBe(1920);
-    expect(next.fps).toBe(30);
+    // PRD-0011 F4 (trap fix) — fps is now canvas-owned, NOT flipped by a
+    // platform preset. The preset carries fps:30 (record value only); the
+    // canvas stays at its own 24.
+    expect(next.fps).toBe(24);
     expect(next.exportPresets[0].platform).toBe("douyin");
     expect(next.exportPresets[0].videoBitrate).toBe(8000);
+  });
+
+  // PRD-0011 F4 — the pinning/nail test for the preset↔fps decoupling trap
+  // fix: applying ANY platform preset must leave comp.fps exactly as the
+  // canvas had it, regardless of what fps the preset table records.
+  it("F4: applying a platform preset never touches comp.fps (canvas-owned)", () => {
+    const comp = makeCompositionWithClips([]);
+    comp.fps = 24;
+    useComposition.setState({ comp });
+    useComposition.getState().applyPlatformPreset({
+      id: "tiktok-9-16",
+      label: "TikTok",
+      platform: "tiktok",
+      width: 1080,
+      height: 1920,
+      fps: 60, // preset records 60 — must NOT leak into comp.fps
+      videoBitrate: 8000,
+      audioBitrate: 192,
+      codec: "h264",
+      container: "mp4",
+      loudnessTargetLufs: -14,
+      safeZonePct: 0.18,
+    });
+    expect(useComposition.getState().comp!.fps).toBe(24);
   });
 
   it("replaces an existing exportPresets[0], does not append", () => {
@@ -875,12 +902,13 @@ describe("applyPlatformPreset (Phase 6.D)", () => {
     expect(t.y).toBeCloseTo(400 * (1080 / 1920), 4);
   });
 
-  it("keeps a centred (0,0) clip centred and still applies preset dims/fps", () => {
+  it("keeps a centred (0,0) clip centred and applies preset dims, leaves fps untouched (canvas-owned)", () => {
     const clip = makeVideoClip({
       id: "vc",
       transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
     });
     const comp = makeCompositionWithClips([clip]);
+    comp.fps = 24;
     useComposition.setState({ comp });
     useComposition.getState().applyPlatformPreset({
       id: "ttk",
@@ -903,6 +931,7 @@ describe("applyPlatformPreset (Phase 6.D)", () => {
     expect(t.x).toBe(0);
     expect(t.y).toBe(0);
     expect(next.exportPresets[0].id).toBe("ttk");
-    expect(next.fps).toBe(30);
+    // PRD-0011 F4 — preset carries fps:30 but the canvas stays at 24.
+    expect(next.fps).toBe(24);
   });
 });

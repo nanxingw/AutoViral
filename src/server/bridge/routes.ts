@@ -2029,12 +2029,18 @@ bridgeRouter.post("/export", async (c) => {
     // composition so render-pipeline's encode stage (reads exportPresets[0])
     // and canvas dimensions follow the platform. The loudness LUFS is passed
     // out-of-band to runRenderPipeline (loudnorm stage reads it, not the comp).
+    //
+    // PRD-0011 F4 (trap fix) — fps is deliberately EXCLUDED from this fold.
+    // The render frame rate must always follow the canvas's own `comp.fps`
+    // (set via TweaksPanel / `autoviral comp fps`), never the preset table's
+    // recorded `fps` — a preset's fps field is a record value only. Folding
+    // it in here used to silently re-encode a 24fps canvas at the preset's
+    // 30fps the moment a platform preset was applied to an export.
     const comp = preset
       ? {
           ...resolved.composition,
           width: preset.width,
           height: preset.height,
-          fps: preset.fps as typeof resolved.composition.fps,
           exportPresets: [preset],
         }
       : resolved.composition;
