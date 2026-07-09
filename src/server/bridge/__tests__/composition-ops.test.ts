@@ -26,6 +26,7 @@ import {
   diffCompositionFor,
   unifiedDiff,
   compositionPreviousPathFor,
+  readCompositionForView,
 } from "../composition-ops.js";
 import { getWork } from "../../../domain/work-store.js";
 import type { Composition } from "../../../shared/composition.js";
@@ -501,6 +502,31 @@ describe("fresh-work lazy seed (mutateCompositionFor / dryRunMutate)", () => {
     // Seeded from makeEmptyComposition → the 4 default lanes are present.
     expect(reread.tracks.length).toBeGreaterThan(0);
     expect(mockGetWork).toHaveBeenCalledWith(workId);
+  });
+
+  // codex review (F5 finding, high): the CLI no-yaml fresh-video seed path
+  // (mutateCompositionFor / dryRunMutate → readOrSeedCompositionFor) called
+  // the bare `makeEmptyComposition({ workId })` factory, which falls through
+  // to its own `?? 30` default — bypassing the content-type registry's
+  // short-video manifest (registry.ts seedFactory: fps 24, PRD-0011 F5).
+  it("seeds fps=24 for a fresh short-video work's FIRST write (F5 — Seedance's native rate, not the bare factory's 30 default)", async () => {
+    mockGetWork.mockResolvedValue({ id: workId, type: "short-video" } as never);
+    const ctx = { workId, worksRoot: workRoot };
+
+    await mutateCompositionFor(ctx, (c) => {
+      addScene(c, { title: "fps probe" });
+      return c;
+    });
+    const reread = await readCompositionFor(ctx);
+    expect(reread.fps).toBe(24);
+  });
+
+  it("readCompositionForView (GET-path seed) also reports fps=24 for a fresh short-video work with no composition.yaml yet", async () => {
+    mockGetWork.mockResolvedValue({ id: workId, type: "short-video" } as never);
+    const ctx = { workId, worksRoot: workRoot };
+
+    const viewed = await readCompositionForView(ctx);
+    expect(viewed.fps).toBe(24);
   });
 
   it("mutateCompositionFor does NOT seed (re-throws ENOENT) when the work does not exist (no disk pollution)", async () => {

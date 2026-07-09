@@ -803,17 +803,24 @@ export const useComposition = create<CompState>()(
         }
         s.comp.updatedAt = new Date().toISOString();
       }),
-    // PRD-0011 F3 — canvas-fps segmented control. Mirrors setAspectRatio's
-    // shape EXACTLY: a thin immer wrapper that calls the shared `ops.setFps`
-    // on the draft, then bumps updatedAt. No fetch/bridge call here — the
-    // change lands via the existing autosave debounce (same as every other
-    // human-UI composition edit), just like setAspectRatio. Agent/human
-    // parity comes from BOTH paths calling the SAME `ops.setFps` pure
-    // function (the store here, the bridge `POST /comp/fps` route
-    // separately) against the same yaml — not from the UI calling the
-    // bridge directly. The op THROWS CompositionOpError on an illegal fps;
-    // surfaced as a localized warn toast (same pattern as setAspectRatio),
-    // leaving comp.fps untouched.
+    // PRD-0011 F3 — canvas-fps op unit-test surface. A thin immer wrapper
+    // over the shared `ops.setFps`, mirroring setAspectRatio's shape exactly
+    // (pure local write, no fetch). The op THROWS CompositionOpError on an
+    // illegal fps; surfaced as a localized warn toast, leaving comp.fps
+    // untouched — kept here (and in store.test.ts) as the op's in-process
+    // test surface / a reusable primitive for future non-network callers.
+    //
+    // codex review (F3 finding, high) — this is NOT the UI's submit path.
+    // `FpsSection` (panels/Tweaks/FpsSection.tsx) does NOT call this action
+    // on click; it POSTs to `POST /api/bridge/v1/comp/fps` (the SAME route
+    // `autoviral comp fps` hits) and relies on the `composition-changed`
+    // broadcast → useBridgeEvents refetch for convergence — mirroring
+    // sceneEdit.ts's patchScene/generateScene ("we NEVER mutate scenes in the
+    // store locally"). A local optimistic write from the click handler would
+    // race this SAME field against a concurrent agent `comp fps` call or the
+    // whole-doc autosave PUT; routing the click through the bridge instead
+    // gives the UI and CLI paths one real write path, matching F2/F3's
+    // documented contract instead of only sharing the pure `ops.setFps` core.
     setFps: (fps) =>
       set((s) => {
         if (!s.comp) return;

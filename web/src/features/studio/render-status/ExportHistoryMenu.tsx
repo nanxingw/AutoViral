@@ -4,6 +4,7 @@ import { useT } from "@/i18n/useT";
 import { useExportHistory, type ExportHistoryJob } from "./useExportHistory";
 import { filenameOf, toOutputUrl } from "./ExportProgress";
 import { revealRenderOutput } from "../services/render";
+import { localizeApiError } from "@/i18n/serverError";
 
 type Translator = ReturnType<typeof useT>;
 
@@ -26,7 +27,7 @@ type Translator = ReturnType<typeof useT>;
 export function ExportHistoryMenu({ workId }: { workId: string }) {
   const [open, setOpen] = useState(false);
   const t = useT();
-  const { items, isLoading } = useExportHistory(workId, open);
+  const { items, isLoading, isError, error, refetch } = useExportHistory(workId, open);
   const [revealError, setRevealError] = useState<string | null>(null);
 
   // Anchor + portal — verbatim pattern from CheckpointsMenu (escapes the
@@ -110,7 +111,32 @@ export function ExportHistoryMenu({ workId }: { workId: string }) {
           }}
         >
           {isLoading && <div style={menuMutedRow}>…</div>}
-          {!isLoading && items.length === 0 && (
+          {/* codex review (S6 finding, medium) — a 503 (RenderQueue not
+              initialized) is a DIFFERENT state from "genuinely zero render
+              history" and must not collapse into the same empty copy. */}
+          {!isLoading && isError && (
+            <div
+              role="alert"
+              style={{
+                padding: "10px 12px",
+                fontFamily: "var(--font-mono)",
+                fontSize: 11,
+                lineHeight: 1.5,
+                color: "var(--status-error, #d4756c)",
+              }}
+            >
+              <div>{localizeApiError(error, t)}</div>
+              <button
+                type="button"
+                data-bare
+                onClick={() => void refetch()}
+                style={{ ...rowActionStyle, marginTop: 6 }}
+              >
+                {t("studio.exportHistory.retry")}
+              </button>
+            </div>
+          )}
+          {!isLoading && !isError && items.length === 0 && (
             <div style={menuMutedRow}>{t("studio.exportHistory.empty")}</div>
           )}
           {items.map((job) => (

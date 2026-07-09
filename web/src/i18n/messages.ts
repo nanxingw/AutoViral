@@ -617,6 +617,7 @@ export const en = {
       ariaLabel: "Canvas frame rate",
       recommendedSuffix: "· Seedance source recommended",
       hint: "Affects the playback clock & export frame rate",
+      submitFailed: "Couldn't switch frame rate — the canvas is unchanged.",
     },
     themeSection: {
       heading: "Theme",
@@ -755,6 +756,11 @@ export const en = {
       statusRunning: "Rendering…",
       statusQueued: "Queued",
       statusCancelled: "Cancelled",
+      // codex review (S6 finding, medium) — a 503 (render queue not yet
+      // initialized) used to fall through to the same `empty` copy as
+      // "genuinely no history", erasing the distinction the server
+      // deliberately encodes (errorCode: render_queue_unavailable).
+      retry: "Retry",
     },
     generationDialog: {
       headerCreateAsset: "Create asset",
@@ -1839,6 +1845,7 @@ export const zh: DeepShape<Messages> = {
       ariaLabel: "画布帧率",
       recommendedSuffix: "· Seedance 源推荐",
       hint: "影响播放帧钟与导出帧率",
+      submitFailed: "帧率切换失败——画布未改动。",
     },
     themeSection: {
       heading: "主题",
@@ -1972,6 +1979,7 @@ export const zh: DeepShape<Messages> = {
       statusRunning: "渲染中…",
       statusQueued: "排队中",
       statusCancelled: "已取消",
+      retry: "重试",
     },
     generationDialog: {
       headerCreateAsset: "新建素材",

@@ -61,7 +61,7 @@ export function TweaksPanel({
       ) : null}
       <ThemeSection />
       {workId ? <PlatformPresetSection workId={workId} /> : null}
-      {workId ? <FpsSection /> : null}
+      {workId ? <FpsSection workId={workId} /> : null}
     </aside>
   );
 }

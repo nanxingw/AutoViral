@@ -1,6 +1,6 @@
 # Recipe: apply a platform export preset
 
-The user says *"set it up for 抖音"* or *"export for B站 instead of TikTok"*. Each platform has different resolution / fps / bitrate / loudness targets; the composition stores them in `exportPresets[]` and the render pipeline picks one by id.
+The user says *"set it up for 抖音"* or *"export for B站 instead of TikTok"*. Each platform has different resolution / bitrate / loudness targets (and a *recorded* fps — see the fps gotcha below); the composition stores them in `exportPresets[]` and the render pipeline picks one by id.
 
 ## What's in a preset
 
@@ -103,7 +103,7 @@ The CLI prints the output path on success — typically `output/p_douyin-final.m
 
 ## Common gotchas
 
-- **30fps vs 24fps mismatch** — composition locks at one fps. If your preset is 30fps but the comp is 24fps, the render pipeline retimes; smooth for normal content but visible on fast pans.
+- **A preset's `fps` field is a RECORD value only, not a render control.** The actual render frame rate is *always* `comp.fps` (the canvas's own fps) — applying a preset (`applyPlatformPreset` / `comp aspect` / the TweaksPanel platform switch) never writes `fps` into the composition, and `/export` explicitly excludes `preset.fps` when folding preset dims into the render (PRD-0011 F4, the preset↔fps decoupling fix). So a 30fps-recorded 抖音 preset applied to a 24fps canvas still renders at 24fps — there is no retiming, no mismatch to worry about. To actually change the render frame rate, use `autoviral comp fps <24|25|30|60>` (see [`03-cli-reference`](../_shared/03-cli-reference.md#autoviral-comp-fps-242530-60)) or the TweaksPanel「画布帧率」control — never by picking a preset.
 - **Audio loudness** — `-14 LUFS` is the social-media standard; -23 is broadcast (B站). The render pipeline normalizes; if the user's BGM is hot, expect a level drop.
 - **`maxDurationSec`** — the render pipeline truncates if your composition is longer. Use `autoviral comp show --format json | jq '.duration'` to check.
 - **Safe zones** — `safeZonePct: 0.05` means the render reserves 5% inset for platform UI overlays. Text clips with `yPct > 95` may get clipped by the platform's "Follow" button.

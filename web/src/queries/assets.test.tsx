@@ -109,6 +109,29 @@ describe("isPipelineInternal", () => {
     expect(isPipelineInternal("assets/autoviral-export-notes.mp4")).toBe(false);
   });
 
+  // codex review (S5 finding, medium) — the PRE-Remotion ffmpeg pre-passes
+  // (speed-ramp, timewarp, crop/flip) also write derived cache MP4s into
+  // output/ BEFORE Stage 1 runs (render-pipeline.ts calls them ahead of the
+  // `intermediatePaths` tracking that starts at Stage 1's output). Unlike the
+  // Stage 1+ intermediates, S5 deliberately does NOT delete these — they are
+  // a keyed ffmpeg-avoidance CACHE (applySpeedRampPrePass / applyTimeWarpPrePass
+  // / applyTransformsPrePass all `stat()` the cache path first and skip the
+  // ffmpeg invocation on a hit; src/server/speed-ramp-ffmpeg.ts, transforms-
+  // ffmpeg.ts). So the fix is a library-visibility filter, not a delete: these
+  // filenames must be hidden from CLIPS the same way the Stage-1 intermediates
+  // are, without being removed from disk (naming: clip-<id>-speed-<n>.mp4 /
+  // clip-<id>-timewarp-<hash>.mp4 / clip-<id>-cropflip-<hash>.mp4).
+  it("flags pre-Remotion ffmpeg pre-pass caches (speed-ramp / timewarp / crop-flip) in output/ (S3/S5)", () => {
+    expect(isPipelineInternal("output/clip-vc_1-speed-200.mp4")).toBe(true);
+    expect(isPipelineInternal("output/clip-vc_1-timewarp-abc1234567.mp4")).toBe(true);
+    expect(isPipelineInternal("output/clip-vc_1-cropflip-abc1234567.mp4")).toBe(true);
+  });
+
+  it("does NOT flag a creator's own clip-* file under assets/ (S3/S5)", () => {
+    expect(isPipelineInternal("assets/clip-highlights-reel.mp4")).toBe(false);
+    expect(isPipelineInternal("assets/clip-vc_1-speed-notes.mp4")).toBe(false);
+  });
+
   it("does NOT flag the finished deliverable files themselves (S4)", () => {
     expect(isPipelineInternal("output/final-1717000000000.mp4")).toBe(false);
     expect(isPipelineInternal("output/proxy-1717000000000.mp4")).toBe(false);

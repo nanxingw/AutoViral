@@ -154,8 +154,10 @@ describe("useComposition — setAspectRatio (S17)", () => {
 
 // ─── PRD-0011 F3 — setFps store action ───────────────────────────────────────
 // Thin immer wrapper over the shared `ops.setFps` (mirrors setAspectRatio's
-// shape exactly). No fetch/bridge call — the write lands via the existing
-// autosave debounce, same as every other human-UI composition edit.
+// shape exactly). This is the op's in-process unit-test surface — NOT the
+// UI's submit path (codex review, F3 finding): FpsSection.tsx POSTs to the
+// bridge `POST /comp/fps` route on click and does not call this action; see
+// FpsSection.test.tsx + store.ts's setFps comment for the full rationale.
 describe("useComposition — setFps (PRD-0011 F3)", () => {
   beforeEach(() => {
     useComposition.setState({ comp: null, selection: null, currentFrame: 0, isPlaying: false });

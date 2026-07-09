@@ -129,4 +129,57 @@ describe("ExportHistoryMenu (S6)", () => {
     expect(await screen.findByText(/no renders yet/i)).toBeInTheDocument();
     expect(screen.queryByTestId("export-history-row")).not.toBeInTheDocument();
   });
+
+  // codex review (S6 finding, medium) — closing then reopening the menu
+  // shortly after a render completes must re-fetch, not serve a stale cache
+  // (staleTime previously masked a just-finished export until the 5s window
+  // elapsed).
+  it("re-fetches every time the menu is reopened, not just on first open", async () => {
+    let calls = 0;
+    mswServer.use(
+      http.get("/api/works/w1/render/jobs", () => {
+        calls += 1;
+        return HttpResponse.json({ jobs: calls === 1 ? [] : [DONE_JOB] });
+      }),
+    );
+    render(qcWrap(<ExportHistoryMenu workId="w1" />));
+    const trigger = screen.getByRole("button", { name: /renders/i });
+
+    await userEvent.click(trigger); // open #1 — empty
+    await screen.findByText(/no renders yet/i);
+    await userEvent.click(trigger); // close
+
+    await userEvent.click(trigger); // open #2 — the render finished meanwhile
+    expect(await screen.findAllByTestId("export-history-row")).toHaveLength(1);
+    expect(calls).toBeGreaterThanOrEqual(2);
+  });
+
+  // codex review (S6 finding, medium) — a 503 (RenderQueue not initialized)
+  // must render as a DISTINCT error state, not silently collapse into the
+  // generic "no renders yet" empty copy (which would misrepresent "the
+  // service can't answer" as "this work genuinely has no history").
+  it("renders a distinct error state (not the empty copy) on a 503, with a retry that recovers", async () => {
+    let attempt = 0;
+    mswServer.use(
+      http.get("/api/works/w1/render/jobs", () => {
+        attempt += 1;
+        if (attempt === 1) {
+          return HttpResponse.json(
+            { error: "RenderQueue not initialized", errorCode: "render_queue_unavailable" },
+            { status: 503 },
+          );
+        }
+        return HttpResponse.json({ jobs: [DONE_JOB] });
+      }),
+    );
+    render(qcWrap(<ExportHistoryMenu workId="w1" />));
+    await userEvent.click(screen.getByRole("button", { name: /renders/i }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(/render queue/i);
+    expect(screen.queryByText(/no renders yet/i)).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole("button", { name: /retry/i }));
+    expect(await screen.findAllByTestId("export-history-row")).toHaveLength(1);
+  });
 });

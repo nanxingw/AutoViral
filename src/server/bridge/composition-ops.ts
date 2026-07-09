@@ -28,10 +28,10 @@ import yaml from "js-yaml";
 import {
   CompositionSchema,
   CompositionWriteSchema,
-  makeEmptyComposition,
   migrateLegacyTrackIds,
   type Composition,
 } from "../../shared/composition.js";
+import { getContentType } from "../../shared/content-types/registry.js";
 import { preflight, type PreflightResult } from "../../shared/composition/preflight.js";
 import { getWork } from "../../domain/work-store.js";
 
@@ -95,8 +95,24 @@ async function readOrSeedCompositionFor(ctx: OpsContext): Promise<Composition> {
     if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
     const work = await getWork(ctx.workId);
     if (!work) throw err; // not a real work — surface the ENOENT, never seed
-    return makeEmptyComposition({ workId: ctx.workId });
+    return seedEmptyComposition(ctx.workId);
   }
+}
+
+/**
+ * codex review (F5 finding, high) — this module's on-disk document is
+ * ALWAYS composition.yaml (video content type; carousel works write
+ * carousel.yaml through a separate module), so every no-yaml seed here
+ * routes through the content-type registry's `short-video` manifest
+ * instead of the bare `makeEmptyComposition({ workId })` factory. The bare
+ * factory's own default stays 30 for back-compat (explicit callers like
+ * YouTube ingest are unaffected) — routing through the manifest is what
+ * gives fresh video works PRD-0011 F5's 24fps (Seedance's ffprobe-confirmed
+ * native rate) via the SAME single source of truth the UI (Studio.tsx) uses,
+ * so the CLI and UI no-yaml paths can never drift apart again.
+ */
+function seedEmptyComposition(workId: string): Composition {
+  return getContentType("short-video").seedFactory(workId) as Composition;
 }
 
 export async function readCompositionFor(ctx: OpsContext): Promise<Composition> {
@@ -161,7 +177,7 @@ export async function readCompositionForView(
     if ((err as NodeJS.ErrnoException)?.code !== "ENOENT") throw err;
     const work = await getWork(ctx.workId);
     if (!work) throw new WorkNotFoundError(ctx.workId);
-    return makeEmptyComposition({ workId: ctx.workId });
+    return seedEmptyComposition(ctx.workId);
   }
 }
 

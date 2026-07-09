@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useComposition } from "@/features/studio/store";
 import { useScript } from "@/features/studio/scriptStore";
-import { makeEmptyComposition } from "@/features/studio/types";
+import type { Composition } from "@/features/studio/types";
+import { getContentType } from "@shared/content-types/registry";
 import {
   loadComposition,
   saveComposition,
@@ -38,6 +39,19 @@ function fmtSavedAt(d: Date, locale: string): string {
     minute: "2-digit",
     hour12: locale !== "zh",
   }).format(d);
+}
+
+// codex review (F5 finding, high) — Studio.tsx is exclusively the
+// short-video editor route (/studio/:workId), so every no-yaml fresh-work
+// seed here routes through the content-type registry's `short-video`
+// manifest (src/shared/content-types/registry.ts) instead of the bare
+// `makeEmptyComposition({ workId })` factory, whose own default stays 30
+// for back-compat. The manifest's seedFactory pins fps:24 (PRD-0011 F5 —
+// Seedance's ffprobe-confirmed native rate), and routing through the SAME
+// manifest the CLI's composition-ops.ts seed path now also uses keeps the
+// UI and CLI no-yaml paths from drifting apart again.
+function seedEmptyVideoComposition(workId: string): Composition {
+  return getContentType("short-video").seedFactory(workId) as Composition;
 }
 
 // A5 (PRD-0010) — panel size constraints as ONE testable source of truth.
@@ -187,7 +201,7 @@ export default function Studio() {
         } else {
           // Network unreachable / non-500 non-404 — fresh-start fallback,
           // doesn't go through typo guard (no 404 → no ambiguity).
-          loadComp(makeEmptyComposition({ workId }));
+          loadComp(seedEmptyVideoComposition(workId));
         }
       }
     })();
@@ -200,7 +214,7 @@ export default function Studio() {
   useEffect(() => {
     if (!loadEmpty || !workId) return;
     if (workInList === true) {
-      loadComp(makeEmptyComposition({ workId }));
+      loadComp(seedEmptyVideoComposition(workId));
     }
   }, [loadEmpty, workInList, workId, loadComp]);
 

@@ -539,6 +539,20 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   // candidate for cleanup once the export finishes successfully. We track
   // them explicitly rather than globbing outDir on a timer so cleanup never
   // touches a file this render didn't itself produce.
+  //
+  // codex review (S5 finding, medium) — the Stage-0/0.4/0.5 PRE-Remotion
+  // ffmpeg pre-passes above (speed-ramp / timewarp / crop-flip) ALSO write
+  // derived mp4s into opts.outDir, but they are DELIBERATELY excluded from
+  // this tracked-intermediates list: each pre-pass keys its cache filename
+  // off the clip id + param hash and `stat()`s that path before invoking
+  // ffmpeg (src/server/speed-ramp-ffmpeg.ts applySpeedRampPrePass,
+  // transforms-ffmpeg.ts applyTimeWarpPrePass/applyTransformsPrePass) — they
+  // are a cross-render REUSE cache, not a disposable Stage-1+ byproduct.
+  // Deleting them here would defeat the cache and force an expensive ffmpeg
+  // re-run on every subsequent export of the same clip/params. Library
+  // visibility is instead handled by web/src/queries/assets.ts's
+  // PIPELINE_INTERNAL filter (clip-*-speed-*/*-timewarp-*/*-cropflip-*),
+  // which hides them from the CLIPS group without touching disk.
   const intermediatePaths: string[] = [workingPath];
 
   // Stage 2: ducking (optional, only if any audio clip has ducking)

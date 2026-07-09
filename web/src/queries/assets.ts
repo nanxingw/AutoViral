@@ -75,6 +75,16 @@ const PIPELINE_INTERNAL: RegExp[] = [
   /^output\/[^/]*-ducked\.mp4$/i, // Stage 2 ducking pass
   /^output\/[^/]*-burned\.mp4$/i, // Stage 3 subtitle burn-in pass
   /^output\/[^/]*-normalized\.mp4$/i, // Stage 4 loudnorm pass
+  // codex review (S5 finding, medium) — the PRE-Remotion ffmpeg pre-passes
+  // (speed-ramp / timewarp / crop-flip) write keyed CACHE mp4s into output/
+  // ahead of Stage 1 (src/server/speed-ramp-ffmpeg.ts / transforms-ffmpeg.ts).
+  // These are deliberately NOT deleted by S5's post-export cleanup — each
+  // pre-pass `stat()`s its cache path first and skips the ffmpeg re-run on a
+  // hit, so deleting them would defeat the cache on every subsequent export.
+  // Hide them from CLIPS instead (visibility filter, not deletion).
+  /^output\/clip-[^/]*-speed-\d+\.mp4$/i, // speed-ramp pre-pass cache
+  /^output\/clip-[^/]*-timewarp-[0-9a-f]+\.mp4$/i, // time-warp (reverse/freeze) pre-pass cache
+  /^output\/clip-[^/]*-cropflip-[0-9a-f]+\.mp4$/i, // crop/flip pre-pass cache
 ];
 
 /** True for pipeline-internal files that should never appear in the library. */
