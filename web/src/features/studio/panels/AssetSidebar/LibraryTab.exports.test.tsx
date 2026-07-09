@@ -119,3 +119,76 @@ describe("LibraryTab — EXPORTS group (#027 / PRD-0012 S4)", () => {
     expect(screen.queryByRole("button", { name: /Exports/i })).toBeNull();
   });
 });
+
+// R… — E2E caught the export badge computed to rgb(15,24,34) (light-theme
+// --accent-hi) sitting on a dark video thumbnail: unreadable. Root cause was
+// --accent-hi/--accent-glow, which are paired against the *page* background
+// (near-black text in light theme), reused on a chip that sits on arbitrary
+// thumbnail pixels instead. Both the badge and the export-timestamp mono
+// label (same file, same root cause — it sits on a fixed near-black bottom
+// scrim, which is *also* near-black in light-theme --accent-hi) now use the
+// fixed dark-glass-plus-white-text idiom already established for the ordinal
+// chip and the add/delete buttons on the same tile. This is a token-level
+// contrast regression net for that idiom, mirroring web/src/test/tokens.contrast.test.ts's
+// hand-rolled WCAG ratio approach — plumbed here instead of there because the
+// fix is deliberately NOT a CSS custom property (theme tokens are the wrong
+// tool for "must contrast against arbitrary thumbnail content").
+describe("LibraryTab — export badge / timestamp contrast against thumbnail imagery", () => {
+  function parseRgb(color: string): [number, number, number, number] {
+    const m = color.match(
+      /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+)\s*)?\)/,
+    );
+    if (!m) throw new Error(`unparseable color: ${color}`);
+    return [Number(m[1]), Number(m[2]), Number(m[3]), m[4] !== undefined ? Number(m[4]) : 1];
+  }
+
+  // Composite a translucent layer over a black canvas — the worst-case
+  // thumbnail this chip can sit on.
+  function compositeOverBlack([r, g, b, a]: [number, number, number, number]): [number, number, number] {
+    return [r * a, g * a, b * a];
+  }
+
+  function relLuminance([r, g, b]: [number, number, number]): number {
+    const t = (c: number) => {
+      const s = c / 255;
+      return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * t(r) + 0.7152 * t(g) + 0.0722 * t(b);
+  }
+
+  function contrastRatio(a: [number, number, number], b: [number, number, number]): number {
+    const la = relLuminance(a);
+    const lb = relLuminance(b);
+    const [hi, lo] = la > lb ? [la, lb] : [lb, la];
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  it("export badge text clears WCAG 3:1 (UI component / large text) against a worst-case near-black thumbnail, and never regresses to a page-bg-paired theme token", () => {
+    groups = [{ group: "EXPORTS", count: 1, items: [FINAL_ITEM] }];
+    const { container } = render(wrap(<LibraryTab workId="w1" />));
+    const badge = container.querySelector('[data-testid="export-badge"]') as HTMLElement;
+    expect(badge).not.toBeNull();
+
+    // --accent-hi / --accent-glow are theme-paired against --bg, not against
+    // arbitrary thumbnail pixels — reintroducing either here is the regression.
+    expect(badge.style.color).not.toMatch(/var\(/);
+    expect(badge.style.backgroundColor).not.toMatch(/var\(/);
+
+    const effectiveText = compositeOverBlack(parseRgb(badge.style.color));
+    const effectiveBg = compositeOverBlack(parseRgb(badge.style.backgroundColor));
+    expect(contrastRatio(effectiveText, effectiveBg)).toBeGreaterThanOrEqual(3);
+  });
+
+  it("export timestamp text clears WCAG 3:1 against its near-black bottom scrim, and never regresses to a theme token", () => {
+    groups = [{ group: "EXPORTS", count: 1, items: [FINAL_ITEM] }];
+    const { container } = render(wrap(<LibraryTab workId="w1" />));
+    const ts = container.querySelector('[data-testid="export-timestamp"]') as HTMLElement;
+    expect(ts).not.toBeNull();
+    expect(ts.style.color).not.toMatch(/var\(/);
+
+    const effectiveText = compositeOverBlack(parseRgb(ts.style.color));
+    // The bottom label strip is a fixed rgba(0,0,0,0.85) gradient — not a
+    // worst-case assumption, the actual composited background at this row.
+    expect(contrastRatio(effectiveText, [0, 0, 0])).toBeGreaterThanOrEqual(3);
+  });
+});

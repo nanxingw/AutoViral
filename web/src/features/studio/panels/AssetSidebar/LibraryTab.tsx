@@ -646,7 +646,13 @@ function AssetTile({
       {/* Top-left chip: ordinal index for ordinary assets, swapped for a
           "成片/成品代理" export badge (#027) when this tile is a finished
           deliverable — an ordinal position is far less useful there than
-          knowing at a glance "this is the export, not a source clip". */}
+          knowing at a glance "this is the export, not a source clip".
+          Deliberately NOT --accent-hi/--accent-glow: those are theme-paired
+          against the page bg (near-black text in light theme), but this chip
+          sits on arbitrary thumbnail pixels, not the page — same fixed
+          dark-glass-plus-white-text idiom as the ordinal chip and the
+          top-right add/delete buttons below, so it stays legible regardless
+          of theme or thumbnail content. */}
       <div
         data-testid={item.isExport ? "export-badge" : undefined}
         style={{
@@ -657,9 +663,9 @@ function AssetTile({
           fontFamily: "var(--font-mono)",
           letterSpacing: item.isExport ? "0.05em" : undefined,
           textTransform: item.isExport ? "uppercase" : undefined,
-          color: item.isExport ? "var(--accent-hi)" : "rgba(255,255,255,0.9)",
-          background: item.isExport ? "var(--accent-glow)" : "rgba(0,0,0,0.4)",
-          border: item.isExport ? "1px solid var(--accent)" : undefined,
+          color: item.isExport ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.9)",
+          background: item.isExport ? "rgba(0,0,0,0.55)" : "rgba(0,0,0,0.4)",
+          border: item.isExport ? "1px solid rgba(255,255,255,0.35)" : undefined,
           padding: "1px 5px",
           borderRadius: 3,
         }}
@@ -784,13 +790,17 @@ function AssetTile({
           {item.ext}
         </div>
         {/* #027 — mono export timestamp, parsed from the final-<ms>/proxy-<ms>
-            filename. Only rendered for EXPORTS-group tiles. */}
+            filename. Only rendered for EXPORTS-group tiles. Same fixed-white
+            idiom as the badge above and the sibling .ext line just above this
+            one: it renders on the near-black bottom scrim
+            (rgba(0,0,0,0.85)), not the page bg, so --accent-hi would go
+            near-black-on-near-black in light theme. */}
         {item.exportedAt !== undefined && (
           <div
             data-testid="export-timestamp"
             style={{
               fontSize: 8,
-              color: "var(--accent-hi)",
+              color: "rgba(255,255,255,0.75)",
               fontFamily: "var(--font-mono)",
               marginTop: 1,
               letterSpacing: "0.04em",
