@@ -17,6 +17,10 @@ import { uiEventBus } from "../ui-events.js";
 async function setupWork(workId: string): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), "autoviral-assetswatch-"));
   await mkdir(join(root, workId, "assets", "images"), { recursive: true });
+  // Real works pre-create output/ at creation time too (work-store.ts:178) —
+  // mirror that here so the output/ watcher (E2E gap 1) has a directory to
+  // attach to, same as assets/.
+  await mkdir(join(root, workId, "output"), { recursive: true });
   return root;
 }
 
@@ -115,6 +119,72 @@ describe("assets-watcher", () => {
         );
         await new Promise((r) => setTimeout(r, 600));
         expect(count).toBe(0);
+      } finally {
+        off();
+      }
+    });
+  });
+
+  // E2E gap 1 (2026-07-09) — a finished export lands in output/, not
+  // assets/. Before this, the watcher only covered assets/, so the asset
+  // library never learned about a fresh export and stayed stale until a
+  // full page reload. watchAssetsFor() must cover BOTH directories.
+  it("fires asset-added when a file lands in output/ (e.g. a finished export)", async () => {
+    const workId = "w_assetswatch_5";
+    const root = await setupWork(workId);
+    await withWorksRoot(root, async () => {
+      const fired = new Promise<void>((resolve) => {
+        const off = uiEventBus.subscribe(workId, (event) => {
+          if (event.type === "asset-added") {
+            off();
+            resolve();
+          }
+        });
+      });
+      watchAssetsFor(workId);
+      await new Promise((r) => setTimeout(r, 50));
+      await writeFile(
+        join(root, workId, "output", "final-1717000000000.mp4"),
+        "mp4-bytes",
+        "utf8",
+      );
+      await Promise.race([
+        fired,
+        new Promise((_r, reject) =>
+          setTimeout(() => reject(new Error("no asset-added event for output/")), 3000),
+        ),
+      ]);
+    });
+  });
+
+  it("fires independently for assets/ and output/ writes (both dirs watched, not just one)", async () => {
+    const workId = "w_assetswatch_6";
+    const root = await setupWork(workId);
+    await withWorksRoot(root, async () => {
+      const events: string[] = [];
+      const off = uiEventBus.subscribe(workId, (event) => {
+        if (event.type === "asset-added") {
+          const uri = (event.payload as { uri?: string | null }).uri ?? "";
+          events.push(uri);
+        }
+      });
+      try {
+        watchAssetsFor(workId);
+        await new Promise((r) => setTimeout(r, 50));
+        await writeFile(
+          join(root, workId, "assets", "images", "a.png"),
+          "x",
+          "utf8",
+        );
+        await new Promise((r) => setTimeout(r, 400));
+        await writeFile(
+          join(root, workId, "output", "final-1.mp4"),
+          "x",
+          "utf8",
+        );
+        await new Promise((r) => setTimeout(r, 400));
+        expect(events.some((u) => u.startsWith("assets/"))).toBe(true);
+        expect(events.some((u) => u.startsWith("output/"))).toBe(true);
       } finally {
         off();
       }
