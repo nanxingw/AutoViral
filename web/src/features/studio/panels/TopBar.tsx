@@ -11,6 +11,7 @@ import {
   type EnqueueRenderOptions,
 } from "../services/render";
 import { ExportProgress } from "../render-status/ExportProgress";
+import { ExportHistoryMenu } from "../render-status/ExportHistoryMenu";
 import { CheckpointsMenu } from "@/features/checkpoints/CheckpointsMenu";
 import { ExportCaptionsDialog } from "./Export/ExportCaptionsDialog";
 import type { CaptionTrackOption } from "./Export/CaptionTracksSection";
@@ -248,6 +249,12 @@ export function TopBar({
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
 
       <CheckpointsMenu workId={workId} />
+
+      {/* S6 (PRD-0012 / issue 027 root-cause 5) — render history so a
+          finished export is still findable after the ExportProgress modal
+          is closed. Sits next to CheckpointsMenu: same "history dropdown"
+          language, different deliverable (mp4 jobs vs yaml snapshots). */}
+      <ExportHistoryMenu workId={workId} />
 
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
 

@@ -32,8 +32,14 @@ export interface ExportProgressProps {
  * a11y mirrors Phase 5.C / 6.D pattern: portal to document.body,
  * role="dialog", aria-modal="true", aria-labelledby on title id.
  */
-/** R43 — extract just the basename from an absolute path. */
-function filenameOf(absolutePath: string): string {
+/**
+ * R43 — extract just the basename from an absolute path.
+ *
+ * S6 (PRD-0012) — exported so ExportHistoryMenu (the "find my export again"
+ * surface) can build the same download/preview links without duplicating
+ * this logic. Keep behaviour identical between the two callers.
+ */
+export function filenameOf(absolutePath: string): string {
   const parts = absolutePath.split("/");
   return parts[parts.length - 1] ?? absolutePath;
 }
@@ -44,8 +50,10 @@ function filenameOf(absolutePath: string): string {
  * (api.ts:1245); we extract the basename and join under workId. Returns
  * null if the path doesn't look like a work output (defensive — link is
  * just hidden in that case rather than 404'ing).
+ *
+ * S6 (PRD-0012) — exported for ExportHistoryMenu; see filenameOf above.
  */
-function toOutputUrl(absolutePath: string, workId: string | undefined): string | null {
+export function toOutputUrl(absolutePath: string, workId: string | undefined): string | null {
   if (!workId) return null;
   const filename = filenameOf(absolutePath);
   if (!filename) return null;

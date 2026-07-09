@@ -737,6 +737,25 @@ export const en = {
       btnPreview: "Preview",
       cancelFailed: "Cancel failed: {msg}",
     },
+    // S6 (PRD-0012 / issue 027) — export history dropdown next to
+    // CheckpointsMenu: find a finished export again after closing the
+    // progress modal. Action-button copy (download/reveal/preview) is
+    // shared with exportProgress above — same three affordances, same
+    // words, single source of truth.
+    exportHistory: {
+      // R-note: deliberately NOT "Export…" — TopBar's existing broad
+      // /导出|Export/ text-match test would otherwise pick up this button
+      // too. "Renders" reads accurately (it lists render jobs) and stays
+      // unambiguous.
+      button: "Renders",
+      empty: "No renders yet — run a render from the Export button.",
+      noPreset: "default",
+      statusDone: "Done",
+      statusFailed: "Failed",
+      statusRunning: "Rendering…",
+      statusQueued: "Queued",
+      statusCancelled: "Cancelled",
+    },
     generationDialog: {
       headerCreateAsset: "Create asset",
       headerCreateVariant: "Create variant",
@@ -1939,6 +1958,20 @@ export const zh: DeepShape<Messages> = {
       btnReveal: "在 Finder 显示",
       btnPreview: "预览",
       cancelFailed: "取消失败：{msg}",
+    },
+    // S6 (PRD-0012 / issue 027) — 导出历史下拉，挂在 CheckpointsMenu 旁；
+    // 动作按钮文案（下载/在Finder显示/预览）复用上面 exportProgress 的词条。
+    // 按钮文案刻意不用「导出」开头——避免与 TopBar 既有 /导出|Export/ 宽匹配测试
+    // 撞在一起；「渲染记录」语义准确（列的是渲染任务）且不含该子串。
+    exportHistory: {
+      button: "渲染记录",
+      empty: "还没有渲染记录 — 点击「导出」按钮开始。",
+      noPreset: "默认",
+      statusDone: "已完成",
+      statusFailed: "失败",
+      statusRunning: "渲染中…",
+      statusQueued: "排队中",
+      statusCancelled: "已取消",
     },
     generationDialog: {
       headerCreateAsset: "新建素材",

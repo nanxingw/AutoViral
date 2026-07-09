@@ -84,6 +84,22 @@ renderRouter.post("/api/works/:id/render", async (c) => {
   return c.json({ jobId: job.id });
 });
 
+// GET /api/works/:id/render/jobs — S6 (PRD-0012 / issue 027 root-cause 5).
+// List this work's render history, newest first, so the UI can offer a
+// "find my export again" surface after the progress modal is dismissed.
+// Deliberately does NOT 404 for an unknown workId: "list everything that
+// happened for this id" degrades to an empty list, not a missing-resource
+// error — there's no work-existence precondition to violate, unlike the
+// enqueue endpoint which needs a saved composition.yaml to act on.
+renderRouter.get("/api/works/:id/render/jobs", (c) => {
+  const renderQueue = getRenderQueue();
+  if (!renderQueue) {
+    return c.json({ error: "RenderQueue not initialized", errorCode: "render_queue_unavailable" }, 503);
+  }
+  const jobs = renderQueue.list(c.req.param("id"));
+  return c.json({ jobs });
+});
+
 // GET /api/render/jobs/:id — Phase 7.B
 renderRouter.get("/api/render/jobs/:id", (c) => {
   const renderQueue = getRenderQueue();
