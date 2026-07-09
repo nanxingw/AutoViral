@@ -189,15 +189,25 @@ export function timeWarpCacheName(clipId: string, w: TimeWarp): string {
 
 /**
  * Build the ffmpeg argv for a single clip's time-warp pass.
- *   ffmpeg -y -loglevel error -i {in} -vf {vChain} [-af {aChain} | -an] {out}
+ *   ffmpeg -y -loglevel error -i {in} -vf {vChain} [-af {aChain} | -an]
+ *     -g {fps} -keyint_min {fps} {out}
  * When the audio chain is empty (freeze) we pass `-an` so the held still is
  * silenced rather than carrying stale audio.
+ *
+ * S3 (PRD-0012): `-g`/`-keyint_min` force a keyframe every `fps` frames
+ * (~1s GOP), mirroring the Seedance ingest normalisation
+ * (src/providers/video/seedance.ts:29-56 normalizeVideoForBrowser). Without
+ * this, this re-encode falls back to libx264's default ~250-frame GOP and
+ * wipes out the source's 1s-GOP normalisation, amplifying the "backward
+ * jump" seek error a reversed/frozen clip's export otherwise inherits
+ * (docs/issues/026-export-backward-frame-jitter.md).
  */
 export function buildTimeWarpFilterArgs(
   input: string,
   output: string,
   vChain: string,
   aChain: string,
+  fps: number,
 ): string[] {
   const args = ["-y", "-loglevel", "error", "-i", input, "-vf", vChain];
   if (aChain) {
@@ -205,6 +215,7 @@ export function buildTimeWarpFilterArgs(
   } else {
     args.push("-an");
   }
+  args.push("-g", String(fps), "-keyint_min", String(fps));
   args.push(output);
   return args;
 }
@@ -217,9 +228,10 @@ export async function runTimeWarpPass(
   output: string,
   vChain: string,
   aChain: string,
+  fps: number,
   signal?: AbortSignal,
 ): Promise<void> {
-  const args = buildTimeWarpFilterArgs(input, output, vChain, aChain);
+  const args = buildTimeWarpFilterArgs(input, output, vChain, aChain, fps);
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error("runTimeWarpPass: aborted before spawn"));
@@ -337,14 +349,24 @@ export function probeVideoDimensions(
 /**
  * Build the ffmpeg argv for a single clip's crop+flip pre-pass.
  *
- *   ffmpeg -y -loglevel error -i {input} -vf "{chain}" -c:a copy {output}
+ *   ffmpeg -y -loglevel error -i {input} -vf "{chain}" -c:a copy
+ *     -g {fps} -keyint_min {fps} {output}
  *
  * Audio is stream-copied untouched (crop/flip is a video-only transform).
+ *
+ * S3 (PRD-0012): `-g`/`-keyint_min` force a keyframe every `fps` frames
+ * (~1s GOP), mirroring the Seedance ingest normalisation
+ * (src/providers/video/seedance.ts:29-56 normalizeVideoForBrowser). Without
+ * this, the re-encode falls back to libx264's default ~250-frame GOP and
+ * wipes out the source's 1s-GOP normalisation, amplifying the "backward
+ * jump" seek error a cropped/flipped clip's export otherwise inherits
+ * (docs/issues/026-export-backward-frame-jitter.md).
  */
 export function buildTransformsFilterArgs(
   input: string,
   output: string,
   chain: string,
+  fps: number,
 ): string[] {
   return [
     "-y",
@@ -356,6 +378,10 @@ export function buildTransformsFilterArgs(
     chain,
     "-c:a",
     "copy",
+    "-g",
+    String(fps),
+    "-keyint_min",
+    String(fps),
     output,
   ];
 }
@@ -368,9 +394,10 @@ export async function runTransformsPass(
   input: string,
   output: string,
   chain: string,
+  fps: number,
   signal?: AbortSignal,
 ): Promise<void> {
-  const args = buildTransformsFilterArgs(input, output, chain);
+  const args = buildTransformsFilterArgs(input, output, chain, fps);
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error("runTransformsPass: aborted before spawn"));
@@ -471,7 +498,7 @@ export async function applyTransformsPrePass(
           } catch {
             /* miss — fall through to ffmpeg */
           }
-          await runTransformsPass(c.src, cachePath, chain, signal);
+          await runTransformsPass(c.src, cachePath, chain, comp.fps, signal);
           return { ...c, src: cachePath, transforms: consumedTransforms };
         }),
       );
@@ -510,6 +537,7 @@ export async function applyTimeWarpPrePass(
     output: string,
     vChain: string,
     aChain: string,
+    fps: number,
     signal?: AbortSignal,
   ) => Promise<void> = runTimeWarpPass,
 ): Promise<Composition> {
@@ -557,7 +585,7 @@ export async function applyTimeWarpPrePass(
           } catch {
             /* miss — fall through to ffmpeg */
           }
-          await runWarp(c.src, cachePath, vChain, aChain, signal);
+          await runWarp(c.src, cachePath, vChain, aChain, comp.fps, signal);
           return consumed;
         }),
       );

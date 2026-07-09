@@ -92,13 +92,34 @@ describe("transformsToFilterChain (S18 ffmpeg crop+flip consumption)", () => {
 
 describe("buildTransformsFilterArgs (S18 — full ffmpeg argv)", () => {
   it("wraps the chain in -vf and the in/out paths", () => {
-    const args = buildTransformsFilterArgs("in.mp4", "out.mp4", "crop=540:1920:0:0,hflip");
+    const args = buildTransformsFilterArgs("in.mp4", "out.mp4", "crop=540:1920:0:0,hflip", 30);
     expect(args).toContain("-i");
     expect(args).toContain("in.mp4");
     expect(args).toContain("out.mp4");
     const vfIdx = args.indexOf("-vf");
     expect(vfIdx).toBeGreaterThan(-1);
     expect(args[vfIdx + 1]).toBe("crop=540:1920:0:0,hflip");
+  });
+
+  // S3 (PRD-0012) — keyframe interval normalisation. Without -g/-keyint_min,
+  // libx264's default ~250-frame GOP overwrites the Seedance source's ~1s-GOP
+  // normalisation (src/providers/video/seedance.ts:29-56), which is what
+  // amplifies the "backward jump" seek error (docs/issues/026) once a clip
+  // goes through this pre-pass. -g/-keyint_min must equal the comp's fps.
+  it("argv contains -g and -keyint_min set to the fps", () => {
+    const args = buildTransformsFilterArgs("in.mp4", "out.mp4", "hflip", 30);
+    const gIdx = args.indexOf("-g");
+    expect(gIdx).toBeGreaterThan(-1);
+    expect(args[gIdx + 1]).toBe("30");
+    const keyintIdx = args.indexOf("-keyint_min");
+    expect(keyintIdx).toBeGreaterThan(-1);
+    expect(args[keyintIdx + 1]).toBe("30");
+  });
+
+  it("a different fps produces a different -g/-keyint_min value (not hardcoded)", () => {
+    const args = buildTransformsFilterArgs("in.mp4", "out.mp4", "hflip", 24);
+    expect(args[args.indexOf("-g") + 1]).toBe("24");
+    expect(args[args.indexOf("-keyint_min") + 1]).toBe("24");
   });
 });
 

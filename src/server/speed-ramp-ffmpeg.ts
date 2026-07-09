@@ -80,12 +80,22 @@ export function chainAtempo(speed: number): string {
  *
  *   ffmpeg -y -loglevel error -i {input} \
  *     -filter_complex "[0:v]setpts=PTS/{speed}[v];[0:a]<chainAtempo>[a]" \
- *     -map "[v]" -map "[a]" {output}
+ *     -map "[v]" -map "[a]" -g {fps} -keyint_min {fps} {output}
+ *
+ * S3 (PRD-0012): `-g`/`-keyint_min` force a keyframe every `fps` frames
+ * (~1s GOP), mirroring the Seedance ingest normalisation
+ * (src/providers/video/seedance.ts:29-56 normalizeVideoForBrowser). This pass
+ * has no `-c:v copy` path (setpts always re-encodes), so without this it
+ * falls back to libx264's default ~250-frame GOP and wipes out the source's
+ * 1s-GOP normalisation, amplifying the "backward jump" seek error a
+ * sped-up/slowed-down clip's export otherwise inherits
+ * (docs/issues/026-export-backward-frame-jitter.md).
  */
 export function buildSpeedRampFilterArgs(
   input: string,
   output: string,
   speed: number,
+  fps: number,
 ): string[] {
   const atempo = chainAtempo(speed);
   return [
@@ -100,6 +110,10 @@ export function buildSpeedRampFilterArgs(
     "[v]",
     "-map",
     "[a]",
+    "-g",
+    String(fps),
+    "-keyint_min",
+    String(fps),
     output,
   ];
 }
@@ -112,9 +126,10 @@ export async function runSpeedRampPass(
   input: string,
   output: string,
   speed: number,
+  fps: number,
   signal?: AbortSignal,
 ): Promise<void> {
-  const args = buildSpeedRampFilterArgs(input, output, speed);
+  const args = buildSpeedRampFilterArgs(input, output, speed, fps);
   return new Promise<void>((resolve, reject) => {
     if (signal?.aborted) {
       reject(new Error("runSpeedRampPass: aborted before spawn"));
@@ -213,7 +228,7 @@ export async function applySpeedRampPrePass(
           } catch {
             /* miss — fall through to ffmpeg */
           }
-          await runSpeedRampPass(c.src, cachePath, stat_speed, signal);
+          await runSpeedRampPass(c.src, cachePath, stat_speed, comp.fps, signal);
           return { ...c, src: cachePath };
         }),
       );

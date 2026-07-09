@@ -6,7 +6,7 @@
 // exercise the math independently of spawn().
 
 import { describe, it, expect } from "vitest";
-import { chainAtempo } from "./speed-ramp-ffmpeg.js";
+import { chainAtempo, buildSpeedRampFilterArgs } from "./speed-ramp-ffmpeg.js";
 
 function productOfAtempos(expr: string): number {
   return expr
@@ -49,5 +49,39 @@ describe("chainAtempo", () => {
     expect(productOfAtempos(expr)).toBeCloseTo(3.0, 4);
     // First step is 2.0, then the remainder 1.5
     expect(expr.split(",")[0]).toBe("atempo=2.0000");
+  });
+});
+
+// S3 (PRD-0012) — keyframe interval normalisation. The speed-ramp pre-pass
+// re-encodes via -filter_complex + -map (no -c:v/-map copy path), so it also
+// needs -g/-keyint_min = fps or a sped-up clip loses the Seedance source's
+// ~1s-GOP normalisation and amplifies the backward-jump seek error
+// (docs/issues/026).
+describe("buildSpeedRampFilterArgs (S3 — argv-level, not just chainAtempo)", () => {
+  it("wraps setpts/atempo in -filter_complex with -map [v] -map [a]", () => {
+    const args = buildSpeedRampFilterArgs("in.mp4", "out.mp4", 2.0, 30);
+    expect(args).toContain("-i");
+    expect(args).toContain("in.mp4");
+    expect(args).toContain("out.mp4");
+    const filterIdx = args.indexOf("-filter_complex");
+    expect(filterIdx).toBeGreaterThan(-1);
+    expect(args[filterIdx + 1]).toContain("setpts=PTS/2");
+    expect(args).toContain("[v]");
+    expect(args).toContain("[a]");
+  });
+
+  it("argv contains -g and -keyint_min set to the fps", () => {
+    const args = buildSpeedRampFilterArgs("in.mp4", "out.mp4", 2.0, 30);
+    const gIdx = args.indexOf("-g");
+    expect(gIdx).toBeGreaterThan(-1);
+    expect(args[gIdx + 1]).toBe("30");
+    const keyintIdx = args.indexOf("-keyint_min");
+    expect(keyintIdx).toBeGreaterThan(-1);
+    expect(args[keyintIdx + 1]).toBe("30");
+  });
+
+  it("output path remains the LAST argv element (render-pipeline reads args[args.length-1] as the cache filename)", () => {
+    const args = buildSpeedRampFilterArgs("in.mp4", "/work/clip-1-speed-200.mp4", 2.0, 24);
+    expect(args[args.length - 1]).toBe("/work/clip-1-speed-200.mp4");
   });
 });

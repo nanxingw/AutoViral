@@ -198,6 +198,7 @@ describe("buildTimeWarpFilterArgs (S19 — argv wiring for the export pass)", ()
       "out.mp4",
       "reverse",
       "areverse",
+      30,
     );
     const vfIdx = args.indexOf("-vf");
     const afIdx = args.indexOf("-af");
@@ -213,10 +214,25 @@ describe("buildTimeWarpFilterArgs (S19 — argv wiring for the export pass)", ()
       "out.mp4",
       "trim=start=1.5,setpts=PTS-STARTPTS,tpad=stop_mode=clone:stop_duration=5",
       "",
+      30,
     );
     expect(args).toContain("-vf");
     // no -af when the audio chain is empty; the held still is silenced (-an).
     expect(args).not.toContain("-af");
     expect(args).toContain("-an");
+  });
+
+  // S3 (PRD-0012) — keyframe interval normalisation (same rationale as the
+  // crop/flip pre-pass: without -g/-keyint_min, a reversed/frozen clip's
+  // re-encode gets libx264's default ~250-frame GOP, wiping out the source's
+  // ~1s-GOP normalisation and amplifying the backward-jump seek error).
+  it("argv contains -g and -keyint_min set to the fps", () => {
+    const args = buildTimeWarpFilterArgs("in.mp4", "out.mp4", "reverse", "areverse", 24);
+    const gIdx = args.indexOf("-g");
+    expect(gIdx).toBeGreaterThan(-1);
+    expect(args[gIdx + 1]).toBe("24");
+    const keyintIdx = args.indexOf("-keyint_min");
+    expect(keyintIdx).toBeGreaterThan(-1);
+    expect(args[keyintIdx + 1]).toBe("24");
   });
 });
