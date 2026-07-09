@@ -34,7 +34,7 @@ import type {
   AssetEntry,
   ProvenanceEdge,
 } from "../../shared/composition.js";
-import { ASPECTS } from "../../shared/composition.js";
+import { ASPECTS, FPS_VALUES } from "../../shared/composition.js";
 // S7 (PRD-0007) — generation handoff. POST /scene/:id/generate builds the prompt
 // from the scene's own fields, generates ONE image via the same provider
 // registry the /api/generate routes use, then registers + links the asset inside
@@ -356,6 +356,45 @@ bridgeRouter.post("/comp/aspect", async (c) => {
     return c.json({ ok: false, error: message, code }, 400);
   }
   return c.json({ ok: true, result: { ratio } });
+});
+
+// PRD-0011 F2 — POST /comp/fps: canvas-fps switch through the shared
+// composition-ops core. Body `{ fps: 24|25|30|60 }`; the write is
+// `ops.setFps` — the SAME implementation the Studio TweaksPanel fps control
+// runs — so an agent switching fps via the CLI (`autoviral comp fps 24`) and a
+// human clicking the control converge on the same composition. On success we
+// broadcast composition-changed so Studio refetches and the preview Player
+// re-initialises its frame clock. Invalid fps → CompositionOpError{code:4} →
+// HTTP 400 + code:4 → CLI exit 4.
+bridgeRouter.post("/comp/fps", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as { fps?: unknown };
+  if (
+    typeof body.fps !== "number" ||
+    !(FPS_VALUES as readonly number[]).includes(body.fps)
+  ) {
+    return c.json(
+      { ok: false, error: `invalid fps (expected one of ${FPS_VALUES.join("/")})`, code: 4 },
+      400,
+    );
+  }
+  const fps = body.fps as (typeof FPS_VALUES)[number];
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.setFps(comp, { fps });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "comp-fps" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { fps } });
 });
 
 // PRD-0009 B6 — POST /comp/duration: set the top-level comp.duration through the

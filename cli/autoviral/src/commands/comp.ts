@@ -134,6 +134,27 @@ export async function compCommand(args: string[]): Promise<void> {
     process.stdout.write(`switched aspect to ${ratio}\n`);
     return;
   }
+  if (sub === "fps") {
+    // PRD-0011 F2 — `comp fps <value>` switches the canvas frame rate in one
+    // shot through the bridge, which runs the SAME shared `ops.setFps` the
+    // Studio TweaksPanel fps control uses. We validate the value locally
+    // (exit 4, never hits the bridge) for a fast obviously-malformed fail;
+    // the server owns the write + composition-changed broadcast. Seedance
+    // (the primary generation source) is a constant 24fps, so 24 is the
+    // recommended default.
+    const value = args[1];
+    const fps = value === undefined ? NaN : Number(value);
+    if (value === undefined || !FPS_VALUES.includes(fps as (typeof FPS_VALUES)[number])) {
+      process.stderr.write(
+        `usage: autoviral comp fps <${FPS_VALUES.join("|")}> (24 recommended — Seedance source is a constant 24fps)\n`,
+      );
+      process.exit(4);
+    }
+    const ctx = readContext();
+    await bridgeRequest(ctx, "POST", "/comp/fps", { fps });
+    process.stdout.write(`switched fps to ${fps}\n`);
+    return;
+  }
   if (sub === "set") {
     // PRD-0009 B6 — `comp set --duration <seconds|auto>`. The ONLY supported
     // path to SET or SHORTEN the overall timeline length. The Studio store only
@@ -195,6 +216,11 @@ function readFlag(args: string[], flag: string): string | undefined {
 // src/shared/composition.ts (the bridge re-validates, but a local check gives a
 // fast obviously-malformed fail without a round-trip).
 const ASPECT_RATIOS = ["9:16", "1:1", "16:9", "4:5"];
+
+// The four canonical fps values — kept in lockstep with FPS_VALUES in
+// src/shared/composition.ts (the bridge re-validates, but a local check gives a
+// fast obviously-malformed fail without a round-trip).
+const FPS_VALUES = [24, 25, 30, 60] as const;
 
 interface PreflightVerdict {
   ok: boolean;

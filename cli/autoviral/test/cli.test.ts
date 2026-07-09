@@ -51,6 +51,9 @@ let lastCompAspect: Record<string, unknown> | null = null;
 // PRD-0009 B6 — capture the last POST /comp/duration body so the CLI test can
 // assert `comp set --duration <s|auto>` reached the bridge in the right shape.
 let lastCompDuration: Record<string, unknown> | null = null;
+// PRD-0011 F2 — capture the last POST /comp/fps body so the CLI test can
+// assert `comp fps <24|25|30|60>` reached the bridge as { fps }.
+let lastCompFps: Record<string, unknown> | null = null;
 // carousel set-layer patch — capture the last POST /carousel/.../layer body so
 // the CLI test can assert which fields the CLI sent (a patch must send ONLY the
 // supplied flags, incl. the new --italic / --tracking, and a partial box).
@@ -175,6 +178,13 @@ beforeAll(async () => {
           truncatesContent: duration < CONTENT_END,
         },
       });
+    }
+    // PRD-0011 F2 — POST /comp/fps. The CLI validates the value locally
+    // (exit 4 before the bridge) so only a canonical fps reaches here; the
+    // mock records the body and echoes the contract { ok, result:{ fps } }.
+    if (req.method === "POST" && url === "/api/bridge/v1/comp/fps") {
+      lastCompFps = await readBody(req);
+      return send(200, { ok: true, result: { fps: lastCompFps.fps } });
     }
     // I08 — carousel write endpoints. Mirror the server's contract: POST
     // /carousel/slide returns { ok, result:{ id } }; POST
@@ -1963,6 +1973,50 @@ describe("autoviral CLI — end-to-end", () => {
     it("--help lists comp aspect", async () => {
       const r = await run(["--help"]);
       expect(r.stdout).toMatch(/comp aspect/);
+    });
+  });
+
+  // PRD-0011 F2 — `comp fps <value>` switches the canvas frame rate in one
+  // shot through the bridge (which runs the SAME shared `ops.setFps` the
+  // Studio TweaksPanel control uses). A canonical value (24/25/30/60) reaches
+  // the bridge as { fps }; a non-canonical one fails fast (exit 4) BEFORE the
+  // bridge — the mock records zero requests for those cases.
+  describe("comp fps — canvas frame-rate switch", () => {
+    it("comp fps 24 → POSTs { fps: 24 } + exit 0 + prints confirmation", async () => {
+      lastCompFps = null;
+      const r = await run(["comp", "fps", "24"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastCompFps).toEqual({ fps: 24 });
+      expect(r.stdout).toMatch(/24/);
+    });
+
+    it.each(["25", "30", "60"])("comp fps %s → POSTs { fps: <value> } + exit 0", async (value) => {
+      lastCompFps = null;
+      const r = await run(["comp", "fps", value]);
+      expect(r.exitCode).toBe(0);
+      expect(lastCompFps).toEqual({ fps: Number(value) });
+    });
+
+    it("comp fps with no value → exit 4 (never hits bridge)", async () => {
+      lastCompFps = null;
+      const r = await run(["comp", "fps"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastCompFps).toBeNull();
+    });
+
+    it.each(["23", "23.976", "120", "0", "-24", "abc"])(
+      "comp fps %s (non-canonical) → exit 4 (never hits bridge)",
+      async (value) => {
+        lastCompFps = null;
+        const r = await run(["comp", "fps", value]);
+        expect(r.exitCode).toBe(4);
+        expect(lastCompFps).toBeNull();
+      },
+    );
+
+    it("--help lists comp fps", async () => {
+      const r = await run(["--help"]);
+      expect(r.stdout).toMatch(/comp fps/);
     });
   });
 
