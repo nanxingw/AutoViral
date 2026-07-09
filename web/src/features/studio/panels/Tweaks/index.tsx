@@ -1,5 +1,6 @@
 import { ThemeSection } from "./ThemeSection";
 import { PlatformPresetSection } from "./PlatformPresetSection";
+import { FpsSection } from "./FpsSection";
 
 export function TweaksPanel({
   open,
@@ -60,6 +61,7 @@ export function TweaksPanel({
       ) : null}
       <ThemeSection />
       {workId ? <PlatformPresetSection workId={workId} /> : null}
+      {workId ? <FpsSection /> : null}
     </aside>
   );
 }

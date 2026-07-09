@@ -255,6 +255,7 @@ export const en = {
       transitionFailed: "Can't add transition here",
       keyframeFailed: "Can't add keyframe here",
       aspectFailed: "Can't switch to that ratio",
+      fpsFailed: "Can't switch to that frame rate",
     },
     preview: {
       aspectLabel: "Canvas ratio",
@@ -610,6 +611,12 @@ export const en = {
       reframingSingular: "Reframing 1 clip…",
       reframingPlural: "Reframing {n} clips…",
       reframeFailed: "Reframe failed — the preset was not applied and your composition is unchanged.",
+    },
+    fpsSection: {
+      heading: "Frame rate",
+      ariaLabel: "Canvas frame rate",
+      recommendedSuffix: "· Seedance source recommended",
+      hint: "Affects the playback clock & export frame rate",
     },
     themeSection: {
       heading: "Theme",
@@ -1471,6 +1478,7 @@ export const zh: DeepShape<Messages> = {
       transitionFailed: "无法在此处添加转场",
       keyframeFailed: "无法在此处添加关键帧",
       aspectFailed: "无法切换到该比例",
+      fpsFailed: "无法切换到该帧率",
     },
     preview: {
       aspectLabel: "画面比例",
@@ -1806,6 +1814,12 @@ export const zh: DeepShape<Messages> = {
       reframingSingular: "正在重构 1 个片段…",
       reframingPlural: "正在重构 {n} 个片段…",
       reframeFailed: "重构失败——预设未应用，画布未改动。",
+    },
+    fpsSection: {
+      heading: "画布帧率",
+      ariaLabel: "画布帧率",
+      recommendedSuffix: "· Seedance 源推荐",
+      hint: "影响播放帧钟与导出帧率",
     },
     themeSection: {
       heading: "主题",

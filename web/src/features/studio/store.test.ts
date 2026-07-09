@@ -152,6 +152,60 @@ describe("useComposition — setAspectRatio (S17)", () => {
   });
 });
 
+// ─── PRD-0011 F3 — setFps store action ───────────────────────────────────────
+// Thin immer wrapper over the shared `ops.setFps` (mirrors setAspectRatio's
+// shape exactly). No fetch/bridge call — the write lands via the existing
+// autosave debounce, same as every other human-UI composition edit.
+describe("useComposition — setFps (PRD-0011 F3)", () => {
+  beforeEach(() => {
+    useComposition.setState({ comp: null, selection: null, currentFrame: 0, isPlaying: false });
+    useToastStore.getState().clear();
+  });
+
+  it("writes comp.fps for each of the four canonical values", () => {
+    const c = makeEmptyComposition({ workId: "w1" });
+    useComposition.getState().loadComposition(c);
+    for (const fps of [24, 25, 30, 60] as const) {
+      useComposition.getState().setFps(fps);
+      expect(useComposition.getState().comp!.fps).toBe(fps);
+    }
+  });
+
+  it("does not touch scenes/assets/tracks — only fps and updatedAt", () => {
+    const c = makeEmptyComposition({ workId: "w1" });
+    useComposition.getState().loadComposition(c);
+    const before = useComposition.getState().comp!;
+    const tracksBefore = JSON.stringify(before.tracks);
+    const assetsBefore = JSON.stringify(before.assets);
+    useComposition.getState().setFps(24);
+    const after = useComposition.getState().comp!;
+    expect(JSON.stringify(after.tracks)).toBe(tracksBefore);
+    expect(JSON.stringify(after.assets)).toBe(assetsBefore);
+    expect(after.fps).toBe(24);
+  });
+
+  it("an invalid fps surfaces a warn toast and leaves comp.fps untouched (defensive — UI only offers the four canonical values)", () => {
+    const c = makeEmptyComposition({ workId: "w1" });
+    useComposition.getState().loadComposition(c);
+    // @ts-expect-error — deliberately feed a non-canonical fps.
+    useComposition.getState().setFps(23);
+    const comp = useComposition.getState().comp!;
+    expect(comp.fps).toBe(30); // untouched (makeEmptyComposition default)
+    const toasts = useToastStore.getState().entries;
+    expect(toasts.some((e) => e.variant === "warn")).toBe(true);
+  });
+
+  it("same-value reset is a harmless idempotent no-op", () => {
+    const c = makeEmptyComposition({ workId: "w1" });
+    useComposition.getState().loadComposition(c);
+    useComposition.getState().setFps(30);
+    const comp = useComposition.getState().comp!;
+    expect(comp.fps).toBe(30);
+    const toasts = useToastStore.getState().entries;
+    expect(toasts.some((e) => e.variant === "warn")).toBe(false);
+  });
+});
+
 // ─── Phase 8.2.B — keyframe actions ──────────────────────────────────────────
 // addKeyframe / removeKeyframe / updateKeyframe mutate `keyframes?: Keyframe[]`
 // on Video/Audio/Overlay clips. TextClip has no keyframes field (D8) → no-op.

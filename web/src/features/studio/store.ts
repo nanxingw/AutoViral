@@ -19,6 +19,7 @@ import { splitKeyframesAtLocal } from "@shared/keyframes";
 // `ops.splitClip` on the immer draft.
 import * as ops from "@shared/composition/ops";
 import { CompositionOpError } from "@shared/composition/ops";
+import type { Fps } from "@shared/composition/ops";
 import {
   clipDuration,
   clipEnd,
@@ -172,6 +173,10 @@ interface CompState {
   // verb runs) so the agent CLI and the human UI converge: flips aspect/width/
   // height and proportionally rescales existing clips' absolute pixel offsets.
   setAspectRatio: (ratio: Aspect) => void;
+  // PRD-0011 F3 — canvas-fps segmented control. Routes through the shared
+  // `ops.setFps` (same code the bridge `POST /comp/fps` verb runs / CLI
+  // `autoviral comp fps` verb), converging agent and human on one write path.
+  setFps: (fps: Fps) => void;
   // ─── Phase 8.2.B — keyframe mutations for the Inspector KeyframePanel ──
   // addKeyframe is idempotent on (property, time) collision (D4 — replace
   // existing entry via addOrReplaceKeyframe). All three are no-ops for
@@ -789,6 +794,37 @@ export const useComposition = create<CompState>()(
             useToastStore.getState().push({
               variant: "warn",
               message: MESSAGES[locale].studio.toast.aspectFailed,
+              detail: err.message,
+              ttlMs: 4000,
+            });
+            return;
+          }
+          throw err;
+        }
+        s.comp.updatedAt = new Date().toISOString();
+      }),
+    // PRD-0011 F3 — canvas-fps segmented control. Mirrors setAspectRatio's
+    // shape EXACTLY: a thin immer wrapper that calls the shared `ops.setFps`
+    // on the draft, then bumps updatedAt. No fetch/bridge call here — the
+    // change lands via the existing autosave debounce (same as every other
+    // human-UI composition edit), just like setAspectRatio. Agent/human
+    // parity comes from BOTH paths calling the SAME `ops.setFps` pure
+    // function (the store here, the bridge `POST /comp/fps` route
+    // separately) against the same yaml — not from the UI calling the
+    // bridge directly. The op THROWS CompositionOpError on an illegal fps;
+    // surfaced as a localized warn toast (same pattern as setAspectRatio),
+    // leaving comp.fps untouched.
+    setFps: (fps) =>
+      set((s) => {
+        if (!s.comp) return;
+        try {
+          ops.setFps(s.comp, { fps });
+        } catch (err) {
+          if (err instanceof CompositionOpError) {
+            const locale = useLocaleStore.getState().locale;
+            useToastStore.getState().push({
+              variant: "warn",
+              message: MESSAGES[locale].studio.toast.fpsFailed,
               detail: err.message,
               ttlMs: 4000,
             });
