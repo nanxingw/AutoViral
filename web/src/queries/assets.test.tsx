@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { useWorkAssets, isPipelineInternal } from "./assets";
+import {
+  useWorkAssets,
+  isPipelineInternal,
+  classifyExport,
+  formatExportedAt,
+} from "./assets";
+import { apiFetch } from "@/lib/api";
 
 // A7 (PRD-0010) — the fixture now also carries the pipeline-internal files the
 // render/audio pipeline scatters through assets/ + output/ (a per-audio
@@ -84,6 +90,79 @@ describe("isPipelineInternal", () => {
     expect(isPipelineInternal("assets/clips/intro.mp4")).toBe(false);
     expect(isPipelineInternal("assets/audio/bgm.mp3")).toBe(false);
   });
+
+  // S5/#027 — render-pipeline derived intermediates (Stage 1 raw render +
+  // -ducked/-burned/-normalized). S5 now deletes these server-side on a
+  // successful export, but this filter is the frontend's own defense-in-
+  // depth against legacy files / a best-effort unlink failure — it must
+  // never match a creator's own file living under assets/.
+  it("flags output/ render-pipeline intermediates (S5)", () => {
+    expect(isPipelineInternal("output/autoviral-export-2026-07-09-00-00-00.mp4")).toBe(true);
+    expect(isPipelineInternal("output/x-ducked.mp4")).toBe(true);
+    expect(isPipelineInternal("output/x-burned.mp4")).toBe(true);
+    expect(isPipelineInternal("output/x-normalized.mp4")).toBe(true);
+    expect(isPipelineInternal("output/autoviral-export-1-ducked.mp4")).toBe(true);
+  });
+
+  it("does NOT flag a creator's own similarly-named file under assets/ (S5)", () => {
+    expect(isPipelineInternal("assets/my-ducked-track.mp4")).toBe(false);
+    expect(isPipelineInternal("assets/autoviral-export-notes.mp4")).toBe(false);
+  });
+
+  it("does NOT flag the finished deliverable files themselves (S4)", () => {
+    expect(isPipelineInternal("output/final-1717000000000.mp4")).toBe(false);
+    expect(isPipelineInternal("output/proxy-1717000000000.mp4")).toBe(false);
+  });
+});
+
+describe("classifyExport (S4 / #027)", () => {
+  it("classifies output/final-<ms>.mp4 as an export, not a proxy", () => {
+    expect(classifyExport("output/final-1717000000000.mp4")).toEqual({
+      isExport: true,
+      isProxyExport: false,
+      exportedAt: 1717000000000,
+    });
+  });
+
+  it("classifies output/proxy-<ms>.mp4 as an export AND flags it as a proxy", () => {
+    expect(classifyExport("output/proxy-1717000000000.mp4")).toEqual({
+      isExport: true,
+      isProxyExport: true,
+      exportedAt: 1717000000000,
+    });
+  });
+
+  it("is case-insensitive on the prefix", () => {
+    expect(classifyExport("output/FINAL-42.mp4").isExport).toBe(true);
+  });
+
+  it("does not classify a plain assets/**.mp4 source clip as an export", () => {
+    expect(classifyExport("assets/clips/intro.mp4")).toEqual({
+      isExport: false,
+      isProxyExport: false,
+    });
+  });
+
+  it("does not classify a render-pipeline intermediate as an export", () => {
+    expect(classifyExport("output/autoviral-export-1.mp4").isExport).toBe(false);
+    expect(classifyExport("output/x-ducked.mp4").isExport).toBe(false);
+  });
+
+  it("does not classify output/final.webm (no timestamp, wrong ext) as an export", () => {
+    expect(classifyExport("output/final.webm").isExport).toBe(false);
+  });
+});
+
+describe("formatExportedAt (S4 / #027)", () => {
+  it("formats an epoch-ms timestamp as MM/DD HH:mm (UTC, deterministic)", () => {
+    // 2026-07-09T14:32:00.000Z
+    expect(formatExportedAt(Date.UTC(2026, 6, 9, 14, 32, 0))).toBe("07/09 14:32");
+  });
+
+  it("zero-pads single-digit month/day/hour/minute", () => {
+    // 2026-01-02T03:04:00.000Z
+    expect(formatExportedAt(Date.UTC(2026, 0, 2, 3, 4, 0))).toBe("01/02 03:04");
+  });
 });
 
 describe("useWorkAssets", () => {
@@ -122,6 +201,62 @@ describe("useWorkAssets", () => {
       "assets/text/publish-text.md",
       "assets/text/subtitles.srt",
     ]);
+  });
+
+  // S4/#027 — deliverables split out of CLIPS into their own EXPORTS group.
+  describe("EXPORTS group (S4 / #027)", () => {
+    it("groups output/final-*.mp4 and output/proxy-*.mp4 into EXPORTS, flags proxy, keeps assets/**.mp4 in CLIPS", async () => {
+      (apiFetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        assets: [
+          "assets/clips/intro.mp4",
+          "output/final-1717000000000.mp4",
+          "output/proxy-1717000001000.mp4",
+        ],
+      });
+      const { result } = renderHook(() => useWorkAssets("w1"), { wrapper });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      const groups = result.current.data!;
+      const byKey = Object.fromEntries(groups.map((g) => [g.group, g]));
+
+      expect(byKey.CLIPS.count).toBe(1);
+      expect(byKey.CLIPS.items[0].path).toBe("assets/clips/intro.mp4");
+      expect(byKey.CLIPS.items[0].isExport).toBeFalsy();
+
+      expect(byKey.EXPORTS.count).toBe(2);
+      const final = byKey.EXPORTS.items.find((i) => i.path.includes("final"))!;
+      const proxy = byKey.EXPORTS.items.find((i) => i.path.includes("proxy"))!;
+      expect(final.isExport).toBe(true);
+      expect(final.isProxyExport).toBe(false);
+      expect(final.exportedAt).toBe(1717000000000);
+      expect(proxy.isExport).toBe(true);
+      expect(proxy.isProxyExport).toBe(true);
+      expect(proxy.exportedAt).toBe(1717000001000);
+    });
+
+    it("filters render-pipeline intermediates so a single export adds at most 2 EXPORTS entries (final + proxy)", async () => {
+      (apiFetch as unknown as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        assets: [
+          "output/autoviral-export-2026-07-09-00-00-00.mp4",
+          "output/autoviral-export-2026-07-09-00-00-00-ducked.mp4",
+          "output/autoviral-export-2026-07-09-00-00-00-ducked-normalized.mp4",
+          "output/final-1717000000000.mp4",
+        ],
+      });
+      const { result } = renderHook(() => useWorkAssets("w1"), { wrapper });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      const allItems = result.current.data!.flatMap((g) => g.items);
+      // Only the final deliverable survives the filter — the three
+      // render-pipeline intermediates never reach any group.
+      expect(allItems).toHaveLength(1);
+      expect(allItems[0].path).toBe("output/final-1717000000000.mp4");
+    });
+
+    it("hides the EXPORTS group entirely when there are no deliverables yet (empty-group hiding, matches existing groups)", async () => {
+      const { result } = renderHook(() => useWorkAssets("w1"), { wrapper });
+      await waitFor(() => expect(result.current.isSuccess).toBe(true));
+      const groupNames = result.current.data!.map((g) => g.group);
+      expect(groupNames).not.toContain("EXPORTS");
+    });
   });
 
   it("returns empty array when workId is null", async () => {

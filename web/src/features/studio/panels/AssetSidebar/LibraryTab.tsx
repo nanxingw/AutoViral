@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useWorkAssets, type AssetItem } from "@/queries/assets";
+import { useWorkAssets, formatExportedAt, type AssetItem } from "@/queries/assets";
 import { GenerationDialog } from "@/features/studio/generation/GenerationDialog";
 import { useGatedMediaSrc } from "@/features/studio/media/useGatedMediaSrc";
 import { SearchBox } from "./SearchBox";
@@ -260,6 +260,11 @@ export function LibraryTab({ workId }: Props) {
           )}
           {groups.map((g) => {
             const isActive = currentGroup?.group === g.group;
+            // #027 — the finished-deliverables group gets a proper bilingual
+            // label ("成品"/"Exports"); the rest keep their existing raw
+            // mono ids (CLIPS/IMAGES/AUDIO/TEXT), unchanged.
+            const label =
+              g.group === "EXPORTS" ? t("studio.assetSidebar.exportsGroup") : g.group;
             return (
               <button
                 key={g.group}
@@ -281,7 +286,7 @@ export function LibraryTab({ workId }: Props) {
                   transition: "all 0.15s",
                 }}
               >
-                {g.group} · {g.count}
+                {label} · {g.count}
               </button>
             );
           })}
@@ -420,6 +425,7 @@ function AssetTile({
   onDelete?: () => void;
   deleteLabel?: string;
 }) {
+  const t = useT();
   const hue = hueFromString(item.path);
   const fallbackBg = `linear-gradient(145deg, hsl(${hue}, 40%, 25%), hsl(${(hue + 30) % 360}, 30%, 12%))`;
   // Video tiles mount their <video> only on hover, then UNMOUNT on leave.
@@ -637,21 +643,32 @@ function AssetTile({
         </div>
       )}
 
-      {/* Top-left index chip */}
+      {/* Top-left chip: ordinal index for ordinary assets, swapped for a
+          "成片/成品代理" export badge (#027) when this tile is a finished
+          deliverable — an ordinal position is far less useful there than
+          knowing at a glance "this is the export, not a source clip". */}
       <div
+        data-testid={item.isExport ? "export-badge" : undefined}
         style={{
           position: "absolute",
           top: 6,
           left: 6,
           fontSize: 9,
           fontFamily: "var(--font-mono)",
-          color: "rgba(255,255,255,0.9)",
-          background: "rgba(0,0,0,0.4)",
+          letterSpacing: item.isExport ? "0.05em" : undefined,
+          textTransform: item.isExport ? "uppercase" : undefined,
+          color: item.isExport ? "var(--accent-hi)" : "rgba(255,255,255,0.9)",
+          background: item.isExport ? "var(--accent-glow)" : "rgba(0,0,0,0.4)",
+          border: item.isExport ? "1px solid var(--accent)" : undefined,
           padding: "1px 5px",
           borderRadius: 3,
         }}
       >
-        {(index + 1).toString().padStart(2, "0")}
+        {item.isExport
+          ? item.isProxyExport
+            ? t("studio.assetSidebar.proxyBadge")
+            : t("studio.assetSidebar.exportBadge")
+          : (index + 1).toString().padStart(2, "0")}
       </div>
 
       {/* Top-right action cluster: "＋" add-to-timeline (#78) + trash delete
@@ -766,6 +783,22 @@ function AssetTile({
         >
           {item.ext}
         </div>
+        {/* #027 — mono export timestamp, parsed from the final-<ms>/proxy-<ms>
+            filename. Only rendered for EXPORTS-group tiles. */}
+        {item.exportedAt !== undefined && (
+          <div
+            data-testid="export-timestamp"
+            style={{
+              fontSize: 8,
+              color: "var(--accent-hi)",
+              fontFamily: "var(--font-mono)",
+              marginTop: 1,
+              letterSpacing: "0.04em",
+            }}
+          >
+            {formatExportedAt(item.exportedAt)}
+          </div>
+        )}
       </div>
     </div>
   );

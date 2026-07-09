@@ -18,6 +18,15 @@ export interface AssetItem {
   ext: string;
   /** Stable filename for display. */
   name: string;
+  /** True for a finished deliverable — `output/final-<ms>.mp4` or
+   *  `output/proxy-<ms>.mp4` — which the library groups into EXPORTS
+   *  instead of CLIPS (issue #027 / PRD-0012 S4). */
+  isExport?: boolean;
+  /** True when `isExport` and the file is the half-res/24fps review proxy
+   *  (Phase 7.C `output/proxy-<ms>.mp4`) rather than the full deliverable. */
+  isProxyExport?: boolean;
+  /** Epoch-ms parsed from the export filename's timestamp, when isExport. */
+  exportedAt?: number;
 }
 
 const VIDEO_EXT = /\.(mp4|mov|webm|m4v)$/i;
@@ -56,11 +65,59 @@ const PIPELINE_INTERNAL: RegExp[] = [
   /(^|\/)chat(-[^/]*)?\.jsonl?$/i, // agent chat log / per-session log
   /(^|\/)\.DS_Store$/i, // macOS filesystem cruft
   /\.(tmp|part|crdownload)$/i, // partial upload / download temp files
+  // S5/#027 — render-pipeline derived intermediates. Best-effort cleanup in
+  // render-pipeline.ts deletes these on a successful export, but this filter
+  // also covers legacy files written before that fix (or the rare unlink
+  // failure). Deliberately anchored to `output/` so a creator's own file —
+  // e.g. "assets/my-ducked-track.mp4" — is never swept up; only the render
+  // pipeline writes into output/.
+  /^output\/autoviral-export-[^/]*\.mp4$/i, // Stage 1 raw Remotion render
+  /^output\/[^/]*-ducked\.mp4$/i, // Stage 2 ducking pass
+  /^output\/[^/]*-burned\.mp4$/i, // Stage 3 subtitle burn-in pass
+  /^output\/[^/]*-normalized\.mp4$/i, // Stage 4 loudnorm pass
 ];
 
 /** True for pipeline-internal files that should never appear in the library. */
 export function isPipelineInternal(path: string): boolean {
   return PIPELINE_INTERNAL.some((re) => re.test(path));
+}
+
+// #027 — a finished deliverable's on-disk name IS its type + timestamp:
+// `output/final-<epoch-ms>.mp4` (full export) or `output/proxy-<epoch-ms>.mp4`
+// (Phase 7.C half-res review proxy). Both come from render-pipeline.ts's
+// Stage 5 filename (`${filePrefix}-${Date.now()}.mp4`).
+const EXPORT_RE = /^output\/(final|proxy)-(\d+)\.mp4$/i;
+
+export interface ExportClassification {
+  isExport: boolean;
+  isProxyExport: boolean;
+  exportedAt?: number;
+}
+
+/** Pure classifier: is `path` a finished export, and if so which kind +
+ *  when. Returns `{ isExport: false, isProxyExport: false }` for anything
+ *  else (including plain `assets/**.mp4` source clips, which stay in
+ *  CLIPS). */
+export function classifyExport(path: string): ExportClassification {
+  const m = path.match(EXPORT_RE);
+  if (!m) return { isExport: false, isProxyExport: false };
+  const ms = Number(m[2]);
+  return {
+    isExport: true,
+    isProxyExport: m[1]!.toLowerCase() === "proxy",
+    exportedAt: Number.isFinite(ms) ? ms : undefined,
+  };
+}
+
+/** Format an export's epoch-ms timestamp for the mono badge, e.g. "07/09
+ *  14:32". Uses UTC getters (not local wall-clock) so the string is
+ *  deterministic across machines/timezones — this is a rough "when", not a
+ *  precise local clock, and determinism matters more than locale-accuracy
+ *  for a small mono badge. */
+export function formatExportedAt(ms: number): string {
+  const d = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getUTCMonth() + 1)}/${pad(d.getUTCDate())} ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}`;
 }
 
 export function useWorkAssets(workId: string | null) {
@@ -82,10 +139,15 @@ export function useWorkAssets(workId: string | null) {
           kind: classify(p),
           ext,
           name,
+          ...classifyExport(p),
         };
       });
+      // #027 — finished deliverables (final-*/proxy-*) get their own EXPORTS
+      // group ahead of CLIPS instead of drowning in the same bucket as raw
+      // source clips. Everything else buckets exactly as before.
       const groups: { [k: string]: AssetItem[] } = {
-        CLIPS: items.filter((i) => i.kind === "video"),
+        EXPORTS: items.filter((i) => i.isExport),
+        CLIPS: items.filter((i) => i.kind === "video" && !i.isExport),
         IMAGES: items.filter((i) => i.kind === "image"),
         AUDIO: items.filter((i) => i.kind === "audio"),
         TEXT: items.filter((i) => i.kind === "text"),

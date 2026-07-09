@@ -328,6 +328,10 @@ export const en = {
       playAudio: "Play preview",
       pauseAudio: "Pause preview",
       textPreviewFailed: "Preview unavailable",
+      // #027 — finished-deliverables group + per-tile badge (S4).
+      exportsGroup: "Exports",
+      exportBadge: "Export",
+      proxyBadge: "Proxy",
     },
     scriptPanel: {
       heading: "Script & storyboard",
@@ -1540,6 +1544,10 @@ export const zh: DeepShape<Messages> = {
       playAudio: "试听",
       pauseAudio: "暂停试听",
       textPreviewFailed: "内容无法预览",
+      // #027 — 成品分组 + 单条徽章 (S4)。
+      exportsGroup: "成品",
+      exportBadge: "成片",
+      proxyBadge: "代理",
     },
     scriptPanel: {
       heading: "剧本·分镜",
