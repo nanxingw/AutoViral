@@ -222,7 +222,7 @@ describe("applyTransformsPrePass (S18 — the render-pipeline Stage 0.5 boundary
       // never spawns ffmpeg (the host has none). The name is derived from the
       // SAME transformsCacheName the prepass uses, proving it resolved a non-empty
       // crop/flip chain (only crop/flip clips get a cache name).
-      const cacheName = transformsCacheName(clipIn.id, clipIn.transforms);
+      const cacheName = transformsCacheName(clipIn.id, clipIn.transforms, comp.fps);
       const cachePath = join(dir, cacheName);
       await writeFile(cachePath, "fake-mp4");
 
@@ -276,22 +276,22 @@ describe("transformsCacheName encodes crop/flip params into the cache key (S18 r
       y: 0,
       rotation: 0,
       crop: { x: 0, y: 0, w: 0.5, h: 0.5 },
-    });
+    }, 30);
     const b = transformsCacheName("v1", {
       scale: 1,
       x: 0,
       y: 0,
       rotation: 0,
       crop: { x: 0.1, y: 0.1, w: 0.5, h: 0.5 },
-    });
+    }, 30);
     expect(a).not.toBe(b);
     expect(a).toContain("v1");
     expect(a).toMatch(/\.mp4$/);
   });
 
   it("flipping a clip changes its cache name (params, not just id)", () => {
-    const noFlip = transformsCacheName("v1", { scale: 1, x: 0, y: 0, rotation: 0, flipH: false });
-    const flipH = transformsCacheName("v1", { scale: 1, x: 0, y: 0, rotation: 0, flipH: true });
+    const noFlip = transformsCacheName("v1", { scale: 1, x: 0, y: 0, rotation: 0, flipH: false }, 30);
+    const flipH = transformsCacheName("v1", { scale: 1, x: 0, y: 0, rotation: 0, flipH: true }, 30);
     expect(flipH).not.toBe(noFlip);
   });
 
@@ -304,6 +304,18 @@ describe("transformsCacheName encodes crop/flip params into the cache key (S18 r
       crop: { x: 0.1, y: 0.2, w: 0.5, h: 0.6 },
       flipV: true,
     };
-    expect(transformsCacheName("v1", t)).toBe(transformsCacheName("v1", t));
+    expect(transformsCacheName("v1", t, 30)).toBe(transformsCacheName("v1", t, 30));
+  });
+
+  // codex review (S3×S6 finding, medium) — same PRD-0011×0012 interaction as
+  // timeWarpCacheName: comp.fps is now user-editable (PRD-0011), and S3's
+  // -g/-keyint_min GOP fix bakes comp.fps into the crop/flip pre-pass output.
+  // Without fps in the signature, changing fps and re-exporting the same
+  // crop/flip clip would silently reuse the OLD GOP's cache file.
+  it("same crop/flip params, DIFFERENT fps → DIFFERENT cache name (PRD-0011×0012 interaction)", () => {
+    const t = { scale: 1, x: 0, y: 0, rotation: 0, flipH: true };
+    const at24 = transformsCacheName("v1", t, 24);
+    const at30 = transformsCacheName("v1", t, 30);
+    expect(at24).not.toBe(at30);
   });
 });

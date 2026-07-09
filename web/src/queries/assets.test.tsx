@@ -132,6 +132,22 @@ describe("isPipelineInternal", () => {
     expect(isPipelineInternal("assets/clip-vc_1-speed-notes.mp4")).toBe(false);
   });
 
+  // codex review (S3×S6 finding, medium) — the speed-ramp pre-pass cache key
+  // was extended to fold in comp.fps (src/server/speed-ramp-ffmpeg.ts
+  // speedRampCacheName), since PRD-0011 made fps user-editable and S3's
+  // -g/-keyint_min GOP fix bakes fps into the cache file, so the filename
+  // grew a `-fps<N>` suffix: clip-<id>-speed-<n>-fps<fps>.mp4. This regex
+  // must keep matching or the new-format cache files leak into the asset
+  // library as visible "clips" (the exact regression this filter exists to
+  // prevent). The OLD no-suffix format is asserted too — it must stay
+  // matched so cache files written before this fix (already on a creator's
+  // disk) don't suddenly start leaking either.
+  it("flags the fps-suffixed speed-ramp cache filename AND the legacy no-fps filename (PRD-0011×0012 interaction)", () => {
+    expect(isPipelineInternal("output/clip-vc_1-speed-200-fps30.mp4")).toBe(true);
+    expect(isPipelineInternal("output/clip-vc_1-speed-200-fps24.mp4")).toBe(true);
+    expect(isPipelineInternal("output/clip-vc_1-speed-200.mp4")).toBe(true); // legacy, no fps suffix
+  });
+
   it("does NOT flag the finished deliverable files themselves (S4)", () => {
     expect(isPipelineInternal("output/final-1717000000000.mp4")).toBe(false);
     expect(isPipelineInternal("output/proxy-1717000000000.mp4")).toBe(false);

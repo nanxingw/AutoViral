@@ -172,7 +172,11 @@ export function timeWarpAudioFilterChain(w: TimeWarp): string {
  * the name (mirrors transformsCacheName) so a changed warp → new name → re-render,
  * same warp → cache HIT.
  */
-export function timeWarpCacheName(clipId: string, w: TimeWarp): string {
+export function timeWarpCacheName(
+  clipId: string,
+  w: TimeWarp,
+  fps: number,
+): string {
   const sig = JSON.stringify({
     reverse: !!w.reverse,
     freezeAtSec: w.freezeAtSec ?? null,
@@ -182,6 +186,13 @@ export function timeWarpCacheName(clipId: string, w: TimeWarp): string {
     // masked by reversing the whole source regardless of in).
     inSec: w.inSec ?? null,
     outSec: w.outSec ?? null,
+    // codex review (S3×S6 finding, medium) — fps is part of the signature.
+    // S3's -g/-keyint_min GOP fix bakes comp.fps into this pre-pass's ffmpeg
+    // output (buildTimeWarpFilterArgs below), and PRD-0011 made fps a
+    // user-editable field: without fps in the key, changing fps and
+    // re-exporting the same warped clip would silently reuse a cache
+    // encoded with the OLD GOP.
+    fps,
   });
   const hash = createHash("sha1").update(sig).digest("hex").slice(0, 10);
   return `clip-${clipId}-timewarp-${hash}.mp4`;
@@ -275,11 +286,20 @@ export async function runTimeWarpPass(
  * → same name (cache HIT), any param change → new name → automatic re-render,
  * with the old file naturally orphaned. Mirrors speed-ramp's parameterised name.
  */
-export function transformsCacheName(clipId: string, t: Transforms): string {
+export function transformsCacheName(
+  clipId: string,
+  t: Transforms,
+  fps: number,
+): string {
   const sig = JSON.stringify({
     crop: t.crop ?? null,
     flipH: !!t.flipH,
     flipV: !!t.flipV,
+    // codex review (S3×S6 finding, medium) — fps is part of the signature,
+    // same rationale as timeWarpCacheName above: this pass's -g/-keyint_min
+    // is baked to comp.fps (buildTransformsFilterArgs), and fps is now
+    // user-editable (PRD-0011), so it must invalidate the cache too.
+    fps,
   });
   const hash = createHash("sha1").update(sig).digest("hex").slice(0, 10);
   return `clip-${clipId}-cropflip-${hash}.mp4`;
@@ -483,7 +503,7 @@ export async function applyTransformsPrePass(
           if (chain === "") return c; // defensive (shouldn't happen given guards)
           const cachePath = join(
             workDir,
-            transformsCacheName(c.id, c.transforms),
+            transformsCacheName(c.id, c.transforms, comp.fps),
           );
           // Strip the consumed fields so the Remotion stage doesn't re-apply.
           const consumedTransforms: Transforms = {
@@ -565,7 +585,10 @@ export async function applyTimeWarpPrePass(
           const vChain = timeWarpVideoFilterChain(warp, comp.fps, playLen);
           const aChain = timeWarpAudioFilterChain(warp);
           if (vChain === "") return c; // defensive (shouldn't happen given guards)
-          const cachePath = join(workDir, timeWarpCacheName(c.id, warp));
+          const cachePath = join(
+            workDir,
+            timeWarpCacheName(c.id, warp, comp.fps),
+          );
           // The warp bakes the clip's [in,out] span into the cached MP4 (reverse
           // trims to [in,out] before reversing; freeze holds the freezeAtSec frame
           // for the play length), so the cache is exactly `playLen` long and starts

@@ -106,12 +106,25 @@ describe("timeWarpAudioFilterChain (S19 reverse audio consumption)", () => {
 
 describe("timeWarpCacheName (S19 — params hashed so a changed warp re-renders)", () => {
   it("same params → same name (cache HIT); different params → different name", () => {
-    const a = timeWarpCacheName("c1", { reverse: true });
-    const b = timeWarpCacheName("c1", { reverse: true });
-    const c = timeWarpCacheName("c1", { freezeAtSec: 1.5 });
+    const a = timeWarpCacheName("c1", { reverse: true }, 30);
+    const b = timeWarpCacheName("c1", { reverse: true }, 30);
+    const c = timeWarpCacheName("c1", { freezeAtSec: 1.5 }, 30);
     expect(a).toBe(b);
     expect(a).not.toBe(c);
     expect(a).toMatch(/^clip-c1-timewarp-[0-9a-f]+\.mp4$/);
+  });
+
+  // codex review (S3×S6 finding, medium) — PRD-0011 made comp.fps a
+  // first-class, user-editable field, and S3's -g/-keyint_min GOP fix tracks
+  // comp.fps at pre-pass time. But the cache KEY only hashed the warp params,
+  // not fps: a user who changes fps and re-exports the SAME clip would hit
+  // the OLD cache (baked with the OLD -g/-keyint_min) and silently skip the
+  // GOP re-encode. fps must be part of the signature so a changed fps → a
+  // different cache name → a fresh ffmpeg run.
+  it("same warp params, DIFFERENT fps → DIFFERENT cache name (PRD-0011×0012 interaction)", () => {
+    const at24 = timeWarpCacheName("c1", { reverse: true }, 24);
+    const at30 = timeWarpCacheName("c1", { reverse: true }, 30);
+    expect(at24).not.toBe(at30);
   });
 });
 

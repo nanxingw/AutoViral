@@ -495,9 +495,11 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
     const filter = args[filterIdx + 1];
     expect(filter).toContain("setpts=PTS/2");
     expect(filter).toContain("atempo=2.0000");
-    // Output filename should encode the clip id + speed for caching.
+    // Output filename should encode the clip id + speed + fps for caching
+    // (fps joined the key in the S3×S6 review fix — PRD-0011 made fps
+    // user-editable, so it must invalidate the cache too).
     const output = args[args.length - 1];
-    expect(output).toContain("clip-1-speed-200.mp4");
+    expect(output).toContain("clip-1-speed-200-fps30.mp4");
   });
 
   it("static speed=0.5 invokes ffmpeg with setpts=PTS/0.5 and atempo=0.5", async () => {
@@ -511,7 +513,7 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
     const filter = args[filterIdx + 1];
     expect(filter).toContain("setpts=PTS/0.5");
     expect(filter).toContain("atempo=0.5000");
-    expect(args[args.length - 1]).toContain("clip-1-speed-50.mp4");
+    expect(args[args.length - 1]).toContain("clip-1-speed-50-fps30.mp4");
   });
 
   it("static speed=4.0 chains atempo=2.0,atempo=2.0", async () => {

@@ -6,7 +6,11 @@
 // exercise the math independently of spawn().
 
 import { describe, it, expect } from "vitest";
-import { chainAtempo, buildSpeedRampFilterArgs } from "./speed-ramp-ffmpeg.js";
+import {
+  chainAtempo,
+  buildSpeedRampFilterArgs,
+  speedRampCacheName,
+} from "./speed-ramp-ffmpeg.js";
 
 function productOfAtempos(expr: string): number {
   return expr
@@ -83,5 +87,31 @@ describe("buildSpeedRampFilterArgs (S3 — argv-level, not just chainAtempo)", (
   it("output path remains the LAST argv element (render-pipeline reads args[args.length-1] as the cache filename)", () => {
     const args = buildSpeedRampFilterArgs("in.mp4", "/work/clip-1-speed-200.mp4", 2.0, 24);
     expect(args[args.length - 1]).toBe("/work/clip-1-speed-200.mp4");
+  });
+});
+
+// codex review (S3×S6 finding, medium) — the speed-ramp cache filename was
+// generated inline (`clip-${id}-speed-${round(speed*100)}.mp4`), keyed ONLY
+// on the clip id + speed, never on fps. S3's -g/-keyint_min GOP fix bakes
+// comp.fps into this pre-pass's ffmpeg output (buildSpeedRampFilterArgs
+// above), but PRD-0011 made fps a user-editable field — so a user who
+// changes fps and re-exports the SAME sped-up clip would hit the OLD cache
+// (wrong GOP) and silently skip the re-encode. Extracted into a named,
+// directly-testable function (mirrors transformsCacheName / timeWarpCacheName)
+// with fps folded into the key.
+describe("speedRampCacheName (S3×S6 — fps is part of the cache key, not just speed)", () => {
+  it("same clip id + speed, DIFFERENT fps → DIFFERENT cache name", () => {
+    const at24 = speedRampCacheName("c1", 2.0, 24);
+    const at30 = speedRampCacheName("c1", 2.0, 30);
+    expect(at24).not.toBe(at30);
+  });
+
+  it("same params → same name (cache HIT still works; deterministic)", () => {
+    expect(speedRampCacheName("c1", 2.0, 30)).toBe(speedRampCacheName("c1", 2.0, 30));
+  });
+
+  it("encodes speed as round(speed*100) and fps verbatim in a stable, greppable name", () => {
+    expect(speedRampCacheName("vc_1", 2.0, 30)).toBe("clip-vc_1-speed-200-fps30.mp4");
+    expect(speedRampCacheName("vc_1", 0.5, 24)).toBe("clip-vc_1-speed-50-fps24.mp4");
   });
 });

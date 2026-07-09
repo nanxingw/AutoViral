@@ -82,7 +82,14 @@ const PIPELINE_INTERNAL: RegExp[] = [
   // pre-pass `stat()`s its cache path first and skips the ffmpeg re-run on a
   // hit, so deleting them would defeat the cache on every subsequent export.
   // Hide them from CLIPS instead (visibility filter, not deletion).
-  /^output\/clip-[^/]*-speed-\d+\.mp4$/i, // speed-ramp pre-pass cache
+  // codex review (S3×S6 finding, medium) — the server-side cache key grew a
+  // `-fps<N>` suffix (src/server/speed-ramp-ffmpeg.ts speedRampCacheName)
+  // once comp.fps became part of the signature (PRD-0011 made fps
+  // user-editable; S3's -g/-keyint_min GOP fix bakes fps into the cache).
+  // The suffix is OPTIONAL in the regex so pre-fix cache files already on a
+  // creator's disk (written before this change, no `-fps` segment) keep
+  // matching too — they must stay hidden, not suddenly leak into CLIPS.
+  /^output\/clip-[^/]*-speed-\d+(-fps\d+)?\.mp4$/i, // speed-ramp pre-pass cache
   /^output\/clip-[^/]*-timewarp-[0-9a-f]+\.mp4$/i, // time-warp (reverse/freeze) pre-pass cache
   /^output\/clip-[^/]*-cropflip-[0-9a-f]+\.mp4$/i, // crop/flip pre-pass cache
 ];

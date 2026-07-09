@@ -168,13 +168,38 @@ export async function runSpeedRampPass(
 }
 
 /**
+ * Cache filename for a clip's speed-ramp pre-pass output. Mirrors
+ * transformsCacheName / timeWarpCacheName in transforms-ffmpeg.ts: params
+ * baked into the name so a changed speed OR fps → new name → re-render,
+ * same params → cache HIT.
+ *
+ * codex review (S3×S6 finding, medium) — fps is part of the name, not just
+ * speed. This pass's -g/-keyint_min is baked to comp.fps
+ * (buildSpeedRampFilterArgs above), and fps is now user-editable
+ * (PRD-0011): without fps in the key, changing fps and re-exporting the
+ * same sped-up clip would silently reuse a cache encoded with the OLD GOP.
+ *
+ * speed uses round(speed*100) (not a hash) so the name stays human-greppable
+ * (0.5 → 50, 2.0 → 200, 1.5 → 150 — no collisions across the supported
+ * [0.1, 4.0] range); fps is one of a small literal set (24/25/30/60) so it's
+ * appended verbatim.
+ */
+export function speedRampCacheName(
+  clipId: string,
+  speed: number,
+  fps: number,
+): string {
+  return `clip-${clipId}-speed-${Math.round(speed * 100)}-fps${fps}.mp4`;
+}
+
+/**
  * Pre-Remotion stage. For each VideoClip with a STATIC non-1 speed, runs
  * the setpts/atempo pass and rewrites clip.src to point at the resampled
  * cache file. For VARIABLE speed (D6), logs a warning and leaves the
  * clip unchanged. For speed=1 / no speed keyframes, the clip is also
  * left untouched.
  *
- * Caching: output goes to `{workDir}/clip-{id}-speed-{round(k*100)}.mp4`.
+ * Caching: output goes to `{workDir}/` + speedRampCacheName(id, speed, fps).
  * If the file already exists we skip the ffmpeg invocation — this keeps
  * re-runs cheap (D-pitfall in plan).
  *
@@ -216,11 +241,7 @@ export async function applySpeedRampPrePass(
             return c; // no speed kfs OR speed=1 → no-op
           }
           // Static, non-1 speed → run the pre-pass (or hit the cache).
-          // Output filename uses round(speed*100) so 0.5 → 50, 2.0 → 200,
-          // 1.5 → 150 (no collisions across speeds we accept).
-          const cacheName = `clip-${c.id}-speed-${Math.round(
-            stat_speed * 100,
-          )}.mp4`;
+          const cacheName = speedRampCacheName(c.id, stat_speed, comp.fps);
           const cachePath = join(workDir, cacheName);
           try {
             await stat(cachePath);
