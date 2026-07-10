@@ -1,6 +1,8 @@
 import { ThemeSection } from "./ThemeSection";
 import { PlatformPresetSection } from "./PlatformPresetSection";
 import { FpsSection } from "./FpsSection";
+import { IconButton } from "@/ui/IconButton";
+import { XIcon } from "@/ui/icons";
 
 export function TweaksPanel({
   open,
@@ -32,32 +34,16 @@ export function TweaksPanel({
       }}
     >
       {onClose ? (
-        <button
-          type="button"
-          data-bare
+        <IconButton
+          size="compact"
+          variant="ghost"
           aria-label="Close settings"
           data-testid="tweaks-close"
           onClick={onClose}
-          style={{
-            position: "absolute",
-            top: 8,
-            right: 8,
-            width: 22,
-            height: 22,
-            borderRadius: 6,
-            border: "none",
-            background: "transparent",
-            color: "var(--text-dim)",
-            cursor: "pointer",
-            display: "grid",
-            placeItems: "center",
-            zIndex: 1,
-          }}
+          style={{ position: "absolute", top: 8, right: 8, zIndex: 1 }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M18 6L6 18M6 6l12 12" />
-          </svg>
-        </button>
+          <XIcon width={12} height={12} />
+        </IconButton>
       ) : null}
       <ThemeSection />
       {workId ? <PlatformPresetSection workId={workId} /> : null}

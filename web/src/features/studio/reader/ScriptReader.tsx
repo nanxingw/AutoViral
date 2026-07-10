@@ -2,6 +2,8 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Markdown } from "@/features/chat/Markdown";
 import { useT } from "@/i18n/useT";
+import { IconButton } from "@/ui/IconButton";
+import { XIcon } from "@/ui/icons";
 import type { AssetEntry, Scene } from "@shared/composition";
 import { useComposition } from "../store";
 import { useScript } from "../scriptStore";
@@ -227,27 +229,16 @@ export function ScriptReader() {
             >
               {t("studio.scriptReader.title")}
             </h2>
-            <button
-              type="button"
+            <IconButton
+              size="md"
+              variant="ghost"
               onClick={closeReader}
               aria-label={t("studio.scriptReader.closeAria")}
               title={t("studio.scriptReader.closeAria")}
-              data-bare
-              style={{
-                width: 28,
-                height: 28,
-                display: "grid",
-                placeItems: "center",
-                borderRadius: 6,
-                border: "1px solid var(--glass-border)",
-                background: "transparent",
-                color: "var(--text-dim)",
-                cursor: "pointer",
-                fontSize: 16,
-              }}
+              style={{ border: "1px solid var(--glass-border)" }}
             >
-              ×
-            </button>
+              <XIcon width={16} height={16} />
+            </IconButton>
           </header>
 
           <div style={{ flex: 1, position: "relative", minHeight: 0 }}>

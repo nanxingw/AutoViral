@@ -5,6 +5,8 @@ import { useDive } from "../dive/diveStore";
 import { useReader } from "../reader/readerStore";
 import { useNavigate } from "react-router-dom";
 import { useT } from "@/i18n/useT";
+import { IconButton } from "@/ui/IconButton";
+import { HelpIcon } from "@/ui/icons";
 import {
   enqueueRender,
   resolveRenderOpts,
@@ -328,31 +330,17 @@ export function TopBar({
 
       <div style={{ width: 1, height: 20, background: "var(--divider)", flexShrink: 0 }} />
 
-      <button
-        type="button"
-        data-bare
+      <IconButton
+        size="lg"
+        variant="surface"
         onClick={() => setShortcutsOpen(true)}
         aria-label={t("studio.topBar.shortcuts")}
         title={t("studio.topBar.shortcuts")}
         data-testid="shortcuts-toggle"
-        style={{
-          width: 32,
-          height: 32,
-          borderRadius: 8,
-          border: "1px solid var(--glass-border)",
-          background: "var(--surface-0)",
-          color: "var(--text-dim)",
-          display: "grid",
-          placeItems: "center",
-          cursor: "pointer",
-          flexShrink: 0,
-          fontFamily: "var(--font-mono)",
-          fontSize: 14,
-          fontWeight: 600,
-        }}
+        style={{ borderRadius: 8 }}
       >
-        ?
-      </button>
+        <HelpIcon width={16} height={16} />
+      </IconButton>
 
       {onToggleSettings ? (
         <button

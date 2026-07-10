@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TweaksPanel } from "./index";
 import { useTheme } from "@/stores/theme";
@@ -30,6 +30,18 @@ describe("TweaksPanel (v4 floating overlay)", () => {
     const lightBtn = screen.getByTestId("theme-toggle-light");
     fireEvent.click(lightBtn);
     expect(useTheme.getState().theme).toBe("light");
+  });
+
+  // S2 (PRD-0013) — the close button is collected into the shared IconButton so
+  // its glyph is centred. It still closes via onClose and keeps its SVG icon.
+  it("close button is a shared IconButton (data-icon-button + SVG) and still fires onClose", () => {
+    const onClose = vi.fn();
+    render(<TweaksPanel open={true} onClose={onClose} />);
+    const btn = screen.getByTestId("tweaks-close");
+    expect(btn).toHaveAttribute("data-icon-button");
+    expect(btn.querySelector("svg")).not.toBeNull();
+    fireEvent.click(btn);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   // Phase 6.D — section is gated on `workId` so existing tests that omit it

@@ -105,6 +105,20 @@ describe("TopBar (v4)", () => {
     ).toBeInTheDocument();
   });
 
+  // S2 (PRD-0013) — the "?" shortcuts button is collected into the shared
+  // IconButton so its glyph is centred (the leaked pill padding shoved it right).
+  // Behaviour is unchanged: it still opens the cheatsheet.
+  it("the ? shortcuts button is a shared IconButton (data-icon-button + SVG)", () => {
+    render(
+      qcWrap(<MemoryRouter>
+        <TopBar workId="w1" savedAt={null} />
+      </MemoryRouter>),
+    );
+    const btn = screen.getByTestId("shortcuts-toggle");
+    expect(btn).toHaveAttribute("data-icon-button");
+    expect(btn.querySelector("svg")).not.toBeNull();
+  });
+
   it("pressing ? opens the cheatsheet (discoverability gesture)", () => {
     render(
       qcWrap(<MemoryRouter>

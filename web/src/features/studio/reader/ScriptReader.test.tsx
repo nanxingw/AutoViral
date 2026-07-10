@@ -296,6 +296,44 @@ describe("ScriptReader", () => {
     expect(screen.getByTestId("reader-loading")).toBeTruthy();
   });
 
+  // ── S2 (PRD-0013): icon-button collection ──────────────────────────────────
+  // The header close button is the截图 defect本体 — a 28×28 icon control that the
+  // leaked global pill padding shoved off-centre. It must now be an IconButton:
+  // an SVG glyph (not the Unicode "×" text node) inside the shared data-icon-button
+  // shell. Behaviour (closeReader on click) is unchanged.
+  it("close button is a shared IconButton (data-icon-button + SVG, not a text ×)", () => {
+    seed({
+      script: "# One\nBody.",
+      sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
+    });
+    render(<ScriptReader />);
+    const closeBtn = screen.getByRole("button", { name: "Close the reader" });
+    expect(closeBtn).toHaveAttribute("data-icon-button");
+    expect(closeBtn.querySelector("svg")).not.toBeNull();
+    // The bare Unicode glyph must no longer be a text child.
+    expect(closeBtn.textContent).not.toContain("×");
+    closeBtn.click();
+    expect(useReader.getState().open).toBe(false);
+  });
+
+  // Reverse assertions — the collection must NOT swallow every aria-labelled
+  // button. The mini-TOC entries render镜号 numbers and the per-card edit button
+  // renders localized text; both would break under line-height:0 / SVG-only
+  // IconButton chrome, so they must stay plain buttons.
+  it("does NOT convert the mini-TOC number buttons or the edit text button to IconButton", () => {
+    seed({
+      script: "# One\nBody.",
+      sceneIds: [{ id: "sc1", order: 0, title: "A", mdAnchor: "One" }],
+    });
+    render(<ScriptReader />);
+    for (const toc of screen.getAllByTestId("reader-toc-item")) {
+      expect(toc).not.toHaveAttribute("data-icon-button");
+    }
+    expect(screen.getByTestId("reader-edit-scene")).not.toHaveAttribute(
+      "data-icon-button",
+    );
+  });
+
   it("disconnects the IntersectionObserver on unmount", () => {
     const disconnect = vi.fn();
     class MockIO {
