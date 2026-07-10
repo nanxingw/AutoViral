@@ -1,0 +1,107 @@
+{
+  "codexJobOk": true,
+  "dimension": "诊断时间线 Playhead 拖动不驱动视频预览的单向同步 bug",
+  "summary": "确切根因是缺少 store→Remotion Player 的 imperative seek 桥，不是 Playhead 只写本地 state，也不是同步 effect 被条件屏蔽。Playhead 拖动与 Ruler 点击/拖动都只调用 setFrame，把 currentFrame 写入 Zustand；PreviewPanel 只有 Player frameupdate→setFrame 的反向桥。唯一的 playerRef.current.seekTo(frame) 位于 PreviewPanel 私有 seekTo，并只被预览运输控件调用。断链点因此位于 setFrame 之后：PreviewPanel 订阅 currentFrame 仅用于 timecode/progress 渲染，没有 effect/action 消费它并调用 PlayerRef.seekTo。d5ba0aa 只新增 Ruler、Ruler.test 与 Timeline wiring，故当前 Ruler 同样没有真正驱动画面的完整链路。Vitest 因只读沙箱无法启动，结论来自 main@ba092f6 的静态链路与 git 历史，运行态需按 presetTests 先证红。",
+  "findings": [
+    {
+      "topic": "状态模型与 Remotion API 边界",
+      "detail": "Studio 没有 currentTime/seek action，只有 currentFrame 与 setFrame；setFrame 只校验、取整、夹紧并写状态。已安装 Remotion PlayerRef 明确提供 imperative seekTo(frame)。",
+      "files": [
+        "web/src/features/studio/store.ts",
+        "node_modules/@remotion/player/dist/cjs/player-methods.d.ts"
+      ],
+      "evidence": "web/src/features/studio/store.ts:100-104 摘录：`currentFrame: number`；:135-137 摘录：`setFrame: (f: number) => void`；:922-931 摘录：`s.currentFrame = Math.max(0, Math.min(max, Math.round(f)))`，没有播放器调用。player-methods.d.ts:7-12 摘录：`seekTo: (frame: number) => void; getCurrentFrame: () => number`。"
+    },
+    {
+      "topic": "路径一｜拖动 Playhead",
+      "detail": "pointerdown 记录起始坐标/帧 → pointermove 换算目标帧 → setFrame → store.currentFrame → Playhead/PreviewPanel/focus 等订阅方更新；链路到此终止，没有 seekTo。",
+      "files": [
+        "web/src/features/studio/panels/Timeline/Playhead.tsx",
+        "web/src/features/studio/store.ts",
+        "web/src/features/studio/panels/PreviewPanel.tsx",
+        "web/src/stores/useFocusSync.ts"
+      ],
+      "evidence": "Playhead.tsx:40-46 `dragRef.current = { startX: e.clientX, startFrame: frame }`；:49-55 `setFrame(d.startFrame + Math.round((dx / pxPerSecond) * fps))`。store.ts:922-931 写入。Playhead.tsx:28-32 `useComposition((s) => s.currentFrame)`；PreviewPanel.tsx:111-117 与 useFocusSync.ts:62-74 订阅但均未调用 seekTo。"
+    },
+    {
+      "topic": "路径二｜点击或拖动 Ruler",
+      "detail": "pointerdown/pointermove → clientX 换算时间和帧 → 同一个 setFrame → 同一批状态订阅方；与 Playhead 在 store 后具有完全相同的断链，未真正驱动 Remotion 画面跳转。",
+      "files": [
+        "web/src/features/studio/panels/Timeline/Ruler.tsx",
+        "web/src/features/studio/panels/Timeline/index.tsx",
+        "web/src/features/studio/store.ts"
+      ],
+      "evidence": "Ruler.tsx:35-40 `setFrame(Math.round(t * fps))`；:43-50 pointerdown/拖动都调用 `seekToClientX`。index.tsx:107-108/184-196 挂载 Ruler/Playhead 无 Player ref 或 seek callback。Track.tsx:120-176 事件仅处理素材/clip DnD。"
+    },
+    {
+      "topic": "路径三｜拖动预览播放器进度条",
+      "detail": "Scrubber pointerdown/window pointermove → onSeek(progress) → PreviewPanel 私有 seekTo(seconds) → playerRef.current.seekTo(frame) → setFrame(frame) → Timeline Playhead 订阅 currentFrame 并移动，解释了 Player→时间线方向正常。",
+      "files": [
+        "web/src/features/studio/panels/PreviewPanel.tsx",
+        "web/src/features/studio/panels/Timeline/Playhead.tsx"
+      ],
+      "evidence": "PreviewPanel.tsx:522-549 `onSeek(p)`；:447-451 `onSeek={(p) => seekTo(p * comp.duration)}`；:169-176 `p.seekTo(f); useComposition.getState().setFrame(f)`。Playhead.tsx:29-32/76-77 订阅并渲染 left。反向桥另见 PreviewPanel.tsx:128-143 `frameupdate` 调 `setFrame(e.detail.frame)`。"
+    },
+    {
+      "topic": "确切断链点与根因排除",
+      "detail": "断链点是 timeline handler 成功调用 setFrame 之后、PlayerRef.seekTo 之前；PreviewPanel 根本没有 store seek 订阅 effect（非 effect guard 屏蔽）；Playhead 无独立本地位置 state（非只写本地 state）。",
+      "files": [
+        "web/src/features/studio/panels/PreviewPanel.tsx",
+        "web/src/features/studio/panels/Timeline/Playhead.tsx"
+      ],
+      "evidence": "PreviewPanel.tsx:128-167 两个 effect 监听 Player frame/play/pause 与 window play/pause，均不依赖 `frame`；唯一 seekTo 定义在 :169-176，调用点仅见 :376、:423、:450。Playhead.tsx:29-32 `frame` 来自 Zustand，唯一 ref 是 :38 拖拽基线。"
+    },
+    {
+      "topic": "d5ba0aa 历史与测试覆盖盲区",
+      "detail": "历史提交把“seek”定义成写 store frame，没有触及 PreviewPanel；测试也只锁定 currentFrame，即使 Player 从未 seek，Timeline 测试仍全绿。",
+      "files": [
+        "web/src/features/studio/panels/Timeline/Ruler.test.tsx",
+        "web/src/features/studio/panels/Timeline/Playhead.test.tsx",
+        "web/src/features/studio/panels/PreviewPanel.test.tsx"
+      ],
+      "evidence": "`git show --stat --oneline d5ba0aa` 只改 Ruler.test.tsx/Ruler.tsx/Timeline/index.tsx，未改 PreviewPanel。Ruler.test.tsx:21-27 只断言 currentFrame===60；Playhead.test.tsx:28-35 只断言 currentFrame===90；PreviewPanel.test.tsx:163-180 只派发 frameupdate 断言 store 为 42/90。"
+    },
+    {
+      "topic": "影响范围与进度条现象的证据冲突",
+      "detail": "同一缺桥还影响 J/L 快捷键、terminal ui-seek、Chat locator、viewer-action，均只调用 setFrame。PreviewPanel 自定义 Scrubber progress 直接由 currentFrame 推导，理论上应随 Playhead 拖动更新；标注为「假设」运行态可能存在第二个问题，或用户所指“进度条”是 Player 画面内部状态。",
+      "files": [
+        "web/src/features/studio/hooks/useShortcuts.ts",
+        "web/src/features/terminal/useBridgeEvents.ts",
+        "web/src/features/studio/panels/Chat/index.tsx",
+        "web/src/features/studio/panels/RightPane/index.tsx",
+        "web/src/features/studio/panels/PreviewPanel.tsx"
+      ],
+      "evidence": "useShortcuts.ts:74-81、useBridgeEvents.ts:116-120、Chat/index.tsx:203-210、RightPane/index.tsx:182-188 均落到 setFrame。PreviewPanel.tsx:117 订阅 frame，:237-240 计算 progress，:447-450 交给 Scrubber。"
+    },
+    {
+      "topic": "验证边界",
+      "detail": "仓库未被修改，最终仍为 main@ba092f6 且 git status 无输出；只读权限阻止 Vitest 建立反馈环，未声称运行态复现成功。",
+      "files": [
+        "web/vitest.config.ts"
+      ],
+      "evidence": "`git branch --show-current`→main，`git rev-parse --short HEAD`→ba092f6，`git status --short` 无输出。`npm run test:web` 因 EPERM 与 __dirname ReferenceError 启动失败（沙箱限制）。"
+    }
+  ],
+  "proposal": "只提方案、不实施：1）web/src/features/studio/store.ts 拆分出 `reportPlayerFrame(frame)`（Player→store 只读上报）与 `requestSeekFrame(frame)`（用户请求 seek，写入带递增 seq 的 `pendingSeek={frame,seq}`，防止相同帧被 Zustand 去重）。2）web/src/features/studio/panels/PreviewPanel.tsx：frameupdate 改调 reportPlayerFrame；新增订阅 pendingSeek 的 effect，内部执行 `playerRef.current.seekTo(pendingSeek.frame)`；Scrubber 也改走 requestSeekFrame，废弃现有直接 seek+setFrame 双路径。3）Playhead.tsx、Ruler.tsx 改调 requestSeekFrame；同步迁移 useShortcuts.ts、features/terminal/useBridgeEvents.ts、panels/Chat/index.tsx、panels/RightPane/index.tsx 的所有 seek 意图调用点，避免只修鼠标遗留键盘/Agent 路径。4）currentFrame 保留作为 UI/focus 共享观测值，composition load 时清空 pendingSeek。不会破坏反向同步：Player 的每帧 frameupdate 只 report 不产生 pendingSeek；不会破坏播放中 scrub：seekTo 不主动 pause，Remotion 内部（node_modules/@remotion/player/dist/cjs/PlayerUI.js:257-269，注释 \"continue playing after seeking if the player was playing before\"）负责续播。",
+  "presetTests": [
+    "先证红：PreviewPanel.test.tsx 中 Player mock 的 seekTo 改为 vi.fn；同 render 挂载 PreviewPanel 与 Playhead，初始30帧，pointerDown x=0/pointerMove x=100，按 Playhead.test.tsx:28-35 参数断言最终 seekTo(90)；当前代码预期红（store=90 但 seekTo 调用0次）",
+    "Ruler 集成红测：同一 Player mock 下挂载 PreviewPanel 与 Ruler，clientX=100/50px/s/30fps，断言 seekTo(60)；当前只会证明 store=60，此断言应先红",
+    "反向同步回归：派发 Player frameupdate{frame:42}，断言 currentFrame 与 Playhead left 更新，同时断言 seekTo 未被调用，证明 reportPlayerFrame 不回流成 seek",
+    "播放中 scrub 回归：Player mock isPlaying=true，连续拖动 Playhead/Ruler，断言 seekTo 收到最新帧、pause spy 未被调用，且继续接收后续 frameupdate",
+    "Preview Scrubber 回归：模拟 track rect 后 pointerdown+window pointermove，断言统一 requestSeekFrame 最终只通过桥调用 seekTo 到正确帧并同步 Timeline Playhead",
+    "Store 单测：requestSeekFrame 对负数/超长/NaN/非整数沿用 store.test.ts:659-693 clamp 预期；reportPlayerFrame 只更新 currentFrame、不增加 pendingSeek.seq",
+    "修复后一次性验证：npm run test:web -- PreviewPanel.test.tsx Playhead.test.tsx Ruler.test.tsx store.test.ts，再跑完整 npm run test:web"
+  ],
+  "risks": [
+    "不要直接写 useEffect(() => playerRef.current?.seekTo(frame), [frame])：PreviewPanel.tsx:128-143 播放时每帧都 setFrame，会把 Player→store 更新重新变成 seek，产生每帧硬跳/抖动/回退",
+    "只改 Playhead/Ruler 会留下键盘、terminal ui-seek、Chat locator、viewer-action 同样失效",
+    "边界帧需统一：store.ts:929-930 上界是 ceil(duration*fps)，而 PlayerUI.js:257-259 实际夹紧到 durationInFrames-1，测试应以 Player 最终合法帧为准",
+    "pendingSeek 若不在 composition 切换时清空，新 Player 可能消费旧 work 的最后一次 seek，需要 loadComposition 回归测试",
+    "高频 pointermove 会产生密集 seek 请求；latest-wins 或按 rAF 合并中间帧，但 pointerup 最终目标帧必须无条件提交"
+  ],
+  "openQuestions": [
+    "需要在可写测试环境运行预设红测；本轮两种 Vitest config loader 都因沙箱限制失败（EPERM / __dirname ReferenceError），尚无实际红测输出",
+    "需确认用户所说“不动的进度条”具体是哪个元素——PreviewPanel 自定义 Scrubber 理论上应随 currentFrame 更新，若确实不动，除 Player seek 缺桥外可能还存在第二个运行态问题（标注为假设）",
+    "未做浏览器 E2E 复现，本轮结论限定为 main@ba092f6 静态源码与 git 历史诊断"
+  ]
+}

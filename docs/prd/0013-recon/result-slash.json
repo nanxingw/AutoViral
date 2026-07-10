@@ -1,0 +1,132 @@
+{
+  "dimension": "AutoViral 聊天 UI 原生支持 Claude Code / Codex 斜杠命令",
+  "summary": "AutoViral 当前不是长驻交互式 CLI，而是每轮新建进程：Claude 使用 `-p ... --output-format stream-json`，Codex 使用 `exec [resume] --json`。前端没有 slash 解析，并会在用户文本前插入 `<viewer-context>`；新会话后端还会追加 AutoViral 教学，因此要求位于消息开头的命令无法可靠识别。Claude Code 2.1.206 的 headless 模式原生支持部分 `/` 命令和自定义 skill，并在 `system/init.slash_commands` 暴露当前能力集，本地 `/compact` 实验已确认。Codex 的 `/compact`、`/model` 等官方上属于交互式 TUI composer，`codex exec` 没有文档化的 slash 分派保证；旧 `~/.codex/prompts` 已弃用，推荐 skills。推荐方案 B：增加 bridge 命令注册表与结构化 command 帧，按命令选择本地执行、provider 翻译或 Claude 原生透传；Codex App Server 作为后续原生控制面的方案 C。",
+  "findings": [
+    {
+      "topic": "聊天桥接与 src/server/bridge 是两套协议",
+      "detail": "真正承载对话的是根目录 `src/ws-bridge.ts` 的 `/ws/browser/{workId}/{sessionId}`；`src/server/bridge/` 是 AutoViral CLI 到 Studio 的 UI/素材操作桥，不接收聊天消息。",
+      "files": [
+        "src/ws-bridge.ts",
+        "src/server/bridge/bridge-ws.ts"
+      ],
+      "evidence": "`src/ws-bridge.ts:489-510`：`sessions: Map<workId, Map<sessionId, WsSession>>`；`src/ws-bridge.ts:516-528` 接受 `/ws/browser/...`。`src/server/bridge/bridge-ws.ts:60-64` `UiEventBus` 只向 Studio 推送事件；`bridge-ws.ts:95-110` 唯一入站形态是 `{t:'approval-response'}`。"
+    },
+    {
+      "topic": "Claude backend 的完整 spawn 协议",
+      "detail": "每轮执行 `claude -p <prompt> --output-format stream-json --verbose --dangerously-skip-permissions`；可追加 `--resume`、`--append-system-prompt`、`--model`。未启用 `--input-format stream-json`，stdin ignore，单 prompt、单进程、单轮输出协议。",
+      "files": [
+        "src/server/chat-backends/claude.ts",
+        "src/server/chat-backends/types.ts"
+      ],
+      "evidence": "`claude.ts:113-135`：`['-p', input.prompt, '--output-format', 'stream-json', '--verbose', '--dangerously-skip-permissions']`；`claude.ts:142-157`：`cwd: PACKAGE_ROOT`、`stdio: ['ignore','pipe','pipe']`。`types.ts:26-47` backend 输入仅 prompt/resumeId/appendSystemPrompt/model/session context。"
+    },
+    {
+      "topic": "Codex backend 的完整 spawn 协议",
+      "detail": "新会话 `codex exec --json --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check [--model M] <prompt>`；续接 `codex exec resume <threadId> --json ... <prompt>`。无 append-system-prompt，AutoViral 直接把增量教学前置到用户 prompt。",
+      "files": [
+        "src/server/chat-backends/codex.ts"
+      ],
+      "evidence": "`codex.ts:171-176`：`wirePrompt = appendSystemPrompt + '\\n\\n---\\n\\n' + input.prompt`；`codex.ts:178-193` fresh/resume 参数数组；`codex.ts:198-212` 同样 cwd/stdin ignore。"
+    },
+    {
+      "topic": "会话生命周期与 resume",
+      "detail": "AutoViral 会话与历史长驻，CLI 进程不长驻：每条后续消息先 kill 旧进程，再用 cliSessionId 新建 resume 进程。Claude session_id / Codex thread_id 写入 append-only sidecar；turn_complete 后 idle，断线后 60 秒 grace。",
+      "files": [
+        "src/ws-bridge.ts",
+        "src/server/sessions/sessions-sidecar.ts",
+        "src/server/chat-backends/claude.ts",
+        "src/server/chat-backends/codex.ts"
+      ],
+      "evidence": "`ws-bridge.ts:1125-1188` 现有进程 `kill('SIGTERM')`；`1190-1233` 内存→sidecar→work.yaml 找 resumeId 重新 spawnCli；`1544-1572` 写回 sidecar；`1642-1731` turn_complete 标 idle；`1986-2008` 60/90 秒断线 grace。`sessions-sidecar.ts:4-18,68-139` append-only、last-write-wins，AutoViral sessionId 与 provider cliSessionId 分离。"
+    },
+    {
+      "topic": "前端发送链路是当前 slash 失效的直接原因",
+      "detail": "Composer 只是普通 textarea；提交后 `useChatSocket.send` 把 viewer context 和附件信封放到输入文本之前，再发送 `{action:'send', text:wireText}`。命令一旦不在消息开头即失效；新会话还会被包装为「系统教学 + 用户消息：/command」。",
+      "files": [
+        "web/src/features/studio/panels/Chat/index.tsx",
+        "web/src/features/chat/useChatSocket.ts",
+        "web/src/features/studio/panels/RightPane/index.tsx",
+        "web/src/features/studio/services/viewerContext.ts",
+        "src/ws-bridge.ts"
+      ],
+      "evidence": "`Chat/index.tsx:414-439` submit() 直接调 send(input, attachments)；`893-919` 只有 textarea change/paste/⌘Enter，无 `/` 检测。`useChatSocket.ts:255-275`：`wireText = [ctx, attachEnv, text].filter(Boolean).join('\\n\\n')`。`RightPane/index.tsx:169-175` 每条消息自动附加 context；`viewerContext.ts:16-51` 有 composition 时总返回信封。`ws-bridge.ts:850-862,1223-1233` fresh spawn 把系统 context 放在用户文本前。"
+    },
+    {
+      "topic": "Claude headless 原生支持及本地验证",
+      "detail": "Claude Agent SDK 允许把 `/compact` 当 prompt 发送，仅无需交互终端的命令可 dispatch；本机 2.1.206 在同型 `-p + stream-json` 下确实进行了客户端 compaction，未调用模型。",
+      "files": [],
+      "evidence": "官方 slash commands 文档：`Only commands that work without an interactive terminal are dispatchable through the SDK`。本地命令 `claude -p '/compact' --model haiku --output-format stream-json --verbose --no-session-persistence --max-budget-usd 0.02`；输出 `status:'compacting'`、`compact_error:'Not enough messages to compact.'`、`num_turns:0`、`total_cost_usd:0`。`--input-format stream-json` 实验结果相同。"
+    },
+    {
+      "topic": "Claude 命令和 skills 可以机器枚举",
+      "detail": "`system/init.slash_commands` 是当前 session 真实可用命令集合（内建+自定义+skills+插件），`skills` 另有名称数组。当前 AutoViral parser 只取 session id，丢弃了这两组能力信息。",
+      "files": [
+        "src/server/chat-backends/claude.ts",
+        "src/ws-bridge.ts",
+        "web/src/features/chat/useChatSocket.ts"
+      ],
+      "evidence": "本地 init 输出含 `slash_commands:['ask-matt',...,'compact','model',...]` 与 `skills:['ask-matt',...]`。`claude.ts:45-52` 对 init 仅调用 `cb.onSessionId`；`ws-bridge.ts:1787-1793` 其它 frame 降级为 `cli_event`；`useChatSocket.ts:238-239` 忽略 `cli_event`。列表只有名称无 description/参数 schema。"
+    },
+    {
+      "topic": "Claude 各命令不能一概原样透传",
+      "detail": "`/compact` 和自定义 skill 可在 headless 中执行；`/model <name>` 不等于 AutoViral 模型切换（每轮重启进程并显式传 `--model`）。依赖 picker/终端 UI 或不在 init 列表中的命令必须禁用或映射本地能力。",
+      "files": [
+        "src/server/chat-backends/claude.ts",
+        "src/ws-bridge.ts",
+        "src/server/routes/works.ts"
+      ],
+      "evidence": "`claude.ts:133-135` 每次 spawn 从 session.model 注入 `--model`；`ws-bridge.ts:1184-1223` 每轮重启进程；`works.ts:532-565` 已有模型配置与 kill/respawn；`ws-bridge.ts:1032-1044` session-scoped setSessionModel。"
+    },
+    {
+      "topic": "Codex exec 与交互 slash 命令不是同一接口",
+      "detail": "Codex 官方把 slash 定义为交互式 composer/TUI 行为；`codex exec` 是脚本/CI 非交互模式，无 slash-command 参数或枚举接口，原样发送 `/compact` 没有官方保证。",
+      "files": [],
+      "evidence": "本机 `codex-cli 0.144.1`；`codex exec --help` 只有 `[PROMPT]`、resume、model、sandbox、`--json`；`codex proto --help` 回退顶层 help（不存在 proto 子命令）。官方文档说明 `/` 在 composer 打开 popup，exec 是 scripts/CI 模式。受控实验因本机沙箱报 `failed to initialize in-process app-server client: Operation not permitted`，raw 行为未获实验结论，采用保守边界。"
+    },
+    {
+      "topic": "Codex 自定义 prompts 已弃用，skills 是推荐机制",
+      "detail": "旧 `~/.codex/prompts/*.md` 能在交互 CLI/IDE 生成 `/prompts:name`，但官方已标记 deprecated，skills 是后续路径。本机无 `~/.codex/prompts`，只有 `~/.codex/skills`。",
+      "files": [],
+      "evidence": "官方文档摘录：`Custom prompts are deprecated. Use skills`；`/prompts:draftpr` 由 TUI 展开为普通消息，仅扫描顶层 Markdown。本地目录检查：`~/.codex/prompts (absent)`，`~/.codex/skills` 存在。"
+    },
+    {
+      "topic": "Codex App Server 是更原生的控制面",
+      "detail": "App Server 提供显式 thread/turn 生命周期与命令等价 RPC：`thread/compact/start`、`model/list`、`skills/list`、`review/start`、`turn/interrupt`。skills 可用 `$skill-name` 文本或结构化 item 调用，更适合长期原生集成。",
+      "files": [],
+      "evidence": "官方 App Server 方法清单含上述 RPC；skills 示例用 `{type:'skill',name,path}`，省略结构化 item 时模型仍尝试解析 `$skill-name`。本机 `codex app-server --help` 确认 0.144.1 支持 stdio/ws/unix transport、`generate-ts`、`generate-json-schema`。"
+    }
+  ],
+  "proposal": "方案 A（最小改动，不推荐单独采用）：composer 检测 `/` 开头输入，发送时跳过 viewer-context/attachments，ws-bridge 把纯命令作为 exact prompt 交给 backend。Claude `/compact` 与已发现 skill 可工作；但 fresh session 教学无法继续放在命令前，`/model` 不持久，Codex exec 无官方保证，失败模式是同一 UI 在两个 backend 上表现完全不同。\n\n方案 B（推荐 v0.1.11）：建立 AutoViral 自有命令注册表，条目含 `name/backend/kind(local|translate|passthrough)/args/availability/description`。新增 `src/server/chat-commands/types.ts`、`registry.ts`、`local.ts`；扩展 `src/server/chat-backends/types.ts` 加 `onCapabilities` 与受控 command adapter；`claude.ts` 从 init 捕获 `slash_commands/skills`，只有动态声明且通过安全策略的命令才可 exact passthrough；`codex.ts` 仅暴露已实现映射，skills 暂译为 `$skill-name args`（须标「实验性/假设」），其余返回 structured unsupported。`ws-bridge.ts` 新增 `{action:'command',name,args}`，与 `{action:'send'}` 分流，禁止附加 viewer context；`/model` 调 `setSessionModel`，`/new` 创建 AutoViral session，`/stop` 调 `killSession`，`/compact` Claude 透传、Codex 明确 unavailable。`src/server/routes/works.ts` 增加 `GET /api/works/:id/chat-commands?sessionId=`，并通过 WS 推送 capability 更新；不放入 `src/server/bridge/`（那是另一套 bridge）。前端新增 `web/src/features/studio/panels/Chat/CommandMenu.tsx` 及测试，扩展 `Composer.module.css`；`index.tsx` 输入首字符 `/` 时展示按 backend/session 过滤的 listbox，支持上下键/Tab/Enter/Esc；`useChatSocket.ts` 新增 `sendCommand()`，`types.ts` 增加 command/catalog/error 类型。Claude 动态列表在真实 session init 后缓存合并；不为打开菜单主动跑 discovery probe（SessionStart hooks 有副作用）。\n\n方案 C（战略上最原生，超出小版本低风险范围）：Claude 改为长驻 `-p --input-format stream-json --output-format stream-json`，Codex `exec` 改为长驻 App Server；session 生命周期分别由 duplex input 与 `thread/start/resume + turn/start` 管理，命令直接映射 provider RPC。优点是命令列表/skills/模型/compact/interrupt 都有结构化协议且无需每轮 spawn；缺点是要重写 `src/server/chat-backends/*` 的进程生命周期、并发/取消、错误恢复和事件映射，回归面显著大于 v0.1.11。推荐先交付 B，并让 B 的 backend adapter 接口能无 UI 改动地迁移到 C。",
+  "presetTests": [
+    "src/server/chat-commands/registry.test.ts：同名命令按 backend/session 过滤；local/translate/passthrough 分类稳定；未知命令返回 unsupported_command，绝不降级成普通模型 prompt。",
+    "src/server/chat-backends/claude.test.ts：解析 system.init 时除 sessionId 外还捕获 slash_commands、skills；重复 init 更新 catalog；名称去重。",
+    "src/server/sessions/__tests__/ws-bridge-slash-command.test.ts：结构化 Claude /compact spawn 的 positional prompt 必须精确等于 /compact，不得出现 <viewer-context>、附件信封、'用户消息：' 或增量教学前缀。",
+    "ws-bridge-slash-command.test.ts：命令必须带 active sessionId；busy session 的 command 遵守 interrupt/dedup 策略；provider 错误广播 command_error 并恢复 idle。",
+    "ws-bridge-slash-command.test.ts：/model haiku 调 session-scoped model setter，下一次普通 Claude spawn 含 --model haiku；不得只执行一次 provider /model。",
+    "src/server/chat-commands/codex.test.ts：当前 exec adapter 对 /compact、/model 等未映射 TUI 命令明确拒绝；不得把 slash 原样当 Codex prompt。",
+    "src/server/routes/works.chat-commands.test.ts：catalog endpoint 校验 workId/sessionId，返回 local + 当前 backend 命令，切换 session/backend 后不串 catalog。",
+    "web/src/features/studio/panels/Chat/CommandMenu.test.tsx：输入首字符 / 渲染 autocomplete；/co 过滤；ArrowUp/Down、Tab/Enter、Esc、ARIA listbox/option 均正确。",
+    "CommandMenu.test.tsx：句中 /、Markdown 路径、URL 不打开菜单；IME composing 时 Enter 不误执行。",
+    "web/src/features/chat/__tests__/useChatSocketCommand.test.ts：sendCommand 发送 {action:'command'}，不调用 viewer-context builder、不生成附件 envelope，也不走普通 optimistic user echo。",
+    "web/src/features/studio/panels/Chat/sendGuard.test.tsx：断线时 provider command 禁用；纯 local command 是否允许离线按注册表声明；双击或重复 ⌘↵ 仍只执行一次。",
+    "CommandMenu.test.tsx：Claude init 动态加入自定义 skill 后菜单实时更新；backend 切到 Codex 后 Claude-only 命令消失；unsupported/error 有可见且可恢复的 UI。"
+  ],
+  "risks": [
+    "不能盲目展示 Claude init 中的全部命令：列表可能包含 /logout、/heapdump、/delete 等外部或破坏性动作；本地 init 实际返回大量内建和插件命令，注册表需要安全分类、参数校验和 deny policy。",
+    "主动启动 CLI 只为枚举命令会执行 SessionStart hooks。调研中的后台 Claude 实验曾短暂触发 hook 修改 CLAUDE.md，随后已精确回退（git branch --show-current 输出 main，git status --short 无输出）；生产 autocomplete 应复用真实 turn 的 init 或隔离 probe，不能在项目 cwd 静默探测。",
+    "Claude /compact 只有已有足够会话历史时才成功；本地新会话返回 'Not enough messages to compact.'，空 session 应禁用或解释。",
+    "Claude 命令能力随版本、平台、套餐与插件变化，官方明确 availability 依赖环境，硬编码完整列表会漂移，必须以 init 动态集合为 provider 真值。",
+    "Codex exec 的 raw slash 行为未能本地验证且官方没有保证；若直接采用方案 A，最危险的失败模式是把 /compact 当普通模型指令并消耗一次 turn。",
+    "命令是否写入 chat.jsonl 会影响 resume、审计和 UI：若仍记录为普通 user block，provider command 可能污染模型历史；若完全不记录，用户看不到刚执行了什么，需要独立 command/system block 类型。",
+    "迁移 Codex App Server 会改变当前「每轮进程结束即 idle」假设；ws-bridge.ts:1818-1874 的 exit 驱动逻辑、stale resume fallback 和断线 grace 都需重新设计。"
+  ],
+  "openQuestions": [
+    "v0.1.11 是否只支持安全核心集（建议 /compact、/model、/new、/stop、自定义 skill），还是目标为暴露 provider init 中的全部命令？",
+    "/model 的产品语义应是修改 AutoViral 当前 session 并持久化，还是只修改一次 provider invocation？推荐前者；若需重启后保留，还要给 SessionRecord 增加 model 字段。",
+    "provider command 在空白新 session 上如何处理：禁用直到第一次普通对话，还是允许 Claude 用 --append-system-prompt 承载 AutoViral 教学而保持 command 位于 prompt 首位？",
+    "Codex skills 在 v0.1.11 是否接受 $skill-name 文本翻译作为实验能力，还是等 App Server 的结构化 skill item 后再宣称原生支持？",
+    "命令执行记录应展示为用户气泡、独立 system/command chip，还是仅 toast；这会决定 ChatBlock schema 和历史迁移方案。",
+    "是否为 Codex App Server 迁移单列后续 PRD slice；当前调研已确认接口可行，但受沙箱限制未完成本机 app-server 端到端协议实验。"
+  ],
+  "codexJobOk": true
+}

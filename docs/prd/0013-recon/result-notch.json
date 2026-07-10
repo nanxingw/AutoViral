@@ -1,0 +1,120 @@
+{
+  "codexJobOk": true,
+  "dimension": "去掉 Studio 作品页顶部的全局导航「刘海」，让创作页面全屏固定不滚动",
+  "summary": "根因是 App 在所有子路由前无条件挂载 TopNav，而 Studio 又独立占用 100vh，两者叠加超过视口。纵向滚动发生在 window/document 外层，不是 Studio 的 PanelGroup；body 仅禁止横向溢出。Studio 各主要面板已经具备 min-height:0 与 overflow:hidden/auto，改成视口锁定后可继续由面板内部滚动。建议先仅对 Studio 隐藏 TopNav，并把全局设置宿主与快捷键从 TopNav 解耦。若灵感、数据以及 Editor 最终都退役，则应整体删除 TopNav，将应用控件迁到 Works 页头和 Studio 的现有 Tweaks 入口。",
+  "findings": [
+    {
+      "topic": "全局导航的实现与挂载",
+      "detail": "路由全部嵌套在 App 下；App 在 Outlet 前无条件渲染 TopNav。TopNav 读取 pathname 仅用于 tab 高亮，没有 Studio 隐藏分支；Studio 页面及 features/studio 内也没有控制全局导航的逻辑。",
+      "files": [
+        "web/src/main.tsx",
+        "web/src/App.tsx",
+        "web/src/ui/TopNav.tsx",
+        "web/src/pages/Studio.tsx"
+      ],
+      "evidence": "web/src/main.tsx:43-50：`<Route element={<App />}>` 下包含 `studio/:workId`；web/src/App.tsx:12-18：`const location = useLocation()` 后直接渲染 `<TopNav />`、`<Outlet />`；web/src/ui/TopNav.tsx:35-44：pathname 只进入 `active()`；web/src/ui/TopNav.tsx:59-96：始终返回 header 与 SettingsPanel；web/src/pages/Studio.tsx:267-280：Studio 直接返回 `.studio-shell`，无 TopNav 条件。截图 img1-notch-studio.png 显示全局控件浮在 Studio 顶部区域，img2-scrolled-double-header.png 显示滚动后两条 header 分成上下两行。"
+    },
+    {
+      "topic": "Studio 可滚动的具体原因与滚动责任",
+      "detail": "Studio 根容器固定为 100vh，且 padding 已由 border-box 包含；它前面还有处于正常文档流中的 sticky TopNav。TopNav 约贡献 62px（12px 上边距、28px logo、上下各 10px padding、2px border），所以文档高度约为 100vh + 62px。Studio 根没有 overflow:hidden，而 body 只设置 overflow-x:hidden，纵向溢出因此交给 window/document 的滚动元素，而不是 Studio 内部容器。源码没有给 TopNav 预留 padding-top；问题是两个兄弟节点高度直接相加。",
+      "files": [
+        "web/src/pages/Studio.tsx",
+        "web/src/ui/TopNav.module.css",
+        "web/src/ui/Glass.module.css",
+        "web/src/styles/globals.css",
+        "web/index.html"
+      ],
+      "evidence": "web/src/pages/Studio.tsx:268-278：`.studio-shell` 为 `height: \"100vh\"`、`padding: 12`、`boxSizing: \"border-box\"`，但无 overflow；web/src/ui/TopNav.module.css:1-7：`.outer { position: sticky; top:12px; margin:12px auto 0; }`；同文件:28-32、40-43：inner 上下 padding 10px、logo 高 28px；web/src/ui/Glass.module.css:1-6：另有 1px border；web/src/styles/globals.css:3-18：body 只有 `min-height:100vh` 和 `overflow-x:hidden`，没有 overflow-y 锁定；web/index.html:1、31-33：标准模式页面的 body 内只有 `#root`。命令 rg -n '(100vh|overflow)' 输出命中 Studio.tsx:274 height: \"100vh\" 与 globals.css:17 overflow-x: hidden，未发现 Studio 顶部让位规则。"
+    },
+    {
+      "topic": "内部面板已有正确的滚动边界",
+      "detail": "外层锁定视口后无需让整个 Studio 滚动；现有聊天、素材、检查器和时间线已经分别拥有内部 overflow 容器。应保留 shell→PanelGroup 的 min-height:0/overflow:hidden 链，并只在内容层使用 overflow:auto。",
+      "files": [
+        "web/src/pages/Studio.tsx",
+        "web/src/features/studio/panels/Timeline/index.tsx",
+        "web/src/features/studio/panels/Chat/index.tsx",
+        "web/src/features/studio/panels/AssetSidebar/LibraryTab.tsx",
+        "web/src/features/studio/panels/Inspector/InspectorTab.tsx",
+        "web/src/features/studio/panels/RightPane/index.module.css"
+      ],
+      "evidence": "web/src/pages/Studio.tsx:296-312、330-358、382-385：PanelGroup 包装层使用 minHeight:0，各区域使用 height:\"100%\", overflow:\"hidden\"；Timeline/index.tsx:103-106：内容层 flex:1、minHeight:0、overflow:\"auto\"；Chat/index.tsx:608、709-719：根层 hidden，消息层 overflowY:auto；LibraryTab.tsx:299-300：素材网格 overflowY:auto；InspectorTab.tsx:13-21：检查器自身 overflow:auto；RightPane/index.module.css:64-68、78-90：surface 使用 min-height:0 与 overflow:hidden。"
+    },
+    {
+      "topic": "语言、主题和全局设置的当前归属",
+      "detail": "LocaleToggle、ThemeToggle、全局设置按钮、SettingsPanel 宿主以及 Cmd/Ctrl+, 快捷键都耦合在 TopNav。若直接不渲染 TopNav，Studio 会失去语言和全局设置入口及快捷键；但 Studio 的工具栏齿轮已经打开 TweaksPanel，其中已有明暗主题切换，因此建议在该面板增加语言与“打开全局设置”，避免继续挤压工具栏。",
+      "files": [
+        "web/src/ui/TopNav.tsx",
+        "web/src/features/studio/panels/TopBar.tsx",
+        "web/src/pages/Studio.tsx",
+        "web/src/features/studio/panels/Tweaks/index.tsx",
+        "web/src/features/studio/panels/Tweaks/ThemeSection.tsx",
+        "web/src/stores/settings.ts"
+      ],
+      "evidence": "web/src/ui/TopNav.tsx:46-57：TopNav 注册 Cmd/Ctrl+,；82-96：渲染 LocaleToggle、ThemeToggle、全局设置按钮及 SettingsPanel；web/src/pages/Studio.tsx:114、280-287、393-397：Studio 本地 settingsOpen 控制 TopBar 齿轮与 TweaksPanel；TopBar.tsx:357-387：现有 settings-toggle；Tweaks/index.tsx:16-32、62-64：固定浮层内挂 ThemeSection；ThemeSection.tsx:23-37：已有 dark/light 控件；settings.ts:12-16：全局面板通过独立 Zustand store 打开，适合从多个页面调用。"
+    },
+    {
+      "topic": "TopNav 整体退役的评估",
+      "detail": "若顶层最终只剩 Works 列表和 Studio，三 tab 导航不再提供信息架构价值，建议整体退役：Works 页头承接品牌、语言、主题和全局设置；Studio 通过自己的返回按钮与 TweaksPanel 承接这些能力。不过当前源码仍注册 Explore、Analytics、Editor 和 NotFound，因此整体删除必须等待另一个纬度确认 Editor 等路由的去留。",
+      "files": [
+        "web/src/ui/TopNav.tsx",
+        "web/src/main.tsx",
+        "web/src/pages/Works.tsx",
+        "web/src/features/studio/panels/TopBar.tsx",
+        "CONTEXT.md"
+      ],
+      "evidence": "web/src/ui/TopNav.tsx:29-33：TABS 仅为 Works、Explore、Analytics；web/src/main.tsx:44-50：当前仍注册 works、explore、analytics、studio、editor 和 catch-all；web/src/pages/Works.tsx:74-78：Works 目前从 <main className=\"page\"> 和 WorksHero 开始，没有自己的应用页头；TopBar.tsx:140-160：Studio 已有返回 Works 按钮；CONTEXT.md:17-20、37-42：领域模型仍定义 short-video 的 Studio 与 image-text 的 Editor。"
+    },
+    {
+      "topic": "既有测试的影响与缺口",
+      "detail": "Studio.layout.test 直接挂载 Studio，不经过 App，因此现有测试永远看不到全局 TopNav，也无法捕获本缺陷；其 Panel 与 ResizeHandle 断言不受修复影响。App.test 目前只验证首页存在 TopNav，需要扩展为按路由断言。若主题继续放在 TweaksPanel，TopBar 的“没有直接主题按钮”行为可保留，但注释不应再写 delegated to global TopNav；Studio.integration 已验证 TweaksPanel 能修改主题。若最终退役 TopNav，TopNav.test 与 navigation e2e 均需替换。",
+      "files": [
+        "web/src/pages/Studio.layout.test.tsx",
+        "web/src/App.test.tsx",
+        "web/src/ui/TopNav.test.tsx",
+        "web/src/features/studio/panels/TopBar.test.tsx",
+        "web/src/features/studio/Studio.integration.test.tsx",
+        "e2e/studio.spec.ts",
+        "e2e/navigation.spec.ts"
+      ],
+      "evidence": "Studio.layout.test.tsx:62-74：测试路由直接以 <Studio /> 为 element；77-128：仅测 panels、handles、尺寸约束；App.test.tsx:7-25：只有首页 renders TopNav；TopNav.test.tsx:27-59：测试 tab、设置与快捷键；TopBar.test.tsx:56-63：明确断言不直接渲染 theme toggle；Studio.integration.test.tsx:124-131：通过 settings-toggle 打开 TweaksPanel 并切换主题；e2e/studio.spec.ts:3-20：尚无导航缺席或滚动断言；e2e/navigation.spec.ts:8、12 仍查找旧双语标签，而 messages.ts:99-107 已改成纯英文，属于实施时需一并清理的潜在既有测试漂移。"
+    },
+    {
+      "topic": "macOS Electron 的窗口拖拽风险",
+      "detail": "TopNav 当前还是 hiddenInset macOS 窗口唯一声明的拖拽区域。隐藏或删除它后必须让 Studio TopBar、未来 WorksHeader 接管 drag，并将其中按钮、链接、菜单标为 no-drag，否则桌面应用可能无法拖动窗口。",
+      "files": [
+        "desktop/main.ts",
+        "web/src/ui/TopNav.tsx",
+        "web/src/ui/TopNav.module.css"
+      ],
+      "evidence": "desktop/main.ts:394-418：darwin 设置 opts.titleBarStyle = \"hiddenInset\"；web/src/ui/TopNav.tsx:18-27：注释明确称 TopNav 是窗口唯一 draggable surface；TopNav.module.css:15-26：.macDrag .inner { -webkit-app-region: drag; }，brand/tabs/right 为 no-drag。"
+    }
+  ],
+  "proposal": "最小可交付方案：1）修改 web/src/App.tsx，用 matchPath('/studio/:workId/*', pathname) 仅在 Studio 路由不渲染 TopNav，其他路由保持现状；2）新增 web/src/features/settings/GlobalSettingsHost.tsx，常驻挂载 SettingsPanel 并统一处理 Cmd/Ctrl+,，修改 web/src/ui/TopNav.tsx 移除面板宿主和快捷键副作用，只保留按钮调用 store；3）修改 web/src/pages/Studio.tsx 并新增 web/src/pages/Studio.module.css，shell 使用 height:100vh; height:100dvh; min-height:0; overflow:hidden;，保留 padding、gap 与内部 PanelGroup 的 flex/min-height 链，禁止改成全局 body overflow:hidden；4）修改 web/src/features/studio/panels/TopBar.tsx 并新增相应 CSS Module，使空白工具栏区域在 macOS Electron 下为 drag、所有交互控件为 no-drag；5）新增 web/src/features/studio/panels/Tweaks/AppPreferencesSection.tsx 并接入 Tweaks/index.tsx，复用 LocaleToggle，保留现有 ThemeSection，并提供打开全局 SettingsPanel 的按钮；6）为 Studio 的 LoadErrorScreen 增加返回 Works 的可选动作，避免隐藏 TopNav 后加载失败页无退出入口；7）先改 App.test.tsx、Studio.layout.test.tsx、Tweaks/index.test.tsx、Studio.integration.test.tsx 与 e2e/studio.spec.ts，再写实现。条件性整体退役方案：待 Explore、Analytics、Editor 去留确认后，新增 web/src/features/works/WorksHeader.tsx 与 CSS Module 承接品牌、LocaleToggle、ThemeToggle、全局设置和 macOS drag；App 永久移除 TopNav；删除 TopNav.tsx/module/test，并重写 navigation e2e 为 WorksHeader→打开作品→Studio→返回 Works 的真实路径。",
+  "presetTests": [
+    "先行红测 web/src/App.test.tsx：在 /studio/w1 挂载 App 与占位 Outlet，断言不存在 role=navigation；在 / 与 /works 断言导航仍存在且 Works 链接可用。",
+    "先行红测 web/src/pages/Studio.layout.test.tsx：Studio shell 的计算样式为 overflow:hidden、视口高度规则生效，现有五个 Panel 与三个 ResizeHandle 仍完整渲染。",
+    "先行红测 e2e/studio.spec.ts：在 1440×900 与最小窗口 1024×680 打开 Studio，断言无全局 navigation，shell 的 top=0、bottom≈innerHeight，document.scrollingElement.scrollHeight <= clientHeight；执行 wheel 后 window.scrollY 仍为 0。",
+    "先行红测 e2e/studio.spec.ts：构造足量聊天、素材或时间线内容，滚动对应内部容器时其 scrollTop 改变，但 window.scrollY 始终为 0。",
+    "先行红测 web/src/features/settings/GlobalSettingsHost.test.tsx：即使 TopNav 不存在，Cmd/Ctrl+, 仍能打开全局设置，Escape 能关闭。",
+    "先行红测 web/src/features/studio/panels/Tweaks/index.test.tsx 与 Studio.integration.test.tsx：Studio 齿轮仍打开 Tweaks；语言切换写入 locale store；主题切换仍写入 theme store；全局设置按钮写入 settings store。",
+    "先行红测 e2e/works.spec.ts：Works 页面仍能使用语言、主题、全局设置与作品入口；若暂不退役 TopNav，同时验证 Works tab 可用。",
+    "先行红测桌面壳样式：模拟 window.autoviralDesktop.platform='darwin'，断言 Studio TopBar/未来 WorksHeader 为 drag，按钮和链接为 no-drag。",
+    "实现前运行上述定向测试并记录红态；实现后执行 npm run test:web，再按仓库 E2E 工作流运行相关 Playwright 用例，最后确认既有套件无回归。"
+  ],
+  "risks": [
+    "只条件隐藏 TopNav 而不迁移 SettingsPanel 宿主，会同时丢失全局设置抽屉和 Cmd/Ctrl+, 快捷键。",
+    "在 globals.css 全局设置 body overflow:hidden 会破坏需要正常文档滚动的 Works、Explore、Analytics 页面；应锁 Studio shell，不锁全站。",
+    "仅写 100dvh 可能影响旧 WebView；应先声明 100vh 作为 fallback，再声明 100dvh。",
+    "移除 TopNav 会移除 macOS Electron 唯一拖拽区，必须同步迁移 app-region。",
+    "直接把三个全局控件横排进 Studio TopBar 会加剧现有 overflow:hidden 下的小窗口截断；复用 TweaksPanel 更稳妥。",
+    "Studio 的 LoadErrorScreen 当前没有返回入口；路由级隐藏 TopNav 后必须补恢复路径。",
+    "TopNav 整体退役若未先确认 Editor 路由，会让 image-text 编辑页失去导航与全局控件。",
+    "现有 navigation e2e 使用旧双语标签，实施时可能先暴露与本改动无关的既有测试漂移。"
+  ],
+  "openQuestions": [
+    "另一个调研纬度是否只删除 Explore、Analytics，还是连当前 /editor/:workId 的 image-text Editor 也退役？这决定 TopNav 能否整体删除。",
+    "Studio 的齿轮是否允许从“工作台偏好”扩展为同时容纳应用级语言、主题、全局设置，还是产品希望保留两个视觉上可区分的设置入口？",
+    "Studio 加载失败页是否也必须占满 100dvh，并显示精简 Studio 顶栏，还是只需增加返回 Works 按钮？",
+    "全局 TopNav 退役后，NotFound 与 ErrorBoundary 是否接受仅依赖其现有返回首页按钮，还是仍需要常驻应用页头？"
+  ]
+}

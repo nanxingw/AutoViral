@@ -1,0 +1,221 @@
+{
+  "codexJobOk": true,
+  "dimension": "删除「灵感」（Explore）与「数据」（Analytics）页面及定时任务的完整影响面",
+  "summary": "影响面不止两个页面：还包括导航、404建议、Settings、双语词条、Works静态InsightRibbon、Chat的coach模式、CLI/Bridge trends入口及多组服务端深模块。服务端实际存在research-scheduler与analytics-collector两套独立cron，源码组合根使用Hono而非Fastify。建议按用户\"简化产品、聚焦内容生产\"的意图彻底删除页面专属API、coach/trends/analytics域、两个后台采集器及无效的autoviral trends CLI，而不是只隐藏UI。通用topicHint、作品内research目录和cost-ledger均直接服务内容生产，必须保留。Config没有Zod strict/passthrough校验，旧字段不会导致解析报错，但必须显式过滤，防止经/api/config回显或重新保存后复活。本轮全程只读，最终git status --short无文件输出；未运行可能产生缓存或临时文件的测试。",
+  "findings": [
+    {
+      "topic": "前端路由、导航与直链",
+      "detail": "Explore/Analytics在main.tsx静态导入并注册为一级路由，TopNav同时硬编码两个tab；删除后NotFound的已知路由和对应测试也必须更新。建议仅对精确旧路径/explore、/analytics使用replace redirect到作品首页/，其余未知路径继续404。",
+      "files": [
+        "web/src/main.tsx",
+        "web/src/ui/TopNav.tsx",
+        "web/src/ui/TopNav.test.tsx",
+        "web/src/pages/NotFound.tsx",
+        "web/src/pages/NotFound.test.tsx",
+        "web/src/App.tsx"
+      ],
+      "evidence": "web/src/main.tsx:8-9 import Explore/Analytics；:44-50注册path=explore/analytics与catch-all；web/src/ui/TopNav.tsx:29-33 TABS含/explore、/analytics；web/src/pages/NotFound.tsx:30-33 KNOWN_ROUTES仍含explore/analytics"
+    },
+    {
+      "topic": "Explore前端完整删除面",
+      "detail": "Explore页面同时承载趋势读取、手动采集、角度brief、持久coach及趋势→创建作品，因此其features、trends/angleBriefs queries和测试可整域删除；coach模式还反向侵入通用ChatPanel/useChatSocket，不能只粗删features/explore。",
+      "files": [
+        "web/src/pages/Explore.tsx",
+        "web/src/pages/Explore.buildTopicHint.test.ts",
+        "web/src/features/explore/",
+        "web/src/queries/trends.ts",
+        "web/src/queries/trends.test.tsx",
+        "web/src/queries/trends.urgency.test.ts",
+        "web/src/queries/angleBriefs.ts",
+        "web/src/features/studio/panels/Chat/index.tsx",
+        "web/src/features/chat/useChatSocket.ts",
+        "web/src/features/chat/__tests__/useChatSocketSendOverride.test.ts"
+      ],
+      "evidence": "web/src/pages/Explore.tsx:4-22导入整个explore feature/query/coach栈；:104-134 POST /api/trends/refresh；:136-166构造workless coach；:239挂载ChatPanel。web/src/features/chat/useChatSocket.ts:86-94 sendOverride明写用于POST /api/coach/message"
+    },
+    {
+      "topic": "Analytics前端完整删除面",
+      "detail": "Analytics页面消费creator snapshot、agent insights、Memory profile，并挂载KPI、作品表现、内容支柱、成长轨迹、诚实矩阵及同步按钮；features/analytics、三个专属query/lib族和测试均可删除。cost query不属于该域。",
+      "files": [
+        "web/src/pages/Analytics.tsx",
+        "web/src/pages/Analytics.audienceStatus.test.ts",
+        "web/src/features/analytics/",
+        "web/src/queries/analytics.ts",
+        "web/src/queries/analytics-insights.ts",
+        "web/src/queries/analytics-insights.test.tsx",
+        "web/src/lib/benchmark.ts",
+        "web/src/lib/benchmark-data.json",
+        "web/src/lib/benchmark.test.ts",
+        "web/src/lib/creator-analytics.ts",
+        "web/src/lib/creator-analytics.test.ts",
+        "web/src/lib/content-pillars.ts",
+        "web/src/lib/content-pillars.test.ts",
+        "web/src/lib/platform-honesty.ts",
+        "web/src/lib/platform-honesty.test.ts"
+      ],
+      "evidence": "web/src/pages/Analytics.tsx:1-16导入analytics queries与展示组件；web/src/queries/analytics.ts:122-130请求/api/analytics/creator；web/src/queries/analytics-insights.ts:43-52请求/api/analytics/insights"
+    },
+    {
+      "topic": "Settings、i18n与测试夹具",
+      "detail": "设置抽屉仍暴露research cron与Douyin Analytics采集，删除页面后必须同时去掉字段、交互、样式、focus section、MSW fixture和服务端错误词条；否则用户仍会看到已退役功能。",
+      "files": [
+        "web/src/features/settings/SettingsPanel.tsx",
+        "web/src/features/settings/SettingsPanel.module.css",
+        "web/src/features/settings/SettingsPanel.test.tsx",
+        "web/src/stores/settings.ts",
+        "web/src/queries/config.ts",
+        "web/src/test/msw.ts",
+        "web/src/i18n/messages.ts",
+        "web/src/i18n/serverError.ts"
+      ],
+      "evidence": "web/src/features/settings/SettingsPanel.tsx:11-17把douyinUrl/researchEnabled/researchCron列为可编辑；:190-227是research开关与cron；:229-273是Douyin URL/cookie/刷新/lastCollected"
+    },
+    {
+      "topic": "topicHint连坐边界",
+      "detail": "只删除Explore专属buildTrendTopicHint和coach-idea解析；通用topicHint必须保留，因为Works新建卡、work-store、session prompt、Memory context与CLI手册均独立消费它。",
+      "files": [
+        "web/src/features/works/NewWorkCard.tsx",
+        "web/src/features/works/NewWorkCard.test.tsx",
+        "web/src/queries/works.ts",
+        "src/domain/work-store.ts",
+        "src/server/routes/works.ts",
+        "src/ws-bridge.ts",
+        "skills/autoviral/manual/_shared/03-cli-reference.md"
+      ],
+      "evidence": "web/src/features/works/NewWorkCard.tsx:51-74 topicHint=pendingHint.trim()||undefined; src/domain/work-store.ts:146-166持久化topicHint；src/server/routes/works.ts:91-122接收保存，:515-522注入agent prompt；src/ws-bridge.ts:737-739用work.topicHint??work.title构造Memory context；Git: 6cec4bc feat(explore/works): wire trend→create flow + reachable topicHint (closes #65)"
+    },
+    {
+      "topic": "Works首页InsightRibbon（Issue #76）",
+      "detail": "InsightRibbon不调用Analytics API，但展示的是明确标注为静态、尚无analytics agent产出的占位洞察；为避免删除数据页后首页仍残留同类鸡肋，应连同Works末尾区块、组件、CSS、测试和14个双语词条删除。",
+      "files": [
+        "web/src/pages/Works.tsx",
+        "web/src/features/works/InsightRibbon.tsx",
+        "web/src/features/works/InsightRibbon.module.css",
+        "web/src/features/works/InsightRibbon.test.tsx",
+        "web/src/i18n/messages.ts"
+      ],
+      "evidence": "web/src/pages/Works.tsx:29-35构造placeholderInsights，:259-268无条件渲染InsightRibbon；web/src/features/works/InsightRibbon.tsx:12-20、63-89明确是SAMPLE与disabled CTA；web/src/i18n/messages.ts:839-850 'Static placeholder cards — the analytics agent isn't producing...'。Git: f840e6a (closes #76)"
+    },
+    {
+      "topic": "服务端API与两套scheduler",
+      "detail": "实际服务端组合根是Hono；除research-scheduler外，analytics-collector也每N分钟注册cron。建议删除trends、analytics、coach全部路由及两个后台服务，否则仍保留无UI的抓取、Claude session、Python venv、磁盘缓存和维护成本。",
+      "files": [
+        "src/server/routes/trends.ts",
+        "src/server/routes/analytics.ts",
+        "src/server/routes/coach.ts",
+        "src/research-scheduler.ts",
+        "src/research-scheduler.test.ts",
+        "src/server/index.ts",
+        "src/server/api.ts",
+        "src/server/routes/_shared.ts",
+        "src/server/trends-write.ts",
+        "src/domain/analytics-collector.ts",
+        "src/domain/collector-parse.ts",
+        "src/domain/generate-insights.ts",
+        "src/domain/insight-guardrail.ts",
+        "src/domain/coach-context.ts",
+        "src/domain/coach-session.ts",
+        "src/domain/angle-briefs.ts",
+        "src/trends/",
+        "python/collector/collect.py"
+      ],
+      "evidence": "src/server/index.ts:1-2导入Hono；src/server/api.ts:22-26、41-49 mount analytics/trends/coach routers。src/research-scheduler.ts:21-42调cron.schedule；src/domain/analytics-collector.ts:200-224以collectInterval构造另一条cron；src/server/index.ts:186-190同时启动二者。Git: 99f4e6c (closes #64), 5 files changed, 229 insertions"
+    },
+    {
+      "topic": "WsBridge、CLI与第二套trends入口",
+      "detail": "页面REST之外还有ephemeral trends_ session、persisted coach_ session、Bridge /trends、context includeTrends及autoviral trends命令。建议一并删除；profileCommand与trendsCommand共文件，必须先拆出profile，不能粗删整个commands/trends.ts。",
+      "files": [
+        "src/ws-bridge.ts",
+        "src/context/trends.ts",
+        "src/context/index.ts",
+        "src/server/bridge/routes.ts",
+        "src/server/chat-backends/types.ts",
+        "src/server/chat-backends/claude.ts",
+        "src/server/chat-backends/codex.ts",
+        "cli/autoviral/src/commands/trends.ts",
+        "cli/autoviral/src/commands/profile.ts",
+        "cli/autoviral/src/cli.ts"
+      ],
+      "evidence": "src/ws-bridge.ts:563-581对trends_/coach_做持久化特判；src/server/bridge/routes.ts:643-650支持context trends=true，:749-763暴露/trends；cli/autoviral/src/commands/trends.ts:1-26定义trendsCommand，:29-32同文件定义profileCommand；src/context/trends.ts:18-22明说当前Source没有fetch，:63-68因此全部skip"
+    },
+    {
+      "topic": "Config向后兼容与Zod判断",
+      "detail": "Config没有Zod schema，也不存在strict/passthrough模式：yaml.load后直接对象展开，所以旧research/analytics字段不会令启动失败。问题在于redactedConfigResponse会展开整个对象，若只删TypeScript类型，旧字段仍可能经/api/config回显；应在加载归一化或响应出口显式剥离。",
+      "files": [
+        "src/infra/config.ts",
+        "src/server/routes/system.ts",
+        "src/server/routes/_shared.ts",
+        "src/server/__tests__/config.test.ts",
+        "src/server/__tests__/config-research-cron.test.ts",
+        "src/server/__tests__/config-redaction.test.ts",
+        "web/src/queries/config.ts"
+      ],
+      "evidence": "src/infra/config.ts:67-73 yaml.load(raw) as Partial<Config>与{...getDefaultConfig(),...parsed}；全仓rg 'ConfigSchema|strict\\(|passthrough\\(' 对config无命中；src/server/routes/_shared.ts:240-253先...configRest再加extras，因此运行时旧字段会穿透"
+    },
+    {
+      "topic": "cost-ledger保留判断",
+      "detail": "cost-ledger不是Analytics的数据源，而是Studio/Editor的per-work生成成本账本，覆盖视频、图片、BGM、TTS、翻译和agent turn；必须完整保留。",
+      "files": [
+        "src/server/cost-ledger/",
+        "src/server/routes/generate.ts",
+        "src/server/routes/audio.ts",
+        "src/server/routes/works.ts",
+        "web/src/queries/cost.ts",
+        "web/src/features/studio/panels/CostBadge.tsx"
+      ],
+      "evidence": "src/server/cost-ledger/index.ts:3-8定义per-work summary/record边界；src/server/routes/generate.ts:1341-1353记录视频费用，:1365-1377提供/api/works/:id/cost"
+    },
+    {
+      "topic": "依赖、文档与版本记录",
+      "detail": "彻底删除后node-cron、@types/node-cron、fast-xml-parser无生产消费者；Playwright仍用于E2E，桌面Remotion Chromium也必须保留，但面向趋势抓取的--heavy/first trends scrape文案和安装逻辑应删除。历史CHANGELOG/PRD不应改写，应新增0.1.11 Removed/Breaking，并以新ADR supersede ADR-010/011。",
+      "files": [
+        "package.json",
+        "src/infra/python-env.ts",
+        "src/infra/dep-doctor.ts",
+        "src/infra/collector-env.ts",
+        "cli/autoviral/src/deps-probe.ts",
+        "cli/autoviral/src/commands/doctor.ts",
+        "cli/autoviral/src/commands/setup.ts",
+        "skills/autoviral/manual/_shared/03-cli-reference.md",
+        "README.md",
+        "CONTEXT.md",
+        "CHANGELOG.md",
+        "docs/adr/ADR-010-grounded-coach-persona.md",
+        "docs/adr/ADR-011-douyin-collector-managed-venv-scrape.md",
+        "docs/adr/ADR-013-chat-multi-backend.md",
+        "docs/reference/how-it-works.md",
+        "docs/reference/experience/trend-research-via-cli.md"
+      ],
+      "evidence": "package.json:101、110、136分别声明fast-xml-parser、node-cron、@types/node-cron；README.md:227、242-243、259-290仍列analytics collector、两页、trends目录和两套配置"
+    }
+  ],
+  "proposal": "(a) 前端页面与路由：删除web/src/pages/Explore.tsx、Explore.buildTopicHint.test.ts、Analytics.tsx、Analytics.audienceStatus.test.ts；删除web/src/features/explore/下全部18个文件和web/src/features/analytics/下全部27个文件；删除web/src/queries/{trends.ts,trends.test.tsx,trends.urgency.test.ts,angleBriefs.ts,analytics.ts,analytics-insights.ts,analytics-insights.test.tsx}；删除web/src/lib/{benchmark.ts,benchmark-data.json,benchmark.test.ts,creator-analytics.ts,creator-analytics.test.ts,content-pillars.ts,content-pillars.test.ts,platform-honesty.ts,platform-honesty.test.ts}。从web/src/main.tsx移除页面import，建议抽web/src/routes.tsx后为精确/explore、/analytics注册<Navigate replace to=\"/\" />；未知路径继续NotFound。TopNav.tsx只保留Works tab；NotFound.tsx移除两个KNOWN_ROUTES；同步修改两者测试。删除Works的InsightRibbon.tsx/.module.css/.test.tsx及Works.tsx尾部inspiration区块。精简通用Chat：从features/studio/panels/Chat/index.tsx删除CoachConfig、coach prop、CoachIdeaActions与parser；从features/chat/useChatSocket.ts删除sendOverride，并删除其专属测试。Settings删除research/douyin两节、对应CSS、focus section、config query字段、MSW handlers和中英词条。\n(b) 服务端API与scheduler：建议彻底删除，而非只删UI。删除src/server/routes/{trends.ts,analytics.ts,coach.ts}、src/research-scheduler.ts/.test.ts、src/server/trends-write.ts、src/trends/全目录、src/domain/{analytics-collector.ts,collector-parse.ts,collector-parse.test.ts,generate-insights.ts,generate-insights.test.ts,insight-guardrail.ts,insight-guardrail.test.ts,coach-context.ts,coach-context.test.ts,coach-session.ts,coach-session.test.ts,angle-briefs.ts,angle-briefs.test.ts}、src/infra/collector-env.ts/.test.ts、python/collector/collect.py。从src/server/api.ts unmount三个router并移除researchTrends re-export；从src/server/index.ts移除两套启动调用；从_shared.ts删除runTrendScript/researchTrends；从ws-bridge.ts删除trends_/coach_会话、事件过滤、finalize/cleanup特例，并把系统提示中的autoviral trends改为通用按需Web research。删除/api/interests与config.interests（无生产消费者）。删除Bridge /trends、includeTrends与src/context/trends.ts；CLI将profileCommand移至新commands/profile.ts后删除trendsCommand。移除node-cron、@types/node-cron、fast-xml-parser和空的npm python/发布项；Playwright保留为开发/E2E依赖，删除仅服务趋势抓取的--heavy、Playwright cache doctor/setup逻辑，但保留scripts/ensure-chromium.mjs与桌面Remotion Chromium。保留topicHint、作品research/工件目录、通用research module和完整cost-ledger。\n(c) Config兼容：从Config类型/default与前端AppConfig删除research/analytics/interests；在loadConfig()对解析对象显式解构丢弃这三个退休键后再合并默认值，读取旧YAML不报错且启动时不主动重写磁盘；旧flat PUT字段researchEnabled/researchCron/douyinUrl静默忽略并返回200；redactedConfigResponse改为明确allowlist或确认退休字段已在归一化入口剥离，禁止旧nested字段回显。下一次用户正常保存配置时再自然写出精简结构，不做启动时破坏性迁移。\n(d) 文档与发布：更新README.md、CONTEXT.md的页面/领域/config/code-map；新增聚焦内容生产并退役discovery/analytics的ADR，将ADR-010/011标Superseded，清理ADR-013对coach/trends的现状描述；docs/reference/experience/trend-research-via-cli.md移入archive或加RETIRED banner，docs/reference/how-it-works.md加历史声明；删除或归档docs/design/screenshots/autoviral-{explore,analytics}.png；skill手册仅删除03-cli-reference.md的first trends scrape/--heavy文案，保留topicHint与作品research目录说明；旧PRD、旧版本CHANGELOG正文保持历史不改。在0.1.11 CHANGELOG新增Removed，建议措辞：Breaking in 0.x：移除Explore/Analytics UI、trends/analytics/coach API、autoviral trends及两套后台采集；旧配置仍可加载但相关字段被忽略；既有磁盘缓存不会自动删除。",
+  "presetTests": [
+    "新增前端路由矩阵：直接访问/explore、/analytics均以replace导航至/，历史URL不留在back stack；/explor、/anlytics与其他未知路径仍显示404，且不再建议已删除页面",
+    "修改web/src/ui/TopNav.test.tsx：只断言Works导航，页面中不存在Explore/Analytics link；修改NotFound.test.tsx删除原两条suggestion用例并增加已退役路由不建议",
+    "删除web专属测试：Explore.buildTopicHint.test.ts、Analytics.audienceStatus.test.ts、features/explore下全部测试、features/analytics下全部测试、queries/{trends.test.tsx,trends.urgency.test.ts,analytics-insights.test.tsx}、lib/{benchmark,creator-analytics,content-pillars,platform-honesty}.test.ts、InsightRibbon.test.tsx、useChatSocketSendOverride.test.ts；修改SettingsPanel.test.tsx和web/src/test/msw.ts去掉旧字段与endpoints",
+    "新增旧配置兼容测试：临时config.yaml含research:{enabled,schedule,platforms}、analytics:{douyinUrl,collectInterval,enabled}、interests时loadConfig()成功且port/model/secret可读；GET /api/config不回显退休字段；PUT旧flat字段返回200、不会创建scheduler或重新持久化这些字段",
+    "新增服务端removed-route矩阵：/api/trends/*、/api/analytics*、/api/coach*、/api/bridge/v1/trends全部404；同时保留/api/works/:id/cost、/api/works、Studio/Editor核心路由回归",
+    "删除server专属测试：research-scheduler.test.ts、config-research-cron.test.ts、api.trends.test.ts、api.cover.test.ts、research-trends-validation.test.ts、analytics-refresh.test.ts、api.analytics-insights.test.ts、api.coach.test.ts、api.coach-angle-briefs.test.ts、ws-bridge-coach.test.ts、collector/coach/angle/insight/trends全部单测；将现有server/__tests__/config.test.ts改写为退休字段兼容契约",
+    "修改共享测试：ws-bridge-chat-backend.test.ts删除trends_ NDJSON/event用例但保留普通work Chat backend；config-redaction.test.ts去掉analytics fixture并断言旧字段不回显；dep-doctor.test.ts、python-env.test.ts、cli/autoviral/test/doctor-setup.test.ts删除collector与first-trends-scrape/--heavy断言；新增autoviral trends为unknown command、profile仍可用",
+    "保留并要求继续通过：NewWorkCard.test.tsx的topicHint payload、work-store/topicHint、普通work session prompt、cost-ledger深模块及cost-ledger route、Studio/Editor CostBadge测试",
+    "完整门禁：依次运行npm run test:web、npm run test:server、npm run test:cli、npm run typecheck:web、npm run build:backend、npm run build:frontend；不得并发运行两套Vitest"
+  ],
+  "risks": [
+    "这是0.x minor的显式破坏性收缩：CLAUDE.md允许0.x minor出现破坏性行为，但CHANGELOG必须用Removed/Breaking列出页面、API、CLI和config字段，不能只写前端精简",
+    "假设：已有用户可能保存/explore、/analytics书签；精确replace redirect到/可减轻失效，但会失去旧页面语义。未知/拼错URL不应全部吞回首页",
+    "假设：可能存在仓库外脚本调用/api/trends*、/api/analytics*、/api/coach*或autoviral trends；彻底删除后将404/unknown command，必须在release note逐项列明",
+    "~/.autoviral/trends不会因删代码自动消失（src/server/routes/trends.ts:37,98,114,179）；建议升级时不自动删除用户数据，只在说明中标为inert并给可选手工清理命令",
+    "同类遗留还有~/.autoviral/analytics/douyin、~/.autoviral/collector-venv、~/.autoviral/works/coach_main；静默清理可能删掉用户历史，均应默认保留",
+    "WsBridge的trends_/coach_分支与普通Chat共处大文件，删除时容易误伤session persistence、checkpoint、cost和记账；必须靠普通work多会话与backend测试证明共享主链未回退",
+    "若只删除TypeScript Config字段而不做运行时过滤，旧YAML会被对象展开保留并可能经/api/config回显；这是兼容实现的主要陷阱",
+    "不要误删桌面Remotion Chromium：趋势抓取的Playwright cache与scripts/ensure-chromium.mjs为Remotion打包的Chrome Headless Shell是两条不同链路"
+  ],
+  "openQuestions": [
+    "精确/explore、/analytics redirect要永久保留，还是仅保留一个版本窗口？本方案建议至少在0.1.11保留，未知路径始终404",
+    "是否确认连同无UI的autoviral trends、Bridge /trends一并退役？本方案建议删除，因为src/context/trends.ts:18-22、63-68显示当前Source契约不匹配，现实调用会被全部skip",
+    "是否确认删除/api/interests与config.interests？源码证据显示删除trends/coach后无生产消费者；若未来仍要把用户赛道用于内容生产，应先定义新的明确消费方，而不是保留孤儿配置",
+    "遗留目录是否只给手工清理说明，还是提供显式autoviral cleanup --retired-data？本方案建议0.1.11不自动清理",
+    "API退役是否需要一版显式410响应？本方案为最大化简化建议直接unmount后404；若确有仓库外集成，再考虑短期410兼容层"
+  ]
+}

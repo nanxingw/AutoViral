@@ -1,0 +1,155 @@
+{
+  "dimension": "时间线（轨道面板）设计对标与实现 spec",
+  "summary": "现有实现已具备 filmstrip、真实波形、trim、ruler scrub、playhead、跨轨拖放和 snap guide，主要问题是视觉体系与高阶交互没有收口，并非从零建设。最明显差距是音频与视频同高、ruler 密度不随 zoom、自定义类型色过饱和、trim 手柄不可见、空轨无引导、选择模型仅支持单 clip。Pneuma 官方包与 DesignCombo 官方源码都采用紧凑分级行高、低饱和类型编码、zoom 自适应刻度和屏幕像素稳定的磁吸。建议 v0.1.11 采用 56/44/36px 分级行高、4px 间距、176px sticky header、28px ruler、5–300px/s zoom，并补齐空轨与框选。三个目标仓库均因 DNS 失败而未克隆成功；Pneuma 改用同一官方仓库发布的 3.13.3 包缓存，OpenCut 源码级覆盖仍是本次限制。",
+  "codexJobOk": true,
+  "findings": [
+    {
+      "topic": "调研证据边界与仓库状态",
+      "detail": "三个指定 shallow clone 均按上限尝试两次后停止，临时 benchmark 目录没有留下半成品；最终 AutoViral 工作树 clean。P3 指本机官方 npm 包缓存 /Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1。",
+      "files": [
+        "/private/tmp/claude-501/-Users-nanjiayan-Desktop-AutoViral-autoviral/783194b6-8dfc-4e56-a324-6e5f90c0a508/scratchpad/benchmark",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/package.json"
+      ],
+      "evidence": "三组命令均为 git clone --depth 1 --filter=blob:limit=500k ...，两次输出均含 fatal: unable to access ... Could not resolve host: github.com；最终 find .../benchmark -maxdepth 2 -type d 只输出 benchmark 根目录，git status --short 无输出。P3/package.json:2-11 摘录：name: pneuma-skills、version: 3.13.3，repository 指向 github.com/pandazki/pneuma-skills.git。"
+    },
+    {
+      "topic": "行高、间距与视觉密度",
+      "detail": "AutoViral 当前 video/audio 都是 56px，text 44px，类型层级不明显；4px LaneGapAdd 间距是可保留的好基础。Pneuma 为 48/32/32px、2px gap；DesignCombo 为 video 48、audio 36、caption 32px。建议在保持可读性的前提下收紧为 video 56、audio/overlay 44、text 36px，统一 4px gap。",
+      "files": [
+        "web/src/features/studio/panels/Timeline/index.tsx",
+        "web/src/features/studio/panels/Timeline/LaneGapAdd.module.css",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/timeline/Timeline.tsx",
+        "openvideodev/react-video-editor/src/components/editor/timeline/timeline.tsx"
+      ],
+      "evidence": "AutoViral index.tsx:121-123：const height = compact ? 44 : 56；LaneGapAdd.module.css:8-14：.gap { height: 4px }。P3/Timeline.tsx:46-63：RULER_H=24、VIDEO_H=48、AUDIO_H=32、SUBTITLE_H=32、GAP=2。DesignCombo 官方源码页的 sizesMap 给出 caption 32、audio 36、video/image/main 48。"
+    },
+    {
+      "topic": "Track header",
+      "detail": "现状 152px header 主要呈现图标、完整 label 和省略号；mute/hide/音量均埋在菜单。Pneuma 140px header 直接承载类型图标、名称、mute/lock/hide 与拖拽重排。考虑 AutoViral 当前 schema 没有 locked，建议扩到 176px，内联 mute、visibility 两个 24px 控件，省略号只保留增删、重命名、语言和音量等低频项。",
+      "files": [
+        "web/src/features/studio/panels/Timeline/TimelineTrackHeader.tsx",
+        "web/src/features/studio/panels/Timeline/TimelineTrackHeader.module.css",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/timeline/TrackLabel.tsx",
+        "src/shared/composition.ts"
+      ],
+      "evidence": "TimelineTrackHeader.module.css:5-19：header width:152px、sticky、surface 背景；TimelineTrackHeader.tsx:333-352 只渲染 menu button，:370-451 才在菜单内提供 mute/hide。P3/TrackLabel.tsx:18、44-70、139-213：LABEL_W=140，22×22 toggle，类型图标、名称、mute/lock/hide 同行。src/shared/composition.ts:408-409 只有 muted、hidden，未见 locked，因此新增锁定会超出纯前端范围。"
+    },
+    {
+      "topic": "Clip 外观、类型配色与状态",
+      "detail": "现状 clip 已有 6px 圆角、1px 边框和 selected glow，但没有普通 hover 状态；audio 使用高饱和紫色、overlay 使用亮青色，与 editorial·cool 的低饱和方向冲突。Pneuma 使用中性 surface 作为 clip 主体，只让类型色进入图标、波形与细边，选中统一回到 accent。建议建立 timeline 专用语义 token，并补齐 normal/hover/selected/dragging/focus-visible 五态。",
+      "files": [
+        "web/src/features/studio/panels/Timeline/Clip.tsx",
+        "web/src/features/studio/panels/Timeline/index.tsx",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/theme/tokens.ts",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/timeline/VideoTrack.tsx"
+      ],
+      "evidence": "Clip.tsx:187-201 使用 #c084fc、#7dd3fc；:204-225 仅 selected 改 accent 边框与 glow；命令 rg onMouseEnter|onPointerEnter|:hover Clip.tsx 输出 NO_MATCH。P3/theme/tokens.ts:1-8 明示 layer colors intentionally desaturated，:40-48 定义低饱和 video/audio/subtitle 色；P3/VideoTrack.tsx:160-180 为正常 surface2 + borderWeak、选中 surface4 + accentBorder。"
+    },
+    {
+      "topic": "视频缩略图与音频波形",
+      "detail": "AutoViral 的媒体可视化基础已经接近对标：filmstrip 缓存固定 0.5s、渲染密度随 zoom 调整；波形优先读取服务端 peaks.json，并以每秒 32 bucket 的密度 fallback 解码。视觉问题主要是 filmstrip 仅 0.55 opacity、波形和 clip 填充层级偏平。建议保留数据链路，只调整缩略图密度映射、透明度、标签渐变和约 3px/峰值条的视觉采样。",
+      "files": [
+        "web/src/features/studio/panels/Timeline/Filmstrip.tsx",
+        "web/src/features/studio/panels/Timeline/WaveformBars.tsx",
+        "web/src/features/studio/panels/Timeline/PeaksSvg.tsx",
+        "web/src/features/studio/hooks/useWaveform.ts",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/timeline/AudioTrack.tsx"
+      ],
+      "evidence": "Filmstrip.tsx:13、30-55：0.5s cache 且 renderStep=Math.max(0.5,60/pxPerSecond)；:78-109 为连续 cover 缩略图，但 opacity 0.55。useWaveform.ts:28-49 为 32 buckets/s、128–8192 clamp，:58-102 优先 peaks.json。P3/AudioTrack.tsx:72-89 按 baseWidth/3 计算 bars，:290-300 通过 inPoint 偏移保证 trim 时波形保持 source-time 锚定。"
+    },
+    {
+      "topic": "字幕 clip 与空素材状态",
+      "detail": "字幕现状是单层灰底文字块，缺少类型层级；A2 空轨完全空白。建议字幕使用中性 surface、2px sage-gray 类型轨、18px CC mono badge 和 11px 单行文本；空轨显示 sticky、低对比虚线提示，而不是留白。",
+      "files": [
+        "web/src/features/studio/panels/Timeline/Clip.tsx",
+        "web/src/features/studio/panels/Timeline/Track.tsx",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/timeline/SubtitleTrack.tsx",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/skill/references/storyboard-workflow.md"
+      ],
+      "evidence": "Clip.tsx:193-196：text 仅为 var(--glass-hi)、var(--glass-border)；:253-268 只显示裁切后的文本。Track.tsx:302-356 只 map filmstrip/waveform/clips，没有 empty branch；命令搜索输出 NO_MATCH: Timeline 目录无 empty-track 实现。P3/SubtitleTrack.tsx:96-125 为 28px 高、8px padding、11px ellipsis；P3/storyboard-workflow.md:3-9、53-54 还以 sketch/anchor/real clip 和 dashed 70% opacity 表达渐进素材状态。"
+    },
+    {
+      "topic": "Ruler 刻度体系",
+      "detail": "AutoViral 的 tick step 只看总时长，不看 zoom，且所有 tick 都是带标签的主刻度，因此截图中只剩 0:00、0:10。Pneuma 已按 pixels-per-second 切换 1/2/5/10s，但仍没有次刻度；DesignCombo 更完整地按最小标签间距选择 0.1–300s 主间隔，再细分次刻度并只绘制 viewport。建议采用 DesignCombo 的主次刻度模型。",
+      "files": [
+        "web/src/features/studio/panels/Timeline/Ruler.tsx",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/timeline/TimeRuler.tsx",
+        "openvideodev/react-video-editor/src/components/editor/timeline/ruler.tsx"
+      ],
+      "evidence": "Ruler.tsx:29-31：step = duration > 60 ? 10 : duration > 20 ? 4 : 2；:89-107 每个 tick 都画全高 border 与标签。P3/TimeRuler.tsx:17-21 根据 pps 选 1/2/5/10s，:31-49 只计算可见区。DesignCombo 官方源码设置 minTextSpacing=60、候选 [0.1,0.5,1,2,5,10,15,30,60,120,300]，并在次刻度不足 6px 时折叠。"
+    },
+    {
+      "topic": "Playhead 与 scrub",
+      "detail": "现有 playhead 已可拖动并有 14px 把手，但视觉为 2px 实线，拖动时没有时间 tooltip。Pneuma 使用 1px 穿透线、12×16px 下尖把手和 mono 时间提示。建议保留整个 Preview 画布实时 seek 作为 scrub preview，同时在把手上方补 mm:ss.ff 玻璃 tooltip，避免再渲染重复缩略图。",
+      "files": [
+        "web/src/features/studio/panels/Timeline/Playhead.tsx",
+        "web/src/features/studio/panels/Timeline/Ruler.tsx",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/timeline/Playhead.tsx"
+      ],
+      "evidence": "AutoViral Playhead.tsx:75-109：2px line、14×14 handle，无 tooltip 分支；Ruler.tsx:43-54 已支持 pointer capture 连续 scrub。P3/Playhead.tsx:117-151：1px visual line、12×16 SVG handle，线 pointer-events none；:153-176 拖动时显示 numeric time tooltip。"
+    },
+    {
+      "topic": "Zoom、snap 与 trim",
+      "detail": "现状 zoom 只有 0.4–3.0 倍按钮；snap guide 已存在，但 trim 只有不可见的 8px hit area，缺少 source ghost 与时间反馈。Pneuma 提供 5–300px/s、1.3 倍步长、自动 fit、普通 wheel 平移、Ctrl/Command+wheel zoom；snap 阈值固定为屏幕 5px，并在 trim 时展示完整 source 虚线边界。建议沿用这些交互，但 zoom 围绕鼠标所在时间而非 viewport 中心。",
+      "files": [
+        "web/src/features/studio/panels/Timeline/index.tsx",
+        "web/src/features/studio/panels/Timeline/Clip.tsx",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/timeline/hooks/useTimelineZoom.ts",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/timeline/hooks/useTrackDragEngine.ts",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/timeline/VideoTrack.tsx"
+      ],
+      "evidence": "index.tsx:31-32、75-96：zoom 初值 1.2、范围 0.4–3、步长 0.2；命令搜索无 wheel handler。index.tsx:197-211 已有全局 snap-line。Clip.tsx:276-300 两侧 8px resize handle 无可见填充。P3/useTimelineZoom.ts:32-34、121-163、184-202 为 5–300px/s、1.3 步长、center anchoring 和 wheel；P3/useTrackDragEngine.ts:25、89-103 使用 SNAP_PX/pps；P3/VideoTrack.tsx:447-499 trim 时画完整 source dashed ghost。"
+    },
+    {
+      "topic": "多选与框选",
+      "detail": "AutoViral store 的 selection 是单一 string，Clip 直接比较并覆盖选择，Timeline 目录没有 Shift/Command modifier 或 marquee。Pneuma 平面时间线也只取 selection.ids 的首项；OpenCut v0.3.0 已把多选移动、共同 resize、Shift/Ctrl 框选追加和选中轨道高亮作为正式能力。建议新增 timelineSelection，同时保留原 selection 作为 Inspector primary，降低迁移风险。",
+      "files": [
+        "web/src/features/studio/store.ts",
+        "web/src/features/studio/panels/Timeline/Clip.tsx",
+        "/Users/nanjiayan/.bun/install/cache/pneuma-skills@3.13.3@@@1/modes/clipcraft/viewer/timeline/Timeline.tsx"
+      ],
+      "evidence": "store.ts:102、135：selection: string|null、setSelection(id)；Clip.tsx:51、58、68：单值比较并覆盖。命令搜索输出 NO_MATCH: Timeline 目录无 wheel/modifier/marquee/empty-track 实现。P3/Timeline.tsx:82-83 只取 ids[0]，:102-107 点击覆盖为单 id。OpenCut 官方 release notes 记录了多 clip 移动/resize、modifier 框选追加、选中轨道高亮与更大轨道间距（第一方但非源码证据）。"
+    },
+    {
+      "topic": "与 AutoViral 既有审美体系的兼容性",
+      "detail": "仓库已有完整暗/亮 accent 四档、四级圆角、JetBrains Mono、玻璃边框和全局噪点，无需建立第二套设计系统。时间线应只新增语义类型色，把玻璃 blur 限制在 sticky header、ruler、tooltip 和菜单，clip/track 主体使用实体或半透明 surface，避免滚动合成成本。",
+      "files": [
+        "web/src/styles/tokens.css",
+        "web/src/styles/globals.css",
+        "web/src/features/studio/panels/Timeline/TimelineTrackHeader.module.css"
+      ],
+      "evidence": "tokens.css:3-21、47-55 定义暗色 accent 四档、surface、glass、6/10/16/22px radius 与 JetBrains Mono；:74-101 定义 light 对应值。globals.css:36-49 已提供 opacity 0.035、mix-blend-mode overlay 噪点。TimelineTrackHeader.module.css:127-137 已采用 blur(24px) saturate(140%) 的品牌玻璃菜单。"
+    }
+  ],
+  "proposal": "【现状 vs 对标 vs 建议】行高：现状 56/56/44px；Pneuma 48/32/32、DesignCombo 48/36/32；建议 video 56、audio/overlay 44、text 36、gap 4px。Header：现状 152px+省略号；Pneuma 140px+三 toggle；建议 176px sticky glass，code badge+语义名+mute+visibility+menu，选中 clip 所在行增加 2px accent 左轨。Clip：现状类型色整块紫/青且无 hover；建议中性 surface 为主体、类型色只用于 2px 轨和内容，normal/hover/selected/dragging/focus-visible 五态。Ruler：现状按 duration 固定 2/4/10s；建议 28px 主次刻度、随 pps 自适应。Playhead：现状 2px+14px 把手；建议 1px+12×14px 下尖把手+14px hit target+时间 tooltip。Zoom：现状按钮 20–150px/s；建议 5–300px/s、fit、range、wheel/pinch。Snap/trim：保留现有全局 guide，统一 6px 屏幕阈值，trim 增加可见手柄、source ghost 和时间 tooltip。空轨/多选：新增 placeholder、modifier 选择与跨轨 marquee。\n【Token spec】在 tokens.css 新增暗色 --timeline-video:#a8c5d6、--timeline-audio:#a89bb8、--timeline-caption:#9caf9f、--timeline-overlay:#88adb8；light 对应 #2a3a4a/#655b70/#506157/#3f6068；soft/border 分别用 color-mix(... 12%, transparent) 与 color-mix(... 38%, var(--glass-border))。选中态始终用 --accent/--accent-hi/--accent-glow，不使用高饱和整块填充。Sticky header、ruler、tooltip 使用 blur(24px) saturate(140%) + 1px --glass-border；clip 不加 backdrop-filter。动画统一 200ms ease-out，drag/scrub 中关闭 transition，并遵守 prefers-reduced-motion。\n【布局与组件 spec】Toolbar 高 36px；ruler 28px；header 176px；clip inset 4px、radius --radius-sm。Header code 使用 JetBrains Mono 10px/18px、名称 Inter 11px、14px 图标置于 24×24 hit target；mute/hidden 状态保持可见，普通态 opacity 0.45，row hover/focus 提升到 1。Clip normal=surface-1 + glass-border；hover=surface-2 + kind-border；selected=accent-hi border + 0 0 0 1px accent + 0 0 14px accent-glow；dragging opacity 0.82。视频 filmstrip opacity 0.82，hover 0.94，底部 18px 渐变标签带；按 48–96px 目标 tile 宽从 0.25/0.5/1/2/5s 选择 step，trim 不拉伸内容。波形目标每 3px 一条、1px gap，普通用 audio-soft、selected 用 audio base。字幕 body 28px，左侧 18px CC badge，正文 11px ellipsis，不显示 duration 次行。\n【Ruler/zoom spec】computeRulerScale(pps) 从 [0.1,0.2,0.5,1,2,5,10,15,30,60,120,300] 选首个满足 major≥72px 的间隔；默认 5 个 subdivision，minor<8px 时折叠。major tick 8px、minor 4px；短片格式 m:ss，major<1s 时 m:ss.d，超过 1h 时 h:mm:ss；只生成 viewport±1 major 的 tick。zoom 控件为 minus、88px 对数 slider、NN px/s mono badge、plus、Fit；按钮倍率 1.25；Ctrl/Command+wheel 和 trackpad pinch 围绕鼠标时间 zoom，普通 wheel/Shift+wheel 横移，双击 badge 恢复 fit。\n【Playhead/snap/trim spec】Playhead visual line 1px、handle 12×14px、可抓区域 14px；scrub 时显示 mm:ss.ff tooltip 并持续驱动 Preview seek，停止后 200ms 消失。Snap 候选为 t=0、playhead、所有轨 clip start/end，以及启用 beat-snap 时的 beat；阈值恒定 6px；guide 贯穿所有 lane，ruler 顶端显示 4px diamond 与时间 badge。Trim handle hit target 10px、可见 rail 2px；hover 显示 40% kind 色，selected 显示 accent；拖动时画完整 source 的 1px dashed --accent-lo ghost，filmstrip/波形保持 source-time 锚定。\n【空轨与框选 spec】空 lane 内显示 sticky hint：audio VO=拖入音频 · 或从资源库选择 VO，video=拖入视频素材，text=拖入字幕 · 或生成字幕，overlay=拖入叠加素材；10px mono、24px 高、6px 圆角、1px dashed kind-border、accent-glow 背景、pointer-events none；drag-over 时替换为现有接受/拒绝反馈。空白区 primary drag 启动 marquee，矩形为 accent-glow+1px accent-lo+6px radius；Shift/Command/Ctrl click 或框选执行 union/toggle，Esc 清空，普通空白点击清空；拖动任一已选 clip 时组移动并保持相对 offset，Inspector 继续读取 primary selection。v0.1.11 建议多选 trim 仅作用 primary，避免隐式改变不等长素材。\n【文件级切片】1）web/src/styles/tokens.css 增加 timeline 语义色；2）新增 Timeline/Timeline.module.css、timelineMetrics.ts、timelineScale.ts、timelinePresentation.ts，集中行高、颜色映射、tick/format/filmstrip step；3）新增 Timeline/hooks/useTimelineZoom.ts，index.tsx 只负责组合与 CSS variables；4）Ruler.tsx/Playhead.tsx 改主次刻度、tooltip 和 pointer anchor；5）TimelineTrackHeader.tsx/module.css 拆 code/name、恢复 inline mute/hide；6）Track.tsx 增加 row state、EmptyTrackHint、MarqueeSelection；7）Clip.tsx 新配 Clip.module.css，增加 kind data attribute、状态 class、可见 trim rail；8）Filmstrip.tsx、PeaksSvg.tsx、WaveformBars.tsx 只调整密度和视觉，不重写 waveform 数据链；9）store.ts 增加 timelineSelection:{ids,primaryId,anchorId} 与 group drag action，保留旧 selection 兼容 Inspector；10）新增 selectionMath.ts、MarqueeSelection.tsx 及相应测试。",
+  "presetTests": [
+    "Vitest｜新增 timelineScale.test.ts：覆盖 pps 临界点、major≥72px、minor≥8px、viewport 裁剪、m:ss/m:ss.d/h:mm:ss 格式和 duration=0。",
+    "Vitest｜新增 useTimelineZoom.test.ts：覆盖 5–300px/s clamp、1.25 倍按钮、Fit、鼠标锚点 zoom 前后时间不漂移、普通 wheel 横移。",
+    "Vitest｜新增 timelinePresentation.test.ts：锁定 56/44/36/44px 行高、4px gap、暗/亮四类 token 映射、track code/name 解析和空轨提示文案。",
+    "Vitest｜扩展 Filmstrip/PeaksSvg/WaveformBars 测试：zoom→0.25/0.5/1/2/5s step、tile 宽 48–96px、trim 后 source offset、约 3px/bar、静音与 loading/error。",
+    "Vitest｜扩展 snapPoints/useClipResize：t=0、playhead、跨轨 start/end、beat、排除自身；不同 pps 下均等价 6px；左右 trim、0.1s 最短、source 上限和 ghost bounds。",
+    "Vitest｜新增 selectionMath.test.ts：replace/toggle/union、primary/anchor、矩形相交、跨轨框选、Esc 清空、删除后 reconcile、组移动保持相对 offset。",
+    "组件测试｜Clip.test.tsx 验证 normal/selected/dragging data-state、两侧 10px hit target、键盘 focus；Track.test.tsx 验证空轨 hint 与 selected-row；Ruler.test.tsx 补主次 tick 与 scrub tooltip。",
+    "E2E 视觉｜暗/亮主题、1280×720 与 1440×900：精确验收 header 176px、ruler 28px、各类行高/4px gap、sticky header/ruler 和 horizontal scroll 对齐。",
+    "E2E 视觉｜同一工程在 10/60/240px/s：主次刻度密度、filmstrip tile、波形密度、zoom 锚点、Fit 和缩放控件 badge 均正确。",
+    "E2E 交互｜normal→hover→selected→dragging→trim：边框、类型轨、accent glow、手柄、source ghost、时间 tooltip、snap guide 出现与释放后消失。",
+    "E2E 交互｜空 VO 轨提示、合法/非法 drag-over；Shift/Command 多选、跨轨 marquee、组拖动、Esc 清空、Inspector 始终跟随 primary。",
+    "E2E 可访问性｜Tab 到 header 控件/zoom/playhead，focus-visible 清晰；mute/hide aria 状态正确；prefers-reduced-motion 下无 200ms 位移动画。"
+  ],
+  "risks": [
+    "三个指定仓库的 clone 都因 DNS 失败；Pneuma 有可验证的官方包缓存，DesignCombo 只有官方 GitHub 源码页，OpenCut 只有第一方 release notes，OpenCut 源码级视觉细节未覆盖。",
+    "多选不是纯视觉改动：当前 selection 被 Inspector、Dive、Chat、快捷键等大量消费者当作单 string；必须保留 primary 兼容层，不能直接把字段改成数组。",
+    "Track schema 没有 locked；若 PRD 要求完整对标 Pneuma 的 lock 控件，需要同步 shared schema、迁移、渲染和 server，不应伪装成前端开关。",
+    "高 zoom 下 filmstrip、SVG 波形和大量 tick 可能增加 DOM/绘制成本；必须只生成 viewport 附近内容，并避免给每个 clip 使用 backdrop-filter。",
+    "假设：主 Preview 已在 ruler/playhead scrub 时实时刷新，因此 spec 不额外增加 144×81 缩略图 popover；若实际刷新延迟明显，需要单独评估缓存帧预览。",
+    "截图与 main 源码存在能力感知差异：源码已有 14px playhead handle、snap line、filmstrip、trim hit area 和完整菜单，PRD 应防止重复实现，仅重做视觉与可发现性。"
+  ],
+  "openQuestions": [
+    "v0.1.11 的多选范围是否只要求框选、组移动、组删除，还是必须像 OpenCut v0.3.0 一样支持多 clip 同步 resize？本 spec 默认 trim 仅作用 primary。",
+    "是否要为 track lock 扩展 composition schema？若仍限定前端优化，建议本版只内联 mute 与 visibility。",
+    "缩放控件要显示真实 px/s 还是对普通用户更友好的百分比？建议 UI 显示 NN px/s，tooltip 同时给百分比。",
+    "空 VO 轨是否有直接录音入口？当前证据只支持拖入/资源库流程，因此文案暂不承诺“录制 VO”。",
+    "网络恢复后需补读 OpenCut 当前 tag 的 timeline 源码，重点核对其 marquee、共同 resize、RMS waveform virtualization 和 selected-row 实现；本次未覆盖。",
+    "需确认提供的截图对应哪个 commit/build；假设它与当前 main 数据结构一致，但视觉可能早于源码中的部分交互增强。"
+  ]
+}

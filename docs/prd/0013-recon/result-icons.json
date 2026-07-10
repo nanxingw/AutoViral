@@ -1,0 +1,149 @@
+{
+  "dimension": "图标按钮不居中的全面审计与统一修复方案",
+  "summary": "reader 目录没有 module.css，真正的 icon-only 控件只有 28×28 的关闭按钮，截图中的偏心现象与其实现一致。静态可确认的主因是 `.studio-shell` 全局 pill 规则向所有按钮注入 `padding:5px 11px`，而 `data-bare` 并未退出该规则。仓库已有三处源码注释明确记录该规则会令固定尺寸图标右移约 3–6px，reader 及多个同类按钮尚未应用局部补丁。只读 AST 扫描覆盖 135 个生产 TSX、195 个 button、78 个 aria-label button，并筛出 47 个启发式 icon-only 候选。建议新增共享 IconButton，并降低全局 fallback 的 specificity、排除 data-bare，再按 reader→Studio 高频区→portal/非 Studio 分批收编。",
+  "findings": [
+    {
+      "topic": "reader 全量审计与直接根因",
+      "detail": "reader 目录共有 ScriptReader、ReaderSceneCard、ReaderField、MiniToc、ReaderLoading、ReaderEmpty 等组件，但无任何 module.css。唯一真正的 icon-only 按钮是关闭按钮：28×28、grid/placeItems:center、Unicode “×”、fontSize 16，却没有 padding:0、lineHeight 或独立图标节点；由于它挂在 `.studio-shell` 内，静态 cascade 可确认会取得全局 `padding:5px 11px`。MiniToc 显示两位镜号且已有 inline-flex 双轴居中，ReaderSceneCard 编辑按钮显示文字，二者不是本缺陷对象。Unicode “×” 的 Inter 字形墨迹/normal line-box 是否造成额外纵向光学偏差属于「假设」，需浏览器测量；截图已经确认最终视觉结果偏心。",
+      "files": [
+        "web/src/features/studio/reader/ScriptReader.tsx:41",
+        "web/src/features/studio/reader/ScriptReader.tsx:230",
+        "web/src/features/studio/reader/ScriptReader.tsx:466",
+        "web/src/features/studio/reader/ScriptReader.tsx:601",
+        "web/src/features/studio/reader/ScriptReader.tsx:657",
+        "web/src/pages/Studio.tsx:269",
+        "web/src/pages/Studio.tsx:365"
+      ],
+      "evidence": "文件枚举命令只输出 6 个文件：ScriptReader.tsx/.test.tsx、interleave.ts/.test.ts、readerStore.ts/.test.ts，没有 CSS 文件。ScriptReader.tsx:230-250 摘录：`width: 28, height: 28, display: \"grid\", placeItems: \"center\", ... fontSize: 16`，子节点为 “×”，没有 padding/lineHeight。Studio.tsx:269 摘录：`className=\"studio-shell\"`；:369 摘录：`<ScriptReader />`。ScriptReader.tsx:466-488 编辑按钮子节点为本地化文字；:657-683 TOC 使用 `padding:\"0 5px\"; display:\"inline-flex\"; alignItems:\"center\"; justifyContent:\"center\"` 并显示镜号。"
+    },
+    {
+      "topic": "系统性 CSS cascade 根因",
+      "detail": "全局选择器 specificity 为 (0,3,1)，高于单个 CSS Module 类；它不仅设置 padding，还会覆盖低 specificity 模块类的边框、背景、字号和圆角。`data-bare` 当前只是语义标记，并未出现在排除条件里。项目中的 LibraryTab、PreviewPanel、TopBar 已分别留下同一缺陷的修复注释，明确记载固定宽度按钮会产生约 3–6px 的图标右移，因此该根因不是无证据推测。",
+      "files": [
+        "web/src/styles/globals.css:1",
+        "web/src/styles/globals.css:57",
+        "web/src/styles/globals.css:73",
+        "web/src/features/studio/panels/AssetSidebar/LibraryTab.tsx:164",
+        "web/src/features/studio/panels/PreviewPanel.tsx:593",
+        "web/src/features/studio/panels/TopBar.tsx:358"
+      ],
+      "evidence": "globals.css:1 `* { box-sizing: border-box; }`；:57 `button { font: inherit; }`；:75-88 `.studio-shell button:not(.send-btn):not([data-accent-swatch]) { padding:5px 11px; font-size:11px; ... }`。LibraryTab.tsx:176-180：`data-bare does NOT actually opt out ... 11px side-padding ... shoves the 14px glyph ~6px right of centre`。PreviewPanel.tsx:597-600：`without it the 14px transport glyphs sit ~3px right of centre`。TopBar.tsx:369-371：`padding:0 cancels the leaked global pill padding ... so the gear glyph centres instead of shifting right`。"
+    },
+    {
+      "topic": "静态确认高风险：顶栏、设置与时间线",
+      "detail": "这些按钮均位于 `.studio-shell` 内且缺少 padding:0，因此可静态确认存在全局 padding 泄漏；是否肉眼明显仍需浏览器二确。清单：TopBar 快捷键“?”为 32×32/grid、无 padding（相邻齿轮已显式 padding:0）；Tweaks 关闭 22×22/grid、无 padding；Timeline 缩放 26×26/grid/lineHeight:1、无 padding；LaneGapAdd 24×24/grid、模块 CSS 无 padding；TimelineTrackHeader 菜单虽声明 padding:3px 5px，但会被更高 specificity 的全局 5px 11px 覆盖。",
+      "files": [
+        "web/src/features/studio/panels/TopBar.tsx:331",
+        "web/src/features/studio/panels/TopBar.tsx:358",
+        "web/src/features/studio/panels/Tweaks/index.tsx:35",
+        "web/src/features/studio/panels/Timeline/index.tsx:72",
+        "web/src/features/studio/panels/Timeline/index.tsx:220",
+        "web/src/features/studio/panels/Timeline/LaneGapAdd.module.css:21",
+        "web/src/features/studio/panels/Timeline/LaneGapAdd.tsx:159",
+        "web/src/features/studio/panels/Timeline/TimelineTrackHeader.module.css:93",
+        "web/src/features/studio/panels/Timeline/TimelineTrackHeader.tsx:337"
+      ],
+      "evidence": "TopBar.tsx:338-352：`width:32; height:32; display:grid; placeItems:center`，无 padding；:366-380 相邻齿轮同尺寸有 `padding:0`。Tweaks/index.tsx:41-55：22×22、grid/placeItems:center、无 padding。Timeline/index.tsx:220-234：26×26、grid/placeItems:center、lineHeight:1，无 padding。LaneGapAdd.module.css:21-40：24×24、grid/place-items:center，无 padding。TimelineTrackHeader.module.css:93-103：`.menuBtn { padding:3px 5px; display:grid; place-items:center }`，全局选择器 specificity 更高。"
+    },
+    {
+      "topic": "静态确认高风险：剧本侧栏与会话条",
+      "detail": "ScriptTab 内至少五组紧凑按钮缺少 padding:0：顶部 reader 入口 24×22、全屏入口 24×22、分镜 reader 入口 24×24、省略号菜单 24×24、ReorderButton 22×22。Chat/Terminal 会话删除按钮更严重：CSS 仅给 width:18、align-self:stretch、line-height:1，没有显式 padding 或双轴布局，且模块类的 border/background 会被全局 pill 选择器覆盖。新建会话在多会话状态下退化为仅“＋”图标，虽有 inline-flex/align-items:center 和水平 padding，仍需纳入视觉二确。",
+      "files": [
+        "web/src/features/studio/panels/AssetSidebar/ScriptTab.tsx:416",
+        "web/src/features/studio/panels/AssetSidebar/ScriptTab.tsx:582",
+        "web/src/features/studio/panels/AssetSidebar/ScriptTab.tsx:1471",
+        "web/src/features/studio/panels/AssetSidebar/ScriptTab.tsx:1513",
+        "web/src/features/studio/panels/AssetSidebar/ScriptTab.tsx:1884",
+        "web/src/features/studio/panels/RightPane/SessionStrip.module.css:71",
+        "web/src/features/studio/panels/RightPane/SessionStrip.tsx:187",
+        "web/src/features/studio/panels/RightPane/TerminalSessionStrip.module.css:69",
+        "web/src/features/studio/panels/RightPane/TerminalSessionStrip.tsx:123"
+      ],
+      "evidence": "ScriptTab.tsx:423-435、:588-602、:1480-1494、:1522-1538、:1893-1906 均给出固定 22/24px 尺寸和 flex/grid 居中，但没有 padding:0。SessionStrip.module.css:71-86：`.deleteBtn { width:18px; font-size:14px; align-self:stretch }`，公共规则只有 `line-height:1`；TerminalSessionStrip.module.css:69-84 相同。对应 TSX 子节点分别是 SessionStrip.tsx:193 和 TerminalSessionStrip.tsx:129 的“×”。"
+    },
+    {
+      "topic": "需浏览器 computed-style 二确：portal 与非 Studio 控件",
+      "detail": "portal 按钮不再是 `.studio-shell` 后代，不会命中全局 pill 规则，但仍可能受浏览器默认 button padding 和 Unicode 字形指标影响。重点清单：Dive 关闭按钮完全没有尺寸/布局样式；AssetPreviewModal 与 ScriptModal 关闭均为 28×28/grid/Unicode “×”，但无 padding:0、lineHeight；SettingsPanel 关闭为 Unicode “×”、font-size:22、padding:4px 8px，无固定盒和行高；ThemeToggle 为 32×32/grid/SVG，但未清除原生 padding。WorkCardMenu 和 TopNav 齿轮是自动宽度 inline-flex 控件，静态上风险较低，但应在全仓验收中抽查。",
+      "files": [
+        "web/src/features/studio/dive/DiveCanvas.tsx:290",
+        "web/src/features/studio/dive/DiveCanvas.tsx:382",
+        "web/src/features/studio/panels/AssetSidebar/AssetPreviewModal.tsx:61",
+        "web/src/features/studio/panels/AssetSidebar/AssetPreviewModal.tsx:204",
+        "web/src/features/studio/panels/AssetSidebar/ScriptModal.tsx:111",
+        "web/src/features/studio/panels/AssetSidebar/ScriptModal.tsx:194",
+        "web/src/features/settings/SettingsPanel.module.css:34",
+        "web/src/ui/ThemeToggle.module.css:1",
+        "web/src/features/works/WorkCardMenu.module.css:7",
+        "web/src/ui/TopNav.module.css:93"
+      ],
+      "evidence": "DiveCanvas.tsx:290 `return createPortal(`，:382-384 仅为 `<button ... data-bare>×</button>`。AssetPreviewModal.tsx:61、ScriptModal.tsx:111 均 createPortal；各关闭样式在 AssetPreviewModal.tsx:209-220、ScriptModal.tsx:200-211，均是 28×28/grid 但无 padding/lineHeight。SettingsPanel.module.css:34-41：`font-size:22px; padding:4px 8px`。ThemeToggle.module.css:1-11：32×32、grid/place-items:center，无 padding。"
+    },
+    {
+      "topic": "已符合规范的正例与无需优先改动项",
+      "detail": "多处控件已同时具备固定尺寸、padding:0、双轴居中，证明统一规则可在不改变外框尺寸的前提下落地。安全正例包括：LibraryTab 工具按钮、Audio/Text 资产动作、Preview transport、Chat composer、Dive zoom、Filmstrip 删除/复制、CostBadge 关闭和附件缩略图关闭。Toast/TrendDrilldown 等非方形关闭按钮已有 padding/line-height 的明确控制，优先级低于上述高风险列表。",
+      "files": [
+        "web/src/features/studio/panels/AssetSidebar/LibraryTab.tsx:164",
+        "web/src/features/studio/panels/AssetSidebar/AudioAssetRow.tsx:127",
+        "web/src/features/studio/panels/AssetSidebar/AudioAssetRow.tsx:201",
+        "web/src/features/studio/panels/AssetSidebar/TextAssetRow.tsx:95",
+        "web/src/features/studio/panels/PreviewPanel.tsx:593",
+        "web/src/features/studio/panels/Chat/Composer.module.css:32",
+        "web/src/features/studio/panels/Chat/index.tsx:923",
+        "web/src/features/studio/dive/dive.css:84",
+        "web/src/features/editor/panels/Filmstrip.tsx:220",
+        "web/src/features/studio/panels/CostBadge.tsx:218",
+        "web/src/components/ToastViewport.module.css:105"
+      ],
+      "evidence": "LibraryTab.tsx:174-187：26×26、padding:0、grid/placeItems:center。AudioAssetRow.tsx:210-222 和 TextAssetRow.tsx:104-117：固定尺寸、padding:0、lineHeight:0、grid。PreviewPanel.tsx:593-610：32×32、padding:0、grid。Composer.module.css:32-47：30×30、grid；Chat/index.tsx:929-952 通过 `send-btn` 明确退出全局规则。dive.css:84-97：26×26、padding:0、line-height:1。Filmstrip.tsx:232-247：18×18、grid、padding:0、lineHeight:1。"
+    },
+    {
+      "topic": "审计覆盖、伪元素排除与测试缺口",
+      "detail": "AST 只读扫描覆盖全部生产 TSX；47 个 icon-like 候选经人工按实现分组。CSS 搜索没有发现任何 button/icon class 的 ::before/::after 占位，因此本次没有伪元素挤占中心的证据。现有 ScriptReader 测试覆盖 interleave、ESC、编辑跳转、加载和 TOC，但没有关闭按钮的结构、共享 class 或 SVG 断言。最终 git 状态仍为 main clean。",
+      "files": [
+        "web/src/features/studio/reader/ScriptReader.test.tsx:48",
+        "web/src/features/studio/reader/ScriptReader.test.tsx:103",
+        "web/src/features/studio/reader/ScriptReader.test.tsx:123",
+        "web/src/features/studio/reader/ScriptReader.test.tsx:299"
+      ],
+      "evidence": "AST 命令输出：`{\"productionTsxFiles\":135,\"buttonElements\":195,\"ariaLabelButtons\":78,\"heuristicIconOnly\":47}`。`rg -n '::before|::after' web/src --glob '*.css'` 只命中 body、卡片、引号与 checkbox，没有按钮选择器。`rg -n 'closeAria|reader.*close|Close|icon|className|style' ScriptReader.test.tsx` 无输出。最终 `git status --short --branch` 输出 `## main...origin/main`。"
+    },
+    {
+      "topic": "共享组件选择依据",
+      "detail": "仓库目前只有面向文字按钮的 Button，其默认 padding:7px 14px、inline-flex、gap:6，不适合直接承担 icon-only 的尺寸与可访问性约束；全仓也不存在 IconButton 定义。因此应新建独立 IconButton，而不是把 `button svg` 或所有 aria-label button 设为全局规则，避免破坏带文字、数字 TOC、下拉箭头和图标+文字组合按钮。",
+      "files": [
+        "web/src/ui/Button.tsx:1",
+        "web/src/ui/Button.module.css:1"
+      ],
+      "evidence": "Button.tsx:5-23 只有 `variant?: default|primary|ghost`；Button.module.css:1-15 明确为 `padding:7px 14px; display:inline-flex; align-items:center; gap:6px`。命令 `rg -n 'export .*IconButton|function IconButton|const IconButton' web/src` 无输出。"
+    }
+  ],
+  "proposal": "文件级方案：1）新增 web/src/ui/IconButton.tsx、IconButton.module.css、IconButton.test.tsx，组件强制可访问名称，默认 type=\"button\"，输出 data-bare data-icon-button；CSS 固定 padding:0; display:inline-grid; place-items:center; line-height:0; flex:none，图标 wrapper 与直接 SVG 均 display:block，尺寸只提供 compact/sm/md/lg 映射，variant 处理 ghost/surface/danger。2）新增 web/src/ui/icons.tsx 或最小 XIcon，将 Unicode “×” 逐步换为统一 24×24 viewBox SVG；不要设置全局 button svg。3）修改 web/src/styles/globals.css：把 Studio pill fallback 改成低 specificity 的 :where(.studio-shell) :where(button:not(.send-btn):not([data-accent-swatch]):not([data-bare]))，使 data-bare 真正退出，并让 CSS Module 类能覆盖 fallback；变更前先用现有 AST 清单确认所有 data-bare 控件自带完整 chrome。4）首批修复 reader/ScriptReader.tsx、TopBar.tsx、Tweaks/index.tsx，因为它们包含截图缺陷及已有对照按钮。5）第二批收编 AssetSidebar/ScriptTab.tsx、Timeline/index.tsx、Timeline/LaneGapAdd.tsx、Timeline/TimelineTrackHeader.tsx、RightPane/SessionStrip.tsx、RightPane/TerminalSessionStrip.tsx；删除各自重复的固定尺寸/居中声明，但保留定位、透明度和业务状态 class。6）第三批收编 portal/外围控件：DiveCanvas.tsx、AssetPreviewModal.tsx、ScriptModal.tsx、SettingsPanel.tsx、ThemeToggle.tsx、WorkCardMenu.tsx、TopNav.tsx。7）已安全的 Preview、Chat composer、LibraryTab、Audio/TextAssetRow、Filmstrip、Dive zoom 先不改行为；在统一组件稳定后再做机械迁移，避免一次 PR 同时改变过多视觉状态。",
+  "presetTests": [
+    "[Vitest] IconButton.test.tsx：默认生成 type=button、转发 ref/click/disabled/title，必须保留 aria-label，并带 data-bare、data-icon-button 与图标 aria-hidden wrapper。",
+    "[Vitest] 对 compact/sm/md/lg 和 ghost/surface/danger 分支断言 class 应用；断言调用方 className 能合并，不能覆盖结构 marker。",
+    "[Vitest] ScriptReader.test.tsx：按本地化 accessible name 取得关闭按钮，断言存在 data-icon-button 和 SVG，且不再以文本“×”作为子节点；点击仍调用 closeReader。",
+    "[Vitest] 在 TopBar、Tweaks、Timeline、ScriptTab、SessionStrip、TerminalSessionStrip 现有测试中增加结构断言：目标 icon-only 控件均带共享 marker，原 click/aria-expanded/disabled 行为不变。",
+    "[Vitest] 对 reader 的 edit 按钮和 mini-TOC 加反向断言：它们不使用 IconButton，防止把所有 aria-label button 粗暴收编。",
+    "[E2E] reader 关闭按钮：暗/亮主题、100%/125% 浏览器缩放下测量 button 与 SVG bounding-box 中心，X/Y 中心差均不超过 1 CSS px；同时截 hover、focus-visible、active。",
+    "[E2E] computed-style：共享控件应为 padding 四边 0px、display inline-grid/grid、place-items center、SVG display block；固定尺寸按钮的 width/height 与迁移前一致。",
+    "[E2E] Studio 高频路径：TopBar “?”/齿轮、Tweaks close、ScriptTab reader/全屏/分镜 reader/ellipsis/reorder、Timeline zoom/lane-add/menu、Chat/Terminal session delete/new 全量测中心差。",
+    "[E2E] portal 路径：依次打开 Dive、AssetPreviewModal、ScriptModal，验证关闭按钮不受 portal 父级、主题或系统字体差异影响。",
+    "[E2E] 外围回归：ThemeToggle、SettingsPanel close、WorkCardMenu、TopNav gear、Filmstrip、Toast；确认边框尺寸、点击热区和键盘焦点环无位移。",
+    "[E2E] 在 hover reveal、菜单展开、streaming/disabled、单会话/多会话等状态间切换，确认图标中心和按钮外框不发生布局跳动。"
+  ],
+  "risks": [
+    "直接给所有 button 或 svg 加全局居中规则会破坏文字按钮、reader TOC 和图标+文字按钮；证据见 ScriptReader.tsx:466-488、:657-683 及 Button.module.css:1-15。",
+    "一次性排除全部 data-bare 可能暴露依赖全局 pill fallback 的旧按钮；当前源码已有多处注释证明 data-bare 语义与真实 cascade 不一致，见 globals.css:75、LibraryTab.tsx:176-180。",
+    "portal 不在 .studio-shell 下，仅修 globals.css 无法覆盖 Dive、AssetPreviewModal、ScriptModal；证据见三个组件的 createPortal 调用。",
+    "将 line-height:0 应用于含文字/数字的按钮会破坏文本排版，因此只能放在 IconButton 内，并要求图标使用 SVG；reader TOC 是明确反例。",
+    "会话删除按钮当前仅 18px 宽，若直接提升到 24px 可能挤压窄右栏；应先保持视觉外框或用 24px 透明命中层，之后由浏览器验收决定。",
+    "静态源码只能确认 cascade 冲突，无法证明不同平台字体的字形墨迹中心；Unicode “×” 的额外光学偏差仍需 DOM/computed-style 与截图二确。"
+  ],
+  "openQuestions": [
+    "浏览器纬度需确认截图中的 reader 偏移由全局 padding、Unicode 字形指标各贡献多少像素，并记录实际 computed padding/line-height。",
+    "是否把最小点击热区统一提升到 24px 或 28px，尤其是当前 18px 会话删除与 22px Tweaks/Lane 按钮？",
+    "v0.1.11 是否要求一次 PR 收编非 Studio 页面，还是先交付 reader 与 Studio 高频区、外围控件仅建清单？",
+    "统一图标资产是否接受新增轻量 icons.tsx，还是继续由各组件内联 SVG、仅共享 IconButton 外壳？"
+  ],
+  "codexJobOk": true
+}
