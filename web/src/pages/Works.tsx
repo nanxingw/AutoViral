@@ -3,7 +3,6 @@ import { useWorks } from "@/queries/works";
 import { WorksHero } from "@/features/works/WorksHero";
 import { NewWorkCard } from "@/features/works/NewWorkCard";
 import { WorksGrid } from "@/features/works/WorksGrid";
-import { InsightRibbon, type Insight } from "@/features/works/InsightRibbon";
 import { useT, type MessageKey } from "@/i18n/useT";
 
 type WorkFilter = "all" | "draft" | "creating" | "ready" | "failed" | "published" | "archived";
@@ -25,14 +24,6 @@ export default function Works() {
   const [query, setQuery] = useState("");
   const list = works.data ?? [];
   const t = useT();
-
-  // #76 — sample insight cards, localized (were hardcoded English literals).
-  // Built inside the component so they re-localize on language switch.
-  const placeholderInsights: Insight[] = [
-    { tag: t("works.insightSample1Tag"), body: t("works.insightSample1Body"), date: "—", cta: t("works.insightSample1Cta") },
-    { tag: t("works.insightSample2Tag"), body: t("works.insightSample2Body"), date: "—", cta: t("works.insightSample2Cta") },
-    { tag: t("works.insightSample3Tag"), body: t("works.insightSample3Body"), date: "—", cta: t("works.insightSample3Cta") },
-  ];
 
   const counts = useMemo(() => ({
     drafts: list.filter((w) => w.status === "draft").length,
@@ -255,17 +246,6 @@ export default function Works() {
       ) : (
         <WorksGrid works={filteredList} filter="all" />
       )}
-
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 18 }}>
-        <h2 style={{ fontSize: 22, margin: 0, fontWeight: 500, letterSpacing: "-0.02em" }}>
-          {t("works.h2InspirationLead")} <em style={{ fontFamily: "Instrument Serif", fontStyle: "italic" }}>{t("works.h2InspirationEm")}</em>
-        </h2>
-      </div>
-      <InsightRibbon
-        insights={placeholderInsights}
-        note={t("works.insightsRibbonNote")}
-        ctaDisabledLabel={t("works.insightCtaDisabled")}
-      />
     </main>
   );
 }

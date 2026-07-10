@@ -67,11 +67,7 @@ describe("SettingsPanel — OpenRouter section", () => {
           secretMeta: {
             openrouterKey: { set: true, lastFour: "AKLT" },
           },
-          douyinUrl: "",
-          researchEnabled: false,
-          researchCron: "0 9 * * *",
           model: "sonnet",
-          analyticsLastCollectedAt: null,
         }),
       ),
     );
@@ -98,11 +94,7 @@ describe("SettingsPanel — OpenRouter section", () => {
         HttpResponse.json({
           openrouterKey: "",
           secretMeta: { openrouterKey: { set: false, lastFour: "" } },
-          douyinUrl: "",
-          researchEnabled: false,
-          researchCron: "0 9 * * *",
           model: "sonnet",
-          analyticsLastCollectedAt: null,
         }),
       ),
       http.put("/api/config", async ({ request }) => {
@@ -136,13 +128,9 @@ describe("SettingsPanel — OpenRouter section", () => {
           openrouterKey: "",
           secretMeta: { openrouterKey: { set: true, lastFour: "AKLT" } },
           // A non-secret field must be dirty for Save to be enabled; we
-          // toggle researchEnabled to force the patch through with the
+          // change the default model to force the patch through with the
           // openrouterKey staying blank.
-          douyinUrl: "",
-          researchEnabled: false,
-          researchCron: "0 9 * * *",
           model: "sonnet",
-          analyticsLastCollectedAt: null,
         }),
       ),
       http.put("/api/config", async ({ request }) => {
@@ -155,9 +143,9 @@ describe("SettingsPanel — OpenRouter section", () => {
     // Wait for the openrouter section + secret hint to confirm config loaded.
     await screen.findByTestId("secret-stored-hint");
 
-    // Flip the research switch to make the form dirty without touching the secret.
-    const researchSwitch = screen.getByRole("switch");
-    fireEvent.click(researchSwitch);
+    // Change the default model to make the form dirty without touching the secret.
+    const modelSelect = screen.getByRole("combobox");
+    fireEvent.change(modelSelect, { target: { value: "opus" } });
 
     const saveBtn = screen.getByRole("button", { name: /save changes|保存/i });
     await waitFor(() => expect(saveBtn).not.toBeDisabled());
@@ -166,82 +154,5 @@ describe("SettingsPanel — OpenRouter section", () => {
     await waitFor(() => expect(savedBody).not.toBeNull());
     // Empty string means "leave-alone" on the server (R109 F475 semantics).
     expect(savedBody.openrouterKey).toBe("");
-  });
-});
-
-describe("SettingsPanel — Douyin collector (S5)", () => {
-  beforeEach(() => {
-    useSettingsPanelStore.setState({ open: true, focusSection: null });
-  });
-
-  const douyinConfig = {
-    openrouterKey: "",
-    secretMeta: { openrouterKey: { set: false, lastFour: "" } },
-    // douyinUrl must be set or the refresh button is disabled.
-    douyinUrl: "https://www.douyin.com/user/abc",
-    researchEnabled: false,
-    researchCron: "0 9 * * *",
-    model: "sonnet",
-    analyticsLastCollectedAt: null,
-  };
-
-  it("renders the cookie-consent disclosure before refreshing (privacy is explicit)", async () => {
-    mswServer.use(http.get("/api/config", () => HttpResponse.json(douyinConfig)));
-    renderPanel();
-
-    // The consent block names the douyin.com sessionid cookie + local-only promise.
-    const consent = await screen.findByTestId("douyin-cookie-consent");
-    expect(consent.textContent).toMatch(/sessionid|cookie/i);
-    expect(consent.textContent).toMatch(/local|never uploaded|绝不上传|本地/i);
-  });
-
-  it("surfaces an ACTIONABLE re-login prompt when refresh returns collector_relogin (401)", async () => {
-    mswServer.use(
-      http.get("/api/config", () => HttpResponse.json(douyinConfig)),
-      http.post("/api/analytics/refresh", () =>
-        HttpResponse.json(
-          {
-            error: "Your Douyin session expired.",
-            errorCode: "collector_relogin",
-            collectorCode: "NOT_LOGGED_IN",
-          },
-          { status: 401 },
-        ),
-      ),
-    );
-    renderPanel();
-
-    const refreshBtn = await screen.findByRole("button", { name: /refresh now|立即同步/i });
-    await waitFor(() => expect(refreshBtn).not.toBeDisabled());
-    fireEvent.click(refreshBtn);
-
-    // Not a silent empty page: the user is told to log into douyin.com + close
-    // their browser, then retry.
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/douyin\.com/i);
-    expect(alert.textContent).toMatch(/close your browser|重新|登录|close/i);
-  });
-
-  it("surfaces a 'run setup' prompt when the managed venv isn't ready (503)", async () => {
-    mswServer.use(
-      http.get("/api/config", () => HttpResponse.json(douyinConfig)),
-      http.post("/api/analytics/refresh", () =>
-        HttpResponse.json(
-          {
-            error: "Collector dependencies aren't installed yet.",
-            errorCode: "collector_not_ready",
-          },
-          { status: 503 },
-        ),
-      ),
-    );
-    renderPanel();
-
-    const refreshBtn = await screen.findByRole("button", { name: /refresh now|立即同步/i });
-    await waitFor(() => expect(refreshBtn).not.toBeDisabled());
-    fireEvent.click(refreshBtn);
-
-    const alert = await screen.findByRole("alert");
-    expect(alert.textContent).toMatch(/autoviral setup|安装/i);
   });
 });

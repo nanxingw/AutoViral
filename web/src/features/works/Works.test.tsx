@@ -20,7 +20,10 @@ describe("Works page", () => {
     render(wrap(<Works />));
     await waitFor(() => expect(screen.getByText(/Hook Formula/i)).toBeInTheDocument());
     expect(screen.getByText(/PICK UP WHERE YOU LEFT OFF/i)).toBeInTheDocument();
-    expect(screen.getByText(/Latest/i)).toBeInTheDocument();
+    // PRD-0013 S4 — the retired "Latest Inspiration" ribbon is gone; the
+    // library heading ("My Works", with "Works" in an <em>) is the stable
+    // section marker now.
+    expect(screen.getByText("Works", { selector: "em" })).toBeInTheDocument();
   });
   it("does not display autopilot / cron copy", async () => {
     render(wrap(<Works />));

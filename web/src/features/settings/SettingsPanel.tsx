@@ -3,16 +3,11 @@ import { useReducedMotion } from "motion/react";
 import { useSettingsPanelStore } from "@/stores/settings";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useT } from "@/i18n/useT";
-import { localizeApiError } from "@/i18n/serverError";
-import { useLocaleStore } from "@/i18n/store";
-import { useConfig, useRefreshAnalytics, useSaveConfig, type AppConfig, type SecretMetaEntry } from "@/queries/config";
+import { useConfig, useSaveConfig, type AppConfig, type SecretMetaEntry } from "@/queries/config";
 import styles from "./SettingsPanel.module.css";
 
 const EDITABLE_KEYS = [
   "openrouterKey",
-  "douyinUrl",
-  "researchEnabled",
-  "researchCron",
   "model",
 ] as const satisfies readonly (keyof AppConfig)[];
 
@@ -77,9 +72,6 @@ export function SettingsPanel() {
   const closePanel = useSettingsPanelStore((s) => s.closePanel);
   const focusSection = useSettingsPanelStore((s) => s.focusSection);
   const t = useT();
-  // e2e-report F56: tie toLocaleString to app locale so EN users in a zh-CN
-  // system see en-US date format and vice versa.
-  const locale = useLocaleStore((s) => s.locale);
   const panelRef = useRef<HTMLDivElement | null>(null);
   // R126 F608 — the JS scroll-behavior option is independent of the CSS
   // `prefers-reduced-motion` @media rule (M223), so we read PRM at runtime
@@ -88,7 +80,6 @@ export function SettingsPanel() {
   // §2 deep-link would otherwise see a sudden smooth scroll.
   const prefersReducedMotion = useReducedMotion();
   const { data: config } = useConfig();
-  const refreshMut = useRefreshAnalytics();
   const saveMut = useSaveConfig();
   const [draft, setDraft] = useState<AppConfig | null>(null);
   const [showUnsaved, setShowUnsaved] = useState(false);
@@ -185,91 +176,6 @@ export function SettingsPanel() {
                   storedHintTemplate={t("settings.field.secretStoredHint")}
                   keepBlankPlaceholder={t("settings.field.secretKeepBlank")}
                 />
-              </section>
-
-              <section data-section="research">
-                <h3 className={styles.sectionLabel}>{t("settings.section.research")}</h3>
-                <p className={styles.sectionHint}>{t("settings.sectionHint.research")}</p>
-                <div className={styles.toggleRow}>
-                  <span id="research-auto-label">{t("settings.field.autoResearch")}</span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={draft.researchEnabled}
-                    aria-labelledby="research-auto-label"
-                    className={styles.toggle}
-                    data-on={draft.researchEnabled}
-                    onClick={() => patch("researchEnabled", !draft.researchEnabled)}
-                  >
-                    <span className={styles.toggleThumb} />
-                  </button>
-                </div>
-                {draft.researchEnabled && (
-                  <div className={styles.field}>
-                    <label htmlFor="research-cron" className={styles.fieldLabel}>{t("settings.field.cron")}</label>
-                    <input
-                      id="research-cron"
-                      className={styles.input}
-                      value={draft.researchCron}
-                      placeholder={t("settings.field.cronPlaceholder")}
-                      aria-describedby="research-cron-hint"
-                      onChange={(e) => patch("researchCron", e.target.value)}
-                    />
-                    {/* e2e-report F139: surface why the :07 minute offset matters
-                        so users who inherited a :00 schedule from older configs
-                        understand the migration rationale. sectionHint reuse keeps
-                        typography consistent across the drawer. */}
-                    <p id="research-cron-hint" className={styles.sectionHint} style={{ marginTop: 4 }}>
-                      {t("settings.field.cronHint")}
-                    </p>
-                  </div>
-                )}
-              </section>
-
-              <section data-section="douyin" id="douyin-binding">
-                <h3 className={styles.sectionLabel}>{t("settings.section.douyin")}</h3>
-                <p className={styles.sectionHint}>{t("settings.sectionHint.douyin")}</p>
-                <div className={styles.field}>
-                  <label htmlFor="douyin-url" className={styles.fieldLabel}>{t("settings.field.douyinUrl")}</label>
-                  <input
-                    id="douyin-url"
-                    className={styles.input}
-                    value={draft.douyinUrl}
-                    onChange={(e) => patch("douyinUrl", e.target.value)}
-                    placeholder="https://www.douyin.com/user/..."
-                  />
-                </div>
-                {/* S5 — cookie-consent disclosure. The refresh reads the user's
-                    douyin.com sessionid cookie from THIS machine's browser
-                    (browser_cookie3), locally only. Be upfront before they click
-                    Refresh so the privacy trade-off is explicit, not hidden. */}
-                <div className={styles.cookieConsent} data-testid="douyin-cookie-consent">
-                  <p className={styles.cookieConsentTitle}>{t("settings.cookieConsentTitle")}</p>
-                  <p className={styles.cookieConsentBody}>{t("settings.cookieConsent")}</p>
-                </div>
-                <div className={styles.refreshRow}>
-                  <button
-                    type="button"
-                    className={styles.refreshBtn}
-                    disabled={!draft.douyinUrl || refreshMut.isPending}
-                    onClick={() => refreshMut.mutate()}
-                  >
-                    {refreshMut.isPending ? t("settings.refreshing") : t("settings.refresh")}
-                  </button>
-                  {config?.analyticsLastCollectedAt && (
-                    <span className={styles.lastCollected}>
-                      {t("settings.lastCollected")}: {new Date(config.analyticsLastCollectedAt).toLocaleString(locale === "zh" ? "zh-CN" : "en-US")}
-                    </span>
-                  )}
-                </div>
-                {/* #72 — surface the refresh error. The collector script was
-                    removed in the refactor, so this now reports an honest
-                    "retired" message instead of the button silently no-op'ing. */}
-                {refreshMut.isError && (
-                  <p role="alert" className={styles.sectionHint} style={{ color: "var(--status-error, #d4756c)" }}>
-                    {localizeApiError(refreshMut.error, t)}
-                  </p>
-                )}
               </section>
 
               <section data-section="model">
