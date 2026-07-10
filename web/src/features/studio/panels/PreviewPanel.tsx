@@ -115,6 +115,11 @@ export function PreviewPanel() {
   // Pneuma uses the same shared-state pattern (playback.currentTime) across
   // preview + timeline + dive views.
   const frame = useComposition((s) => s.currentFrame);
+  // S1 (PRD-0013) — subscribe to the store's seek-intent bridge. A new
+  // pendingSeek object (fresh seq) means a user seek intent from Playhead /
+  // Ruler / J-L / terminal / Chat locator; the effect below drives the Player.
+  const pendingSeek = useComposition((s) => s.pendingSeek);
+  const requestSeekFrame = useComposition((s) => s.requestSeekFrame);
   const [playing, setPlaying] = useState(false);
   // #74 — these two transport controls used to be dead (aria-label + cursor
   // but no onClick). Volume is driven imperatively on the PlayerRef; speed is
@@ -130,7 +135,8 @@ export function PreviewPanel() {
     const p = playerRef.current;
     if (!p) return;
     const onFrame = (e: { detail: { frame: number } }) =>
-      useComposition.getState().setFrame(e.detail.frame);
+      // S1 — report only; a Player frame must never reflux back out as a seek.
+      useComposition.getState().reportPlayerFrame(e.detail.frame);
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
     p.addEventListener("frameupdate", onFrame as any);
@@ -166,14 +172,24 @@ export function PreviewPanel() {
     };
   }, []);
 
+  // S1 — the only place that imperatively seeks the Remotion Player. It fires
+  // whenever a fresh pendingSeek (new seq) arrives from ANY seek intent, so the
+  // transport buttons, Scrubber, Playhead, Ruler, keyboard, terminal and Chat
+  // locator all converge here. We deliberately do NOT depend on `frame`
+  // (playback would then re-seek every reported frame → hard-jump jitter).
+  useEffect(() => {
+    if (!pendingSeek) return;
+    playerRef.current?.seekTo(pendingSeek.frame);
+    // seekTo does not pause: Remotion resumes playback internally if it was
+    // playing before the seek (PlayerUI "continue playing after seeking").
+  }, [pendingSeek]);
+
+  // Transport / Scrubber seek helper — routes through the store's seek intent
+  // so the picture-driving path is identical to the timeline's.
   const seekTo = useCallback((seconds: number) => {
-    const p = playerRef.current;
     const fps = comp?.fps ?? 30;
-    if (!p) return;
-    const f = Math.max(0, Math.min(Math.round(seconds * fps), (comp?.duration ?? 0) * fps));
-    p.seekTo(f);
-    useComposition.getState().setFrame(f);
-  }, [comp]);
+    requestSeekFrame(Math.round(seconds * fps));
+  }, [comp, requestSeekFrame]);
 
   // #74 — volume level. Setting a non-zero level also un-mutes (you can't
   // raise volume while muted and expect silence). Mute toggle is separate.
@@ -551,6 +567,7 @@ function Scrubber({
   return (
     <div
       ref={trackRef}
+      data-testid="preview-scrubber"
       onPointerDown={onPointerDown}
       style={{
         flex: 1,

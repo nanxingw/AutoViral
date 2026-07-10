@@ -181,7 +181,10 @@ export function RightPane({
               // read each call always hits the live setters.
               dispatchAction={(action) =>
                 dispatchViewerAction(action, {
-                  setFrame: useComposition.getState().setFrame,
+                  // S1 — the agent's "I moved the playhead to 3s" viewer-action
+                  // must drive the preview picture; route it through the seek
+                  // intent bridge like every other seek path.
+                  setFrame: useComposition.getState().requestSeekFrame,
                   setClipSelection: useComposition.getState().setSelection,
                   setCurrentSlide: useEditor.getState().setCurrentSlide,
                   setLayerSelection: useEditor.getState().setSelectionLayer,

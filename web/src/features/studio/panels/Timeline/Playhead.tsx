@@ -14,8 +14,9 @@
 //   - We render a single full-height bar (D5) instead of pneuma's
 //     visual-line + handle pair. Only the top 14px tab is interactive.
 //
-// Reads `currentFrame` from the store; writes via `setFrame`. `pxPerSecond`
-// + `fps` come from props (parent owns zoom + comp.fps).
+// Reads `currentFrame` from the store; writes a seek intent via
+// `requestSeekFrame` (S1 — PreviewPanel consumes pendingSeek to drive the
+// Player). `pxPerSecond` + `fps` come from props (parent owns zoom + comp.fps).
 //
 import { useRef } from "react";
 import { useComposition } from "../../store";
@@ -27,7 +28,8 @@ interface PlayheadProps {
 
 export function Playhead({ pxPerSecond, fps }: PlayheadProps) {
   const frame = useComposition((s) => s.currentFrame);
-  const setFrame = useComposition((s) => s.setFrame);
+  // S1 (PRD-0013) — publish a seek intent so PreviewPanel drives the Player.
+  const requestSeekFrame = useComposition((s) => s.requestSeekFrame);
   const duration = useComposition((s) => s.comp?.duration ?? 0);
   const x = (frame / fps) * pxPerSecond;
   const maxFrame = Math.ceil(duration * fps);
@@ -51,7 +53,7 @@ export function Playhead({ pxPerSecond, fps }: PlayheadProps) {
     if (!d) return;
     if (pxPerSecond <= 0) return; // defensive: pre-zoom-resolution paint
     const dx = e.clientX - d.startX;
-    setFrame(d.startFrame + Math.round((dx / pxPerSecond) * fps));
+    requestSeekFrame(d.startFrame + Math.round((dx / pxPerSecond) * fps));
   };
 
   const onPointerUp = (e: React.PointerEvent) => {

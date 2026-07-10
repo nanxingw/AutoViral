@@ -206,7 +206,8 @@ function jumpToStudioComposition(data: LocatorData) {
     s.setSelection(data.clipId);
   }
   if (typeof data.time === "number" && s.comp) {
-    s.setFrame(Math.round(data.time * s.comp.fps));
+    // S1 — jump the preview picture to the locator time, not just the store.
+    s.requestSeekFrame(Math.round(data.time * s.comp.fps));
   }
 }
 

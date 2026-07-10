@@ -116,7 +116,9 @@ export function useBridgeEvents(workId: string | undefined): void {
         case "ui-seek": {
           const fps = store.comp?.fps ?? 30;
           const seconds = (ev.payload as { seconds: number }).seconds ?? 0;
-          store.setFrame(Math.round(seconds * fps));
+          // S1 — agent `autoviral seek` must move the preview picture, not just
+          // the store frame, so it publishes a seek intent like the UI paths.
+          store.requestSeekFrame(Math.round(seconds * fps));
           break;
         }
         case "ui-play":

@@ -101,6 +101,16 @@ interface CompState {
   comp: Composition | null;
   selection: string | null;
   currentFrame: number;
+  // S1 (PRD-0013) — the store→Player seek bridge. A user *seek intent*
+  // (Playhead drag / Ruler click / J-L / terminal ui-seek / Chat locator /
+  // viewer-action) publishes `pendingSeek`; PreviewPanel subscribes and drives
+  // the Remotion PlayerRef imperatively (`seekTo`). `seq` increments on every
+  // request so two seeks to the SAME frame still re-fire (Zustand would
+  // otherwise dedup an identical value and the picture would never move). A
+  // Player *frame report* (reportPlayerFrame) only updates currentFrame and
+  // never touches pendingSeek — so playback's per-frame frameupdate never
+  // refluxes back out as a seek. recon: docs/prd/0013-recon/result-playhead.json
+  pendingSeek: { frame: number; seq: number } | null;
   isPlaying: boolean;
   beats: number[];
   dragState: DragState | null;
@@ -134,6 +144,11 @@ interface CompState {
   splitClip: (clipId: string, atSec: number) => void;
   setSelection: (id: string | null) => void;
   setFrame: (f: number) => void;
+  // S1 (PRD-0013) — user seek intent: clamps (same rule as setFrame) then
+  // publishes pendingSeek so PreviewPanel imperatively seeks the Player.
+  requestSeekFrame: (frame: number) => void;
+  // S1 (PRD-0013) — Player→store frame report: updates currentFrame only.
+  reportPlayerFrame: (frame: number) => void;
   setPlaying: (p: boolean) => void;
   setBeats: (b: number[]) => void;
   recomputeDuration: () => void;
@@ -248,6 +263,18 @@ interface CompState {
 // arrays we JSON-clone, which is fine because Track has no Date / Map / Set
 // fields (every property is a primitive, string-keyed object, or nested
 // arrays of the same).
+// S1 (PRD-0013) — single clamp rule shared by setFrame / requestSeekFrame /
+// reportPlayerFrame so all three converge on the same bounds. Returns null for
+// non-finite input (NaN / Infinity) so callers leave state untouched. Upper
+// bound = ceil(comp.duration * fps); the Player itself applies the final
+// durationInFrames-1 clamp on seekTo.
+function clampFrame(comp: Composition | null, f: number): number | null {
+  if (!Number.isFinite(f)) return null;
+  const fps = comp?.fps ?? 30;
+  const max = comp ? Math.ceil(comp.duration * fps) : Infinity;
+  return Math.max(0, Math.min(max, Math.round(f)));
+}
+
 function snapshotTracks(tracks: Track[]): Track[] {
   const plain = isDraft(tracks) ? (current(tracks) as Track[]) : tracks;
   return JSON.parse(JSON.stringify(plain)) as Track[];
@@ -258,6 +285,7 @@ export const useComposition = create<CompState>()(
     comp: null,
     selection: null,
     currentFrame: 0,
+    pendingSeek: null,
     isPlaying: false,
     beats: [],
     dragState: null,
@@ -267,6 +295,9 @@ export const useComposition = create<CompState>()(
     loadComposition: (c) =>
       set((s) => {
         s.comp = c;
+        // Drop any stale seek intent so a freshly-mounted Player for the new
+        // composition doesn't consume the previous work's last pendingSeek.
+        s.pendingSeek = null;
       }),
     addClip: (trackId, clip) =>
       set((s) => {
@@ -924,10 +955,25 @@ export const useComposition = create<CompState>()(
         // Clamp at the action so any caller (Playhead drag, 4.J keyboard
         // nudge, future playback engine, devtools) can't write a negative
         // or out-of-bounds frame. Upper bound = ceil(comp.duration * fps).
-        if (!Number.isFinite(f)) return;
-        const fps = s.comp?.fps ?? 30;
-        const max = s.comp ? Math.ceil(s.comp.duration * fps) : Infinity;
-        s.currentFrame = Math.max(0, Math.min(max, Math.round(f)));
+        const clamped = clampFrame(s.comp, f);
+        if (clamped !== null) s.currentFrame = clamped;
+      }),
+    requestSeekFrame: (f) =>
+      set((s) => {
+        const clamped = clampFrame(s.comp, f);
+        if (clamped === null) return; // reject NaN/Infinity, leave state intact
+        s.currentFrame = clamped;
+        // Bump seq unconditionally so a repeat seek to the same frame still
+        // re-fires the PreviewPanel effect (identical-value dedup would strand
+        // the Player). Absolute so we never overflow across long sessions.
+        s.pendingSeek = { frame: clamped, seq: (s.pendingSeek?.seq ?? 0) + 1 };
+      }),
+    reportPlayerFrame: (f) =>
+      set((s) => {
+        // Player→store: currentFrame only, never pendingSeek — playback's
+        // per-frame frameupdate must not bounce back out as a seek.
+        const clamped = clampFrame(s.comp, f);
+        if (clamped !== null) s.currentFrame = clamped;
       }),
     setPlaying: (p) =>
       set((s) => {

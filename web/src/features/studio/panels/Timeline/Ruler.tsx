@@ -22,7 +22,8 @@ interface RulerProps {
 }
 
 export function Ruler({ duration, pxPerSecond, totalWidth, fps }: RulerProps) {
-  const setFrame = useComposition((s) => s.setFrame);
+  // S1 (PRD-0013) — publish a seek intent so PreviewPanel drives the Player.
+  const requestSeekFrame = useComposition((s) => s.requestSeekFrame);
   const regionRef = useRef<HTMLDivElement>(null);
   const scrubbingRef = useRef(false);
 
@@ -37,7 +38,7 @@ export function Ruler({ duration, pxPerSecond, totalWidth, fps }: RulerProps) {
     if (!el || pxPerSecond <= 0) return;
     const rect = el.getBoundingClientRect();
     const t = Math.max(0, (clientX - rect.left) / pxPerSecond);
-    setFrame(Math.round(t * fps)); // store clamps to [0, maxFrame]
+    requestSeekFrame(Math.round(t * fps)); // store clamps to [0, maxFrame]
   };
 
   const onPointerDown = (e: React.PointerEvent) => {

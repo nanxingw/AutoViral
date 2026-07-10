@@ -73,12 +73,13 @@ export function useShortcuts(workId: string | null, cbs?: SaveCallbacks) {
       }
       if (!isMod && (e.key === "j" || e.key === "J")) {
         e.preventDefault();
-        state.setFrame(Math.max(0, state.currentFrame - 5 * fps));
+        // S1 — seek intent so the preview picture actually jumps -5s.
+        state.requestSeekFrame(Math.max(0, state.currentFrame - 5 * fps));
         return;
       }
       if (!isMod && (e.key === "l" || e.key === "L")) {
         e.preventDefault();
-        state.setFrame(state.currentFrame + 5 * fps);
+        state.requestSeekFrame(state.currentFrame + 5 * fps);
         return;
       }
 
