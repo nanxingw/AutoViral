@@ -7,7 +7,36 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-## [0.1.9] - 2026-07-07
+## [0.1.10] - 2026-07-09
+
+**导出保真与 fps 一等公民**（PRD-0011 + PRD-0012，14 片）—— 两条主线：**导出可交付**（成片"跳回前几帧"抽动根治 + 成品与素材分家、导出历史找得回）与**画布帧率可改**（fps 从"文档谎称锁定、实则裸奔"升级为与画幅同级的一等可编辑参数）。全程测试先行（预设测试证红→转绿），每批实现经 codex 独立审查（19 findings，9 个 medium+ 全部修复或有据驳回），8 纬浏览器 E2E（截图 + DOM/computed-style 二确 + completeness-critic）验收，E2E 抓出的三个 CONFIRMED 缺口当日修复并复验通过。
+
+### 导出保真（PRD-0012）
+
+- **成片倒跳抽动根治** — 导出与预览共用的视频组件按 `getRemotionEnvironment().isRendering` 分支：服务端导出（含 streaming 路径）走帧精确的 `OffthreadVideo`（ffmpeg 抽帧），浏览器预览保持原生 `<Video>`（2026-05-08 解码器预算优化不回退）；预览专属的 seek 容差参数只在预览分支下发。实证：对帧级取证 work 重新导出，倒跳事件从 44 处降为 **0 处**（源片基线 0；预览纬 20 采样点严格单调无倒带）。
+- **ffmpeg 预处理关键帧归一** — 裁剪/翻转、timewarp、变速三个 pre-pass 重编码统一补 `-g/-keyint_min = 帧率`（对齐 Seedance 入库归一先例），拆掉"过 pre-pass 的 clip 被 libx264 默认 ~10s GOP 抹掉 1s 归一"的潜伏雷；pre-pass 缓存 key 同步纳入 fps，防止改帧率后命中旧 GOP 缓存令修复静默失效。
+- **jitter-scan 取证工具入库**（`scripts/jitter-scan.mjs` + `src/domain/backward-jump-scan.ts` 纯核）— 帧级倒跳检测（灰度指纹 + "与前 1 帧差异大却与前 k 帧近同"签名）成为仓库 QA 标尺，"导出是否干净"由数据判定。
+
+### 成品管理（PRD-0012）
+
+- **素材库「成品」分组** — 导出成片/代理独立成组、带成片徽章与 mono 导出时间，与源素材分区展示；渲染中间产物（`autoviral-export-*`、`*-ducked/-burned/-normalized`）与 pre-pass 缓存过滤不再展示。一次导出素材库只新增 1–2 个条目（此前 4–5 个 mp4 全量混入 CLIPS）。
+- **渲染中间产物清理** — 渲染成功产出 final 后服务端 best-effort 删除本次派生的中间 mp4；失败路径保留现场以便诊断。
+- **导出历史** — 新增 `GET /api/works/:id/render/jobs` 与 TopBar「渲染记录」菜单（时间倒序，每条含下载/在 Finder 显示/预览三入口），关掉进度弹窗后成片始终找得回。
+- **导出实时可见** — 素材库 watcher 补上 `output/` 目录监听：导出完成后成品组实时出现新成片，无需刷新页面。
+- **agent 导出同权** — bridge `POST /export`（agent/CLI 路径）完成后写入 render-queue 终态记录，agent 导出的成片与 UI 导出一样出现在导出历史里（此前永远缺席）。
+
+### 画布帧率（PRD-0011）
+
+- **正式修改入口，agent-人同路** — 共享 ops 核新增 `setFps` 意图（四档 24/25/30/60，非法值带码拒绝、同值幂等）；bridge 新增 `POST /comp/fps` per-intent 路由（镜像 `/comp/aspect`）；CLI 新增 `autoviral comp fps <24|25|30|60>`；Studio 设置抽屉新增「画布帧率」四档 segmented control（24 档标注 Seedance 源推荐）。四条入口收敛到同一个 op、同一份 composition.yaml、同一个 `composition-changed` 广播——CLI 改完 UI 无刷新即时反映（E2E 实测）。
+- **preset 与 fps 解耦（修陷阱）** — 平台 preset 应用不再覆写画布 fps，导出也不再用 preset.fps 压过画布值（preset 的 fps 字段降级为记录值）。实证：24fps 画布套「抖音」preset 导出，成片 `r_frame_rate=24/1`。
+- **video 作品默认 24fps** — 新建 video 作品（UI 与 CLI 双路）默认与 Seedance 源片同帧率，从源头消除播放漂移；YouTube ingest 等显式传值路径不受影响。
+- **手册纠偏** — 删除 "fps is locked at create-time" 不实文案两处，`comp fps` verb 文档化（时间字段全为秒、改 fps 无损、不触发素材重生成）。
+
+### Fixed
+
+- **新建作品种子路径绕过 content-type registry**（codex review 抓获）— Studio 与 bridge 的 fresh-video 种子路径裸调 `makeEmptyComposition` 工厂，registry 的 seedFactory 无生产调用方；两处改走同一 manifest，UI/CLI 新建行为收敛单一事实源。
+- **成品组正则漏手工命名成片** — `final-30fps.mp4` 这类无毫秒时间戳的成片此前静默混入 CLIPS；放宽为 `final-/proxy-` 前缀匹配，无时间戳时优雅省略时间徽章。
+- **成片/时间戳徽章亮色主题下不可辨** — 徽章误用与页面背景配对的 `--accent-hi` token（亮色主题=深墨色）叠在深色缩略图上对比度 ≈1:1；改用固定深玻璃底 + 亮字（≈19:1），并以对比度回归测试锁住。
 
 **画布全貌与剧本通读升级** —— 两条主线：**Dive 画布 editorial 重设计**（横向时间轴、缩放系统、去玻璃纯色化、扇叠/边/入场的高级感细节）与 **ScriptReader 剧本通读**（剧本 + 分镜交织成一条阅读流，从全屏 modal 进化为**中央停靠面板**：左对话、中阅读、右编辑三区并存）。全程测试先行（预设测试证红→转绿），多轮多纬度浏览器 E2E（截图 + DOM/computed-style 二确）验收。
 
