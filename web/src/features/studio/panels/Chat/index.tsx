@@ -22,7 +22,6 @@ import { ConnectionStatus } from "./ConnectionStatus";
 import { useComposerDraft } from "@/stores/composerDraft";
 import { useToastStore } from "@/stores/toast";
 import { useActiveSessionId } from "@/features/chat/activeSession";
-import { parseCoachIdeas, type CoachIdea } from "@/features/explore/coachSession";
 import composerStyles from "./Composer.module.css";
 
 /** Clean line icons (feather/lucide geometry) — a consistent SVG family that
@@ -211,46 +210,8 @@ function jumpToStudioComposition(data: LocatorData) {
   }
 }
 
-/**
- * PRD-0006 S7 — the workId-decoupling config. ChatPanel was hard-wired to a
- * work: it HTTP-seeds history from /api/works/:id/chat, uploads attachments to
- * the work's assets, offers per-turn checkpoint rollback, and switches the
- * GLOBAL model tier. The grounded inspiration coach is WORKLESS (its own
- * persisted session), so when `coach` is supplied ChatPanel:
- *   · seeds history from the WS `message_history` reseed only (no HTTP work seed)
- *   · routes SEND through `coach.send` (POST /api/coach/message), not the WS frame
- *   · hides checkpoint rollback + attachment upload (no work to anchor them to)
- *   · renders `coach.modelSwitcher` (SESSION-scoped) instead of the work ModelSwitcher
- *   · seeds the empty box with `coach.onboarding` prompts + coach copy
- * Studio/Editor pass NO `coach` prop → every work-bound behaviour is unchanged.
- */
-export interface CoachConfig {
-  /** SEND override — routes the wire text through an HTTP endpoint. */
-  send: (wireText: string) => void;
-  /** Session-scoped model switcher node (replaces the work ModelSwitcher). */
-  modelSwitcher?: ReactNode;
-  /** Header title / subtitle copy. */
-  title: string;
-  subtitle?: string;
-  /** Empty-box prompt library: clicking a starter fills the composer. */
-  onboarding: {
-    title: string;
-    sub: string;
-    placeholder: string;
-    prompts: { label: string; prompt: string }[];
-  };
-  /** PRD-0006 S8 — one-click coach idea → new work. When the coach emits a
-   *  `<coach-idea .../>` tag, the bubble renders a "用此创作" action; clicking
-   *  it calls this with the parsed idea (the page creates a work seeded with a
-   *  topicHint and navigates to it). The READ-ONLY coach never creates works
-   *  itself — the user hands the idea off to the creation agent here. */
-  onCreateFromIdea?: (idea: CoachIdea) => void;
-}
-
 export interface ChatPanelProps {
   workId: string;
-  /** PRD-0006 S7 — when present, run in workless coach mode (see CoachConfig). */
-  coach?: CoachConfig;
   /** Optional shortcut buttons rendered between messages and composer.
    *  No default — the Studio instant-send chips were removed (they fired a
    *  prefilled prompt on a single click with no chance to review). Editors
@@ -277,32 +238,24 @@ export interface ChatPanelProps {
 
 export function ChatPanel({
   workId,
-  coach,
   quickActions,
   onJumpToLocator = jumpToStudioComposition,
   getViewerContext,
   dispatchAction,
   onTurnComplete,
 }: ChatPanelProps) {
-  const coachMode = !!coach;
   const { send, state: wsState } = useChatSocket(
     workId,
     getViewerContext,
     dispatchAction,
     onTurnComplete,
-    undefined,
-    // Coach mode: route the SEND through POST /api/coach/message (decoupled
-    // from the WS frame) — the WS still streams replies + reseeds history.
-    coach?.send,
   );
   // Pull the work's checkpoint list so each assistant text block can render
   // a "rollback to this turn" chip when its turn produced a snapshot. We
   // keep this enabled at all times — the route is cheap and the dropdown
-  // wants the same data, so caching across both is a win. Coach is WORKLESS:
-  // there's no work to anchor a checkpoint to, so we don't query (a coach_main
-  // id would 404 /api/works/coach_main/checkpoints).
+  // wants the same data, so caching across both is a win.
   const { items: checkpointItems, restore: restoreCheckpoint, restoring } =
-    useCheckpoints(workId, !coachMode);
+    useCheckpoints(workId);
   const blocks = useChatStore((s) => s.blocks);
   const setBlocks = useChatStore((s) => s.setBlocks);
   const streaming = useChatStore((s) => s.streaming);
@@ -328,11 +281,9 @@ export function ChatPanel({
 
   // C4 — the active session's backend ("claude" | "codex"), read from the
   // sidecar-backed session list. Drives the header BackendSwitcher badge and the
-  // token-only usage chips for codex. Coach chat is workless + always claude, so
-  // the fetch is skipped there.
+  // token-only usage chips for codex.
   const [sessionBackend, setSessionBackend] = useState<"claude" | "codex">("claude");
   useEffect(() => {
-    if (coachMode) return;
     let cancelled = false;
     apiFetch<{ sessions: ChatSessionRecord[] }>(`/api/works/${workId}/sessions`)
       .then((d) => {
@@ -344,22 +295,12 @@ export function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [workId, activeSessionId, coachMode]);
+  }, [workId, activeSessionId]);
 
   // Load chat history on mount / workId or session change. Without this,
   // switching into a work (or session) showed an empty panel even when the
   // session's log had hundreds of past blocks.
-  //
-  // Coach mode (S7) is WORKLESS: there's no /api/works/coach_main/chat log to
-  // HTTP-seed from. Its persisted history is reseeded over the WS
-  // `message_history` frame instead (useChatSocket), which survives reload. So
-  // skip the HTTP seed entirely — calling it would 404 and (harmlessly) clear
-  // the WS-reseeded blocks in the race.
   useEffect(() => {
-    if (coachMode) {
-      setLoadingHistory(false);
-      return;
-    }
     let cancelled = false;
     setLoadingHistory(true);
     setBlocks([]);
@@ -387,7 +328,7 @@ export function ChatPanel({
     return () => {
       cancelled = true;
     };
-  }, [workId, activeSessionId, setBlocks, coachMode]);
+  }, [workId, activeSessionId, setBlocks]);
 
   // Sticky-scroll: only auto-scroll to the bottom when the user was already
   // near the bottom. If they've scrolled up to read history, the new agent
@@ -415,9 +356,8 @@ export function ChatPanel({
   const canSend = input.trim().length > 0 || attachments.length > 0;
   // A2 (PRD-0010) — a dropped bridge WS must NOT accept a send: the old path
   // buffered the frame in ReconnectingWS and silently resent it on reconnect,
-  // which double-recorded the user message on disk. Coach mode sends over HTTP
-  // (sendOverride), not the WS, so it has no buffer-resend risk → stay enabled.
-  const sendBlockedByConnection = !coachMode && wsState !== "open";
+  // which double-recorded the user message on disk.
+  const sendBlockedByConnection = wsState !== "open";
   // A2 — useRef in-flight lock (the REAL reentrancy guard; #62/#51 lockRef
   // precedent). `input`/`canSend` are useState, so a same-tick second submit
   // (double-click / repeated ⌘↵) reads the STALE value and would fire send()
@@ -512,31 +452,23 @@ export function ChatPanel({
     requestAnimationFrame(() => composerRef.current?.focus());
   };
 
-  // Empty-box starter prompts. Coach mode (S7) seeds the page-supplied prompt
-  // library (grounded works/trends questions) so the user never faces a blank
-  // box; work-bound chat keeps its built-in planning/assets/research starters.
-  const onboardingCopy = coach
-    ? {
-        title: coach.onboarding.title,
-        sub: coach.onboarding.sub,
-        prompts: coach.onboarding.prompts,
-        placeholder: coach.onboarding.placeholder,
-      }
-    : {
-        title: t("chat.onboardingTitle"),
-        sub: t("chat.onboardingSub"),
-        prompts: (
-          [
-            ["onboardingPlanning", "onboardingPlanningPrompt"],
-            ["onboardingAssets", "onboardingAssetsPrompt"],
-            ["onboardingResearch", "onboardingResearchPrompt"],
-          ] as const
-        ).map(([labelKey, promptKey]) => ({
-          label: t(`chat.${labelKey}` as MessageKey),
-          prompt: t(`chat.${promptKey}` as MessageKey),
-        })),
-        placeholder: t("chat.composerPlaceholder"),
-      };
+  // Empty-box starter prompts — the work-bound chat's built-in
+  // planning/assets/research starters.
+  const onboardingCopy = {
+    title: t("chat.onboardingTitle"),
+    sub: t("chat.onboardingSub"),
+    prompts: (
+      [
+        ["onboardingPlanning", "onboardingPlanningPrompt"],
+        ["onboardingAssets", "onboardingAssetsPrompt"],
+        ["onboardingResearch", "onboardingResearchPrompt"],
+      ] as const
+    ).map(([labelKey, promptKey]) => ({
+      label: t(`chat.${labelKey}` as MessageKey),
+      prompt: t(`chat.${promptKey}` as MessageKey),
+    })),
+    placeholder: t("chat.composerPlaceholder"),
+  };
 
   // #5 — element affordances ("加入聊天上下文" on a clip / canvas layer) inject
   // a reference phrase into THIS composer via the composer-draft store, since
@@ -644,23 +576,8 @@ export function ChatPanel({
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 13, fontWeight: 600, letterSpacing: "-0.015em" }}>
-            {coach ? coach.title : t("chat.agentName")}
+            {t("chat.agentName")}
           </div>
-          {coach?.subtitle ? (
-            <div
-              style={{
-                fontSize: 10.5,
-                color: "var(--text-dim)",
-                letterSpacing: "-0.005em",
-                marginTop: 1,
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-                whiteSpace: "nowrap",
-              }}
-            >
-              {coach.subtitle}
-            </div>
-          ) : null}
           <div
             style={{
               fontSize: 10,
@@ -669,18 +586,14 @@ export function ChatPanel({
               letterSpacing: "0.06em",
             }}
           >
-            {coach
-              ? coach.modelSwitcher
-              : (
-                <BackendSwitcher
-                  workId={workId}
-                  sessionId={activeSessionId}
-                  backend={sessionBackend}
-                  established={blocks.length > 0}
-                  streaming={streaming}
-                  onBackendSwitched={setSessionBackend}
-                />
-              )}
+            <BackendSwitcher
+              workId={workId}
+              sessionId={activeSessionId}
+              backend={sessionBackend}
+              established={blocks.length > 0}
+              streaming={streaming}
+              onBackendSwitched={setSessionBackend}
+            />
             {streaming ? ` · ${t("chat.streaming")}` : ""}
             <ConnectionStatus state={wsState} />
           </div>
@@ -814,7 +727,6 @@ export function ChatPanel({
             checkpoints={checkpointItems}
             onRollback={(file) => void restoreCheckpoint(file)}
             restoring={restoring}
-            onCreateFromIdea={coach?.onCreateFromIdea}
             backend={sessionBackend}
           />
         ))}
@@ -969,7 +881,6 @@ function ChatBlock({
   checkpoints,
   onRollback,
   restoring,
-  onCreateFromIdea,
   backend,
 }: {
   block: StreamBlock;
@@ -978,23 +889,10 @@ function ChatBlock({
   checkpoints: Checkpoint[];
   onRollback: (file: string) => void;
   restoring: string | null;
-  /** PRD-0006 S8 — coach mode only: hand a `<coach-idea/>` off to create a work. */
-  onCreateFromIdea?: (idea: CoachIdea) => void;
   /** C4 — the session backend, so the per-turn UsageBadge can go token-only for codex. */
   backend?: string;
 }) {
   const { type } = block;
-  // PRD-0006 S8 — in coach mode, pull out any `<coach-idea/>` tags so the
-  // bubble shows clean prose and the idea(s) render as "用此创作" actions. When
-  // there's no handler (work-bound chat) we leave the text untouched. Memoised
-  // so the streaming push loop doesn't re-parse every block on every token.
-  const ideaParse = useMemo(
-    () =>
-      onCreateFromIdea && type === "text"
-        ? parseCoachIdeas(block.text)
-        : { cleaned: block.text, ideas: [] as CoachIdea[] },
-    [onCreateFromIdea, type, block.text],
-  );
   // Find the snapshot that captures this turn's yaml (if any). We only
   // want this on assistant text blocks — user messages and tool chips
   // don't represent agent output.
@@ -1121,7 +1019,7 @@ function ChatBlock({
           wordBreak: "break-word",
         }}
       >
-        {segmentTextWithLocators(ideaParse.cleaned).map((seg, i) =>
+        {segmentTextWithLocators(block.text).map((seg, i) =>
           seg.kind === "markdown" ? (
             <Markdown key={i} text={seg.text} workId={workId} />
           ) : (
@@ -1134,11 +1032,6 @@ function ChatBlock({
           ),
         )}
       </div>
-      {/* PRD-0006 S8 — one-click "用此创作" actions for each coach-suggested
-          idea. Only in coach mode (onCreateFromIdea present + tags parsed). */}
-      {onCreateFromIdea && ideaParse.ideas.length > 0 ? (
-        <CoachIdeaActions ideas={ideaParse.ideas} onCreate={onCreateFromIdea} />
-      ) : null}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         {block.usage ? <UsageBadge usage={block.usage} backend={backend} /> : null}
         {rollbackTarget ? (
@@ -1191,92 +1084,6 @@ function ChatBlock({
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-/**
- * PRD-0006 S8 — render one "用此创作" action per coach-suggested idea. Each card
- * shows the idea title and, on click, hands the parsed idea to the page (create
- * a new work seeded with a topicHint built from the idea, then navigate). This
- * is the only place the read-only coach's output crosses into work creation —
- * the user chooses to hand the idea off to the creation agent.
- */
-function CoachIdeaActions({
-  ideas,
-  onCreate,
-}: {
-  ideas: CoachIdea[];
-  onCreate: (idea: CoachIdea) => void;
-}) {
-  const t = useT();
-  return (
-    <div
-      style={{
-        marginTop: 8,
-        display: "flex",
-        flexDirection: "column",
-        gap: 6,
-        maxWidth: "100%",
-      }}
-    >
-      {ideas.map((idea, i) => (
-        <button
-          key={`${idea.title}_${i}`}
-          type="button"
-          onClick={() => onCreate(idea)}
-          aria-label={t("explore.coach.createFromIdeaAria", { title: idea.title })}
-          title={idea.title}
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            padding: "8px 11px",
-            background: "linear-gradient(135deg, var(--accent-glow), rgba(168,197,214,0.06))",
-            border: "1px solid var(--accent)",
-            borderRadius: 10,
-            cursor: "pointer",
-            textAlign: "left",
-            color: "var(--text)",
-            transition: "background 0.12s, border-color 0.12s",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "var(--accent)";
-            e.currentTarget.style.color = "var(--accent-fg)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background =
-              "linear-gradient(135deg, var(--accent-glow), rgba(168,197,214,0.06))";
-            e.currentTarget.style.color = "var(--text)";
-          }}
-        >
-          <span
-            aria-hidden="true"
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              letterSpacing: "0.06em",
-              textTransform: "uppercase",
-              opacity: 0.85,
-              flexShrink: 0,
-            }}
-          >
-            ✦ {t("explore.coach.createFromIdea")}
-          </span>
-          <span
-            style={{
-              fontSize: 12,
-              fontWeight: 500,
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-              minWidth: 0,
-            }}
-          >
-            {idea.title}
-          </span>
-        </button>
-      ))}
     </div>
   );
 }
