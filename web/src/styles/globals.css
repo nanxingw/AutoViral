@@ -54,7 +54,12 @@ body::before {
 ::-webkit-scrollbar-thumb:hover { background: var(--accent-lo); }
 
 a { color: inherit; text-decoration: none; }
-button { font: inherit; }
+/* :where() keeps this reset at (0,0,0) so it can't out-specify the (0,0,0)
+   Studio pill fallback below. A bare `button { font: inherit }` reset is
+   (0,0,1) — strictly above the pill — which silently re-inherited a larger,
+   lighter font onto every plain Studio pill, undoing its pinned 11px/500
+   (PRD-0013 S2). Any CSS Module class (0,1,0) still overrides both. */
+:where(button) { font: inherit; }
 
 /* Editorial flourishes used by hero / section heads */
 .font-editorial { font-family: var(--font-editorial); font-weight: 400; letter-spacing: -0.01em; }
