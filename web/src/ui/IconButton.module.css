@@ -1,0 +1,76 @@
+.iconBtn {
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+  line-height: 0;
+  flex: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.iconBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* The icon wrapper + any direct SVG must be block so no inline-baseline gap
+   re-introduces the vertical offset we're trying to kill. */
+.icon {
+  display: grid;
+  place-items: center;
+  line-height: 0;
+}
+.icon svg {
+  display: block;
+}
+
+/* ── sizes ── */
+.compact {
+  width: 22px;
+  height: 22px;
+}
+.sm {
+  width: 26px;
+  height: 26px;
+}
+.md {
+  width: 28px;
+  height: 28px;
+}
+.lg {
+  width: 32px;
+  height: 32px;
+}
+
+/* ── variants ── */
+.ghost {
+  background: transparent;
+  border-color: transparent;
+}
+.ghost:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.surface {
+  background: var(--surface-0);
+  border-color: var(--glass-border);
+}
+.surface:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.danger {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text-dim);
+}
+.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, #ff7a5c 16%, transparent);
+  color: #ff7a5c;
+}
