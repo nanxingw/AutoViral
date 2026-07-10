@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { forwardRef, useImperativeHandle, useRef } from "react";
 import { PreviewPanel } from "./PreviewPanel";
+import { Playhead } from "./Timeline/Playhead";
+import { Ruler } from "./Timeline/Ruler";
 import { useComposition } from "@/features/studio/store";
 import { makeEmptyComposition } from "@/features/studio/types";
 
@@ -12,6 +14,11 @@ const playerRefs: Array<HTMLElement> = [];
 // #74 — record imperative volume calls so tests can assert the transport
 // controls actually drive the PlayerRef.
 const volumeLog: { volume: number; muted: boolean } = { volume: 1, muted: false };
+// S1 (PRD-0013) — record imperative seekTo / pause calls so the seek-bridge
+// tests can assert store seek intents actually reach the Remotion PlayerRef.
+const seekLog: number[] = [];
+const pauseLog: { count: number } = { count: 0 };
+const playerState: { isPlaying: boolean } = { isPlaying: false };
 
 vi.mock("@remotion/player", () => ({
   // Real PlayerRef is an imperative handle; PreviewPanel passes a ref to
@@ -32,9 +39,13 @@ vi.mock("@remotion/player", () => ({
           // @ts-expect-error: forward to DOM
           elRef.current?.removeEventListener(...args),
         play: () => {},
-        pause: () => {},
-        isPlaying: () => false,
-        seekTo: () => {},
+        pause: () => {
+          pauseLog.count += 1;
+        },
+        isPlaying: () => playerState.isPlaying,
+        seekTo: (f: number) => {
+          seekLog.push(f);
+        },
         setVolume: (v: number) => {
           volumeLog.volume = v;
         },
@@ -220,6 +231,106 @@ describe("PreviewPanel", () => {
       expect(screen.getByRole("button", { name: /speed/i })).toHaveTextContent("1.5×");
       // The declarative prop reaches <Player>.
       expect(playerRefs.at(-1)).toHaveAttribute("data-playback-rate", "1.5");
+    });
+  });
+
+  // S1 (PRD-0013) — store→Player seek bridge. Before this slice every timeline
+  // seek intent (Playhead drag, Ruler click, J/L, terminal, Chat locator) only
+  // wrote store.currentFrame; the Remotion Player was never seeked, so dragging
+  // the playhead did NOT move the preview picture (recon: result-playhead.json).
+  // These integration tests mount PreviewPanel (which owns the PlayerRef) next
+  // to the real Playhead/Ruler and assert the imperative seekTo(frame) fires.
+  describe("playhead → Player seek bridge (S1)", () => {
+    beforeEach(() => {
+      seekLog.length = 0;
+      pauseLog.count = 0;
+      playerState.isPlaying = false;
+      playerRefs.length = 0;
+      useComposition.setState({
+        comp: makeEmptyComposition({ workId: "w1", duration: 10 }),
+        currentFrame: 30, // 1s @ 30fps
+        pendingSeek: null,
+      });
+    });
+
+    it("dragging the Playhead drives PlayerRef.seekTo(frame)", () => {
+      render(
+        <>
+          <PreviewPanel />
+          <Playhead pxPerSecond={50} fps={30} />
+        </>,
+      );
+      const playhead = screen.getByTestId("playhead");
+      fireEvent.pointerDown(playhead, { clientX: 0, pointerId: 1 });
+      fireEvent.pointerMove(playhead, { clientX: 100, pointerId: 1 });
+      // dx=100 → 2s @ 30fps → +60 frames; starting at 30 → 90.
+      fireEvent.pointerUp(playhead, { clientX: 100, pointerId: 1 });
+      expect(useComposition.getState().currentFrame).toBe(90);
+      expect(seekLog.at(-1)).toBe(90);
+    });
+
+    it("clicking the Ruler drives PlayerRef.seekTo(frame)", () => {
+      render(
+        <>
+          <PreviewPanel />
+          <Ruler duration={10} pxPerSecond={50} totalWidth={500} fps={30} />
+        </>,
+      );
+      const region = screen.getByTestId("ruler-seek-region");
+      // clientX=100 → 2s @ 50px/s → 60 frames @ 30fps.
+      fireEvent.pointerDown(region, { clientX: 100, pointerId: 1 });
+      fireEvent.pointerUp(region, { clientX: 100, pointerId: 1 });
+      expect(seekLog.at(-1)).toBe(60);
+    });
+
+    it("a Player frameupdate updates currentFrame but does NOT re-seek (no reflux)", () => {
+      render(
+        <>
+          <PreviewPanel />
+          <Playhead pxPerSecond={50} fps={30} />
+        </>,
+      );
+      const playerEl = playerRefs[0];
+      const playhead = screen.getByTestId("playhead");
+      act(() => {
+        playerEl.dispatchEvent(new CustomEvent("frameupdate", { detail: { frame: 42 } }));
+      });
+      expect(useComposition.getState().currentFrame).toBe(42);
+      // Playhead reflects the reported frame: 42/30 * 50 = 70px.
+      expect((playhead as HTMLElement).style.left).toBe("70px");
+      // Reporting a Player frame must never bounce back out as a seek.
+      expect(seekLog.length).toBe(0);
+    });
+
+    it("scrubbing the Playhead while playing seeks to the latest frame without pausing", () => {
+      playerState.isPlaying = true;
+      render(
+        <>
+          <PreviewPanel />
+          <Playhead pxPerSecond={50} fps={30} />
+        </>,
+      );
+      const playhead = screen.getByTestId("playhead");
+      fireEvent.pointerDown(playhead, { clientX: 0, pointerId: 1 });
+      fireEvent.pointerMove(playhead, { clientX: 50, pointerId: 1 }); // +30 → 60
+      fireEvent.pointerMove(playhead, { clientX: 100, pointerId: 1 }); // +60 → 90
+      fireEvent.pointerUp(playhead, { clientX: 100, pointerId: 1 });
+      expect(seekLog.at(-1)).toBe(90);
+      // seekTo must not pause playback — Remotion resumes internally.
+      expect(pauseLog.count).toBe(0);
+    });
+
+    it("dragging the preview Scrubber routes through the unified seek bridge", () => {
+      render(<PreviewPanel />);
+      const scrubTrack = screen.getByTestId("preview-scrubber") as HTMLElement;
+      expect(scrubTrack).toBeTruthy();
+      // jsdom getBoundingClientRect is all-zero → clientX maps to progress 0..1
+      // via width 0; force a non-zero rect so p resolves deterministically.
+      scrubTrack.getBoundingClientRect = () =>
+        ({ left: 0, width: 100, top: 0, height: 4, right: 100, bottom: 4, x: 0, y: 0, toJSON() {} }) as DOMRect;
+      fireEvent.pointerDown(scrubTrack, { clientX: 50, pointerId: 1 });
+      // progress 0.5 * duration 10 = 5s → 150 frames @ 30fps.
+      expect(seekLog.at(-1)).toBe(150);
     });
   });
 });

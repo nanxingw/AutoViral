@@ -693,6 +693,77 @@ describe("setFrame action clamping (Phase 4.H follow-up)", () => {
   });
 });
 
+// S1 (PRD-0013) — the store now distinguishes a user *seek intent*
+// (requestSeekFrame → writes pendingSeek so PreviewPanel imperatively drives
+// the Remotion Player) from a Player *frame report* (reportPlayerFrame → only
+// updates currentFrame, never bounces back out as a seek). recon:
+// docs/prd/0013-recon/result-playhead.json.
+describe("requestSeekFrame / reportPlayerFrame (S1)", () => {
+  beforeEach(() => {
+    useComposition.setState({
+      comp: makeCompositionWithClips([
+        makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 4 }),
+      ]),
+      currentFrame: 0,
+      pendingSeek: null,
+    });
+  });
+
+  it("requestSeekFrame clamps exactly like setFrame (negative / over-duration / NaN / rounding)", () => {
+    const s = () => useComposition.getState();
+    s().requestSeekFrame(-30);
+    expect(s().currentFrame).toBe(0);
+    // comp.duration = 4, fps = 30 → max = 120.
+    s().requestSeekFrame(500);
+    expect(s().currentFrame).toBe(120);
+    s().requestSeekFrame(60);
+    s().requestSeekFrame(Number.NaN);
+    expect(s().currentFrame).toBe(60);
+    s().requestSeekFrame(Number.POSITIVE_INFINITY);
+    expect(s().currentFrame).toBe(60);
+    s().requestSeekFrame(7.4);
+    expect(s().currentFrame).toBe(7);
+    s().requestSeekFrame(7.6);
+    expect(s().currentFrame).toBe(8);
+  });
+
+  it("requestSeekFrame publishes a pendingSeek with a monotonically increasing seq", () => {
+    const s = () => useComposition.getState();
+    expect(s().pendingSeek).toBeNull();
+    s().requestSeekFrame(30);
+    const first = s().pendingSeek!;
+    expect(first.frame).toBe(30);
+    s().requestSeekFrame(30); // SAME frame — must still bump seq (Zustand would
+    // otherwise dedup an identical value and the Player would never re-seek).
+    const second = s().pendingSeek!;
+    expect(second.frame).toBe(30);
+    expect(second.seq).toBeGreaterThan(first.seq);
+  });
+
+  it("reportPlayerFrame updates currentFrame without producing a pendingSeek", () => {
+    const s = () => useComposition.getState();
+    s().reportPlayerFrame(42);
+    expect(s().currentFrame).toBe(42);
+    expect(s().pendingSeek).toBeNull();
+    // A prior seek intent's pendingSeek is not disturbed by a frame report.
+    s().requestSeekFrame(30);
+    const seqBefore = s().pendingSeek!.seq;
+    s().reportPlayerFrame(31);
+    expect(s().currentFrame).toBe(31);
+    expect(s().pendingSeek!.seq).toBe(seqBefore);
+  });
+
+  it("loadComposition clears any stale pendingSeek (new Player must not consume old work's seek)", () => {
+    const s = () => useComposition.getState();
+    s().requestSeekFrame(30);
+    expect(s().pendingSeek).not.toBeNull();
+    s().loadComposition(
+      makeCompositionWithClips([makeVideoClip({ id: "b", trackOffset: 0, in: 0, out: 2 })]),
+    );
+    expect(s().pendingSeek).toBeNull();
+  });
+});
+
 describe("rebindClip", () => {
   it("rebinds a clip's src to the target asset's uri", () => {
     const a = makeVideoClip({ id: "clip1", src: "/old.mp4" });
