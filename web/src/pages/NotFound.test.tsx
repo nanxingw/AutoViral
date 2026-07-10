@@ -71,16 +71,23 @@ describe("NotFound", () => {
   // R110 F490 — Levenshtein fuzzy match against known top-level routes
   // surfaces a "Did you mean:" suggestion when the typo is within 2 edits.
   describe("fuzzy route suggestion (F490)", () => {
-    it("suggests /explore for /explor (distance 1)", () => {
-      renderAt("/explor");
+    it("suggests /studio for /studi (distance 1)", () => {
+      renderAt("/studi");
       const sug = screen.getByTestId("notfound-suggestion");
-      expect(sug.textContent).toMatch(/\/explore/);
+      expect(sug.textContent).toMatch(/\/studio/);
     });
 
-    it("suggests /settings analogues — /anlytics → /analytics (distance 1)", () => {
-      renderAt("/anlytics");
+    it("suggests /editor for /editr (distance 1)", () => {
+      renderAt("/editr");
       const sug = screen.getByTestId("notfound-suggestion");
-      expect(sug.textContent).toMatch(/\/analytics/);
+      expect(sug.textContent).toMatch(/\/editor/);
+    });
+
+    // PRD-0013 S4 — the retired explore/analytics routes must no longer be
+    // surfaced as guesses even for a distance-1 typo of their old names.
+    it("does NOT suggest the retired /explore or /analytics routes", () => {
+      renderAt("/explor");
+      expect(screen.queryByTestId("notfound-suggestion")).not.toBeInTheDocument();
     });
 
     it("does NOT suggest anything for /completely-foreign (distance > 2)", () => {

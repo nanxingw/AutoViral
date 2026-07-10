@@ -28,8 +28,6 @@ const isMacDesktop =
 
 const TABS: Array<{ to: string; key: MessageKey }> = [
   { to: "/", key: "topnav.works" },
-  { to: "/explore", key: "topnav.explore" },
-  { to: "/analytics", key: "topnav.analytics" },
 ];
 
 export function TopNav() {

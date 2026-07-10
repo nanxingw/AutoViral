@@ -30,7 +30,7 @@ import { useT } from "@/i18n/useT";
 /** Top-level routes from `main.tsx` we fuzzy-match against. Keep in
  * sync if new routes ship. Index ("") is intentionally omitted from
  * suggestion targets — we don't want to suggest "/" for a 1-char typo. */
-const KNOWN_ROUTES = ["works", "explore", "analytics", "studio", "editor"] as const;
+const KNOWN_ROUTES = ["works", "studio", "editor"] as const;
 
 /** Classic two-row dynamic programming Levenshtein. Bound at 32 chars
  * so we don't pay for adversarial long-segment inputs. */

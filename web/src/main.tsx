@@ -1,15 +1,9 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MotionConfig } from "motion/react";
-import App from "./App";
-import Works from "./pages/Works";
-import Explore from "./pages/Explore";
-import Analytics from "./pages/Analytics";
-import Studio from "./pages/Studio";
-import Editor from "./pages/Editor";
-import NotFound from "./pages/NotFound";
+import { AppRoutes } from "./routes";
 import "./styles/tokens.css";
 import "./styles/globals.css";
 import "./styles/typography.css";
@@ -39,17 +33,7 @@ ReactDOM.createRoot(rootEl).render(
             first round of testing. Both flags are safe with our current
             route table (no startTransition-incompatible Suspense usage). */}
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <Routes>
-            <Route element={<App />}>
-              <Route index element={<Works />} />
-              <Route path="works" element={<Works />} />
-              <Route path="explore" element={<Explore />} />
-              <Route path="analytics" element={<Analytics />} />
-              <Route path="studio/:workId" element={<Studio />} />
-              <Route path="editor/:workId" element={<Editor />} />
-              <Route path="*" element={<NotFound />} />
-            </Route>
-          </Routes>
+          <AppRoutes />
         </BrowserRouter>
       </MotionConfig>
     </QueryClientProvider>

@@ -36,13 +36,11 @@ describe("<TopNav />", () => {
     renderAt("/works");
     expect(screen.getByRole("link", { name: /works/i })).toHaveAttribute("aria-current", "page");
   });
-  it("highlights Explore on /explore", () => {
-    renderAt("/explore");
-    expect(screen.getByRole("link", { name: /explore/i })).toHaveAttribute("aria-current", "page");
-  });
-  it("highlights Analytics on /analytics", () => {
-    renderAt("/analytics");
-    expect(screen.getByRole("link", { name: /analytics/i })).toHaveAttribute("aria-current", "page");
+  // PRD-0013 S4 — Explore/Analytics tabs retired; only Works remains.
+  it("renders no Explore/Analytics nav links", () => {
+    renderAt("/");
+    expect(screen.queryByRole("link", { name: /explore/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /analytics/i })).not.toBeInTheDocument();
   });
 
   it("opens SettingsPanel when gear button is clicked", () => {
@@ -65,15 +63,9 @@ describe("<TopNav />", () => {
   it("EN locale renders pure-English nav labels with no Chinese suffix (F560)", () => {
     renderAt("/");
     const works = screen.getByRole("link", { name: /works/i });
-    const explore = screen.getByRole("link", { name: /explore/i });
-    const analytics = screen.getByRole("link", { name: /analytics/i });
-    // Exact text — no " · 作品" / " · 灵感" / " · 数据" suffix.
+    // Exact text — no " · 作品" suffix.
     expect(works.textContent).toBe("Works");
-    expect(explore.textContent).toBe("Explore");
-    expect(analytics.textContent).toBe("Analytics");
     // Triple-check no CJK chars leaked into the EN block.
-    for (const el of [works, explore, analytics]) {
-      expect(el.textContent ?? "").not.toMatch(/[一-鿿]/);
-    }
+    expect(works.textContent ?? "").not.toMatch(/[一-鿿]/);
   });
 });
