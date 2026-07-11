@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { render, fireEvent, screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { render, fireEvent, screen, act } from "@testing-library/react";
 import { Ruler } from "./Ruler";
+import { Playhead } from "./Playhead";
 import { useComposition } from "../../store";
 import { makeCompositionWithClips, makeVideoClip } from "../../../../test/composition-fixtures";
 
@@ -15,6 +16,10 @@ beforeEach(() => {
     isPlaying: false,
     dragState: null,
   });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 describe("Ruler click-to-seek (#77)", () => {
@@ -71,5 +76,39 @@ describe("Ruler click-to-seek (#77)", () => {
     };
     fireEvent.pointerDown(region, { clientX: 10, pointerId: 9 });
     expect(captured).toBe(9);
+  });
+});
+
+describe("S7 timeline ruler and scrub presentation", () => {
+  it("renders labeled major ticks and shorter unlabeled minor ticks", () => {
+    render(<Ruler duration={10} pxPerSecond={100} totalWidth={1000} fps={30} />);
+
+    const majorTicks = screen.getAllByTestId("ruler-tick-major");
+    const minorTicks = screen.getAllByTestId("ruler-tick-minor");
+    expect(majorTicks.length).toBeGreaterThan(0);
+    expect(minorTicks.length).toBeGreaterThan(0);
+    expect(majorTicks[0].style.height).toBe("8px");
+    expect(minorTicks[0].style.height).toBe("4px");
+    expect(majorTicks.some((tick) => tick.textContent === "0:01")).toBe(true);
+    expect(minorTicks.every((tick) => tick.textContent === "")).toBe(true);
+  });
+
+  it("shows the playhead time while scrubbing and removes it 200ms after release", () => {
+    vi.useFakeTimers();
+    useComposition.setState({ currentFrame: 30 });
+    render(<Playhead pxPerSecond={50} fps={30} />);
+    const playhead = screen.getByTestId("playhead");
+
+    fireEvent.pointerDown(playhead, { clientX: 0, pointerId: 1 });
+    expect(screen.getByRole("tooltip").textContent).toBe("00:01.00");
+
+    fireEvent.pointerMove(playhead, { clientX: 25, pointerId: 1 });
+    expect(screen.getByRole("tooltip").textContent).toBe("00:01.15");
+
+    fireEvent.pointerUp(playhead, { clientX: 25, pointerId: 1 });
+    act(() => vi.advanceTimersByTime(199));
+    expect(screen.getByRole("tooltip")).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
   });
 });

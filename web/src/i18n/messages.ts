@@ -499,6 +499,14 @@ export const en = {
       trackLabelAudio: "Music",
       trackLabelText: "Subs",
       trackLabelOverlay: "FX",
+      seekAria: "Seek timeline",
+      playheadAria: "Playhead",
+      emptyTrack: {
+        video: "Drop video media",
+        audio: "Drop audio · or choose VO from the library",
+        text: "Drop captions · or generate captions",
+        overlay: "Drop overlay media",
+      },
       dnd: {
         // I19/I20 — drag library assets onto tracks + move clips between
         // same-kind tracks. Mostly aria/title hints; the cue is visual.
@@ -1462,6 +1470,14 @@ export const zh: DeepShape<Messages> = {
       trackLabelAudio: "BGM",
       trackLabelText: "字幕",
       trackLabelOverlay: "覆盖",
+      seekAria: "定位时间线",
+      playheadAria: "播放头",
+      emptyTrack: {
+        video: "拖入视频素材",
+        audio: "拖入音频 · 或从资源库选择 VO",
+        text: "拖入字幕 · 或生成字幕",
+        overlay: "拖入叠加素材",
+      },
       dnd: {
         // I19/I20 — 把素材库的素材拖到轨道 + 在同类型轨道间移动片段。
         clipDragHandleAria: "拖动把此片段移到其它轨道",

@@ -18,8 +18,10 @@
 // `requestSeekFrame` (S1 — PreviewPanel consumes pendingSeek to drive the
 // Player). `pxPerSecond` + `fps` come from props (parent owns zoom + comp.fps).
 //
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useT } from "@/i18n/useT";
 import { useComposition } from "../../store";
+import styles from "./Playhead.module.css";
 
 interface PlayheadProps {
   pxPerSecond: number;
@@ -27,6 +29,7 @@ interface PlayheadProps {
 }
 
 export function Playhead({ pxPerSecond, fps }: PlayheadProps) {
+  const t = useT();
   const frame = useComposition((s) => s.currentFrame);
   // S1 (PRD-0013) — publish a seek intent so PreviewPanel drives the Player.
   const requestSeekFrame = useComposition((s) => s.requestSeekFrame);
@@ -38,6 +41,13 @@ export function Playhead({ pxPerSecond, fps }: PlayheadProps) {
   // event), matching pneuma's `dragTime` snapshot semantics
   // (pneuma:75-77 + 84-88).
   const dragRef = useRef<{ startX: number; startFrame: number } | null>(null);
+  const hideTooltipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+  const [showTooltip, setShowTooltip] = useState(false);
+
+  useEffect(() => () => {
+    if (hideTooltipTimerRef.current) clearTimeout(hideTooltipTimerRef.current);
+  }, []);
 
   const onPointerDown = (e: React.PointerEvent) => {
     const target = e.currentTarget as HTMLElement;
@@ -46,6 +56,9 @@ export function Playhead({ pxPerSecond, fps }: PlayheadProps) {
     // for jsdom which lacks the API on synthetic targets.
     target.setPointerCapture?.(e.pointerId);
     dragRef.current = { startX: e.clientX, startFrame: frame };
+    if (hideTooltipTimerRef.current) clearTimeout(hideTooltipTimerRef.current);
+    setIsScrubbing(true);
+    setShowTooltip(true);
   };
 
   const onPointerMove = (e: React.PointerEvent) => {
@@ -60,13 +73,29 @@ export function Playhead({ pxPerSecond, fps }: PlayheadProps) {
     const target = e.currentTarget as HTMLElement;
     target.releasePointerCapture?.(e.pointerId);
     dragRef.current = null;
+    setIsScrubbing(false);
+    if (hideTooltipTimerRef.current) clearTimeout(hideTooltipTimerRef.current);
+    hideTooltipTimerRef.current = setTimeout(() => {
+      setShowTooltip(false);
+      hideTooltipTimerRef.current = null;
+    }, 200);
   };
+
+  const safeFps = Number.isFinite(fps) && fps > 0 ? fps : 1;
+  const roundedFrame = Math.max(0, Math.round(frame));
+  const totalSeconds = Math.floor(roundedFrame / safeFps);
+  const tooltipMinutes = Math.floor(totalSeconds / 60);
+  const tooltipSeconds = totalSeconds % 60;
+  const tooltipFrames = roundedFrame % safeFps;
+  const tooltipTime = `${String(tooltipMinutes).padStart(2, "0")}:${String(tooltipSeconds).padStart(2, "0")}.${String(tooltipFrames).padStart(2, "0")}`;
 
   return (
     <div
+      className={styles.playhead}
       data-testid="playhead"
+      data-scrubbing={isScrubbing}
       role="slider"
-      aria-label="Playhead"
+      aria-label={t("studio.timeline.playheadAria")}
       aria-valuenow={frame}
       aria-valuemin={0}
       aria-valuemax={maxFrame}
@@ -75,40 +104,16 @@ export function Playhead({ pxPerSecond, fps }: PlayheadProps) {
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
       style={{
-        position: "absolute",
         left: x,
-        top: 0,
-        bottom: 0,
-        width: 2,
-        background: "var(--accent)",
-        cursor: "ew-resize",
-        zIndex: 7,
-        boxShadow: "0 0 6px var(--accent-glow)",
-        // Re-enable pointer events: the parent overlay wrapper sets
-        // pointerEvents:"none" so clip drags below still work; the Playhead
-        // itself opts back in for its own hit area.
-        pointerEvents: "auto",
-        // Avoid native touch-scroll stealing the drag on touch devices.
-        touchAction: "none",
       }}
     >
-      {/* 14px tab/head at the top — visually anchors the cursor and gives
-          a generous hit-target. The bar below the tab is still draggable
-          (cursor: ew-resize) since pointerdown anywhere on this element
-          captures the pointer. */}
-      <div
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          left: -6,
-          top: 0,
-          width: 14,
-          height: 14,
-          background: "var(--accent)",
-          borderRadius: "0 0 50% 50%",
-          pointerEvents: "none",
-        }}
-      />
+      <div className={styles.line} aria-hidden="true" />
+      <div className={styles.handle} aria-hidden="true" />
+      {showTooltip && (
+        <div className={styles.tooltip} role="tooltip">
+          {tooltipTime}
+        </div>
+      )}
     </div>
   );
 }

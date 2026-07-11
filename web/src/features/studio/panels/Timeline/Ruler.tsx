@@ -11,8 +11,11 @@
 //
 // Extracted from Timeline/index.tsx (was a local function) so the seek logic is
 // unit-testable in isolation, mirroring Playhead.tsx.
-import { useRef } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
+import { useT } from "@/i18n/useT";
 import { useComposition } from "../../store";
+import { TIMELINE_HEADER_WIDTH, TIMELINE_RULER_HEIGHT } from "./timelineMetrics";
+import { computeRulerScale } from "./timelineScale";
 
 interface RulerProps {
   duration: number;
@@ -22,14 +25,48 @@ interface RulerProps {
 }
 
 export function Ruler({ duration, pxPerSecond, totalWidth, fps }: RulerProps) {
+  const t = useT();
   // S1 (PRD-0013) — publish a seek intent so PreviewPanel drives the Player.
   const requestSeekFrame = useComposition((s) => s.requestSeekFrame);
+  const containerRef = useRef<HTMLDivElement>(null);
   const regionRef = useRef<HTMLDivElement>(null);
   const scrubbingRef = useRef(false);
+  const [viewport, setViewport] = useState({ start: 0, end: duration });
 
-  const step = duration > 60 ? 10 : duration > 20 ? 4 : 2;
-  const ticks: number[] = [];
-  for (let s = 0; s <= duration; s += step) ticks.push(s);
+  useLayoutEffect(() => {
+    const scrollElement = containerRef.current?.parentElement;
+    if (!scrollElement || pxPerSecond <= 0) return;
+
+    const updateViewport = () => {
+      const viewportWidth = Math.max(0, scrollElement.clientWidth - TIMELINE_HEADER_WIDTH);
+      if (viewportWidth === 0) {
+        setViewport({ start: 0, end: duration });
+        return;
+      }
+      setViewport({
+        start: Math.max(0, scrollElement.scrollLeft / pxPerSecond),
+        end: Math.min(
+          duration,
+          (scrollElement.scrollLeft + viewportWidth) / pxPerSecond,
+        ),
+      });
+    };
+
+    updateViewport();
+    scrollElement.addEventListener("scroll", updateViewport, { passive: true });
+    window.addEventListener("resize", updateViewport);
+    return () => {
+      scrollElement.removeEventListener("scroll", updateViewport);
+      window.removeEventListener("resize", updateViewport);
+    };
+  }, [duration, pxPerSecond]);
+
+  const { ticks } = computeRulerScale({
+    duration,
+    pxPerSecond,
+    viewportStart: viewport.start,
+    viewportEnd: viewport.end,
+  });
 
   // Map a viewport clientX to a timeline frame. getBoundingClientRect already
   // accounts for horizontal scroll, so the region's left edge is always time=0.
@@ -56,23 +93,30 @@ export function Ruler({ duration, pxPerSecond, totalWidth, fps }: RulerProps) {
 
   return (
     <div
+      ref={containerRef}
       style={{
-        height: 22,
+        height: TIMELINE_RULER_HEIGHT,
         borderBottom: "1px solid var(--divider)",
         position: "sticky",
         top: 0,
         background: "var(--surface-1)",
-        backdropFilter: "blur(8px)",
+        backdropFilter: "blur(24px) saturate(140%)",
         zIndex: 4,
         display: "flex",
       }}
     >
-      <div style={{ width: 152, flexShrink: 0, borderRight: "1px solid var(--divider)" }} />
+      <div
+        style={{
+          width: TIMELINE_HEADER_WIDTH,
+          flexShrink: 0,
+          borderRight: "1px solid var(--divider)",
+        }}
+      />
       <div
         ref={regionRef}
         data-testid="ruler-seek-region"
         role="slider"
-        aria-label="Seek timeline"
+        aria-label={t("studio.timeline.seekAria")}
         aria-valuemin={0}
         aria-valuemax={Math.round(duration)}
         onPointerDown={onPointerDown}
@@ -87,24 +131,36 @@ export function Ruler({ duration, pxPerSecond, totalWidth, fps }: RulerProps) {
           touchAction: "none",
         }}
       >
-        {ticks.map((s) => (
+        {ticks.map((tick) => (
           <div
-            key={s}
+            key={`${tick.kind}-${tick.time}`}
+            data-testid={`ruler-tick-${tick.kind}`}
             style={{
               position: "absolute",
-              left: s * pxPerSecond,
-              top: 0,
+              left: tick.time * pxPerSecond,
               bottom: 0,
-              borderLeft: "1px solid var(--divider)",
-              paddingLeft: 4,
-              fontSize: 9,
-              fontFamily: "var(--font-mono)",
-              color: "var(--text-dimmer)",
-              lineHeight: "22px",
-              pointerEvents: "none", // clicks fall through to the seek region
+              width: 1,
+              height: tick.kind === "major" ? 8 : 4,
+              background: "var(--divider)",
+              pointerEvents: "none",
             }}
           >
-            {Math.floor(s / 60)}:{(s % 60).toString().padStart(2, "0")}
+            {tick.kind === "major" && (
+              <span
+                style={{
+                  position: "absolute",
+                  left: 4,
+                  bottom: 9,
+                  whiteSpace: "nowrap",
+                  fontSize: 9,
+                  fontFamily: "var(--font-mono)",
+                  color: "var(--text-dimmer)",
+                  lineHeight: "12px",
+                }}
+              >
+                {tick.label}
+              </span>
+            )}
           </div>
         ))}
       </div>

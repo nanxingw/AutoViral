@@ -1,0 +1,71 @@
+.playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  transform: translateX(-7px);
+  cursor: ew-resize;
+  z-index: 7;
+  pointer-events: auto;
+  touch-action: none;
+  transition: left 200ms ease-out;
+}
+
+.playhead[data-scrubbing="true"] {
+  transition: none;
+}
+
+.line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 6.5px;
+  width: 1px;
+  background: var(--accent);
+  box-shadow: 0 0 6px var(--accent-glow);
+  pointer-events: none;
+}
+
+.handle {
+  position: absolute;
+  top: 0;
+  left: 1px;
+  width: 12px;
+  height: 14px;
+  background: var(--accent);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  pointer-events: none;
+}
+
+.tooltip {
+  position: absolute;
+  top: 17px;
+  left: 50%;
+  transform: translateX(-50%);
+  min-width: max-content;
+  padding: 3px 6px;
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  pointer-events: none;
+  transition: opacity 200ms ease-out;
+}
+
+.playhead[data-scrubbing="true"] .tooltip {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .playhead,
+  .tooltip {
+    transition: none;
+  }
+}
