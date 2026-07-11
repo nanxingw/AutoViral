@@ -76,7 +76,7 @@ import {
 import { resolve as resolveVariables } from "../../composition/variables/index.js";
 import { synthesizeNarration } from "../../providers/tts/registry.js";
 import { runAsrCaptions } from "../../domain/asr-captions.js";
-import { getContext, getProfile, getTrends } from "../../context/index.js";
+import { getContext, getProfile } from "../../context/index.js";
 import { lintComposition } from "../../composition/quality/lint.js";
 import { inspectComposition } from "../../composition/quality/inspect.js";
 import { validateComposition } from "../../composition/quality/validate.js";
@@ -646,7 +646,6 @@ bridgeRouter.get("/context", async (c) => {
   const q = c.req.query();
   const ctx = await getContext(g.workId, {
     includeProfile: q.profile !== "false",
-    includeTrends: q.trends === "true",
   });
   return c.json({
     ok: true,
@@ -744,22 +743,6 @@ bridgeRouter.post("/quality/check", async (c) => {
   } catch (err) {
     return c.json({ ok: false, error: (err as Error).message }, 500);
   }
-});
-
-bridgeRouter.get("/trends", async (c) => {
-  const g = workIdOrError(c);
-  if (!g.ok) return g.res;
-  const q = c.req.query();
-  const platforms = q.platform
-    ? (q.platform.split(",") as Array<
-        "douyin" | "bilibili" | "youtube" | "xiaohongshu"
-      >)
-    : undefined;
-  const trends = await getTrends({
-    platforms,
-    topic: q.topic,
-  });
-  return c.json({ ok: true, result: trends });
 });
 
 // SSE stream — every focus-changed event flushes the latest context.

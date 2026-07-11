@@ -28,7 +28,7 @@ import { checkpointCommand } from "./commands/checkpoint.js";
 import { ingestCommand } from "./commands/ingest.js";
 import { preprocessCommand } from "./commands/preprocess.js";
 import { contextCommand } from "./commands/context.js";
-import { trendsCommand, profileCommand } from "./commands/trends.js";
+import { profileCommand } from "./commands/profile.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { setupCommand } from "./commands/setup.js";
 import {
@@ -66,7 +66,6 @@ const dispatch: Record<string, (args: string[]) => Promise<void>> = {
   ingest: ingestCommand,
   preprocess: preprocessCommand,
   context: contextCommand,
-  trends: trendsCommand,
   profile: profileCommand,
   doctor: doctorCommand,
   setup: setupCommand,
@@ -191,11 +190,10 @@ function usage(): string {
     "",
     "Setup / diagnostics:",
     "  doctor                        Print a dependency readiness table",
-    "    (ffmpeg/ffprobe, TTS venv, playwright, claude CLI). Non-zero exit if a",
+    "    (ffmpeg/ffprobe, TTS venv, claude CLI). Non-zero exit if a",
     "    CORE dep (ffmpeg/ffprobe) is missing. Runs locally — no daemon needed.",
-    "  setup [--heavy]               Install missing deps with progress",
-    "    (managed ffmpeg/ffprobe + TTS venv). --heavy also installs playwright",
-    "    chromium now (else it lazy-installs on first use). No npm postinstall.",
+    "  setup                         Install missing deps with progress",
+    "    (managed ffmpeg/ffprobe + TTS venv). No npm postinstall.",
     "",
     "Run `autoviral docs` for the full manual.",
     "",

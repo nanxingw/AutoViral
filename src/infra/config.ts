@@ -17,14 +17,7 @@ export interface Config {
   // the untyped `...config` spread. Declaring it makes the secret path typed
   // and enumerable by SECRET_PATHS (src/server/api.ts).
   jimeng?: { accessKey?: string; secretKey?: string };
-  research: { enabled: boolean; schedule: string; platforms: string[] };
-  interests?: string[];
   memory?: { apiKey: string; userId: string; syncEnabled: boolean };
-  analytics?: {
-    douyinUrl: string;
-    collectInterval: number;
-    enabled: boolean;
-  };
 }
 
 // AUTOVIRAL_DATA_DIR relocates ALL on-disk state (works, trends AND config.yaml)
@@ -49,14 +42,6 @@ export function getDefaultConfig(): Config {
   return {
     port: 3271,
     model: "opus",
-    // e2e-report F139: minute :07 not :00. Multi-tenant CLI installs all
-    // firing on the exact same wall-clock minute look like coordinated
-    // scraping to small-red-book / douyin anti-bot heuristics. Offsetting
-    // minute (07 chosen arbitrarily but stable, not random — easier debug)
-    // breaks the synchronisation without changing the twice-daily cadence.
-    research: { enabled: true, schedule: "7 9,21 * * *", platforms: ["douyin", "xiaohongshu"] },
-    interests: [],
-    analytics: { douyinUrl: "", collectInterval: 60, enabled: true },
   };
 }
 
@@ -68,9 +53,16 @@ export async function loadConfig(): Promise<Config> {
   await ensureDir(CONFIG_DIR);
   try {
     const raw = await readFile(CONFIG_PATH, "utf-8");
-    const parsed = yaml.load(raw) as Partial<Config> | null;
-    const config: Config = { ...getDefaultConfig(), ...parsed };
-    config.interests = config.interests ?? [];
+    const parsed = yaml.load(raw) as (
+      Partial<Config> & { research?: unknown; analytics?: unknown; interests?: unknown }
+    ) | null;
+    const {
+      research: _retiredResearch,
+      analytics: _retiredAnalytics,
+      interests: _retiredInterests,
+      ...activeConfig
+    } = parsed ?? {};
+    const config: Config = { ...getDefaultConfig(), ...activeConfig };
 
     // .env overrides
     if (process.env.OPENROUTER_API_KEY) {

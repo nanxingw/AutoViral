@@ -10,7 +10,7 @@ import type { Spawner } from "./python-env.js";
 // filesystem state never leak between cases. Mirrors deps.test.ts's idiom.
 //
 // The spawner is ALWAYS injected — these tests never run a real `python3 -m
-// venv` or `pip install` or `playwright install`.
+// venv` or `pip install`.
 
 type PyEnvModule = typeof import("./python-env.js");
 
@@ -266,70 +266,6 @@ describe("ensureTtsVenv() — missing python3 error path", () => {
   });
 });
 
-describe("ensurePlaywrightChromium() — lazy install + progress", () => {
-  // Point PLAYWRIGHT_BROWSERS_PATH at a guaranteed-empty temp dir so the cache
-  // short-circuit doesn't fire (and the real host cache never leaks in).
-  async function withEmptyBrowserCache<T>(fn: () => Promise<T>): Promise<T> {
-    const cacheDir = await mkdtemp(join(tmpdir(), "av-pw-cache-"));
-    const prev = process.env.PLAYWRIGHT_BROWSERS_PATH;
-    process.env.PLAYWRIGHT_BROWSERS_PATH = cacheDir;
-    try {
-      return await fn();
-    } finally {
-      if (prev === undefined) delete process.env.PLAYWRIGHT_BROWSERS_PATH;
-      else process.env.PLAYWRIGHT_BROWSERS_PATH = prev;
-      await rm(cacheDir, { recursive: true, force: true });
-    }
-  }
-
-  it("runs `playwright install chromium` and surfaces progress lines", async () => {
-    await withFreshEnv(async (env) => {
-      await withEmptyBrowserCache(async () => {
-        const { calls, spawner } = recordingSpawner({});
-        const progress: string[] = [];
-        await env.ensurePlaywrightChromium({ spawner, onProgress: (l) => progress.push(l) });
-
-        // The install ran with `install chromium` (the CLI is resolved to an
-        // absolute bundled path, so we assert the stable trailing args, not the
-        // bare `playwright` literal which only the npx fallback emits).
-        const installCall = calls.find((c) => c.args.includes("chromium"));
-        expect(installCall?.args).toEqual(
-          expect.arrayContaining(["install", "chromium"]),
-        );
-        // Caller-visible progress: at minimum the start + ready bookends fired.
-        expect(progress.some((l) => /ensuring chromium/.test(l))).toBe(true);
-        expect(progress.some((l) => /ready/.test(l))).toBe(true);
-      });
-    });
-  });
-
-  it("short-circuits (no spawn) when a chromium build is already cached", async () => {
-    await withFreshEnv(async (env) => {
-      await withEmptyBrowserCache(async () => {
-        // Drop a chromium-<build> dir into the cache so chromiumCached() is true.
-        const cacheDir = process.env.PLAYWRIGHT_BROWSERS_PATH!;
-        await mkdir(join(cacheDir, "chromium-1097"), { recursive: true });
-
-        const { calls, spawner } = recordingSpawner({});
-        const progress: string[] = [];
-        await env.ensurePlaywrightChromium({ spawner, onProgress: (l) => progress.push(l) });
-
-        // Cache hit → no install spawn at all.
-        expect(calls).toEqual([]);
-        expect(progress.some((l) => /already cached/.test(l))).toBe(true);
-      });
-    });
-  });
-
-  it("throws when the install exits non-zero", async () => {
-    await withFreshEnv(async (env) => {
-      await withEmptyBrowserCache(async () => {
-        const { spawner } = recordingSpawner({ pwCode: 1 });
-        await expect(env.ensurePlaywrightChromium({ spawner })).rejects.toThrow(/chromium failed/);
-      });
-    });
-  });
-});
 
 describe("whisperModelLazyDownloadNote()", () => {
   it("documents that the model downloads on first ASR use, not at boot", async () => {

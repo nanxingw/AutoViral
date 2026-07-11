@@ -4,7 +4,7 @@
  *
  * WsBridge owns everything session-shaped: browser sockets, message history,
  * sidecar/cliSessionId bookkeeping, cost ledger, checkpoints, memory sync, the
- * `trends_` research event filtering, and process lifecycle (exit/error). A
+ * process lifecycle (exit/error). A
  * ChatBackend owns only the two CLI-specific concerns:
  *
  *   - `buildSpawn`  — turn the logical spawn inputs (prompt / resume id / 补教学
@@ -16,9 +16,7 @@
  *     in C3).
  *
  * The claude implementation is a pure move-over of the old inline spawnCli logic
- * (behavior zero change). Backend-specific coupling that must stay put — e.g.
- * the `trends_` WebSearch tool-name matching — lives in WsBridge's callbacks
- * (via onRawMessage), NOT in the backend, per the C2 slice.
+ * (behavior zero change).
  */
 
 import type { SpawnOptions } from "node:child_process";
@@ -77,13 +75,13 @@ export interface ChatTurnComplete {
 /**
  * The unified event surface a parser drives. WsBridge supplies these; the parser
  * calls them as it decodes the stream. Ordering per message: `onRawMessage`
- * first (the pre-dispatch peek — trends filtering lives here), then exactly one
+ * first, then exactly one
  * of the typed callbacks (or `onOther` for an unrecognized frame). For an
  * assistant message, `onAssistantMessage` fires once before its blocks are
  * walked into onText / onThinking / onToolUse.
  */
 export interface ChatStreamCallbacks {
-  /** Every parsed frame, BEFORE type dispatch (the trends peek hook). */
+  /** Every parsed frame, BEFORE type dispatch. */
   onRawMessage?(msg: ChatRawMessage): void;
   /** system.init — the backend session id (may be undefined on claude). */
   onSessionId(cliSessionId: string | undefined, msg: ChatRawMessage): void;

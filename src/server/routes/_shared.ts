@@ -19,7 +19,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, extname } from "node:path";
 import { type Config } from "../../infra/config.js";
-import { PACKAGE_ROOT } from "../../infra/paths.js";
 import { FFPROBE_BIN } from "../ffmpeg-paths.js";
 import { dataDir } from "../../infra/config.js";
 import type { WsBridge } from "../../ws-bridge.js";
@@ -32,48 +31,7 @@ import {
 } from "../../shared/composition.js";
 import { isWorkType, getContentType } from "../../shared/content-types/registry.js";
 
-// ── Python script runner for real-time trend data ────────────────────────────
-
 export const execFileAsync = promisify(execFile);
-
-export async function runTrendScript(platform: string): Promise<string> {
-  // Anchor on PACKAGE_ROOT (not process.cwd()) so it resolves in a packaged app.
-  // NOTE: skills/autoviral/modules/ was DELETED in the agentic-terminal refactor
-  // (see CLAUDE.md / ADR-004), so these research scripts no longer ship. Rather
-  // than spawn a nonexistent script (which would throw an opaque ENOENT), we
-  // detect the missing script and degrade gracefully: returning '' makes the
-  // caller fall back to live WebSearch (see the `dataClause` ternary at the call
-  // site). TODO(agentic-terminal): if real-time trend ingestion is revived, port
-  // these to the new skill layout and drop this guard.
-  const scriptsDir = join(PACKAGE_ROOT, 'skills', 'autoviral', 'modules', 'research', 'scripts');
-  const script = platform === 'douyin' ? 'douyin_hot_search.py' : 'newsnow_trends.py';
-  const scriptPath = join(scriptsDir, script);
-
-  const { existsSync } = await import("node:fs");
-  if (!existsSync(scriptPath)) {
-    console.warn(
-      `[trends] research script unavailable (${scriptPath}); falling back to WebSearch`,
-    );
-    return '';
-  }
-
-  try {
-    if (platform === 'douyin') {
-      const { stdout } = await execFileAsync('python3', [
-        scriptPath, '--top', '30'
-      ], { timeout: 30000 });
-      return stdout;
-    }
-    // Other platforms via newsnow
-    const { stdout } = await execFileAsync('python3', [
-      scriptPath, platform, '--top', '20'
-    ], { timeout: 30000 });
-    return stdout;
-  } catch (err) {
-    console.error(`[trends] Script error for ${platform}:`, err);
-    return '';
-  }
-}
 
 // ── MIME type helper ────────────────────────────────────────────────────────
 
@@ -204,6 +162,7 @@ export const SECRET_PATHS = [
 // dropped from the GET response spread. (memory.syncEnabled — the only
 // non-secret field any client reads — is surfaced explicitly below.)
 export const SECRET_BEARING_KEYS = ["openrouter", "jimeng", "memory"] as const;
+const RETIRED_CONFIG_KEYS = ["research", "analytics", "interests"] as const;
 
 // PUT-editable secret flat fields: empty string in the body means "leave the
 // stored value alone" so the user can save other fields without re-typing
@@ -243,6 +202,7 @@ export function redactedConfigResponse(
 ): Record<string, unknown> {
   const configRest = { ...(config as unknown as Record<string, unknown>) };
   for (const k of SECRET_BEARING_KEYS) delete configRest[k];
+  for (const k of RETIRED_CONFIG_KEYS) delete configRest[k];
   return {
     ...configRest,
     // The flat `openrouterKey` stays in the shape (always "") so older clients
@@ -500,49 +460,4 @@ export function safeTitleFromWork(title: string | undefined): string {
       .replace(/[^\w.-]+/g, "-")
       .replace(/^-+|-+$/g, "") || "autoviral-export"
   );
-}
-
-// ── Research collection (manual refresh + scheduler share this) ──────────────
-
-// #64 — exported so the research scheduler (src/research-scheduler.ts) runs the
-// EXACT same collection as the manual POST /api/trends/refresh, keeping scheduled
-// and manual research identical.
-export async function researchTrends(platforms: string[]): Promise<{ collected: string[]; errors: string[] }> {
-  const { collectPlatform, defaultPipelineDeps } = await import("../../trends/pipeline.js");
-  const { writeValidatedTrendsYaml } = await import("../../trends/write.js");
-  const { gcOldCovers, coversDir } = await import("../../trends/covers.js");
-  const { runCliBrief } = await import("../../cli-brief.js");
-  const { loadConfig } = await import("../../infra/config.js");
-  const { homedir } = await import("node:os");
-  const collected: string[] = [];
-  const errors: string[] = [];
-  // S14 — feed the user's content interests into the pipeline so collected
-  // trends are ranked by fit-to-channel before they're written to disk.
-  const cfg = await loadConfig();
-  const deps = defaultPipelineDeps(runCliBrief, (cfg.interests ?? []) as string[]);
-  for (const platform of platforms) {
-    if (!["youtube", "tiktok", "xiaohongshu", "douyin"].includes(platform)) {
-      errors.push(`${platform} (unsupported)`);
-      continue;
-    }
-    try {
-      const result = await collectPlatform(platform as any, deps);
-      if (result.pipelineStatus !== "ok") {
-        errors.push(`${platform} (${result.errors.join("; ")})`);
-        continue;
-      }
-      const trendsDir = join(homedir(), ".autoviral", "trends", platform);
-      const dateStr = new Date().toISOString().slice(0, 10);
-      const w = await writeValidatedTrendsYaml(trendsDir, dateStr, result);
-      if (!w.written) {
-        errors.push(`${platform} (write-failed: ${w.issues.map(i => i.path).join(",")})`);
-        continue;
-      }
-      await gcOldCovers(coversDir(platform), 80);
-      collected.push(platform);
-    } catch (e) {
-      errors.push(`${platform} (${e instanceof Error ? e.message : String(e)})`);
-    }
-  }
-  return { collected, errors };
 }

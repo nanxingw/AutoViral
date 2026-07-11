@@ -6,19 +6,17 @@
 // the instant the binary is on PATH, before any `autoviral start`. It checks:
 //   • ffmpeg + ffprobe  — env → managed → vendored → PATH (src/infra/deps.ts)
 //   • TTS venv          — edge-tts + stable-ts under ~/.autoviral/tts-venv
-//   • playwright        — chromium in the per-platform browsers cache
 //   • claude CLI        — presence on $PATH (can't be bundled; report only)
 //
 // EXIT CODES: non-zero when a CORE dep (ffmpeg/ffprobe, or the Remotion render
 // entry — pre-built bundle / web/src checkout) is missing, else 0. A missing
-// TTS/playwright/claude is a WARNING (degrades a feature, not the core
+// TTS/claude is a WARNING (degrades a feature, not the core
 // render/export chain) and does NOT fail the exit code — `autoviral setup` (or
 // first-use lazy install) handles those.
 
 import {
   probeClaude,
   probeFfmpegBoth,
-  probePlaywright,
   probeRemotionEntry,
   probeTts,
   type DepSource,
@@ -45,7 +43,6 @@ function sourceLabel(source: DepSource, onPath: boolean): string {
 export async function doctorCommand(_args: string[]): Promise<void> {
   const ff = probeFfmpegBoth();
   const tts = probeTts();
-  const pw = probePlaywright();
   const claude = probeClaude();
 
   const rows: string[] = [];
@@ -101,15 +98,6 @@ export async function doctorCommand(_args: string[]): Promise<void> {
       .join(" + ");
     rows.push(`${WARN} ${pad("tts venv")} missing ${missing}`);
     rows.push("    fix: run `autoviral setup` (creates the venv & pip-installs them)");
-  }
-
-  // ── playwright chromium — heavy, lazy-installed on first use ───────────────
-  if (pw.cached) {
-    rows.push(`${OK} ${pad("playwright")} chromium cached`);
-    rows.push(`    → ${pw.cacheDir}`);
-  } else {
-    rows.push(`${WARN} ${pad("playwright")} chromium not installed`);
-    rows.push("    note: ~150MB, lazy-installs on first trends scrape (or `autoviral setup --heavy`)");
   }
 
   // ── claude CLI — cannot be bundled, detect + report ───────────────────────

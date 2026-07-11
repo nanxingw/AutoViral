@@ -12,9 +12,9 @@
 //
 // This module therefore re-implements the DOCUMENTED resolution contract of
 // src/infra/deps.ts (env → managed → vendored → PATH) and src/infra/python-env.ts
-// (tts-venv layout, playwright cache) as small pure-read probes, plus the
-// matching install primitives (copy vendored ffmpeg → managed; venv + pip;
-// playwright install). The contracts are frozen in those modules' doc comments;
+// (tts-venv layout) as small pure-read probes, plus the matching install
+// primitives (copy vendored ffmpeg → managed; venv + pip). The contracts are
+// frozen in those modules' doc comments;
 // keep this file in lockstep if they change.
 
 import { existsSync, readdirSync } from "node:fs";
@@ -202,38 +202,6 @@ export function probeTts(): TtsProbe {
   const edgeTts = existsSync(venvBinPath("edge-tts"));
   const stableTs = stableTsPresent();
   return { edgeTts, stableTs, ready: edgeTts && stableTs, venvDir: ttsVenvDir() };
-}
-
-// ── playwright chromium cache (mirrors src/infra/python-env.ts) ──────────────
-
-export interface PlaywrightProbe {
-  cached: boolean;
-  cacheDir: string;
-}
-
-function playwrightBrowsersCacheDir(): string {
-  const override = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (override && override.trim()) return override;
-  if (process.platform === "win32") {
-    const base = process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
-    return join(base, "ms-playwright");
-  }
-  if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Caches", "ms-playwright");
-  }
-  const xdg = process.env.XDG_CACHE_HOME;
-  return join(xdg && xdg.trim() ? xdg : join(homedir(), ".cache"), "ms-playwright");
-}
-
-export function probePlaywright(): PlaywrightProbe {
-  const cacheDir = playwrightBrowsersCacheDir();
-  let cached = false;
-  try {
-    cached = readdirSync(cacheDir).some((e) => e.startsWith("chromium"));
-  } catch {
-    cached = false;
-  }
-  return { cached, cacheDir };
 }
 
 // ── claude CLI (cannot be bundled — detect + report only) ────────────────────
@@ -498,48 +466,6 @@ export async function installTtsVenv(
     };
   }
   return { status: "installed", detail: `edge-tts + stable-ts installed into ${dir}` };
-}
-
-/**
- * Install Playwright's chromium (heavy, ~150MB) — only when the user opts in
- * with `autoviral setup --heavy`. Mirrors python-env.ts.ensurePlaywrightChromium:
- * resolve the bundled CLI's absolute path, run it under the current node, stream
- * download progress. Skips when chromium is already cached.
- */
-export async function installPlaywrightChromium(
-  report: ProgressReporter,
-  spawner: Spawner = realSpawner,
-): Promise<InstallResult> {
-  if (probePlaywright().cached) {
-    return { status: "already", detail: "chromium already cached" };
-  }
-  const cli = resolvePlaywrightCli();
-  report("  downloading chromium (~150MB) …");
-  const r = cli
-    ? await spawner(process.execPath, [cli, "install", "chromium"], {
-        onLine: (l) => report(`    ${l}`),
-      })
-    : await spawner("npx", ["playwright", "install", "chromium"], {
-        onLine: (l) => report(`    ${l}`),
-      });
-  if (r.code !== 0) {
-    return {
-      status: "failed",
-      detail: `playwright install chromium exited ${r.code}: ${r.stderr.slice(0, 200)}`,
-    };
-  }
-  return { status: "installed", detail: "chromium installed" };
-}
-
-function resolvePlaywrightCli(): string | null {
-  for (const spec of ["playwright/cli.js", "@playwright/test/cli.js"]) {
-    try {
-      return require.resolve(spec);
-    } catch {
-      // try next
-    }
-  }
-  return null;
 }
 
 function errMsg(e: unknown): string {

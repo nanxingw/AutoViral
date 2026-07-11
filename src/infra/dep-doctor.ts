@@ -13,33 +13,24 @@
 // resolution contract. THIS module is part of the SAME bundle as the daemon, so
 // it imports the REAL src/infra/deps.ts (detect / ensureManaged / managedPathFor)
 // and src/infra/python-env.ts (ttsVenvReady / ttsVenvDir / venvBinPath /
-// ensureTtsVenv / ensurePlaywrightChromium) DIRECTLY — single source of truth,
+// ensureTtsVenv) DIRECTLY — single source of truth,
 // zero drift. No probe logic is duplicated; the only thing we compute here is
 // "is a bare-name binary actually on PATH" (the same cheap sweep server/index.ts
-// already does) and the playwright browsers-cache read (python-env keeps its
-// chromium-cache read private; it's display-only here and the real install path
-// goes through ensurePlaywrightChromium()).
+// already does).
 //
 // Both run CLIENT-SIDE — pure local reads (doctor) / installers (setup), no
 // daemon required. Dependencies are injected so unit tests never copy ffmpeg,
 // create a venv, or hit PyPI.
 
-import { existsSync, readdirSync } from "node:fs";
-import { homedir } from "node:os";
+import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { detect, ensureManaged, type DepName } from "./deps.js";
 import {
-  ensurePlaywrightChromium,
   ensureTtsVenv,
   ttsVenvDir,
   ttsVenvReady,
   venvBinPath,
 } from "./python-env.js";
-import {
-  collectorVenvDir,
-  collectorVenvReady,
-  ensureCollectorVenv,
-} from "./collector-env.js";
 import { REMOTION_ENTRY_POINT } from "./paths.js";
 
 const OK = "✓";
@@ -91,33 +82,6 @@ function resolveClaude(): string | null {
   return null;
 }
 
-/** Per-platform Playwright browsers cache dir — same contract python-env.ts uses
- *  internally (it keeps its copy private). Display-only: doctor reports whether a
- *  chromium build is cached; the real install goes through ensurePlaywrightChromium(). */
-function playwrightCacheDir(): string {
-  const override = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (override && override.trim()) return override;
-  if (process.platform === "win32") {
-    const base = process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
-    return join(base, "ms-playwright");
-  }
-  if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Caches", "ms-playwright");
-  }
-  const xdg = process.env.XDG_CACHE_HOME;
-  return join(xdg && xdg.trim() ? xdg : join(homedir(), ".cache"), "ms-playwright");
-}
-
-/** True when a chromium build already sits in the Playwright browsers cache.
- *  Pure read; never spawns. */
-function chromiumCached(): boolean {
-  try {
-    return readdirSync(playwrightCacheDir()).some((e) => e.startsWith("chromium"));
-  } catch {
-    return false; // cache dir absent → nothing installed.
-  }
-}
-
 /** D1 (PRD-0009 E2E): whether the Remotion render entry resolves — either a
  *  pre-built bundle dir (AUTOVIRAL_REMOTION_BUNDLE, packaged app) or the
  *  web/src source checkout (sibling of dist/, dev + repo daemon). Without one
@@ -165,12 +129,7 @@ export interface DoctorDeps {
   /** Whether a core bare-name binary resolves on $PATH (only consulted at the
    *  "path" tier). Injected so a missing-ffmpeg case is unit-testable. */
   binaryOnPath: (name: string) => boolean;
-  chromiumCached: () => boolean;
   resolveClaude: () => string | null;
-  /** Whether the managed Douyin-collector venv (f2 + browser_cookie3) is
-   *  provisioned. Injected so the present/missing report is unit-testable. */
-  collectorVenvReady: typeof collectorVenvReady;
-  collectorVenvDir: typeof collectorVenvDir;
   /** D1: Remotion render-entry probe (bundle env or web/src sibling). Injected
    *  so the missing-entry → exit-1 case is unit-testable. */
   remotionEntry: () => RemotionEntryProbe;
@@ -183,24 +142,19 @@ const realDoctorDeps: DoctorDeps = {
   ttsVenvDir,
   venvBinPath,
   binaryOnPath,
-  chromiumCached,
   resolveClaude,
-  collectorVenvReady,
-  collectorVenvDir,
   remotionEntry: probeRemotionEntry,
   out: stdout,
 };
 
 /**
  * Print a dependency-readiness table for ffmpeg/ffprobe (the core render chain),
- * the TTS venv (edge-tts + stable-ts), playwright chromium, and the claude CLI,
+ * the TTS venv (edge-tts + stable-ts) and the claude CLI,
  * each with where it resolves and how to fix a gap.
  *
  * Returns exit code 1 IFF a CORE dependency (ffmpeg/ffprobe) is unspawnable —
  * i.e. it resolved only to a bare PATH name that isn't actually on $PATH. A
- * missing TTS/playwright/claude is a WARNING (degrades a feature, not the core
- * chain) and does NOT change the exit code; `autoviral setup` (or first-use lazy
- * install) handles those.
+ * missing TTS/claude is a WARNING and does not change the exit code.
  */
 export async function runDoctor(deps: Partial<DoctorDeps> = {}): Promise<number> {
   const d = { ...realDoctorDeps, ...deps };
@@ -265,25 +219,6 @@ export async function runDoctor(deps: Partial<DoctorDeps> = {}): Promise<number>
     rows.push("    fix: run `autoviral setup` (creates the venv & pip-installs them)");
   }
 
-  // ── collector venv (f2 + browser_cookie3) — warning, not core ──────────────
-  // The Douyin analytics collector's managed deps. Reported honestly so a missing
-  // dep surfaces here instead of a silent ENOENT when refresh is wired (S5).
-  if (d.collectorVenvReady()) {
-    rows.push(`${OK} ${pad("collector")} f2 + browser_cookie3 ready`);
-    rows.push(`    → ${d.collectorVenvDir()}`);
-  } else {
-    rows.push(`${WARN} ${pad("collector")} not ready (missing f2 + browser_cookie3)`);
-    rows.push("    fix: run `autoviral setup` (creates the venv & pip-installs them)");
-  }
-
-  // ── playwright chromium — heavy, lazy-installed on first use ────────────────
-  if (d.chromiumCached()) {
-    rows.push(`${OK} ${pad("playwright")} chromium cached`);
-  } else {
-    rows.push(`${WARN} ${pad("playwright")} chromium not installed`);
-    rows.push("    note: ~150MB, lazy-installs on first trends scrape (or `autoviral setup --heavy`)");
-  }
-
   // ── claude CLI — cannot be bundled, detect + report ────────────────────────
   const claudePath = d.resolveClaude();
   if (claudePath) {
@@ -309,18 +244,10 @@ export async function runDoctor(deps: Partial<DoctorDeps> = {}): Promise<number>
 
 // ── setup ────────────────────────────────────────────────────────────────────
 
-export interface SetupOpts {
-  /** Install playwright chromium (~150MB) now instead of lazy-on-first-use. */
-  heavy?: boolean;
-}
-
 /** Dependencies injected for tests — defaults call the REAL provisioners. */
 export interface SetupDeps {
   ensureManaged: typeof ensureManaged;
   ensureTtsVenv: typeof ensureTtsVenv;
-  /** Provisions the managed Douyin-collector venv (f2 + browser_cookie3). */
-  ensureCollectorVenv: typeof ensureCollectorVenv;
-  ensurePlaywrightChromium: typeof ensurePlaywrightChromium;
   /** Post-install readiness probe for the core binaries (mirrors runDoctor). */
   detect: typeof detect;
   binaryOnPath: (name: string) => boolean;
@@ -330,8 +257,6 @@ export interface SetupDeps {
 const realSetupDeps: SetupDeps = {
   ensureManaged,
   ensureTtsVenv,
-  ensureCollectorVenv,
-  ensurePlaywrightChromium,
   detect,
   binaryOnPath,
   out: stdout,
@@ -341,25 +266,20 @@ const realSetupDeps: SetupDeps = {
  * Install the missing pieces with streamed progress:
  *   1. ensureManaged() copies the vendored ffmpeg/ffprobe into ~/.autoviral/bin;
  *   2. ensureTtsVenv() provisions the TTS python venv (edge-tts + stable-ts);
- *   3. ensureCollectorVenv() provisions the Douyin-collector venv (f2 +
- *      browser_cookie3);
- *   4. playwright chromium — lazy by default (just a note), or ensurePlaywright-
- *      Chromium() now with `--heavy`.
  *
  * Returns exit code 1 ONLY when the CORE step (ffmpeg/ffprobe) leaves the
- * binaries unspawnable; a TTS / collector / playwright failure is reported but
- * doesn't fail the whole setup (those degrade a feature, not the core render
+ * binaries unspawnable; a TTS failure is reported but doesn't fail the whole
+ * setup (it degrades a feature, not the core render
  * chain). Mirrors the bridge CLI's setup exit-code semantics.
  */
 export async function runSetup(
-  opts: SetupOpts = {},
   deps: Partial<SetupDeps> = {},
 ): Promise<number> {
   const d = { ...realSetupDeps, ...deps };
   d.out("autoviral setup — installing dependencies\n");
 
   // ── 1. core: ffmpeg + ffprobe → ~/.autoviral/bin ───────────────────────────
-  d.out("[1/3] ffmpeg + ffprobe (managed binaries)");
+  d.out("[1/2] ffmpeg + ffprobe (managed binaries)");
   let coreFailed = false;
   try {
     await d.ensureManaged();
@@ -382,7 +302,7 @@ export async function runSetup(
   }
 
   // ── 2. TTS venv: edge-tts + stable-ts ──────────────────────────────────────
-  d.out("[2/4] TTS venv (edge-tts + stable-ts)");
+  d.out("[2/2] TTS venv (edge-tts + stable-ts)");
   let ttsFailed = false;
   try {
     await d.ensureTtsVenv();
@@ -392,43 +312,13 @@ export async function runSetup(
     d.out(`${WARN} tts venv: ${e instanceof Error ? e.message : String(e)}\n`);
   }
 
-  // ── 3. collector venv: f2 + browser_cookie3 ────────────────────────────────
-  d.out("[3/4] collector venv (f2 + browser_cookie3)");
-  let collectorFailed = false;
-  try {
-    await d.ensureCollectorVenv();
-    d.out(`${OK} collector venv: f2 + browser_cookie3 ready\n`);
-  } catch (e) {
-    collectorFailed = true;
-    d.out(`${WARN} collector venv: ${e instanceof Error ? e.message : String(e)}\n`);
-  }
-
-  // ── 4. playwright chromium: heavy, lazy by default ─────────────────────────
-  if (opts.heavy) {
-    d.out("[4/4] playwright chromium (--heavy)");
-    try {
-      await d.ensurePlaywrightChromium({ onProgress: (l) => d.out(`  ${l}`) });
-      d.out(`${OK} chromium: ready\n`);
-    } catch (e) {
-      d.out(`${WARN} chromium: ${e instanceof Error ? e.message : String(e)}\n`);
-    }
-  } else {
-    d.out("[4/4] playwright chromium");
-    d.out(
-      `${WARN} chromium: lazy-installs (~150MB) on first trends scrape — pass --heavy to install now\n`,
-    );
-  }
-
   // ── summary + exit code ────────────────────────────────────────────────────
   if (coreFailed) {
     d.out("Setup finished with a CORE failure — render/export needs ffmpeg. See above.");
     d.out("Re-run `autoviral doctor` to re-check.");
     return 1;
   }
-  const notes = [
-    ttsFailed ? "TTS install failed" : null,
-    collectorFailed ? "collector install failed" : null,
-  ].filter(Boolean);
+  const notes = [ttsFailed ? "TTS install failed" : null].filter(Boolean);
   const note = notes.length ? ` (${notes.join("; ")} — see above)` : "";
   d.out(`Setup complete.${note} Run \`autoviral doctor\` to verify.`);
   return 0;

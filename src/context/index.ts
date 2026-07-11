@@ -24,8 +24,6 @@ export interface AgentContext {
   composition: CompositionSummary | null;
   /** H0.4 — user creation history snapshot, cached 5min. */
   profile?: import("./profile.js").ProfileSnapshot;
-  /** H0.4 — multi-platform trend items. */
-  trends?: import("./trends.js").TrendsSummary;
 }
 
 function worksRoot(): string {
@@ -62,26 +60,19 @@ function summarize(comp: Composition): CompositionSummary {
 
 export async function getContext(
   workId: string,
-  opts: { includeTrends?: boolean; includeProfile?: boolean } = {},
+  opts: { includeProfile?: boolean } = {},
 ): Promise<AgentContext> {
   const focus = readFocus(workId);
   const composition = await readCompositionSummary(workId);
-  // Trends + profile are opt-in so the default context call stays fast.
-  // CLI `autoviral context` enables them by default; `autoviral trends` /
-  // `autoviral profile` hit dedicated endpoints for finer-grained control.
+  // Profile is opt-in so the default context call stays fast.
+  // `autoviral profile` also exposes a dedicated endpoint.
   const result: AgentContext = { workId, focus, composition };
   if (opts.includeProfile) {
     const { getProfile } = await import("./profile.js");
     result.profile = await getProfile();
   }
-  if (opts.includeTrends) {
-    const { getTrends } = await import("./trends.js");
-    result.trends = await getTrends();
-  }
   return result;
 }
 
 export { getProfile, clearProfileCache } from "./profile.js";
-export { getTrends } from "./trends.js";
 export type { ProfileSnapshot } from "./profile.js";
-export type { TrendsSummary, TrendItem, Platform } from "./trends.js";

@@ -22,19 +22,13 @@
 //   * concurrent callers share one in-flight promise so a burst doesn't run
 //     `python3 -m venv` N times.
 //
-// Heavy / optional deps (playwright chromium ~150MB, whisper models GB-scale)
-// are NOT force-installed at boot. ensurePlaywrightChromium() lazily downloads
-// chromium on first trends-scrape use and surfaces progress via a callback.
+// Whisper models are downloaded lazily by stable-ts on first ASR use.
 
 import { spawn, type SpawnOptions } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
-import { createRequire } from "node:module";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { dataDir } from "./config.js";
-
-const require = createRequire(import.meta.url);
 
 // ── venv path resolution (pure reads — never spawn) ──────────────────────────
 
@@ -288,156 +282,6 @@ export async function ensureTtsVenv(opts: EnsureTtsVenvOptions = {}): Promise<vo
   return ttsVenvInFlight;
 }
 
-// ── ensurePlaywrightChromium() — lazy heavy dep (trends scrape) ───────────────
-
-/** Progress sink for the chromium download — the trends scrape route can wire
- *  this to a UI toast / log line so a ~150MB download isn't a blank stall. */
-export type ProgressReporter = (line: string) => void;
-
-export interface EnsurePlaywrightOptions {
-  spawner?: Spawner;
-  /** Surfaced progress lines (download %, "browser already installed", …). */
-  onProgress?: ProgressReporter;
-  /** Force a re-install even if a cached browser looks present. */
-  force?: boolean;
-}
-
-let playwrightInFlight: Promise<void> | null = null;
-
-/** Default per-platform Playwright browsers cache dir, honouring the
- *  PLAYWRIGHT_BROWSERS_PATH override (which Playwright itself respects). This is
- *  where `playwright install chromium` drops the `chromium-<build>` folder. */
-function playwrightBrowsersCacheDir(): string {
-  const override = process.env.PLAYWRIGHT_BROWSERS_PATH;
-  if (override && override.trim()) return override;
-  if (process.platform === "win32") {
-    const base = process.env.LOCALAPPDATA ?? join(homedir(), "AppData", "Local");
-    return join(base, "ms-playwright");
-  }
-  if (process.platform === "darwin") {
-    return join(homedir(), "Library", "Caches", "ms-playwright");
-  }
-  // Linux: XDG cache, default ~/.cache.
-  const xdg = process.env.XDG_CACHE_HOME;
-  return join(xdg && xdg.trim() ? xdg : join(homedir(), ".cache"), "ms-playwright");
-}
-
-/** True when a chromium build already sits in the Playwright browsers cache —
- *  the cheap readiness short-circuit that lets us skip the few-hundred-ms
- *  `playwright install` spawn on every scrape. Pure read; never spawns. */
-function chromiumCached(): boolean {
-  const cacheDir = playwrightBrowsersCacheDir();
-  let entries: string[];
-  try {
-    entries = readdirSync(cacheDir);
-  } catch {
-    return false; // cache dir not created yet → nothing installed.
-  }
-  return entries.some((e) => e.startsWith("chromium"));
-}
-
-/** Absolute path to the bundled Playwright CLI, or `null` if it can't be
- *  resolved. Mirrors deps.ts's vendored-absolute-path philosophy: resolving the
- *  CLI's real path (instead of bare `npx`) means a stripped PATH — common when
- *  the daemon spawns under a packaged app — can't break the install spawn. */
-function resolvePlaywrightCli(): string | null {
-  // @playwright/test ships the `playwright` CLI as `cli.js`; the bare
-  // `playwright` package re-exports the same. Try both so whichever is in
-  // node_modules resolves.
-  for (const spec of ["playwright/cli.js", "@playwright/test/cli.js"]) {
-    try {
-      return require.resolve(spec);
-    } catch {
-      // try next
-    }
-  }
-  return null;
-}
-
-/**
- * Lazily ensure Playwright's chromium browser is installed (first trends-scrape
- * use). Short-circuits to a no-op when chromium is already in the browsers
- * cache; otherwise runs `playwright install chromium`, downloading ~150MB.
- * NEVER called at install/boot — only on first use, per PRD-0003 §1's layered
- * strategy (heavy optional deps download on first use, with progress, not at
- * install time).
- *
- * The CLI is resolved to its absolute bundled path (not bare `npx`) so a
- * stripped PATH can't break the spawn — consistent with deps.ts. If the path
- * can't be resolved we fall back to `npx playwright …`.
- *
- * Progress is surfaced line-by-line via opts.onProgress so the caller can show
- * the user a download indicator instead of a frozen blank.
- *
- * Best-effort + coalesced: concurrent scrapes share one in-flight install.
- * A failure throws so the caller can fall back / report; it does not retry here.
- */
-export async function ensurePlaywrightChromium(
-  opts: EnsurePlaywrightOptions = {},
-): Promise<void> {
-  const onProgress = opts.onProgress;
-  const report = (line: string) => {
-    if (onProgress) onProgress(line);
-  };
-
-  // Cheap readiness short-circuit: a cached chromium build means there's
-  // nothing to do, so we skip the install spawn entirely (no PATH dependency,
-  // no few-hundred-ms tax on every scrape).
-  if (!opts.force && chromiumCached()) {
-    report("[playwright] chromium already cached.");
-    return;
-  }
-
-  if (playwrightInFlight) return playwrightInFlight;
-
-  playwrightInFlight = (async () => {
-    try {
-      report("[playwright] ensuring chromium is installed…");
-      const spawner: Spawner =
-        opts.spawner ??
-        ((cmd, args, sopts) =>
-          new Promise<SpawnResult>((resolve, reject) => {
-            const child = spawn(cmd, args, { ...sopts });
-            let stdout = "";
-            let stderr = "";
-            // Stream both pipes to the progress reporter so the ~150MB download
-            // shows live percentage instead of a blank wait.
-            child.stdout?.on("data", (d) => {
-              const s = d.toString();
-              stdout += s;
-              report(s.trimEnd());
-            });
-            child.stderr?.on("data", (d) => {
-              const s = d.toString();
-              stderr += s;
-              report(s.trimEnd());
-            });
-            child.on("error", reject);
-            child.on("close", (code) => resolve({ code, stderr, stdout }));
-          }));
-
-      // Resolve the playwright CLI to its absolute bundled path and run it with
-      // the current node binary (`process.execPath`) — no PATH dependency. Only
-      // the chromium browser is fetched (not firefox/webkit), and it's
-      // idempotent. Fall back to bare `npx playwright …` only when the absolute
-      // path can't be resolved (e.g. an unexpected node_modules layout).
-      const cli = resolvePlaywrightCli();
-      const r = cli
-        ? await spawner(process.execPath, [cli, "install", "chromium"])
-        : await spawner("npx", ["playwright", "install", "chromium"]);
-      if (r.code !== 0) {
-        throw new Error(
-          `playwright install chromium failed (exit ${r.code}): ${r.stderr.slice(0, 500)}`,
-        );
-      }
-      report("[playwright] chromium ready.");
-    } finally {
-      playwrightInFlight = null;
-    }
-  })();
-
-  return playwrightInFlight;
-}
 
 // ── whisper model lazy-download hook ─────────────────────────────────────────
 //
@@ -465,5 +309,4 @@ export function whisperModelLazyDownloadNote(): string {
  *  freshly mutated env / filesystem. */
 export function _resetPythonEnvForTests(): void {
   ttsVenvInFlight = null;
-  playwrightInFlight = null;
 }

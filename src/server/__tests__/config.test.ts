@@ -1,70 +1,80 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
-import { withTempDataDir, jsonReq } from "./_helpers.js";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { jsonReq, withTempDataDir } from "./_helpers.js";
 
-// History — this file used to assert the OPPOSITE invariant ("D3 cleanup":
-// researchEnabled / researchCron should NOT appear on /api/config). That cleanup
-// was only half-done: the server side dropped the flat keys, but the entire web
-// frontend (SettingsPanel + queries/config + msw fixtures + SettingsPanel.test)
-// kept reading/writing them. The "auto-research never fires" symptom that #64
-// reported was the cleanup's collateral — Settings posted those keys, the server
-// silently ignored them, no scheduler ran. #64 re-wired the flat keys to the
-// nested config.research.{enabled,schedule} persistence + boot a scheduler that
-// consumes them. These tests now assert the *post-#64* contract: the flat keys
-// are part of the API surface, GET reflects defaults, PUT round-trips through
-// the nested store.
-describe("/api/config — researchEnabled / researchCron round-trip (post-#64)", () => {
+const RETIRED_KEYS = [
+  "research",
+  "analytics",
+  "interests",
+  "douyinUrl",
+  "researchEnabled",
+  "researchCron",
+  "analyticsLastCollectedAt",
+] as const;
+
+describe("/api/config — PRD-0013 retired config compatibility", () => {
   beforeEach(() => vi.resetModules());
 
-  it("GET exposes researchEnabled (boolean) and researchCron (5-field expr)", async () => {
+  it("loads legacy YAML without exposing retired config or rewriting the file", async () => {
+    await withTempDataDir(async (dir) => {
+      const path = join(dir, "config.yaml");
+      const legacy = [
+        "port: 4411",
+        "model: sonnet",
+        "research:",
+        "  enabled: true",
+        "  schedule: not-a-valid-cron",
+        "analytics:",
+        "  douyinUrl: https://www.douyin.com/user/legacy",
+        "  enabled: true",
+        "  collectInterval: 60",
+        "interests:",
+        "  - video",
+        "",
+      ].join("\n");
+      await writeFile(path, legacy, "utf-8");
+
+      const { loadConfig } = await import("../../infra/config.js");
+      const config = await loadConfig() as unknown as Record<string, unknown>;
+
+      expect(config.port).toBe(4411);
+      expect(config.model).toBe("sonnet");
+      expect(config).not.toHaveProperty("research");
+      expect(config).not.toHaveProperty("analytics");
+      expect(config).not.toHaveProperty("interests");
+      expect(await readFile(path, "utf-8")).toBe(legacy);
+    });
+  });
+
+  it("GET omits every retired field", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
       const res = await apiRoutes.fetch(new Request("http://localhost/api/config"));
-      const j = (await res.json()) as { researchEnabled: unknown; researchCron: unknown };
-      expect(j).toHaveProperty("researchEnabled");
-      expect(j).toHaveProperty("researchCron");
-      // Whichever default the server seeds, the shape must hold so the
-      // Settings form (and the scheduler) can bind to a typed value.
-      expect(typeof j.researchEnabled).toBe("boolean");
-      expect(typeof j.researchCron).toBe("string");
-      expect((j.researchCron as string).trim().split(/\s+/).length).toBe(5);
+      const body = await res.json() as Record<string, unknown>;
+
+      expect(res.status).toBe(200);
+      for (const key of RETIRED_KEYS) expect(body).not.toHaveProperty(key);
     });
   });
 
-  it("PUT persists researchEnabled / researchCron and a subsequent GET reflects them", async () => {
+  it("PUT silently ignores retired flat fields, including an invalid legacy cron", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes } = await import("../api.js");
-      const put = await apiRoutes.fetch(jsonReq("PUT", "/api/config", {
-        researchEnabled: true,
-        researchCron: "0 9 * * *",
-      }));
-      expect(put.status).toBe(200);
-      const after = (await (
-        await apiRoutes.fetch(new Request("http://localhost/api/config"))
-      ).json()) as { researchEnabled: boolean; researchCron: string };
-      expect(after.researchEnabled).toBe(true);
-      expect(after.researchCron).toBe("0 9 * * *");
-    });
-  });
-
-  it("PUT with an invalid cron expression is rejected (400 invalid_cron) and state is unchanged", async () => {
-    await withTempDataDir(async () => {
-      const { apiRoutes } = await import("../api.js");
-      // First take a baseline.
-      const before = (await (
-        await apiRoutes.fetch(new Request("http://localhost/api/config"))
-      ).json()) as { researchCron: string };
-
       const res = await apiRoutes.fetch(jsonReq("PUT", "/api/config", {
+        model: "sonnet",
+        douyinUrl: "https://www.douyin.com/user/ignored",
+        researchEnabled: true,
         researchCron: "this is not a cron",
       }));
-      expect(res.status).toBe(400);
+      const body = await res.json() as Record<string, unknown>;
 
-      const after = (await (
-        await apiRoutes.fetch(new Request("http://localhost/api/config"))
-      ).json()) as { researchCron: string };
-      // Reject must not partially apply — the rejected value must NOT have
-      // overwritten the previous schedule.
-      expect(after.researchCron).toBe(before.researchCron);
+      expect(res.status).toBe(200);
+      expect(body.model).toBe("sonnet");
+      for (const key of RETIRED_KEYS) expect(body).not.toHaveProperty(key);
+
+      const persisted = await readFile(join(process.env.AUTOVIRAL_DATA_DIR!, "config.yaml"), "utf-8");
+      expect(persisted).not.toMatch(/research|analytics|interests|douyinUrl/);
     });
   });
 });

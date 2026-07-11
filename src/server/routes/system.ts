@@ -1,13 +1,10 @@
-// System domain sub-router (I11): status, config, interests, logs,
+// System domain sub-router (I11): status, config, logs,
 // test-runner, memory. Split verbatim from api.ts — no behaviour/path change.
 
 import { Hono } from "hono";
-import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import cron from "node-cron";
 import { loadConfig, saveConfig } from "../../infra/config.js";
-import { restartResearchScheduler } from "../../research-scheduler.js";
 import { readLogs } from "../../infra/logger.js";
 import { runPipeline, getRunStatus, listRuns, getRunReport, type RunConfig } from "../../test-runner.js";
 import { evaluateWork } from "../../test-evaluator.js";
@@ -36,24 +33,10 @@ systemRouter.get("/api/status", async (c) => {
 // GET /api/config
 systemRouter.get("/api/config", async (c) => {
   const config = await loadConfig();
-  let analyticsLastCollectedAt: string | null = null;
-  try {
-    const latestPath = join(homedir(), ".autoviral", "analytics", "douyin", "latest.json");
-    const raw = await readFile(latestPath, "utf-8");
-    const parsed = JSON.parse(raw);
-    analyticsLastCollectedAt = parsed.collected_at ?? null;
-  } catch { /* file may not exist; ok */ }
   // #60 + C1.1 — strip EVERY secret-bearing nested object so no plaintext
   // credential escapes, surfacing redacted {set,lastFour} via secretMeta. The
   // SAME helper now drives the PUT response (which used to echo raw config).
-  return c.json(
-    redactedConfigResponse(config, {
-      douyinUrl: config.analytics?.douyinUrl ?? "",
-      researchEnabled: config.research?.enabled ?? false,
-      researchCron: config.research?.schedule ?? "7 9,21 * * *",
-      analyticsLastCollectedAt,
-    }),
-  );
+  return c.json(redactedConfigResponse(config));
 });
 
 // PUT /api/config
@@ -75,66 +58,16 @@ systemRouter.put("/api/config", async (c) => {
   if (body.model !== undefined) {
     config.model = body.model as string;
   }
-  if (body.douyinUrl !== undefined) {
-    if (!config.analytics) config.analytics = { douyinUrl: "", collectInterval: 60, enabled: true };
-    config.analytics.douyinUrl = body.douyinUrl as string;
-  }
   if (body.memorySyncEnabled !== undefined) {
     if (!config.memory) config.memory = { apiKey: "", userId: "autoviral-user", syncEnabled: false };
     config.memory.syncEnabled = body.memorySyncEnabled as boolean;
   }
-  if (body.researchEnabled !== undefined) {
-    if (!config.research) config.research = { enabled: true, schedule: "7 9,21 * * *", platforms: ["douyin", "xiaohongshu"] };
-    config.research.enabled = body.researchEnabled as boolean;
-  }
-  if (body.researchCron !== undefined) {
-    const cronExpr = String(body.researchCron).trim();
-    // #64 — validate BEFORE persisting. An invalid cron would later throw inside
-    // cron.schedule and silently kill the research scheduler, leaving the toggle
-    // looking healthy while auto-research never fires.
-    if (cronExpr && !cron.validate(cronExpr)) {
-      return c.json({ error: "Invalid cron expression", errorCode: "invalid_cron" }, 400);
-    }
-    if (!config.research) config.research = { enabled: true, schedule: "7 9,21 * * *", platforms: ["douyin", "xiaohongshu"] };
-    config.research.schedule = cronExpr || "7 9,21 * * *";
-  }
-
   await saveConfig(config);
-  // #64 — apply research schedule/enable changes live so the Settings control
-  // actually takes effect without a server restart.
-  if (body.researchEnabled !== undefined || body.researchCron !== undefined) {
-    void restartResearchScheduler();
-  }
   // C1.1 (PRD-0009) — NEVER echo the raw config back. The previous
   // `c.json(config)` returned every plaintext secret (openrouter.apiKey /
   // jimeng.accessKey+secretKey / memory.apiKey) on the write path, a leak the
   // GET-only #60 strip never covered. Same redacted shape as GET now.
-  return c.json(
-    redactedConfigResponse(config, {
-      douyinUrl: config.analytics?.douyinUrl ?? "",
-      researchEnabled: config.research?.enabled ?? false,
-      researchCron: config.research?.schedule ?? "7 9,21 * * *",
-    }),
-  );
-});
-
-// GET /api/interests — 获取用户兴趣列表
-systemRouter.get("/api/interests", async (c) => {
-  const config = await loadConfig();
-  return c.json({ interests: config.interests ?? [] });
-});
-
-// PUT /api/interests — 更新用户兴趣列表
-systemRouter.put("/api/interests", async (c) => {
-  try {
-    const body = await c.req.json<{ interests: string[] }>();
-    const current = await loadConfig();
-    const interests = body.interests ?? [];
-    await saveConfig({ ...current, interests });
-    return c.json({ success: true, interests });
-  } catch (err) {
-    return c.json({ error: "Failed to save interests" }, 500);
-  }
+  return c.json(redactedConfigResponse(config));
 });
 
 // ---------------------------------------------------------------------------

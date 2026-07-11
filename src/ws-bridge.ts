@@ -11,10 +11,8 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { writeFile, readFile, rm, mkdir } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { WebSocketServer, WebSocket } from "ws";
-import yaml from "js-yaml";
 import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { appendFile } from "node:fs/promises";
@@ -35,12 +33,6 @@ import {
   findIdleSessions,
   type SessionRecord,
 } from "./server/sessions/sessions-sidecar.js";
-import {
-  buildCoachSystemPrompt,
-  isCoachKey,
-  COACH_DEFAULT_MODEL,
-} from "./domain/coach-session.js";
-import { assembleCoachContext } from "./domain/coach-context.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -340,7 +332,7 @@ ${manualLoadSection}
 
 ## 4 个能力，按需直接调用
 
-你做的事可归为 4 个**能力**（capabilities，无固定先后）：**research**（趋势 / 对标 / 已有素材——\`autoviral trends\`、\`GET /api/trends/*\`）· **planning**（把意图转成 brief，写进 plan/）· **assets**（上面的生成端点）· **assembly**（用 \`autoviral clip\` / 转场 / TTS / 字幕拼装）。任意能力都可**直接调用**，没有前置依赖、没有顺序约束、没有评审门禁。
+你做的事可归为 4 个**能力**（capabilities，无固定先后）：**research**（按需进行 Web 调研、对标分析或梳理已有素材）· **planning**（把意图转成 brief，写进 plan/）· **assets**（上面的生成端点）· **assembly**（用 \`autoviral clip\` / 转场 / TTS / 字幕拼装）。任意能力都可**直接调用**，没有前置依赖、没有顺序约束、没有评审门禁。
 ${isVideo ? `
 ## 计划层：剧本 + 分镜（planning，可选）
 
@@ -488,9 +480,7 @@ export const ALLOWED_STREAM_TYPES = ["user", "text", "thinking", "tool_use", "to
 
 export class WsBridge {
   /** Nested keying (ADR-008): workId → sessionId → WsSession. A work has one
-   *  entry per concurrent chat session; the default/legacy session is `s_1`.
-   *  Trend sessions reuse the sessionKey as the workId slot with a single
-   *  default sub-session — they are ephemeral and never multi-session. */
+   *  entry per concurrent chat session; the default/legacy session is `s_1`. */
   private sessions: Map<string, Map<string, WsSession>> = new Map();
   /** TTL (ms) after which an idle session is auto-archived on sweep.
    *  Injectable so tests don't wait 7 days. */
@@ -530,8 +520,8 @@ export class WsBridge {
 
   // ── Session keying helpers ───────────────────────────────────────────────
 
-  /** Resolve the effective sessionId. Trend keys (`trends_…`) and any caller
-   *  that omits sessionId target the default session. */
+  /** Resolve the effective sessionId. Any caller that omits sessionId targets
+   *  the default session. */
   private resolveSessionId(sessionId?: string): string {
     return sessionId && sessionId.trim() ? sessionId : DEFAULT_CHAT_SESSION_ID;
   }
@@ -559,26 +549,9 @@ export class WsBridge {
     if (perWork.size === 0) this.sessions.delete(workId);
   }
 
-  /**
-   * Sidecar for a session key. Returns null ONLY for ephemeral `trends_` keys
-   * (intentionally history-less). A `coach_` key DOES get a real sidecar — the
-   * research/strategy coach is a PERSISTED session whose history survives reload
-   * (PRD-0006 D5). A normal work id gets one too.
-   */
-  private sidecarFor(workId: string): SessionSidecar | null {
-    if (workId.startsWith("trends_")) return null;
+  /** Sidecar for a work's chat sessions. */
+  private sidecarFor(workId: string): SessionSidecar {
     return new SessionSidecar(workId);
-  }
-
-  /**
-   * True iff `key` names a real Work (has a work.yaml record + checkpointable
-   * deliverable). False for the two workless session kinds: ephemeral `trends_`
-   * and the persisted `coach_`. Guards the work-record-only side effects
-   * (getWork / syncMessage / createCheckpoint) so a coach turn doesn't try to
-   * checkpoint a non-existent composition or look up a missing work.
-   */
-  private isWorkBound(key: string): boolean {
-    return !key.startsWith("trends_") && !isCoachKey(key);
   }
 
   // ── Session management ───────────────────────────────────────────────────
@@ -658,13 +631,10 @@ export class WsBridge {
   }
 
   private appendToChatLog(workId: string, block: ChatBlock, sessionId?: string): void {
-    if (workId.startsWith("trends_")) return;
     const sid = this.resolveSessionId(sessionId);
     const chatFile = chatLogPath(workId, sid);
-    // Ensure the session dir exists before appending. Work dirs are pre-created,
-    // but a workless persisted coach (`coach_*`) session has no pre-made dir, so
-    // the append would ENOENT and silently drop history. mkdir(recursive) is
-    // idempotent, so this is a no-op for real works.
+    // Ensure the session dir exists before appending. mkdir(recursive) is
+    // idempotent for existing work directories.
     const dir = join(dataDir, "works", workId);
     const line = JSON.stringify(block) + "\n";
     this.enqueueChatWrite(chatFile, async () => {
@@ -684,7 +654,6 @@ export class WsBridge {
    * a string synchronously at call time.
    */
   private rewriteChatLog(workId: string, sessionId: string, blocks: ChatBlock[]): void {
-    if (workId.startsWith("trends_")) return;
     const chatFile = chatLogPath(workId, sessionId);
     const dir = join(dataDir, "works", workId);
     const content =
@@ -866,187 +835,8 @@ export class WsBridge {
   }
 
   /**
-   * Create an ephemeral trend research session.
-   * Uses sonnet model, auto-kills after 180s, filters CLI events into simplified research events.
-   */
-  async createTrendSession(sessionKey: string, prompt: string): Promise<WsSession> {
-    const existing = this.getSessionEntry(sessionKey, DEFAULT_CHAT_SESSION_ID);
-    if (existing?.cliProcess) {
-      try { existing.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-    }
-
-    const session: WsSession = {
-      workId: sessionKey,
-      sessionId: DEFAULT_CHAT_SESSION_ID,
-      idle: false,
-      browserSockets: existing?.browserSockets ?? new Set(),
-      messageHistory: [],
-      model: "sonnet",
-    };
-    this.setSessionEntry(sessionKey, DEFAULT_CHAT_SESSION_ID, session);
-
-    this.spawnCli(session, prompt);
-
-    // Auto-kill after 180s
-    setTimeout(() => {
-      if (session.cliProcess) {
-        try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-        session.cliProcess = undefined;
-        // Still try to read files even on timeout — agent may have written data.json
-        this.finalizeTrendData(sessionKey).catch(() => {}).finally(() => {
-          this.broadcastToBrowsers(sessionKey, {
-            event: "research_error",
-            data: { message: "搜索超时，请稍后重试" },
-          });
-          this.cleanupTrendSession(sessionKey);
-        });
-      }
-    }, 180000);
-
-    this.broadcastToBrowsers(sessionKey, {
-      event: "research_started",
-      data: { platform: sessionKey.split("_")[1] ?? "unknown" },
-    });
-
-    return session;
-  }
-
-  /**
-   * Assemble the coach's grounding context (works + selected-platform trends +
-   * interests) from disk, then build the research/strategy system prompt
-   * (D5, PRD-0006). Lazy by construction: the pure builder caps + budgets the
-   * works block, so we never embed the full library every turn. Falls back to a
-   * trends/interests-only prompt if the scrape is missing (honest thin-data).
-   */
-  private async buildCoachPrompt(platform: string): Promise<string> {
-    const { getLatestCreatorData } = await import("./domain/analytics-collector.js");
-    const ctx = await assembleCoachContext(platform, {
-      getLatestCreatorData,
-      getTrendTopics: async (p) => {
-        // Read the on-disk trends artifact for the selected platform and pull
-        // out topic titles (data.json `{topics:[{title}]}` written by the
-        // research agent). Missing/unreadable → [] (honest empty, no fake).
-        try {
-          const file = join(homedir(), ".autoviral", "trends", p, "data.json");
-          const raw = await readFile(file, "utf-8");
-          const data = JSON.parse(raw) as { topics?: Array<{ title?: string }> };
-          return (data.topics ?? [])
-            .map((t) => t?.title)
-            .filter((t): t is string => typeof t === "string" && t.length > 0)
-            .slice(0, 12);
-        } catch {
-          return [];
-        }
-      },
-      getInterests: async () => {
-        try {
-          const cfg = await loadConfig();
-          return cfg.interests ?? [];
-        } catch {
-          return [];
-        }
-      },
-    });
-    return buildCoachSystemPrompt(ctx);
-  }
-
-  /**
-   * Create (or restart) the PERSISTED research/strategy coach session for a
-   * coach key (`coach_*`). Unlike the ephemeral `trends_` session this one is
-   * sidecar-backed (history survives reload). The coach runs on a SESSION-SCOPED
-   * model (`COACH_DEFAULT_MODEL` by default, or `opts.model`) — never the global
-   * `config.model`, so switching the coach's tier can't steal the editing
-   * agent's tier (the bug S6 fixes). `initialPrompt` is the user's first message;
-   * we prepend the grounded coach system prompt on the FIRST turn only (resume
-   * keeps the agent's existing context).
-   */
-  async createCoachSession(
-    coachKey: string,
-    initialPrompt: string,
-    opts: { platform?: string; model?: string } = {},
-  ): Promise<WsSession> {
-    if (!isCoachKey(coachKey)) {
-      throw new Error(`createCoachSession requires a coach_* key, got "${coachKey}"`);
-    }
-    const sid = DEFAULT_CHAT_SESSION_ID;
-    const platform = opts.platform ?? "douyin";
-    const model = opts.model ?? COACH_DEFAULT_MODEL;
-    logBridge("coach_session_create", coachKey, { model, platform, promptLen: initialPrompt.length });
-
-    const existing = this.getSessionEntry(coachKey, sid);
-    if (existing?.cliProcess) {
-      try { existing.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-    }
-
-    // Persisted: ensure the sidecar record exists BEFORE spawn so a refresh
-    // recovers the coach session (sidecarFor returns a real sidecar for coach_).
-    await this.ensureSidecarRecord(coachKey, sid).catch(() => {});
-
-    const session: WsSession = {
-      workId: coachKey,
-      sessionId: sid,
-      idle: false,
-      browserSockets: existing?.browserSockets ?? new Set(),
-      messageHistory: existing?.messageHistory ?? [],
-      // SESSION-scoped model — bound to THIS session, not config.model.
-      model,
-    };
-    this.setSessionEntry(coachKey, sid, session);
-
-    // Load persisted history (survives restart) from the coach's own chat log.
-    try {
-      const raw = await readFile(chatLogPath(coachKey, sid), "utf-8");
-      const blocks: ChatBlock[] = [];
-      for (const line of raw.split("\n")) {
-        if (!line.trim()) continue;
-        try { blocks.push(JSON.parse(line)); } catch { /* skip malformed */ }
-      }
-      if (blocks.length > 0) session.messageHistory = assignFallbackIds(blocks);
-    } catch { /* no prior history */ }
-
-    // Resume the cliSessionId from the sidecar if we have one; else first turn.
-    let resumeId: string | undefined;
-    try {
-      const record = await this.sidecarFor(coachKey)?.get(sid);
-      if (record?.cliSessionId) resumeId = record.cliSessionId;
-      if (resumeId) session.cliSessionId = resumeId;
-    } catch { /* ignore */ }
-
-    if (resumeId) {
-      this.spawnCli(session, initialPrompt, resumeId);
-    } else {
-      const systemPrompt = await this.buildCoachPrompt(platform);
-      this.spawnCli(session, systemPrompt + "\n\n---\n\n用户消息：" + initialPrompt);
-    }
-    return session;
-  }
-
-  /**
-   * Set the model alias for ONE live session, scoped to that (workId,
-   * sessionId) — the SESSION-scoped model fix (PRD-0006 D5). The old
-   * ModelSwitcher wrote the GLOBAL `config.model`, so changing the coach's tier
-   * also changed the editing agent's tier. This mutates only the in-memory
-   * session; the new tier binds on the session's NEXT spawn (killing the live
-   * CLI forces a respawn). Returns true if the session existed.
-   */
-  setSessionModel(workId: string, model: string, sessionId?: string): boolean {
-    const sid = this.resolveSessionId(sessionId);
-    const session = this.getSessionEntry(workId, sid);
-    if (!session) return false;
-    session.model = model;
-    // Force a respawn on the next turn so the new tier takes effect, without
-    // touching any OTHER session's model (or the global config).
-    if (session.cliProcess) {
-      try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-      session.cliProcess = undefined;
-      session.idle = true;
-    }
-    return true;
-  }
-
-  /**
    * C4 (PRD-0010) — switch the chat BACKEND for ONE session, kill+respawn style
-   * (mirrors setSessionModel). Unlike the model tier, a backend can only be set
+   * Unlike the model tier, a backend can only be set
    * on a FRESH session: claude and codex resume ids are not interchangeable, so
    * an ESTABLISHED session (one that already owns a cliSessionId or any recorded
    * history) can never switch without silently dropping its context. Such a
@@ -1065,7 +855,7 @@ export class WsBridge {
     session.backend = next;
     // Persist the new pin so a refresh / restart keeps the choice.
     this.sidecarFor(workId)?.patch(sid, { backend: next }).catch(() => {});
-    // Respawn on the next turn, exactly like setSessionModel.
+    // Respawn on the next turn so the backend change takes effect.
     if (session.cliProcess) {
       try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
       session.cliProcess = undefined;
@@ -1104,17 +894,15 @@ export class WsBridge {
     // so route it to THIS session's sockets, not every chat on the work. Carries
     // the recorded block's stable id so the live seed path agrees with reload.
     this.broadcastToSession(workId, sid, { event: "block", data: { ...recorded, sessionId: sid } });
-    if (this.isWorkBound(workId)) {
-      getWork(workId).then(w => {
-        if (!w) return;
-        syncMessage(workId, w.title, "chat", "user", text).catch(() => {});
-      }).catch(() => {});
-    }
+    getWork(workId).then(w => {
+      if (!w) return;
+      syncMessage(workId, w.title, "chat", "user", text).catch(() => {});
+    }).catch(() => {});
   }
 
   /**
-   * Resume the session with a new user message. Returns a boolean that the two
-   * HTTP callers (coach.ts, works.ts `/chat`) read to decide 200 vs 500:
+   * Resume the session with a new user message. Returns a boolean that the
+   * works `/chat` HTTP caller reads to decide 200 vs 500:
    *   - `false` — the ONLY hard failure: no such session. → 500.
    *   - `true`  — the message was handled. This INCLUDES an idempotency-window
    *     reject (A2): a duplicate is already being served by the in-flight turn,
@@ -1173,13 +961,10 @@ export class WsBridge {
     this.bumpSessionActivity(workId, sid, displayText).catch(() => {});
 
     // Real-time memory sync — user message (D3: no pipeline keyed sync).
-    // Coach sessions are workless, so they skip memory sync + checkpointing.
-    if (this.isWorkBound(workId)) {
-      getWork(workId).then(w => {
-        if (!w) return;
-        syncMessage(workId, w.title, "chat", "user", text).catch(() => {});
-      }).catch(() => {});
-    }
+    getWork(workId).then(w => {
+      if (!w) return;
+      syncMessage(workId, w.title, "chat", "user", text).catch(() => {});
+    }).catch(() => {});
 
     // If CLI is still running (shouldn't normally be, but just in case)
     if (session.cliProcess) {
@@ -1264,22 +1049,6 @@ export class WsBridge {
     return true;
   }
 
-  killTrendSession(sessionKey: string): boolean {
-    if (!sessionKey.startsWith("trends_")) return false;
-    const session = this.getSessionEntry(sessionKey, DEFAULT_CHAT_SESSION_ID);
-    if (!session) return false;
-    if (session.cliProcess) {
-      try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-      session.cliProcess = undefined;
-    }
-    this.broadcastToBrowsers(sessionKey, {
-      event: "research_error",
-      data: { message: "用户取消" },
-    });
-    this.cleanupTrendSession(sessionKey);
-    return true;
-  }
-
   getSession(workId: string, sessionId?: string): WsSession | undefined {
     return this.getSessionEntry(workId, this.resolveSessionId(sessionId));
   }
@@ -1316,64 +1085,6 @@ export class WsBridge {
     return flat;
   }
 
-  /**
-   * After trend session completes, read the agent-written data.json and
-   * copy it to the dated YAML cache so GET /api/trends/:platform picks it up.
-   * Also read report.md and broadcast it to the frontend.
-   */
-  private async finalizeTrendData(sessionKey: string): Promise<void> {
-    const platform = sessionKey.split("_")[1] ?? "unknown";
-    const trendsDir = join(homedir(), ".autoviral", "trends", platform);
-    const dataFile = join(trendsDir, "data.json");
-    const reportFile = join(trendsDir, "report.md");
-
-    try {
-      // Read the JSON data the agent wrote
-      const raw = await readFile(dataFile, "utf-8");
-      const data = JSON.parse(raw);
-      if (data.topics && Array.isArray(data.topics)) {
-        // Save as dated YAML for the trends API
-        const dateStr = new Date().toISOString().slice(0, 10);
-        await writeFile(
-          join(trendsDir, `${dateStr}.yaml`),
-          yaml.dump(data, { lineWidth: -1 }),
-          "utf-8"
-        );
-      }
-    } catch {
-      // Agent may not have written valid data.json — fall back to stdout parsing
-    }
-
-    // Read report and broadcast to frontend
-    try {
-      const report = await readFile(reportFile, "utf-8");
-      if (report.trim()) {
-        this.broadcastToBrowsers(sessionKey, {
-          event: "research_report",
-          data: { report },
-        });
-      }
-    } catch {
-      // No report file — that's fine
-    }
-  }
-
-  private cleanupTrendSession(sessionKey: string): void {
-    this.broadcastToBrowsers(sessionKey, {
-      event: "session_closed",
-      data: { sessionKey },
-    });
-    const session = this.getSessionEntry(sessionKey, DEFAULT_CHAT_SESSION_ID);
-    if (session) {
-      for (const ws of session.browserSockets) {
-        try { ws.close(); } catch { /* ignore */ }
-      }
-    }
-    setTimeout(() => {
-      this.deleteSessionEntry(sessionKey, DEFAULT_CHAT_SESSION_ID);
-    }, 5000);
-  }
-
   // ── CLI spawn ────────────────────────────────────────────────────────────
 
   /**
@@ -1408,10 +1119,6 @@ export class WsBridge {
     sid: string,
   ): Promise<string | undefined> {
     try {
-      // The changelog teaches the EDITING-agent prompt (buildSystemPrompt) only.
-      // Coach (coach_) and trend (trends_) sessions run a different prompt
-      // (buildCoachPrompt / research) and must never receive this teaching.
-      if (!this.isWorkBound(workId)) return undefined;
       const sidecar = this.sidecarFor(workId);
       if (!sidecar) return undefined;
       const record = await sidecar.get(sid);
@@ -1495,52 +1202,12 @@ export class WsBridge {
     // Accumulate assistant text chunks for this turn (also read by the exit
     // handler below, so these stay in method scope, not inside the parser).
     let turnText = "";
-    let lastEventWasToolResult = false;
-
     // Translate the claude stream-json stdout into the unified ChatBackend event
     // callbacks. Every SESSION side effect (broadcast / recordBlock / sidecar /
-    // cost ledger / checkpoint / memory sync / trends filtering) stays HERE — the
+    // cost ledger / checkpoint / memory sync) stays HERE — the
     // backend only owns arg/env construction (buildSpawn) and frame routing
     // (createLineParser). This is a pure move-over of the old inline dispatch.
     const parser = backend.createLineParser({
-      // Pre-dispatch peek. Trend-session WebSearch tool-name matching + the
-      // simplified research events stay coupled to claude here, per C2.
-      onRawMessage: (msg) => {
-        if (session.workId.startsWith("trends_")) {
-          if (msg.type === "assistant" && msg.message?.content) {
-            for (const block of msg.message.content as Array<Record<string, unknown>>) {
-              if (block.type === "tool_use" && block.name === "WebSearch") {
-                const input = block.input as Record<string, unknown> | undefined;
-                this.broadcastToSession(session.workId, session.sessionId, {
-                  event: "search_query",
-                  data: { query: (input?.query as string) ?? "" },
-                });
-                lastEventWasToolResult = false;
-              }
-            }
-          }
-          if (msg.type === "user" && (msg as Record<string, unknown>).message) {
-            const userMsg = (msg as Record<string, unknown>).message as Record<string, unknown>;
-            const content = userMsg.content as Array<Record<string, unknown>> | undefined;
-            if (content) {
-              for (const block of content) {
-                if (block.type === "tool_result") {
-                  const resultText = typeof block.content === "string"
-                    ? block.content
-                    : JSON.stringify(block.content);
-                  const summary = resultText.slice(0, 80) || "搜索完成";
-                  this.broadcastToSession(session.workId, session.sessionId, {
-                    event: "search_result",
-                    data: { summary },
-                  });
-                }
-              }
-              lastEventWasToolResult = true;
-            }
-          }
-        }
-      },
-
       // system.init — capture session ID and persist.
       onSessionId: (cliSessionId) => {
         if (cliSessionId) {
@@ -1554,10 +1221,8 @@ export class WsBridge {
               cliSessionId,
               lastActive: new Date().toISOString(),
               // B7(a)-lite — stamp the prompt version this session is taught up
-              // to (session.taughtPromptVersion), ONLY when actually set and only
-              // for work-bound editing sessions (see WsSession docstring).
-              ...(this.isWorkBound(session.workId) &&
-              session.taughtPromptVersion !== undefined
+              // to (session.taughtPromptVersion), only when actually set.
+              ...(session.taughtPromptVersion !== undefined
                 ? { lastInjectedPromptVersion: session.taughtPromptVersion }
                 : {}),
             }).catch(() => {});
@@ -1582,19 +1247,8 @@ export class WsBridge {
       },
 
       onText: (text) => {
-        if (session.workId.startsWith("trends_") && lastEventWasToolResult) {
-          this.broadcastToSession(session.workId, session.sessionId, {
-            event: "analyzing",
-            data: {},
-          });
-          lastEventWasToolResult = false;
-        }
         turnText += text;
-        let blockId: string | undefined;
-        if (!session.workId.startsWith("trends_")) {
-          const rec = this.recordBlock(session, { type: "text", text, timestamp: new Date().toISOString() });
-          blockId = rec.id;
-        }
+        const blockId = this.recordBlock(session, { type: "text", text, timestamp: new Date().toISOString() }).id;
         this.broadcastToSession(session.workId, session.sessionId, {
           event: "assistant_text",
           data: { workId: session.workId, text, ...(blockId ? { id: blockId } : {}) },
@@ -1602,11 +1256,7 @@ export class WsBridge {
       },
 
       onThinking: (text) => {
-        let blockId: string | undefined;
-        if (!session.workId.startsWith("trends_")) {
-          const rec = this.recordBlock(session, { type: "thinking", text, collapsed: true });
-          blockId = rec.id;
-        }
+        const blockId = this.recordBlock(session, { type: "thinking", text, collapsed: true }).id;
         this.broadcastToSession(session.workId, session.sessionId, {
           event: "assistant_thinking",
           data: { workId: session.workId, text, ...(blockId ? { id: blockId } : {}) },
@@ -1614,11 +1264,7 @@ export class WsBridge {
       },
 
       onToolUse: (name, input) => {
-        let blockId: string | undefined;
-        if (!session.workId.startsWith("trends_")) {
-          const rec = this.recordBlock(session, { type: "tool_use", text: JSON.stringify(input), toolName: name });
-          blockId = rec.id;
-        }
+        const blockId = this.recordBlock(session, { type: "tool_use", text: JSON.stringify(input), toolName: name }).id;
         this.broadcastToSession(session.workId, session.sessionId, {
           event: "tool_use",
           data: { workId: session.workId, name, input, ...(blockId ? { id: blockId } : {}) },
@@ -1626,11 +1272,7 @@ export class WsBridge {
       },
 
       onToolResult: (content) => {
-        let blockId: string | undefined;
-        if (!session.workId.startsWith("trends_")) {
-          const rec = this.recordBlock(session, { type: "tool_result", text: content, collapsed: true });
-          blockId = rec.id;
-        }
+        const blockId = this.recordBlock(session, { type: "tool_result", text: content, collapsed: true }).id;
         this.broadcastToSession(session.workId, session.sessionId, {
           event: "tool_result",
           data: { workId: session.workId, content, ...(blockId ? { id: blockId } : {}) },
@@ -1661,8 +1303,7 @@ export class WsBridge {
               lastActive: new Date().toISOString(),
               // B7(a)-lite — same conditional prompt-version stamp as the
               // system.init writeback above (Wave B review fix — no downgrade).
-              ...(this.isWorkBound(session.workId) &&
-              session.taughtPromptVersion !== undefined
+              ...(session.taughtPromptVersion !== undefined
                 ? { lastInjectedPromptVersion: session.taughtPromptVersion }
                 : {}),
             }).catch(() => {});
@@ -1734,49 +1375,46 @@ export class WsBridge {
         // sessions live solely in their chat-{sessionId}.jsonl (already appended
         // block-by-block above), so a non-default turn must NOT clobber chat.json
         // with the wrong session's history.
-        if (this.isWorkBound(session.workId)) {
-          // B3 — rewrite the session's jsonl from messageHistory so the usage
-          // just stamped onto the last text block survives a restart (jsonl is
-          // authoritative on reload). The default session ALSO mirrors the legacy
-          // chat.json snapshot.
-          this.rewriteChatLog(session.workId, session.sessionId, session.messageHistory);
-          if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
-            saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
-          }
-          // B3 — record the agent turn cost into the per-work ledger. The frame's
-          // total_cost_usd is the PER-TURN charge (see the delta note above), so
-          // record it DIRECTLY, once per turn, as a real metered cost
-          // (estimated:false). recordCostEvent is best-effort and never throws.
-          if (typeof cost === "number" && cost > 0) {
-            recordCostEvent({
-              workId: session.workId,
-              kind: "agent",
-              provider: "claude",
-              model: session.model,
-              usd: cost,
-              estimated: false,
-              meta: {
-                sessionId: session.sessionId,
-                ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
-                ...(durationMs !== undefined ? { durationMs } : {}),
-                ...(typeof usage?.input_tokens === "number"
-                  ? { inputTokens: usage.input_tokens }
-                  : {}),
-                ...(typeof usage?.output_tokens === "number"
-                  ? { outputTokens: usage.output_tokens }
-                  : {}),
-              },
-            });
-          }
-          // Snapshot the deliverable yaml so the user can roll back if this turn
-          // made things worse. createCheckpoint dedupes on content hash — turns
-          // that didn't touch yaml don't add rows. Coach sessions are workless
-          // (no deliverable) so they skip this.
-          createCheckpoint(session.workId).catch(() => {});
+        // B3 — rewrite the session's jsonl from messageHistory so the usage
+        // just stamped onto the last text block survives a restart (jsonl is
+        // authoritative on reload). The default session ALSO mirrors the legacy
+        // chat.json snapshot.
+        this.rewriteChatLog(session.workId, session.sessionId, session.messageHistory);
+        if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
+          saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
         }
+        // B3 — record the agent turn cost into the per-work ledger. The frame's
+        // total_cost_usd is the PER-TURN charge (see the delta note above), so
+        // record it DIRECTLY, once per turn, as a real metered cost
+        // (estimated:false). recordCostEvent is best-effort and never throws.
+        if (typeof cost === "number" && cost > 0) {
+          recordCostEvent({
+            workId: session.workId,
+            kind: "agent",
+            provider: "claude",
+            model: session.model,
+            usd: cost,
+            estimated: false,
+            meta: {
+              sessionId: session.sessionId,
+              ...(session.cliSessionId ? { cliSessionId: session.cliSessionId } : {}),
+              ...(durationMs !== undefined ? { durationMs } : {}),
+              ...(typeof usage?.input_tokens === "number"
+                ? { inputTokens: usage.input_tokens }
+                : {}),
+              ...(typeof usage?.output_tokens === "number"
+                ? { outputTokens: usage.output_tokens }
+                : {}),
+            },
+          });
+        }
+        // Snapshot the deliverable yaml so the user can roll back if this turn
+        // made things worse. createCheckpoint dedupes on content hash — turns
+        // that didn't touch yaml don't add rows.
+        createCheckpoint(session.workId).catch(() => {});
         // Real-time memory sync — assistant text (complete turn, not fragments).
         // D3: no pipeline — sync against the work title with a generic "chat" key.
-        if (this.isWorkBound(session.workId) && resultText) {
+        if (resultText) {
           getWork(session.workId).then(w => {
             if (!w) return;
             syncMessage(session.workId, w.title, "chat", "assistant", resultText).catch(() => {});
@@ -1832,7 +1470,7 @@ export class WsBridge {
         turnText.length === 0 &&
         resumeSessionId !== undefined &&
         backend.staleResumePattern?.test(stderrTail) === true;
-      if (staleResume && !session.workId.startsWith("trends_")) {
+      if (staleResume) {
         logBridge("cli_stale_resume_fallback", session.workId, {
           staleId: resumeSessionId,
           sessionId: session.sessionId,
@@ -1844,33 +1482,14 @@ export class WsBridge {
         void this.respawnFreshAfterStaleResume(session, prompt);
         return;
       }
-      if (session.workId.startsWith("trends_")) {
-        if (code === 0) {
-          // Read agent-written files and broadcast report before done event
-          this.finalizeTrendData(session.workId).catch(() => {}).finally(() => {
-            this.broadcastToSession(session.workId, session.sessionId, {
-              event: "research_done",
-              data: { platform: session.workId.split("_")[1] ?? "unknown" },
-            });
-            this.cleanupTrendSession(session.workId);
-          });
-        } else {
-          this.broadcastToSession(session.workId, session.sessionId, {
-            event: "research_error",
-            data: { message: `CLI exited with code ${code}` },
-          });
-          this.cleanupTrendSession(session.workId);
-        }
-      } else {
-        this.broadcastToSession(session.workId, session.sessionId, {
-          event: "cli_exited",
-          data: { workId: session.workId, code, signal },
-        });
-        // Persist chat to disk on CLI exit — default session only (others live
-        // in their own chat-{sessionId}.jsonl, see turn_complete above).
-        if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
-          saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
-        }
+      this.broadcastToSession(session.workId, session.sessionId, {
+        event: "cli_exited",
+        data: { workId: session.workId, code, signal },
+      });
+      // Persist chat to disk on CLI exit — default session only (others live
+      // in their own chat-{sessionId}.jsonl, see turn_complete above).
+      if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
+        saveWorkChat(session.workId, { blocks: session.messageHistory }).catch(() => {});
       }
     });
 
@@ -1895,12 +1514,6 @@ export class WsBridge {
         event: "cli_error",
         data: { workId: session.workId, error: message, code: (err as NodeJS.ErrnoException).code },
       });
-      if (session.workId.startsWith("trends_")) {
-        this.broadcastToSession(session.workId, session.sessionId, {
-          event: "research_error",
-          data: { message },
-        });
-      }
     });
   }
 
@@ -1988,24 +1601,17 @@ export class WsBridge {
       if (session.browserSockets.size === 0 && session.cliProcess) {
         // Idle reconnect grace — React StrictMode double-mount, route nav, tab
         // switch, brief network hiccup all trigger ws.close. Aborting the agent
-        // mid-turn after 1s was destructive; bump to 60s for normal works,
-        // 90s for trends (which run shorter prompts but still benefit from a
-        // grace window). (Codex review 2026-04-27)
-        const delay = session.workId.startsWith("trends_") ? 90_000 : 60_000;
+        // mid-turn after 1s was destructive; allow a 60s reconnect grace.
         setTimeout(() => {
           if (session.browserSockets.size === 0 && session.cliProcess) {
             try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
             session.cliProcess = undefined;
-            if (session.workId.startsWith("trends_")) {
-              this.cleanupTrendSession(session.workId);
-            } else {
-              session.idle = true;
-              // Grace-timeout abort is per-session lifecycle (ADR-008 §3) — fan
-              // it only to this session's sockets, not every chat on the work.
-              this.broadcastToSession(session.workId, session.sessionId, { event: "cli_exited", data: { workId: session.workId, sessionId: session.sessionId } });
-            }
+            session.idle = true;
+            // Grace-timeout abort is per-session lifecycle (ADR-008 §3) — fan
+            // it only to this session's sockets, not every chat on the work.
+            this.broadcastToSession(session.workId, session.sessionId, { event: "cli_exited", data: { workId: session.workId, sessionId: session.sessionId } });
           }
-        }, delay);
+        }, 60_000);
       }
     });
     ws.on("error", () => session.browserSockets.delete(ws));

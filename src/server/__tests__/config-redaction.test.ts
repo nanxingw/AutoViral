@@ -20,7 +20,6 @@ const h = vi.hoisted(() => {
     memory: { apiKey: "fbc5-PLAINTEXT-uuid-4444DDDD", userId: "autoviral-user", syncEnabled: true },
     research: { enabled: true, schedule: "7 9,21 * * *", platforms: ["douyin", "xiaohongshu"] },
     analytics: { douyinUrl: "https://www.douyin.com/user/x", collectInterval: 60, enabled: true },
-    interests: [],
   };
   return { baseConfig, state: { saved: null as any } };
 });
@@ -122,13 +121,17 @@ describe("GET /api/config secret redaction (#60)", () => {
     expect(body.secretMeta.openrouterKey.set).toBe(true);
   });
 
-  it("still surfaces non-secret fields the UI reads (model, memorySyncEnabled)", async () => {
+  it("still surfaces active non-secret fields without retired analytics config", async () => {
     const { body } = await getConfig();
     expect(body.model).toBe("opus");
     expect(body.port).toBe(3271);
     // memory object is stripped, but its only client-read field is surfaced flat
     expect(body.memorySyncEnabled).toBe(true);
-    expect(body.douyinUrl).toBe("https://www.douyin.com/user/x");
+    expect(body).not.toHaveProperty("research");
+    expect(body).not.toHaveProperty("analytics");
+    expect(body).not.toHaveProperty("douyinUrl");
+    expect(body).not.toHaveProperty("researchEnabled");
+    expect(body).not.toHaveProperty("researchCron");
   });
 });
 

@@ -66,10 +66,10 @@ describe("autoviral doctor — spawn", () => {
     expect(r.stdout).toMatch(/✓\s+ffprobe/);
     expect(r.stdout).toContain(fakeFfmpeg);
     expect(r.stdout).toMatch(/Core dependencies OK/);
-    // The four dependency families are all listed.
+    // Optional dependency families are listed without the retired trend scraper.
     expect(r.stdout).toMatch(/tts venv/);
-    expect(r.stdout).toMatch(/playwright/);
     expect(r.stdout).toMatch(/claude CLI/);
+    expect(r.stdout).not.toMatch(/playwright|trends scrape|--heavy/);
   });
 
   it("doctor does NOT require a running daemon (no AUTOVIRAL_WORK_ID)", async () => {
@@ -234,22 +234,13 @@ describe("autoviral setup — unknown flag rejection (spawn)", () => {
     expect(r.stdout).not.toMatch(/installing dependencies/);
   });
 
-  it("setup --bogus error names the flag, not --heavy (the known flag is unaffected)", async () => {
-    // Defence-in-depth: the rejection must be specific to the unknown flag and
-    // never swallow the known --heavy. (A full `setup --heavy` install is driven
-    // in-process via the mocked-deps wiring test below, so we don't spawn a real
-    // install here — it would touch pip/playwright.)
-    const r = await execa("node", [BIN, "setup", "--bogus", "--heavy"], {
+  it("setup --heavy is retired and fails before any install", async () => {
+    const r = await execa("node", [BIN, "setup", "--heavy"], {
       reject: false,
       env: env(),
     }).catch((e) => e);
     expect(r.exitCode).toBe(4);
-    // The "unknown flag" complaint names --bogus, never --heavy (the usage line
-    // may list --heavy as the valid flag — that's the offered alternative, not
-    // the rejected one).
-    expect(r.stderr).toMatch(/unknown flag --bogus/);
-    expect(r.stderr).not.toMatch(/unknown flag --heavy/);
-    // And it bailed before any install ran.
+    expect(r.stderr).toMatch(/unknown flag --heavy/);
     expect(r.stdout).not.toMatch(/installing dependencies/);
   });
 });
@@ -419,7 +410,7 @@ describe("setupCommand — wiring (install module mocked)", () => {
     vi.resetModules();
   });
 
-  it("calls installManagedFfmpeg + installTtsVenv with a progress reporter; skips playwright by default; exit 0", async () => {
+  it("calls installManagedFfmpeg + installTtsVenv with a progress reporter; exit 0", async () => {
     const installManagedFfmpeg = vi.fn(async (report: (l: string) => void) => {
       report("ffmpeg progress");
       return { status: "installed" as const, detail: "ok" };
@@ -428,14 +419,9 @@ describe("setupCommand — wiring (install module mocked)", () => {
       report("tts progress");
       return { status: "installed" as const, detail: "ok" };
     });
-    const installPlaywrightChromium = vi.fn(async () => ({
-      status: "installed" as const,
-      detail: "ok",
-    }));
     vi.doMock("../src/deps-probe.js", () => ({
       installManagedFfmpeg,
       installTtsVenv,
-      installPlaywrightChromium,
     }));
 
     const { setupCommand } = await import("../src/commands/setup.js");
@@ -446,38 +432,16 @@ describe("setupCommand — wiring (install module mocked)", () => {
     expect(installManagedFfmpeg).toHaveBeenCalledTimes(1);
     expect(typeof installManagedFfmpeg.mock.calls[0][0]).toBe("function"); // progress reporter
     expect(installTtsVenv).toHaveBeenCalledTimes(1);
-    // Default (no --heavy) → playwright is NOT installed eagerly.
-    expect(installPlaywrightChromium).not.toHaveBeenCalled();
     expect(process.exitCode === 0 || process.exitCode === undefined).toBe(true);
-    process.exitCode = prevExit;
-  });
-
-  it("--heavy → also installs playwright chromium", async () => {
-    const installManagedFfmpeg = vi.fn(async () => ({ status: "installed" as const, detail: "ok" }));
-    const installTtsVenv = vi.fn(async () => ({ status: "installed" as const, detail: "ok" }));
-    const installPlaywrightChromium = vi.fn(async () => ({ status: "installed" as const, detail: "ok" }));
-    vi.doMock("../src/deps-probe.js", () => ({
-      installManagedFfmpeg,
-      installTtsVenv,
-      installPlaywrightChromium,
-    }));
-
-    const { setupCommand } = await import("../src/commands/setup.js");
-    const prevExit = process.exitCode;
-    process.exitCode = undefined;
-    await setupCommand(["--heavy"]);
-    expect(installPlaywrightChromium).toHaveBeenCalledTimes(1);
     process.exitCode = prevExit;
   });
 
   it("core ffmpeg install failure → exit code 1", async () => {
     const installManagedFfmpeg = vi.fn(async () => ({ status: "failed" as const, detail: "no disk" }));
     const installTtsVenv = vi.fn(async () => ({ status: "installed" as const, detail: "ok" }));
-    const installPlaywrightChromium = vi.fn(async () => ({ status: "skipped" as const, detail: "" }));
     vi.doMock("../src/deps-probe.js", () => ({
       installManagedFfmpeg,
       installTtsVenv,
-      installPlaywrightChromium,
     }));
 
     const { setupCommand } = await import("../src/commands/setup.js");

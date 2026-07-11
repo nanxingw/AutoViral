@@ -178,10 +178,9 @@ export function runCLI(): void {
   program
     .command("setup")
     .description("Install missing dependencies (ffmpeg/ffprobe, TTS venv, …)")
-    .option("--heavy", "Also install playwright chromium (~150MB) now")
-    .action(async (opts: { heavy?: boolean }) => {
+    .action(async () => {
       const { runSetup } = await import("./infra/dep-doctor.js");
-      const code = await runSetup({ heavy: opts.heavy });
+      const code = await runSetup();
       process.exit(code);
     });
 

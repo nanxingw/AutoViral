@@ -9,7 +9,7 @@ import { EventEmitter } from "node:events";
 // single spawn chokepoint (spawnCli) through its PUBLIC surface — the exact
 // `claude` spawn args across flag combos (resume / 补教学 append / model), the
 // spawn env + options, and the NDJSON → browser-broadcast event sequence for
-// both a normal editing turn and a `trends_` research turn.
+// a normal editing turn.
 //
 // It is GREEN on the pre-refactor code (it is the snapshot baseline) and MUST
 // stay byte-for-byte GREEN after the ChatBackend interface is extracted and the
@@ -168,12 +168,13 @@ describe("WsBridge — C2 claude spawn arg composition (locked across flag combo
     });
   });
 
-  it("MODEL set (fresh trend session, model=sonnet): base args + --model", async () => {
+  it("MODEL set (fresh work session, model=sonnet): base args + --model", async () => {
     await withTempDataDir(async (dir) => {
-      const { WsBridge } = await import("../../../ws-bridge.js");
-      await mkdir(join(dir, "works"), { recursive: true });
+      const { WsBridge, DEFAULT_CHAT_SESSION_ID } = await import("../../../ws-bridge.js");
+      const work = "w_model";
+      await mkdir(join(dir, "works", work), { recursive: true });
       const bridge = new WsBridge(3271);
-      await bridge.createTrendSession("trends_douyin", "调研一下");
+      await bridge.createSession(work, "继续", "sonnet", DEFAULT_CHAT_SESSION_ID);
       expect(normArgs(lastSpawn().args)).toEqual([...BASE_ARGS, "--model", "sonnet"]);
     });
   });
@@ -271,39 +272,6 @@ describe("WsBridge — C2 NDJSON → broadcast event sequence (editing turn, loc
       const seq = events(sink);
       expect(seq.map((e) => e.event)).toEqual(["cli_event"]);
       expect(seq[0].data).toEqual({ type: "mystery", foo: "bar" });
-    });
-  });
-});
-
-describe("WsBridge — C2 trends NDJSON → research event sequence (locked)", () => {
-  it("WebSearch tool_use → search_query+tool_use; tool_result → search_result+tool_result; text → analyzing+assistant_text", async () => {
-    await withTempDataDir(async (dir) => {
-      const { WsBridge, DEFAULT_CHAT_SESSION_ID } = await import("../../../ws-bridge.js");
-      await mkdir(join(dir, "works"), { recursive: true });
-      const bridge = new WsBridge(3271);
-      await bridge.createTrendSession("trends_douyin", "调研");
-      const session = bridge.getSession("trends_douyin", DEFAULT_CHAT_SESSION_ID)!;
-      const sink: string[] = [];
-      session.browserSockets.add(fakeSocket(sink));
-
-      const proc = session.cliProcess as unknown as { stdout: EventEmitter };
-      emit(proc, { type: "assistant", message: { id: "m1", content: [{ type: "tool_use", name: "WebSearch", input: { query: "热点" } }] } });
-      emit(proc, { type: "user", message: { content: [{ type: "tool_result", content: "搜到了三条" }] } });
-      emit(proc, { type: "assistant", message: { id: "m2", content: [{ type: "text", text: "分析结果" }] } });
-      await sleep(40);
-
-      const seq = events(sink);
-      expect(seq.map((e) => e.event)).toEqual([
-        "search_query",
-        "tool_use",
-        "search_result",
-        "tool_result",
-        "analyzing",
-        "assistant_text",
-      ]);
-      expect(seq.find((e) => e.event === "search_query")!.data.query).toBe("热点");
-      expect(seq.find((e) => e.event === "search_result")!.data.summary).toBe("搜到了三条");
-      expect(seq.find((e) => e.event === "assistant_text")!.data.text).toBe("分析结果");
     });
   });
 });
