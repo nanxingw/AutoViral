@@ -35,15 +35,16 @@
 // (typo'd workId, or a legacy work pre-dating output/'s pre-creation) is
 // skipped silently; bridge-ws calls this again on the next connect.
 
-import { watch, statSync, type FSWatcher } from "node:fs";
+import { statSync } from "node:fs";
 import { join, basename } from "node:path";
 import { uiEventBus } from "./ui-events.js";
 import { getWorksRoot } from "../safe-paths.js";
+import { watchDirectory, type DirectoryWatcher } from "./resilient-watch.js";
 
 type WatchRoot = "assets" | "output";
 const WATCH_ROOTS: readonly WatchRoot[] = ["assets", "output"];
 
-const watchers = new Map<string, FSWatcher>();
+const watchers = new Map<string, DirectoryWatcher>();
 const pending = new Map<string, NodeJS.Timeout>();
 
 const DEBOUNCE_MS = 250;
@@ -62,9 +63,9 @@ function startWatch(workId: string, root: WatchRoot): void {
   const key = watchKey(workId, root);
   if (watchers.has(key)) return;
   const dir = dirFor(workId, root);
-  let w: FSWatcher;
+  let w: DirectoryWatcher;
   try {
-    w = watch(dir, { recursive: true, persistent: true }, (_evt, filename) => {
+    w = watchDirectory(dir, { recursive: true, persistent: true }, (_evt, filename) => {
       const rel = filename ? filename.toString() : "";
       if (rel && IGNORED.test(basename(rel))) return;
       // macOS emits a self-referencing event named after the watched dir

@@ -14,12 +14,12 @@
 // We dedupe per workId (one watcher per work) so reconnecting the WebSocket
 // doesn't multiply listeners.
 
-import { watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import { uiEventBus } from "./ui-events.js";
 import { getWorksRoot } from "../safe-paths.js";
+import { watchDirectory, type DirectoryWatcher } from "./resilient-watch.js";
 
-const watchers = new Map<string, FSWatcher>();
+const watchers = new Map<string, DirectoryWatcher>();
 
 /** The directory that holds plan/script.md for a work. Resolves the works root
  *  via the shared helper so the watcher never diverges from the REST routes on a
@@ -31,9 +31,9 @@ function planDirFor(workId: string): string {
 export function watchPlanFor(workId: string): void {
   if (watchers.has(workId)) return;
   const dir = planDirFor(workId);
-  let w: FSWatcher;
+  let w: DirectoryWatcher;
   try {
-    w = watch(dir, { persistent: true }, (_evt, filename) => {
+    w = watchDirectory(dir, { persistent: true }, (_evt, filename) => {
       // Atomic rename on macOS surfaces as a 'rename' event with the filename
       // (or null on some platforms). Coalesce by re-checking the filename and
       // firing a single plan-changed.

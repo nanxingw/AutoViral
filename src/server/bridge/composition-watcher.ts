@@ -10,13 +10,13 @@
 // We dedupe per workId (one watcher per work) so reconnecting the
 // WebSocket doesn't multiply listeners.
 
-import { watch, type FSWatcher } from "node:fs";
 import { dirname } from "node:path";
 import { uiEventBus } from "./ui-events.js";
 import { compositionPathFor } from "./composition-ops.js";
 import { getWorksRoot } from "../safe-paths.js";
+import { watchDirectory, type DirectoryWatcher } from "./resilient-watch.js";
 
-const watchers = new Map<string, FSWatcher>();
+const watchers = new Map<string, DirectoryWatcher>();
 
 export function watchCompositionFor(workId: string): void {
   if (watchers.has(workId)) return;
@@ -24,9 +24,9 @@ export function watchCompositionFor(workId: string): void {
   // REST routes in lockstep on a non-default config (single source of truth).
   const fullPath = compositionPathFor({ workId, worksRoot: getWorksRoot() });
   const dir = dirname(fullPath);
-  let w: FSWatcher;
+  let w: DirectoryWatcher;
   try {
-    w = watch(dir, { persistent: true }, (_evt, filename) => {
+    w = watchDirectory(dir, { persistent: true }, (_evt, filename) => {
       // Atomic rename on macOS surfaces as a 'rename' event with the
       // filename (or null on some platforms). Coalesce by re-checking
       // the filename and firing a single composition-changed.
