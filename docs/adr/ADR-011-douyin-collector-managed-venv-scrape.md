@@ -1,6 +1,6 @@
 # ADR-011: Douyin creator-analytics collector — managed-venv scrape via the user's browser session
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-014](ADR-014-retire-discovery-and-analytics.md)
 - **Date:** 2026-06-08（随 v0.1.5 发布回填 — 决策在 PRD-0006 实现期定）
 - **Deciders:** nanxingw（拍板"数据源 = 本地已有 + 重建抖音采集器"、采集器走"托管 Python venv"而非纯 TS）+ AI design partner（PRD-0006 调研 + git 考古被删采集器）
 - **Related:** [PRD-0003 §1](../prd/0003-v0.1.2-zero-friction-setup.md)（外部依赖自举 + 托管 venv/doctor 机制，本 ADR 复用）· [ADR-007](ADR-007-single-media-provider-registry.md)（单一 provider registry——本采集器**不**走它，见决策 #5）

@@ -3,7 +3,7 @@
 - **Status:** Accepted
 - **Date:** 2026-07-02（Proposed — PRD-0010 Wave C）· 2026-07-03（Accepted — nanxingw 拍板）
 - **Deciders:** nanxingw + AI design partner（PRD-0010 v0.1.8）
-- **Related:** [ADR-005](ADR-005-dual-chat-entry-layout.md)（Chat｜Terminal 右栏布局 — 本 ADR 给 **Chat** 面加第二后端）· [ADR-008](ADR-008-multi-session-chat-terminal.md)（`(workId, sessionId)` keying — backend 是与 `cliSessionId` 并列的新 per-session 属性）· [ADR-007](ADR-007-single-media-provider-registry.md)（单一 registry-of-plugins 模式 — 本 ADR 把同一模式用到 chat backend）· [ADR-010](ADR-010-grounded-coach-persona.md)（灵感页 coach persona — 明确不在本 ADR 范围，保持 claude）
+- **Related:** [ADR-005](ADR-005-dual-chat-entry-layout.md)（Chat｜Terminal 右栏布局 — 本 ADR 给 **Chat** 面加第二后端）· [ADR-008](ADR-008-multi-session-chat-terminal.md)（`(workId, sessionId)` keying — backend 是与 `cliSessionId` 并列的新 per-session 属性）· [ADR-007](ADR-007-single-media-provider-registry.md)（单一 registry-of-plugins 模式 — 本 ADR 把同一模式用到 chat backend）
 - **Resolves:** [PRD-0010](../prd/0010-v0.1.8-chat-codex-cost-canvas.md) Wave C（C2 接口抽取 / C3 codex 实现 / C4 per-session 切换）
 
 ## Context
@@ -14,7 +14,7 @@
 
 - `spawnCli` 是 `src/ws-bridge.ts` 里的**单一 chokepoint**，硬编码了 claude 的 spawn 形态（`-p` + `--output-format stream-json` NDJSON）与逐帧解析。
 - 会话身份已经是 `(workId, sessionId)`（[ADR-008](ADR-008-multi-session-chat-terminal.md)），`cliSessionId` 存 claude 的 `--resume` UUID。
-- WsBridge 承担了一切「会话形状」的职责：browser socket 广播、`messageHistory`、`.sessions.jsonl` sidecar / `cliSessionId` 记账、cost ledger、checkpoint、memory sync、`trends_` 研究事件过滤、进程生命周期（exit/error）。
+- WsBridge 承担了一切「会话形状」的职责：browser socket 广播、`messageHistory`、`.sessions.jsonl` sidecar / `cliSessionId` 记账、cost ledger、checkpoint、memory sync、进程生命周期（exit/error）。
 
 **设计张力**：要接入第二后端（codex）**又不把 WsBridge 的会话编排 fork 成两份**。codex 与 claude 的差异集中在四点：① `exec --json` 的 JSONL 事件 schema ≠ claude 的 stream-json；② resume 走 `exec resume` 子命令 ≠ `--resume` 旗标；③ 无 `--append-system-prompt` 等价物；④ 只报 token 用量、无 per-turn USD；⑤ 需要交互式登录（`auth.json`）。
 
@@ -29,7 +29,7 @@
 - `buildSpawn(input)` — 把逻辑输入（prompt / resumeId / 补教学 append / model + workId / port）变成 `child_process.spawn` 要的精确 `{ cmd, args, options }`。
 - `createLineParser(cb)` — 把该后端的流式 stdout 翻译成**统一的 `ChatStreamCallbacks`**（`onSessionId` / `onText` / `onThinking` / `onToolUse` / `onToolResult` / `onTurnComplete` / `onOther`），使 WsBridge 的 dispatch **只写一次、跨后端复用**。
 
-claude 实现（`claude.ts`）是旧内联逻辑的**纯平移，行为零变化**，用快照测试锁死。**必须留在原位的后端耦合**（如 `trends_` WebSearch 工具名匹配）通过 `onRawMessage` peek 钩子留在 WsBridge 的 callback 里，**不**进 backend。`registry.ts` 把 id → impl 做成一张小表，claude 兜底（与 [ADR-007](ADR-007-single-media-provider-registry.md) 的 MediaProvider registry 同构）。
+claude 实现（`claude.ts`）是旧内联逻辑的**纯平移，行为零变化**，用快照测试锁死。`registry.ts` 把 id → impl 做成一张小表，claude 兜底（与 [ADR-007](ADR-007-single-media-provider-registry.md) 的 MediaProvider registry 同构）。
 
 ### 2. backend 是 per-session 属性，resume 不互通 → 首轮后不可变（C4）
 
@@ -47,11 +47,11 @@ backend 存 `SessionRecord.backend`（sidecar round-trip）+ `WsSession.backend`
 
 ### 范围声明
 
-后端选择**只作用于 Studio Chat 面的 per-session 选择**。灵感页的 grounded coach persona（[ADR-010](ADR-010-grounded-coach-persona.md)）与 trends 研究路径**保持 claude-only**——v0.1.8 里它们不是多后端表面。Terminal 面从来就 skill-agnostic（任何 CLI），不受影响。
+后端选择**只作用于 Studio Chat 面的 per-session 选择**。Terminal 面从来就 skill-agnostic（任何 CLI），不受影响。
 
 ## 备选（已否决）
 
-- **A. 为 codex fork 一个专用 bridge / 把 WsBridge 复制两份。** 会重复所有会话编排（广播/记账/sidecar/checkpoint/memory/cost/trends），必然漂移。否决——抽接缝、编排写一次。
+- **A. 为 codex fork 一个专用 bridge / 把 WsBridge 复制两份。** 会重复所有会话编排（广播/记账/sidecar/checkpoint/memory/cost），必然漂移。否决——抽接缝、编排写一次。
 - **B. backend 做成全局/app 级设置（非 per-session）。** 用户要的是「留着一个 claude 对话、并排开一个 codex」；全局会强迫所有 work/会话共用一个后端、切换即毁上下文。否决——per-session。
 - **C. 允许对话中途切后端（移植历史）。** claude 与 codex 的 resume id/历史不互通，静默丢上下文的「切换」是谎。否决——切换=开新会话，显式。
 - **D. 给 codex 本地 USD 估算（价格表）。** 无可靠 per-turn 价，猜测违反诚实不变量。否决——token-only 徽章。

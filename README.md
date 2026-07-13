@@ -70,13 +70,12 @@ AutoViral 是一个本地运行的 AI 内容工作台，你描述一个选题，
 | 配音 (TTS) | edge-tts → OpenAI 兜底 | 中/英旁白音轨 |
 | 图文排版 | HTML/CSS + Playwright | 5 套小红书模板、专业字体 |
 | 视频合成 | Remotion + FFmpeg | 合成、字幕、配乐、转场 |
-| 趋势调研 | AI Web Search | 抖音/小红书实时热点 |
-| 数据分析 | 定时采集 | 粉丝/播放/互动数据追踪 |
+| 作品内调研 | Agent 按需 Web research | 研究笔记保存在当前作品的 `research/` 目录 |
 | 质量评审 | LLM-as-Judge | 每步可选质量门控 |
 
-### 个性化创作：记忆系统 + 数据驱动
+### 个性化创作：记忆系统 + 作品上下文
 
-AutoViral 不只是一个工具——它会**记住你**，并**用数据优化**每一次创作。
+AutoViral 不只是一个工具——它会**记住你**，并在每个作品里延续创作上下文。
 
 **🧠 长期记忆（EverMemOS）**
 
@@ -85,22 +84,9 @@ AutoViral 不只是一个工具——它会**记住你**，并**用数据优化*
 - **风格画像** — 你偏好的表达方式、视觉风格、人设定位
 - **创作历史** — 过去做过什么、哪些选题效果好
 - **平台规则** — 各平台的算法偏好和内容规范
-- **竞品动态** — 同领域热门内容的趋势变化
+- **当前作品** — `topicHint`、方案与按需调研笔记
 
 每次创作完成后，对话内容自动同步回 EverMemOS，形成越用越懂你的正向循环。
-
-**📊 平台数据反馈**
-
-通过定时采集抖音创作者数据（粉丝、播放、点赞、评论），AI 在后续创作中参考真实表现：
-
-- 哪类视频播放量高？AI 会倾向类似选题
-- 哪些时段发布效果好？AI 会建议最佳发布时间
-- 评论区在聊什么？AI 会捕捉受众兴趣点
-
-```
-创作 → 发布 → 数据采集 → 记忆沉淀 → 下次创作更精准
-  └───────────────── 闭环优化 ─────────────────┘
-```
 
 ---
 
@@ -158,24 +144,18 @@ autoviral start --foreground   # 前台启动（看日志）
 
 | 你想做 | 短视频 | 图文 |
 |------|--------|------|
-| 找选题 | 搜索热点趋势、分析竞品 | 搜索话题热度、参考爆款 |
+| 找选题 | 按需搜索、分析竞品 | 按需搜索、参考同类内容 |
 | 定方案 | 分镜脚本、画面描述、台词 | 每张图的内容规划、文案 |
 | 出素材 | 生首帧 → 生视频片段 → 配音 | 生配图 → 排版渲染 |
 | 成片 | Remotion 合成 + 字幕 + 配乐 | Konva 多图层 + 排序 + 发布文案 |
 
-任意一步都能做起点：给完整 brief 就直接出素材、成片；只想看趋势就单独调研。agent 不会反问"我们应该先做哪一步"。
+任意一步都能做起点：给完整 brief 就直接出素材、成片；只想先做作品内调研也可以。agent 不会反问"我们应该先做哪一步"。
 
 > 工位本身对"什么是好视频"不持立场——审美交给你挂载的 sibling taste skill（`editorial-pro` 等），`skills/autoviral/` 只教 agent **如何操作这个工位**。
 
 ### 3. 预览与导出
 
 成品在右侧素材面板预览，保存在 `~/.autoviral/works/<id>/output/`。
-
-### 4. 数据追踪（可选）
-
-在「数据」页面粘贴抖音主页链接，系统定时采集播放、点赞、评论数据，AI 在后续创作中参考。
-
----
 
 ## AI 生成服务
 
@@ -224,10 +204,11 @@ src/                          # 后端 TypeScript
   index.ts                    #   daemon 入口
   cli.ts                      #   autoviral CLI 入口（start/stop/config …）
   infra/                      #   跨切面基础设施（config / logger / paths）
-  domain/                     #   核心领域（work-store / memory / analytics-collector / audio-tools）
+  domain/                     #   核心领域（work-store / memory / audio-tools）
   server/                     #   Express + WS bridge
     api.ts                    #     REST 端点（config / works / assets …）
     bridge/                   #     /api/bridge/v1/* —— 终端面向的协议（routes、ingest-youtube）
+    cost-ledger/              #     每作品成本账本
     render-pipeline.ts        #     Remotion 驱动的 mp4 导出
   providers/                  #   OpenRouter 适配器（image / video）
   tts-providers/              #   edge-tts → OpenAI 兜底
@@ -239,8 +220,6 @@ web/src/                      # 前端 React 19 + Vite + Zustand + TanStack Quer
     Works.tsx                 #   作品 hub（pick up where you left off）
     Studio.tsx                #   视频创作（Remotion Player + 多轨 Timeline + Tweaks）
     Editor.tsx                #   图文创作（Konva 多图层 + Inspector + Filmstrip）
-    Explore.tsx               #   趋势探索
-    Analytics.tsx             #   数据仪表盘
   features/
     studio/                   #   视频合成数据模型 / Remotion composition / Tweaks
     editor/                   #   图文 carousel / Konva canvas / Inspector
@@ -260,7 +239,6 @@ skills/autoviral/             # 操作手册 skill（agent-agnostic markdown，�
   config.yaml                 #   配置
   fonts/                      #   下载的专业字体
   works/                      #   作品数据 + 素材 + 成品
-  trends/                     #   趋势缓存
 ```
 
 ### 技术栈
@@ -286,9 +264,6 @@ skills/autoviral/             # 操作手册 skill（agent-agnostic markdown，�
 |--------|--------|------|
 | `port` | `3271` | 仪表盘端口 |
 | `model` | `opus` | Claude 模型（opus / sonnet / haiku） |
-| `research.schedule` | `0 9,21 * * *` | 定时调研（每天 9:00 和 21:00） |
-| `analytics.collectInterval` | `60` | 数据采集间隔（分钟） |
-| `interests` | `[]` | 关注领域（在探索页面配置） |
 
 ### CLI 命令
 

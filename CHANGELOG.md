@@ -7,6 +7,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **0.x breaking：** 移除 Explore / Analytics UI、trends / analytics / coach API、`autoviral trends` 及两套后台采集。
+
+### Breaking
+
+- 旧配置仍可加载但相关字段被忽略；既有磁盘缓存不会自动删除。
+
 ## [0.1.10] - 2026-07-09
 
 **导出保真与 fps 一等公民**（PRD-0011 + PRD-0012，14 片）—— 两条主线：**导出可交付**（成片"跳回前几帧"抽动根治 + 成品与素材分家、导出历史找得回）与**画布帧率可改**（fps 从"文档谎称锁定、实则裸奔"升级为与画幅同级的一等可编辑参数）。全程测试先行（预设测试证红→转绿），每批实现经 codex 独立审查（19 findings，9 个 medium+ 全部修复或有据驳回），8 纬浏览器 E2E（截图 + DOM/computed-style 二确 + completeness-critic）验收，E2E 抓出的三个 CONFIRMED 缺口当日修复并复验通过。

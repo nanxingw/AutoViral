@@ -1,6 +1,6 @@
 # ADR-010: Grounded coach — a second, persisted agent persona on 灵感
 
-- **Status:** Accepted
+- **Status:** Superseded by [ADR-014](ADR-014-retire-discovery-and-analytics.md)
 - **Date:** 2026-06-08（随 v0.1.5 发布回填 — 决策在 PRD-0006 实现期定，发版后补记）
 - **Deciders:** nanxingw（拍板"灵感页该有 chat 接口的 agent" + 持久对话）+ AI design partner（PRD-0006 调研 13-agent workflow）
 - **Related:** [ADR-005](ADR-005-dual-chat-entry-layout.md)（Chat/Terminal 双入口；Chat = `claude -p` 子进程）· [ADR-008](ADR-008-multi-session-chat-terminal.md)（`(workId, sessionId)` 多会话 + sidecar 持久化）
