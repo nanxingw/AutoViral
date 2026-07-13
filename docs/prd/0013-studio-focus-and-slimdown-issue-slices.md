@@ -121,6 +121,11 @@
 
 **预设测试**：各组件既有测试加结构断言（marker + 原 click/aria 行为不变）；SessionStrip 断言命中层尺寸。
 
+**TDD proof（2026-07-11）**：
+- redProof：`npm run test:web -- <6 个 S6 targeted 测试文件>` → `Test Files 6 failed (6)`；`Tests 6 failed | 102 passed (108)`。
+- greenProof：同一 targeted 命令 → `Test Files 6 passed (6)`；`Tests 108 passed (108)`。
+- 附加门禁：`npm run typecheck:web` 退出码 `0`。全量 `test:web` 按本任务的 targeted-only 约束留给集成阶段。
+
 **Acceptance criteria**：
 - [ ] 证红转绿 + `test:web` 全绿；像素中心差验收归 S10 图标纬。
 
