@@ -62,6 +62,15 @@ function mount() {
   );
 }
 
+describe("Editor route shell (PRD-0013 S5)", () => {
+  it("keeps a return-to-Works control after the global navigation is retired", () => {
+    mount();
+    expect(
+      screen.getByRole("button", { name: /works|作品/i }),
+    ).toBeInTheDocument();
+  });
+});
+
 // 2026-06-02 (#1 carousel chat): Editor's left column now mounts the shared
 // RightPane (Chat | Terminal tabs) — the same agent surface as Studio —
 // instead of a bare TerminalPanel. Chat is the default-active tab (ADR-005),
