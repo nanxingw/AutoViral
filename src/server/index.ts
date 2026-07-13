@@ -32,6 +32,31 @@ const __dirname = dirname(__filename);
 // Resolve web/dist relative to the package root (two levels up from dist/server/)
 const WEB_DIST = join(__dirname, "..", "..", "web", "dist");
 
+export function createHttpApp(webDist = WEB_DIST): Hono {
+  const app = new Hono();
+
+  // Mount API routes before static files and the SPA fallback.
+  app.route("/", apiRoutes);
+  app.use("/*", serveStatic({ root: webDist }));
+
+  // SPA fallback: serve index.html for any non-API GET request that didn't
+  // match a static file. Unmatched API requests must keep HTTP 404 semantics.
+  app.get("*", async (c) => {
+    if (c.req.path.startsWith("/api")) {
+      return c.json({ error: "not_found" }, 404);
+    }
+    try {
+      const indexPath = join(webDist, "index.html");
+      const html = await readFile(indexPath, "utf-8");
+      return c.html(html);
+    } catch {
+      return c.text("Dashboard not built. Run: npm run build:frontend", 404);
+    }
+  });
+
+  return app;
+}
+
 export async function startServer(port: number): Promise<{ server: Server }> {
   // Repair PATH before initProviders() probes ffmpeg/edge-tts. A daemon started
   // outside a login shell lacks /opt/homebrew/bin, making bare-name spawns fail
@@ -121,24 +146,7 @@ export async function startServer(port: number): Promise<{ server: Server }> {
     console.warn(`[cost-ledger] init failed (cost tracking disabled): ${(err as Error).message}`);
   }
 
-  const app = new Hono();
-
-  // 5. Mount API routes
-  app.route("/", apiRoutes);
-
-  // 8. Serve static frontend files from web/dist/
-  app.use("/*", serveStatic({ root: WEB_DIST }));
-
-  // SPA fallback: serve index.html for any non-API GET request that didn't match a static file
-  app.get("*", async (c) => {
-    try {
-      const indexPath = join(WEB_DIST, "index.html");
-      const html = await readFile(indexPath, "utf-8");
-      return c.html(html);
-    } catch {
-      return c.text("Dashboard not built. Run: npm run build:frontend", 404);
-    }
-  });
+  const app = createHttpApp();
 
   // 6. Start HTTP server + WebSocket upgrade handler
   const nodeServer = serve({
