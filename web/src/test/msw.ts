@@ -40,6 +40,51 @@ export const handlers = [
       model: "sonnet",
     }),
   ),
+  http.get("/api/works/:id/chat-commands", ({ request }) => {
+    const sessionId = new URL(request.url).searchParams.get("sessionId") ?? "s_1";
+    return HttpResponse.json({
+      sessionId,
+      backend: "claude",
+      commands: [
+        {
+          name: "model",
+          backend: "claude",
+          kind: "local",
+          args: { required: true, placeholder: "model" },
+          availability: { available: true },
+          description: "Set the model used by this session's next agent turn.",
+          denyPolicy: "allow",
+        },
+        {
+          name: "new",
+          backend: "claude",
+          kind: "local",
+          args: { required: false },
+          availability: { available: true },
+          description: "Create a new AutoViral chat session.",
+          denyPolicy: "allow",
+        },
+        {
+          name: "stop",
+          backend: "claude",
+          kind: "local",
+          args: { required: false },
+          availability: { available: false, reasonCode: "session_idle", reason: "There is no active turn to stop." },
+          description: "Stop the active agent turn.",
+          denyPolicy: "allow",
+        },
+        {
+          name: "compact",
+          backend: "claude",
+          kind: "passthrough",
+          args: { required: false },
+          availability: { available: false, reasonCode: "history_required", reason: "/compact requires an existing conversation." },
+          description: "Compact the current Claude conversation context.",
+          denyPolicy: "allow",
+        },
+      ],
+    });
+  }),
 ];
 
 export const mswServer = setupServer(...handlers);

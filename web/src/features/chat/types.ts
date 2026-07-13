@@ -4,8 +4,31 @@ export type StreamBlockType =
   | "thinking"
   | "tool_use"
   | "tool_result"
+  | "command"
   | "ask_question"
   | "locator";
+
+export type ChatCommandStatus = "running" | "ok" | "unsupported" | "error";
+
+export interface ChatCommandEntry {
+  name: string;
+  backend: "claude" | "codex";
+  kind: "local" | "translate" | "passthrough";
+  args: { required: boolean; placeholder?: string };
+  availability: {
+    available: boolean;
+    reasonCode?: string;
+    reason?: string;
+  };
+  description: string;
+  denyPolicy: "allow" | "safe_dynamic_only";
+}
+
+export interface ChatCommandCatalog {
+  sessionId: string;
+  backend: "claude" | "codex";
+  commands: ChatCommandEntry[];
+}
 
 export interface TurnUsage {
   /** Cost of this single turn in USD (Claude CLI's `total_cost_usd`). */
@@ -66,6 +89,12 @@ export interface StreamBlock {
   /** Media the user attached to this (user) message. Rendered as thumbnails
    *  in the bubble; the agent got the paths via the <attachments> envelope. */
   attachments?: ChatAttachment[];
+  /** Structured slash-command lifecycle. Commands never masquerade as user
+   * messages, so the history renderer can give them dedicated chrome. */
+  commandName?: string;
+  commandArgs?: string;
+  commandStatus?: ChatCommandStatus;
+  commandResult?: string;
   /** Set on the last text block of a turn when turn_complete arrives.
    *  Lets the bubble render a small cost/duration/tokens badge. */
   usage?: TurnUsage;

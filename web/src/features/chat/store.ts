@@ -1,10 +1,26 @@
 import { create } from "zustand";
-import type { StreamBlock, StreamBlockType, TurnUsage, ChatAttachment } from "./types";
+import type {
+  StreamBlock,
+  StreamBlockType,
+  TurnUsage,
+  ChatAttachment,
+  ChatCommandStatus,
+} from "./types";
+
+interface CommandBlockUpdate {
+  name: string;
+  args?: string;
+  status: ChatCommandStatus;
+  result?: string;
+}
 
 interface ChatStore {
   blocks: StreamBlock[];
   streaming: boolean;
   push: (b: { id?: string; type: StreamBlockType; text: string; toolName?: string; questions?: string[]; attachments?: ChatAttachment[] }) => void;
+  /** Start or settle the newest matching command block. A result frame updates
+   * its command_started block instead of creating a normal chat bubble. */
+  upsertCommand: (command: CommandBlockUpdate) => void;
   /** Replace the whole conversation — used when seeding from a server history
    *  path (HTTP /chat or WS message_history). Dedups by id defensively. */
   setBlocks: (blocks: StreamBlock[]) => void;
@@ -93,6 +109,43 @@ export const useChatStore = create<ChatStore>((set) => ({
       }
       return {
         blocks: [...s.blocks, { ts: Date.now(), ...b, id: nextId() }],
+      };
+    }),
+  upsertCommand: (command) =>
+    set((s) => {
+      const args = command.args?.trim() ?? "";
+      const invocation = `/${command.name}${args ? ` ${args}` : ""}`;
+      if (command.status !== "running") {
+        const index = s.blocks.findLastIndex(
+          (block) =>
+            block.type === "command" &&
+            block.commandName === command.name &&
+            block.commandStatus === "running",
+        );
+        if (index !== -1) {
+          const blocks = s.blocks.slice();
+          blocks[index] = {
+            ...blocks[index],
+            commandStatus: command.status,
+            commandResult: command.result,
+          };
+          return { blocks };
+        }
+      }
+      return {
+        blocks: [
+          ...s.blocks,
+          {
+            id: nextId(),
+            ts: Date.now(),
+            type: "command",
+            text: invocation,
+            commandName: command.name,
+            commandArgs: args,
+            commandStatus: command.status,
+            commandResult: command.result,
+          },
+        ],
       };
     }),
   setBlocks: (blocks) => set({ blocks: dedupeById(blocks) }),

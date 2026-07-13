@@ -509,6 +509,9 @@ export const en = {
       zoomFit: "Fit",
       zoomFitAria: "Fit the full timeline",
       snapGuideAria: "Snapped at {time}",
+      trimLeftAria: "Trim clip start",
+      trimRightAria: "Trim clip end",
+      marqueeAria: "Marquee selection",
       emptyTrack: {
         video: "Drop video media",
         audio: "Drop audio · or choose VO from the library",
@@ -1016,6 +1019,31 @@ export const en = {
     versionTag: "v3 · DESIGN",
     settings: "Global settings",
   },
+  chatCommands: {
+    menuLabel: "Slash commands",
+    description: {
+      model: "Set the model for this session's next turn",
+      new: "Create a new chat session",
+      stop: "Stop the active agent turn",
+      compact: "Compact the current Claude conversation",
+      skill: "Claude skill /{name}",
+    },
+    availability: {
+      historyRequired: "/compact requires an existing conversation.",
+      disconnected: "Reconnect this chat before running a provider command.",
+      sessionRequired: "An active session is required.",
+      sessionIdle: "There is no active turn to stop.",
+      unsupportedBackend: "This command is unavailable for the current backend.",
+      capabilitiesUnknown: "The provider has not advertised this command for this session.",
+      unavailable: "This command is currently unavailable.",
+    },
+    status: {
+      running: "Running",
+      completed: "Completed",
+      unsupported: "Unsupported",
+      failed: "Failed",
+    },
+  },
 } as const;
 
 export type Messages = typeof en;
@@ -1493,6 +1521,9 @@ export const zh: DeepShape<Messages> = {
       zoomFit: "全览",
       zoomFitAria: "缩放至完整时间线",
       snapGuideAria: "吸附至 {time}",
+      trimLeftAria: "裁切片段起点",
+      trimRightAria: "裁切片段终点",
+      marqueeAria: "框选片段",
       emptyTrack: {
         video: "拖入视频素材",
         audio: "拖入音频 · 或从资源库选择 VO",
@@ -1988,6 +2019,31 @@ export const zh: DeepShape<Messages> = {
     brand: "Autoviral",
     versionTag: "v3 · 设计",
     settings: "全局设置",
+  },
+  chatCommands: {
+    menuLabel: "斜杠命令",
+    description: {
+      model: "设置此会话下一回合使用的模型",
+      new: "新建聊天会话",
+      stop: "停止当前代理回合",
+      compact: "压缩当前 Claude 对话上下文",
+      skill: "Claude 技能 /{name}",
+    },
+    availability: {
+      historyRequired: "/compact 需要已有对话记录。",
+      disconnected: "请先重新连接此聊天，再运行服务方命令。",
+      sessionRequired: "需要一个有效会话。",
+      sessionIdle: "当前没有正在运行的回合可停止。",
+      unsupportedBackend: "当前后端不支持此命令。",
+      capabilitiesUnknown: "服务方尚未为此会话声明该命令。",
+      unavailable: "此命令当前不可用。",
+    },
+    status: {
+      running: "执行中",
+      completed: "已完成",
+      unsupported: "不支持",
+      failed: "失败",
+    },
   },
 };
 

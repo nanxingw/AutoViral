@@ -23,6 +23,8 @@ import { useComposerDraft } from "@/stores/composerDraft";
 import { useToastStore } from "@/stores/toast";
 import { useActiveSessionId } from "@/features/chat/activeSession";
 import composerStyles from "./Composer.module.css";
+import { CommandMenu } from "./CommandMenu";
+import { CommandBlock } from "./CommandBlock";
 
 /** Clean line icons (feather/lucide geometry) — a consistent SVG family that
  *  replaces the stray 📎 emoji and reads as intentional against the editorial
@@ -244,7 +246,7 @@ export function ChatPanel({
   dispatchAction,
   onTurnComplete,
 }: ChatPanelProps) {
-  const { send, state: wsState } = useChatSocket(
+  const { send, sendCommand, commandCatalog, state: wsState } = useChatSocket(
     workId,
     getViewerContext,
     dispatchAction,
@@ -367,8 +369,27 @@ export function ChatPanel({
   // clicks in separate macrotasks the lock is already released, but by then the
   // composer is cleared so `canSend`/attachments gate the second click instead.
   const sendingRef = useRef(false);
+  const executeCommand = (name: string, args: string) => {
+    if (uploading || sendBlockedByConnection || sendingRef.current) return;
+    sendingRef.current = true;
+    queueMicrotask(() => {
+      sendingRef.current = false;
+    });
+    sendCommand(name, args);
+    setInput("");
+    setUploadError(null);
+  };
   const submit = () => {
     if (!canSend || uploading || sendBlockedByConnection || sendingRef.current) return;
+    const commandMatch = input.match(/^\/([^\s]+)(?:\s+(.*))?$/s);
+    if (commandMatch) {
+      const command = commandCatalog?.commands.find(
+        (candidate) => candidate.name === commandMatch[1].toLowerCase(),
+      );
+      if (!command?.availability.available) return;
+      executeCommand(command.name, (commandMatch[2] ?? "").trim());
+      return;
+    }
     sendingRef.current = true;
     queueMicrotask(() => {
       sendingRef.current = false;
@@ -803,31 +824,35 @@ export function ChatPanel({
               {t("chat.sendDisconnected")}
             </div>
           )}
-          <textarea
-            ref={composerRef}
+          <CommandMenu
+            textareaRef={composerRef}
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onPaste={onPaste}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            placeholder={onboardingCopy.placeholder}
-            rows={2}
-            style={{
-              background: "transparent",
-              border: "none",
-              outline: "none",
-              resize: "none",
-              color: "var(--text)",
-              fontSize: 13,
-              fontFamily: "inherit",
-              lineHeight: 1.5,
-              minHeight: 38,
-              letterSpacing: "-0.01em",
-              width: "100%",
+            catalog={commandCatalog}
+            onValueChange={setInput}
+            onRun={executeCommand}
+            textareaProps={{
+              onPaste,
+              onKeyDown: (e) => {
+                if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  submit();
+                }
+              },
+              placeholder: onboardingCopy.placeholder,
+              rows: 2,
+              style: {
+                background: "transparent",
+                border: "none",
+                outline: "none",
+                resize: "none",
+                color: "var(--text)",
+                fontSize: 13,
+                fontFamily: "inherit",
+                lineHeight: 1.5,
+                minHeight: 38,
+                letterSpacing: "-0.01em",
+                width: "100%",
+              },
             }}
           />
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -893,6 +918,9 @@ function ChatBlock({
   backend?: string;
 }) {
   const { type } = block;
+  if (type === "command") {
+    return <CommandBlock block={block} />;
+  }
   // Find the snapshot that captures this turn's yaml (if any). We only
   // want this on assistant text blocks — user messages and tool chips
   // don't represent agent output.

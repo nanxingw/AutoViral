@@ -5,6 +5,8 @@ import { useActiveSessionId, DEFAULT_SESSION_ID } from "./activeSession";
 import type { StreamBlockType, ViewerAction, ChatAttachment } from "./types";
 import { extractViewerActions } from "./types";
 import { seedBlocksFromHistory } from "./seed";
+import { apiFetch } from "@/lib/api";
+import type { ChatCommandCatalog, ChatCommandStatus } from "./types";
 
 /** Minimal XML attribute escape for the <attachments> envelope. Filenames are
  *  server-sanitised (no slashes) but may still contain quotes / angle brackets. */
@@ -88,6 +90,7 @@ export function useChatSocket(
   const setBlocks = useChatStore((s) => s.setBlocks);
   const setStreaming = useChatStore((s) => s.setStreaming);
   const attachUsage = useChatStore((s) => s.attachLastTurnUsage);
+  const upsertCommand = useChatStore((s) => s.upsertCommand);
   // Reactive active session for this work — switching it re-runs the effect.
   const activeSessionId = useActiveSessionId(workId);
   const sid = sessionId ?? activeSessionId ?? DEFAULT_SESSION_ID;
@@ -100,10 +103,15 @@ export function useChatSocket(
   // Connection state surfaced to the chat UI so users see when the bridge
   // is reconnecting instead of silently losing messages into the void.
   const [wsState, setWsState] = useState<WSState>("connecting");
+  const [commandCatalog, setCommandCatalog] = useState<ChatCommandCatalog | null>(null);
+  // Local commands return only a command_result frame. Remember the arguments
+  // for display without creating an optimistic history echo.
+  const pendingCommandArgs = useRef(new Map<string, string>());
 
   useEffect(() => {
     if (!workId) {
       setWsState("connecting");
+      setCommandCatalog(null);
       return;
     }
     // Clear stale bubbles on session switch so a freshly-created (empty)
@@ -111,6 +119,20 @@ export function useChatSocket(
     // backend only sends a `message_history` frame when the session HAS
     // history, so an empty session would otherwise inherit the old blocks.
     setBlocks([]);
+    setCommandCatalog(null);
+    pendingCommandArgs.current.clear();
+    let capabilityFrameCount = 0;
+    let cancelled = false;
+    // The HTTP catalog makes the menu available before a provider emits a new
+    // init frame. Any WS capability frame wins, preventing a slower fetch from
+    // overwriting live session capabilities.
+    void apiFetch<ChatCommandCatalog>(
+      `/api/works/${workId}/chat-commands?sessionId=${encodeURIComponent(sid)}`,
+    )
+      .then((catalog) => {
+        if (!cancelled && capabilityFrameCount === 0) setCommandCatalog(catalog);
+      })
+      .catch(() => {});
     const ws = new ReconnectingWS<string>(`/ws/browser/${workId}/${sid}`);
     ref.current = ws;
     setWsState(ws.getState());
@@ -120,6 +142,41 @@ export function useChatSocket(
         const frame = JSON.parse(raw) as IncomingFrame;
         const data = (frame.data ?? {}) as DataDict;
         switch (frame.event) {
+          case "chat_capabilities": {
+            capabilityFrameCount += 1;
+            if (Array.isArray(data.commands)) {
+              setCommandCatalog(data as unknown as ChatCommandCatalog);
+            }
+            break;
+          }
+          case "command_started": {
+            const name = asString(data.command).replace(/^\/+/, "");
+            const args = asString(data.args).trim();
+            pendingCommandArgs.current.set(name, args);
+            upsertCommand({ name, args, status: "running" });
+            break;
+          }
+          case "command_result":
+          case "command_error": {
+            const name = asString(data.command).replace(/^\/+/, "");
+            const nested = (data.data ?? {}) as DataDict;
+            const status = (
+              frame.event === "command_error"
+                ? data.status === "unsupported"
+                  ? "unsupported"
+                  : "error"
+                : "ok"
+            ) as ChatCommandStatus;
+            const result = asString(nested.result ?? data.message);
+            upsertCommand({
+              name,
+              args: pendingCommandArgs.current.get(name) ?? "",
+              status,
+              result: result || undefined,
+            });
+            pendingCommandArgs.current.delete(name);
+            break;
+          }
           case "message_history": {
             const blocks = (data.blocks as Array<DataDict>) ?? [];
             setBlocks(seedBlocksFromHistory(blocks));
@@ -233,15 +290,29 @@ export function useChatSocket(
       }
     });
     return () => {
+      cancelled = true;
       off();
       offState();
       ws.dispose();
       ref.current = null;
     };
-  }, [workId, sid, push, setBlocks, setStreaming, attachUsage]);
+  }, [workId, sid, push, setBlocks, setStreaming, attachUsage, upsertCommand]);
 
   return {
     state: wsState,
+    commandCatalog,
+    sendCommand(name: string, args = "") {
+      const normalizedName = name.replace(/^\/+/, "").trim().toLowerCase();
+      const normalizedArgs = args.trim();
+      pendingCommandArgs.current.set(normalizedName, normalizedArgs);
+      // Intentionally bypass getViewerContext, attachment envelopes, and the
+      // ordinary message's optimistic `user` block.
+      ref.current?.send(JSON.stringify({
+        action: "command",
+        name: normalizedName,
+        args: normalizedArgs,
+      }));
+    },
     send(text: string, attachments?: ChatAttachment[]) {
       // The wire message prepends two agent-only envelopes, in order:
       //   1. <viewer-context> — what the user has selected / playhead state
