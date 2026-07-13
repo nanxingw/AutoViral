@@ -65,6 +65,19 @@ afterEach(() => {
 });
 
 describe("ScriptModal (A4) — full-screen read/edit modal", () => {
+  it("uses the shared close IconButton and preserves its click behavior", () => {
+    seedScript("w1", "# Outline\n");
+    const onClose = vi.fn();
+    render(<ScriptModal open workId="w1" onClose={onClose} />);
+    const close = screen.getByRole("button", {
+      name: "Close full-screen script",
+    });
+    expect(close).toHaveAttribute("data-icon-button");
+    expect(close.querySelector("svg")).not.toBeNull();
+    fireEvent.click(close);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("renders a dialog when open, nothing when closed", () => {
     seedScript("w1", "# Outline\n");
     const { rerender } = render(

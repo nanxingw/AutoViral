@@ -27,6 +27,13 @@ import {
   CAMERA_KEY,
   STATUS_FILLED,
 } from "../../sceneI18n";
+import { IconButton } from "@/ui/IconButton";
+import {
+  ArrowDownIcon,
+  ArrowUpIcon,
+  ExpandIcon,
+  MoreHorizontalIcon,
+} from "@/ui/icons";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ScriptTab — the work's storyboard skeleton (剧本·分镜), PRD-0007 → PRD-0008.
@@ -413,41 +420,19 @@ function ScriptEditorFold({ workId }: { workId: string }) {
           </span>
           <span>{t("studio.scriptPanel.scriptHeading")}</span>
         </button>
-        <button
-          type="button"
-          data-bare
+        <IconButton
+          size="compact"
           data-testid="script-open-reader"
           aria-label={t("studio.scriptPanel.scriptOpenReader")}
           title={t("studio.scriptPanel.scriptOpenReader")}
           onClick={() => openReader(workId)}
           style={{
-            width: 24,
-            height: 22,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "transparent",
-            border: "none",
-            borderRadius: 6,
             color: "var(--text-dimmer)",
-            cursor: "pointer",
             flexShrink: 0,
           }}
         >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden
-          >
-            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-          </svg>
-        </button>
+          <ExpandIcon width={12} height={12} />
+        </IconButton>
       </div>
       {!collapsed && <ScriptEditor workId={workId} />}
     </div>
@@ -579,42 +564,19 @@ function ScriptEditor({ workId }: { workId: string }) {
             {t("studio.scriptPanel.scriptModePreview")}
           </ModeButton>
           {/* A4 — open the full-screen reader/editor (portal to body). */}
-          <button
-            type="button"
-            data-bare
+          <IconButton
+            size="compact"
+            variant="surface"
             onClick={() => setModalOpen(true)}
             aria-label={t("studio.scriptPanel.scriptOpenFull")}
             title={t("studio.scriptPanel.scriptOpenFull")}
             style={{
               marginLeft: 4,
-              width: 24,
-              height: 22,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              background: "transparent",
-              border: "1px solid var(--glass-border)",
-              borderRadius: 6,
               color: "var(--text-dimmer)",
-              cursor: "pointer",
-              fontSize: 12,
-              lineHeight: 1,
             }}
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden
-            >
-              <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-            </svg>
-          </button>
+            <ExpandIcon width={12} height={12} />
+          </IconButton>
         </div>
       </div>
 
@@ -1075,7 +1037,7 @@ function SceneCard({
                   })}
                   onClick={() => onMove(index, index - 1)}
                 >
-                  ↑
+                  <ArrowUpIcon />
                 </ReorderButton>
               )}
               {!isLast && (
@@ -1085,7 +1047,7 @@ function SceneCard({
                   })}
                   onClick={() => onMove(index, index + 1)}
                 >
-                  ↓
+                  <ArrowDownIcon />
                 </ReorderButton>
               )}
             </div>
@@ -1468,9 +1430,8 @@ export function SceneSummaryRow({
       {/* ⤢ — expand into the center reading panel. Appears on hover/focus like
           the ⋯ menu; a SIBLING of the accordion toggle so clicking it never
           expands the in-card Inspector. */}
-      <button
-        type="button"
-        data-bare
+      <IconButton
+        size="compact"
         data-testid="scene-open-reader"
         aria-label={t("studio.scriptPanel.openInReaderAria", { n: shotNo })}
         title={t("studio.scriptPanel.openInReaderAria", { n: shotNo })}
@@ -1478,41 +1439,19 @@ export function SceneSummaryRow({
         onBlur={() => setHovered(false)}
         onClick={onOpenReader}
         style={{
-          width: 24,
-          height: 24,
-          display: "inline-flex",
-          alignItems: "center",
-          justifyContent: "center",
-          background: "transparent",
-          border: "none",
-          borderRadius: 6,
           color: "var(--text-dim)",
-          cursor: "pointer",
           flexShrink: 0,
           opacity: hovered || menuOpen ? 1 : 0,
           transition: "opacity 0.12s",
         }}
       >
-        <svg
-          width="12"
-          height="12"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden
-        >
-          <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
-        </svg>
-      </button>
+        <ExpandIcon width={12} height={12} />
+      </IconButton>
 
       {/* ⋯ menu trigger — appears on hover/focus or while the menu is open. */}
       <div style={{ position: "relative", flexShrink: 0 }}>
-        <button
-          type="button"
-          data-bare
+        <IconButton
+          size="compact"
           aria-label={t("studio.scriptPanel.sceneMenuAria", { n: shotNo })}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
@@ -1520,25 +1459,14 @@ export function SceneSummaryRow({
           onBlur={() => setHovered(false)}
           onClick={() => setMenuOpen((o) => !o)}
           style={{
-            width: 24,
-            height: 24,
-            display: "inline-flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "transparent",
-            border: "none",
-            borderRadius: 6,
             color: "var(--text-dim)",
-            cursor: "pointer",
-            fontSize: 14,
-            lineHeight: 1,
             // Keep it focusable but visually quiet until hovered/open.
             opacity: hovered || menuOpen ? 1 : 0,
             transition: "opacity 0.12s",
           }}
         >
-          ⋯
-        </button>
+          <MoreHorizontalIcon />
+        </IconButton>
         {menuOpen && (
           <SceneRowMenu
             isFirst={isFirst}
@@ -1886,27 +1814,13 @@ function ReorderButton({
   ...rest
 }: React.ButtonHTMLAttributes<HTMLButtonElement>) {
   return (
-    <button
-      type="button"
-      data-bare
+    <IconButton
+      size="compact"
+      variant="surface"
       {...rest}
-      style={{
-        width: 22,
-        height: 22,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "transparent",
-        border: "1px solid var(--glass-border)",
-        borderRadius: 6,
-        color: "var(--text-dim)",
-        cursor: "pointer",
-        fontSize: 11,
-        lineHeight: 1,
-      }}
     >
       {children}
-    </button>
+    </IconButton>
   );
 }
 

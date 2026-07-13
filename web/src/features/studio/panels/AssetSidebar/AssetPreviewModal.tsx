@@ -5,6 +5,8 @@ import { useModalFocus } from "@/hooks/useModalFocus";
 import { useT } from "@/i18n/useT";
 import { useAssetText, FULL_TEXT_MAX_CHARS } from "../../hooks/useAssetText";
 import type { AssetItem } from "@/queries/assets";
+import { IconButton } from "@/ui/IconButton";
+import { XIcon } from "@/ui/icons";
 
 interface Props {
   asset: AssetItem | null;
@@ -201,26 +203,13 @@ export function AssetPreviewModal({ asset, onClose, onAddToTimeline, onDelete }:
                     {t("studio.assetPreview.delete")}
                   </button>
                 )}
-                <button
-                  type="button"
+                <IconButton
                   onClick={onClose}
                   aria-label={t("studio.assetPreview.btnClose")}
-                  data-bare
-                  style={{
-                    width: 28,
-                    height: 28,
-                    display: "grid",
-                    placeItems: "center",
-                    borderRadius: 6,
-                    border: "1px solid var(--glass-border)",
-                    background: "transparent",
-                    color: "var(--text-dim)",
-                    cursor: "pointer",
-                    fontSize: 16,
-                  }}
+                  variant="surface"
                 >
-                  ×
-                </button>
+                  <XIcon />
+                </IconButton>
               </div>
             </header>
 

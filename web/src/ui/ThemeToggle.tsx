@@ -1,5 +1,6 @@
 import { useTheme } from "@/stores/theme";
 import { useT } from "@/i18n/useT";
+import { IconButton } from "@/ui/IconButton";
 import styles from "./ThemeToggle.module.css";
 
 export function ThemeToggle() {
@@ -15,8 +16,9 @@ export function ThemeToggle() {
     : t("topnav.themeToggleToDark");
 
   return (
-    <button
-      type="button"
+    <IconButton
+      size="lg"
+      variant="surface"
       className={styles.btn}
       onClick={toggle}
       aria-label={targetLabel}
@@ -32,6 +34,6 @@ export function ThemeToggle() {
           <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
         </svg>
       )}
-    </button>
+    </IconButton>
   );
 }

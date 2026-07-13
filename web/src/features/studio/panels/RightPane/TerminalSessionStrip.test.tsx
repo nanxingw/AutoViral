@@ -13,7 +13,7 @@
  * store is the source of truth the assertions read.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, within } from "@testing-library/react";
 
 // Spy on the kill helper so we can assert delete (and only delete) disposes a pty.
 const killMock = vi.fn();
@@ -94,6 +94,26 @@ describe("TerminalSessionStrip (I25)", () => {
     const st = useTerminalSessions.getState().get("w4");
     expect(st.ids).toEqual(["s_1"]);
     expect(st.active).toBe("s_1");
+  });
+
+  it("uses a shared icon button with a 24px transparent hit target and keeps two-step delete", () => {
+    useTerminalSessions.setState({ byWork: { w_icon: { ids: ["s_1", "s_2"], active: "s_1" } } });
+    render(<TerminalSessionStrip workId="w_icon" />);
+    const deleteButton = screen.getByRole("button", {
+      name: /Close Terminal 2|\u5173\u95ed \u7ec8\u7aef 2/,
+    });
+
+    expect(deleteButton).toHaveAttribute("data-icon-button");
+    expect(deleteButton.querySelector("svg")).not.toBeNull();
+    expect(deleteButton).toHaveStyle({ width: "18px", height: "18px" });
+    expect(
+      within(deleteButton).getByTestId("terminal-session-delete-hit-target"),
+    ).toHaveStyle({ width: "24px", height: "24px" });
+
+    fireEvent.click(deleteButton);
+    expect(
+      screen.getByRole("button", { name: /Close Terminal 2|\u5173\u95ed \u7ec8\u7aef 2/ }),
+    ).toHaveTextContent(/Close\?|\u5173\u95ed\uff1f/i);
   });
 
   it("does not render a delete affordance for the last remaining terminal", () => {

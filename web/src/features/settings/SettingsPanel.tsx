@@ -4,6 +4,8 @@ import { useSettingsPanelStore } from "@/stores/settings";
 import { useModalFocus } from "@/hooks/useModalFocus";
 import { useT } from "@/i18n/useT";
 import { useConfig, useSaveConfig, type AppConfig, type SecretMetaEntry } from "@/queries/config";
+import { IconButton } from "@/ui/IconButton";
+import { XIcon } from "@/ui/icons";
 import styles from "./SettingsPanel.module.css";
 
 const EDITABLE_KEYS = [
@@ -151,14 +153,13 @@ export function SettingsPanel() {
       >
         <header className={styles.header}>
           <h2>{t("settings.title")}</h2>
-          <button
-            type="button"
+          <IconButton
             className={styles.closeBtn}
             aria-label={t("settings.close")}
             onClick={requestClose}
           >
-            ×
-          </button>
+            <XIcon />
+          </IconButton>
         </header>
         <div className={styles.body}>
           {draft ? (

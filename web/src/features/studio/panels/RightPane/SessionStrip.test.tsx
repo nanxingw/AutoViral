@@ -10,7 +10,7 @@
  * store is the source of truth the assertions read.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, cleanup, within } from "@testing-library/react";
 import type { ChatSessionRecord } from "@/features/chat/types";
 
 const nowIso = new Date().toISOString();
@@ -122,6 +122,26 @@ describe("SessionStrip (I24)", () => {
     const deleteButtons = screen.queryAllByRole("button", { name: /Delete|删除/ });
     expect(deleteButtons.length).toBe(2);
     cleanup();
+  });
+
+  it("uses a shared icon button with a 24px transparent hit target and keeps two-step delete", async () => {
+    sessionsFixture = [rec("s_1"), rec("s_2")];
+    render(<SessionStrip workId="w_icon" />);
+    const deleteButton = await screen.findByRole("button", {
+      name: /Delete Session 2|\u5220\u9664 \u4f1a\u8bdd 2/,
+    });
+
+    expect(deleteButton).toHaveAttribute("data-icon-button");
+    expect(deleteButton.querySelector("svg")).not.toBeNull();
+    expect(deleteButton).toHaveStyle({ width: "18px", height: "18px" });
+    expect(
+      within(deleteButton).getByTestId("session-delete-hit-target"),
+    ).toHaveStyle({ width: "24px", height: "24px" });
+
+    fireEvent.click(deleteButton);
+    expect(
+      screen.getByRole("button", { name: /Delete Session 2|\u5220\u9664 \u4f1a\u8bdd 2/ }),
+    ).toHaveTextContent(/Delete\?|\u5220\u9664\uff1f/i);
   });
 
   it("hides the delete affordance when only one session remains", async () => {

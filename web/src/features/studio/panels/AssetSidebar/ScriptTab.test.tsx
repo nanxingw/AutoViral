@@ -1297,3 +1297,25 @@ describe("ScriptTab — expand to the center reading panel", () => {
     expect(useReader.getState().focusSceneId).toBeNull();
   });
 });
+
+describe("ScriptTab (PRD-0013 S6) — shared icon buttons", () => {
+  it("collects all five named icon-button groups without changing their accessible names", async () => {
+    loadScenes([FULL_SCENE, SPARSE_SCENE]);
+    render(<ScriptTab />);
+
+    const buttons = [
+      screen.getByTestId("script-open-reader"),
+      screen.getByRole("button", { name: "Open full screen" }),
+      screen.getByRole("button", { name: "Read shot 1 in the center panel" }),
+      screen.getByRole("button", { name: "Shot 1 actions" }),
+    ];
+
+    await expandCard("s1");
+    buttons.push(screen.getByRole("button", { name: "Move shot 1 later" }));
+
+    for (const button of buttons) {
+      expect(button).toHaveAttribute("data-icon-button");
+      expect(button.querySelector("svg")).not.toBeNull();
+    }
+  });
+});

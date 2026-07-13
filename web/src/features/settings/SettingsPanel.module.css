@@ -32,12 +32,7 @@
   margin: 0;
 }
 .closeBtn {
-  background: transparent;
-  border: 0;
-  font-size: 22px;
-  cursor: pointer;
   color: var(--text-dim);
-  padding: 4px 8px;
 }
 .closeBtn:hover { color: var(--text); }
 .body {

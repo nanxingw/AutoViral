@@ -49,7 +49,10 @@ describe("SettingsPanel — skeleton", () => {
   it("closes on close button click", () => {
     useSettingsPanelStore.setState({ open: true, focusSection: null });
     renderPanel();
-    fireEvent.click(screen.getByRole("button", { name: /close settings|关闭设置/i }));
+    const close = screen.getByRole("button", { name: /close settings|关闭设置/i });
+    expect(close).toHaveAttribute("data-icon-button");
+    expect(close.querySelector("svg")).not.toBeNull();
+    fireEvent.click(close);
     expect(useSettingsPanelStore.getState().open).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { beforeEach, describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { DiveCanvas } from "./DiveCanvas";
 import { useComposition } from "../store";
@@ -6,6 +6,11 @@ import {
   makeAssetGraph,
   makeVideoClip,
 } from "../../../test/composition-fixtures";
+import { useLocaleStore } from "@/i18n/store";
+
+beforeEach(() => {
+  useLocaleStore.setState({ locale: "en" });
+});
 
 describe("DiveCanvas", () => {
   it("renders a node per asset in comp.assets", () => {
@@ -70,6 +75,19 @@ describe("DiveCanvas", () => {
     const onClose = vi.fn();
     render(<DiveCanvas open={true} onClose={onClose} />);
     fireEvent.click(screen.getByTestId("dive-backdrop"));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("localizes the shared close IconButton and preserves its click behavior", () => {
+    const comp = makeAssetGraph({ ids: ["a"] });
+    useComposition.setState({ comp, selection: null });
+    useLocaleStore.setState({ locale: "zh" });
+    const onClose = vi.fn();
+    render(<DiveCanvas open={true} onClose={onClose} />);
+    const close = screen.getByRole("button", { name: "\u5173\u95ed" });
+    expect(close).toHaveAttribute("data-icon-button");
+    expect(close.querySelector("svg")).not.toBeNull();
+    fireEvent.click(close);
     expect(onClose).toHaveBeenCalledOnce();
   });
 

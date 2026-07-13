@@ -27,6 +27,8 @@ import {
   useTerminalSessionIds,
   DEFAULT_TERMINAL_SESSION_ID,
 } from "@/features/terminal/terminalSessions";
+import { IconButton } from "@/ui/IconButton";
+import { XIcon } from "@/ui/icons";
 import styles from "./TerminalSessionStrip.module.css";
 
 /** "s_2" → 2 (the human-facing terminal number). Falls back to the raw id. */
@@ -120,14 +122,26 @@ export function TerminalSessionStrip({ workId }: TerminalSessionStripProps) {
                     {t("studio.rightPane.terminalSessions.deleteConfirm")}
                   </button>
                 ) : (
-                  <button
-                    type="button"
+                  <IconButton
+                    size="compact"
+                    variant="danger"
                     className={styles.deleteBtn}
                     aria-label={t("studio.rightPane.terminalSessions.deleteAria", { label })}
                     onClick={() => setConfirmDelete(id)}
                   >
-                    ×
-                  </button>
+                    <span
+                      data-testid="terminal-session-delete-hit-target"
+                      style={{
+                        position: "absolute",
+                        left: "50%",
+                        top: "50%",
+                        width: 24,
+                        height: 24,
+                        transform: "translate(-50%, -50%)",
+                      }}
+                    />
+                    <XIcon width={12} height={12} />
+                  </IconButton>
                 ))}
             </div>
           );

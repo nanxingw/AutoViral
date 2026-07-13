@@ -3,7 +3,7 @@
 // can read the whole document in place. Non-text kinds are unchanged. We mock
 // the content hook so the text branch renders deterministically.
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { AssetPreviewModal } from "./AssetPreviewModal";
 import { useLocaleStore } from "@/i18n/store";
 import type { AssetItem } from "@/queries/assets";
@@ -48,6 +48,16 @@ beforeEach(() => {
 });
 
 describe("AssetPreviewModal — text branch", () => {
+  it("uses the shared close IconButton and preserves its click behavior", () => {
+    const onClose = vi.fn();
+    render(<AssetPreviewModal asset={TEXT} onClose={onClose} />);
+    const close = screen.getByRole("button", { name: "Close preview" });
+    expect(close).toHaveAttribute("data-icon-button");
+    expect(close.querySelector("svg")).not.toBeNull();
+    fireEvent.click(close);
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("renders the full text body in a <pre>", () => {
     render(<AssetPreviewModal asset={TEXT} onClose={() => {}} />);
     const pre = screen.getByTestId("asset-text-full");

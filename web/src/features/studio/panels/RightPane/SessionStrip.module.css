@@ -68,7 +68,6 @@
   letter-spacing: 0.04em;
 }
 
-.deleteBtn,
 .deleteConfirm {
   flex: 0 0 auto;
   border: none;
@@ -81,8 +80,11 @@
 
 .deleteBtn {
   width: 18px;
-  font-size: 14px;
-  align-self: stretch;
+  height: 18px;
+  align-self: center;
+  position: relative;
+  overflow: visible;
+  color: var(--ink-3);
 }
 
 .deleteBtn:hover {

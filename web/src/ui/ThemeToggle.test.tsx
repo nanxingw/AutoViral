@@ -14,6 +14,7 @@ describe("<ThemeToggle />", () => {
     // F31/F32 a11y: the label is target-state-aware ("Switch to light theme"
     // when currently dark) — it no longer reads the static "Toggle theme".
     expect(screen.getByLabelText(/switch to (light|dark) theme/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/switch to (light|dark) theme/i)).toHaveAttribute("data-icon-button");
     expect(document.querySelector("[data-icon='sun']")).toBeInTheDocument();
   });
 

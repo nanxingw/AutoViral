@@ -36,6 +36,8 @@ import { SceneGroupNode } from "./nodes/SceneGroupNode";
 import { DiveEdge } from "./nodes/DiveEdge";
 import { miniMapNodeColor } from "./miniMapColor";
 import { useT } from "@/i18n/useT";
+import { IconButton } from "@/ui/IconButton";
+import { XIcon } from "@/ui/icons";
 
 interface Props {
   open: boolean;
@@ -379,9 +381,9 @@ export function DiveCanvas({ open, onClose }: Props) {
                 {t("studio.diveCanvas.viewLineage")}
               </ViewToggleButton>
             </div>
-            <button type="button" onClick={onClose} aria-label="Close" data-bare>
-              ×
-            </button>
+            <IconButton onClick={onClose} aria-label={t("cost.close")}>
+              <XIcon />
+            </IconButton>
           </div>
         </header>
         <div style={{ flex: 1, position: "relative", minHeight: 0 }}>

@@ -7,6 +7,8 @@ import { useT } from "@/i18n/useT";
 import { useScript } from "../../scriptStore";
 import { saveScript } from "../../services/script";
 import { ApiError } from "@/lib/api";
+import { IconButton } from "@/ui/IconButton";
+import { XIcon } from "@/ui/icons";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // A4 (PRD-0010) — full-screen 剧本 reader/editor.
@@ -191,27 +193,14 @@ export function ScriptModal({
                     {t("studio.scriptPanel.scriptModePreview")}
                   </ModeButton>
                 </div>
-                <button
-                  type="button"
+                <IconButton
                   onClick={onClose}
                   aria-label={t("studio.scriptPanel.scriptModalCloseAria")}
                   title={t("studio.scriptPanel.scriptModalCloseAria")}
-                  data-bare
-                  style={{
-                    width: 28,
-                    height: 28,
-                    display: "grid",
-                    placeItems: "center",
-                    borderRadius: 6,
-                    border: "1px solid var(--glass-border)",
-                    background: "transparent",
-                    color: "var(--text-dim)",
-                    cursor: "pointer",
-                    fontSize: 16,
-                  }}
+                  variant="surface"
                 >
-                  ×
-                </button>
+                  <XIcon />
+                </IconButton>
               </div>
             </header>
 

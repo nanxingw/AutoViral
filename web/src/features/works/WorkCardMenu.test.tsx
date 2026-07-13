@@ -7,7 +7,9 @@ const noop = () => {};
 describe("WorkCardMenu", () => {
   it("renders the menu trigger button", () => {
     render(<WorkCardMenu onRename={noop} onDelete={noop} />);
-    expect(screen.getByRole("button", { name: /open menu|打开菜单/i })).toBeInTheDocument();
+    const trigger = screen.getByRole("button", { name: /open menu|打开菜单/i });
+    expect(trigger).toHaveAttribute("data-icon-button");
+    expect(trigger.querySelector("svg")).not.toBeNull();
   });
 
   it("opens dropdown on click and shows Rename + Delete items (#51)", () => {

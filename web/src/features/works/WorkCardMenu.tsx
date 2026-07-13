@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useT } from "@/i18n/useT";
+import { IconButton } from "@/ui/IconButton";
+import { MoreHorizontalIcon } from "@/ui/icons";
 import styles from "./WorkCardMenu.module.css";
 
 interface WorkCardMenuProps {
@@ -37,8 +39,9 @@ export function WorkCardMenu({ onRename, onDelete }: WorkCardMenuProps) {
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => e.stopPropagation()}
     >
-      <button
-        type="button"
+      <IconButton
+        size="sm"
+        variant="surface"
         className={styles.trigger}
         aria-label={t("works.menu.openMenu")}
         aria-haspopup="menu"
@@ -49,12 +52,8 @@ export function WorkCardMenu({ onRename, onDelete }: WorkCardMenuProps) {
           setOpen((v) => !v);
         }}
       >
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-          <circle cx="5" cy="12" r="2" />
-          <circle cx="12" cy="12" r="2" />
-          <circle cx="19" cy="12" r="2" />
-        </svg>
-      </button>
+        <MoreHorizontalIcon width={14} height={14} />
+      </IconButton>
       {open && (
         <div className={styles.dropdown} role="menu">
           {/* #51 — Rename wires the previously-orphaned useUpdateWork hook
