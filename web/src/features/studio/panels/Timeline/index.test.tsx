@@ -97,6 +97,28 @@ describe("Timeline unified snap guide", () => {
     expect(screen.getByRole("status")).toHaveAccessibleName(/1:00\.00/);
   });
 
+  it("carries rounded snap seconds across later minute boundaries", () => {
+    const comp = makeEmptyComposition({ workId: "snap-carry-later" });
+    comp.duration = 180;
+    useComposition.setState({
+      comp,
+      dragState: {
+        clipId: "",
+        originalStart: 0,
+        candidateStart: 0,
+        preview: new Map(),
+        snapTime: 119.999,
+        targetTrackId: null,
+        guideOnly: true,
+      },
+    });
+
+    render(<Timeline />);
+
+    expect(screen.getByTestId("snap-line")).toHaveTextContent("2:00.00");
+    expect(screen.getByRole("status")).toHaveAccessibleName(/2:00\.00/);
+  });
+
   it("formats hour-scale snap times for the badge and accessible name", () => {
     const comp = makeEmptyComposition({ workId: "snap-hour" });
     comp.duration = 4_000;
