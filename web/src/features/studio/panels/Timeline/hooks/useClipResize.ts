@@ -13,10 +13,8 @@
 //   moving edge) and dispatch `resizeClip(id, edge, snappedTime)`. The
 //   D2 right-edge clamp (next clip's start) and `MIN_CLIP_DUR` floor
 //   live inside the store action, so the hook stays a thin glue layer.
-// - Snap pass uses `collectSnapPoints` + `snapToNearest` (D1 0.06s).
-//   Pneuma's `SNAP_PX = 5 / pps` is roughly equivalent at our default
-//   zoom but D1 is the audit-locked threshold, so we use the absolute
-//   second value.
+// - Snap pass uses `collectSnapPoints` + `snapToNearest` with the shared
+//   6px screen-space radius converted through the active px/s scale.
 // - `cancelResize` re-dispatches `resizeClip` with the original
 //   anchor time, restoring the clip to its pre-resize state. Pneuma
 //   only commits a single trim command on mouseup; we mutate live, so
@@ -37,9 +35,12 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useComposition } from "../../../store";
-import { collectSnapPoints, snapToNearest, clipDuration } from "@autoviral/timeline";
-
-const SNAP_THRESHOLD = 0.06;
+import {
+  collectSnapPoints,
+  snapToNearest,
+  clipDuration,
+  snapToleranceSeconds,
+} from "@autoviral/timeline";
 
 interface ResizeStart {
   edge: "left" | "right";
@@ -99,8 +100,13 @@ export function useClipResize({
         state.comp,
         new Set([clipId]),
         playhead,
+        state.beats,
       );
-      const snap = snapToNearest(candidate, points, SNAP_THRESHOLD);
+      const snap = snapToNearest(
+        candidate,
+        points,
+        snapToleranceSeconds(pxPerSecond),
+      );
       state.resizeClip(clipId, start.edge, snap.time);
     },
     [clipId, pxPerSecond],

@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { collectSnapPoints, snapToNearest, snapDraggedStartToPoints } from "@autoviral/timeline";
+import {
+  collectSnapPoints,
+  snapToNearest,
+  snapDraggedStartToPoints,
+  snapToleranceSeconds,
+} from "@autoviral/timeline";
 import { makeVideoClip, makeCompositionWithClips } from "../../../../test/composition-fixtures";
 
 describe("collectSnapPoints", () => {
@@ -36,6 +41,14 @@ describe("collectSnapPoints", () => {
     const points = collectSnapPoints(null, new Set(), -1);
     expect(points.map((p) => p.time)).toEqual([0]);
   });
+
+  it("includes enabled beat times in the shared candidate set", () => {
+    const points = collectSnapPoints(null, new Set(), 1, [0.5, 1.5]);
+    expect(points.filter((point) => point.label === "beat").map((point) => point.time)).toEqual([
+      0.5,
+      1.5,
+    ]);
+  });
 });
 
 describe("snapToNearest", () => {
@@ -62,6 +75,18 @@ describe("snapToNearest", () => {
     // Second iter: 1 < 1 is false, so the first point wins.
     const ps = [{ time: 1, label: "a" }, { time: 3, label: "b" }];
     expect(snapToNearest(2, ps, 1.5)).toEqual({ time: 1, snappedTo: 1 });
+  });
+
+  it.each([50, 120, 300])("uses the same 6px screen threshold at %d px/s", (pxPerSecond) => {
+    const threshold = snapToleranceSeconds(pxPerSecond);
+    expect(snapToNearest(2 + 5.9 / pxPerSecond, points, threshold)).toEqual({
+      time: 2,
+      snappedTo: 2,
+    });
+    expect(snapToNearest(2 + 6.1 / pxPerSecond, points, threshold)).toEqual({
+      time: 2 + 6.1 / pxPerSecond,
+      snappedTo: null,
+    });
   });
 });
 

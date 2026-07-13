@@ -27,6 +27,7 @@ import {
   OFFSET_EPSILON,
   computeRipplePreview,
   snapDraggedStartFull,
+  snapToleranceSeconds,
 } from "@autoviral/timeline";
 import { rippleDeleteFromTrack } from "./panels/Timeline/toolbar/rippleDelete";
 import { collapseGapsOnTrack } from "./panels/Timeline/toolbar/collapseGaps";
@@ -207,7 +208,7 @@ interface CompState {
   ) => void;
   // Phase 4.B — drag-preview actions (begin → update → commit/cancel)
   beginDrag: (clipId: string) => void;
-  updateDragCandidate: (candidateStart: number) => void;
+  updateDragCandidate: (candidateStart: number, pxPerSecond?: number) => void;
   // #3 — record the cross-track move target while body-dragging. The caller
   // (Clip.tsx) resolves the hovered same-kind lane via `resolveDragTargetTrack`
   // and pushes it here; null clears it (cursor back over the source lane / a
@@ -1030,7 +1031,7 @@ export const useComposition = create<CompState>()(
           targetTrackId: null,
         };
       }),
-    updateDragCandidate: (candidateStart) =>
+    updateDragCandidate: (candidateStart, pxPerSecond = 100) =>
       set((s) => {
         if (!s.comp || !s.dragState) return;
         const draggedId = s.dragState.clipId;
@@ -1052,7 +1053,8 @@ export const useComposition = create<CompState>()(
           draggedDur,
           candidateStart,
           playhead,
-          0.06,
+          snapToleranceSeconds(pxPerSecond),
+          s.beats,
         );
         const preview = computeRipplePreview(
           track.clips as Clip[],

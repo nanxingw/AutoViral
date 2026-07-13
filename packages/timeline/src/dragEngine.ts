@@ -137,11 +137,13 @@ export function snapDraggedStartFull(
   candidateStart: number,
   playheadTime: number,
   snapThresholdSeconds: number,
+  beatTimes: readonly number[] = [],
 ): { start: number; snapTime: number | null } {
   const points: SnapPoint[] = collectSnapPoints(
     composition,
     new Set([draggedClipId]),
     playheadTime,
+    beatTimes,
   );
   const r = snapDraggedStartToPoints(
     candidateStart,

@@ -87,7 +87,7 @@ export function Clip({
     const move = (ev: PointerEvent) => {
       const delta = (ev.clientX - startX) / pxPerSecond;
       const raw = Math.max(0, startOffset + delta);
-      updateDragCandidate(raw);
+      updateDragCandidate(raw, pxPerSecond);
       // #3 — track-aware: find the lane under the cursor (vertical axis) and
       // retarget the clip there when it's a different SAME-KIND lane. The lane
       // div carries `data-track-id` (Track.tsx); hovering the label column or

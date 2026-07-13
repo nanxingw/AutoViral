@@ -7,7 +7,7 @@
 // lanes container so a single pointer captures the move/click for all
 // tracks. Behaviour:
 //   • visible only when `store.bladeMode === true`
-//   • pointermove → live hover guide (snapped to clip edges via D1=0.06s)
+//   • pointermove → live hover guide (snapped within the shared 6px radius)
 //   • click → resolve which clip's interval contains the snapped time
 //             across all tracks, then dispatch `splitClip(clipId, t)`
 //   • click in a gap → silent no-op (D4)
@@ -29,7 +29,7 @@ export function BladeTool({
   const bladeMode = useComposition((s) => s.bladeMode);
   const splitClip = useComposition((s) => s.splitClip);
   const comp = useComposition((s) => s.comp);
-  const { snapTime, snappedToEdge, setHoverTime } = useSplitHoverSnap();
+  const { snapTime, snappedToEdge, setHoverTime } = useSplitHoverSnap(pxPerSecond);
 
   if (!bladeMode || !comp) return null;
 

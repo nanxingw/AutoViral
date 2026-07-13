@@ -8,14 +8,29 @@ export interface SnapPoint {
   label: string;
 }
 
+/** Magnetic-snap radius is a screen-space constant at every zoom level. */
+export const TIMELINE_SNAP_THRESHOLD_PX = 6;
+
+export function snapToleranceSeconds(pxPerSecond: number): number {
+  return Number.isFinite(pxPerSecond) && pxPerSecond > 0
+    ? TIMELINE_SNAP_THRESHOLD_PX / pxPerSecond
+    : 0;
+}
+
 export function collectSnapPoints(
   composition: Composition | null,
   excludeClipIds: ReadonlySet<string>,
   playheadTime: number,
+  beatTimes: readonly number[] = [],
 ): SnapPoint[] {
   const points: SnapPoint[] = [{ time: 0, label: "start" }];
   if (Number.isFinite(playheadTime) && playheadTime >= 0) {
     points.push({ time: playheadTime, label: "playhead" });
+  }
+  for (const beat of beatTimes) {
+    if (Number.isFinite(beat) && beat >= 0) {
+      points.push({ time: beat, label: "beat" });
+    }
   }
   if (!composition) return points;
   for (const track of composition.tracks) {

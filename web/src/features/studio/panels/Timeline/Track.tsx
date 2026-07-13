@@ -116,7 +116,15 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
       if (dragged) dur = clipDuration(dragged);
       excludeId = payload.clipId;
     }
-    const { start } = resolveDropTime(comp, rawTime, dur, playhead, excludeId);
+    const { start } = resolveDropTime(
+      comp,
+      rawTime,
+      dur,
+      playhead,
+      excludeId,
+      pxPerSecond,
+      store.beats,
+    );
     setDropPreview({ start, legal });
     return legal;
   };
@@ -164,7 +172,15 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
       }
       excludeId = payload.clipId;
     }
-    const { start } = resolveDropTime(comp, rawTime, dur, playhead, excludeId);
+    const { start } = resolveDropTime(
+      comp,
+      rawTime,
+      dur,
+      playhead,
+      excludeId,
+      pxPerSecond,
+      store.beats,
+    );
     const intent = resolveDrop(payload, { id: track.id, kind: track.kind }, start, sourceTrackId);
     if (intent.type === "add-asset") {
       // buildClipFromAsset only reads kind + path — reconstruct a minimal asset.

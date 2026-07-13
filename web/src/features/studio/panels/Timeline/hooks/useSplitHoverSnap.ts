@@ -12,11 +12,11 @@
 // match our overlay shape).
 import { useState, useMemo } from "react";
 import { useComposition } from "../../../store";
-import { collectSnapPoints, snapToNearest } from "@autoviral/timeline";
-
-// D1: 0.06s snap threshold — same constant as the drag-engine snap
-// (see `dragEngine.ts` / store.ts:323) so the magnetic feel matches.
-const SPLIT_SNAP_THRESHOLD_SEC = 0.06;
+import {
+  collectSnapPoints,
+  snapToNearest,
+  snapToleranceSeconds,
+} from "@autoviral/timeline";
 
 export interface SplitHoverSnap {
   /** Snapped (or raw) hover time in seconds; null when not hovering. */
@@ -29,10 +29,11 @@ export interface SplitHoverSnap {
   setHoverTime: (t: number | null) => void;
 }
 
-export function useSplitHoverSnap(): SplitHoverSnap {
+export function useSplitHoverSnap(pxPerSecond = 100): SplitHoverSnap {
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const comp = useComposition((s) => s.comp);
   const currentFrame = useComposition((s) => s.currentFrame);
+  const beats = useComposition((s) => s.beats);
   const fps = comp?.fps ?? 30;
   const playhead = currentFrame / fps;
 
@@ -40,14 +41,18 @@ export function useSplitHoverSnap(): SplitHoverSnap {
     if (hoverTime === null) {
       return { snapTime: null, snappedToEdge: false, raw: null as number | null };
     }
-    const points = collectSnapPoints(comp, new Set(), playhead);
-    const r = snapToNearest(hoverTime, points, SPLIT_SNAP_THRESHOLD_SEC);
+    const points = collectSnapPoints(comp, new Set(), playhead, beats);
+    const r = snapToNearest(
+      hoverTime,
+      points,
+      snapToleranceSeconds(pxPerSecond),
+    );
     return {
       snapTime: r.time,
       snappedToEdge: r.snappedTo !== null,
       raw: hoverTime,
     };
-  }, [hoverTime, comp, playhead]);
+  }, [beats, comp, hoverTime, playhead, pxPerSecond]);
 
   return { ...snap, setHoverTime };
 }

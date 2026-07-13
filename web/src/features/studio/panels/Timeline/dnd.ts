@@ -12,7 +12,7 @@
 // jsdom can't faithfully reproduce). The React seam (Track/Clip) only wires
 // these helpers to `dragstart`/`dragover`/`drop`.
 import type { Composition } from "@shared/composition";
-import { snapDraggedStartFull } from "@autoviral/timeline";
+import { snapDraggedStartFull, snapToleranceSeconds } from "@autoviral/timeline";
 import type { AssetItem } from "@/queries/assets";
 import type { Track } from "../../types";
 
@@ -154,7 +154,8 @@ export function resolveDropTime(
   clipDuration: number,
   playheadTime: number,
   excludeClipId: string | null,
-  snapThreshold = 0.06,
+  pxPerSecond = 100,
+  beatTimes: readonly number[] = [],
 ): { start: number; snapTime: number | null } {
   return snapDraggedStartFull(
     comp,
@@ -162,7 +163,8 @@ export function resolveDropTime(
     clipDuration,
     rawTime,
     playheadTime,
-    snapThreshold,
+    snapToleranceSeconds(pxPerSecond),
+    beatTimes,
   );
 }
 

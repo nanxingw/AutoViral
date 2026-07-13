@@ -18,6 +18,8 @@ export {
   collectSnapPoints,
   snapToNearest,
   snapDraggedStartToPoints,
+  snapToleranceSeconds,
+  TIMELINE_SNAP_THRESHOLD_PX,
 } from "./snapPoints";
 export type { SnapPoint } from "./snapPoints";
 
