@@ -72,6 +72,36 @@ export interface ChatTurnComplete {
   usage?: Record<string, number>;
 }
 
+/** Provider capabilities discovered from a real session init frame. */
+export interface ChatProviderCapabilities {
+  slashCommands: string[];
+  skills: string[];
+}
+
+/** A structured command request presented to a backend adapter. */
+export interface ChatBackendCommandInput {
+  name: string;
+  args: string;
+  capabilities?: ChatProviderCapabilities;
+}
+
+/** A backend adapter either produces a controlled wire prompt or rejects the
+ * command. Unsupported commands never carry a prompt, which prevents callers
+ * from accidentally downgrading a slash command into an ordinary model turn. */
+export type ChatBackendCommandResult =
+  | {
+      status: "ready";
+      kind: "translate" | "passthrough";
+      command: string;
+      prompt: string;
+    }
+  | {
+      status: "unsupported";
+      errorCode: "unsupported_command";
+      command: string;
+      message: string;
+    };
+
 /**
  * The unified event surface a parser drives. WsBridge supplies these; the parser
  * calls them as it decodes the stream. Ordering per message: `onRawMessage`
@@ -85,6 +115,8 @@ export interface ChatStreamCallbacks {
   onRawMessage?(msg: ChatRawMessage): void;
   /** system.init — the backend session id (may be undefined on claude). */
   onSessionId(cliSessionId: string | undefined, msg: ChatRawMessage): void;
+  /** Provider command/skill catalog discovered from a real init frame. */
+  onCapabilities?(capabilities: ChatProviderCapabilities, msg: ChatRawMessage): void;
   /** An assistant message with content, once, before its blocks are walked. */
   onAssistantMessage?(msg: ChatRawMessage, blocks: Array<Record<string, unknown>>): void;
   /** An assistant text block. */
@@ -128,6 +160,9 @@ export interface ChatBackend {
    *  the turn fresh instead of leaving the chat silently dead. */
   readonly staleResumePattern?: RegExp;
   buildSpawn(input: ChatSpawnInput): ChatSpawnDescriptor;
+  /** Resolve only explicitly supported slash commands. An unsupported result
+   * has no prompt and must never be passed to buildSpawn. */
+  resolveCommand(input: ChatBackendCommandInput): ChatBackendCommandResult;
   createLineParser(cb: ChatStreamCallbacks): ChatLineParser;
   /** Optional pre-spawn login/auth check. Backends whose CLI needs an
    *  interactive login (codex) implement this to probe local auth state.

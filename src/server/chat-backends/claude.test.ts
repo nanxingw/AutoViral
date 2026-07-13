@@ -103,6 +103,7 @@ function recorder() {
   const cb: ChatStreamCallbacks = {
     onRawMessage: (m) => log.push(["raw", (m as any).type]),
     onSessionId: (id) => log.push(["session", id]),
+    onCapabilities: (capabilities) => log.push(["capabilities", capabilities]),
     onAssistantMessage: (_m, blocks) => log.push(["assistantMsg", blocks.length]),
     onText: (t) => log.push(["text", t]),
     onThinking: (t) => log.push(["thinking", t]),
@@ -119,6 +120,41 @@ function line(obj: Record<string, unknown>): string {
 }
 
 describe("claudeBackend.createLineParser — unified event translation", () => {
+  it("captures slash_commands and skills from init, cache-merges repeated init updates, and dedupes names", () => {
+    const { log, cb } = recorder();
+    const p = claudeBackend.createLineParser(cb);
+
+    p.push(line({
+      type: "system",
+      subtype: "init",
+      session_id: "cli-1",
+      slash_commands: ["compact", "review", "compact"],
+      skills: ["review", "draft"],
+    }));
+    p.push(line({
+      type: "system",
+      subtype: "init",
+      session_id: "cli-1",
+      slash_commands: ["compact", "new-command"],
+      skills: ["draft", "publish"],
+    }));
+
+    expect(log.filter((entry) => entry[0] === "capabilities")).toEqual([
+      ["capabilities", {
+        slashCommands: ["compact", "review"],
+        skills: ["review", "draft"],
+      }],
+      ["capabilities", {
+        slashCommands: ["compact", "review", "new-command"],
+        skills: ["review", "draft", "publish"],
+      }],
+    ]);
+    expect(log.filter((entry) => entry[0] === "session")).toEqual([
+      ["session", "cli-1"],
+      ["session", "cli-1"],
+    ]);
+  });
+
   it("translates a full claude turn into the ordered unified callbacks", () => {
     const { log, cb } = recorder();
     const p = claudeBackend.createLineParser(cb);
@@ -132,6 +168,7 @@ describe("claudeBackend.createLineParser — unified event translation", () => {
     expect(log).toEqual([
       ["raw", "system"],
       ["session", "cli-1"],
+      ["capabilities", { slashCommands: [], skills: [] }],
       ["raw", "assistant"],
       ["assistantMsg", 1],
       ["thinking", "hmm"],

@@ -161,6 +161,16 @@ export const codexBackend: ChatBackend = {
 
   notFoundMessage: CODEX_NOT_FOUND_MESSAGE,
 
+  resolveCommand(input) {
+    const name = input.name.replace(/^\/+/, "").trim();
+    return {
+      status: "unsupported",
+      errorCode: "unsupported_command",
+      command: name,
+      message: `Codex exec does not support /${name}.`,
+    };
+  },
+
   buildSpawn(input: ChatSpawnInput): ChatSpawnDescriptor {
     // "全放开权限模式" — the equivalent of claude's --dangerously-skip-permissions.
     // --dangerously-bypass-approvals-and-sandbox skips all confirmations AND the

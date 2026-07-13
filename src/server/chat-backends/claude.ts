@@ -15,6 +15,7 @@ import { PACKAGE_ROOT, buildSpawnPath } from "../../infra/paths.js";
 import { dataDir } from "../../infra/config.js";
 import type {
   ChatBackend,
+  ChatBackendCommandResult,
   ChatLineParser,
   ChatRawMessage,
   ChatSpawnDescriptor,
@@ -22,6 +23,7 @@ import type {
   ChatStreamCallbacks,
   ChatTurnComplete,
 } from "./types.js";
+import { isDeniedChatCommandName } from "../chat-commands/registry.js";
 
 /** Normalize a claude `result` frame into the provider-agnostic summary. */
 function buildTurnComplete(msg: ChatRawMessage): ChatTurnComplete {
@@ -42,13 +44,42 @@ function buildTurnComplete(msg: ChatRawMessage): ChatTurnComplete {
 
 /** Dispatch one parsed claude frame to the unified callbacks. The branch order
  *  and guards mirror the old inline spawnCli dispatch byte-for-byte. */
-function dispatch(msg: ChatRawMessage, cb: ChatStreamCallbacks): void {
+function dispatch(
+  msg: ChatRawMessage,
+  cb: ChatStreamCallbacks,
+  capabilityCache: { slashCommands: string[]; skills: string[] },
+): void {
   // Pre-dispatch peek (trends WebSearch filtering lives in the caller).
   cb.onRawMessage?.(msg);
 
   // system.init — capture session id.
   if (msg.type === "system" && msg.subtype === "init") {
     cb.onSessionId(msg.session_id, msg);
+    const mergeNames = (current: string[], incoming: unknown): string[] => {
+      if (!Array.isArray(incoming)) return current;
+      const next = [...current];
+      const seen = new Set(current);
+      for (const value of incoming) {
+        if (typeof value !== "string") continue;
+        const name = value.replace(/^\/+/, "").trim();
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        next.push(name);
+      }
+      return next;
+    };
+    capabilityCache.slashCommands = mergeNames(
+      capabilityCache.slashCommands,
+      msg.slash_commands,
+    );
+    capabilityCache.skills = mergeNames(capabilityCache.skills, msg.skills);
+    cb.onCapabilities?.(
+      {
+        slashCommands: [...capabilityCache.slashCommands],
+        skills: [...capabilityCache.skills],
+      },
+      msg,
+    );
     return;
   }
 
@@ -110,6 +141,29 @@ export const claudeBackend: ChatBackend = {
   // store (account switch / store pruned) prints exactly this and exits 1.
   staleResumePattern: /No conversation found with session ID/i,
 
+  resolveCommand(input): ChatBackendCommandResult {
+    const name = input.name.replace(/^\/+/, "").trim().toLowerCase();
+    const slashCommands = new Set(input.capabilities?.slashCommands ?? []);
+    const skills = new Set(input.capabilities?.skills ?? []);
+    const dynamicallyAvailable = slashCommands.has(name) || skills.has(name);
+    const allowed = name === "compact" ? slashCommands.has("compact") : skills.has(name);
+    if (!dynamicallyAvailable || !allowed || isDeniedChatCommandName(name)) {
+      return {
+        status: "unsupported",
+        errorCode: "unsupported_command",
+        command: name,
+        message: `Claude command /${name} is not available for this session.`,
+      };
+    }
+    const args = input.args.trim();
+    return {
+      status: "ready",
+      kind: "passthrough",
+      command: name,
+      prompt: `/${name}${args ? ` ${args}` : ""}`,
+    };
+  },
+
   buildSpawn(input: ChatSpawnInput): ChatSpawnDescriptor {
     const args = [
       "-p",
@@ -159,6 +213,7 @@ export const claudeBackend: ChatBackend = {
 
   createLineParser(cb: ChatStreamCallbacks): ChatLineParser {
     let buffer = "";
+    const capabilityCache = { slashCommands: [] as string[], skills: [] as string[] };
     return {
       push(chunk: string): void {
         buffer += chunk;
@@ -168,7 +223,7 @@ export const claudeBackend: ChatBackend = {
           if (!line.trim()) continue;
           try {
             const msg = JSON.parse(line) as ChatRawMessage;
-            dispatch(msg, cb);
+            dispatch(msg, cb, capabilityCache);
           } catch {
             // Non-JSON line, ignore (matches the old inline swallow — the whole
             // parse+dispatch body was inside a single try/catch).

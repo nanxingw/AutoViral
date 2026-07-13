@@ -228,6 +228,7 @@ describe("WsBridge — C2 NDJSON → broadcast event sequence (editing turn, loc
       const seq = events(sink);
       expect(seq.map((e) => e.event)).toEqual([
         "session_ready",
+        "chat_capabilities",
         "assistant_thinking",
         "assistant_text",
         "tool_use",

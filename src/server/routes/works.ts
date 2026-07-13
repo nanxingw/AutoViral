@@ -606,6 +606,26 @@ worksRouter.post("/api/works/:id/chat", async (c) => {
 // stay consistent; they never `new WsBridge()`.
 // ---------------------------------------------------------------------------
 
+// Session/backend-scoped command catalog. Dynamic provider capabilities are
+// reused from real init frames; this endpoint never launches a discovery CLI.
+worksRouter.get("/api/works/:id/chat-commands", async (c) => {
+  const id = c.req.param("id");
+  if (!SAFE_ID.test(id)) {
+    return c.json({ error: "Invalid workId", errorCode: "invalid_work_id" }, 400);
+  }
+  const sessionId = c.req.query("sessionId");
+  if (!sessionId || !SAFE_ID.test(sessionId)) {
+    return c.json({ error: "Invalid sessionId", errorCode: "invalid_session_id" }, 400);
+  }
+  const wsBridge = getWsBridge();
+  if (!wsBridge) return c.json({ error: "WsBridge not initialized" }, 503);
+  const catalog = await wsBridge.getChatCommandCatalog(id, sessionId);
+  if (!catalog) {
+    return c.json({ error: "Session not found", errorCode: "session_not_found" }, 404);
+  }
+  return c.json(catalog);
+});
+
 // GET /api/works/:id/sessions — list the work's chat sessions (active, not
 // archived/deleted). On a legacy single-session work the bridge lazily migrates
 // the old cliSessionId/chat.jsonl into an `s_1` record before returning.

@@ -24,6 +24,10 @@ import { recordCostEvent } from "./server/cost-ledger/index.js";
 import { getContentType } from "./shared/content-types/registry.js";
 import { createCheckpoint } from "./server/checkpoints.js";
 import { getChatBackend, resolveBackendId, type ChatBackendId } from "./server/chat-backends/registry.js";
+import type { ChatProviderCapabilities } from "./server/chat-backends/types.js";
+import { listChatCommands, resolveChatCommand } from "./server/chat-commands/registry.js";
+import { executeLocalChatCommand } from "./server/chat-commands/local.js";
+import type { ChatCommandCatalog, ChatCommandExecutionResult } from "./server/chat-commands/types.js";
 import { listSharedAssets } from "./shared-assets.js";
 import { MemoryClient } from "./domain/memory.js";
 import { syncMessage } from "./memory-sync.js";
@@ -122,12 +126,18 @@ export interface WsSession {
    *  later, or to a settled-idle CLI, is a legitimate resend and passes. */
   lastUserText?: string;
   lastUserAt?: number;
+  /** Commands/skills discovered from this provider session's real init. */
+  capabilities?: ChatProviderCapabilities;
+  /** Structured command idempotency bookkeeping. */
+  lastCommandKey?: string;
+  lastCommandAt?: number;
 }
 
 /** A2 (PRD-0010) — how long an identical, back-to-back user message is treated
  *  as a duplicate. Kept short so a user deliberately re-sending the same short
  *  line (e.g. "继续") is not swallowed. */
 export const USER_MESSAGE_DEDUP_WINDOW_MS = 3000;
+export const COMMAND_DEDUP_WINDOW_MS = 3000;
 
 /** The id of a work's first/legacy chat session. A work created before
  *  multi-session keying has exactly one chat that maps to chat.jsonl. */
@@ -482,6 +492,9 @@ export class WsBridge {
   /** Nested keying (ADR-008): workId → sessionId → WsSession. A work has one
    *  entry per concurrent chat session; the default/legacy session is `s_1`. */
   private sessions: Map<string, Map<string, WsSession>> = new Map();
+  /** Processes intentionally replaced by a command must not later overwrite
+   * the replacement process's idle/error state when their delayed exit fires. */
+  private supersededCommandProcesses = new WeakSet<ChildProcess>();
   /** TTL (ms) after which an idle session is auto-archived on sweep.
    *  Injectable so tests don't wait 7 days. */
   private readonly idleTtlMs: number;
@@ -864,6 +877,183 @@ export class WsBridge {
     return true;
   }
 
+  /** Set one session's model. The next turn respawns with --model. */
+  setSessionModel(workId: string, model: string, sessionId?: string): boolean {
+    const sid = this.resolveSessionId(sessionId);
+    const session = this.getSessionEntry(workId, sid);
+    if (!session) return false;
+    session.model = model;
+    if (session.cliProcess) {
+      this.supersededCommandProcesses.add(session.cliProcess);
+      try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
+      session.cliProcess = undefined;
+    }
+    session.idle = true;
+    return true;
+  }
+
+  private commandCatalogForSession(session: WsSession): ChatCommandCatalog {
+    const backend = resolveBackendId(session.backend);
+    return {
+      sessionId: session.sessionId,
+      backend,
+      commands: listChatCommands({
+        backend,
+        capabilities: session.capabilities ?? { slashCommands: [], skills: [] },
+        session: {
+          exists: true,
+          connected: session.browserSockets.size > 0,
+          idle: session.idle,
+          hasHistory: !!session.cliSessionId || session.messageHistory.length > 0,
+        },
+      }),
+    };
+  }
+
+  /** Catalog shared by the HTTP endpoint and WS capability pushes. */
+  async getChatCommandCatalog(workId: string, sessionId: string): Promise<ChatCommandCatalog | null> {
+    const sid = this.resolveSessionId(sessionId);
+    const live = this.getSessionEntry(workId, sid);
+    if (live) {
+      if (live.backend === undefined) {
+        const record = await this.sidecarFor(workId).get(sid).catch(() => undefined);
+        live.backend = resolveBackendId(record?.backend);
+      }
+      return this.commandCatalogForSession(live);
+    }
+    const record = await this.sidecarFor(workId).get(sid).catch(() => undefined);
+    if (!record || record.surface !== "chat") return null;
+    const backend = resolveBackendId(record.backend);
+    return {
+      sessionId: sid,
+      backend,
+      commands: listChatCommands({
+        backend,
+        capabilities: { slashCommands: [], skills: [] },
+        session: {
+          exists: true,
+          connected: false,
+          idle: true,
+          hasHistory: !!record.cliSessionId,
+        },
+      }),
+    };
+  }
+
+  private broadcastCommandResult(session: WsSession, result: ChatCommandExecutionResult): void {
+    this.broadcastToSession(session.workId, session.sessionId, {
+      event: result.status === "ok" ? "command_result" : "command_error",
+      data: { ...result, sessionId: session.sessionId },
+    });
+  }
+
+  /** Execute a structured command without entering the ordinary message path. */
+  async sendCommand(
+    workId: string,
+    nameInput: string,
+    argsInput: string,
+    sessionId: string,
+  ): Promise<ChatCommandExecutionResult> {
+    if (!sessionId || !sessionId.trim()) {
+      return {
+        status: "error",
+        command: nameInput.replace(/^\/+/, ""),
+        errorCode: "session_required",
+      };
+    }
+    const sid = this.resolveSessionId(sessionId);
+    const session = this.getSessionEntry(workId, sid);
+    const name = nameInput.replace(/^\/+/, "").trim().toLowerCase();
+    const args = argsInput.trim();
+    if (!session) {
+      return { status: "error", command: name, errorCode: "session_not_found" };
+    }
+
+    const backendId = resolveBackendId(session.backend);
+    const resolution = resolveChatCommand({
+      backend: backendId,
+      name,
+      args,
+      capabilities: session.capabilities ?? { slashCommands: [], skills: [] },
+      session: {
+        exists: true,
+        connected: session.browserSockets.size > 0,
+        idle: session.idle,
+        hasHistory: !!session.cliSessionId || session.messageHistory.length > 0,
+      },
+    });
+    if (resolution.status === "unsupported") {
+      const result: ChatCommandExecutionResult = {
+        status: "unsupported",
+        command: name,
+        errorCode: resolution.errorCode,
+        message: resolution.message,
+      };
+      this.broadcastCommandResult(session, result);
+      return result;
+    }
+
+    const commandKey = `${name}\u0000${args}`;
+    if (
+      session.lastCommandKey === commandKey &&
+      session.lastCommandAt !== undefined &&
+      Date.now() - session.lastCommandAt <= COMMAND_DEDUP_WINDOW_MS
+    ) {
+      const result: ChatCommandExecutionResult = {
+        status: "ok",
+        command: name,
+        deduped: true,
+      };
+      this.broadcastCommandResult(session, result);
+      return result;
+    }
+    session.lastCommandKey = commandKey;
+    session.lastCommandAt = Date.now();
+
+    if (resolution.command.kind === "local") {
+      const result = await executeLocalChatCommand(name, args, {
+        workId,
+        sessionId: sid,
+        backend: backendId,
+        setSessionModel: (model) => this.setSessionModel(workId, model, sid),
+        createSession: (backend) => this.createNewSession(workId, backend),
+        killSession: () => this.killSession(workId, sid),
+      });
+      this.broadcastCommandResult(session, result);
+      return result;
+    }
+
+    const backend = getChatBackend(backendId);
+    const adapted = backend.resolveCommand({ name, args, capabilities: session.capabilities });
+    if (adapted.status === "unsupported") {
+      const result: ChatCommandExecutionResult = {
+        status: "unsupported",
+        command: name,
+        errorCode: adapted.errorCode,
+        message: adapted.message,
+      };
+      this.broadcastCommandResult(session, result);
+      return result;
+    }
+
+    if (session.cliProcess) {
+      this.supersededCommandProcesses.add(session.cliProcess);
+      try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
+      session.cliProcess = undefined;
+    }
+    session.idle = false;
+    this.broadcastToSession(workId, sid, {
+      event: "command_started",
+      data: { command: name, args, sessionId: sid },
+    });
+    this.spawnCli(session, adapted.prompt, session.cliSessionId, undefined, name);
+    this.broadcastToSession(workId, sid, {
+      event: "session_state",
+      data: { idle: false, sessionId: sid },
+    });
+    return { status: "ok", command: name };
+  }
+
   /**
    * Send a follow-up message using --resume + new -p.
    * Kills current CLI (if busy) and spawns a new one that resumes the session.
@@ -1175,6 +1365,7 @@ export class WsBridge {
     prompt: string,
     resumeSessionId?: string,
     appendSystemPrompt?: string,
+    commandName?: string,
   ): void {
     // C4 — resolve the concrete backend for THIS session (claude default). It
     // owns buildSpawn / createLineParser / notFoundMessage; every SESSION side
@@ -1202,6 +1393,7 @@ export class WsBridge {
     // Accumulate assistant text chunks for this turn (also read by the exit
     // handler below, so these stay in method scope, not inside the parser).
     let turnText = "";
+    let commandSettled = false;
     // Translate the claude stream-json stdout into the unified ChatBackend event
     // callbacks. Every SESSION side effect (broadcast / recordBlock / sidecar /
     // cost ledger / checkpoint / memory sync) stays HERE — the
@@ -1234,6 +1426,18 @@ export class WsBridge {
         this.broadcastToSession(session.workId, session.sessionId, {
           event: "session_ready",
           data: { workId: session.workId, sessionId: session.sessionId, cliSessionId: session.cliSessionId },
+        });
+      },
+
+      onCapabilities: (capabilities) => {
+        const previous = session.capabilities ?? { slashCommands: [], skills: [] };
+        session.capabilities = {
+          slashCommands: [...new Set([...previous.slashCommands, ...capabilities.slashCommands])],
+          skills: [...new Set([...previous.skills, ...capabilities.skills])],
+        };
+        this.broadcastToSession(session.workId, session.sessionId, {
+          event: "chat_capabilities",
+          data: this.commandCatalogForSession(session),
         });
       },
 
@@ -1284,6 +1488,14 @@ export class WsBridge {
       onTurnComplete: (tc) => {
         session.idle = true;
         const resultText = tc.result ?? turnText;
+        if (commandName && !commandSettled) {
+          commandSettled = true;
+          this.broadcastCommandResult(session, {
+            status: "ok",
+            command: commandName,
+            data: { result: resultText },
+          });
+        }
         logBridge("turn_complete", session.workId, {
           hasResult: tc.result !== undefined,
           resultLen: tc.result?.length ?? 0,
@@ -1454,9 +1666,29 @@ export class WsBridge {
     });
 
     proc.on("exit", (code, signal) => {
+      if (this.supersededCommandProcesses.has(proc)) {
+        this.supersededCommandProcesses.delete(proc);
+        return;
+      }
       logBridge("cli_exit", session.workId, { code, signal, turnTextLen: turnText.length });
       session.cliProcess = undefined;
       session.idle = true;
+
+      if (commandName && !commandSettled) {
+        commandSettled = true;
+        if (code === 0) {
+          this.broadcastCommandResult(session, { status: "ok", command: commandName });
+        } else {
+          this.broadcastCommandResult(session, {
+            status: "error",
+            command: commandName,
+            errorCode: "command_failed",
+            message: stderrTail || `Command /${commandName} exited with code ${code}.`,
+          });
+          session.lastCommandKey = undefined;
+          session.lastCommandAt = undefined;
+        }
+      }
 
       // Stale-resume fallback: the stored cliSessionId no longer exists in the
       // CLI's local conversation store (account switch / store pruned) — the
@@ -1466,6 +1698,7 @@ export class WsBridge {
       // chat history is bridge-owned and unaffected; only CLI-side context is
       // lost, which is exactly the already-true reality of a dead resume id.
       const staleResume =
+        commandName === undefined &&
         code !== 0 &&
         turnText.length === 0 &&
         resumeSessionId !== undefined &&
@@ -1494,6 +1727,10 @@ export class WsBridge {
     });
 
     proc.on("error", (err) => {
+      if (this.supersededCommandProcesses.has(proc)) {
+        this.supersededCommandProcesses.delete(proc);
+        return;
+      }
       // A packaged Electron app inherits a minimal GUI PATH that often does
       // NOT include the `claude` binary, so spawn() fails with ENOENT. Surface
       // a clear, actionable message instead of a cryptic spawn error — and
@@ -1506,14 +1743,27 @@ export class WsBridge {
       const message = isNotFound
         ? backend.notFoundMessage
         : `创作 agent 启动失败：${err.message}`;
+      if (commandName && !commandSettled) {
+        commandSettled = true;
+        this.broadcastCommandResult(session, {
+          status: "error",
+          command: commandName,
+          errorCode: "command_failed",
+          message,
+        });
+        session.lastCommandKey = undefined;
+        session.lastCommandAt = undefined;
+      }
       logBridge("cli_spawn_error", session.workId, {
         code: (err as NodeJS.ErrnoException).code,
         message: err.message,
       });
-      this.broadcastToSession(session.workId, session.sessionId, {
-        event: "cli_error",
-        data: { workId: session.workId, error: message, code: (err as NodeJS.ErrnoException).code },
-      });
+      if (!commandName) {
+        this.broadcastToSession(session.workId, session.sessionId, {
+          event: "cli_error",
+          data: { workId: session.workId, error: message, code: (err as NodeJS.ErrnoException).code },
+        });
+      }
     });
   }
 
@@ -1522,6 +1772,7 @@ export class WsBridge {
 
   private async handleBrowserConnection(workId: string, ws: WebSocket, sessionId?: string): Promise<void> {
     const sid = this.resolveSessionId(sessionId);
+    const hasExplicitSessionId = typeof sessionId === "string" && sessionId.trim().length > 0;
     // Lazy legacy migration / sidecar seed so a refresh recovers the list.
     await this.ensureSidecarRecord(workId, sid).catch(() => {});
     const session = this.ensureSession(workId, sid);
@@ -1554,9 +1805,10 @@ export class WsBridge {
 
     // Load persisted cliSessionId (sidecar record → work.yaml for default) if
     // not already set in memory.
-    if (!session.cliSessionId) {
+    if (!session.cliSessionId || session.backend === undefined) {
       try {
         const record = await this.sidecarFor(workId)?.get(sid);
+        if (session.backend === undefined) session.backend = resolveBackendId(record?.backend);
         if (record?.cliSessionId) {
           session.cliSessionId = record.cliSessionId;
         } else if (sid === DEFAULT_CHAT_SESSION_ID) {
@@ -1578,6 +1830,12 @@ export class WsBridge {
       timestamp: new Date().toISOString(),
     }));
 
+    ws.send(JSON.stringify({
+      event: "chat_capabilities",
+      data: this.commandCatalogForSession(session),
+      timestamp: new Date().toISOString(),
+    }));
+
     // Replay chat history so browser can reconstruct conversation
     if (session.messageHistory.length > 0) {
       ws.send(JSON.stringify({
@@ -1592,6 +1850,26 @@ export class WsBridge {
         const msg = JSON.parse(raw.toString());
         if (msg.action === "send" && typeof msg.text === "string") {
           await this.sendMessage(workId, msg.text, sid);
+        } else if (msg.action === "command" && typeof msg.name === "string") {
+          if (!hasExplicitSessionId) {
+            ws.send(JSON.stringify({
+              event: "command_error",
+              data: {
+                status: "error",
+                command: msg.name.replace(/^\/+/, ""),
+                errorCode: "session_required",
+                sessionId: sid,
+              },
+              timestamp: new Date().toISOString(),
+            }));
+            return;
+          }
+          const args = typeof msg.args === "string"
+            ? msg.args
+            : Array.isArray(msg.args)
+              ? msg.args.filter((value: unknown) => typeof value === "string").join(" ")
+              : "";
+          await this.sendCommand(workId, msg.name, args, sid);
         }
       } catch { /* invalid JSON */ }
     });
