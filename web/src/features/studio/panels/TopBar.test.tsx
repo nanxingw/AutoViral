@@ -43,6 +43,25 @@ beforeEach(() => {
 });
 
 describe("TopBar (v4)", () => {
+  it("makes the darwin desktop bar draggable while controls remain clickable", () => {
+    Object.defineProperty(window, "autoviralDesktop", {
+      configurable: true,
+      value: { isDesktop: true, platform: "darwin" },
+    });
+    render(
+      qcWrap(<MemoryRouter>
+        <TopBar workId="w1" savedAt={null} />
+      </MemoryRouter>),
+    );
+    const surface = screen.getByTestId("studio-topbar");
+    expect(getComputedStyle(surface).getPropertyValue("-webkit-app-region")).toBe("drag");
+    expect(
+      getComputedStyle(screen.getByRole("button", { name: /back|返回/i }))
+        .getPropertyValue("-webkit-app-region"),
+    ).toBe("no-drag");
+    delete window.autoviralDesktop;
+  });
+
   it("renders the editorial Autoviral italic + Studio v4.0 eyebrow", () => {
     render(
       qcWrap(<MemoryRouter>

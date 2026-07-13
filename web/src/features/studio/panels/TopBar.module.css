@@ -1,0 +1,7 @@
+.macDrag {
+  -webkit-app-region: drag;
+}
+
+.macDrag :is(button, a, input, select, textarea, [role="button"], [role="menuitem"]) {
+  -webkit-app-region: no-drag;
+}

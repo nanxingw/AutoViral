@@ -1,4 +1,3 @@
-import { useEffect } from "react";
 import clsx from "clsx";
 import { Link, useLocation } from "react-router-dom";
 import { Glass } from "./Glass";
@@ -6,7 +5,6 @@ import { ThemeToggle } from "./ThemeToggle";
 import { LocaleToggle } from "./LocaleToggle";
 import { useT, type MessageKey } from "@/i18n/useT";
 import { useSettingsPanelStore } from "@/stores/settings";
-import { SettingsPanel } from "@/features/settings/SettingsPanel";
 import styles from "./TopNav.module.css";
 
 declare global {
@@ -43,56 +41,42 @@ export function TopNav() {
   const t = useT();
   const openPanel = useSettingsPanelStore((s) => s.openPanel);
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === ",") {
-        e.preventDefault();
-        openPanel();
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [openPanel]);
-
   return (
-    <>
-      <header className={clsx(styles.outer, isMacDesktop && styles.macDrag)}>
-        <Glass className={styles.inner}>
-          <Link to="/" className={styles.brand}>
-            <div className={styles.logo}>A</div>
-            <div className={styles.brandLines}>
-              <span className={styles.brandTitle}>Autoviral</span>
-              <span className={styles.brandTag}>{t("topnav.versionTag")}</span>
-            </div>
-          </Link>
-          <nav className={styles.tabs}>
-            {TABS.map((tab) => (
-              <Link
-                key={tab.to}
-                to={tab.to}
-                className={styles.tab}
-                aria-current={active(tab.to) ? "page" : undefined}
-              >
-                {t(tab.key)}
-              </Link>
-            ))}
-          </nav>
-          <div className={styles.right}>
-            <LocaleToggle />
-            <ThemeToggle />
-            <button
-              type="button"
-              className={styles.gearBtn}
-              aria-label={t("topnav.settings")}
-              onClick={() => openPanel()}
-            >
-              <GearIcon />
-            </button>
+    <header className={clsx(styles.outer, isMacDesktop && styles.macDrag)}>
+      <Glass className={styles.inner}>
+        <Link to="/" className={styles.brand}>
+          <div className={styles.logo}>A</div>
+          <div className={styles.brandLines}>
+            <span className={styles.brandTitle}>Autoviral</span>
+            <span className={styles.brandTag}>{t("topnav.versionTag")}</span>
           </div>
-        </Glass>
-      </header>
-      <SettingsPanel />
-    </>
+        </Link>
+        <nav className={styles.tabs}>
+          {TABS.map((tab) => (
+            <Link
+              key={tab.to}
+              to={tab.to}
+              className={styles.tab}
+              aria-current={active(tab.to) ? "page" : undefined}
+            >
+              {t(tab.key)}
+            </Link>
+          ))}
+        </nav>
+        <div className={styles.right}>
+          <LocaleToggle />
+          <ThemeToggle />
+          <button
+            type="button"
+            className={styles.gearBtn}
+            aria-label={t("topnav.settings")}
+            onClick={() => openPanel()}
+          >
+            <GearIcon />
+          </button>
+        </div>
+      </Glass>
+    </header>
   );
 }
 

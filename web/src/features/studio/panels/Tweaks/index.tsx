@@ -3,6 +3,7 @@ import { PlatformPresetSection } from "./PlatformPresetSection";
 import { FpsSection } from "./FpsSection";
 import { IconButton } from "@/ui/IconButton";
 import { XIcon } from "@/ui/icons";
+import { AppPreferencesSection } from "./AppPreferencesSection";
 
 export function TweaksPanel({
   open,
@@ -46,6 +47,7 @@ export function TweaksPanel({
         </IconButton>
       ) : null}
       <ThemeSection />
+      <AppPreferencesSection />
       {workId ? <PlatformPresetSection workId={workId} /> : null}
       {workId ? <FpsSection workId={workId} /> : null}
     </aside>

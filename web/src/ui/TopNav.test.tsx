@@ -50,10 +50,10 @@ describe("<TopNav />", () => {
     expect(useSettingsPanelStore.getState().open).toBe(true);
   });
 
-  it("opens SettingsPanel on ⌘ ,", () => {
+  it("leaves the application shortcut to GlobalSettingsHost", () => {
     renderAt("/");
     fireEvent.keyDown(document, { key: ",", metaKey: true });
-    expect(useSettingsPanelStore.getState().open).toBe(true);
+    expect(useSettingsPanelStore.getState().open).toBe(false);
   });
 
   // R119 F560 — EN locale must render pure-EN nav labels, not the legacy

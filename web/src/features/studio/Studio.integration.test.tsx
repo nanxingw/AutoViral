@@ -6,6 +6,8 @@ import Studio from "@/pages/Studio";
 import { useComposition } from "./store";
 import { makeEmptyComposition, type VideoClip } from "./types";
 import { useTheme } from "@/stores/theme";
+import { useLocaleStore } from "@/i18n/store";
+import { useSettingsPanelStore } from "@/stores/settings";
 
 vi.mock("@remotion/player", () => ({
   Player: (props: any) => (
@@ -66,6 +68,8 @@ beforeEach(() => {
     beats: [],
   });
   useTheme.setState({ theme: "dark" });
+  useLocaleStore.setState({ locale: "en" });
+  useSettingsPanelStore.setState({ open: false, focusSection: null });
 });
 
 function mount() {
@@ -121,7 +125,7 @@ describe("Studio integration", () => {
     expect(tracks[0].clips).toHaveLength(1);
   });
 
-  it("Settings toggle reveals the floating TweaksPanel and theme writes through (A2)", async () => {
+  it("Studio gear opens Tweaks, whose app controls write through to global stores", async () => {
     const { findByTestId, queryByTestId } = mount();
     await findByTestId("player");
     expect(queryByTestId("tweaks-panel")).toBeNull();
@@ -129,5 +133,9 @@ describe("Studio integration", () => {
     const lightBtn = await findByTestId("theme-toggle-light");
     fireEvent.click(lightBtn);
     expect(useTheme.getState().theme).toBe("light");
+    fireEvent.click(await findByTestId("open-global-settings"));
+    expect(useSettingsPanelStore.getState().open).toBe(true);
+    fireEvent.click(await findByTestId("locale-toggle-zh"));
+    expect(useLocaleStore.getState().locale).toBe("zh");
   });
 });

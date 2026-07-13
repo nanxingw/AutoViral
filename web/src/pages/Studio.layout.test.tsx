@@ -75,6 +75,15 @@ function mount() {
 }
 
 describe("Studio layout (Phase 9.1: react-resizable-panels)", () => {
+  it("locks the Studio shell to the viewport without exposing outer overflow", () => {
+    const { container } = mount();
+    const shell = container.querySelector(".studio-shell") as HTMLElement;
+    const style = getComputedStyle(shell);
+    expect(style.overflow).toBe("hidden");
+    expect(style.minHeight).toMatch(/^0(px)?$/);
+    expect(style.height).toBe(`${window.innerHeight}px`);
+  });
+
   it("renders all expected resizable panels by id", () => {
     const { container } = mount();
     // react-resizable-panels emits data-panel-id on its panel root.

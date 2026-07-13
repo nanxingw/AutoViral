@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { LoadErrorScreen } from "./LoadErrorScreen";
+import { MemoryRouter } from "react-router-dom";
 
 // #61 — the failure screen must show a human headline and tuck the raw server
 // detail (ZodError JSON) into a collapsible panel, never as the headline.
@@ -37,6 +38,21 @@ describe("<LoadErrorScreen /> (#61)", () => {
   it("omits the details panel entirely when there is no detail", () => {
     render(<LoadErrorScreen title="Failed to load" message="Network down." detail="" helpText="h" />);
     expect(screen.queryByTestId("loaderror-details")).toBeNull();
+  });
+
+  it("offers a recovery action when the caller provides one", () => {
+    render(
+      <MemoryRouter>
+        <LoadErrorScreen
+          title="Failed to load"
+          message="Broken."
+          helpText="h"
+          actionTo="/"
+          actionLabel="Back to works"
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: "Back to works" })).toHaveAttribute("href", "/");
   });
 
   it("copies a diagnostic JSON blob containing the detail to the clipboard", async () => {

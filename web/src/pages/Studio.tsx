@@ -1,5 +1,6 @@
 import { useParams } from "react-router-dom";
 import { useEffect, useState } from "react";
+import clsx from "clsx";
 import { Panel, PanelGroup, PanelResizeHandle } from "react-resizable-panels";
 import { useComposition } from "@/features/studio/store";
 import { useScript } from "@/features/studio/scriptStore";
@@ -29,6 +30,7 @@ import { localizeApiErrorParts } from "@/i18n/serverError";
 import { LoadErrorScreen } from "@/components/LoadErrorScreen";
 import { useWorks } from "@/queries/works";
 import NotFound from "./NotFound";
+import styles from "./Studio.module.css";
 
 // Same locale-aware HH:MM helper as Editor.tsx — keeps the savedAt
 // indicator short + predictable instead of letting the browser default
@@ -260,22 +262,16 @@ export default function Studio() {
         message={loadError.message}
         detail={loadError.detail}
         helpText={t("studio.loadError.helpText", { workId })}
+        actionTo="/"
+        actionLabel={t("errorBoundary.btnHome")}
       />
     );
   }
 
   return (
     <div
-      className="studio-shell"
+      className={clsx("studio-shell", styles.shell)}
       data-work-id={workId}
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        height: "100vh",
-        gap: 12,
-        padding: 12,
-        boxSizing: "border-box",
-      }}
     >
       <div data-area="top" className="glass" style={{ flex: "0 0 56px" }}>
         <TopBar

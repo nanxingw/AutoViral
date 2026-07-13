@@ -20,6 +20,8 @@ import type { CaptionTrackOption } from "./Export/CaptionTracksSection";
 import { GenerateCaptionsButton } from "./GenerateCaptionsButton";
 import { ShortcutsCheatsheet } from "./ShortcutsCheatsheet";
 import { CostBadge } from "./CostBadge";
+import clsx from "clsx";
+import styles from "./TopBar.module.css";
 
 export interface TopBarProps {
   workId: string;
@@ -57,6 +59,10 @@ export function TopBar({
   // "useRef is the real race lock, useState is UI feedback only".
   const enqueueingRef = useRef(false);
   const [enqueueing, setEnqueueing] = useState(false);
+  const isMacDesktop =
+    typeof window !== "undefined" &&
+    window.autoviralDesktop?.isDesktop === true &&
+    window.autoviralDesktop?.platform === "darwin";
 
   // Phase H (#35) — derive the text-track list for the captions dialog.
   // Reading from the composition store keeps the dialog in sync with the
@@ -129,6 +135,8 @@ export function TopBar({
 
   return (
     <div
+      data-testid="studio-topbar"
+      className={clsx(isMacDesktop && styles.macDrag)}
       style={{
         display: "flex",
         alignItems: "center",

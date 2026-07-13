@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useT } from "@/i18n/useT";
 
 /**
@@ -17,12 +18,16 @@ export function LoadErrorScreen({
   message,
   detail,
   helpText,
+  actionTo,
+  actionLabel,
 }: {
   title: string;
   message: string;
   /** Raw technical detail (ZodError JSON etc.). Collapsible; omitted when "". */
   detail?: string;
   helpText: string;
+  actionTo?: string;
+  actionLabel?: string;
 }) {
   const t = useT();
   const [copied, setCopied] = useState(false);
@@ -123,6 +128,11 @@ export function LoadErrorScreen({
       )}
 
       <p style={{ fontSize: 12, opacity: 0.7 }}>{helpText}</p>
+      {actionTo && actionLabel ? (
+        <Link to={actionTo} style={{ display: "inline-flex", marginTop: 12 }}>
+          {actionLabel}
+        </Link>
+      ) : null}
     </div>
   );
 }

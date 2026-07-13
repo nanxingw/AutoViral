@@ -24,11 +24,13 @@ export function LocaleToggle() {
         active={locale === "zh"}
         onClick={() => setLocale("zh")}
         label={t("topnav.localeToggleZh")}
+        testId="locale-toggle-zh"
       />
       <Seg
         active={locale === "en"}
         onClick={() => setLocale("en")}
         label={t("topnav.localeToggleEn")}
+        testId="locale-toggle-en"
       />
     </div>
   );
@@ -38,16 +40,19 @@ function Seg({
   active,
   onClick,
   label,
+  testId,
 }: {
   active: boolean;
   onClick: () => void;
   label: string;
+  testId: string;
 }) {
   // e2e-report F72: aria-pressed reflects active locale so SR users hear the
   // selected segment. Visual styling via background-color isn't perceivable.
   return (
     <button
       type="button"
+      data-testid={testId}
       onClick={onClick}
       aria-pressed={active}
       style={{

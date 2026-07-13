@@ -2,8 +2,14 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { TweaksPanel } from "./index";
 import { useTheme } from "@/stores/theme";
+import { useLocaleStore } from "@/i18n/store";
+import { useSettingsPanelStore } from "@/stores/settings";
 
-beforeEach(() => useTheme.setState({ theme: "dark" }));
+beforeEach(() => {
+  useTheme.setState({ theme: "dark" });
+  useLocaleStore.setState({ locale: "en" });
+  useSettingsPanelStore.setState({ open: false, focusSection: null });
+});
 
 describe("TweaksPanel (v4 floating overlay)", () => {
   it("renders nothing when open is false", () => {
@@ -30,6 +36,16 @@ describe("TweaksPanel (v4 floating overlay)", () => {
     const lightBtn = screen.getByTestId("theme-toggle-light");
     fireEvent.click(lightBtn);
     expect(useTheme.getState().theme).toBe("light");
+  });
+
+  it("exposes app preferences: locale and global settings", () => {
+    render(<TweaksPanel open={true} />);
+    fireEvent.click(screen.getByRole("button", { name: "中" }));
+    expect(useLocaleStore.getState().locale).toBe("zh");
+    fireEvent.click(
+      screen.getByRole("button", { name: /全局设置|global settings/i }),
+    );
+    expect(useSettingsPanelStore.getState().open).toBe(true);
   });
 
   // S2 (PRD-0013) — the close button is collected into the shared IconButton so
