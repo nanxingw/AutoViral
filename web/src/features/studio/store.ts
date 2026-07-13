@@ -56,6 +56,9 @@ export interface DragState {
   // applies a moveClipToTrack when this is set; the destination lane highlights
   // itself by reading this from dragState.
   targetTrackId: string | null;
+  /** True when dragState only carries the unified snap guide for a trim,
+   * blade hover, or native drop rather than a clip-body move. */
+  guideOnly?: boolean;
 }
 
 // Phase E (issue #32) — Track-level undo/redo. No global undo/redo machinery
@@ -208,6 +211,7 @@ interface CompState {
   ) => void;
   // Phase 4.B — drag-preview actions (begin → update → commit/cancel)
   beginDrag: (clipId: string) => void;
+  setSnapGuide: (snapTime: number | null) => void;
   updateDragCandidate: (candidateStart: number, pxPerSecond?: number) => void;
   // #3 — record the cross-track move target while body-dragging. The caller
   // (Clip.tsx) resolves the hovered same-kind lane via `resolveDragTargetTrack`
@@ -1029,6 +1033,26 @@ export const useComposition = create<CompState>()(
           preview: new Map([[clipId, clip.trackOffset]]),
           snapTime: null,
           targetTrackId: null,
+        };
+      }),
+    setSnapGuide: (snapTime) =>
+      set((s) => {
+        if (s.dragState && !s.dragState.guideOnly) {
+          s.dragState.snapTime = snapTime;
+          return;
+        }
+        if (snapTime === null) {
+          s.dragState = null;
+          return;
+        }
+        s.dragState = {
+          clipId: "",
+          originalStart: 0,
+          candidateStart: 0,
+          preview: new Map(),
+          snapTime,
+          targetTrackId: null,
+          guideOnly: true,
         };
       }),
     updateDragCandidate: (candidateStart, pxPerSecond = 100) =>

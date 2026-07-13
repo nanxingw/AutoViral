@@ -1,8 +1,7 @@
-import { Fragment, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { useComposition } from "../../store";
 import { Track } from "./Track";
 import { Ruler } from "./Ruler";
-import { BladeTool } from "./BladeTool";
 import { Playhead } from "./Playhead";
 import { TimelineTrackHeader } from "./TimelineTrackHeader";
 import { LaneGapAdd } from "./LaneGapAdd";
@@ -10,11 +9,106 @@ import { useT } from "@/i18n/useT";
 import { TIMELINE_HEADER_WIDTH } from "./timelineMetrics";
 import { IconButton } from "@/ui/IconButton";
 import { useTimelineZoom } from "./hooks/useTimelineZoom";
+import { useSplitHoverSnap } from "./hooks/useSplitHoverSnap";
+import { clipDuration, clipEnd, OFFSET_EPSILON } from "@autoviral/timeline";
+import type { Clip } from "../../types";
+import {
+  canAcceptDrop,
+  dropTimeFromPointer,
+  readDragPayload,
+  resolveDropTime,
+} from "./dnd";
+import { useBeatSnap } from "../../hooks/useBeatSnap";
 
 function formatSnapTime(time: number): string {
-  const minutes = Math.floor(time / 60);
-  const seconds = time - minutes * 60;
-  return `${minutes}:${seconds.toFixed(2).padStart(5, "0")}`;
+  const totalHundredths = Math.round(Math.max(0, time) * 100);
+  const totalMinutes = Math.floor(totalHundredths / 6_000);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  const secondHundredths = totalHundredths % 6_000;
+  const seconds = Math.floor(secondHundredths / 100);
+  const hundredths = secondHundredths % 100;
+  const minutePrefix = hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}`
+    : String(minutes);
+  return `${minutePrefix}:${String(seconds).padStart(2, "0")}.${String(
+    hundredths,
+  ).padStart(2, "0")}`;
+}
+
+function UnifiedBladeTool({
+  pxPerSecond,
+  totalWidth,
+}: {
+  pxPerSecond: number;
+  totalWidth: number;
+}) {
+  const bladeMode = useComposition((s) => s.bladeMode);
+  const comp = useComposition((s) => s.comp);
+  const splitClip = useComposition((s) => s.splitClip);
+  const setSnapGuide = useComposition((s) => s.setSnapGuide);
+  const { snapTime, setHoverTime } = useSplitHoverSnap(pxPerSecond);
+  const guideActiveRef = useRef(false);
+
+  useEffect(() => {
+    if (bladeMode) {
+      guideActiveRef.current = true;
+      setSnapGuide(snapTime);
+    } else if (guideActiveRef.current) {
+      guideActiveRef.current = false;
+      setSnapGuide(null);
+    }
+  }, [bladeMode, setSnapGuide, snapTime]);
+  useEffect(
+    () => () => {
+      if (guideActiveRef.current) setSnapGuide(null);
+    },
+    [setSnapGuide],
+  );
+
+  if (!bladeMode || !comp) return null;
+
+  const localXFromEvent = (event: { clientX: number; currentTarget: EventTarget }) => {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    return event.clientX - rect.left;
+  };
+
+  const onClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    const raw = Math.max(0, localXFromEvent(event) / pxPerSecond);
+    const time = snapTime ?? raw;
+    for (const track of comp.tracks) {
+      const hit = (track.clips as Clip[]).find(
+        (clip) =>
+          time > clip.trackOffset + OFFSET_EPSILON &&
+          time < clipEnd(clip) - OFFSET_EPSILON,
+      );
+      if (hit) {
+        splitClip(hit.id, time);
+        return;
+      }
+    }
+  };
+
+  return (
+    <div
+      data-testid="blade-overlay"
+      onPointerMove={(event) => {
+        const x = localXFromEvent(event);
+        setHoverTime(Math.max(0, x / pxPerSecond));
+      }}
+      onPointerLeave={() => setHoverTime(null)}
+      onClick={onClick}
+      style={{
+        position: "absolute",
+        left: TIMELINE_HEADER_WIDTH,
+        top: 22,
+        width: totalWidth,
+        bottom: 0,
+        cursor: "crosshair",
+        zIndex: 6,
+      }}
+    />
+  );
 }
 
 const TRACK_COLORS: Record<string, string> = {
@@ -39,13 +133,65 @@ export function Timeline() {
   const dragState = useComposition((s) => s.dragState);
   const scrollRef = useRef<HTMLDivElement>(null);
   const zoom = useTimelineZoom({ duration: comp?.duration ?? 0, scrollRef });
+  const beatClip = comp?.tracks
+    .flatMap((track) => track.clips)
+    .find((clip) => clip.kind === "audio" && clip.type === "bgm");
+  useBeatSnap({
+    workId: comp?.workId ?? null,
+    assetPath: beatClip?.kind === "audio" ? beatClip.src : null,
+  });
   const pxPerSecond = zoom.pixelsPerSecond;
 
   if (!comp) return null;
   const totalWidth = Math.max(800, comp.duration * pxPerSecond);
 
+  const updateNativeDropGuide = (event: React.DragEvent<HTMLDivElement>) => {
+    const lane = (event.target as Element | null)?.closest<HTMLElement>(
+      "[data-track-id]",
+    );
+    const payload = readDragPayload(event.dataTransfer);
+    const state = useComposition.getState();
+    const targetTrack = state.comp?.tracks.find(
+      (track) => track.id === lane?.dataset.trackId,
+    );
+    if (!lane || !payload || !targetTrack || !canAcceptDrop(payload, targetTrack.kind)) {
+      state.setSnapGuide(null);
+      return;
+    }
+
+    let duration = 5;
+    let excludeClipId: string | null = null;
+    if (payload.source === "clip") {
+      const dragged = state.comp?.tracks
+        .flatMap((track) => track.clips)
+        .find((clip) => clip.id === payload.clipId);
+      if (dragged) duration = clipDuration(dragged);
+      excludeClipId = payload.clipId;
+    }
+    const rawTime = dropTimeFromPointer(
+      event.clientX,
+      lane.getBoundingClientRect().left + 6,
+      pxPerSecond,
+    );
+    const fps = state.comp?.fps || 30;
+    const { snapTime } = resolveDropTime(
+      state.comp,
+      rawTime,
+      duration,
+      state.currentFrame / fps,
+      excludeClipId,
+      pxPerSecond,
+      state.beats,
+    );
+    state.setSnapGuide(snapTime);
+  };
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div
+      data-timeline-unified-snap="true"
+      style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}
+    >
+      <style>{`[data-timeline-unified-snap="true"] [data-testid="drop-indicator"] { display: none !important; }`}</style>
       {/* Toolbar */}
       <div
         style={{
@@ -147,7 +293,18 @@ export function Timeline() {
       {/* Body: track-label column on left, scrollable lanes on right */}
       <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
         {/* Lanes (label + waveform area) */}
-        <div ref={scrollRef} style={{ flex: 1, overflow: "auto", position: "relative" }}>
+        <div
+          ref={scrollRef}
+          onDragOver={updateNativeDropGuide}
+          onDragLeave={(event) => {
+            const next = event.relatedTarget as Node | null;
+            if (!next || !event.currentTarget.contains(next)) {
+              useComposition.getState().setSnapGuide(null);
+            }
+          }}
+          onDrop={() => useComposition.getState().setSnapGuide(null)}
+          style={{ flex: 1, overflow: "auto", position: "relative" }}
+        >
           {/* Ruler */}
           <Ruler duration={comp.duration} pxPerSecond={pxPerSecond} totalWidth={totalWidth} fps={comp.fps} />
           {/* Tracks — Phase F (issue #33). Sort by displayOrder so the visual
@@ -212,10 +369,9 @@ export function Timeline() {
           })()}
           {/* Phase 4.G — click-to-split overlay; renders only while
               bladeMode is on. 4.J wires `B` / `Cmd+B` to toggle. */}
-          <BladeTool
+          <UnifiedBladeTool
             pxPerSecond={pxPerSecond}
             totalWidth={totalWidth}
-            labelColumnWidth={TIMELINE_HEADER_WIDTH}
           />
           {/* Phase 4.H — Playhead + snap-line overlays.
               D5: Playhead is a sibling of <Ruler /> mounted full-height

@@ -1,6 +1,7 @@
-import { act, renderHook } from "@testing-library/react";
+import { createElement, useRef } from "react";
+import { act, render, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { useTimelineZoom } from "./useTimelineZoom";
+import { useTimelineZoom, type TimelineZoom } from "./useTimelineZoom";
 
 function makeScrollElement(width = 976) {
   const element = document.createElement("div");
@@ -60,11 +61,65 @@ describe("useTimelineZoom", () => {
   });
 
   it("keeps the time under the mouse stationary while wheel-zooming", () => {
-    const { result, element } = renderZoom();
-    element.scrollLeft = 180;
-    const laneMouseX = 300;
+    const duration = 100;
+    let zoom: TimelineZoom | null = null;
+    function Harness() {
+      const scrollRef = useRef<HTMLDivElement>(null);
+      const nextZoom = useTimelineZoom({ duration, scrollRef });
+      zoom = nextZoom;
+      return createElement(
+        "div",
+        { ref: scrollRef, "data-testid": "scroll" },
+        createElement("div", {
+          "data-testid": "content",
+          style: { width: 176 + duration * nextZoom.pixelsPerSecond },
+        }),
+      );
+    }
+    const view = render(createElement(Harness));
+    const element = view.getByTestId("scroll");
+    const content = view.getByTestId("content");
+    Object.defineProperty(element, "clientWidth", {
+      configurable: true,
+      value: 976,
+    });
+    element.getBoundingClientRect = () => ({
+      x: 0,
+      y: 0,
+      top: 0,
+      right: 976,
+      bottom: 200,
+      left: 0,
+      width: 976,
+      height: 200,
+      toJSON: () => ({}),
+    });
+    let scrollLeft = 0;
+    Object.defineProperties(element, {
+      scrollWidth: {
+        configurable: true,
+        get: () => Number.parseFloat(content.style.width),
+      },
+      scrollLeft: {
+        configurable: true,
+        get: () => scrollLeft,
+        set: (value: number) => {
+          // Match browser overflow geometry: writes beyond the current
+          // committed content width are clamped immediately.
+          scrollLeft = Math.min(
+            Math.max(0, value),
+            Math.max(0, element.scrollWidth - element.clientWidth),
+          );
+        },
+      },
+    });
+
+    act(() => zoom!.fit());
+    expect(element.scrollWidth).toBe(element.clientWidth);
+
+    const laneMouseX = 760;
     const clientX = 176 + laneMouseX;
-    const timeBefore = (element.scrollLeft + laneMouseX) / result.current.pixelsPerSecond;
+    const timeBefore = (element.scrollLeft + laneMouseX) / zoom!.pixelsPerSecond;
 
     act(() => {
       const event = new WheelEvent("wheel", {
@@ -81,7 +136,8 @@ describe("useTimelineZoom", () => {
       element.dispatchEvent(event);
     });
 
-    const timeAfter = (element.scrollLeft + laneMouseX) / result.current.pixelsPerSecond;
+    expect(element.scrollWidth).toBeGreaterThan(element.clientWidth);
+    const timeAfter = (element.scrollLeft + laneMouseX) / zoom!.pixelsPerSecond;
     expect(timeAfter).toBeCloseTo(timeBefore, 8);
   });
 

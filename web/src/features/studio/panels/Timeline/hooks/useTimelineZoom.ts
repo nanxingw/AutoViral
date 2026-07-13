@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { TIMELINE_HEADER_WIDTH } from "../timelineMetrics";
 
 const MIN_PIXELS_PER_SECOND = 5;
@@ -41,6 +41,22 @@ export function useTimelineZoom({
 }): TimelineZoom {
   const [pixelsPerSecond, setPixelsPerSecond] = useState(INITIAL_PIXELS_PER_SECOND);
   const pixelsPerSecondRef = useRef(INITIAL_PIXELS_PER_SECOND);
+  const pendingAnchorRef = useRef<{
+    anchorTime: number;
+    laneX: number;
+    target: number;
+  } | null>(null);
+
+  useLayoutEffect(() => {
+    const pending = pendingAnchorRef.current;
+    const element = scrollRef.current;
+    if (!pending || !element || pending.target !== pixelsPerSecond) return;
+    element.scrollLeft = Math.max(
+      0,
+      pending.anchorTime * pixelsPerSecond - pending.laneX,
+    );
+    pendingAnchorRef.current = null;
+  }, [pixelsPerSecond, scrollRef]);
 
   const laneCenterClientX = useCallback(() => {
     const element = scrollRef.current;
@@ -64,7 +80,7 @@ export function useTimelineZoom({
         const anchor = anchorClientX ?? fallbackAnchor;
         const laneX = Math.max(0, anchor - rect.left - TIMELINE_HEADER_WIDTH);
         const anchorTime = (element.scrollLeft + laneX) / current;
-        element.scrollLeft = Math.max(0, anchorTime * target - laneX);
+        pendingAnchorRef.current = { anchorTime, laneX, target };
       }
       pixelsPerSecondRef.current = target;
       setPixelsPerSecond(target);
@@ -92,6 +108,7 @@ export function useTimelineZoom({
     const fitted = duration > 0 && laneWidth > 0
       ? laneWidth / duration
       : MIN_PIXELS_PER_SECOND;
+    pendingAnchorRef.current = null;
     if (element) element.scrollLeft = 0;
     const target = clampZoom(fitted);
     pixelsPerSecondRef.current = target;

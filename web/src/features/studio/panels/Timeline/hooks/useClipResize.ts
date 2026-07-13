@@ -108,11 +108,13 @@ export function useClipResize({
         snapToleranceSeconds(pxPerSecond),
       );
       state.resizeClip(clipId, start.edge, snap.time);
+      state.setSnapGuide(snap.snappedTo);
     },
     [clipId, pxPerSecond],
   );
 
   const endResize = useCallback(() => {
+    useComposition.getState().setSnapGuide(null);
     startRef.current = null;
     setIsResizing(false);
   }, []);
@@ -127,6 +129,7 @@ export function useClipResize({
         .getState()
         .resizeClip(clipId, start.edge, start.anchorTime);
     }
+    useComposition.getState().setSnapGuide(null);
     startRef.current = null;
     setIsResizing(false);
   }, [clipId]);

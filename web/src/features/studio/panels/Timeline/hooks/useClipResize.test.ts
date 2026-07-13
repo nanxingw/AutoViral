@@ -54,6 +54,21 @@ describe("useClipResize", () => {
     expect(a.out).toBeCloseTo(5);
   });
 
+  it("publishes a snapped trim to the unified guide until resize ends", () => {
+    const { result } = renderHook(() =>
+      useClipResize({ clipId: "a", pxPerSecond: 50 }),
+    );
+
+    act(() => {
+      result.current.beginResize("right", 0);
+      result.current.dragResize(148);
+    });
+    expect(useComposition.getState().dragState?.snapTime).toBeCloseTo(5);
+
+    act(() => result.current.endResize());
+    expect(useComposition.getState().dragState).toBeNull();
+  });
+
   it("left-edge drag updates trackOffset + in", () => {
     useComposition.setState({
       comp: makeCompositionWithClips([
