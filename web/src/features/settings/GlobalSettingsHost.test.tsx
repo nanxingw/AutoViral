@@ -23,7 +23,7 @@ describe("GlobalSettingsHost", () => {
   it.each([
     { metaKey: true, ctrlKey: false },
     { metaKey: false, ctrlKey: true },
-  ])("opens settings with Cmd/Ctrl+, without TopNav", (modifiers) => {
+  ])("opens settings with Cmd/Ctrl+, independently of page headers", (modifiers) => {
     mount();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     fireEvent.keyDown(document, { key: ",", ...modifiers });

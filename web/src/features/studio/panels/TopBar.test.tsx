@@ -72,7 +72,7 @@ describe("TopBar (v4)", () => {
     expect(screen.getByText(/Studio.*v4\.0/i)).toBeTruthy();
   });
 
-  it("does NOT render a theme toggle (delegated to global TopNav)", () => {
+  it("does NOT render a theme toggle (Works owns global display controls)", () => {
     render(
       qcWrap(<MemoryRouter>
         <TopBar workId="w1" savedAt={null} />

@@ -1,0 +1,71 @@
+.outer {
+  position: sticky;
+  top: 12px;
+  z-index: 50;
+  max-width: 1280px;
+  margin: 12px auto 0;
+  padding: 0 24px;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+.inner {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 14px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, var(--accent-hi), var(--accent-lo));
+  display: grid;
+  place-items: center;
+  color: var(--accent-fg);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.brandLines {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+}
+
+.brandTitle {
+  font-family: "Instrument Serif", serif;
+  font-size: 15px;
+  font-style: italic;
+}
+
+.brandTag {
+  color: var(--text-dimmer);
+  font-family: "JetBrains Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+}
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.macDrag {
+  -webkit-app-region: drag;
+}
+
+.macDrag :is(button, a, input, select, textarea, [role="button"], [role="menuitem"]) {
+  -webkit-app-region: no-drag;
+}

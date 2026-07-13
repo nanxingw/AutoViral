@@ -18,7 +18,7 @@ import { useT } from "@/i18n/useT";
  *   readers (previous markup made SR users miss the "404" entirely).
  * - **F495** Primary CTA auto-focused on mount so keyboard users land
  *   directly on the recovery action (was falling through to `<body>`,
- *   forcing Tab through every TopNav button first).
+ *   forcing Tab through every application-header control first).
  * - **F498** Primary CTA visual upgrade — solid accent fill replaces
  *   the near-transparent `--accent-glow` tint, restoring the clickable
  *   affordance that the original looked-like-disabled background lost.
@@ -93,7 +93,7 @@ export default function NotFound() {
   }, [t]);
 
   // F495 — keyboard users land on the recovery CTA without Tab-hunting
-  // through TopNav. preventScroll keeps the editorial 200px glyph in view.
+  // through an application header. preventScroll keeps the editorial 200px glyph in view.
   useEffect(() => {
     backLinkRef.current?.focus({ preventScroll: true });
   }, []);

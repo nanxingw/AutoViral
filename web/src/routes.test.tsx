@@ -11,8 +11,8 @@ import { AppRoutes } from "./routes";
 vi.mock("./pages/Works", () => ({ default: () => <div data-testid="works-page">WORKS</div> }));
 vi.mock("./pages/Studio", () => ({ default: () => <div data-testid="studio-page">STUDIO</div> }));
 vi.mock("./pages/Editor", () => ({ default: () => <div data-testid="editor-page">EDITOR</div> }));
-// App wraps every route with TopNav — reduce it to a bare <Outlet/> so we
-// don't drag settings/query providers into the route-table assertion.
+// Reduce App to a bare <Outlet/> so the route-table assertion does not pull
+// in application-shell settings/query providers.
 vi.mock("./App", async () => {
   const rr = await vi.importActual<typeof import("react-router-dom")>("react-router-dom");
   return { default: () => <rr.Outlet /> };

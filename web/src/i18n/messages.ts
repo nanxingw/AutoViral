@@ -1011,6 +1011,11 @@ export const en = {
     unsavedConfirm: "Discard",
     saveError: "Save failed. Your changes are still here — try again.",
   },
+  worksHeader: {
+    brand: "Autoviral",
+    versionTag: "v3 · DESIGN",
+    settings: "Global settings",
+  },
 } as const;
 
 export type Messages = typeof en;
@@ -1978,6 +1983,11 @@ export const zh: DeepShape<Messages> = {
     unsavedBody: "你的修改将会丢失。",
     unsavedConfirm: "放弃",
     saveError: "保存失败。修改还在 — 重试一次。",
+  },
+  worksHeader: {
+    brand: "Autoviral",
+    versionTag: "v3 · 设计",
+    settings: "全局设置",
   },
 };
 

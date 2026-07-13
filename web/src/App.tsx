@@ -1,8 +1,8 @@
-import { matchPath, Outlet, useLocation } from "react-router-dom";
-import { TopNav } from "@/ui/TopNav";
+import { Outlet, useLocation } from "react-router-dom";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ToastViewport } from "@/components/ToastViewport";
 import { GlobalSettingsHost } from "@/features/settings/GlobalSettingsHost";
+import { WorksHeader } from "@/features/works/WorksHeader";
 
 export default function App() {
   // Reset the boundary on route change so a previously-crashed page
@@ -11,10 +11,10 @@ export default function App() {
   // state. The application shell stays outside the boundary so global
   // settings remain available even when a route subtree crashed.
   const location = useLocation();
-  const isStudio = !!matchPath("/studio/:workId/*", location.pathname);
+  const isWorks = location.pathname === "/" || location.pathname === "/works";
   return (
     <>
-      {isStudio ? null : <TopNav />}
+      {isWorks ? <WorksHeader /> : null}
       <GlobalSettingsHost />
       <ErrorBoundary key={location.pathname}>
         <Outlet />
