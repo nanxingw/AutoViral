@@ -26,6 +26,8 @@ import {
   MIN_CLIP_DUR,
   OFFSET_EPSILON,
   computeRipplePreview,
+  collectSnapPoints,
+  snapDraggedStartToPoints,
   snapDraggedStartFull,
   snapToleranceSeconds,
 } from "@autoviral/timeline";
@@ -1133,24 +1135,75 @@ export const useComposition = create<CompState>()(
       set((s) => {
         if (!s.comp || !s.dragState) return;
         const draggedId = s.dragState.clipId;
-        if (s.dragState.preview.size > 1) {
-          const selectedIds = new Set(s.dragState.preview.keys());
-          const items = s.comp.tracks.flatMap((track) =>
+        const selectedIds =
+          s.timelineSelection.primaryId === s.selection &&
+          s.timelineSelection.ids.includes(draggedId)
+            ? new Set(s.timelineSelection.ids)
+            : new Set([draggedId]);
+        if (selectedIds.size > 1) {
+          const selectedClips = s.comp.tracks.flatMap((track) =>
             (track.clips as Clip[])
               .filter((clip) => selectedIds.has(clip.id))
               .map((clip) => ({
-                id: clip.id,
+                clip,
                 trackId: track.id,
-                start: clip.trackOffset,
               })),
           );
-          s.dragState.candidateStart = candidateStart;
-          s.dragState.preview = computeGroupMoveOffsets(
-            items,
-            draggedId,
-            candidateStart,
+          const dragged = selectedClips.find(
+            ({ clip }) => clip.id === draggedId,
+          )?.clip;
+          if (!dragged) return;
+          const fps = s.comp.fps || 30;
+          const points = collectSnapPoints(
+            s.comp,
+            selectedIds,
+            s.currentFrame / fps,
+            s.beats,
           );
-          s.dragState.snapTime = null;
+          const snap = snapDraggedStartToPoints(
+            candidateStart,
+            clipDuration(dragged),
+            points,
+            snapToleranceSeconds(pxPerSecond),
+          );
+          const items = selectedClips.map(({ clip, trackId }) => ({
+            id: clip.id,
+            trackId,
+            start: clip.trackOffset,
+          }));
+          const preview = computeGroupMoveOffsets(items, draggedId, snap.start);
+
+          for (const track of s.comp.tracks) {
+            const occupied = (track.clips as Clip[])
+              .filter((clip) => selectedIds.has(clip.id))
+              .map((clip) => ({
+                start: preview.get(clip.id)!,
+                end: preview.get(clip.id)! + clipDuration(clip),
+              }));
+            const neighbours = (track.clips as Clip[])
+              .filter((clip) => !selectedIds.has(clip.id))
+              .sort((a, b) => a.trackOffset - b.trackOffset);
+            for (const neighbour of neighbours) {
+              let start = neighbour.trackOffset;
+              while (true) {
+                const collision = occupied.find(
+                  (interval) =>
+                    start < interval.end &&
+                    start + clipDuration(neighbour) > interval.start,
+                );
+                if (!collision) break;
+                start = collision.end;
+              }
+              preview.set(neighbour.id, start);
+              occupied.push({
+                start,
+                end: start + clipDuration(neighbour),
+              });
+            }
+          }
+          s.dragState.candidateStart = candidateStart;
+          s.dragState.preview = preview;
+          s.dragState.snapTime = snap.snapTime;
           return;
         }
         // Ripple stays within the dragged clip's own track — cross-track

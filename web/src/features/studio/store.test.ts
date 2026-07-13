@@ -172,6 +172,81 @@ describe("useComposition store", () => {
     ).toEqual([10, 13.5]);
   });
 
+  it("ripples a non-selected neighbour instead of overlapping it during a group drag", () => {
+    const c = makeEmptyComposition({ workId: "group-move-neighbour" });
+    const track = c.tracks.find((candidate) => candidate.kind === "video")!;
+    const first = VideoClipSchema.parse({
+      id: "g1",
+      kind: "video",
+      src: "/g1.mp4",
+      in: 0,
+      out: 1,
+      trackOffset: 2,
+      fitMode: "cover",
+      transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+      filters: { brightness: 0, contrast: 0, saturation: 0 },
+    });
+    (track.clips as VideoClip[]).push(
+      first,
+      { ...first, id: "g2", src: "/g2.mp4", trackOffset: 5.5 },
+      { ...first, id: "neighbour", src: "/neighbour.mp4", trackOffset: 14 },
+    );
+    c.duration = 15;
+    useComposition.getState().loadComposition(c);
+    useComposition.getState().setTimelineSelection({
+      ids: ["g1", "g2"],
+      primaryId: "g1",
+      anchorId: "g1",
+    });
+
+    useComposition.getState().beginDrag("g1");
+    useComposition.getState().updateDragCandidate(10);
+    useComposition.getState().commitDrag();
+
+    expect(
+      useComposition
+        .getState()
+        .comp!.tracks.find((candidate) => candidate.id === track.id)!
+        .clips.map((clip) => clip.trackOffset),
+    ).toEqual([10, 13.5, 14.5]);
+  });
+
+  it("snaps a selected group without snapping to another selected clip", () => {
+    const c = makeEmptyComposition({ workId: "group-move-snap" });
+    const track = c.tracks.find((candidate) => candidate.kind === "video")!;
+    const first = VideoClipSchema.parse({
+      id: "g1",
+      kind: "video",
+      src: "/g1.mp4",
+      in: 0,
+      out: 1,
+      trackOffset: 2,
+      fitMode: "cover",
+      transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+      filters: { brightness: 0, contrast: 0, saturation: 0 },
+    });
+    (track.clips as VideoClip[]).push(
+      first,
+      { ...first, id: "g2", src: "/g2.mp4", trackOffset: 5 },
+      { ...first, id: "snap-target", src: "/target.mp4", trackOffset: 10 },
+    );
+    c.duration = 11;
+    useComposition.getState().loadComposition(c);
+    useComposition.getState().setTimelineSelection({
+      ids: ["g1", "g2"],
+      primaryId: "g1",
+      anchorId: "g1",
+    });
+
+    useComposition.getState().beginDrag("g1");
+    useComposition.getState().updateDragCandidate(8.95, 100);
+
+    expect(
+      Object.fromEntries(useComposition.getState().dragState!.preview),
+    ).toMatchObject({ g1: 9, g2: 12, "snap-target": 10 });
+    expect(useComposition.getState().dragState!.snapTime).toBe(10);
+  });
+
   it("removes all selected clips and clears both selection surfaces", () => {
     const c = makeEmptyComposition({ workId: "group-delete" });
     const track = c.tracks.find((candidate) => candidate.kind === "video")!;

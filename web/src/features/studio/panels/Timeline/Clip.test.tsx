@@ -18,6 +18,13 @@ beforeEach(() => {
     transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
     filters: { brightness: 0, contrast: 0, saturation: 0 },
   });
+  c.assets.push({
+    id: "source-x",
+    uri: "x.mp4",
+    kind: "video",
+    metadata: { duration: 8 },
+    status: "ready",
+  });
   useComposition.setState({
     comp: c,
     selection: null,
@@ -134,14 +141,25 @@ describe("Clip", () => {
   });
 
   it("exposes 10px trim hit areas with visible rails", () => {
+    useComposition.getState().setSelection("v1");
     const { getByTestId } = render(
       <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
     );
-    expect(getByTestId("resize-left")).toHaveAttribute("data-hit-area", "10");
-    expect(getByTestId("resize-left")).toHaveAccessibleName("Trim clip start");
-    expect(getByTestId("resize-left").querySelector("[data-trim-rail]")).toBeInTheDocument();
-    expect(getByTestId("resize-right")).toHaveAttribute("data-hit-area", "10");
-    expect(getByTestId("resize-right")).toHaveAccessibleName("Trim clip end");
+    const left = getByTestId("resize-left");
+    const right = getByTestId("resize-right");
+    const leftRail = left.querySelector<HTMLElement>("[data-trim-rail]")!;
+    const rightRail = right.querySelector<HTMLElement>("[data-trim-rail]")!;
+
+    expect(left).toHaveAccessibleName("Trim clip start");
+    expect(right).toHaveAccessibleName("Trim clip end");
+    expect(getComputedStyle(left).width).toBe("10px");
+    expect(getComputedStyle(right).width).toBe("10px");
+    expect(getComputedStyle(left).left).toBe("0px");
+    expect(getComputedStyle(right).right).toBe("0px");
+    expect(getComputedStyle(leftRail).width).toBe("2px");
+    expect(getComputedStyle(rightRail).width).toBe("2px");
+    expect(getComputedStyle(leftRail).height).toBe("100%");
+    expect(getComputedStyle(rightRail).height).toBe("100%");
   });
 
   it("modifier-click unions and toggles timeline selection", () => {

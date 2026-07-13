@@ -94,7 +94,9 @@ describe("MarqueeSelection", () => {
       clientY: 0,
     });
     fireEvent.pointerMove(window, { clientX: 50, clientY: 70 });
-    expect(screen.getByRole("status", { name: /marquee selection/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("status", { name: /marquee selection/i }),
+    ).toBeInTheDocument();
     fireEvent.pointerUp(window, { clientX: 50, clientY: 70 });
 
     expect(useComposition.getState().timelineSelection.ids).toEqual(["a", "b"]);
@@ -143,6 +145,33 @@ describe("MarqueeSelection", () => {
     });
     fireEvent.pointerUp(window, { clientX: 5, clientY: 5 });
     expect(useComposition.getState().selection).toBeNull();
+  });
+
+  it("aborts an active marquee on pointer cancellation without changing selection", () => {
+    render(<Harness />);
+    setRect(screen.getByTestId("surface"), { left: 0, top: 0 });
+    setRect(screen.getByTestId("clip-b"), {
+      left: 60,
+      top: 10,
+      right: 90,
+      bottom: 30,
+    });
+    useComposition.getState().setSelection("a");
+
+    fireEvent.pointerDown(screen.getByTestId("lane-b"), {
+      button: 0,
+      clientX: 50,
+      clientY: 0,
+    });
+    fireEvent.pointerMove(window, { clientX: 100, clientY: 40 });
+    expect(screen.getByRole("status", { name: /marquee selection/i })).toBeInTheDocument();
+    fireEvent.pointerCancel(window, { clientX: 100, clientY: 40 });
+
+    expect(
+      screen.queryByRole("status", { name: /marquee selection/i }),
+    ).not.toBeInTheDocument();
+    expect(useComposition.getState().timelineSelection.ids).toEqual(["a"]);
+    expect(useComposition.getState().selection).toBe("a");
   });
 
   it("deletes every selected clip as one group", () => {

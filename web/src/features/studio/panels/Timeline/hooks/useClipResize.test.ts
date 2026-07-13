@@ -1,17 +1,31 @@
-import { describe, it, expect, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { describe, it, expect, beforeEach, vi } from "vitest";
+import { render, renderHook, act, waitFor } from "@testing-library/react";
+import { createElement } from "react";
 import { useClipResize } from "./useClipResize";
 import { useComposition } from "../../../store";
 import {
+  makeAudioClip,
   makeCompositionWithClips,
   makeVideoClip,
 } from "../../../../../test/composition-fixtures";
+import { Filmstrip } from "../Filmstrip";
+import { WaveformBars } from "../WaveformBars";
+import { __resetFrameCacheForTests } from "./useFrameExtractor";
+import { _resetWaveformCacheForTests } from "../../../hooks/useWaveform";
 
 beforeEach(() => {
   const a = makeVideoClip({ id: "a", trackOffset: 0, in: 0, out: 2 });
   const b = makeVideoClip({ id: "b", trackOffset: 5, in: 0, out: 2 });
+  const comp = makeCompositionWithClips([a, b]);
+  comp.assets.push({
+    id: "asset-x",
+    uri: "/x.mp4",
+    kind: "video",
+    metadata: { duration: 10 },
+    status: "ready",
+  });
   useComposition.setState({
-    comp: makeCompositionWithClips([a, b]),
+    comp,
     selection: null,
     currentFrame: 0,
     isPlaying: false,
@@ -154,7 +168,7 @@ describe("useClipResize", () => {
     expect(b.out).toBeCloseTo(2);
   });
 
-  it("keeps the source-time origin anchored during a left trim", () => {
+  it("renders Filmstrip and Waveform from the updated source time after a left trim", async () => {
     useComposition.setState({
       comp: makeCompositionWithClips([
         makeVideoClip({ id: "a", trackOffset: 2, in: 1, out: 4 }),
@@ -170,11 +184,94 @@ describe("useClipResize", () => {
       result.current.endResize();
     });
 
-    const a = useComposition.getState().comp!.tracks[0].clips[0] as {
-      trackOffset: number;
-      in: number;
-    };
-    expect(a.trackOffset - a.in).toBeCloseTo(1);
+    const trimmedVideo = useComposition.getState().comp!.tracks[0]
+      .clips[0] as ReturnType<typeof makeVideoClip>;
+    __resetFrameCacheForTests();
+    const seekSpy = vi.fn();
+    const currentTimeDescriptor = Object.getOwnPropertyDescriptor(
+      HTMLMediaElement.prototype,
+      "currentTime",
+    );
+    const currentTimes = new WeakMap<HTMLMediaElement, number>();
+    Object.defineProperty(HTMLMediaElement.prototype, "currentTime", {
+      configurable: true,
+      set(this: HTMLMediaElement, time: number) {
+        currentTimes.set(this, time);
+        seekSpy(time);
+        queueMicrotask(() => this.dispatchEvent(new Event("seeked")));
+      },
+      get(this: HTMLMediaElement) {
+        return currentTimes.get(this) ?? 0;
+      },
+    });
+    try {
+      const filmstrip = render(
+        createElement(Filmstrip, {
+          clip: trimmedVideo,
+          pxPerSecond: 50,
+          height: 48,
+        }),
+      );
+      await waitFor(() => expect(seekSpy).toHaveBeenCalled());
+      expect(
+        Math.min(...seekSpy.mock.calls.map(([time]) => time)),
+      ).toBeCloseTo(2);
+      filmstrip.unmount();
+    } finally {
+      if (currentTimeDescriptor) {
+        Object.defineProperty(
+          HTMLMediaElement.prototype,
+          "currentTime",
+          currentTimeDescriptor,
+        );
+      }
+    }
+
+    const audio = makeAudioClip({
+      id: "audio",
+      trackOffset: 2,
+      in: 0.1,
+      out: 0.8,
+    });
+    useComposition.setState({ comp: makeCompositionWithClips([audio]) });
+    const audioResize = renderHook(() =>
+      useClipResize({ clipId: "audio", pxPerSecond: 50 }),
+    );
+    act(() => {
+      audioResize.result.current.beginResize("left", 0);
+      audioResize.result.current.dragResize(5);
+      audioResize.result.current.endResize();
+    });
+    const trimmedAudio = useComposition.getState().comp!.tracks[0]
+      .clips[0] as ReturnType<typeof makeAudioClip>;
+    _resetWaveformCacheForTests();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      })),
+    );
+    try {
+      const waveform = render(
+        createElement(WaveformBars, {
+          clip: trimmedAudio,
+          pxPerSecond: 50,
+          height: 48,
+        }),
+      );
+      await waitFor(() => {
+        const renderedWaveform = waveform.container.querySelector(
+          '[aria-label="waveform"]',
+        );
+        expect(renderedWaveform).not.toBeNull();
+        expect(
+          Number(renderedWaveform!.getAttribute("data-source-offset")),
+        ).toBeCloseTo(0.2);
+      });
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("right-edge drag is capped by next clip's start (D2 via store)", () => {
@@ -286,6 +383,47 @@ describe("useClipResize", () => {
     };
     expect(after.out).toBeCloseTo(3);
   });
+
+  it.each(["missing asset", "missing duration metadata"])(
+    "uses the clip source window when the registry has %s",
+    (registryCase) => {
+      const clip = makeVideoClip({
+        id: "source-without-asset-metadata",
+        src: "assets/clips/unregistered.mp4",
+        trackOffset: 4,
+        in: 1,
+        out: 3,
+      });
+      const comp = makeCompositionWithClips([clip]);
+      if (registryCase === "missing duration metadata") {
+        comp.assets.push({
+          id: "durationless-source",
+          uri: "assets/clips/unregistered.mp4",
+          kind: "video",
+          metadata: {},
+          status: "ready",
+        });
+      }
+      useComposition.setState({ comp });
+
+      const { result } = renderHook(() =>
+        useClipResize({
+          clipId: "source-without-asset-metadata",
+          pxPerSecond: 50,
+        }),
+      );
+      act(() => {
+        result.current.beginResize("right", 0);
+        result.current.dragResize(1000);
+      });
+
+      const after = useComposition.getState().comp!.tracks[0].clips[0] as {
+        out: number;
+      };
+      expect(after.out).toBeCloseTo(3);
+      expect(result.current.sourceGhost).toEqual({ startSec: 3, endSec: 6 });
+    },
+  );
 
   it("exposes the full source ghost bounds only while trimming", () => {
     const clip = makeVideoClip({

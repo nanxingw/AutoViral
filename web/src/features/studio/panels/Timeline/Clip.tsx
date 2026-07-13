@@ -251,7 +251,6 @@ export function Clip({
           asset DnD still rides native HTML5 DnD via dnd.ts (unchanged). */}
       <div
         data-testid="resize-left"
-        data-hit-area="10"
         aria-label={t("studio.timeline.trimLeftAria")}
         className={`${styles.resizeHandle} ${styles.resizeLeft}`}
         onPointerDown={onHandleDown("left")}
@@ -260,7 +259,6 @@ export function Clip({
       </div>
       <div
         data-testid="resize-right"
-        data-hit-area="10"
         aria-label={t("studio.timeline.trimRightAria")}
         className={`${styles.resizeHandle} ${styles.resizeRight}`}
         onPointerDown={onHandleDown("right")}

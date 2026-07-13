@@ -76,6 +76,7 @@ function comparableAssetPath(path: string): string {
 function sourceDurationForClip(
   state: ReturnType<typeof useComposition.getState>,
   src: string,
+  fallbackDuration: number,
 ): number {
   const comparableSrc = comparableAssetPath(src);
   const duration = state.comp?.assets.find(
@@ -83,7 +84,7 @@ function sourceDurationForClip(
   )?.metadata.duration;
   return typeof duration === "number" && Number.isFinite(duration) && duration > 0
     ? duration
-    : Infinity;
+    : fallbackDuration;
 }
 
 function clampResizeTime(
@@ -144,7 +145,7 @@ export function useClipResize({
         ? clip.out
         : clipDuration(clip);
       const assetDuration = hasSourceWindow
-        ? sourceDurationForClip(state, clip.src)
+        ? sourceDurationForClip(state, clip.src, originalOut)
         : Infinity;
       const sourceGhost =
         hasSourceWindow && Number.isFinite(assetDuration)
