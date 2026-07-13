@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, it, expect, beforeEach } from "vitest";
 import { Track } from "./Track";
 import { useComposition } from "../../store";
@@ -97,6 +97,23 @@ beforeEach(() => {
 });
 
 describe("Track (dnd-kit)", () => {
+  it("shows the localized per-kind hint for an empty track", () => {
+    const track = { ...useComposition.getState().comp!.tracks.find((t) => t.kind === "audio")!, clips: [] };
+    render(<Track track={track} pxPerSecond={50} totalWidth={800} color="purple" label="Audio" />);
+    const hint = screen.getByTestId("empty-track-hint");
+    expect(hint).toHaveTextContent("Drop audio · or choose VO from the library");
+    expect(hint).toHaveStyle({ pointerEvents: "none" });
+  });
+
+  it("marks the row containing the selected clip with a 2px accent rail", () => {
+    const track = useComposition.getState().comp!.tracks.find((t) => t.kind === "video")!;
+    useComposition.setState({ selection: track.clips[0].id });
+    const { container } = render(<Track track={track} pxPerSecond={50} totalWidth={800} color="blue" label="Video" />);
+    const row = container.querySelector('[data-selected-row="true"]') as HTMLElement;
+    expect(row).toHaveStyle({ borderLeftWidth: "2px", borderLeftStyle: "solid" });
+    expect(row.getAttribute("style")).toContain("border-left-color: var(--accent)");
+  });
+
   it("renders all clips in order", () => {
     const comp = useComposition.getState().comp!;
     const { container } = render(

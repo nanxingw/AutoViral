@@ -15,6 +15,8 @@ import {
 import { useT } from "@/i18n/useT";
 import type { AssetItem } from "@/queries/assets";
 import type { Track as TrackType } from "../../types";
+import { EMPTY_TRACK_MESSAGE_KEYS, TIMELINE_KIND_TOKENS } from "./timelinePresentation";
+import styles from "./Track.module.css";
 
 interface Props {
   track: TrackType;
@@ -86,6 +88,8 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
   const isCrossTrackTarget = useComposition(
     (s) => s.dragState?.targetTrackId === track.id,
   );
+  const selection = useComposition((s) => s.selection);
+  const isSelectedRow = track.clips.some((clip) => clip.id === selection);
 
   // Read the dragged payload, compute the snapped drop time, and update the
   // hover preview. Shared by dragenter/dragover so the indicator tracks the
@@ -178,11 +182,16 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
 
   return (
     <div
+      className={styles.row}
       data-kind={track.kind}
+      data-selected-row={isSelectedRow ? "true" : "false"}
       style={{
         display: "flex",
         borderBottom: "1px solid var(--divider)",
         minHeight: height,
+        borderLeftWidth: 2,
+        borderLeftStyle: "solid",
+        borderLeftColor: isSelectedRow ? "var(--accent)" : "transparent",
       }}
     >
       {/* Label column (sticky-ish). Skipped when TimelineTrackHeader is
@@ -237,6 +246,29 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
           transition: "box-shadow 0.12s, background 0.12s",
         }}
       >
+        {track.clips.length === 0 && !dropPreview && !isCrossTrackTarget && (
+          <div
+            data-testid="empty-track-hint"
+            style={{
+              position: "sticky",
+              left: 12,
+              width: "max-content",
+              height: 24,
+              padding: "0 8px",
+              display: "flex",
+              alignItems: "center",
+              borderRadius: 6,
+              border: `1px dashed ${TIMELINE_KIND_TOKENS[track.kind].border}`,
+              background: TIMELINE_KIND_TOKENS[track.kind].soft,
+              color: TIMELINE_KIND_TOKENS[track.kind].base,
+              fontFamily: "var(--font-mono)",
+              fontSize: 10,
+              pointerEvents: "none",
+            }}
+          >
+            {t(EMPTY_TRACK_MESSAGE_KEYS[track.kind])}
+          </div>
+        )}
         {/* I19/I20 — drop indicator line at the snapped start. Accent when the
             drop is legal, red when the lane rejects the dragged kind. */}
         {dropPreview && (
@@ -341,6 +373,7 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
                   clip={c}
                   pxPerSecond={pxPerSecond}
                   height={height - 8}
+                  selected={selection === c.id}
                 />
               </div>
             ) : null,

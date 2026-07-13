@@ -30,6 +30,59 @@ beforeEach(() => {
 });
 
 describe("Clip", () => {
+  it("exposes its video kind and normal presentation state", () => {
+    const { container } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    const clip = container.firstChild as HTMLElement;
+    expect(clip).toHaveAttribute("data-kind", "video");
+    expect(clip).toHaveAttribute("data-state", "normal");
+  });
+
+  it("exposes hover presentation state while the pointer is over the clip", () => {
+    const { container } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    const clip = container.firstChild as HTMLElement;
+    fireEvent.mouseEnter(clip);
+    expect(clip).toHaveAttribute("data-state", "hover");
+  });
+
+  it("exposes selected presentation state for the selected clip", () => {
+    useComposition.setState({ selection: "v1" });
+    const { container } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    expect(container.firstChild).toHaveAttribute("data-state", "selected");
+  });
+
+  it("exposes dragging presentation state during an active body drag", () => {
+    useComposition.setState({
+      dragState: {
+        clipId: "v1",
+        originalStart: 1,
+        candidateStart: 1,
+        preview: new Map([["v1", 1]]),
+        snapTime: null,
+        targetTrackId: "video-main",
+      },
+    });
+    const { container } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    expect(container.firstChild).toHaveAttribute("data-state", "dragging");
+  });
+
+  it("exposes focus-visible presentation state when keyboard-focused", () => {
+    const { container } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    const clip = container.firstChild as HTMLElement;
+    fireEvent.keyDown(document, { key: "Tab" });
+    fireEvent.focus(clip);
+    expect(clip).toHaveAttribute("data-state", "focus-visible");
+  });
+
   it("renders with proportional width", () => {
     const { container } = render(
       <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,

@@ -26,9 +26,10 @@ interface Props {
   clip: AudioClip;
   pxPerSecond: number;
   height: number;
+  selected?: boolean;
 }
 
-export function WaveformBars({ clip, pxPerSecond, height }: Props) {
+export function WaveformBars({ clip, pxPerSecond, height, selected = false }: Props) {
   // composition.yaml stores clip.src as a workspace-relative path
   // ("assets/audio/bed.mp3"). Passing that raw to fetch() resolves
   // against the current SPA route (/studio/<workId>/assets/...) and
@@ -113,5 +114,5 @@ export function WaveformBars({ clip, pxPerSecond, height }: Props) {
   // Shared renderer (A6): the timeline overlay and the library-row mini
   // waveform now render through the same PeaksSvg. absolute+opacity 0.55 keep
   // this call byte-compatible with the pre-extraction markup.
-  return <PeaksSvg peaks={visible} width={width} height={height} absolute opacity={0.55} />;
+  return <PeaksSvg peaks={visible} width={width} height={height} absolute opacity={0.82} sourceOffset={clip.in} color={selected ? "var(--timeline-audio)" : "var(--timeline-audio-soft)"} />;
 }

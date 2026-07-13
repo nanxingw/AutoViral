@@ -10,6 +10,7 @@ import { useComposition } from "../../store";
 import type { Track } from "../../types";
 import { useT } from "@/i18n/useT";
 import styles from "./LaneGapAdd.module.css";
+import { IconButton } from "@/ui/IconButton";
 
 /* ─── Phase F (issue #33) — lane-gap hover-plus button ────────────────────
    24x24 "+" button living in the 4px gap between two adjacent lane rows.
@@ -156,7 +157,7 @@ export function LaneGapAdd({ upperTrackId, lowerTrackId }: Props) {
         data-upper={upperTrackId ?? ""}
         data-lower={lowerTrackId ?? ""}
       >
-        <button
+        <IconButton
           ref={btnRef}
           type="button"
           className={`${styles.btn}${visible ? ` ${styles.btnVisible}` : ""}`}
@@ -170,12 +171,14 @@ export function LaneGapAdd({ upperTrackId, lowerTrackId }: Props) {
           onBlur={() => {
             if (!pickerPos) setVisible(false);
           }}
+          size="sm"
+          variant="ghost"
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
             <line x1="12" y1="5" x2="12" y2="19" />
             <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
-        </button>
+        </IconButton>
       </div>
 
       {pickerPos && createPortal(

@@ -28,6 +28,7 @@ interface Props {
    * without duplicating the component.
    */
   absolute?: boolean;
+  sourceOffset?: number;
 }
 
 export function PeaksSvg({
@@ -37,8 +38,19 @@ export function PeaksSvg({
   color = "var(--accent, #a8c5d6)",
   opacity = 0.55,
   absolute = false,
+  sourceOffset,
 }: Props) {
-  const barCount = peaks.length;
+  const targetBarCount = Math.max(1, Math.floor(width / 4));
+  const barCount = Math.min(peaks.length, targetBarCount);
+  const sampled = Array.from({ length: barCount }, (_, index) => {
+    const start = Math.floor((index * peaks.length) / barCount);
+    const end = Math.max(start + 1, Math.ceil(((index + 1) * peaks.length) / barCount));
+    let peak = 0;
+    for (let sourceIndex = start; sourceIndex < end; sourceIndex += 1) {
+      peak = Math.max(peak, peaks[sourceIndex] ?? 0);
+    }
+    return peak;
+  });
 
   const positioning: CSSProperties = absolute
     ? { position: "absolute", left: 0, top: 0 }
@@ -68,22 +80,23 @@ export function PeaksSvg({
       aria-label="waveform"
       width={width}
       height={height}
-      viewBox={`0 0 ${barCount} 100`}
+      viewBox={`0 0 ${barCount * 4} 100`}
       preserveAspectRatio="none"
+      data-source-offset={sourceOffset}
       style={{
         ...positioning,
         pointerEvents: "none",
         opacity,
       }}
     >
-      {Array.from(peaks).map((p, i) => {
+      {sampled.map((p, i) => {
         const h = Math.max(2, p * 100);
         return (
           <rect
             key={i}
-            x={i}
+            x={i * 4}
             y={(100 - h) / 2}
-            width={1}
+            width={3}
             height={h}
             fill={color}
           />

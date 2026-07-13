@@ -1,0 +1,177 @@
+.clip {
+  --clip-kind: var(--timeline-video);
+  --clip-kind-soft: var(--timeline-video-soft);
+  --clip-kind-border: var(--timeline-video-border);
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  overflow: hidden;
+  padding: 4px 6px 4px 8px;
+  cursor: grab;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface-1) 72%, transparent);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  box-shadow: none;
+  transition:
+    background 200ms ease-out,
+    border-color 200ms ease-out,
+    box-shadow 200ms ease-out,
+    opacity 200ms ease-out;
+}
+
+.clip::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--clip-kind);
+  pointer-events: none;
+}
+
+.clip[data-kind="audio"] {
+  --clip-kind: var(--timeline-audio);
+  --clip-kind-soft: var(--timeline-audio-soft);
+  --clip-kind-border: var(--timeline-audio-border);
+}
+
+.clip[data-kind="text"] {
+  --clip-kind: var(--timeline-caption);
+  --clip-kind-soft: var(--timeline-caption-soft);
+  --clip-kind-border: var(--timeline-caption-border);
+}
+
+.clip[data-kind="overlay"] {
+  --clip-kind: var(--timeline-overlay);
+  --clip-kind-soft: var(--timeline-overlay-soft);
+  --clip-kind-border: var(--timeline-overlay-border);
+}
+
+.clip[data-kind="video"],
+.clip[data-kind="audio"] {
+  background: color-mix(in srgb, var(--surface-1) 54%, transparent);
+}
+
+.clip[data-state="hover"] {
+  background: color-mix(in srgb, var(--surface-2) 78%, var(--clip-kind-soft));
+  border-color: var(--clip-kind-border);
+}
+
+.clip[data-state="selected"] {
+  border-color: var(--accent-hi);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 0 14px var(--accent-glow);
+}
+
+.clip[data-state="dragging"] {
+  opacity: 0.82;
+  cursor: grabbing;
+  transition: none;
+}
+
+.clip[data-state="focus-visible"] {
+  border-color: var(--accent-hi);
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 0 10px var(--accent-glow);
+}
+
+.mediaContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.duration {
+  overflow: hidden;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clip[data-kind="video"] .duration,
+.clip[data-kind="video"] .label {
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.6);
+}
+
+.captionContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.ccBadge {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  place-items: center;
+  color: var(--clip-kind);
+  background: var(--clip-kind-soft);
+  border: 1px solid var(--clip-kind-border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.04em;
+}
+
+.captionLabel {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 11px;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.resizeHandle {
+  position: absolute;
+  z-index: 5;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.resizeLeft {
+  left: -4px;
+}
+
+.resizeRight {
+  right: -4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .clip {
+    transition: none;
+  }
+}

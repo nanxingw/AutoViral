@@ -4,7 +4,6 @@
 
 .root {
   position: relative;
-  width: 152px;
   flex-shrink: 0;
   display: flex;
   align-items: center;

@@ -9,8 +9,26 @@ import { useFrameExtractor } from "./hooks/useFrameExtractor";
 import { resolveAssetUrl } from "../../composition/resolveAssetUrl";
 import { useComposition } from "../../store";
 import type { VideoClip } from "../../types";
+import styles from "./Filmstrip.module.css";
 
 const CACHE_INTERVAL = 0.5; // D8
+const FILMSTRIP_STEPS = [0.25, 0.5, 1, 2, 5] as const;
+
+export function selectFilmstripStep(pxPerSecond: number): number {
+  const safePps = Math.max(1, pxPerSecond);
+  const inRange = FILMSTRIP_STEPS.filter((candidate) => {
+    const width = candidate * safePps;
+    return width >= 48 && width <= 96;
+  });
+  if (inRange.length > 0) return inRange[inRange.length - 1];
+  return FILMSTRIP_STEPS.reduce((best, candidate) => {
+    const width = candidate * safePps;
+    const bestWidth = best * safePps;
+    const distance = width < 48 ? 48 - width : width > 96 ? width - 96 : 0;
+    const bestDistance = bestWidth < 48 ? 48 - bestWidth : bestWidth > 96 ? bestWidth - 96 : 0;
+    return distance < bestDistance ? candidate : best;
+  });
+}
 
 interface Props {
   clip: VideoClip;
@@ -27,7 +45,7 @@ export function Filmstrip({ clip, pxPerSecond, height }: Props) {
   const workId = useComposition((s) => s.comp?.workId ?? "");
   const resolvedSrc = workId ? resolveAssetUrl(clip.src, workId) : clip.src;
   const dur = clip.out - clip.in;
-  const renderStep = Math.max(CACHE_INTERVAL, 60 / Math.max(1, pxPerSecond));
+  const renderStep = selectFilmstripStep(pxPerSecond);
 
   // Cache grid: every 0.5s within [in, out). Uses Number(toFixed(3)) so the
   // Map keys round-trip through extractOne's `t.toFixed(3)` cache key.
@@ -78,6 +96,7 @@ export function Filmstrip({ clip, pxPerSecond, height }: Props) {
   return (
     <div
       aria-label="filmstrip"
+      className={styles.filmstrip}
       style={{
         position: "absolute",
         left: 0,
@@ -87,7 +106,6 @@ export function Filmstrip({ clip, pxPerSecond, height }: Props) {
         display: "flex",
         overflow: "hidden",
         pointerEvents: "none",
-        opacity: 0.55,
         borderRadius: 4,
       }}
     >

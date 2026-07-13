@@ -6,7 +6,7 @@ import { useComposerDraft } from "@/stores/composerDraft";
 import { describeClip } from "@/features/chat/describeElement";
 import { resolveDragTargetTrack } from "./dnd";
 import { useT } from "@/i18n/useT";
-import clsx from "clsx";
+import styles from "./Clip.module.css";
 
 export function Clip({
   clipId,
@@ -38,6 +38,8 @@ export function Clip({
   const inject = useComposerDraft((s) => s.inject);
   // #5 — right-click "加入聊天上下文" menu anchor (viewport coords), or null.
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
+  const [hovered, setHovered] = useState(false);
+  const [focusVisible, setFocusVisible] = useState(false);
   if (!clip) return null;
 
   const dur = "duration" in clip ? clip.duration : clip.out - clip.in;
@@ -49,9 +51,16 @@ export function Clip({
   const left = renderedOffset * pxPerSecond;
   const width = dur * pxPerSecond;
   const isSelected = selection === clipId;
-  const isLight =
-    typeof document !== "undefined" &&
-    document.documentElement.getAttribute("data-theme") === "light";
+  const isDragging = dragState?.preview.has(clipId) ?? false;
+  const presentationState = isDragging
+    ? "dragging"
+    : isSelected
+      ? "selected"
+      : focusVisible
+        ? "focus-visible"
+        : hovered
+          ? "hover"
+          : "normal";
 
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -164,68 +173,23 @@ export function Clip({
       ? clip.src.split("/").pop()?.replace(/\.[^.]+$/, "").slice(0, 18) ?? clipId
       : clipId;
 
-  let background: string;
-  let borderColor: string;
-  let fg: string;
-  let fgDim: string;
-
-  if (trackKind === "video") {
-    // Bug 2 fix: video clip body must be transparent so the Filmstrip
-    // (rendered beneath in Track.tsx) shows through. Pneuma's VideoTrack
-    // (.cache/pneuma-clipcraft/.../timeline/VideoTrack.tsx:158-179) uses
-    // the same pattern — the clip frame is just a border + label, the
-    // thumbnails carry the visual identity. Selected state still adds a
-    // subtle accent tint so the active clip is distinguishable.
-    background = isSelected
-      ? isLight
-        ? "rgba(42,58,74,0.10)"
-        : "rgba(168,197,214,0.12)"
-      : "transparent";
-    borderColor = "rgba(128,128,128,0.18)";
-    fg = isLight ? "rgba(15,24,34,0.92)" : "rgba(255,255,255,0.95)";
-    fgDim = isLight ? "rgba(15,24,34,0.55)" : "rgba(255,255,255,0.7)";
-  } else if (trackKind === "audio") {
-    background = "linear-gradient(90deg, rgba(192,132,252,0.15), rgba(192,132,252,0.1))";
-    borderColor = "rgba(192,132,252,0.25)";
-    fg = "#c084fc";
-    fgDim = "rgba(192,132,252,0.6)";
-  } else if (trackKind === "text") {
-    background = "var(--glass-hi)";
-    borderColor = "var(--glass-border)";
-    fg = "var(--text)";
-    fgDim = "var(--text-dim)";
-  } else {
-    background = "rgba(125,211,252,0.12)";
-    borderColor = "rgba(125,211,252,0.25)";
-    fg = "#7dd3fc";
-    fgDim = "rgba(125,211,252,0.6)";
-  }
-
-  if (isSelected) {
-    borderColor = "var(--accent)";
-  }
-
   return (
     <>
     <div
-      className={clsx("timeline-clip", clip.kind, isSelected && "selected")}
+      className={`timeline-clip ${clip.kind} ${styles.clip}`}
+      data-kind={trackKind}
+      data-state={presentationState}
+      tabIndex={0}
       style={{
-        position: "absolute",
         left,
         width: Math.max(width, 24),
-        top: 4,
-        bottom: 4,
-        background,
-        border: `1px solid ${borderColor}`,
-        borderRadius: 6,
-        padding: "4px 6px",
-        cursor: "grab",
-        overflow: "hidden",
-        boxShadow: isSelected ? "0 0 12px var(--accent-glow)" : "none",
-        transition: "box-shadow 0.15s",
       }}
       onPointerDown={onPointerDown}
       onContextMenu={onContextMenu}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onFocus={() => setFocusVisible(true)}
+      onBlur={() => setFocusVisible(false)}
     >
       {/* R47-fix4: text clips skip the duration sub-label. Text track is
           a compact 44px row, and showing both "2.3s" + the actual subtitle
@@ -233,39 +197,17 @@ export function Clip({
           already visible in the timeline header bar; for text the
           subtitle content is what matters. Video / audio still show it
           since the underlying media isn't readable from thumbnails. */}
-      {trackKind !== "text" && (
-        <div
-          style={{
-            fontSize: 9,
-            fontFamily: "var(--font-mono)",
-            color: fgDim,
-            letterSpacing: "0.06em",
-            // Bug 2 follow-up: video clips no longer have an opaque background
-            // (the filmstrip is shown beneath), so labels need a soft shadow to
-            // stay legible over thumbnails.
-            textShadow:
-              trackKind === "video" ? "0 1px 2px rgba(0,0,0,0.6)" : undefined,
-          }}
-        >
-          {dur.toFixed(1)}s
+      {trackKind === "text" ? (
+        <div className={styles.captionContent}>
+          <span className={styles.ccBadge}>CC</span>
+          <span className={styles.captionLabel}>{label}</span>
+        </div>
+      ) : (
+        <div className={styles.mediaContent}>
+          <span className={styles.duration}>{dur.toFixed(1)}s</span>
+          <span className={styles.label}>{label}</span>
         </div>
       )}
-      <div
-        style={{
-          fontSize: 10,
-          color: fg,
-          fontWeight: 500,
-          marginTop: 2,
-          letterSpacing: "-0.01em",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          whiteSpace: "nowrap",
-          textShadow:
-            trackKind === "video" ? "0 1px 2px rgba(0,0,0,0.6)" : undefined,
-        }}
-      >
-        {label}
-      </div>
       {/* #3 — cross-track move now lives on the clip BODY (CapCut/剪映/Premiere
           style): a vertical body-drag over a different same-kind lane retargets
           the clip via `resolveDragTargetTrack` + `updateDragTarget`, committed
@@ -275,29 +217,13 @@ export function Clip({
           asset DnD still rides native HTML5 DnD via dnd.ts (unchanged). */}
       <div
         data-testid="resize-left"
+        className={`${styles.resizeHandle} ${styles.resizeLeft}`}
         onPointerDown={onHandleDown("left")}
-        style={{
-          position: "absolute",
-          top: 0,
-          bottom: 0,
-          left: -4,
-          width: 8,
-          cursor: "ew-resize",
-          zIndex: 5,
-        }}
       />
       <div
         data-testid="resize-right"
+        className={`${styles.resizeHandle} ${styles.resizeRight}`}
         onPointerDown={onHandleDown("right")}
-        style={{
-          position: "absolute",
-          top: 0,
-          bottom: 0,
-          right: -4,
-          width: 8,
-          cursor: "ew-resize",
-          zIndex: 5,
-        }}
       />
     </div>
       {menuPos && (

@@ -7,6 +7,8 @@ import { Playhead } from "./Playhead";
 import { TimelineTrackHeader } from "./TimelineTrackHeader";
 import { LaneGapAdd } from "./LaneGapAdd";
 import { useT } from "@/i18n/useT";
+import { TIMELINE_HEADER_WIDTH } from "./timelineMetrics";
+import { IconButton } from "@/ui/IconButton";
 
 const TRACK_COLORS: Record<string, string> = {
   video: "var(--accent)",
@@ -69,15 +71,14 @@ export function Timeline() {
           {comp.duration.toFixed(2)}s
         </span>
         <div style={{ flex: 1 }} />
-        <button
-          type="button"
-          data-bare
+        <IconButton
           onClick={() => setZoom((z) => Math.max(0.4, z - 0.2))}
-          style={iconBtn()}
+          size="sm"
+          variant="surface"
           aria-label="Zoom out"
         >
-          −
-        </button>
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7h8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+        </IconButton>
         <span
           style={{
             fontSize: 11,
@@ -89,15 +90,14 @@ export function Timeline() {
         >
           {zoom.toFixed(1)}×
         </span>
-        <button
-          type="button"
-          data-bare
+        <IconButton
           onClick={() => setZoom((z) => Math.min(3, z + 0.2))}
-          style={iconBtn()}
+          size="sm"
+          variant="surface"
           aria-label="Zoom in"
         >
-          +
-        </button>
+          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M3 7h8M7 3v8" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>
+        </IconButton>
       </div>
 
       {/* Body: track-label column on left, scrollable lanes on right */}
@@ -171,7 +171,7 @@ export function Timeline() {
           <BladeTool
             pxPerSecond={pxPerSecond}
             totalWidth={totalWidth}
-            labelColumnWidth={152}
+            labelColumnWidth={TIMELINE_HEADER_WIDTH}
           />
           {/* Phase 4.H — Playhead + snap-line overlays.
               D5: Playhead is a sibling of <Ruler /> mounted full-height
@@ -187,7 +187,7 @@ export function Timeline() {
               position: "absolute",
               top: 0,
               bottom: 0,
-              left: 152,
+              left: TIMELINE_HEADER_WIDTH,
               right: 0,
               pointerEvents: "none",
               zIndex: 6,
@@ -215,21 +215,4 @@ export function Timeline() {
       </div>
     </div>
   );
-}
-
-function iconBtn(): React.CSSProperties {
-  return {
-    width: 26,
-    height: 26,
-    borderRadius: 6,
-    border: "1px solid var(--glass-border)",
-    background: "var(--surface-0)",
-    color: "var(--text-dim)",
-    cursor: "pointer",
-    display: "grid",
-    placeItems: "center",
-    fontSize: 14,
-    fontWeight: 600,
-    lineHeight: 1,
-  };
 }

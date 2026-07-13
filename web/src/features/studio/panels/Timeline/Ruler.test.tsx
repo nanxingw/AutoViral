@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { render, fireEvent, screen, act } from "@testing-library/react";
 import { Ruler } from "./Ruler";
 import { Playhead } from "./Playhead";
+import { Timeline } from "./index";
 import { useComposition } from "../../store";
 import { makeCompositionWithClips, makeVideoClip } from "../../../../test/composition-fixtures";
 
@@ -80,6 +81,31 @@ describe("Ruler click-to-seek (#77)", () => {
 });
 
 describe("S7 timeline ruler and scrub presentation", () => {
+  it("keeps the ruler, track headers, playhead, and blade on one time origin", () => {
+    const comp = useComposition.getState().comp!;
+    useComposition.setState({
+      comp: {
+        ...comp,
+        tracks: comp.tracks.map((track) => ({ ...track, clips: [] })),
+      },
+      bladeMode: true,
+    });
+    const { container } = render(<Timeline />);
+
+    const rulerRegion = screen.getByTestId("ruler-seek-region");
+    const rulerOrigin = (rulerRegion.previousElementSibling as HTMLElement).style.width;
+    const trackHeader = container.querySelector<HTMLElement>("[data-track-id][data-kind]");
+    const playheadOverlay = screen.getByTestId("playhead-overlay");
+    const bladeOverlay = screen.getByTestId("blade-overlay");
+
+    expect(trackHeader).not.toBeNull();
+    expect([
+      getComputedStyle(trackHeader!).width,
+      playheadOverlay.style.left,
+      bladeOverlay.style.left,
+    ]).toEqual([rulerOrigin, rulerOrigin, rulerOrigin]);
+  });
+
   it("renders labeled major ticks and shorter unlabeled minor ticks", () => {
     render(<Ruler duration={10} pxPerSecond={100} totalWidth={1000} fps={30} />);
 

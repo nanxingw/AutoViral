@@ -34,6 +34,10 @@ afterEach(() => {
 });
 
 describe("<LaneGapAdd /> — dwell timing", () => {
+  it("uses the shared IconButton shell for the gap trigger", () => {
+    render(<LaneGapAdd />);
+    expect(screen.getByTestId("lane-gap-btn")).toHaveAttribute("data-icon-button");
+  });
   it("button is not visible immediately on hover", () => {
     const video = getTrack("video");
     const audio = getTrack("audio");

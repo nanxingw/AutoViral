@@ -8,7 +8,6 @@ import {
   type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  type ReactElement,
 } from "react";
 import { createPortal } from "react-dom";
 import { useComposition } from "../../store";
@@ -16,6 +15,9 @@ import type { Track } from "../../types";
 import { useT } from "@/i18n/useT";
 import { clampMenuToViewport, type MenuPosition } from "./menuPosition";
 import styles from "./TimelineTrackHeader.module.css";
+import { TIMELINE_HEADER_WIDTH } from "./timelineMetrics";
+import { TIMELINE_KIND_TOKENS } from "./timelinePresentation";
+import { IconButton } from "@/ui/IconButton";
 
 /* ─── Phase F (issue #33) — track header row ───────────────────────────────
    Double-entry surface for lane mutations. Right-click anywhere on the cell
@@ -28,40 +30,7 @@ import styles from "./TimelineTrackHeader.module.css";
    tonality — the ⋯ trigger is opacity 0 until the row is hovered so the
    timeline stays calm at rest. */
 
-const KIND_COLOR: Record<Track["kind"], string> = {
-  video: "var(--accent)",
-  audio: "#c084fc",
-  text: "var(--text-dim)",
-  overlay: "#7dd3fc",
-};
-
-const KIND_ICON: Record<Track["kind"], ReactElement> = {
-  video: (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-      <rect x="2" y="6" width="14" height="12" rx="2" />
-      <path d="M22 8l-6 4 6 4V8z" />
-    </svg>
-  ),
-  audio: (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-      <path d="M9 18V5l12-2v13" />
-      <circle cx="6" cy="18" r="3" />
-      <circle cx="18" cy="16" r="3" />
-    </svg>
-  ),
-  text: (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-      <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
-    </svg>
-  ),
-  overlay: (
-    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-    </svg>
-  ),
-};
+const TRACK_LABEL_SEPARATOR = " · ";
 
 const LANGUAGE_OPTIONS: Array<{ value: string | null; label: string }> = [
   { value: "zh", label: "ZH" },
@@ -247,34 +216,37 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
   }, [closeMenu, setTrackLanguage, track.id]);
 
   // ── mute / hide ────────────────────────────────────────────────────────
-  // store doesn't expose dedicated setMuted/setHidden actions; mutate via
-  // renameTrack-style snapshot? No — the cleanest path that survives the
-  // strict file-edit boundary is to call the store's `loadComposition` is
-  // overkill. Instead, mutate via direct setState — this is well-trodden in
-  // the rest of the file (e.g. setState in Track.test.tsx). It's not in the
-  // store API but is supported by zustand and keeps history intact-ish.
-  // BUT — to keep history correct, we use the actions that do exist. Since
-  // neither mute nor hide are in #32's API, we fall back to setState here
-  // and accept that toggling mute/hide doesn't enter the trackHistory stack.
-  // (Following issues can promote these to first-class store actions; for
-  // now the UI affordance is more important than the undo coverage.)
+  // These flags do not yet have first-class store actions. Keep the update
+  // immutable so Zustand subscribers (including the header row) rerender.
   const toggleMuted = useCallback(() => {
     useComposition.setState((s) => {
       if (!s.comp) return s;
-      const t = s.comp.tracks.find((x) => x.id === track.id);
-      if (!t) return s;
-      t.muted = !t.muted;
-      return s;
+      return {
+        comp: {
+          ...s.comp,
+          tracks: s.comp.tracks.map((candidate) =>
+            candidate.id === track.id
+              ? { ...candidate, muted: !candidate.muted }
+              : candidate,
+          ),
+        },
+      };
     });
   }, [track.id]);
 
   const toggleHidden = useCallback(() => {
     useComposition.setState((s) => {
       if (!s.comp) return s;
-      const t = s.comp.tracks.find((x) => x.id === track.id);
-      if (!t) return s;
-      t.hidden = !t.hidden;
-      return s;
+      return {
+        comp: {
+          ...s.comp,
+          tracks: s.comp.tracks.map((candidate) =>
+            candidate.id === track.id
+              ? { ...candidate, hidden: !candidate.hidden }
+              : candidate,
+          ),
+        },
+      };
     });
   }, [track.id]);
 
@@ -282,6 +254,10 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
     () => (track.label && track.label.length > 0 ? track.label : fallbackLabel),
     [track.label, fallbackLabel],
   );
+  const [trackCode, trackName] = useMemo(() => {
+    const [code, ...nameParts] = displayedLabel.split(TRACK_LABEL_SEPARATOR);
+    return [code, nameParts.join(TRACK_LABEL_SEPARATOR) || fallbackLabel];
+  }, [displayedLabel, fallbackLabel]);
   const isSubtitleLane = track.kind === "text";
   // #79 — per-track dB lane gain. The render pipeline + setTrackVolume store
   // action shipped with #34 but never got a control; audio tracks rendered at a
@@ -291,6 +267,7 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
 
   const rootStyle: CSSProperties = useMemo(() => ({
     minHeight: height,
+    width: TIMELINE_HEADER_WIDTH,
   }), [height]);
 
   const menuStyle: CSSProperties | undefined = menuPos
@@ -309,9 +286,21 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
       >
         <span
           className={styles.kindIcon}
-          style={{ color: KIND_COLOR[track.kind] }}
+          style={{
+            color: TIMELINE_KIND_TOKENS[track.kind].base,
+            minWidth: 24,
+            height: 18,
+            paddingInline: 4,
+            border: `1px solid ${TIMELINE_KIND_TOKENS[track.kind].border}`,
+            borderRadius: 4,
+            background: TIMELINE_KIND_TOKENS[track.kind].soft,
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            lineHeight: "18px",
+            letterSpacing: "0.04em",
+          }}
         >
-          {KIND_ICON[track.kind]}
+          {trackCode}
         </span>
 
         {renaming ? (
@@ -325,19 +314,48 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
             aria-label={t("studio.timeline.trackHeader.rename")}
           />
         ) : (
-          <span className={styles.label} title={displayedLabel}>
-            {displayedLabel}
+          <span
+            className={styles.label}
+            title={trackName}
+            style={{ fontFamily: "var(--font-sans)", fontSize: 11 }}
+          >
+            {trackName}
           </span>
         )}
 
-        {/* Mute/Hide live INSIDE the ⋯ menu (not as inline buttons). Three
-            icons fought 152px against the label until label collapsed to
-            0 — Notion/Linear/Resolve all consolidate per-row actions into
-            a single overflow menu. Right-click still opens the same menu. */}
         <button
+          type="button"
+          className={styles.toggleBtn}
+          style={{ width: 24, height: 24, padding: 0, flexShrink: 0 }}
+          data-active={track.muted}
+          aria-pressed={track.muted}
+          aria-label={t(track.muted
+            ? "studio.timeline.trackHeader.unmute"
+            : "studio.timeline.trackHeader.mute")}
+          onClick={toggleMuted}
+        >
+          {track.muted ? <IconMuted /> : <IconUnmuted />}
+        </button>
+        <button
+          type="button"
+          className={styles.toggleBtn}
+          style={{ width: 24, height: 24, padding: 0, flexShrink: 0 }}
+          data-active={track.hidden}
+          aria-pressed={track.hidden}
+          aria-label={t(track.hidden
+            ? "studio.timeline.trackHeader.show"
+            : "studio.timeline.trackHeader.hide")}
+          onClick={toggleHidden}
+        >
+          {track.hidden ? <IconHidden /> : <IconVisible />}
+        </button>
+
+        <IconButton
           ref={menuBtnRef}
           type="button"
           className={styles.menuBtn}
+          size="sm"
+          variant="ghost"
           aria-label={t("studio.timeline.trackHeader.menuAria")}
           aria-haspopup="menu"
           aria-expanded={menuPos !== null}
@@ -349,7 +367,7 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
           }}
         >
           <IconDots />
-        </button>
+        </IconButton>
       </div>
 
       {menuPos && createPortal(
@@ -367,28 +385,6 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
             {t("studio.timeline.trackHeader.addBelow")}
           </button>
           <hr className={styles.menuDivider} />
-          <button
-            type="button"
-            role="menuitemcheckbox"
-            className={styles.menuItem}
-            aria-checked={track.muted}
-            onClick={() => {
-              toggleMuted();
-              closeMenu();
-            }}
-          >
-            {track.muted ? (
-              <>
-                <IconUnmuted />
-                <span>{t("studio.timeline.trackHeader.unmute")}</span>
-              </>
-            ) : (
-              <>
-                <IconMuted />
-                <span>{t("studio.timeline.trackHeader.mute")}</span>
-              </>
-            )}
-          </button>
           {isAudioLane && (
             // dB lane gain. role="group" (not menuitem) so the slider keeps its
             // own a11y semantics inside the menu; kept open while dragging since
@@ -427,29 +423,6 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
               </span>
             </div>
           )}
-          <button
-            type="button"
-            role="menuitemcheckbox"
-            className={styles.menuItem}
-            aria-checked={track.hidden}
-            onClick={() => {
-              toggleHidden();
-              closeMenu();
-            }}
-          >
-            {track.hidden ? (
-              <>
-                <IconVisible />
-                <span>{t("studio.timeline.trackHeader.show")}</span>
-              </>
-            ) : (
-              <>
-                <IconHidden />
-                <span>{t("studio.timeline.trackHeader.hide")}</span>
-              </>
-            )}
-          </button>
-          <hr className={styles.menuDivider} />
           <button type="button" role="menuitem" className={styles.menuItem} onClick={handleRename}>
             {t("studio.timeline.trackHeader.rename")}
           </button>

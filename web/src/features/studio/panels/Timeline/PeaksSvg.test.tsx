@@ -41,7 +41,7 @@ describe("PeaksSvg", () => {
     const svg = container.querySelector('svg[aria-label="waveform"]')!;
     expect(svg.getAttribute("width")).toBe("160");
     expect(svg.getAttribute("height")).toBe("48");
-    expect(svg.getAttribute("viewBox")).toBe("0 0 1 100");
+    expect(svg.getAttribute("viewBox")).toBe("0 0 4 100");
   });
 
   it("renders a skeleton (no svg) when peaks is empty", () => {
@@ -62,5 +62,12 @@ describe("PeaksSvg", () => {
     expect(
       container.querySelector('[aria-label="waveform-loading"]'),
     ).not.toBeNull();
+  });
+
+  it("renders about one 3px bar plus 1px gap per 4px of width", () => {
+    const peaks = Array.from({ length: 128 }, (_, index) => (index + 1) / 128);
+    const { container } = render(<PeaksSvg peaks={peaks} width={160} height={48} />);
+    expect(container.querySelectorAll("rect")).toHaveLength(40);
+    expect(container.querySelector("rect")).toHaveAttribute("width", "3");
   });
 });

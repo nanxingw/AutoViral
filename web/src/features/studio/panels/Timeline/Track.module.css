@@ -1,0 +1,7 @@
+.row {
+  transition: border-color 200ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row { transition: none; }
+}

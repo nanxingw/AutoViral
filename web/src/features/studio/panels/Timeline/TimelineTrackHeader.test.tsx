@@ -274,26 +274,29 @@ describe("<TimelineTrackHeader /> — per-track volume (#79)", () => {
 });
 
 describe("<TimelineTrackHeader /> — visual state", () => {
-  it("renders the track label", () => {
+  it("uses the shared IconButton shell for the overflow trigger", () => {
+    render(<TimelineTrackHeader track={getTrack("audio")} fallbackLabel="Music" height={56} />);
+    expect(screen.getByRole("button", { name: /track options/i })).toHaveAttribute("data-icon-button");
+  });
+  it("renders a mono track-code badge beside the localized track name", () => {
     const track = getTrack("audio");
     render(<TimelineTrackHeader track={track} fallbackLabel="Music" height={56} />);
-    // Default seeded label is "A1"; fallback wins only when label is empty.
-    expect(screen.getByText(track.label)).toBeInTheDocument();
+    expect(screen.getByText("A1")).toBeInTheDocument();
+    expect(screen.getByText("BGM")).toBeInTheDocument();
   });
 
-  it("mute / hide live in the menu as menuitemcheckbox entries", async () => {
+  it("toggles mute and visibility from inline controls", async () => {
     const track = getTrack("audio");
     const user = userEvent.setup();
     render(<TimelineTrackHeader track={track} fallbackLabel="Music" height={56} />);
 
-    // Inline mute/hide buttons removed by 2026-05-25 redesign — they live
-    // inside the ⋯ menu now (Notion/Linear/Resolve convention). Open menu
-    // and assert both checkbox items render with aria-checked="false".
-    await user.click(screen.getByRole("button", { name: /track options/i }));
+    await user.click(screen.getByRole("button", { name: /^mute/i }));
+    await user.click(screen.getByRole("button", { name: /hide lane/i }));
 
-    const muteItem = await screen.findByRole("menuitemcheckbox", { name: /^mute/i });
-    expect(muteItem.getAttribute("aria-checked")).toBe("false");
-    const hideItem = await screen.findByRole("menuitemcheckbox", { name: /hide lane/i });
-    expect(hideItem.getAttribute("aria-checked")).toBe("false");
+    const updated = useComposition
+      .getState()
+      .comp!.tracks.find((candidate) => candidate.id === track.id)!;
+    expect(updated.muted).toBe(true);
+    expect(updated.hidden).toBe(true);
   });
 });

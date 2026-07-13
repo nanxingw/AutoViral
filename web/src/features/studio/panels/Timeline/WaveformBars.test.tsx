@@ -122,7 +122,8 @@ describe("WaveformBars", () => {
     );
     const svg = container.querySelector('[aria-label="waveform"]') as SVGElement;
     const rects = svg.querySelectorAll("rect");
-    expect(rects.length).toBe(52);
+    expect(rects.length).toBe(5);
+    expect(svg).toHaveAttribute("data-source-offset", "0.4");
   });
 
   it("returns the loading placeholder for a zero-duration clip", () => {

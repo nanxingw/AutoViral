@@ -1,0 +1,12 @@
+.filmstrip {
+  opacity: 0.82;
+  transition: opacity 200ms ease-out;
+}
+
+.filmstrip:hover {
+  opacity: 0.94;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .filmstrip { transition: none; }
+}
