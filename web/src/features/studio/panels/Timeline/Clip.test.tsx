@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { Clip } from "./Clip";
 import { useComposition } from "../../store";
 import { useComposerDraft } from "@/stores/composerDraft";
-import { makeEmptyComposition } from "../../types";
+import { makeEmptyComposition, type VideoClip } from "../../types";
 
 beforeEach(() => {
   const c = makeEmptyComposition({ workId: "w" });
@@ -131,6 +131,70 @@ describe("Clip", () => {
     );
     expect(getByTestId("resize-left")).toBeInTheDocument();
     expect(getByTestId("resize-right")).toBeInTheDocument();
+  });
+
+  it("exposes 10px trim hit areas with visible rails", () => {
+    const { getByTestId } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    expect(getByTestId("resize-left")).toHaveAttribute("data-hit-area", "10");
+    expect(getByTestId("resize-left")).toHaveAccessibleName("Trim clip start");
+    expect(getByTestId("resize-left").querySelector("[data-trim-rail]")).toBeInTheDocument();
+    expect(getByTestId("resize-right")).toHaveAttribute("data-hit-area", "10");
+    expect(getByTestId("resize-right")).toHaveAccessibleName("Trim clip end");
+  });
+
+  it("modifier-click unions and toggles timeline selection", () => {
+    const comp = useComposition.getState().comp!;
+    comp.tracks[0].clips.push({
+      ...(comp.tracks[0].clips[0] as VideoClip),
+      id: "v2",
+      trackOffset: 6,
+    } as VideoClip);
+    render(
+      <>
+        <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />
+        <Clip clipId="v2" pxPerSecond={50} trackKind="video" color="var(--accent)" />
+      </>,
+    );
+    const clips = document.querySelectorAll<HTMLElement>(".timeline-clip");
+    fireEvent.pointerDown(clips[0], { button: 0, pointerId: 1 });
+    fireEvent.pointerUp(window);
+    fireEvent.pointerDown(clips[1], { button: 0, pointerId: 2, shiftKey: true });
+    fireEvent.pointerUp(window);
+    expect(useComposition.getState().timelineSelection.ids).toEqual(["v1", "v2"]);
+
+    fireEvent.pointerDown(clips[0], { button: 0, pointerId: 4 });
+    expect(useComposition.getState().timelineSelection.ids).toEqual(["v1", "v2"]);
+    expect(useComposition.getState().dragState?.preview.size).toBe(2);
+    fireEvent.pointerUp(window);
+
+    fireEvent.pointerDown(clips[0], { button: 0, pointerId: 3, ctrlKey: true });
+    fireEvent.pointerUp(window);
+    expect(useComposition.getState().timelineSelection.ids).toEqual(["v2"]);
+    expect(useComposition.getState().selection).toBe("v2");
+  });
+
+  it("renders the full-source dashed ghost while trimming", () => {
+    useComposition.getState().comp!.assets.push({
+      id: "source",
+      uri: "x.mp4",
+      kind: "video",
+      metadata: { duration: 8 },
+      status: "ready",
+    });
+    const { getByTestId } = render(
+      <Clip clipId="v1" pxPerSecond={50} trackKind="video" color="var(--accent)" />,
+    );
+    fireEvent.pointerDown(getByTestId("resize-left"), {
+      button: 0,
+      clientX: 0,
+      pointerId: 7,
+    });
+    const ghost = getByTestId("source-ghost");
+    expect(ghost).toHaveStyle({ left: "50px", width: "400px" });
+    fireEvent.pointerUp(window);
+    expect(screen.queryByTestId("source-ghost")).not.toBeInTheDocument();
   });
 
   it("pointerdown on the right handle does NOT begin a body-drag (4.B regression)", () => {

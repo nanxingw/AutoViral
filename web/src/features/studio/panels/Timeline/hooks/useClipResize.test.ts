@@ -103,6 +103,80 @@ describe("useClipResize", () => {
     expect(result.current.isResizing).toBe(false);
   });
 
+  it("keeps the legacy single-selection trim path when multi-selection state is stale", () => {
+    useComposition.setState({
+      selection: "b",
+      timelineSelection: {
+        ids: ["a", "b"],
+        primaryId: "a",
+        anchorId: "a",
+      },
+    });
+    const { result } = renderHook(() =>
+      useClipResize({ clipId: "b", pxPerSecond: 50 }),
+    );
+
+    act(() => {
+      result.current.beginResize("right", 0);
+      result.current.dragResize(50);
+      result.current.endResize();
+    });
+
+    const b = useComposition
+      .getState()
+      .comp!.tracks[0].clips.find((clip) => clip.id === "b")! as {
+      out: number;
+    };
+    expect(b.out).toBeCloseTo(3);
+  });
+
+  it("allows trim only on the primary clip in a multi-selection", () => {
+    useComposition.getState().setTimelineSelection({
+      ids: ["a", "b"],
+      primaryId: "a",
+      anchorId: "a",
+    });
+    const { result } = renderHook(() =>
+      useClipResize({ clipId: "b", pxPerSecond: 50 }),
+    );
+
+    act(() => {
+      result.current.beginResize("right", 0);
+      result.current.dragResize(50);
+      result.current.endResize();
+    });
+
+    const b = useComposition
+      .getState()
+      .comp!.tracks[0].clips.find((clip) => clip.id === "b")! as {
+      out: number;
+    };
+    expect(b.out).toBeCloseTo(2);
+  });
+
+  it("keeps the source-time origin anchored during a left trim", () => {
+    useComposition.setState({
+      comp: makeCompositionWithClips([
+        makeVideoClip({ id: "a", trackOffset: 2, in: 1, out: 4 }),
+      ]),
+    });
+    const { result } = renderHook(() =>
+      useClipResize({ clipId: "a", pxPerSecond: 50 }),
+    );
+
+    act(() => {
+      result.current.beginResize("left", 0);
+      result.current.dragResize(50);
+      result.current.endResize();
+    });
+
+    const a = useComposition.getState().comp!.tracks[0].clips[0] as {
+      trackOffset: number;
+      in: number;
+    };
+    expect(a.trackOffset - a.in).toBeCloseTo(1);
+  });
+
   it("right-edge drag is capped by next clip's start (D2 via store)", () => {
     const { result } = renderHook(() =>
       useClipResize({ clipId: "a", pxPerSecond: 50 }),
@@ -161,5 +235,83 @@ describe("useClipResize", () => {
       .comp!.tracks[0].clips.find((c) => c.id === "a")! as { out: number };
     expect(after.out).toBeCloseTo(2);
     expect(result.current.isResizing).toBe(false);
+  });
+
+  it("enforces a 0.1s minimum visible duration", () => {
+    const { result } = renderHook(() =>
+      useClipResize({ clipId: "a", pxPerSecond: 50 }),
+    );
+    act(() => {
+      result.current.beginResize("right", 0);
+      result.current.dragResize(-1000);
+      result.current.endResize();
+    });
+    const a = useComposition
+      .getState()
+      .comp!.tracks[0].clips.find((c) => c.id === "a")! as {
+      in: number;
+      out: number;
+    };
+    expect(a.out - a.in).toBeCloseTo(0.1);
+  });
+
+  it("caps a right trim at the source asset duration", () => {
+    const clip = makeVideoClip({
+      id: "source-bounded",
+      src: "assets/clips/source.mp4",
+      trackOffset: 1,
+      in: 0.5,
+      out: 2,
+    });
+    const comp = makeCompositionWithClips([clip]);
+    comp.assets.push({
+      id: "asset-source",
+      uri: "assets/clips/source.mp4",
+      kind: "video",
+      metadata: { duration: 3 },
+      status: "ready",
+    });
+    useComposition.setState({ comp });
+
+    const { result } = renderHook(() =>
+      useClipResize({ clipId: "source-bounded", pxPerSecond: 50 }),
+    );
+    act(() => {
+      result.current.beginResize("right", 0);
+      result.current.dragResize(1000);
+      result.current.endResize();
+    });
+    const after = useComposition.getState().comp!.tracks[0].clips[0] as {
+      out: number;
+    };
+    expect(after.out).toBeCloseTo(3);
+  });
+
+  it("exposes the full source ghost bounds only while trimming", () => {
+    const clip = makeVideoClip({
+      id: "ghost",
+      src: "assets/clips/source.mp4",
+      trackOffset: 4,
+      in: 1,
+      out: 3,
+    });
+    const comp = makeCompositionWithClips([clip]);
+    comp.assets.push({
+      id: "asset-source",
+      uri: "assets/clips/source.mp4",
+      kind: "video",
+      metadata: { duration: 8 },
+      status: "ready",
+    });
+    useComposition.setState({ comp });
+
+    const { result } = renderHook(() =>
+      useClipResize({ clipId: "ghost", pxPerSecond: 50 }),
+    );
+    expect(result.current.sourceGhost).toBeNull();
+    act(() => result.current.beginResize("left", 0));
+    expect(result.current.sourceGhost).toEqual({ startSec: 3, endSec: 11 });
+    act(() => result.current.endResize());
+    expect(result.current.sourceGhost).toBeNull();
   });
 });

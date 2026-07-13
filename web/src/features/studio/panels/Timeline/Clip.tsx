@@ -7,6 +7,11 @@ import { describeClip } from "@/features/chat/describeElement";
 import { resolveDragTargetTrack } from "./dnd";
 import { useT } from "@/i18n/useT";
 import styles from "./Clip.module.css";
+import {
+  replaceTimelineSelection,
+  toggleTimelineSelection,
+  unionTimelineSelection,
+} from "./selectionMath";
 
 export function Clip({
   clipId,
@@ -23,6 +28,7 @@ export function Clip({
     s.comp?.tracks.flatMap((t) => t.clips).find((c) => c.id === clipId),
   );
   const selection = useComposition((s) => s.selection);
+  const timelineSelection = useComposition((s) => s.timelineSelection);
   const setSelection = useComposition((s) => s.setSelection);
   const dragState = useComposition((s) => s.dragState);
   const beginDrag = useComposition((s) => s.beginDrag);
@@ -50,7 +56,11 @@ export function Clip({
   const renderedOffset = previewStart ?? clip.trackOffset;
   const left = renderedOffset * pxPerSecond;
   const width = dur * pxPerSecond;
-  const isSelected = selection === clipId;
+  const effectiveTimelineSelection =
+    timelineSelection.primaryId === selection
+      ? timelineSelection
+      : replaceTimelineSelection(selection);
+  const isSelected = effectiveTimelineSelection.ids.includes(clipId);
   const isDragging = dragState?.preview.has(clipId) ?? false;
   const presentationState = isDragging
     ? "dragging"
@@ -74,7 +84,29 @@ export function Clip({
     // off the body-drag pipeline and move the clip.
     if (e.button !== 0) return;
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
-    setSelection(clipId);
+    const store = useComposition.getState();
+    if (e.metaKey || e.ctrlKey) {
+      store.setTimelineSelection(
+        toggleTimelineSelection(effectiveTimelineSelection, clipId),
+      );
+    } else if (e.shiftKey) {
+      store.setTimelineSelection(
+        unionTimelineSelection(effectiveTimelineSelection, [clipId], clipId),
+      );
+    } else if (
+      effectiveTimelineSelection.ids.length > 1 &&
+      effectiveTimelineSelection.ids.includes(clipId)
+    ) {
+      // Pointer-down on any member of an existing group keeps the group
+      // intact and promotes the grabbed member to primary. beginDrag below
+      // can then build one relative-offset preview for the entire selection.
+      store.setTimelineSelection({
+        ...effectiveTimelineSelection,
+        primaryId: clipId,
+      });
+    } else {
+      setSelection(clipId);
+    }
     beginDrag(clipId);
     const startX = e.clientX;
     const startOffset = clip.trackOffset;
@@ -136,6 +168,7 @@ export function Clip({
   // (4.B) from also firing on edge pointerdown. Window-level listeners live
   // for the duration of one drag and are torn down on pointerup/cancel.
   const onHandleDown = (edge: "left" | "right") => (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
     e.stopPropagation();
     (e.currentTarget as HTMLElement).setPointerCapture?.(e.pointerId);
     resize.beginResize(edge, e.clientX);
@@ -177,6 +210,7 @@ export function Clip({
     <>
     <div
       className={`timeline-clip ${clip.kind} ${styles.clip}`}
+      data-clip-id={clipId}
       data-kind={trackKind}
       data-state={presentationState}
       tabIndex={0}
@@ -217,15 +251,36 @@ export function Clip({
           asset DnD still rides native HTML5 DnD via dnd.ts (unchanged). */}
       <div
         data-testid="resize-left"
+        data-hit-area="10"
+        aria-label={t("studio.timeline.trimLeftAria")}
         className={`${styles.resizeHandle} ${styles.resizeLeft}`}
         onPointerDown={onHandleDown("left")}
-      />
+      >
+        <span data-trim-rail aria-hidden="true" className={styles.trimRail} />
+      </div>
       <div
         data-testid="resize-right"
+        data-hit-area="10"
+        aria-label={t("studio.timeline.trimRightAria")}
         className={`${styles.resizeHandle} ${styles.resizeRight}`}
         onPointerDown={onHandleDown("right")}
-      />
+      >
+        <span data-trim-rail aria-hidden="true" className={styles.trimRail} />
+      </div>
     </div>
+      {resize.sourceGhost && (
+        <div
+          data-testid="source-ghost"
+          aria-hidden="true"
+          className={styles.sourceGhost}
+          style={{
+            left: resize.sourceGhost.startSec * pxPerSecond,
+            width:
+              (resize.sourceGhost.endSec - resize.sourceGhost.startSec) *
+              pxPerSecond,
+          }}
+        />
+      )}
       {menuPos && (
         <ContextMenu
           x={menuPos.x}

@@ -158,16 +158,45 @@
   z-index: 5;
   top: 0;
   bottom: 0;
-  width: 8px;
+  display: grid;
+  width: 10px;
+  place-items: center;
   cursor: ew-resize;
 }
 
 .resizeLeft {
-  left: -4px;
+  left: 0;
 }
 
 .resizeRight {
-  right: -4px;
+  right: 0;
+}
+
+.trimRail {
+  width: 2px;
+  height: 100%;
+  background: transparent;
+  transition: background 120ms ease-out;
+}
+
+.resizeHandle:hover .trimRail {
+  background: color-mix(in srgb, var(--clip-kind) 40%, transparent);
+}
+
+.clip[data-state="selected"] .trimRail,
+.clip[data-state="dragging"] .trimRail {
+  background: var(--accent);
+}
+
+.sourceGhost {
+  position: absolute;
+  z-index: 4;
+  top: 4px;
+  bottom: 4px;
+  box-sizing: border-box;
+  border: 1px dashed var(--accent-lo);
+  border-radius: var(--radius-sm);
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

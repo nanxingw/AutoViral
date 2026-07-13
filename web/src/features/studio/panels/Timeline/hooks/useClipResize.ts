@@ -20,12 +20,9 @@
 //   only commits a single trim command on mouseup; we mutate live, so
 //   Escape needs an explicit revert (pneuma lines 217-237 emit the
 //   commit; AutoViral inverts to a per-move dispatch + revert).
-// - Pneuma additionally clamps right-edge outPoint to `assetDuration`
-//   (pneuma:148,188). AutoViral's Clip schema has no source-duration
-//   field today, so this upper bound is silently dropped — the only
-//   cap on the right edge is the next clip's start (D2). TODO: once
-//   Clip carries `assetDuration` (asset metadata schema work), add
-//   `Math.min(cap, assetDuration)` inside resizeClip.
+// - Source duration comes from the composition asset registry
+//   (`clip.src` ↔ `asset.uri`). It caps the right edge and defines the
+//   complete-source ghost shown during a trim.
 //
 // The hook is pointer-event source-agnostic: it exposes
 // `beginResize / dragResize / endResize / cancelResize` as imperative
@@ -41,12 +38,24 @@ import {
   clipDuration,
   snapToleranceSeconds,
 } from "@autoviral/timeline";
+import { replaceTimelineSelection } from "../selectionMath";
 
 interface ResizeStart {
   edge: "left" | "right";
   startClientX: number;
   /** Original timeline-time of the moving edge — also the revert target. */
   anchorTime: number;
+  originalStart: number;
+  originalIn: number;
+  originalOut: number;
+  hasSourceWindow: boolean;
+  assetDuration: number;
+  sourceGhost: SourceGhostBounds | null;
+}
+
+export interface SourceGhostBounds {
+  startSec: number;
+  endSec: number;
 }
 
 export interface UseClipResize {
@@ -55,6 +64,47 @@ export interface UseClipResize {
   dragResize: (clientX: number) => void;
   endResize: () => void;
   cancelResize: () => void;
+  sourceGhost: SourceGhostBounds | null;
+}
+
+const MIN_TRIM_DURATION = 0.1;
+
+function comparableAssetPath(path: string): string {
+  return path.replace(/^\.\//, "").replace(/^\//, "");
+}
+
+function sourceDurationForClip(
+  state: ReturnType<typeof useComposition.getState>,
+  src: string,
+): number {
+  const comparableSrc = comparableAssetPath(src);
+  const duration = state.comp?.assets.find(
+    (asset) => comparableAssetPath(asset.uri) === comparableSrc,
+  )?.metadata.duration;
+  return typeof duration === "number" && Number.isFinite(duration) && duration > 0
+    ? duration
+    : Infinity;
+}
+
+function clampResizeTime(
+  start: ResizeStart,
+  desiredTimelineTime: number,
+): number {
+  if (start.edge === "left") {
+    const sourceStartOnTimeline = start.originalStart - start.originalIn;
+    const minTimelineTime = start.hasSourceWindow
+      ? Math.max(0, sourceStartOnTimeline)
+      : 0;
+    const maxTimelineTime =
+      start.originalStart +
+      (start.originalOut - MIN_TRIM_DURATION - start.originalIn);
+    return Math.min(maxTimelineTime, Math.max(minTimelineTime, desiredTimelineTime));
+  }
+  const minTimelineTime = start.originalStart + MIN_TRIM_DURATION;
+  const maxTimelineTime = Number.isFinite(start.assetDuration)
+    ? start.originalStart + (start.assetDuration - start.originalIn)
+    : Infinity;
+  return Math.min(maxTimelineTime, Math.max(minTimelineTime, desiredTimelineTime));
 }
 
 export function useClipResize({
@@ -74,11 +124,46 @@ export function useClipResize({
         .flatMap((t) => t.clips)
         .find((c) => c.id === clipId);
       if (!clip) return;
+      const effectiveTimelineSelection =
+        state.timelineSelection.primaryId === state.selection
+          ? state.timelineSelection
+          : replaceTimelineSelection(state.selection);
+      if (
+        effectiveTimelineSelection.ids.length > 1 &&
+        effectiveTimelineSelection.primaryId !== clipId
+      ) {
+        return;
+      }
       const anchorTime =
         edge === "left"
           ? clip.trackOffset
           : clip.trackOffset + clipDuration(clip);
-      startRef.current = { edge, startClientX: clientX, anchorTime };
+      const hasSourceWindow = clip.kind === "video" || clip.kind === "audio";
+      const originalIn = hasSourceWindow ? clip.in : 0;
+      const originalOut = hasSourceWindow
+        ? clip.out
+        : clipDuration(clip);
+      const assetDuration = hasSourceWindow
+        ? sourceDurationForClip(state, clip.src)
+        : Infinity;
+      const sourceGhost =
+        hasSourceWindow && Number.isFinite(assetDuration)
+          ? {
+              startSec: clip.trackOffset - originalIn,
+              endSec: clip.trackOffset - originalIn + assetDuration,
+            }
+          : null;
+      startRef.current = {
+        edge,
+        startClientX: clientX,
+        anchorTime,
+        originalStart: clip.trackOffset,
+        originalIn,
+        originalOut,
+        hasSourceWindow,
+        assetDuration,
+        sourceGhost,
+      };
       setIsResizing(true);
     },
     [clipId],
@@ -93,7 +178,7 @@ export function useClipResize({
       if (!state.comp) return;
       const dx = clientX - start.startClientX;
       const dt = dx / pxPerSecond;
-      const candidate = start.anchorTime + dt;
+      const candidate = clampResizeTime(start, start.anchorTime + dt);
       const fps = state.comp.fps || 30;
       const playhead = state.currentFrame / fps;
       const points = collectSnapPoints(
@@ -107,8 +192,13 @@ export function useClipResize({
         points,
         snapToleranceSeconds(pxPerSecond),
       );
-      state.resizeClip(clipId, start.edge, snap.time);
-      state.setSnapGuide(snap.snappedTo);
+      const resizedTime = clampResizeTime(start, snap.time);
+      state.resizeClip(clipId, start.edge, resizedTime);
+      state.setSnapGuide(
+        snap.snappedTo != null && Math.abs(resizedTime - snap.snappedTo) < 1e-6
+          ? snap.snappedTo
+          : null,
+      );
     },
     [clipId, pxPerSecond],
   );
@@ -134,5 +224,12 @@ export function useClipResize({
     setIsResizing(false);
   }, [clipId]);
 
-  return { isResizing, beginResize, dragResize, endResize, cancelResize };
+  return {
+    isResizing,
+    beginResize,
+    dragResize,
+    endResize,
+    cancelResize,
+    sourceGhost: isResizing ? startRef.current?.sourceGhost ?? null : null,
+  };
 }

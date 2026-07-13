@@ -34,6 +34,13 @@ import { collapseGapsOnTrack } from "./panels/Timeline/toolbar/collapseGaps";
 import { useToastStore } from "@/stores/toast";
 import { MESSAGES } from "@/i18n/messages";
 import { useLocaleStore } from "@/i18n/store";
+import {
+  clearTimelineSelection,
+  computeGroupMoveOffsets,
+  reconcileTimelineSelection,
+  replaceTimelineSelection,
+  type TimelineSelection,
+} from "./panels/Timeline/selectionMath";
 
 // Phase 4.B — `dragState.preview` is a Map; immer needs the MapSet plugin
 // enabled at module load to draft map mutations under produce().
@@ -104,6 +111,7 @@ export type AddTrackOpts = {
 interface CompState {
   comp: Composition | null;
   selection: string | null;
+  timelineSelection: TimelineSelection;
   currentFrame: number;
   // S1 (PRD-0013) — the store→Player seek bridge. A user *seek intent*
   // (Playhead drag / Ruler click / J-L / terminal ui-seek / Chat locator /
@@ -147,6 +155,9 @@ interface CompState {
   setBladeMode: (on: boolean) => void;
   splitClip: (clipId: string, atSec: number) => void;
   setSelection: (id: string | null) => void;
+  setTimelineSelection: (selection: TimelineSelection) => void;
+  clearTimelineSelection: () => void;
+  removeTimelineSelection: () => void;
   setFrame: (f: number) => void;
   // S1 (PRD-0013) — user seek intent: clamps (same rule as setFrame) then
   // publishes pendingSeek so PreviewPanel imperatively seeks the Player.
@@ -289,6 +300,7 @@ export const useComposition = create<CompState>()(
   immer((set) => ({
     comp: null,
     selection: null,
+    timelineSelection: clearTimelineSelection(),
     currentFrame: 0,
     pendingSeek: null,
     isPlaying: false,
@@ -557,6 +569,7 @@ export const useComposition = create<CompState>()(
           0,
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
         );
+        reconcileSelection(s);
       }),
     // ─── Phase 4.C — ripple-delete + collapse-gaps ───────────────────────
     // Both delegate to pure-track helpers under
@@ -583,6 +596,7 @@ export const useComposition = create<CompState>()(
           0,
           ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
         );
+        reconcileSelection(s);
       }),
     collapseGaps: (trackId) =>
       set((s) => {
@@ -954,6 +968,56 @@ export const useComposition = create<CompState>()(
     setSelection: (id) =>
       set((s) => {
         s.selection = id;
+        s.timelineSelection = replaceTimelineSelection(id);
+      }),
+    setTimelineSelection: (nextSelection) =>
+      set((s) => {
+        const allowed = new Set(nextSelection.ids);
+        const reconciled = reconcileTimelineSelection(nextSelection, allowed);
+        s.timelineSelection = reconciled;
+        s.selection = reconciled.primaryId;
+      }),
+    clearTimelineSelection: () =>
+      set((s) => {
+        s.timelineSelection = clearTimelineSelection();
+        s.selection = null;
+      }),
+    removeTimelineSelection: () =>
+      set((s) => {
+        if (!s.comp || s.timelineSelection.ids.length === 0) return;
+        const selectedIds = new Set(s.timelineSelection.ids);
+        const exists = s.comp.tracks.some((track) =>
+          (track.clips as Clip[]).some((clip) => selectedIds.has(clip.id)),
+        );
+        if (!exists) {
+          s.timelineSelection = clearTimelineSelection();
+          s.selection = null;
+          return;
+        }
+        pushClipHistory(s);
+        for (const track of s.comp.tracks) {
+          track.clips = (track.clips as Clip[]).filter(
+            (clip) => !selectedIds.has(clip.id),
+          ) as typeof track.clips;
+          if (track.transitions?.length) {
+            const clips = track.clips as Clip[];
+            const survivingIds = new Set(clips.map((clip) => clip.id));
+            const newLastClipId = clips[clips.length - 1]?.id;
+            track.transitions = track.transitions.filter(
+              (transition) =>
+                survivingIds.has(transition.afterClipId) &&
+                transition.afterClipId !== newLastClipId,
+            );
+          }
+        }
+        s.comp.duration = Math.max(
+          0,
+          ...s.comp.tracks.flatMap((track) =>
+            (track.clips as Clip[]).map(clipEnd),
+          ),
+        );
+        s.timelineSelection = clearTimelineSelection();
+        s.selection = null;
       }),
     setFrame: (f) =>
       set((s) => {
@@ -1026,11 +1090,21 @@ export const useComposition = create<CompState>()(
         const all = s.comp.tracks.flatMap((t) => t.clips as Clip[]);
         const clip = all.find((c) => c.id === clipId);
         if (!clip) return;
+        const selectedIds =
+          s.timelineSelection.primaryId === s.selection &&
+          s.timelineSelection.ids.includes(clipId)
+            ? new Set(s.timelineSelection.ids)
+            : new Set([clipId]);
+        const preview = new Map(
+          all
+            .filter((candidate) => selectedIds.has(candidate.id))
+            .map((candidate) => [candidate.id, candidate.trackOffset]),
+        );
         s.dragState = {
           clipId,
           originalStart: clip.trackOffset,
           candidateStart: clip.trackOffset,
-          preview: new Map([[clipId, clip.trackOffset]]),
+          preview,
           snapTime: null,
           targetTrackId: null,
         };
@@ -1059,6 +1133,26 @@ export const useComposition = create<CompState>()(
       set((s) => {
         if (!s.comp || !s.dragState) return;
         const draggedId = s.dragState.clipId;
+        if (s.dragState.preview.size > 1) {
+          const selectedIds = new Set(s.dragState.preview.keys());
+          const items = s.comp.tracks.flatMap((track) =>
+            (track.clips as Clip[])
+              .filter((clip) => selectedIds.has(clip.id))
+              .map((clip) => ({
+                id: clip.id,
+                trackId: track.id,
+                start: clip.trackOffset,
+              })),
+          );
+          s.dragState.candidateStart = candidateStart;
+          s.dragState.preview = computeGroupMoveOffsets(
+            items,
+            draggedId,
+            candidateStart,
+          );
+          s.dragState.snapTime = null;
+          return;
+        }
         // Ripple stays within the dragged clip's own track — cross-track
         // clips are visible via collectSnapPoints (for snap lines) but never
         // get pushed by the cascade.
@@ -1371,10 +1465,21 @@ function pushClipHistory(s: {
 // removeClip). A dangling selection makes the Inspector / handles read a clip
 // that isn't there. Drop it to null when it no longer resolves; leave a valid
 // selection untouched.
-function reconcileSelection(s: { comp: Composition | null; selection: string | null }) {
-  if (!s.comp || s.selection == null) return;
-  const stillExists = s.comp.tracks.some((t) =>
-    (t.clips as Clip[]).some((c) => c.id === s.selection),
+function reconcileSelection(s: {
+  comp: Composition | null;
+  selection: string | null;
+  timelineSelection: TimelineSelection;
+}) {
+  const existingIds = new Set(
+    s.comp?.tracks.flatMap((track) =>
+      (track.clips as Clip[]).map((clip) => clip.id),
+    ) ?? [],
   );
-  if (!stillExists) s.selection = null;
+  const current =
+    s.timelineSelection.primaryId === s.selection
+      ? s.timelineSelection
+      : replaceTimelineSelection(s.selection);
+  const reconciled = reconcileTimelineSelection(current, existingIds);
+  s.timelineSelection = reconciled;
+  s.selection = reconciled.primaryId;
 }

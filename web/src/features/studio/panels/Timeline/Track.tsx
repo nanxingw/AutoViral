@@ -89,7 +89,16 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
     (s) => s.dragState?.targetTrackId === track.id,
   );
   const selection = useComposition((s) => s.selection);
-  const isSelectedRow = track.clips.some((clip) => clip.id === selection);
+  const timelineSelection = useComposition((s) => s.timelineSelection);
+  const selectedIds =
+    timelineSelection.primaryId === selection
+      ? timelineSelection.ids
+      : selection
+        ? [selection]
+        : [];
+  const isSelectedRow = track.clips.some((clip) =>
+    selectedIds.includes(clip.id),
+  );
 
   // Read the dragged payload, compute the snapped drop time, and update the
   // hover preview. Shared by dragenter/dragover so the indicator tracks the
@@ -389,7 +398,7 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
                   clip={c}
                   pxPerSecond={pxPerSecond}
                   height={height - 8}
-                  selected={selection === c.id}
+                  selected={selectedIds.includes(c.id)}
                 />
               </div>
             ) : null,

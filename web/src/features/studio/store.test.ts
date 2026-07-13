@@ -91,8 +91,120 @@ describe("useComposition store", () => {
   it("selection set/clear", () => {
     useComposition.getState().setSelection("v1");
     expect(useComposition.getState().selection).toBe("v1");
+    expect(useComposition.getState().timelineSelection).toEqual({
+      ids: ["v1"],
+      primaryId: "v1",
+      anchorId: "v1",
+    });
     useComposition.getState().setSelection(null);
     expect(useComposition.getState().selection).toBeNull();
+    expect(useComposition.getState().timelineSelection).toEqual({
+      ids: [],
+      primaryId: null,
+      anchorId: null,
+    });
+  });
+
+  it("keeps the legacy selection equal to a multi-selection's primary", () => {
+    useComposition.getState().setTimelineSelection({
+      ids: ["v1", "v2"],
+      primaryId: "v2",
+      anchorId: "v1",
+    });
+    expect(useComposition.getState().selection).toBe("v2");
+    expect(useComposition.getState().timelineSelection.primaryId).toBe(
+      useComposition.getState().selection,
+    );
+  });
+
+  it("preserves the legacy selection behavior when a composition is loaded", () => {
+    useComposition.getState().setSelection("legacy-primary");
+    useComposition
+      .getState()
+      .loadComposition(makeEmptyComposition({ workId: "next-work" }));
+    expect(useComposition.getState().selection).toBe("legacy-primary");
+    expect(useComposition.getState().timelineSelection.primaryId).toBe(
+      "legacy-primary",
+    );
+  });
+
+  it("moves a selected group with every relative offset intact", () => {
+    const c = makeEmptyComposition({ workId: "group-move" });
+    const track = c.tracks.find((candidate) => candidate.kind === "video")!;
+    const first = VideoClipSchema.parse({
+      id: "g1",
+      kind: "video",
+      src: "/g1.mp4",
+      in: 0,
+      out: 1,
+      trackOffset: 2,
+      fitMode: "cover",
+      transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+      filters: { brightness: 0, contrast: 0, saturation: 0 },
+    });
+    const second = VideoClipSchema.parse({
+      ...first,
+      id: "g2",
+      src: "/g2.mp4",
+      trackOffset: 5.5,
+    });
+    (track.clips as VideoClip[]).push(first, second);
+    c.duration = 6.5;
+    useComposition.getState().loadComposition(c);
+    useComposition.getState().setTimelineSelection({
+      ids: ["g1", "g2"],
+      primaryId: "g1",
+      anchorId: "g1",
+    });
+
+    useComposition.getState().beginDrag("g1");
+    useComposition.getState().updateDragCandidate(10);
+    expect(Object.fromEntries(useComposition.getState().dragState!.preview)).toEqual({
+      g1: 10,
+      g2: 13.5,
+    });
+    useComposition.getState().commitDrag();
+    expect(
+      useComposition
+        .getState()
+        .comp!.tracks.find((candidate) => candidate.id === track.id)!
+        .clips.map((clip) => clip.trackOffset),
+    ).toEqual([10, 13.5]);
+  });
+
+  it("removes all selected clips and clears both selection surfaces", () => {
+    const c = makeEmptyComposition({ workId: "group-delete" });
+    const track = c.tracks.find((candidate) => candidate.kind === "video")!;
+    const first = VideoClipSchema.parse({
+      id: "d1",
+      kind: "video",
+      src: "/d1.mp4",
+      in: 0,
+      out: 1,
+      trackOffset: 0,
+      fitMode: "cover",
+      transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+      filters: { brightness: 0, contrast: 0, saturation: 0 },
+    });
+    (track.clips as VideoClip[]).push(first, {
+      ...first,
+      id: "d2",
+      trackOffset: 2,
+    });
+    useComposition.getState().loadComposition(c);
+    useComposition.getState().setTimelineSelection({
+      ids: ["d1", "d2"],
+      primaryId: "d1",
+      anchorId: "d1",
+    });
+    useComposition.getState().removeTimelineSelection();
+    expect(
+      useComposition
+        .getState()
+        .comp!.tracks.find((candidate) => candidate.id === track.id)!.clips,
+    ).toEqual([]);
+    expect(useComposition.getState().selection).toBeNull();
+    expect(useComposition.getState().timelineSelection.ids).toEqual([]);
   });
 });
 

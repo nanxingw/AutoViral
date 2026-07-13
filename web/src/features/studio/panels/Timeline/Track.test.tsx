@@ -114,6 +114,19 @@ describe("Track (dnd-kit)", () => {
     expect(row.getAttribute("style")).toContain("border-left-color: var(--accent)");
   });
 
+  it("marks every row containing any member of a cross-track selection", () => {
+    const videoTrack = useComposition.getState().comp!.tracks.find((t) => t.kind === "video")!;
+    useComposition.getState().setTimelineSelection({
+      ids: ["audio-1", "a"],
+      primaryId: "audio-1",
+      anchorId: "audio-1",
+    });
+    const { container } = render(
+      <Track track={videoTrack} pxPerSecond={50} totalWidth={800} color="blue" label="Video" />,
+    );
+    expect(container.querySelector('[data-selected-row="true"]')).toBeInTheDocument();
+  });
+
   it("renders all clips in order", () => {
     const comp = useComposition.getState().comp!;
     const { container } = render(

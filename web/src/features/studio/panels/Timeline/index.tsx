@@ -19,6 +19,7 @@ import {
   resolveDropTime,
 } from "./dnd";
 import { useBeatSnap } from "../../hooks/useBeatSnap";
+import { MarqueeSelection } from "./MarqueeSelection";
 
 function formatSnapTime(time: number): string {
   const totalHundredths = Math.round(Math.max(0, time) * 100);
@@ -307,6 +308,7 @@ export function Timeline() {
         >
           {/* Ruler */}
           <Ruler duration={comp.duration} pxPerSecond={pxPerSecond} totalWidth={totalWidth} fps={comp.fps} />
+          <MarqueeSelection containerRef={scrollRef} />
           {/* Tracks — Phase F (issue #33). Sort by displayOrder so the visual
               order tracks the schema invariant; render TimelineTrackHeader
               as a sibling of Track (sitting in the same 110px sticky-left
