@@ -1,4 +1,10 @@
-import type { Keyframe, KeyframeEasing, KeyframeProperty } from "./composition.js";
+import type {
+  CubicBezierEasing,
+  Keyframe,
+  KeyframeEasing,
+  KeyframeProperty,
+} from "./composition.js";
+import { DISCRETE_KEYFRAME_EASINGS } from "./composition.js";
 
 /** Time-equality tolerance for dedup at the same (property, time). ~one-quarter of a 60 fps frame. */
 export const KEYFRAME_TIME_EPSILON = 1e-4;
@@ -57,7 +63,107 @@ function bezier(
   return sampleCurveY(t);
 }
 
+// PRD-0014 S12 — a KeyframeEasing is EITHER a discrete preset string OR a custom
+// cubic-bezier object. This guard narrows the union so `applyEasing` (and any
+// consumer) can branch. `null`/`undefined` are not easings.
+export function isCubicBezierEasing(
+  e: KeyframeEasing | undefined | null,
+): e is CubicBezierEasing {
+  return (
+    typeof e === "object" &&
+    e !== null &&
+    (e as CubicBezierEasing).type === "cubic-bezier"
+  );
+}
+
+/**
+ * Validate a cubic-bezier control-point tuple `[x1,y1,x2,y2]`. The x control
+ * points must be finite ∈ [0,1] (a timing function must be single-valued in x);
+ * y is finite but unbounded (overshoot / bounce curves are allowed).
+ */
+export function isValidBezierPoints(p: unknown): p is [number, number, number, number] {
+  if (!Array.isArray(p) || p.length !== 4) return false;
+  const [x1, y1, x2, y2] = p as unknown[];
+  const finite = [x1, y1, x2, y2].every(
+    (n) => typeof n === "number" && Number.isFinite(n),
+  );
+  if (!finite) return false;
+  return (
+    (x1 as number) >= 0 &&
+    (x1 as number) <= 1 &&
+    (x2 as number) >= 0 &&
+    (x2 as number) <= 1
+  );
+}
+
+/**
+ * Is `e` a well-formed KeyframeEasing? True for a discrete preset name or a
+ * `{type:"cubic-bezier", p:[x1,y1,x2,y2]}` object with in-range x control points.
+ * The shared validity gate the ops layer consults (so the CLI / bridge chokepoint
+ * rejects a bad easing without a full `CompositionSchema.parse`).
+ */
+export function isValidKeyframeEasing(e: unknown): e is KeyframeEasing {
+  // Reference the discrete list lazily (inside the call, not at module init) to
+  // dodge the keyframes.ts ↔ composition.ts import cycle: at module-eval time
+  // `DISCRETE_KEYFRAME_EASINGS` can still be in its TDZ. `.includes` on a
+  // 4-element array is negligible.
+  if (typeof e === "string") {
+    return (DISCRETE_KEYFRAME_EASINGS as readonly string[]).includes(e);
+  }
+  if (e && typeof e === "object") {
+    const o = e as { type?: unknown; p?: unknown };
+    return o.type === "cubic-bezier" && isValidBezierPoints(o.p);
+  }
+  return false;
+}
+
+/**
+ * Parse an easing SPEC (from the CLI `--easing` flag or the bridge wire) into a
+ * canonical `KeyframeEasing`. Accepts:
+ *   - a discrete preset name string (linear/easeIn/easeOut/easeInOut) → returned
+ *     verbatim (the op validates the name against the enum),
+ *   - a CSS-style string `cubic-bezier(x1,y1,x2,y2)` → `{type:"cubic-bezier",p}`,
+ *   - an already-structured `{type:"cubic-bezier",p:[…]}` object → validated.
+ * Throws `Error` on malformed cubic-bezier syntax or an out-of-range x control
+ * point (the caller maps this to a 4xx / exit-4). A plain unknown discrete name
+ * is returned as-is so the op owns the "not a real preset" rejection message.
+ */
+export function parseEasingSpec(raw: unknown): KeyframeEasing {
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    const o = raw as { type?: unknown; p?: unknown };
+    if (o.type === "cubic-bezier") {
+      const p = Array.isArray(o.p) ? o.p.map(Number) : [];
+      if (!isValidBezierPoints(p)) {
+        throw new Error(
+          `invalid cubic-bezier easing points ${JSON.stringify(o.p)} (need [x1,y1,x2,y2] with x1,x2 in [0,1])`,
+        );
+      }
+      return { type: "cubic-bezier", p };
+    }
+    throw new Error(`invalid easing object ${JSON.stringify(raw)}`);
+  }
+  if (typeof raw === "string") {
+    const s = raw.trim();
+    const m = /^cubic-bezier\(\s*([^)]*)\)$/i.exec(s);
+    if (m) {
+      const nums = m[1].split(",").map((x) => Number(x.trim()));
+      if (!isValidBezierPoints(nums)) {
+        throw new Error(
+          `invalid cubic-bezier easing "${s}" (need 4 numbers with x1,x2 in [0,1])`,
+        );
+      }
+      return { type: "cubic-bezier", p: nums };
+    }
+    // A discrete preset name — return verbatim; the op validates it.
+    return s as KeyframeEasing;
+  }
+  throw new Error(`invalid easing ${String(raw)}`);
+}
+
 function applyEasing(easing: KeyframeEasing, t: number): number {
+  if (isCubicBezierEasing(easing)) {
+    return bezier(easing.p[0], easing.p[1], easing.p[2], easing.p[3], t);
+  }
   switch (easing) {
     case "linear":
       return t;

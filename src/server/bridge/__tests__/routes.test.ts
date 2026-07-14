@@ -1241,6 +1241,70 @@ describe("bridge router — Phase 3 clip writes", () => {
     expect(kf?.easing).toBe("easeOut");
   });
 
+  // PRD-0014 S12 — the bridge parses a `cubic-bezier(x1,y1,x2,y2)` string (the
+  // CLI `--easing` form) into the structured `{type:'cubic-bezier',p:[...]}` the
+  // op stores. Discrete names still round-trip; an out-of-range x is a 400+code4.
+  it("POST /clip/:id/keyframe parses a cubic-bezier(...) easing string into the structured form", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/keyframe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      // atSec within vc_s01's [0,2] span — earlier split/trim tests shrank it.
+      body: JSON.stringify({ property: "scale", atSec: 1.5, value: 2, easing: "cubic-bezier(0.4,0,0.2,1)" }),
+    });
+    expect(res.status).toBe(200);
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: {
+        tracks: Array<{
+          clips: Array<{
+            id: string;
+            keyframes?: Array<{ property: string; time: number; value: number; easing: unknown }>;
+          }>;
+        }>;
+      };
+    };
+    const clip = compBody.result.tracks.flatMap((t) => t.clips).find((c) => c.id === "vc_s01");
+    const kf = clip?.keyframes?.find((k) => k.property === "scale" && k.time === 1.5);
+    expect(kf?.easing).toEqual({ type: "cubic-bezier", p: [0.4, 0, 0.2, 1] });
+  });
+
+  it("POST /clip/:id/keyframe accepts a structured cubic-bezier easing object", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/keyframe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({
+        property: "x",
+        atSec: 1.2,
+        value: 5,
+        easing: { type: "cubic-bezier", p: [0.25, 0.1, 0.25, 1] },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: { tracks: Array<{ clips: Array<{ id: string; keyframes?: Array<{ property: string; time: number; easing: unknown }> }> }> };
+    };
+    const clip = compBody.result.tracks.flatMap((t) => t.clips).find((c) => c.id === "vc_s01");
+    const kf = clip?.keyframes?.find((k) => k.property === "x" && k.time === 1.2);
+    expect(kf?.easing).toEqual({ type: "cubic-bezier", p: [0.25, 0.1, 0.25, 1] });
+  });
+
+  it("POST /clip/:id/keyframe with an out-of-range cubic-bezier x → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/keyframe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ property: "scale", atSec: 0.5, value: 1, easing: "cubic-bezier(1.5,0,0.2,1)" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
   it("POST /clip/:id/keyframe is idempotent on a (property, atSec) collision (D4)", async () => {
     const headers = { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId };
     await app.request("/api/bridge/v1/clip/vc_s01/keyframe", {

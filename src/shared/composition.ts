@@ -182,11 +182,40 @@ export type ProvenanceEdge = z.infer<typeof ProvenanceEdgeSchema>;
 // We diverge from the master-plan §8.2 sketch (`prop`/`t`/`v`/`ease` short keys
 // + hyphen-cased easings) to camelCase parallel to the rest of this file.
 
-export const KeyframeEasingSchema = z.enum([
+// PRD-0014 S12 — the 4 discrete easings kept verbatim (regression lock). Named
+// export so the ops layer / Inspector enumerate the discrete set without
+// re-listing it (single source of truth).
+export const DISCRETE_KEYFRAME_EASINGS = [
   "linear",
   "easeIn",
   "easeOut",
   "easeInOut",
+] as const;
+export type DiscreteKeyframeEasing = (typeof DISCRETE_KEYFRAME_EASINGS)[number];
+
+// A custom cubic-bezier timing function, mirroring CSS `cubic-bezier(x1,y1,x2,y2)`
+// and Remotion's `Easing.bezier(x1,y1,x2,y2)`. The curve runs (0,0)→(1,1) with
+// control points (x1,y1) and (x2,y2). The x control points MUST stay in [0,1] —
+// a timing function must be a single-valued function of x — while y is
+// unbounded, so overshoot / anticipation (bounce) curves are expressible.
+export const CubicBezierEasingSchema = z.object({
+  type: z.literal("cubic-bezier"),
+  p: z.tuple([
+    z.number().min(0).max(1), // x1 ∈ [0,1]
+    z.number(), // y1 (unbounded — bounce allowed)
+    z.number().min(0).max(1), // x2 ∈ [0,1]
+    z.number(), // y2 (unbounded)
+  ]),
+});
+export type CubicBezierEasing = z.infer<typeof CubicBezierEasingSchema>;
+
+// Keyframe easing = the 4 discrete presets ∪ a custom cubic-bezier. The union
+// order tries the enum first so a legacy string ("linear" …) still parses to the
+// same string it always did; a `{type:"cubic-bezier",p}` object takes the second
+// arm. Back-compat: a keyframe with no `easing` field defaults to "linear".
+export const KeyframeEasingSchema = z.union([
+  z.enum(DISCRETE_KEYFRAME_EASINGS),
+  CubicBezierEasingSchema,
 ]);
 export type KeyframeEasing = z.infer<typeof KeyframeEasingSchema>;
 

@@ -32,9 +32,11 @@ import {
 import type {
   Composition,
   AssetEntry,
+  KeyframeEasing,
   ProvenanceEdge,
 } from "../../shared/composition.js";
 import { ASPECTS, FPS_VALUES } from "../../shared/composition.js";
+import { parseEasingSpec } from "../../shared/keyframes.js";
 // S7 (PRD-0007) — generation handoff. POST /scene/:id/generate builds the prompt
 // from the scene's own fields, generates ONE image via the same provider
 // registry the /api/generate routes use, then registers + links the asset inside
@@ -2382,12 +2384,18 @@ bridgeRouter.post("/clip/:id/keyframe", async (c) => {
   if (typeof body.value !== "number" || !Number.isFinite(body.value)) {
     return c.json({ ok: false, error: "missing/invalid value", code: 4 }, 400);
   }
-  let easing: string | undefined;
+  // PRD-0014 S12 — `easing` may be a discrete preset name, a `cubic-bezier(...)`
+  // string (the CLI `--easing` form), or an already-structured
+  // `{type:"cubic-bezier",p:[…]}` object. Normalize the wire form into the
+  // canonical KeyframeEasing here; a malformed / out-of-range curve is a 400+4.
+  let easing: KeyframeEasing | undefined;
   if (body.easing !== undefined) {
-    if (typeof body.easing !== "string" || !body.easing) {
-      return c.json({ ok: false, error: "invalid easing", code: 4 }, 400);
+    try {
+      easing = parseEasingSpec(body.easing);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "invalid easing";
+      return c.json({ ok: false, error: message, code: 4 }, 400);
     }
-    easing = body.easing;
   }
   const property = body.property;
   const atSec = body.atSec;

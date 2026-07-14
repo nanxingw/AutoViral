@@ -225,6 +225,52 @@ describe("KeyframePanel", () => {
     expect(options).toEqual(["scale", "x", "y", "rotation", "opacity"]);
   });
 
+  // PRD-0014 S12 — the easing selector gains a "cubic-bezier" custom option that
+  // reveals four control-point number inputs; submitting authors a structured
+  // {type:"cubic-bezier",p:[x1,y1,x2,y2]} easing through the same store op.
+  it("authoring with the custom cubic-bezier easing option calls addKeyframe with a bezier object (S12)", async () => {
+    const user = userEvent.setup();
+    const comp = makeCompWithVideoClip("clip-1");
+    useComposition.setState({ comp, selection: "clip-1", currentFrame: 0 });
+    const spy = vi.spyOn(useComposition.getState(), "addKeyframe");
+    render(<KeyframePanel />);
+    await user.click(screen.getByRole("button", { name: /add keyframe/i }));
+    const easingSelect = screen.getByLabelText(/easing/i) as HTMLSelectElement;
+    await user.selectOptions(easingSelect, "cubic-bezier");
+    const x1 = screen.getByLabelText(/bezier x1/i);
+    const y1 = screen.getByLabelText(/bezier y1/i);
+    const x2 = screen.getByLabelText(/bezier x2/i);
+    const y2 = screen.getByLabelText(/bezier y2/i);
+    await user.clear(x1);
+    await user.type(x1, "0.33");
+    await user.clear(y1);
+    await user.type(y1, "0.1");
+    await user.clear(x2);
+    await user.type(x2, "0.66");
+    await user.clear(y2);
+    await user.type(y2, "0.9");
+    await user.click(screen.getByRole("button", { name: /submit/i }));
+    expect(spy).toHaveBeenCalledWith(
+      "clip-1",
+      expect.objectContaining({
+        property: "scale",
+        easing: { type: "cubic-bezier", p: [0.33, 0.1, 0.66, 0.9] },
+      }),
+    );
+  });
+
+  it("renders the bezier controls for a keyframe already carrying a cubic-bezier easing (S12)", () => {
+    const keyframes: Keyframe[] = [
+      { property: "scale", time: 0, value: 1, easing: { type: "cubic-bezier", p: [0.4, 0, 0.2, 1] } },
+    ];
+    const comp = makeCompWithVideoClip("clip-1", { keyframes });
+    useComposition.setState({ comp, selection: "clip-1" });
+    render(<KeyframePanel />);
+    const easingSelect = screen.getByLabelText(/easing for scale keyframe/i) as HTMLSelectElement;
+    expect(easingSelect.value).toBe("cubic-bezier");
+    expect(screen.getByLabelText(/bezier x1/i)).toBeInTheDocument();
+  });
+
   // Phase 8.3.D — VideoClip gains "speed" in the property dropdown; AudioClip
   // and OverlayClip explicitly do NOT (D1 — speed is VideoClip-only in v1).
   it("VideoClip selection exposes 'speed' as the 5th property option (D1)", async () => {

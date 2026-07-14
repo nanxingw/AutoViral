@@ -272,6 +272,55 @@ describe("@shared composition ops — addKeyframe", () => {
       expect((e as CompositionOpError).code).toBe(4);
     }
   });
+
+  // PRD-0014 S12 — cubic-bezier easing objects author + validate through the op.
+  it("carries a cubic-bezier easing object through onto the keyframe", () => {
+    const clip = videoClip({ id: "v1" });
+    const comp = compWith([clip]);
+    addKeyframe(comp, {
+      clipId: "v1",
+      property: "scale",
+      atSec: 0,
+      value: 1,
+      easing: { type: "cubic-bezier", p: [0.4, 0, 0.2, 1] } as never,
+    });
+    const written = (comp.tracks[0].clips[0] as { keyframes?: Keyframe[] }).keyframes!;
+    expect(written[0].easing).toEqual({ type: "cubic-bezier", p: [0.4, 0, 0.2, 1] });
+  });
+
+  it("throws code:4 for a cubic-bezier easing with x outside [0,1]", () => {
+    const comp = compWith([videoClip({ id: "v1" })]);
+    try {
+      addKeyframe(comp, {
+        clipId: "v1",
+        property: "opacity",
+        atSec: 0,
+        value: 1,
+        easing: { type: "cubic-bezier", p: [1.5, 0, 0.2, 1] } as never,
+      });
+      throw new Error("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(CompositionOpError);
+      expect((e as CompositionOpError).code).toBe(4);
+    }
+  });
+
+  it("throws code:4 for a cubic-bezier easing with a wrong-length p tuple", () => {
+    const comp = compWith([videoClip({ id: "v1" })]);
+    try {
+      addKeyframe(comp, {
+        clipId: "v1",
+        property: "opacity",
+        atSec: 0,
+        value: 1,
+        easing: { type: "cubic-bezier", p: [0.4, 0, 0.2] } as never,
+      });
+      throw new Error("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(CompositionOpError);
+      expect((e as CompositionOpError).code).toBe(4);
+    }
+  });
 });
 
 describe("@shared composition ops — setKeyframe", () => {

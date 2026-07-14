@@ -1,10 +1,46 @@
 import { describe, it, expect } from "vitest";
-import type { Keyframe } from "./composition.js";
+import type { CubicBezierEasing, Keyframe } from "./composition.js";
 import {
   interpolateProperty,
   addOrReplaceKeyframe,
   splitKeyframesAtLocal,
+  parseEasingSpec,
+  isValidKeyframeEasing,
 } from "./keyframes.js";
+
+// Independent cubic-bezier reference (WebKit UnitBezier via bisection on x).
+// Deliberately NOT the impl under test — proves `applyEasing` matches the
+// canonical cubic-bezier curve (the same curve Remotion's `Easing.bezier` uses).
+function refCubicBezier(
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
+  x: number,
+): number {
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  const sampleX = (t: number) => {
+    const mt = 1 - t;
+    // B(t) with p0=(0,0), p3=(1,1)
+    return 3 * mt * mt * t * x1 + 3 * mt * t * t * x2 + t * t * t;
+  };
+  const sampleY = (t: number) => {
+    const mt = 1 - t;
+    return 3 * mt * mt * t * y1 + 3 * mt * t * t * y2 + t * t * t;
+  };
+  let lo = 0;
+  let hi = 1;
+  let t = x;
+  for (let i = 0; i < 60; i++) {
+    const xe = sampleX(t) - x;
+    if (Math.abs(xe) < 1e-9) break;
+    if (xe > 0) hi = t;
+    else lo = t;
+    t = (lo + hi) / 2;
+  }
+  return sampleY(t);
+}
 
 describe("interpolateProperty", () => {
   it("returns null when no keyframe exists for the requested property", () => {
@@ -109,6 +145,120 @@ describe("interpolateProperty", () => {
     ];
     expect(interpolateProperty(kfs, "scale", 1)).toBeCloseTo(1.5, 6);
     expect(interpolateProperty(kfs, "x", 0.5)).toBeCloseTo(50, 6);
+  });
+});
+
+// PRD-0014 S12 — cubic-bezier easing objects flow through the SAME
+// interpolation consumer (`applyEasing` inside `interpolateProperty`). Preview
+// and export both read this pure function, so a custom bezier is WYSIWYG by
+// construction.
+describe("interpolateProperty — cubic-bezier easing (S12)", () => {
+  it("routes {type:'cubic-bezier',p:[0.42,0,0.58,1]} identically to the discrete easeInOut", () => {
+    const bez: CubicBezierEasing = { type: "cubic-bezier", p: [0.42, 0, 0.58, 1] };
+    for (const t of [0.1, 0.25, 0.5, 0.75, 0.9]) {
+      const a = interpolateProperty(
+        [
+          { property: "scale", time: 0, value: 0, easing: bez },
+          { property: "scale", time: 1, value: 1, easing: bez },
+        ],
+        "scale",
+        t,
+      )!;
+      const b = interpolateProperty(
+        [
+          { property: "scale", time: 0, value: 0, easing: "easeInOut" },
+          { property: "scale", time: 1, value: 1, easing: "easeInOut" },
+        ],
+        "scale",
+        t,
+      )!;
+      expect(a).toBeCloseTo(b, 6);
+    }
+  });
+
+  it("matches an independent cubic-bezier reference at t=0.5 for [0.4,0,0.2,1]", () => {
+    const bez: CubicBezierEasing = { type: "cubic-bezier", p: [0.4, 0, 0.2, 1] };
+    const y = interpolateProperty(
+      [
+        { property: "x", time: 0, value: 0, easing: bez },
+        { property: "x", time: 1, value: 1, easing: bez },
+      ],
+      "x",
+      0.5,
+    )!;
+    expect(y).toBeCloseTo(refCubicBezier(0.4, 0, 0.2, 1, 0.5), 4);
+    // sanity band around the known ~0.776 value (fast-out slow-in)
+    expect(y).toBeGreaterThan(0.7);
+    expect(y).toBeLessThan(0.85);
+  });
+
+  it("keeps segment endpoints exact even when y overshoots (bounce)", () => {
+    const bez: CubicBezierEasing = { type: "cubic-bezier", p: [0.4, -0.3, 0.2, 1.3] };
+    const kfs: Keyframe[] = [
+      { property: "x", time: 0, value: 0, easing: bez },
+      { property: "x", time: 2, value: 10, easing: bez },
+    ];
+    expect(interpolateProperty(kfs, "x", 0)).toBe(0);
+    expect(interpolateProperty(kfs, "x", 2)).toBe(10);
+  });
+});
+
+describe("parseEasingSpec (S12 — CLI/bridge string form)", () => {
+  it("parses a cubic-bezier(...) string into a structured easing", () => {
+    expect(parseEasingSpec("cubic-bezier(0.4,0,0.2,1)")).toEqual({
+      type: "cubic-bezier",
+      p: [0.4, 0, 0.2, 1],
+    });
+  });
+
+  it("tolerates whitespace inside the parens", () => {
+    expect(parseEasingSpec("cubic-bezier( 0.4 , 0 , 0.2 , 1 )")).toEqual({
+      type: "cubic-bezier",
+      p: [0.4, 0, 0.2, 1],
+    });
+  });
+
+  it("passes discrete names through verbatim (离散名照旧)", () => {
+    expect(parseEasingSpec("linear")).toBe("linear");
+    expect(parseEasingSpec("easeInOut")).toBe("easeInOut");
+  });
+
+  it("normalizes an already-structured cubic-bezier object", () => {
+    expect(parseEasingSpec({ type: "cubic-bezier", p: [0.4, 0, 0.2, 1] })).toEqual({
+      type: "cubic-bezier",
+      p: [0.4, 0, 0.2, 1],
+    });
+  });
+
+  it("allows y overshoot", () => {
+    expect(parseEasingSpec("cubic-bezier(0.5,-0.5,0.5,1.5)")).toEqual({
+      type: "cubic-bezier",
+      p: [0.5, -0.5, 0.5, 1.5],
+    });
+  });
+
+  it("throws when an x control point is outside [0,1]", () => {
+    expect(() => parseEasingSpec("cubic-bezier(1.5,0,0.2,1)")).toThrow();
+  });
+
+  it("throws on malformed cubic-bezier syntax (wrong arity)", () => {
+    expect(() => parseEasingSpec("cubic-bezier(0.4,0,0.2)")).toThrow();
+  });
+});
+
+describe("isValidKeyframeEasing (S12)", () => {
+  it("is true for discrete names and well-formed bezier objects", () => {
+    expect(isValidKeyframeEasing("linear")).toBe(true);
+    expect(isValidKeyframeEasing("easeInOut")).toBe(true);
+    expect(isValidKeyframeEasing({ type: "cubic-bezier", p: [0.4, 0, 0.2, 1] })).toBe(true);
+  });
+
+  it("is false for unknown names and malformed / out-of-range bezier objects", () => {
+    expect(isValidKeyframeEasing("wobble")).toBe(false);
+    expect(isValidKeyframeEasing({ type: "cubic-bezier", p: [1.5, 0, 0.2, 1] })).toBe(false);
+    expect(isValidKeyframeEasing({ type: "cubic-bezier", p: [0.4, 0, 0.2] })).toBe(false);
+    expect(isValidKeyframeEasing({ type: "spring" })).toBe(false);
+    expect(isValidKeyframeEasing(undefined)).toBe(false);
   });
 });
 

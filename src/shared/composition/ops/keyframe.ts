@@ -20,8 +20,12 @@
 // CompositionOpError{code:4}.
 
 import type { Clip, Composition, KeyframeProperty, KeyframeEasing } from "../../composition.js";
-import { SPEED_MIN, SPEED_MAX } from "../../composition.js";
-import { addOrReplaceKeyframe, KEYFRAME_TIME_EPSILON } from "../../keyframes.js";
+import { SPEED_MIN, SPEED_MAX, DISCRETE_KEYFRAME_EASINGS } from "../../composition.js";
+import {
+  addOrReplaceKeyframe,
+  isValidKeyframeEasing,
+  KEYFRAME_TIME_EPSILON,
+} from "../../keyframes.js";
 import { CompositionOpError } from "./errors.js";
 
 // Floating-point tolerance for the upper-bound boundary check. Mirrors the
@@ -56,13 +60,10 @@ const KEYFRAME_PROPERTIES: ReadonlySet<string> = new Set<KeyframeProperty>([
   "speed",
 ]);
 
-// The easing enum (KeyframeEasingSchema). `undefined` defaults to "linear".
-const KEYFRAME_EASINGS: ReadonlySet<string> = new Set<KeyframeEasing>([
-  "linear",
-  "easeIn",
-  "easeOut",
-  "easeInOut",
-]);
+// Easing validity (KeyframeEasingSchema): a discrete preset name OR a custom
+// cubic-bezier object with in-range x control points. `undefined` defaults to
+// "linear". Delegates to the shared `isValidKeyframeEasing` so the CLI/bridge
+// chokepoint and the schema stay in lockstep (PRD-0014 S12).
 
 export interface KeyframeWrite {
   clipId: string;
@@ -100,10 +101,10 @@ export function addKeyframe(comp: Composition, p: KeyframeWrite): void {
       4,
     );
   }
-  if (easing !== undefined && !KEYFRAME_EASINGS.has(easing)) {
+  if (easing !== undefined && !isValidKeyframeEasing(easing)) {
     throw new CompositionOpError(
-      `addKeyframe: '${easing}' is not a keyframe easing` +
-        ` (allowed: ${[...KEYFRAME_EASINGS].join(", ")})`,
+      `addKeyframe: ${JSON.stringify(easing)} is not a keyframe easing` +
+        ` (allowed: ${DISCRETE_KEYFRAME_EASINGS.join(", ")}, or {type:"cubic-bezier",p:[x1,y1,x2,y2]} with x1,x2 in [0,1])`,
       4,
     );
   }

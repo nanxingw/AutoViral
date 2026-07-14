@@ -53,6 +53,10 @@ let lastClipDuplicate: Record<string, unknown> | null = null;
 // and select bodies so the CLI test can assert each new verb reached the wire.
 let lastKeyframeRemove: Record<string, unknown> | null = null;
 let lastKeyframeMove: Record<string, unknown> | null = null;
+// PRD-0014 S12 — capture the last POST /clip/:id/keyframe body so the CLI test
+// can assert `clip keyframe add/set --easing "cubic-bezier(...)"` forwarded the
+// easing string to the bridge verbatim (the bridge owns the string→struct parse).
+let lastKeyframeAdd: Record<string, unknown> | null = null;
 let lastReframe: Record<string, unknown> | null = null;
 // PRD-0014 S5 — capture the last POST /clip/:id/detach-audio so the CLI test can
 // assert `clip detach-audio <id>` reached the wire (empty body).
@@ -600,6 +604,7 @@ beforeAll(async () => {
       const kfMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/keyframe$/.exec(url ?? "");
       if (req.method === "POST" && kfMatch) {
         const body = await readBody(req);
+        lastKeyframeAdd = body;
         const clipId = decodeURIComponent(kfMatch[1]);
         const target = clips.find((c) => c.id === clipId);
         if (!target) {
@@ -1311,11 +1316,31 @@ describe("autoviral CLI — end-to-end", () => {
   });
 
   it("clip keyframe set <id> --property --at --value --easing → exit 0", async () => {
+    lastKeyframeAdd = null;
     const r = await run([
       "clip", "keyframe", "set", "vc_s01",
       "--property", "opacity", "--at", "5.18", "--value", "0", "--easing", "linear",
     ]);
     expect(r.exitCode).toBe(0);
+    expect(lastKeyframeAdd).toMatchObject({ easing: "linear" });
+  });
+
+  // PRD-0014 S12 — a cubic-bezier easing string forwards verbatim to the bridge
+  // (which parses it into the structured form). Discrete names still work.
+  it("clip keyframe set <id> --easing 'cubic-bezier(...)' → forwards the string, exit 0", async () => {
+    lastKeyframeAdd = null;
+    const r = await run([
+      "clip", "keyframe", "set", "vc_s01",
+      "--property", "scale", "--at", "3", "--value", "2",
+      "--easing", "cubic-bezier(0.4,0,0.2,1)",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastKeyframeAdd).toMatchObject({
+      property: "scale",
+      atSec: 3,
+      value: 2,
+      easing: "cubic-bezier(0.4,0,0.2,1)",
+    });
   });
 
   it("clip keyframe with no verb / a bad verb → exit 4 (never hits bridge)", async () => {

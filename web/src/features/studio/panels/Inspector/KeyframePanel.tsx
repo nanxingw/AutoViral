@@ -20,7 +20,60 @@ import { clampKeyframeTime, clipKeyframeDuration } from "./keyframeBounds";
 // *original-array index* — the position in clip.keyframes — not the sorted
 // display order. We carry the original index through `{ kf, idx }` rows.
 
-const EASINGS: KeyframeEasing[] = ["linear", "easeIn", "easeOut", "easeInOut"];
+const EASINGS = ["linear", "easeIn", "easeOut", "easeInOut"] as const;
+
+// PRD-0014 S12 — the easing selector value the <select> renders. A discrete
+// preset is its own name; a cubic-bezier object collapses to the sentinel
+// "cubic-bezier", which reveals the four control-point inputs.
+const CUSTOM_BEZIER = "cubic-bezier";
+
+function easingSelectValue(e: KeyframeEasing): string {
+  return typeof e === "object" ? CUSTOM_BEZIER : e;
+}
+
+// Default control points when the user first switches to the custom option
+// (a gentle ease — CSS `ease` ≈ cubic-bezier(0.25,0.1,0.25,1)).
+const DEFAULT_BEZIER: [number, number, number, number] = [0.25, 0.1, 0.25, 1];
+
+// Four control-point number inputs bound to `p`; `onChange` receives the next
+// tuple. x1/x2 are clamped to [0,1] on the store side (the shared op / schema
+// reject out-of-range x), y is free. Labels are stable for tests + a11y.
+function BezierInputs({
+  p,
+  onChange,
+  idPrefix,
+}: {
+  p: [number, number, number, number];
+  onChange: (next: [number, number, number, number]) => void;
+  idPrefix: string;
+}) {
+  const fields: Array<{ i: 0 | 1 | 2 | 3; label: string }> = [
+    { i: 0, label: "x1" },
+    { i: 1, label: "y1" },
+    { i: 2, label: "x2" },
+    { i: 3, label: "y2" },
+  ];
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      {fields.map(({ i, label }) => (
+        <input
+          key={label}
+          aria-label={`${idPrefix} bezier ${label}`}
+          type="number"
+          step="0.05"
+          value={String(p[i])}
+          onChange={(e) => {
+            const v = Number(e.target.value);
+            const next = [...p] as [number, number, number, number];
+            next[i] = Number.isFinite(v) ? v : p[i];
+            onChange(next);
+          }}
+          style={{ ...inputStyle, width: 52 }}
+        />
+      ))}
+    </div>
+  );
+}
 
 function propertiesForClip(kind: Clip["kind"]): KeyframeProperty[] {
   switch (kind) {
@@ -241,14 +294,20 @@ function AddForm({
   const [property, setProperty] = useState<KeyframeProperty>(properties[0]);
   const [time, setTime] = useState<string>("0");
   const [value, setValue] = useState<string>(String(defaultValueFor(properties[0])));
-  const [easing, setEasing] = useState<KeyframeEasing>("linear");
+  const [easingKind, setEasingKind] = useState<string>("linear");
+  const [bez, setBez] = useState<[number, number, number, number]>(DEFAULT_BEZIER);
   const t = useT();
+
+  const buildEasing = (): KeyframeEasing =>
+    easingKind === CUSTOM_BEZIER
+      ? { type: "cubic-bezier", p: bez }
+      : (easingKind as KeyframeEasing);
 
   const handleSubmit = () => {
     const t = Number(time);
     const v = Number(value);
     if (!Number.isFinite(t) || !Number.isFinite(v)) return;
-    onSubmit({ property, time: t, value: v, easing });
+    onSubmit({ property, time: t, value: v, easing: buildEasing() });
   };
 
   return (
@@ -311,8 +370,8 @@ function AddForm({
       <label style={{ display: "flex", flexDirection: "column", gap: 2 }}>
         <span style={labelStyle}>{t("studio.keyframePanel.formEasing")}</span>
         <select
-          value={easing}
-          onChange={(e) => setEasing(e.target.value as KeyframeEasing)}
+          value={easingKind}
+          onChange={(e) => setEasingKind(e.target.value)}
           style={inputStyle}
         >
           {EASINGS.map((e) => (
@@ -320,8 +379,12 @@ function AddForm({
               {e}
             </option>
           ))}
+          <option value={CUSTOM_BEZIER}>{CUSTOM_BEZIER}</option>
         </select>
       </label>
+      {easingKind === CUSTOM_BEZIER && (
+        <BezierInputs p={bez} onChange={setBez} idPrefix="add" />
+      )}
       <div style={{ display: "flex", gap: 6, alignSelf: "flex-end" }}>
         <button
           type="button"
@@ -457,8 +520,18 @@ function Row({
       </label>
       <select
         aria-label={`easing for ${kf.property} keyframe`}
-        value={kf.easing}
-        onChange={(e) => onUpdate({ easing: e.target.value as KeyframeEasing })}
+        value={easingSelectValue(kf.easing)}
+        onChange={(e) => {
+          const kind = e.target.value;
+          if (kind === CUSTOM_BEZIER) {
+            // Switch to a custom curve, seeding from the current bezier if any.
+            const seed =
+              typeof kf.easing === "object" ? kf.easing.p : DEFAULT_BEZIER;
+            onUpdate({ easing: { type: "cubic-bezier", p: [...seed] as [number, number, number, number] } });
+          } else {
+            onUpdate({ easing: kind as KeyframeEasing });
+          }
+        }}
         style={inputStyle}
       >
         {EASINGS.map((e) => (
@@ -466,7 +539,15 @@ function Row({
             {e}
           </option>
         ))}
+        <option value={CUSTOM_BEZIER}>{CUSTOM_BEZIER}</option>
       </select>
+      {typeof kf.easing === "object" && (
+        <BezierInputs
+          p={kf.easing.p}
+          onChange={(next) => onUpdate({ easing: { type: "cubic-bezier", p: next } })}
+          idPrefix={`${kf.property}`}
+        />
+      )}
       <button
         type="button"
         aria-label="Delete keyframe"
