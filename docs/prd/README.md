@@ -45,3 +45,9 @@
 | [0005](0005-v0.1.5-bug-backlog-issue-slices.md) | v0.1.5 bug backlog（9 个对抗验证过的真 bug；docs-only tracker，非 PRD 而是 issue 切片直存） | Active | 2026-06-05 |
 | [0006](0006-v0.1.5-inspiration-data-redesign.md) | v0.1.5 诚实的数据 + 有根的教练（灵感 & 数据两页重做：D1 接已有 per-work 数据 · D2 benchmark 带 · D3 洞察诚实护栏 · D4 托管 venv 重建抖音采集器 · D5 持久策略 coach · 删人口卡换诚实空态） | Shipped | 2026-06-08 |
 | [0007](0007-v0.1.6-script-storyboard-planning.md) | v0.1.6 剧本 · 分镜规划层（唤醒潜伏 SceneSchema + plan/script.md：剧本=叙事总纲≈PRD · 分镜=逐镜执行表≈issue · 素材区第三 tab 可视可手改可让 agent 改 · 生成=下游 handoff · 计划/执行解耦 · 单层 Scene 不预埋电影级层级 · per-work 写锁加固） | Draft | 2026-06-08 |
+| [0008](0008-v0.1.7-storyboard-shot-sheet.md) | v0.1.7 折叠镜表（Shot Sheet）— 剧本·分镜 tab 交互重设计 | Shipped | 2026-06-10 |
+| [0010](0010-v0.1.8-chat-codex-cost-canvas.md) | v0.1.8 工作台可信度与全貌升级 | Shipped | 2026-07-06 |
+| [0011](0011-canvas-fps-editable.md) | 画布帧率可改（fps 一等公民化，v0.1.10） | Shipped | 2026-07-09 |
+| [0012](0012-export-fidelity-and-deliverables.md) | 导出保真与成品管理（v0.1.10，与 0011 同批） | Shipped | 2026-07-09 |
+| [0013](0013-studio-focus-and-slimdown.md) | v0.1.11 Studio 工作台聚焦：布局固定、时间线精修、slash 命令与产品瘦身 | Shipped | 2026-07-10 |
+| [0014](0014-wysiwyg-editing-parity.md) | v0.2.0 WYSIWYG 焊死与剪辑能力对标：承载 agent 亲手剪的完整短视频（OpenCut 对标 + AI↔Studio 双驱动，切片见 [issue-slices](0014-wysiwyg-editing-parity-issue-slices.md)） | Proposed | 2026-07-14 |
