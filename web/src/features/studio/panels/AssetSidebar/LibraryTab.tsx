@@ -323,7 +323,7 @@ export function LibraryTab({ workId }: Props) {
                 onOpen={() => setPreview(item)}
                 onAdd={
                   isAddableAsset(item)
-                    ? () => addToTimeline(item)
+                    ? () => void addToTimeline(item)
                     : undefined
                 }
                 addLabel={t("studio.assetSidebar.addToTimeline")}
@@ -361,7 +361,7 @@ export function LibraryTab({ workId }: Props) {
                 onOpen={() => setPreview(item)}
                 onAdd={
                   isAddableAsset(item)
-                    ? () => addToTimeline(item)
+                    ? () => void addToTimeline(item)
                     : undefined
                 }
                 addLabel={t("studio.assetSidebar.addToTimeline")}
@@ -384,7 +384,7 @@ export function LibraryTab({ workId }: Props) {
         onAddToTimeline={
           preview && isAddableAsset(preview)
             ? () => {
-                addToTimeline(preview);
+                void addToTimeline(preview);
                 setPreview(null);
               }
             : undefined

@@ -3,13 +3,23 @@ import { clipEnd } from "@autoviral/timeline";
 import type { AssetItem } from "@/queries/assets";
 import { useComposition } from "../../store";
 import type { Clip, Track } from "../../types";
+import { importClipRemote, notifyImportFailed } from "./importClip";
 
 // #78 — wire the orphaned `addClip` store action to a UI trigger so users can
-// place library assets onto the timeline (previously clips could only be put
-// there by the agent). Placement appends a default-length clip at the end of
-// the matching-kind track; the user then trims it with the existing edge-drag
-// resize. A real media-duration probe is out of scope (async, needs a hidden
-// media element) — DEFAULT_ASSET_CLIP_DUR is the editable placeholder length.
+// place library assets onto the timeline.
+//
+// S6b (PRD-0014) — VIDEO placement no longer builds a local fixed-length
+// placeholder clip. A video is imported through the shared server-side
+// `importClip` verb (bridge POST /import → ffprobe → Asset/Provenance
+// registration), the SAME verb `autoviral clip import` runs — so the clip's
+// duration is a REAL probe value and the asset/provenance graph is registered,
+// exactly matching the CLI. The clip appears via the `composition-changed` WS
+// broadcast (useBridgeEvents), NOT a local store write.
+//
+// audio/image STAY on the local store path: `importClip` is video-only, and a
+// probe of audio/image doesn't buy a timeline duration the way a video does.
+// DEFAULT_ASSET_CLIP_DUR is their editable placeholder length (the user trims
+// with the existing edge-drag resize).
 export const DEFAULT_ASSET_CLIP_DUR = 5; // seconds
 
 const ADDABLE_KINDS = new Set<AssetItem["kind"]>(["video", "audio", "image"]);
@@ -34,9 +44,11 @@ function targetTrackKind(asset: AssetItem): Track["kind"] | null {
 }
 
 /**
- * Pure: build a {@link Clip} from a library asset at a given append offset.
- * Returns null for kinds with no timeline representation. `src` is the asset's
- * work-relative path — the renderer resolves it to a URL via resolveAssetUrl.
+ * Pure: build a LOCAL {@link Clip} from a library asset at a given append
+ * offset. audio → audio clip, image → overlay clip. **video returns null** —
+ * S6b routes video through the server-side importClip verb (see the hook /
+ * Track drop), so there is no local video clip to build. text / other → null.
+ * `src` is the asset's work-relative path — the renderer resolves it to a URL.
  */
 export function buildClipFromAsset(
   asset: AssetItem,
@@ -44,19 +56,6 @@ export function buildClipFromAsset(
 ): Clip | null {
   const id = crypto.randomUUID();
   switch (asset.kind) {
-    case "video":
-      return {
-        id,
-        kind: "video",
-        src: asset.path,
-        in: 0,
-        out: DEFAULT_ASSET_CLIP_DUR,
-        trackOffset,
-        // S16 — default fit-fill mode (crop-to-fill, the legacy behaviour).
-        fitMode: "cover",
-        transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
-        filters: { brightness: 0, contrast: 0, saturation: 0 },
-      };
     case "audio":
       return {
         id,
@@ -82,48 +81,97 @@ export function buildClipFromAsset(
         position: { xPct: 0, yPct: 0, wPct: 100, hPct: 100 },
         opacity: 1,
       };
+    // video → null: the server importClip verb owns video placement (S6b).
     default:
       return null;
   }
 }
 
+/** The result of an add-to-timeline gesture — the three call surfaces (library
+ *  ＋ button, preview modal, timeline drop) all consume this uniform shape. */
+export type AddAssetResult =
+  | { status: "added"; clipId: string; durationSec?: number }
+  | { status: "skipped" }
+  | { status: "error"; message: string };
+
 /**
- * Hook returning `addAssetToTimeline(asset)`: appends a clip built from the
- * asset to the end of the matching-kind track, selecting it. Images target an
- * overlay track, creating one on demand since the default lane set has none.
- * Returns the new clip id, or null if the asset isn't placeable / no comp.
+ * Hook returning `addAssetToTimeline(asset, opts?)`. VIDEO → async bridge import
+ * (server ffprobe owns the duration; the clip arrives via the WS refresh).
+ * audio/image → append a local clip to the matching-kind track, selecting it
+ * (images target an overlay track, created on demand). `opts` lets a drop pass
+ * an explicit destination `trackId` + landing `atSec`; omitted → append at the
+ * end of the matching-kind lane.
+ *
+ * Returns `{status:"added", ...}` on success, `{status:"skipped"}` for a
+ * non-placeable asset / no comp, `{status:"error"}` when an import fails (a
+ * user-visible toast is already raised).
  */
 export function useAddAssetToTimeline() {
-  return useCallback((asset: AssetItem): string | null => {
-    const kind = targetTrackKind(asset);
-    if (!kind) return null;
-    const store = useComposition.getState();
-    if (!store.comp) return null;
+  return useCallback(
+    async (
+      asset: AssetItem,
+      opts?: { trackId?: string; atSec?: number },
+    ): Promise<AddAssetResult> => {
+      const store = useComposition.getState();
+      if (!store.comp) return { status: "skipped" };
 
-    // Resolve the destination track. video/audio always exist in the default
-    // lane set; overlay (images) is created on demand.
-    let trackId: string;
-    const existingTrack = store.comp.tracks.find((t) => t.kind === kind);
-    if (existingTrack) {
-      trackId = existingTrack.id;
-    } else if (kind === "overlay") {
-      trackId = store.addTrack("overlay");
-    } else {
-      return null;
-    }
+      // ── VIDEO: shared server-side importClip verb ──────────────────────────
+      if (asset.kind === "video") {
+        try {
+          const res = await importClipRemote(store.comp.workId, {
+            path: asset.path,
+            trackId: opts?.trackId,
+            atSec: opts?.atSec,
+          });
+          return { status: "added", clipId: res.clipId, durationSec: res.durationSec };
+        } catch (err) {
+          notifyImportFailed(err);
+          return {
+            status: "error",
+            message: err instanceof Error ? err.message : String(err),
+          };
+        }
+      }
 
-    // Append at the end of the destination track (re-read fresh state in case
-    // addTrack just mutated it).
-    const dest = useComposition
-      .getState()
-      .comp!.tracks.find((t) => t.id === trackId)!;
-    const clips = dest.clips as Clip[];
-    const offset = clips.length ? Math.max(...clips.map(clipEnd)) : 0;
+      // ── audio / image: local store placement (unchanged) ───────────────────
+      const kind = targetTrackKind(asset);
+      if (!kind) return { status: "skipped" };
 
-    const clip = buildClipFromAsset(asset, offset);
-    if (!clip) return null;
-    store.addClip(trackId, clip);
-    store.setSelection(clip.id);
-    return clip.id;
-  }, []);
+      // Resolve the destination track. audio always exists in the default lane
+      // set; overlay (images) is created on demand.
+      let trackId: string;
+      if (opts?.trackId) {
+        trackId = opts.trackId;
+      } else {
+        const existingTrack = store.comp.tracks.find((t) => t.kind === kind);
+        if (existingTrack) {
+          trackId = existingTrack.id;
+        } else if (kind === "overlay") {
+          trackId = store.addTrack("overlay");
+        } else {
+          return { status: "skipped" };
+        }
+      }
+
+      // Landing offset: an explicit drop `atSec`, else append at the end of the
+      // destination track (re-read fresh state in case addTrack just mutated it).
+      const dest = useComposition
+        .getState()
+        .comp!.tracks.find((t) => t.id === trackId)!;
+      const clips = dest.clips as Clip[];
+      const offset =
+        opts?.atSec != null
+          ? opts.atSec
+          : clips.length
+            ? Math.max(...clips.map(clipEnd))
+            : 0;
+
+      const clip = buildClipFromAsset(asset, offset);
+      if (!clip) return { status: "skipped" };
+      store.addClip(trackId, clip);
+      store.setSelection(clip.id);
+      return { status: "added", clipId: clip.id };
+    },
+    [],
+  );
 }

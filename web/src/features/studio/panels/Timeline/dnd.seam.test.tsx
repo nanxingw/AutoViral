@@ -31,6 +31,14 @@ const ASSET_GROUPS: AssetGroup[] = [
 vi.mock("@/queries/assets", () => ({
   useWorkAssets: () => ({ data: ASSET_GROUPS, isLoading: false }),
 }));
+// S6b — a video asset drop rides the bridge `/import` verb via apiFetch; mock the
+// transport so the seam test can assert the request (and so LibraryTab's own
+// apiFetch usage doesn't hit the network).
+const apiFetch = vi.fn();
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+  return { ...actual, apiFetch: (...args: unknown[]) => apiFetch(...args) };
+});
 // vi.mock specifiers resolve relative to THIS test file. Timeline/ and
 // AssetSidebar/ are siblings under panels/, so the module LibraryTab imports as
 // "../../generation/GenerationDialog" is the same module from here too.
@@ -239,7 +247,16 @@ describe("Clip body cross-track drag (#3 seam)", () => {
 });
 
 describe("Track drop target — asset payload (I19 seam)", () => {
-  it("dropping an asset payload on a matching-kind lane calls addClip with src===asset path", () => {
+  // S6b (PRD-0014) — a VIDEO asset drop routes through the shared server-side
+  // `importClip` verb (bridge POST /import → ffprobe), NOT a local addClip with a
+  // fixed-5s placeholder. The drop is fire-and-forget; apiFetch fires
+  // synchronously inside onDrop so we can assert it right after the drop event.
+  it("dropping a VIDEO asset routes through the bridge /import verb (not a local addClip)", () => {
+    apiFetch.mockReset();
+    apiFetch.mockResolvedValue({
+      ok: true,
+      result: { clipId: "vc_x", assetId: "imp_y", durationSec: 6 },
+    });
     const addClip = vi.fn();
     useComposition.setState({ addClip });
 
@@ -261,10 +278,52 @@ describe("Track drop target — asset payload (I19 seam)", () => {
     fireEvent.dragOver(lane, { dataTransfer: dt, clientX: 100 });
     fireEvent.drop(lane, { dataTransfer: dt, clientX: 100 });
 
+    // Video no longer builds a local placeholder clip.
+    expect(addClip).not.toHaveBeenCalled();
+    // It posts to the shared import verb with the work id + work-relative path,
+    // forwarding the drop's target lane + snapped offset.
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    const [path, opts] = apiFetch.mock.calls[0] as [
+      string,
+      { method?: string; headers?: Record<string, string>; body?: Record<string, unknown> },
+    ];
+    expect(path).toBe("/api/bridge/v1/import");
+    expect(opts.method).toBe("POST");
+    expect(opts.headers?.["X-AutoViral-Work-Id"]).toBe("w");
+    expect(opts.body?.path).toBe("assets/clips/a.mp4");
+    expect(opts.body?.trackId).toBe(videoTrack().id);
+    expect(typeof opts.body?.at).toBe("number");
+  });
+
+  it("dropping an AUDIO asset still places a local clip via addClip (video-only import)", () => {
+    apiFetch.mockReset();
+    const addClip = vi.fn();
+    useComposition.setState({ addClip });
+
+    const { getByTestId } = render(
+      <Track
+        track={audioTracks()[0]}
+        pxPerSecond={50}
+        totalWidth={400}
+        color="var(--accent)"
+        label="BGM"
+      />,
+    );
+    const lane = getByTestId("track-lane-audio");
+    const dt = fakeDataTransfer();
+    dt.setData(
+      TIMELINE_DND_MIME,
+      JSON.stringify({ source: "asset", assetPath: "assets/audio/b.mp3", assetKind: "audio" }),
+    );
+    fireEvent.dragOver(lane, { dataTransfer: dt, clientX: 100 });
+    fireEvent.drop(lane, { dataTransfer: dt, clientX: 100 });
+
+    // audio path is unchanged — no bridge import, a local addClip.
+    expect(apiFetch).not.toHaveBeenCalled();
     expect(addClip).toHaveBeenCalledTimes(1);
     const [trackId, clip] = addClip.mock.calls[0];
-    expect(trackId).toBe(videoTrack().id);
-    expect((clip as { src: string }).src).toBe("assets/clips/a.mp4");
+    expect(trackId).toBe(audioTracks()[0].id);
+    expect((clip as { src: string }).src).toBe("assets/audio/b.mp3");
   });
 
   it("an illegal-kind asset payload mutates nothing and marks the indicator rejected", () => {

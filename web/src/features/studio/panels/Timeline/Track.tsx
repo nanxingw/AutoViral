@@ -5,6 +5,7 @@ import { WaveformBars } from "./WaveformBars";
 import { useComposition } from "../../store";
 import { clipDuration } from "@autoviral/timeline";
 import { buildClipFromAsset } from "../AssetSidebar/addAssetToTimeline";
+import { importClipRemote, notifyImportFailed } from "../AssetSidebar/importClip";
 import {
   readDragPayload,
   canAcceptDrop,
@@ -192,12 +193,25 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
     );
     const intent = resolveDrop(payload, { id: track.id, kind: track.kind }, start, sourceTrackId);
     if (intent.type === "add-asset") {
-      // buildClipFromAsset only reads kind + path — reconstruct a minimal asset.
-      const asset = { kind: intent.assetKind, path: intent.assetPath } as AssetItem;
-      const clip = buildClipFromAsset(asset, intent.start);
-      if (clip) {
-        store.addClip(intent.trackId, clip);
-        store.setSelection(clip.id);
+      if (intent.assetKind === "video") {
+        // S6b — a video drop imports through the shared server-side `importClip`
+        // verb (ffprobe owns the duration; Asset/Provenance get registered), the
+        // SAME verb `autoviral clip import` runs. Fire-and-forget: the imported
+        // clip arrives via the composition-changed WS broadcast, and a probe
+        // failure raises a user-visible toast (never a poison placeholder clip).
+        void importClipRemote(comp.workId, {
+          path: intent.assetPath,
+          trackId: intent.trackId,
+          atSec: intent.start,
+        }).catch(notifyImportFailed);
+      } else {
+        // buildClipFromAsset only reads kind + path — reconstruct a minimal asset.
+        const asset = { kind: intent.assetKind, path: intent.assetPath } as AssetItem;
+        const clip = buildClipFromAsset(asset, intent.start);
+        if (clip) {
+          store.addClip(intent.trackId, clip);
+          store.setSelection(clip.id);
+        }
       }
     } else if (intent.type === "move-clip") {
       store.moveClipToTrack(intent.clipId, intent.targetTrackId);

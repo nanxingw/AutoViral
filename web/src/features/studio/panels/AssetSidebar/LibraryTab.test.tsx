@@ -7,8 +7,17 @@ import { useComposition } from "../../store";
 import { makeEmptyComposition } from "../../types";
 import type { AssetItem, AssetGroup } from "@/queries/assets";
 
-// #78 — the library tile's "＋" must reach the store's addClip (orphan-wiring).
-// We mock the data + heavy children so the test isolates LibraryTab's wiring.
+// #78 — the library tile's "＋" wires the orphaned add-to-timeline gesture.
+// S6b (PRD-0014) — for a VIDEO asset the ＋ now rides the shared server-side
+// `importClip` verb (bridge POST /import → ffprobe), NOT a local addClip. Mock
+// the data + heavy children + the apiFetch transport so the test isolates
+// LibraryTab's wiring.
+
+const apiFetch = vi.fn();
+vi.mock("@/lib/api", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/api")>("@/lib/api");
+  return { ...actual, apiFetch: (...args: unknown[]) => apiFetch(...args) };
+});
 
 const GROUPS: AssetGroup[] = [
   {
@@ -45,26 +54,41 @@ function wrap(ui: ReactNode) {
 beforeEach(() => {
   useComposition.getState().loadComposition(makeEmptyComposition({ workId: "w1" }));
   useComposition.setState({ selection: null });
+  apiFetch.mockReset();
+  apiFetch.mockResolvedValue({
+    ok: true,
+    result: { clipId: "vc_x", assetId: "imp_y", durationSec: 6 },
+  });
 });
 
-describe("LibraryTab — add asset to timeline (#78)", () => {
-  it("clicking a tile's ＋ appends the asset to the timeline via addClip", () => {
+describe("LibraryTab — add asset to timeline (#78 / S6b)", () => {
+  it("clicking a VIDEO tile's ＋ imports it through the bridge (no local placeholder clip)", () => {
     render(wrap(<LibraryTab workId="w1" />));
     const videoTrackBefore = useComposition
       .getState()
       .comp!.tracks.find((t) => t.kind === "video")!;
     expect(videoTrackBefore.clips).toHaveLength(0);
 
-    // The ＋ affordance is labelled with the add-to-timeline string.
+    // The ＋ affordance is labelled with the add-to-timeline string. The import
+    // is async but apiFetch fires synchronously inside the click handler.
     fireEvent.click(screen.getByRole("button", { name: /add to timeline/i }));
 
+    // Video routes through the shared server-side import verb (ffprobe owns the
+    // duration + registers the Asset/Provenance) — not a local 5s placeholder.
+    expect(apiFetch).toHaveBeenCalledTimes(1);
+    const [path, opts] = apiFetch.mock.calls[0] as [
+      string,
+      { method?: string; headers?: Record<string, string>; body?: Record<string, unknown> },
+    ];
+    expect(path).toBe("/api/bridge/v1/import");
+    expect(opts.headers?.["X-AutoViral-Work-Id"]).toBe("w1");
+    expect(opts.body).toEqual({ path: "assets/clips/a.mp4" });
+
+    // No local clip appears synchronously — the WS broadcast brings it in.
     const videoTrackAfter = useComposition
       .getState()
       .comp!.tracks.find((t) => t.kind === "video")!;
-    expect(videoTrackAfter.clips).toHaveLength(1);
-    expect((videoTrackAfter.clips[0] as { src: string }).src).toBe(
-      "assets/clips/a.mp4",
-    );
+    expect(videoTrackAfter.clips).toHaveLength(0);
   });
 
   it("the ＋ does not also open the preview modal (stopPropagation)", () => {
