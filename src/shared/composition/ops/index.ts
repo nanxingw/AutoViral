@@ -37,3 +37,6 @@ export type { TrackProps } from "./setTrackProps.js";
 // PRD-0014 S8 — keyframe edit (remove/move) + transition update above; reframe sugar.
 export { reframeClip } from "./reframeClip.js";
 export type { ReframeParams } from "./reframeClip.js";
+// PRD-0014 S5 — detach a video clip's source audio to a first-class AudioClip.
+export { detachAudio } from "./detachAudio.js";
+export type { DetachAudioResult } from "./detachAudio.js";

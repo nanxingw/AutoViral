@@ -54,6 +54,9 @@ let lastClipDuplicate: Record<string, unknown> | null = null;
 let lastKeyframeRemove: Record<string, unknown> | null = null;
 let lastKeyframeMove: Record<string, unknown> | null = null;
 let lastReframe: Record<string, unknown> | null = null;
+// PRD-0014 S5 — capture the last POST /clip/:id/detach-audio so the CLI test can
+// assert `clip detach-audio <id>` reached the wire (empty body).
+let lastDetachAudio: Record<string, unknown> | null = null;
 let lastTransitionSet: Record<string, unknown> | null = null;
 let lastSelect: Record<string, unknown> | null = null;
 // S4 (US 10) — capture the last PUT /comp body so the CLI test can assert the
@@ -516,6 +519,24 @@ beforeAll(async () => {
         const id = `vc_dup${nextSeq++}`;
         clips.push({ id, trackKind: target.trackKind });
         return send(200, { ok: true, result: { id } });
+      }
+    }
+    // PRD-0014 S5 — POST /clip/:id/detach-audio (clip detach-audio). A known
+    // clipId mints a detached AudioClip id + returns { audioClipId, trackId }; an
+    // unknown clipId is the op's rejection → 400 + code 4 → CLI exit 4. Records
+    // the (empty) body so the CLI wire shape can be asserted.
+    {
+      const detMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/detach-audio$/.exec(url ?? "");
+      if (req.method === "POST" && detMatch) {
+        lastDetachAudio = await readBody(req);
+        const clipId = decodeURIComponent(detMatch[1]);
+        const target = clips.find((c) => c.id === clipId);
+        if (!target || target.trackKind !== "video") {
+          return send(400, { ok: false, error: "no such video clip", code: 4 });
+        }
+        const audioClipId = `ac_det${nextSeq++}`;
+        clips.push({ id: audioClipId, trackKind: "audio" });
+        return send(200, { ok: true, result: { audioClipId, trackId: "trk_a1" } });
       }
     }
     // PRD-0014 S8 — POST /clip/:id/keyframe/remove + /keyframe/move. Mirror the
@@ -1443,6 +1464,27 @@ describe("autoviral CLI — end-to-end", () => {
 
     it("clip duplicate an unknown clip → bridge 400 code:4 → exit 4", async () => {
       const r = await run(["clip", "duplicate", "vc_nope"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    // PRD-0014 S5 — clip detach-audio <id>. Pulls a video clip's source audio to
+    // a first-class AudioClip through the shared op; prints the minted audio clip
+    // id, sends an empty body.
+    it("clip detach-audio <id> → POSTs /clip/:id/detach-audio, prints audio clip id", async () => {
+      lastDetachAudio = null;
+      const r = await run(["clip", "detach-audio", "vc_s01"]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toMatch(/^ac_det/);
+      expect(lastDetachAudio).toEqual({});
+    });
+
+    it("clip detach-audio with no id → exit 4 (never hits bridge)", async () => {
+      const r = await run(["clip", "detach-audio"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("clip detach-audio an unknown clip → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["clip", "detach-audio", "vc_nope"]);
       expect(r.exitCode).toBe(4);
     });
 

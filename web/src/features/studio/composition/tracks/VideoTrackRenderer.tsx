@@ -11,6 +11,7 @@ import { TransitionSeries, linearTiming, springTiming } from "@remotion/transiti
 import { groupChains } from "../transitions/groupChains";
 import { presentationFor } from "../transitions/presentations";
 import type { Transition } from "@shared/composition";
+import { resolveSourceAudio } from "@shared/composition";
 import type { VideoClip, Track } from "../../types";
 
 /** Map a transition's `easing` field to a Remotion timing function. Phase 1
@@ -137,6 +138,12 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // pass bakes into the export (transforms-ffmpeg.timeWarpVideoFilterChain).
   const freezeStart =
     clip.freezeAtSec != null ? Math.round(clip.freezeAtSec * fps) : null;
+  // S5 (PRD-0014) — source-audio gate. enabled:false → muted (detachAudio pulled
+  // the clip's own audio out to a first-class AudioClip; the source must NOT
+  // double-play). When enabled, `volume` scales the embedded audio (default 1).
+  // Consumed identically in preview (<Video>) and export (<OffthreadVideo>) — so
+  // muting the source on export is WYSIWYG by construction (single renderer).
+  const srcAudio = resolveSourceAudio(clip);
   // Shared across BOTH branches — src/trim/speed are identical for preview
   // and export (WYSIWYG by construction).
   const baseProps = {
@@ -144,6 +151,8 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
     startFrom: freezeStart != null ? freezeStart : Math.round(clip.in * fps),
     endAt: freezeStart != null ? freezeStart + 1 : Math.round(clip.out * fps),
     playbackRate: speed,
+    muted: !srcAudio.enabled,
+    volume: srcAudio.volume,
   } as const;
   // Preview-ONLY props. <Video>'s native <video> element does discrete
   // browser seeks under decoder/main-thread pressure, which the user
@@ -188,6 +197,10 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
         <VideoEl
           {...baseProps}
           {...previewOnlyProps}
+          // S5 — the blur backdrop is a SECOND stacked <video> of the same source;
+          // it must stay silent so a source-audio-enabled clip doesn't double-play
+          // (only the foreground contained layer carries baseProps' muted/volume).
+          muted
           style={{
             ...innerSizing,
             objectFit: "cover",

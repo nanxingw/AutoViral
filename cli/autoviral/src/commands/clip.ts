@@ -394,6 +394,29 @@ export async function clipCommand(args: string[]): Promise<void> {
     return;
   }
 
+  if (sub === "detach-audio") {
+    // S5 (PRD-0014) — `autoviral clip detach-audio <id>`. The bridge runs the
+    // shared `ops.detachAudio` (mint a same-source AudioClip on an audio lane +
+    // mute the video clip's own source), the SAME two-step atomic op the Studio
+    // "Detach" button runs, so an agent pulling原声 for ducking and a human
+    // clicking Detach converge. We validate args locally (exit 4, never hits the
+    // bridge); the server owns the semantic validation (unknown / non-video /
+    // already-detached → 400 code:4 → exit 4). Echoes the minted audio clip id.
+    const id = rest[0];
+    if (!id || id.startsWith("--")) {
+      process.stderr.write("usage: autoviral clip detach-audio <id>\n");
+      process.exit(4);
+    }
+    const result = await bridgeRequest<{ audioClipId: string; trackId: string }>(
+      ctx,
+      "POST",
+      `/clip/${encodeURIComponent(id)}/detach-audio`,
+      {},
+    );
+    process.stdout.write(`${result.audioClipId}\n`);
+    return;
+  }
+
   if (sub === "set") {
     const id = rest[0];
     if (!id) {

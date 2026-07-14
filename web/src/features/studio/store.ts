@@ -139,6 +139,13 @@ interface CompState {
   // removeClip and Shift+Backspace to rippleDeleteClip in 4.J.
   rippleDeleteClip: (clipId: string) => void;
   collapseGaps: (trackId: string) => void;
+  // PRD-0014 S5 — detach a video clip's own source audio into a first-class
+  // AudioClip (type "original") on an audio lane + mute the source, via the
+  // shared `ops.detachAudio` — the SAME two-step atomic op the bridge/CLI
+  // (`autoviral clip detach-audio`) runs, so the human "Detach" button and the
+  // agent converge. No-op guards live in the op (unknown/non-video/already
+  // detached throw); the store swallows the throw (silent no-op contract).
+  detachClipAudio: (clipId: string) => void;
   // Phase 4.I — edge-drag resize. `newTime` is the proposed timeline-time of
   // the moving edge. Clamps left at 0, right at next clip's trackOffset (D2),
   // and enforces minDuration 0.05s on both edges. Branches on clip kind:
@@ -594,6 +601,34 @@ export const useComposition = create<CompState>()(
         if (willRemove) pushClipHistory(s);
         ops.rippleDeleteClip(s.comp, { clipId });
         reconcileSelection(s);
+      }),
+    // PRD-0014 S5 — thin wrapper over the shared `ops.detachAudio` (the SAME code
+    // the bridge/CLI `clip detach-audio` runs). The op owns the two-step atomic
+    // mutation (mint AudioClip + mute source) and the reject-on-already-detached
+    // guard; the store keeps its own concerns: undo snapshot (only on a real
+    // change) + selecting the new detached audio clip so the user sees it land.
+    detachClipAudio: (clipId) =>
+      set((s) => {
+        if (!s.comp) return;
+        // Pre-check so a rejected detach doesn't push an undo snapshot (mirrors
+        // rippleDeleteClip's willRemove gate). The op still owns the authoritative
+        // guard (throws on unknown / non-video / already-detached); we only want
+        // to skip history + the throw for the same conditions.
+        let target: Clip | undefined;
+        for (const t of s.comp.tracks) {
+          const c = (t.clips as Clip[]).find((c) => c.id === clipId);
+          if (c) {
+            target = c;
+            break;
+          }
+        }
+        if (!target || target.kind !== "video") return;
+        // Absent sourceAudio = enabled (legacy); only enabled:false is detached.
+        if (target.sourceAudio?.enabled === false) return;
+        pushClipHistory(s);
+        const { audioClipId } = ops.detachAudio(s.comp, { clipId });
+        // Select the freshly-detached audio clip so the user sees it land.
+        s.selection = audioClipId;
       }),
     collapseGaps: (trackId) =>
       set((s) => {

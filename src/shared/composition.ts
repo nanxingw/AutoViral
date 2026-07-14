@@ -70,6 +70,38 @@ const FiltersSchema = z.object({
 });
 export type Filters = z.infer<typeof FiltersSchema>;
 
+// PRD-0014 S5 — source-audio gate for a VideoClip's OWN embedded audio track.
+// `enabled:false` mutes it in BOTH the preview (Remotion <Video muted>) and the
+// export (<OffthreadVideo muted> + the speed-ramp pre-pass emitting a video-only
+// graph), so `detachAudio` can pull the source track out to a first-class
+// AudioClip (for ducking / voice replacement) with NO double-play. `volume`
+// scales the embedded audio while enabled — same [0,1.5] range as
+// AudioClip.volume. `enabled` defaults true INSIDE the object so a partial
+// `{ volume: 0.5 }` still parses; the whole field is optional with no top-level
+// default so EVERY pre-S5 work (no key) parses IDENTICALLY (resolveSourceAudio
+// reads absent as {enabled:true, volume:1} — the legacy "video plays its sound").
+export const SourceAudioSchema = z.object({
+  enabled: z.boolean().default(true),
+  volume: z.number().min(0).max(1.5).optional(),
+});
+export type SourceAudio = z.infer<typeof SourceAudioSchema>;
+
+/**
+ * The single pure reader BOTH render sides consume for a video clip's source
+ * audio. Absent `sourceAudio` → `{ enabled: true, volume: 1 }` (legacy behaviour,
+ * back-compat for every work authored before S5). `enabled`/`volume` default the
+ * same way inside a partial object.
+ */
+export function resolveSourceAudio(clip: {
+  sourceAudio?: { enabled?: boolean; volume?: number };
+}): { enabled: boolean; volume: number } {
+  const sa = clip.sourceAudio;
+  return {
+    enabled: sa?.enabled ?? true,
+    volume: sa?.volume ?? 1,
+  };
+}
+
 // ─── Asset registry ─────────────────────────────────────────────────────────
 // AssetEntry promotes raw file paths to a first-class object with semantic id
 // and physical metadata. metadata holds ONLY physical/format properties (size,
@@ -231,6 +263,10 @@ const VideoClipObjectSchema = z.object({
   // Both optional with NO default → every existing work still parses.
   freezeAtSec: z.number().min(0).optional(),
   reverse: z.boolean().optional(),
+  // S5 (PRD-0014) — source-audio gate (detach / mute the clip's own audio).
+  // Optional with NO default → every existing work still parses (absent =
+  // enabled; resolveSourceAudio owns the read-side default).
+  sourceAudio: SourceAudioSchema.optional(),
   keyframes: z.array(KeyframeSchema).optional(),
 });
 export const VideoClipSchema = VideoClipObjectSchema.superRefine(

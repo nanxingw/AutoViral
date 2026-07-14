@@ -624,6 +624,10 @@ export const en = {
       duckingRatio: "Ratio",
       duckingHint: "Auto-lowers this clip while a voiceover plays",
       resetAria: "Reset {prop} to default",
+      sectionSourceAudio: "Source audio",
+      sourceAudioEnabled: "Source audio",
+      detachAudio: "Detach audio",
+      detachAudioHint: "Pull the source audio onto its own track (for ducking or replacement)",
     },
     platformPreset: {
       heading: "Platform",
@@ -1641,6 +1645,10 @@ export const zh: DeepShape<Messages> = {
       duckingRatio: "强度比",
       duckingHint: "配音播放时自动压低本片段",
       resetAria: "重置 {prop} 为默认值",
+      sectionSourceAudio: "原声",
+      sourceAudioEnabled: "原声",
+      detachAudio: "拆分原声",
+      detachAudioHint: "把原声拉成独立音轨（用于闪避或替换）",
     },
     platformPreset: {
       heading: "平台",

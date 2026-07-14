@@ -2083,6 +2083,41 @@ bridgeRouter.post("/clip/:id/duplicate", async (c) => {
   return c.json({ ok: true, result: { id: newClipId } });
 });
 
+// S5 (PRD-0014) — POST /clip/:id/detach-audio: pull a video clip's embedded
+// source audio into a first-class AudioClip (type:"original") on an audio lane
+// (minted if none) AND mute the source (sourceAudio.enabled=false) through the
+// shared `ops.detachAudio` — the SAME two-step atomic op the Studio "Detach"
+// button runs. A second call on an already-detached clip / unknown id / non-video
+// clip → CompositionOpError{code:4} → HTTP 400. Echoes the minted audio clip id
+// + its track id so the agent can immediately reference / duck the new track.
+bridgeRouter.post("/clip/:id/detach-audio", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  }
+  let result: { audioClipId: string; trackId: string } = {
+    audioClipId: "",
+    trackId: "",
+  };
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        result = ops.detachAudio(comp, { clipId: id });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-detach-audio" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result });
+});
+
 // S9 (US 4/5/9) — POST /transition: add a cut-point transition on a video track
 // through the shared composition-ops core. Body `{ trackId, afterClipId, preset,
 // durationSec? }`; the video-only guard, the last-clip-anchor rejection, the

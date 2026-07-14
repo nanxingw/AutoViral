@@ -35,6 +35,7 @@ import type {
   Clip,
   Keyframe,
 } from "../shared/composition.js";
+import { resolveSourceAudio } from "../shared/composition.js";
 import {
   clampSpeed,
   isStaticSpeed,
@@ -660,8 +661,14 @@ async function processVideoSpeed(
     } catch {
       /* miss — fall through to ffmpeg */
     }
-    // Probe only on a cache miss (an ffmpeg pass is about to run anyway).
-    const hasAudio = await probeAudio(c.src, signal);
+    // S5 (PRD-0014) — a detached source (sourceAudio.enabled=false) must NOT
+    // carry its embedded audio into the cache MP4 (belt for the Remotion muted
+    // drop — the禁 "detach 后源声双份出声"); skip the probe entirely and emit a
+    // video-only concat graph. Otherwise probe on a cache miss (an ffmpeg pass is
+    // about to run anyway).
+    const hasAudio = resolveSourceAudio(c).enabled
+      ? await probeAudio(c.src, signal)
+      : false;
     await runVariableSpeedPass(c.src, cachePath, segments, fps, hasAudio, signal);
     return rewritten;
   }
@@ -677,7 +684,10 @@ async function processVideoSpeed(
   } catch {
     /* miss — fall through to ffmpeg */
   }
-  const hasAudio = await probeAudio(c.src, signal);
+  // S5 (PRD-0014) — detached source → video-only cache (see the variable branch).
+  const hasAudio = resolveSourceAudio(c).enabled
+    ? await probeAudio(c.src, signal)
+    : false;
   await runSpeedRampPass(c.src, cachePath, staticSpeed, fps, hasAudio, signal);
   return { ...c, src: cachePath };
 }

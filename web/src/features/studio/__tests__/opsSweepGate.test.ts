@@ -51,6 +51,9 @@ const SUNK: Record<string, string> = {
   updateTransition: "updateTransition",
   removeKeyframe: "removeKeyframe",
   updateKeyframe: "moveKeyframe", // routes through moveKeyframe (time) + setKeyframe (value)
+  // ── S5 (PRD-0014) — detach a video clip's source audio to a first-class
+  // AudioClip; the store button and `autoviral clip detach-audio` share the op.
+  detachClipAudio: "detachAudio",
 };
 
 // Store-only editing verbs NOT yet lifted. Each carries the slice/reason so the

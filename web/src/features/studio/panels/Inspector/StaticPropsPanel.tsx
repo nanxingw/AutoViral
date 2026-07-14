@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useComposition } from "../../store";
 import type { Clip } from "../../types";
+import { resolveSourceAudio } from "../../types";
 import { useT } from "@/i18n/useT";
 
 // #56 — static property controls. The schema (transforms/filters/opacity/
@@ -146,6 +147,7 @@ export function StaticPropsPanel() {
   const comp = useComposition((s) => s.comp);
   const selection = useComposition((s) => s.selection);
   const updateClip = useComposition((s) => s.updateClip);
+  const detachClipAudio = useComposition((s) => s.detachClipAudio);
   const t = useT();
 
   const clip = useMemo<Clip | null>(() => {
@@ -336,7 +338,14 @@ export function StaticPropsPanel() {
   // defaults to satisfy the (required) schema fields.
   const audioClip = clip.kind === "audio" ? clip : null;
 
-  if (sections.length === 0 && !audioClip) return null;
+  // S5 (PRD-0014) — source-audio controls for a VideoClip: a switch (mute the
+  // clip's own audio), a volume slider (while enabled), and a Detach button that
+  // pulls the source onto its own audio lane via the shared op. `updateClip`
+  // spread-guards the sibling field (#81/#86) so toggling doesn't wipe volume.
+  const videoClip = clip.kind === "video" ? clip : null;
+  const srcAudio = videoClip ? resolveSourceAudio(videoClip) : null;
+
+  if (sections.length === 0 && !audioClip && !videoClip) return null;
 
   const resetAriaTpl = (prop: string) =>
     t("studio.inspector.resetAria", { prop });
@@ -354,6 +363,75 @@ export function StaticPropsPanel() {
           ))}
         </div>
       ))}
+
+      {videoClip && srcAudio && (
+        <div style={sectionStyle}>
+          <div style={sectionHeader}>{t("studio.inspector.sectionSourceAudio")}</div>
+          <div style={rowStyle}>
+            <label htmlFor="source-audio-enabled" style={labelStyle}>
+              {t("studio.inspector.sourceAudioEnabled")}
+            </label>
+            <input
+              id="source-audio-enabled"
+              type="checkbox"
+              aria-label={t("studio.inspector.sourceAudioEnabled")}
+              checked={srcAudio.enabled}
+              onChange={(e) =>
+                updateClip(videoClip.id, {
+                  sourceAudio: {
+                    ...(videoClip.sourceAudio ?? {}),
+                    enabled: e.target.checked,
+                  },
+                })
+              }
+              style={{ justifySelf: "start", width: 16, height: 16, accentColor: "var(--accent)" }}
+            />
+          </div>
+
+          {srcAudio.enabled && (
+            <PropRow
+              row={{
+                key: "sourceAudioVolume",
+                label: t("studio.inspector.propVolume"),
+                value: srcAudio.volume,
+                min: 0,
+                max: 1.5,
+                step: 0.01,
+                defaultValue: 1,
+                onChange: (v) =>
+                  updateClip(videoClip.id, {
+                    // Base on the RESOLVED source (enabled always defined) so the
+                    // patch satisfies the required-`enabled` SourceAudio shape;
+                    // override only volume (spread-guard keeps enabled intact).
+                    sourceAudio: { ...srcAudio, volume: v },
+                  }),
+              }}
+              resetAriaTpl={resetAriaTpl}
+            />
+          )}
+
+          <button
+            type="button"
+            aria-label={t("studio.inspector.detachAudio")}
+            title={t("studio.inspector.detachAudioHint")}
+            disabled={!srcAudio.enabled}
+            onClick={() => detachClipAudio(videoClip.id)}
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              padding: "5px 10px",
+              background: "var(--surface-0)",
+              border: "1px solid var(--glass-border)",
+              borderRadius: 6,
+              color: srcAudio.enabled ? "var(--text)" : "var(--text-dimmer)",
+              cursor: srcAudio.enabled ? "pointer" : "not-allowed",
+              justifySelf: "start",
+            }}
+          >
+            {t("studio.inspector.detachAudio")}
+          </button>
+        </div>
+      )}
 
       {audioClip && (
         <div style={sectionStyle}>
