@@ -67,6 +67,9 @@ let lastTransitionIn: Record<string, unknown> | null = null;
 // PRD-0014 S13 — capture the last POST /clip/:id/mask so the CLI test can assert
 // `clip mask <id> --shape ellipse` / `--preset` / `--none` reached the wire.
 let lastMask: Record<string, unknown> | null = null;
+// PRD-0014 S14 — capture the last POST /clip/:id/effects/:verb body + verb so the
+// CLI test can assert `clip effects add|remove|reorder|toggle|set` reached the wire.
+let lastEffects: { verb: string; body: Record<string, unknown> } | null = null;
 let lastTransitionSet: Record<string, unknown> | null = null;
 let lastSelect: Record<string, unknown> | null = null;
 // S4 (US 10) — capture the last PUT /comp body so the CLI test can assert the
@@ -577,6 +580,24 @@ beforeAll(async () => {
           return send(400, { ok: false, error: "no such clip", code: 4 });
         }
         return send(200, { ok: true, result: { id: clipId } });
+      }
+    }
+    // PRD-0014 S14 — POST /clip/:id/effects/:verb (clip effects add/…). A known
+    // clipId runs the op + returns { id, effectId? }; add mints an effectId so the
+    // CLI echoes it. Capture the verb + body so the wire shape can be asserted.
+    {
+      const fxMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/effects\/([^/]+)$/.exec(url ?? "");
+      if (req.method === "POST" && fxMatch) {
+        const verb = decodeURIComponent(fxMatch[2]);
+        lastEffects = { verb, body: await readBody(req) };
+        const clipId = decodeURIComponent(fxMatch[1]);
+        if (!clips.find((c) => c.id === clipId)) {
+          return send(400, { ok: false, error: "no such clip", code: 4 });
+        }
+        return send(200, {
+          ok: true,
+          result: { id: clipId, effectId: verb === "add" ? "eff_mock01" : undefined },
+        });
       }
     }
     // PRD-0014 S8 — POST /clip/:id/keyframe/remove + /keyframe/move. Mirror the
@@ -1645,6 +1666,98 @@ describe("autoviral CLI — end-to-end", () => {
     it("clip mask on an unknown clip → bridge 400 code:4 → exit 4", async () => {
       const r = await run(["clip", "mask", "vc_nope", "--shape", "rect"]);
       expect(r.exitCode).toBe(4);
+    });
+
+    // PRD-0014 S14 — clip effects add/remove/reorder/toggle/set + clip set --blend
+    // + track add --kind adjustment. Routes to POST /clip/:id/effects/:verb (the
+    // shared ops) / PATCH /clip (blend) / POST /track (adjustment lane), so the
+    // agent's effect chain and a human's Inspector converge.
+    it("clip effects add <id> --type grade --params → POSTs /effects/add, echoes effectId", async () => {
+      lastEffects = null;
+      const r = await run([
+        "clip", "effects", "add", "vc_s01", "--type", "grade", "--params", '{"brightness":0.2}',
+      ]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe("eff_mock01");
+      expect(lastEffects).toEqual({ verb: "add", body: { type: "grade", params: { brightness: 0.2 } } });
+    });
+
+    it("clip effects add --index N --enabled false forwards index + enabled", async () => {
+      lastEffects = null;
+      const r = await run([
+        "clip", "effects", "add", "vc_s01", "--type", "blur", "--index", "1", "--enabled", "false",
+      ]);
+      expect(r.exitCode).toBe(0);
+      expect(lastEffects).toEqual({ verb: "add", body: { type: "blur", index: 1, enabled: false } });
+    });
+
+    it("clip effects remove <id> --effect → POSTs /effects/remove { effectId }", async () => {
+      lastEffects = null;
+      const r = await run(["clip", "effects", "remove", "vc_s01", "--effect", "eff_x"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastEffects).toEqual({ verb: "remove", body: { effectId: "eff_x" } });
+    });
+
+    it("clip effects reorder <id> --effect --to-index → POSTs { effectId, toIndex }", async () => {
+      lastEffects = null;
+      const r = await run(["clip", "effects", "reorder", "vc_s01", "--effect", "eff_x", "--to-index", "0"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastEffects).toEqual({ verb: "reorder", body: { effectId: "eff_x", toIndex: 0 } });
+    });
+
+    it("clip effects toggle <id> --effect --enabled false → POSTs { effectId, enabled:false }", async () => {
+      lastEffects = null;
+      const r = await run(["clip", "effects", "toggle", "vc_s01", "--effect", "eff_x", "--enabled", "false"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastEffects).toEqual({ verb: "toggle", body: { effectId: "eff_x", enabled: false } });
+    });
+
+    it("clip effects set <id> --effect --params → POSTs { effectId, params }", async () => {
+      lastEffects = null;
+      const r = await run([
+        "clip", "effects", "set", "vc_s01", "--effect", "eff_x", "--params", '{"contrast":0.4}',
+      ]);
+      expect(r.exitCode).toBe(0);
+      expect(lastEffects).toEqual({ verb: "set", body: { effectId: "eff_x", params: { contrast: 0.4 } } });
+    });
+
+    it("clip effects with no verb / no id → exit 4 (never hits bridge)", async () => {
+      lastEffects = null;
+      expect((await run(["clip", "effects"])).exitCode).toBe(4);
+      expect((await run(["clip", "effects", "add"])).exitCode).toBe(4);
+      expect(lastEffects).toBeNull();
+    });
+
+    it("clip effects add without --type → exit 4 (never hits bridge)", async () => {
+      lastEffects = null;
+      const r = await run(["clip", "effects", "add", "vc_s01"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastEffects).toBeNull();
+    });
+
+    it("clip effects add --params (malformed json) → exit 4 (never hits bridge)", async () => {
+      lastEffects = null;
+      const r = await run(["clip", "effects", "add", "vc_s01", "--type", "grade", "--params", "not-json"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastEffects).toBeNull();
+    });
+
+    it("clip effects on an unknown clip → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["clip", "effects", "add", "vc_nope", "--type", "grade"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("clip set --blend screen → PATCHes { blendMode: 'screen' } (string, not coerced)", async () => {
+      lastClipPatch = null;
+      const r = await run(["clip", "set", "vc_s01", "--blend", "screen"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastClipPatch).toEqual({ blendMode: "screen" });
+    });
+
+    it("track add --kind adjustment → prints the minted trackId", async () => {
+      const r = await run(["track", "add", "--kind", "adjustment"]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toMatch(/^trk_/);
     });
 
     it("track collapse <id> → POSTs /track/:id/collapse, exit 0", async () => {

@@ -29,6 +29,7 @@ import {
   CompositionSchema,
   CompositionWriteSchema,
   migrateLegacyTrackIds,
+  projectLegacyFilters,
   type Composition,
 } from "../../shared/composition.js";
 import { getContentType } from "../../shared/content-types/registry.js";
@@ -123,7 +124,9 @@ export async function readCompositionFor(ctx: OpsContext): Promise<Composition> 
   // stays strict; the helper rewrites legacy `audio-0`/`video-0`/... ids to
   // `trk_<uuid>` and back-fills `displayOrder` before zod sees them. Next
   // write naturally persists the migrated shape.
-  const migrated = migrateLegacyTrackIds(parsed);
+  // S14 (PRD-0014) — also project any legacy flat `filters` into the new ordered
+  // `effects` grade stack (idempotent; next write persists the new format).
+  const migrated = projectLegacyFilters(migrateLegacyTrackIds(parsed));
   return CompositionSchema.parse(migrated);
 }
 

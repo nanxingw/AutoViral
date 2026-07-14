@@ -12,7 +12,7 @@
 
 import { bridgeRequest, readContext } from "../client.js";
 
-const KINDS = ["video", "audio", "text", "overlay"];
+const KINDS = ["video", "audio", "text", "overlay", "adjustment"];
 
 export async function trackCommand(args: string[]): Promise<void> {
   const [sub, ...rest] = args;

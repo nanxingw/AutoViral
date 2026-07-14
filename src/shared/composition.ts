@@ -78,6 +78,87 @@ const FiltersSchema = z.object({
 });
 export type Filters = z.infer<typeof FiltersSchema>;
 
+// ─── S14 (PRD-0014) — blendMode + ordered effects stack + adjustment layer ────
+// `blendMode` composites a VideoClip / OverlayClip / adjustment layer with the
+// pixels below it (CSS `mix-blend-mode`, consumed identically by preview +
+// headless export — WYSIWYG by construction, no ffmpeg dual). "add" maps to the
+// CSS `plus-lighter` value; the other four are literal CSS blend modes.
+export const BLEND_MODES = ["normal", "screen", "multiply", "overlay", "add"] as const;
+export type BlendMode = (typeof BLEND_MODES)[number];
+export const BlendModeSchema = z.enum(BLEND_MODES);
+
+// An `effects` stack replaces the flat three-knob `filters`: an ORDERED array of
+// `{id, type, params, enabled}`, applied top→bottom. A legacy `filters` (the
+// three grade knobs + lut) is READ-TIME projected into a single leading `grade`
+// entry (projectLegacyFilters / resolveClipEffects), so no data is lost and the
+// new format round-trips idempotently. Built-in types: grade (收编现有三旋钮+lut)
+// / blur / vignette / grain. `params` is an intentionally-freeform record (its
+// shape varies per type — same rationale as ProvenanceOperation.params); the
+// renderer interprets it per type. `enabled:false` keeps the entry in the stack
+// but skips its contribution (a专业 NLE toggle).
+export const EFFECT_TYPES = ["grade", "blur", "vignette", "grain"] as const;
+export type EffectType = (typeof EFFECT_TYPES)[number];
+export const EffectSchema = z.object({
+  id: z.string(),
+  type: z.enum(EFFECT_TYPES),
+  params: z.record(z.any()).default({}),
+  enabled: z.boolean().default(true),
+});
+export type Effect = z.infer<typeof EffectSchema>;
+
+/**
+ * Mint a fresh `eff_<uuid8>` id for an effect-stack entry. Mirrors
+ * {@link newTrackId} / {@link newSceneId} so every effect-creation site (ops,
+ * CLI, bridge) uses the same shape.
+ */
+export function newEffectId(): string {
+  const uuid = crypto.randomUUID().replace(/-/g, "");
+  return `eff_${uuid.slice(0, 8)}`;
+}
+
+// Deterministic id for the ONE grade entry a legacy `filters` is projected into.
+// Deterministic (not a fresh uuid) so `projectLegacyFilters` is idempotent AND a
+// migration snapshot is stable across loads.
+export const LEGACY_GRADE_EFFECT_ID = "eff_legacy_grade";
+
+/**
+ * Project a flat `filters` (brightness/contrast/saturation/lut) into the params
+ * of a `grade` effect — dropping the zero / absent knobs so a no-op filter
+ * yields `null` (an empty grade carries no information — lossless to skip).
+ */
+export function filtersToGradeParams(
+  filters: { brightness?: number; contrast?: number; saturation?: number; lut?: string } | undefined,
+): Record<string, number | string> | null {
+  if (!filters) return null;
+  const params: Record<string, number | string> = {};
+  if (typeof filters.brightness === "number" && filters.brightness !== 0)
+    params.brightness = filters.brightness;
+  if (typeof filters.contrast === "number" && filters.contrast !== 0)
+    params.contrast = filters.contrast;
+  if (typeof filters.saturation === "number" && filters.saturation !== 0)
+    params.saturation = filters.saturation;
+  if (typeof filters.lut === "string" && filters.lut) params.lut = filters.lut;
+  return Object.keys(params).length ? params : null;
+}
+
+/**
+ * The single pure reader BOTH render sides consume for a clip's effect stack.
+ * A clip that ALREADY carries `effects` wins (new format); otherwise a legacy
+ * non-default `filters` is projected into one `grade` entry on the fly. So the
+ * renderer reads exactly one source of truth whether or not the on-disk
+ * migration (projectLegacyFilters) has run yet. Absent both → `[]`.
+ */
+export function resolveClipEffects(clip: {
+  effects?: Effect[];
+  filters?: { brightness?: number; contrast?: number; saturation?: number; lut?: string };
+}): Effect[] {
+  if (clip.effects) return clip.effects;
+  const params = filtersToGradeParams(clip.filters);
+  return params
+    ? [{ id: LEGACY_GRADE_EFFECT_ID, type: "grade", params, enabled: true }]
+    : [];
+}
+
 // PRD-0014 S5 — source-audio gate for a VideoClip's OWN embedded audio track.
 // `enabled:false` mutes it in BOTH the preview (Remotion <Video muted>) and the
 // export (<OffthreadVideo muted> + the speed-ramp pre-pass emitting a video-only
@@ -354,6 +435,13 @@ const VideoClipObjectSchema = z.object({
   // S13 (PRD-0014) — rect/ellipse shape mask (see MaskSchema). Optional with NO
   // default → every pre-S13 work parses unchanged (absent = no mask).
   mask: MaskSchema.optional(),
+  // S14 (PRD-0014) — blendMode + ordered effects stack. Both optional with NO
+  // default so every pre-S14 work parses IDENTICALLY (absent blendMode = normal;
+  // absent effects → resolveClipEffects projects the legacy `filters`). The
+  // renderer reads `resolveClipEffects(clip)` (effects wins, else legacy filters)
+  // so a pre-migration work still grades correctly.
+  blendMode: BlendModeSchema.optional(),
+  effects: z.array(EffectSchema).optional(),
   keyframes: z.array(KeyframeSchema).optional(),
 });
 export const VideoClipSchema = VideoClipObjectSchema.superRefine(
@@ -437,6 +525,9 @@ const OverlayClipObjectSchema = z.object({
     hPct: z.number(),
   }),
   opacity: z.number().min(0).max(1).default(1),
+  // S14 (PRD-0014) — blendMode on an overlay (screen/multiply for漏光 / 纹理叠加).
+  // Optional with NO default → every pre-S14 overlay parses unchanged.
+  blendMode: BlendModeSchema.optional(),
   keyframes: z.array(KeyframeSchema).optional(),
 });
 export const OverlayClipSchema = OverlayClipObjectSchema.superRefine(
@@ -444,7 +535,22 @@ export const OverlayClipSchema = OverlayClipObjectSchema.superRefine(
 );
 export type OverlayClip = z.infer<typeof OverlayClipSchema>;
 
-export type Clip = VideoClip | AudioClip | TextClip | OverlayClip;
+// S14 (PRD-0014) — an ADJUSTMENT layer clip: it carries an `effects` stack (and an
+// optional blendMode) and applies to the composited output of every z-lower track
+// WITHIN its time window `[trackOffset, trackOffset+duration)`. It lives on a
+// `kind:"adjustment"` track. No src/in/out — it is a pure effect window, not media.
+const AdjustmentClipObjectSchema = z.object({
+  id: z.string(),
+  kind: z.literal("adjustment"),
+  trackOffset: z.number().min(0),
+  duration: z.number().min(0),
+  effects: z.array(EffectSchema).optional(),
+  blendMode: BlendModeSchema.optional(),
+});
+export const AdjustmentClipSchema = AdjustmentClipObjectSchema;
+export type AdjustmentClip = z.infer<typeof AdjustmentClipObjectSchema>;
+
+export type Clip = VideoClip | AudioClip | TextClip | OverlayClip | AdjustmentClip;
 
 // Discriminated union uses the raw object schemas (zod doesn't accept
 // ZodEffects as union members). The speed-keyframe range constraint is
@@ -577,7 +683,10 @@ const TrackObjectSchema = z.object({
   id: z.string().regex(TRACK_ID_PREFIX_REGEX, {
     message: "Track id must start with 'trk_' (Phase D — issue #31)",
   }),
-  kind: z.enum(["video", "audio", "text", "overlay"]),
+  // S14 (PRD-0014) — `adjustment` is a new lane kind holding AdjustmentClips
+  // (effect windows over the z-lower tracks). Appended to the enum so pre-S14
+  // works (no adjustment lane) parse unchanged.
+  kind: z.enum(["video", "audio", "text", "overlay", "adjustment"]),
   label: z.string(),
   displayOrder: z.number().int().nonnegative(),
   language: z.string().optional(),
@@ -597,6 +706,7 @@ const TrackObjectSchema = z.object({
       AudioClipObjectSchema,
       TextClipSchema,
       OverlayClipObjectSchema,
+      AdjustmentClipObjectSchema,
     ]),
   ),
   // #54 Phase 1 — transitions at cut points (only meaningful on video
@@ -911,6 +1021,7 @@ const StrictVideoClipObjectSchema = VideoClipObjectSchema.strict();
 const StrictAudioClipObjectSchema = AudioClipObjectSchema.strict();
 const StrictTextClipSchema = TextClipSchema.strict();
 const StrictOverlayClipObjectSchema = OverlayClipObjectSchema.strict();
+const StrictAdjustmentClipObjectSchema = AdjustmentClipObjectSchema.strict();
 
 // Strict track: same fields + same refinement as TrackSchema, but `.strict()`
 // so a misspelled track-level OR clip-level key is rejected, not stripped.
@@ -921,6 +1032,7 @@ const StrictTrackSchema = TrackObjectSchema.extend({
       StrictAudioClipObjectSchema,
       StrictTextClipSchema,
       StrictOverlayClipObjectSchema,
+      StrictAdjustmentClipObjectSchema,
     ]),
   ),
 })
@@ -1047,6 +1159,67 @@ export function migrateLegacyTrackIds(raw: unknown): unknown {
   });
 
   return { ...obj, tracks: migratedTracks };
+}
+
+/**
+ * S14 (PRD-0014) — read-time projection of every video clip's legacy flat
+ * `filters` into a leading `effects` grade entry, so the on-disk composition
+ * migrates to the new ordered-stack format on its next write ("写回新格式").
+ *
+ * Idempotent + lossless (快照回归锁):
+ *  - a clip that ALREADY has `effects` is left byte-identical (no re-projection,
+ *    no second grade entry) — so loading a migrated comp again is a no-op;
+ *  - a clip whose `filters` is default / absent (no grade information) is left
+ *    untouched — an empty grade carries nothing, skipping it is lossless;
+ *  - a clip with a non-default `filters` and no `effects` gains
+ *    `effects:[{id:LEGACY_GRADE_EFFECT_ID, type:"grade", params, enabled}]` and
+ *    its `filters` is reset to the neutral default (the grade now lives in
+ *    effects — the single source of truth the renderer reads).
+ *
+ * Returns a NEW object; never mutates `raw`. Non-composition shapes pass through
+ * unchanged (CompositionSchema.parse surfaces the real error downstream). Mirrors
+ * migrateLegacyTrackIds' defensive style + is composed after it in the read path.
+ */
+export function projectLegacyFilters(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const obj = raw as Record<string, unknown>;
+  const tracks = obj.tracks;
+  if (!Array.isArray(tracks)) return raw;
+
+  let touched = false;
+  const migratedTracks = tracks.map((t) => {
+    if (!t || typeof t !== "object") return t;
+    const track = t as Record<string, unknown>;
+    if (!Array.isArray(track.clips)) return track;
+    let trackTouched = false;
+    const clips = track.clips.map((c) => {
+      if (!c || typeof c !== "object") return c;
+      const clip = c as Record<string, unknown>;
+      if (clip.kind !== "video") return clip;
+      // Idempotent: an existing effects stack wins, leave the clip alone.
+      if (clip.effects !== undefined) return clip;
+      const params = filtersToGradeParams(
+        clip.filters as
+          | { brightness?: number; contrast?: number; saturation?: number; lut?: string }
+          | undefined,
+      );
+      if (!params) return clip;
+      trackTouched = true;
+      return {
+        ...clip,
+        // Reset filters to the neutral default — the grade now lives in effects.
+        filters: { brightness: 0, contrast: 0, saturation: 0 },
+        effects: [
+          { id: LEGACY_GRADE_EFFECT_ID, type: "grade", params, enabled: true },
+        ],
+      };
+    });
+    if (!trackTouched) return track;
+    touched = true;
+    return { ...track, clips };
+  });
+
+  return touched ? { ...obj, tracks: migratedTracks } : raw;
 }
 
 export function makeEmptyComposition(opts: {

@@ -63,6 +63,15 @@ const SUNK: Record<string, string> = {
   // ── S13 (PRD-0014) — set/clear a video clip's rect/ellipse MASK; the Inspector
   // mask controls and `autoviral clip mask` share the op.
   setClipMask: "setClipMask",
+  // ── S14 (PRD-0014) — ordered effect-stack edits + blend mode; the Inspector
+  // effects list / blend dropdown and `autoviral clip effects …` / `clip set
+  // --blend` share the ops.
+  addClipEffect: "addEffect",
+  removeClipEffect: "removeEffect",
+  reorderClipEffect: "reorderEffect",
+  toggleClipEffect: "toggleEffect",
+  updateClipEffectParams: "updateEffectParams",
+  setClipBlendMode: "patchClipProps",
 };
 
 // Store-only editing verbs NOT yet lifted. Each carries the slice/reason so the

@@ -417,6 +417,97 @@ export async function clipCommand(args: string[]): Promise<void> {
     return;
   }
 
+  if (sub === "effects") {
+    // S14 (PRD-0014) — `autoviral clip effects <verb> <id> …` mutates a
+    // video/adjustment clip's ORDERED effect stack through the shared ops (the
+    // SAME ops the Studio Inspector effects list runs). Verbs:
+    //   add     <id> --type grade|blur|vignette|grain [--params <json>] [--index N] [--enabled true|false]
+    //   remove  <id> --effect <effectId>
+    //   reorder <id> --effect <effectId> --to-index N
+    //   toggle  <id> --effect <effectId> [--enabled true|false]
+    //   set     <id> --effect <effectId> --params <json>
+    // Args are validated locally (exit 4, never hits the bridge); the server owns
+    // the semantic validation (unknown/non-effect clip, unknown type/effectId).
+    const verb = rest[0];
+    const id = rest[1];
+    const VERBS = ["add", "remove", "reorder", "toggle", "set"];
+    if (!verb || !VERBS.includes(verb) || !id || id.startsWith("--")) {
+      process.stderr.write(
+        "usage: autoviral clip effects <add|remove|reorder|toggle|set> <id> [flags]\n",
+      );
+      process.exit(4);
+    }
+    const flagArgs = rest.slice(2);
+    const opts = parseFlags(flagArgs);
+    const parseParams = (raw: string | undefined): Record<string, unknown> | undefined => {
+      if (raw === undefined) return undefined;
+      try {
+        const p = JSON.parse(raw);
+        if (p == null || typeof p !== "object" || Array.isArray(p)) throw new Error("not object");
+        return p as Record<string, unknown>;
+      } catch {
+        process.stderr.write(
+          "autoviral clip effects: --params must be a JSON object (e.g. '{\"brightness\":0.2}')\n",
+        );
+        process.exit(4);
+      }
+    };
+    let body: Record<string, unknown> = {};
+    if (verb === "add") {
+      const type = opts["--type"];
+      if (!type) {
+        process.stderr.write(
+          "autoviral clip effects add: --type grade|blur|vignette|grain required\n",
+        );
+        process.exit(4);
+      }
+      body = { type };
+      const params = parseParams(opts["--params"]);
+      if (params !== undefined) body.params = params;
+      if (opts["--index"] !== undefined) {
+        const n = Number(opts["--index"]);
+        if (!Number.isFinite(n)) {
+          process.stderr.write("autoviral clip effects add: --index must be a number\n");
+          process.exit(4);
+        }
+        body.index = n;
+      }
+      if (opts["--enabled"] !== undefined) body.enabled = opts["--enabled"] !== "false";
+    } else {
+      const effectId = opts["--effect"];
+      if (!effectId) {
+        process.stderr.write(`autoviral clip effects ${verb}: --effect <effectId> required\n`);
+        process.exit(4);
+      }
+      body = { effectId };
+      if (verb === "reorder") {
+        const n = Number(opts["--to-index"]);
+        if (!Number.isFinite(n)) {
+          process.stderr.write("autoviral clip effects reorder: --to-index <N> required\n");
+          process.exit(4);
+        }
+        body.toIndex = n;
+      } else if (verb === "toggle") {
+        if (opts["--enabled"] !== undefined) body.enabled = opts["--enabled"] !== "false";
+      } else if (verb === "set") {
+        const params = parseParams(opts["--params"]);
+        if (params === undefined) {
+          process.stderr.write("autoviral clip effects set: --params <json> required\n");
+          process.exit(4);
+        }
+        body.params = params;
+      }
+    }
+    const result = await bridgeRequest<{ id: string; effectId?: string }>(
+      ctx,
+      "POST",
+      `/clip/${encodeURIComponent(id)}/effects/${verb}`,
+      body,
+    );
+    if (result.effectId) process.stdout.write(`${result.effectId}\n`);
+    return;
+  }
+
   if (sub === "mask") {
     // S13 (PRD-0014) — `autoviral clip mask <id> --shape rect|ellipse
     // [--feather <0..1>] [--inverted]` / `--preset letterbox-2.35` / `--none`.
@@ -634,6 +725,9 @@ const CLIP_SET_FLAG_PATHS: Record<string, string> = {
   saturation: "filters.saturation",
   // S16 (US 25) — fit-fill mode (cover/contain/blur). `--fit-mode` → `fitMode`.
   "fit-mode": "fitMode",
+  // S14 (PRD-0014) — composite blend mode. `--blend screen` → `blendMode` (a
+  // plain scalar routed through the same per-kind whitelist as the other props).
+  blend: "blendMode",
   // audio
   "fade-in": "fadeIn",
   "fade-out": "fadeOut",
@@ -661,6 +755,7 @@ const STRING_VALUED_PATHS: ReadonlySet<string> = new Set<string>([
   "type", // audio clip type enum (original/bgm/voiceover/sfx)
   "filters.lut", // video LUT name
   "fitMode", // S16 — fit-fill enum (cover/contain/blur); never number-coerce
+  "blendMode", // S14 — blend enum (normal/screen/multiply/overlay/add)
   "style.font", // text font family
   "style.color", // text fill (hex like `000000`)
   "style.stroke.color", // text stroke (hex)

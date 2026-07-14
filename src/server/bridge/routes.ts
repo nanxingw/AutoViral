@@ -1222,7 +1222,7 @@ bridgeRouter.post("/captions/generate", async (c) => {
 // (`autoviral track add --kind audio`) and a human clicking "+ lane" converge
 // on the same composition. Missing work-id / invalid kind → code:4 → CLI exit 4.
 // We echo the minted trackId so the agent can immediately add clips to it.
-const TRACK_KINDS = ["video", "audio", "text", "overlay"] as const;
+const TRACK_KINDS = ["video", "audio", "text", "overlay", "adjustment"] as const;
 bridgeRouter.post("/track", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
@@ -2286,6 +2286,102 @@ bridgeRouter.post("/clip/:id/mask", async (c) => {
     return c.json({ ok: false, error: message }, 500);
   }
   return c.json({ ok: true, result: { id } });
+});
+
+// S14 (PRD-0014) — POST /clip/:id/effects/:verb: mutate a video/adjustment clip's
+// ORDERED effect stack through the shared `ops.{add,remove,reorder,toggle,
+// updateEffect}` — the SAME ops the Studio Inspector effects list runs, so an
+// agent's `autoviral clip effects …` and a human's Inspector edit converge on ONE
+// composition. Verbs + bodies:
+//   add     { type, params?, enabled?, index? }  → mints + echoes effectId
+//   remove  { effectId }
+//   reorder { effectId, toIndex }
+//   toggle  { effectId, enabled? }                → omit enabled to flip
+//   set     { effectId, params }                  → merge params (spread-guard)
+// Unknown / non-effect-bearing clip, unknown type/effectId → CompositionOpError
+// {code:4} → HTTP 400 + code:4 → CLI exit 4.
+bridgeRouter.post("/clip/:id/effects/:verb", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  const verb = c.req.param("verb");
+  if (!id) {
+    return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  }
+  const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>;
+  let mintedEffectId: string | undefined;
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        switch (verb) {
+          case "add": {
+            if (typeof body.type !== "string") {
+              throw new CompositionOpError("effects add: missing/invalid type", 4);
+            }
+            const r = ops.addEffect(comp, {
+              clipId: id,
+              type: body.type as never,
+              params: (body.params as Record<string, unknown>) ?? undefined,
+              enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+              index: typeof body.index === "number" ? body.index : undefined,
+            });
+            mintedEffectId = r.effectId;
+            break;
+          }
+          case "remove": {
+            if (typeof body.effectId !== "string") {
+              throw new CompositionOpError("effects remove: missing effectId", 4);
+            }
+            ops.removeEffect(comp, { clipId: id, effectId: body.effectId });
+            break;
+          }
+          case "reorder": {
+            if (typeof body.effectId !== "string" || typeof body.toIndex !== "number") {
+              throw new CompositionOpError("effects reorder: needs effectId + toIndex", 4);
+            }
+            ops.reorderEffect(comp, { clipId: id, effectId: body.effectId, toIndex: body.toIndex });
+            break;
+          }
+          case "toggle": {
+            if (typeof body.effectId !== "string") {
+              throw new CompositionOpError("effects toggle: missing effectId", 4);
+            }
+            ops.toggleEffect(comp, {
+              clipId: id,
+              effectId: body.effectId,
+              enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
+            });
+            break;
+          }
+          case "set": {
+            if (typeof body.effectId !== "string" || body.params == null || typeof body.params !== "object") {
+              throw new CompositionOpError("effects set: needs effectId + params object", 4);
+            }
+            ops.updateEffectParams(comp, {
+              clipId: id,
+              effectId: body.effectId,
+              params: body.params as Record<string, unknown>,
+            });
+            break;
+          }
+          default:
+            throw new CompositionOpError(`effects: unknown verb ${verb}`, 4);
+        }
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-effects" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (err instanceof CompositionOpError) {
+      return c.json({ ok: false, error: message, code: err.code }, 400);
+    }
+    // eslint-disable-next-line no-console
+    console.error(`[bridge] POST /clip/:id/effects/:verb unexpected failure: ${message}`);
+    return c.json({ ok: false, error: message }, 500);
+  }
+  return c.json({ ok: true, result: { id, effectId: mintedEffectId } });
 });
 
 // S9 (US 4/5/9) — POST /transition: add a cut-point transition on a video track

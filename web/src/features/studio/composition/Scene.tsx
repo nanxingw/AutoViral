@@ -5,6 +5,7 @@ import { VideoTrackRenderer } from "./tracks/VideoTrackRenderer";
 import { AudioTrackRenderer } from "./tracks/AudioTrackRenderer";
 import { TextTrackRenderer } from "./tracks/TextTrackRenderer";
 import { OverlayTrackRenderer } from "./tracks/OverlayTrackRenderer";
+import { AdjustmentTrackRenderer } from "./tracks/AdjustmentTrackRenderer";
 import { resolveCompositionAssets } from "./resolveAssetUrl";
 import { CaptionsLayer } from "./captions/CaptionsLayer";
 
@@ -29,6 +30,8 @@ export function Scene({ comp }: { comp: Composition }) {
           return <AudioTrackRenderer key={t.id} track={t} />;
         if (t.kind === "text")
           return <TextTrackRenderer key={t.id} track={t} />;
+        if (t.kind === "adjustment")
+          return <AdjustmentTrackRenderer key={t.id} track={t} />;
         return <OverlayTrackRenderer key={t.id} track={t} />;
       })}
       {showCaptionOverlay ? (

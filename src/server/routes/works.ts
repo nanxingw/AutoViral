@@ -19,6 +19,7 @@ import {
   type Composition,
   CompositionSchema,
   migrateLegacyTrackIds,
+  projectLegacyFilters,
 } from "../../shared/composition.js";
 import { SAFE_ID, resolveAssetFile, UnsafePathError } from "../safe-paths.js";
 import { uiEventBus } from "../bridge/ui-events.js";
@@ -200,7 +201,7 @@ worksRouter.get("/api/works/:id/composition", async (c) => {
     // Phase D (issue #31) — migrate pre-Phase-D track ids (`video-0` etc.)
     // to `trk_<uuid>` + displayOrder before zod sees them. Schema is strict
     // post-Phase-D; the migration keeps legacy yaml round-trippable.
-    const migrated = migrateLegacyTrackIds(yaml.load(raw));
+    const migrated = projectLegacyFilters(migrateLegacyTrackIds(yaml.load(raw)));
     const parsed = CompositionSchema.parse(migrated);
     return c.json(synthesiseLegacyAssetsAndProvenance(parsed));
   } catch (err: any) {

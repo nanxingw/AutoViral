@@ -63,6 +63,8 @@ const ALLOWED_PATHS: Record<Clip["kind"], readonly string[]> = {
     "filters.brightness",
     "filters.contrast",
     "filters.saturation",
+    // S14 (PRD-0014) — composite blend mode (normal/screen/multiply/overlay/add).
+    "blendMode",
   ],
   audio: [
     "src",
@@ -103,6 +105,14 @@ const ALLOWED_PATHS: Record<Clip["kind"], readonly string[]> = {
     "position.wPct",
     "position.hPct",
     "opacity",
+    // S14 (PRD-0014) — blend mode on an overlay (screen漏光 / multiply纹理).
+    "blendMode",
+  ],
+  adjustment: [
+    "trackOffset",
+    "duration",
+    // S14 (PRD-0014) — blend mode of the adjustment layer over the tracks below.
+    "blendMode",
   ],
 };
 

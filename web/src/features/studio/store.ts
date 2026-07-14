@@ -11,6 +11,8 @@ import type {
   Track,
   Transition,
   Aspect,
+  EffectType,
+  BlendMode,
 } from "./types";
 import { splitKeyframesAtLocal } from "@shared/keyframes";
 // ADR-009 (S6) — shared composition-ops core. splitClip's invariants live here
@@ -173,6 +175,26 @@ interface CompState {
   // and THROWS on illegal input; the store keeps the transition-family silent
   // no-op contract (catch CompositionOpError — the Inspector never produces one).
   setClipMask: (clipId: string, spec: MaskSpec | MaskPresetSpec | null) => void;
+  // PRD-0014 S14 — ordered effect-stack edits + blend mode, each a thin wrapper
+  // over the shared `ops.{add,remove,reorder,toggle,updateEffect}Effect(Params)`
+  // / `ops.patchClipProps` — the SAME ops the bridge/CLI (`autoviral clip effects
+  // …` / `clip set --blend`) run, so the human Inspector and the agent converge on
+  // ONE composition. The ops own validation + in-place mutation; the store keeps
+  // the family's silent-no-op contract (catch CompositionOpError).
+  addClipEffect: (
+    clipId: string,
+    type: EffectType,
+    params?: Record<string, unknown>,
+  ) => void;
+  removeClipEffect: (clipId: string, effectId: string) => void;
+  reorderClipEffect: (clipId: string, effectId: string, toIndex: number) => void;
+  toggleClipEffect: (clipId: string, effectId: string, enabled?: boolean) => void;
+  updateClipEffectParams: (
+    clipId: string,
+    effectId: string,
+    params: Record<string, unknown>,
+  ) => void;
+  setClipBlendMode: (clipId: string, blendMode: BlendMode) => void;
   // Phase 4.I — edge-drag resize. `newTime` is the proposed timeline-time of
   // the moving edge. Clamps left at 0, right at next clip's trackOffset (D2),
   // and enforces minDuration 0.05s on both edges. Branches on clip kind:
@@ -730,6 +752,86 @@ export const useComposition = create<CompState>()(
             });
             return; // composition untouched, but the user is told.
           }
+          throw err;
+        }
+      }),
+    // PRD-0014 S14 — effect-stack + blend wrappers over the shared ops. Each is
+    // the SAME code the bridge/CLI runs; a rejection surfaces a toast (like the
+    // mask family) rather than a silent no-op. history is not pushed here (these
+    // are inspector-grade tweaks, matching updateTransition's no-history contract).
+    addClipEffect: (clipId, type, params) =>
+      set((s) => {
+        if (!s.comp) return;
+        try {
+          ops.addEffect(s.comp, { clipId, type, params });
+        } catch (err) {
+          if (err instanceof CompositionOpError) {
+            const locale = useLocaleStore.getState().locale;
+            useToastStore.getState().push({
+              variant: "warn",
+              message: MESSAGES[locale].studio.toast.effectFailed,
+              detail: err.message,
+              ttlMs: 4000,
+            });
+            return;
+          }
+          throw err;
+        }
+      }),
+    removeClipEffect: (clipId, effectId) =>
+      set((s) => {
+        if (!s.comp) return;
+        try {
+          ops.removeEffect(s.comp, { clipId, effectId });
+        } catch (err) {
+          if (err instanceof CompositionOpError) return;
+          throw err;
+        }
+      }),
+    reorderClipEffect: (clipId, effectId, toIndex) =>
+      set((s) => {
+        if (!s.comp) return;
+        try {
+          ops.reorderEffect(s.comp, { clipId, effectId, toIndex });
+        } catch (err) {
+          if (err instanceof CompositionOpError) return;
+          throw err;
+        }
+      }),
+    toggleClipEffect: (clipId, effectId, enabled) =>
+      set((s) => {
+        if (!s.comp) return;
+        try {
+          ops.toggleEffect(s.comp, { clipId, effectId, enabled });
+        } catch (err) {
+          if (err instanceof CompositionOpError) return;
+          throw err;
+        }
+      }),
+    updateClipEffectParams: (clipId, effectId, params) =>
+      set((s) => {
+        if (!s.comp) return;
+        try {
+          ops.updateEffectParams(s.comp, { clipId, effectId, params });
+        } catch (err) {
+          if (err instanceof CompositionOpError) return;
+          throw err;
+        }
+      }),
+    // blendMode is a plain scalar → route through the SAME per-kind whitelist op
+    // (`ops.patchClipProps`) the bridge PATCH /clip uses, so `clip set --blend`
+    // and this converge byte-for-byte.
+    setClipBlendMode: (clipId, blendMode) =>
+      set((s) => {
+        if (!s.comp) return;
+        const clip = s.comp.tracks
+          .flatMap((t) => t.clips as Clip[])
+          .find((c) => c.id === clipId);
+        if (!clip) return;
+        try {
+          ops.patchClipProps(clip, { blendMode }, s.comp.fps);
+        } catch (err) {
+          if (err instanceof CompositionOpError) return;
           throw err;
         }
       }),

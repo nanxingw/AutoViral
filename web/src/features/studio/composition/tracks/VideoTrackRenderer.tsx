@@ -29,7 +29,8 @@ function timingFor(easing: Transition["easing"], durationInFrames: number) {
       return linearTiming({ durationInFrames });
   }
 }
-import { toCssFilter } from "../filters/cssFilters";
+import { effectsToCssFilter, effectOverlayLayers, blendModeToCss } from "../filters/cssFilters";
+import { resolveClipEffects } from "@shared/composition";
 import { interpolateProperty } from "@shared/keyframes";
 import {
   computeVideoSpeedForFrame,
@@ -79,7 +80,14 @@ export function computeVideoOpacityForFrame(
 function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   const { fps, width, height } = useVideoConfig();
   const frame = useCurrentFrame();
-  const filter = toCssFilter(clip.filters);
+  // S14 (PRD-0014) — the clip's ordered effect stack drives the CSS filter chain
+  // (grade + blur) + the vignette/grain overlay layers. resolveClipEffects reads
+  // `clip.effects` when present, else projects the legacy flat `filters` on the
+  // fly — so a pre-S14 work still grades correctly (WYSIWYG by construction: the
+  // SAME filter string in preview and export).
+  const clipEffects = resolveClipEffects(clip);
+  const filter = effectsToCssFilter(clipEffects);
+  const overlays = effectOverlayLayers(clipEffects);
   const { scale, x, y, rotation } = computeVideoTransformForFrame(clip, frame, fps);
   // Phase 8.3.C — read speed keyframes (D3 fallback 1.0, D4 clamp). Routed
   // through Remotion's playbackRate prop, NOT the CSS transform (D8).
@@ -254,6 +262,20 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // (renderMedia runs this SAME component tree in Chromium) — WYSIWYG by
   // construction, no ffmpeg dual (S13 单渲染器原则). Absent = no wrapper
   // (back-compat for every pre-S13 work). The badge below stays OUTSIDE the mask.
+  // S14 (PRD-0014) — vignette / grain effect overlays stack OVER the clip body
+  // (inside the mask so they are clipped to the shape too). Absent = unchanged.
+  const bodyWithOverlays =
+    overlays.length === 0 ? (
+      body
+    ) : (
+      <>
+        {body}
+        {overlays.map((o) => (
+          <div key={o.key} data-test={o.testId} style={o.style} />
+        ))}
+      </>
+    );
+
   const maskDef = buildClipMask(clip.mask, { width, height });
   const masked = maskDef ? (
     <div
@@ -269,10 +291,25 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
         WebkitMaskRepeat: "no-repeat",
       }}
     >
-      {body}
+      {bodyWithOverlays}
     </div>
   ) : (
-    body
+    bodyWithOverlays
+  );
+
+  // S14 (PRD-0014) — blendMode composites the WHOLE clip (masked body + overlays)
+  // against the z-lower tracks via CSS `mix-blend-mode`. Absent / normal → no
+  // wrapper (back-compat). Consumed identically in preview + export.
+  const blend = blendModeToCss(clip.blendMode);
+  const composited = blend ? (
+    <div
+      data-test="clip-blend"
+      style={{ position: "absolute", inset: 0, mixBlendMode: blend as React.CSSProperties["mixBlendMode"] }}
+    >
+      {masked}
+    </div>
+  ) : (
+    masked
   );
 
   // S19 (US 29/30) — reverse is EXPORT-ONLY. A browser <video> can't play
@@ -288,10 +325,10 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // never performs — a dishonest preview. When freeze is also set, suppress the
   // reverse badge (freeze is already WYSIWYG; there is no export-only reverse to
   // warn about, and definitely no phantom reverse to advertise).
-  if (!clip.reverse || clip.freezeAtSec != null) return masked;
+  if (!clip.reverse || clip.freezeAtSec != null) return composited;
   return (
     <>
-      {masked}
+      {composited}
       <div
         data-test="reverse-export-only"
         style={{

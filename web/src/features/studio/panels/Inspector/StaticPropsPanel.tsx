@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useComposition } from "../../store";
 import type { Clip } from "../../types";
-import { resolveSourceAudio } from "../../types";
+import { resolveSourceAudio, resolveClipEffects } from "../../types";
 import { TRANSITION_PRESETS } from "@shared/transitions";
 import { useT } from "@/i18n/useT";
 
@@ -91,6 +91,19 @@ const resetBtnStyle: React.CSSProperties = {
   lineHeight: 1,
 };
 
+// PRD-0014 S14 — compact button for the effects-stack controls (add/toggle/remove).
+const effectBtnStyle: React.CSSProperties = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  padding: "4px 8px",
+  background: "var(--surface-0)",
+  border: "1px solid var(--glass-border)",
+  borderRadius: 6,
+  color: "var(--text)",
+  cursor: "pointer",
+  lineHeight: 1,
+};
+
 function PropRow({
   row,
   resetAriaTpl,
@@ -152,6 +165,13 @@ export function StaticPropsPanel() {
   const reattachClipAudio = useComposition((s) => s.reattachClipAudio);
   const setClipTransitionIn = useComposition((s) => s.setClipTransitionIn);
   const setClipMask = useComposition((s) => s.setClipMask);
+  // PRD-0014 S14 — blend + effect-stack actions (each a thin wrapper over the
+  // shared ops the CLI/bridge run, so the Inspector and `autoviral clip effects
+  // …` / `clip set --blend` converge on ONE composition).
+  const setClipBlendMode = useComposition((s) => s.setClipBlendMode);
+  const addClipEffect = useComposition((s) => s.addClipEffect);
+  const removeClipEffect = useComposition((s) => s.removeClipEffect);
+  const toggleClipEffect = useComposition((s) => s.toggleClipEffect);
   const t = useT();
 
   const clip = useMemo<Clip | null>(() => {
@@ -347,6 +367,9 @@ export function StaticPropsPanel() {
   // pulls the source onto its own audio lane via the shared op. `updateClip`
   // spread-guards the sibling field (#81/#86) so toggling doesn't wipe volume.
   const videoClip = clip.kind === "video" ? clip : null;
+  const overlayClip = clip.kind === "overlay" ? clip : null;
+  // S14 — blendMode applies to video + overlay; the effects stack to video.
+  const blendClip = videoClip ?? overlayClip;
   const srcAudio = videoClip ? resolveSourceAudio(videoClip) : null;
   // Review fix #1 — is there an AudioClip previously detached from THIS video
   // still on a lane? If so, re-enabling the source must go through the atomic
@@ -632,6 +655,102 @@ export function StaticPropsPanel() {
           >
             {t("studio.inspector.maskLetterbox")}
           </button>
+        </div>
+      )}
+
+      {/* PRD-0014 S14 — blend mode (video + overlay). Routes through the shared
+          `setClipBlendMode` store action (→ ops.patchClipProps), so `clip set
+          --blend` and this dropdown converge. */}
+      {blendClip && (
+        <div style={sectionStyle}>
+          <div style={sectionHeader}>{t("studio.inspector.sectionBlend")}</div>
+          <div style={rowStyle}>
+            <label htmlFor="blend-mode" style={labelStyle}>
+              {t("studio.inspector.blendMode")}
+            </label>
+            <select
+              id="blend-mode"
+              aria-label={t("studio.inspector.blendMode")}
+              value={(blendClip as { blendMode?: string }).blendMode ?? "normal"}
+              onChange={(e) =>
+                setClipBlendMode(
+                  blendClip.id,
+                  e.target.value as "normal" | "screen" | "multiply" | "overlay" | "add",
+                )
+              }
+              style={{ ...numberInputStyle, gridColumn: "2 / span 3", textAlign: "left" }}
+            >
+              {["normal", "screen", "multiply", "overlay", "add"].map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* PRD-0014 S14 — ordered effects stack (video). Add a built-in effect,
+          toggle it on/off, or remove it — every control routes through the shared
+          effect ops (the SAME ops `autoviral clip effects …` run). */}
+      {videoClip && (
+        <div style={sectionStyle} data-test="effects-section">
+          <div style={sectionHeader}>{t("studio.inspector.sectionEffects")}</div>
+          <div style={{ ...rowStyle, gridTemplateColumns: "1fr", gap: 6 }}>
+            {(resolveClipEffects(videoClip) ?? []).map((eff) => (
+              <div
+                key={eff.id}
+                data-test="effect-entry"
+                data-effect-type={eff.type}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 11,
+                  color: "var(--text)",
+                  opacity: eff.enabled === false ? 0.5 : 1,
+                }}
+              >
+                <span>{eff.type}</span>
+                <span style={{ display: "flex", gap: 6 }}>
+                  <button
+                    type="button"
+                    aria-label={t("studio.inspector.effectToggle")}
+                    title={t("studio.inspector.effectToggle")}
+                    onClick={() => toggleClipEffect(videoClip.id, eff.id)}
+                    style={effectBtnStyle}
+                  >
+                    {eff.enabled === false ? "○" : "●"}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={t("studio.inspector.effectRemove")}
+                    title={t("studio.inspector.effectRemove")}
+                    onClick={() => removeClipEffect(videoClip.id, eff.id)}
+                    style={effectBtnStyle}
+                  >
+                    ✕
+                  </button>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
+            {(["grade", "blur", "vignette", "grain"] as const).map((type) => (
+              <button
+                key={type}
+                type="button"
+                aria-label={`${t("studio.inspector.effectAdd")} ${type}`}
+                title={`${t("studio.inspector.effectAdd")} ${type}`}
+                onClick={() => addClipEffect(videoClip.id, type)}
+                style={effectBtnStyle}
+              >
+                + {type}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
