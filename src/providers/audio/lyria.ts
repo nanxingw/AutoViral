@@ -190,6 +190,8 @@ export function createLyriaProvider(
           "HTTP-Referer": "http://localhost:3271",
         },
         body: JSON.stringify(payload),
+        // S10 — cancel the stream when the client disconnects.
+        ...(req.signal ? { signal: req.signal } : {}),
       });
 
       if (!res.ok) {

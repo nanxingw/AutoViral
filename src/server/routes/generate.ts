@@ -44,6 +44,55 @@ import {
   type ProvenanceEdge,
 } from "../../shared/composition.js";
 import { safeTitleFromWork } from "./_shared.js";
+import type { ContentfulStatusCode } from "hono/utils/http-status";
+import {
+  manifestKey,
+  reserveGeneration,
+  completeGeneration,
+  failGeneration,
+  isAbortError,
+  isOrphanedGeneration,
+} from "../generation-resilience.js";
+
+// S10 (PRD-0014) — the honest status for a client-aborted generation is 499
+// (Client Closed Request); it's not in Hono's typed status union, so name the
+// cast once here.
+const HTTP_CLIENT_CLOSED = 499 as unknown as ContentfulStatusCode;
+
+// S10 — a duplicate下单 for an already in-flight key is a conflict.
+const HTTP_CONFLICT = 409 as const;
+
+/** Absolute work directory that holds composition.yaml + generation-manifest.json. */
+function workDirFor(workId: string): string {
+  return join(dataDir, "works", workId);
+}
+
+/**
+ * S10 — book an ORPHANED note in the cost-ledger for a generation abandoned
+ * after its upstream job was already dispatched (billed but un-recallable). The
+ * spend stays visible; `estimated:true` because the final metered cost is
+ * unknown once we stop polling. Best-effort — never throws.
+ */
+function recordOrphanedGeneration(args: {
+  workId: string;
+  kind: string;
+  provider?: string;
+  costUsd?: number;
+  providerJobId?: string;
+}): void {
+  recordCostEvent({
+    workId: args.workId,
+    kind: args.kind,
+    provider: args.provider,
+    usd: typeof args.costUsd === "number" ? args.costUsd : 0,
+    estimated: true,
+    meta: {
+      orphaned: true,
+      note: "client disconnected mid-generation; upstream job abandoned (uncancellable async job)",
+      ...(args.providerJobId ? { providerJobId: args.providerJobId } : {}),
+    },
+  });
+}
 
 export const generateRouter = new Hono();
 
@@ -280,11 +329,53 @@ generateRouter.post("/api/generate/image", async (c) => {
       /* no composition — model default applies */
     }
   }
+  // S10 — content-addressed idempotency (mirrors the video path). Key on the
+  // REQUEST inputs (raw aspectRatio, not the canvas-follow-derived one, which
+  // drifts once a composition is seeded). A caller-supplied `seed` intentionally
+  // differentiates candidates. The batch endpoint is NOT gated (it wants variety).
+  const imgWorkDir = workDirFor(workId);
+  const imgKey = manifestKey({
+    prompt,
+    params: {
+      kind: "image",
+      provider: provider.name,
+      aspectRatio,
+      width,
+      height,
+      imageSize,
+      seed,
+      model,
+      referenceImage,
+    },
+  });
+  const imgReservation = await reserveGeneration(imgWorkDir, imgKey);
+  if (imgReservation.decision === "skip") {
+    return c.json({ ...(imgReservation.entry.response as object), skipped: true });
+  }
+  if (imgReservation.decision === "reject") {
+    return c.json(
+      {
+        success: false,
+        error: "An identical image generation is already in flight for this work",
+        code: "GENERATION_IN_FLIGHT",
+      },
+      HTTP_CONFLICT,
+    );
+  }
+  const imgSignal = c.req.raw.signal;
   try {
     const result = await provider.generateImage({
       prompt, width, height, workId, filename: safeFilename, referenceImage,
       aspectRatio: effectiveAspectRatio, imageSize, seed, temperature, model,
+      // S10 — cancel the upstream call on client disconnect.
+      signal: imgSignal,
     });
+    // S10 — a client-abort mid-request: release the manifest (retry allowed) and
+    // report a cancellation rather than a (leaky) provider error.
+    if (imgSignal.aborted) {
+      await failGeneration(imgWorkDir, imgKey);
+      return c.json({ success: false, code: "GENERATION_CANCELLED", orphaned: false }, HTTP_CLIENT_CLOSED);
+    }
     // C1.2 — when the provider returns a FAILURE, sanitize its error string
     // before it reaches the client (it can carry the upstream model/account id).
     // We keep the EXISTING status semantics (the body already carries
@@ -292,6 +383,7 @@ generateRouter.post("/api/generate/image", async (c) => {
     // scrubbed, the response shape/status is unchanged. A failed generation
     // registers no asset + books no cost (B2 acceptance: 失败不记).
     if (!result.success) {
+      await failGeneration(imgWorkDir, imgKey);
       return c.json({ ...result, error: sanitizeProviderError(result.error) });
     }
 
@@ -342,8 +434,18 @@ generateRouter.post("/api/generate/image", async (c) => {
         meta: { assetId },
       });
     }
-    return c.json({ ...result, assetId });
+    const imgResponse = { ...result, assetId };
+    // S10 — cache the successful response so an identical repeat request skips.
+    await completeGeneration(imgWorkDir, imgKey, {
+      assetPath: result.assetPath,
+      response: imgResponse,
+    });
+    return c.json(imgResponse);
   } catch (err: any) {
+    await failGeneration(imgWorkDir, imgKey);
+    if (isAbortError(err) || imgSignal.aborted) {
+      return c.json({ success: false, code: "GENERATION_CANCELLED", orphaned: false }, HTTP_CLIENT_CLOSED);
+    }
     return c.json({ success: false, error: sanitizeProviderError(err?.message), code: "API_ERROR" }, 500);
   }
 });
@@ -441,13 +543,47 @@ generateRouter.post("/api/generate/video", async (c) => {
   if (!provider) {
     return c.json({ success: false, error: "No video provider available", code: "INVALID_PARAMS" }, 400);
   }
+  const wDirAbs = join(dataDir, "works", workId);
+  const outDirAbs = join(wDirAbs, "assets", provider.name);
+  const effectiveDuration = durationSec ?? 5;
+
+  // S10 — content-addressed idempotency: reserve BEFORE dispatch. done → return
+  // the cached asset (no double下单/double-bill); in-flight → 409; failed/absent
+  // → proceed. The key is hashed over the REQUEST's stable inputs — the raw
+  // `aspectRatio` the caller sent, NOT the canvas-follow-derived
+  // `effectiveAspectRatio`: that value drifts once the first generation seeds a
+  // composition.yaml, which would silently defeat idempotency (identical request
+  // → different key → re-下单). Idempotency keys on what the client asked for.
+  const genKey = manifestKey({
+    prompt,
+    params: {
+      kind: "video",
+      provider: provider.name,
+      aspectRatio,
+      resolution: effectiveResolution,
+      durationSec: effectiveDuration,
+      firstFrame: firstFrameImage,
+      lastFrame: lastFrameImage,
+    },
+  });
+  const reservation = await reserveGeneration(wDirAbs, genKey);
+  if (reservation.decision === "skip") {
+    return c.json({ ...(reservation.entry.response as object), skipped: true });
+  }
+  if (reservation.decision === "reject") {
+    return c.json(
+      {
+        success: false,
+        error: "An identical generation is already in flight for this work",
+        code: "GENERATION_IN_FLIGHT",
+      },
+      HTTP_CONFLICT,
+    );
+  }
   try {
     // The mp4 lands in the work's assets/<provider>/ tree so the existing
     // /api/works/:id/assets/* serving picks it up; we convert the absolute
     // write path back to a work-relative uri for the response.
-    const wDirAbs = join(dataDir, "works", workId);
-    const outDirAbs = join(wDirAbs, "assets", provider.name);
-    const effectiveDuration = durationSec ?? 5;
     const result = await provider.generateVideo({
       prompt,
       durationSec: effectiveDuration,
@@ -456,6 +592,9 @@ generateRouter.post("/api/generate/video", async (c) => {
       ...(effectiveResolution ? { resolution: effectiveResolution } : {}),
       ...(firstFrameImage ? { firstFrameImage } : {}),
       ...(lastFrameImage ? { lastFrameImage } : {}),
+      // S10 — thread the request-abort signal so a client disconnect cancels
+      // the upstream job (cancelable) or orphans it (async poll).
+      signal: c.req.raw.signal,
     });
     const relativeUri = result.assetUri.startsWith(wDirAbs + "/")
       ? result.assetUri.slice(wDirAbs.length + 1)
@@ -505,15 +644,38 @@ generateRouter.post("/api/generate/video", async (c) => {
       });
     }
 
-    return c.json({
+    const response = {
       success: true,
       assetId,
       assetPath: result.assetUri,
       previewUrl: `/api/works/${workId}/${relativeUri}`,
       stub: result.stub,
       costUsd: result.costUsd,
-    });
+    };
+    // S10 — mark the manifest done so an identical repeat request skips.
+    await completeGeneration(wDirAbs, genKey, { assetPath: relativeUri, response });
+    return c.json(response);
   } catch (err: any) {
+    // S10 — a client-abort clears the manifest (failed → retry allowed) and, for
+    // an orphaned (billed-but-abandoned) upstream job, books a ledger note.
+    if (isAbortError(err)) {
+      await failGeneration(wDirAbs, genKey);
+      if (isOrphanedGeneration(err)) {
+        recordOrphanedGeneration({
+          workId,
+          kind: "video",
+          provider: provider.name,
+          costUsd: err.costUsd,
+          providerJobId: err.providerJobId,
+        });
+      }
+      return c.json(
+        { success: false, code: err.code, orphaned: isOrphanedGeneration(err) },
+        HTTP_CLIENT_CLOSED,
+      );
+    }
+    // A genuine failure releases the manifest lock so the caller can retry.
+    await failGeneration(wDirAbs, genKey);
     // C1.2 — sanitize before returning so an upstream video-provider error
     // can't leak the internal model/account id to the client.
     return c.json({ success: false, error: sanitizeProviderError(err?.message), code: "API_ERROR" }, 500);
@@ -682,6 +844,31 @@ generateRouter.post("/api/generate/bgm", async (c) => {
   const wDirAbs = join(dataDir, "works", workId);
   const outDirAbs = join(wDirAbs, "assets", "audio");
 
+  // S10 — content-addressed idempotency (mirrors the video/image paths). A
+  // caller-supplied `seed` differentiates variants.
+  const bgmKey = manifestKey({
+    prompt: String(prompt),
+    params: {
+      kind: "bgm",
+      provider: entry.name,
+      vocal: vocal !== undefined ? Boolean(vocal) : undefined,
+      seed: typeof seed === "number" ? seed : undefined,
+      temperature: typeof temperature === "number" ? temperature : undefined,
+      durationSeconds,
+    },
+  });
+  const bgmReservation = await reserveGeneration(wDirAbs, bgmKey);
+  if (bgmReservation.decision === "skip") {
+    return c.json({ ...(bgmReservation.entry.response as object), skipped: true });
+  }
+  if (bgmReservation.decision === "reject") {
+    return c.json(
+      { success: false, error: "An identical BGM generation is already in flight for this work", code: "GENERATION_IN_FLIGHT" },
+      HTTP_CONFLICT,
+    );
+  }
+  const bgmSignal = c.req.raw.signal;
+
   try {
     // Call the registry entry (the keyless lyria singleton in prod; a capturing
     // fake under test). The config key is injected per-call via opts.apiKey so
@@ -702,6 +889,8 @@ generateRouter.post("/api/generate/bgm", async (c) => {
       ...(typeof seed === "number" ? { seed } : {}),
       ...(typeof temperature === "number" ? { temperature } : {}),
       ...(referenceImages.length > 0 ? { referenceImages } : {}),
+      // S10 — cancel the stream on client disconnect.
+      signal: bgmSignal,
     };
     // D2-fixup — explicit type so result keeps its MusicGenerateResult shape
     // across the catch boundary (an unannotated `let` degrades to `any` once the
@@ -764,7 +953,7 @@ generateRouter.post("/api/generate/bgm", async (c) => {
       });
     }
 
-    return c.json({
+    const bgmResponse = {
       success: true,
       assetId,
       relativeUri,
@@ -772,8 +961,19 @@ generateRouter.post("/api/generate/bgm", async (c) => {
       previewUrl: `/api/works/${workId}/${relativeUri}`,
       stub: result.stub,
       costUsd: result.costUsd,
-    });
+    };
+    // S10 — cache the response so an identical repeat request skips.
+    await completeGeneration(wDirAbs, bgmKey, { assetPath: relativeUri, response: bgmResponse });
+    return c.json(bgmResponse);
   } catch (err: any) {
+    // S10 — a client-abort releases the manifest lock (retry allowed) + reports a
+    // cancellation. BGM is a single streamed request (no enqueue/poll billing
+    // gap), so an abort is a clean cancel, not an orphan.
+    if (isAbortError(err) || bgmSignal.aborted) {
+      await failGeneration(wDirAbs, bgmKey);
+      return c.json({ success: false, code: "GENERATION_CANCELLED", orphaned: false }, HTTP_CLIENT_CLOSED);
+    }
+    await failGeneration(wDirAbs, bgmKey);
     // D2 — classify the upstream empty-audio failure (it reaches here only after
     // the single retry above ALSO returned empty). It's an UPSTREAM transient,
     // not a caller mistake, so return 502 (not 500) + a discriminable code + an
@@ -1295,71 +1495,118 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
     }
   }
 
-  const result = await provider.generateVideo({
+  // S10 — content-addressed idempotency + abort, parity with /api/generate/video.
+  // Key on request inputs (raw body aspectRatio, not the canvas-follow-derived
+  // `aspectRatio` which drifts once a composition is seeded).
+  const provKey = manifestKey({
     prompt: body.prompt,
-    durationSec,
-    ...(aspectRatio ? { aspectRatio } : {}),
-    outputAbsoluteDir: seedanceDirAbs,
-    // R44 — i2v anchors. When provided, Seedance switches from text-only
-    // to first-frame-driven generation, which is the only way to do
-    // "一镜到底 + 参考人物" workflows.
-    ...(body.firstFrameImage ? { firstFrameImage: body.firstFrameImage } : {}),
-    ...(body.lastFrameImage ? { lastFrameImage: body.lastFrameImage } : {}),
-  });
-  // Convert absolute write path back to work-relative for the asset entry.
-  const relativeAssetUri = result.assetUri.startsWith(wDirAbs + "/")
-    ? result.assetUri.slice(wDirAbs.length + 1)
-    : result.assetUri;
-
-  // Best-effort composition update — if there's no composition.yaml yet (legacy
-  // works) we still return the adapter result so the UI can show it. Shared with
-  // /api/generate/video so the AssetEntry/provenance shape is identical.
-  const assetId = await registerGeneratedVideoAsset({
-    workId: body.workId,
-    relativeAssetUri,
-    providerId,
-    prompt: body.prompt,
-    result,
-    durationSec,
-    // B7 — this path takes the i2v anchor as firstFrameImage (URL/data URI);
-    // it reverse-looks-up when it matches a stored asset, else stays null.
-    firstFrame: body.firstFrameImage,
-    ...(typeof body.sceneId === "string" && body.sceneId ? { sceneId: body.sceneId } : {}),
-    extraParams: { ...(aspectRatio ? { aspectRatio } : {}), durationSec },
-  });
-
-  // I17 — broadcast asset-added so the library refreshes live. This is the
-  // path the chat agent / generation dialog actually drive; same shape as the
-  // image/video handlers above and audio.ts:279.
-  uiEventBus.publish(body.workId, {
-    type: "asset-added",
-    workId: body.workId,
-    ts: Date.now(),
-    payload: { kind: "video", uri: relativeAssetUri, origin: "generate" },
-  });
-
-  // B1 (PRD-0010) — same video cost booking as /api/generate/video: this is the
-  // provider-scoped path the generation dialog drives, so it must record too or
-  // human-UI generations would be invisible in the ledger. Real metered cost,
-  // estimated:false, stubs skipped, best-effort.
-  if (!result.stub && typeof result.costUsd === "number") {
-    recordCostEvent({
-      workId: body.workId,
+    params: {
       kind: "video",
       provider: providerId,
-      usd: result.costUsd,
-      estimated: false,
-      meta: { assetId },
-    });
+      aspectRatio: body.aspectRatio,
+      durationSec,
+      firstFrame: body.firstFrameImage,
+      lastFrame: body.lastFrameImage,
+    },
+  });
+  const provReservation = await reserveGeneration(wDirAbs, provKey);
+  if (provReservation.decision === "skip") {
+    return c.json({ ...(provReservation.entry.response as object), skipped: true });
+  }
+  if (provReservation.decision === "reject") {
+    return c.json(
+      { error: "An identical generation is already in flight for this work", code: "GENERATION_IN_FLIGHT" },
+      HTTP_CONFLICT,
+    );
   }
 
-  return c.json({
-    assetId,
-    assetUri: relativeAssetUri,
-    providerJobId: result.providerJobId,
-    costUsd: result.costUsd,
-    stub: result.stub,
-  });
+  try {
+    const result = await provider.generateVideo({
+      prompt: body.prompt,
+      durationSec,
+      ...(aspectRatio ? { aspectRatio } : {}),
+      outputAbsoluteDir: seedanceDirAbs,
+      // R44 — i2v anchors. When provided, Seedance switches from text-only
+      // to first-frame-driven generation, which is the only way to do
+      // "一镜到底 + 参考人物" workflows.
+      ...(body.firstFrameImage ? { firstFrameImage: body.firstFrameImage } : {}),
+      ...(body.lastFrameImage ? { lastFrameImage: body.lastFrameImage } : {}),
+      // S10 — cancel the upstream job on client disconnect.
+      signal: c.req.raw.signal,
+    });
+    // Convert absolute write path back to work-relative for the asset entry.
+    const relativeAssetUri = result.assetUri.startsWith(wDirAbs + "/")
+      ? result.assetUri.slice(wDirAbs.length + 1)
+      : result.assetUri;
+
+    // Best-effort composition update — if there's no composition.yaml yet (legacy
+    // works) we still return the adapter result so the UI can show it. Shared with
+    // /api/generate/video so the AssetEntry/provenance shape is identical.
+    const assetId = await registerGeneratedVideoAsset({
+      workId: body.workId,
+      relativeAssetUri,
+      providerId,
+      prompt: body.prompt,
+      result,
+      durationSec,
+      // B7 — this path takes the i2v anchor as firstFrameImage (URL/data URI);
+      // it reverse-looks-up when it matches a stored asset, else stays null.
+      firstFrame: body.firstFrameImage,
+      ...(typeof body.sceneId === "string" && body.sceneId ? { sceneId: body.sceneId } : {}),
+      extraParams: { ...(aspectRatio ? { aspectRatio } : {}), durationSec },
+    });
+
+    // I17 — broadcast asset-added so the library refreshes live. This is the
+    // path the chat agent / generation dialog actually drive; same shape as the
+    // image/video handlers above and audio.ts:279.
+    uiEventBus.publish(body.workId, {
+      type: "asset-added",
+      workId: body.workId,
+      ts: Date.now(),
+      payload: { kind: "video", uri: relativeAssetUri, origin: "generate" },
+    });
+
+    // B1 (PRD-0010) — same video cost booking as /api/generate/video: this is the
+    // provider-scoped path the generation dialog drives, so it must record too or
+    // human-UI generations would be invisible in the ledger. Real metered cost,
+    // estimated:false, stubs skipped, best-effort.
+    if (!result.stub && typeof result.costUsd === "number") {
+      recordCostEvent({
+        workId: body.workId,
+        kind: "video",
+        provider: providerId,
+        usd: result.costUsd,
+        estimated: false,
+        meta: { assetId },
+      });
+    }
+
+    const provResponse = {
+      assetId,
+      assetUri: relativeAssetUri,
+      providerJobId: result.providerJobId,
+      costUsd: result.costUsd,
+      stub: result.stub,
+    };
+    await completeGeneration(wDirAbs, provKey, { assetPath: relativeAssetUri, response: provResponse });
+    return c.json(provResponse);
+  } catch (err: any) {
+    if (isAbortError(err)) {
+      await failGeneration(wDirAbs, provKey);
+      if (isOrphanedGeneration(err)) {
+        recordOrphanedGeneration({
+          workId: body.workId,
+          kind: "video",
+          provider: providerId,
+          costUsd: err.costUsd,
+          providerJobId: err.providerJobId,
+        });
+      }
+      return c.json({ error: err.code, orphaned: isOrphanedGeneration(err) }, HTTP_CLIENT_CLOSED);
+    }
+    await failGeneration(wDirAbs, provKey);
+    return c.json({ error: sanitizeProviderError(err?.message) }, 500);
+  }
 });
 
 // ── B1 (PRD-0010) — per-work cost summary ────────────────────────────────────

@@ -47,6 +47,14 @@ export interface VideoGenerateOptions {
    * (including Seedance 2.0) accept this.
    */
   lastFrameImage?: string;
+  /**
+   * S10 (PRD-0014) — request-abort signal. The route passes
+   * `c.req.raw.signal` so a client disconnect cancels the in-flight generation.
+   * Adapters wire it into their fetch/poll: aborting BEFORE enqueue throws
+   * GenerationAbortedError (nothing billed); aborting AFTER enqueue throws
+   * OrphanedGenerationError (the async job is billed but can't be recalled).
+   */
+  signal?: AbortSignal;
 }
 
 export interface VideoGenerateResult {

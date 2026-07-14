@@ -40,6 +40,9 @@ export interface MusicGenerateOptions {
    * key (config.yaml, not process.env). Omit for stub/test paths.
    */
   apiKey?: string;
+  /** S10 (PRD-0014) — request-abort signal; the route passes c.req.raw.signal so
+   *  a client disconnect cancels the in-flight BGM generation. */
+  signal?: AbortSignal;
 }
 
 export interface MusicGenerateResult {

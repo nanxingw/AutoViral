@@ -124,6 +124,8 @@ export class OpenRouterImageProvider implements GenerateProvider {
           'HTTP-Referer': 'http://localhost:3271',
         },
         body: JSON.stringify(payload),
+        // S10 — cancel the network call when the client disconnects.
+        ...(opts.signal ? { signal: opts.signal } : {}),
       })
 
       if (!res.ok) {

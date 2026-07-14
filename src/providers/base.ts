@@ -11,6 +11,9 @@ export interface ImageOpts {
   seed?: number
   temperature?: number
   model?: string
+  /** S10 (PRD-0014) — request-abort signal; the route passes c.req.raw.signal so
+   *  a client disconnect cancels the in-flight image generation. */
+  signal?: AbortSignal
 }
 
 export interface GenerateResult {

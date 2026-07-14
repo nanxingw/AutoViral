@@ -3,6 +3,10 @@ import { writeFile, mkdir, rename, unlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { FFMPEG_BIN } from "../../server/ffmpeg-paths.js";
+import {
+  GenerationAbortedError,
+  OrphanedGenerationError,
+} from "../../server/generation-resilience.js";
 
 /**
  * Re-encode an mp4 to be browser-friendly for the studio player.
@@ -162,6 +166,11 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
     id: "seedance",
     displayName: "Seedance 2.0 (via OpenRouter)",
     async generateVideo(req: VideoGenerateOptions): Promise<VideoGenerateResult> {
+      // S10 — abort BEFORE any (paid) work: a pre-aborted signal short-circuits
+      // before enqueue so nothing is dispatched or billed.
+      if (req.signal?.aborted) {
+        throw new GenerationAbortedError();
+      }
       const apiKey = process.env.OPENROUTER_API_KEY;
       if (!apiKey) {
         // Stub mode: no API key.
@@ -198,27 +207,37 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
           frame_type: "last_frame",
         });
       }
-      const enqueueRes = await fetch(`${baseUrl}/videos`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        // FLAT payload — the OpenRouter videos schema has no `input` wrapper;
-        // nesting silently dropped every param. Only send optional fields when
-        // the caller set them so the gateway default applies otherwise.
-        body: JSON.stringify({
-          model: "bytedance/seedance-2.0",
-          prompt: req.prompt,
-          duration: req.durationSec,
-          ...(req.aspectRatio ? { aspect_ratio: req.aspectRatio } : {}),
-          ...(req.resolution ? { resolution: req.resolution } : {}),
-          ...(req.generateAudio !== undefined
-            ? { generate_audio: req.generateAudio }
-            : {}),
-          ...(frameImages.length > 0 ? { frame_images: frameImages } : {}),
-        }),
-      });
+      let enqueueRes: Response;
+      try {
+        enqueueRes = await fetch(`${baseUrl}/videos`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+          },
+          // FLAT payload — the OpenRouter videos schema has no `input` wrapper;
+          // nesting silently dropped every param. Only send optional fields when
+          // the caller set them so the gateway default applies otherwise.
+          body: JSON.stringify({
+            model: "bytedance/seedance-2.0",
+            prompt: req.prompt,
+            duration: req.durationSec,
+            ...(req.aspectRatio ? { aspect_ratio: req.aspectRatio } : {}),
+            ...(req.resolution ? { resolution: req.resolution } : {}),
+            ...(req.generateAudio !== undefined
+              ? { generate_audio: req.generateAudio }
+              : {}),
+            ...(frameImages.length > 0 ? { frame_images: frameImages } : {}),
+          }),
+          // S10 — abort the enqueue fetch itself if the client disconnects
+          // before the job is created (nothing billed yet).
+          ...(req.signal ? { signal: req.signal } : {}),
+        });
+      } catch (err) {
+        // A fetch cancelled by our own signal is a clean pre-dispatch abort.
+        if (req.signal?.aborted) throw new GenerationAbortedError();
+        throw err;
+      }
       if (!enqueueRes.ok) {
         const body = await enqueueRes.text();
         throw new Error(`Seedance enqueue failed: ${enqueueRes.status} ${body}`);
@@ -238,10 +257,31 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
       // 2) Poll
       let final: PollResponse | null = null;
       for (let i = 0; i < MAX_POLL_ATTEMPTS; i++) {
+        // S10 — the job is now enqueued (and billed at completion), but the
+        // OpenRouter videos API has NO cancel endpoint. If the client
+        // disconnected we stop polling and surface an OrphanedGenerationError so
+        // the route books an orphaned cost note instead of silently retrying →
+        // double-charging (堵孤儿计费).
+        if (req.signal?.aborted) {
+          throw new OrphanedGenerationError({ providerJobId: job.id });
+        }
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-        const pollRes = await fetch(job.polling_url, {
-          headers: { Authorization: `Bearer ${apiKey}` },
-        });
+        if (req.signal?.aborted) {
+          throw new OrphanedGenerationError({ providerJobId: job.id });
+        }
+        let pollRes: Response;
+        try {
+          pollRes = await fetch(job.polling_url, {
+            headers: { Authorization: `Bearer ${apiKey}` },
+            ...(req.signal ? { signal: req.signal } : {}),
+          });
+        } catch (err) {
+          // A poll fetch cancelled by our signal ⇒ the enqueued job is orphaned.
+          if (req.signal?.aborted) {
+            throw new OrphanedGenerationError({ providerJobId: job.id });
+          }
+          throw err;
+        }
         if (!pollRes.ok) continue;
         const status = (await pollRes.json()) as PollResponse;
         if (status.status === "completed") {
