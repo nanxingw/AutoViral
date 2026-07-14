@@ -2044,7 +2044,20 @@ bridgeRouter.post("/clip/:id/duplicate", async (c) => {
   if (!id) {
     return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
   }
-  const body = (await c.req.json().catch(() => ({}))) as { offset?: unknown };
+  // S7 review fix (finding 5): distinguish an ABSENT/empty body (allowed —
+  // defaults to back-to-back placement) from a MALFORMED-but-present body
+  // (reject 400). The old `.json().catch(() => ({}))` swallowed unparsable JSON
+  // into an empty object, so a client sending garbage got a silent successful
+  // duplicate with default placement instead of an error.
+  const raw = (await c.req.text().catch(() => "")).trim();
+  let body: { offset?: unknown } = {};
+  if (raw.length > 0) {
+    try {
+      body = JSON.parse(raw) as { offset?: unknown };
+    } catch {
+      return c.json({ ok: false, error: "malformed JSON body", code: 4 }, 400);
+    }
+  }
   let offsetSec: number | undefined;
   if (body.offset !== undefined) {
     if (typeof body.offset !== "number" || !Number.isFinite(body.offset)) {

@@ -3805,6 +3805,162 @@ exportPresets: []
   });
 });
 
+// S7 (PRD-0014) review fix — ripple-delete + duplicate through the FULL bridge
+// round-trip on a STORED transition-bearing composition. The CLI-layer test
+// (cli.test.ts) mocks the bridge and only asserts wire-format + exit code; the
+// real ripple/gap-collapse semantics AND the schema-validity of the write can
+// only be locked here, where writeCompositionFor's strict CompositionWriteSchema
+// actually parses the result. Each test seeds its OWN isolated work-id so the
+// order-dependent shared-YAML pattern of other blocks can't leak in.
+describe("bridge router — S7 ripple / duplicate (transition-bearing round-trip)", () => {
+  let workRoot: string;
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  // Three back-to-back video clips + a transition after c2 (fades c2→c3).
+  const yamlFor = (workId: string) => `id: c_${workId}
+workId: ${workId}
+fps: 30
+width: 1080
+height: 1920
+duration: 8.0
+aspect: "9:16"
+updatedAt: "2026-07-14T00:00:00.000Z"
+tracks:
+  - id: trk_v1
+    kind: video
+    label: V1
+    muted: false
+    hidden: false
+    clips:
+      - id: c1
+        kind: video
+        src: assets/sample-shot.mp4
+        in: 0
+        out: 2.0
+        trackOffset: 0
+      - id: c2
+        kind: video
+        src: assets/sample-shot.mp4
+        in: 0
+        out: 3.0
+        trackOffset: 2.0
+      - id: c3
+        kind: video
+        src: assets/sample-shot.mp4
+        in: 0
+        out: 1.0
+        trackOffset: 5.0
+    transitions:
+      - id: tr_c2c3
+        afterClipId: c2
+        preset: cross-dissolve
+        durationSec: 0.5
+        alignment: center
+        easing: linear
+assets: []
+provenance: []
+exportPresets: []
+`;
+
+  async function seed(workId: string) {
+    const { mkdtemp, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-ripple-route-"));
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(join(workRoot, workId, "composition.yaml"), yamlFor(workId), "utf8");
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  }
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  function getComp(workId: string) {
+    return app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+  }
+
+  it("ripple-deletes c2, SHIFTS successor c3 left, and prunes the orphaned transition (no 400)", async () => {
+    const workId = "w_ripple_orphan";
+    await seed(workId);
+    const res = await app.request(`/api/bridge/v1/clip/c2/ripple`, {
+      method: "POST",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    // If the op did NOT prune the transition anchored to the removed c2, the
+    // strict write schema would reject this VALID ripple with a 400.
+    expect(res.status).toBe(200);
+
+    const comp = await getComp(workId);
+    const body = (await comp.json()) as {
+      result: {
+        tracks: Array<{
+          id: string;
+          clips: Array<{ id: string; trackOffset: number }>;
+          transitions?: Array<{ afterClipId: string }>;
+        }>;
+      };
+    };
+    const v1 = body.result.tracks.find((t) => t.id === "trk_v1")!;
+    expect(v1.clips.map((c) => c.id)).toEqual(["c1", "c3"]);
+    // c2 had duration 3 → c3 slides from 5.0 to 2.0 (gap closed).
+    expect(v1.clips.find((c) => c.id === "c3")!.trackOffset).toBeCloseTo(2.0);
+    // The transition anchored to the vanished c2 is gone → the write is valid.
+    expect(v1.transitions ?? []).toHaveLength(0);
+  });
+
+  it("ripple-deletes the LAST clip c3 and prunes the now-last-clip orphan transition (no 400)", async () => {
+    const workId = "w_ripple_lastclip";
+    await seed(workId);
+    // Deleting c3 makes c2 the new last clip; the transition pinned after c2 then
+    // has no successor. Without the prune, the strict write superRefine 400s.
+    const res = await app.request(`/api/bridge/v1/clip/c3/ripple`, {
+      method: "POST",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    expect(res.status).toBe(200);
+
+    const comp = await getComp(workId);
+    const body = (await comp.json()) as {
+      result: { tracks: Array<{ id: string; clips: Array<{ id: string }>; transitions?: unknown[] }> };
+    };
+    const v1 = body.result.tracks.find((t) => t.id === "trk_v1")!;
+    expect(v1.clips.map((c) => c.id)).toEqual(["c1", "c2"]);
+    expect(v1.transitions ?? []).toHaveLength(0);
+  });
+
+  it("duplicate with an empty body succeeds (defaults to back-to-back)", async () => {
+    const workId = "w_dup_empty";
+    await seed(workId);
+    const res = await app.request(`/api/bridge/v1/clip/c1/duplicate`, {
+      method: "POST",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { id: string } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.id).toBeTruthy();
+  });
+
+  it("duplicate with a MALFORMED JSON body → 400 + code 4 (not a silent default)", async () => {
+    const workId = "w_dup_malformed";
+    await seed(workId);
+    const res = await app.request(`/api/bridge/v1/clip/c1/duplicate`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": workId,
+      },
+      body: "{ offset: not json ]",
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+});
+
 // S10 (US 6/7/8) — track add/remove + clip add by trackId + overlay support.
 describe("bridge router — S10 /track + clip trackId + overlay", () => {
   let workRoot: string;

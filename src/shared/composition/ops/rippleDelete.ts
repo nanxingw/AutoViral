@@ -67,6 +67,30 @@ export function rippleDeleteClip(
         c.trackOffset = Math.max(0, c.trackOffset - removedDur);
       }
     }
+
+    // #54 / S8 — drop transitions the ripple-delete just invalidated, in place
+    // (filter back onto the SAME array reference) — mirrors ops.moveClipToTrack
+    // and store.removeClip. TWO conditions, not one:
+    //  (a) afterClipId === the REMOVED clip — its anchor left the track; and
+    //  (b) afterClipId === the now-LAST clip — after the splice that clip has no
+    //      successor, so a transition pinned to it has nothing to fade INTO and
+    //      the Track superRefine rejects it on the next parse.
+    // Without this, writeCompositionFor's CompositionWriteSchema.parse throws a
+    // 400 on a VALID ripple of a work carrying transitions (bridge/CLI path), and
+    // the store keeps an unwriteable composition in memory (UI path). newLastId is
+    // read AFTER the splice (the removed clip is gone).
+    const trackWithTransitions = track as {
+      transitions?: { afterClipId: string }[];
+    };
+    if (trackWithTransitions.transitions && trackWithTransitions.transitions.length > 0) {
+      const newLastId = clips[clips.length - 1]?.id;
+      const kept = trackWithTransitions.transitions.filter(
+        (tr) => tr.afterClipId !== p.clipId && tr.afterClipId !== newLastId,
+      );
+      trackWithTransitions.transitions.length = 0;
+      trackWithTransitions.transitions.push(...kept);
+    }
+
     recomputeDuration(comp);
     return { removed: true };
   }

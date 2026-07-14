@@ -17,7 +17,10 @@ function videoClip(id: string, trackOffset: number, dur: number): Clip {
   } as unknown as Clip;
 }
 
-function compWith(clips: Clip[]): Composition {
+function compWith(
+  clips: Clip[],
+  transitions: { id: string; afterClipId: string; preset: string }[] = [],
+): Composition {
   return {
     id: "c_test",
     workId: "test",
@@ -37,7 +40,7 @@ function compWith(clips: Clip[]): Composition {
         muted: false,
         hidden: false,
         clips,
-        transitions: [],
+        transitions,
       } as unknown as Track,
     ],
     assets: [],
@@ -100,5 +103,52 @@ describe("ops.rippleDeleteClip", () => {
     const ref = comp.tracks[0].clips;
     rippleDeleteClip(comp, { clipId: "a" });
     expect(comp.tracks[0].clips).toBe(ref);
+  });
+
+  // ── S7 review fix (finding 1) — transition pruning ──────────────────────
+  // The op MUST drop transitions the ripple-delete just invalidated, mirroring
+  // ops.moveClipToTrack / store.removeClip. Otherwise a VALID work carrying
+  // transitions becomes UNwriteable: refineTrack rejects (a) a transition whose
+  // afterClipId anchor clip vanished, and (b) a transition pinned to the clip
+  // that becomes the new LAST clip (a last-clip transition has no successor).
+  it("prunes a transition anchored to the removed clip (orphan condition)", () => {
+    // a[0,2) b[2,3) c[5,1). Transition after `b` (fades b→c). Delete b → the
+    // transition's anchor is gone → must be pruned.
+    const comp = compWith(
+      [videoClip("a", 0, 2), videoClip("b", 2, 3), videoClip("c", 5, 1)],
+      [{ id: "tr_bc", afterClipId: "b", preset: "cross-dissolve" }],
+    );
+    const { removed } = rippleDeleteClip(comp, { clipId: "b" });
+    expect(removed).toBe(true);
+    const transitions = (comp.tracks[0] as unknown as { transitions: { id: string }[] })
+      .transitions;
+    expect(transitions.map((t) => t.id)).toEqual([]);
+  });
+
+  it("prunes a transition pinned to the clip that becomes the new last clip", () => {
+    // a[0,2) b[2,3) c[5,1). Transition after `b` (fades b→c). Delete c → b is
+    // now the LAST clip; the transition after b has no successor → must be pruned.
+    const comp = compWith(
+      [videoClip("a", 0, 2), videoClip("b", 2, 3), videoClip("c", 5, 1)],
+      [{ id: "tr_bc", afterClipId: "b", preset: "cross-dissolve" }],
+    );
+    const { removed } = rippleDeleteClip(comp, { clipId: "c" });
+    expect(removed).toBe(true);
+    const transitions = (comp.tracks[0] as unknown as { transitions: { id: string }[] })
+      .transitions;
+    expect(transitions.map((t) => t.id)).toEqual([]);
+  });
+
+  it("keeps a still-valid transition (anchor survives and is not the new last)", () => {
+    // a[0,2) b[2,3) c[5,1) d[6,1). Transition after `a` (fades a→b). Delete c →
+    // a is neither removed nor the new last clip; transition stays.
+    const comp = compWith(
+      [videoClip("a", 0, 2), videoClip("b", 2, 3), videoClip("c", 5, 1), videoClip("d", 6, 1)],
+      [{ id: "tr_ab", afterClipId: "a", preset: "cross-dissolve" }],
+    );
+    rippleDeleteClip(comp, { clipId: "c" });
+    const transitions = (comp.tracks[0] as unknown as { transitions: { id: string }[] })
+      .transitions;
+    expect(transitions.map((t) => t.id)).toEqual(["tr_ab"]);
   });
 });

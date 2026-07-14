@@ -1326,6 +1326,31 @@ describe("autoviral CLI — end-to-end", () => {
       expect(lastTrackSet).toEqual({ muted: true });
     });
 
+    it("track set <id> --muted false → forwards a boolean", async () => {
+      lastTrackSet = null;
+      const r = await run(["track", "set", "trk_a1", "--muted", "false"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastTrackSet).toEqual({ muted: false });
+    });
+
+    // S7 review fix (finding 6): an invalid boolean value is a HARD error, not a
+    // silent coercion to `false`. The old `=== "true"` turned `--muted treu` into
+    // `muted: false`, silently UNmuting a track — data corruption dressed as
+    // success. Must never hit the bridge.
+    it("track set <id> --muted <typo> → exit 4 (never hits bridge)", async () => {
+      lastTrackSet = null;
+      const r = await run(["track", "set", "trk_a1", "--muted", "treu"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastTrackSet).toBeNull();
+    });
+
+    it("track set <id> --hidden <typo> → exit 4 (never hits bridge)", async () => {
+      lastTrackSet = null;
+      const r = await run(["track", "set", "trk_a1", "--hidden", "1"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastTrackSet).toBeNull();
+    });
+
     it("track set with no props → exit 4 (never hits bridge)", async () => {
       const r = await run(["track", "set", "trk_a1"]);
       expect(r.exitCode).toBe(4);

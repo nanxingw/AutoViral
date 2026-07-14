@@ -18,10 +18,11 @@
 // be classified (sink it, or explicitly defer it) — you can't add a store-only
 // mutation and slip past.
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { useComposition } from "../store";
+import { makeEmptyComposition, type Composition } from "@shared/composition";
 import * as ops from "@shared/composition/ops";
 
 // store action name → shared op export it MUST delegate to.
@@ -42,6 +43,10 @@ const SUNK: Record<string, string> = {
   renameTrack: "setTrackProps",
   setTrackLanguage: "setTrackProps",
   setTrackVolume: "setTrackProps",
+  // S7 review fix (finding 4) — the header mute/hide toggles used to raw-setState
+  // (invisible to this gate). They are now first-class actions through the op.
+  setTrackMuted: "setTrackProps",
+  setTrackHidden: "setTrackProps",
 };
 
 // Store-only editing verbs NOT yet lifted. Each carries the slice/reason so the
@@ -91,7 +96,7 @@ const UI_ONLY = new Set<string>([
 ]);
 
 function storeFunctionNames(): string[] {
-  const state = useComposition.getState() as Record<string, unknown>;
+  const state = useComposition.getState() as unknown as Record<string, unknown>;
   return Object.keys(state).filter((k) => typeof state[k] === "function");
 }
 
@@ -143,5 +148,164 @@ describe("shared-ops sweep matrix gate (S7)", () => {
     expect(stale, `SUNK maps a non-existent store action: ${stale.join(", ")}`).toEqual(
       [],
     );
+  });
+});
+
+// ── S7 review fix (finding 2) — SINK_PENDING is a FROZEN, shrink-only ledger ──
+// The substring/classification gate above lets a store-only editing verb "pass"
+// by living in SINK_PENDING. Left unbounded that is a silent escape hatch: a new
+// store-only mutation could be quietly parked here forever. This ratchet freezes
+// the exact set — the debt can only SHRINK (sink a verb → delete its entry). Any
+// ADDITION forces a deliberate edit to this snapshot (loud, reviewed), so you
+// cannot slip a brand-new store-only verb past the gate by deferring it.
+const SINK_PENDING_FROZEN = [
+  "addClip",
+  "updateClip",
+  "removeClip",
+  "moveClipWithinTrack",
+  "updateTransition",
+  "removeKeyframe",
+  "updateKeyframe",
+  "reorderTracks",
+  "rebindClip",
+  "applyPlatformPreset",
+  "removeTimelineSelection",
+  "addAsset",
+  "addProvenance",
+  "removeAsset",
+  "recomputeDuration",
+].sort();
+
+describe("shared-ops sweep matrix gate — SINK_PENDING ratchet (S7 review)", () => {
+  it("SINK_PENDING is the frozen allowlist and can only shrink, never grow", () => {
+    const current = Object.keys(SINK_PENDING).sort();
+    // A NEW store-only verb dropped into SINK_PENDING (or a resurrected old one)
+    // fails here: update the frozen snapshot ONLY by REMOVING an entry you sank.
+    expect(
+      current,
+      "SINK_PENDING changed — you may only REMOVE entries (by sinking the verb " +
+        "to a shared op). Adding a store-only verb here is a silent dual-drive leak.",
+    ).toEqual(SINK_PENDING_FROZEN);
+  });
+});
+
+// ── S7 review fix (finding 3) — BEHAVIORAL parity, not a source substring ──
+// The wiring assertion above is a global `STORE_SRC.includes("ops.<name>")`
+// substring: for the setTrackProps family (renameTrack / setTrackLanguage /
+// setTrackVolume / setTrackMuted / setTrackHidden ALL alias ONE op) a single
+// reference satisfies the check for all five, so any single action could be
+// unwired and the gate stays green. This block closes that hole functionally:
+// drive the store action and the shared op from an IDENTICAL starting comp and
+// assert the mutated track is byte-identical. A store action that diverged from
+// the op (missed spread-guard, wrong field, raw setState) fails here.
+describe("shared-ops sweep matrix gate — behavioral parity (S7 review)", () => {
+  beforeEach(() => {
+    useComposition.setState({ comp: null });
+  });
+
+  function base(): Composition {
+    return makeEmptyComposition({ workId: "w_parity", aspect: "9:16" });
+  }
+  function trackById(comp: Composition, id: string) {
+    return comp.tracks.find((t) => t.id === id)!;
+  }
+
+  // Each row: pick a track by kind, run the store action, and the equivalent
+  // ops.setTrackProps call, from the SAME base comp. Assert the tracks match.
+  const cases: {
+    name: string;
+    kind: "video" | "audio" | "text";
+    run: (id: string) => void;
+    props: ops.TrackProps;
+  }[] = [
+    {
+      name: "renameTrack",
+      kind: "video",
+      run: (id) => useComposition.getState().renameTrack(id, "V-renamed"),
+      props: { label: "V-renamed" },
+    },
+    {
+      name: "setTrackLanguage",
+      kind: "text",
+      run: (id) => useComposition.getState().setTrackLanguage(id, "en"),
+      props: { language: "en" },
+    },
+    {
+      name: "setTrackVolume",
+      kind: "audio",
+      run: (id) => useComposition.getState().setTrackVolume(id, -6),
+      props: { volume: -6 },
+    },
+    {
+      name: "setTrackMuted",
+      kind: "audio",
+      run: (id) => useComposition.getState().setTrackMuted(id, true),
+      props: { muted: true },
+    },
+    {
+      name: "setTrackHidden",
+      kind: "video",
+      run: (id) => useComposition.getState().setTrackHidden(id, true),
+      props: { hidden: true },
+    },
+  ];
+
+  it.each(cases)(
+    "$name produces the SAME track mutation as ops.setTrackProps",
+    ({ kind, run, props }) => {
+      const seed = base();
+      const trackId = seed.tracks.find((t) => t.kind === kind)!.id;
+
+      // store path
+      const cStore = structuredClone(seed);
+      useComposition.getState().loadComposition(cStore);
+      run(trackId);
+      const storeTrack = trackById(useComposition.getState().comp!, trackId);
+
+      // op path — mutate an identical clone directly
+      const cOp = structuredClone(seed);
+      ops.setTrackProps(cOp, { trackId, props });
+      const opTrack = trackById(cOp, trackId);
+
+      expect(storeTrack).toEqual(opTrack);
+    },
+  );
+
+  it("rippleDeleteClip store action matches ops.rippleDeleteClip (incl. transition prune)", () => {
+    const seed = base();
+    const vId = seed.tracks.find((t) => t.kind === "video")!.id;
+    const mk = (id: string, off: number, dur: number) => ({
+      id,
+      kind: "video" as const,
+      src: `${id}.mp4`,
+      in: 0,
+      out: dur,
+      trackOffset: off,
+      transforms: {},
+      filters: {},
+    });
+    seed.tracks.find((t) => t.id === vId)!.clips = [
+      mk("a", 0, 2),
+      mk("b", 2, 3),
+      mk("c", 5, 1),
+    ] as never;
+    // Transition after `b` (fades b→c) — orphaned once b is ripple-deleted.
+    seed.tracks.find((t) => t.id === vId)!.transitions = [
+      { id: "tr_bc", afterClipId: "b", preset: "cross-dissolve", durationSec: 0.5, alignment: "center", easing: "linear" },
+    ] as never;
+
+    const cStore = structuredClone(seed);
+    useComposition.getState().loadComposition(cStore);
+    useComposition.getState().rippleDeleteClip("b");
+    const storeTrack = trackById(useComposition.getState().comp!, vId);
+
+    const cOp = structuredClone(seed);
+    ops.rippleDeleteClip(cOp, { clipId: "b" });
+    const opTrack = trackById(cOp, vId);
+
+    expect((storeTrack.clips as { id: string }[]).map((c) => c.id)).toEqual(
+      (opTrack.clips as { id: string }[]).map((c) => c.id),
+    );
+    expect(storeTrack.transitions).toEqual(opTrack.transitions);
   });
 });

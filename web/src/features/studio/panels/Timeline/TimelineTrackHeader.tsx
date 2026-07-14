@@ -57,6 +57,8 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
   const renameTrack = useComposition((s) => s.renameTrack);
   const setTrackLanguage = useComposition((s) => s.setTrackLanguage);
   const setTrackVolume = useComposition((s) => s.setTrackVolume);
+  const setTrackMuted = useComposition((s) => s.setTrackMuted);
+  const setTrackHidden = useComposition((s) => s.setTrackHidden);
   // Track ordering — we need it to know which track sits above `track` so
   // "Add lane above" can pick the correct afterTrackId anchor.
   const trackAbove = useComposition((s) => {
@@ -216,39 +218,17 @@ export function TimelineTrackHeader({ track, fallbackLabel, height }: Props) {
   }, [closeMenu, setTrackLanguage, track.id]);
 
   // ── mute / hide ────────────────────────────────────────────────────────
-  // These flags do not yet have first-class store actions. Keep the update
-  // immutable so Zustand subscribers (including the header row) rerender.
+  // Route through the first-class store actions (PRD-0014 S7 review fix) so the
+  // WRITE goes through the SAME shared `ops.setTrackProps` the CLI `track set
+  // --muted/--hidden` runs — agent + human converge on one composition. (The old
+  // raw inline setState was a store-only leak the sweep gate couldn't see.)
   const toggleMuted = useCallback(() => {
-    useComposition.setState((s) => {
-      if (!s.comp) return s;
-      return {
-        comp: {
-          ...s.comp,
-          tracks: s.comp.tracks.map((candidate) =>
-            candidate.id === track.id
-              ? { ...candidate, muted: !candidate.muted }
-              : candidate,
-          ),
-        },
-      };
-    });
-  }, [track.id]);
+    setTrackMuted(track.id, !track.muted);
+  }, [setTrackMuted, track.id, track.muted]);
 
   const toggleHidden = useCallback(() => {
-    useComposition.setState((s) => {
-      if (!s.comp) return s;
-      return {
-        comp: {
-          ...s.comp,
-          tracks: s.comp.tracks.map((candidate) =>
-            candidate.id === track.id
-              ? { ...candidate, hidden: !candidate.hidden }
-              : candidate,
-          ),
-        },
-      };
-    });
-  }, [track.id]);
+    setTrackHidden(track.id, !track.hidden);
+  }, [setTrackHidden, track.id, track.hidden]);
 
   const displayedLabel = useMemo(
     () => (track.label && track.label.length > 0 ? track.label : fallbackLabel),

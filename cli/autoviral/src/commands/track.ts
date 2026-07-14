@@ -108,8 +108,16 @@ export async function trackCommand(args: string[]): Promise<void> {
       }
       props.volume = v;
     }
-    if (opts["--muted"] !== undefined) props.muted = opts["--muted"] === "true";
-    if (opts["--hidden"] !== undefined) props.hidden = opts["--hidden"] === "true";
+    // Strict boolean parse (S7 review fix): only the literal `true`/`false` are
+    // accepted. The old `=== "true"` silently coerced ANY typo (`--muted treu`)
+    // to `false`, which would UNmute a track instead of erroring — a silent
+    // data-corruption footgun.
+    if (opts["--muted"] !== undefined) {
+      props.muted = parseStrictBool("--muted", opts["--muted"]);
+    }
+    if (opts["--hidden"] !== undefined) {
+      props.hidden = parseStrictBool("--hidden", opts["--hidden"]);
+    }
     if (Object.keys(props).length === 0) {
       process.stderr.write(
         "autoviral track set: at least one of --label / --language / --volume / --muted / --hidden is required\n",
@@ -127,6 +135,18 @@ export async function trackCommand(args: string[]): Promise<void> {
 
   process.stderr.write(`autoviral track: unknown subcommand "${sub ?? ""}"\n`);
   process.exit(127);
+}
+
+// Strict boolean flag parse — accepts ONLY the literals `true` / `false`, exits
+// 4 (never hits the bridge) on anything else. A missing value or a typo is a
+// hard error, not a silent `false` (S7 review fix).
+function parseStrictBool(flag: string, raw: string | undefined): boolean {
+  if (raw === "true") return true;
+  if (raw === "false") return false;
+  process.stderr.write(
+    `autoviral track set: ${flag} expects true|false (got "${raw ?? ""}")\n`,
+  );
+  process.exit(4);
 }
 
 function parseFlags(argv: string[]): Record<string, string> {

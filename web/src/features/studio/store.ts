@@ -260,6 +260,12 @@ interface CompState {
   // type since `Track.volume` doesn't exist on the strict schema yet. Once
   // #34 lands the cast can disappear and round-trip persistence kicks in.
   setTrackVolume: (id: string, db: number) => void;
+  // Per-lane mute / hide flags. First-class store actions (PRD-0014 S7 review
+  // fix) so the header toggles and the CLI (`track set --muted/--hidden`)
+  // converge on the SAME shared `ops.setTrackProps` writer — the raw inline
+  // setState they used before was a store-only leak the sweep gate couldn't see.
+  setTrackMuted: (id: string, muted: boolean) => void;
+  setTrackHidden: (id: string, hidden: boolean) => void;
   // Undo / redo for the lane stack only — clip-level history is the separate
   // stack below. `undoTrackOp` is a no-op when past is empty; same for redo
   // when future is empty.
@@ -1411,6 +1417,24 @@ export const useComposition = create<CompState>()(
         if (target.volume === db) return;
         pushHistory(s);
         ops.setTrackProps(s.comp, { trackId: id, props: { volume: db } });
+      }),
+    setTrackMuted: (id, muted) =>
+      set((s) => {
+        if (!s.comp) return;
+        const t = s.comp.tracks.find((t) => t.id === id);
+        if (!t) return;
+        if (t.muted === muted) return; // no-op if unchanged
+        pushHistory(s);
+        ops.setTrackProps(s.comp, { trackId: id, props: { muted } });
+      }),
+    setTrackHidden: (id, hidden) =>
+      set((s) => {
+        if (!s.comp) return;
+        const t = s.comp.tracks.find((t) => t.id === id);
+        if (!t) return;
+        if (t.hidden === hidden) return; // no-op if unchanged
+        pushHistory(s);
+        ops.setTrackProps(s.comp, { trackId: id, props: { hidden } });
       }),
     undoTrackOp: () =>
       set((s) => {
