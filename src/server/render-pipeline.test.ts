@@ -371,6 +371,101 @@ describe("runRenderPipeline — encode stage wiring", () => {
     // baseComp has exportPresets: [], so spawn must NOT be called.
     expect(_spawn).not.toHaveBeenCalled();
   });
+
+  // S11 review finding 1 — `render enqueue --preset <id>` must actually REACH
+  // the encoder, not be dropped in favour of exportPresets[0]. Give the comp
+  // TWO presets and ask for the SECOND by id: the encode-stage ffmpeg must use
+  // the requested preset's bitrate (12000k), NOT the first preset's (8000k).
+  it("applies the queued opts.presetId (2nd preset), NOT exportPresets[0]", async () => {
+    _spawn.mockClear();
+    const bili: ExportPreset = {
+      ...douyin,
+      id: "bilibili-16-9",
+      label: "B站 16:9",
+      platform: "bilibili",
+      videoBitrate: 12000,
+    };
+    const compTwoPresets: Composition = {
+      ...baseComp,
+      exportPresets: [douyin, bili],
+    };
+    const promise = runRenderPipeline({
+      comp: compTwoPresets,
+      outDir: "/tmp/out-preset",
+      presetId: "bilibili-16-9",
+    });
+    await drainSpawnsUntilSettled(_spawn, promise);
+    await promise;
+    const encodeCall = _spawn.mock.calls.find((c) =>
+      (c[1] as string[]).includes("libx264"),
+    );
+    expect(encodeCall, "expected an encode-stage spawn").toBeDefined();
+    const args = encodeCall![1] as string[];
+    // The requested preset (bilibili, 12000k) must win over exportPresets[0]
+    // (douyin, 8000k).
+    expect(args).toContain("12000k");
+    expect(args).not.toContain("8000k");
+  });
+
+  it("throws a clear error when opts.presetId names a preset the comp does not have", async () => {
+    _spawn.mockClear();
+    const compWithPreset: Composition = { ...baseComp, exportPresets: [douyin] };
+    await expect(
+      runRenderPipeline({
+        comp: compWithPreset,
+        outDir: "/tmp/out-badpreset",
+        presetId: "does-not-exist",
+      }),
+    ).rejects.toThrow(/preset/i);
+  });
+});
+
+// S11 review finding 6 — a `--caption-tracks` request that names a text-track
+// id the composition does NOT contain must FAIL LOUDLY (before the expensive
+// render), not silently render as if the caption were produced. Pre-fix the id
+// was silently filtered out and the job still reported success with no captions.
+describe("runRenderPipeline — caption track validation (S11 finding 6)", () => {
+  const compWithTextTrack: Composition = {
+    ...baseComp,
+    tracks: [
+      {
+        id: "t_zh",
+        kind: "text",
+        clips: [],
+      } as any,
+    ],
+  };
+
+  it("rejects a burnTrackId that references a non-existent text track", async () => {
+    await expect(
+      runRenderPipeline({
+        comp: compWithTextTrack,
+        outDir: "/tmp/out-badcap-1",
+        captionTracks: { burnTrackId: "t_ghost" },
+      }),
+    ).rejects.toThrow(/t_ghost/);
+  });
+
+  it("rejects a sidecarTrackId that references a non-existent text track", async () => {
+    await expect(
+      runRenderPipeline({
+        comp: compWithTextTrack,
+        outDir: "/tmp/out-badcap-2",
+        captionTracks: { burnTrackId: "t_zh", sidecarTrackIds: ["t_missing"] },
+      }),
+    ).rejects.toThrow(/t_missing/);
+  });
+
+  it("accepts caption tracks that all exist (no throw)", async () => {
+    _spawn.mockClear();
+    const promise = runRenderPipeline({
+      comp: compWithTextTrack,
+      outDir: "/tmp/out-goodcap",
+      captionTracks: { burnTrackId: "t_zh", sidecarTrackIds: [] },
+    });
+    await drainSpawnsUntilSettled(_spawn, promise);
+    await expect(promise).resolves.toMatch(/\.mp4$/);
+  });
 });
 
 // S5 (issue #027) — a successful export must not litter output/ with the

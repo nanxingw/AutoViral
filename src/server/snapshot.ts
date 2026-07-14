@@ -70,12 +70,25 @@ export function resolveSnapshotFrame(opts: {
   at?: number;
   playheadSec?: number;
   fps: number;
+  /** S11 review finding 4 — the composition's duration in seconds. When given,
+   *  the resolved frame is upper-clamped to the LAST real frame here, so the
+   *  caller names the PNG after the frame it will actually render. Without it
+   *  the raw (out-of-range) index would become the filename while the renderer
+   *  clamped separately downstream — the filename lied about the image. */
+  durationSec?: number;
 }): number {
+  const clampUpper = (f: number): number => {
+    if (opts.durationSec === undefined || !Number.isFinite(opts.durationSec)) {
+      return f;
+    }
+    const totalFrames = Math.max(1, Math.round(opts.durationSec * opts.fps));
+    return Math.min(f, totalFrames - 1);
+  };
   if (opts.frame !== undefined && Number.isFinite(opts.frame)) {
-    return Math.max(0, Math.round(opts.frame));
+    return clampUpper(Math.max(0, Math.round(opts.frame)));
   }
   const atSec = opts.at ?? opts.playheadSec ?? 0;
-  return Math.round(Math.max(0, atSec) * opts.fps);
+  return clampUpper(Math.round(Math.max(0, atSec) * opts.fps));
 }
 
 export interface SnapshotResult {
@@ -290,6 +303,10 @@ async function snapshotVideo(
     at: ctx.at,
     playheadSec: readFocus(ctx.workId).playheadSec ?? undefined,
     fps: comp.fps,
+    // S11 finding 4 — clamp to the comp's real frame window HERE so the PNG
+    // filename below matches the frame renderCompositionStill actually renders
+    // (it clamps again as defence, but by then the filename is already chosen).
+    durationSec: comp.duration,
   });
 
   const outDir = join(root, ctx.workId, "output");

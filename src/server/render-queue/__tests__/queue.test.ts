@@ -61,4 +61,31 @@ describe("RenderQueue — facade", () => {
     expect(queue.get(j2.id)?.status).toBe("cancelled");
     resolveFn("/tmp/x.mp4");
   });
+
+  // S11 review finding 2 — after cancelling a RUNNING job, the dedup helper
+  // (findActiveRenderJob = "any queued|running job for this work") must NOT
+  // still see it as active — otherwise an immediately-following enqueue would
+  // dedup onto the dying job instead of starting a fresh render. This locks the
+  // running-cancel → immediate-enqueue race.
+  it("a cancelled running job is no longer 'active' for dedup (running-cancel → enqueue race)", async () => {
+    let resolveFn: (v: string) => void = () => {};
+    runner.mockImplementation(
+      () =>
+        new Promise((res) => {
+          resolveFn = res;
+        }),
+    );
+    const j1 = queue.enqueue({ workId: "w-1", type: "full" });
+    // Wait until the worker actually starts running it.
+    await vi.waitFor(() => expect(queue.get(j1.id)?.status).toBe("running"));
+
+    queue.cancel(j1.id);
+    // Synchronously (mirrors the DELETE route reading the row right after
+    // cancel) there must be NO active job for w-1 anymore.
+    const active = queue
+      .list("w-1")
+      .find((j) => j.status === "queued" || j.status === "running");
+    expect(active).toBeUndefined();
+    resolveFn("/tmp/x.mp4");
+  });
 });

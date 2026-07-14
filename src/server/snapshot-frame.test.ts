@@ -52,4 +52,27 @@ describe("resolveSnapshotFrame", () => {
   it("clamps a negative derived time to frame 0", () => {
     expect(resolveSnapshotFrame({ at: -3, fps: 30 })).toBe(0);
   });
+
+  // S11 review finding 4 — when durationSec is supplied, an out-of-range
+  // explicit frame must be clamped to the LAST real frame HERE, so the caller
+  // (snapshotVideo) names the PNG after the frame it will actually render.
+  // Pre-fix, resolveSnapshotFrame returned the raw out-of-range index (which
+  // became the filename) and remotion-still clamped it again later — so the
+  // filename lied about which frame the image contained.
+  it("clamps an out-of-range explicit frame to the last real frame when durationSec is given", () => {
+    // 4s * 30fps = 120 frames → valid window [0, 119].
+    expect(
+      resolveSnapshotFrame({ frame: 99999, fps: 30, durationSec: 4 }),
+    ).toBe(119);
+  });
+
+  it("leaves an in-range explicit frame untouched when durationSec is given", () => {
+    expect(
+      resolveSnapshotFrame({ frame: 30, fps: 30, durationSec: 4 }),
+    ).toBe(30);
+  });
+
+  it("without durationSec, does not upper-clamp (legacy behaviour preserved)", () => {
+    expect(resolveSnapshotFrame({ frame: 99999, fps: 30 })).toBe(99999);
+  });
 });

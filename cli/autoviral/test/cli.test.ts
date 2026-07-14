@@ -3341,6 +3341,25 @@ describe("autoviral CLI — end-to-end", () => {
       expect(r.exitCode).toBe(4);
     });
 
+    // S11 review finding 4 — the CLI-reference doc promises an INTEGER frame
+    // contract ("a non-integer ... exits 4"). A finite fractional (12.5) or a
+    // negative (-3) frame must be rejected at the cheap CLI boundary, not
+    // silently round/clamp-normalised inside the renderer (which would render a
+    // DIFFERENT frame than the one the agent asked for).
+    it("render snapshot --frame 12.5 (fractional) → exit 4 (integer contract, never hits bridge)", async () => {
+      lastSnapshot = null;
+      const r = await run(["render", "snapshot", "--frame", "12.5"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSnapshot).toBeNull();
+    });
+
+    it("render snapshot --frame -3 (negative) → exit 4 (never hits bridge)", async () => {
+      lastSnapshot = null;
+      const r = await run(["render", "snapshot", "--frame", "-3"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastSnapshot).toBeNull();
+    });
+
     it("render with an unknown subverb falls back to the legacy `export --proxy` alias", async () => {
       lastExport = null;
       const r = await run(["render"]);
@@ -3348,6 +3367,24 @@ describe("autoviral CLI — end-to-end", () => {
       // Legacy alias: `autoviral render` == `export --proxy` (synchronous bridge
       // export), preserved for back-compat — prints the export path, not a jobId.
       expect(r.stdout.trim()).toBe("/tmp/work/output/autoviral-export.mp4");
+      expect(lastExport).toMatchObject({ proxy: true });
+    });
+
+    // S11 review finding 3 — a bare `render` (or `render --flags`) aliases the
+    // legacy synchronous export, but an UNKNOWN positional subverb (a typo like
+    // `render stats`) must NOT silently fall through to that expensive real
+    // render. It's a typo → reject with exit 4, never touching export.
+    it("render <unknown-subverb> (e.g. `render stats`) → exit 4, never fires the legacy export", async () => {
+      lastExport = null;
+      const r = await run(["render", "stats"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastExport).toBeNull();
+    });
+
+    it("render --proxy (legacy flag, no subverb) still aliases export --proxy", async () => {
+      lastExport = null;
+      const r = await run(["render", "--proxy"]);
+      expect(r.exitCode).toBe(0);
       expect(lastExport).toMatchObject({ proxy: true });
     });
 

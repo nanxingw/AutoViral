@@ -81,6 +81,7 @@ export interface RunRenderPipelineLike {
     outDir: string;
     burnSubtitles?: boolean;
     loudnessTargetLufs?: number;
+    presetId?: string;
     proxy?: boolean;
     signal?: AbortSignal;
     onProgress?: (stage: RenderStage, pct: number) => void;
@@ -165,7 +166,16 @@ export class RenderQueueWorker {
     }
     const ac = this.inflight.get(jobId);
     if (ac) ac.abort();
-    // Final status flip happens inside drain() when the runner rejects.
+    // S11 review finding 2 — flip to the terminal "cancelled" status
+    // SYNCHRONOUSLY (not only abort the controller and wait for the async
+    // pipeline rejection to flip it). Otherwise the DELETE route reads the row
+    // right after cancel() and still sees "running", so findActiveRenderJob
+    // treats it as active and an immediately-following enqueue dedups onto the
+    // job that's already on its way out. The pipeline rejection/resolution in
+    // runOne() re-affirms "cancelled" idempotently once the aborted subprocess
+    // actually settles (its terminal handlers gate on ac.signal.aborted).
+    this.deps.store.update(jobId, { status: "cancelled" });
+    this.emit(jobId, { status: "cancelled", progress: job.progress });
   }
 
   private emit(
@@ -243,6 +253,10 @@ export class RenderQueueWorker {
         outDir: this.deps.outDirFor(job.workId),
         proxy: job.type === "proxy",
         signal: ac.signal,
+        // S11 — the enqueued preset (`render enqueue --preset <id>`) lives on
+        // the persisted job row; forward it so the encode stage actually uses
+        // it instead of always falling back to comp.exportPresets[0].
+        presetId: job.presetId,
         burnSubtitles: extras?.burnSubtitles,
         loudnessTargetLufs: extras?.loudnessTargetLufs,
         captionTracks: extras?.captionTracks,

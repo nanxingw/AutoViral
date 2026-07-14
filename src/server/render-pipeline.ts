@@ -126,6 +126,12 @@ export interface RenderJobOptions {
   signal?: AbortSignal;
   /** Phase 7.C — half-res / 24fps / half-bitrate proxy render. */
   proxy?: boolean;
+  /** S11 — the render-queue job's `presetId` (from `render enqueue --preset`).
+   *  Selects WHICH of `comp.exportPresets` the final encode uses. When omitted
+   *  the encode falls back to `exportPresets[0]` (legacy behaviour). When set
+   *  but not found in the comp, the pipeline throws (a silently-ignored preset
+   *  request is a dead control — the class of bug this field closes). */
+  presetId?: string;
   /** Phase H (issue #35) — per-track caption strategy following the DaVinci
    *  Resolve subtitle model. When supplied, takes precedence over the legacy
    *  `burnSubtitles` boolean.
@@ -344,6 +350,36 @@ const CODEC_MAP: Record<"h264" | "h265" | "vp9" | "av1", string> = {
  * h264_nvenc / h264_videotoolbox / h264_vaapi / h264_qsv. macOS Apple
  * Silicon now uses VideoToolbox = ~2-4× faster on the same h264 baseline.
  */
+/**
+ * S11 — pick the ExportPreset the final encode should use.
+ *
+ * - No `presetId` (legacy / UI export): use `exportPresets[0]` (or undefined ⇒
+ *   rename-passthrough, unchanged).
+ * - Explicit `presetId` (`render enqueue --preset <id>`): match by preset `id`
+ *   first, then by `platform` (the CLI flag reads naturally as either). A
+ *   requested preset that the composition does NOT contain THROWS — silently
+ *   falling back to `[0]` would render a DIFFERENT preset than the one the
+ *   agent asked for (a dead control), the exact bug this seam closes.
+ */
+export function resolveExportPreset(
+  comp: Composition,
+  presetId?: string,
+): ExportPreset | undefined {
+  const presets = comp.exportPresets ?? [];
+  if (presetId === undefined) return presets[0];
+  const found =
+    presets.find((p) => p.id === presetId) ??
+    presets.find((p) => p.platform === presetId);
+  if (!found) {
+    throw new Error(
+      `render preset "${presetId}" not found in composition (available: ${
+        presets.map((p) => p.id).join(", ") || "none"
+      })`,
+    );
+  }
+  return found;
+}
+
 export async function runEncodeStage(
   input: string,
   output: string,
@@ -460,6 +496,30 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   const captionStrategy = opts.captionTracks;
   const burnTrackId = captionStrategy?.burnTrackId ?? null;
   const sidecarIdSet = new Set(captionStrategy?.sidecarTrackIds ?? []);
+  // S11 review finding 6 — validate the requested caption track ids UP FRONT
+  // (this is cheap, and it runs before the multi-minute render). Pre-fix an
+  // unknown id was silently dropped by the filters below, so the job finished
+  // "done" with NO caption for the track the user asked to burn/sidecar and no
+  // signal that anything went wrong. Throw here so the job fails loudly with a
+  // message `render status` surfaces — a fast fail beats a silent no-op. (We
+  // validate before Stage 1, NOT the sidecar WRITE at the end: hard-failing a
+  // finished render on a late disk-write error is a deliberately different
+  // trade — see the sidecar emission block below.)
+  if (captionStrategy != null) {
+    const textIds = new Set(
+      comp.tracks.filter((t) => t.kind === "text").map((t) => t.id),
+    );
+    const requested: string[] = [];
+    if (burnTrackId != null) requested.push(burnTrackId);
+    requested.push(...(captionStrategy.sidecarTrackIds ?? []));
+    const missing = requested.filter((id) => !textIds.has(id));
+    if (missing.length > 0) {
+      throw new Error(
+        `caption track(s) not found in composition: ${missing.join(", ")} ` +
+          `(existing text tracks: ${[...textIds].join(", ") || "none"})`,
+      );
+    }
+  }
   const sidecarTextTracks =
     captionStrategy != null
       ? comp.tracks.filter(
@@ -636,7 +696,7 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
   // types are rendered in quick succession).
   const filePrefix = opts.proxy ? "proxy" : "final";
   const finalPath = join(opts.outDir, `${filePrefix}-${Date.now()}.mp4`);
-  const preset = comp.exportPresets?.[0];
+  const preset = resolveExportPreset(comp, opts.presetId);
   if (preset) {
     // runEncodeStage reads workingPath but does not delete it — it stays in
     // intermediatePaths for the cleanup pass below.

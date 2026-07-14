@@ -141,4 +141,44 @@ describe("RenderQueueWorker — lifecycle", () => {
     const lastCallOpts = runner.fn.mock.calls.at(-1)![0] as any;
     expect(lastCallOpts.signal?.aborted).toBe(true);
   });
+
+  // S11 review finding 2 — cancelling a RUNNING job must flip it to a terminal
+  // status SYNCHRONOUSLY (not merely abort the controller and wait for the
+  // async pipeline rejection). Otherwise there's a race window where the DELETE
+  // route returns a still-"running" row and an immediately-following enqueue
+  // dedups onto the job that is on its way out (findActiveRenderJob treats
+  // "running" as active). We assert the flip is observable BEFORE the runner
+  // settles.
+  it("cancel() on a running job flips to cancelled SYNCHRONOUSLY (no await for pipeline settle)", async () => {
+    const job = store.insert({ workId: "w-1", type: "full" });
+    worker.start();
+    await vi.waitFor(() =>
+      expect(store.get(job.id)?.status).toBe("running"),
+    );
+
+    worker.cancel(job.id);
+    // Immediately — WITHOUT resolving/rejecting the runner — the row must
+    // already read cancelled. This closes the dedup race.
+    expect(store.get(job.id)?.status).toBe("cancelled");
+    // The abort still fired so the subprocess actually stops.
+    const lastCallOpts = runner.fn.mock.calls.at(-1)![0] as any;
+    expect(lastCallOpts.signal?.aborted).toBe(true);
+    // The eventual pipeline rejection re-affirms cancelled idempotently.
+    runner.reject(new Error("aborted"));
+    await vi.waitFor(() =>
+      expect(store.get(job.id)?.status).toBe("cancelled"),
+    );
+  });
+
+  // S11 review finding 1 — the enqueued presetId must be forwarded from the job
+  // row into runRenderPipeline. Pre-fix the worker never read job.presetId, so
+  // `render enqueue --preset X` was a no-op at render time.
+  it("forwards the job's presetId into runRenderPipeline", async () => {
+    const job = store.insert({ workId: "w-1", type: "full", presetId: "bilibili-16-9" });
+    worker.start();
+    await vi.waitFor(() => expect(runner.fn).toHaveBeenCalledOnce());
+    const opts = runner.fn.mock.calls[0]![0] as any;
+    expect(opts.presetId).toBe("bilibili-16-9");
+    runner.resolve("/tmp/works/w-1/output/final.mp4");
+  });
 });

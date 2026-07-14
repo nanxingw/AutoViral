@@ -59,8 +59,19 @@ export async function renderCommand(args: string[]): Promise<void> {
         return renderSnapshotVerb(rest);
     }
   }
-  // Legacy alias — `autoviral render [flags]` == `export --proxy` (synchronous
-  // proxy render). Preserved for un-migrated review scripts.
+  // S11 review finding 3 — the legacy alias is ONLY for a bare `autoviral
+  // render` or `render --flags` (no positional subverb). A non-flag first token
+  // that isn't a known verb is a typo (e.g. `render stats`) — reject it with
+  // exit 4 instead of silently forwarding to `export --proxy`, which would fire
+  // an expensive real render for a mistyped command.
+  if (sub !== undefined && !sub.startsWith("--")) {
+    process.stderr.write(
+      `autoviral render: unknown subcommand '${sub}' (expected enqueue|status|cancel|history|snapshot; a bare 'render' or 'render --flags' aliases export --proxy)\n`,
+    );
+    process.exit(4);
+  }
+  // Legacy alias — `autoviral render` / `render --flags` == `export --proxy`
+  // (synchronous proxy render). Preserved for un-migrated review scripts.
   return exportCommand([...args, "--proxy"]);
 }
 
@@ -170,9 +181,13 @@ async function renderSnapshotVerb(args: string[]): Promise<void> {
     if (a === "--frame") {
       const raw = args[++i];
       const n = Number(raw);
-      if (raw === undefined || !Number.isFinite(n)) {
+      // S11 review finding 4 — enforce the documented INTEGER contract at the
+      // cheap CLI boundary. A fractional (12.5) or negative (-3) frame is
+      // rejected here rather than silently round/clamp-normalised inside the
+      // renderer, which would render a DIFFERENT frame than the one requested.
+      if (raw === undefined || !Number.isInteger(n) || n < 0) {
         process.stderr.write(
-          `autoviral render snapshot: --frame needs an integer frame index (got ${raw ?? "nothing"})\n`,
+          `autoviral render snapshot: --frame needs a non-negative integer frame index (got ${raw ?? "nothing"})\n`,
         );
         process.exit(4);
       }
