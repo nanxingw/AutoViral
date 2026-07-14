@@ -27,12 +27,17 @@ export interface CaptionSegment {
 }
 
 export type AsrCaptionsResult =
-  | { ok: true; captions: CaptionSegment[] }
+  | { ok: true; captions: CaptionSegment[]; words?: CaptionSegment[] }
   | { ok: false; status: 500 | 503; code: string; error: string };
 
 export async function runAsrCaptions(
   absAudioPath: string,
   language?: string,
+  // PRD-0014 S9 — when `wordLevel` is set, also transcribe WORD timestamps
+  // (`word_timestamps=True` → `result.all_words()`) and return them as `words`.
+  // The `--script` alignment path needs per-word anchors; the legacy segment
+  // path (default) is untouched so existing callers keep their behaviour.
+  opts?: { wordLevel?: boolean },
 ): Promise<AsrCaptionsResult> {
   // Auto-provision the managed venv (I15) so a clean machine has stable-ts
   // without a manual `pip install`. Idempotent + cheap once provisioned;
@@ -51,6 +56,7 @@ export async function runAsrCaptions(
 
   // Shell out to a small inline python that calls stable_whisper.transcribe and
   // dumps timecoded segments as JSON on stdout.
+  const wordLevel = opts?.wordLevel === true;
   const py = `
 import json, sys
 try:
@@ -59,11 +65,21 @@ except Exception as e:
     print(json.dumps({"error": "stable-whisper not installed: " + str(e)}), file=sys.stdout)
     sys.exit(0)
 model = stable_whisper.load_model("base")
-result = model.transcribe(${JSON.stringify(absAudioPath)}${language ? `, language=${JSON.stringify(language)}` : ""})
+result = model.transcribe(${JSON.stringify(absAudioPath)}${language ? `, language=${JSON.stringify(language)}` : ""}${wordLevel ? ", word_timestamps=True" : ""})
 segs = []
 for s in result.segments:
     segs.append({"start": float(s.start), "end": float(s.end), "text": s.text.strip()})
-print(json.dumps({"segments": segs}))
+out = {"segments": segs}
+${wordLevel ? `words = []
+try:
+    for w in result.all_words():
+        t = (w.word or "").strip()
+        if t:
+            words.append({"start": float(w.start), "end": float(w.end), "text": t})
+except Exception:
+    words = []
+out["words"] = words` : ""}
+print(json.dumps(out))
 `;
   try {
     // Run under the venv interpreter (where ensureTtsVenv installed stable-ts);
@@ -90,7 +106,14 @@ print(json.dumps({"segments": segs}))
       end: Number(s.end),
       text: String(s.text ?? ""),
     }));
-    return { ok: true, captions };
+    const words: CaptionSegment[] | undefined = wordLevel
+      ? (parsed.words ?? []).map((w: any) => ({
+          start: Number(w.start),
+          end: Number(w.end),
+          text: String(w.text ?? ""),
+        }))
+      : undefined;
+    return words ? { ok: true, captions, words } : { ok: true, captions };
   } catch (err: any) {
     return {
       ok: false,

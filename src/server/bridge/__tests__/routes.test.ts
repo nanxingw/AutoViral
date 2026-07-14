@@ -4806,9 +4806,11 @@ describe("bridge router — Phase 3 captions generate (S14)", () => {
     expect(body.result?.written).toBe(2);
 
     // ASR ran against the first audio clip's src (assets/sample-bgm.mp3), abs path.
+    // PRD-0014 S9 — the segment path passes { wordLevel: false } (script mode off).
     expect(mockAsr).toHaveBeenCalledWith(
       expect.stringContaining("assets/sample-bgm.mp3"),
       "zh",
+      { wordLevel: false },
     );
 
     const after = await textClips();
@@ -4874,7 +4876,68 @@ describe("bridge router — Phase 3 captions generate (S14)", () => {
     expect(mockAsr).toHaveBeenCalledWith(
       expect.stringContaining("assets/voice.mp3"),
       undefined,
+      { wordLevel: false },
     );
+  });
+
+  // PRD-0014 S9 — `--script` path: word-level ASR is coarse-aligned to the
+  // ground-truth script, written as a CaptionModel (`captions` +
+  // `captionStrategy: "overlay"`) rather than bare TextClips. The on-screen text
+  // is the truth, never the ASR's mis-heard words.
+  it("--script aligns word timing to the truth → writes a CaptionModel (overlay strategy)", async () => {
+    // ASR heard 你想要的答案就在这里 but botched 答案→那村 (word-level timing).
+    mockAsr.mockResolvedValueOnce({
+      ok: true,
+      captions: [{ start: 0, end: 3, text: "你想要的那村就在这里" }],
+      words: [
+        { start: 0.0, end: 0.3, text: "你" },
+        { start: 0.3, end: 0.6, text: "想" },
+        { start: 0.6, end: 0.9, text: "要" },
+        { start: 0.9, end: 1.1, text: "的" },
+        { start: 1.1, end: 1.4, text: "那" }, // wrong
+        { start: 1.4, end: 1.7, text: "村" }, // wrong
+        { start: 1.95, end: 2.2, text: "就" },
+        { start: 2.2, end: 2.4, text: "在" },
+        { start: 2.4, end: 2.7, text: "这" },
+        { start: 2.7, end: 3.0, text: "里" },
+      ],
+    });
+
+    const res = await app.request("/api/bridge/v1/captions/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({
+        script: "你想要的答案，就在这里。",
+        language: "zh",
+        maxCjkChars: 14,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { ok: boolean; result?: { written: number } };
+    expect(body.ok).toBe(true);
+    expect(body.result?.written).toBeGreaterThan(0);
+
+    // ASR ran in word-level mode.
+    expect(mockAsr).toHaveBeenLastCalledWith(
+      expect.any(String),
+      "zh",
+      { wordLevel: true },
+    );
+
+    // The composition now carries a CaptionModel + overlay strategy, and the
+    // caption text is the GROUND TRUTH (no ASR error words leak).
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const cbody = (await comp.json()) as {
+      result: { captionStrategy?: string; captions?: { segments: Array<{ text: string }> } };
+    };
+    expect(cbody.result.captionStrategy).toBe("overlay");
+    expect(cbody.result.captions).toBeTruthy();
+    const allText = (cbody.result.captions?.segments ?? []).map((s) => s.text).join("");
+    expect(allText).toContain("答案");
+    expect(allText).not.toContain("那");
+    expect(allText).not.toContain("村");
   });
 
   it("without a work-id header → 400", async () => {
@@ -5125,6 +5188,7 @@ describe("bridge router — captions generate, real served-URL audio src (E2E re
     expect(mockAsr).toHaveBeenCalledWith(
       expect.stringContaining(join("music", "bgm.mp3")),
       "zh",
+      { wordLevel: false },
     );
     const calledWith = mockAsr.mock.calls.at(-1)?.[0] as string;
     expect(calledWith).not.toContain("/api/works/");

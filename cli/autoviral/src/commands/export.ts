@@ -23,6 +23,7 @@ interface ExportFlags {
   variablesFile?: string;
   strictVariables: boolean;
   continueOnError: boolean;
+  captionTracks?: string[];
 }
 
 function parseFlags(args: string[]): ExportFlags {
@@ -35,7 +36,24 @@ function parseFlags(args: string[]): ExportFlags {
     const a = args[i];
     if (a === "--proxy") out.proxy = true;
     else if (a === "--preset") out.preset = args[++i];
-    else if (a === "--variables") {
+    else if (a === "--caption-tracks") {
+      // PRD-0014 S9 — `--caption-tracks zh[,en]`: a comma-separated language
+      // list. The bridge resolves each language to a text track (first burned
+      // into the video, the rest emitted as sidecar SRTs). The CLI just parses
+      // + forwards; empty/blank entries are dropped.
+      const raw = args[++i] ?? "";
+      const langs = raw
+        .split(",")
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0);
+      if (langs.length === 0) {
+        process.stderr.write(
+          `autoviral: --caption-tracks needs at least one language (e.g. zh or zh,en)\n`,
+        );
+        process.exit(4);
+      }
+      out.captionTracks = langs;
+    } else if (a === "--variables") {
       const json = args[++i];
       try {
         out.variables = JSON.parse(json) as Overrides;
@@ -121,6 +139,7 @@ export async function exportCommand(args: string[]): Promise<void> {
           variables,
           strictVariables: flags.strictVariables,
           variantStem: stem,
+          ...(flags.captionTracks ? { captionTracks: flags.captionTracks } : {}),
         });
         process.stdout.write(`${file}\t${result.path}\tok\n`);
         succeeded += 1;
@@ -157,6 +176,7 @@ export async function exportCommand(args: string[]): Promise<void> {
     proxy: flags.proxy,
     variables,
     strictVariables: flags.strictVariables,
+    ...(flags.captionTracks ? { captionTracks: flags.captionTracks } : {}),
   });
   process.stdout.write(`${result.path}\n`);
 }

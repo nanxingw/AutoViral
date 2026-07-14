@@ -100,6 +100,11 @@ let lastSceneLink: Record<string, unknown> | null = null;
 // D3 — capture the last POST /api/works/:id/checkpoints body so the CLI test can
 // assert `checkpoint create --label` reached the works route as { label }.
 let lastCheckpointCreate: Record<string, unknown> | null = null;
+// PRD-0014 S9 — capture the last /captions/generate and /export bodies so the
+// CLI test can assert `--script` / `--max-cjk-chars` / `--caption-tracks`
+// reached the bridge wire.
+let lastCaptionsGenerate: Record<string, unknown> | null = null;
+let lastExport: Record<string, unknown> | null = null;
 // S5 (PRD-0007) — in-memory 剧本 (plan/script.md) the works-route mock GET
 // returns + PUT records, so `script edit` then `script show` round-trips
 // end-to-end through the CLI's plain-text request path. Starts EMPTY (a work
@@ -700,6 +705,7 @@ beforeAll(async () => {
     // `assetPath:"assets/missing.mp3"` echoes back written:0.
     if (req.method === "POST" && url === "/api/bridge/v1/captions/generate") {
       const body = await readBody(req);
+      lastCaptionsGenerate = body;
       if (body.language === "nodep") {
         return send(503, { ok: false, error: "stable-whisper not installed", code: "PYTHON_DEP_MISSING" });
       }
@@ -719,6 +725,14 @@ beforeAll(async () => {
       }
       const written = body.assetPath === "assets/missing.mp3" ? 0 : 3;
       return send(200, { ok: true, result: { written, language: body.language ?? null } });
+    }
+    // PRD-0014 S9 — POST /export. Capture the body so the CLI test can assert
+    // `--caption-tracks zh,en` forwarded as captionTracks:["zh","en"] and that a
+    // bare `export` omits it (back-compat). Mirrors the bridge envelope shape:
+    // { ok, result:{ path } }.
+    if (req.method === "POST" && url === "/api/bridge/v1/export") {
+      lastExport = await readBody(req);
+      return send(200, { ok: true, result: { path: "/tmp/work/output/autoviral-export.mp4" } });
     }
     if (req.method === "POST" && url === "/api/bridge/v1/select") {
       // PRD-0014 S8 — capture the select body so the CLI test can assert the
@@ -1340,6 +1354,77 @@ describe("autoviral CLI — end-to-end", () => {
   it("captions unknown subcommand → exit 127", async () => {
     const r = await run(["captions", "frobnicate"]);
     expect(r.exitCode).toBe(127);
+  });
+
+  // PRD-0014 S9 — `captions generate --script <file> [--max-cjk-chars N]`.
+  // The CLI reads the ground-truth script file, forwards its TEXT as `script`
+  // plus `maxCjkChars`, so the bridge can align ASR timing to the truth and
+  // write a CaptionModel. A missing --script file is a caller error → exit 4
+  // BEFORE the bridge is ever hit (no partial write).
+  it("captions generate --script <missing file> → exit 4, never hits bridge", async () => {
+    lastCaptionsGenerate = null;
+    const r = await run(["captions", "generate", "--script", "/no/such/script.txt"]);
+    expect(r.exitCode).toBe(4);
+    expect(r.stderr).toMatch(/script/i);
+    expect(lastCaptionsGenerate).toBeNull(); // bridge never called
+  });
+
+  it("captions generate --script <file> --max-cjk-chars 12 → forwards script text + maxCjkChars", async () => {
+    lastCaptionsGenerate = null;
+    const scriptPath = join(__dirname, "fixtures-s9-script.txt");
+    await writeFile(scriptPath, "你想要的答案，就在这里。\n", "utf8");
+    try {
+      const r = await run([
+        "captions", "generate",
+        "--script", scriptPath,
+        "--max-cjk-chars", "12",
+      ]);
+      expect(r.exitCode).toBe(0);
+      expect(lastCaptionsGenerate).toMatchObject({
+        script: "你想要的答案，就在这里。\n",
+        maxCjkChars: 12,
+      });
+    } finally {
+      await rm(scriptPath, { force: true });
+    }
+  });
+
+  it("captions generate --script <file> (no --max-cjk-chars) → defaults maxCjkChars 14", async () => {
+    lastCaptionsGenerate = null;
+    const scriptPath = join(__dirname, "fixtures-s9-script2.txt");
+    await writeFile(scriptPath, "一二三四五六", "utf8");
+    try {
+      const r = await run(["captions", "generate", "--script", scriptPath]);
+      expect(r.exitCode).toBe(0);
+      expect((lastCaptionsGenerate as any)?.maxCjkChars).toBe(14);
+    } finally {
+      await rm(scriptPath, { force: true });
+    }
+  });
+
+  // PRD-0014 S9 — `export --caption-tracks zh[,en]` forwards the language list to
+  // the bridge /export body verbatim; the bridge resolves languages → text
+  // tracks (first burned, rest sidecar SRTs). The CLI face is a pure pass-through.
+  it("export --caption-tracks zh,en → forwards captionTracks:['zh','en'], prints the path", async () => {
+    lastExport = null;
+    const r = await run(["export", "--caption-tracks", "zh,en"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toBe("/tmp/work/output/autoviral-export.mp4");
+    expect((lastExport as any)?.captionTracks).toEqual(["zh", "en"]);
+  });
+
+  it("export --caption-tracks zh (single) → forwards captionTracks:['zh']", async () => {
+    lastExport = null;
+    const r = await run(["export", "--caption-tracks", "zh"]);
+    expect(r.exitCode).toBe(0);
+    expect((lastExport as any)?.captionTracks).toEqual(["zh"]);
+  });
+
+  it("export with NO --caption-tracks → body omits captionTracks (back-compat)", async () => {
+    lastExport = null;
+    const r = await run(["export"]);
+    expect(r.exitCode).toBe(0);
+    expect((lastExport as any)?.captionTracks).toBeUndefined();
   });
 
   // S12 (US 16 / 35-37) — `autoviral clip keyframe add|set <id> --property --at

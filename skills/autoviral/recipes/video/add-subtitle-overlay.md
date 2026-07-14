@@ -1,11 +1,20 @@
 # Recipe: add a subtitle overlay (CaptionModel strategy)
 
-The user has voice or BGM in their composition and wants per-word captions on screen. AutoViral has two strategies:
+The user has voice or BGM in their composition and wants captions on screen. The path is `captionStrategy: "overlay"` — captions render via the React `<CaptionsLayer>` inside the single Remotion pass (preview = export), from a structured `CaptionModel`. Lines are regroupable/restyleable without re-running Whisper.
 
-- `captionStrategy: burn` (legacy) — libass hard-burns into the video track from `.srt` files or `text` clips. Final, baked.
-- `captionStrategy: overlay` (newer) — renders captions via React `<CaptionsLayer>` at compose time, from a structured `CaptionModel`. Regroupable without re-running Whisper.
+> The old standalone libass hard-burn (`captionStrategy: "burn"`) was **retired** — `src/domain/audio-tools.ts::burnSubtitles` throws unconditionally now, so don't reach for it. If you need captions baked into the pixels for redistribution, you don't need libass either: put the lines on a `text` track and burn just that lane at export via `autoviral export --caption-tracks <lang>` (Remotion composites the first language's text track into the video, further languages become sidecar `.srt`s). See "Baking captions in" at the bottom.
 
-This recipe covers `overlay`. It's the right default for short-form social video.
+## Fastest path — `captions generate --script`
+
+If the user already has the **ground-truth script** (the exact lines that were spoken — e.g. a TTS input or a shot-list narration), align it to the audio and get a CaptionModel in one shot:
+
+```bash
+autoviral captions generate --script plan/narration.txt --max-cjk-chars 14
+```
+
+This runs ASR for **word-level timing**, coarse-aligns (LCS anchoring) the ground-truth text onto those anchors — so the on-screen text is your exact script, never the ASR's mis-heard words — splits CJK into ≤ `--max-cjk-chars` (default 14) lines at word/punctuation boundaries, and writes `captions: CaptionModel` + `captionStrategy: "overlay"` into the composition. Studio refreshes automatically. Prefer this whenever the truth text exists; it's the difference between clean captions and captions littered with Whisper errors.
+
+If there's **no** ground-truth script, fall back to the raw ASR verb (`autoviral captions generate`, no `--script`) or the manual Whisper path below.
 
 ## The CaptionModel shape
 
@@ -154,10 +163,19 @@ You should see captions appearing word-by-word with the highlight color cycling 
 - **Highlight too aggressive**: drop `activeScale` to 1.0, soften `activeColor` toward the cool-steel `--accent` (`#a8c5d6`).
 - **Background too heavy**: reduce alpha — `rgba(0,0,0,0.35)` for cinematic looks, `rgba(0,0,0,0.0)` with a `textStroke` for clean overlays.
 
-## When to use `burn` instead
+## Baking captions in (redistribution)
 
-- The user is exporting for a platform that strips overlay layers (very rare nowadays)
-- The user wants a fixed final mp4 with subtitles baked in for re-distribution
-- The composition is going to be remixed by a non-AutoViral tool
+Sometimes the user wants a flattened mp4 with subtitles welded into the pixels — a platform that strips overlay layers (rare now), or a file headed for a non-AutoViral remix tool. **You do not need the retired libass path for this.** Put the caption lines on a `text` track, then burn just that lane at export:
+
+```bash
+# The first --caption-tracks language is composited into the video by Remotion
+# (same renderer as preview); any further languages ride along as sidecar .srt.
+autoviral export --caption-tracks zh
+autoviral export --caption-tracks zh,en     # zh burned in, en as a sidecar .srt
+```
 
 For everything else, prefer `overlay` — it's regroupable, restyle-able, and faster to iterate.
+
+## Managed-ffmpeg gotcha
+
+Every burn/encode step shells out to the **managed ffmpeg** the workstation provisions (`~/.autoviral/bin`), resolved via `ffmpeg-paths.ts` — not whatever `ffmpeg` happens to be on `PATH`. If an export that touches captions fails with a missing-binary error, it's the managed ffmpeg that's absent, not your composition: run `autoviral doctor` to (re)provision it. Never hard-code a system ffmpeg path in a recipe; it drifts across machines and breaks the double-driven (agent + human) parity.

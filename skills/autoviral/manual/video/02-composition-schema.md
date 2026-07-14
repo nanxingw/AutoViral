@@ -209,12 +209,13 @@ exportPresets:
 
 ## Captions
 
-Two strategies. The `captionStrategy` field on the composition picks one:
+**`overlay` (the CaptionModel path) is the one to use.** Set `captionStrategy: "overlay"` and attach a `captions: CaptionModel` (below): captions render via the React `<CaptionsLayer>` inside the single Remotion pass, so preview = export, and they stay regroupable/restyleable without re-running Whisper.
 
-- `burn` (or absent) — libass hard-burns subtitles into the video track. Captions come from a `.srt` reference somewhere or from `text` clips.
-- `overlay` — uses the `captions: CaptionModel` field below. Per-word ASR segments are rendered via React `<CaptionsLayer>` at compose time. Regroupable without re-running Whisper.
+The old `captionStrategy: "burn"` (standalone libass hard-burn) was **retired** in the agentic-terminal refactor — `src/domain/audio-tools.ts::burnSubtitles` now throws unconditionally, so a `burn` strategy no longer does anything but error. Don't reach for it; the libass Python is preserved only in git tag `pre-skill-rewrite-snapshot`.
 
-See `recipes/add-subtitle-overlay.md` for the wire-up.
+If you truly need captions **baked into the pixels** (a flattened mp4 for redistribution), you don't need libass: put the lines on a `text` track and burn just that lane at export with `autoviral export --caption-tracks <lang>` — the first requested language's text track is composited into the video by Remotion (same renderer as preview), any further languages ride along as sidecar `.srt` files. No Python, no font-install dance, no managed-ffmpeg burn step.
+
+See `recipes/add-subtitle-overlay.md` for the wire-up (including `autoviral captions generate --script <file>`, which aligns ASR word timing to your ground-truth script and writes the CaptionModel for you).
 
 ## What the CLI lets you set on `clip set`
 

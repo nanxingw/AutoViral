@@ -251,6 +251,56 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     ).not.toMatch(/overlay (?:track )?(?:is )?NOT yet supported|overlay track not yet supported/i);
   });
 
+  // PRD-0014 S9 — libass hard-burn is a DEAD path: src/domain/audio-tools.ts
+  // ::burnSubtitles throws unconditionally (removed in the agentic-terminal
+  // refactor). The manual used to present `captionStrategy: burn` as a working
+  // "libass hard-burns" strategy — a zombie doc that would send an agent down a
+  // guaranteed-throw path. S9 rewrites the captions docs so overlay+CaptionModel
+  // is THE path and the retired burn is labelled as such. This guard pins the
+  // correction so the libass live-path lie can't creep back.
+  it("the CAPTIONS docs no longer present libass hard-burn as a working strategy (it throws)", () => {
+    const schema = readFileSync(
+      join(MANUAL_DIR, "video", "02-composition-schema.md"),
+      "utf8",
+    );
+    const recipe = readFileSync(
+      join(
+        REPO_ROOT,
+        "skills",
+        "autoviral",
+        "recipes",
+        "video",
+        "add-subtitle-overlay.md",
+      ),
+      "utf8",
+    );
+    // The dead claim — "libass hard-burns ... into the video track" as a live
+    // strategy — must be gone from BOTH surfaces.
+    expect(
+      schema,
+      "02-composition-schema.md still advertises libass hard-burn as a working strategy — burnSubtitles throws",
+    ).not.toMatch(/libass hard-burns/i);
+    expect(
+      recipe,
+      "add-subtitle-overlay.md still advertises libass hard-burn as a working strategy — burnSubtitles throws",
+    ).not.toMatch(/libass hard-burns/i);
+    // The overlay + CaptionModel path must be documented as the main route.
+    expect(schema).toMatch(/captionStrategy/);
+    expect(schema).toMatch(/overlay/i);
+    // The retirement must be stated plainly so nobody re-adds the libass path.
+    expect(
+      schema,
+      "02-composition-schema.md must state the libass burn path was retired (throws)",
+    ).toMatch(/retired|removed|throws|no longer/i);
+    // Managed-ffmpeg gotcha must appear in the overlay recipe (S9 ask).
+    expect(
+      recipe,
+      "add-subtitle-overlay.md must carry the managed-ffmpeg gotcha",
+    ).toMatch(/managed ffmpeg/i);
+    // The recipe must point at the new `captions generate --script` verb.
+    expect(recipe).toMatch(/captions generate --script/);
+  });
+
   it("the i2v batch recipe never claims audio/text clip-add is unsupported (they write today)", () => {
     const recipe = readFileSync(
       join(

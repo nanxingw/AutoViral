@@ -80,6 +80,7 @@ import {
 import { resolve as resolveVariables } from "../../composition/variables/index.js";
 import { synthesizeNarration } from "../../providers/tts/registry.js";
 import { runAsrCaptions } from "../../domain/asr-captions.js";
+import { alignScriptToCaptionModel } from "../../domain/caption-align.js";
 import { getContext, getProfile } from "../../context/index.js";
 import { lintComposition } from "../../composition/quality/lint.js";
 import { inspectComposition } from "../../composition/quality/inspect.js";
@@ -1083,7 +1084,12 @@ bridgeRouter.post("/captions/generate", async (c) => {
     assetPath?: string;
     language?: string;
     trackId?: string;
+    // PRD-0014 S9 — ground-truth script + CJK per-line cap for the aligned
+    // CaptionModel path.
+    script?: string;
+    maxCjkChars?: number;
   };
+  const scriptMode = typeof body.script === "string" && body.script.trim().length > 0;
 
   // Resolve the audio source. Default: the first audio-track clip's `src`. The
   // caller may override with an explicit `assetPath` (relative to the work).
@@ -1156,7 +1162,9 @@ bridgeRouter.post("/captions/generate", async (c) => {
     );
   }
 
-  const asr = await runAsrCaptions(absAudioPath, body.language);
+  const asr = await runAsrCaptions(absAudioPath, body.language, {
+    wordLevel: scriptMode,
+  });
   if (!asr.ok) {
     return c.json({ ok: false, error: asr.error, code: asr.code }, asr.status);
   }
@@ -1165,7 +1173,11 @@ bridgeRouter.post("/captions/generate", async (c) => {
   // like a silent success. Short-circuit BEFORE touching the composition (no new
   // empty text lane, no broadcast) and return an explicit signal so the agent /
   // UI knows nothing was written, rather than reading `written:0` as "done".
-  if (asr.captions.length === 0) {
+  // In script mode the anchors come from WORD timing, so gauge speech off words.
+  const hasSpeech = scriptMode
+    ? (asr.words?.length ?? 0) > 0
+    : asr.captions.length > 0;
+  if (!hasSpeech) {
     return c.json({
       ok: true,
       result: {
@@ -1174,6 +1186,46 @@ bridgeRouter.post("/captions/generate", async (c) => {
         message: "no speech detected in the audio source",
       },
     });
+  }
+
+  // PRD-0014 S9 — `--script` path: align the ASR word timing to the GROUND-TRUTH
+  // script text (coarse LCS anchoring → CJK line-split at maxCjkChars) and write
+  // the result as a CaptionModel (`captions` + `captionStrategy: "overlay"`),
+  // NOT bare TextClips. The overlay strategy renders via <CaptionsLayer> so the
+  // captions are regroupable/restyleable without re-running ASR, and preview =
+  // export (single Remotion renderer).
+  if (scriptMode) {
+    const model = alignScriptToCaptionModel(asr.words ?? [], body.script!, {
+      maxCjkChars: body.maxCjkChars,
+      modelId: `cm_${g.workId}_${Date.now().toString(36)}`,
+      language: body.language,
+    });
+    const written = model.groups.length;
+    if (written === 0) {
+      return c.json({
+        ok: true,
+        result: {
+          written: 0,
+          language: body.language ?? null,
+          message: "the script produced no caption lines (empty after alignment)",
+        },
+      });
+    }
+    try {
+      await mutateCompositionFor(
+        { workId: g.workId },
+        (draft) => {
+          draft.captions = model;
+          draft.captionStrategy = "overlay";
+          return draft;
+        },
+        () => broadcast(g.workId, "composition-changed", { reason: "captions-generate" }),
+      );
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ ok: false, error: message, code: 4 }, 400);
+    }
+    return c.json({ ok: true, result: { written, language: body.language ?? null } });
   }
 
   // Write the segments as TextClips into the text track. Same atomic
@@ -2801,6 +2853,13 @@ bridgeRouter.post("/export", async (c) => {
     // H2.2 — caller-supplied variable overrides applied before render
     variables?: Record<string, string | number | boolean>;
     strictVariables?: boolean;
+    // PRD-0014 S9 — `--caption-tracks zh[,en]`: a language list resolved to
+    // text tracks below (first burned, rest sidecar SRTs). Accepts either the
+    // CLI's `string[]` (languages) or the render-queue's already-resolved
+    // `{ burnTrackId, sidecarTrackIds }` object shape.
+    captionTracks?:
+      | string[]
+      | { burnTrackId?: string | null; sidecarTrackIds?: string[] };
   };
   // S15 (US 22/23/24) — resolve `--preset` against the @shared single-source
   // table BEFORE any work. An unknown name is a caller error: fail loud with
@@ -2889,10 +2948,51 @@ bridgeRouter.post("/export", async (c) => {
       process.env.AUTOVIRAL_WORKS_ROOT ??
       join(homedir(), ".autoviral/works");
     const outDir = join(worksRoot, g.workId, "output");
+    // PRD-0014 S9 — resolve the requested caption tracks. A `string[]` from the
+    // CLI is a language list: the FIRST language's text track is burned into the
+    // video, every subsequent language's text track becomes a sidecar SRT. An
+    // object is passed straight through (render-queue parity). Languages with no
+    // matching text track are ignored (nothing to burn/emit for them).
+    let captionTracks:
+      | { burnTrackId?: string | null; sidecarTrackIds?: string[] }
+      | undefined;
+    if (Array.isArray(body.captionTracks)) {
+      const textTracks = comp.tracks.filter((t) => t.kind === "text");
+      const resolveLang = (lang: string): string | undefined => {
+        const norm = lang.trim().toLowerCase();
+        const hit = textTracks.find(
+          (t) =>
+            typeof t.language === "string" &&
+            t.language.trim().toLowerCase() === norm,
+        );
+        return hit?.id;
+      };
+      const ids = body.captionTracks
+        .map((lang) => resolveLang(lang))
+        .filter((id): id is string => typeof id === "string");
+      if (ids.length > 0) {
+        captionTracks = {
+          burnTrackId: ids[0],
+          sidecarTrackIds: ids.slice(1),
+        };
+      }
+    } else if (body.captionTracks && typeof body.captionTracks === "object") {
+      const r = body.captionTracks;
+      captionTracks = {
+        burnTrackId:
+          typeof r.burnTrackId === "string" || r.burnTrackId === null
+            ? r.burnTrackId
+            : undefined,
+        sidecarTrackIds: Array.isArray(r.sidecarTrackIds)
+          ? r.sidecarTrackIds.filter((x): x is string => typeof x === "string")
+          : undefined,
+      };
+    }
     const finalPath = await runRenderPipeline({
       comp,
       outDir,
       proxy: body.proxy ?? false,
+      captionTracks,
       // S15 — drive the loudnorm stage from the resolved preset. Without this
       // the pipeline always fell back to its -14 default, so 微信(-16) etc.
       // were unreachable via /export (issue #80). Omitted when no preset so
