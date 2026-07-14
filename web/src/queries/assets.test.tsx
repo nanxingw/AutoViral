@@ -152,6 +152,19 @@ describe("isPipelineInternal", () => {
     expect(isPipelineInternal("output/final-1717000000000.mp4")).toBe(false);
     expect(isPipelineInternal("output/proxy-1717000000000.mp4")).toBe(false);
   });
+
+  // S4 (PRD-0014) — variable-speed export added two new pre-pass caches: the
+  // segmented setpts/atempo → concat video cache (clip-<id>-speedvar-<hash>.mp4)
+  // and the AudioClip static-speed atempo cache (clip-<id>-speedaud-<hash>.m4a).
+  // Both are content-hashed like timewarp/cropflip, so they must be hidden too
+  // or they leak into the CLIPS group (the same regression the older speed-ramp
+  // filter prevents).
+  it("flags the S4 variable-speed concat + audio-atempo pre-pass caches (PRD-0014)", () => {
+    expect(isPipelineInternal("output/clip-vc_1-speedvar-abc1234567.mp4")).toBe(true);
+    expect(isPipelineInternal("output/clip-ac_1-speedaud-abc1234567.m4a")).toBe(true);
+    // Not a hash-formatted name → not one of ours (stays visible).
+    expect(isPipelineInternal("assets/clip-vc_1-speedvar-notes.mp4")).toBe(false);
+  });
 });
 
 describe("classifyExport (S4 / #027)", () => {

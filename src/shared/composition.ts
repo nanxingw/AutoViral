@@ -159,8 +159,10 @@ export const KeyframePropertySchema = z.enum([
   "volume",
   // Phase 8.3 (D2/D11) — speed reuses the keyframes infrastructure rather than
   // a separate SpeedRampSchema. Per-clip semantics differ from transforms (D8):
-  // speed feeds Remotion's playbackRate, NOT a CSS transform. AudioClip schema
-  // accepts speed keyframes but the renderer/exporter ignore them in v1 (D1).
+  // speed feeds Remotion's playbackRate, NOT a CSS transform. AudioClip accepts
+  // speed keyframes; S4 (PRD-0014) consumes a STATIC audio speed on export via
+  // an atempo pre-pass (src/server/speed-ramp-ffmpeg.ts processAudioSpeed) —
+  // variable audio speed and the audio PREVIEW remain unconsumed for now.
   "speed",
 ]);
 export type KeyframeProperty = z.infer<typeof KeyframePropertySchema>;

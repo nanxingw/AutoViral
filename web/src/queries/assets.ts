@@ -89,7 +89,12 @@ const PIPELINE_INTERNAL: RegExp[] = [
   // The suffix is OPTIONAL in the regex so pre-fix cache files already on a
   // creator's disk (written before this change, no `-fps` segment) keep
   // matching too — they must stay hidden, not suddenly leak into CLIPS.
-  /^output\/clip-[^/]*-speed-\d+(-fps\d+)?\.mp4$/i, // speed-ramp pre-pass cache
+  /^output\/clip-[^/]*-speed-\d+(-fps\d+)?\.mp4$/i, // static speed-ramp pre-pass cache
+  // S4 (PRD-0014) — variable-speed segmented concat + AudioClip atempo caches.
+  // Both are content-hashed like the timewarp/cropflip caches (the curve /
+  // speed+span+fps folded into a sha1), so they follow the same hidden pattern.
+  /^output\/clip-[^/]*-speedvar-[0-9a-f]+\.mp4$/i, // variable-speed concat pre-pass cache
+  /^output\/clip-[^/]*-speedaud-[0-9a-f]+\.m4a$/i, // AudioClip static-speed atempo cache
   /^output\/clip-[^/]*-timewarp-[0-9a-f]+\.mp4$/i, // time-warp (reverse/freeze) pre-pass cache
   /^output\/clip-[^/]*-cropflip-[0-9a-f]+\.mp4$/i, // crop/flip pre-pass cache
 ];

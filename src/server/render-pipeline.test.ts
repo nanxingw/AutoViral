@@ -529,26 +529,33 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
     expect(filter).toContain("atempo=2.0000,atempo=2.0000");
   });
 
-  it("variable speed → warning emitted, no setpts pre-pass spawned", async () => {
+  // S4 (PRD-0014) — variable speed export used to warn + fall back to 1×. It
+  // now runs a real segmented setpts/atempo → concat pre-pass, so the FIRST
+  // spawn IS the speed pass, the filtergraph carries per-segment trim+setpts,
+  // and NO "Variable-speed export" warning is emitted.
+  it("variable speed → segmented setpts/atempo concat pre-pass spawned, no warn", async () => {
     _spawn.mockClear();
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    // Two distinct keyframe values → variable speed (D6 falls back to 1×)
+    // Two distinct keyframe values → variable speed.
     const comp = makeVideoCompWithSpeed("clip-1", [
-      { time: 0, value: 1.0 },
-      { time: 4, value: 2.0 },
+      { time: 0, value: 2.0 },
+      { time: 2, value: 1.0 },
     ]);
     const promise = runRenderPipeline({ comp, outDir: "/tmp/out-var" });
     await drainSpawnsToClose(promise);
     await promise;
-    // None of the spawned ffmpeg invocations should be a speed pass —
-    // i.e. their filter_complex args don't mention setpts=PTS/.
-    for (const call of _spawn.mock.calls) {
-      const args = call[1] as string[];
-      const filterIdx = args.indexOf("-filter_complex");
-      const filter = filterIdx >= 0 ? (args[filterIdx + 1] as string) : "";
-      expect(filter).not.toContain("setpts=PTS/");
-    }
-    expect(warnSpy).toHaveBeenCalledWith(
+    // Stage 0 is the speed pass: its filter_complex builds per-segment
+    // trim/setpts + a concat.
+    const firstCall = _spawn.mock.calls[0];
+    expect(firstCall[0]).toBe("ffmpeg");
+    const args = firstCall[1] as string[];
+    const filter = args[args.indexOf("-filter_complex") + 1] as string;
+    expect(filter).toContain("setpts=(PTS-STARTPTS)/2");
+    expect(filter).toContain("concat=n=2:v=1:a=1[v][a]");
+    const output = args[args.length - 1] as string;
+    expect(output).toMatch(/clip-clip-1-speedvar-[0-9a-f]+\.mp4$/);
+    // The dead v1 warning must be gone.
+    expect(warnSpy).not.toHaveBeenCalledWith(
       expect.stringMatching(/Variable-speed export/i),
     );
     warnSpy.mockRestore();
