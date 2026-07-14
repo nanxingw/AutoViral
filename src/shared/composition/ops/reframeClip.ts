@@ -116,14 +116,26 @@ export function reframeClip(comp: Composition, p: ReframeParams): void {
       );
     }
     const fps = comp.fps;
-    const snap = (sec: number) => Math.round(sec * fps) / fps;
     const dur = clipDuration(clip);
+    // Snap each endpoint to the nearest frame boundary, then CLAMP into [0, dur].
+    // Rounding a FRACTIONAL-frame clip duration UP can push the default
+    // `to = dur` a hair past the clip end (e.g. 2.06s @30fps → 62/30 = 2.0667s);
+    // `addKeyframe` rejects that as an off-clip time (code:4), so the default
+    // punch-in would throw. Clamping keeps both endpoints inside the clip's own
+    // span so the window can never fall out of bounds.
+    const snap = (sec: number) => Math.min(Math.max(Math.round(sec * fps) / fps, 0), dur);
     const from = snap(p.fromSec ?? 0);
     const to = snap(p.toSec ?? dur);
-    // Author via the shared keyframe op so bounds/type validation and the
-    // (property, time) collision math are exactly what the CLI/UI keyframe path
-    // uses. `addKeyframe` clamps nothing but rejects an off-clip time — snap
-    // keeps both endpoints inside [0, dur].
+    // Reframe is composition sugar over the EXISTING transform keyframe family
+    // (PRD-0014 S8: "crop + scale/x/y keyframe"). The punch-in animates `scale`
+    // 1 → punchInScale; `x`/`y` are pinned to the clip's CURRENT position across
+    // the same window (constant curves) so the zoom preserves framing instead of
+    // snapping the clip to origin — reframe writes a COMPLETE transform keyframe
+    // group, not a lone scale curve. Authoring via the shared keyframe op keeps
+    // the bounds/type validation + (property, time) collision math identical to
+    // the CLI/UI keyframe path.
+    const curX = Number.isFinite(transforms.x) ? transforms.x : 0;
+    const curY = Number.isFinite(transforms.y) ? transforms.y : 0;
     addKeyframe(comp, { clipId: p.clipId, property: "scale", atSec: from, value: 1 });
     addKeyframe(comp, {
       clipId: p.clipId,
@@ -131,5 +143,9 @@ export function reframeClip(comp: Composition, p: ReframeParams): void {
       atSec: to,
       value: p.punchInScale,
     });
+    addKeyframe(comp, { clipId: p.clipId, property: "x", atSec: from, value: curX });
+    addKeyframe(comp, { clipId: p.clipId, property: "x", atSec: to, value: curX });
+    addKeyframe(comp, { clipId: p.clipId, property: "y", atSec: from, value: curY });
+    addKeyframe(comp, { clipId: p.clipId, property: "y", atSec: to, value: curY });
   }
 }

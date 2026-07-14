@@ -3992,6 +3992,214 @@ exportPresets: []
   });
 });
 
+// PRD-0014 S8 (review finding 5) — the S8 mutation ROUTES (PATCH /transition/:id,
+// POST /clip/:id/keyframe/remove · /keyframe/move · /reframe) previously had NO
+// bridge-level persistence coverage — only the CLI wire-shape mock and the /select
+// multi-target case existed. These drive the REAL route → mutateCompositionFor →
+// writeCompositionFor (strict write schema) → read back /comp, locking the on-disk
+// result so the agent-CLI path and the human-UI store path (which run the SAME
+// shared ops) can't silently diverge.
+describe("bridge router — S8 mutation persistence (review finding 5)", () => {
+  let workRoot: string;
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  // Two back-to-back video clips + a transition after c1, and c1 carries a seeded
+  // opacity keyframe so keyframe remove/move have a real target.
+  const yamlFor = (workId: string) => `id: c_${workId}
+workId: ${workId}
+fps: 30
+width: 1080
+height: 1920
+duration: 6.0
+aspect: "9:16"
+updatedAt: "2026-07-14T00:00:00.000Z"
+tracks:
+  - id: trk_v1
+    kind: video
+    label: V1
+    muted: false
+    hidden: false
+    clips:
+      - id: c1
+        kind: video
+        src: assets/sample-shot.mp4
+        in: 0
+        out: 3.0
+        trackOffset: 0
+        keyframes:
+          - property: opacity
+            time: 1.0
+            value: 0.5
+            easing: linear
+      - id: c2
+        kind: video
+        src: assets/sample-shot.mp4
+        in: 0
+        out: 3.0
+        trackOffset: 3.0
+    transitions:
+      - id: tr_c1c2
+        afterClipId: c1
+        preset: cross-dissolve
+        durationSec: 0.5
+        alignment: center
+        easing: linear
+assets: []
+provenance: []
+exportPresets: []
+`;
+
+  async function seed(workId: string) {
+    const { mkdtemp, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-s8-persist-"));
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(join(workRoot, workId, "composition.yaml"), yamlFor(workId), "utf8");
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  }
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  type CompResult = {
+    result: {
+      tracks: Array<{
+        id: string;
+        clips: Array<{
+          id: string;
+          transforms?: { crop?: { x: number; y: number; w: number; h: number } };
+          keyframes?: Array<{ property: string; time: number; value: number }>;
+        }>;
+        transitions?: Array<{ id: string; preset: string; durationSec: number; alignment: string }>;
+      }>;
+    };
+  };
+  async function readComp(workId: string): Promise<CompResult> {
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    return (await comp.json()) as CompResult;
+  }
+  const hdr = (workId: string) => ({
+    "Content-Type": "application/json",
+    "X-AutoViral-Work-Id": workId,
+  });
+
+  it("PATCH /transition/:id persists the new preset + re-clamped duration on disk", async () => {
+    const workId = "w_s8_tr_set";
+    await seed(workId);
+    const res = await app.request("/api/bridge/v1/transition/tr_c1c2", {
+      method: "PATCH",
+      headers: hdr(workId),
+      body: JSON.stringify({ preset: "wipe-left", durationSec: 1.2 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await readComp(workId);
+    const tr = body.result.tracks.find((t) => t.id === "trk_v1")!.transitions![0];
+    expect(tr.id).toBe("tr_c1c2");
+    expect(tr.preset).toBe("wipe-left");
+    // Both clips 3s → handle 1.5 each → cap 3s; 1.2 stays.
+    expect(tr.durationSec).toBeCloseTo(1.2, 5);
+  });
+
+  it("PATCH /transition/:id with an unknown id → 400 + code 4", async () => {
+    const workId = "w_s8_tr_ghost";
+    await seed(workId);
+    const res = await app.request("/api/bridge/v1/transition/tr_ghost", {
+      method: "PATCH",
+      headers: hdr(workId),
+      body: JSON.stringify({ preset: "wipe-left" }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+  });
+
+  it("POST /clip/:id/keyframe/remove deletes the (property, atSec) keyframe on disk", async () => {
+    const workId = "w_s8_kf_rm";
+    await seed(workId);
+    const res = await app.request("/api/bridge/v1/clip/c1/keyframe/remove", {
+      method: "POST",
+      headers: hdr(workId),
+      body: JSON.stringify({ property: "opacity", atSec: 1.0 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await readComp(workId);
+    const c1 = body.result.tracks.flatMap((t) => t.clips).find((c) => c.id === "c1")!;
+    // The clip's only keyframe was opacity@1 → array now empty/undefined.
+    expect((c1.keyframes ?? []).some((k) => k.property === "opacity")).toBe(false);
+  });
+
+  it("POST /clip/:id/keyframe/remove with no matching keyframe → 400 + code 4", async () => {
+    const workId = "w_s8_kf_rm_miss";
+    await seed(workId);
+    const res = await app.request("/api/bridge/v1/clip/c1/keyframe/remove", {
+      method: "POST",
+      headers: hdr(workId),
+      body: JSON.stringify({ property: "scale", atSec: 1.0 }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+  });
+
+  it("POST /clip/:id/keyframe/move relocates the keyframe time on disk (value kept)", async () => {
+    const workId = "w_s8_kf_mv";
+    await seed(workId);
+    const res = await app.request("/api/bridge/v1/clip/c1/keyframe/move", {
+      method: "POST",
+      headers: hdr(workId),
+      body: JSON.stringify({ property: "opacity", fromSec: 1.0, toSec: 2.0 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await readComp(workId);
+    const c1 = body.result.tracks.flatMap((t) => t.clips).find((c) => c.id === "c1")!;
+    const kf = (c1.keyframes ?? []).find((k) => k.property === "opacity");
+    expect(kf?.time).toBeCloseTo(2.0, 5);
+    expect(kf?.value).toBe(0.5); // value unchanged — this is a TIME edit
+  });
+
+  it("POST /clip/:id/reframe writes a centered crop + scale/x/y punch-in keyframes on disk", async () => {
+    const workId = "w_s8_reframe";
+    await seed(workId);
+    const res = await app.request("/api/bridge/v1/clip/c1/reframe", {
+      method: "POST",
+      headers: hdr(workId),
+      body: JSON.stringify({ aspect: "1:1", punchInScale: 1.3, fromSec: 0, toSec: 2 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await readComp(workId);
+    const c1 = body.result.tracks.flatMap((t) => t.clips).find((c) => c.id === "c1")!;
+    // comp 1080×1920 → ratio 0.5625; target 1:1 (wider) → full width, cropped height.
+    const crop = c1.transforms!.crop!;
+    expect(crop.w).toBeCloseTo(1, 5);
+    expect(crop.h).toBeCloseTo(1080 / 1920, 4);
+    // The punch-in writes the COMPLETE transform keyframe group (finding 1).
+    for (const prop of ["scale", "x", "y"] as const) {
+      const curve = (c1.keyframes ?? [])
+        .filter((k) => k.property === prop)
+        .sort((a, b) => a.time - b.time);
+      expect(curve.map((k) => k.time)).toEqual([0, 2]);
+    }
+    const scale = (c1.keyframes ?? [])
+      .filter((k) => k.property === "scale")
+      .sort((a, b) => a.time - b.time);
+    expect(scale[0].value).toBe(1);
+    expect(scale[1].value).toBe(1.3);
+  });
+
+  it("POST /clip/:id/reframe with a malformed aspect → 400 + code 4", async () => {
+    const workId = "w_s8_reframe_bad";
+    await seed(workId);
+    const res = await app.request("/api/bridge/v1/clip/c1/reframe", {
+      method: "POST",
+      headers: hdr(workId),
+      body: JSON.stringify({ aspect: "banana" }),
+    });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { code?: number }).code).toBe(4);
+  });
+});
+
 // S10 (US 6/7/8) — track add/remove + clip add by trackId + overlay support.
 describe("bridge router — S10 /track + clip trackId + overlay", () => {
   let workRoot: string;

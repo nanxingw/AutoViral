@@ -105,11 +105,72 @@ describe("@shared composition ops — reframeClip", () => {
     expect(scale[1].value).toBe(1.3);
   });
 
+  // PRD-0014 S8 (review finding 1) — reframe writes a COMPLETE transform keyframe
+  // group ("crop + scale/x/y keyframe"), not a lone scale curve. `x`/`y` are
+  // pinned to the clip's CURRENT position across the punch-in window (constant
+  // curves) so the zoom preserves framing instead of snapping the clip to origin.
+  it("authors x + y keyframe pairs pinned to the clip's current position (finding 1)", () => {
+    const comp = compWith([videoClip({ id: "v1", out: 6 })], 30);
+    reframeClip(comp, {
+      clipId: "v1",
+      aspect: "9:16",
+      punchInScale: 1.3,
+      fromSec: 0.02, // → 1/30
+      toSec: 2.017, // → 61/30
+    });
+    const kfs = clip0(comp).keyframes!;
+    for (const prop of ["x", "y"] as const) {
+      const curve = kfs.filter((k) => k.property === prop).sort((a, b) => a.time - b.time);
+      expect(curve, `${prop} keyframe pair`).toHaveLength(2);
+      expect(curve[0].time).toBeCloseTo(1 / 30, 6);
+      expect(curve[1].time).toBeCloseTo(61 / 30, 6);
+      // Fixture clip sits at x:0 / y:0 → constant curve at 0 (framing preserved).
+      expect(curve[0].value).toBe(0);
+      expect(curve[1].value).toBe(0);
+    }
+  });
+
+  it("pins x/y keyframes to a NON-zero existing position (no reset to origin)", () => {
+    const comp = compWith([videoClip({ id: "v1", out: 6 })], 30);
+    // Nudge the clip off-origin BEFORE reframing.
+    (clip0(comp) as unknown as { transforms: { x: number; y: number } }).transforms.x = 40;
+    (clip0(comp) as unknown as { transforms: { x: number; y: number } }).transforms.y = -25;
+    reframeClip(comp, { clipId: "v1", aspect: "9:16", punchInScale: 1.2, fromSec: 0, toSec: 3 });
+    const kfs = clip0(comp).keyframes!;
+    expect(kfs.filter((k) => k.property === "x").map((k) => k.value)).toEqual([40, 40]);
+    expect(kfs.filter((k) => k.property === "y").map((k) => k.value)).toEqual([-25, -25]);
+  });
+
   it("defaults the punch-in window to [0, clip duration] when from/to are omitted", () => {
     const comp = compWith([videoClip({ id: "v1", out: 4 })], 30);
     reframeClip(comp, { clipId: "v1", aspect: "9:16", punchInScale: 1.2 });
-    const scale = clip0(comp).keyframes!.filter((k) => k.property === "scale");
-    expect(scale.map((k) => k.time).sort((a, b) => a - b)).toEqual([0, 4]);
+    const kfs = clip0(comp).keyframes!;
+    for (const prop of ["scale", "x", "y"] as const) {
+      const times = kfs.filter((k) => k.property === prop).map((k) => k.time).sort((a, b) => a - b);
+      expect(times, `${prop} window`).toEqual([0, 4]);
+    }
+  });
+
+  // PRD-0014 S8 (review finding 2) — a fractional-frame clip duration: rounding
+  // the default `to = dur` to the nearest frame can push it a hair PAST the clip
+  // end (2.06 → 62/30 = 2.0667 > 2.06), which addKeyframe rejects as an off-clip
+  // time (code:4). The op must clamp the snapped endpoints into [0, dur] so the
+  // default punch-in never falls out of bounds and never throws.
+  it("clamps a frame-rounded default window inside a fractional-frame clip duration (finding 2)", () => {
+    const comp = compWith([videoClip({ id: "v1", out: 2.06 })], 30);
+    expect(() =>
+      reframeClip(comp, { clipId: "v1", aspect: "9:16", punchInScale: 1.2 }),
+    ).not.toThrow();
+    const scale = clip0(comp)
+      .keyframes!.filter((k) => k.property === "scale")
+      .sort((a, b) => a.time - b.time);
+    expect(scale).toHaveLength(2);
+    expect(scale[0].time).toBe(0);
+    // End keyframe clamped to the clip's own (fractional) duration, never past it.
+    expect(scale[1].time).toBeLessThanOrEqual(2.06 + 1e-9);
+    expect(scale[1].time).toBeCloseTo(2.06, 6);
+    // And the whole thing must re-parse (no off-clip keyframe leaked through).
+    expect(() => CompositionSchema.parse(comp)).not.toThrow();
   });
 
   it("produces a schema-valid composition (crop stays inside the frame)", () => {

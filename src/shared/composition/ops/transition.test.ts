@@ -336,6 +336,26 @@ describe("@shared composition ops — updateTransition", () => {
     expect(comp.tracks[0].transitions![0].durationSec).toBeCloseTo(3, 5);
   });
 
+  // PRD-0014 S8 (review finding 3) — the docstring promises durationSec is
+  // ALWAYS re-clamped "even if a clip was trimmed after the transition was
+  // added". A PRESET-ONLY edit (no durationSec in the patch) must still tighten
+  // a now-too-large stored duration. Here we trim the successor clip shorter,
+  // then change ONLY the preset: the stale 3s must collapse to the new handle.
+  it("re-clamps a stale durationSec on a PRESET-ONLY edit after an adjacent trim (finding 3)", () => {
+    const comp = seed() as Composition & { __trId: string };
+    // Widen to the full 3s handle first (both clips 3s).
+    updateTransition(comp, { transitionId: comp.__trId, durationSec: 99 });
+    expect(comp.tracks[0].transitions![0].durationSec).toBeCloseTo(3, 5);
+    // Now trim the SUCCESSOR clip (c2) from 3s → 1s. New handle = 0.5 each → 1s.
+    const c2 = (comp.tracks[0].clips as Clip[]).find((c) => (c as { id: string }).id === "c2")!;
+    (c2 as { out: number }).out = 1;
+    // Change ONLY the preset — no durationSec in the patch.
+    updateTransition(comp, { transitionId: comp.__trId, preset: "wipe-left" });
+    expect(comp.tracks[0].transitions![0].preset).toBe("wipe-left");
+    // The stale 3s must have been re-clamped to the tightened 1s handle.
+    expect(comp.tracks[0].transitions![0].durationSec).toBeCloseTo(1, 5);
+  });
+
   it("preserves the array + track identity (ADR-009 — never replaced)", () => {
     const comp = seed() as Composition & { __trId: string };
     const trackRef = comp.tracks[0];

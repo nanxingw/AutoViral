@@ -143,15 +143,22 @@ export function updateTransition(
     const tr = transitions.find((t) => t.id === p.transitionId);
     if (!tr) continue;
 
-    if (p.durationSec !== undefined) {
-      // Re-clamp against the CURRENT adjacent clip durations. Only clamp when the
-      // anchor still has a successor (a valid transition always does; guard keeps
-      // us safe against a transient orphan mid-edit).
+    // ALWAYS re-clamp against the CURRENT adjacent clip durations — using the
+    // requested durationSec when given, else the transition's own stored value.
+    // A PRESET-ONLY edit (no durationSec in the patch) must still tighten a
+    // now-too-large stored duration if a neighbour was trimmed AFTER the
+    // transition was added (review finding 3) — otherwise the docstring's "always
+    // re-clamped … even if a clip was trimmed" promise is a lie and an over-large
+    // cross-fade survives. When nothing was trimmed the clamp is a no-op (the
+    // stored value already fits). Only clamp when the anchor still has a successor
+    // (a valid transition always does; the guard is safe against a transient
+    // orphan mid-edit).
+    {
       const clips = track.clips as Clip[];
       const beforeIdx = clips.findIndex((c) => c.id === tr.afterClipId);
       if (beforeIdx >= 0 && beforeIdx < clips.length - 1) {
         tr.durationSec = clampHandleDuration(
-          p.durationSec,
+          p.durationSec ?? tr.durationSec,
           clipDuration(clips[beforeIdx]),
           clipDuration(clips[beforeIdx + 1]),
         );

@@ -269,6 +269,118 @@ describe("shared-ops sweep matrix gate — behavioral parity (S7 review)", () =>
     },
   );
 
+  // ── S8 review fix (finding 4) — BEHAVIORAL parity for the S8 verbs ──
+  // The wiring assertion for updateTransition / removeKeyframe / updateKeyframe is
+  // ONLY a `STORE_SRC.includes("ops.<name>")` substring — and each of those op
+  // names ALSO appears in a store COMMENT (the block docstrings mention
+  // `ops.updateTransition` / `ops.removeKeyframe` / `ops.moveKeyframe`). So the
+  // substring check is satisfiable by prose alone: delete the real delegation and
+  // the gate stays green ("born green"). These cases close that hole functionally
+  // — drive the store action and the shared op from an IDENTICAL comp and assert
+  // the mutated clip/track is byte-identical. A store action that stopped
+  // delegating (raw setState, wrong coordinate) fails here.
+  function mkVideo(id: string, off: number, dur: number) {
+    return {
+      id,
+      kind: "video" as const,
+      src: `${id}.mp4`,
+      in: 0,
+      out: dur,
+      trackOffset: off,
+      transforms: {},
+      filters: {},
+    };
+  }
+  function clipById(comp: Composition, clipId: string) {
+    return (comp.tracks.flatMap((t) => t.clips as unknown[]) as { id: string }[]).find(
+      (c) => c.id === clipId,
+    ) as { keyframes?: unknown[] } | undefined;
+  }
+
+  it("updateTransition store action matches ops.updateTransition (finding 4)", () => {
+    const seed = base();
+    const vId = seed.tracks.find((t) => t.kind === "video")!.id;
+    seed.tracks.find((t) => t.id === vId)!.clips = [
+      mkVideo("a", 0, 3),
+      mkVideo("b", 3, 3),
+    ] as never;
+    // Seed a transition through the shared op so BOTH paths start from the
+    // identical id/duration (structuredClone copies it into each clone).
+    const { transitionId } = ops.addTransition(seed, {
+      trackId: vId,
+      afterClipId: "a",
+      preset: "cross-dissolve",
+      durationSec: 0.5,
+    });
+
+    const cStore = structuredClone(seed);
+    useComposition.getState().loadComposition(cStore);
+    useComposition.getState().updateTransition(vId, transitionId, {
+      preset: "wipe-left",
+      durationSec: 1.2,
+    });
+    const storeTrack = trackById(useComposition.getState().comp!, vId);
+
+    const cOp = structuredClone(seed);
+    ops.updateTransition(cOp, { transitionId, preset: "wipe-left", durationSec: 1.2 });
+    const opTrack = trackById(cOp, vId);
+
+    expect(storeTrack.transitions).toEqual(opTrack.transitions);
+  });
+
+  it("removeKeyframe store action matches ops.removeKeyframe (finding 4)", () => {
+    const seed = base();
+    const vId = seed.tracks.find((t) => t.kind === "video")!.id;
+    seed.tracks.find((t) => t.id === vId)!.clips = [mkVideo("a", 0, 4)] as never;
+    // Author two keyframes via the shared op so the array is deterministic.
+    ops.addKeyframe(seed, { clipId: "a", property: "opacity", atSec: 1, value: 0.5 });
+    ops.addKeyframe(seed, { clipId: "a", property: "scale", atSec: 2, value: 1.4 });
+    // The store addresses by original-array INDEX; resolve the opacity keyframe's.
+    const seedKfs = clipById(seed, "a")!.keyframes as { property: string; time: number }[];
+    const idx = seedKfs.findIndex((k) => k.property === "opacity" && k.time === 1);
+    expect(idx).toBeGreaterThanOrEqual(0);
+
+    const cStore = structuredClone(seed);
+    useComposition.getState().loadComposition(cStore);
+    useComposition.getState().removeKeyframe("a", idx);
+    const storeKfs = clipById(useComposition.getState().comp!, "a")!.keyframes;
+
+    const cOp = structuredClone(seed);
+    ops.removeKeyframe(cOp, { clipId: "a", property: "opacity", atSec: 1 });
+    const opKfs = clipById(cOp, "a")!.keyframes;
+
+    expect(storeKfs).toEqual(opKfs);
+  });
+
+  it("updateKeyframe store action matches ops.moveKeyframe+setKeyframe (finding 4)", () => {
+    const seed = base();
+    const vId = seed.tracks.find((t) => t.kind === "video")!.id;
+    seed.tracks.find((t) => t.id === vId)!.clips = [mkVideo("a", 0, 4)] as never;
+    ops.addKeyframe(seed, { clipId: "a", property: "opacity", atSec: 1, value: 0.5 });
+    const seedKfs = clipById(seed, "a")!.keyframes as { property: string; time: number }[];
+    const idx = seedKfs.findIndex((k) => k.property === "opacity" && k.time === 1);
+
+    const cStore = structuredClone(seed);
+    useComposition.getState().loadComposition(cStore);
+    // A combined TIME + VALUE edit — the store routes time through moveKeyframe
+    // and value through setKeyframe; replicate both on the op-path clone.
+    useComposition.getState().updateKeyframe("a", idx, { time: 2.5, value: 0.8 });
+    const storeKfs = clipById(useComposition.getState().comp!, "a")!.keyframes;
+
+    const cOp = structuredClone(seed);
+    ops.moveKeyframe(cOp, { clipId: "a", property: "opacity", fromSec: 1, toSec: 2.5 });
+    ops.setKeyframe(cOp, {
+      clipId: "a",
+      property: "opacity",
+      atSec: 2.5,
+      value: 0.8,
+      easing: "linear", // the authored keyframe's original easing (addKeyframe default)
+    });
+    const opKfs = clipById(cOp, "a")!.keyframes;
+
+    expect(storeKfs).toEqual(opKfs);
+  });
+
   it("rippleDeleteClip store action matches ops.rippleDeleteClip (incl. transition prune)", () => {
     const seed = base();
     const vId = seed.tracks.find((t) => t.kind === "video")!.id;
