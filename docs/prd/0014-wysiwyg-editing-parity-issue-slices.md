@@ -86,6 +86,25 @@
 
 ---
 
+## S6b · 素材库"添加到时间线"收敛到 importClip（S6 review finding 3 专片）
+
+**What**：S6 交付后 codex review 确认：`AssetSidebar/addAssetToTimeline.ts` 的 video 路径仍在 store 内构造固定 5s 占位 clip + 绕过 Asset/Provenance 登记，违反 S6 的"禁"。本片把 UI 侧 video 添加收敛到服务端共享 importClip：hook 改异步经 bridge `POST /import`（服务端 ffprobe 是唯一真实 duration 来源）+ 传 workId + WS 刷新闭环；更新 LibraryTab / AssetPreviewModal / Track.tsx 拖放三个调用面；重写受影响的 web 测试（add-to-timeline / 拖放套件按新异步契约锁外部行为）。audio/image 添加维持现状（importClip 是 video-only）。
+**禁**：video 路径保留任何"固定 5s 占位时长"分支；probe 失败静默放置。
+
+**预设测试**（先落盘证红）：
+- hook 测试：video asset 添加 → 发起 bridge import 请求（mock fetch 断言 body）而非直接 store.addClip；成功后 clip 时长 = probe 返回值非 5s——当前红。
+- 拖放/LibraryTab 集成：沿用既有套件结构改写为异步等待后断言；probe 失败 → 用户可见错误态、不落 clip。
+- 回归：audio/image 添加路径行为不变。
+
+**Acceptance criteria**：
+- [ ] 证红转绿；`test:web` + `test:server` 全绿。
+- [ ] UI 添加与 CLI `clip import` 产出的 clip 结构一致（同 probe、同 Asset/Provenance 登记）。
+
+**Blocked by**：S6。
+**Code-area hints**：`web/src/features/studio/panels/AssetSidebar/addAssetToTimeline.ts:123`（5s 占位现场）；bridge import 路由已在 S6 落地（`src/server/bridge/routes.ts` grep "import"）。
+
+---
+
 ## S7 · 共享 ops 下沉 I：ripple / collapse / duplicate / track set + sweep matrix gate
 
 **What**：把 store-only 动词提升为共享 op 并三端接线：`rippleDeleteClip`（删 clip + 同轨后续 clips 前移）、`collapseGapsOnTrack`、`duplicateClip`（新 id、offset 顺延或 `--offset`）、`setTrackProps`（label/language/volume/muted/hidden 部分更新）。store 改为薄包装调共享 op（外部行为不变）；CLI 新增 `clip remove --ripple`、`track collapse <id>`、`clip duplicate <id> [--offset <sec>]`、`track set <id> --label/--language/--volume/--muted`；bridge 路由对应补齐。**同时落 sweep matrix gate 测试**：枚举 store 的全部编辑类 action（白名单豁免纯 UI 态如 selection/viewport），断言每个在 `src/shared/composition/ops` 有对应导出——本片起该 gate 常驻，防止未来再造 store-only 动词。
@@ -367,6 +386,6 @@
 | W1 | S1 → S2 | 转场根因 + 注册表（Epic A） |
 | W2 | S4 → S6 | 变速导出 + 成片回填（独立域） |
 | W3 | S7 → S8 → S5 → S3 → S12 → S15 → S13 → S14 | schema/ops/store 连续链（Epic D+B+G+H，严格串行防冲突） |
-| W4 | S9 → S10 → S11 | 字幕/韧性/渲染 CLI（Epic E+F） |
+| W4 | S6b → S9 → S10 → S11 | 素材库收敛补片 + 字幕/韧性/渲染 CLI（Epic C+E+F） |
 | W5 | S16 → S17 | 一致性 gate + 文档（依赖前序交付） |
 | W6 | S18 → S19 | E2E 终验 + 发布准备 |
