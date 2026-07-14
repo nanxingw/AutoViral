@@ -11,6 +11,9 @@ import {
   setTransitionIn,
   reframeClip,
   addTransition,
+  rippleDeleteClip,
+  collapseGapsOnTrack,
+  patchClipProps,
 } from "./index.js";
 
 // PRD-0014 S15 — sweep matrix over the WHOLE time-writing op family. Every op
@@ -175,6 +178,100 @@ const cases: { name: string; readback: () => number }[] = [
       });
       const tr = comp.tracks[0].transitions!.find((t) => t.id === transitionId)!;
       return tr.durationSec;
+    },
+  },
+  {
+    // FINDING 3 — a tiny explicit width snaps to 0, then clampHandleDuration
+    // FLOORS at 0.05s = 1.5 frames @30fps. Frame-alignment must be a POST-clamp
+    // postcondition, else the stored value is sub-frame again.
+    name: "addTransition tiny durationSec (0.01) is frame-aligned after the handle clamp",
+    readback: () => {
+      const comp = compWith([videoClip("a", 0, 3), videoClip("b", 3, 3)]);
+      const { transitionId } = addTransition(comp, {
+        trackId: "trk_v0",
+        afterClipId: "a",
+        preset: "cross-dissolve",
+        durationSec: 0.01,
+      });
+      return comp.tracks[0].transitions!.find((t) => t.id === transitionId)!.durationSec;
+    },
+  },
+  {
+    // FINDING 3 — an OMITTED durationSec falls back to the preset registry
+    // default (whip-pan-left = 0.35s = 10.5 frames @30fps), which bypassed snapping.
+    name: "addTransition default preset duration (whip-pan-left 0.35) is frame-aligned",
+    readback: () => {
+      const comp = compWith([videoClip("a", 0, 3), videoClip("b", 3, 3)]);
+      const { transitionId } = addTransition(comp, {
+        trackId: "trk_v0",
+        afterClipId: "a",
+        preset: "whip-pan-left",
+      });
+      return comp.tracks[0].transitions!.find((t) => t.id === transitionId)!.durationSec;
+    },
+  },
+  {
+    // FINDING 3 — setTransitionIn's auto-fit DEFAULT (registry default, no explicit
+    // durationSec) also bypassed snapping; whip-pan-left 0.35 = 10.5 frames.
+    name: "setTransitionIn default preset duration is frame-aligned",
+    readback: () => {
+      const comp = compWith([videoClip("a", 0, 4)]);
+      setTransitionIn(comp, { clipId: "a", spec: { preset: "whip-pan-left" } });
+      return (comp.tracks[0].clips[0] as { transitionIn: { durationSec: number } }).transitionIn
+        .durationSec;
+    },
+  },
+  {
+    // FINDING 3 — a keyframe authored AT a fractional-frame clip end used to clamp
+    // to the fractional clip duration (2.06s = 61.8 frames @30fps). The clamp must
+    // land on a whole frame ≤ the clip span.
+    name: "addKeyframe at a fractional clip-end clamps to a whole frame",
+    readback: () => {
+      const comp = compWith([videoClip("a", 0, 2.06)]);
+      addKeyframe(comp, { clipId: "a", property: "opacity", atSec: 2.06, value: 0.5 });
+      return (comp.tracks[0].clips[0] as { keyframes: { time: number }[] }).keyframes[0].time;
+    },
+  },
+  {
+    // FINDING 2 — importClip wrote the probe duration to `out` verbatim; a probe of
+    // 4.017s = 120.51 frames @30fps left the clip end off-grid.
+    name: "importClip.out (probe duration) snaps to a whole frame",
+    readback: () => {
+      const comp = compWith([]);
+      const { clipId } = importClip(comp, { probe: { durationSec: 4.017 }, src: "out/x.mp4" });
+      const clip = (comp.tracks[0].clips as Clip[]).find((c) => c.id === clipId)!;
+      return (clip as { out: number }).out;
+    },
+  },
+  {
+    // FINDING 2 — rippleDeleteClip slides later clips by the removed clip's duration;
+    // a fractional removed duration (1.017s) left the slid offset off-grid.
+    name: "rippleDeleteClip slid offset is frame-aligned",
+    readback: () => {
+      const comp = compWith([videoClip("a", 0, 1.017), videoClip("b", 2, 1)]);
+      rippleDeleteClip(comp, { clipId: "a" });
+      return (comp.tracks[0].clips as Clip[]).find((c) => c.id === "b")!.trackOffset;
+    },
+  },
+  {
+    // FINDING 2 — collapseGapsOnTrack repacks from a running cursor; a fractional
+    // clip duration left the next clip's repacked offset off-grid.
+    name: "collapseGapsOnTrack repacked offset is frame-aligned",
+    readback: () => {
+      const comp = compWith([videoClip("a", 0, 1.017), videoClip("b", 5, 1)]);
+      collapseGapsOnTrack(comp, { trackId: "trk_v0" });
+      return (comp.tracks[0].clips as Clip[]).find((c) => c.id === "b")!.trackOffset;
+    },
+  },
+  {
+    // FINDING 1 — patchClipProps is the shared `clip set` op; a `--trackOffset
+    // 1.017` (or --in/--out/--duration) written through it must snap to a whole
+    // frame like every other time-writing op (fps threaded from the composition).
+    name: "patchClipProps trackOffset snaps (CLI `clip set` path)",
+    readback: () => {
+      const comp = compWith([videoClip("a", 0, 4)]);
+      patchClipProps(comp.tracks[0].clips[0] as Clip, { trackOffset: 1.017 }, comp.fps);
+      return (comp.tracks[0].clips[0] as { trackOffset: number }).trackOffset;
     },
   },
 ];

@@ -19,6 +19,7 @@
 // the store keeps its silent-no-op contract; the route decides whether to 400.
 
 import type { Composition, Clip } from "../../composition.js";
+import { snapToFrame } from "../../frame.js";
 
 // Floating-point tolerance for the "strictly after" boundary. Mirrors the
 // timeline package's OFFSET_EPSILON; inlined so the op stays free of the
@@ -62,9 +63,12 @@ export function rippleDeleteClip(
     // Remove in place (keeps the array reference — decision #1).
     clips.splice(idx, 1);
     // Slide every clip that STARTED after the removed clip left by its duration.
+    // S15 finding 2 — snap the DERIVED offset to a whole frame: if `removedDur`
+    // carried any sub-frame residue, the slid offset would land off-grid; snapping
+    // the result keeps the whole track frame-aligned (a no-op when inputs already are).
     for (const c of clips) {
       if (c.trackOffset > removedStart + OFFSET_EPSILON) {
-        c.trackOffset = Math.max(0, c.trackOffset - removedDur);
+        c.trackOffset = snapToFrame(Math.max(0, c.trackOffset - removedDur), comp.fps);
       }
     }
 

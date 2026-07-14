@@ -31,6 +31,7 @@ import {
   CompositionWriteSchema,
   type Composition,
 } from "../composition.js";
+import { detectOverlaps, formatOverlap } from "./overlap.js";
 
 export interface PreflightResult {
   /** True iff there are zero blocking errors. Warnings do NOT flip this. */
@@ -78,38 +79,15 @@ export function preflight(candidate: unknown): PreflightResult {
  */
 function collectWarnings(comp: Composition, warnings: string[]): void {
   // track-overlap — two clips on one track whose timeline ranges intersect.
-  // Video/audio clips span `in`..`out`; text/overlay clips span `duration`.
-  // S15 (PRD-0014) — overlay lanes are EXEMPT: picture-in-picture overlays
-  // legitimately stack, so overlapping overlay clips are NOT a smell.
-  comp.tracks.forEach((track) => {
-    if ((track as { kind?: string }).kind === "overlay") return;
-    const ranges: Array<{ id: string; start: number; end: number }> = [];
-    track.clips.forEach((clip) => {
-      const c = clip as unknown as {
-        id?: string;
-        trackOffset?: number;
-        in?: number;
-        out?: number;
-        duration?: number;
-      };
-      const start = c.trackOffset ?? 0;
-      let dur: number;
-      if (c.duration !== undefined) dur = c.duration;
-      else if (c.in !== undefined && c.out !== undefined) dur = c.out - c.in;
-      else dur = 0;
-      ranges.push({ id: c.id ?? "<unnamed>", start, end: start + dur });
-    });
-    ranges.sort((a, b) => a.start - b.start);
-    for (let i = 1; i < ranges.length; i++) {
-      const prev = ranges[i - 1]!;
-      const cur = ranges[i]!;
-      if (cur.start < prev.end - 1e-6) {
-        warnings.push(
-          `clip "${cur.id}" overlaps "${prev.id}" on track "${track.id}" (${cur.start.toFixed(2)}s starts before ${prev.end.toFixed(2)}s)`,
-        );
-      }
-    }
-  });
+  // S15 (PRD-0014, review findings 4/5/6): delegates to the ONE shared detector
+  // (composition/overlap.ts) instead of a hand-rolled loop, so this warning layer
+  // and the `track-overlap` lint rule agree byte-for-byte. The detector is
+  // speed-aware (effectiveClipDuration, not raw out-in), reports every overlapping
+  // pair (full pairwise, not just adjacent), exempts overlay lanes (PiP stacks),
+  // and yields structured {clipAId, clipBId, start, end} records we format here.
+  for (const rec of detectOverlaps(comp)) {
+    warnings.push(formatOverlap(rec));
+  }
 
   // dangling-segment-id — caption groups must reference declared segments.
   if (comp.captions) {

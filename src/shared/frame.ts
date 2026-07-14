@@ -48,3 +48,30 @@ export function snapToFrame(sec: number, fps: number): number {
   }
   return Math.round(sec * fps) / fps;
 }
+
+/**
+ * Round `sec` DOWN to the largest whole-frame boundary ≤ `sec` at `fps`.
+ *
+ * Used where snapping UP would push a value past an upper bound and self-reject:
+ * a keyframe authored AT a fractional-frame clip end (S15 finding 3) must land on
+ * a whole frame WITHIN the clip's own span, and a transition's auto-fit default
+ * must not grow past the clip's effective width. `snapToFrame` (round-to-nearest)
+ * can overshoot; `frameFloor` cannot.
+ */
+export function frameFloor(sec: number, fps: number): number {
+  if (!Number.isFinite(fps) || fps <= 0) {
+    throw new CompositionOpError(
+      `frameFloor: fps ${String(fps)} must be a finite positive number`,
+      4,
+    );
+  }
+  if (!Number.isFinite(sec) || sec < 0) {
+    throw new CompositionOpError(
+      `frameFloor: sec ${String(sec)} must be a finite number ≥ 0`,
+      4,
+    );
+  }
+  // +1e-9 tolerance so a value already on a boundary (15.0 frames) floors to
+  // itself despite binary-float error, not to the frame below it.
+  return Math.floor(sec * fps + 1e-9) / fps;
+}

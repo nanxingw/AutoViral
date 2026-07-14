@@ -19,6 +19,7 @@
 // redundant undo snapshot). On a real move `comp.duration` is recomputed.
 
 import type { Composition, Clip } from "../../composition.js";
+import { snapToFrame } from "../../frame.js";
 
 const OFFSET_EPSILON = 1e-6;
 
@@ -57,8 +58,12 @@ export function collapseGapsOnTrack(
   // A reorder counts as a move; so does any offset adjustment in the walk below.
   let moved = clips.map((c) => c.id).join("|") !== beforeOrder;
   for (const c of clips) {
-    if (Math.abs(c.trackOffset - cursor) > OFFSET_EPSILON) {
-      c.trackOffset = cursor;
+    // S15 finding 2 — place each clip at the running cursor SNAPPED to a whole
+    // frame: a sub-frame clip duration would otherwise let repacked offsets drift
+    // off-grid (a no-op when every duration is already frame-aligned).
+    const placed = snapToFrame(Math.max(0, cursor), comp.fps);
+    if (Math.abs(c.trackOffset - placed) > OFFSET_EPSILON) {
+      c.trackOffset = placed;
       moved = true;
     }
     cursor += clipDuration(c);

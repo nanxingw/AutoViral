@@ -26,7 +26,7 @@ import {
   isValidKeyframeEasing,
   KEYFRAME_TIME_EPSILON,
 } from "../../keyframes.js";
-import { snapToFrame } from "../../frame.js";
+import { snapToFrame, frameFloor } from "../../frame.js";
 import { CompositionOpError } from "./errors.js";
 
 // Floating-point tolerance for the upper-bound boundary check. Mirrors the
@@ -148,12 +148,13 @@ export function addKeyframe(comp: Composition, p: KeyframeWrite): void {
     );
   }
 
-  // S15 — quantise the keyframe time to a whole frame. `Math.min(_, maxAtSec)`:
-  // a keyframe authored AT a fractional-frame clip end (e.g. reframe's default
-  // punch-in window `to = dur` where dur = 2.06s @30fps) would otherwise snap UP
-  // past the clip end and get rejected as off-clip — clamping the snapped value
-  // to the clip's own span keeps a boundary keyframe valid.
-  const snappedAtSec = Math.min(snapToFrame(atSec, comp.fps), maxAtSec);
+  // S15 — quantise the keyframe time to a whole frame, clamped to the clip's own
+  // span. finding 3: the upper bound is the clip end FRAME-FLOORED, not the raw
+  // (possibly fractional) `maxAtSec` — clamping to a fractional clip end (2.06s =
+  // 61.8 frames @30fps) would store the endpoint keyframe off-grid. `frameFloor`
+  // gives the largest whole frame ≤ the clip span, so a boundary keyframe stays
+  // valid AND frame-aligned.
+  const snappedAtSec = Math.min(snapToFrame(atSec, comp.fps), frameFloor(maxAtSec, comp.fps));
 
   // The clip is VideoClip | AudioClip | OverlayClip — all carry the optional
   // `keyframes?: Keyframe[]` leaf. `addOrReplaceKeyframe` returns a fresh array
@@ -284,9 +285,10 @@ export function moveKeyframe(
   const maxAtSec = clipKeyframeDuration(clip);
   // S15 — clamp into [0, clipDuration] FIRST (a negative `toSec` clamps to 0, not
   // a snapToFrame rejection), THEN quantise the clamped value to a whole frame,
-  // re-clamping so a fractional-frame clip end can't be overshot.
+  // re-clamping to the clip end FRAME-FLOORED (finding 3) so a fractional-frame
+  // clip end can't leave the keyframe off-grid.
   const clampedRaw = Math.min(Math.max(p.toSec, 0), maxAtSec);
-  const clamped = Math.min(snapToFrame(clampedRaw, comp.fps), maxAtSec);
+  const clamped = Math.min(snapToFrame(clampedRaw, comp.fps), frameFloor(maxAtSec, comp.fps));
   entry.time = clamped;
   // Keep the array sorted (property ASC, then time ASC) — the SAME order
   // addOrReplaceKeyframe maintains — so index-based consumers stay consistent.

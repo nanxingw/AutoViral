@@ -49,6 +49,7 @@ import {
 import { dataDir } from "../../infra/config.js";
 import { randomUUID } from "node:crypto";
 import { preflight } from "../../shared/composition/preflight.js";
+import { snapToFrame } from "../../shared/frame.js";
 import { mutateCarouselFor, applyLayerPatch } from "./carousel-ops.js";
 // ADR-009 (S6) — shared composition-ops core. POST /split delegates the split
 // math + invariants to `ops.splitClip` (the SAME implementation the studio
@@ -939,15 +940,22 @@ bridgeRouter.post("/clip", async (c) => {
       }
       const id = newClipId(body.track);
       newId = id;
-      const offset = body.offset ?? 0;
+      // S15 finding 1 — the generic `clip add` bridge path constructs clips
+      // inline; frame-quantise every caller-supplied SECONDS field (in/out/offset/
+      // duration) so an agent's `--offset 1.23456` lands on-grid like every op.
+      const snap = (n: number) =>
+        Number.isFinite(n) && n >= 0 ? snapToFrame(n, comp.fps) : n;
+      const inSnapped = snap(inSec);
+      const outSnapped = snap(outSec);
+      const offset = snap(body.offset ?? 0);
       if (body.track === "video") {
         if (!body.src) throw new Error("video clip requires --src");
         track.clips.push({
           id,
           kind: "video",
           src: body.src,
-          in: inSec,
-          out: outSec,
+          in: inSnapped,
+          out: outSnapped,
           trackOffset: offset,
           transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
           filters: { brightness: 0, contrast: 0, saturation: 0 },
@@ -958,8 +966,8 @@ bridgeRouter.post("/clip", async (c) => {
           id,
           kind: "audio",
           src: body.src,
-          in: inSec,
-          out: outSec,
+          in: inSnapped,
+          out: outSnapped,
           trackOffset: offset,
           volume: 1,
           fadeIn: 0,
@@ -972,7 +980,7 @@ bridgeRouter.post("/clip", async (c) => {
           kind: "text",
           text: body.text,
           trackOffset: offset,
-          duration: body.duration ?? 3,
+          duration: snap(body.duration ?? 3),
         } as any);
       } else {
         // S10 (US 6) — overlay is a first-class lane now (the old "not yet
@@ -986,7 +994,7 @@ bridgeRouter.post("/clip", async (c) => {
           kind: "overlay",
           src: body.src,
           trackOffset: offset,
-          duration: body.duration ?? 5,
+          duration: snap(body.duration ?? 5),
           position: { xPct: 0, yPct: 0, wPct: 100, hPct: 100 },
           opacity: 1,
         } as any);
@@ -2833,7 +2841,14 @@ bridgeRouter.patch("/clip/:id", async (c) => {
           if (clip) {
             // `comp.tracks[*].clips[*]` is a discriminated-union member; the op
             // narrows on `.kind` internally so a plain cast is enough here.
-            ops.patchClipProps(clip as Parameters<typeof ops.patchClipProps>[0], patch);
+            // S15 finding 1 — pass the composition fps so a `clip set` on a
+            // timeline / source-window field (in/out/trackOffset/duration) snaps
+            // to a whole frame, exactly like `clip import --at` / trim / split.
+            ops.patchClipProps(
+              clip as Parameters<typeof ops.patchClipProps>[0],
+              patch,
+              comp.fps,
+            );
             found = true;
             break;
           }

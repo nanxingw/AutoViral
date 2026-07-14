@@ -135,3 +135,23 @@ export function clampHandleDuration(
     Math.max(TRANSITION_DURATION_MIN_SEC, out),
   );
 }
+
+/**
+ * PRD-0014 S15 (review finding 3) — frame-align a transition duration as a
+ * POSTcondition of the handle clamp. `clampHandleDuration` floors at 0.05s and
+ * caps at half the smaller adjacent clip, but neither bound is frame-aligned
+ * (0.05s = 1.5 frames @30fps; registry defaults like 0.35s = 10.5), so a snapped
+ * INPUT could still be stored sub-frame. Snap DOWN to the largest whole frame ≤
+ * the handle-safe value (never re-exceed the clamp), but never below the schema's
+ * min-frame floor. Callers pass the ALREADY-clamped value.
+ */
+export function frameAlignTransitionDuration(cappedSec: number, fps: number): number {
+  if (!Number.isFinite(fps) || fps <= 0) return cappedSec;
+  const minFrames = Math.ceil(TRANSITION_DURATION_MIN_SEC * fps - 1e-9);
+  // Largest whole frame ≤ the handle-safe capped value (never grow past the cap).
+  let frames = Math.floor(cappedSec * fps + 1e-9);
+  // Never below the schema minimum (only overshoots the cap in the degenerate
+  // case where the adjacent clips are shorter than a single min-frame transition).
+  if (frames < minFrames) frames = minFrames;
+  return frames / fps;
+}

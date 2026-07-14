@@ -166,9 +166,14 @@ describe("@shared composition ops — reframeClip", () => {
       .sort((a, b) => a.time - b.time);
     expect(scale).toHaveLength(2);
     expect(scale[0].time).toBe(0);
-    // End keyframe clamped to the clip's own (fractional) duration, never past it.
+    // End keyframe clamped INSIDE the clip's own (fractional) duration, never past
+    // it — the original finding-2 invariant (no off-clip keyframe, no throw).
     expect(scale[1].time).toBeLessThanOrEqual(2.06 + 1e-9);
-    expect(scale[1].time).toBeCloseTo(2.06, 6);
+    // S15 finding 3 — the endpoint is now clamped to the clip end FRAME-FLOORED
+    // (largest whole frame ≤ 2.06s = 61/30 = 2.0333…), not the raw fractional
+    // 2.06s, so the stored keyframe time is on-grid instead of 61.8 frames.
+    expect(scale[1].time).toBeCloseTo(61 / 30, 6);
+    expect(Math.abs(scale[1].time * 30 - Math.round(scale[1].time * 30))).toBeLessThan(1e-6);
     // And the whole thing must re-parse (no off-clip keyframe leaked through).
     expect(() => CompositionSchema.parse(comp)).not.toThrow();
   });

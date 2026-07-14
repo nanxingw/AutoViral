@@ -20,6 +20,13 @@
 
 import type { Clip } from "../../composition.js";
 import { CompositionOpError } from "./errors.js";
+import { snapToFrame } from "../../frame.js";
+
+// S15 finding 1 — the timeline / source-window paths that carry a caller-supplied
+// SECONDS value and so must be frame-quantised (when a composition fps is passed),
+// exactly like every other time-writing op. Non-timing paths (transforms, filters,
+// text, style, …) are written verbatim.
+const TIMING_PATHS = new Set(["in", "out", "trackOffset", "duration"]);
 
 // Floating-point tolerance for the freezeAtSec upper-bound boundary check.
 // Mirrors ATSEC_EPSILON in keyframe.ts (the sibling clip-local-time guard).
@@ -118,6 +125,7 @@ const ALLOWED_PATHS: Record<Clip["kind"], readonly string[]> = {
 export function patchClipProps(
   clip: Clip,
   patch: Record<string, unknown>,
+  fps?: number,
 ): void {
   const allowed = ALLOWED_PATHS[clip.kind];
   if (!allowed) {
@@ -165,9 +173,24 @@ export function patchClipProps(
     }
   }
 
-  // Phase 2 — write. All paths are now known-good, so every set lands.
+  // Phase 2 — write. All paths are now known-good, so every set lands. S15
+  // finding 1: a timeline / source-window field (in/out/trackOffset/duration) set
+  // through the shared `clip set` op is frame-quantised when a composition fps is
+  // provided, so an agent's `clip set v1 --trackOffset 1.23456` reads back on-grid
+  // just like `clip import --at` / trim / split. Non-finite / negative timing
+  // values fall through unsnapped (downstream schema validation rejects them).
   for (const [path, value] of Object.entries(patch)) {
-    setNestedPath(clip as Record<string, unknown>, path, value);
+    let v: unknown = value;
+    if (
+      fps !== undefined &&
+      TIMING_PATHS.has(path) &&
+      typeof v === "number" &&
+      Number.isFinite(v) &&
+      v >= 0
+    ) {
+      v = snapToFrame(v, fps);
+    }
+    setNestedPath(clip as Record<string, unknown>, path, v);
   }
 }
 

@@ -19,6 +19,7 @@ import {
   TRANSITION_PRESET_META,
   getPresetMeta,
   clampHandleDuration,
+  frameAlignTransitionDuration,
   type TransitionPreset,
 } from "../../transitions.js";
 
@@ -92,7 +93,13 @@ export function addTransition(
     durationSec !== undefined
       ? snapToFrame(durationSec, comp.fps)
       : getPresetMeta(preset).defaultDurationSec;
-  const dur = clampHandleDuration(desired, clipDuration(before), clipDuration(after));
+  // S15 finding 3 — frame-align as a POSTcondition of the clamp: the clamp's
+  // 0.05s floor / registry defaults (0.35, 0.6, 0.7) are NOT frame boundaries, so
+  // the stored value must be re-snapped AFTER clamping, not just the input before.
+  const dur = frameAlignTransitionDuration(
+    clampHandleDuration(desired, clipDuration(before), clipDuration(after)),
+    comp.fps,
+  );
 
   const transitionId = `tr_${crypto.randomUUID()}`;
 
@@ -169,10 +176,14 @@ export function updateTransition(
           p.durationSec !== undefined
             ? snapToFrame(p.durationSec, comp.fps)
             : tr.durationSec;
-        tr.durationSec = clampHandleDuration(
-          desired,
-          clipDuration(clips[beforeIdx]),
-          clipDuration(clips[beforeIdx + 1]),
+        // S15 finding 3 — frame-align AFTER the handle clamp (see addTransition).
+        tr.durationSec = frameAlignTransitionDuration(
+          clampHandleDuration(
+            desired,
+            clipDuration(clips[beforeIdx]),
+            clipDuration(clips[beforeIdx + 1]),
+          ),
+          comp.fps,
         );
       }
     }

@@ -201,7 +201,11 @@ export function importClip(
     kind: "video",
     src,
     in: 0,
-    out: durationSec,
+    // S15 finding 2 — the probe duration is an external value written to `out`;
+    // snap it so the imported clip END lands frame-aligned (a probe of 4.017s =
+    // 120.51 frames @30fps must not persist off-grid, or every derived keyframe
+    // endpoint / ripple offset inherits the sub-frame drift).
+    out: snapToFrame(durationSec, comp.fps),
     trackOffset,
     fitMode: "cover",
     transforms: { scale: 1, x: 0, y: 0, rotation: 0 },

@@ -19,6 +19,10 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { CompositionSchema, type Composition } from "../../shared/composition.js";
+import {
+  detectTrackOverlaps,
+  formatOverlap,
+} from "../../shared/composition/overlap.js";
 
 export type LintSeverity = "error" | "warning" | "info";
 
@@ -79,41 +83,27 @@ function semanticChecks(
   findings: LintFinding[],
   opts: LintOptions,
 ): void {
-  // Track-overlap rule. S15 (PRD-0014) — overlay lanes are EXEMPT (PiP overlays
-  // legitimately stack); video/audio/text lanes are still flagged.
+  // Track-overlap rule. S15 (PRD-0014, review findings 4/5/6): delegates to the
+  // ONE shared detector (composition/overlap.ts) — the SAME one the preflight
+  // warning layer uses. It is speed-aware (effectiveClipDuration, not raw out-in —
+  // the old loop also mis-read the field as `durationSec` and silently measured
+  // text clips as zero-length), reports every overlapping pair (full pairwise, not
+  // just adjacent), and exempts overlay lanes. We map each structured record back
+  // to a clip index for the locator.
   comp.tracks.forEach((track, ti) => {
     if ((track as { kind?: string }).kind === "overlay") return;
-    const ranges: Array<{ id: string; start: number; end: number; ci: number }> = [];
-    track.clips.forEach((clip, ci) => {
-      const c = clip as unknown as {
-        id?: string;
-        kind?: string;
-        trackOffset?: number;
-        // Video/audio clips use `in`/`out` for source range; text/overlay
-        // use `durationSec`. Handle both.
-        in?: number;
-        out?: number;
-        durationSec?: number;
-      };
-      const start = c.trackOffset ?? 0;
-      let dur: number;
-      if (c.durationSec !== undefined) dur = c.durationSec;
-      else if (c.in !== undefined && c.out !== undefined) dur = c.out - c.in;
-      else dur = 0;
-      ranges.push({ id: c.id ?? `<unnamed>`, start, end: start + dur, ci });
-    });
-    ranges.sort((a, b) => a.start - b.start);
-    for (let i = 1; i < ranges.length; i++) {
-      const prev = ranges[i - 1]!;
-      const cur = ranges[i]!;
-      if (cur.start < prev.end - 1e-6) {
-        findings.push({
-          severity: "error",
-          ruleId: "track-overlap",
-          message: `clip "${cur.id}" overlaps "${prev.id}" on track "${track.id}" (${cur.start.toFixed(2)}s starts before ${prev.end.toFixed(2)}s)`,
-          locator: `tracks[${ti}].clips[${cur.ci}]`,
-        });
-      }
+    for (const rec of detectTrackOverlaps(
+      track as { id: string; clips: readonly unknown[] },
+    )) {
+      const ci = track.clips.findIndex(
+        (c) => (c as { id?: string }).id === rec.clipBId,
+      );
+      findings.push({
+        severity: "error",
+        ruleId: "track-overlap",
+        message: formatOverlap(rec),
+        locator: `tracks[${ti}].clips[${ci}]`,
+      });
     }
   });
 
