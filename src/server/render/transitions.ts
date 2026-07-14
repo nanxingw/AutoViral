@@ -435,13 +435,24 @@ export function buildGravLensFilterGraph(opts: {
   // whose expressions ARE evaluated per-frame (uppercase `T`).
   //
   // Distortion strength ramps over the transition window:
-  //   A: 0 → -0.5 (barrel inward, "swallowed") across [offset,end]
+  //   A: 0 → -0.5 (barrel inward, "swallowed")
   //   B: +0.5 → 0 (pincushion relaxing back to identity)
   // For each output pixel we compute its centered vector (dx,dy), a
   // normalized squared radius r2∈[0,1], then sample the source at a point
   // scaled by (1 + strength·r2). Registers: 1=dx, 2=dy, 3=r2, 4=strength·r2.
+  //
+  // S1 review fix — each geq runs on its OWN input's local timeline BEFORE
+  // xfade splices them together. Clip A (`[0:v]`) starts at output 0, so its
+  // ramp rides A-local == output time across [offsetSec,endSec]. Clip B
+  // (`[1:v]`) is a standalone clip whose local time 0 is the START of the
+  // transition (xfade pulls B-local [0,duration] into the crossfade window),
+  // so B's pincushion must ramp over B-LOCAL [0,transitionDuration]. The
+  // earlier code gated B on A's absolute [offsetSec,endSec] window, which in
+  // B-local time never overlaps the transition — B rendered undistorted
+  // through the cut and then warped mid-playback afterward (confirmed by
+  // sampling decoded tail frames of a static clip).
   const aStrength = `if(between(T,${offsetSec},${endSec}),-0.5*((T-${offsetSec})/${opts.transitionDuration}),0)`;
-  const bStrength = `if(between(T,${offsetSec},${endSec}),0.5*(1-((T-${offsetSec})/${opts.transitionDuration})),0)`;
+  const bStrength = `if(between(T,0,${opts.transitionDuration}),0.5*(1-(T/${opts.transitionDuration})),0)`;
   const warp = (strength: string) =>
     `st(1,X-W/2);st(2,Y-H/2);` +
     `st(3,(ld(1)*ld(1)+ld(2)*ld(2))/(W*W/4+H*H/4));` +
