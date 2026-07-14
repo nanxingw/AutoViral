@@ -36,6 +36,10 @@ let lastClipPatch: Record<string, unknown> | null = null;
 // S10 (US 7/8) — capture the last POST /clip body so the CLI test can assert the
 // `--track-id` flag reached the bridge as `trackId`.
 let lastClipAdd: Record<string, unknown> | null = null;
+// S6 (PRD-0014) — capture the last POST /import body so the CLI test can assert
+// `clip import <path> [--track] [--at] [--replace-timeline]` reached the bridge
+// in the right shape (path / trackId / at / replaceTimeline).
+let lastImport: Record<string, unknown> | null = null;
 // S10 (US 6/7/8) — capture the last POST /track body so the CLI test can assert
 // the `track add` flags (kind / --after / --label / --language) reached the wire.
 let lastTrackAdd: Record<string, unknown> | null = null;
@@ -392,6 +396,27 @@ beforeAll(async () => {
       const id = `vc_split${nextSeq++}`;
       clips.push({ id, trackKind: target.trackKind });
       return send(200, { ok: true, result: { id } });
+    }
+    // S6 (PRD-0014) — POST /import. Mirrors the server contract: a good path
+    // probes → returns { clipId, assetId, durationSec }; a path containing "bad"
+    // stands in for a probe failure → 400 + code 4 + errorCode PROBE_FAILED →
+    // CLI exit 4. Records the body so the flag→wire mapping can be asserted.
+    if (req.method === "POST" && url === "/api/bridge/v1/import") {
+      const body = await readBody(req);
+      lastImport = body;
+      if (typeof body.path === "string" && body.path.includes("bad")) {
+        return send(400, {
+          ok: false,
+          error: "probe failed",
+          code: 4,
+          errorCode: "PROBE_FAILED",
+        });
+      }
+      const clipId = `vc_imp${nextSeq++}`;
+      return send(200, {
+        ok: true,
+        result: { clipId, assetId: `imp_${nextSeq}`, durationSec: 5 },
+      });
     }
     // S7 (US 2/9) — POST /clip/:id/trim. Mirrors the server contract: a known
     // clipId sets its source window in place + returns { id }; an unknown
@@ -762,6 +787,56 @@ describe("autoviral CLI — end-to-end", () => {
 
   it("clip split an unknown clip → bridge 400 code:4 → exit 4", async () => {
     const r = await run(["clip", "split", "nope", "--at", "2.0"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  // S6 (PRD-0014) — `autoviral clip import <path>` POSTs the source path to
+  // /import; the bridge ffprobes it + runs the shared `ops.importClip`.
+  it("clip import <path> → prints the new clip id, sends { path }", async () => {
+    lastImport = null;
+    const r = await run(["clip", "import", "output/final.mp4"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout.trim()).toMatch(/^vc_imp/);
+    expect(lastImport).toMatchObject({ path: "output/final.mp4" });
+  });
+
+  it("clip import --replace-timeline → sends replaceTimeline:true", async () => {
+    lastImport = null;
+    const r = await run(["clip", "import", "output/final.mp4", "--replace-timeline"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastImport).toMatchObject({
+      path: "output/final.mp4",
+      replaceTimeline: true,
+    });
+  });
+
+  it("clip import --at <sec> --track <id> → sends at (number) + trackId", async () => {
+    lastImport = null;
+    const r = await run([
+      "clip", "import", "output/final.mp4",
+      "--at", "2.5",
+      "--track", "trk_v0",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastImport).toMatchObject({
+      path: "output/final.mp4",
+      at: 2.5,
+      trackId: "trk_v0",
+    });
+  });
+
+  it("clip import with no path → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "import"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip import a non-numeric --at → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "import", "output/final.mp4", "--at", "abc"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip import a corrupt file → bridge 400 code:4 → exit 4", async () => {
+    const r = await run(["clip", "import", "output/bad.mp4"]);
     expect(r.exitCode).toBe(4);
   });
 

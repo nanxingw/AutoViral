@@ -66,6 +66,7 @@ import { runRenderPipeline, type RenderStage } from "../render-pipeline.js";
 import { resolvePlatformPreset } from "../../shared/platform-presets.js";
 import { getRenderQueue } from "../routes/_shared.js";
 import { renderSnapshot, assetUrlToWorkRel } from "../snapshot.js";
+import { probeMedia } from "../probe-media.js";
 import { listCheckpoints, restoreCheckpoint } from "../checkpoints.js";
 import { ingestYouTubeIntoWork } from "./ingest-youtube.js";
 import {
@@ -1700,6 +1701,102 @@ bridgeRouter.post("/split", async (c) => {
     return c.json({ ok: false, error: message, code }, 400);
   }
   return c.json({ ok: true, result: { id: newId } });
+});
+
+// S6 (PRD-0014) — POST /import: bring a finished / external video file back onto
+// the timeline as a first-class edit verb (`autoviral clip import <path>`). The
+// flow is ffprobe → register AssetEntry(video) + ProvenanceEdge(import) → place a
+// VideoClip, with the register+place done through the shared `ops.importClip`
+// under the SAME per-work write lock every verb uses. Body:
+//   { path, trackId?, at?, replaceTimeline?, name? }
+//
+// `path` is work-relative (e.g. `output/final.mp4`). A probe that can't read a
+// usable duration is a HARD failure → 400 + code:4 + errorCode "PROBE_FAILED"
+// and NO clip is placed (a zero/NaN-duration clip corrupts the timeline). The
+// probe runs OUTSIDE the lock (slow I/O), mirroring scene generate.
+bridgeRouter.post("/import", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const body = (await c.req.json().catch(() => ({}))) as {
+    path?: unknown;
+    trackId?: unknown;
+    at?: unknown;
+    replaceTimeline?: unknown;
+    name?: unknown;
+  };
+  if (typeof body.path !== "string" || body.path.trim().length === 0) {
+    return c.json({ ok: false, error: "missing path", code: 4 }, 400);
+  }
+  const relPath = body.path;
+  const atSec =
+    typeof body.at === "number" && Number.isFinite(body.at) ? body.at : undefined;
+  const trackId =
+    typeof body.trackId === "string" && body.trackId ? body.trackId : undefined;
+  const replaceTimeline = body.replaceTimeline === true;
+  const name = typeof body.name === "string" && body.name ? body.name : undefined;
+
+  // Path-traversal guard — `path` is attacker-controllable (an agent can put
+  // `../` / an absolute path in it). Resolve under the work dir and assert it
+  // stays strictly INSIDE it before ffprobe ever touches the file. Same
+  // containment check the captions route uses.
+  const worksRoot =
+    process.env.AUTOVIRAL_WORKS_ROOT ?? join(homedir(), ".autoviral/works");
+  const workDir = resolve(worksRoot, g.workId);
+  const absPath = resolve(workDir, relPath);
+  const within = relative(workDir, absPath);
+  if (within.startsWith("..") || within.startsWith(sep) || within === "") {
+    return c.json(
+      { ok: false, error: `import path escapes the work dir: ${relPath}`, code: 4 },
+      400,
+    );
+  }
+
+  // ffprobe OUTSIDE the lock. A rejection = corrupt file / no duration → the
+  // input error 400 + code:4 + PROBE_FAILED tag; NO write happens.
+  let probe;
+  try {
+    probe = await probeMedia(absPath);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return c.json(
+      {
+        ok: false,
+        error: `probe failed for ${relPath}: ${message}`,
+        code: 4,
+        errorCode: "PROBE_FAILED",
+      },
+      400,
+    );
+  }
+
+  let clipId = "";
+  let assetId = "";
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ({ clipId, assetId } = ops.importClip(comp, {
+          probe,
+          src: relPath,
+          trackId,
+          atSec,
+          replaceTimeline,
+          name,
+          actor: "agent",
+        }));
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-import" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({
+    ok: true,
+    result: { clipId, assetId, durationSec: probe.durationSec },
+  });
 });
 
 // S7 (US 2/9) — POST /clip/:id/trim: source-window trim through the shared

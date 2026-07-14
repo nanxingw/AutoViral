@@ -149,6 +149,47 @@ export async function clipCommand(args: string[]): Promise<void> {
     return;
   }
 
+  if (sub === "import") {
+    // S6 (PRD-0014) — `autoviral clip import <path> [--track <id>]
+    // [--replace-timeline] [--at <sec>]`. The bridge ffprobes the file then runs
+    // the shared `ops.importClip` (register Asset + ProvenanceEdge + place a
+    // VideoClip), so a成片 an agent generated lands on the timeline the same way
+    // a human's "添加到时间线" does. We validate args locally (exit 4, never hits
+    // the bridge) so an obviously-malformed invocation fails fast; the server
+    // owns the probe + semantic validation (bad file / no video lane).
+    const path = rest[0];
+    if (!path || path.startsWith("--")) {
+      process.stderr.write(
+        "usage: autoviral clip import <path> [--track <trackId>] [--replace-timeline] [--at <seconds>]\n",
+      );
+      process.exit(4);
+    }
+    // `--replace-timeline` is a bare boolean flag (no value) — pull it out before
+    // parseFlags (which pairs every --flag with the next token).
+    const flagArgs = rest.slice(1);
+    const replaceTimeline = flagArgs.includes("--replace-timeline");
+    const opts = parseFlags(flagArgs.filter((a) => a !== "--replace-timeline"));
+    const bodyImport: Record<string, unknown> = { path };
+    if (opts["--track"]) bodyImport.trackId = opts["--track"];
+    if (opts["--at"] !== undefined) {
+      const at = Number(opts["--at"]);
+      if (!Number.isFinite(at)) {
+        process.stderr.write("autoviral clip import: --at <seconds> must be a number\n");
+        process.exit(4);
+      }
+      bodyImport.at = at;
+    }
+    if (replaceTimeline) bodyImport.replaceTimeline = true;
+    const result = await bridgeRequest<{ clipId: string; assetId: string }>(
+      ctx,
+      "POST",
+      "/import",
+      bodyImport,
+    );
+    process.stdout.write(`${result.clipId}\n`);
+    return;
+  }
+
   if (sub === "keyframe") {
     // S12 (US 16 / 35-37 backfill) — `autoviral clip keyframe add|set <id>
     // --property <p> --at <sec> --value <v> [--easing <e>]`. The bridge runs the

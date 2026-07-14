@@ -14,6 +14,11 @@ vi.mock("../../../domain/asr-captions.js", () => ({
   runAsrCaptions: vi.fn(),
 }));
 import { runAsrCaptions } from "../../../domain/asr-captions.js";
+// S6 (PRD-0014) — mock the ffprobe wrapper so the POST /import wire test asserts
+// the probe→op→asset/provenance plumbing without a real ffprobe binary / fixture
+// mp4. The real probe path is covered by probe-media integration (ffmpeg-gated).
+vi.mock("../../probe-media.js", () => ({ probeMedia: vi.fn() }));
+import { probeMedia } from "../../probe-media.js";
 import { bridgeRouter } from "../routes.js";
 import { uiEventBus } from "../ui-events.js";
 
@@ -4648,5 +4653,205 @@ describe("bridge router — captions generate, real served-URL audio src (E2E re
     for (const call of mockAsr.mock.calls) {
       expect(call[0]).not.toContain("etc/passwd");
     }
+  });
+});
+
+// ─── S6 (PRD-0014) — POST /import ────────────────────────────────────────────
+// `clip import` = ffprobe the source → register AssetEntry(video) +
+// ProvenanceEdge(import) → place a VideoClip, all through the shared
+// `ops.importClip`. The probe is mocked (see top-of-file vi.mock); a mocked
+// rejection stands in for a corrupt/no-duration file → the route must 4xx with
+// an errorCode, NEVER place a poison clip.
+describe("bridge router — S6 clip import", () => {
+  let workRoot: string;
+  const workId = "w_import";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+  const mockProbe = probeMedia as unknown as ReturnType<typeof vi.fn>;
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-import-route-"));
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(
+      join(workRoot, workId, "composition.yaml"),
+      fixture.replace(/workId: sample-work/, `workId: ${workId}`),
+      "utf8",
+    );
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  it("probes the file, registers an asset + provenance edge, and places a video clip", async () => {
+    mockProbe.mockResolvedValueOnce({
+      durationSec: 6.4,
+      width: 1080,
+      height: 1920,
+      fps: 24,
+    });
+    const res = await app.request("/api/bridge/v1/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ path: "output/final.mp4" }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      ok: boolean;
+      result?: { clipId: string; assetId: string; durationSec: number };
+    };
+    expect(body.ok).toBe(true);
+    expect(body.result?.clipId).toMatch(/^vc_/);
+    expect(body.result?.assetId).toMatch(/^imp_/);
+    expect(body.result?.durationSec).toBe(6.4);
+
+    // The composition now carries the clip, the asset, and the provenance edge.
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: {
+        tracks: Array<{ kind: string; clips: Array<{ id: string; src?: string; out?: number }> }>;
+        assets: Array<{ id: string; kind: string; uri: string; metadata: { duration?: number } }>;
+        provenance: Array<{ toAssetId: string; operation: { type: string } }>;
+      };
+    };
+    const clip = compBody.result.tracks
+      .filter((t) => t.kind === "video")
+      .flatMap((t) => t.clips)
+      .find((c) => c.id === body.result!.clipId);
+    expect(clip).toBeTruthy();
+    expect(clip?.src).toBe("output/final.mp4");
+    expect(clip?.out).toBe(6.4);
+    const asset = compBody.result.assets.find((a) => a.id === body.result!.assetId);
+    expect(asset?.kind).toBe("video");
+    expect(asset?.uri).toBe("output/final.mp4");
+    expect(asset?.metadata.duration).toBe(6.4);
+    const edge = compBody.result.provenance.find(
+      (e) => e.toAssetId === body.result!.assetId,
+    );
+    expect(edge?.operation.type).toBe("import");
+  });
+
+  it("--replace-timeline clears video-track clips before placing the single clip", async () => {
+    mockProbe.mockResolvedValueOnce({ durationSec: 9 });
+    const res = await app.request("/api/bridge/v1/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ path: "output/full.mp4", replaceTimeline: true }),
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { result: { clipId: string } };
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: { tracks: Array<{ kind: string; clips: Array<{ id: string; trackOffset: number }> }> };
+    };
+    const videoClips = compBody.result.tracks
+      .filter((t) => t.kind === "video")
+      .flatMap((t) => t.clips);
+    // exactly the replacement clip survives on the video lanes, sitting at 0
+    expect(videoClips.map((c) => c.id)).toEqual([body.result.clipId]);
+    expect(videoClips[0].trackOffset).toBe(0);
+    // audio lanes are untouched (the sample-work fixture ships an audio clip)
+    const audioClips = compBody.result.tracks
+      .filter((t) => t.kind === "audio")
+      .flatMap((t) => t.clips);
+    expect(audioClips.length).toBeGreaterThan(0);
+  });
+
+  it("a probe failure (corrupt / no-duration file) → 4xx with an errorCode, no clip placed", async () => {
+    mockProbe.mockRejectedValueOnce(new Error("probeMedia: no usable duration for output/bad.mp4"));
+    const before = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const beforeCount = (
+      (await before.json()) as { result: { tracks: Array<{ clips: unknown[] }> } }
+    ).result.tracks.reduce((n, t) => n + t.clips.length, 0);
+
+    const res = await app.request("/api/bridge/v1/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ path: "output/bad.mp4" }),
+    });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    const body = (await res.json()) as { ok: boolean; code?: number; errorCode?: string };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    expect(body.errorCode).toBe("PROBE_FAILED");
+
+    const after = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const afterCount = (
+      (await after.json()) as { result: { tracks: Array<{ clips: unknown[] }> } }
+    ).result.tracks.reduce((n, t) => n + t.clips.length, 0);
+    expect(afterCount).toBe(beforeCount);
+  });
+
+  it("missing path → 400 + code 4 (never probes)", async () => {
+    mockProbe.mockClear();
+    const res = await app.request("/api/bridge/v1/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({}),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    expect(mockProbe).not.toHaveBeenCalled();
+  });
+
+  it("a path escaping the work dir → 400 + code 4 (never probes)", async () => {
+    mockProbe.mockClear();
+    const res = await app.request("/api/bridge/v1/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ path: "../../../etc/passwd" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    expect(mockProbe).not.toHaveBeenCalled();
+  });
+
+  it("without a work-id header → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "output/x.mp4" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("broadcasts composition-changed after the write lands", async () => {
+    mockProbe.mockResolvedValueOnce({ durationSec: 4 });
+    const events: unknown[] = [];
+    const unsub = uiEventBus.subscribe(workId, (ev) => events.push(ev));
+    const res = await app.request("/api/bridge/v1/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ path: "output/broadcast.mp4" }),
+    });
+    unsub();
+    expect(res.status).toBe(200);
+    expect(
+      events.some(
+        (e) => (e as { type?: string }).type === "composition-changed",
+      ),
+    ).toBe(true);
   });
 });
