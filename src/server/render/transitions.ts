@@ -98,7 +98,13 @@ export async function applyLightLeakTransition(
     "-y", "-loglevel", "error",
     "-i", clipA,
     "-i", clipB,
-    "-loop", "1", "-i", overlayPath,
+    // Bound the looping overlay image to the transition end (== clipADuration).
+    // An unbounded `-loop 1` image never signals EOF, so `-shortest` never
+    // terminates and ffmpeg hangs forever. The overlay is `enable`-gated to
+    // the transition window and needs no frames past it, so clipADuration is a
+    // safe upper bound; overlay's default eof_action=repeat holds the last
+    // frame while the B tail plays out.
+    "-loop", "1", "-t", String(clipADuration), "-i", overlayPath,
     "-filter_complex", filterComplex,
     "-map", "[v]",
     "-map", "[a]",
@@ -277,16 +283,23 @@ export function buildGlitchCutFilterGraph(opts: {
   // Per-channel horizontal offset using sin() so it's deterministic
   // and bounded. Red shifts +, blue shifts −, green stays put. Outside
   // the transition window the offset is 0 so the frame is untouched.
-  const rOff = `if(between(t,${offsetSec},${endSec}),sin(t*200)*15,0)`;
-  const bOff = `if(between(t,${offsetSec},${endSec}),-sin(t*200)*15,0)`;
+  //
+  // ffmpeg gotcha (S1): geq's time variable is uppercase `T` — lowercase
+  // `t` is undefined and aborts filter init. The shift also can't be nested
+  // inside p()'s coordinate argument (the parser mis-splits the if(a,b,c)
+  // commas), so we hoist it into a register via st()/ld() before sampling.
+  // No alpha expression: the frame is opaque and the output is yuv420p, so
+  // geq copies the (opaque) alpha through untouched — `alpha(X,Y)` was both
+  // superfluous and the wrong sampler name for RGB-mode geq.
+  const rOff = `if(between(T,${offsetSec},${endSec}),sin(T*200)*15,0)`;
+  const bOff = `if(between(T,${offsetSec},${endSec}),-sin(T*200)*15,0)`;
   return [
     `[0:v][1:v]xfade=transition=fade:duration=${opts.transitionDuration}:offset=${offsetSec}[xfaded]`,
     `[xfaded]format=rgba,fps=${opts.fps}[base]`,
     `[base]geq=` +
-      `r='p(X+(${rOff}),Y)':` +
+      `r='st(0,${rOff});p(X+ld(0),Y)':` +
       `g='p(X,Y)':` +
-      `b='p(X+(${bOff}),Y)':` +
-      `a='alpha(X,Y)'[v]`,
+      `b='st(0,${bOff});p(X+ld(0),Y)'[v]`,
     `[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`,
   ].join(";");
 }
@@ -345,17 +358,21 @@ export function buildDomainWarpFilterGraph(opts: {
   const endSec = offsetSec + opts.transitionDuration;
   // Amplitude ramps in and out across the transition window. Outside
   // the window it's zero so frames pass through unchanged.
+  //
+  // Same geq gotcha as glitch-cut (S1): uppercase `T`, and the displacement
+  // is hoisted into register 0 via st()/ld() rather than nested inside p()'s
+  // argument. All three channels reuse the identical offset. No alpha expr.
   const xOff =
-    `if(between(t,${offsetSec},${endSec}),` +
-    `sin(Y/30+t*8)*40*((t-${offsetSec})/${opts.transitionDuration}),0)`;
+    `if(between(T,${offsetSec},${endSec}),` +
+    `sin(Y/30+T*8)*40*((T-${offsetSec})/${opts.transitionDuration}),0)`;
+  const warp = `st(0,${xOff});p(X+ld(0),Y)`;
   return [
     `[0:v][1:v]xfade=transition=fade:duration=${opts.transitionDuration}:offset=${offsetSec}[xfaded]`,
     `[xfaded]format=rgba,fps=${opts.fps}[base]`,
     `[base]geq=` +
-      `r='p(X+(${xOff}),Y)':` +
-      `g='p(X+(${xOff}),Y)':` +
-      `b='p(X+(${xOff}),Y)':` +
-      `a='alpha(X,Y)'[v]`,
+      `r='${warp}':` +
+      `g='${warp}':` +
+      `b='${warp}'[v]`,
     `[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`,
   ].join(";");
 }
@@ -412,13 +429,27 @@ export function buildGravLensFilterGraph(opts: {
 }): string {
   const offsetSec = opts.clipADuration - opts.transitionDuration;
   const endSec = offsetSec + opts.transitionDuration;
-  // A ramps from k1=0 → k1=-0.5 (barrel inward) across the window.
-  // B starts at k1=+0.5 (pincushion) and ramps back to 0.
-  const aK1 = `if(between(t,${offsetSec},${endSec}),-0.5*((t-${offsetSec})/${opts.transitionDuration}),0)`;
-  const bK1 = `if(between(t,${offsetSec},${endSec}),0.5*(1-((t-${offsetSec})/${opts.transitionDuration})),0)`;
+  // S1: `lenscorrection`'s k1 is a static <double> option — it cannot parse
+  // a time expression, so the original `k1='if(between(t,...),...)'` aborted
+  // filter init outright. We instead express the radial distortion in `geq`,
+  // whose expressions ARE evaluated per-frame (uppercase `T`).
+  //
+  // Distortion strength ramps over the transition window:
+  //   A: 0 → -0.5 (barrel inward, "swallowed") across [offset,end]
+  //   B: +0.5 → 0 (pincushion relaxing back to identity)
+  // For each output pixel we compute its centered vector (dx,dy), a
+  // normalized squared radius r2∈[0,1], then sample the source at a point
+  // scaled by (1 + strength·r2). Registers: 1=dx, 2=dy, 3=r2, 4=strength·r2.
+  const aStrength = `if(between(T,${offsetSec},${endSec}),-0.5*((T-${offsetSec})/${opts.transitionDuration}),0)`;
+  const bStrength = `if(between(T,${offsetSec},${endSec}),0.5*(1-((T-${offsetSec})/${opts.transitionDuration})),0)`;
+  const warp = (strength: string) =>
+    `st(1,X-W/2);st(2,Y-H/2);` +
+    `st(3,(ld(1)*ld(1)+ld(2)*ld(2))/(W*W/4+H*H/4));` +
+    `st(4,(${strength})*ld(3));` +
+    `p(W/2+ld(1)*(1+ld(4)),H/2+ld(2)*(1+ld(4)))`;
   return [
-    `[0:v]lenscorrection=k1='${aK1}':k2=0[a_dist]`,
-    `[1:v]lenscorrection=k1='${bK1}':k2=0[b_dist]`,
+    `[0:v]format=gbrp,fps=${opts.fps},geq=r='${warp(aStrength)}':g='${warp(aStrength)}':b='${warp(aStrength)}'[a_dist]`,
+    `[1:v]format=gbrp,fps=${opts.fps},geq=r='${warp(bStrength)}':g='${warp(bStrength)}':b='${warp(bStrength)}'[b_dist]`,
     `[a_dist][b_dist]xfade=transition=fade:duration=${opts.transitionDuration}:offset=${offsetSec}[v]`,
     `[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`,
   ].join(";");
@@ -442,10 +473,11 @@ export function buildGravLensFilterGraph(opts: {
 //   DONE in R46 #5 follow-up (see applyDomainWarpTransition).
 //
 // ### #5.c — Gravitational lens (radial distortion)
-//   DONE in R46 #5 follow-up (see applyGravLensTransition). ffmpeg
-//   `lenscorrection` filter approximates the WebGL shader closely
-//   enough for the editorial use-case; Remotion port still possible
-//   when streaming-render path lands.
+//   DONE in R46 #5 follow-up (see applyGravLensTransition). Implemented
+//   as a per-frame `geq` radial warp (S1) — `lenscorrection`'s k1 is a
+//   static <double> and can't ramp over time. Approximates the WebGL
+//   shader closely enough for the editorial use-case; Remotion port
+//   still possible when streaming-render path lands.
 //
 // Total POC delivered (light-leak + glitch + domain-warp + grav-lens):
 // 4 transitions. hyperframes ships ~6 with their custom WebGL renderer.
