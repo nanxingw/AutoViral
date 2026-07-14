@@ -8,7 +8,8 @@
 //   --variables-file ./batch/           OR a directory (H2.4 batch mode)
 //   --strict-variables  fail when overrides reference undeclared keys
 //
-// `autoviral render` is an alias that forces `--proxy`.
+// The `autoviral render` alias (== `export --proxy`) now lives in commands/
+// render.ts, alongside the async render-queue verbs (enqueue/status/…).
 
 import { readFile, stat, readdir } from "node:fs/promises";
 import { basename, extname, join } from "node:path";
@@ -179,8 +180,4 @@ export async function exportCommand(args: string[]): Promise<void> {
     ...(flags.captionTracks ? { captionTracks: flags.captionTracks } : {}),
   });
   process.stdout.write(`${result.path}\n`);
-}
-
-export async function renderCommand(args: string[]): Promise<void> {
-  return exportCommand([...args, "--proxy"]);
 }

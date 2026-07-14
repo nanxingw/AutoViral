@@ -462,6 +462,53 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     }
   });
 
+  // PRD-0014 S11 (#94 blocker 5) — the render QUEUE was an agent-discoverability
+  // black box: the status endpoint has always existed at `GET /api/render/jobs/:id`
+  // (routes/render.ts:104, WITH progress), but the issue reporter guessed the wrong
+  // URL (`GET /api/works/:id/render/:jobId`) and concluded render was un-inspectable.
+  // The fix is documentation: the CLI-REFERENCE manual must teach the real
+  // queue-lifecycle endpoints + the `render enqueue/status/cancel/history/snapshot`
+  // verbs that wrap them. Pin every endpoint + verb so the black-box lie can't creep
+  // back (a manual that drops one strands the agent again).
+  it("the CLI-REFERENCE manual documents the render-queue lifecycle endpoints + verbs (#94 blocker 5 discoverability)", () => {
+    const cliRef = readFileSync(
+      join(MANUAL_DIR, "_shared", "03-cli-reference.md"),
+      "utf8",
+    );
+    // The real queue REST surface (routes/render.ts) the CLI drives.
+    const endpoints = [
+      "GET /api/render/jobs/:id", // the status endpoint the reporter couldn't find
+      "DELETE /api/render/jobs/:id",
+      "POST /api/works/:id/render",
+      "GET /api/works/:id/render/jobs",
+    ];
+    for (const ep of endpoints) {
+      expect(
+        cliRef.includes(ep),
+        `03-cli-reference.md must document \`${ep}\` — the render queue is otherwise a discoverability black box (#94 blocker 5)`,
+      ).toBe(true);
+    }
+    // The CLI verbs that make the queue reachable without hand-rolling curl.
+    for (const verb of [
+      "render enqueue",
+      "render status",
+      "render cancel",
+      "render history",
+      "render snapshot",
+    ]) {
+      expect(
+        cliRef.includes(verb),
+        `03-cli-reference.md must document \`autoviral ${verb}\``,
+      ).toBe(true);
+    }
+    // The wrong URL the reporter guessed must be explicitly corrected so a future
+    // reader doesn't repeat the mistake.
+    expect(
+      cliRef,
+      "the manual must NOT teach the phantom `GET /api/works/:id/render/:jobId` — that URL 404s; the real one is `GET /api/render/jobs/:id`",
+    ).not.toMatch(/GET \/api\/works\/:id\/render\/:jobId/);
+  });
+
   it("covers both reference families (docs-slug + file-path) so a new form can't slip the net unnoticed", () => {
     const refs = allRefs();
     const haveDocsSlug = refs.some((r) => r.kind === "docs");

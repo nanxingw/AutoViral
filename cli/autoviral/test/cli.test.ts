@@ -105,6 +105,11 @@ let lastCheckpointCreate: Record<string, unknown> | null = null;
 // reached the bridge wire.
 let lastCaptionsGenerate: Record<string, unknown> | null = null;
 let lastExport: Record<string, unknown> | null = null;
+// PRD-0014 S11 — capture the last render-queue enqueue body + snapshot body so
+// the CLI test can assert `render enqueue --proxy/--preset/--caption-tracks` and
+// `render snapshot --frame/--out` reached the wire in the right shape.
+let lastRenderEnqueue: Record<string, unknown> | null = null;
+let lastSnapshot: Record<string, unknown> | null = null;
 // S5 (PRD-0007) — in-memory 剧本 (plan/script.md) the works-route mock GET
 // returns + PUT records, so `script edit` then `script show` round-trips
 // end-to-end through the CLI's plain-text request path. Starts EMPTY (a work
@@ -734,6 +739,57 @@ beforeAll(async () => {
       lastExport = await readBody(req);
       return send(200, { ok: true, result: { path: "/tmp/work/output/autoviral-export.mp4" } });
     }
+    // PRD-0014 S11 — render-queue lifecycle. These hit the WORKS/render REST
+    // (routes/render.ts), NOT the bridge `{ok,result}` envelope — the CLI's
+    // apiJson/apiJsonAbs helpers unwrap bare JSON. Enqueue returns { jobId };
+    // GET/DELETE /api/render/jobs/:id return a bare RenderJob (with progress);
+    // GET /api/works/:id/render/jobs returns { jobs }. An unknown job id is the
+    // real route's 404 { error, errorCode } (no `code` field → status-class → CLI
+    // exit 4). Capture the enqueue body so --proxy/--preset/--caption-tracks can
+    // be asserted on the wire.
+    if (req.method === "POST" && url === "/api/works/w_e2e/render") {
+      lastRenderEnqueue = await readBody(req);
+      return send(200, { jobId: "job_seq1" });
+    }
+    if (req.method === "GET" && url === "/api/works/w_e2e/render/jobs") {
+      return send(200, {
+        jobs: [
+          { id: "job_a", workId: "w_e2e", type: "full", status: "done", progress: 1, createdAt: "2026-07-14T00:00:00.000Z" },
+          { id: "job_b", workId: "w_e2e", type: "proxy", status: "running", progress: 0.4, createdAt: "2026-07-14T00:01:00.000Z" },
+        ],
+      });
+    }
+    {
+      const jobMatch = /^\/api\/render\/jobs\/([^/]+)$/.exec(url ?? "");
+      if (jobMatch) {
+        const id = decodeURIComponent(jobMatch[1]);
+        if (id === "job_ghost") {
+          return send(404, { error: "Job not found", errorCode: "render_job_not_found" });
+        }
+        if (req.method === "GET") {
+          return send(200, {
+            id,
+            workId: "w_e2e",
+            type: "full",
+            status: "running",
+            progress: 0.5,
+            stage: "render",
+            createdAt: "2026-07-14T00:00:00.000Z",
+            startedAt: "2026-07-14T00:00:01.000Z",
+          });
+        }
+        if (req.method === "DELETE") {
+          return send(200, {
+            id,
+            workId: "w_e2e",
+            type: "full",
+            status: "cancelled",
+            progress: 0.5,
+            createdAt: "2026-07-14T00:00:00.000Z",
+          });
+        }
+      }
+    }
     if (req.method === "POST" && url === "/api/bridge/v1/select") {
       // PRD-0014 S8 — capture the select body so the CLI test can assert the
       // multi-target { kind:"clips", ids:[...] } shape + single-id back-compat.
@@ -752,6 +808,26 @@ beforeAll(async () => {
     }
     if (req.method === "POST" && url === "/api/bridge/v1/snapshot") {
       const body = await readBody(req);
+      lastSnapshot = body;
+      // PRD-0014 S11 — `render snapshot --frame N [--out]`. When a numeric frame
+      // is given the CLI is exercising the single-frame render path (not the
+      // --at time path). Echo the frame (and any --out filename) into the path so
+      // the test can assert the frame/out forwarding + that `frame` reached the
+      // wire as a NUMBER (captured in lastSnapshot).
+      if (typeof body.frame === "number") {
+        const name =
+          typeof body.out === "string" && body.out
+            ? body.out
+            : `snapshot-frame-${body.frame}.png`;
+        return send(200, {
+          ok: true,
+          result: {
+            path: `/tmp/work/output/${name}`,
+            kind: "video-still",
+            textLayersComposited: true,
+          },
+        });
+      }
       // Echo the requested frame/slide into the path so the test can assert the
       // CLI forwarded --at / --slide correctly. Mirrors the server contract:
       // { ok, result: { path, kind, textLayersComposited } }. A --slide request
@@ -3140,6 +3216,147 @@ describe("autoviral CLI — end-to-end", () => {
   it("--help lists snapshot", async () => {
     const r = await run(["--help"]);
     expect(r.stdout).toMatch(/snapshot/);
+  });
+
+  // PRD-0014 S11 — render-queue lifecycle CLI. `render enqueue` hits the async
+  // queue (returns a jobId); `render status/cancel` poll/kill it; `render
+  // history` lists a work's jobs; `render snapshot --frame` is the cheap
+  // single-frame ground-truth self-check. The legacy `render` alias (= `export
+  // --proxy`, synchronous) is preserved for any un-migrated script.
+  describe("render — queue lifecycle + snapshot (S11)", () => {
+    it("render enqueue → prints the jobId (async queue), exit 0", async () => {
+      lastRenderEnqueue = null;
+      const r = await run(["render", "enqueue"]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe("job_seq1");
+      // A bare enqueue defaults to a full render (no proxy) — the queue route
+      // reads `type` ("proxy" | else "full").
+      expect(lastRenderEnqueue).not.toBeNull();
+      expect((lastRenderEnqueue as { type?: string }).type).not.toBe("proxy");
+    });
+
+    it("render enqueue --proxy → sends type:'proxy'", async () => {
+      lastRenderEnqueue = null;
+      const r = await run(["render", "enqueue", "--proxy"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastRenderEnqueue).toMatchObject({ type: "proxy" });
+    });
+
+    it("render enqueue --preset douyin → sends presetId", async () => {
+      lastRenderEnqueue = null;
+      const r = await run(["render", "enqueue", "--preset", "douyin"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastRenderEnqueue).toMatchObject({ presetId: "douyin" });
+    });
+
+    it("render enqueue --caption-tracks A,B,C → burn=first, sidecars=rest (queue contract)", async () => {
+      lastRenderEnqueue = null;
+      const r = await run(["render", "enqueue", "--caption-tracks", "t_zh,t_en,t_ja"]);
+      expect(r.exitCode).toBe(0);
+      // The queue body's captionTracks is { burnTrackId, sidecarTrackIds } —
+      // the first track is burned in, the rest emit sidecar SRTs. --caption-tracks
+      // passes THROUGH to that shape (S11 must not change the queue REST contract).
+      expect(lastRenderEnqueue).toMatchObject({
+        captionTracks: { burnTrackId: "t_zh", sidecarTrackIds: ["t_en", "t_ja"] },
+      });
+    });
+
+    it("render enqueue with NO --caption-tracks → body omits captionTracks", async () => {
+      lastRenderEnqueue = null;
+      const r = await run(["render", "enqueue"]);
+      expect(r.exitCode).toBe(0);
+      expect((lastRenderEnqueue as { captionTracks?: unknown }).captionTracks).toBeUndefined();
+    });
+
+    it("render status <jobId> → prints the job incl. progress, exit 0", async () => {
+      const r = await run(["render", "status", "job_seq1"]);
+      expect(r.exitCode).toBe(0);
+      const parsed = JSON.parse(r.stdout) as { id: string; status: string; progress: number };
+      expect(parsed.id).toBe("job_seq1");
+      expect(parsed.status).toBe("running");
+      // The whole point of `render status` vs a black box: the agent sees progress.
+      expect(parsed.progress).toBe(0.5);
+    });
+
+    it("render status with no jobId → exit 4 (never hits the queue)", async () => {
+      const r = await run(["render", "status"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("render status <unknown> → queue 404 → exit 4", async () => {
+      const r = await run(["render", "status", "job_ghost"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("render cancel <jobId> → prints the cancelled job, exit 0", async () => {
+      const r = await run(["render", "cancel", "job_seq1"]);
+      expect(r.exitCode).toBe(0);
+      const parsed = JSON.parse(r.stdout) as { id: string; status: string };
+      expect(parsed.status).toBe("cancelled");
+    });
+
+    it("render cancel with no jobId → exit 4 (never hits the queue)", async () => {
+      const r = await run(["render", "cancel"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("render cancel <unknown> → queue 404 → exit 4", async () => {
+      const r = await run(["render", "cancel", "job_ghost"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("render history → prints this work's jobs, newest listed, exit 0", async () => {
+      const r = await run(["render", "history"]);
+      expect(r.exitCode).toBe(0);
+      const parsed = JSON.parse(r.stdout) as { jobs: Array<{ id: string }> };
+      expect(Array.isArray(parsed.jobs)).toBe(true);
+      expect(parsed.jobs.map((j) => j.id)).toEqual(["job_a", "job_b"]);
+    });
+
+    it("render snapshot --frame 30 → single-frame path, prints the PNG path, exit 0", async () => {
+      lastSnapshot = null;
+      const r = await run(["render", "snapshot", "--frame", "30"]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe("/tmp/work/output/snapshot-frame-30.png");
+      // `frame` must reach the wire as a NUMBER (not the "30" string).
+      expect(lastSnapshot).toMatchObject({ frame: 30 });
+      expect(typeof (lastSnapshot as { frame: unknown }).frame).toBe("number");
+    });
+
+    it("render snapshot --frame 30 --out cover.png → forwards out, path uses it", async () => {
+      lastSnapshot = null;
+      const r = await run(["render", "snapshot", "--frame", "30", "--out", "cover.png"]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toBe("/tmp/work/output/cover.png");
+      expect(lastSnapshot).toMatchObject({ frame: 30, out: "cover.png" });
+    });
+
+    it("render snapshot with no --frame → exit 4 (frame is required, never hits bridge)", async () => {
+      const r = await run(["render", "snapshot"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("render snapshot --frame abc (non-integer) → exit 4 (never hits bridge)", async () => {
+      const r = await run(["render", "snapshot", "--frame", "abc"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("render with an unknown subverb falls back to the legacy `export --proxy` alias", async () => {
+      lastExport = null;
+      const r = await run(["render"]);
+      expect(r.exitCode).toBe(0);
+      // Legacy alias: `autoviral render` == `export --proxy` (synchronous bridge
+      // export), preserved for back-compat — prints the export path, not a jobId.
+      expect(r.stdout.trim()).toBe("/tmp/work/output/autoviral-export.mp4");
+      expect(lastExport).toMatchObject({ proxy: true });
+    });
+
+    it("--help lists the render queue verbs (enqueue / status / snapshot --frame)", async () => {
+      const r = await run(["--help"]);
+      expect(r.stdout).toMatch(/render enqueue/);
+      expect(r.stdout).toMatch(/render status/);
+      expect(r.stdout).toMatch(/render snapshot/);
+    });
   });
 
   it("unknown command → exit 127", async () => {

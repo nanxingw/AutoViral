@@ -228,7 +228,29 @@ export async function apiJson<T>(
   workPath: string,
   body?: unknown,
 ): Promise<T> {
-  const url = `http://127.0.0.1:${ctx.port}/api/works/${encodeURIComponent(ctx.workId)}${workPath}`;
+  return apiJsonAbs<T>(
+    ctx,
+    method,
+    `/api/works/${encodeURIComponent(ctx.workId)}${workPath}`,
+    body,
+  );
+}
+
+// JSON request against an ABSOLUTE `/api/...` route that is NOT nested under
+// `/api/works/:workId` (NOR the bridge `{ok,result}` envelope). Used by the
+// render-queue lifecycle (PRD-0014 S11): `render status/cancel` hit
+// `/api/render/jobs/:id` — a top-level route, not a per-work one — which returns
+// a BARE RenderJob (or `{ error, errorCode }` with a 4xx/5xx status). Same
+// exit-code contract as bridgeRequest / apiJson: 4 = your input was wrong (4xx),
+// 3 = the service broke (5xx / malformed response). The caller passes the full
+// `/api/...` path.
+export async function apiJsonAbs<T>(
+  ctx: BridgeContext,
+  method: "GET" | "POST" | "PUT" | "DELETE",
+  apiPath: string,
+  body?: unknown,
+): Promise<T> {
+  const url = `http://127.0.0.1:${ctx.port}${apiPath}`;
   const res = await fetchWithBudget(
     url,
     {
@@ -236,11 +258,11 @@ export async function apiJson<T>(
       headers: body == null ? undefined : { "Content-Type": "application/json" },
       body: body == null ? undefined : JSON.stringify(body),
     },
-    `api ${method} ${workPath}`,
+    `api ${method} ${apiPath}`,
   );
   if (!res.ok) {
     const txt = await res.text();
-    process.stderr.write(`autoviral: api ${method} ${workPath} → ${res.status} ${txt}\n`);
+    process.stderr.write(`autoviral: api ${method} ${apiPath} → ${res.status} ${txt}\n`);
     process.exit(res.status >= 400 && res.status < 500 ? 4 : 3);
   }
   return (await res.json()) as T;

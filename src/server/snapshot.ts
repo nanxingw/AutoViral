@@ -39,10 +39,43 @@ export interface SnapshotContext {
   workId: string;
   /** video: seconds into the timeline. Omitted ⇒ current playhead (focus). */
   at?: number;
+  /**
+   * video: an explicit 0-based frame index (PRD-0014 S11 `render snapshot
+   * --frame N`). When finite it WINS over `at`/playhead — the agent wants a
+   * specific render frame as a ground-truth self-check, not a wall-clock time.
+   */
+  frame?: number;
+  /**
+   * video: an output filename for the PNG (PRD-0014 S11 `render snapshot
+   * --out <png>`). A bare basename placed inside the work's `output/` dir; when
+   * omitted a deterministic `snapshot-frame-<N>.png` name is used. The bridge
+   * route rejects any path separator so this can't escape the output dir.
+   */
+  outName?: string;
   /** carousel: slide id. Omitted ⇒ first slide. */
   slide?: string;
   /** Override for tests / non-default work roots. Defaults to ~/.autoviral/works. */
   worksRoot?: string;
+}
+
+/**
+ * Pick the still's 0-based frame index. An explicit, finite `frame` wins (the
+ * S11 `render snapshot --frame N` path); otherwise fall back to the legacy time
+ * path: `at` seconds if given, else the live playhead, else 0 — converted to a
+ * frame via `round(sec * fps)`. Negative inputs clamp to frame 0. Pure so the
+ * precedence is unit-testable without launching Chromium.
+ */
+export function resolveSnapshotFrame(opts: {
+  frame?: number;
+  at?: number;
+  playheadSec?: number;
+  fps: number;
+}): number {
+  if (opts.frame !== undefined && Number.isFinite(opts.frame)) {
+    return Math.max(0, Math.round(opts.frame));
+  }
+  const atSec = opts.at ?? opts.playheadSec ?? 0;
+  return Math.round(Math.max(0, atSec) * opts.fps);
 }
 
 export interface SnapshotResult {
@@ -249,16 +282,25 @@ async function snapshotVideo(
   // without this the still hangs forever loading <Html5Video> and times out.
   // This is what makes "snapshot ≡ the deliverable frame" actually hold.
   const compForRender = rewriteClipSrcsToAbsolute(comp);
-  // Current playhead unless an explicit --at was given. focus.playheadSec is
-  // process-local and mirrors the user's literal viewport.
-  const atSec = ctx.at ?? readFocus(ctx.workId).playheadSec ?? 0;
-  const frame = Math.round(Math.max(0, atSec) * comp.fps);
+  // An explicit --frame wins (S11); else the current playhead unless an explicit
+  // --at was given. focus.playheadSec is process-local and mirrors the user's
+  // literal viewport.
+  const frame = resolveSnapshotFrame({
+    frame: ctx.frame,
+    at: ctx.at,
+    playheadSec: readFocus(ctx.workId).playheadSec ?? undefined,
+    fps: comp.fps,
+  });
 
   const outDir = join(root, ctx.workId, "output");
   await mkdir(outDir, { recursive: true });
-  // Deterministic, overwritten name — a snapshot is a transient self-check, not
-  // a versioned deliverable; we don't want N stale snapshot-*.png piling up.
-  const outFile = join(outDir, `snapshot-frame-${frame}.png`);
+  // Default: deterministic, overwritten name — a snapshot is a transient
+  // self-check, not a versioned deliverable; we don't want N stale
+  // snapshot-*.png piling up. `--out <name>` (S11) lets the agent name it (bare
+  // basename, validated by the bridge route to stay inside output/).
+  const outFile = ctx.outName
+    ? join(outDir, ctx.outName)
+    : join(outDir, `snapshot-frame-${frame}.png`);
   await renderCompositionStill(
     compForRender as unknown as {
       duration: number;

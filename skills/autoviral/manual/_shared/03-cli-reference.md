@@ -640,9 +640,45 @@ autoviral export --preset douyin
 autoviral export --proxy               # faster preview render
 ```
 
-### `autoviral render`
+### `autoviral render <enqueue|status|cancel|history|snapshot>` — the async render queue
 
-Alias for `autoviral export --proxy`. Use for quick review cycles.
+`export` above is **synchronous** — it blocks until the render finishes. The **render queue** is the async path (the same one the Studio's export button uses): you enqueue a job, get a `jobId` back immediately, then poll its progress. Use this when you want the render to run in the background while you keep working, or when you need to inspect progress / cancel a long render.
+
+> **The queue was NOT a black box — the URL was just easy to guess wrong (#94).** The status endpoint has always existed at `GET /api/render/jobs/:id` (a **top-level** route, *not* nested under the work), and it returns the job **with a 0..1 `progress` field**. There is no `…/render/:jobId` under `/api/works` — reach for the top-level `/api/render/jobs/:id` instead.
+
+The REST surface these verbs wrap (`routes/render.ts`):
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /api/works/:id/render` | Enqueue a render job → `{ jobId }` (409 if `composition.yaml` isn't saved yet). |
+| `GET /api/render/jobs/:id` | Fetch one job — `status` + `progress` (0..1) + `stage` + `outputPath`. |
+| `DELETE /api/render/jobs/:id` | Cancel a queued/running job. |
+| `GET /api/works/:id/render/jobs` | List this work's render history (newest first). |
+
+```bash
+jobId=$(autoviral render enqueue --proxy)   # enqueue → prints the jobId
+autoviral render status "$jobId"             # { ..., "status":"running", "progress":0.42 }
+autoviral render cancel "$jobId"             # cancel a queued/running job
+autoviral render history                     # { "jobs":[ ... ] } for this work
+```
+
+- `render enqueue [--preset <name>] [--proxy] [--caption-tracks A[,B,...]]` — enqueue and print the `jobId`. `--proxy` is the faster half-res review render. `--caption-tracks` **passes through to the queue's caption strategy** `{ burnTrackId, sidecarTrackIds }`: the **first** track id is burned into the video, the **rest** are emitted as sidecar `.srt` files next to the mp4. (If a render for this work is already in flight, enqueue attaches to it — the same `jobId` — and notes it on stderr; #62 dedup.)
+- `render status <jobId>` / `render cancel <jobId>` — a bad / unknown `jobId` exits 4. `status` prints the whole job (JSON when piped) so `jq '.progress'` works.
+- `render history` — prints `{ jobs: [...] }`, honoring `--format json|yaml|table`.
+- A bare `autoviral render` (no subverb) still aliases `export --proxy` for back-compat.
+
+### `autoviral render snapshot --frame N [--out <png>]`
+
+The cheap **ground-truth self-check** for a specific render frame (#94 / G-32). Unlike `snapshot --at <time>` (which derives the frame from a wall-clock time / the live playhead), this captures an **explicit 0-based frame index** via `remotion-still` — one frame, **not** a full export. Prints the absolute PNG path so you can `Read` it.
+
+```bash
+autoviral render snapshot --frame 30                 # frame 30 → output/snapshot-frame-30.png
+autoviral render snapshot --frame 30 --out cover.png # name it (bare filename, lands in output/)
+```
+
+- `--frame N` is **required** (a non-integer or a missing value exits 4). For a time-based still use `autoviral snapshot --at <time>` instead.
+- `--out <png>` must be a **bare filename** (no path separators) — it lands in the work's `output/` dir; a path-separator value exits 4.
+- Same faithful Remotion still as `snapshot` (overlays/text baked in) — it goes through the single-frame path, never a full render.
 
 ### `autoviral snapshot [--at <time>] [--slide <id>]`
 

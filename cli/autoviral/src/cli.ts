@@ -22,7 +22,8 @@ import { transitionCommand } from "./commands/transition.js";
 import { captionsCommand } from "./commands/captions.js";
 import { carouselCommand } from "./commands/carousel.js";
 import { askCommand } from "./commands/ask.js";
-import { exportCommand, renderCommand } from "./commands/export.js";
+import { exportCommand } from "./commands/export.js";
+import { renderCommand } from "./commands/render.js";
 import { snapshotCommand } from "./commands/snapshot.js";
 import { checkpointCommand } from "./commands/checkpoint.js";
 import { ingestCommand } from "./commands/ingest.js";
@@ -172,8 +173,16 @@ function usage(): string {
     "  carousel set-layer <slideId> --kind <text|image|shape|sticker> [--id L] [--x N --y N --w N --h N] [...]",
     "    Carousel (图文) write surface. Full schema: `autoviral docs carousel/02-schema`.",
     "  ask <message> [--yes-no|--ok-cancel] [--timeout seconds]",
-    "  export [--preset name] [--proxy]",
-    "  render                        Alias for `export --proxy`",
+    "  export [--preset name] [--proxy]      Synchronous render (blocks, prints the path).",
+    "  render enqueue [--preset name] [--proxy] [--caption-tracks A[,B,...]]",
+    "    Enqueue an ASYNC render on the queue → prints the jobId. --caption-tracks",
+    "    passes through to { burnTrackId, sidecarTrackIds } (first burned, rest SRT).",
+    "  render status <jobId>         Print a job's status + 0..1 progress.",
+    "  render cancel <jobId>         Cancel a queued/running job.",
+    "  render history                List this work's render jobs.",
+    "  render snapshot --frame N [--out <png>]",
+    "    Cheap single-frame ground-truth self-check (remotion-still, NOT a full",
+    "    export). Prints the PNG path. `render` alone still aliases `export --proxy`.",
     "  snapshot [--at <time>] [--slide <id>]",
     "    Capture the CURRENT frame (video) or slide (carousel) as a PNG and",
     "    print its path — Read it to visually self-check before delivering.",

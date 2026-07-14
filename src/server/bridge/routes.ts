@@ -3072,12 +3072,30 @@ bridgeRouter.post("/snapshot", async (c) => {
   if (!g.ok) return g.res;
   const body = (await c.req.json().catch(() => ({}))) as {
     at?: number;
+    frame?: number;
+    out?: string;
     slide?: string;
   };
+  // PRD-0014 S11 — `render snapshot --out <name>`: a bare output filename inside
+  // the work's output/ dir. Reject any path separator / leading dot so it can't
+  // escape (mirrors the /render/reveal filename gate). An unsafe name is an input
+  // error, not a silent fall-through to the default name.
+  const out = typeof body.out === "string" ? body.out : undefined;
+  if (
+    out !== undefined &&
+    (out === "" || out.includes("/") || out.includes("\\") || out.startsWith("."))
+  ) {
+    return c.json(
+      { ok: false, error: "snapshot --out must be a bare filename (no path separators)", code: 4 },
+      400,
+    );
+  }
   try {
     const result = await renderSnapshot({
       workId: g.workId,
       at: typeof body.at === "number" ? body.at : undefined,
+      frame: typeof body.frame === "number" ? body.frame : undefined,
+      outName: out,
       slide: typeof body.slide === "string" ? body.slide : undefined,
     });
     return c.json({ ok: true, result });
