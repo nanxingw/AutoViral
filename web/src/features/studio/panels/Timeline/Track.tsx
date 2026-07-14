@@ -4,7 +4,7 @@ import { Filmstrip } from "./Filmstrip";
 import { WaveformBars } from "./WaveformBars";
 import { useComposition } from "../../store";
 import { clipDuration } from "@autoviral/timeline";
-import { buildClipFromAsset } from "../AssetSidebar/addAssetToTimeline";
+import { buildClipFromAsset, DEFAULT_ASSET_CLIP_DUR } from "../AssetSidebar/addAssetToTimeline";
 import { importClipRemote, notifyImportFailed } from "../AssetSidebar/importClip";
 import {
   readDragPayload,
@@ -12,6 +12,7 @@ import {
   dropTimeFromPointer,
   resolveDropTime,
   resolveDrop,
+  assetDragSnapDuration,
 } from "./dnd";
 import { useT } from "@/i18n/useT";
 import type { AssetItem } from "@/queries/assets";
@@ -115,9 +116,12 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
     const comp = store.comp;
     const fps = comp?.fps || 30;
     const playhead = store.currentFrame / fps;
-    // Snap; for an asset use the default placeholder length, for a clip its real
-    // duration (so the end-edge snaps too). Exclude a clip from its own edges.
-    let dur = 5;
+    // Snap length: a clip uses its real duration (so the end-edge snaps too); an
+    // audio/image asset uses its placeholder clip length; a VIDEO asset uses 0 —
+    // its true length is unknown client-side (server ffprobe owns it, S6b), so we
+    // pin the START only and never snap an end from a fictitious length. Exclude
+    // a clip from its own edges.
+    let dur = DEFAULT_ASSET_CLIP_DUR;
     let excludeId: string | null = null;
     if (payload.source === "clip") {
       const dragged = comp?.tracks
@@ -125,6 +129,8 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
         .find((c) => c.id === payload.clipId);
       if (dragged) dur = clipDuration(dragged);
       excludeId = payload.clipId;
+    } else {
+      dur = assetDragSnapDuration(payload.assetKind, DEFAULT_ASSET_CLIP_DUR);
     }
     const { start } = resolveDropTime(
       comp,
@@ -168,7 +174,9 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
     const rawTime = dropTimeFromPointer(e.clientX, laneLeft, pxPerSecond);
     const fps = comp.fps || 30;
     const playhead = store.currentFrame / fps;
-    let dur = 5;
+    // Same snap-length rule as updateHover: real duration for a clip, 0 for a
+    // video asset (unknown length — start-only snap, S6b), placeholder otherwise.
+    let dur = DEFAULT_ASSET_CLIP_DUR;
     let excludeId: string | null = null;
     let sourceTrackId: string | null = null;
     if (payload.source === "clip") {
@@ -181,6 +189,8 @@ export function Track({ track, pxPerSecond, totalWidth, color, label, hideLabel 
         }
       }
       excludeId = payload.clipId;
+    } else {
+      dur = assetDragSnapDuration(payload.assetKind, DEFAULT_ASSET_CLIP_DUR);
     }
     const { start } = resolveDropTime(
       comp,

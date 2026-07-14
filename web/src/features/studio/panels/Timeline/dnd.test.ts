@@ -9,6 +9,7 @@ import {
   resolveDropTime,
   resolveDrop,
   resolveDragTargetTrack,
+  assetDragSnapDuration,
   type AssetDragPayload,
   type ClipDragPayload,
   type TrackView,
@@ -222,5 +223,22 @@ describe("resolveDragTargetTrack — #3 clip-body cross-track target", () => {
   });
   it("returns null when the hovered track id is not in the composition", () => {
     expect(resolveDragTargetTrack(tracks, "t_v1", "ghost")).toBeNull();
+  });
+});
+
+describe("assetDragSnapDuration — S6b: no fictitious video length for snapping", () => {
+  // PRD-0014 S6b finding 1: a VIDEO asset's true length is unknown client-side
+  // (the server ffprobe owns it), so the drop-snap engine must be fed 0 — only
+  // the START pins. Feeding a fixed placeholder (the old `dur = 5`) let an
+  // end-edge snap against a fictitious length shift the landing `at`, which is
+  // exactly the fixed-5s guess S6b's "禁" forbids on the video path.
+  it("returns 0 for a video asset (server ffprobe owns the real length)", () => {
+    expect(assetDragSnapDuration("video", 5)).toBe(0);
+  });
+  it("returns the placeholder length for audio/image (their local clip IS that long)", () => {
+    expect(assetDragSnapDuration("audio", 5)).toBe(5);
+    expect(assetDragSnapDuration("image", 5)).toBe(5);
+    // honours whatever placeholder the caller passes (not hard-coded 5)
+    expect(assetDragSnapDuration("audio", 9)).toBe(9);
   });
 });

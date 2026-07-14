@@ -168,6 +168,23 @@ export function resolveDropTime(
   );
 }
 
+/**
+ * S6b — the dragged item's length (seconds) fed to the drop-snap engine so an
+ * end-edge can snap. An audio/image asset lands as a `placeholderDuration`-long
+ * local clip, so that length is the honest end. A **video** asset's true length
+ * is unknown client-side — the server ffprobe owns it (the import verb) — so we
+ * return 0: the engine then only pins the START and never snaps an end computed
+ * from a FICTITIOUS length, which would shift the landing `at`. Feeding a fixed
+ * placeholder (the old `dur = 5`) here re-introduced exactly the fixed-5s guess
+ * on the video path that S6b's "禁" forbids.
+ */
+export function assetDragSnapDuration(
+  assetKind: AssetItem["kind"],
+  placeholderDuration: number,
+): number {
+  return assetKind === "video" ? 0 : placeholderDuration;
+}
+
 // ── Drop resolution: payload + target → a store-action intent ────────────────
 // Like #59 split the *decision* away from the Konva event handler, the drop
 // handler stays a thin DOM shim: it parses the payload, computes the time, and

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, fireEvent } from "@testing-library/react";
+import { render, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { Track } from "./Track";
@@ -8,6 +8,8 @@ import { LibraryTab } from "../AssetSidebar/LibraryTab";
 import { useComposition } from "../../store";
 import { TIMELINE_DND_MIME, readDragPayload } from "./dnd";
 import { makeEmptyComposition, type AudioClip } from "../../types";
+import { useToastStore } from "@/stores/toast";
+import { ApiError } from "@/lib/api";
 import type { AssetGroup, AssetItem } from "@/queries/assets";
 
 // Asset library fixture for the AssetTile drag-source test. Mirrors
@@ -293,6 +295,44 @@ describe("Track drop target — asset payload (I19 seam)", () => {
     expect(opts.body?.path).toBe("assets/clips/a.mp4");
     expect(opts.body?.trackId).toBe(videoTrack().id);
     expect(typeof opts.body?.at).toBe("number");
+  });
+
+  it("a VIDEO asset drop the bridge REJECTS raises a user-visible error toast (S6b finding 4 — Track path)", async () => {
+    apiFetch.mockReset();
+    apiFetch.mockRejectedValue(
+      new ApiError("400 Bad Request", 400, {
+        ok: false,
+        error: "probe failed",
+        errorCode: "PROBE_FAILED",
+      }),
+    );
+    useToastStore.getState().clear();
+
+    const { getByTestId } = render(
+      <Track
+        track={videoTrack()}
+        pxPerSecond={50}
+        totalWidth={400}
+        color="var(--accent)"
+        label="Video"
+      />,
+    );
+    const lane = getByTestId("track-lane-video");
+    const dt = fakeDataTransfer();
+    dt.setData(
+      TIMELINE_DND_MIME,
+      JSON.stringify({ source: "asset", assetPath: "assets/clips/bad.mp4", assetKind: "video" }),
+    );
+    fireEvent.dragOver(lane, { dataTransfer: dt, clientX: 100 });
+    fireEvent.drop(lane, { dataTransfer: dt, clientX: 100 });
+
+    // The fire-and-forget import's `.catch(notifyImportFailed)` must surface the
+    // failure — a corrupt take can never silently no-op on the drop path.
+    await waitFor(() => {
+      const toasts = useToastStore.getState().entries;
+      expect(toasts).toHaveLength(1);
+      expect(toasts[0].variant).toBe("error");
+    });
   });
 
   it("dropping an AUDIO asset still places a local clip via addClip (video-only import)", () => {

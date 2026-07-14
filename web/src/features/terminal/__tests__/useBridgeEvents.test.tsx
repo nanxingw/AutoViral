@@ -3,6 +3,8 @@ import { renderHook, act, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
 import { useBridgeEvents } from "../useBridgeEvents";
+import { useComposition } from "@/features/studio/store";
+import { useToastStore } from "@/stores/toast";
 
 // The hook dynamically imports the composition service and calls
 // loadComposition(workId) on both composition-changed and asset-added. Mock it
@@ -309,5 +311,113 @@ describe("useBridgeEvents · reconnect after socket drop", () => {
       vi.advanceTimersByTime(30_000);
     });
     expect(MockWS.instances.length).toBe(1);
+  });
+});
+
+// ── PRD-0014 S6b review findings 2 & 3 ───────────────────────────────────────
+// The video "add to timeline" path no longer writes the clip locally: it awaits
+// the bridge import, and the clip appears ONLY when the composition-changed
+// broadcast refetches from disk. That makes the refetch path load-bearing, and
+// surfaced two gaps:
+//   • finding 3 — a refetch fired for the OLD work must not overwrite the store
+//     after the user switched works (the async result would clobber the new work).
+//   • finding 2 — a refetch that keeps failing must surface a user-visible error
+//     (and retry), not silently swallow so the UI never shows the imported clip.
+describe("useBridgeEvents · composition refetch robustness (S6b findings 2 & 3)", () => {
+  beforeEach(() => {
+    (globalThis as any).WebSocket = MockWS;
+    MockWS.instances = [];
+    loadComposition.mockReset();
+    loadComposition.mockResolvedValue(null);
+    useToastStore.getState().clear();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    delete (globalThis as any).WebSocket;
+    vi.restoreAllMocks();
+  });
+
+  it("finding 3 — a stale refetch for a switched-away work never overwrites the store", async () => {
+    // Arrange: work A's composition-changed fires an in-flight refetch that will
+    // resolve only AFTER we switch to work B.
+    let resolveA: ((v: any) => void) | undefined;
+    loadComposition.mockImplementationOnce(
+      () => new Promise((r) => (resolveA = r)) as Promise<null>,
+    );
+    const storeLoad = vi
+      .spyOn(useComposition.getState(), "loadComposition")
+      .mockImplementation(() => {});
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    const { rerender, unmount } = renderHook(
+      ({ id }: { id: string }) => useBridgeEvents(id),
+      { wrapper, initialProps: { id: "w_A" } },
+    );
+
+    act(() => {
+      MockWS.instances[0].emit({
+        type: "composition-changed",
+        workId: "w_A",
+        ts: Date.now(),
+        payload: {},
+      });
+    });
+    // Wait until the (dynamic-import) refetch has actually invoked the service —
+    // only then is the pending promise's resolver captured.
+    await waitFor(() => expect(loadComposition).toHaveBeenCalledWith("w_A"));
+
+    // The user switches to work B — the w_A effect is torn down (disposed).
+    rerender({ id: "w_B" });
+
+    // The w_A refetch now resolves LATE, carrying w_A's composition.
+    await act(async () => {
+      resolveA?.({
+        workId: "w_A",
+        fps: 30,
+        width: 1080,
+        height: 1920,
+        duration: 0,
+        tracks: [],
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The stale result must be dropped — the store was never loaded with w_A.
+    expect(storeLoad).not.toHaveBeenCalled();
+    unmount();
+    storeLoad.mockRestore();
+  });
+
+  it("finding 2 — retries then surfaces an error toast when the refetch keeps failing", async () => {
+    vi.useFakeTimers();
+    loadComposition.mockReset();
+    loadComposition.mockRejectedValue(new Error("disk unreadable"));
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={qc}>{children}</QueryClientProvider>
+    );
+    renderHook(() => useBridgeEvents("w_test"), { wrapper });
+
+    MockWS.instances[0].emit({
+      type: "composition-changed",
+      workId: "w_test",
+      ts: Date.now(),
+      payload: {},
+    });
+
+    // Fast-forward through every retry backoff. The initial attempt + retries all
+    // reject; the final failure raises the toast (no timer of its own).
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    // It genuinely retried (>1 attempt), not a single silent swallow.
+    expect(loadComposition.mock.calls.length).toBeGreaterThan(1);
+    const toasts = useToastStore.getState().entries;
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0].variant).toBe("error");
   });
 });

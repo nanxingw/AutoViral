@@ -257,6 +257,7 @@ export const en = {
       aspectFailed: "Can't switch to that ratio",
       fpsFailed: "Can't switch to that frame rate",
       importFailed: "Can't import that clip",
+      refreshFailed: "Couldn't load the latest edits — try again",
     },
     preview: {
       aspectLabel: "Canvas ratio",
@@ -1323,6 +1324,7 @@ export const zh: DeepShape<Messages> = {
       aspectFailed: "无法切换到该比例",
       fpsFailed: "无法切换到该帧率",
       importFailed: "无法导入该素材",
+      refreshFailed: "无法加载最新改动，请重试",
     },
     preview: {
       aspectLabel: "画面比例",

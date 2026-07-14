@@ -15,8 +15,16 @@ import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useComposition } from "@/features/studio/store";
 import { useToastStore } from "@/stores/toast";
+import { useLocaleStore } from "@/i18n/store";
+import { MESSAGES } from "@/i18n/messages";
 
 type UiEvent = { type: string; workId: string; ts: number; payload: any };
+
+// S6b finding 2 — the video import clip only appears via the composition
+// refetch, so a transient read failure can't be swallowed. Retry a few times
+// with a short backoff, then surface a user-visible error toast.
+const REFETCH_MAX_RETRIES = 3;
+const REFETCH_RETRY_MS = 800;
 
 // kind → toast variant mapping. Phase 5 Task 5.1 — the toast store now
 // supports success/warn/error/info directly so the kind-indicator dot
@@ -38,19 +46,48 @@ export function useBridgeEvents(workId: string | undefined): void {
     const proto = window.location.protocol === "https:" ? "wss" : "ws";
     const url = `${proto}://${window.location.host}/ws/bridge/${workId}`;
 
+    // Set the moment this effect is torn down (unmount OR a workId switch). Every
+    // async store write below re-checks it: React runs the old effect's cleanup
+    // BEFORE the new effect connects, so an in-flight refetch that resolves after
+    // a work switch sees `disposed === true` and drops its (now-stale) result
+    // instead of clobbering the freshly-loaded work (S6b finding 3). The stores
+    // are single global singletons, so this cross-work guard is load-bearing.
+    let disposed = false;
+
+    // S6b finding 2 — surface a persistent refetch failure. Localized, guarded so
+    // a torn-down effect never toasts.
+    const pushRefreshError = () => {
+      if (disposed) return;
+      const locale = useLocaleStore.getState().locale;
+      useToastStore.getState().push({
+        variant: "error",
+        message: MESSAGES[locale].studio.toast.refreshFailed,
+        ttlMs: 5000,
+      });
+    };
+
     // Re-fetch the composition from disk into the store. Kept as a dynamic
     // import so this hook stays free of a hard dep on the composition service
     // (which has its own test surface). Shared by composition-changed and
     // asset-added (I17) so both refresh the dive canvas / asset registry.
-    const refetchComposition = () => {
+    const refetchComposition = (attempt = 0) => {
       import("@/features/studio/services/composition")
-        .then(({ loadComposition }) =>
-          loadComposition(workId).then(
-            (found) => found && useComposition.getState().loadComposition(found),
-          ),
-        )
+        .then(({ loadComposition }) => loadComposition(workId))
+        .then((found) => {
+          // finding 3 — drop a stale result if we switched work mid-flight.
+          if (disposed || !found) return;
+          useComposition.getState().loadComposition(found);
+        })
         .catch(() => {
-          /* swallow — refetch failure is non-fatal */
+          if (disposed) return;
+          // finding 2 — retry the transient failure, then surface it (the
+          // imported clip appears ONLY via this refetch, so a silent swallow
+          // leaves the UI permanently missing the clip with no explanation).
+          if (attempt < REFETCH_MAX_RETRIES) {
+            setTimeout(() => refetchComposition(attempt + 1), REFETCH_RETRY_MS);
+          } else {
+            pushRefreshError();
+          }
         });
     };
 
@@ -67,7 +104,11 @@ export function useBridgeEvents(workId: string | undefined): void {
       ])
         .then(([{ loadCarousel }, { useEditor }]) =>
           loadCarousel(workId).then(
-            (found) => found && useEditor.getState().loadCarousel(found),
+            (found) => {
+              // finding 3 — same cross-work stale-drop guard (global editor store).
+              if (disposed || !found) return;
+              useEditor.getState().loadCarousel(found);
+            },
           ),
         )
         .catch(() => {
@@ -90,7 +131,11 @@ export function useBridgeEvents(workId: string | undefined): void {
         .then(([{ loadScript }, { useScript }]) =>
           // Stamp the owning workId so the script store stays tenant-aware: the
           // WS is per-work, so this `workId` is the script's rightful owner.
-          loadScript(workId).then((md) => useScript.getState().setScript(workId, md)),
+          loadScript(workId).then((md) => {
+            // finding 3 — drop a stale result if the effect was torn down.
+            if (disposed) return;
+            useScript.getState().setScript(workId, md);
+          }),
         )
         .catch(() => {
           /* swallow — refetch failure is non-fatal */
@@ -207,7 +252,6 @@ export function useBridgeEvents(workId: string | undefined): void {
     // any events published while we were down are gone for good (the bus has
     // no replay).
     let ws: WebSocket | null = null;
-    let disposed = false;
     let retryMs = 1000;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     let hadConnection = false;
