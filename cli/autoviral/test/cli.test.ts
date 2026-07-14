@@ -1542,6 +1542,21 @@ describe("autoviral CLI — end-to-end", () => {
       expect(r.exitCode).toBe(4);
     });
 
+    it("clip set --transition-in glitch:0.4 --scale 2 (mixed flags) → exit 4, NO bridge call (finding #6 atomicity)", async () => {
+      // --transition-in is a SEPARATE atomic mutation (POST /transition-in) from
+      // the generic PATCH the other flags use; combining them in one call would be
+      // non-atomic (entrance commits, then a failing PATCH leaves a partial write).
+      // The CLI must reject up front WITHOUT committing anything.
+      lastTransitionIn = null;
+      lastClipPatch = null;
+      const r = await run([
+        "clip", "set", "vc_s01", "--transition-in", "glitch:0.4", "--scale", "2",
+      ]);
+      expect(r.exitCode).toBe(4);
+      expect(lastTransitionIn).toBeNull(); // entrance NOT committed
+      expect(lastClipPatch).toBeNull(); // PATCH NOT sent
+    });
+
     it("track collapse <id> → POSTs /track/:id/collapse, exit 0", async () => {
       const r = await run(["track", "collapse", "trk_v1"]);
       expect(r.exitCode).toBe(0);

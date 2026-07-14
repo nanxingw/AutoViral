@@ -435,6 +435,21 @@ export async function clipCommand(args: string[]): Promise<void> {
     const tinRaw = opts["--transition-in"];
     if (tinRaw !== undefined) {
       delete opts["--transition-in"];
+      // Finding #6 — `--transition-in` runs a DEDICATED shared op via its own
+      // endpoint (POST /clip/:id/transition-in), a SEPARATE mutation from the
+      // generic PATCH the other flags use. Committing both in one invocation is
+      // NON-ATOMIC: the entrance would land first, then a failing PATCH would
+      // report failure while the entrance stayed persisted (partial write that
+      // contradicts the reported failure). Reject the mixed call up front — before
+      // ANY request — so nothing is committed; run the two as separate commands.
+      if (Object.keys(opts).length > 0) {
+        process.stderr.write(
+          "autoviral clip set: --transition-in can't be combined with other flags in " +
+            "one call (it's a separate atomic mutation). Run it as its own command, " +
+            "e.g. `clip set <id> --transition-in glitch:0.4` then `clip set <id> --scale 2`.\n",
+        );
+        process.exit(4);
+      }
       let tinBody: Record<string, unknown>;
       if (tinRaw === "none") {
         tinBody = { clear: true };
@@ -464,9 +479,9 @@ export async function clipCommand(args: string[]): Promise<void> {
         `/clip/${encodeURIComponent(id)}/transition-in`,
         tinBody,
       );
-      // If --transition-in was the ONLY flag, we're done; otherwise fall through
-      // to PATCH the remaining scalar props.
-      if (Object.keys(opts).length === 0) return;
+      // Mixed flags were rejected above, so `--transition-in` is the ONLY flag
+      // once we reach here — the entrance mutation is the whole command.
+      return;
     }
 
     const patch: Record<string, unknown> = {};

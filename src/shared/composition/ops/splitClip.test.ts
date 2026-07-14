@@ -203,4 +203,43 @@ describe("@shared composition ops — splitClip", () => {
     expect(() => splitClip(comp, { clipId: "a", atSec: 8 })).toThrow(CompositionOpError);
     expect(comp.tracks[0].clips.length).toBe(1);
   });
+
+  // ── S3 review fix (finding #2): transitionIn is a HEAD entrance ─────────────
+  it("keeps transitionIn ONLY on the head child; the tail child never inherits the entrance (finding #2)", () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "tail-id" as `${string}-${string}-${string}-${string}-${string}`,
+    );
+    const clip = videoClip({ id: "a", trackOffset: 0, in: 0, out: 6 });
+    (clip as unknown as { transitionIn: unknown }).transitionIn = {
+      preset: "glitch",
+      durationSec: 0.4,
+    };
+    const comp = compWith([clip]);
+    splitClip(comp, { clipId: "a", atSec: 3 });
+    const clips = comp.tracks[0].clips as Clip[];
+    const head = clips.find((c) => c.id === "a") as unknown as { transitionIn?: unknown };
+    const tail = clips.find((c) => c.id === "tail-id") as unknown as { transitionIn?: unknown };
+    // head keeps its (fitting) entrance; tail has NO phantom entrance at the cut.
+    expect(head.transitionIn).toEqual({ preset: "glitch", durationSec: 0.4 });
+    expect(tail.transitionIn).toBeUndefined();
+  });
+
+  it("clamps the head child's entrance to its shrunken duration so the split persists (finding #2)", () => {
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(
+      "tail2" as `${string}-${string}-${string}-${string}-${string}`,
+    );
+    const clip = videoClip({ id: "a", trackOffset: 0, in: 0, out: 6 });
+    (clip as unknown as { transitionIn: unknown }).transitionIn = {
+      preset: "glitch",
+      durationSec: 0.4,
+    };
+    const comp = compWith([clip]);
+    // split at 0.25 → head effective width 0.25 < 0.4 entrance → clamp to 0.25 so
+    // the write-path refine (durationSec ≤ effective) doesn't silently reject it.
+    splitClip(comp, { clipId: "a", atSec: 0.25 });
+    const head = (comp.tracks[0].clips as Clip[]).find((c) => c.id === "a") as unknown as {
+      transitionIn?: { durationSec: number };
+    };
+    expect(head.transitionIn?.durationSec).toBeCloseTo(0.25, 6);
+  });
 });

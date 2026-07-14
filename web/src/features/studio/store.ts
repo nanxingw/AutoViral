@@ -682,7 +682,21 @@ export const useComposition = create<CompState>()(
         try {
           ops.setTransitionIn(s.comp, { clipId, spec });
         } catch (err) {
-          if (err instanceof CompositionOpError) return; // silent no-op (historical)
+          if (err instanceof CompositionOpError) {
+            // Finding #3 — SURFACE, don't swallow. The op rejects an entrance that
+            // can't fit a very short clip (< 0.05s effective) or an unknown preset;
+            // the CLI/bridge return code:4 for the SAME call, so the UI must tell
+            // the user WHY it landed nowhere instead of silently no-op'ing. Mirrors
+            // the addTransition / splitClip surfacing pattern above.
+            const locale = useLocaleStore.getState().locale;
+            useToastStore.getState().push({
+              variant: "warn",
+              message: MESSAGES[locale].studio.toast.transitionFailed,
+              detail: err.message,
+              ttlMs: 4000,
+            });
+            return; // composition untouched, but the user is told.
+          }
           throw err;
         }
       }),

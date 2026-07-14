@@ -21,6 +21,10 @@ vi.mock("../../probe-media.js", () => ({ probeMedia: vi.fn() }));
 import { probeMedia } from "../../probe-media.js";
 import { bridgeRouter } from "../routes.js";
 import { uiEventBus } from "../ui-events.js";
+// PRD-0014 S3 finding #5 — spy on the shared op so a test can force an
+// UNEXPECTED (non-CompositionOpError) failure and assert the route maps it to
+// 500, not a masquerading 400/code:4.
+import * as ops from "../../../shared/composition/ops/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -5548,5 +5552,29 @@ describe("bridge router — S3 transition-in (real route + persistence)", () => 
     expect(res.status).toBe(400);
     const body = (await res.json()) as { code?: number };
     expect(body.code).toBe(4);
+  });
+
+  it("an UNEXPECTED (non-op) failure → 500, NOT masqueraded as a 400 client error (finding #5)", async () => {
+    // Force a read/schema/persistence-style fault (a plain Error, not a
+    // CompositionOpError). The route must NOT collapse this into 400/code:4 —
+    // that would hide a real server bug behind a generic client error.
+    const spy = vi
+      .spyOn(ops, "setTransitionIn")
+      .mockImplementationOnce(() => {
+        throw new Error("simulated disk/schema failure");
+      });
+    try {
+      const res = await app.request("/api/bridge/v1/clip/vc_s01/transition-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ preset: "glitch", durationSec: 0.4 }),
+      });
+      expect(res.status).toBe(500);
+      const body = (await res.json()) as { code?: number };
+      // a 500 carries NO client-error code (it's a server bug, not user input).
+      expect(body.code).toBeUndefined();
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

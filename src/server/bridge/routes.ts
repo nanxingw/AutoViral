@@ -2173,8 +2173,18 @@ bridgeRouter.post("/clip/:id/transition-in", async (c) => {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    const code = err instanceof CompositionOpError ? err.code : 4;
-    return c.json({ ok: false, error: message, code }, 400);
+    // Finding #5 — ONLY a CompositionOpError is a genuine client-input error
+    // (unknown / non-video clip, bad preset/easing, over-long entrance) → 400 +
+    // code:4 → CLI exit 4. An UNEXPECTED failure (read / strict-write-schema /
+    // persistence) is a server bug and MUST NOT masquerade as user input: log it
+    // and return 500 so the real fault is visible instead of hidden behind a
+    // generic 400/code:4 that would send the agent chasing its own input.
+    if (err instanceof CompositionOpError) {
+      return c.json({ ok: false, error: message, code: err.code }, 400);
+    }
+    // eslint-disable-next-line no-console
+    console.error(`[bridge] POST /clip/:id/transition-in unexpected failure: ${message}`);
+    return c.json({ ok: false, error: message }, 500);
   }
   return c.json({ ok: true, result: { id } });
 });

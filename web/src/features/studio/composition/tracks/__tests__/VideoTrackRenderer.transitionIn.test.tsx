@@ -10,6 +10,14 @@ import { render } from "@testing-library/react";
 // under isRendering=false AND isRendering=true and matching the node.
 
 const isRenderingRef = { current: false };
+// finding #4 — fps is mutable so the frame-conversion assertion can sweep
+// several (durationSec, fps) pairs; the renderer reads it via useVideoConfig.
+const fpsRef = { current: 30 };
+// finding #4 — capture the REAL `timing` object every Transition receives so the
+// test derives the frame span from production input (round(durationSec × fps))
+// instead of trusting a number the mock invented.
+type CapturedTiming = { getDurationInFrames: (o: { fps: number }) => number };
+const capturedTimings: CapturedTiming[] = [];
 
 vi.mock("remotion", async (orig) => {
   const actual = (await orig()) as Record<string, unknown>;
@@ -36,7 +44,7 @@ vi.mock("remotion", async (orig) => {
     ),
     useCurrentFrame: () => 3,
     useVideoConfig: () => ({
-      fps: 30,
+      fps: fpsRef.current,
       width: 1080,
       height: 1920,
       durationInFrames: 180,
@@ -67,22 +75,28 @@ vi.mock("@remotion/transitions", async (orig) => {
         <div data-test="transition-series-sequence">{children}</div>
       ),
       Transition: (props: {
+        timing?: CapturedTiming;
         presentation?: {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           component: React.ComponentType<any>;
           props: Record<string, unknown>;
         };
       }) => {
+        // finding #4 — record the timing the renderer supplied and DERIVE the
+        // frame span from it (round(durationSec*fps)) rather than hardcoding 12,
+        // so a broken seconds→frames conversion would change this number.
+        if (props.timing) capturedTimings.push(props.timing);
         const pres = props.presentation;
         if (!pres) return null;
         const Comp = pres.component;
+        const frames = props.timing?.getDurationInFrames({ fps: fpsRef.current }) ?? 0;
         return (
           <div data-test="transition-slot">
             <Comp
               presentationProgress={0.5}
               presentationDirection="entering"
               passedProps={pres.props}
-              presentationDurationInFrames={12}
+              presentationDurationInFrames={frames}
               bothEnteringAndExiting={false}
             >
               <div data-test="transition-scene-content" />
@@ -179,6 +193,80 @@ describe("VideoTrackRenderer → transitionIn entrance render tree (PRD-0014 S3)
     const { container } = render(<Scene comp={comp} />);
     expect(container.querySelector('[data-test="entrance-blank"]')).toBeNull();
     expect(container.querySelector('[data-test="transition-series"]')).toBeNull();
+  });
+
+  it("derives the entrance frame span from durationSec × fps — multiple durations/FPS (finding #4)", () => {
+    // Each pair yields a DISTINCT frame count, so a wrong seconds→frames
+    // conversion (off-by-one, or seconds mistaken for frames) would break this.
+    const cases: Array<[number, number, number]> = [
+      [0.4, 30, 12],
+      [0.5, 30, 15],
+      [0.4, 25, 10],
+      [1.0, 24, 24],
+    ];
+    for (const [durationSec, fps, expected] of cases) {
+      isRenderingRef.current = false;
+      fpsRef.current = fps;
+      capturedTimings.length = 0;
+      render(<Scene comp={compWithEntrance("glitch", durationSec)} />);
+      // exactly one entrance transition on a single-clip chain
+      expect(capturedTimings.length).toBe(1);
+      expect(capturedTimings[0].getDurationInFrames({ fps })).toBe(expected);
+    }
+    fpsRef.current = 30;
+  });
+
+  it("a NON-first clip in a cut-point chain still renders its OWN entrance (finding #1 regression)", () => {
+    isRenderingRef.current = false;
+    fpsRef.current = 30;
+    capturedTimings.length = 0;
+    const comp = makeEmptyComposition({ workId: "w-s3-chain" });
+    const mk = (id: string, offset: number, transitionIn?: VideoClip["transitionIn"]): VideoClip => ({
+      id,
+      kind: "video",
+      src: `assets/${id}.mp4`,
+      in: 0,
+      out: 3,
+      trackOffset: offset,
+      transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+      filters: { brightness: 0, contrast: 0, saturation: 0 },
+      fitMode: "cover",
+      ...(transitionIn ? { transitionIn } : {}),
+    });
+    const clipA = mk("vc_A", 0);
+    // clip B is the SECOND (non-first) clip AND carries its own entrance.
+    const clipB = mk("vc_B", 3, { preset: "zoom-in", durationSec: 0.4 });
+    const videoTrack: Track = {
+      id: "trk_v1",
+      kind: "video",
+      label: "Video",
+      displayOrder: comp.tracks.length,
+      muted: false,
+      hidden: false,
+      volume: 0,
+      // a cut-point transition A→B (glitch) — B's entrance must coexist with it.
+      transitions: [
+        {
+          id: "tr_AB",
+          afterClipId: "vc_A",
+          preset: "glitch",
+          durationSec: 0.3,
+          alignment: "center",
+          easing: "linear",
+        },
+      ],
+      clips: [clipA, clipB],
+    };
+    comp.tracks.push(videoTrack);
+    comp.duration = 6;
+    const { container } = render(<Scene comp={comp} />);
+    // the cut-point transition (glitch) between A and B is present …
+    expect(container.querySelector('[data-transition-preset="glitch"]')).not.toBeNull();
+    // … AND clip B's OWN entrance (zoom-in) is ALSO rendered — orthogonal
+    // coexistence (finding #1: this used to be silently dropped for non-first
+    // clips). B's entrance has its blank "before" scene too.
+    expect(container.querySelector('[data-transition-preset="zoom-in"]')).not.toBeNull();
+    expect(container.querySelector('[data-test="entrance-blank"]')).not.toBeNull();
   });
 
   it("preview and export render the SAME entrance node (preview==export)", () => {

@@ -107,6 +107,33 @@ describe("setTransitionIn (S3)", () => {
     expect((liveClip(comp, "v1").transitionIn as { durationSec: number }).durationSec).toBe(0.4);
   });
 
+  it("AUTO-FITS an omitted duration to a SHORT clip instead of rejecting (finding #3)", () => {
+    // clip effective width 0.3s; glitch registry default 0.4s would overflow.
+    // Omitting the duration must clamp DOWN to fit (0.3), NOT throw — so picking a
+    // preset in the Inspector on a short clip always yields a valid entrance.
+    const comp = compWith([videoClip({ id: "v1", in: 0, out: 0.3 })]);
+    setTransitionIn(comp, { clipId: "v1", spec: { preset: "glitch" } });
+    expect(
+      (liveClip(comp, "v1").transitionIn as { durationSec: number }).durationSec,
+    ).toBeCloseTo(0.3, 6);
+  });
+
+  it("still REJECTS an EXPLICIT over-long duration on a short clip (finding #3 keeps explicit strict)", () => {
+    const comp = compWith([videoClip({ id: "v1", in: 0, out: 0.3 })]);
+    expect(() =>
+      setTransitionIn(comp, { clipId: "v1", spec: { preset: "glitch", durationSec: 0.4 } }),
+    ).toThrow(CompositionOpError);
+  });
+
+  it("rejects even an auto-fit entrance on a clip shorter than the schema minimum (finding #3)", () => {
+    // effective 0.02s < 0.05s schema min → no valid entrance exists; the store
+    // wrapper turns this CompositionOpError into a user-facing toast.
+    const comp = compWith([videoClip({ id: "v1", in: 0, out: 0.02 })]);
+    expect(() =>
+      setTransitionIn(comp, { clipId: "v1", spec: { preset: "glitch" } }),
+    ).toThrow(CompositionOpError);
+  });
+
   it("spec:null CLEARS an existing transitionIn", () => {
     const comp = compWith([
       videoClip({ id: "v1", transitionIn: { preset: "glitch", durationSec: 0.4 } }),

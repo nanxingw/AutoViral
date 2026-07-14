@@ -448,23 +448,51 @@ export function VideoTrackRenderer({ track }: { track: Track }) {
         // transition consumes durationInFrames from BOTH adjacent sequences
         // (handles), shortening the chain by sum(transition durations) — same
         // visual outcome as the EXPORT because Stage 1 of render-pipeline runs
-        // this exact <Scene/> (WYSIWYG by construction, #54 Phase 1). A leading
-        // `entrance` (first clip's transitionIn) is prepended inside the SAME
-        // series (orthogonal to the cut-point transitions).
+        // this exact <Scene/> (WYSIWYG by construction, #54 Phase 1). EVERY clip's
+        // own `transitionIn` is honoured (not just the first) — see the per-clip
+        // nesting below.
         return (
           <Sequence key={chain.clips.map((c) => c.id).join(":")} from={from}>
             <TransitionSeries>
-              {entrance}
               {chain.clips.flatMap((c, i) => {
                 const seqDur = Math.max(1, Math.round(effectiveClipDuration(c) * fps));
-                const nodes: React.ReactNode[] = [
-                  <TransitionSeries.Sequence
-                    key={`s-${c.id}`}
-                    durationInFrames={seqDur}
-                  >
-                    <VideoClipRenderer clip={c} />
-                  </TransitionSeries.Sequence>,
-                ];
+                // S3 review fix (finding #1) — a clip's entrance is ORTHOGONAL to
+                // the cut-point transition that may precede it. A NON-first clip
+                // already sits after a <TransitionSeries.Transition>, so its own
+                // entrance can't be prepended at the outer level; instead we nest
+                // `[blank, entrance, clip]` INSIDE the clip's own sequence. The
+                // inner series total span = seqDur (the entrance overlaps the
+                // blank), so chain timing is byte-identical. The FIRST clip goes
+                // through the SAME nesting (no more outer-level prepend), so first
+                // and non-first clips honour transitionIn uniformly. Clips with no
+                // entrance render the bare <VideoClipRenderer> exactly as before,
+                // so a chain with zero entrances is unchanged (back-compat).
+                const clipEntrance = entranceNodes(c, fps, dims);
+                const clipSeq =
+                  clipEntrance.length === 0 ? (
+                    <TransitionSeries.Sequence
+                      key={`s-${c.id}`}
+                      durationInFrames={seqDur}
+                    >
+                      <VideoClipRenderer clip={c} />
+                    </TransitionSeries.Sequence>
+                  ) : (
+                    <TransitionSeries.Sequence
+                      key={`s-${c.id}`}
+                      durationInFrames={seqDur}
+                    >
+                      <TransitionSeries>
+                        {clipEntrance}
+                        <TransitionSeries.Sequence
+                          key={`si-${c.id}`}
+                          durationInFrames={seqDur}
+                        >
+                          <VideoClipRenderer clip={c} />
+                        </TransitionSeries.Sequence>
+                      </TransitionSeries>
+                    </TransitionSeries.Sequence>
+                  );
+                const nodes: React.ReactNode[] = [clipSeq];
                 const t = chain.transitions[i];
                 if (t) {
                   const trDur = Math.max(1, Math.round(t.durationSec * fps));

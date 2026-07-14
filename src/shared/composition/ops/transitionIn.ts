@@ -87,21 +87,31 @@ export function setTransitionIn(
     throw new CompositionOpError(`setTransitionIn: invalid easing ${easing}`, 4);
   }
 
-  // durationSec defaults to the preset's registry default when omitted.
-  const durationSec =
-    p.spec.durationSec ?? getPresetMeta(preset as TransitionPreset).defaultDurationSec;
+  // ≤ effective (speed-aware) clip duration — an entrance can't outlast the clip.
+  const eff = effectiveClipDuration(video);
+  // durationSec defaults to the preset's registry default when omitted — but an
+  // OMITTED duration AUTO-FITS to the clip (finding #3): a preset whose registry
+  // default (e.g. 0.5s) would overflow a short clip's effective width is clamped
+  // DOWN so picking a preset in the Inspector always yields a VALID entrance
+  // instead of a silent rejection. An EXPLICIT over-long duration is still
+  // rejected below (agents/humans who type a number get told it doesn't fit).
+  const explicit = p.spec.durationSec !== undefined;
+  const durationSec = explicit
+    ? (p.spec.durationSec as number)
+    : Math.min(getPresetMeta(preset as TransitionPreset).defaultDurationSec, eff);
   if (!Number.isFinite(durationSec)) {
     throw new CompositionOpError(`setTransitionIn: durationSec must be a finite number`, 4);
   }
   if (durationSec < TRANSITION_DURATION_MIN_SEC || durationSec > TRANSITION_DURATION_MAX_SEC) {
+    // Covers the degenerate auto-fit case too: a clip shorter than the schema
+    // minimum (< 0.05s) can't host ANY valid entrance, so even the clamped value
+    // is rejected here — surfaced to the user as a toast by the store wrapper.
     throw new CompositionOpError(
       `setTransitionIn: durationSec ${durationSec} out of range ` +
         `[${TRANSITION_DURATION_MIN_SEC}, ${TRANSITION_DURATION_MAX_SEC}]`,
       4,
     );
   }
-  // ≤ effective (speed-aware) clip duration — an entrance can't outlast the clip.
-  const eff = effectiveClipDuration(video);
   if (durationSec > eff + 1e-6) {
     throw new CompositionOpError(
       `setTransitionIn: durationSec ${durationSec} exceeds the clip's effective duration ${eff}`,

@@ -13,6 +13,8 @@
 
 import type { Composition, Clip, Keyframe } from "../../composition.js";
 import { splitKeyframesAtLocal } from "../../keyframes.js";
+import { effectiveClipDuration } from "../../speed-ramp.js";
+import { TRANSITION_DURATION_MIN_SEC } from "../../transitions.js";
 import { CompositionOpError } from "./errors.js";
 
 // Floating-point tolerance for the boundary no-op guards. Mirrors the
@@ -137,6 +139,29 @@ export function splitClip(
     if (origKfs) {
       (childA as { keyframes?: Keyframe[] }).keyframes = kfA;
       (childB as { keyframes?: Keyframe[] }).keyframes = kfB;
+    }
+
+    // S3 review fix (finding #2) — `transitionIn` is an ENTRANCE that plays at
+    // the clip's HEAD. Only child A (the head half, [start, atSec)) may keep it;
+    // child B is the interior/tail, so a duplicated entrance there would inject a
+    // phantom transition at the split point. Strip it from B unconditionally
+    // (no-op on kinds that never carry transitionIn).
+    delete (childB as { transitionIn?: unknown }).transitionIn;
+    // If the head half is now SHORTER than its entrance, the write-path refine
+    // (transitionIn.durationSec ≤ effective duration, composition.ts) would
+    // reject the WHOLE split — a silent persistence failure. Clamp the entrance
+    // to fit the shrunken head; drop it entirely when even the schema minimum
+    // (0.05s) can't fit, so the op always yields a schema-valid result.
+    const headTin = (childA as { transitionIn?: { durationSec: number } }).transitionIn;
+    if (headTin) {
+      const headEff = effectiveClipDuration(childA as never);
+      if (headTin.durationSec > headEff + OFFSET_EPSILON) {
+        if (headEff >= TRANSITION_DURATION_MIN_SEC) {
+          headTin.durationSec = headEff;
+        } else {
+          delete (childA as { transitionIn?: unknown }).transitionIn;
+        }
+      }
     }
 
     // In-place splice keeps the SAME `clips` array (decision #1) and preserves
