@@ -1089,6 +1089,17 @@ bridgeRouter.post("/captions/generate", async (c) => {
     script?: string;
     maxCjkChars?: number;
   };
+  // S9 review finding #5 — a `script` key that is present but blank (empty /
+  // whitespace-only) is a caller error, NOT a cue to silently fall back to the
+  // legacy ASR→TextClip path. The CLI already rejects a bare/empty `--script`,
+  // but a direct-to-bridge caller must hit the same gate here (defense in
+  // depth) so an empty script never quietly degrades to un-aligned captions.
+  if (typeof body.script === "string" && body.script.trim().length === 0) {
+    return c.json(
+      { ok: false, error: "script is empty or whitespace-only — provide the ground-truth line text", code: 4 },
+      400,
+    );
+  }
   const scriptMode = typeof body.script === "string" && body.script.trim().length > 0;
 
   // Resolve the audio source. Default: the first audio-track clip's `src`. The
@@ -2949,10 +2960,18 @@ bridgeRouter.post("/export", async (c) => {
       join(homedir(), ".autoviral/works");
     const outDir = join(worksRoot, g.workId, "output");
     // PRD-0014 S9 — resolve the requested caption tracks. A `string[]` from the
-    // CLI is a language list: the FIRST language's text track is burned into the
-    // video, every subsequent language's text track becomes a sidecar SRT. An
-    // object is passed straight through (render-queue parity). Languages with no
-    // matching text track are ignored (nothing to burn/emit for them).
+    // CLI is an ORDERED language list: the FIRST language's text track is burned
+    // into the video, every subsequent language's text track becomes a sidecar
+    // SRT. An object is passed straight through (render-queue parity).
+    //
+    // S9 review finding #1 — a requested language with no matching text track is
+    // a HARD ERROR (400 code:4), NOT silently dropped. The old drop-then-take-
+    // first behaviour was doubly wrong: requesting `zh,en` when only `en` exists
+    // used to burn `en` (it silently became the first survivor, swapping the
+    // burn/sidecar role the caller asked for), and requesting all-unmatched used
+    // to leave captionTracks undefined → the legacy path burned EVERY text lane.
+    // We now preserve the requested order (no role re-shuffle) and never fall
+    // back to "render all".
     let captionTracks:
       | { burnTrackId?: string | null; sidecarTrackIds?: string[] }
       | undefined;
@@ -2967,9 +2986,26 @@ bridgeRouter.post("/export", async (c) => {
         );
         return hit?.id;
       };
-      const ids = body.captionTracks
-        .map((lang) => resolveLang(lang))
-        .filter((id): id is string => typeof id === "string");
+      const requested = body.captionTracks
+        .map((l) => (typeof l === "string" ? l : String(l)))
+        .filter((l) => l.trim().length > 0);
+      const missing: string[] = [];
+      const ids: string[] = [];
+      for (const lang of requested) {
+        const id = resolveLang(lang);
+        if (id === undefined) missing.push(lang);
+        else ids.push(id);
+      }
+      if (missing.length > 0) {
+        return c.json(
+          {
+            ok: false,
+            error: `no text track found for caption language(s): ${missing.join(", ")} — tag a text lane with that language first`,
+            code: 4,
+          },
+          400,
+        );
+      }
       if (ids.length > 0) {
         captionTracks = {
           burnTrackId: ids[0],

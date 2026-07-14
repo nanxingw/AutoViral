@@ -33,13 +33,34 @@ export async function captionsCommand(args: string[]): Promise<void> {
     // is a caller error (exit 4) that never touches the bridge — no half-written
     // caption model. The text goes on the wire as `script`; `--max-cjk-chars`
     // (default 14) sets the per-line CJK cap the bridge splits at.
-    if (opts["--script"]) {
+    // S9 review finding #5 — validate on FLAG PRESENCE, not truthiness. A bare
+    // `--script` (no path) used to leave `opts["--script"]` undefined, so the
+    // whole block was skipped and the call silently degraded to the legacy
+    // ASR→TextClip path — the caller asked for aligned captions and got none.
+    // A present-but-valueless flag is a caller error (exit 4), never a fallback.
+    if ("--script" in opts) {
+      const scriptPath = opts["--script"];
+      if (!scriptPath || scriptPath.startsWith("--")) {
+        process.stderr.write(
+          "autoviral: --script needs a file path (e.g. --script plan/script.md)\n",
+        );
+        process.exit(4);
+      }
       let scriptText: string;
       try {
-        scriptText = await readFile(opts["--script"], "utf8");
+        scriptText = await readFile(scriptPath, "utf8");
       } catch (err) {
         process.stderr.write(
-          `autoviral: --script file not found or unreadable: ${opts["--script"]} — ${(err as Error).message}\n`,
+          `autoviral: --script file not found or unreadable: ${scriptPath} — ${(err as Error).message}\n`,
+        );
+        process.exit(4);
+      }
+      // An empty / whitespace-only script cannot align to anything. Reject it
+      // here rather than let it fall through to the ASR→TextClip path (which
+      // would produce no CaptionModel and look like a silent success).
+      if (scriptText.trim().length === 0) {
+        process.stderr.write(
+          `autoviral: --script file is empty or whitespace-only: ${scriptPath}\n`,
         );
         process.exit(4);
       }

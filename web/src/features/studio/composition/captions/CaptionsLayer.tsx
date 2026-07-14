@@ -155,6 +155,13 @@ function CaptionGroupRenderer({ model, group, anim, timeSec, fps }: GroupRendere
           const seg = findSegment(model, segId);
           if (!seg) return null;
           const isActive = activeSeg?.segmentId === seg.segmentId;
+          // Inter-word gap only at a LATIN↔LATIN boundary. Per-word CJK
+          // segments (one char each — the per-word `segments` the CaptionModel
+          // promises) must render flush like natural Chinese, NOT spaced out by
+          // the 0.18em latin word-gap (S9 review finding #3).
+          const prevSeg = i > 0 ? findSegment(model, group.segmentIds[i - 1]!) : undefined;
+          const needsLeadingSpace =
+            !!prevSeg && latinBoundary(prevSeg.text, seg.text);
           return (
             <CaptionWord
               key={segId}
@@ -162,7 +169,7 @@ function CaptionGroupRenderer({ model, group, anim, timeSec, fps }: GroupRendere
               isActive={isActive}
               hilight={hilight}
               groupColor={style.color ?? "#FFFFFF"}
-              isFirstInGroup={i === 0}
+              needsLeadingSpace={needsLeadingSpace}
             />
           );
         })}
@@ -171,15 +178,22 @@ function CaptionGroupRenderer({ model, group, anim, timeSec, fps }: GroupRendere
   );
 }
 
+// True when two adjacent segments both touch on a latin/digit char at the seam,
+// so a word-gap belongs between them. CJK↔CJK / CJK↔latin seams render flush.
+const LATIN_EDGE = /[A-Za-z0-9]/;
+function latinBoundary(prev: string, cur: string): boolean {
+  return LATIN_EDGE.test(prev.slice(-1)) && LATIN_EDGE.test(cur.slice(0, 1));
+}
+
 interface CaptionWordProps {
   seg: CaptionSegment;
   isActive: boolean;
   hilight: CaptionAnimationSet["highlight"];
   groupColor: string;
-  isFirstInGroup: boolean;
+  needsLeadingSpace: boolean;
 }
 
-function CaptionWord({ seg, isActive, hilight, groupColor, isFirstInGroup }: CaptionWordProps) {
+function CaptionWord({ seg, isActive, hilight, groupColor, needsLeadingSpace }: CaptionWordProps) {
   const color = isActive ? hilight?.activeColor ?? groupColor : hilight?.dimColor ?? groupColor;
   const type = hilight?.type ?? "basic-color";
 
@@ -226,7 +240,7 @@ function CaptionWord({ seg, isActive, hilight, groupColor, isFirstInGroup }: Cap
         clipPath,
         display: "inline-block",
         transition: transitions,
-        marginLeft: isFirstInGroup ? 0 : "0.18em",
+        marginLeft: needsLeadingSpace ? "0.18em" : 0,
       }}
     >
       {showMarkerSweep && (

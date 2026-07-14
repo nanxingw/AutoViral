@@ -96,10 +96,120 @@ describe("alignScriptLines — script truth text + ASR timing (coarse LCS align)
       alignScriptLines([{ text: "你", start: 0, end: 1 }], "  ", { maxCjkChars: 14 }),
     ).toEqual([]);
   });
+
+  // S9 review finding #4 — the aligner must be BYTE-FAITHFUL to the ground
+  // truth. Two regressions it used to have: (a) a leading opening quote with no
+  // preceding word was dropped, and (b) a hard-split of an over-cap CJK run kept
+  // only the atom chars, truncating the trailing terminal 。/…/」.
+  it("preserves leading opening quotes (attached to the following word)", () => {
+    const asr: AsrWord[] = [
+      { text: "你", start: 0.0, end: 0.5 },
+      { text: "好", start: 0.5, end: 1.0 },
+    ];
+    const lines = alignScriptLines(asr, "「你好」", { maxCjkChars: 14 });
+    expect(lines.map((l) => l.text).join("")).toBe("「你好」");
+  });
+
+  it("preserves a trailing terminal period even when a long run is hard-split at the cap", () => {
+    // 5 CJK atoms + 。, split at cap 4 → the last chunk must still carry 。 (the
+    // old matchIdx-count slice dropped it).
+    const asr: AsrWord[] = "一二三四五".split("").map((ch, i) => ({
+      text: ch,
+      start: i * 0.2,
+      end: i * 0.2 + 0.2,
+    }));
+    const lines = alignScriptLines(asr, "一二三四五。", { maxCjkChars: 4 });
+    expect(lines.map((l) => l.text).join("")).toBe("一二三四五。");
+    // The 。 rides on the LAST line, not silently dropped.
+    expect(lines[lines.length - 1]!.text).toMatch(/。$/);
+  });
+
+  it("preserves a trailing ellipsis on the final line", () => {
+    const asr: AsrWord[] = "等等".split("").map((ch, i) => ({
+      text: ch,
+      start: i * 0.3,
+      end: i * 0.3 + 0.3,
+    }));
+    const lines = alignScriptLines(asr, "等等……", { maxCjkChars: 14 });
+    expect(lines.map((l) => l.text).join("")).toBe("等等……");
+  });
 });
 
-describe("buildCaptionModelFromLines / alignScriptToCaptionModel — valid CaptionModel", () => {
-  it("maps each line to a segment + a group referencing it; validates against the schema", () => {
+describe("buildCaptionModelFromLines / alignScriptToCaptionModel — per-word CaptionModel", () => {
+  // S9 review finding #3 — the CaptionModel's `segments` half is PER-WORD (from
+  // ASR timing, CONTEXT.md), decoupled from `groups` which express the on-screen
+  // lines. The old build emitted one segment per LINE, which killed per-word
+  // highlight (activeSegmentInGroup could never advance inside a line) and made
+  // regrouping impossible. Assert the EXTERNAL behaviour: a single line yields
+  // multiple per-char segments whose timing rides the ASR anchors, one group
+  // referencing them all, and the active word advancing as time moves.
+  it("emits per-word segments + one multi-segment group; the active word advances with time", () => {
+    const asr: AsrWord[] = [
+      { text: "你", start: 0.0, end: 0.5 },
+      { text: "好", start: 0.5, end: 1.0 },
+      { text: "世", start: 1.0, end: 1.5 },
+      { text: "界", start: 1.5, end: 2.0 },
+    ];
+    const model = alignScriptToCaptionModel(asr, "你好世界", {
+      maxCjkChars: 14,
+      modelId: "cm_pw",
+      language: "zh",
+    });
+
+    // One on-screen line → one group, but FOUR per-char segments.
+    expect(model.groups).toHaveLength(1);
+    expect(model.segments).toHaveLength(4);
+    expect(model.groups[0]!.segmentIds).toHaveLength(4);
+    expect(model.segments.map((s) => s.text)).toEqual(["你", "好", "世", "界"]);
+
+    // Per-word timing rides the ASR anchors (not one blob for the whole line).
+    expect(model.segments[0]!.start).toBeCloseTo(0.0, 2);
+    expect(model.segments[0]!.end).toBeCloseTo(0.5, 2);
+    expect(model.segments[2]!.start).toBeCloseTo(1.0, 2);
+    expect(model.segments[2]!.end).toBeCloseTo(1.5, 2);
+
+    // The "active word" at t=1.2s is 世 (segment idx 2) — impossible when the
+    // whole line was a single segment.
+    const activeAt = (t: number) =>
+      model.segments.find((s) => t >= s.start && t <= s.end)?.text;
+    expect(activeAt(0.2)).toBe("你");
+    expect(activeAt(1.2)).toBe("世");
+    expect(activeAt(1.8)).toBe("界");
+
+    expect(() => CaptionModelSchema.parse(model)).not.toThrow();
+  });
+
+  it("splits into groups per line, each carrying its own per-word segments", () => {
+    const asr: AsrWord[] = [
+      { text: "你", start: 0.0, end: 0.3 },
+      { text: "想", start: 0.3, end: 0.6 },
+      { text: "要", start: 0.6, end: 0.9 },
+      { text: "的", start: 0.9, end: 1.1 },
+      { text: "答", start: 1.1, end: 1.4 },
+      { text: "案", start: 1.4, end: 1.7 },
+      { text: "就", start: 1.95, end: 2.2 },
+      { text: "在", start: 2.2, end: 2.4 },
+      { text: "这", start: 2.4, end: 2.7 },
+      { text: "里", start: 2.7, end: 3.0 },
+    ];
+    const model = alignScriptToCaptionModel(asr, "你想要的答案，就在这里。", {
+      maxCjkChars: 14,
+      modelId: "cm_2",
+      language: "zh",
+    });
+    // Two lines → two groups; segments concatenate back to the ground truth
+    // (punctuation attached to the adjacent word's segment).
+    expect(model.groups).toHaveLength(2);
+    const groupText = (gi: number) =>
+      model.groups[gi]!.segmentIds
+        .map((id) => model.segments.find((s) => s.segmentId === id)!.text)
+        .join("");
+    expect(groupText(0)).toBe("你想要的答案，");
+    expect(groupText(1)).toBe("就在这里。");
+    expect(() => CaptionModelSchema.parse(model)).not.toThrow();
+  });
+
+  it("hand-built {start,end,text} lines (no atoms) fall back to one segment per line", () => {
     const lines = [
       { start: 0, end: 1, text: "你好" },
       { start: 1, end: 2.5, text: "世界" },
@@ -109,31 +219,11 @@ describe("buildCaptionModelFromLines / alignScriptToCaptionModel — valid Capti
       language: "zh",
       audioTrackId: "trk_a1",
     });
-
     expect(model.segments).toHaveLength(2);
     expect(model.groups).toHaveLength(2);
-    expect(model.segments[0]!.text).toBe("你好");
     expect(model.groups[0]!.segmentIds).toEqual([model.segments[0]!.segmentId]);
-    expect(model.groups[1]!.start).toBeCloseTo(1, 6);
     expect(model.language).toBe("zh");
     expect(model.audioTrackId).toBe("trk_a1");
-
-    // Must be a valid CaptionModel per the shared zod schema.
-    expect(() => CaptionModelSchema.parse(model)).not.toThrow();
-  });
-
-  it("alignScriptToCaptionModel wires align → model in one call", () => {
-    const asr: AsrWord[] = [
-      { text: "你", start: 0.0, end: 0.5 },
-      { text: "好", start: 0.5, end: 1.0 },
-    ];
-    const model = alignScriptToCaptionModel(asr, "你好。", {
-      maxCjkChars: 14,
-      modelId: "cm_x",
-      language: "zh",
-    });
-    expect(model.groups).toHaveLength(1);
-    expect(model.segments[0]!.text).toBe("你好。");
     expect(() => CaptionModelSchema.parse(model)).not.toThrow();
   });
 });

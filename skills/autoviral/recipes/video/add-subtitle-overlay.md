@@ -178,4 +178,16 @@ For everything else, prefer `overlay` — it's regroupable, restyle-able, and fa
 
 ## Managed-ffmpeg gotcha
 
-Every burn/encode step shells out to the **managed ffmpeg** the workstation provisions (`~/.autoviral/bin`), resolved via `ffmpeg-paths.ts` — not whatever `ffmpeg` happens to be on `PATH`. If an export that touches captions fails with a missing-binary error, it's the managed ffmpeg that's absent, not your composition: run `autoviral doctor` to (re)provision it. Never hard-code a system ffmpeg path in a recipe; it drifts across machines and breaks the double-driven (agent + human) parity.
+Every burn/encode step shells out to a **workstation-resolved ffmpeg**, not whatever `ffmpeg` happens to be on `PATH`. Resolution (`src/infra/deps.ts`, surfaced as `ffmpeg-paths.ts`) walks a fixed precedence and takes the first that exists:
+
+1. **env override** — `FFMPEG_PATH` / `FFPROBE_PATH` (the packaged desktop app points these at its bundled binaries).
+2. **managed** — `~/.autoviral/bin/ffmpeg` if a copy has been provisioned there.
+3. **vendored** — the bundled `ffmpeg-static` absolute path. This is the **default on a normal install**: it works under a stripped `PATH` with zero system ffmpeg, so most exports never touch `~/.autoviral/bin` at all.
+4. **bare `ffmpeg`** — last-resort lookup on `PATH`.
+
+So "managed ffmpeg in `~/.autoviral/bin`" is only one tier, and usually not the one in play. If a caption export dies with a missing-binary error, it means every tier missed — provisioning, not your composition, is the gap:
+
+- **`autoviral setup`** — INSTALLS: creates `~/.autoviral/bin` and copies the vendored binaries in (also builds the TTS venv). This is what fixes a missing dependency.
+- **`autoviral doctor`** — VERIFIES only: a pure read that prints which tier each binary resolved from. It does not install or re-provision anything; use it to confirm `setup` worked and to see which tier is active.
+
+Never hard-code a system ffmpeg path in a recipe; it drifts across machines and breaks the double-driven (agent + human) parity.

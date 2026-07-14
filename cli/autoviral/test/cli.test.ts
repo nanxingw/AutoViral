@@ -1402,6 +1402,33 @@ describe("autoviral CLI — end-to-end", () => {
     }
   });
 
+  // S9 review finding #5 — a bare `--script` (flag present, no value) or an
+  // empty / whitespace-only file must be a CALLER ERROR (exit 4), never a silent
+  // degrade to the legacy ASR→TextClip path. The old truthiness check skipped
+  // the whole block on a bare flag and forwarded an empty string on an empty
+  // file, so both quietly ran ASR and wrote no CaptionModel.
+  it("captions generate --script (bare, no path) → exit 4, never hits bridge", async () => {
+    lastCaptionsGenerate = null;
+    const r = await run(["captions", "generate", "--script"]);
+    expect(r.exitCode).toBe(4);
+    expect(r.stderr).toMatch(/script/i);
+    expect(lastCaptionsGenerate).toBeNull();
+  });
+
+  it("captions generate --script <empty file> → exit 4, never hits bridge (no silent fallback)", async () => {
+    lastCaptionsGenerate = null;
+    const scriptPath = join(__dirname, "fixtures-s9-empty.txt");
+    await writeFile(scriptPath, "   \n\t\n", "utf8");
+    try {
+      const r = await run(["captions", "generate", "--script", scriptPath]);
+      expect(r.exitCode).toBe(4);
+      expect(r.stderr).toMatch(/empty|whitespace/i);
+      expect(lastCaptionsGenerate).toBeNull();
+    } finally {
+      await rm(scriptPath, { force: true });
+    }
+  });
+
   // PRD-0014 S9 — `export --caption-tracks zh[,en]` forwards the language list to
   // the bridge /export body verbatim; the bridge resolves languages → text
   // tracks (first burned, rest sidecar SRTs). The CLI face is a pure pass-through.

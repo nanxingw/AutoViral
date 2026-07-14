@@ -71,14 +71,20 @@ for s in result.segments:
     segs.append({"start": float(s.start), "end": float(s.end), "text": s.text.strip()})
 out = {"segments": segs}
 ${wordLevel ? `words = []
+words_error = None
 try:
     for w in result.all_words():
         t = (w.word or "").strip()
         if t:
             words.append({"start": float(w.start), "end": float(w.end), "text": t})
-except Exception:
-    words = []
-out["words"] = words` : ""}
+except Exception as e:
+    # A word-timing extraction failure must NOT be swallowed into an empty list
+    # that the route then misreports as "no speech" — surface it so the caller
+    # sees a real failure (S9 review finding #2).
+    words_error = "word-timing extraction failed: " + str(e)
+out["words"] = words
+if words_error is not None:
+    out["words_error"] = words_error` : ""}
 print(json.dumps(out))
 `;
   try {
@@ -99,6 +105,19 @@ print(json.dumps(out))
         // and pip 404s. Burned ~5 minutes 2026-05-09 chasing this.
         code: "PYTHON_DEP_MISSING",
         error: `${parsed.error}. Run \`pip install stable-ts\` to enable ASR (the import is named stable_whisper but the PyPI package is stable-ts).`,
+      };
+    }
+    // S9 review finding #2 — `result.all_words()` raised inside the transcribe
+    // script (word timing unavailable for this model/version). The inline python
+    // reports it as `words_error` instead of returning an empty word list, so we
+    // propagate a real 500 rather than let the route see `words:[]` and falsely
+    // report "no speech" with HTTP 200.
+    if (wordLevel && typeof parsed.words_error === "string") {
+      return {
+        ok: false,
+        status: 500,
+        code: "WORD_TIMING_FAILED",
+        error: String(parsed.words_error),
       };
     }
     const captions: CaptionSegment[] = (parsed.segments ?? []).map((s: any) => ({

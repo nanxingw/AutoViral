@@ -37,8 +37,10 @@ type PipelineOpts = {
     height: number;
     fps: number;
     exportPresets: Array<{ id: string }>;
+    tracks: Array<{ id: string; kind: string; language?: string }>;
   };
   loudnessTargetLufs?: number;
+  captionTracks?: { burnTrackId?: string | null; sidecarTrackIds?: string[] };
 };
 
 function lastCall(): PipelineOpts {
@@ -190,6 +192,143 @@ describe("POST /export — F4 preset never overrides comp.fps (canvas-owned)", (
     expect(opts.comp.exportPresets[0].id).toBe("douyin-9-16");
     // ...but fps stays the CANVAS value (24), never preset.fps (30).
     expect(opts.comp.fps).toBe(24);
+  });
+});
+
+// PRD-0014 S9 review finding #1 — `--caption-tracks <langs>` resolution. The
+// route maps an ORDERED language list to text-track ids: first burned, rest
+// sidecar. The old code silently dropped an unmatched language and then took
+// the first SURVIVOR as the burn track (swapping the role the caller asked for)
+// — and when ALL were unmatched it left captionTracks undefined, so the legacy
+// pipeline burned EVERY text lane. These tests pin the corrected contract: any
+// unmatched language 400s, matched ones keep their requested order, and there
+// is NEVER a fall-back to "render all".
+describe("POST /export — caption-track language resolution (S9 finding #1)", () => {
+  let workRoot: string;
+  const workId = "w_export_captions";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  beforeAll(async () => {
+    const { mkdtemp, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-export-cap-"));
+    const yaml = `id: c_${workId}
+workId: ${workId}
+fps: 30
+width: 1080
+height: 1920
+duration: 12.0
+aspect: "9:16"
+updatedAt: "2026-05-14T00:00:00.000Z"
+tracks:
+  - id: video-0
+    kind: video
+    label: Video
+    muted: false
+    hidden: false
+    clips:
+      - id: vc_s01
+        kind: video
+        src: assets/sample-shot.mp4
+        in: 0
+        out: 4.0
+        trackOffset: 0
+  - id: text-zh
+    kind: text
+    label: 中文字幕
+    language: zh
+    muted: false
+    hidden: false
+    clips:
+      - id: tc_zh
+        kind: text
+        text: "你好"
+        trackOffset: 0
+        duration: 3.0
+  - id: text-en
+    kind: text
+    label: English
+    language: en
+    muted: false
+    hidden: false
+    clips:
+      - id: tc_en
+        kind: text
+        text: "Hello"
+        trackOffset: 0
+        duration: 3.0
+assets: []
+provenance: []
+exportPresets: []
+`;
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(join(workRoot, workId, "composition.yaml"), yaml, "utf8");
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+  beforeEach(() => {
+    runRenderPipeline.mockClear();
+    runRenderPipeline.mockResolvedValue("/tmp/out/final-123.mp4");
+  });
+
+  const post = (captionTracks: unknown) =>
+    app.request("/api/bridge/v1/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ captionTracks }),
+    });
+
+  // The composition loader may migrate authored track ids, so resolve the
+  // expected ids from the composition the route actually handed the pipeline
+  // (by language) rather than the literal yaml ids — this keeps the test about
+  // the burn/sidecar ROLE, not the id-mint.
+  const idByLang = (opts: PipelineOpts, lang: string) =>
+    opts.comp.tracks.find((t) => t.kind === "text" && t.language === lang)!.id;
+
+  it("zh,en → burn zh, sidecar [en] (requested order preserved)", async () => {
+    const res = await post(["zh", "en"]);
+    expect(res.status).toBe(200);
+    const opts = lastCall();
+    expect(opts.captionTracks?.burnTrackId).toBe(idByLang(opts, "zh"));
+    expect(opts.captionTracks?.sidecarTrackIds).toEqual([idByLang(opts, "en")]);
+  });
+
+  it("en,zh → burn en, sidecar [zh] (role follows request order, never re-shuffled)", async () => {
+    const res = await post(["en", "zh"]);
+    expect(res.status).toBe(200);
+    const opts = lastCall();
+    expect(opts.captionTracks?.burnTrackId).toBe(idByLang(opts, "en"));
+    expect(opts.captionTracks?.sidecarTrackIds).toEqual([idByLang(opts, "zh")]);
+  });
+
+  it("zh alone → burn zh, no sidecar", async () => {
+    const res = await post(["zh"]);
+    expect(res.status).toBe(200);
+    const opts = lastCall();
+    expect(opts.captionTracks?.burnTrackId).toBe(idByLang(opts, "zh"));
+    expect(opts.captionTracks?.sidecarTrackIds).toEqual([]);
+  });
+
+  it("zh,fr (fr unmatched) → 400 code:4, pipeline NOT called (no role swap)", async () => {
+    const res = await post(["zh", "fr"]);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number; error: string };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    expect(body.error).toMatch(/fr/);
+    expect(runRenderPipeline).not.toHaveBeenCalled();
+  });
+
+  it("fr alone (all unmatched) → 400 code:4, pipeline NOT called (no fall-back to render-all)", async () => {
+    const res = await post(["fr"]);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    expect(runRenderPipeline).not.toHaveBeenCalled();
   });
 });
 

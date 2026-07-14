@@ -23,10 +23,26 @@ export interface AsrWord {
   text: string;
 }
 
+// A single matchable atom (one CJK char / one latin word) with its own timing +
+// the verbatim ground-truth text (adjacent punctuation attached). This is the
+// per-word granularity the CaptionModel's `segments` half promises (CONTEXT.md:
+// "immutable per-word segments"), so the overlay renderer can highlight word by
+// word and the caption can be regrouped without re-running ASR.
+export interface CaptionAtom {
+  start: number;
+  end: number;
+  text: string;
+  latin: boolean;
+}
+
 export interface CaptionLine {
   start: number;
   end: number;
   text: string;
+  // The per-word atoms that make up this line (in reading order). Populated by
+  // alignScriptLines; consumed by buildCaptionModelFromLines to emit per-word
+  // segments. Optional so a hand-built {start,end,text} line still works.
+  atoms?: CaptionAtom[];
 }
 
 // CJK ideographs + kana. A single such char is one matchable atom and counts 1
@@ -38,6 +54,10 @@ const WORD_RE = /[A-Za-z0-9'À-ɏ]/;
 const TERMINAL_RE = /[。！？!?…]/;
 // Pause punctuation is a preferred break point (break after).
 const PAUSE_RE = /[，、；：,;:]/;
+// Opening punctuation attaches FORWARD to the next atom (leading quotes /
+// brackets), everything else attaches BACK to the preceding atom. This is how
+// we keep the ground truth byte-faithful without severing a matchable atom.
+const OPENING_RE = /[「『（【〈《“‘"'([{]/;
 
 function isCjk(ch: string): boolean {
   return CJK_RE.test(ch);
@@ -346,6 +366,37 @@ function splitLines(units: ScriptUnit[], maxCjkChars: number): PendingLine[] {
   return lines;
 }
 
+// Build the verbatim display text for EACH matchable atom (parallel to the
+// atom stream), attaching adjacent punctuation so nothing in the ground truth
+// is dropped: an OPENING punct (leading quote / bracket) prepends to the NEXT
+// atom; any other punct (terminal / pause / closing quote) appends to the
+// PRECEDING atom. A closing punct that somehow precedes the first atom is
+// buffered forward too. This replaces the old buildWords path that silently
+// dropped leading punctuation and truncated a hard-split line's trailing
+// terminal punctuation (S9 review findings #4).
+function atomDisplayTexts(units: ScriptUnit[]): string[] {
+  const texts: string[] = [];
+  let pendingPrefix = "";
+  for (const u of units) {
+    if (u.kind === "atom") {
+      texts.push(pendingPrefix + u.text);
+      pendingPrefix = "";
+    } else if (u.kind === "punct") {
+      if (OPENING_RE.test(u.text) || texts.length === 0) {
+        pendingPrefix += u.text; // attach to the next atom
+      } else {
+        texts[texts.length - 1] += u.text; // attach to the preceding atom
+      }
+    }
+    // whitespace carries no display char — inter-word spacing is re-derived
+    // from the per-atom `latin` flag when a line is assembled.
+  }
+  if (pendingPrefix && texts.length > 0) {
+    texts[texts.length - 1] += pendingPrefix;
+  }
+  return texts;
+}
+
 // ─── Public API ────────────────────────────────────────────────────────────
 
 export function alignScriptLines(
@@ -355,18 +406,35 @@ export function alignScriptLines(
 ): CaptionLine[] {
   const maxCjkChars = Math.max(1, Math.floor(opts?.maxCjkChars ?? 14));
   const units = tokenizeScript(scriptText ?? "");
-  const scriptNorms = units.filter((u) => u.kind === "atom").map((u) => u.norm!);
+  const atomUnits = units.filter((u) => u.kind === "atom");
+  const scriptNorms = atomUnits.map((u) => u.norm!);
   if (scriptNorms.length === 0) return [];
   const asr = asrAtoms(asrWords ?? []);
   if (asr.length === 0) return [];
 
   const anchors = lcsAnchors(asr, scriptNorms);
   const times = timeScriptAtoms(asr, scriptNorms.length, anchors);
+  const atomTexts = atomDisplayTexts(units);
+  const atomLatin = atomUnits.map((u) => !u.cjk);
   const pending = splitLines(units, maxCjkChars);
 
   const lines: CaptionLine[] = [];
   for (const p of pending) {
     if (p.matchIdxs.length === 0) continue;
+    // Per-word atoms for this line, timing straight off timeScriptAtoms.
+    const atoms: CaptionAtom[] = p.matchIdxs.map((idx) => ({
+      start: times[idx]!.start,
+      end: Math.max(times[idx]!.start, times[idx]!.end),
+      text: atomTexts[idx]!,
+      latin: atomLatin[idx]!,
+    }));
+    // Line text is re-derived from the atoms (byte-faithful), a single space
+    // between two adjacent latin atoms for readability, none around CJK.
+    let text = "";
+    for (let i = 0; i < atoms.length; i++) {
+      if (i > 0 && atoms[i - 1]!.latin && atoms[i]!.latin) text += " ";
+      text += atoms[i]!.text;
+    }
     const firstIdx = p.matchIdxs[0]!;
     const lastIdx = p.matchIdxs[p.matchIdxs.length - 1]!;
     let start = times[firstIdx]!.start;
@@ -376,7 +444,7 @@ export function alignScriptLines(
       start = lines[lines.length - 1]!.end;
     }
     if (end < start) end = start;
-    lines.push({ start, end, text: p.text });
+    lines.push({ start, end, text, atoms });
   }
   return lines;
 }
@@ -403,21 +471,44 @@ export function buildCaptionModelFromLines(
   },
 ): CaptionModel {
   const style = opts.style ?? DEFAULT_GROUP_STYLE;
+  // CaptionModel's two halves (CONTEXT.md): immutable PER-WORD `segments` (from
+  // ASR timing) + visual `groups` that decide the on-screen lines. Each line
+  // becomes ONE group referencing its atoms' segments — so the overlay renderer
+  // highlights word by word and the caption can be regrouped without re-running
+  // ASR. A line without per-atom data (a hand-built {start,end,text}) falls back
+  // to a single whole-line segment so older callers keep working.
+  const segments: CaptionModel["segments"] = [];
+  const groups: CaptionModel["groups"] = [];
+  let segCounter = 0;
+  lines.forEach((l, gi) => {
+    const atoms: CaptionAtom[] =
+      l.atoms && l.atoms.length > 0
+        ? l.atoms
+        : [{ start: l.start, end: l.end, text: l.text, latin: false }];
+    const segmentIds: string[] = [];
+    for (const atom of atoms) {
+      const segmentId = `seg_${String(segCounter).padStart(4, "0")}`;
+      segCounter++;
+      segments.push({
+        segmentId,
+        start: Math.max(0, atom.start),
+        end: Math.max(0, Math.max(atom.start, atom.end)),
+        text: atom.text,
+      });
+      segmentIds.push(segmentId);
+    }
+    groups.push({
+      groupId: `grp_${String(gi).padStart(3, "0")}`,
+      start: Math.max(0, l.start),
+      end: Math.max(0, l.end),
+      segmentIds,
+      style,
+    });
+  });
   const model: CaptionModel = {
     modelId: opts.modelId,
-    segments: lines.map((l, i) => ({
-      segmentId: `seg_${String(i).padStart(4, "0")}`,
-      start: Math.max(0, l.start),
-      end: Math.max(0, l.end),
-      text: l.text,
-    })),
-    groups: lines.map((l, i) => ({
-      groupId: `grp_${String(i).padStart(3, "0")}`,
-      start: Math.max(0, l.start),
-      end: Math.max(0, l.end),
-      segmentIds: [`seg_${String(i).padStart(4, "0")}`],
-      style,
-    })),
+    segments,
+    groups,
   };
   if (opts.language) model.language = opts.language;
   if (opts.audioTrackId !== undefined) model.audioTrackId = opts.audioTrackId;

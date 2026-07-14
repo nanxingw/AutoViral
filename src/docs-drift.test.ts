@@ -301,6 +301,59 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     expect(recipe).toMatch(/captions generate --script/);
   });
 
+  // S9 review finding #6 — the managed-ffmpeg gotcha used to lie about the tool
+  // semantics: it claimed ffmpeg is ONLY the managed `~/.autoviral/bin` copy and
+  // that `autoviral doctor` "(re)provisions" it. In truth deps.ts resolves in a
+  // precedence (env → managed → VENDORED ffmpeg-static → PATH, vendored being
+  // the usual default), and `doctor` is a PURE READ — `autoviral setup` is what
+  // installs. Pin the corrected semantics so the wrong instruction can't return.
+  it("the managed-ffmpeg gotcha states the real resolution order + setup/doctor roles (not doctor-provisions)", () => {
+    const recipe = readFileSync(
+      join(
+        REPO_ROOT,
+        "skills",
+        "autoviral",
+        "recipes",
+        "video",
+        "add-subtitle-overlay.md",
+      ),
+      "utf8",
+    );
+    // The gotcha section (from the "Managed-ffmpeg" heading onward).
+    const idx = recipe.indexOf("Managed-ffmpeg gotcha");
+    expect(idx, "the managed-ffmpeg gotcha section is missing").toBeGreaterThan(-1);
+    const section = recipe.slice(idx);
+
+    // The real precedence must be documented — not just ~/.autoviral/bin. The
+    // vendored tier + a PATH-independent story must appear.
+    expect(section, "gotcha must mention the vendored ffmpeg-static tier").toMatch(
+      /vendored|ffmpeg-static/i,
+    );
+    expect(section, "gotcha must mention the env override tier (FFMPEG_PATH)").toMatch(
+      /FFMPEG_PATH/,
+    );
+    expect(section, "gotcha must mention the PATH last-resort tier").toMatch(/PATH/);
+
+    // `autoviral setup` is the INSTALLER; `autoviral doctor` is a read-only
+    // VERIFIER. Both verbs must be present with those roles.
+    expect(section).toMatch(/autoviral setup/);
+    expect(section).toMatch(/autoviral doctor/);
+    expect(section, "gotcha must frame setup as the installer").toMatch(
+      /setup[^.]*\binstall/i,
+    );
+    expect(section, "gotcha must frame doctor as read-only verify, not install").toMatch(
+      /doctor[^.]*\b(verif|read|confirm|does not install|not install)/i,
+    );
+
+    // The dead instruction — doctor (re)provisions / installs ffmpeg — must be
+    // gone. `doctor` must never be the sentence's install/provision verb.
+    expect(
+      section,
+      "gotcha still tells the reader `doctor` (re)provisions/installs ffmpeg — it is a pure read; use `setup`",
+    ).not.toMatch(/doctor[^.]*\b(re-?provision|re-?install)/i);
+    expect(section).not.toMatch(/doctor to \(?re-?\)?provision/i);
+  });
+
   it("the i2v batch recipe never claims audio/text clip-add is unsupported (they write today)", () => {
     const recipe = readFileSync(
       join(
