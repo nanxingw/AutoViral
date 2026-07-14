@@ -77,4 +77,28 @@ describe("<StaticPropsPanel /> — source audio (S5)", () => {
     expect(audioClipCount()).toBe(before + 1);
     expect(liveVideo("v1").sourceAudio?.enabled).toBe(false);
   });
+
+  // Review fix #1 — the禁 "detach 后源声双份出声". After detach, re-enabling the 原声
+  // switch must ATOMICALLY delete the detached AudioClip (route through the reverse
+  // op), or the source + the pulled track both play.
+  it("re-enabling 原声 after Detach deletes the detached clip (no double-play)", () => {
+    useComposition.setState({ comp: compWithVideoClip("v1"), selection: "v1" });
+    const { rerender } = render(<StaticPropsPanel />);
+    const before = audioClipCount();
+
+    // Detach: +1 audio clip, source muted. (The store re-selects the new audio
+    // clip; the user re-selects the video clip to reach its 原声 switch — exactly
+    // the finding #1 scenario "detach 后仍可通过 Inspector 重新开启视频原声".)
+    fireEvent.click(screen.getByRole("button", { name: /拆分原声|detach/i }));
+    expect(audioClipCount()).toBe(before + 1);
+    useComposition.setState({ selection: "v1" });
+    rerender(<StaticPropsPanel />);
+    const toggle = screen.getByRole("checkbox", { name: /原声|source audio/i });
+    expect(toggle).not.toBeChecked();
+
+    // Re-enable: the detached twin is removed AND the source is back on.
+    fireEvent.click(toggle);
+    expect(audioClipCount()).toBe(before); // twin gone — not a double
+    expect(liveVideo("v1").sourceAudio?.enabled).toBe(true);
+  });
 });

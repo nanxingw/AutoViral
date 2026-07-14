@@ -54,6 +54,9 @@ const SUNK: Record<string, string> = {
   // ── S5 (PRD-0014) — detach a video clip's source audio to a first-class
   // AudioClip; the store button and `autoviral clip detach-audio` share the op.
   detachClipAudio: "detachAudio",
+  // S5 review fix #1 — the REVERSE op: re-enable source audio + delete the
+  // detached AudioClip through the shared `ops.attachAudio`.
+  reattachClipAudio: "attachAudio",
 };
 
 // Store-only editing verbs NOT yet lifted. Each carries the slice/reason so the

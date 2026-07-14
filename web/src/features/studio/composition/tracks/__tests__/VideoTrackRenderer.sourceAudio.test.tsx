@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
 
 // PRD-0014 S5 — source-audio RENDERER CONSUMPTION proof. `sourceAudio` is NOT a
@@ -12,6 +12,10 @@ import { render } from "@testing-library/react";
 //   - sourceAudio.volume → forwarded to the <Video> volume.
 
 const frameRef = { current: 0 };
+// Review fix #5 — drive BOTH render environments. The prior test hardcoded
+// isRendering:false (preview <Video>); the export path uses <OffthreadVideo>, so
+// muting the source on export must be proven too. This ref lets each test pick.
+const renderingRef = { current: false };
 vi.mock("remotion", async (orig) => {
   const actual = (await orig()) as Record<string, unknown>;
   const Passthrough = ({ children }: { children?: React.ReactNode }) => (
@@ -53,8 +57,8 @@ vi.mock("remotion", async (orig) => {
     }),
     getRemotionEnvironment: () => ({
       isStudio: false,
-      isRendering: false,
-      isPlayer: true,
+      isRendering: renderingRef.current,
+      isPlayer: !renderingRef.current,
       isReadOnlyStudio: false,
       isClientSideRendering: false,
     }),
@@ -100,6 +104,10 @@ function videoLayer(container: HTMLElement): HTMLElement {
 }
 
 describe("VideoTrackRenderer consumes sourceAudio (S5)", () => {
+  beforeEach(() => {
+    renderingRef.current = false; // default: preview branch
+  });
+
   it("no sourceAudio (old work) → <Video> is NOT muted, volume 1", () => {
     frameRef.current = 30;
     const { container } = render(<Scene comp={compWithVideo({})} />);
@@ -124,5 +132,28 @@ describe("VideoTrackRenderer consumes sourceAudio (S5)", () => {
     const v = videoLayer(container);
     expect(v.getAttribute("data-muted")).toBe("false");
     expect(v.getAttribute("data-volume")).toBe("0.5");
+  });
+
+  // Review fix #5 — EXPORT branch (<OffthreadVideo>, isRendering:true). Muting the
+  // detached source on export is the WYSIWYG half; the prior suite only covered
+  // preview. Same baseProps drive both, so the drop must hold here too.
+  it("EXPORT branch (isRendering:true): enabled:false → OffthreadVideo muted", () => {
+    renderingRef.current = true;
+    frameRef.current = 30;
+    const { container } = render(
+      <Scene comp={compWithVideo({ sourceAudio: { enabled: false } })} />,
+    );
+    expect(videoLayer(container).getAttribute("data-muted")).toBe("true");
+  });
+
+  it("EXPORT branch (isRendering:true): volume forwarded on OffthreadVideo", () => {
+    renderingRef.current = true;
+    frameRef.current = 30;
+    const { container } = render(
+      <Scene comp={compWithVideo({ sourceAudio: { enabled: true, volume: 0.25 } })} />,
+    );
+    const v = videoLayer(container);
+    expect(v.getAttribute("data-muted")).toBe("false");
+    expect(v.getAttribute("data-volume")).toBe("0.25");
   });
 });

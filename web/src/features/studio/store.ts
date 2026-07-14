@@ -146,6 +146,11 @@ interface CompState {
   // agent converge. No-op guards live in the op (unknown/non-video/already
   // detached throw); the store swallows the throw (silent no-op contract).
   detachClipAudio: (clipId: string) => void;
+  // S5 review fix #1 — the REVERSE of detachClipAudio (Inspector "原声" switch
+  // back ON). Re-enables the source AND atomically deletes the detached
+  // AudioClip via `ops.attachAudio`, so re-enabling never double-plays the
+  // source + the pulled track.
+  reattachClipAudio: (clipId: string) => void;
   // Phase 4.I — edge-drag resize. `newTime` is the proposed timeline-time of
   // the moving edge. Clamps left at 0, right at next clip's trackOffset (D2),
   // and enforces minDuration 0.05s on both edges. Branches on clip kind:
@@ -629,6 +634,26 @@ export const useComposition = create<CompState>()(
         const { audioClipId } = ops.detachAudio(s.comp, { clipId });
         // Select the freshly-detached audio clip so the user sees it land.
         s.selection = audioClipId;
+      }),
+    // S5 review fix #1 — reverse op. Re-enable source audio + atomically drop
+    // the detached AudioClip (ops.attachAudio). Only snapshots undo when the
+    // target is a real video clip (mirrors detachClipAudio's guard).
+    reattachClipAudio: (clipId) =>
+      set((s) => {
+        if (!s.comp) return;
+        let target: Clip | undefined;
+        for (const t of s.comp.tracks) {
+          const c = (t.clips as Clip[]).find((c) => c.id === clipId);
+          if (c) {
+            target = c;
+            break;
+          }
+        }
+        if (!target || target.kind !== "video") return;
+        pushClipHistory(s);
+        ops.attachAudio(s.comp, { clipId });
+        // Keep the video clip selected so the source-audio controls stay open.
+        s.selection = clipId;
       }),
     collapseGaps: (trackId) =>
       set((s) => {

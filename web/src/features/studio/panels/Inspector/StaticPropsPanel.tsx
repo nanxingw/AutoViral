@@ -148,6 +148,7 @@ export function StaticPropsPanel() {
   const selection = useComposition((s) => s.selection);
   const updateClip = useComposition((s) => s.updateClip);
   const detachClipAudio = useComposition((s) => s.detachClipAudio);
+  const reattachClipAudio = useComposition((s) => s.reattachClipAudio);
   const t = useT();
 
   const clip = useMemo<Clip | null>(() => {
@@ -344,6 +345,20 @@ export function StaticPropsPanel() {
   // spread-guards the sibling field (#81/#86) so toggling doesn't wipe volume.
   const videoClip = clip.kind === "video" ? clip : null;
   const srcAudio = videoClip ? resolveSourceAudio(videoClip) : null;
+  // Review fix #1 — is there an AudioClip previously detached from THIS video
+  // still on a lane? If so, re-enabling the source must go through the atomic
+  // reverse op (reattachClipAudio → ops.attachAudio) which deletes that twin, so
+  // the source + the detached track never double-play (the禁 "detach 后源声双份出声").
+  const hasDetachedTwin = !!(
+    videoClip &&
+    comp?.tracks.some((tr) =>
+      (tr.clips as Clip[]).some(
+        (c) =>
+          c.kind === "audio" &&
+          (c as { detachedFrom?: string }).detachedFrom === videoClip.id,
+      ),
+    )
+  );
 
   if (sections.length === 0 && !audioClip && !videoClip) return null;
 
@@ -376,14 +391,23 @@ export function StaticPropsPanel() {
               type="checkbox"
               aria-label={t("studio.inspector.sourceAudioEnabled")}
               checked={srcAudio.enabled}
-              onChange={(e) =>
-                updateClip(videoClip.id, {
-                  sourceAudio: {
-                    ...(videoClip.sourceAudio ?? {}),
-                    enabled: e.target.checked,
-                  },
-                })
-              }
+              onChange={(e) => {
+                // Review fix #1 — re-enabling WITH a detached twin present routes
+                // through the atomic reverse op so the pulled AudioClip is deleted
+                // in the same mutation (no double-play). All other transitions
+                // (disable, or re-enable with no twin) are a plain spread-guarded
+                // enabled write.
+                if (e.target.checked && hasDetachedTwin) {
+                  reattachClipAudio(videoClip.id);
+                } else {
+                  updateClip(videoClip.id, {
+                    sourceAudio: {
+                      ...(videoClip.sourceAudio ?? {}),
+                      enabled: e.target.checked,
+                    },
+                  });
+                }
+              }}
               style={{ justifySelf: "start", width: 16, height: 16, accentColor: "var(--accent)" }}
             />
           </div>

@@ -146,6 +146,43 @@ describe("detachAudio op (S5)", () => {
     expect(() => detachAudio(comp, { clipId: "ac1" })).toThrow(CompositionOpError);
   });
 
+  it("stamps a detachedFrom back-link on the minted AudioClip (review fix #1)", () => {
+    const comp = compWithVideo();
+    const { audioClipId } = detachAudio(comp, { clipId: "vc1" });
+    const a = audioClips(comp).find((c) => c.id === audioClipId) as unknown as {
+      detachedFrom?: string;
+    };
+    expect(a.detachedFrom).toBe("vc1");
+  });
+
+  it("REJECTS detach on a speed-ramped clip (review fix #3 — would desync audio)", () => {
+    const comp = compWithVideo({
+      keyframes: [
+        { property: "speed", time: 0, value: 2, easing: "linear" },
+        { property: "speed", time: 2, value: 0.5, easing: "linear" },
+      ],
+    });
+    expect(() => detachAudio(comp, { clipId: "vc1" })).toThrow(CompositionOpError);
+    // and it did NOT half-mutate: no audio clip minted, source still enabled.
+    expect(audioClips(comp)).toHaveLength(0);
+    expect(resolveSourceAudio(findVideo(comp, "vc1")).enabled).toBe(true);
+  });
+
+  it("REJECTS detach on a static non-1 speed clip too (review fix #3)", () => {
+    const comp = compWithVideo({
+      keyframes: [{ property: "speed", time: 0, value: 2, easing: "linear" }],
+    });
+    expect(() => detachAudio(comp, { clipId: "vc1" })).toThrow(CompositionOpError);
+  });
+
+  it("ALLOWS detach when speed keyframes are all no-op 1.0 (no clock warp)", () => {
+    const comp = compWithVideo({
+      keyframes: [{ property: "speed", time: 0, value: 1, easing: "linear" }],
+    });
+    expect(() => detachAudio(comp, { clipId: "vc1" })).not.toThrow();
+    expect(audioClips(comp)).toHaveLength(1);
+  });
+
   it("second call on an already-detached clip is a hard error (no duplicate audio clip)", () => {
     const comp = compWithVideo();
     detachAudio(comp, { clipId: "vc1" });

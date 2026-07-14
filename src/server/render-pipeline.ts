@@ -295,6 +295,12 @@ function compositionToMixTracks(comp: Composition): MixTrack[] {
       source: clip.src,
       type: clip.type ?? "bgm",
       volume: (clip.volume ?? 1) * laneGainLinear,
+      // S5 review fix #2 — carry the clip's source [in,out] so the ducking
+      // re-mix reads the SAME sub-region Stage-1 Remotion did (a detached/
+      // trimmed clip has in>0). Without this the ducked audio plays from
+      // source second 0.
+      in: clip.in,
+      out: clip.out,
       delay: clip.trackOffset,
       fadeIn: clip.fadeIn,
       fadeOut: clip.fadeOut,

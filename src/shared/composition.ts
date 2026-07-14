@@ -293,6 +293,12 @@ const AudioClipObjectSchema = z.object({
     .optional(),
   type: z.enum(["original", "bgm", "voiceover", "sfx"]).default("bgm"),
   keyframes: z.array(KeyframeSchema).optional(),
+  // S5 (PRD-0014, review fix #1) — stable back-link from a DETACHED source-audio
+  // clip to the VideoClip it was pulled from. `detachAudio` stamps this so the
+  // reverse `attachAudio` op (re-enabling the source in the Inspector) can
+  // ATOMICALLY delete the matching clip and never leave both playing (the禁
+  // "detach 后源声双份出声"). Absent on every normal (non-detached) audio clip.
+  detachedFrom: z.string().optional(),
 });
 export const AudioClipSchema = AudioClipObjectSchema.superRefine(
   refineSpeedKeyframes,

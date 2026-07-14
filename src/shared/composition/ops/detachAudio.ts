@@ -90,6 +90,23 @@ export function detachAudio(
       4,
     );
   }
+  // Review fix #3 — a speed-adjusted video plays its embedded audio at a
+  // NON-1 (or variable) rate via Remotion playbackRate + the export atempo
+  // pass, but a detached AudioClip carries no speed curve and the audio
+  // renderer has no playbackRate, so the pulled track would play at 1×
+  // against a sped-up picture (silent音画失步). Rather than emit a desynced
+  // track, REJECT the detach on any speed keyframe that isn't a no-op 1.0.
+  // (Uniform-1 speed keyframes are harmless — they don't warp the clock.)
+  const hasSpeedWarp = (video.keyframes ?? []).some(
+    (k) => k.property === "speed" && k.value !== 1,
+  );
+  if (hasSpeedWarp) {
+    throw new CompositionOpError(
+      `detachAudio: clip ${p.clipId} has a speed ramp — detaching would desync the ` +
+        `pulled audio from the sped-up picture. Remove the speed keyframes first.`,
+      4,
+    );
+  }
 
   // ── Phase 2: mutate. All checks passed, so every write below lands. ──
   // Find (or mint) an audio lane. addTrack pushes onto comp.tracks in place.
@@ -117,6 +134,10 @@ export function detachAudio(
     fadeOut: 0,
     // The detached track IS the clip's original diegetic audio.
     type: "original",
+    // Review fix #1 — stable back-link so `attachAudio` (re-enable in the
+    // Inspector) knows exactly which clip to atomically delete, preventing the
+    // source + this track double-playing on re-enable.
+    detachedFrom: video.id,
   };
   (audioTrack.clips as Clip[]).push(audioClip);
 

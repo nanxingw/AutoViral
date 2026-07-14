@@ -40,3 +40,5 @@ export type { ReframeParams } from "./reframeClip.js";
 // PRD-0014 S5 — detach a video clip's source audio to a first-class AudioClip.
 export { detachAudio } from "./detachAudio.js";
 export type { DetachAudioResult } from "./detachAudio.js";
+export { attachAudio } from "./attachAudio.js";
+export type { AttachAudioResult } from "./attachAudio.js";

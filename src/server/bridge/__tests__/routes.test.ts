@@ -5324,3 +5324,113 @@ describe("bridge router — S6 clip import honours AUTOVIRAL_DATA_DIR (finding 4
     expect(probedPath).toBe(join(dataDir, "works", workId, "output/final.mp4"));
   });
 });
+
+// PRD-0014 S5 review fix #6 — REAL bridge route coverage for POST
+// /clip/:id/detach-audio. The CLI test uses a hand-rolled fake server that mints
+// an AudioClip itself, so it never exercises the real Hono route / ops.detachAudio
+// persistence. This drives the actual router against a real on-disk work: seed a
+// video clip, POST detach, then read the persisted composition back and assert the
+// AudioClip was minted (type original, detachedFrom back-link), the source muted,
+// and a composition-changed broadcast fired. A route deletion / stopped calling
+// ops.detachAudio / stopped persisting fails HERE.
+describe("bridge router — S5 detach-audio (real route + persistence)", () => {
+  let workRoot: string;
+  const workId = "w_detach_route";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-detach-route-"));
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(
+      join(workRoot, workId, "composition.yaml"),
+      fixture.replace(/workId: sample-work/, `workId: ${workId}`),
+      "utf8",
+    );
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  it("POST /clip/:id/detach-audio mints an AudioClip (type original + detachedFrom) and mutes the source", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (ev) => events.push(ev.type));
+    try {
+      const res = await app.request("/api/bridge/v1/clip/vc_s01/detach-audio", {
+        method: "POST",
+        headers: { "X-AutoViral-Work-Id": workId },
+      });
+      expect(res.status).toBe(200);
+      const body = (await res.json()) as {
+        ok: boolean;
+        result?: { audioClipId: string; trackId: string };
+      };
+      expect(body.ok).toBe(true);
+      const audioClipId = body.result!.audioClipId;
+      expect(audioClipId).toBeTruthy();
+
+      // Read the PERSISTED composition back through the real GET /comp route.
+      const comp = await app.request("/api/bridge/v1/comp", {
+        headers: { "X-AutoViral-Work-Id": workId },
+      });
+      const compBody = (await comp.json()) as {
+        result: {
+          tracks: Array<{
+            kind: string;
+            clips: Array<{
+              id: string;
+              kind: string;
+              type?: string;
+              detachedFrom?: string;
+              sourceAudio?: { enabled?: boolean };
+            }>;
+          }>;
+        };
+      };
+      const allClips = compBody.result.tracks.flatMap((t) => t.clips);
+
+      // (1) the minted AudioClip persisted with the back-link.
+      const minted = allClips.find((c) => c.id === audioClipId);
+      expect(minted?.kind).toBe("audio");
+      expect(minted?.type).toBe("original");
+      expect(minted?.detachedFrom).toBe("vc_s01");
+
+      // (2) the source video clip is muted.
+      const source = allClips.find((c) => c.id === "vc_s01");
+      expect(source?.sourceAudio?.enabled).toBe(false);
+
+      // (3) the write broadcast a composition-changed event.
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  it("POST /clip/:id/detach-audio a second time → 400 + code 4 (already detached, no dup)", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/detach-audio", {
+      method: "POST",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+  });
+
+  it("POST /clip/:id/detach-audio unknown clip → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/nope/detach-audio", {
+      method: "POST",
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+});

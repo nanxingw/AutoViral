@@ -591,6 +591,7 @@ describe("compositionToMixTracks — Phase G per-track volume + mute (issue #34)
       clipVolume?: number;
       type?: "bgm" | "voiceover" | "sfx" | "original";
       offset?: number;
+      inSec?: number;
       duration?: number;
       ducking?: { ratio: number; attack: number; release: number };
     }>;
@@ -608,7 +609,7 @@ describe("compositionToMixTracks — Phase G per-track volume + mute (issue #34)
         id: c.id,
         kind: "audio" as const,
         src: c.src,
-        in: 0,
+        in: c.inSec ?? 0,
         out: c.duration ?? 4,
         trackOffset: c.offset ?? 0,
         volume: c.clipVolume ?? 1,
@@ -643,6 +644,38 @@ describe("compositionToMixTracks — Phase G per-track volume + mute (issue #34)
     expect(vo.volume).toBeCloseTo(1.0, 6);
     // -12 dB × clipVolume 0.8 → 0.2512 × 0.8 ≈ 0.2009
     expect(sfx.volume).toBeCloseTo(0.2009, 3);
+  });
+
+  // S5 review fix #2 — a detached / trimmed AudioClip carries a non-zero source
+  // in-point; the ducking re-mix must read the SAME [in,out] sub-region Stage-1
+  // Remotion did, or it plays from source second 0. This asserts the adapter
+  // forwards in/out (the mixAudioTracks side then emits atrim=start:end).
+  it("carries the clip's source [in,out] into the MixTrack (detached/trimmed clip)", () => {
+    const comp: Composition = {
+      ...baseComp,
+      tracks: [
+        audioLane({
+          id: "trk_orig",
+          label: "Original",
+          order: 0,
+          clips: [
+            {
+              id: "ac_det",
+              src: "/shot.mp4",
+              type: "original",
+              inSec: 5,
+              duration: 10, // out
+              offset: 2,
+            },
+          ],
+        }),
+      ],
+    };
+    const mix = __compositionToMixTracksForTest(comp);
+    expect(mix).toHaveLength(1);
+    expect(mix[0].in).toBe(5);
+    expect(mix[0].out).toBe(10);
+    expect(mix[0].delay).toBe(2); // trackOffset → adelay positions the trimmed seg
   });
 
   it("track.muted=true collapses lane gain to ~0 regardless of lane volume or clip volume", () => {

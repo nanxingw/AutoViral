@@ -169,8 +169,16 @@ export function speedRampCacheName(
   clipId: string,
   speed: number,
   fps: number,
+  // Review fix #4 — the pre-pass now BAKES a video-only vs audio-carrying MP4
+  // depending on `resolveSourceAudio(clip).enabled` (see processVideoSpeed).
+  // That value MUST be in the cache key or a disabled-then-enabled (or
+  // detach-then-undo) re-export hits a stale no-audio cache and stays silent.
+  // Default true keeps the byte-for-byte name for the common (enabled) case so
+  // existing on-disk caches keep hitting; only the disabled variant gets `-na`.
+  srcAudio: boolean = true,
 ): string {
-  return `clip-${clipId}-speed-${Math.round(speed * 100)}-fps${fps}.mp4`;
+  const audioSuffix = srcAudio ? "" : "-na";
+  return `clip-${clipId}-speed-${Math.round(speed * 100)}-fps${fps}${audioSuffix}.mp4`;
 }
 
 // ─── S4 (PRD-0014) — variable-speed segmentation ───────────────────────────
@@ -415,6 +423,10 @@ export function variableSpeedCacheName(
   inSec: number,
   outSec: number,
   fps: number,
+  // Review fix #4 — same source-audio gating as the static name. Default true
+  // keeps the existing hash for the enabled case (no on-disk cache churn); the
+  // disabled variant gets a distinct `-na` suffix so it can't collide.
+  srcAudio: boolean = true,
 ): string {
   const speedKfs = keyframes
     .filter((k) => k.property === "speed")
@@ -422,7 +434,8 @@ export function variableSpeedCacheName(
     .sort((a, b) => a.t - b.t);
   const sig = JSON.stringify({ speedKfs, inSec, outSec, fps });
   const hash = createHash("sha1").update(sig).digest("hex").slice(0, 10);
-  return `clip-${clipId}-speedvar-${hash}.mp4`;
+  const audioSuffix = srcAudio ? "" : "-na";
+  return `clip-${clipId}-speedvar-${hash}${audioSuffix}.mp4`;
 }
 
 /**
@@ -640,6 +653,11 @@ async function processVideoSpeed(
 ): Promise<VideoClip> {
   const staticSpeed = isStaticSpeed(c);
   const hasSpeedKf = (c.keyframes ?? []).some((k) => k.property === "speed");
+  // Review fix #4 — resolve source-audio state ONCE up front and fold it into
+  // BOTH cache names below, so the cached MP4's audio structure (video-only when
+  // disabled vs audio-carrying when enabled) can't be served across a
+  // disable→enable / detach→undo re-export. Read before the `stat` cache probe.
+  const srcAudioEnabled = resolveSourceAudio(c).enabled;
 
   // Variable speed = has speed keyframes AND isStaticSpeed returned null
   // (i.e. they don't all share the same value). S4: bake the ramp.
@@ -648,7 +666,7 @@ async function processVideoSpeed(
     if (segments.length === 0 || totalTimelineDuration <= 0) return c; // defensive
     const cachePath = join(
       workDir,
-      variableSpeedCacheName(c.id, c.keyframes ?? [], c.in, c.out, fps),
+      variableSpeedCacheName(c.id, c.keyframes ?? [], c.in, c.out, fps, srcAudioEnabled),
     );
     // The concat cache bakes the whole [in,out] ramp and starts at 0, so the
     // rewritten clip plays it straight — reset in/out and STRIP the speed
@@ -666,9 +684,7 @@ async function processVideoSpeed(
     // drop — the禁 "detach 后源声双份出声"); skip the probe entirely and emit a
     // video-only concat graph. Otherwise probe on a cache miss (an ffmpeg pass is
     // about to run anyway).
-    const hasAudio = resolveSourceAudio(c).enabled
-      ? await probeAudio(c.src, signal)
-      : false;
+    const hasAudio = srcAudioEnabled ? await probeAudio(c.src, signal) : false;
     await runVariableSpeedPass(c.src, cachePath, segments, fps, hasAudio, signal);
     return rewritten;
   }
@@ -677,7 +693,10 @@ async function processVideoSpeed(
     return c; // no speed kfs OR speed=1 → no-op
   }
   // Static, non-1 speed → run the pre-pass (or hit the cache).
-  const cachePath = join(workDir, speedRampCacheName(c.id, staticSpeed, fps));
+  const cachePath = join(
+    workDir,
+    speedRampCacheName(c.id, staticSpeed, fps, srcAudioEnabled),
+  );
   try {
     await stat(cachePath);
     return { ...c, src: cachePath };
@@ -685,9 +704,7 @@ async function processVideoSpeed(
     /* miss — fall through to ffmpeg */
   }
   // S5 (PRD-0014) — detached source → video-only cache (see the variable branch).
-  const hasAudio = resolveSourceAudio(c).enabled
-    ? await probeAudio(c.src, signal)
-    : false;
+  const hasAudio = srcAudioEnabled ? await probeAudio(c.src, signal) : false;
   await runSpeedRampPass(c.src, cachePath, staticSpeed, fps, hasAudio, signal);
   return { ...c, src: cachePath };
 }

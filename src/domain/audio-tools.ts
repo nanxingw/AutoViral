@@ -135,6 +135,11 @@ export interface MixTrack {
   source: string;           // absolute file path
   type: "original" | "bgm" | "voiceover" | "sfx";
   volume: number;           // 0.0-1.0
+  // S5 review fix #2 — the SOURCE [in,out] sub-region (seconds) this track
+  // reads. Stage-1 Remotion already honours AudioClip.in/out; the ducking
+  // re-mix must too, or a trimmed / detached clip (in>0) plays from source 0.
+  in?: number;              // source in-point, seconds
+  out?: number;             // source out-point, seconds
   delay?: number;           // seconds
   fadeIn?: number;          // seconds
   fadeOut?: number;         // seconds
@@ -214,6 +219,22 @@ export async function mixAudioTracks(opts: MixOptions): Promise<void> {
     const track = tracks[i];
     const inputRef = `[${i + 1}:a]`; // input 0 is video, tracks start at 1
     const filters: string[] = [];
+
+    // S5 review fix #2 — trim to the source [in,out] sub-region FIRST (before
+    // volume/delay/fade), then reset PTS so downstream adelay positions the
+    // trimmed segment from 0. Without this a detached/trimmed clip (in>0) would
+    // play from source second 0 during ducking, diverging from Stage-1 Remotion
+    // (which reads startFrom=in). Only emitted when a real sub-region is set;
+    // an in=0 clip with no out is left untouched (byte-identical to pre-fix).
+    const trimStart = track.in ?? 0;
+    const hasTrim = trimStart > 0 || (track.out != null && track.out > 0);
+    if (hasTrim) {
+      const trimExpr =
+        track.out != null && track.out > trimStart
+          ? `atrim=start=${trimStart}:end=${track.out}`
+          : `atrim=start=${trimStart}`;
+      filters.push(trimExpr, "asetpts=PTS-STARTPTS");
+    }
 
     // Volume — always present
     filters.push(`volume=${track.volume}`);
