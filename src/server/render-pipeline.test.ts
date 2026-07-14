@@ -40,10 +40,18 @@ vi.mock("./ffmpeg-paths.js", () => ({ FFMPEG_BIN: "ffmpeg", FFPROBE_BIN: "ffprob
 // to import without throwing).
 vi.mock("node:child_process", () => {
   return {
-    spawn: vi.fn(() => {
+    spawn: vi.fn((cmd?: string, args?: string[]) => {
       const proc = new EventEmitter() as any;
       proc.stdout = new EventEmitter();
       proc.stderr = new EventEmitter();
+      // S4 (PRD-0014) — the speed pre-pass now ffprobes for an audio stream
+      // before building the setpts/atempo graph (silent-video guard). Answer
+      // that probe with one audio-stream index so the graph keeps its audio
+      // path; nextTick beats drainSpawnsUntilSettled's setImmediate close(0).
+      const selIdx = args?.indexOf("-select_streams") ?? -1;
+      if (cmd === "ffprobe" && selIdx >= 0 && args?.[selIdx + 1] === "a") {
+        process.nextTick(() => proc.stdout.emit("data", Buffer.from("0\n")));
+      }
       return proc;
     }),
     execFile: vi.fn((_cmd: string, _args: string[], cb: any) => {
@@ -487,8 +495,9 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
     // First spawn call IS the speed pre-pass (Stage 0), before any other
     // ffmpeg-invoking stage.
     expect(_spawn).toHaveBeenCalled();
-    const firstCall = _spawn.mock.calls[0];
-    expect(firstCall[0]).toBe("ffmpeg");
+    // The first ffmpeg spawn IS the speed pre-pass (a preceding ffprobe now
+    // detects the audio stream — S4 silent-video guard, finding 2).
+    const firstCall = _spawn.mock.calls.find((c) => c[0] === "ffmpeg")!;
     const args = firstCall[1] as string[];
     const filterIdx = args.indexOf("-filter_complex");
     expect(filterIdx).toBeGreaterThan(-1);
@@ -508,7 +517,7 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
     const promise = runRenderPipeline({ comp, outDir: "/tmp/out-speed-0_5" });
     await drainSpawnsToClose(promise);
     await promise;
-    const args = _spawn.mock.calls[0][1] as string[];
+    const args = _spawn.mock.calls.find((c) => c[0] === "ffmpeg")![1] as string[];
     const filterIdx = args.indexOf("-filter_complex");
     const filter = args[filterIdx + 1];
     expect(filter).toContain("setpts=PTS/0.5");
@@ -522,7 +531,7 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
     const promise = runRenderPipeline({ comp, outDir: "/tmp/out-speed-4" });
     await drainSpawnsToClose(promise);
     await promise;
-    const args = _spawn.mock.calls[0][1] as string[];
+    const args = _spawn.mock.calls.find((c) => c[0] === "ffmpeg")![1] as string[];
     const filter = args[args.indexOf("-filter_complex") + 1];
     expect(filter).toContain("setpts=PTS/4");
     // chainAtempo(4) → "atempo=2.0000,atempo=2.0000"
@@ -545,12 +554,15 @@ describe("runRenderPipeline — speed-ramp pre-pass (Phase 8.3.E)", () => {
     await drainSpawnsToClose(promise);
     await promise;
     // Stage 0 is the speed pass: its filter_complex builds per-segment
-    // trim/setpts + a concat.
-    const firstCall = _spawn.mock.calls[0];
-    expect(firstCall[0]).toBe("ffmpeg");
+    // trim/setpts + a concat. (A preceding ffprobe now detects the audio
+    // stream — find the ffmpeg call, not calls[0].)
+    const firstCall = _spawn.mock.calls.find((c) => c[0] === "ffmpeg")!;
     const args = firstCall[1] as string[];
     const filter = args[args.indexOf("-filter_complex") + 1] as string;
-    expect(filter).toContain("setpts=(PTS-STARTPTS)/2");
+    // TIMELINE-domain eased plan (S4 finding 1): the 2→1 linear ramp over
+    // timeline [0,2] consumes 3s of source → an AVERAGED 1.5× first segment
+    // (the old source-domain hold-left plan emitted a literal 2× here).
+    expect(filter).toContain("setpts=(PTS-STARTPTS)/1.5");
     expect(filter).toContain("concat=n=2:v=1:a=1[v][a]");
     const output = args[args.length - 1] as string;
     expect(output).toMatch(/clip-clip-1-speedvar-[0-9a-f]+\.mp4$/);

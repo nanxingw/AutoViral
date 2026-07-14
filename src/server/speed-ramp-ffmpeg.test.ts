@@ -16,12 +16,14 @@ import {
   buildAudioSpeedFilterArgs,
   audioSpeedCacheName,
 } from "./speed-ramp-ffmpeg.js";
+import { effectiveClipDuration } from "../shared/speed-ramp.js";
+
+function atempoFactors(expr: string): number[] {
+  return expr.split(",").map((part) => Number(part.replace(/^atempo=/, "")));
+}
 
 function productOfAtempos(expr: string): number {
-  return expr
-    .split(",")
-    .map((part) => Number(part.replace(/^atempo=/, "")))
-    .reduce((a, b) => a * b, 1);
+  return atempoFactors(expr).reduce((a, b) => a * b, 1);
 }
 
 describe("chainAtempo", () => {
@@ -41,10 +43,26 @@ describe("chainAtempo", () => {
     expect(productOfAtempos(expr)).toBeCloseTo(4.0, 4);
   });
 
-  it("speed=0.1 chains 0.5 * 0.5 * 0.4 = 0.1 (3-stage)", () => {
+  it("speed=0.1 chains 0.5^3 * 0.8 = 0.1 — every factor stays in [0.5,2] (finding 5)", () => {
     const expr = chainAtempo(0.1);
-    expect(expr).toBe("atempo=0.5000,atempo=0.5000,atempo=0.4000");
+    // The old chain ended in an illegal atempo=0.4000 (< ffmpeg's 0.5 floor).
+    expect(expr).toBe("atempo=0.5000,atempo=0.5000,atempo=0.5000,atempo=0.8000");
     expect(productOfAtempos(expr)).toBeCloseTo(0.1, 4);
+  });
+
+  it("EVERY chained factor lies in [0.5, 2.0] across the whole supported range", () => {
+    // ffmpeg errors on any atempo outside [0.5, 2.0]; the chain must respect it
+    // for every value in [SPEED_MIN, SPEED_MAX] (finding 5 — the old test only
+    // checked the product, locking in an unrunnable 0.4 factor).
+    for (let s = 0.1; s <= 4.0 + 1e-9; s += 0.05) {
+      const speed = Number(s.toFixed(2));
+      const factors = atempoFactors(chainAtempo(speed));
+      for (const f of factors) {
+        expect(f).toBeGreaterThanOrEqual(0.5 - 1e-9);
+        expect(f).toBeLessThanOrEqual(2.0 + 1e-9);
+      }
+      expect(factors.reduce((a, b) => a * b, 1)).toBeCloseTo(speed, 4);
+    }
   });
 
   it("speed=0.5 returns a single atempo=0.5000", () => {
@@ -93,6 +111,17 @@ describe("buildSpeedRampFilterArgs (S3 — argv-level, not just chainAtempo)", (
     const args = buildSpeedRampFilterArgs("in.mp4", "/work/clip-1-speed-200.mp4", 2.0, 24);
     expect(args[args.length - 1]).toBe("/work/clip-1-speed-200.mp4");
   });
+
+  it("hasAudio=false → video-only graph, NO [0:a]/atempo/[a] map (finding 2)", () => {
+    const args = buildSpeedRampFilterArgs("in.mp4", "out.mp4", 2.0, 30, false);
+    const f = args[args.indexOf("-filter_complex") + 1];
+    expect(f).toBe("[0:v]setpts=PTS/2[v]");
+    expect(f).not.toContain("[0:a]");
+    expect(f).not.toContain("atempo");
+    // Only [v] is mapped — a silent source has no [a] stream to map.
+    const maps = args.filter((a, i) => args[i - 1] === "-map");
+    expect(maps).toEqual(["[v]"]);
+  });
 });
 
 // codex review (S3×S6 finding, medium) — the speed-ramp cache filename was
@@ -128,7 +157,7 @@ describe("speedRampCacheName (S3×S6 — fps is part of the cache key, not just 
 // crack). S4 replaces the warn+fallback with a real segmented setpts/atempo →
 // concat pass.
 
-describe("planSpeedSegments (S4 — variable-speed source segmentation)", () => {
+describe("planSpeedSegments (S4 — TIMELINE-domain eased segmentation, finding 1)", () => {
   const kf = (time: number, value: number) => ({
     property: "speed" as const,
     time,
@@ -136,41 +165,67 @@ describe("planSpeedSegments (S4 — variable-speed source segmentation)", () => 
     easing: "linear" as const,
   });
 
-  it("2→1 step curve over a 4s clip → two segments (2×, 1×), total 3s timeline", () => {
-    const clip = { in: 0, out: 4, keyframes: [kf(0, 2), kf(2, 1)] };
+  // The WHOLE POINT of the plan (S4 acceptance + finding 1/3): its total timeline
+  // duration must equal the preview's effectiveClipDuration to within ±1 frame.
+  // The old source-domain hold-left plan violated this by many frames.
+  it.each([
+    ["1→2 ramp (the finding's canonical case)", { in: 0, out: 4, keyframes: [kf(0, 1), kf(2, 2)] }],
+    ["2→1 ramp", { in: 0, out: 4, keyframes: [kf(0, 2), kf(2, 1)] }],
+    ["three-value 2→1→0.5", { in: 0, out: 6, keyframes: [kf(0, 2), kf(2, 1), kf(4, 0.5)] }],
+    ["clip.in offset", { in: 1, out: 5, keyframes: [kf(0, 1), kf(2, 2)] }],
+  ])("total timeline duration == preview effectiveClipDuration within ±1 frame: %s", (_name, clip) => {
+    const fps = 30;
+    const { totalTimelineDuration } = planSpeedSegments(clip, fps);
+    expect(Math.abs(totalTimelineDuration - effectiveClipDuration(clip))).toBeLessThanOrEqual(
+      1 / fps + 1e-9,
+    );
+  });
+
+  it("1→2 ramp over a 4s clip → ~2.5s timeline (NOT the v1 source-domain 3s)", () => {
+    // Preview: playbackRate eases 1→2 over timeline [0,2] (consuming 3s of
+    // source), then holds 2× over the last 1s of source (0.5s timeline) = 2.5s.
+    const clip = { in: 0, out: 4, keyframes: [kf(0, 1), kf(2, 2)] };
     const { segments, totalTimelineDuration } = planSpeedSegments(clip, 30);
+    expect(totalTimelineDuration).toBeCloseTo(2.5, 4);
     expect(segments).toHaveLength(2);
-    expect(segments[0]).toMatchObject({ srcStart: 0, srcEnd: 2, speed: 2 });
-    expect(segments[1]).toMatchObject({ srcStart: 2, srcEnd: 4, speed: 1 });
-    // 2s of source @ 2× = 1s timeline; 2s of source @ 1× = 2s timeline.
-    expect(segments[0].timelineDuration).toBeCloseTo(1, 5);
-    expect(segments[1].timelineDuration).toBeCloseTo(2, 5);
-    expect(totalTimelineDuration).toBeCloseTo(3, 5);
+    // Interval [0,2] averages 1.5× (3s source / 2s timeline); tail holds 2×.
+    expect(segments[0]).toMatchObject({ srcStart: 0 });
+    expect(segments[0].speed).toBeCloseTo(1.5, 3);
+    expect(segments[0].srcEnd).toBeCloseTo(3, 3);
+    expect(segments[0].timelineDuration).toBeCloseTo(2, 4);
+    expect(segments[1].speed).toBeCloseTo(2, 3);
+    expect(segments[1].srcEnd).toBeCloseTo(4, 6); // last segment lands on clip.out
+    expect(segments[1].timelineDuration).toBeCloseTo(0.5, 4);
   });
 
-  it("frame-aligns segment cut points to the composition fps", () => {
-    // keyframe at a sub-frame source time (30.51 frames @ 30fps) snaps to the
-    // nearest whole frame (31 → 1.0333s) — no dropped/split frames at joins.
-    const clip = { in: 0, out: 4, keyframes: [kf(0, 2), kf(1.017, 1)] };
+  it("source spans are contiguous and cover exactly [in,out]", () => {
+    const clip = { in: 1, out: 5, keyframes: [kf(0, 2), kf(2, 1), kf(3, 0.5)] };
     const { segments } = planSpeedSegments(clip, 30);
-    const boundary = segments[0].srcEnd;
-    expect(boundary * 30).toBeCloseTo(Math.round(boundary * 30), 6);
-    expect(boundary).toBeCloseTo(31 / 30, 6);
+    expect(segments[0].srcStart).toBeCloseTo(1, 6);
+    expect(segments[segments.length - 1].srcEnd).toBeCloseTo(5, 6);
+    for (let i = 1; i < segments.length; i++) {
+      expect(segments[i].srcStart).toBeCloseTo(segments[i - 1].srcEnd, 6);
+    }
   });
 
-  it("keyframe time is clip-local: respects clip.in when placing source cuts", () => {
-    const clip = { in: 1, out: 5, keyframes: [kf(0, 2), kf(2, 1)] };
-    const { segments } = planSpeedSegments(clip, 30);
-    expect(segments[0]).toMatchObject({ srcStart: 1, srcEnd: 3, speed: 2 });
-    expect(segments[1]).toMatchObject({ srcStart: 3, srcEnd: 5, speed: 1 });
+  it("every segment's timeline width is frame-aligned (no mid-frame joins)", () => {
+    // Sub-frame keyframe time still yields whole-frame segment widths.
+    const clip = { in: 0, out: 4, keyframes: [kf(0, 1), kf(1.017, 2)] };
+    const fps = 30;
+    const { segments } = planSpeedSegments(clip, fps);
+    for (const seg of segments) {
+      const frames = seg.timelineDuration * fps;
+      expect(frames).toBeCloseTo(Math.round(frames), 6);
+    }
   });
 
-  it("three-value curve → three source segments in order", () => {
-    const clip = { in: 0, out: 6, keyframes: [kf(0, 2), kf(2, 1), kf(4, 0.5)] };
-    const { segments } = planSpeedSegments(clip, 30);
-    expect(segments.map((s) => s.speed)).toEqual([2, 1, 0.5]);
-    expect(segments.map((s) => s.srcStart)).toEqual([0, 2, 4]);
-    expect(segments.map((s) => s.srcEnd)).toEqual([2, 4, 6]);
+  it("uniform (static) keyframes → a single constant segment over [in,out]", () => {
+    const clip = { in: 0, out: 4, keyframes: [kf(0, 2), kf(4, 2)] };
+    const { segments, totalTimelineDuration } = planSpeedSegments(clip, 30);
+    expect(segments).toEqual([
+      { srcStart: 0, srcEnd: 4, speed: 2, timelineDuration: 2 },
+    ]);
+    expect(totalTimelineDuration).toBeCloseTo(2, 6);
   });
 });
 
@@ -200,6 +255,17 @@ describe("buildVariableSpeedFilterArgs (S4 — per-segment trim/setpts/atempo �
     expect(args[gIdx + 1]).toBe("24");
     expect(args[args.indexOf("-keyint_min") + 1]).toBe("24");
     expect(args[args.length - 1]).toBe("out.mp4");
+  });
+
+  it("hasAudio=false → video-only concat (a=0), no atrim/atempo/[a] map (finding 2)", () => {
+    const args = buildVariableSpeedFilterArgs("in.mp4", "out.mp4", segments, 30, false);
+    const f = args[args.indexOf("-filter_complex") + 1];
+    expect(f).toContain("concat=n=2:v=1:a=0[v]");
+    expect(f).not.toContain("atrim");
+    expect(f).not.toContain("atempo");
+    expect(f).not.toContain("[0:a]");
+    const maps = args.filter((a, i) => args[i - 1] === "-map");
+    expect(maps).toEqual(["[v]"]);
   });
 });
 

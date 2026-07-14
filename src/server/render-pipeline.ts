@@ -397,13 +397,13 @@ export async function runRenderPipeline(opts: RenderJobOptions): Promise<string>
     }
   };
 
-  // Stage 0 (Phase 8.3.E) — speed-ramp pre-pass for static-speed VideoClips.
-  // For each video clip with a static, non-1 speed (D6) we run an ffmpeg
-  // setpts/atempo invocation that resamples the source MP4 *before* Remotion
-  // ever sees it, rewriting clip.src to the cached output. Variable-speed
-  // clips emit a console warning and fall back to 1× export (deferred to
-  // Phase 8.3.5). Pre-Remotion lives upstream of every other stage so that
-  // ducking / loudnorm / encode all see the resampled audio + video.
+  // Stage 0 (Phase 8.3.E / S4 PRD-0014) — speed-ramp pre-pass. For each video
+  // clip with a static, non-1 speed (D6) we run an ffmpeg setpts/atempo pass
+  // that resamples the source MP4 *before* Remotion sees it. VARIABLE speed
+  // (multi-value keyframes) runs a segmented setpts/atempo → concat pass whose
+  // baked duration matches the preview's eased ramp (planSpeedSegments) — no
+  // more warn+fall-back-to-1×. Pre-Remotion lives upstream of every other stage
+  // so ducking / loudnorm / encode all see the resampled audio + video.
   checkAbort();
   const compAfterSpeed = await applySpeedRampPrePass(
     compProxy,

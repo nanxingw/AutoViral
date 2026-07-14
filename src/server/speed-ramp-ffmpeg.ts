@@ -26,7 +26,7 @@ import { spawn } from "node:child_process";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import { FFMPEG_BIN } from "./ffmpeg-paths.js";
+import { FFMPEG_BIN, FFPROBE_BIN } from "./ffmpeg-paths.js";
 import type {
   Composition,
   VideoClip,
@@ -35,21 +35,30 @@ import type {
   Clip,
   Keyframe,
 } from "../shared/composition.js";
-import { clampSpeed, isStaticSpeed } from "../shared/speed-ramp.js";
+import {
+  clampSpeed,
+  isStaticSpeed,
+  effectiveClipDuration,
+} from "../shared/speed-ramp.js";
+import { interpolateProperty } from "../shared/keyframes.js";
 
 /**
  * Build the comma-chained `atempo=` filter expression for any speed in
- * [0.1, 4.0]. ffmpeg's per-instance atempo is constrained to [0.5, 2.0],
- * so we decompose:
- *   - speed >= 1: repeated 2.0 stages until remainder ∈ [1.0, 2.0]
- *   - speed <  1: repeated 0.5 stages until remainder ∈ [0.5, 1.0]
+ * [0.1, 4.0]. ffmpeg's per-instance atempo is constrained to [0.5, 2.0], so we
+ * decompose into a chain whose product equals `speed` AND whose EVERY factor
+ * lies in [0.5, 2.0] (a strict ffmpeg build errors on any atempo outside that
+ * range — S4 review, finding 5). We peel whole 2.0× (speed>1) or 0.5× (speed<1)
+ * stages until the remainder itself falls inside a single atempo's band:
+ *   - speed > 1: peel 2.0 while remaining > 2.0  → remainder ∈ (1.0, 2.0]
+ *   - speed < 1: peel 0.5 while remaining < 0.5  → remainder ∈ [0.5, 1.0)
  * For speed exactly 1.0, returns the no-op "atempo=1.0".
  *
  * Examples:
  *   chainAtempo(2.0)  → "atempo=2.0000"
- *   chainAtempo(4.0)  → "atempo=2.0000,atempo=2.0000"      (2.0 × 2.0 = 4.0)
+ *   chainAtempo(4.0)  → "atempo=2.0000,atempo=2.0000"                 (2×2 = 4)
  *   chainAtempo(0.5)  → "atempo=0.5000"
- *   chainAtempo(0.1)  → "atempo=0.5000,atempo=0.5000,atempo=0.4000"  (3-stage)
+ *   chainAtempo(0.1)  → "atempo=0.5000,atempo=0.5000,atempo=0.5000,atempo=0.8000"
+ *                        (0.5³ × 0.8 = 0.1 — every factor ≥ 0.5, 4-stage)
  *   chainAtempo(3.0)  → "atempo=2.0000,atempo=1.5000"
  */
 export function chainAtempo(speed: number): string {
@@ -57,27 +66,16 @@ export function chainAtempo(speed: number): string {
   const parts: number[] = [];
   let remaining = speed;
   if (speed > 1.0) {
-    // Push a 2.0 stage so long as the *remainder after dividing* would still
-    // exceed the 2.0 ceiling, i.e. while remaining > 4.0. Once remaining is in
-    // (2.0, 4.0] we push one final 2.0 stage that brings the next remainder
-    // into the [1.0, 2.0] band — handled by the trailing parts.push below.
-    while (remaining > 4.0 + 1e-9) {
-      parts.push(2.0);
-      remaining /= 2.0;
-    }
-    if (remaining > 2.0 + 1e-9) {
+    // Peel 2.0× stages until the remainder is within a single atempo's ceiling.
+    while (remaining > 2.0 + 1e-9) {
       parts.push(2.0);
       remaining /= 2.0;
     }
   } else {
-    // Mirror: push a 0.5 stage while the *next remainder* would still be below
-    // 0.5 (atempo's per-stage minimum), i.e. while remaining < 0.25. Once
-    // remaining ∈ [0.25, 0.5) the trailing parts.push emits a sub-0.5 final
-    // adjustment (e.g. 0.4 for speed=0.1, giving "0.5,0.5,0.4" per plan
-    // §Step 5). Strict ffmpeg builds reject atempo<0.5 — but the plan's D6
-    // explicitly tolerates this for the rare extreme; the test fixtures
-    // verify product-of-parts = requested speed within 1e-4.
-    while (remaining < 0.25 - 1e-9) {
+    // Peel 0.5× stages until the remainder is ≥ atempo's 0.5 floor. This keeps
+    // the trailing factor in [0.5, 1.0) — never the sub-0.5 value the old
+    // `< 0.25` bound emitted (e.g. speed=0.1 used to end in an illegal 0.4).
+    while (remaining < 0.5 - 1e-9) {
       parts.push(0.5);
       remaining /= 0.5;
     }
@@ -107,8 +105,15 @@ export function buildSpeedRampFilterArgs(
   output: string,
   speed: number,
   fps: number,
+  hasAudio = true,
 ): string[] {
-  const atempo = chainAtempo(speed);
+  // A silent VideoClip (legacy generations, muted sources) has no [0:a]; mapping
+  // it makes ffmpeg fail with "matches no streams" (S4 review, finding 2). When
+  // hasAudio is false we emit a video-only graph.
+  const filter = hasAudio
+    ? `[0:v]setpts=PTS/${speed}[v];[0:a]${chainAtempo(speed)}[a]`
+    : `[0:v]setpts=PTS/${speed}[v]`;
+  const maps = hasAudio ? ["-map", "[v]", "-map", "[a]"] : ["-map", "[v]"];
   return [
     "-y",
     "-loglevel",
@@ -116,11 +121,8 @@ export function buildSpeedRampFilterArgs(
     "-i",
     input,
     "-filter_complex",
-    `[0:v]setpts=PTS/${speed}[v];[0:a]${atempo}[a]`,
-    "-map",
-    "[v]",
-    "-map",
-    "[a]",
+    filter,
+    ...maps,
     "-g",
     String(fps),
     "-keyint_min",
@@ -138,9 +140,10 @@ export async function runSpeedRampPass(
   output: string,
   speed: number,
   fps: number,
+  hasAudio = true,
   signal?: AbortSignal,
 ): Promise<void> {
-  const args = buildSpeedRampFilterArgs(input, output, speed, fps);
+  const args = buildSpeedRampFilterArgs(input, output, speed, fps, hasAudio);
   return spawnFfmpeg(args, "runSpeedRampPass", signal);
 }
 
@@ -186,22 +189,54 @@ export interface SpeedSegment {
 }
 
 /**
+ * Eased source-seconds consumed over the clip-local TIMELINE window [tA, tB].
+ * Integrates the same eased speed curve `interpolateProperty` feeds Remotion's
+ * per-frame `<OffthreadVideo playbackRate>` (midpoint rule, fine step). Out-of-
+ * range times clamp to the last keyframe (D3 hold) — matching effectiveClipDuration.
+ */
+function integrateSourceOverTimeline(
+  keyframes: readonly Keyframe[] | undefined,
+  tA: number,
+  tB: number,
+): number {
+  const dt = 0.002; // 500 Hz — sub-frame for any real curve
+  let consumed = 0;
+  let t = tA;
+  while (t < tB - 1e-9) {
+    const step = Math.min(dt, tB - t);
+    const mid = t + step / 2;
+    const speed = clampSpeed(interpolateProperty(keyframes, "speed", mid) ?? 1.0);
+    consumed += speed * step;
+    t += step;
+  }
+  return consumed;
+}
+
+/**
  * Decompose a VideoClip's variable speed keyframes into a piecewise-constant
- * plan over the clip's SOURCE span [in, out]. Each speed keyframe marks a cut
- * point; the segment starting at a cut holds that keyframe's value (hold-left
- * step), and the final segment runs to clip.out.
+ * plan whose TOTAL timeline duration equals the preview's effectiveClipDuration
+ * (src/shared/speed-ramp.ts) — the WYSIWYG contract this slice exists to honour.
  *
- * Keyframe `time` is clip-local (relative to clip start = `in`), so the source
- * position of a keyframe is `in + kf.time`. Cut points are frame-aligned to
- * `fps` (round to the nearest whole frame) so no segment join lands mid-frame
- * (the D-plan's "段切点帧对齐" — dropped/split frames at joins are a
- * WYSIWYG-breaking artefact).
+ * Domain (D9, matching the preview — S4 review, finding 1): keyframe `time` is
+ * clip-local TIMELINE seconds and the speed curve is EASED via
+ * interpolateProperty (the exact function `playbackRate` samples per frame). The
+ * old v1 read `time` as SOURCE time with a hold-left step, which diverged from
+ * the preview by many frames (e.g. a 4s clip 1→2 previews ~2.5s but the source-
+ * domain plan said 3s — >±1 frame, the core acceptance miss).
  *
- * Example (the S4 acceptance case): a 4s clip with speed 2 at t=0 and speed 1
- * at t=2 →
- *   segment 0: source [0,2] @ 2× → 1s timeline
- *   segment 1: source [2,4] @ 1× → 2s timeline
- *   totalTimelineDuration = 3s   (v1 exported this at 4s / 1×)
+ * We cut the timeline at each keyframe position (frame-aligned) and at tEnd (the
+ * timeline instant all (out-in) source seconds are consumed), then give each
+ * interval a CONSTANT speed = (source consumed over the interval, by eased
+ * integration) / (interval's frame-aligned timeline width). Per interval that
+ * reproduces the exact source span and timeline width, so the concatenated cache
+ * duration equals the preview's to sub-frame accuracy. Segment source spans are
+ * contiguous and the last lands exactly on clip.out — no dropped/double source.
+ *
+ * Example (the S4 acceptance case): a 4s clip, speed 1 at t=0 and speed 2 at
+ * t=2 (linear) →
+ *   timeline [0,2]:   eased 1→2 consumes 3s of source → speed 1.5, 2.0s timeline
+ *   timeline [2,2.5]: holds 2× over the last 1s of source → speed 2, 0.5s timeline
+ *   totalTimelineDuration = 2.5s   (the v1 source-domain hold-left plan said 3s)
  */
 export function planSpeedSegments(
   clip: { in: number; out: number; keyframes?: readonly Keyframe[] },
@@ -210,44 +245,69 @@ export function planSpeedSegments(
   const snap = (sec: number) => Math.round(sec * fps) / fps;
   const inSrc = snap(clip.in);
   const outSrc = snap(clip.out);
-  const speedKfs = (clip.keyframes ?? [])
-    .filter((k) => k.property === "speed")
-    .map((k) => ({ srcPos: snap(clip.in + k.time), value: clampSpeed(k.value) }))
-    .sort((a, b) => a.srcPos - b.srcPos);
-
-  // Cut points: clip start, out, and every in-range keyframe position.
-  const cuts = new Set<number>([inSrc, outSrc]);
-  for (const kf of speedKfs) {
-    if (kf.srcPos > inSrc + FRAME_EPS && kf.srcPos < outSrc - FRAME_EPS) {
-      cuts.add(kf.srcPos);
-    }
+  const sourceDur = outSrc - inSrc;
+  if (sourceDur <= FRAME_EPS) {
+    return { segments: [], totalTimelineDuration: 0 };
   }
-  const boundaries = [...cuts].sort((a, b) => a - b);
 
-  // Hold-left speed lookup: the value of the last keyframe whose source
-  // position is ≤ the segment start; fall back to the first keyframe's value
-  // (or 1.0 if there are somehow none) for a leading segment before any kf.
-  const speedAt = (srcPos: number): number => {
-    let v = speedKfs.length > 0 ? speedKfs[0].value : 1.0;
-    for (const kf of speedKfs) {
-      if (kf.srcPos <= srcPos + FRAME_EPS) v = kf.value;
-    }
-    return v;
-  };
+  const speedKfs = (clip.keyframes ?? []).filter((k) => k.property === "speed");
+  const stat = isStaticSpeed(clip);
+
+  // Uniform speed (all keyframes equal) → one constant segment over [in,out].
+  if (stat !== null) {
+    const timelineDuration = sourceDur / stat;
+    return {
+      segments: [{ srcStart: inSrc, srcEnd: outSrc, speed: stat, timelineDuration }],
+      totalTimelineDuration: timelineDuration,
+    };
+  }
+  // No speed keyframes at all → 1× passthrough (defensive; callers gate on this).
+  if (speedKfs.length === 0) {
+    return {
+      segments: [{ srcStart: inSrc, srcEnd: outSrc, speed: 1, timelineDuration: sourceDur }],
+      totalTimelineDuration: sourceDur,
+    };
+  }
+
+  // Variable speed — TIMELINE-domain, eased. tEnd is where the whole source span
+  // is consumed (the preview's own clip width). Cut the timeline at tEnd and at
+  // each in-range keyframe, all snapped to whole frames.
+  const tEnd = effectiveClipDuration(clip);
+  const nEnd = Math.max(1, Math.round(tEnd * fps));
+  const bFrames = new Set<number>([0, nEnd]);
+  for (const kf of speedKfs) {
+    const f = Math.round(kf.time * fps);
+    if (f > 0 && f < nEnd) bFrames.add(f);
+  }
+  const frames = [...bFrames].sort((a, b) => a - b);
+
+  // Raw eased source consumed per timeline interval; scaled so the total lands
+  // exactly on sourceDur (removes discretisation drift, keeps segments contiguous).
+  const raw = frames.slice(0, -1).map((f, i) => {
+    const tA = f / fps;
+    const tB = frames[i + 1] / fps;
+    return { tA, tB, src: integrateSourceOverTimeline(clip.keyframes, tA, tB) };
+  });
+  const rawTotal = raw.reduce((a, r) => a + r.src, 0) || sourceDur;
+  const scale = sourceDur / rawTotal;
 
   const segments: SpeedSegment[] = [];
-  for (let i = 0; i < boundaries.length - 1; i++) {
-    const srcStart = boundaries[i];
-    const srcEnd = boundaries[i + 1];
-    if (srcEnd - srcStart <= FRAME_EPS) continue;
-    const speed = speedAt(srcStart);
+  let cursor = inSrc;
+  raw.forEach((r, i) => {
+    const width = r.tB - r.tA;
+    const isLast = i === raw.length - 1;
+    const srcStart = cursor;
+    const srcEnd = isLast ? outSrc : cursor + r.src * scale;
+    const span = srcEnd - srcStart;
+    cursor = srcEnd;
+    if (span <= FRAME_EPS || width <= FRAME_EPS) return;
     segments.push({
       srcStart,
       srcEnd,
-      speed,
-      timelineDuration: (srcEnd - srcStart) / speed,
+      speed: span / width,
+      timelineDuration: width,
     });
-  }
+  });
   const totalTimelineDuration = segments.reduce(
     (a, s) => a + s.timelineDuration,
     0,
@@ -272,27 +332,43 @@ export function buildVariableSpeedFilterArgs(
   output: string,
   segments: SpeedSegment[],
   fps: number,
+  hasAudio = true,
 ): string[] {
+  // Silent source → skip every [0:a] atrim/atempo and concat video-only, else
+  // ffmpeg errors on the missing audio stream (S4 review, finding 2).
   const parts: string[] = [];
   const concatIn: string[] = [];
   segments.forEach((seg, i) => {
     const k = seg.speed;
-    const atempo = chainAtempo(k);
+    // `fps=${fps}` re-samples each retimed segment to CFR at the composition fps.
+    // setpts alone leaves a VFR stream whose PTS span drifts a frame or two past
+    // the intended timeline width; normalising to CFR makes each frame-aligned
+    // segment carry EXACTLY round(timelineDuration*fps) frames, so the baked
+    // cache's duration equals planSpeedSegments' total (= the preview's
+    // effectiveClipDuration) to sub-frame accuracy (S4 review, finding 1/3).
     parts.push(
       `[0:v]trim=start=${fmt(seg.srcStart)}:end=${fmt(seg.srcEnd)},` +
-        `setpts=(PTS-STARTPTS)/${fmt(k)}[v${i}]`,
+        `setpts=(PTS-STARTPTS)/${fmt(k)},fps=${fps}[v${i}]`,
     );
-    parts.push(
-      `[0:a]atrim=start=${fmt(seg.srcStart)}:end=${fmt(seg.srcEnd)},` +
-        `asetpts=PTS-STARTPTS,${atempo}[a${i}]`,
-    );
-    concatIn.push(`[v${i}][a${i}]`);
+    if (hasAudio) {
+      parts.push(
+        `[0:a]atrim=start=${fmt(seg.srcStart)}:end=${fmt(seg.srcEnd)},` +
+          `asetpts=PTS-STARTPTS,${chainAtempo(k)}[a${i}]`,
+      );
+      concatIn.push(`[v${i}][a${i}]`);
+    } else {
+      concatIn.push(`[v${i}]`);
+    }
   });
+  const n = segments.length;
   const filter =
     parts.join(";") +
     ";" +
     concatIn.join("") +
-    `concat=n=${segments.length}:v=1:a=1[v][a]`;
+    (hasAudio
+      ? `concat=n=${n}:v=1:a=1[v][a]`
+      : `concat=n=${n}:v=1:a=0[v]`);
+  const maps = hasAudio ? ["-map", "[v]", "-map", "[a]"] : ["-map", "[v]"];
   return [
     "-y",
     "-loglevel",
@@ -301,10 +377,7 @@ export function buildVariableSpeedFilterArgs(
     input,
     "-filter_complex",
     filter,
-    "-map",
-    "[v]",
-    "-map",
-    "[a]",
+    ...maps,
     "-g",
     String(fps),
     "-keyint_min",
@@ -319,9 +392,10 @@ export async function runVariableSpeedPass(
   output: string,
   segments: SpeedSegment[],
   fps: number,
+  hasAudio = true,
   signal?: AbortSignal,
 ): Promise<void> {
-  const args = buildVariableSpeedFilterArgs(input, output, segments, fps);
+  const args = buildVariableSpeedFilterArgs(input, output, segments, fps, hasAudio);
   return spawnFfmpeg(args, "runVariableSpeedPass", signal);
 }
 
@@ -450,6 +524,52 @@ function spawnFfmpeg(
 }
 
 /**
+ * ffprobe whether the source has ≥1 audio stream. Silent VideoClips (legacy
+ * generations, muted exports) have none — mapping [0:a] on them makes the
+ * setpts/atempo pass fail ("Stream specifier '0:a' matches no streams", S4
+ * review finding 2). Mirrors probeVideoDimensions (transforms-ffmpeg.ts).
+ * Injectable into applySpeedRampPrePass so unit tests need no real binary.
+ */
+export function probeHasAudioStream(
+  srcPath: string,
+  signal?: AbortSignal,
+): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error("probeHasAudioStream: aborted before spawn"));
+      return;
+    }
+    const child = spawn(FFPROBE_BIN, [
+      "-v",
+      "error",
+      "-select_streams",
+      "a",
+      "-show_entries",
+      "stream=index",
+      "-of",
+      "csv=p=0",
+      srcPath,
+    ]);
+    let out = "";
+    let err = "";
+    child.stdout?.on("data", (d: Buffer | string) => (out += d.toString()));
+    child.stderr?.on("data", (d: Buffer | string) => (err += d.toString()));
+    child.on("error", reject);
+    child.on("close", (code: number | null) => {
+      if (code !== 0) {
+        reject(
+          new Error(
+            `probeHasAudioStream: ffprobe exit ${code} for ${srcPath}: ${err}`,
+          ),
+        );
+        return;
+      }
+      resolve(out.trim().length > 0);
+    });
+  });
+}
+
+/**
  * Pre-Remotion stage. For each VideoClip with a STATIC non-1 speed, runs
  * the setpts/atempo pass and rewrites clip.src to point at the resampled
  * cache file. For VARIABLE speed (S4), runs the segmented setpts/atempo →
@@ -470,6 +590,10 @@ export async function applySpeedRampPrePass(
   comp: Composition,
   workDir: string,
   signal?: AbortSignal,
+  probeAudio: (
+    src: string,
+    signal?: AbortSignal,
+  ) => Promise<boolean> = probeHasAudioStream,
 ): Promise<Composition> {
   const newTracks: Track[] = await Promise.all(
     comp.tracks.map(async (track) => {
@@ -477,7 +601,13 @@ export async function applySpeedRampPrePass(
         const newClips: Clip[] = await Promise.all(
           track.clips.map((clipRaw) =>
             clipRaw.kind === "video"
-              ? processVideoSpeed(clipRaw as VideoClip, comp.fps, workDir, signal)
+              ? processVideoSpeed(
+                  clipRaw as VideoClip,
+                  comp.fps,
+                  workDir,
+                  probeAudio,
+                  signal,
+                )
               : clipRaw,
           ),
         );
@@ -504,6 +634,7 @@ async function processVideoSpeed(
   c: VideoClip,
   fps: number,
   workDir: string,
+  probeAudio: (src: string, signal?: AbortSignal) => Promise<boolean>,
   signal?: AbortSignal,
 ): Promise<VideoClip> {
   const staticSpeed = isStaticSpeed(c);
@@ -529,7 +660,9 @@ async function processVideoSpeed(
     } catch {
       /* miss — fall through to ffmpeg */
     }
-    await runVariableSpeedPass(c.src, cachePath, segments, fps, signal);
+    // Probe only on a cache miss (an ffmpeg pass is about to run anyway).
+    const hasAudio = await probeAudio(c.src, signal);
+    await runVariableSpeedPass(c.src, cachePath, segments, fps, hasAudio, signal);
     return rewritten;
   }
 
@@ -544,7 +677,8 @@ async function processVideoSpeed(
   } catch {
     /* miss — fall through to ffmpeg */
   }
-  await runSpeedRampPass(c.src, cachePath, staticSpeed, fps, signal);
+  const hasAudio = await probeAudio(c.src, signal);
+  await runSpeedRampPass(c.src, cachePath, staticSpeed, fps, hasAudio, signal);
   return { ...c, src: cachePath };
 }
 
