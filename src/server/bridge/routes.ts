@@ -1705,6 +1705,9 @@ bridgeRouter.post("/scene/:id/generate", async (c) => {
       // the model's hidden 1024×1024 square. No platform hard-coding: change
       // comp.aspect and the next take follows.
       aspectRatio: comp.aspect,
+      // F3 (S10) — thread the request-abort signal so a client disconnect
+      // cancels the in-flight (paid) reshoot instead of leaving it running.
+      signal: c.req.raw.signal,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

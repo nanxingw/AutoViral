@@ -22,9 +22,9 @@
 //      so the concurrency race (two identical requests arriving together) resolves
 //      to exactly one dispatch.
 
-import { readFile, writeFile, mkdir } from "node:fs/promises";
+import { readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 // ── Abort / orphan error vocabulary ──────────────────────────────────────────
 
@@ -83,7 +83,7 @@ export function isOrphanedGeneration(err: unknown): err is OrphanedGenerationErr
 
 // ── Content-addressed manifest ───────────────────────────────────────────────
 
-export type ManifestStatus = "in-flight" | "done" | "failed";
+export type ManifestStatus = "in-flight" | "done" | "failed" | "orphaned";
 
 export interface ManifestEntry {
   key: string;
@@ -93,12 +93,29 @@ export interface ManifestEntry {
   /** The full JSON response the route returned on the original success, so a
    *  skip echoes byte-identical output (idempotent). */
   response?: unknown;
+  /** F1 — on `orphaned`: the abandoned upstream job id (when the provider knew
+   *  it) so the operator can reconcile the paid job the route stopped polling. */
+  providerJobId?: string;
+  /** F1 — on `orphaned`: the (known/estimated) spend of the abandoned job. */
+  orphanCostUsd?: number;
   updatedAt: string;
 }
 
 export type Manifest = Record<string, ManifestEntry>;
 
 export const MANIFEST_FILE = "generation-manifest.json";
+
+/**
+ * F8 — in-flight LEASE window. An `in-flight` entry whose `updatedAt` is older
+ * than this is treated as a CRASHED holder (the process that reserved it died
+ * before complete/fail could run) and is reclaimable, so a restart isn't
+ * stranded on a permanent 409. It must comfortably exceed the longest legit
+ * generation (Seedance polls up to ~15min) so a slow-but-live job is never
+ * stolen. NOTE: this applies ONLY to `in-flight`; an `orphaned` entry is a
+ * deliberate lock (a paid upstream job may still be running) and is NEVER
+ * auto-released by staleness.
+ */
+export const IN_FLIGHT_LEASE_MS = 30 * 60 * 1000; // 30 minutes
 
 /** Deterministic JSON with sorted object keys + `undefined` dropped, so param
  *  ordering and optional-spread gaps never change the hash. Arrays keep order. */
@@ -146,45 +163,87 @@ function withWorkLock<T>(workDir: string, fn: () => Promise<T>): Promise<T> {
 }
 
 async function readManifest(workDir: string): Promise<Manifest> {
+  // F6 — FAIL CLOSED. Only a genuinely ABSENT file is an empty (fresh) manifest.
+  // Swallowing a permission error / corrupt JSON as "empty" would silently
+  // forget existing done/in-flight/orphaned state and let a paid job be
+  // re-下单 — the exact double-charge the slice forbids. Anything but ENOENT
+  // propagates so the route surfaces the error instead of paying twice.
+  let raw: string;
   try {
-    const raw = await readFile(join(workDir, MANIFEST_FILE), "utf-8");
-    const parsed = JSON.parse(raw) as unknown;
-    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      return parsed as Manifest;
-    }
-    return {};
-  } catch {
-    // Missing / unreadable / corrupt → treat as empty (fresh work).
-    return {};
+    raw = await readFile(join(workDir, MANIFEST_FILE), "utf-8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException)?.code === "ENOENT") return {};
+    throw err;
   }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    throw new Error(
+      `generation-manifest.json at ${workDir} is corrupt (unparseable JSON): ${(err as Error).message}`,
+    );
+  }
+  if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+    return parsed as Manifest;
+  }
+  throw new Error(`generation-manifest.json at ${workDir} is not a JSON object`);
 }
 
 async function writeManifest(workDir: string, manifest: Manifest): Promise<void> {
+  // F6 — ATOMIC replace. Write to a unique temp sibling then rename over the
+  // target: a crash mid-write leaves the PREVIOUS manifest intact rather than a
+  // truncated file that readManifest would (now) reject. rename is atomic on the
+  // same filesystem, so a concurrent reader never observes a partial file.
   await mkdir(workDir, { recursive: true });
-  await writeFile(join(workDir, MANIFEST_FILE), JSON.stringify(manifest, null, 2), "utf-8");
+  const target = join(workDir, MANIFEST_FILE);
+  const tmp = `${target}.tmp.${process.pid}.${randomUUID().slice(0, 8)}`;
+  await writeFile(tmp, JSON.stringify(manifest, null, 2), "utf-8");
+  await rename(tmp, target);
 }
+
+export type RejectReason = "in-flight" | "orphaned";
 
 export type ReserveDecision =
   | { decision: "skip"; entry: ManifestEntry }
-  | { decision: "reject"; entry: ManifestEntry }
+  | { decision: "reject"; entry: ManifestEntry; reason: RejectReason }
   | { decision: "proceed"; key: string };
+
+/** True when an in-flight entry's lease has expired (crashed holder). */
+function isStaleInFlight(entry: ManifestEntry, now: number): boolean {
+  const ts = Date.parse(entry.updatedAt);
+  return Number.isFinite(ts) && now - ts > IN_FLIGHT_LEASE_MS;
+}
 
 /**
  * Claim a generation slot for `key`, atomically deciding whether to dispatch:
- *   - `done`      → skip (caller returns `entry.response` verbatim; no dispatch)
- *   - `in-flight` → reject (a concurrent/duplicate request already下单)
+ *   - `done`          → skip (caller returns `entry.response` verbatim; no dispatch)
+ *   - `in-flight`     → reject `in-flight` (a concurrent/duplicate request already下单),
+ *                       UNLESS the lease expired (crashed holder) → proceed (F8 recovery)
+ *   - `orphaned`      → reject `orphaned` (F1: a billed upstream job the route stopped
+ *                       polling may still be running — re-下单 would double-charge). NEVER
+ *                       auto-released by staleness.
  *   - `failed` / absent → proceed (writes an in-flight entry; caller dispatches)
  *
  * Serialized per workDir so concurrent identical reserves collapse to one
  * `proceed`. On `proceed` the caller MUST eventually call completeGeneration
- * (success) or failGeneration (error/abort) to release the in-flight lock.
+ * (success), failGeneration (retryable error/clean abort), or orphanGeneration
+ * (billed-but-abandoned) to release the in-flight lock.
  */
 export function reserveGeneration(workDir: string, key: string): Promise<ReserveDecision> {
   return withWorkLock(workDir, async (): Promise<ReserveDecision> => {
     const manifest = await readManifest(workDir);
     const entry = manifest[key];
     if (entry?.status === "done") return { decision: "skip", entry };
-    if (entry?.status === "in-flight") return { decision: "reject", entry };
+    // F1 — orphaned is a deliberate lock: refuse identical retries until the
+    // upstream terminal state is reconciled (paid job may still be running).
+    if (entry?.status === "orphaned") return { decision: "reject", entry, reason: "orphaned" };
+    if (entry?.status === "in-flight") {
+      // F8 — a fresh in-flight is a real concurrent dispatch → reject; a stale
+      // one is a crashed holder → reclaim it (fall through to proceed).
+      if (!isStaleInFlight(entry, Date.now())) {
+        return { decision: "reject", entry, reason: "in-flight" };
+      }
+    }
     manifest[key] = { key, status: "in-flight", updatedAt: new Date().toISOString() };
     await writeManifest(workDir, manifest);
     return { decision: "proceed", key };
@@ -215,6 +274,32 @@ export function failGeneration(workDir: string, key: string): Promise<void> {
   return withWorkLock(workDir, async () => {
     const manifest = await readManifest(workDir);
     manifest[key] = { key, status: "failed", updatedAt: new Date().toISOString() };
+    await writeManifest(workDir, manifest);
+  });
+}
+
+/**
+ * F1 — mark a reserved key ORPHANED: the request was aborted after an upstream
+ * job was dispatched (and billed) but the provider has no way to recall it, so
+ * the route stopped polling. Unlike `failed`, this does NOT unlock the key —
+ * a subsequent identical request is rejected (reason "orphaned") instead of
+ * re-下单 a fresh paid job while the abandoned one may still be running upstream.
+ * The operator reconciles it out-of-band (the cost-ledger note + providerJobId).
+ */
+export function orphanGeneration(
+  workDir: string,
+  key: string,
+  meta: { providerJobId?: string; costUsd?: number } = {},
+): Promise<void> {
+  return withWorkLock(workDir, async () => {
+    const manifest = await readManifest(workDir);
+    manifest[key] = {
+      key,
+      status: "orphaned",
+      updatedAt: new Date().toISOString(),
+      ...(meta.providerJobId !== undefined ? { providerJobId: meta.providerJobId } : {}),
+      ...(meta.costUsd !== undefined ? { orphanCostUsd: meta.costUsd } : {}),
+    };
     await writeManifest(workDir, manifest);
   });
 }

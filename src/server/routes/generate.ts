@@ -50,6 +50,7 @@ import {
   reserveGeneration,
   completeGeneration,
   failGeneration,
+  orphanGeneration,
   isAbortError,
   isOrphanedGeneration,
 } from "../generation-resilience.js";
@@ -338,12 +339,18 @@ generateRouter.post("/api/generate/image", async (c) => {
     prompt,
     params: {
       kind: "image",
+      endpoint: "generate-image",
       provider: provider.name,
       aspectRatio,
       width,
       height,
       imageSize,
       seed,
+      // F5 — temperature is forwarded to the provider (line below) and changes
+      // the sampled image, so it MUST participate in the content hash — otherwise
+      // two requests differing only in temperature collide and the second gets a
+      // stale asset.
+      temperature,
       model,
       referenceImage,
     },
@@ -353,11 +360,14 @@ generateRouter.post("/api/generate/image", async (c) => {
     return c.json({ ...(imgReservation.entry.response as object), skipped: true });
   }
   if (imgReservation.decision === "reject") {
+    const orphaned = imgReservation.reason === "orphaned";
     return c.json(
       {
         success: false,
-        error: "An identical image generation is already in flight for this work",
-        code: "GENERATION_IN_FLIGHT",
+        error: orphaned
+          ? "A prior identical image generation was orphaned (a paid upstream job may still be running); refusing to re-下单. Change params or reconcile it to retry."
+          : "An identical image generation is already in flight for this work",
+        code: orphaned ? "GENERATION_ORPHANED" : "GENERATION_IN_FLIGHT",
       },
       HTTP_CONFLICT,
     );
@@ -558,6 +568,13 @@ generateRouter.post("/api/generate/video", async (c) => {
     prompt,
     params: {
       kind: "video",
+      // F4 — namespace by endpoint. This route and
+      // /api/providers/:id/generate-video hash the SAME generation params but
+      // cache DIFFERENT HTTP response contracts ({success,previewUrl} here vs
+      // {assetUri,providerJobId} there). Without the discriminator a cross-
+      // endpoint skip returns the wrong shape (the i2v recipe reads `success`
+      // and mis-flags success as failure). Each endpoint keeps its own namespace.
+      endpoint: "generate-video",
       provider: provider.name,
       aspectRatio,
       resolution: effectiveResolution,
@@ -571,11 +588,14 @@ generateRouter.post("/api/generate/video", async (c) => {
     return c.json({ ...(reservation.entry.response as object), skipped: true });
   }
   if (reservation.decision === "reject") {
+    const orphaned = reservation.reason === "orphaned";
     return c.json(
       {
         success: false,
-        error: "An identical generation is already in flight for this work",
-        code: "GENERATION_IN_FLIGHT",
+        error: orphaned
+          ? "A prior identical generation was orphaned (a paid upstream job may still be running); refusing to re-下单. Change params or reconcile it to retry."
+          : "An identical generation is already in flight for this work",
+        code: orphaned ? "GENERATION_ORPHANED" : "GENERATION_IN_FLIGHT",
       },
       HTTP_CONFLICT,
     );
@@ -656,11 +676,16 @@ generateRouter.post("/api/generate/video", async (c) => {
     await completeGeneration(wDirAbs, genKey, { assetPath: relativeUri, response });
     return c.json(response);
   } catch (err: any) {
-    // S10 — a client-abort clears the manifest (failed → retry allowed) and, for
-    // an orphaned (billed-but-abandoned) upstream job, books a ledger note.
+    // S10 — a client-abort ends the manifest reservation. F1: an ORPHANED
+    // (billed-but-abandoned) job LOCKS the key (status orphaned) so an identical
+    // retry is refused instead of re-下单 while the paid job may still run; a
+    // clean abort (nothing dispatched) just fails (retry allowed).
     if (isAbortError(err)) {
-      await failGeneration(wDirAbs, genKey);
       if (isOrphanedGeneration(err)) {
+        await orphanGeneration(wDirAbs, genKey, {
+          providerJobId: err.providerJobId,
+          costUsd: err.costUsd,
+        });
         recordOrphanedGeneration({
           workId,
           kind: "video",
@@ -668,6 +693,8 @@ generateRouter.post("/api/generate/video", async (c) => {
           costUsd: err.costUsd,
           providerJobId: err.providerJobId,
         });
+      } else {
+        await failGeneration(wDirAbs, genKey);
       }
       return c.json(
         { success: false, code: err.code, orphaned: isOrphanedGeneration(err) },
@@ -850,10 +877,16 @@ generateRouter.post("/api/generate/bgm", async (c) => {
     prompt: String(prompt),
     params: {
       kind: "bgm",
+      endpoint: "generate-bgm",
       provider: entry.name,
       vocal: vocal !== undefined ? Boolean(vocal) : undefined,
       seed: typeof seed === "number" ? seed : undefined,
       temperature: typeof temperature === "number" ? temperature : undefined,
+      // F5 — referenceImage(s) are forwarded to the music provider (opts.
+      // referenceImages below) and steer the generated track, so they must be
+      // in the content hash — otherwise two different reference images collide
+      // and the second request returns the first's stale audio.
+      referenceImages: referenceImages.length > 0 ? referenceImages : undefined,
       durationSeconds,
     },
   });
@@ -862,8 +895,15 @@ generateRouter.post("/api/generate/bgm", async (c) => {
     return c.json({ ...(bgmReservation.entry.response as object), skipped: true });
   }
   if (bgmReservation.decision === "reject") {
+    const orphaned = bgmReservation.reason === "orphaned";
     return c.json(
-      { success: false, error: "An identical BGM generation is already in flight for this work", code: "GENERATION_IN_FLIGHT" },
+      {
+        success: false,
+        error: orphaned
+          ? "A prior identical BGM generation was orphaned (a paid upstream job may still be running); refusing to re-下单."
+          : "An identical BGM generation is already in flight for this work",
+        code: orphaned ? "GENERATION_ORPHANED" : "GENERATION_IN_FLIGHT",
+      },
       HTTP_CONFLICT,
     );
   }
@@ -1123,13 +1163,19 @@ generateRouter.post("/api/generate/image/batch", async (c) => {
     const candidatesDir = join(dataDir, "works", workId, "assets", "frames", "candidates", shotId);
     await mkdir(candidatesDir, { recursive: true });
 
-    // Generate `n` random seeds and fire all requests concurrently
+    // Generate `n` random seeds and fire all requests concurrently. The batch
+    // endpoint is intentionally NOT manifest-gated (random seeds = variety by
+    // design), but F3 — it must still thread the request-abort signal so a
+    // client disconnect cancels the in-flight (paid) candidate generations
+    // instead of leaving them running.
+    const batchSignal = c.req.raw.signal;
     const seeds = Array.from({ length: n }, () => Math.floor(Math.random() * 2_147_483_647));
     const results = await Promise.allSettled(
       seeds.map((seed) =>
         provider.generateImage({
           prompt, width, height, aspectRatio, workId, seed,
           filename: `frames/candidates/${shotId}/seed-${seed}.png`,
+          signal: batchSignal,
         }),
       ),
     );
@@ -1502,6 +1548,11 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
     prompt: body.prompt,
     params: {
       kind: "video",
+      // F4 — namespace by endpoint (see /api/generate/video). This path caches a
+      // DIFFERENT response contract ({assetUri,providerJobId}, no `success`), so
+      // it must NOT share a key with the generic endpoint or a cross-endpoint
+      // skip would echo the wrong shape.
+      endpoint: "providers-generate-video",
       provider: providerId,
       aspectRatio: body.aspectRatio,
       durationSec,
@@ -1514,8 +1565,14 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
     return c.json({ ...(provReservation.entry.response as object), skipped: true });
   }
   if (provReservation.decision === "reject") {
+    const orphaned = provReservation.reason === "orphaned";
     return c.json(
-      { error: "An identical generation is already in flight for this work", code: "GENERATION_IN_FLIGHT" },
+      {
+        error: orphaned
+          ? "A prior identical generation was orphaned (a paid upstream job may still be running); refusing to re-下单."
+          : "An identical generation is already in flight for this work",
+        code: orphaned ? "GENERATION_ORPHANED" : "GENERATION_IN_FLIGHT",
+      },
       HTTP_CONFLICT,
     );
   }
@@ -1592,8 +1649,13 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
     return c.json(provResponse);
   } catch (err: any) {
     if (isAbortError(err)) {
-      await failGeneration(wDirAbs, provKey);
+      // F1 — parity with /api/generate/video: an orphaned job LOCKS the key so
+      // a retry is refused; a clean abort fails (retry allowed).
       if (isOrphanedGeneration(err)) {
+        await orphanGeneration(wDirAbs, provKey, {
+          providerJobId: err.providerJobId,
+          costUsd: err.costUsd,
+        });
         recordOrphanedGeneration({
           workId: body.workId,
           kind: "video",
@@ -1601,6 +1663,8 @@ generateRouter.post("/api/providers/:providerId/generate-video", async (c) => {
           costUsd: err.costUsd,
           providerJobId: err.providerJobId,
         });
+      } else {
+        await failGeneration(wDirAbs, provKey);
       }
       return c.json({ error: err.code, orphaned: isOrphanedGeneration(err) }, HTTP_CLIENT_CLOSED);
     }

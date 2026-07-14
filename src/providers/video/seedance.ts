@@ -234,15 +234,46 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
           ...(req.signal ? { signal: req.signal } : {}),
         });
       } catch (err) {
-        // A fetch cancelled by our own signal is a clean pre-dispatch abort.
-        if (req.signal?.aborted) throw new GenerationAbortedError();
+        // F2 — the POST was already IN FLIGHT when the abort fired. We cannot
+        // know whether the gateway created a billed job before the socket
+        // dropped, so this is NOT a clean cancel: treat it as orphan/
+        // unknown-dispatch so the route LOCKS the key + books a note instead of
+        // re-下单 on retry. Only a PRE-dispatch abort (checked at entry, above)
+        // is a clean GenerationAbortedError.
+        if (req.signal?.aborted) {
+          throw new OrphanedGenerationError({
+            message:
+              "enqueue aborted after POST dispatch; upstream job state unknown (possible billed orphan)",
+          });
+        }
         throw err;
       }
       if (!enqueueRes.ok) {
-        const body = await enqueueRes.text();
+        // A non-ok enqueue means no job was created (not billed). Reading the
+        // error body can itself abort — that's a clean cancel, nothing to orphan.
+        let body: string;
+        try {
+          body = await enqueueRes.text();
+        } catch (err) {
+          if (req.signal?.aborted) throw new GenerationAbortedError();
+          throw err;
+        }
         throw new Error(`Seedance enqueue failed: ${enqueueRes.status} ${body}`);
       }
-      const job = (await enqueueRes.json()) as EnqueueResponse;
+      // F2 — the enqueue SUCCEEDED (job created + billed). Reading its body can
+      // still be cut short by an abort; that's an orphan (a paid job we never
+      // even learned the id of to poll), NOT a clean cancel.
+      let job: EnqueueResponse;
+      try {
+        job = (await enqueueRes.json()) as EnqueueResponse;
+      } catch (err) {
+        if (req.signal?.aborted) {
+          throw new OrphanedGenerationError({
+            message: "enqueue body read aborted; upstream job orphaned (id unknown)",
+          });
+        }
+        throw err;
+      }
       // Fail-fast: a 200 enqueue whose body lacks `polling_url` would otherwise
       // reach `fetch(job.polling_url)` below as fetch(undefined) and throw the
       // opaque "Failed to parse URL from undefined" deep in the poll loop —
@@ -283,7 +314,18 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
           throw err;
         }
         if (!pollRes.ok) continue;
-        const status = (await pollRes.json()) as PollResponse;
+        // F2 — reading the poll body can abort mid-stream; the job is enqueued
+        // and billed, so that's an orphan (with the known job id), not a raw
+        // AbortError leaking past the route's orphan bookkeeping.
+        let status: PollResponse;
+        try {
+          status = (await pollRes.json()) as PollResponse;
+        } catch (err) {
+          if (req.signal?.aborted) {
+            throw new OrphanedGenerationError({ providerJobId: job.id });
+          }
+          throw err;
+        }
         if (status.status === "completed") {
           final = status;
           break;
@@ -302,12 +344,39 @@ export function createSeedanceProvider(opts: SeedanceProviderOptions = {}): Vide
         throw new Error(`Seedance job ${job.id} completed but no unsigned_urls`);
       }
 
-      // 3) Download mp4
-      const dlRes = await fetch(url, { headers: { Authorization: `Bearer ${apiKey}` } });
+      // 3) Download mp4. F2 — thread the signal so a client disconnect cancels
+      // the download too. By this point the job COMPLETED and was billed, so an
+      // abort here is an orphan (we hold the job id + cost), not a clean cancel.
+      let dlRes: Response;
+      try {
+        dlRes = await fetch(url, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          ...(req.signal ? { signal: req.signal } : {}),
+        });
+      } catch (err) {
+        if (req.signal?.aborted) {
+          throw new OrphanedGenerationError({
+            providerJobId: job.id,
+            costUsd: final.usage?.cost,
+          });
+        }
+        throw err;
+      }
       if (!dlRes.ok) {
         throw new Error(`Seedance download failed: ${dlRes.status}`);
       }
-      const buf = Buffer.from(await dlRes.arrayBuffer());
+      let buf: Buffer;
+      try {
+        buf = Buffer.from(await dlRes.arrayBuffer());
+      } catch (err) {
+        if (req.signal?.aborted) {
+          throw new OrphanedGenerationError({
+            providerJobId: job.id,
+            costUsd: final.usage?.cost,
+          });
+        }
+        throw err;
+      }
       const hash = hashPrompt(req.prompt);
       const filename = `seedance-${hash}.mp4`;
       // Per-request outputAbsoluteDir wins; falls back to construct-time

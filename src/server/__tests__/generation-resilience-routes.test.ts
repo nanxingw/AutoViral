@@ -258,3 +258,171 @@ describe("S10 · generation manifest idempotency", () => {
     });
   });
 });
+
+// ── Review fixes (F1 / F4 / F5) ──────────────────────────────────────────────
+describe("S10 review · F1 orphaned key refuses re-下单", () => {
+  beforeEach(() => {
+    process.env.OPENROUTER_API_KEY = "";
+    vi.resetModules();
+  });
+  afterEach(() => {
+    delete process.env.OPENROUTER_API_KEY;
+  });
+
+  it("after an orphaned cancel, an IDENTICAL retry is refused 409 without re-dispatching", async () => {
+    await withTempDataDir(async () => {
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      const { CostLedger, setCostLedger } = await import("../cost-ledger/index.js");
+      const { registerProvider } = await import("../../providers/registry.js");
+      const { OrphanedGenerationError } = await import("../generation-resilience.js");
+      setCostLedger(new CostLedger({ dbPath: ":memory:" }));
+
+      let dispatches = 0;
+      registerProvider({
+        name: "seedance",
+        capability: "video",
+        displayName: "Orphaning Seedance",
+        envKey: "OPENROUTER_API_KEY",
+        default: true,
+        generateVideo: (opts: VideoGenerateOptions): Promise<VideoGenerateResult> =>
+          new Promise((_resolve, reject) => {
+            dispatches++;
+            opts.signal?.addEventListener(
+              "abort",
+              () => reject(new OrphanedGenerationError({ providerJobId: "job_orphan", costUsd: 0.6 })),
+              { once: true },
+            );
+          }),
+      });
+
+      const w = await createWork({ title: "orphan-retry", type: "short-video", platforms: ["douyin"] });
+      const body = { workId: w.id, prompt: "same push-in", filename: "clip.mp4" };
+
+      const controller = new AbortController();
+      const pending = apiRoutes.fetch(abortableReq("/api/generate/video", body, controller.signal));
+      await new Promise((r) => setTimeout(r, 25));
+      controller.abort();
+      const first = await pending;
+      expect((await first.json()).orphaned).toBe(true);
+
+      // Immediate identical retry — refused WITHOUT a second (paid) dispatch.
+      const second = await apiRoutes.fetch(jsonReq("POST", "/api/generate/video", body));
+      expect(second.status).toBe(409);
+      const j2: any = await second.json();
+      expect(j2.code).toBe("GENERATION_ORPHANED");
+      expect(dispatches).toBe(1);
+    });
+  });
+});
+
+describe("S10 review · F4 the two video endpoints don't cross-contaminate response shapes", () => {
+  beforeEach(() => {
+    process.env.OPENROUTER_API_KEY = "";
+    vi.resetModules();
+  });
+  afterEach(() => {
+    delete process.env.OPENROUTER_API_KEY;
+  });
+
+  it("provider-scoped result never leaks into the generic /api/generate/video contract", async () => {
+    await withTempDataDir(async () => {
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      const { registerProvider } = await import("../../providers/registry.js");
+      const { mkdir, writeFile } = await import("node:fs/promises");
+      registerProvider({
+        name: "seedance",
+        capability: "video",
+        displayName: "Shape Seedance",
+        envKey: "OPENROUTER_API_KEY",
+        default: true,
+        generateVideo: async (o: VideoGenerateOptions): Promise<VideoGenerateResult> => {
+          const assetUri = `${o.outputAbsoluteDir}/clip.mp4`;
+          await mkdir(o.outputAbsoluteDir!, { recursive: true });
+          await writeFile(assetUri, Buffer.from([0x00]));
+          return { assetUri, costUsd: 0.5, stub: false, providerJobId: "job_shape" };
+        },
+      });
+
+      const w = await createWork({ title: "shape", type: "short-video", platforms: ["douyin"] });
+
+      // Provider-scoped endpoint first — its contract is { assetUri, providerJobId } (NO success).
+      const r2 = await apiRoutes.fetch(
+        jsonReq("POST", "/api/providers/seedance/generate-video", {
+          workId: w.id,
+          prompt: "identical",
+          durationSec: 4,
+        }),
+      );
+      expect(r2.status).toBe(200);
+      const j2: any = await r2.json();
+      expect(j2.assetUri).toBeDefined();
+
+      // Generic endpoint, SAME generation params — must return ITS OWN contract
+      // (success + previewUrl), never the provider-scoped shape via a colliding key.
+      const r1 = await apiRoutes.fetch(
+        jsonReq("POST", "/api/generate/video", {
+          workId: w.id,
+          prompt: "identical",
+          durationSec: 4,
+          filename: "clip.mp4",
+        }),
+      );
+      expect(r1.status).toBe(200);
+      const j1: any = await r1.json();
+      expect(j1.success).toBe(true);
+      expect(j1.previewUrl).toBeDefined();
+    });
+  });
+});
+
+describe("S10 review · F5 key covers every content-bearing param", () => {
+  beforeEach(() => {
+    process.env.OPENROUTER_API_KEY = "";
+    vi.resetModules();
+  });
+  afterEach(() => {
+    delete process.env.OPENROUTER_API_KEY;
+  });
+
+  it("image: two requests differing ONLY in temperature both dispatch (not skipped)", async () => {
+    await withTempDataDir(async () => {
+      const { apiRoutes } = await import("../api.js");
+      const { createWork } = await import("../../domain/work-store.js");
+      const { registerProvider } = await import("../../providers/registry.js");
+      const { mkdir, writeFile } = await import("node:fs/promises");
+
+      let count = 0;
+      registerProvider({
+        name: "openrouter-image",
+        capability: "image",
+        displayName: "Counting Image",
+        envKey: "OPENROUTER_API_KEY",
+        default: true,
+        generateImage: async (o: any) => {
+          count++;
+          const abs = `${o.outputAbsoluteDir ?? "/tmp"}/img-${count}.png`;
+          try {
+            await mkdir(o.outputAbsoluteDir ?? "/tmp", { recursive: true });
+            await writeFile(abs, Buffer.from([0x00]));
+          } catch {
+            /* ignore */
+          }
+          return { success: true, assetPath: abs, costUsd: 0 };
+        },
+      });
+
+      const w = await createWork({ title: "temp", type: "short-video", platforms: ["douyin"] });
+      const base = { workId: w.id, prompt: "a portrait", filename: "p.png" };
+
+      const a = await apiRoutes.fetch(jsonReq("POST", "/api/generate/image", { ...base, temperature: 0.2 }));
+      const b = await apiRoutes.fetch(jsonReq("POST", "/api/generate/image", { ...base, temperature: 0.9 }));
+      expect(a.status).toBe(200);
+      expect(b.status).toBe(200);
+      const jb: any = await b.json();
+      expect(jb.skipped).toBeUndefined();
+      expect(count).toBe(2);
+    });
+  });
+});
