@@ -4854,4 +4854,78 @@ describe("bridge router — S6 clip import", () => {
       ),
     ).toBe(true);
   });
+
+  // review finding 6 — a wrong-typed optional field must fail LOUD (400 + code 4)
+  // instead of being silently coerced to "not passed" (which would run a
+  // different-than-intended semantic under a 200). Never probes.
+  it.each([
+    ["at as a string", { path: "output/x.mp4", at: "5" }],
+    ["at as NaN-ish string", { path: "output/x.mp4", at: "later" }],
+    ["replaceTimeline as a string", { path: "output/x.mp4", replaceTimeline: "true" }],
+    ["trackId as a number", { path: "output/x.mp4", trackId: 123 }],
+    ["name as a number", { path: "output/x.mp4", name: 5 }],
+  ])("rejects %s → 400 + code 4 (never probes)", async (_label, payload) => {
+    mockProbe.mockClear();
+    const res = await app.request("/api/bridge/v1/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify(payload),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { ok: boolean; code?: number };
+    expect(body.ok).toBe(false);
+    expect(body.code).toBe(4);
+    expect(mockProbe).not.toHaveBeenCalled();
+  });
+});
+
+// review finding 4 — the route must resolve the source file under the SAME works
+// root the rest of the server uses (getWorksRoot): AUTOVIRAL_WORKS_ROOT →
+// <AUTOVIRAL_DATA_DIR>/works → ~/.autoviral/works. A custom data dir (no explicit
+// WORKS_ROOT) must NOT fall through to ~/.autoviral/works and probe the wrong path.
+describe("bridge router — S6 clip import honours AUTOVIRAL_DATA_DIR (finding 4)", () => {
+  let dataDir: string;
+  const workId = "w_import_datadir";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+  const prevDataDir = process.env.AUTOVIRAL_DATA_DIR;
+  const mockProbe = probeMedia as unknown as ReturnType<typeof vi.fn>;
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    dataDir = await mkdtemp(join(tmpdir(), "autoviral-datadir-"));
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    await mkdir(join(dataDir, "works", workId), { recursive: true });
+    await writeFile(
+      join(dataDir, "works", workId, "composition.yaml"),
+      fixture.replace(/workId: sample-work/, `workId: ${workId}`),
+      "utf8",
+    );
+    // Only DATA_DIR is set; WORKS_ROOT is explicitly cleared for this block.
+    delete process.env.AUTOVIRAL_WORKS_ROOT;
+    process.env.AUTOVIRAL_DATA_DIR = dataDir;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+    if (prevDataDir === undefined) delete process.env.AUTOVIRAL_DATA_DIR;
+    else process.env.AUTOVIRAL_DATA_DIR = prevDataDir;
+  });
+
+  it("probes the file under <AUTOVIRAL_DATA_DIR>/works, not ~/.autoviral/works", async () => {
+    mockProbe.mockClear();
+    mockProbe.mockResolvedValueOnce({ durationSec: 3 });
+    const res = await app.request("/api/bridge/v1/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ path: "output/final.mp4" }),
+    });
+    expect(res.status).toBe(200);
+    expect(mockProbe).toHaveBeenCalledTimes(1);
+    const probedPath = mockProbe.mock.calls[0][0] as string;
+    expect(probedPath).toBe(join(dataDir, "works", workId, "output/final.mp4"));
+  });
 });

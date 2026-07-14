@@ -178,6 +178,68 @@ describe("ops.importClip — replaceTimeline semantics", () => {
   });
 });
 
+describe("ops.importClip — composition.duration (review S6 finding 1)", () => {
+  it("grows a fresh-work duration to the placed clip's end (not left at 0)", () => {
+    // A brand-new work ships duration:0; without a recompute the Player/export
+    // would render a single frame regardless of the imported clip's length.
+    const comp = compWith([track("trk_v0", "video", 0)]);
+    expect(comp.duration).toBe(0);
+    importClip(comp, { probe: { durationSec: 8 }, src: "output/final.mp4" });
+    expect(comp.duration).toBe(8);
+  });
+
+  it("extends duration when appending a clip longer than the current end", () => {
+    const comp = compWith([
+      track("trk_v0", "video", 0, [videoClip("vc_a", 0, 4)]),
+    ]);
+    comp.duration = 4; // current content end
+    importClip(comp, { probe: { durationSec: 10 }, src: "output/long.mp4" });
+    // appended at 4 → new content end = 4 + 10 = 14
+    expect(comp.duration).toBe(14);
+  });
+
+  it("recomputes duration across ALL tracks after replaceTimeline", () => {
+    const comp = compWith([
+      track("trk_v0", "video", 0, [videoClip("vc_a", 0, 30)]),
+      track("trk_a1", "audio", 1, [audioClip("ac_1")]), // ends at 5
+    ]);
+    comp.duration = 30;
+    importClip(comp, {
+      probe: { durationSec: 9 },
+      src: "output/full.mp4",
+      replaceTimeline: true,
+    });
+    // video wiped + single 9s clip at 0; audio clip still ends at 5 → max = 9
+    expect(comp.duration).toBe(9);
+  });
+});
+
+describe("ops.importClip — replaceTimeline clears dangling transitions (review S6 finding 2)", () => {
+  it("wipes a video track's transitions along with its clips (no dangling afterClipId)", () => {
+    const vtrack = track("trk_v0", "video", 0, [
+      videoClip("vc_a", 0, 4),
+      videoClip("vc_b", 4, 4),
+    ]) as { transitions: unknown[] };
+    // an existing cut-point transition after the first clip
+    vtrack.transitions = [{ afterClipId: "vc_a", preset: "fade", durationSec: 0.5 }];
+    const comp = compWith([
+      vtrack,
+      track("trk_a1", "audio", 1, [audioClip("ac_1")]),
+    ]);
+    importClip(comp, {
+      probe: { durationSec: 9 },
+      src: "output/full.mp4",
+      replaceTimeline: true,
+    });
+    const v0 = comp.tracks.find((t) => t.id === "trk_v0")! as unknown as {
+      transitions: unknown[];
+    };
+    // clips replaced with the single import; transitions must be emptied so the
+    // stale afterClipId "vc_a" cannot dangle through the write-path refine (400).
+    expect(v0.transitions).toEqual([]);
+  });
+});
+
 describe("ops.importClip — guards", () => {
   it("throws CompositionOpError{code:4} on a missing/invalid duration", () => {
     for (const bad of [0, -1, NaN, Number.POSITIVE_INFINITY]) {

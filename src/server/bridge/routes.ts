@@ -84,6 +84,7 @@ import { validateComposition } from "../../composition/quality/validate.js";
 import { animationMap } from "../../composition/quality/animation-map.js";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { getWorksRoot } from "../safe-paths.js";
 
 // Per-workId boolean flag controlling whether the terminal prefix line
 // renders. Stored in-memory; frontend mirrors to localStorage for cross-
@@ -1717,31 +1718,46 @@ bridgeRouter.post("/split", async (c) => {
 bridgeRouter.post("/import", async (c) => {
   const g = workIdOrError(c);
   if (!g.ok) return g.res;
-  const body = (await c.req.json().catch(() => ({}))) as {
-    path?: unknown;
-    trackId?: unknown;
-    at?: unknown;
-    replaceTimeline?: unknown;
-    name?: unknown;
-  };
-  if (typeof body.path !== "string" || body.path.trim().length === 0) {
-    return c.json({ ok: false, error: "missing path", code: 4 }, 400);
+  // Strict request schema (review finding 6) — a wrong-TYPED optional field must
+  // fail LOUD (400 + code 4), not be silently coerced to "not passed" (which
+  // would run a different-than-intended semantic under a 200). `path` is the only
+  // required field; the rest are optional but type-checked when present.
+  const rawBody = await c.req.json().catch(() => ({}));
+  const ImportBodySchema = z
+    .object({
+      path: z.string().trim().min(1),
+      trackId: z.string().min(1).optional(),
+      at: z.number().finite().optional(),
+      replaceTimeline: z.boolean().optional(),
+      name: z.string().min(1).optional(),
+    })
+    .strict();
+  const parsedBody = ImportBodySchema.safeParse(rawBody);
+  if (!parsedBody.success) {
+    return c.json(
+      {
+        ok: false,
+        error: `invalid import body: ${parsedBody.error.issues
+          .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+          .join("; ")}`,
+        code: 4,
+      },
+      400,
+    );
   }
-  const relPath = body.path;
-  const atSec =
-    typeof body.at === "number" && Number.isFinite(body.at) ? body.at : undefined;
-  const trackId =
-    typeof body.trackId === "string" && body.trackId ? body.trackId : undefined;
-  const replaceTimeline = body.replaceTimeline === true;
-  const name = typeof body.name === "string" && body.name ? body.name : undefined;
+  const relPath = parsedBody.data.path;
+  const atSec = parsedBody.data.at;
+  const trackId = parsedBody.data.trackId;
+  const replaceTimeline = parsedBody.data.replaceTimeline === true;
+  const name = parsedBody.data.name;
 
   // Path-traversal guard — `path` is attacker-controllable (an agent can put
   // `../` / an absolute path in it). Resolve under the work dir and assert it
   // stays strictly INSIDE it before ffprobe ever touches the file. Same
-  // containment check the captions route uses.
-  const worksRoot =
-    process.env.AUTOVIRAL_WORKS_ROOT ?? join(homedir(), ".autoviral/works");
-  const workDir = resolve(worksRoot, g.workId);
+  // containment check the captions route uses. `getWorksRoot()` is the canonical
+  // resolver (AUTOVIRAL_WORKS_ROOT → <AUTOVIRAL_DATA_DIR>/works → ~/.autoviral/works)
+  // so a custom data dir probes the right place (review finding 4).
+  const workDir = resolve(getWorksRoot(), g.workId);
   const absPath = resolve(workDir, relPath);
   const within = relative(workDir, absPath);
   if (within.startsWith("..") || within.startsWith(sep) || within === "") {

@@ -103,7 +103,20 @@ export function probeMedia(
         );
         return;
       }
-      const stream = parsed.streams?.[0] ?? {};
+      // `importClip` places a VIDEO clip, so a usable video stream is mandatory.
+      // ffprobe was invoked with `-select_streams v:0`, so `streams` is empty for
+      // a pure-audio file even though `format.duration` is present — accepting the
+      // container duration alone would wrongly register an audio-only file as a
+      // VideoClip (review finding 5). Require the selected video stream to exist.
+      const stream = parsed.streams?.[0];
+      if (!stream) {
+        reject(
+          new Error(
+            `probeMedia: no video stream in ${srcPath} — cannot import a non-video file as a video clip`,
+          ),
+        );
+        return;
+      }
       // Prefer container duration; fall back to the stream's own duration.
       const durationRaw = parsed.format?.duration ?? stream.duration;
       const durationSec = Number(durationRaw);

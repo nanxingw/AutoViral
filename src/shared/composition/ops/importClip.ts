@@ -32,6 +32,7 @@ import type {
   VideoClip,
 } from "../../composition.js";
 import { CompositionOpError } from "./errors.js";
+import { compositionContentEnd } from "./setDuration.js";
 
 /**
  * Physical probe result the server's ffprobe wrapper produces. Only
@@ -137,11 +138,18 @@ export function importClip(
   }
 
   // (3) replaceTimeline — empty EVERY video lane's clips in place (keep array
-  // identity via splice), leaving audio/text/overlay lanes untouched.
+  // identity via splice), leaving audio/text/overlay lanes untouched. Cut-point
+  // transitions on those lanes MUST be emptied in lockstep: a transition's
+  // `afterClipId` now points at a clip we just removed, and the write-path
+  // refine (refineTrack) rejects a dangling afterClipId with a 400 — so a stored
+  // work containing transitions would fail `clip import --replace-timeline`.
   if (replaceTimeline) {
     for (const t of comp.tracks) {
       if (t.kind === "video" && t.clips.length > 0) {
         t.clips.splice(0, t.clips.length);
+        if (Array.isArray(t.transitions) && t.transitions.length > 0) {
+          t.transitions.splice(0, t.transitions.length);
+        }
       }
     }
   }
@@ -197,6 +205,12 @@ export function importClip(
     filters: { brightness: 0, contrast: 0, saturation: 0 },
   } as VideoClip;
   track.clips.push(clip);
+
+  // (7) Recompute comp.duration from content across ALL tracks — the SAME口径
+  // trimClip / splitClip use. Without this a fresh work (duration:0) would place
+  // the clip yet still render a single frame, and appending / replacing with a
+  // longer take would stay clipped to the stale duration.
+  comp.duration = compositionContentEnd(comp);
 
   return { clipId, assetId };
 }
