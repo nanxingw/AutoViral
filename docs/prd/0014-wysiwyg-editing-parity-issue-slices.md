@@ -218,6 +218,7 @@
 
 **Blocked by**：S12（ops/schema 连续链尾）。
 **Code-area hints**：`refineTrack`（`composition.ts:357-398`）；OpenCut 对标 `.../timeline/placement/overlap.ts`。
+**已知 residual（S15 review F1，诚实登记）**：store 拖拽/左缘 resize（commitDrag 等）仍直写时间字段绕过 snapToFrame——完整 rewire 需新共享 move/resize op + #48 keyframe rebasing，超 review-fix 范围；CLI/bridge/op 全路径已帧对齐，UI 拖拽落点的量化收敛归入 SINK_PENDING 棘轮欠账，S18 E2E 需注意此路径、S19 known-issues 提及。detachAudio 刻意不 snap（镜像源 clip 保唇同步，off-grid 已在源头拦截）。
 
 ---
 
