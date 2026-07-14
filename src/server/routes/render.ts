@@ -230,13 +230,26 @@ type TransitionApplyFn = (opts: {
   fps: number;
 }) => Promise<string>;
 
+// PRD-0014 S2 review fix (finding 2) — the `Deprecation` response header field
+// is defined by RFC 9745 ("The Deprecation HTTP Response Header Field"), NOT
+// RFC 8594 (that RFC defines `Sunset`). Per RFC 9745 §2.1 the value MUST be an
+// sf-date — a Structured Field Date, i.e. an `@` sigil followed by an integer
+// number of seconds since the Unix epoch. The bare token `true` (a leftover
+// from the pre-RFC draft) is not a valid sf-date, so standards-conformant
+// clients silently ignore it. This constant is the date these four endpoints
+// became deprecated: 2026-07-14 (the PRD-0014 S2 landing). Successor discovery
+// still rides the RFC 8288 `Link` header with rel="successor-version".
+const TRANSITION_DEPRECATION_SF_DATE = "@1783987200"; // 2026-07-14T00:00:00Z
+
 async function runTransitionEndpoint(c: any, applyFn: TransitionApplyFn) {
   // PRD-0014 S2 — these four ffmpeg-bake endpoints are DEPRECATED in favour of
   // the Remotion registry presets (glitch / light-leak now render WYSIWYG in the
   // composition; whip-pan / zoom join them). They stay one version cycle for
-  // un-migrated external scripts. Advertise it (RFC 8594) on EVERY response,
-  // including the fast 400 validation path, so callers can detect the sunset.
-  c.header("Deprecation", "true");
+  // un-migrated external scripts. Advertise it (RFC 9745, sf-date value) on
+  // EVERY response, including the fast 400 validation path, so conformant
+  // callers can detect the deprecation. (No `Sunset` header yet — the v0.3
+  // removal date is not fixed; add an RFC 8594 `Sunset` once it is.)
+  c.header("Deprecation", TRANSITION_DEPRECATION_SF_DATE);
   c.header(
     "Link",
     '</api/bridge/v1/transition>; rel="successor-version"; title="use transition add --preset"',

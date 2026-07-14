@@ -1036,6 +1036,48 @@ describe("bridge router — Phase 3 clip writes", () => {
     expect(v0After.transitions?.some((x) => x.id === transitionId) ?? false).toBe(false);
   });
 
+  // PRD-0014 S2 review fix (finding 4) — the six stylize/motion presets must
+  // survive the FULL write chokepoint, not just the in-place op. This drives the
+  // real bridge route → ops.addTransition → mutateCompositionFor →
+  // writeCompositionFor(CompositionWriteSchema.parse → Track superRefine) →
+  // persist, then reads the transition back off disk. If a new preset were
+  // missing from the schema enum (TransitionPresetEnum is derived from the shared
+  // registry) or tripped the track refine, the write would 400 here. The op-level
+  // test (ops/transition.test.ts) only re-parses TransitionSchema in isolation and
+  // never exercises this integrated write path.
+  it("POST /transition persists a glitch preset through the strict write schema + track refine", async () => {
+    const first = await addVideoClip(300);
+    await addVideoClip(304); // successor so `first` is not last
+    const vTrack = await videoTrackId();
+    const post = await app.request("/api/bridge/v1/transition", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ trackId: vTrack, afterClipId: first, preset: "glitch" }),
+    });
+    expect(post.status).toBe(200);
+    const postBody = (await post.json()) as { ok: boolean; result?: { id: string } };
+    expect(postBody.ok).toBe(true);
+    const transitionId = postBody.result!.id;
+
+    // Read back the PERSISTED composition — proof it passed the strict write
+    // schema (CompositionWriteSchema) + refineTrack, not just the in-place op.
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const compBody = (await comp.json()) as {
+      result: {
+        tracks: Array<{
+          id: string;
+          transitions?: Array<{ id: string; afterClipId: string; preset: string }>;
+        }>;
+      };
+    };
+    const v0 = compBody.result.tracks.find((t) => t.id === vTrack)!;
+    const tr = v0.transitions?.find((x) => x.id === transitionId);
+    expect(tr?.preset).toBe("glitch");
+    expect(tr?.afterClipId).toBe(first);
+  });
+
   it("POST /transition pinned to the LAST clip → 400 + code 4", async () => {
     // Add a clip and pin a transition AFTER it while it is the last clip → reject.
     const last = await addVideoClip(200);

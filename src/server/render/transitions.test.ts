@@ -486,17 +486,28 @@ describe("S1 · four cinematic endpoints render on real color clips", () => {
 // PRD-0014 S2 — the four ffmpeg-bake endpoints are superseded by the Remotion
 // registry presets (glitch / light-leak land there as WYSIWYG presentations).
 // They stay one version cycle for un-migrated external scripts, but MUST now
-// advertise their deprecation via an RFC-8594 `Deprecation` response header.
-// Asserted on the fast 400 path (invalid body) so it needs no ffmpeg.
+// advertise their deprecation via a `Deprecation` response header.
+//
+// review fix (finding 2): the `Deprecation` field is defined by RFC 9745 (NOT
+// RFC 8594 — that defines `Sunset`), and RFC 9745 §2.1 requires the value to be
+// an sf-date: an `@` sigil + integer Unix seconds. The bare `true` a prior
+// version emitted is not a valid sf-date and conformant clients drop it. Assert
+// the value is a well-formed sf-date so a regression back to `true` fails.
+// Checked on the fast 400 path (invalid body) so it needs no ffmpeg.
 describe("S2 · /api/transitions/* advertise Deprecation header (PRD-0014)", () => {
   const endpoints = ["light-leak", "glitch", "domain-warp", "grav-lens"] as const;
+  // RFC 9745 §2.1 sf-date: "@" followed by an integer number of seconds.
+  const SF_DATE = /^@-?\d+$/;
   for (const name of endpoints) {
-    it(`POST /api/transitions/${name} sets Deprecation: true even on the 400 path`, async () => {
+    it(`POST /api/transitions/${name} sets an RFC 9745 sf-date Deprecation header even on the 400 path`, async () => {
       const res = await renderRouter.fetch(
         jsonReq("POST", `/api/transitions/${name}`, { workId: "bad id!" }),
       );
       expect(res.status).toBe(400);
-      expect(res.headers.get("Deprecation")).toBe("true");
+      const dep = res.headers.get("Deprecation");
+      expect(dep).toMatch(SF_DATE);
+      // Not the pre-RFC bare token — that's the regression this guards.
+      expect(dep).not.toBe("true");
     });
   }
 });
