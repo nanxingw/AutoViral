@@ -46,7 +46,11 @@ export function VariantSwitcher() {
       break;
     }
   }
-  if (!selectedClip || selectedClip.kind === "text") {
+  if (
+    !selectedClip ||
+    selectedClip.kind === "text" ||
+    selectedClip.kind === "adjustment"
+  ) {
     return <EmptyState message={t("studio.variantSwitcher.emptyNoBinding")} />;
   }
 

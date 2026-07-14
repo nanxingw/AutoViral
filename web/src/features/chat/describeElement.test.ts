@@ -13,6 +13,7 @@ const CLIP_NOUNS: ClipNouns = {
   audio: "音频",
   text: "字幕",
   overlay: "叠加",
+  adjustment: "调整层",
 };
 const LAYER_NOUNS: LayerNouns = {
   text: "文字图层",

@@ -519,6 +519,7 @@ export const en = {
         audio: "Drop audio · or choose VO from the library",
         text: "Drop captions · or generate captions",
         overlay: "Drop overlay media",
+        adjustment: "Drop an effect · or add an adjustment layer via agent",
       },
       dnd: {
         // I19/I20 — drag library assets onto tracks + move clips between
@@ -1004,6 +1005,7 @@ export const en = {
         audio: "audio",
         text: "caption",
         overlay: "overlay",
+        adjustment: "adjustment layer",
       },
       layer: {
         text: "text layer",
@@ -1563,6 +1565,7 @@ export const zh: DeepShape<Messages> = {
         audio: "拖入音频 · 或从资源库选择 VO",
         text: "拖入字幕 · 或生成字幕",
         overlay: "拖入叠加素材",
+        adjustment: "拖入效果 · 或用 agent 添加调整层",
       },
       dnd: {
         // I19/I20 — 把素材库的素材拖到轨道 + 在同类型轨道间移动片段。
@@ -2037,6 +2040,7 @@ export const zh: DeepShape<Messages> = {
         audio: "音频",
         text: "字幕",
         overlay: "叠加",
+        adjustment: "调整层",
       },
       layer: {
         text: "文字图层",

@@ -74,18 +74,21 @@ describe("timeline presentation", () => {
       audio: "studio.timeline.emptyTrack.audio",
       text: "studio.timeline.emptyTrack.text",
       overlay: "studio.timeline.emptyTrack.overlay",
+      adjustment: "studio.timeline.emptyTrack.adjustment",
     });
     expect(en.studio.timeline.emptyTrack).toEqual({
       video: "Drop video media",
       audio: "Drop audio · or choose VO from the library",
       text: "Drop captions · or generate captions",
       overlay: "Drop overlay media",
+      adjustment: "Drop an effect · or add an adjustment layer via agent",
     });
     expect(zh.studio.timeline.emptyTrack).toEqual({
       video: "拖入视频素材",
       audio: "拖入音频 · 或从资源库选择 VO",
       text: "拖入字幕 · 或生成字幕",
       overlay: "拖入叠加素材",
+      adjustment: "拖入效果 · 或用 agent 添加调整层",
     });
   });
 });

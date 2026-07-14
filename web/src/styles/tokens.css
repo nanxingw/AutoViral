@@ -11,6 +11,7 @@
   --timeline-audio: #a89bb8;
   --timeline-caption: #9caf9f;
   --timeline-overlay: #88adb8;
+  --timeline-adjustment: #9a92ac;
   --timeline-video-soft: color-mix(in srgb, var(--timeline-video) 12%, transparent);
   --timeline-video-border: color-mix(in srgb, var(--timeline-video) 38%, var(--glass-border));
   --timeline-audio-soft: color-mix(in srgb, var(--timeline-audio) 12%, transparent);
@@ -19,6 +20,8 @@
   --timeline-caption-border: color-mix(in srgb, var(--timeline-caption) 38%, var(--glass-border));
   --timeline-overlay-soft: color-mix(in srgb, var(--timeline-overlay) 12%, transparent);
   --timeline-overlay-border: color-mix(in srgb, var(--timeline-overlay) 38%, var(--glass-border));
+  --timeline-adjustment-soft: color-mix(in srgb, var(--timeline-adjustment) 12%, transparent);
+  --timeline-adjustment-border: color-mix(in srgb, var(--timeline-adjustment) 38%, var(--glass-border));
 
   --bg: #0a0b0f;
   --bg-grad:
@@ -95,6 +98,7 @@
   --timeline-audio: #655b70;
   --timeline-caption: #506157;
   --timeline-overlay: #3f6068;
+  --timeline-adjustment: #504a5e;
 
   --bg: #fafaf7;
   --bg-grad:

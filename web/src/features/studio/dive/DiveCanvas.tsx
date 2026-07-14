@@ -81,7 +81,8 @@ export function DiveCanvas({ open, onClose }: Props) {
     if (!comp || !selection) return null;
     for (const t of comp.tracks) {
       const c = (t.clips as Clip[]).find((c) => c.id === selection);
-      if (c && c.kind !== "text") return findAssetByUri(comp, c.src)?.id ?? null;
+      if (c && c.kind !== "text" && c.kind !== "adjustment")
+        return findAssetByUri(comp, c.src)?.id ?? null;
     }
     return null;
   }, [comp, selection]);

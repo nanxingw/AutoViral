@@ -96,6 +96,10 @@ function propertiesForClip(kind: Clip["kind"]): KeyframeProperty[] {
       return ["volume"];
     case "text":
       return [];
+    case "adjustment":
+      // S14 (PRD-0014) — adjustment clips carry an effects stack, not
+      // keyframe-able transforms; no animatable properties here.
+      return [];
   }
 }
 

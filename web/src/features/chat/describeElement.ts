@@ -24,6 +24,9 @@ export type LayerNouns = Record<Layer["kind"], string>;
 
 function clipName(clip: Clip): string {
   if (clip.kind === "text") return clip.text.trim().slice(0, 24);
+  // S14 (PRD-0014) — adjustment clips are pure effect windows with no src /
+  // name; fall back to the bare noun (describeClip handles the empty name).
+  if (clip.kind === "adjustment") return "";
   // video / audio / overlay all carry a `src` path — show its basename.
   const base = clip.src.split("/").pop()?.replace(/\.[^.]+$/, "") ?? "";
   return base.slice(0, 24);

@@ -48,6 +48,12 @@
   --clip-kind-border: var(--timeline-overlay-border);
 }
 
+.clip[data-kind="adjustment"] {
+  --clip-kind: var(--timeline-adjustment);
+  --clip-kind-soft: var(--timeline-adjustment-soft);
+  --clip-kind-border: var(--timeline-adjustment-border);
+}
+
 .clip[data-kind="video"],
 .clip[data-kind="audio"] {
   background: color-mix(in srgb, var(--surface-1) 54%, transparent);

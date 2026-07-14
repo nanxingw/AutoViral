@@ -1016,9 +1016,9 @@ export const useComposition = create<CompState>()(
         for (const t of s.comp.tracks) {
           const c = (t.clips as Clip[]).find((c) => c.id === clipId);
           if (c) {
-            // text clips have no `src` field — skip them; rebind only applies
-            // to video / audio / overlay clips that bind to a media URI.
-            if (c.kind !== "text") {
+            // text + adjustment clips have no `src` field — skip them; rebind
+            // only applies to video / audio / overlay clips that bind a URI.
+            if (c.kind !== "text" && c.kind !== "adjustment") {
               c.src = newAsset.uri;
             }
             return;

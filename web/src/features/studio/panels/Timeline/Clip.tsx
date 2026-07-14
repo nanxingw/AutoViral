@@ -21,7 +21,7 @@ export function Clip({
 }: {
   clipId: string;
   pxPerSecond: number;
-  trackKind: "video" | "audio" | "text" | "overlay";
+  trackKind: "video" | "audio" | "text" | "overlay" | "adjustment";
   color: string;
 }) {
   const clip = useComposition((s) =>
@@ -295,6 +295,7 @@ export function Clip({
                     audio: t("chat.addToContext.clip.audio"),
                     text: t("chat.addToContext.clip.text"),
                     overlay: t("chat.addToContext.clip.overlay"),
+                    adjustment: t("chat.addToContext.clip.adjustment"),
                   }),
                 ),
             },
