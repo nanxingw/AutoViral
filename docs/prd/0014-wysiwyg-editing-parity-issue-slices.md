@@ -223,12 +223,16 @@
 
 ## S13 · mask + letterbox preset
 
-**What**：schema 新增 `VideoClip.mask?: {type:"rect"|"ellipse", feather?: 0..1, inverted?: boolean, rect?: {x,y,w,h 归一化}}`；渲染：Remotion 侧 SVG clipPath + feather 用 blur 边缘（预览=导出同一组件，不写 ffmpeg 对偶）；letterbox 做成 preset（CLI `clip mask <id> --preset letterbox-2.35`，展开为 rect+inverted）；共享 op `setClipMask`；CLI `clip mask <id> --shape ellipse --feather 0.2 [--inverted]` / `--none`；Inspector mask 节（shape/feather/inverted 控件）。
+**What**：schema 新增 `VideoClip.mask?: {type:"rect"|"ellipse", feather?: 0..1, inverted?: boolean, rect?: {x,y,w,h 归一化}}`；渲染：Remotion 侧 CSS `mask-image`（内嵌 data-URI SVG `<path>` + feather 用 `feGaussianBlur` 软边）（预览=导出同一组件，不写 ffmpeg 对偶）；letterbox 做成 preset（CLI `clip mask <id> --preset letterbox-2.35`，展开为居中 rect band）；共享 op `setClipMask`；CLI `clip mask <id> --shape ellipse --feather 0.2 [--inverted]` / `--none`；Inspector mask 节（shape/feather/inverted 控件）。
 **禁**：mask 参数 keyframe 化（本版明确不做）；ffmpeg 侧对偶实现。
 
+> **实现校准（S13 code-review 修复 r1）**：
+> - 渲染改用 CSS `mask-image`（alpha mask）而非 `clip-path`：**feather 必须走 alpha 软边**（`feGaussianBlur`），`clip-path` 只能硬裁不能羽化，与本 slice 的「feather 用 blur 边缘」自相矛盾。故渲染树断言以 wrapper 的 `mask-image` data-URI SVG 结构（ellipse 弧线 / `feGaussianBlur` / `fill-rule="evenodd"`）为可观察证据。
+> - letterbox preset 展开为**非 inverted** 的居中 rect band：keep-inside 默认语义下，一条居中横带 rect **不 inverted** 才是「留中间、遮上下黑边」的正确 letterbox；若 inverted 反而会保留上下黑边、遮住内容（恰好相反）。原文「rect+inverted」措辞有误，已按实现校正。
+
 **预设测试**：
-- schema/refine：归一化范围校验、preset 展开值断言。
-- 渲染树：带 ellipse mask 的 clip 渲染树含 clipPath 节点、feather>0 时含 blur；inverted 的 path 方向正确（可断言生成的 SVG path 字符串）。
+- schema/refine：归一化范围校验、preset 展开值断言（letterbox 展开为非 inverted 居中带，精确断言 key 集）；op rect 边界与持久化 `MaskRectSchema` 严格同步（`x+w<=1`，杜绝亚帧 sliver 逃逸 op 却在写盘 500）。
+- 渲染树：带 ellipse mask 的 clip 渲染出 `[data-test='clip-mask']` wrapper，其 `mask-image` data-URI SVG 含 ellipse 弧线、feather>0 时含 `feGaussianBlur`、inverted 时含 `fill-rule="evenodd"`（可断言生成的 SVG 字符串 + DOM 二确）。
 - op + CLI + Inspector 组件测试。
 - 一致性预备：mask 渲染组件在 `renderMedia` 单帧下不抛（为 S16 铺路）。
 

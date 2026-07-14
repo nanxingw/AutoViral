@@ -709,17 +709,27 @@ export const useComposition = create<CompState>()(
       }),
     // PRD-0014 S13 — thin wrapper over the shared `ops.setClipMask` (the SAME code
     // the bridge/CLI `clip mask` runs). The op owns shape/feather/rect/preset
-    // validation + in-place assignment; the store keeps the transition-family
-    // silent no-op contract, catching CompositionOpError so an illegal set leaves
-    // the composition untouched (the Inspector only ever supplies valid shapes /
-    // 0..1 feather, so this catch is purely defensive).
+    // validation + in-place assignment.
     setClipMask: (clipId, spec) =>
       set((s) => {
         if (!s.comp) return;
         try {
           ops.setClipMask(s.comp, { clipId, spec });
         } catch (err) {
-          if (err instanceof CompositionOpError) return; // silent no-op (untouched)
+          if (err instanceof CompositionOpError) {
+            // Review-fix (finding #5) — SURFACE, don't swallow. The bridge/CLI
+            // return code:4 for the SAME rejected call, so the UI must tell the
+            // user WHY the mask edit landed nowhere instead of silently no-op'ing
+            // (the exact gap the transition family already closed one wrapper up).
+            const locale = useLocaleStore.getState().locale;
+            useToastStore.getState().push({
+              variant: "warn",
+              message: MESSAGES[locale].studio.toast.maskFailed,
+              detail: err.message,
+              ttlMs: 4000,
+            });
+            return; // composition untouched, but the user is told.
+          }
           throw err;
         }
       }),

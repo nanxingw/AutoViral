@@ -251,6 +251,7 @@ export const en = {
     toast: {
       splitFailed: "Can't split here",
       transitionFailed: "Can't add transition here",
+      maskFailed: "Can't apply that mask",
       keyframeFailed: "Can't add keyframe here",
       aspectFailed: "Can't switch to that ratio",
       fpsFailed: "Can't switch to that frame rate",
@@ -1304,6 +1305,7 @@ export const zh: DeepShape<Messages> = {
     toast: {
       splitFailed: "无法在此处分割",
       transitionFailed: "无法在此处添加转场",
+      maskFailed: "无法应用该蒙版",
       keyframeFailed: "无法在此处添加关键帧",
       aspectFailed: "无法切换到该比例",
       fpsFailed: "无法切换到该帧率",

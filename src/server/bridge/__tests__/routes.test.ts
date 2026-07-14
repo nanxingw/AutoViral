@@ -5718,6 +5718,25 @@ describe("bridge router — S13 mask (real route + persistence)", () => {
     expect(mask.rect.w).toBe(1);
     expect(mask.rect.h).toBeGreaterThan(0);
     expect(mask.rect.h).toBeLessThan(1);
+    // Review-fix (finding #1) — the letterbox preset is NON-inverted (keep the
+    // central band); pin that so a future drift can't re-add `inverted`.
+    expect(mask).not.toHaveProperty("inverted");
+    expect(Object.keys(mask as Record<string, unknown>).sort()).toEqual(["rect", "type"]);
+  });
+
+  it("a rect whose x+w overshoots 1 by a sub-1e-9 sliver → 400 + code 4 (not a 500) (finding #4)", async () => {
+    // x=0.2, w=0.8000000005 → x+w = 1.0000000005 — inside the op's OLD `1 + 1e-9`
+    // slack (so it slipped through the op) but OUTSIDE the strict persistence
+    // MaskRectSchema (`x+w<=1`), which threw at CompositionWriteSchema.parse →
+    // surfaced as an opaque HTTP 500. The op now rejects it in lockstep → 400/code:4.
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/mask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ shape: "rect", rect: { x: 0.2, y: 0, w: 0.8000000005, h: 1 } }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
   });
 
   it("clear: true removes the mask", async () => {

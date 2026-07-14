@@ -151,6 +151,41 @@ describe("VideoTrackRenderer mask consumption (S13)", () => {
     expect(wrapper).not.toBeNull();
     // the masked video body still renders inside the wrapper.
     expect(wrapper!.querySelector("[data-test='video']")).not.toBeNull();
+    // Review-fix (finding #2) — assert the OBSERVABLE rendered mask, not just the
+    // wrapper's presence: the inline `mask-image` must carry the SVG data-URI, and
+    // feather>0 must produce a real gaussian blur in the DOM mask (both survive
+    // encodeURIComponent verbatim). This proves the field drives a real rendered
+    // mask geometry, matching the buildClipMask unit assertions above.
+    const maskImage =
+      wrapper!.style.maskImage ||
+      wrapper!.style.getPropertyValue("mask-image") ||
+      wrapper!.style.getPropertyValue("-webkit-mask-image") ||
+      wrapper!.getAttribute("style") ||
+      "";
+    expect(maskImage).toContain("data:image/svg+xml");
+    expect(maskImage).toContain("feGaussianBlur");
+  });
+
+  it("an inverted mask → the rendered wrapper's mask-image carries the evenodd cutout (finding #2)", () => {
+    frameRef.current = 30;
+    envRef.isRendering = false;
+    const { container } = render(
+      <Scene
+        comp={compWithVideo({
+          mask: { type: "ellipse", inverted: true, rect: { x: 0.25, y: 0.25, w: 0.5, h: 0.5 } },
+        })}
+      />,
+    );
+    const wrapper = container.querySelector<HTMLElement>("[data-test='clip-mask']");
+    expect(wrapper).not.toBeNull();
+    const maskImage =
+      wrapper!.style.maskImage ||
+      wrapper!.style.getPropertyValue("mask-image") ||
+      wrapper!.style.getPropertyValue("-webkit-mask-image") ||
+      wrapper!.getAttribute("style") ||
+      "";
+    // inverted → fill-rule="evenodd" (a punched hole) reaches the rendered DOM mask.
+    expect(maskImage).toContain("evenodd");
   });
 
   it("renders under renderMedia (isRendering=true) WITHOUT throwing (S16 prep)", () => {

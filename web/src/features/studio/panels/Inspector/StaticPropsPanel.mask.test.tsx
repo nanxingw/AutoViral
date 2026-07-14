@@ -101,5 +101,10 @@ describe("<StaticPropsPanel /> — mask (S13)", () => {
     expect(clip.mask?.rect?.w).toBe(1);
     expect(clip.mask?.rect?.h).toBeGreaterThan(0);
     expect(clip.mask?.rect?.h).toBeLessThan(1);
+    // Review-fix (finding #1) — the letterbox preset KEEPS the central band under
+    // the keep-inside default, so it is NON-inverted. Pin that so a future drift
+    // can't silently re-add `inverted` (which would keep the BARS and hide the
+    // content — the opposite of a letterbox).
+    expect(clip.mask).not.toHaveProperty("inverted");
   });
 });

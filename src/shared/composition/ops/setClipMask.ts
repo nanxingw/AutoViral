@@ -131,7 +131,15 @@ export function setClipMask(
     if (r.w <= 0 || r.h <= 0) {
       throw new CompositionOpError(`setClipMask: rect must enclose a positive area (w>0, h>0)`, 4);
     }
-    if (r.x + r.w > 1 + 1e-9 || r.y + r.h > 1 + 1e-9) {
+    // Review-fix (finding #4) — enforce the SAME strict bound the persistence
+    // MaskRectSchema does (`x+w<=1` / `y+h<=1`, composition.ts). The old `1 + 1e-9`
+    // slack let a rect whose x+w overshot 1 by a sub-1e-9 sliver PASS the op but
+    // then FAIL CompositionWriteSchema.parse at write time — surfacing as an
+    // opaque HTTP 500 (unexpected server error) instead of a 400/code:4 client
+    // error. Rejecting in lockstep with the schema keeps the boundary a clean
+    // client-input rejection. The letterbox preset lands x+w == 1 EXACTLY (not
+    // >1), so it still passes.
+    if (r.x + r.w > 1 || r.y + r.h > 1) {
       throw new CompositionOpError(`setClipMask: rect must stay inside the frame (x+w<=1, y+h<=1)`, 4);
     }
   }

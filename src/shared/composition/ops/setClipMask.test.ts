@@ -106,6 +106,13 @@ describe("setClipMask (S13)", () => {
     expect(mask.rect.y).toBeCloseTo((1 - 0.5625 / 2.35) / 2, 5);
     expect(mask.rect.x).toBe(0);
     expect(mask.rect.w).toBe(1);
+    // Review-fix (finding #1) — pin the EXACT expansion so a future drift can't
+    // silently re-add `inverted`. A letterbox KEEPS the central band under the
+    // keep-inside default, so the preset is NON-inverted (inverting the band
+    // would keep the BARS and hide the content — the opposite of a letterbox).
+    // The PRD's "rect+inverted" wording was corrected in S13 to match.
+    expect(mask).not.toHaveProperty("inverted");
+    expect(Object.keys(mask).sort()).toEqual(["rect", "type"]);
   });
 
   it("rejects an unknown preset (code 4)", () => {
@@ -169,6 +176,20 @@ describe("setClipMask (S13)", () => {
       setClipMask(comp, {
         clipId: "v1",
         spec: { type: "rect", rect: { x: 0.8, y: 0, w: 0.5, h: 1 } },
+      }),
+    ).toThrow(CompositionOpError);
+  });
+
+  it("rejects a rect whose x+w overshoots 1 by a sub-1e-9 sliver (lockstep with persistence, no 500 leak) (finding #4)", () => {
+    const comp = compWith([videoClip({ id: "v1" })]);
+    // x=0.2, w=0.8000000005 → x+w = 1.0000000005. This landed INSIDE the op's old
+    // `1 + 1e-9` slack (so the op passed it) but OUTSIDE the persistence
+    // MaskRectSchema bound (`x+w<=1`), so the write-schema rejected it → HTTP 500.
+    // The op must now reject it in lockstep with the schema (→ 400/code:4).
+    expect(() =>
+      setClipMask(comp, {
+        clipId: "v1",
+        spec: { type: "rect", rect: { x: 0.2, y: 0, w: 0.8000000005, h: 1 } },
       }),
     ).toThrow(CompositionOpError);
   });
