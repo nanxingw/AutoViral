@@ -57,6 +57,9 @@ const SUNK: Record<string, string> = {
   // S5 review fix #1 — the REVERSE op: re-enable source audio + delete the
   // detached AudioClip through the shared `ops.attachAudio`.
   reattachClipAudio: "attachAudio",
+  // ── S3 (PRD-0014) — set/clear a video clip's ENTRANCE transition; the
+  // Inspector selector and `autoviral clip set --transition-in` share the op.
+  setClipTransitionIn: "setTransitionIn",
 };
 
 // Store-only editing verbs NOT yet lifted. Each carries the slice/reason so the

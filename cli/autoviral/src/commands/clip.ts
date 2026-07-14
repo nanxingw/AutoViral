@@ -424,6 +424,51 @@ export async function clipCommand(args: string[]): Promise<void> {
       process.exit(4);
     }
     const opts = parseFlags(rest.slice(1));
+
+    // PRD-0014 S3 — `--transition-in <preset>:<durationSec>` (entrance transition)
+    // is NOT a plain scalar prop patch: it routes through the dedicated shared
+    // `ops.setTransitionIn` (which validates the preset + clamps durationSec ≤ the
+    // clip's effective duration). Syntax: `glitch:0.4` (preset + duration),
+    // `glitch` (preset, default duration), or `none` (clear). We pull it out of
+    // the generic flag loop and POST /clip/:id/transition-in; any OTHER flags in
+    // the same invocation still go through the normal PATCH below.
+    const tinRaw = opts["--transition-in"];
+    if (tinRaw !== undefined) {
+      delete opts["--transition-in"];
+      let tinBody: Record<string, unknown>;
+      if (tinRaw === "none") {
+        tinBody = { clear: true };
+      } else {
+        const [preset, durRaw] = tinRaw.split(":");
+        if (!preset) {
+          process.stderr.write(
+            "autoviral clip set --transition-in: expected <preset>[:<durationSec>] or none\n",
+          );
+          process.exit(4);
+        }
+        tinBody = { preset };
+        if (durRaw !== undefined && durRaw !== "") {
+          const dur = Number(durRaw);
+          if (!Number.isFinite(dur)) {
+            process.stderr.write(
+              "autoviral clip set --transition-in: durationSec must be a number (preset:seconds)\n",
+            );
+            process.exit(4);
+          }
+          tinBody.durationSec = dur;
+        }
+      }
+      await bridgeRequest(
+        ctx,
+        "POST",
+        `/clip/${encodeURIComponent(id)}/transition-in`,
+        tinBody,
+      );
+      // If --transition-in was the ONLY flag, we're done; otherwise fall through
+      // to PATCH the remaining scalar props.
+      if (Object.keys(opts).length === 0) return;
+    }
+
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(opts)) {
       const flag = k.replace(/^--/, "");

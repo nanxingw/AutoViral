@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useComposition } from "../../store";
 import type { Clip } from "../../types";
 import { resolveSourceAudio } from "../../types";
+import { TRANSITION_PRESETS } from "@shared/transitions";
 import { useT } from "@/i18n/useT";
 
 // #56 — static property controls. The schema (transforms/filters/opacity/
@@ -149,6 +150,7 @@ export function StaticPropsPanel() {
   const updateClip = useComposition((s) => s.updateClip);
   const detachClipAudio = useComposition((s) => s.detachClipAudio);
   const reattachClipAudio = useComposition((s) => s.reattachClipAudio);
+  const setClipTransitionIn = useComposition((s) => s.setClipTransitionIn);
   const t = useT();
 
   const clip = useMemo<Clip | null>(() => {
@@ -454,6 +456,81 @@ export function StaticPropsPanel() {
           >
             {t("studio.inspector.detachAudio")}
           </button>
+        </div>
+      )}
+
+      {videoClip && (
+        <div style={sectionStyle}>
+          <div style={sectionHeader}>{t("studio.inspector.sectionTransitionIn")}</div>
+          {/* PRD-0014 S3 — entrance transition selector. Both controls route
+              through the shared `setClipTransitionIn` store action (→
+              ops.setTransitionIn) so the human Inspector and `autoviral clip set
+              --transition-in` converge on ONE composition. "none" clears. */}
+          <div style={rowStyle}>
+            <label htmlFor="transition-in-preset" style={labelStyle}>
+              {t("studio.inspector.transitionInPreset")}
+            </label>
+            <select
+              id="transition-in-preset"
+              aria-label={t("studio.inspector.transitionInPreset")}
+              value={videoClip.transitionIn?.preset ?? "__none__"}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "__none__") {
+                  setClipTransitionIn(videoClip.id, null);
+                } else {
+                  // Keep the existing duration if the clip already had an
+                  // entrance; otherwise let the op default to the preset's
+                  // registry default (durationSec omitted).
+                  const durationSec = videoClip.transitionIn?.durationSec;
+                  setClipTransitionIn(videoClip.id, {
+                    preset: v as (typeof TRANSITION_PRESETS)[number],
+                    ...(durationSec !== undefined ? { durationSec } : {}),
+                    ...(videoClip.transitionIn?.easing
+                      ? { easing: videoClip.transitionIn.easing }
+                      : {}),
+                  });
+                }
+              }}
+              style={{ ...numberInputStyle, gridColumn: "2 / span 3", textAlign: "left" }}
+            >
+              <option value="__none__">{t("studio.inspector.transitionInNone")}</option>
+              {TRANSITION_PRESETS.map((preset) => (
+                <option key={preset} value={preset}>
+                  {preset}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {videoClip.transitionIn && (
+            <div style={rowStyle}>
+              <label htmlFor="transition-in-duration" style={labelStyle}>
+                {t("studio.inspector.transitionInDuration")}
+              </label>
+              <input
+                id="transition-in-duration"
+                type="number"
+                aria-label={t("studio.inspector.transitionInDuration")}
+                min={0.05}
+                max={5}
+                step={0.05}
+                value={videoClip.transitionIn.durationSec}
+                onChange={(e) => {
+                  const next = Number(e.target.value);
+                  if (!Number.isFinite(next)) return;
+                  setClipTransitionIn(videoClip.id, {
+                    preset: videoClip.transitionIn!.preset,
+                    durationSec: next,
+                    ...(videoClip.transitionIn!.easing
+                      ? { easing: videoClip.transitionIn!.easing }
+                      : {}),
+                  });
+                }}
+                style={{ ...numberInputStyle, gridColumn: "3 / span 2" }}
+              />
+            </div>
+          )}
         </div>
       )}
 

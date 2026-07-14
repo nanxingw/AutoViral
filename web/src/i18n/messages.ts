@@ -628,6 +628,10 @@ export const en = {
       sourceAudioEnabled: "Source audio",
       detachAudio: "Detach audio",
       detachAudioHint: "Pull the source audio onto its own track (for ducking or replacement)",
+      sectionTransitionIn: "Entrance",
+      transitionInPreset: "Transition",
+      transitionInNone: "None",
+      transitionInDuration: "Duration (s)",
     },
     platformPreset: {
       heading: "Platform",
@@ -1649,6 +1653,10 @@ export const zh: DeepShape<Messages> = {
       sourceAudioEnabled: "原声",
       detachAudio: "拆分原声",
       detachAudioHint: "把原声拉成独立音轨（用于闪避或替换）",
+      sectionTransitionIn: "入场转场",
+      transitionInPreset: "转场",
+      transitionInNone: "无",
+      transitionInDuration: "时长（秒）",
     },
     platformPreset: {
       heading: "平台",

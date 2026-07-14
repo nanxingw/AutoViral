@@ -2118,6 +2118,67 @@ bridgeRouter.post("/clip/:id/detach-audio", async (c) => {
   return c.json({ ok: true, result });
 });
 
+// S3 (PRD-0014) — POST /clip/:id/transition-in: set (or clear) a video clip's
+// ENTRANCE transition through the shared `ops.setTransitionIn` — the SAME op the
+// Studio Inspector's入场转场 selector runs, so an agent's `autoviral clip set <id>
+// --transition-in glitch:0.4` and a human converge on ONE composition. Body:
+//   { preset, durationSec?, easing? }  → set (durationSec defaults to the preset
+//                                        registry default; op validates ≤ effective)
+//   { clear: true }                    → clear the entrance
+// Unknown / non-video clip, unknown preset, out-of-range durationSec →
+// CompositionOpError{code:4} → HTTP 400 + code:4 → CLI exit 4.
+bridgeRouter.post("/clip/:id/transition-in", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  }
+  const body = (await c.req.json().catch(() => ({}))) as {
+    preset?: unknown;
+    durationSec?: unknown;
+    easing?: unknown;
+    clear?: unknown;
+  };
+  let spec: ops.TransitionInSpec | null;
+  if (body.clear === true) {
+    spec = null;
+  } else {
+    if (typeof body.preset !== "string" || !body.preset) {
+      return c.json({ ok: false, error: "missing preset", code: 4 }, 400);
+    }
+    const s: ops.TransitionInSpec = { preset: body.preset };
+    if (body.durationSec !== undefined) {
+      if (typeof body.durationSec !== "number" || !Number.isFinite(body.durationSec)) {
+        return c.json({ ok: false, error: "invalid durationSec (seconds)", code: 4 }, 400);
+      }
+      s.durationSec = body.durationSec;
+    }
+    if (body.easing !== undefined) {
+      if (body.easing !== "linear" && body.easing !== "spring" && body.easing !== "ease-in-out") {
+        return c.json({ ok: false, error: "invalid easing", code: 4 }, 400);
+      }
+      s.easing = body.easing;
+    }
+    spec = s;
+  }
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.setTransitionIn(comp, { clipId: id, spec });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-transition-in" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
 // S9 (US 4/5/9) — POST /transition: add a cut-point transition on a video track
 // through the shared composition-ops core. Body `{ trackId, afterClipId, preset,
 // durationSec? }`; the video-only guard, the last-clip-anchor rejection, the

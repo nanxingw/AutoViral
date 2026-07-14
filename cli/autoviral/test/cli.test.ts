@@ -57,6 +57,9 @@ let lastReframe: Record<string, unknown> | null = null;
 // PRD-0014 S5 — capture the last POST /clip/:id/detach-audio so the CLI test can
 // assert `clip detach-audio <id>` reached the wire (empty body).
 let lastDetachAudio: Record<string, unknown> | null = null;
+// PRD-0014 S3 — capture the last POST /clip/:id/transition-in so the CLI test can
+// assert `clip set <id> --transition-in glitch:0.4` (and `none`) reached the wire.
+let lastTransitionIn: Record<string, unknown> | null = null;
 let lastTransitionSet: Record<string, unknown> | null = null;
 let lastSelect: Record<string, unknown> | null = null;
 // S4 (US 10) — capture the last PUT /comp body so the CLI test can assert the
@@ -537,6 +540,21 @@ beforeAll(async () => {
         const audioClipId = `ac_det${nextSeq++}`;
         clips.push({ id: audioClipId, trackKind: "audio" });
         return send(200, { ok: true, result: { audioClipId, trackId: "trk_a1" } });
+      }
+    }
+    // PRD-0014 S3 — POST /clip/:id/transition-in (clip set --transition-in). A
+    // known clipId sets/clears the entrance + returns { id }; an unknown clipId
+    // is the op's CompositionOpError → 400 + code 4 → CLI exit 4. Records the body
+    // so the CLI wire shape (preset/durationSec OR clear) can be asserted.
+    {
+      const tinMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/transition-in$/.exec(url ?? "");
+      if (req.method === "POST" && tinMatch) {
+        lastTransitionIn = await readBody(req);
+        const clipId = decodeURIComponent(tinMatch[1]);
+        if (!clips.find((c) => c.id === clipId)) {
+          return send(400, { ok: false, error: "no such clip", code: 4 });
+        }
+        return send(200, { ok: true, result: { id: clipId } });
       }
     }
     // PRD-0014 S8 — POST /clip/:id/keyframe/remove + /keyframe/move. Mirror the
@@ -1485,6 +1503,42 @@ describe("autoviral CLI — end-to-end", () => {
 
     it("clip detach-audio an unknown clip → bridge 400 code:4 → exit 4", async () => {
       const r = await run(["clip", "detach-audio", "vc_nope"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    // PRD-0014 S3 — clip set --transition-in <preset>:<durationSec> (entrance
+    // transition). Routes to POST /clip/:id/transition-in (NOT the generic PATCH)
+    // because it runs the dedicated shared `ops.setTransitionIn`. `none` clears.
+    it("clip set --transition-in glitch:0.4 → POSTs /clip/:id/transition-in { preset, durationSec }", async () => {
+      lastTransitionIn = null;
+      const r = await run(["clip", "set", "vc_s01", "--transition-in", "glitch:0.4"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastTransitionIn).toEqual({ preset: "glitch", durationSec: 0.4 });
+    });
+
+    it("clip set --transition-in glitch (no duration) → POSTs { preset } only (op defaults duration)", async () => {
+      lastTransitionIn = null;
+      const r = await run(["clip", "set", "vc_s01", "--transition-in", "glitch"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastTransitionIn).toEqual({ preset: "glitch" });
+    });
+
+    it("clip set --transition-in none → POSTs { clear: true }", async () => {
+      lastTransitionIn = null;
+      const r = await run(["clip", "set", "vc_s01", "--transition-in", "none"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastTransitionIn).toEqual({ clear: true });
+    });
+
+    it("clip set --transition-in glitch:abc (non-numeric duration) → exit 4 (never hits bridge)", async () => {
+      lastTransitionIn = null;
+      const r = await run(["clip", "set", "vc_s01", "--transition-in", "glitch:abc"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastTransitionIn).toBeNull();
+    });
+
+    it("clip set --transition-in on an unknown clip → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["clip", "set", "vc_nope", "--transition-in", "glitch:0.4"]);
       expect(r.exitCode).toBe(4);
     });
 

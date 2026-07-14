@@ -354,23 +354,92 @@ function pct(n: number): string {
   return `${Number(n.toFixed(4))}%`;
 }
 
+/**
+ * S3 (PRD-0014) — a transparent full-frame scene used as the "before" sequence
+ * of a clip's ENTRANCE transition. The entrance presentation composites the
+ * incoming clip OVER this blank, so the clip fades/glitches/whips in from
+ * nothing at its head. Kept dead-simple (an absolutely-filled empty div) so it
+ * adds no pixels of its own.
+ */
+function BlankScene() {
+  return <div style={{ position: "absolute", inset: 0 }} data-test="entrance-blank" />;
+}
+
+/**
+ * S3 (PRD-0014) — build the leading `[blankSequence, transition]` nodes that put
+ * a clip's `transitionIn` presentation at its HEAD, inside a <TransitionSeries>.
+ * The blank sequence + the transition BOTH span `entranceFrames`; the transition
+ * overlaps them so the clip's own sequence still starts at chain-local frame 0
+ * (no time shift — the entrance overlays the clip's first `entranceFrames`).
+ * Returns `[]` when the clip has no entrance. Same component drives preview +
+ * export (WYSIWYG by construction — no ffmpeg dual, mirrors the S2 cut-point
+ * presets).
+ */
+function entranceNodes(
+  clip: VideoClip,
+  fps: number,
+  dims: { width: number; height: number },
+): React.ReactNode[] {
+  const ti = clip.transitionIn;
+  if (!ti) return [];
+  const entranceFrames = Math.max(1, Math.round(ti.durationSec * fps));
+  return [
+    <TransitionSeries.Sequence
+      key={`entrance-blank-${clip.id}`}
+      durationInFrames={entranceFrames}
+    >
+      <BlankScene />
+    </TransitionSeries.Sequence>,
+    <TransitionSeries.Transition
+      key={`entrance-tr-${clip.id}`}
+      presentation={presentationFor(ti.preset, dims)}
+      timing={timingFor(ti.easing ?? "linear", entranceFrames)}
+    />,
+  ];
+}
+
 export function VideoTrackRenderer({ track }: { track: Track }) {
   const { fps, width, height } = useVideoConfig();
   if (track.hidden) return null;
+  const dims = { width, height };
   const chains = groupChains(track.clips as VideoClip[], track.transitions ?? []);
   return (
     <>
       {chains.map((chain) => {
         const first = chain.clips[0];
         const from = Math.round(first.trackOffset * fps);
-        // Single-clip chain → plain <Sequence> (unchanged behaviour). This
-        // covers ALL tracks until the user adds a transition; matters for
-        // back-compat with every existing test + work.
-        if (chain.clips.length === 1) {
+        // S3 — an entrance transition on the chain's FIRST clip prepends a
+        // blank + transition inside a <TransitionSeries>. It is ORTHOGONAL to
+        // the cut-point transitions between clips (both can be present).
+        const entrance = entranceNodes(first, fps, dims);
+        // Single-clip chain with NO entrance → plain <Sequence> (unchanged
+        // behaviour). This covers ALL tracks until the user adds a transition;
+        // matters for back-compat with every existing test + work.
+        if (chain.clips.length === 1 && entrance.length === 0) {
           const dur = Math.max(1, Math.round(effectiveClipDuration(first) * fps));
           return (
             <Sequence key={first.id} from={from} durationInFrames={dur}>
               <VideoClipRenderer clip={first} />
+            </Sequence>
+          );
+        }
+        // Single-clip chain WITH an entrance → wrap the lone clip in a
+        // <TransitionSeries> [blank, entrance-transition, clip]. Total span =
+        // clipDur (the transition overlaps the blank), so timeline timing is
+        // preserved.
+        if (chain.clips.length === 1) {
+          const clipDur = Math.max(1, Math.round(effectiveClipDuration(first) * fps));
+          return (
+            <Sequence key={first.id} from={from} durationInFrames={clipDur}>
+              <TransitionSeries>
+                {entrance}
+                <TransitionSeries.Sequence
+                  key={`s-${first.id}`}
+                  durationInFrames={clipDur}
+                >
+                  <VideoClipRenderer clip={first} />
+                </TransitionSeries.Sequence>
+              </TransitionSeries>
             </Sequence>
           );
         }
@@ -379,10 +448,13 @@ export function VideoTrackRenderer({ track }: { track: Track }) {
         // transition consumes durationInFrames from BOTH adjacent sequences
         // (handles), shortening the chain by sum(transition durations) — same
         // visual outcome as the EXPORT because Stage 1 of render-pipeline runs
-        // this exact <Scene/> (WYSIWYG by construction, #54 Phase 1).
+        // this exact <Scene/> (WYSIWYG by construction, #54 Phase 1). A leading
+        // `entrance` (first clip's transitionIn) is prepended inside the SAME
+        // series (orthogonal to the cut-point transitions).
         return (
           <Sequence key={chain.clips.map((c) => c.id).join(":")} from={from}>
             <TransitionSeries>
+              {entrance}
               {chain.clips.flatMap((c, i) => {
                 const seqDur = Math.max(1, Math.round(effectiveClipDuration(c) * fps));
                 const nodes: React.ReactNode[] = [

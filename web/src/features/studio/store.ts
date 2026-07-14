@@ -151,6 +151,21 @@ interface CompState {
   // AudioClip via `ops.attachAudio`, so re-enabling never double-plays the
   // source + the pulled track.
   reattachClipAudio: (clipId: string) => void;
+  // PRD-0014 S3 — set (spec) or clear (null) a video clip's ENTRANCE transition
+  // (transitionIn) via the shared `ops.setTransitionIn` — the SAME op the bridge/
+  // CLI (`autoviral clip set <id> --transition-in glitch:0.4`) runs, so the human
+  // Inspector selector and the agent converge on ONE composition. durationSec is
+  // optional (op defaults to the preset registry default); the op owns the
+  // preset / range / ≤-effective validation and THROWS on illegal input, so the
+  // store keeps its historical silent-no-op contract (catch CompositionOpError).
+  setClipTransitionIn: (
+    clipId: string,
+    spec: {
+      preset: Transition["preset"];
+      durationSec?: number;
+      easing?: Transition["easing"];
+    } | null,
+  ) => void;
   // Phase 4.I — edge-drag resize. `newTime` is the proposed timeline-time of
   // the moving edge. Clamps left at 0, right at next clip's trackOffset (D2),
   // and enforces minDuration 0.05s on both edges. Branches on clip kind:
@@ -654,6 +669,22 @@ export const useComposition = create<CompState>()(
         ops.attachAudio(s.comp, { clipId });
         // Keep the video clip selected so the source-audio controls stay open.
         s.selection = clipId;
+      }),
+    // PRD-0014 S3 — thin wrapper over the shared `ops.setTransitionIn` (the SAME
+    // code the bridge/CLI `clip set --transition-in` runs). The op owns the
+    // preset / range / ≤-effective validation + in-place assignment; the store
+    // keeps its historical silent-no-op contract for the transition family (like
+    // updateTransition — no clip-history push), catching CompositionOpError so an
+    // illegal set leaves the composition untouched.
+    setClipTransitionIn: (clipId, spec) =>
+      set((s) => {
+        if (!s.comp) return;
+        try {
+          ops.setTransitionIn(s.comp, { clipId, spec });
+        } catch (err) {
+          if (err instanceof CompositionOpError) return; // silent no-op (historical)
+          throw err;
+        }
       }),
     collapseGaps: (trackId) =>
       set((s) => {

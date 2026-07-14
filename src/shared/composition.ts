@@ -1,5 +1,13 @@
 import { z } from "zod";
 import { TRANSITION_PRESETS } from "./transitions.js";
+// PRD-0014 S3 — `transitionIn.durationSec` is validated against the clip's
+// EFFECTIVE (speed-aware) timeline width in refineTrack. effectiveClipDuration
+// lives in ./speed-ramp; it consumes SPEED_MIN/SPEED_MAX declared BELOW in this
+// file, forming a cycle — but it is only ever CALLED at parse time (a function
+// declaration, hoisted), never at module-eval time, so the live binding is
+// always initialised by the time refineTrack runs. (Same safe function-level
+// cycle keyframes.ts ↔ composition.ts already relies on.)
+import { effectiveClipDuration } from "./speed-ramp.js";
 
 export const FPS_VALUES = [24, 25, 30, 60] as const;
 export const ASPECTS = ["9:16", "1:1", "16:9", "4:5"] as const;
@@ -230,6 +238,23 @@ function refineSpeedKeyframes<
   });
 }
 
+// PRD-0014 S3 — `transitionIn`: an ENTRANCE transition applied to a video clip's
+// HEAD (the clip fades/glitches/whips IN over its first `durationSec`). This is
+// ORTHOGONAL to a cut-point `Transition` (which lives on the track between two
+// adjacent clips) — the two coexist and never merge. `preset` is drawn from the
+// SAME shared registry as cut-point transitions (TRANSITION_PRESETS — the S2
+// Remotion-presentation全集), so preview + export share one renderer (WYSIWYG by
+// construction). `easing` mirrors `Transition.easing`. `durationSec` is bounded
+// to the schema [0.05, 5] here AND re-checked ≤ the clip's EFFECTIVE (speed-
+// aware) duration in refineTrack — an entrance can't consume more than the whole
+// clip. Optional with NO default so every pre-S3 work (no key) parses unchanged.
+export const TransitionInSchema = z.object({
+  preset: z.enum(TRANSITION_PRESETS),
+  durationSec: z.number().min(0.05).max(5),
+  easing: z.enum(["linear", "spring", "ease-in-out"]).optional(),
+});
+export type TransitionIn = z.infer<typeof TransitionInSchema>;
+
 // Internal raw object schema — exported `VideoClipSchema` wraps this with the
 // speed-keyframe superRefine. The raw form is also re-used inside the
 // discriminatedUnion below (zod requires ZodObject members, not ZodEffects).
@@ -267,6 +292,9 @@ const VideoClipObjectSchema = z.object({
   // Optional with NO default → every existing work still parses (absent =
   // enabled; resolveSourceAudio owns the read-side default).
   sourceAudio: SourceAudioSchema.optional(),
+  // S3 (PRD-0014) — entrance transition (see TransitionInSchema). Optional with
+  // NO default → every pre-S3 work parses unchanged (absent = no entrance).
+  transitionIn: TransitionInSchema.optional(),
   keyframes: z.array(KeyframeSchema).optional(),
 });
 export const VideoClipSchema = VideoClipObjectSchema.superRefine(
@@ -400,7 +428,14 @@ export type Transition = z.infer<typeof TransitionSchema>;
 // hole, so there is exactly one implementation.
 function refineTrack(
   track: {
-    clips: { kind: string; id: string; keyframes?: { property: string; value: number }[] }[];
+    clips: {
+      kind: string;
+      id: string;
+      in?: number;
+      out?: number;
+      keyframes?: { property: string; value: number; time?: number }[];
+      transitionIn?: { durationSec: number };
+    }[];
     transitions?: { afterClipId: string }[];
   },
   ctx: z.RefinementCtx,
@@ -408,6 +443,31 @@ function refineTrack(
   track.clips.forEach((clip, ci) => {
     if (clip.kind === "text") return;
     const kfs = clip.keyframes;
+    // S3 (PRD-0014) — an entrance transition can't be longer than the clip it
+    // enters. Check `transitionIn.durationSec` ≤ the clip's EFFECTIVE (speed-
+    // aware) timeline width: a 2× clip has half the usable duration, so an
+    // over-long entrance that would still be running past the clip's end is a
+    // write-path rejection (not a silent renderer clamp). Only video clips carry
+    // transitionIn (see VideoClipObjectSchema).
+    if (clip.kind === "video" && clip.transitionIn && clip.in != null && clip.out != null) {
+      const eff = effectiveClipDuration({
+        in: clip.in,
+        out: clip.out,
+        keyframes: clip.keyframes as never,
+      });
+      // +epsilon so a transition set to exactly the clip's effective length
+      // (a common "entrance covers the whole clip" case) is not spuriously
+      // rejected by float noise.
+      if (clip.transitionIn.durationSec > eff + 1e-6) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["clips", ci, "transitionIn", "durationSec"],
+          message:
+            `transitionIn.durationSec ${clip.transitionIn.durationSec} exceeds the clip's ` +
+            `effective duration ${eff}`,
+        });
+      }
+    }
     if (!kfs) return;
     kfs.forEach((kf, ki) => {
       if (kf.property !== "speed") return;

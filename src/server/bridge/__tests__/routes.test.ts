@@ -5434,3 +5434,119 @@ describe("bridge router — S5 detach-audio (real route + persistence)", () => {
     expect(body.code).toBe(4);
   });
 });
+
+// PRD-0014 S3 — POST /clip/:id/transition-in (real route + persistence). The CLI
+// test uses a hand-rolled fake server, so it never exercises the actual Hono route
+// / ops.setTransitionIn / strict-write-schema persistence. This drives the real
+// router against an on-disk work: set an entrance, read the persisted composition
+// back and assert `transitionIn` survived the strict write schema + track refine;
+// then clear it, and finally reject an over-long entrance + unknown clip.
+describe("bridge router — S3 transition-in (real route + persistence)", () => {
+  let workRoot: string;
+  const workId = "w_transitionin_route";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-transitionin-route-"));
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(
+      join(workRoot, workId, "composition.yaml"),
+      fixture.replace(/workId: sample-work/, `workId: ${workId}`),
+      "utf8",
+    );
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  async function transitionInOf(): Promise<unknown> {
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const body = (await comp.json()) as {
+      result: { tracks: Array<{ clips: Array<{ id: string; transitionIn?: unknown }> }> };
+    };
+    return body.result.tracks
+      .flatMap((t) => t.clips)
+      .find((c) => c.id === "vc_s01")?.transitionIn;
+  }
+
+  it("sets a glitch entrance that survives the strict write schema + refine, then broadcasts", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (ev) => events.push(ev.type));
+    try {
+      const res = await app.request("/api/bridge/v1/clip/vc_s01/transition-in", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ preset: "glitch", durationSec: 0.4 }),
+      });
+      expect(res.status).toBe(200);
+      expect(await transitionInOf()).toEqual({ preset: "glitch", durationSec: 0.4 });
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  it("defaults durationSec to the preset registry default when omitted", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/transition-in", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ preset: "zoom-in" }),
+    });
+    expect(res.status).toBe(200);
+    // zoom-in registry default = 0.5
+    expect(await transitionInOf()).toEqual({ preset: "zoom-in", durationSec: 0.5 });
+  });
+
+  it("clear: true removes the entrance", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/transition-in", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ clear: true }),
+    });
+    expect(res.status).toBe(200);
+    expect(await transitionInOf()).toBeUndefined();
+  });
+
+  it("an over-long entrance (9s on a 4s clip) → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/transition-in", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ preset: "glitch", durationSec: 9 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("an unknown preset → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/transition-in", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ preset: "no-such-preset", durationSec: 0.4 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("an unknown clip → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/nope/transition-in", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ preset: "glitch", durationSec: 0.4 }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+});
