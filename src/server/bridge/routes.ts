@@ -1288,6 +1288,98 @@ bridgeRouter.delete("/track/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// S7 (PRD-0014) — POST /track/:id/collapse: repack a lane's clips back-to-back
+// from 0 through the shared `ops.collapseGapsOnTrack`, the SAME code the Studio
+// collapse-gaps toolbar action runs, so `autoviral track collapse <id>` and a
+// human clicking "collapse gaps" converge. Unknown track id → 400 + code:4.
+bridgeRouter.post("/track/:id/collapse", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing track id", code: 4 }, 400);
+  }
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        const { found } = ops.collapseGapsOnTrack(comp, { trackId: id });
+        if (!found) {
+          throw new CompositionOpError(`no track with id ${id}`, 4);
+        }
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "track-collapse" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
+// S7 (PRD-0014) — PATCH /track/:id: partial-update a lane's props (label /
+// language / volume / muted / hidden) through the shared `ops.setTrackProps`,
+// the SAME op the Studio renameTrack / setTrackLanguage / setTrackVolume actions
+// run, so `autoviral track set <id> --label/--language/--volume/--muted` and a
+// human editing the track header converge. Body carries only the keys to change
+// (spread-guard: siblings untouched); `language: null` clears it. A wrong-typed
+// field fails LOUD (400 + code:4), never a silent coerce. Unknown id → 400.
+bridgeRouter.patch("/track/:id", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing track id", code: 4 }, 400);
+  }
+  const rawBody = await c.req.json().catch(() => ({}));
+  const TrackPropsSchema = z
+    .object({
+      label: z.string().optional(),
+      language: z.string().nullable().optional(),
+      volume: z.number().finite().optional(),
+      muted: z.boolean().optional(),
+      hidden: z.boolean().optional(),
+    })
+    .strict();
+  const parsed = TrackPropsSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    return c.json(
+      {
+        ok: false,
+        error: `invalid track props: ${parsed.error.issues
+          .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+          .join("; ")}`,
+        code: 4,
+      },
+      400,
+    );
+  }
+  const props = parsed.data;
+  if (Object.keys(props).length === 0) {
+    return c.json(
+      { ok: false, error: "track set: at least one prop is required", code: 4 },
+      400,
+    );
+  }
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.setTrackProps(comp, { trackId: id, props });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "track-set" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
 // ─── S2 (PRD-0007) — scene (分镜 / storyboard) write verbs ────────────────────
 // The five scene routes mirror /split exactly: each delegates the mutation to a
 // shared `@shared` scene op (the SAME implementation the Studio store runs), so
@@ -1905,6 +1997,77 @@ bridgeRouter.post("/clip/:id/move", async (c) => {
     return c.json({ ok: false, error: message, code }, 400);
   }
   return c.json({ ok: true, result: { id } });
+});
+
+// S7 (PRD-0014) — POST /clip/:id/ripple: ripple-delete a clip (remove it AND
+// slide every later same-track clip left to close the gap) through the shared
+// `ops.rippleDeleteClip`, the SAME code the Studio Shift+Backspace ripple runs,
+// so `autoviral clip remove <id> --ripple` and a human converge byte-for-byte.
+// Unlike the store's silent no-op contract, an unknown clip id here is a 400 +
+// code:4 (an agent that asked to ripple a clip that isn't there made an error).
+bridgeRouter.post("/clip/:id/ripple", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  }
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        const { removed } = ops.rippleDeleteClip(comp, { clipId: id });
+        if (!removed) {
+          throw new CompositionOpError(`no clip with id ${id}`, 4);
+        }
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-ripple-delete" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
+// S7 (PRD-0014) — POST /clip/:id/duplicate: deep-copy a clip onto the same track
+// (fresh id, placed after the original or at an explicit `--offset` delta)
+// through the shared `ops.duplicateClip`. Body `{ offset? }`. Echoes the minted
+// clip id so the agent can immediately reference the copy. Unknown id / bad
+// offset → 400 + code:4.
+bridgeRouter.post("/clip/:id/duplicate", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  }
+  const body = (await c.req.json().catch(() => ({}))) as { offset?: unknown };
+  let offsetSec: number | undefined;
+  if (body.offset !== undefined) {
+    if (typeof body.offset !== "number" || !Number.isFinite(body.offset)) {
+      return c.json({ ok: false, error: "invalid offset (seconds)", code: 4 }, 400);
+    }
+    offsetSec = body.offset;
+  }
+  let newClipId = "";
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ({ newClipId } = ops.duplicateClip(comp, { clipId: id, offsetSec }));
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-duplicate" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id: newClipId } });
 });
 
 // S9 (US 4/5/9) — POST /transition: add a cut-point transition on a video track

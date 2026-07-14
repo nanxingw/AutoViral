@@ -46,11 +46,56 @@ export async function clipCommand(args: string[]): Promise<void> {
 
   if (sub === "remove") {
     const id = rest[0];
-    if (!id) {
-      process.stderr.write("usage: autoviral clip remove <id>\n");
+    if (!id || id.startsWith("--")) {
+      process.stderr.write("usage: autoviral clip remove <id> [--ripple]\n");
       process.exit(4);
     }
-    await bridgeRequest(ctx, "DELETE", `/clip/${encodeURIComponent(id)}`, undefined);
+    // S7 (PRD-0014) — `--ripple` closes the gap: remove the clip AND slide every
+    // later same-track clip left by its duration (the SAME shared op the Studio
+    // Shift+Backspace runs). Plain remove leaves a gap (DELETE). An unknown id
+    // on the ripple path is a bridge 400/code:4 (POST route rejects), unlike the
+    // lenient plain DELETE.
+    const ripple = rest.slice(1).includes("--ripple");
+    if (ripple) {
+      await bridgeRequest(ctx, "POST", `/clip/${encodeURIComponent(id)}/ripple`, {});
+    } else {
+      await bridgeRequest(ctx, "DELETE", `/clip/${encodeURIComponent(id)}`, undefined);
+    }
+    return;
+  }
+
+  if (sub === "duplicate") {
+    // S7 (PRD-0014) — `autoviral clip duplicate <id> [--offset <sec>]`. The bridge
+    // runs the shared `ops.duplicateClip` (deep clone + fresh id, placed after the
+    // original or at an explicit --offset delta), the SAME code a UI "duplicate"
+    // affordance would run. We validate args locally (exit 4, never hits the
+    // bridge); the server owns the unknown-clip rejection. Echoes the new clip id.
+    const id = rest[0];
+    if (!id || id.startsWith("--")) {
+      process.stderr.write(
+        "usage: autoviral clip duplicate <id> [--offset <seconds>]\n",
+      );
+      process.exit(4);
+    }
+    const opts = parseFlags(rest.slice(1));
+    const body: Record<string, unknown> = {};
+    if (opts["--offset"] !== undefined) {
+      const off = Number(opts["--offset"]);
+      if (!Number.isFinite(off)) {
+        process.stderr.write(
+          "autoviral clip duplicate: --offset <seconds> must be a number\n",
+        );
+        process.exit(4);
+      }
+      body.offset = off;
+    }
+    const result = await bridgeRequest<{ id: string }>(
+      ctx,
+      "POST",
+      `/clip/${encodeURIComponent(id)}/duplicate`,
+      body,
+    );
+    process.stdout.write(`${result.id}\n`);
     return;
   }
 

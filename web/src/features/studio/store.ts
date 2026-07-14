@@ -31,8 +31,6 @@ import {
   snapDraggedStartFull,
   snapToleranceSeconds,
 } from "@autoviral/timeline";
-import { rippleDeleteFromTrack } from "./panels/Timeline/toolbar/rippleDelete";
-import { collapseGapsOnTrack } from "./panels/Timeline/toolbar/collapseGaps";
 import { useToastStore } from "@/stores/toast";
 import { MESSAGES } from "@/i18n/messages";
 import { useLocaleStore } from "@/i18n/store";
@@ -573,31 +571,24 @@ export const useComposition = create<CompState>()(
         );
         reconcileSelection(s);
       }),
-    // ─── Phase 4.C — ripple-delete + collapse-gaps ───────────────────────
-    // Both delegate to pure-track helpers under
-    // `panels/Timeline/toolbar/{rippleDelete,collapseGaps}.ts`. Adapted
-    // from pneuma's CompositionCommand[] builders (see those files for
-    // citations) and gated behind D3 (`clipDuration` from clipMath.ts).
+    // ─── Phase 4.C / PRD-0014 S7 — ripple-delete + collapse-gaps ──────────
+    // ADR-009: both are now thin wrappers over the shared composition-ops core
+    // (`ops.rippleDeleteClip` / `ops.collapseGapsOnTrack`) — the SAME code the
+    // bridge/CLI (`clip remove --ripple` / `track collapse <id>`) runs — so an
+    // agent and a human closing a gap converge byte-for-byte. The op owns the
+    // clip math + duration recompute; the store keeps its own concerns: undo
+    // snapshot + selection reconcile.
     rippleDeleteClip: (clipId) =>
       set((s) => {
         if (!s.comp) return;
-        for (let i = 0; i < s.comp.tracks.length; i++) {
-          const t = s.comp.tracks[i];
-          if ((t.clips as Clip[]).some((c) => c.id === clipId)) {
-            // S20 fix-up — ripple-delete is the single most destructive clip
-            // edit (removes a clip AND ripples its successors left), yet it was
-            // the one clip mutation that never snapshotted for Cmd+Z. Snapshot
-            // ONLY once the target is found, so a stray ripple-delete of an
-            // unknown id doesn't litter the stack (mirrors removeClip).
-            pushClipHistory(s);
-            s.comp.tracks[i] = rippleDeleteFromTrack(t, clipId) as typeof t;
-            break;
-          }
-        }
-        s.comp.duration = Math.max(
-          0,
-          ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
+        // Snapshot for undo ONLY when the target exists, so a stray ripple of an
+        // unknown id doesn't litter the stack (mirrors removeClip). The op is a
+        // silent no-op (returns removed:false) for an unknown id.
+        const willRemove = s.comp.tracks.some((t) =>
+          (t.clips as Clip[]).some((c) => c.id === clipId),
         );
+        if (willRemove) pushClipHistory(s);
+        ops.rippleDeleteClip(s.comp, { clipId });
         reconcileSelection(s);
       }),
     collapseGaps: (trackId) =>
@@ -605,26 +596,18 @@ export const useComposition = create<CompState>()(
         if (!s.comp) return;
         const idx = s.comp.tracks.findIndex((t) => t.id === trackId);
         if (idx < 0) return;
-        const before = s.comp.tracks[idx];
-        const collapsed = collapseGapsOnTrack(before) as typeof before;
-        // S20 fix-up — collapse-gaps repositions every clip on the track but
-        // never snapshotted for Cmd+Z. Only push history when the collapse
-        // actually moved a clip (compare offsets pre/post), so collapsing an
-        // already-tight track is a true no-op and doesn't pad the undo stack
-        // with an identical state (which would evict useful history sooner
-        // under the 50-deep cap and let a stray Cmd+Z appear to do nothing).
-        const moved =
-          before.clips.length !== collapsed.clips.length ||
-          before.clips.some(
-            (c, i) => c.trackOffset !== collapsed.clips[i]?.trackOffset,
-          );
+        // Capture a pre-collapse snapshot so undo restores the original offsets,
+        // but only COMMIT it to history when the op reports a real move — an
+        // already-tight track stays a true no-op (no stack padding, no redo-branch
+        // wipe), matching the historical S20 fix-up behaviour.
+        const snapshot = snapshotTracks(s.comp.tracks);
+        const { moved } = ops.collapseGapsOnTrack(s.comp, { trackId });
         if (!moved) return;
-        pushClipHistory(s);
-        s.comp.tracks[idx] = collapsed;
-        s.comp.duration = Math.max(
-          0,
-          ...s.comp.tracks.flatMap((t) => (t.clips as Clip[]).map(clipEnd)),
-        );
+        s.clipHistory.past.push(snapshot);
+        if (s.clipHistory.past.length > TRACK_HISTORY_LIMIT) {
+          s.clipHistory.past.shift();
+        }
+        s.clipHistory.future = [];
       }),
     // ─── Phase 4.I — edge-drag resize ─────────────────────────────────────
     // Adopts pneuma's clamp expressions (`.cache/pneuma-clipcraft/.../
@@ -1377,6 +1360,13 @@ export const useComposition = create<CompState>()(
           if (t) t.displayOrder = i;
         }
       }),
+    // ─── PRD-0014 S7 — lane props (label / language / volume) ─────────────
+    // ADR-009: the WRITE goes through the shared `ops.setTrackProps` (partial
+    // update + spread-guard), the SAME op the bridge/CLI (`track set <id>
+    // --label/--language/--volume/--muted`) runs, so agent + human converge on
+    // one composition. The find/no-op guards, the friendly per-kind affordance
+    // warnings, and the track-history snapshot stay store concerns — the op is
+    // kind-agnostic (schema permits these fields on every kind).
     renameTrack: (id, label) =>
       set((s) => {
         if (!s.comp) return;
@@ -1384,7 +1374,7 @@ export const useComposition = create<CompState>()(
         if (!t) return;
         if (t.label === label) return; // no-op if unchanged
         pushHistory(s);
-        t.label = label;
+        ops.setTrackProps(s.comp, { trackId: id, props: { label } });
       }),
     setTrackLanguage: (id, lang) =>
       set((s) => {
@@ -1403,11 +1393,8 @@ export const useComposition = create<CompState>()(
         const next = lang ?? undefined;
         if (t.language === next) return;
         pushHistory(s);
-        if (next === undefined) {
-          delete (t as { language?: string }).language;
-        } else {
-          t.language = next;
-        }
+        // `next: undefined` tells the op to DELETE the optional field (clear).
+        ops.setTrackProps(s.comp, { trackId: id, props: { language: next } });
       }),
     setTrackVolume: (id, db) =>
       set((s) => {
@@ -1420,13 +1407,10 @@ export const useComposition = create<CompState>()(
           );
           return;
         }
-        // Cast through — `volume` lands on the schema in issue #34. Until
-        // then we attach it as a forward-compat field so the action works
-        // end-to-end; the schema parser will accept it once #34 lands.
         const target = t as Track & { volume?: number };
         if (target.volume === db) return;
         pushHistory(s);
-        target.volume = db;
+        ops.setTrackProps(s.comp, { trackId: id, props: { volume: db } });
       }),
     undoTrackOp: () =>
       set((s) => {

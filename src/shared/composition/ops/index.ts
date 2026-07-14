@@ -24,3 +24,12 @@ export { setFps } from "./setFps.js";
 export type { Fps } from "./setFps.js";
 export { importClip } from "./importClip.js";
 export type { ImportProbe, ImportClipParams } from "./importClip.js";
+// PRD-0014 S7 — store-only editing verbs lifted into the shared core.
+export { rippleDeleteClip } from "./rippleDelete.js";
+export type { RippleDeleteResult } from "./rippleDelete.js";
+export { collapseGapsOnTrack } from "./collapseGaps.js";
+export type { CollapseGapsResult } from "./collapseGaps.js";
+export { duplicateClip } from "./duplicateClip.js";
+export type { DuplicateClipResult } from "./duplicateClip.js";
+export { setTrackProps } from "./setTrackProps.js";
+export type { TrackProps } from "./setTrackProps.js";

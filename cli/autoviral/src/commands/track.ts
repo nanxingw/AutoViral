@@ -58,6 +58,73 @@ export async function trackCommand(args: string[]): Promise<void> {
     return;
   }
 
+  if (sub === "collapse") {
+    // S7 (PRD-0014) — `autoviral track collapse <trackId>` repacks the lane's
+    // clips back-to-back from 0 through the shared `ops.collapseGapsOnTrack` (the
+    // SAME code the Studio collapse-gaps toolbar runs). Unknown track → bridge
+    // 400/code:4 → exit 4.
+    const id = rest[0];
+    if (!id || id.startsWith("--")) {
+      process.stderr.write("usage: autoviral track collapse <trackId>\n");
+      process.exit(4);
+    }
+    await bridgeRequest(
+      ctx,
+      "POST",
+      `/track/${encodeURIComponent(id)}/collapse`,
+      {},
+    );
+    return;
+  }
+
+  if (sub === "set") {
+    // S7 (PRD-0014) — `autoviral track set <trackId> --label/--language/--volume/
+    // --muted/--hidden`. PATCHes only the supplied props through the shared
+    // `ops.setTrackProps` (the SAME code the Studio renameTrack / setTrackLanguage
+    // / setTrackVolume actions run) — spread-guard means siblings are untouched.
+    // `--language ""` clears the field. We validate args locally (exit 4); the
+    // server owns the unknown-track + type validation.
+    const id = rest[0];
+    if (!id || id.startsWith("--")) {
+      process.stderr.write(
+        "usage: autoviral track set <trackId> [--label <s>] [--language <s|\"\">] [--volume <dB>] [--muted <true|false>] [--hidden <true|false>]\n",
+      );
+      process.exit(4);
+    }
+    const opts = parseFlags(rest.slice(1));
+    const props: Record<string, unknown> = {};
+    if (opts["--label"] !== undefined) props.label = opts["--label"];
+    if (opts["--language"] !== undefined) {
+      // Empty string clears the language (→ null); anything else sets it.
+      props.language = opts["--language"] === "" ? null : opts["--language"];
+    }
+    if (opts["--volume"] !== undefined) {
+      const v = Number(opts["--volume"]);
+      if (!Number.isFinite(v)) {
+        process.stderr.write(
+          "autoviral track set: --volume <dB> must be a number\n",
+        );
+        process.exit(4);
+      }
+      props.volume = v;
+    }
+    if (opts["--muted"] !== undefined) props.muted = opts["--muted"] === "true";
+    if (opts["--hidden"] !== undefined) props.hidden = opts["--hidden"] === "true";
+    if (Object.keys(props).length === 0) {
+      process.stderr.write(
+        "autoviral track set: at least one of --label / --language / --volume / --muted / --hidden is required\n",
+      );
+      process.exit(4);
+    }
+    await bridgeRequest(
+      ctx,
+      "PATCH",
+      `/track/${encodeURIComponent(id)}`,
+      props,
+    );
+    return;
+  }
+
   process.stderr.write(`autoviral track: unknown subcommand "${sub ?? ""}"\n`);
   process.exit(127);
 }

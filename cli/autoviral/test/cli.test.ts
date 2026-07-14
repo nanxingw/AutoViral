@@ -43,6 +43,12 @@ let lastImport: Record<string, unknown> | null = null;
 // S10 (US 6/7/8) — capture the last POST /track body so the CLI test can assert
 // the `track add` flags (kind / --after / --label / --language) reached the wire.
 let lastTrackAdd: Record<string, unknown> | null = null;
+// S7 (PRD-0014) — capture the last PATCH /track/:id body so the CLI test can
+// assert `track set <id> --label/--language/--volume/--muted` reached the wire.
+let lastTrackSet: Record<string, unknown> | null = null;
+// S7 (PRD-0014) — capture the last POST /clip/:id/duplicate body so the CLI test
+// can assert `clip duplicate <id> [--offset]` reached the wire (offset number).
+let lastClipDuplicate: Record<string, unknown> | null = null;
 // S4 (US 10) — capture the last PUT /comp body so the CLI test can assert the
 // full composition the CLI read from a file / stdin reached the bridge verbatim.
 let lastCompPut: Record<string, unknown> | null = null;
@@ -269,6 +275,30 @@ beforeAll(async () => {
         }
         return send(200, { ok: true });
       }
+      // S7 (PRD-0014) — PATCH /track/:id (track set). Records the props the CLI
+      // sent so the test can assert the flag → prop mapping + coercion; `trk_ghost`
+      // is the op's unknown-track rejection → 400 + code 4 → CLI exit 4.
+      if (req.method === "PATCH" && trackMatch) {
+        const id = decodeURIComponent(trackMatch[1]);
+        lastTrackSet = await readBody(req);
+        if (id === "trk_ghost") {
+          return send(400, { ok: false, error: "no such track", code: 4 });
+        }
+        return send(200, { ok: true, result: { id } });
+      }
+    }
+    // S7 (PRD-0014) — POST /track/:id/collapse (track collapse). A known id
+    // resolves; `trk_ghost` is the op's unknown-track rejection → 400 + code 4.
+    {
+      const collapseMatch = /^\/api\/bridge\/v1\/track\/([^/]+)\/collapse$/.exec(url ?? "");
+      if (req.method === "POST" && collapseMatch) {
+        await readBody(req);
+        const id = decodeURIComponent(collapseMatch[1]);
+        if (id === "trk_ghost") {
+          return send(400, { ok: false, error: "no such track", code: 4 });
+        }
+        return send(200, { ok: true, result: { id } });
+      }
     }
     if (req.method === "DELETE" && url.startsWith("/api/bridge/v1/clip/")) {
       const id = url.split("/").pop()!;
@@ -446,6 +476,39 @@ beforeAll(async () => {
           return send(400, { ok: false, error: "no such clip", code: 4 });
         }
         return send(200, { ok: true, result: { id: clipId } });
+      }
+    }
+    // S7 (PRD-0014) — POST /clip/:id/ripple (clip remove --ripple). A known clipId
+    // ripple-deletes + returns { id }; an unknown clipId is the op's rejection →
+    // 400 + code 4 → CLI exit 4 (the POST path is NOT lenient like plain DELETE).
+    {
+      const rippleMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/ripple$/.exec(url ?? "");
+      if (req.method === "POST" && rippleMatch) {
+        await readBody(req);
+        const clipId = decodeURIComponent(rippleMatch[1]);
+        const idx = clips.findIndex((c) => c.id === clipId);
+        if (idx < 0) {
+          return send(400, { ok: false, error: "no such clip", code: 4 });
+        }
+        clips.splice(idx, 1);
+        return send(200, { ok: true, result: { id: clipId } });
+      }
+    }
+    // S7 (PRD-0014) — POST /clip/:id/duplicate (clip duplicate). A known clipId
+    // mints a copy id + returns { id }; an unknown clipId is the op's rejection →
+    // 400 + code 4 → CLI exit 4. Records the body so --offset can be asserted.
+    {
+      const dupMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/duplicate$/.exec(url ?? "");
+      if (req.method === "POST" && dupMatch) {
+        lastClipDuplicate = await readBody(req);
+        const clipId = decodeURIComponent(dupMatch[1]);
+        const target = clips.find((c) => c.id === clipId);
+        if (!target) {
+          return send(400, { ok: false, error: "no such clip", code: 4 });
+        }
+        const id = `vc_dup${nextSeq++}`;
+        clips.push({ id, trackKind: target.trackKind });
+        return send(200, { ok: true, result: { id } });
       }
     }
     // S12 (US 16 / 35-37) — POST /clip/:id/keyframe. Mirrors the server
@@ -1160,6 +1223,128 @@ describe("autoviral CLI — end-to-end", () => {
   it("track unknown subcommand → exit 127", async () => {
     const r = await run(["track", "frobnicate"]);
     expect(r.exitCode).toBe(127);
+  });
+
+  // S7 (PRD-0014) — ripple / collapse / duplicate / track-set write verbs. Each
+  // round-trips through the bridge to the SAME shared op the Studio store runs.
+  describe("S7 — ripple / collapse / duplicate / track set", () => {
+    it("clip remove <id> --ripple → POSTs /clip/:id/ripple, exit 0", async () => {
+      const add = await run(["clip", "add", "--track", "video", "--src", "rip.mp4"]);
+      const id = add.stdout.trim();
+      const r = await run(["clip", "remove", id, "--ripple"]);
+      expect(r.exitCode).toBe(0);
+    });
+
+    it("clip remove <id> --ripple for an unknown clip → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["clip", "remove", "vc_nope", "--ripple"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("clip remove <id> (no --ripple) still DELETEs → exit 0", async () => {
+      const add = await run(["clip", "add", "--track", "video", "--src", "del.mp4"]);
+      const id = add.stdout.trim();
+      const r = await run(["clip", "remove", id]);
+      expect(r.exitCode).toBe(0);
+    });
+
+    it("clip duplicate <id> → prints the new clip id, empty body", async () => {
+      lastClipDuplicate = null;
+      const add = await run(["clip", "add", "--track", "video", "--src", "dup.mp4"]);
+      const id = add.stdout.trim();
+      const r = await run(["clip", "duplicate", id]);
+      expect(r.exitCode).toBe(0);
+      expect(r.stdout.trim()).toMatch(/^vc_dup/);
+      expect(lastClipDuplicate).toEqual({});
+    });
+
+    it("clip duplicate <id> --offset <sec> → forwards offset as a number", async () => {
+      lastClipDuplicate = null;
+      const add = await run(["clip", "add", "--track", "video", "--src", "dup2.mp4"]);
+      const id = add.stdout.trim();
+      const r = await run(["clip", "duplicate", id, "--offset", "1.5"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastClipDuplicate).toEqual({ offset: 1.5 });
+    });
+
+    it("clip duplicate with no id → exit 4 (never hits bridge)", async () => {
+      const r = await run(["clip", "duplicate"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("clip duplicate a non-numeric --offset → exit 4 (never hits bridge)", async () => {
+      const r = await run(["clip", "duplicate", "vc_s01", "--offset", "abc"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("clip duplicate an unknown clip → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["clip", "duplicate", "vc_nope"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("track collapse <id> → POSTs /track/:id/collapse, exit 0", async () => {
+      const r = await run(["track", "collapse", "trk_v1"]);
+      expect(r.exitCode).toBe(0);
+    });
+
+    it("track collapse with no id → exit 4 (never hits bridge)", async () => {
+      const r = await run(["track", "collapse"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("track collapse an unknown track → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["track", "collapse", "trk_ghost"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("track set <id> --label --volume → PATCHes only the supplied props", async () => {
+      lastTrackSet = null;
+      const r = await run([
+        "track", "set", "trk_a1", "--label", "A1 · BGM", "--volume", "-6",
+      ]);
+      expect(r.exitCode).toBe(0);
+      expect(lastTrackSet).toEqual({ label: "A1 · BGM", volume: -6 });
+    });
+
+    it("track set <id> --language en → forwards the language string", async () => {
+      lastTrackSet = null;
+      const r = await run(["track", "set", "trk_cc", "--language", "en"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastTrackSet).toEqual({ language: "en" });
+    });
+
+    it('track set <id> --language "" → clears language (null on the wire)', async () => {
+      lastTrackSet = null;
+      const r = await run(["track", "set", "trk_cc", "--language", ""]);
+      expect(r.exitCode).toBe(0);
+      expect(lastTrackSet).toEqual({ language: null });
+    });
+
+    it("track set <id> --muted true → forwards a boolean", async () => {
+      lastTrackSet = null;
+      const r = await run(["track", "set", "trk_a1", "--muted", "true"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastTrackSet).toEqual({ muted: true });
+    });
+
+    it("track set with no props → exit 4 (never hits bridge)", async () => {
+      const r = await run(["track", "set", "trk_a1"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("track set a non-numeric --volume → exit 4 (never hits bridge)", async () => {
+      const r = await run(["track", "set", "trk_a1", "--volume", "loud"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("track set with no id → exit 4 (never hits bridge)", async () => {
+      const r = await run(["track", "set"]);
+      expect(r.exitCode).toBe(4);
+    });
+
+    it("track set an unknown track → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["track", "set", "trk_ghost", "--label", "x"]);
+      expect(r.exitCode).toBe(4);
+    });
   });
 
   // S2 (PRD-0007) — `autoviral scene add/list/set/reorder/link/remove` drives the
