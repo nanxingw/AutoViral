@@ -55,22 +55,32 @@ function BezierInputs({
   ];
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      {fields.map(({ i, label }) => (
-        <input
-          key={label}
-          aria-label={`${idPrefix} bezier ${label}`}
-          type="number"
-          step="0.05"
-          value={String(p[i])}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            const next = [...p] as [number, number, number, number];
-            next[i] = Number.isFinite(v) ? v : p[i];
-            onChange(next);
-          }}
-          style={{ ...inputStyle, width: 52 }}
-        />
-      ))}
+      {fields.map(({ i, label }) => {
+        // S12 review F2 — a cubic-bezier timing function must be single-valued in
+        // x, so x1/x2 (i === 0 || 2) advertise the [0,1] bound; y stays free
+        // (overshoot / bounce curves). The op still rejects an out-of-range x and
+        // the store now surfaces a warn toast, but the constraint belongs on the
+        // control too so the ceiling is discoverable (spinner + validation hint).
+        const isX = i === 0 || i === 2;
+        return (
+          <input
+            key={label}
+            aria-label={`${idPrefix} bezier ${label}`}
+            type="number"
+            step="0.05"
+            min={isX ? 0 : undefined}
+            max={isX ? 1 : undefined}
+            value={String(p[i])}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              const next = [...p] as [number, number, number, number];
+              next[i] = Number.isFinite(v) ? v : p[i];
+              onChange(next);
+            }}
+            style={{ ...inputStyle, width: 52 }}
+          />
+        );
+      })}
     </div>
   );
 }

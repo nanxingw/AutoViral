@@ -271,6 +271,27 @@ describe("KeyframePanel", () => {
     expect(screen.getByLabelText(/bezier x1/i)).toBeInTheDocument();
   });
 
+  // S12 review F2 — a cubic-bezier timing function must be single-valued in x,
+  // so the x1/x2 control-point inputs must advertise the [0,1] constraint
+  // (min=0, max=1); the y inputs stay unbounded (overshoot / bounce curves).
+  it("constrains the custom bezier x1/x2 inputs to [0,1] (min=0 max=1); y stays free (S12 F2)", () => {
+    const keyframes: Keyframe[] = [
+      { property: "scale", time: 0, value: 1, easing: { type: "cubic-bezier", p: [0.4, 0, 0.2, 1] } },
+    ];
+    const comp = makeCompWithVideoClip("clip-1", { keyframes });
+    useComposition.setState({ comp, selection: "clip-1" });
+    render(<KeyframePanel />);
+    const x1 = screen.getByLabelText(/bezier x1/i) as HTMLInputElement;
+    const x2 = screen.getByLabelText(/bezier x2/i) as HTMLInputElement;
+    const y1 = screen.getByLabelText(/bezier y1/i) as HTMLInputElement;
+    expect(x1).toHaveAttribute("min", "0");
+    expect(x1).toHaveAttribute("max", "1");
+    expect(x2).toHaveAttribute("min", "0");
+    expect(x2).toHaveAttribute("max", "1");
+    // y is unbounded — no max constraint.
+    expect(y1).not.toHaveAttribute("max");
+  });
+
   // Phase 8.3.D — VideoClip gains "speed" in the property dropdown; AudioClip
   // and OverlayClip explicitly do NOT (D1 — speed is VideoClip-only in v1).
   it("VideoClip selection exposes 'speed' as the 5th property option (D1)", async () => {

@@ -539,6 +539,29 @@ describe("useComposition — keyframe actions", () => {
     expect(c.keyframes![0].time).toBe(0); // time unchanged
   });
 
+  // S12 review F2 — editing an existing keyframe with an out-of-range easing
+  // (e.g. a cubic-bezier whose x control point is > 1) used to be swallowed
+  // silently: the op threw CompositionOpError, the store caught it and returned
+  // with no toast, so the user's edit vanished without a trace. It must now
+  // surface a warn toast (same contract as addKeyframe) and leave comp untouched.
+  it("updateKeyframe surfaces a warn toast when the op rejects an out-of-range bezier x", () => {
+    useToastStore.getState().clear();
+    useComposition.setState({
+      comp: makeCompWithVideoClip("clip-1", {
+        keyframes: [{ property: "scale", time: 0, value: 1, easing: "linear" }],
+      }),
+    });
+    useComposition.getState().updateKeyframe("clip-1", 0, {
+      easing: { type: "cubic-bezier", p: [1.5, 0, 0.2, 1] },
+    });
+    // comp untouched — the rejected easing never landed.
+    const c = findClip(useComposition.getState().comp!, "clip-1") as VideoClip;
+    expect(c.keyframes![0].easing).toBe("linear");
+    // and the user is TOLD (not silently swallowed).
+    const toasts = useToastStore.getState().entries;
+    expect(toasts.some((e) => e.variant === "warn")).toBe(true);
+  });
+
   it("actions are no-ops when clipId does not resolve to a clip", () => {
     useComposition.setState({ comp: makeCompWithVideoClip("clip-1") });
     expect(() => {

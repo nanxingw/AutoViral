@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { Easing } from "remotion";
 import type { CubicBezierEasing, Keyframe } from "./composition.js";
 import {
   interpolateProperty,
@@ -243,6 +244,66 @@ describe("parseEasingSpec (S12 — CLI/bridge string form)", () => {
 
   it("throws on malformed cubic-bezier syntax (wrong arity)", () => {
     expect(() => parseEasingSpec("cubic-bezier(0.4,0,0.2)")).toThrow();
+  });
+
+  // S12 review F1 — a MISSING string component must NOT be silently coerced to 0
+  // by `Number("")`. `cubic-bezier(0.4,,0.2,1)` is malformed, not `[0.4,0,0.2,1]`.
+  it("rejects an empty / whitespace-only component (no Number('') → 0 coercion)", () => {
+    expect(() => parseEasingSpec("cubic-bezier(0.4,,0.2,1)")).toThrow();
+    expect(() => parseEasingSpec("cubic-bezier(0.4, ,0.2,1)")).toThrow();
+    expect(() => parseEasingSpec("cubic-bezier(,0,0.2,1)")).toThrow();
+  });
+
+  // S12 review F1 — a STRUCTURED object must be schema-validated, never
+  // type-coerced. `null`/""/booleans in `p` must be REJECTED (Number(null)=0,
+  // Number("")=0, Number(true)=1 would otherwise slip past the numeric gate).
+  it("rejects a structured object whose p components are not real numbers", () => {
+    expect(() => parseEasingSpec({ type: "cubic-bezier", p: [null, 0, 0.2, 1] })).toThrow();
+    expect(() => parseEasingSpec({ type: "cubic-bezier", p: ["", 0, 0.2, 1] })).toThrow();
+    expect(() => parseEasingSpec({ type: "cubic-bezier", p: [true, 0, 0.2, 1] })).toThrow();
+    expect(() => parseEasingSpec({ type: "cubic-bezier", p: [false, 0, 0.2, 1] })).toThrow();
+    expect(() => parseEasingSpec({ type: "cubic-bezier", p: ["0.4", 0, 0.2, 1] })).toThrow();
+  });
+});
+
+// S12 review F3 — the What mandates preview/export interpolation route through
+// Remotion's `Easing.bezier`. These pin the impl to Remotion AS THE ORACLE:
+// `interpolateProperty`'s eased output must equal `Easing.bezier(...)(t)` EXACTLY
+// (the value 0→1 keyframe pair makes the returned value == the raw eased factor).
+// A repo-local Newton/bisection bezier differs at ~1e-8, so exact equality fails
+// unless the impl literally calls `Easing.bezier`.
+describe("interpolateProperty — Remotion Easing.bezier oracle (S12 F3)", () => {
+  const easedFactor = (easing: Keyframe["easing"], t: number) =>
+    interpolateProperty(
+      [
+        { property: "x", time: 0, value: 0, easing },
+        { property: "x", time: 1, value: 1, easing },
+      ],
+      "x",
+      t,
+    )!;
+
+  it("cubic-bezier interpolation equals Remotion Easing.bezier EXACTLY", () => {
+    const p: [number, number, number, number] = [0.4, 0, 0.2, 1];
+    const bez: CubicBezierEasing = { type: "cubic-bezier", p };
+    const oracle = Easing.bezier(p[0], p[1], p[2], p[3]);
+    for (const t of [0.1, 0.25, 0.5, 0.75, 0.9]) {
+      expect(easedFactor(bez, t)).toBe(oracle(t));
+    }
+  });
+
+  it("discrete easeIn/easeOut/easeInOut equal the matching Remotion Easing.bezier exactly", () => {
+    const cases: Array<[Keyframe["easing"], [number, number, number, number]]> = [
+      ["easeIn", [0.42, 0, 1, 1]],
+      ["easeOut", [0, 0, 0.58, 1]],
+      ["easeInOut", [0.42, 0, 0.58, 1]],
+    ];
+    for (const [name, p] of cases) {
+      const oracle = Easing.bezier(p[0], p[1], p[2], p[3]);
+      for (const t of [0.1, 0.3, 0.5, 0.7, 0.9]) {
+        expect(easedFactor(name, t)).toBe(oracle(t));
+      }
+    }
   });
 });
 

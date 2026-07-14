@@ -1100,7 +1100,22 @@ export const useComposition = create<CompState>()(
               });
             }
           } catch (err) {
-            if (err instanceof CompositionOpError) return; // silent no-op
+            if (err instanceof CompositionOpError) {
+              // S12 review F2 — a genuine op REJECTION (out-of-range easing x,
+              // non-finite value, out-of-clip time) must NOT vanish silently: the
+              // user edited a real keyframe and the write was refused. Surface it
+              // as a warn toast (same contract as addKeyframe), leaving the comp
+              // untouched. (Structural no-ops — unknown clip / text clip / missing
+              // entry — already returned above, BEFORE this try, and stay silent.)
+              const locale = useLocaleStore.getState().locale;
+              useToastStore.getState().push({
+                variant: "warn",
+                message: MESSAGES[locale].studio.toast.keyframeFailed,
+                detail: err.message,
+                ttlMs: 4000,
+              });
+              return;
+            }
             throw err;
           }
           return;

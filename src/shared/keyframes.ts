@@ -4,63 +4,33 @@ import type {
   KeyframeEasing,
   KeyframeProperty,
 } from "./composition.js";
-import { DISCRETE_KEYFRAME_EASINGS } from "./composition.js";
+import { CubicBezierEasingSchema, DISCRETE_KEYFRAME_EASINGS } from "./composition.js";
+import { Easing } from "remotion";
 
 /** Time-equality tolerance for dedup at the same (property, time). ~one-quarter of a 60 fps frame. */
 export const KEYFRAME_TIME_EPSILON = 1e-4;
 
-/**
- * Pure cubic-bezier evaluation matching Remotion's `Easing.bezier(p1x,p1y,p2x,p2y)` outputs.
- * Cubic Bezier defined by (0,0), (p1x,p1y), (p2x,p2y), (1,1). Computes t for the given x via
- * Newton-Raphson, then evaluates y(t). Bisection fallback for robustness. Mirrors WebKit's impl.
- */
-function bezier(
-  p1x: number,
-  p1y: number,
-  p2x: number,
-  p2y: number,
-  x: number,
-): number {
-  if (x <= 0) return 0;
-  if (x >= 1) return 1;
+// PRD-0014 S12 — cubic-bezier evaluation is Remotion's `Easing.bezier(x1,y1,x2,y2)`
+// (the What mandates preview/export interpolation route through it, so a custom
+// curve renders IDENTICALLY here, in the Remotion preview, and on export, and we
+// inherit Remotion's precision + upgrade semantics rather than a repo-local
+// Newton/bisection copy that could drift). `Easing.bezier` precomputes a sample
+// table on construction, so we memoise the built timing functions (the discrete
+// presets are constant; custom curves are keyed by their control points) to keep
+// the per-frame `interpolateProperty` hot path allocation-free after warm-up.
+const EASE_IN = Easing.bezier(0.42, 0, 1, 1);
+const EASE_OUT = Easing.bezier(0, 0, 0.58, 1);
+const EASE_IN_OUT = Easing.bezier(0.42, 0, 0.58, 1);
 
-  const cx = 3 * p1x;
-  const bx = 3 * (p2x - p1x) - cx;
-  const ax = 1 - cx - bx;
-
-  const cy = 3 * p1y;
-  const by = 3 * (p2y - p1y) - cy;
-  const ay = 1 - cy - by;
-
-  const sampleCurveX = (t: number) => ((ax * t + bx) * t + cx) * t;
-  const sampleCurveY = (t: number) => ((ay * t + by) * t + cy) * t;
-  const sampleCurveDerivativeX = (t: number) =>
-    (3 * ax * t + 2 * bx) * t + cx;
-
-  // Newton-Raphson — converges in ~4 iterations for monotone curves.
-  let t = x;
-  for (let i = 0; i < 8; i++) {
-    const x2 = sampleCurveX(t) - x;
-    if (Math.abs(x2) < 1e-7) return sampleCurveY(t);
-    const d = sampleCurveDerivativeX(t);
-    if (Math.abs(d) < 1e-7) break;
-    t = t - x2 / d;
+const customBezierCache = new Map<string, (t: number) => number>();
+function cubicBezierFn(p: readonly [number, number, number, number]): (t: number) => number {
+  const key = `${p[0]},${p[1]},${p[2]},${p[3]}`;
+  let fn = customBezierCache.get(key);
+  if (!fn) {
+    fn = Easing.bezier(p[0], p[1], p[2], p[3]);
+    customBezierCache.set(key, fn);
   }
-
-  // Bisection fallback for pathological control-point configurations.
-  let lo = 0;
-  let hi = 1;
-  t = x;
-  while (lo < hi) {
-    const x2 = sampleCurveX(t) - x;
-    if (Math.abs(x2) < 1e-7) return sampleCurveY(t);
-    if (x2 > 0) hi = t;
-    else lo = t;
-    const next = (hi + lo) / 2;
-    if (next === t) break;
-    t = next;
-  }
-  return sampleCurveY(t);
+  return fn;
 }
 
 // PRD-0014 S12 — a KeyframeEasing is EITHER a discrete preset string OR a custom
@@ -132,13 +102,17 @@ export function parseEasingSpec(raw: unknown): KeyframeEasing {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     const o = raw as { type?: unknown; p?: unknown };
     if (o.type === "cubic-bezier") {
-      const p = Array.isArray(o.p) ? o.p.map(Number) : [];
-      if (!isValidBezierPoints(p)) {
+      // Schema-validate the STRUCTURE — never type-coerce. `.map(Number)` would
+      // turn null/""/booleans into 0/1 and slip a malformed curve past the gate
+      // (S12 review F1). `CubicBezierEasingSchema` requires every `p` component
+      // to be a real number and pins x1,x2 ∈ [0,1] (the shared source of truth).
+      const parsed = CubicBezierEasingSchema.safeParse(raw);
+      if (!parsed.success) {
         throw new Error(
-          `invalid cubic-bezier easing points ${JSON.stringify(o.p)} (need [x1,y1,x2,y2] with x1,x2 in [0,1])`,
+          `invalid cubic-bezier easing object ${JSON.stringify(raw)} (need p:[x1,y1,x2,y2] numbers with x1,x2 in [0,1])`,
         );
       }
-      return { type: "cubic-bezier", p };
+      return parsed.data;
     }
     throw new Error(`invalid easing object ${JSON.stringify(raw)}`);
   }
@@ -146,7 +120,14 @@ export function parseEasingSpec(raw: unknown): KeyframeEasing {
     const s = raw.trim();
     const m = /^cubic-bezier\(\s*([^)]*)\)$/i.exec(s);
     if (m) {
-      const nums = m[1].split(",").map((x) => Number(x.trim()));
+      // Reject an empty / whitespace-only component BEFORE `Number()` — otherwise
+      // `Number("")` coerces the missing value to 0 and `cubic-bezier(0.4,,0.2,1)`
+      // masquerades as the legal `[0.4,0,0.2,1]` (S12 review F1). A blank token
+      // maps to NaN so `isValidBezierPoints`' finiteness check rejects it.
+      const nums = m[1].split(",").map((x) => {
+        const tok = x.trim();
+        return tok === "" ? Number.NaN : Number(tok);
+      });
       if (!isValidBezierPoints(nums)) {
         throw new Error(
           `invalid cubic-bezier easing "${s}" (need 4 numbers with x1,x2 in [0,1])`,
@@ -162,17 +143,17 @@ export function parseEasingSpec(raw: unknown): KeyframeEasing {
 
 function applyEasing(easing: KeyframeEasing, t: number): number {
   if (isCubicBezierEasing(easing)) {
-    return bezier(easing.p[0], easing.p[1], easing.p[2], easing.p[3], t);
+    return cubicBezierFn(easing.p)(t);
   }
   switch (easing) {
     case "linear":
       return t;
     case "easeIn":
-      return bezier(0.42, 0, 1, 1, t);
+      return EASE_IN(t);
     case "easeOut":
-      return bezier(0, 0, 0.58, 1, t);
+      return EASE_OUT(t);
     case "easeInOut":
-      return bezier(0.42, 0, 0.58, 1, t);
+      return EASE_IN_OUT(t);
   }
 }
 
