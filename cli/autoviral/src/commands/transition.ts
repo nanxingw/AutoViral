@@ -63,6 +63,49 @@ export async function transitionCommand(args: string[]): Promise<void> {
     return;
   }
 
+  if (sub === "set") {
+    // PRD-0014 S8 — `autoviral transition set <id> [--preset <name>] [--dur <sec>]
+    // [--alignment center|start|end] [--easing linear|spring|ease-in-out]`. The
+    // bridge runs the shared `ops.updateTransition` (in-place patch + durationSec
+    // re-clamp), the SAME code the Studio Inspector's transition edit runs, so an
+    // agent editing a transition via the CLI and a human converge. At least one
+    // field is required. We validate locally (exit 4, never hits the bridge); the
+    // server owns the unknown-id / unknown-preset rejection.
+    const id = rest[0];
+    if (!id || id.startsWith("--")) {
+      process.stderr.write(
+        "usage: autoviral transition set <id> [--preset <name>] [--dur <sec>] [--alignment <a>] [--easing <e>]\n",
+      );
+      process.exit(4);
+    }
+    const opts = parseFlags(rest.slice(1));
+    const patch: Record<string, unknown> = {};
+    if (opts["--preset"] !== undefined) patch.preset = opts["--preset"];
+    if (opts["--dur"] !== undefined) {
+      const dur = Number(opts["--dur"]);
+      if (!Number.isFinite(dur)) {
+        process.stderr.write("autoviral transition set: --dur <seconds> must be a number\n");
+        process.exit(4);
+      }
+      patch.durationSec = dur;
+    }
+    if (opts["--alignment"] !== undefined) patch.alignment = opts["--alignment"];
+    if (opts["--easing"] !== undefined) patch.easing = opts["--easing"];
+    if (Object.keys(patch).length === 0) {
+      process.stderr.write(
+        "autoviral transition set: at least one of --preset / --dur / --alignment / --easing is required\n",
+      );
+      process.exit(4);
+    }
+    await bridgeRequest(
+      ctx,
+      "PATCH",
+      `/transition/${encodeURIComponent(id)}`,
+      patch,
+    );
+    return;
+  }
+
   if (sub === "remove") {
     const id = rest[0];
     if (!id || id.startsWith("--")) {

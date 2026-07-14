@@ -248,16 +248,17 @@ export async function clipCommand(args: string[]): Promise<void> {
     // malformed invocation fails fast; the server owns the semantic validation
     // (unknown property/clip/easing, text clip, speed range, negative time).
     const [verb, id, ...flagArgs] = rest;
-    if (verb !== "add" && verb !== "set") {
-      process.stderr.write(
-        "usage: autoviral clip keyframe add|set <id> --property <p> --at <sec> --value <v> [--easing <e>]\n",
-      );
+    const KF_USAGE =
+      "usage: autoviral clip keyframe add|set|remove|move <id> ...\n" +
+      "  add|set    <id> --property <p> --at <sec> --value <v> [--easing <e>]\n" +
+      "  remove     <id> --property <p> --at <sec>\n" +
+      "  move       <id> --property <p> --from <sec> --to <sec>\n";
+    if (verb !== "add" && verb !== "set" && verb !== "remove" && verb !== "move") {
+      process.stderr.write(KF_USAGE);
       process.exit(4);
     }
     if (!id || id.startsWith("--")) {
-      process.stderr.write(
-        "usage: autoviral clip keyframe add|set <id> --property <p> --at <sec> --value <v> [--easing <e>]\n",
-      );
+      process.stderr.write(KF_USAGE);
       process.exit(4);
     }
     const opts = parseFlags(flagArgs);
@@ -268,6 +269,49 @@ export async function clipCommand(args: string[]): Promise<void> {
       );
       process.exit(4);
     }
+
+    // PRD-0014 S8 — `remove` deletes the keyframe at (property, atSec); `move`
+    // relocates it to a new time (value unchanged, clamped into the clip span).
+    // Both run the shared ops the Studio KeyframePanel uses, so the CLI edit and
+    // a human's drag converge. The server owns the semantic validation (no such
+    // keyframe / clip / text clip → 400 code:4 → CLI exit 4).
+    if (verb === "remove") {
+      const atRaw = opts["--at"];
+      const at = atRaw === undefined ? NaN : Number(atRaw);
+      if (!Number.isFinite(at)) {
+        process.stderr.write("autoviral clip keyframe remove: --at <seconds> required (number)\n");
+        process.exit(4);
+      }
+      await bridgeRequest(
+        ctx,
+        "POST",
+        `/clip/${encodeURIComponent(id)}/keyframe/remove`,
+        { property, atSec: at },
+      );
+      return;
+    }
+    if (verb === "move") {
+      const fromRaw = opts["--from"];
+      const from = fromRaw === undefined ? NaN : Number(fromRaw);
+      if (!Number.isFinite(from)) {
+        process.stderr.write("autoviral clip keyframe move: --from <seconds> required (number)\n");
+        process.exit(4);
+      }
+      const toRaw = opts["--to"];
+      const to = toRaw === undefined ? NaN : Number(toRaw);
+      if (!Number.isFinite(to)) {
+        process.stderr.write("autoviral clip keyframe move: --to <seconds> required (number)\n");
+        process.exit(4);
+      }
+      await bridgeRequest(
+        ctx,
+        "POST",
+        `/clip/${encodeURIComponent(id)}/keyframe/move`,
+        { property, fromSec: from, toSec: to },
+      );
+      return;
+    }
+
     const atRaw = opts["--at"];
     const at = atRaw === undefined ? NaN : Number(atRaw);
     if (!Number.isFinite(at)) {
@@ -291,6 +335,60 @@ export async function clipCommand(args: string[]): Promise<void> {
       ctx,
       "POST",
       `/clip/${encodeURIComponent(id)}/keyframe`,
+      body,
+    );
+    return;
+  }
+
+  if (sub === "reframe") {
+    // PRD-0014 S8 — `autoviral clip reframe <id> --aspect 9:16 [--punch-in
+    // <scale>] [--from <sec> --to <sec>]`. PURE COMPOSITION SUGAR: the bridge runs
+    // the shared `ops.reframeClip`, which composes a centered `crop` + optional
+    // frame-aligned `scale` keyframes — no new schema field. We validate args
+    // locally (exit 4, never hits the bridge); the server owns the semantic
+    // validation (unknown/non-video clip, malformed aspect).
+    const id = rest[0];
+    if (!id || id.startsWith("--")) {
+      process.stderr.write(
+        "usage: autoviral clip reframe <id> --aspect <W:H> [--punch-in <scale>] [--from <sec> --to <sec>]\n",
+      );
+      process.exit(4);
+    }
+    const opts = parseFlags(rest.slice(1));
+    const aspect = opts["--aspect"];
+    if (!aspect) {
+      process.stderr.write("autoviral clip reframe: --aspect <W:H> required (e.g. 9:16)\n");
+      process.exit(4);
+    }
+    const body: Record<string, unknown> = { aspect };
+    if (opts["--punch-in"] !== undefined) {
+      const scale = Number(opts["--punch-in"]);
+      if (!Number.isFinite(scale)) {
+        process.stderr.write("autoviral clip reframe: --punch-in <scale> must be a number\n");
+        process.exit(4);
+      }
+      body.punchInScale = scale;
+    }
+    if (opts["--from"] !== undefined) {
+      const from = Number(opts["--from"]);
+      if (!Number.isFinite(from)) {
+        process.stderr.write("autoviral clip reframe: --from <seconds> must be a number\n");
+        process.exit(4);
+      }
+      body.fromSec = from;
+    }
+    if (opts["--to"] !== undefined) {
+      const to = Number(opts["--to"]);
+      if (!Number.isFinite(to)) {
+        process.stderr.write("autoviral clip reframe: --to <seconds> must be a number\n");
+        process.exit(4);
+      }
+      body.toSec = to;
+    }
+    await bridgeRequest(
+      ctx,
+      "POST",
+      `/clip/${encodeURIComponent(id)}/reframe`,
       body,
     );
     return;

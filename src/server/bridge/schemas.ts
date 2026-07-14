@@ -20,6 +20,11 @@ export type WhoAmIResponse = z.infer<typeof WhoAmIResponseSchema>;
 
 export const SelectTargetSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("clip"), id: z.string() }),
+  // PRD-0014 S8 — multi-select protocol. `select clips <id...>` broadcasts an
+  // ARRAY of ids; the Studio highlights all of them (reusing the PRD-0013
+  // MarqueeSelection store state). The single-`clip` variant stays for backward
+  // compatibility — every existing single-select consumer is untouched.
+  z.object({ kind: z.literal("clips"), ids: z.array(z.string()).min(1) }),
   z.object({ kind: z.literal("track"), id: z.string() }),
   z.object({ kind: z.literal("none") }),
 ]);

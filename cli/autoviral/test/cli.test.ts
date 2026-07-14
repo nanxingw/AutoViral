@@ -49,6 +49,13 @@ let lastTrackSet: Record<string, unknown> | null = null;
 // S7 (PRD-0014) — capture the last POST /clip/:id/duplicate body so the CLI test
 // can assert `clip duplicate <id> [--offset]` reached the wire (offset number).
 let lastClipDuplicate: Record<string, unknown> | null = null;
+// PRD-0014 S8 — capture the last keyframe remove/move, reframe, transition set,
+// and select bodies so the CLI test can assert each new verb reached the wire.
+let lastKeyframeRemove: Record<string, unknown> | null = null;
+let lastKeyframeMove: Record<string, unknown> | null = null;
+let lastReframe: Record<string, unknown> | null = null;
+let lastTransitionSet: Record<string, unknown> | null = null;
+let lastSelect: Record<string, unknown> | null = null;
 // S4 (US 10) — capture the last PUT /comp body so the CLI test can assert the
 // full composition the CLI read from a file / stdin reached the bridge verbatim.
 let lastCompPut: Record<string, unknown> | null = null;
@@ -511,6 +518,40 @@ beforeAll(async () => {
         return send(200, { ok: true, result: { id } });
       }
     }
+    // PRD-0014 S8 — POST /clip/:id/keyframe/remove + /keyframe/move. Mirror the
+    // server contract: a known clipId returns { id }; an unknown clipId is the
+    // op's CompositionOpError → 400 + code 4 → CLI exit 4. Capture the body so
+    // the CLI test can assert the (property/atSec) / (property/fromSec/toSec)
+    // wire shape.
+    {
+      const kfRmMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/keyframe\/remove$/.exec(url ?? "");
+      if (req.method === "POST" && kfRmMatch) {
+        lastKeyframeRemove = await readBody(req);
+        const clipId = decodeURIComponent(kfRmMatch[1]);
+        if (!clips.find((c) => c.id === clipId)) {
+          return send(400, { ok: false, error: "no such clip", code: 4 });
+        }
+        return send(200, { ok: true, result: { id: clipId } });
+      }
+      const kfMvMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/keyframe\/move$/.exec(url ?? "");
+      if (req.method === "POST" && kfMvMatch) {
+        lastKeyframeMove = await readBody(req);
+        const clipId = decodeURIComponent(kfMvMatch[1]);
+        if (!clips.find((c) => c.id === clipId)) {
+          return send(400, { ok: false, error: "no such clip", code: 4 });
+        }
+        return send(200, { ok: true, result: { id: clipId } });
+      }
+      const reframeMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/reframe$/.exec(url ?? "");
+      if (req.method === "POST" && reframeMatch) {
+        lastReframe = await readBody(req);
+        const clipId = decodeURIComponent(reframeMatch[1]);
+        if (!clips.find((c) => c.id === clipId)) {
+          return send(400, { ok: false, error: "no such clip", code: 4 });
+        }
+        return send(200, { ok: true, result: { id: clipId } });
+      }
+    }
     // S12 (US 16 / 35-37) — POST /clip/:id/keyframe. Mirrors the server
     // contract: a known clipId authoring a keyframe returns { id }; an unknown
     // clipId / a text clip / a bad property is the op's CompositionOpError → 400
@@ -548,9 +589,20 @@ beforeAll(async () => {
     }
     // S9 (US 4/5/9) — DELETE /transition/:id. A known id resolves; `tr_ghost`
     // is the op's CompositionOpError → 400 + code 4 → CLI exit 4.
+    // PRD-0014 S8 — PATCH /transition/:id (transition set). Capture the patch so
+    // the CLI test can assert --preset/--dur/--alignment/--easing reached the
+    // wire; `tr_ghost` still rejects (op's CompositionOpError → 400 code:4).
     {
       const trMatch = /^\/api\/bridge\/v1\/transition\/([^/]+)$/.exec(url ?? "");
       if (req.method === "DELETE" && trMatch) {
+        const id = decodeURIComponent(trMatch[1]);
+        if (id === "tr_ghost") {
+          return send(400, { ok: false, error: "no such transition", code: 4 });
+        }
+        return send(200, { ok: true, result: { id } });
+      }
+      if (req.method === "PATCH" && trMatch) {
+        lastTransitionSet = await readBody(req);
         const id = decodeURIComponent(trMatch[1]);
         if (id === "tr_ghost") {
           return send(400, { ok: false, error: "no such transition", code: 4 });
@@ -585,8 +637,13 @@ beforeAll(async () => {
       const written = body.assetPath === "assets/missing.mp3" ? 0 : 3;
       return send(200, { ok: true, result: { written, language: body.language ?? null } });
     }
+    if (req.method === "POST" && url === "/api/bridge/v1/select") {
+      // PRD-0014 S8 — capture the select body so the CLI test can assert the
+      // multi-target { kind:"clips", ids:[...] } shape + single-id back-compat.
+      lastSelect = await readBody(req);
+      return send(200, { ok: true });
+    }
     if (req.method === "POST" && (
-      url === "/api/bridge/v1/select" ||
       url === "/api/bridge/v1/seek" ||
       url === "/api/bridge/v1/play" ||
       url === "/api/bridge/v1/pause" ||
@@ -1040,6 +1097,114 @@ describe("autoviral CLI — end-to-end", () => {
   it("transition unknown subcommand → exit 127", async () => {
     const r = await run(["transition", "frobnicate"]);
     expect(r.exitCode).toBe(127);
+  });
+
+  // ─── PRD-0014 S8 — transition set / keyframe remove·move / reframe / select ──
+  it("transition set <id> --preset --dur → PATCHes /transition/:id, exit 0", async () => {
+    lastTransitionSet = null;
+    const r = await run(["transition", "set", "tr_seq1", "--preset", "wipe-left", "--dur", "0.6"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastTransitionSet).toEqual({ preset: "wipe-left", durationSec: 0.6 });
+  });
+
+  it("transition set with --alignment/--easing only → exit 0 (partial patch)", async () => {
+    lastTransitionSet = null;
+    const r = await run(["transition", "set", "tr_seq1", "--alignment", "start", "--easing", "spring"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastTransitionSet).toEqual({ alignment: "start", easing: "spring" });
+  });
+
+  it("transition set with NO fields → exit 4 (never hits bridge)", async () => {
+    const r = await run(["transition", "set", "tr_seq1"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("transition set with no id → exit 4 (never hits bridge)", async () => {
+    const r = await run(["transition", "set", "--preset", "wipe-left"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("transition set a non-numeric --dur → exit 4 (never hits bridge)", async () => {
+    const r = await run(["transition", "set", "tr_seq1", "--dur", "abc"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("transition set an unknown id → bridge 400 code:4 → exit 4", async () => {
+    const r = await run(["transition", "set", "tr_ghost", "--preset", "wipe-left"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip keyframe remove <id> --property --at → POSTs /keyframe/remove, exit 0", async () => {
+    lastKeyframeRemove = null;
+    const r = await run(["clip", "keyframe", "remove", "vc_s01", "--property", "scale", "--at", "1.5"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastKeyframeRemove).toEqual({ property: "scale", atSec: 1.5 });
+  });
+
+  it("clip keyframe remove with no --at → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "keyframe", "remove", "vc_s01", "--property", "scale"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip keyframe move <id> --property --from --to → POSTs /keyframe/move, exit 0", async () => {
+    lastKeyframeMove = null;
+    const r = await run([
+      "clip", "keyframe", "move", "vc_s01",
+      "--property", "scale", "--from", "1", "--to", "2.5",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastKeyframeMove).toEqual({ property: "scale", fromSec: 1, toSec: 2.5 });
+  });
+
+  it("clip keyframe move with no --to → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "keyframe", "move", "vc_s01", "--property", "scale", "--from", "1"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip keyframe remove an unknown clip → bridge 400 code:4 → exit 4", async () => {
+    const r = await run(["clip", "keyframe", "remove", "vc_ghost", "--property", "scale", "--at", "1"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("clip reframe <id> --aspect → POSTs /reframe, exit 0", async () => {
+    lastReframe = null;
+    const r = await run(["clip", "reframe", "vc_s01", "--aspect", "9:16"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastReframe).toEqual({ aspect: "9:16" });
+  });
+
+  it("clip reframe with --punch-in --from --to → forwards the punch-in window", async () => {
+    lastReframe = null;
+    const r = await run([
+      "clip", "reframe", "vc_s01",
+      "--aspect", "9:16", "--punch-in", "1.3", "--from", "0", "--to", "2",
+    ]);
+    expect(r.exitCode).toBe(0);
+    expect(lastReframe).toEqual({ aspect: "9:16", punchInScale: 1.3, fromSec: 0, toSec: 2 });
+  });
+
+  it("clip reframe with no --aspect → exit 4 (never hits bridge)", async () => {
+    const r = await run(["clip", "reframe", "vc_s01"]);
+    expect(r.exitCode).toBe(4);
+  });
+
+  it("select clips <id...> → POSTs the multi-target { kind:'clips', ids }, exit 0", async () => {
+    lastSelect = null;
+    const r = await run(["select", "clips", "vc_s01", "ac_bgm01", "tc_hook01"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastSelect).toEqual({ target: { kind: "clips", ids: ["vc_s01", "ac_bgm01", "tc_hook01"] } });
+  });
+
+  it("select clip <id> single-id → unchanged { kind:'clip', id } (back-compat)", async () => {
+    lastSelect = null;
+    const r = await run(["select", "clip", "vc_s01"]);
+    expect(r.exitCode).toBe(0);
+    expect(lastSelect).toEqual({ target: { kind: "clip", id: "vc_s01" } });
+  });
+
+  it("select clips with no ids → exit 4 (never hits bridge)", async () => {
+    const r = await run(["select", "clips"]);
+    expect(r.exitCode).toBe(4);
   });
 
   // S14 (US 20/21) — `autoviral captions generate [--language L] [--asset P]`

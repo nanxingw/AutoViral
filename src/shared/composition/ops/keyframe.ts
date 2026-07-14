@@ -21,7 +21,7 @@
 
 import type { Clip, Composition, KeyframeProperty, KeyframeEasing } from "../../composition.js";
 import { SPEED_MIN, SPEED_MAX } from "../../composition.js";
-import { addOrReplaceKeyframe } from "../../keyframes.js";
+import { addOrReplaceKeyframe, KEYFRAME_TIME_EPSILON } from "../../keyframes.js";
 import { CompositionOpError } from "./errors.js";
 
 // Floating-point tolerance for the upper-bound boundary check. Mirrors the
@@ -169,6 +169,118 @@ export function addKeyframe(comp: Composition, p: KeyframeWrite): void {
  */
 export function setKeyframe(comp: Composition, p: KeyframeWrite): void {
   addKeyframe(comp, p);
+}
+
+// ─── PRD-0014 S8 — keyframe EDIT ops (remove / move) ─────────────────────────
+// Continuation of the S12 down-sinking: the Studio KeyframePanel remove / drag
+// paths and the bridge/CLI (`autoviral clip keyframe remove/move`) consume THESE
+// implementations, so a human dragging a keyframe and an agent moving one via
+// the CLI converge on an identical `keyframes` array. Addressed by (property,
+// atSec) — the same coordinate the CLI names — not an array index.
+
+/**
+ * Resolve `clipId` to a keyframe-carrying clip. Throws CompositionOpError{code:4}
+ * for an unknown clip or a text clip (text carries no keyframes — D8). Returns
+ * the clip and its `keyframes` array reference (or undefined when the clip has
+ * none — the callers treat that as "nothing to remove/move").
+ */
+function resolveKeyframeClip(
+  comp: Composition,
+  clipId: string,
+  verb: string,
+): { clip: Clip; arr: import("../../composition.js").Keyframe[] | undefined } {
+  const clip = findClip(comp, clipId);
+  if (!clip) {
+    throw new CompositionOpError(`${verb}: no clip with id ${clipId}`, 4);
+  }
+  if (clip.kind === "text") {
+    throw new CompositionOpError(
+      `${verb}: clip ${clipId} is a text clip — text clips carry no keyframes (D8)`,
+      4,
+    );
+  }
+  const arr = (clip as { keyframes?: import("../../composition.js").Keyframe[] }).keyframes;
+  return { clip, arr };
+}
+
+export interface KeyframeRemove {
+  clipId: string;
+  property: KeyframeProperty;
+  atSec: number;
+}
+
+/**
+ * Remove the keyframe at `(property, atSec)` on `clipId`. Matches within
+ * `KEYFRAME_TIME_EPSILON` (the SAME tolerance `addOrReplaceKeyframe` dedups on,
+ * so a keyframe authored via the CLI is removable via the CLI at the same time).
+ * When the clip's array empties, the `keyframes` leaf is set to `undefined` —
+ * the historical store contract — so an animated-then-cleared clip re-serialises
+ * exactly like a clip that never had keyframes.
+ *
+ * Throws `CompositionOpError{code:4}` when: no clip / a text clip / no keyframe
+ * matches `(property, atSec)`.
+ */
+export function removeKeyframe(comp: Composition, p: KeyframeRemove): void {
+  const { clip, arr } = resolveKeyframeClip(comp, p.clipId, "removeKeyframe");
+  const idx = arr?.findIndex(
+    (k) => k.property === p.property && Math.abs(k.time - p.atSec) < KEYFRAME_TIME_EPSILON,
+  );
+  if (arr === undefined || idx === undefined || idx < 0) {
+    throw new CompositionOpError(
+      `removeKeyframe: no ${p.property} keyframe at ${p.atSec}s on clip ${p.clipId}`,
+      4,
+    );
+  }
+  arr.splice(idx, 1); // in place — keeps the array reference (ADR-009)
+  if (arr.length === 0) {
+    (clip as { keyframes?: import("../../composition.js").Keyframe[] }).keyframes = undefined;
+  }
+}
+
+export interface KeyframeMove {
+  clipId: string;
+  property: KeyframeProperty;
+  fromSec: number;
+  toSec: number;
+}
+
+/**
+ * Move the keyframe at `(property, fromSec)` to `toSec`, leaving its value and
+ * easing untouched (this is a TIME edit — the value curve keeps its samples,
+ * only their placement changes). `toSec` is CLAMPED into `[0, clipDuration]`
+ * (the drag UI clamps too; the op is the authoritative clamp so the CLI can't
+ * write an off-clip keyframe). Re-sorts within the property. Returns the
+ * resulting (clamped) `atSec` so callers can report where the keyframe landed.
+ *
+ * Throws `CompositionOpError{code:4}` when: no clip / a text clip / no keyframe
+ * matches `(property, fromSec)`.
+ */
+export function moveKeyframe(
+  comp: Composition,
+  p: KeyframeMove,
+): { property: KeyframeProperty; atSec: number } {
+  const { clip, arr } = resolveKeyframeClip(comp, p.clipId, "moveKeyframe");
+  const entry = arr?.find(
+    (k) => k.property === p.property && Math.abs(k.time - p.fromSec) < KEYFRAME_TIME_EPSILON,
+  );
+  if (!entry) {
+    throw new CompositionOpError(
+      `moveKeyframe: no ${p.property} keyframe at ${p.fromSec}s on clip ${p.clipId}`,
+      4,
+    );
+  }
+  if (!Number.isFinite(p.toSec)) {
+    throw new CompositionOpError(`moveKeyframe: toSec ${p.toSec} must be finite`, 4);
+  }
+  const maxAtSec = clipKeyframeDuration(clip);
+  const clamped = Math.min(Math.max(p.toSec, 0), maxAtSec);
+  entry.time = clamped;
+  // Keep the array sorted (property ASC, then time ASC) — the SAME order
+  // addOrReplaceKeyframe maintains — so index-based consumers stay consistent.
+  arr!.sort((a, b) =>
+    a.property === b.property ? a.time - b.time : a.property.localeCompare(b.property),
+  );
+  return { property: p.property, atSec: clamped };
 }
 
 // Local clip lookup across all tracks. Mirrors the find loop in the sibling ops

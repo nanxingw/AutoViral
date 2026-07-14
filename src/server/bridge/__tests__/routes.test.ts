@@ -196,6 +196,37 @@ describe("bridge router — Phase 3 UI commands", () => {
     expect(ev.payload).toEqual({ kind: "clip", id: "vc_s07" });
   });
 
+  // PRD-0014 S8 — multi-select protocol. `select clips <id...>` broadcasts an
+  // ARRAY of ids; the single-clip `select clip <id>` variant (above) stays valid
+  // (back-compat).
+  it("POST /select publishes a multi-target ui-select { kind:'clips', ids }", async () => {
+    const got = captureNext("w_cmd_multi");
+    const res = await app.request("/api/bridge/v1/select", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_cmd_multi",
+      },
+      body: JSON.stringify({ target: { kind: "clips", ids: ["vc_a", "vc_b", "ac_c"] } }),
+    });
+    expect(res.status).toBe(200);
+    const ev = await got;
+    expect(ev.type).toBe("ui-select");
+    expect(ev.payload).toEqual({ kind: "clips", ids: ["vc_a", "vc_b", "ac_c"] });
+  });
+
+  it("POST /select rejects a multi-target with an empty ids array (schema min 1)", async () => {
+    const res = await app.request("/api/bridge/v1/select", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-AutoViral-Work-Id": "w_cmd_empty",
+      },
+      body: JSON.stringify({ target: { kind: "clips", ids: [] } }),
+    });
+    expect(res.status).toBe(400);
+  });
+
   it("POST /seek publishes ui-seek with seconds", async () => {
     const got = captureNext("w_cmd_2");
     const res = await app.request("/api/bridge/v1/seek", {

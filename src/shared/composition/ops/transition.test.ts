@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Composition, Clip } from "../../composition.js";
 import { TransitionSchema } from "../../composition.js";
-import { addTransition, removeTransition } from "./transition.js";
+import { addTransition, removeTransition, updateTransition } from "./transition.js";
 import { CompositionOpError } from "./errors.js";
 import { TRANSITION_PRESETS } from "../../transitions.js";
 
@@ -292,5 +292,74 @@ describe("@shared composition ops — removeTransition", () => {
       expect(e).toBeInstanceOf(CompositionOpError);
       expect((e as CompositionOpError).code).toBe(4);
     }
+  });
+});
+
+// PRD-0014 S8 — `updateTransition`: in-place edit of a transition's preset /
+// durationSec / alignment / easing, found by id across any track (trackId is
+// advisory). durationSec is always re-clamped to the handle so the invariant
+// survives a later clip trim. Unknown preset / transition → CompositionOpError.
+describe("@shared composition ops — updateTransition", () => {
+  function seed(): Composition {
+    const comp = compWith([
+      videoClip({ id: "c1", trackOffset: 0, in: 0, out: 3 }),
+      videoClip({ id: "c2", trackOffset: 3, in: 0, out: 3 }),
+    ]);
+    const { transitionId } = addTransition(comp, {
+      trackId: "trk_v",
+      afterClipId: "c1",
+      preset: "cross-dissolve",
+      durationSec: 0.5,
+    });
+    return Object.assign(comp, { __trId: transitionId }) as Composition & { __trId: string };
+  }
+
+  it("patches preset / alignment / easing in place and stays refine-valid", () => {
+    const comp = seed() as Composition & { __trId: string };
+    updateTransition(comp, {
+      transitionId: comp.__trId,
+      preset: "wipe-left",
+      alignment: "start",
+      easing: "spring",
+    });
+    const tr = comp.tracks[0].transitions![0];
+    expect(tr.preset).toBe("wipe-left");
+    expect(tr.alignment).toBe("start");
+    expect(tr.easing).toBe("spring");
+    expect(() => TransitionSchema.parse(tr)).not.toThrow();
+  });
+
+  it("re-clamps durationSec to the available handle (half the smaller adjacent clip)", () => {
+    const comp = seed() as Composition & { __trId: string };
+    // both clips 3s → handle = 1.5 each → max transition 3s; ask 99 → clamp 3.
+    updateTransition(comp, { transitionId: comp.__trId, durationSec: 99 });
+    expect(comp.tracks[0].transitions![0].durationSec).toBeCloseTo(3, 5);
+  });
+
+  it("preserves the array + track identity (ADR-009 — never replaced)", () => {
+    const comp = seed() as Composition & { __trId: string };
+    const trackRef = comp.tracks[0];
+    const arrRef = comp.tracks[0].transitions;
+    updateTransition(comp, { transitionId: comp.__trId, preset: "wipe-left" });
+    expect(comp.tracks[0]).toBe(trackRef);
+    expect(comp.tracks[0].transitions).toBe(arrRef);
+  });
+
+  it("throws code:4 on an unknown transitionId", () => {
+    const comp = seed() as Composition & { __trId: string };
+    try {
+      updateTransition(comp, { transitionId: "tr_ghost", preset: "wipe-left" });
+      throw new Error("should have thrown");
+    } catch (e) {
+      expect(e).toBeInstanceOf(CompositionOpError);
+      expect((e as CompositionOpError).code).toBe(4);
+    }
+  });
+
+  it("throws code:4 on an unknown preset (registry is the source of truth)", () => {
+    const comp = seed() as Composition & { __trId: string };
+    expect(() =>
+      updateTransition(comp, { transitionId: comp.__trId, preset: "no-such-preset" }),
+    ).toThrow(CompositionOpError);
   });
 });

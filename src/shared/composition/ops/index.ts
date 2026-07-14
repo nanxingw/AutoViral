@@ -8,7 +8,7 @@ export { splitClip } from "./splitClip.js";
 export { trimClip } from "./trimClip.js";
 export { patchClipProps } from "./patchClipProps.js";
 export { moveClipToTrack } from "./moveClipToTrack.js";
-export { addTransition, removeTransition } from "./transition.js";
+export { addTransition, removeTransition, updateTransition } from "./transition.js";
 export { addTrack, removeTrack } from "./track.js";
 export {
   addScene,
@@ -17,7 +17,8 @@ export {
   linkSceneAssets,
   removeScene,
 } from "./scene.js";
-export { addKeyframe, setKeyframe } from "./keyframe.js";
+export { addKeyframe, setKeyframe, removeKeyframe, moveKeyframe } from "./keyframe.js";
+export type { KeyframeWrite, KeyframeRemove, KeyframeMove } from "./keyframe.js";
 export { setAspectRatio, rescaleCompositionForResize } from "./setAspectRatio.js";
 export { setCompositionDuration, compositionContentEnd } from "./setDuration.js";
 export { setFps } from "./setFps.js";
@@ -33,3 +34,6 @@ export { duplicateClip } from "./duplicateClip.js";
 export type { DuplicateClipResult } from "./duplicateClip.js";
 export { setTrackProps } from "./setTrackProps.js";
 export type { TrackProps } from "./setTrackProps.js";
+// PRD-0014 S8 — keyframe edit (remove/move) + transition update above; reframe sugar.
+export { reframeClip } from "./reframeClip.js";
+export type { ReframeParams } from "./reframeClip.js";

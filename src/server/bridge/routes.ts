@@ -2174,6 +2174,76 @@ bridgeRouter.delete("/transition/:id", async (c) => {
   return c.json({ ok: true, result: { id } });
 });
 
+// PRD-0014 S8 — PATCH /transition/:id: edit a transition in place (preset /
+// durationSec / alignment / easing) through the shared `ops.updateTransition`,
+// the SAME in-place patch + durationSec re-clamp the Studio Inspector runs, so an
+// agent's `autoviral transition set <id> --preset --dur` and a human's edit
+// converge. Unknown transition id / unknown preset → CompositionOpError{code:4}
+// → HTTP 400 + code:4 → CLI exit 4.
+bridgeRouter.patch("/transition/:id", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing transition id", code: 4 }, 400);
+  }
+  const body = (await c.req.json().catch(() => ({}))) as {
+    preset?: unknown;
+    durationSec?: unknown;
+    alignment?: unknown;
+    easing?: unknown;
+  };
+  const patch: {
+    transitionId: string;
+    preset?: string;
+    durationSec?: number;
+    alignment?: "center" | "start" | "end";
+    easing?: "linear" | "spring" | "ease-in-out";
+  } = { transitionId: id };
+  if (body.preset !== undefined) {
+    if (typeof body.preset !== "string" || !body.preset) {
+      return c.json({ ok: false, error: "invalid preset", code: 4 }, 400);
+    }
+    patch.preset = body.preset;
+  }
+  if (body.durationSec !== undefined) {
+    if (typeof body.durationSec !== "number" || !Number.isFinite(body.durationSec)) {
+      return c.json({ ok: false, error: "invalid durationSec (seconds)", code: 4 }, 400);
+    }
+    patch.durationSec = body.durationSec;
+  }
+  if (body.alignment !== undefined) {
+    if (body.alignment !== "center" && body.alignment !== "start" && body.alignment !== "end") {
+      return c.json({ ok: false, error: "invalid alignment", code: 4 }, 400);
+    }
+    patch.alignment = body.alignment;
+  }
+  if (body.easing !== undefined) {
+    if (body.easing !== "linear" && body.easing !== "spring" && body.easing !== "ease-in-out") {
+      return c.json({ ok: false, error: "invalid easing", code: 4 }, 400);
+    }
+    patch.easing = body.easing;
+  }
+  if (patch.preset === undefined && patch.durationSec === undefined && patch.alignment === undefined && patch.easing === undefined) {
+    return c.json({ ok: false, error: "no fields to update", code: 4 }, 400);
+  }
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.updateTransition(comp, patch);
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "transition-update" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
 // S12 (US 16 / 35-37 backfill) — POST /clip/:id/keyframe: author one keyframe on
 // a numeric clip property through the shared `ops.addKeyframe`, the SAME
 // collision math the Studio KeyframePanel runs, so an agent authoring a
@@ -2230,6 +2300,139 @@ bridgeRouter.post("/clip/:id/keyframe", async (c) => {
         return comp;
       },
       () => broadcast(g.workId, "composition-changed", { reason: "keyframe-add" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
+// PRD-0014 S8 — POST /clip/:id/keyframe/remove: delete the keyframe at
+// (property, atSec) through the shared `ops.removeKeyframe` (the SAME array the
+// Studio KeyframePanel edits). Body `{ property, atSec }`. No matching keyframe /
+// clip / a text clip → CompositionOpError{code:4} → HTTP 400 → CLI exit 4.
+bridgeRouter.post("/clip/:id/keyframe/remove", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  const body = (await c.req.json().catch(() => ({}))) as {
+    property?: unknown;
+    atSec?: unknown;
+  };
+  if (typeof body.property !== "string" || !body.property) {
+    return c.json({ ok: false, error: "missing property", code: 4 }, 400);
+  }
+  if (typeof body.atSec !== "number" || !Number.isFinite(body.atSec)) {
+    return c.json({ ok: false, error: "missing/invalid atSec (seconds)", code: 4 }, 400);
+  }
+  const property = body.property;
+  const atSec = body.atSec;
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.removeKeyframe(comp, { clipId: id, property: property as never, atSec });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "keyframe-remove" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
+// PRD-0014 S8 — POST /clip/:id/keyframe/move: relocate the keyframe at
+// (property, fromSec) to toSec (value unchanged, clamped into the clip span)
+// through the shared `ops.moveKeyframe`. Body `{ property, fromSec, toSec }`.
+// No matching keyframe / clip / a text clip → CompositionOpError{code:4} → 400.
+bridgeRouter.post("/clip/:id/keyframe/move", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  const body = (await c.req.json().catch(() => ({}))) as {
+    property?: unknown;
+    fromSec?: unknown;
+    toSec?: unknown;
+  };
+  if (typeof body.property !== "string" || !body.property) {
+    return c.json({ ok: false, error: "missing property", code: 4 }, 400);
+  }
+  if (typeof body.fromSec !== "number" || !Number.isFinite(body.fromSec)) {
+    return c.json({ ok: false, error: "missing/invalid fromSec (seconds)", code: 4 }, 400);
+  }
+  if (typeof body.toSec !== "number" || !Number.isFinite(body.toSec)) {
+    return c.json({ ok: false, error: "missing/invalid toSec (seconds)", code: 4 }, 400);
+  }
+  const property = body.property;
+  const fromSec = body.fromSec;
+  const toSec = body.toSec;
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.moveKeyframe(comp, { clipId: id, property: property as never, fromSec, toSec });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "keyframe-move" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    const code = err instanceof CompositionOpError ? err.code : 4;
+    return c.json({ ok: false, error: message, code }, 400);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
+// PRD-0014 S8 — POST /clip/:id/reframe: composition sugar. Runs the shared
+// `ops.reframeClip`, which composes a centered `crop` + optional frame-aligned
+// `scale` keyframes (punch-in) — introducing NO new schema field. Body
+// `{ aspect, punchInScale?, fromSec?, toSec? }`. Unknown/non-video clip or a
+// malformed aspect → CompositionOpError{code:4} → HTTP 400 → CLI exit 4.
+bridgeRouter.post("/clip/:id/reframe", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  const body = (await c.req.json().catch(() => ({}))) as {
+    aspect?: unknown;
+    punchInScale?: unknown;
+    fromSec?: unknown;
+    toSec?: unknown;
+  };
+  if (typeof body.aspect !== "string" || !body.aspect) {
+    return c.json({ ok: false, error: "missing aspect (W:H)", code: 4 }, 400);
+  }
+  const params: {
+    clipId: string;
+    aspect: string;
+    punchInScale?: number;
+    fromSec?: number;
+    toSec?: number;
+  } = { clipId: id, aspect: body.aspect };
+  for (const key of ["punchInScale", "fromSec", "toSec"] as const) {
+    const v = body[key];
+    if (v !== undefined) {
+      if (typeof v !== "number" || !Number.isFinite(v)) {
+        return c.json({ ok: false, error: `invalid ${key}`, code: 4 }, 400);
+      }
+      params[key] = v;
+    }
+  }
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.reframeClip(comp, params);
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "reframe" }),
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

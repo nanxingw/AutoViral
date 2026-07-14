@@ -107,9 +107,15 @@ export function useBridgeEvents(workId: string | undefined): void {
       const store = useComposition.getState();
       switch (ev.type) {
         case "ui-select": {
-          const target = ev.payload as { kind: string; id?: string };
+          const target = ev.payload as { kind: string; id?: string; ids?: string[] };
           if (target?.kind === "clip" && target.id) store.setSelection(target.id);
-          else if (target?.kind === "none") store.setSelection(null);
+          else if (target?.kind === "clips" && Array.isArray(target.ids) && target.ids.length) {
+            // PRD-0014 S8 — multi-select: highlight EVERY id (reusing the
+            // PRD-0013 timeline multi-selection store state). The first id is the
+            // primary/anchor, so a subsequent single-clip edit has a focus.
+            const ids = target.ids;
+            store.setTimelineSelection({ ids, primaryId: ids[0], anchorId: ids[0] });
+          } else if (target?.kind === "none") store.setSelection(null);
           // track selection (highlight only, no store field for it yet) ignored
           break;
         }

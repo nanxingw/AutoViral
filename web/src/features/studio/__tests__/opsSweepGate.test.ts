@@ -47,6 +47,10 @@ const SUNK: Record<string, string> = {
   // (invisible to this gate). They are now first-class actions through the op.
   setTrackMuted: "setTrackProps",
   setTrackHidden: "setTrackProps",
+  // ── S8 (PRD-0014) — down-sunk this slice ──
+  updateTransition: "updateTransition",
+  removeKeyframe: "removeKeyframe",
+  updateKeyframe: "moveKeyframe", // routes through moveKeyframe (time) + setKeyframe (value)
 };
 
 // Store-only editing verbs NOT yet lifted. Each carries the slice/reason so the
@@ -57,9 +61,6 @@ const SINK_PENDING: Record<string, string> = {
   updateClip: "ops.patchClipProps exists; store rewire pending",
   removeClip: "bridge DELETE /clip inlines filter; no dedicated op yet",
   moveClipWithinTrack: "pending",
-  updateTransition: "S8 — ops.updateTransition",
-  removeKeyframe: "S8 — ops.removeKeyframe",
-  updateKeyframe: "S8 — ops.moveKeyframe/setKeyframe",
   reorderTracks: "pending",
   rebindClip: "pending",
   applyPlatformPreset: "partial: rescale via ops.rescaleCompositionForResize",
@@ -163,9 +164,6 @@ const SINK_PENDING_FROZEN = [
   "updateClip",
   "removeClip",
   "moveClipWithinTrack",
-  "updateTransition",
-  "removeKeyframe",
-  "updateKeyframe",
   "reorderTracks",
   "rebindClip",
   "applyPlatformPreset",

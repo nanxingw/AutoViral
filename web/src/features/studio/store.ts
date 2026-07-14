@@ -12,7 +12,6 @@ import type {
   Transition,
   Aspect,
 } from "./types";
-import { clampHandleDuration } from "@shared/transitions";
 import { splitKeyframesAtLocal } from "@shared/keyframes";
 // ADR-009 (S6) — shared composition-ops core. splitClip's invariants live here
 // now (single source of truth shared with the bridge); the store action calls
@@ -491,30 +490,29 @@ export const useComposition = create<CompState>()(
       });
       return mintedId;
     },
-    updateTransition: (trackId, transitionId, patch) =>
+    // PRD-0014 S8 — transition edit now routes through the shared
+    // `ops.updateTransition` (the SAME in-place patch + durationSec re-clamp the
+    // bridge `transition set <id> --preset --dur` verb runs), so an agent editing
+    // a transition via the CLI and a human in the Inspector converge on one
+    // composition. The op finds the transition by id across any track (so the
+    // `trackId` arg is now advisory — kept for the existing call-site signatures)
+    // and THROWS CompositionOpError on unknown id / preset; the store keeps its
+    // historical silent-no-op contract, so we catch and leave the comp untouched.
+    updateTransition: (_trackId, transitionId, patch) =>
       set((s) => {
         if (!s.comp) return;
-        const t = s.comp.tracks.find((tt) => tt.id === trackId);
-        if (!t || !t.transitions) return;
-        const tr = t.transitions.find((x) => x.id === transitionId);
-        if (!tr) return;
-        // Re-clamp durationSec against current adjacent clip durations so the
-        // handle invariant never breaks even if the user trimmed a clip after.
-        if (patch.durationSec !== undefined) {
-          const beforeIdx = (t.clips as Clip[]).findIndex((c) => c.id === tr.afterClipId);
-          if (beforeIdx >= 0 && beforeIdx < t.clips.length - 1) {
-            const before = (t.clips as Clip[])[beforeIdx];
-            const after = (t.clips as Clip[])[beforeIdx + 1];
-            tr.durationSec = clampHandleDuration(
-              patch.durationSec,
-              clipDuration(before),
-              clipDuration(after),
-            );
-          }
+        try {
+          ops.updateTransition(s.comp, {
+            transitionId,
+            preset: patch.preset,
+            durationSec: patch.durationSec,
+            alignment: patch.alignment,
+            easing: patch.easing,
+          });
+        } catch (err) {
+          if (err instanceof CompositionOpError) return; // silent no-op (historical)
+          throw err;
         }
-        if (patch.preset !== undefined) tr.preset = patch.preset;
-        if (patch.alignment !== undefined) tr.alignment = patch.alignment;
-        if (patch.easing !== undefined) tr.easing = patch.easing;
       }),
     // ADR-009 (S9) — transition remove now routes through the shared op
     // (`ops.removeTransition`), consumed identically by the bridge (`autoviral
@@ -924,6 +922,13 @@ export const useComposition = create<CompState>()(
           throw err;
         }
       }),
+    // PRD-0014 S8 — remove / update keyframe now route through the shared ops
+    // (`ops.removeKeyframe` / `ops.moveKeyframe` + `ops.setKeyframe`), the SAME
+    // code the bridge `clip keyframe remove/move` verbs run. The KeyframePanel
+    // still addresses by original-array INDEX (its display concern), so the store
+    // resolves the index → the keyframe's own (property, time) coordinate and
+    // hands THAT to the op. External behavior is unchanged (a bad index / unknown
+    // clip / text clip stays a silent no-op).
     removeKeyframe: (clipId, indexInClipArray) =>
       set((s) => {
         if (!s.comp) return;
@@ -935,8 +940,17 @@ export const useComposition = create<CompState>()(
           const arr = target.keyframes;
           if (!arr) return;
           if (indexInClipArray < 0 || indexInClipArray >= arr.length) return;
-          arr.splice(indexInClipArray, 1);
-          if (arr.length === 0) target.keyframes = undefined;
+          const entry = arr[indexInClipArray];
+          try {
+            ops.removeKeyframe(s.comp, {
+              clipId,
+              property: entry.property,
+              atSec: entry.time,
+            });
+          } catch (err) {
+            if (err instanceof CompositionOpError) return; // silent no-op
+            throw err;
+          }
           return;
         }
       }),
@@ -952,7 +966,38 @@ export const useComposition = create<CompState>()(
           if (!arr) return;
           const entry = arr[indexInClipArray];
           if (!entry) return;
-          Object.assign(entry, patch);
+          const property = entry.property;
+          try {
+            // A TIME change relocates the keyframe in place (value/easing kept) —
+            // `ops.moveKeyframe`, which clamps the target into the clip span.
+            let atSec = entry.time;
+            if (patch.time !== undefined && Math.abs(patch.time - entry.time) > 1e-9) {
+              atSec = ops.moveKeyframe(s.comp, {
+                clipId,
+                property,
+                fromSec: entry.time,
+                toSec: patch.time,
+              }).atSec;
+            }
+            // A VALUE / EASING change replaces the entry at (property, atSec) —
+            // `ops.setKeyframe` (idempotent author-or-replace).
+            if (patch.value !== undefined || patch.easing !== undefined) {
+              const cur =
+                (target.keyframes ?? []).find(
+                  (k) => k.property === property && Math.abs(k.time - atSec) < 1e-4,
+                ) ?? entry;
+              ops.setKeyframe(s.comp, {
+                clipId,
+                property,
+                atSec,
+                value: patch.value ?? cur.value,
+                easing: patch.easing ?? cur.easing,
+              });
+            }
+          } catch (err) {
+            if (err instanceof CompositionOpError) return; // silent no-op
+            throw err;
+          }
           return;
         }
       }),

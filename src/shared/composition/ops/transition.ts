@@ -108,6 +108,67 @@ export function addTransition(
 }
 
 /**
+ * PRD-0014 S8 — edit a transition in place: patch its `preset` / `durationSec` /
+ * `alignment` / `easing`. Found by `transitionId` across ANY track (so the store
+ * action's `trackId` arg is advisory — the id is globally unique). Mutates the
+ * EXISTING transition object in place (array + object identity survive — decision
+ * #1). `durationSec` is ALWAYS re-clamped to the handle (half the smaller
+ * adjacent clip) so the invariant survives even if a clip was trimmed after the
+ * transition was added — the SAME re-clamp the Studio Inspector runs. `preset`
+ * must come from the shared registry (single source of truth); an unknown preset
+ * is a code:4 rejection, not a silently-stored bad value.
+ *
+ * Throws `CompositionOpError{code:4}` when no transition matches `transitionId`,
+ * or `preset` (when given) is not in the registry.
+ */
+export function updateTransition(
+  comp: Composition,
+  p: {
+    transitionId: string;
+    preset?: string;
+    durationSec?: number;
+    alignment?: "center" | "start" | "end";
+    easing?: "linear" | "spring" | "ease-in-out";
+  },
+): void {
+  if (
+    p.preset !== undefined &&
+    !Object.prototype.hasOwnProperty.call(TRANSITION_PRESET_META, p.preset)
+  ) {
+    throw new CompositionOpError(`updateTransition: unknown preset ${p.preset}`, 4);
+  }
+  for (const track of comp.tracks) {
+    const transitions = track.transitions;
+    if (!transitions || transitions.length === 0) continue;
+    const tr = transitions.find((t) => t.id === p.transitionId);
+    if (!tr) continue;
+
+    if (p.durationSec !== undefined) {
+      // Re-clamp against the CURRENT adjacent clip durations. Only clamp when the
+      // anchor still has a successor (a valid transition always does; guard keeps
+      // us safe against a transient orphan mid-edit).
+      const clips = track.clips as Clip[];
+      const beforeIdx = clips.findIndex((c) => c.id === tr.afterClipId);
+      if (beforeIdx >= 0 && beforeIdx < clips.length - 1) {
+        tr.durationSec = clampHandleDuration(
+          p.durationSec,
+          clipDuration(clips[beforeIdx]),
+          clipDuration(clips[beforeIdx + 1]),
+        );
+      }
+    }
+    if (p.preset !== undefined) tr.preset = p.preset as TransitionPreset;
+    if (p.alignment !== undefined) tr.alignment = p.alignment;
+    if (p.easing !== undefined) tr.easing = p.easing;
+    return;
+  }
+  throw new CompositionOpError(
+    `updateTransition: no transition with id ${p.transitionId}`,
+    4,
+  );
+}
+
+/**
  * Remove the transition `transitionId` from whichever track holds it, restoring a
  * hard cut at that point. We filter the offending entry out of the EXISTING
  * `transitions` array in place (array identity survives — decision #1).
