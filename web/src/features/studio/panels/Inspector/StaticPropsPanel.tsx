@@ -172,6 +172,8 @@ export function StaticPropsPanel() {
   const addClipEffect = useComposition((s) => s.addClipEffect);
   const removeClipEffect = useComposition((s) => s.removeClipEffect);
   const toggleClipEffect = useComposition((s) => s.toggleClipEffect);
+  const reorderClipEffect = useComposition((s) => s.reorderClipEffect);
+  const updateClipEffectParams = useComposition((s) => s.updateClipEffectParams);
   const t = useT();
 
   const clip = useMemo<Clip | null>(() => {
@@ -246,41 +248,66 @@ export function StaticPropsPanel() {
     });
 
     // Adjust (color) — schema bounds -1..1 (composition.ts:18-20).
-    const fl = clip.filters;
-    const setFilters = (patch: Partial<typeof fl>) =>
-      updateClip(clip.id, { filters: { ...fl, ...patch } });
+    // Review fix (finding #2) — the three colour knobs MUST target the effect
+    // stack's `grade` entry, NOT the legacy flat `clip.filters`. The renderer
+    // reads `effects` and ignores `filters` once a stack exists (resolveClipEffects:
+    // effects wins), so writing `filters` here was a SILENT DROP the moment the
+    // clip had ANY effect (added a blur, migrated legacy grade, etc.). Read the
+    // resolved grade params (which project legacy `filters` on the fly) and write
+    // through the shared effect ops so the Inspector, the effects-stack list, and
+    // `autoviral clip effects set` all converge on ONE grade entry.
+    const gradeEff = (clip.effects ?? []).find((e) => e.type === "grade");
+    const resolvedGrade = resolveClipEffects(clip).find((e) => e.type === "grade");
+    const gp = (resolvedGrade?.params ?? {}) as {
+      brightness?: number;
+      contrast?: number;
+      saturation?: number;
+    };
+    const setGrade = (patch: {
+      brightness?: number;
+      contrast?: number;
+      saturation?: number;
+    }) => {
+      if (gradeEff) {
+        updateClipEffectParams(clip.id, gradeEff.id, patch);
+      } else {
+        // No persisted grade yet → create one, seeded from any legacy-projected
+        // params so a pre-S14 grade isn't lost when the first knob is dragged.
+        addClipEffect(clip.id, "grade", { ...gp, ...patch });
+      }
+    };
     sections.push({
       title: t("studio.inspector.sectionAdjust"),
       rows: [
         {
           key: "brightness",
           label: t("studio.inspector.propBrightness"),
-          value: fl.brightness,
+          value: gp.brightness ?? 0,
           min: -1,
           max: 1,
           step: 0.01,
           defaultValue: 0,
-          onChange: (v) => setFilters({ brightness: v }),
+          onChange: (v) => setGrade({ brightness: v }),
         },
         {
           key: "contrast",
           label: t("studio.inspector.propContrast"),
-          value: fl.contrast,
+          value: gp.contrast ?? 0,
           min: -1,
           max: 1,
           step: 0.01,
           defaultValue: 0,
-          onChange: (v) => setFilters({ contrast: v }),
+          onChange: (v) => setGrade({ contrast: v }),
         },
         {
           key: "saturation",
           label: t("studio.inspector.propSaturation"),
-          value: fl.saturation,
+          value: gp.saturation ?? 0,
           min: -1,
           max: 1,
           step: 0.01,
           defaultValue: 0,
-          onChange: (v) => setFilters({ saturation: v }),
+          onChange: (v) => setGrade({ saturation: v }),
         },
       ],
     });
@@ -696,47 +723,78 @@ export function StaticPropsPanel() {
       {videoClip && (
         <div style={sectionStyle} data-test="effects-section">
           <div style={sectionHeader}>{t("studio.inspector.sectionEffects")}</div>
-          <div style={{ ...rowStyle, gridTemplateColumns: "1fr", gap: 6 }}>
-            {(resolveClipEffects(videoClip) ?? []).map((eff) => (
-              <div
-                key={eff.id}
-                data-test="effect-entry"
-                data-effect-type={eff.type}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 11,
-                  color: "var(--text)",
-                  opacity: eff.enabled === false ? 0.5 : 1,
-                }}
-              >
-                <span>{eff.type}</span>
-                <span style={{ display: "flex", gap: 6 }}>
-                  <button
-                    type="button"
-                    aria-label={t("studio.inspector.effectToggle")}
-                    title={t("studio.inspector.effectToggle")}
-                    onClick={() => toggleClipEffect(videoClip.id, eff.id)}
-                    style={effectBtnStyle}
+          {(() => {
+            const list = resolveClipEffects(videoClip) ?? [];
+            return (
+              <div style={{ ...rowStyle, gridTemplateColumns: "1fr", gap: 6 }}>
+                {list.map((eff, idx) => (
+                  <div
+                    key={eff.id}
+                    data-test="effect-entry"
+                    data-effect-type={eff.type}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 8,
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 11,
+                      color: "var(--text)",
+                      opacity: eff.enabled === false ? 0.5 : 1,
+                    }}
                   >
-                    {eff.enabled === false ? "○" : "●"}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={t("studio.inspector.effectRemove")}
-                    title={t("studio.inspector.effectRemove")}
-                    onClick={() => removeClipEffect(videoClip.id, eff.id)}
-                    style={effectBtnStyle}
-                  >
-                    ✕
-                  </button>
-                </span>
+                    <span>{eff.type}</span>
+                    <span style={{ display: "flex", gap: 6 }}>
+                      {/* Review fix (finding #7) — ordered-stack reorder controls.
+                          The store already had `reorderClipEffect` but no UI called
+                          it, so the acceptance-required ordering interaction was
+                          missing. Up/down move the entry one slot, routed through
+                          the SAME op `autoviral clip effects reorder` runs. Disabled
+                          at the ends. */}
+                      <button
+                        type="button"
+                        aria-label={t("studio.inspector.effectMoveUp")}
+                        title={t("studio.inspector.effectMoveUp")}
+                        disabled={idx === 0}
+                        onClick={() => reorderClipEffect(videoClip.id, eff.id, idx - 1)}
+                        style={{ ...effectBtnStyle, opacity: idx === 0 ? 0.35 : 1 }}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={t("studio.inspector.effectMoveDown")}
+                        title={t("studio.inspector.effectMoveDown")}
+                        disabled={idx === list.length - 1}
+                        onClick={() => reorderClipEffect(videoClip.id, eff.id, idx + 1)}
+                        style={{ ...effectBtnStyle, opacity: idx === list.length - 1 ? 0.35 : 1 }}
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={t("studio.inspector.effectToggle")}
+                        title={t("studio.inspector.effectToggle")}
+                        onClick={() => toggleClipEffect(videoClip.id, eff.id)}
+                        style={effectBtnStyle}
+                      >
+                        {eff.enabled === false ? "○" : "●"}
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={t("studio.inspector.effectRemove")}
+                        title={t("studio.inspector.effectRemove")}
+                        onClick={() => removeClipEffect(videoClip.id, eff.id)}
+                        style={effectBtnStyle}
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            );
+          })()}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
             {(["grade", "blur", "vignette", "grain"] as const).map((type) => (
               <button

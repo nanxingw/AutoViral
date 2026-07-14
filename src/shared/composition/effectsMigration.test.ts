@@ -99,14 +99,31 @@ describe("projectLegacyFilters (S14)", () => {
     expect((firstClip(twice).effects as unknown[]).length).toBe(1);
   });
 
-  it("leaves a clip that already has effects untouched (effects wins)", () => {
+  it("folds a non-neutral filters into a LEADING grade even when effects already exist (no colour data lost)", () => {
+    // Review fix (finding #2) — a clip that carried BOTH a non-neutral `filters`
+    // and an `effects` stack used to keep the filters unmigrated, but the renderer
+    // ignores `filters` once `effects` is present → the legacy grade was silently
+    // dropped. Now the flat grade is folded as the BASE entry (index 0) and the
+    // existing stack is preserved on top; `filters` is reset to neutral.
     const existing = [{ id: "eff_keep", type: "blur", params: { radius: 4 }, enabled: true }];
     const migrated = projectLegacyFilters(
       rawComp({ filters: { brightness: 0.9 }, effects: existing }),
     );
-    // effects unchanged; filters NOT reset (we never touch an effects-carrying clip).
-    expect(firstClip(migrated).effects).toEqual(existing);
-    expect(firstClip(migrated).filters).toEqual({ brightness: 0.9 });
+    expect(firstClip(migrated).effects).toEqual([
+      { id: LEGACY_GRADE_EFFECT_ID, type: "grade", params: { brightness: 0.9 }, enabled: true },
+      { id: "eff_keep", type: "blur", params: { radius: 4 }, enabled: true },
+    ]);
+    expect(firstClip(migrated).filters).toEqual({ brightness: 0, contrast: 0, saturation: 0 });
+  });
+
+  it("is idempotent even for the both-present case (second pass is a no-op)", () => {
+    const existing = [{ id: "eff_keep", type: "blur", params: { radius: 4 }, enabled: true }];
+    const once = projectLegacyFilters(
+      rawComp({ filters: { brightness: 0.9 }, effects: existing }),
+    );
+    const twice = projectLegacyFilters(once);
+    expect(twice).toEqual(once);
+    expect((firstClip(twice).effects as unknown[]).length).toBe(2);
   });
 
   it("leaves a default-filter clip untouched (no empty grade)", () => {

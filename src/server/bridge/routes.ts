@@ -871,11 +871,14 @@ bridgeRouter.post("/preprocess/tts", async (c) => {
 // the resulting full composition; we add convenience verbs only for the
 // few mutations that recur often enough to justify the round-trip.
 
-function newClipId(track: "video" | "audio" | "overlay" | "text"): string {
+function newClipId(
+  track: "video" | "audio" | "overlay" | "text" | "adjustment",
+): string {
   const prefix =
     track === "video" ? "vc"
       : track === "audio" ? "ac"
       : track === "text" ? "tc"
+      : track === "adjustment" ? "adj"
       : "oc";
   return `${prefix}_${randomBytes(3).toString("hex")}`;
 }
@@ -886,7 +889,7 @@ bridgeRouter.post("/clip", async (c) => {
   const body = (await c.req.json()) as {
     src?: string;
     text?: string;
-    track: "video" | "audio" | "overlay" | "text";
+    track: "video" | "audio" | "overlay" | "text" | "adjustment";
     // S10 (US 7/8) — optional precise lane target. When supplied, the clip
     // lands on exactly this trackId (404-class reject if it doesn't exist or
     // its kind ≠ `track`); when omitted, we fall back to the FIRST same-kind
@@ -981,6 +984,22 @@ bridgeRouter.post("/clip", async (c) => {
           text: body.text,
           trackOffset: offset,
           duration: snap(body.duration ?? 3),
+        } as any);
+      } else if (body.track === "adjustment") {
+        // Review fix (finding #5) — `adjustment` is a first-class kind in
+        // TRACK_KINDS, so it passed the up-front validation and then FELL INTO
+        // the `else` (overlay) branch, writing an OverlayClip STRUCTURE (src +
+        // position) into an adjustment lane — a semantically-wrong, unrenderable
+        // clip. Construct a real AdjustmentClip instead: a pure effect WINDOW
+        // (trackOffset + duration + an empty effects stack), NO src/position.
+        // The stack is then edited via POST /clip/:id/effects/:verb (the shared
+        // ops the Inspector runs), so CLI + UI converge on ONE construction.
+        track.clips.push({
+          id,
+          kind: "adjustment",
+          trackOffset: offset,
+          duration: snap(body.duration ?? 5),
+          effects: [],
         } as any);
       } else {
         // S10 (US 6) — overlay is a first-class lane now (the old "not yet

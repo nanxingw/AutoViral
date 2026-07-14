@@ -183,7 +183,7 @@ describe("VideoTrackRenderer blendMode + effects consumption (S14)", () => {
     expect(wrapper!.querySelector("[data-test='video']")).not.toBeNull();
   });
 
-  it("effects grade → the video element carries the grade filter", () => {
+  it("effects grade → an ORDERED effect-filter WRAPPER carries the grade filter (review fix #3)", () => {
     frameRef.current = 30;
     envRef.isRendering = false;
     const { container } = render(
@@ -193,19 +193,67 @@ describe("VideoTrackRenderer blendMode + effects consumption (S14)", () => {
         })}
       />,
     );
-    const vid = container.querySelector<HTMLElement>("[data-test='video']");
-    expect(vid).not.toBeNull();
-    expect((vid!.getAttribute("style") || "")).toContain("brightness(1.3)");
+    // Review fix #3 — the effect stack is nested wrappers now, NOT a flat filter
+    // baked onto the <video>. The grade lives on its own effect-filter wrapper
+    // that CONTAINS the media element.
+    const wrap = container.querySelector<HTMLElement>(
+      "[data-test='effect-filter'][data-effect-type='grade']",
+    );
+    expect(wrap).not.toBeNull();
+    expect(wrap!.getAttribute("style") || "").toContain("brightness(1.3)");
+    expect(wrap!.querySelector("[data-test='video']")).not.toBeNull();
   });
 
-  it("legacy filters (no effects) still grade — projected on the fly", () => {
+  it("legacy filters (no effects) still grade — projected on the fly onto the wrapper", () => {
     frameRef.current = 30;
     envRef.isRendering = false;
     const { container } = render(
       <Scene comp={compWithVideo({ filters: { brightness: 0.4, contrast: 0, saturation: 0 } })} />,
     );
-    const vid = container.querySelector<HTMLElement>("[data-test='video']");
-    expect((vid!.getAttribute("style") || "")).toContain("brightness(1.4)");
+    const wrap = container.querySelector<HTMLElement>(
+      "[data-test='effect-filter'][data-effect-type='grade']",
+    );
+    expect(wrap).not.toBeNull();
+    expect(wrap!.getAttribute("style") || "").toContain("brightness(1.4)");
+  });
+
+  it("cross-type reorder changes the NESTING (真·有序栈): blur ↔ vignette (review fix #3)", () => {
+    frameRef.current = 30;
+    envRef.isRendering = false;
+    const blur: Effect = { id: "b", type: "blur", params: { radius: 6 }, enabled: true };
+    const vig: Effect = { id: "v", type: "vignette", params: { strength: 0.6 }, enabled: true };
+
+    // [vignette, blur] → the blur filter wraps (and so BLURS) the vignette overlay.
+    const a = render(<Scene comp={compWithVideo({ effects: [vig, blur] })} />).container;
+    const blurWrapA = a.querySelector(
+      "[data-test='effect-filter'][data-effect-type='blur']",
+    );
+    expect(blurWrapA).not.toBeNull();
+    expect(
+      blurWrapA!.querySelector(
+        "[data-test='effect-overlay-wrap'][data-effect-type='vignette']",
+      ),
+    ).not.toBeNull();
+
+    // [blur, vignette] → the nesting FLIPS: the vignette sits OUTSIDE the blur
+    // (painted on top, NOT blurred). If the stack were not truly ordered these two
+    // would render identically — the exact defect the finding called out.
+    const b = render(<Scene comp={compWithVideo({ effects: [blur, vig] })} />).container;
+    const vigWrapB = b.querySelector(
+      "[data-test='effect-overlay-wrap'][data-effect-type='vignette']",
+    );
+    expect(vigWrapB).not.toBeNull();
+    expect(
+      vigWrapB!.querySelector("[data-test='effect-filter'][data-effect-type='blur']"),
+    ).not.toBeNull();
+    const blurWrapB = b.querySelector(
+      "[data-test='effect-filter'][data-effect-type='blur']",
+    );
+    expect(
+      blurWrapB!.querySelector(
+        "[data-test='effect-overlay-wrap'][data-effect-type='vignette']",
+      ),
+    ).toBeNull();
   });
 });
 
@@ -269,5 +317,71 @@ describe("AdjustmentTrackRenderer consumption (S14)", () => {
     expect(() =>
       render(<Scene comp={compWithAdjustment({ at: 1, duration: 2, effects: [grade] })} />),
     ).not.toThrow();
+  });
+
+  it("CONSUMES a vignette-only stack (review fix #4 — vignette/grain were inert on adjustment)", () => {
+    frameRef.current = 60;
+    envRef.isRendering = false;
+    const vig: Effect = { id: "av", type: "vignette", params: { strength: 0.7 }, enabled: true };
+    const { container } = render(
+      <Scene comp={compWithAdjustment({ at: 1, duration: 2, effects: [vig] })} />,
+    );
+    // grade/blur absent → no backdrop-filter layer, but the vignette overlay MUST
+    // still render (before the fix effectsToCssFilter returned "" → return null →
+    // two of four built-in effects did nothing on an adjustment lane).
+    expect(container.querySelector("[data-test='adjustment-layer']")).toBeNull();
+    expect(container.querySelector("[data-test='effect-vignette']")).not.toBeNull();
+  });
+
+  it("CONSUMES a grain-only stack on the adjustment lane (review fix #4)", () => {
+    frameRef.current = 60;
+    envRef.isRendering = false;
+    const grain: Effect = { id: "ag", type: "grain", params: { opacity: 0.2 }, enabled: true };
+    const { container } = render(
+      <Scene comp={compWithAdjustment({ at: 1, duration: 2, effects: [grain] })} />,
+    );
+    expect(container.querySelector("[data-test='effect-grain']")).not.toBeNull();
+  });
+});
+
+describe("Scene paints tracks in displayOrder, not array order (review fix #6)", () => {
+  it("an adjustment lane with a LOWER displayOrder paints BEFORE (under) the video, even when later in the array", () => {
+    frameRef.current = 60;
+    envRef.isRendering = false;
+    const comp = compWithVideo({});
+    // The video track compWithVideo pushed is last in the array; give it a HIGH
+    // displayOrder and append an adjustment lane with a LOWER displayOrder. Array
+    // order is [..., video, adjustment]; displayOrder says adjustment is UNDER the
+    // video. reorderTracks writes displayOrder without touching the array, so this
+    // is exactly the post-drag state the finding described.
+    const videoTrack = comp.tracks[comp.tracks.length - 1];
+    videoTrack.displayOrder = 9;
+    const adjTrack: Track = {
+      id: newTrackId(),
+      kind: "adjustment",
+      label: "ADJ",
+      displayOrder: 1, // LOWER than the video → paints first (under it)
+      muted: false,
+      hidden: false,
+      volume: 0,
+      transitions: [],
+      clips: [
+        { id: "adj_z", kind: "adjustment", trackOffset: 0, duration: 8, effects: [
+          { id: "g", type: "grade", params: { saturation: -1 }, enabled: true },
+        ] } as never,
+      ],
+    };
+    comp.tracks.push(adjTrack);
+    const { container } = render(<Scene comp={comp} />);
+    const marks = Array.from(
+      container.querySelectorAll<HTMLElement>(
+        "[data-test='adjustment-layer'], [data-test='video']",
+      ),
+    ).map((el) => el.getAttribute("data-test"));
+    // Painted in displayOrder: adjustment (1) BEFORE video (9). Without the sort
+    // the array order would put the video first.
+    expect(marks[0]).toBe("adjustment-layer");
+    expect(marks).toContain("video");
+    expect(marks.indexOf("adjustment-layer")).toBeLessThan(marks.indexOf("video"));
   });
 });

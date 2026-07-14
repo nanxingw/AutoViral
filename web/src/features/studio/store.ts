@@ -81,6 +81,23 @@ export interface DragState {
 // by extending pushTrackHistory() to snapshot more than just `tracks`.
 const TRACK_HISTORY_LIMIT = 50;
 
+// PRD-0014 S14 (review fix #9) — the effect-stack + blend ops (remove / reorder /
+// toggle / updateParams / setBlend) used to swallow a rejected CompositionOpError
+// with a bare `return`: no toast, no log — a silent no-op inconsistent with the
+// sibling `addClipEffect` (which DOES toast). Route them all through this shared
+// warning toast so a rejected effect edit tells the user WHY it landed nowhere,
+// mirroring the mask / transition families. Returns undefined so callers can
+// `return warnEffectFailed(err)` from a zustand set-callback.
+function warnEffectFailed(err: unknown): void {
+  const locale = useLocaleStore.getState().locale;
+  useToastStore.getState().push({
+    variant: "warn",
+    message: MESSAGES[locale].studio.toast.effectFailed,
+    detail: err instanceof Error ? err.message : String(err),
+    ttlMs: 4000,
+  });
+}
+
 export interface TrackHistory {
   past: Track[][];
   future: Track[][];
@@ -784,7 +801,7 @@ export const useComposition = create<CompState>()(
         try {
           ops.removeEffect(s.comp, { clipId, effectId });
         } catch (err) {
-          if (err instanceof CompositionOpError) return;
+          if (err instanceof CompositionOpError) return warnEffectFailed(err);
           throw err;
         }
       }),
@@ -794,7 +811,7 @@ export const useComposition = create<CompState>()(
         try {
           ops.reorderEffect(s.comp, { clipId, effectId, toIndex });
         } catch (err) {
-          if (err instanceof CompositionOpError) return;
+          if (err instanceof CompositionOpError) return warnEffectFailed(err);
           throw err;
         }
       }),
@@ -804,7 +821,7 @@ export const useComposition = create<CompState>()(
         try {
           ops.toggleEffect(s.comp, { clipId, effectId, enabled });
         } catch (err) {
-          if (err instanceof CompositionOpError) return;
+          if (err instanceof CompositionOpError) return warnEffectFailed(err);
           throw err;
         }
       }),
@@ -814,7 +831,7 @@ export const useComposition = create<CompState>()(
         try {
           ops.updateEffectParams(s.comp, { clipId, effectId, params });
         } catch (err) {
-          if (err instanceof CompositionOpError) return;
+          if (err instanceof CompositionOpError) return warnEffectFailed(err);
           throw err;
         }
       }),
@@ -831,7 +848,7 @@ export const useComposition = create<CompState>()(
         try {
           ops.patchClipProps(clip, { blendMode }, s.comp.fps);
         } catch (err) {
-          if (err instanceof CompositionOpError) return;
+          if (err instanceof CompositionOpError) return warnEffectFailed(err);
           throw err;
         }
       }),

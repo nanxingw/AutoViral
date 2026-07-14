@@ -1,6 +1,7 @@
 import { Sequence, useVideoConfig, Img, useCurrentFrame } from "remotion";
 import type { OverlayClip, Track } from "../../types";
 import { interpolateProperty } from "@shared/keyframes";
+import { blendModeToCss } from "../filters/cssFilters";
 
 /**
  * Pure helper for testability: returns the effective transform + opacity
@@ -35,6 +36,14 @@ function OverlayClipRenderer({ clip }: { clip: OverlayClip }) {
     frame,
     fps,
   );
+  // S14 (PRD-0014, review fix #1) — blendMode composites the overlay against the
+  // z-lower tracks via CSS `mix-blend-mode` (screen for 漏光, multiply for 纹理
+  // 叠加, add → plus-lighter). Before this the field was schema/UI/CLI-writable
+  // but the renderer never read it, so an overlay blend silently rendered as
+  // `normal`. Set directly on the <Img> so it blends its own pixels; absent /
+  // normal → no mix-blend-mode (back-compat, identical to pre-S14). Consumed
+  // identically in preview + export (single Remotion tree).
+  const blend = blendModeToCss(clip.blendMode);
   return (
     <Img
       src={clip.src}
@@ -46,6 +55,9 @@ function OverlayClipRenderer({ clip }: { clip: OverlayClip }) {
         height: `${clip.position.hPct}%`,
         opacity,
         transform: `translate(${x}px, ${y}px) rotate(${rotation}deg) scale(${scale})`,
+        ...(blend
+          ? { mixBlendMode: blend as React.CSSProperties["mixBlendMode"] }
+          : {}),
       }}
     />
   );

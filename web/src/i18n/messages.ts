@@ -648,6 +648,8 @@ export const en = {
       effectAdd: "Add effect",
       effectRemove: "Remove effect",
       effectToggle: "Toggle effect",
+      effectMoveUp: "Move effect up",
+      effectMoveDown: "Move effect down",
     },
     platformPreset: {
       heading: "Platform",
@@ -1689,6 +1691,8 @@ export const zh: DeepShape<Messages> = {
       effectAdd: "添加效果",
       effectRemove: "移除效果",
       effectToggle: "启用/禁用",
+      effectMoveUp: "上移效果",
+      effectMoveDown: "下移效果",
     },
     platformPreset: {
       heading: "平台",

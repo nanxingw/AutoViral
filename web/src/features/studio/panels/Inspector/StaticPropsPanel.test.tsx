@@ -116,15 +116,18 @@ describe("<StaticPropsPanel />", () => {
     });
   });
 
-  it("filter slider change merges into the nested filters object", () => {
+  it("brightness slider writes the effect-stack grade entry, NOT the legacy flat filters (review fix #2)", () => {
     useComposition.setState({ comp: compWithVideoClip("v1"), selection: "v1" });
     render(<StaticPropsPanel />);
     const slider = screen.getByRole("slider", { name: /brightness/i });
     fireEvent.change(slider, { target: { value: "0.4" } });
-    const live = liveClip("v1");
-    expect(live).toMatchObject({
-      filters: { brightness: 0.4, contrast: 0, saturation: 0 },
-    });
+    const live = liveClip("v1") as VideoClip;
+    // The renderer reads `effects` and IGNORES `filters` once a stack exists, so
+    // the colour knob must target the grade entry (find-or-create) — writing
+    // `filters` here was a silent drop. `filters` stays neutral.
+    const grade = (live.effects ?? []).find((e) => e.type === "grade");
+    expect(grade?.params.brightness).toBe(0.4);
+    expect(live.filters).toEqual({ brightness: 0, contrast: 0, saturation: 0 });
   });
 
   it("reset button restores the schema default and leaves siblings untouched", async () => {

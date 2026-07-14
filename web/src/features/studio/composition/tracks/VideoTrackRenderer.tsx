@@ -29,7 +29,8 @@ function timingFor(easing: Transition["easing"], durationInFrames: number) {
       return linearTiming({ durationInFrames });
   }
 }
-import { effectsToCssFilter, effectOverlayLayers, blendModeToCss } from "../filters/cssFilters";
+import { blendModeToCss } from "../filters/cssFilters";
+import { wrapWithEffectStack } from "../filters/EffectStack";
 import { resolveClipEffects } from "@shared/composition";
 import { interpolateProperty } from "@shared/keyframes";
 import {
@@ -80,14 +81,15 @@ export function computeVideoOpacityForFrame(
 function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   const { fps, width, height } = useVideoConfig();
   const frame = useCurrentFrame();
-  // S14 (PRD-0014) — the clip's ordered effect stack drives the CSS filter chain
-  // (grade + blur) + the vignette/grain overlay layers. resolveClipEffects reads
+  // S14 (PRD-0014) — the clip's ORDERED effect stack. resolveClipEffects reads
   // `clip.effects` when present, else projects the legacy flat `filters` on the
-  // fly — so a pre-S14 work still grades correctly (WYSIWYG by construction: the
-  // SAME filter string in preview and export).
+  // fly — so a pre-S14 work still grades correctly (WYSIWYG by construction).
+  // Review fix (finding #3) — the stack is applied as ORDERED NESTED WRAPPERS
+  // (wrapWithEffectStack) around the whole clip body, NOT as one flat CSS filter
+  // baked onto the <video> with vignette/grain always painted last. So the media
+  // element itself no longer carries the effect filter (`filter: undefined`
+  // below); moving an effect across another in the stack changes the real output.
   const clipEffects = resolveClipEffects(clip);
-  const filter = effectsToCssFilter(clipEffects);
-  const overlays = effectOverlayLayers(clipEffects);
   const { scale, x, y, rotation } = computeVideoTransformForFrame(clip, frame, fps);
   // Phase 8.3.C — read speed keyframes (D3 fallback 1.0, D4 clamp). Routed
   // through Remotion's playbackRate prop, NOT the CSS transform (D8).
@@ -213,8 +215,9 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
             ...innerSizing,
             objectFit: "cover",
             // The blurred background scales slightly past the frame so the blur
-            // has no hard edges, and stacks the clip's own filter chain on top.
-            filter: `blur(48px) ${filter || ""}`.trim(),
+            // has no hard edges. The clip's own effect filters are applied by the
+            // ordered wrapper (wrapWithEffectStack) around the whole body, not here.
+            filter: "blur(48px)",
             transform: `${transform} scale(1.1)`,
           }}
         />
@@ -224,7 +227,6 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
           style={{
             ...innerSizing,
             objectFit: "contain",
-            filter: filter || undefined,
             transform,
           }}
         />
@@ -241,7 +243,6 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
         style={{
           ...innerSizing,
           objectFit: fitMode === "contain" ? "contain" : "cover",
-          filter: filter || undefined,
           transform,
           opacity: zoom ? undefined : opacity,
         }}
@@ -262,19 +263,12 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // (renderMedia runs this SAME component tree in Chromium) — WYSIWYG by
   // construction, no ffmpeg dual (S13 单渲染器原则). Absent = no wrapper
   // (back-compat for every pre-S13 work). The badge below stays OUTSIDE the mask.
-  // S14 (PRD-0014) — vignette / grain effect overlays stack OVER the clip body
-  // (inside the mask so they are clipped to the shape too). Absent = unchanged.
-  const bodyWithOverlays =
-    overlays.length === 0 ? (
-      body
-    ) : (
-      <>
-        {body}
-        {overlays.map((o) => (
-          <div key={o.key} data-test={o.testId} style={o.style} />
-        ))}
-      </>
-    );
+  // S14 (PRD-0014, review fix #3) — the ORDERED effect stack wraps the clip body
+  // in array order (grade/blur → filter wrappers, vignette/grain → overlay-on-top
+  // wrappers), so a later effect nests OUTSIDE an earlier one and cross-type
+  // reorders change the output. Sits INSIDE the mask so overlays are clipped to
+  // the shape too. Empty / all-disabled stack → `body` unchanged (back-compat).
+  const bodyWithOverlays = wrapWithEffectStack(body, clipEffects);
 
   const maskDef = buildClipMask(clip.mask, { width, height });
   const masked = maskDef ? (

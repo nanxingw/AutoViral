@@ -72,6 +72,33 @@ describe("<StaticPropsPanel /> — blend + effects (S14)", () => {
     expect((liveVideo("v1").effects as Effect[]).length).toBe(0);
   });
 
+  it("move-down reorders the effect through the shared reorder op (review fix #7)", () => {
+    const effects: Effect[] = [
+      { id: "e1", type: "grade", params: {}, enabled: true },
+      { id: "e2", type: "blur", params: { radius: 4 }, enabled: true },
+    ];
+    useComposition.setState({ comp: compWithVideoClip("v1", { effects }), selection: "v1" });
+    render(<StaticPropsPanel />);
+    // The FIRST entry (grade) has an enabled move-down; clicking it swaps the order.
+    const downs = screen.getAllByLabelText("Move effect down");
+    fireEvent.click(downs[0]);
+    const live = (liveVideo("v1").effects as Effect[]).map((e) => e.id);
+    expect(live).toEqual(["e2", "e1"]);
+  });
+
+  it("editing brightness updates the EXISTING grade entry in place (no duplicate grade)", () => {
+    const effects: Effect[] = [{ id: "g1", type: "grade", params: { brightness: 0.1 }, enabled: true }];
+    useComposition.setState({ comp: compWithVideoClip("v1", { effects }), selection: "v1" });
+    render(<StaticPropsPanel />);
+    fireEvent.change(screen.getByRole("slider", { name: /brightness/i }), {
+      target: { value: "0.5" },
+    });
+    const live = liveVideo("v1").effects as Effect[];
+    expect(live).toHaveLength(1);
+    expect(live[0].id).toBe("g1");
+    expect(live[0].params.brightness).toBe(0.5);
+  });
+
   it("renders the legacy filters projected as a grade entry in the list", () => {
     useComposition.setState({
       comp: compWithVideoClip("v1", { filters: { brightness: 0.3, contrast: 0, saturation: 0 } }),

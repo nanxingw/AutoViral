@@ -1196,21 +1196,34 @@ export function projectLegacyFilters(raw: unknown): unknown {
       if (!c || typeof c !== "object") return c;
       const clip = c as Record<string, unknown>;
       if (clip.kind !== "video") return clip;
-      // Idempotent: an existing effects stack wins, leave the clip alone.
-      if (clip.effects !== undefined) return clip;
       const params = filtersToGradeParams(
         clip.filters as
           | { brightness?: number; contrast?: number; saturation?: number; lut?: string }
           | undefined,
       );
+      // Neutral / absent filters → nothing to fold. This is ALSO the idempotency
+      // guard: a migrated clip has its `filters` reset to neutral, so a second
+      // pass is a no-op whether or not the clip already carries an effects stack.
       if (!params) return clip;
       trackTouched = true;
+      // Review fix (finding #2) — a clip that carries BOTH a non-neutral `filters`
+      // AND an `effects` stack is a lossy conflict: the renderer reads `effects`
+      // and ignores `filters` (resolveClipEffects: effects wins), so the legacy
+      // grade would vanish. Fold the flat grade into a LEADING `grade` entry (the
+      // BASE layer, index 0) and PRESERVE any existing S14+ effects on top — no
+      // colour data is dropped. When there is no prior stack this is the plain
+      // legacy projection. Either way `filters` is reset to neutral, so the second
+      // pass hits the `!params` no-op above (idempotent).
+      const existing = Array.isArray(clip.effects)
+        ? (clip.effects as unknown[])
+        : [];
       return {
         ...clip,
         // Reset filters to the neutral default — the grade now lives in effects.
         filters: { brightness: 0, contrast: 0, saturation: 0 },
         effects: [
           { id: LEGACY_GRADE_EFFECT_ID, type: "grade", params, enabled: true },
+          ...existing,
         ],
       };
     });

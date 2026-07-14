@@ -4442,6 +4442,50 @@ exportPresets: []
     expect(body.code).toBe(4);
   });
 
+  // ── S14 review fix (finding #5) — POST /clip track:"adjustment" used to pass
+  // the TRACK_KINDS up-front check and then FALL INTO the overlay `else` branch,
+  // writing an OverlayClip STRUCTURE (src + position) into an adjustment lane — a
+  // semantically-wrong, unrenderable clip. It must construct a real AdjustmentClip
+  // (kind:"adjustment", trackOffset + duration + empty effects, NO src/position).
+  it("POST /clip track:adjustment constructs a real AdjustmentClip (not an overlay-shaped clip)", async () => {
+    // Add an adjustment lane first.
+    const trackRes = await app.request("/api/bridge/v1/track", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ kind: "adjustment" }),
+    });
+    expect(trackRes.status).toBe(200);
+    const adjTrackId = ((await trackRes.json()) as { result: { trackId: string } })
+      .result.trackId;
+
+    const res = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({
+        track: "adjustment",
+        trackId: adjTrackId,
+        offset: 1,
+        duration: 3,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const id = ((await res.json()) as { result: { id: string } }).result.id;
+    const comp = await getComp();
+    const clip = comp.result.tracks
+      .flatMap((t) => t.clips)
+      .find((c) => c.id === id) as
+      | { kind: string; src?: string; position?: unknown; effects?: unknown[]; trackOffset?: number; duration?: number }
+      | undefined;
+    expect(clip).toBeDefined();
+    expect(clip!.kind).toBe("adjustment");
+    // NOT an overlay: no src, no position — the exact wrong-data the bug produced.
+    expect(clip!.src).toBeUndefined();
+    expect(clip!.position).toBeUndefined();
+    expect(clip!.effects).toEqual([]);
+    expect(clip!.trackOffset).toBe(1);
+    expect(clip!.duration).toBe(3);
+  });
+
   // ── S10 fix-up (finding #1) — `duration` is a RELATIVE clip length, not an
   // absolute source `out`. `--in 2 --duration 3` must produce in=2 / out=5
   // (a 3-second clip), NOT in=2 / out=3 (a 1-second clip — the old bug).
