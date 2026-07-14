@@ -77,7 +77,7 @@ export function computeVideoOpacityForFrame(
 }
 
 function VideoClipRenderer({ clip }: { clip: VideoClip }) {
-  const { fps } = useVideoConfig();
+  const { fps, width, height } = useVideoConfig();
   const frame = useCurrentFrame();
   const filter = toCssFilter(clip.filters);
   const { scale, x, y, rotation } = computeVideoTransformForFrame(clip, frame, fps);
@@ -248,6 +248,33 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
     );
   }
 
+  // S13 (PRD-0014) — rect/ellipse MASK. Wrap the clip body in an element carrying
+  // a CSS `mask-image` (an inline SVG shape + optional gaussian-blur feather),
+  // consumed IDENTICALLY by the browser preview and the headless export
+  // (renderMedia runs this SAME component tree in Chromium) — WYSIWYG by
+  // construction, no ffmpeg dual (S13 单渲染器原则). Absent = no wrapper
+  // (back-compat for every pre-S13 work). The badge below stays OUTSIDE the mask.
+  const maskDef = buildClipMask(clip.mask, { width, height });
+  const masked = maskDef ? (
+    <div
+      data-test="clip-mask"
+      style={{
+        position: "absolute",
+        inset: 0,
+        maskImage: maskDef.maskImage,
+        WebkitMaskImage: maskDef.maskImage,
+        maskSize: "100% 100%",
+        WebkitMaskSize: "100% 100%",
+        maskRepeat: "no-repeat",
+        WebkitMaskRepeat: "no-repeat",
+      }}
+    >
+      {body}
+    </div>
+  ) : (
+    body
+  );
+
   // S19 (US 29/30) — reverse is EXPORT-ONLY. A browser <video> can't play
   // backwards, so we do NOT fake WYSIWYG: the preview plays forward but stamps
   // an EXPLICIT placeholder badge over the clip telling the user the reverse
@@ -261,10 +288,10 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // never performs — a dishonest preview. When freeze is also set, suppress the
   // reverse badge (freeze is already WYSIWYG; there is no export-only reverse to
   // warn about, and definitely no phantom reverse to advertise).
-  if (!clip.reverse || clip.freezeAtSec != null) return body;
+  if (!clip.reverse || clip.freezeAtSec != null) return masked;
   return (
     <>
-      {body}
+      {masked}
       <div
         data-test="reverse-export-only"
         style={{
@@ -352,6 +379,88 @@ export function cssCropZoom(crop?: {
 function pct(n: number): string {
   // Trim trailing zeros so "20" not "20.000000000004"; keep CSS-valid %.
   return `${Number(n.toFixed(4))}%`;
+}
+
+/**
+ * S13 (PRD-0014) — build a CSS `mask-image` for a clip's rect/ellipse mask.
+ * Returns `{ maskImage, svg }` (an inline data-URI SVG the wrapper applies via
+ * `mask-image` / `-webkit-mask-image`) or undefined when there is no mask.
+ *
+ * The SVG draws the shape as a `<path>` filled opaque (`#fff`) on a transparent
+ * frame → the mask's ALPHA keeps the INSIDE of the shape (mask-image is
+ * alpha-sourced). `feather` (0–1) adds an `feGaussianBlur` that softens the alpha
+ * edge. `inverted` prepends a full-frame rect subpath and switches to
+ * `fill-rule="evenodd"`, so the shape becomes a transparent HOLE and the OUTSIDE
+ * is kept instead (cutout / vignette). Chromium rasterises this identically for
+ * the browser preview and the headless export (renderMedia) — WYSIWYG by
+ * construction, no ffmpeg dual. Pure + exported so its geometry is unit-tested.
+ */
+export function buildClipMask(
+  mask:
+    | {
+        type: "rect" | "ellipse";
+        feather?: number;
+        inverted?: boolean;
+        rect?: { x: number; y: number; w: number; h: number };
+      }
+    | undefined,
+  dims: { width: number; height: number },
+): { maskImage: string; svg: string } | undefined {
+  if (!mask) return undefined;
+  const W = dims.width;
+  const H = dims.height;
+  const r = mask.rect ?? { x: 0, y: 0, w: 1, h: 1 };
+  // Defensive clamp — a hand-rolled/legacy comp could carry w/h=0 (→ div issues)
+  // or off-frame values; keep the geometry inside [0,1] and away from zero.
+  const w = Math.min(1, Math.max(1e-4, r.w));
+  const h = Math.min(1, Math.max(1e-4, r.h));
+  const x = Math.min(1 - w, Math.max(0, r.x));
+  const y = Math.min(1 - h, Math.max(0, r.y));
+  const px = x * W;
+  const py = y * H;
+  const pw = w * W;
+  const ph = h * H;
+  const shape =
+    mask.type === "ellipse"
+      ? svgEllipsePath(px + pw / 2, py + ph / 2, pw / 2, ph / 2)
+      : svgRectPath(px, py, pw, ph);
+  const inverted = mask.inverted === true;
+  const d = inverted ? `${svgRectPath(0, 0, W, H)} ${shape}` : shape;
+  const fillRule = inverted ? ' fill-rule="evenodd"' : "";
+  const feather = Math.min(1, Math.max(0, mask.feather ?? 0));
+  const hasBlur = feather > 0;
+  // stdDeviation scales with feather × a fraction of the shorter frame edge, so
+  // the softness reads the same on portrait and landscape frames.
+  const std = hasBlur ? round2(feather * 0.12 * Math.min(W, H)) : 0;
+  const filterDef = hasBlur
+    ? `<filter id="avm-f" x="-25%" y="-25%" width="150%" height="150%">` +
+      `<feGaussianBlur stdDeviation="${std}"/></filter>`
+    : "";
+  const filterAttr = hasBlur ? ` filter="url(#avm-f)"` : "";
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">` +
+    (filterDef ? `<defs>${filterDef}</defs>` : "") +
+    `<path d="${d}"${fillRule} fill="#fff"${filterAttr}/>` +
+    `</svg>`;
+  const maskImage = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+  return { maskImage, svg };
+}
+
+function svgRectPath(x: number, y: number, w: number, h: number): string {
+  return `M${round2(x)} ${round2(y)}H${round2(x + w)}V${round2(y + h)}H${round2(x)}Z`;
+}
+
+function svgEllipsePath(cx: number, cy: number, rx: number, ry: number): string {
+  // Two half-arcs sweep the full ellipse (SVG has no ellipse path primitive).
+  return (
+    `M${round2(cx - rx)} ${round2(cy)}` +
+    `A${round2(rx)} ${round2(ry)} 0 1 0 ${round2(cx + rx)} ${round2(cy)}` +
+    `A${round2(rx)} ${round2(ry)} 0 1 0 ${round2(cx - rx)} ${round2(cy)}Z`
+  );
+}
+
+function round2(n: number): number {
+  return Number(n.toFixed(2));
 }
 
 /**

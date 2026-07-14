@@ -284,6 +284,33 @@ export const TransitionInSchema = z.object({
 });
 export type TransitionIn = z.infer<typeof TransitionInSchema>;
 
+// PRD-0014 S13 — `mask`: a rect / ellipse shape mask on a VideoClip. `rect` is a
+// NORMALISED bounding box [0,1] (the ellipse is inscribed in it; a rect mask IS
+// it); absent → the full frame. `feather` (0–1) softens the edge (SVG blur),
+// `inverted` keeps the OUTSIDE instead of the inside. The renderer builds an SVG
+// mask consumed identically by preview + export (single renderer, no ffmpeg
+// dual). Mask params are NOT keyframe-able this version (OpenCut also doesn't).
+// Optional with NO default so every pre-S13 work (no key) parses unchanged. The
+// `rect` bounds mirror CropSchema: positive area + inside the frame.
+const MaskRectSchema = z
+  .object({
+    x: z.number().min(0).max(1),
+    y: z.number().min(0).max(1),
+    w: z.number().min(0).max(1),
+    h: z.number().min(0).max(1),
+  })
+  .refine((r) => r.w > 0, { message: "蒙版宽度必须大于 0 (w > 0)", path: ["w"] })
+  .refine((r) => r.h > 0, { message: "蒙版高度必须大于 0 (h > 0)", path: ["h"] })
+  .refine((r) => r.x + r.w <= 1, { message: "蒙版超出右边界 (x + w <= 1)", path: ["w"] })
+  .refine((r) => r.y + r.h <= 1, { message: "蒙版超出下边界 (y + h <= 1)", path: ["h"] });
+export const MaskSchema = z.object({
+  type: z.enum(["rect", "ellipse"]),
+  feather: z.number().min(0).max(1).optional(),
+  inverted: z.boolean().optional(),
+  rect: MaskRectSchema.optional(),
+});
+export type Mask = z.infer<typeof MaskSchema>;
+
 // Internal raw object schema — exported `VideoClipSchema` wraps this with the
 // speed-keyframe superRefine. The raw form is also re-used inside the
 // discriminatedUnion below (zod requires ZodObject members, not ZodEffects).
@@ -324,6 +351,9 @@ const VideoClipObjectSchema = z.object({
   // S3 (PRD-0014) — entrance transition (see TransitionInSchema). Optional with
   // NO default → every pre-S3 work parses unchanged (absent = no entrance).
   transitionIn: TransitionInSchema.optional(),
+  // S13 (PRD-0014) — rect/ellipse shape mask (see MaskSchema). Optional with NO
+  // default → every pre-S13 work parses unchanged (absent = no mask).
+  mask: MaskSchema.optional(),
   keyframes: z.array(KeyframeSchema).optional(),
 });
 export const VideoClipSchema = VideoClipObjectSchema.superRefine(

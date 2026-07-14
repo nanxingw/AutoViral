@@ -60,6 +60,9 @@ const SUNK: Record<string, string> = {
   // ── S3 (PRD-0014) — set/clear a video clip's ENTRANCE transition; the
   // Inspector selector and `autoviral clip set --transition-in` share the op.
   setClipTransitionIn: "setTransitionIn",
+  // ── S13 (PRD-0014) — set/clear a video clip's rect/ellipse MASK; the Inspector
+  // mask controls and `autoviral clip mask` share the op.
+  setClipMask: "setClipMask",
 };
 
 // Store-only editing verbs NOT yet lifted. Each carries the slice/reason so the

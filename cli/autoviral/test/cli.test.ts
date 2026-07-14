@@ -64,6 +64,9 @@ let lastDetachAudio: Record<string, unknown> | null = null;
 // PRD-0014 S3 — capture the last POST /clip/:id/transition-in so the CLI test can
 // assert `clip set <id> --transition-in glitch:0.4` (and `none`) reached the wire.
 let lastTransitionIn: Record<string, unknown> | null = null;
+// PRD-0014 S13 — capture the last POST /clip/:id/mask so the CLI test can assert
+// `clip mask <id> --shape ellipse` / `--preset` / `--none` reached the wire.
+let lastMask: Record<string, unknown> | null = null;
 let lastTransitionSet: Record<string, unknown> | null = null;
 let lastSelect: Record<string, unknown> | null = null;
 // S4 (US 10) — capture the last PUT /comp body so the CLI test can assert the
@@ -555,6 +558,21 @@ beforeAll(async () => {
       if (req.method === "POST" && tinMatch) {
         lastTransitionIn = await readBody(req);
         const clipId = decodeURIComponent(tinMatch[1]);
+        if (!clips.find((c) => c.id === clipId)) {
+          return send(400, { ok: false, error: "no such clip", code: 4 });
+        }
+        return send(200, { ok: true, result: { id: clipId } });
+      }
+    }
+    // PRD-0014 S13 — POST /clip/:id/mask (clip mask). A known clipId sets/clears
+    // the mask + returns { id }; an unknown clipId is the op's CompositionOpError
+    // → 400 + code 4 → CLI exit 4. Records the body so the CLI wire shape
+    // (shape/feather/inverted OR preset OR clear) can be asserted.
+    {
+      const maskMatch = /^\/api\/bridge\/v1\/clip\/([^/]+)\/mask$/.exec(url ?? "");
+      if (req.method === "POST" && maskMatch) {
+        lastMask = await readBody(req);
+        const clipId = decodeURIComponent(maskMatch[1]);
         if (!clips.find((c) => c.id === clipId)) {
           return send(400, { ok: false, error: "no such clip", code: 4 });
         }
@@ -1580,6 +1598,53 @@ describe("autoviral CLI — end-to-end", () => {
       expect(r.exitCode).toBe(4);
       expect(lastTransitionIn).toBeNull(); // entrance NOT committed
       expect(lastClipPatch).toBeNull(); // PATCH NOT sent
+    });
+
+    // PRD-0014 S13 — clip mask <id> [--shape ellipse --feather 0.2 --inverted] /
+    // [--preset letterbox-2.35] / [--none]. Routes to POST /clip/:id/mask (the
+    // shared ops.setClipMask), so the agent's mask and a human's Inspector edit
+    // converge. Args validated locally (exit 4, never hits the bridge); the server
+    // owns the semantic validation (unknown/non-video clip, bad shape/preset).
+    it("clip mask <id> --shape ellipse --feather 0.2 --inverted → POSTs { shape, feather, inverted }", async () => {
+      lastMask = null;
+      const r = await run([
+        "clip", "mask", "vc_s01", "--shape", "ellipse", "--feather", "0.2", "--inverted",
+      ]);
+      expect(r.exitCode).toBe(0);
+      expect(lastMask).toEqual({ shape: "ellipse", feather: 0.2, inverted: true });
+    });
+
+    it("clip mask <id> --preset letterbox-2.35 → POSTs { preset }", async () => {
+      lastMask = null;
+      const r = await run(["clip", "mask", "vc_s01", "--preset", "letterbox-2.35"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastMask).toEqual({ preset: "letterbox-2.35" });
+    });
+
+    it("clip mask <id> --none → POSTs { clear: true }", async () => {
+      lastMask = null;
+      const r = await run(["clip", "mask", "vc_s01", "--none"]);
+      expect(r.exitCode).toBe(0);
+      expect(lastMask).toEqual({ clear: true });
+    });
+
+    it("clip mask with no id → exit 4 (never hits bridge)", async () => {
+      lastMask = null;
+      const r = await run(["clip", "mask"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastMask).toBeNull();
+    });
+
+    it("clip mask <id> --shape ellipse --feather abc (non-numeric) → exit 4 (never hits bridge)", async () => {
+      lastMask = null;
+      const r = await run(["clip", "mask", "vc_s01", "--shape", "ellipse", "--feather", "abc"]);
+      expect(r.exitCode).toBe(4);
+      expect(lastMask).toBeNull();
+    });
+
+    it("clip mask on an unknown clip → bridge 400 code:4 → exit 4", async () => {
+      const r = await run(["clip", "mask", "vc_nope", "--shape", "rect"]);
+      expect(r.exitCode).toBe(4);
     });
 
     it("track collapse <id> → POSTs /track/:id/collapse, exit 0", async () => {

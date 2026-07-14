@@ -417,6 +417,71 @@ export async function clipCommand(args: string[]): Promise<void> {
     return;
   }
 
+  if (sub === "mask") {
+    // S13 (PRD-0014) — `autoviral clip mask <id> --shape rect|ellipse
+    // [--feather <0..1>] [--inverted]` / `--preset letterbox-2.35` / `--none`.
+    // The bridge runs the shared `ops.setClipMask` (the SAME op the Studio
+    // Inspector mask controls run), so an agent's mask and a human's Inspector
+    // edit converge. We validate args locally (exit 4, never hits the bridge);
+    // the server owns the semantic validation (unknown/non-video clip, bad
+    // shape/preset, out-of-range feather/rect).
+    const id = rest[0];
+    if (!id || id.startsWith("--")) {
+      process.stderr.write(
+        "usage: autoviral clip mask <id> --shape rect|ellipse [--feather <0..1>] " +
+          "[--inverted] [--rect <json>] | --preset <name> | --none\n",
+      );
+      process.exit(4);
+    }
+    // `--none` and `--inverted` are BARE boolean flags (no value) — pull them out
+    // before parseFlags (which pairs every --flag with the next token).
+    const flagArgs = rest.slice(1);
+    const none = flagArgs.includes("--none");
+    const inverted = flagArgs.includes("--inverted");
+    const opts = parseFlags(
+      flagArgs.filter((a) => a !== "--none" && a !== "--inverted"),
+    );
+    let body: Record<string, unknown>;
+    if (none) {
+      body = { clear: true };
+    } else if (opts["--preset"]) {
+      body = { preset: opts["--preset"] };
+    } else {
+      const shape = opts["--shape"];
+      if (shape !== "rect" && shape !== "ellipse") {
+        process.stderr.write(
+          "autoviral clip mask: --shape rect|ellipse required (or --preset <name> / --none)\n",
+        );
+        process.exit(4);
+      }
+      const m: Record<string, unknown> = { shape };
+      if (opts["--feather"] !== undefined) {
+        const f = Number(opts["--feather"]);
+        if (!Number.isFinite(f)) {
+          process.stderr.write("autoviral clip mask: --feather <0..1> must be a number\n");
+          process.exit(4);
+        }
+        m.feather = f;
+      }
+      if (inverted) m.inverted = true;
+      if (opts["--rect"] !== undefined) {
+        let rect: unknown;
+        try {
+          rect = JSON.parse(opts["--rect"]);
+        } catch {
+          process.stderr.write(
+            "autoviral clip mask: --rect must be JSON (e.g. '{\"x\":0,\"y\":0,\"w\":1,\"h\":0.5}')\n",
+          );
+          process.exit(4);
+        }
+        m.rect = rect;
+      }
+      body = m;
+    }
+    await bridgeRequest(ctx, "POST", `/clip/${encodeURIComponent(id)}/mask`, body);
+    return;
+  }
+
   if (sub === "set") {
     const id = rest[0];
     if (!id) {

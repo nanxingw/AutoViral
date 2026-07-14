@@ -151,6 +151,7 @@ export function StaticPropsPanel() {
   const detachClipAudio = useComposition((s) => s.detachClipAudio);
   const reattachClipAudio = useComposition((s) => s.reattachClipAudio);
   const setClipTransitionIn = useComposition((s) => s.setClipTransitionIn);
+  const setClipMask = useComposition((s) => s.setClipMask);
   const t = useT();
 
   const clip = useMemo<Clip | null>(() => {
@@ -531,6 +532,106 @@ export function StaticPropsPanel() {
               />
             </div>
           )}
+        </div>
+      )}
+
+      {videoClip && (
+        <div style={sectionStyle}>
+          <div style={sectionHeader}>{t("studio.inspector.sectionMask")}</div>
+          {/* PRD-0014 S13 — rect/ellipse mask controls. Every control routes
+              through the shared `setClipMask` store action (→ ops.setClipMask), so
+              the human Inspector and `autoviral clip mask` converge on ONE
+              composition. "None" clears; spreads guard the sibling mask fields. */}
+          <div style={rowStyle}>
+            <label htmlFor="mask-shape" style={labelStyle}>
+              {t("studio.inspector.maskShape")}
+            </label>
+            <select
+              id="mask-shape"
+              aria-label={t("studio.inspector.maskShape")}
+              value={videoClip.mask?.type ?? "__none__"}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === "__none__") {
+                  setClipMask(videoClip.id, null);
+                } else {
+                  setClipMask(videoClip.id, {
+                    ...(videoClip.mask ?? {}),
+                    type: v as "rect" | "ellipse",
+                  });
+                }
+              }}
+              style={{ ...numberInputStyle, gridColumn: "2 / span 3", textAlign: "left" }}
+            >
+              <option value="__none__">{t("studio.inspector.maskShapeNone")}</option>
+              <option value="rect">{t("studio.inspector.maskShapeRect")}</option>
+              <option value="ellipse">{t("studio.inspector.maskShapeEllipse")}</option>
+            </select>
+          </div>
+
+          {videoClip.mask && (
+            <>
+              <div style={rowStyle}>
+                <label htmlFor="mask-feather" style={labelStyle}>
+                  {t("studio.inspector.maskFeather")}
+                </label>
+                <input
+                  id="mask-feather"
+                  type="range"
+                  aria-label={t("studio.inspector.maskFeather")}
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={videoClip.mask.feather ?? 0}
+                  onChange={(e) =>
+                    setClipMask(videoClip.id, {
+                      ...videoClip.mask!,
+                      feather: parseFloat(e.target.value),
+                    })
+                  }
+                  style={{ ...sliderStyle, gridColumn: "2 / span 3" }}
+                />
+              </div>
+              <div style={rowStyle}>
+                <label htmlFor="mask-inverted" style={labelStyle}>
+                  {t("studio.inspector.maskInverted")}
+                </label>
+                <input
+                  id="mask-inverted"
+                  type="checkbox"
+                  aria-label={t("studio.inspector.maskInverted")}
+                  checked={videoClip.mask.inverted ?? false}
+                  onChange={(e) =>
+                    setClipMask(videoClip.id, {
+                      ...videoClip.mask!,
+                      inverted: e.target.checked,
+                    })
+                  }
+                  style={{ justifySelf: "start", width: 16, height: 16, accentColor: "var(--accent)" }}
+                />
+              </div>
+            </>
+          )}
+
+          <button
+            type="button"
+            aria-label={t("studio.inspector.maskLetterbox")}
+            title={t("studio.inspector.maskLetterbox")}
+            onClick={() => setClipMask(videoClip.id, { preset: "letterbox-2.35" })}
+            style={{
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              padding: "5px 10px",
+              background: "var(--surface-0)",
+              border: "1px solid var(--glass-border)",
+              borderRadius: 6,
+              color: "var(--text)",
+              cursor: "pointer",
+              justifySelf: "start",
+            }}
+          >
+            {t("studio.inspector.maskLetterbox")}
+          </button>
         </div>
       )}
 

@@ -18,7 +18,7 @@ import { splitKeyframesAtLocal } from "@shared/keyframes";
 // `ops.splitClip` on the immer draft.
 import * as ops from "@shared/composition/ops";
 import { CompositionOpError } from "@shared/composition/ops";
-import type { Fps } from "@shared/composition/ops";
+import type { Fps, MaskSpec, MaskPresetSpec } from "@shared/composition/ops";
 import {
   clipDuration,
   clipEnd,
@@ -166,6 +166,13 @@ interface CompState {
       easing?: Transition["easing"];
     } | null,
   ) => void;
+  // PRD-0014 S13 — set (spec / preset) or clear (null) a video clip's rect/ellipse
+  // MASK via the shared `ops.setClipMask` — the SAME op the bridge/CLI
+  // (`autoviral clip mask`) runs, so the human Inspector controls and the agent
+  // converge on ONE composition. The op owns shape/feather/rect/preset validation
+  // and THROWS on illegal input; the store keeps the transition-family silent
+  // no-op contract (catch CompositionOpError — the Inspector never produces one).
+  setClipMask: (clipId: string, spec: MaskSpec | MaskPresetSpec | null) => void;
   // Phase 4.I — edge-drag resize. `newTime` is the proposed timeline-time of
   // the moving edge. Clamps left at 0, right at next clip's trackOffset (D2),
   // and enforces minDuration 0.05s on both edges. Branches on clip kind:
@@ -697,6 +704,22 @@ export const useComposition = create<CompState>()(
             });
             return; // composition untouched, but the user is told.
           }
+          throw err;
+        }
+      }),
+    // PRD-0014 S13 — thin wrapper over the shared `ops.setClipMask` (the SAME code
+    // the bridge/CLI `clip mask` runs). The op owns shape/feather/rect/preset
+    // validation + in-place assignment; the store keeps the transition-family
+    // silent no-op contract, catching CompositionOpError so an illegal set leaves
+    // the composition untouched (the Inspector only ever supplies valid shapes /
+    // 0..1 feather, so this catch is purely defensive).
+    setClipMask: (clipId, spec) =>
+      set((s) => {
+        if (!s.comp) return;
+        try {
+          ops.setClipMask(s.comp, { clipId, spec });
+        } catch (err) {
+          if (err instanceof CompositionOpError) return; // silent no-op (untouched)
           throw err;
         }
       }),

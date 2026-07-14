@@ -40,6 +40,9 @@ export type { ReframeParams } from "./reframeClip.js";
 // PRD-0014 S3 — set/clear a video clip's ENTRANCE transition (transitionIn).
 export { setTransitionIn } from "./transitionIn.js";
 export type { TransitionInSpec } from "./transitionIn.js";
+// PRD-0014 S13 — set/clear a video clip's rect/ellipse MASK (mask).
+export { setClipMask } from "./setClipMask.js";
+export type { MaskSpec, MaskPresetSpec, MaskShape } from "./setClipMask.js";
 // PRD-0014 S5 — detach a video clip's source audio to a first-class AudioClip.
 export { detachAudio } from "./detachAudio.js";
 export type { DetachAudioResult } from "./detachAudio.js";

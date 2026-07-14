@@ -2199,6 +2199,95 @@ bridgeRouter.post("/clip/:id/transition-in", async (c) => {
   return c.json({ ok: true, result: { id } });
 });
 
+// S13 (PRD-0014) — POST /clip/:id/mask: set (or clear) a video clip's rect/ellipse
+// MASK through the shared `ops.setClipMask` — the SAME op the Studio Inspector's
+// mask controls run, so an agent's `autoviral clip mask <id> --shape ellipse
+// --feather 0.2 [--inverted]` / `--preset letterbox-2.35` and a human converge on
+// ONE composition. Body (one of):
+//   { shape, feather?, inverted?, rect? }  → set a direct mask
+//   { preset }                             → expand a named preset (letterbox-<r>)
+//   { clear: true }                        → clear the mask
+// Unknown / non-video clip, unknown shape/preset, out-of-range feather/rect →
+// CompositionOpError{code:4} → HTTP 400 + code:4 → CLI exit 4.
+bridgeRouter.post("/clip/:id/mask", async (c) => {
+  const g = workIdOrError(c);
+  if (!g.ok) return g.res;
+  const id = c.req.param("id");
+  if (!id) {
+    return c.json({ ok: false, error: "missing clip id", code: 4 }, 400);
+  }
+  const body = (await c.req.json().catch(() => ({}))) as {
+    shape?: unknown;
+    feather?: unknown;
+    inverted?: unknown;
+    rect?: unknown;
+    preset?: unknown;
+    clear?: unknown;
+  };
+  let spec: ops.MaskSpec | ops.MaskPresetSpec | null;
+  if (body.clear === true) {
+    spec = null;
+  } else if (body.preset !== undefined) {
+    if (typeof body.preset !== "string" || !body.preset) {
+      return c.json({ ok: false, error: "invalid preset", code: 4 }, 400);
+    }
+    spec = { preset: body.preset };
+  } else {
+    if (body.shape !== "rect" && body.shape !== "ellipse") {
+      return c.json({ ok: false, error: "missing/invalid shape (rect|ellipse)", code: 4 }, 400);
+    }
+    const s: ops.MaskSpec = { type: body.shape };
+    if (body.feather !== undefined) {
+      if (typeof body.feather !== "number" || !Number.isFinite(body.feather)) {
+        return c.json({ ok: false, error: "invalid feather (0..1)", code: 4 }, 400);
+      }
+      s.feather = body.feather;
+    }
+    if (body.inverted !== undefined) {
+      if (typeof body.inverted !== "boolean") {
+        return c.json({ ok: false, error: "invalid inverted (boolean)", code: 4 }, 400);
+      }
+      s.inverted = body.inverted;
+    }
+    if (body.rect !== undefined) {
+      const r = body.rect as Record<string, unknown>;
+      const leaves = ["x", "y", "w", "h"] as const;
+      if (
+        r == null ||
+        typeof r !== "object" ||
+        Array.isArray(r) ||
+        !leaves.every((k) => typeof r[k] === "number")
+      ) {
+        return c.json({ ok: false, error: "invalid rect (needs numeric x,y,w,h)", code: 4 }, 400);
+      }
+      s.rect = { x: r.x as number, y: r.y as number, w: r.w as number, h: r.h as number };
+    }
+    spec = s;
+  }
+  try {
+    await mutateCompositionFor(
+      { workId: g.workId },
+      (comp) => {
+        ops.setClipMask(comp, { clipId: id, spec });
+        return comp;
+      },
+      () => broadcast(g.workId, "composition-changed", { reason: "clip-mask" }),
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    // Only a CompositionOpError is a genuine client-input error → 400/code:4. An
+    // UNEXPECTED failure (read / strict-write-schema / persistence) is a server
+    // bug and must surface as 500, not masquerade as user input.
+    if (err instanceof CompositionOpError) {
+      return c.json({ ok: false, error: message, code: err.code }, 400);
+    }
+    // eslint-disable-next-line no-console
+    console.error(`[bridge] POST /clip/:id/mask unexpected failure: ${message}`);
+    return c.json({ ok: false, error: message }, 500);
+  }
+  return c.json({ ok: true, result: { id } });
+});
+
 // S9 (US 4/5/9) — POST /transition: add a cut-point transition on a video track
 // through the shared composition-ops core. Body `{ trackId, afterClipId, preset,
 // durationSec? }`; the video-only guard, the last-clip-anchor rejection, the

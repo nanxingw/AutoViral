@@ -5642,3 +5642,113 @@ describe("bridge router — S3 transition-in (real route + persistence)", () => 
     }
   });
 });
+
+// PRD-0014 S13 — POST /clip/:id/mask (real route + persistence). Drive the real
+// router against an on-disk work: set an ellipse mask, read the persisted
+// composition back and assert `mask` survived the strict write schema + refine;
+// expand a letterbox preset; clear it; and reject a bad shape + unknown clip.
+describe("bridge router — S13 mask (real route + persistence)", () => {
+  let workRoot: string;
+  const workId = "w_mask_route";
+  const prevWorksRoot = process.env.AUTOVIRAL_WORKS_ROOT;
+
+  beforeAll(async () => {
+    const { mkdtemp, readFile, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    workRoot = await mkdtemp(join(tmpdir(), "autoviral-mask-route-"));
+    const fixture = await readFile(
+      join(__dirname, "../../../../tests/fixtures/sample-work/composition.yaml"),
+      "utf8",
+    );
+    await mkdir(join(workRoot, workId), { recursive: true });
+    await writeFile(
+      join(workRoot, workId, "composition.yaml"),
+      fixture.replace(/workId: sample-work/, `workId: ${workId}`),
+      "utf8",
+    );
+    process.env.AUTOVIRAL_WORKS_ROOT = workRoot;
+  });
+  afterAll(() => {
+    if (prevWorksRoot === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+    else process.env.AUTOVIRAL_WORKS_ROOT = prevWorksRoot;
+  });
+
+  async function maskOf(): Promise<unknown> {
+    const comp = await app.request("/api/bridge/v1/comp", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const body = (await comp.json()) as {
+      result: { tracks: Array<{ clips: Array<{ id: string; mask?: unknown }> }> };
+    };
+    return body.result.tracks
+      .flatMap((t) => t.clips)
+      .find((c) => c.id === "vc_s01")?.mask;
+  }
+
+  it("sets an ellipse mask that survives the strict write schema + refine, then broadcasts", async () => {
+    const events: string[] = [];
+    const off = uiEventBus.subscribe(workId, (ev) => events.push(ev.type));
+    try {
+      const res = await app.request("/api/bridge/v1/clip/vc_s01/mask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+        body: JSON.stringify({ shape: "ellipse", feather: 0.2, inverted: true }),
+      });
+      expect(res.status).toBe(200);
+      expect(await maskOf()).toEqual({
+        type: "ellipse",
+        feather: 0.2,
+        inverted: true,
+      });
+      expect(events).toContain("composition-changed");
+    } finally {
+      off();
+    }
+  });
+
+  it("expands the letterbox-2.35 preset to a centered rect band", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/mask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ preset: "letterbox-2.35" }),
+    });
+    expect(res.status).toBe(200);
+    const mask = (await maskOf()) as { type: string; rect: { w: number; h: number } };
+    expect(mask.type).toBe("rect");
+    expect(mask.rect.w).toBe(1);
+    expect(mask.rect.h).toBeGreaterThan(0);
+    expect(mask.rect.h).toBeLessThan(1);
+  });
+
+  it("clear: true removes the mask", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/mask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ clear: true }),
+    });
+    expect(res.status).toBe(200);
+    expect(await maskOf()).toBeUndefined();
+  });
+
+  it("an unknown shape → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/vc_s01/mask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ shape: "star" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+
+  it("an unknown clip → 400 + code 4", async () => {
+    const res = await app.request("/api/bridge/v1/clip/nope/mask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ shape: "rect" }),
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { code?: number };
+    expect(body.code).toBe(4);
+  });
+});
