@@ -509,6 +509,126 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     ).not.toMatch(/GET \/api\/works\/:id\/render\/:jobId/);
   });
 
+  // PRD-0014 S17 (#95) — the operator manual gained four short-video recipes +
+  // generation-resilience / cost gotchas the "full 中文 short-video" build had to
+  // re-derive by hand. The #95 病灶 this guard防的是 the recipe-vs-runtime lie:
+  // a recipe that advertises a verb the CLI never wired (a "comment承诺未接线").
+  // For every verb a new recipe teaches, we assert BOTH that the recipe shows it
+  // AND that the same verb is actually present in cli/autoviral/src (the wiring
+  // oracle) — so a recipe can never document a dead-end command.
+  describe("PRD-0014 S17 — #95 operator recipes reference only wired CLI verbs", () => {
+    const RECIPE_DIR = join(
+      REPO_ROOT,
+      "skills",
+      "autoviral",
+      "recipes",
+      "video",
+    );
+    const CLI_SRC_DIR = join(REPO_ROOT, "cli", "autoviral", "src");
+
+    // Concatenate every CLI command source once — the "is this verb wired?"
+    // oracle. If a recipe advertises a token absent here, the verb is a phantom.
+    const cliSource = (() => {
+      const parts: string[] = [];
+      const walk = (dir: string) => {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          const p = join(dir, e.name);
+          if (e.isDirectory()) walk(p);
+          else if (e.isFile() && /\.ts$/.test(e.name)) parts.push(readFileSync(p, "utf8"));
+        }
+      };
+      walk(CLI_SRC_DIR);
+      return parts.join("\n");
+    })();
+
+    // { recipe file, prose the recipe MUST advertise, token that MUST exist in
+    //  the CLI source proving the verb is wired }. One row per recipe↔verb pair.
+    const VERB_CHECKS: { file: string; recipe: RegExp; cli: RegExp }[] = [
+      // decouple-narration → S5 clip detach-audio
+      { file: "decouple-narration.md", recipe: /autoviral clip detach-audio/, cli: /"detach-audio"/ },
+      // beat-cutting → S3 transitionIn + S8 reframe + S7 ripple
+      { file: "beat-cutting.md", recipe: /autoviral clip set [^\n]*--transition-in/, cli: /--transition-in/ },
+      { file: "beat-cutting.md", recipe: /autoviral clip reframe/, cli: /sub === "reframe"/ },
+      { file: "beat-cutting.md", recipe: /autoviral clip remove [^\n]*--ripple/, cli: /--ripple/ },
+      // burn-subtitles → S9 captions --script + export --caption-tracks
+      { file: "burn-subtitles-asr-aligned.md", recipe: /autoviral captions generate --script/, cli: /"--script" in opts/ },
+      { file: "burn-subtitles-asr-aligned.md", recipe: /autoviral export --caption-tracks/, cli: /--caption-tracks/ },
+      // generate-cover → S11 render snapshot self-check
+      { file: "generate-cover.md", recipe: /autoviral render snapshot --frame/, cli: /renderSnapshotVerb/ },
+    ];
+
+    it("all four #95 recipes exist on disk", () => {
+      for (const f of [
+        "decouple-narration.md",
+        "beat-cutting.md",
+        "burn-subtitles-asr-aligned.md",
+        "generate-cover.md",
+      ]) {
+        expect(
+          existsSync(join(RECIPE_DIR, f)),
+          `skills/autoviral/recipes/video/${f} must exist (S17 / #95)`,
+        ).toBe(true);
+      }
+    });
+
+    it("every verb each recipe advertises is actually wired in cli/autoviral/src", () => {
+      for (const { file, recipe, cli } of VERB_CHECKS) {
+        const body = readFileSync(join(RECIPE_DIR, file), "utf8");
+        expect(
+          recipe.test(body),
+          `${file} must advertise \`${recipe}\` (the whole point of the #95 recipe)`,
+        ).toBe(true);
+        expect(
+          cli.test(cliSource),
+          `${file} advertises a verb whose wiring token \`${cli}\` is absent from cli/autoviral/src — a comment承诺未接线`,
+        ).toBe(true);
+      }
+    });
+
+    it("beat-cutting states the native-speed / one-visual-per-phrase mechanics (not a slow-mo fill)", () => {
+      const body = readFileSync(join(RECIPE_DIR, "beat-cutting.md"), "utf8");
+      // The #95 operational core: never `setpts` slow-mo to fill a shot.
+      expect(body).toMatch(/setpts/);
+      expect(body, "beat-cutting must warn against slow-mo填时 judder").toMatch(
+        /judder|卡顿|slow[- ]?mo/i,
+      );
+    });
+
+    it("generate-cover points at the image endpoint (中文 title prompt pattern)", () => {
+      const body = readFileSync(join(RECIPE_DIR, "generate-cover.md"), "utf8");
+      expect(body).toMatch(/\/api\/generate\/image/);
+    });
+
+    it("05-conventions carries the S10 generation-resilience gotcha + the 720p/1080p cost knob", () => {
+      const conv = readFileSync(join(MANUAL_DIR, "_shared", "05-conventions.md"), "utf8");
+      // S10 mechanism — content-addressed manifest + orphaned-billing note.
+      expect(conv, "05-conventions must document the generation-manifest.json").toMatch(
+        /generation-manifest\.json/,
+      );
+      expect(conv, "05-conventions must warn about orphaned (billed-but-abandoned) jobs").toMatch(
+        /orphan/i,
+      );
+      // Cost knob (#95 item 7).
+      expect(conv).toMatch(/720p/);
+      expect(conv).toMatch(/1080p/);
+    });
+
+    it("SKILL.md's recipe index lists the four new #95 recipes", () => {
+      const skillMd = readFileSync(SKILL_MD, "utf8");
+      for (const r of [
+        "decouple-narration.md",
+        "beat-cutting.md",
+        "burn-subtitles-asr-aligned.md",
+        "generate-cover.md",
+      ]) {
+        expect(
+          skillMd,
+          `SKILL.md recipe index must list ${r} so \`autoviral docs\` readers discover it`,
+        ).toMatch(new RegExp(r.replace(/\./g, "\\.")));
+      }
+    });
+  });
+
   it("covers both reference families (docs-slug + file-path) so a new form can't slip the net unnoticed", () => {
     const refs = allRefs();
     const haveDocsSlug = refs.some((r) => r.kind === "docs");

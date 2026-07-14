@@ -58,6 +58,10 @@ Read the partition that matches `work.type`.
 - `generate-i2v-batch.md`
 - `apply-platform-preset.md`
 - `add-subtitle-overlay.md`
+- `burn-subtitles-asr-aligned.md` — ASR gives right timing / wrong text → substitute the ground-truth script (`captions generate --script`), burn a lane at export
+- `decouple-narration.md` — one continuous locked-voice VO track over silent picture (never trust i2v embedded voice)
+- `beat-cutting.md` — cut ~4–5s beats at native speed, one dedicated visual per phrase, no `setpts` slow-mo fill
+- `generate-cover.md` — native 中文 title/subtitle/logo poster via the image endpoint, then self-check the pixels
 - `ingest-youtube.md` — turn a YouTube URL into a 中文 short via the one-shot `autoviral ingest youtube` pipeline
 
 **`recipes/carousel/`** (图文):

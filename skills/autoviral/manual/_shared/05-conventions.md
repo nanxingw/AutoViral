@@ -129,6 +129,42 @@ These are landmines you'll step in if you ignore them:
 - **Missing asset file** — `clip add --src does-not-exist.mp4` succeeds; the render will fail later. Validate paths exist before adding when you can.
 - **Audio clip on a video track** — discriminated union catches `kind` mismatch but only at parse time; if you somehow craft a clip in a way that confuses the union, behavior is undefined.
 
+## Generation resilience — abort cancels upstream, batches are idempotent (S10)
+
+Asset generation (video / image / bgm / tts) is billed upstream, so the workstation
+guards two failure modes for you — know how they behave so you don't double-charge or
+strand a job:
+
+- **A client-side timeout does NOT cancel a server-side generation by itself.** What
+  cancels is a real **request abort**: when the CLI/HTTP client disconnects (or aborts the
+  signal), the route passes the abort to the provider. A provider that *can* cancel aborts
+  its in-flight fetch; an async provider that already **enqueued a billed job it can't
+  recall** (Seedance's poll API) leaves an **orphaned** job — the route books an
+  `orphaned` note in the cost-ledger so the spend is visible instead of silently
+  double-billing on retry. Don't lean on a "generous timeout" as a fix; a genuine abort is
+  what stops the upstream work.
+- **Batch generation is idempotent via a per-work `generation-manifest.json`**, keyed by
+  the **content hash** of `(prompt + params)` — never a timestamp. The entry point reserves
+  before dispatch: a `done` key **skips** (echoes the cached asset, no re-下单), an
+  `in-flight` key is rejected with **HTTP 409** (no concurrent duplicate order), a
+  `failed`/absent key proceeds (retry allowed). So re-running the same prompt is safe and
+  free — it returns the existing asset rather than paying again. Statuses are
+  `in-flight | done | failed | orphaned`.
+- **Under session interruptions, prefer foreground single-clip calls over long background
+  jobs.** A background job spanning a turn boundary can get torn down; a single-clip
+  foreground generation (one `POST /api/generate/*` you wait on) survives better. Loop
+  single calls rather than firing one long batch when the session may be interrupted.
+
+## Cost knob — 720p vs 1080p (Seedance)
+
+Seedance video is priced per output pixel-second: roughly **720p ≈ $0.15/s, 1080p ≈
+$0.34/s** (per the `resolution` field of `POST /api/generate/video`). **720p upscaled to
+1080p is fine for 抖音 / 小红书** — most vertical shorts don't need native 1080p, so default
+to 720p and reserve 1080p for hero shots. Full cost table + fields:
+`autoviral docs _shared/03-cli-reference` ("POST /api/generate/video"). Managed-ffmpeg
+resolution (why a burn/encode may fail on a stripped `PATH`) is in the *ASR-aligned
+subtitle* recipe's gotcha and `add-subtitle-overlay.md`.
+
 ## Versioning
 
 The bridge path is `/api/bridge/v1/`. Breaking changes ship as `/v2/`. `autoviral whoami` returns the bridge version it speaks; the CLI checks compat on startup and prints an "upgrade autoviral" message if the server is newer.
