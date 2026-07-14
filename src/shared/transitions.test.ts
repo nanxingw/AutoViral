@@ -55,6 +55,49 @@ describe("transition preset registry (#54)", () => {
   });
 });
 
+// PRD-0014 S2 — the stylize family (glitch / light-leak) + the motion-family
+// completion (whip-pan / zoom) migrate from orphaned ffmpeg-bake REST endpoints
+// into the SAME Remotion registry every other preset lives in. Adding a preset
+// to the registry is the WYSIWYG-by-construction contract: preview + export
+// consume this one source of truth (the web presentationFor factory + the op's
+// enum both derive from it), so a "render-only" or "preview-only" orphan becomes
+// impossible. These assertions are RED until the six rows land.
+describe("transition registry — S2 stylize/motion additions (PRD-0014)", () => {
+  const S2_PRESETS = [
+    "glitch",
+    "light-leak",
+    "whip-pan-left",
+    "whip-pan-right",
+    "zoom-in",
+    "zoom-out",
+  ] as const;
+
+  it("registers all six new presets with a positive default duration", () => {
+    for (const p of S2_PRESETS) {
+      expect((TRANSITION_PRESETS as readonly string[]).includes(p)).toBe(true);
+      const meta = (TRANSITION_PRESET_META as Record<string, { defaultDurationSec: number }>)[p];
+      expect(meta).toBeDefined();
+      expect(meta.defaultDurationSec).toBeGreaterThan(0);
+    }
+  });
+
+  it("glitch + light-leak are the stylize family; whip-pan + zoom are motion", () => {
+    const fam = (p: string) =>
+      (TRANSITION_PRESET_META as Record<string, { family: string }>)[p].family;
+    expect(fam("glitch")).toBe("stylize");
+    expect(fam("light-leak")).toBe("stylize");
+    expect(fam("whip-pan-left")).toBe("motion");
+    expect(fam("whip-pan-right")).toBe("motion");
+    expect(fam("zoom-in")).toBe("motion");
+    expect(fam("zoom-out")).toBe("motion");
+  });
+
+  it("covers the stylize family (previously only orphaned ffmpeg endpoints)", () => {
+    const families = new Set(TRANSITION_PRESETS.map((p) => getPresetMeta(p).family));
+    expect(families.has("stylize")).toBe(true);
+  });
+});
+
 describe("clampHandleDuration (#54 handles)", () => {
   it("passes through when both clips have plenty of room", () => {
     expect(clampHandleDuration(0.5, 5, 5)).toBeCloseTo(0.5, 5);

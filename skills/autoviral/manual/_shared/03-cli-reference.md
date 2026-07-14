@@ -492,6 +492,8 @@ Returns `{ assetPath: "output/<name>", previewUrl }`.
 
 ### Cinematic transitions — 4 endpoints
 
+> **DEPRECATED (PRD-0014 S2, removed in v0.3).** These four ffmpeg-bake endpoints now respond with a `Deprecation: true` header. `glitch` and `light-leak` have moved into the composition transition registry as WYSIWYG Remotion presets (preview = export from one source of truth), joined by `whip-pan-left`/`whip-pan-right`/`zoom-in`/`zoom-out`. Prefer `autoviral transition add --preset <name>` — e.g. `--preset glitch` / `--preset light-leak` — which writes a first-class cut-point transition into the composition instead of baking a standalone MP4. The endpoints stay one version cycle only for un-migrated external scripts.
+
 All four take the **same** body and never require hand-written `ffmpeg xfade` — the bridge probes clipA's dimensions and renders the blend for you. `autoviral transition add` is the easier dissolve path; reach for these HTTP endpoints when you want a specific cinematic look.
 
 Body (all four): `{ workId, clipARelative, clipBRelative, outputFilename, clipADuration, transitionDuration? }`

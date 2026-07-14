@@ -483,6 +483,24 @@ describe("S1 · four cinematic endpoints render on real color clips", () => {
 // not just the apply*() functions. POST to each endpoint against a fixture
 // work and assert 200 + the output file lands on disk. ──
 
+// PRD-0014 S2 — the four ffmpeg-bake endpoints are superseded by the Remotion
+// registry presets (glitch / light-leak land there as WYSIWYG presentations).
+// They stay one version cycle for un-migrated external scripts, but MUST now
+// advertise their deprecation via an RFC-8594 `Deprecation` response header.
+// Asserted on the fast 400 path (invalid body) so it needs no ffmpeg.
+describe("S2 · /api/transitions/* advertise Deprecation header (PRD-0014)", () => {
+  const endpoints = ["light-leak", "glitch", "domain-warp", "grav-lens"] as const;
+  for (const name of endpoints) {
+    it(`POST /api/transitions/${name} sets Deprecation: true even on the 400 path`, async () => {
+      const res = await renderRouter.fetch(
+        jsonReq("POST", `/api/transitions/${name}`, { workId: "bad id!" }),
+      );
+      expect(res.status).toBe(400);
+      expect(res.headers.get("Deprecation")).toBe("true");
+    });
+  }
+});
+
 describe("S1 · POST /api/transitions/* render on a fixture work", () => {
   const endpoints = ["light-leak", "glitch", "domain-warp", "grav-lens"] as const;
 

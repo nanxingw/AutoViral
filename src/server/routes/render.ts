@@ -231,6 +231,16 @@ type TransitionApplyFn = (opts: {
 }) => Promise<string>;
 
 async function runTransitionEndpoint(c: any, applyFn: TransitionApplyFn) {
+  // PRD-0014 S2 — these four ffmpeg-bake endpoints are DEPRECATED in favour of
+  // the Remotion registry presets (glitch / light-leak now render WYSIWYG in the
+  // composition; whip-pan / zoom join them). They stay one version cycle for
+  // un-migrated external scripts. Advertise it (RFC 8594) on EVERY response,
+  // including the fast 400 validation path, so callers can detect the sunset.
+  c.header("Deprecation", "true");
+  c.header(
+    "Link",
+    '</api/bridge/v1/transition>; rel="successor-version"; title="use transition add --preset"',
+  );
   const body = await c.req.json().catch(() => ({}));
   const workId = String(body.workId ?? "");
   const clipARel = String(body.clipARelative ?? "");

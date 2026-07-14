@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { Composition, Clip } from "../../composition.js";
+import { TransitionSchema } from "../../composition.js";
 import { addTransition, removeTransition } from "./transition.js";
 import { CompositionOpError } from "./errors.js";
 import { TRANSITION_PRESETS } from "../../transitions.js";
@@ -189,6 +190,49 @@ describe("@shared composition ops — addTransition", () => {
       ).not.toThrow();
       expect(comp.tracks[0].transitions![0].preset).toBe(preset);
     }
+  });
+
+  // PRD-0014 S2 — `transition add --preset glitch` (and the other five stylize/
+  // motion additions) must flow through the SAME shared op the UI uses, and the
+  // written transition must survive the schema refine (the bridge write-path
+  // chokepoint). RED until the presets join the registry (the op rejects an
+  // unknown preset with code:4 before this even reaches the parse).
+  describe("S2 · stylize/motion presets flow through the shared op (PRD-0014)", () => {
+    const S2_PRESETS = [
+      "glitch",
+      "light-leak",
+      "whip-pan-left",
+      "whip-pan-right",
+      "zoom-in",
+      "zoom-out",
+    ] as const;
+
+    it("addTransition writes a glitch preset that re-parses through TransitionSchema (refine passes)", () => {
+      const comp = compWith([
+        videoClip({ id: "c1", trackOffset: 0, in: 0, out: 3 }),
+        videoClip({ id: "c2", trackOffset: 3, in: 0, out: 3 }),
+      ]);
+      const { transitionId } = addTransition(comp, {
+        trackId: "trk_v",
+        afterClipId: "c1",
+        preset: "glitch",
+      });
+      const written = comp.tracks[0].transitions!.find((t) => t.id === transitionId)!;
+      expect(written.preset).toBe("glitch");
+      // The bridge validates on write; the written transition must pass the schema.
+      expect(() => TransitionSchema.parse(written)).not.toThrow();
+    });
+
+    it.each(S2_PRESETS)("addTransition accepts the %s preset without throwing", (preset) => {
+      const comp = compWith([
+        videoClip({ id: "c1", trackOffset: 0, in: 0, out: 3 }),
+        videoClip({ id: "c2", trackOffset: 3, in: 0, out: 3 }),
+      ]);
+      expect(() =>
+        addTransition(comp, { trackId: "trk_v", afterClipId: "c1", preset }),
+      ).not.toThrow();
+      expect(comp.tracks[0].transitions![0].preset).toBe(preset);
+    });
   });
 
   it("throws code:4 on a non-video track (Phase 1 video-only)", () => {

@@ -28,6 +28,16 @@ export const TRANSITION_PRESETS = [
   "push-down",
   // ④ motion
   "flip",
+  "whip-pan-left",
+  "whip-pan-right",
+  "zoom-in",
+  "zoom-out",
+  // ⑤ stylize — PRD-0014 S2. Migrated from the orphaned ffmpeg-bake REST
+  // endpoints (light-leak / glitch) into the registry so preview + export share
+  // one source of truth. Rendered entirely via Remotion (CSS filter/transform),
+  // no ffmpeg dual — see web presentationFor.
+  "glitch",
+  "light-leak",
   // ⑥ cut
   "hard-cut",
 ] as const;
@@ -69,6 +79,17 @@ export const TRANSITION_PRESET_META: Record<TransitionPreset, TransitionPresetMe
   "push-up":        { family: "slide",    ffmpegXfade: "slideup",    defaultDurationSec: 0.5 },
   "push-down":      { family: "slide",    ffmpegXfade: "slidedown",  defaultDurationSec: 0.5 },
   "flip":           { family: "motion",   ffmpegXfade: "",           defaultDurationSec: 0.7 },
+  // ④ motion completion (PRD-0014 S2 / G-18) — whip-pan + zoom. Custom Remotion
+  // presentations (CSS transform/filter); no ffmpeg xfade analog, so ffmpegXfade
+  // is the honest empty string (never consumed — everything renders WYSIWYG).
+  "whip-pan-left":  { family: "motion",   ffmpegXfade: "",           defaultDurationSec: 0.35 },
+  "whip-pan-right": { family: "motion",   ffmpegXfade: "",           defaultDurationSec: 0.35 },
+  "zoom-in":        { family: "motion",   ffmpegXfade: "",           defaultDurationSec: 0.5 },
+  "zoom-out":       { family: "motion",   ffmpegXfade: "",           defaultDurationSec: 0.5 },
+  // ⑤ stylize (PRD-0014 S2) — glitch (RGB-split jitter) + light-leak (warm
+  // screen flash). Custom Remotion presentations; no ffmpeg analog.
+  "glitch":         { family: "stylize",  ffmpegXfade: "",           defaultDurationSec: 0.4 },
+  "light-leak":     { family: "stylize",  ffmpegXfade: "",           defaultDurationSec: 0.6 },
   "hard-cut":       { family: "cut",      ffmpegXfade: "",           defaultDurationSec: 0.05 },
 };
 
