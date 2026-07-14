@@ -234,12 +234,13 @@ describe("@shared composition ops — splitClip", () => {
       durationSec: 0.4,
     };
     const comp = compWith([clip]);
-    // split at 0.25 → head effective width 0.25 < 0.4 entrance → clamp to 0.25 so
-    // the write-path refine (durationSec ≤ effective) doesn't silently reject it.
-    splitClip(comp, { clipId: "a", atSec: 0.25 });
+    // split at 0.2s (6 frames @30fps — frame-aligned so S15 snap is a no-op) →
+    // head effective width 0.2 < 0.4 entrance → clamp to 0.2 so the write-path
+    // refine (durationSec ≤ effective) doesn't silently reject it.
+    splitClip(comp, { clipId: "a", atSec: 0.2 });
     const head = (comp.tracks[0].clips as Clip[]).find((c) => c.id === "a") as unknown as {
       transitionIn?: { durationSec: number };
     };
-    expect(head.transitionIn?.durationSec).toBeCloseTo(0.25, 6);
+    expect(head.transitionIn?.durationSec).toBeCloseTo(0.2, 6);
   });
 });

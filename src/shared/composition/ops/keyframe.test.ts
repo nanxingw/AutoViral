@@ -107,11 +107,13 @@ describe("@shared composition ops — addKeyframe", () => {
     // own end. Both times land within the clip's [0, 5] span (the op rejects a
     // keyframe past the end — see "throws code:4 for an atSec past the clip's
     // duration" below).
-    addKeyframe(comp, { clipId: "v1", property: "opacity", atSec: 4.82, value: 1 });
+    // Frame-aligned times (4.8s = 144 frames @30fps) so the assertion tests the
+    // crossfade authoring, not the S15 frame-snap (covered by the snapToFrame sweep).
+    addKeyframe(comp, { clipId: "v1", property: "opacity", atSec: 4.8, value: 1 });
     addKeyframe(comp, { clipId: "v1", property: "opacity", atSec: 5, value: 0 });
     const written = (comp.tracks[0].clips[0] as { keyframes?: Keyframe[] }).keyframes!;
     expect(written.map((k) => [k.property, k.time, k.value])).toEqual([
-      ["opacity", 4.82, 1],
+      ["opacity", 4.8, 1],
       ["opacity", 5, 0],
     ]);
   });

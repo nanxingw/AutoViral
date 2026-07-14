@@ -79,8 +79,10 @@ function semanticChecks(
   findings: LintFinding[],
   opts: LintOptions,
 ): void {
-  // Track-overlap rule
+  // Track-overlap rule. S15 (PRD-0014) — overlay lanes are EXEMPT (PiP overlays
+  // legitimately stack); video/audio/text lanes are still flagged.
   comp.tracks.forEach((track, ti) => {
+    if ((track as { kind?: string }).kind === "overlay") return;
     const ranges: Array<{ id: string; start: number; end: number; ci: number }> = [];
     track.clips.forEach((clip, ci) => {
       const c = clip as unknown as {

@@ -16,6 +16,7 @@
 
 import type { Composition, Clip, Keyframe } from "../../composition.js";
 import { splitKeyframesAtLocal } from "../../keyframes.js";
+import { snapToFrame } from "../../frame.js";
 import { CompositionOpError } from "./errors.js";
 
 // Inlined so the op stays free of the web-only `@autoviral/timeline` package
@@ -74,8 +75,13 @@ export function trimClip(
   p: { clipId: string; in?: number; out?: number },
 ): void {
   const { clipId } = p;
-  const wantIn = p.in;
-  const wantOut = p.out;
+  // S15 — quantise the caller's requested source window to whole frames at the
+  // OP ENTRY (pre-clamp negatives to 0 first so a `--in -5` still clamps to 0
+  // rather than tripping snapToFrame's ≥0 guard). Snapping the INPUT (not the
+  // clamped output) preserves the MIN_CLIP_DUR floor — the adjacency/minimum
+  // clamps below still apply, they just operate on frame-aligned targets.
+  const wantIn = p.in === undefined ? undefined : snapToFrame(Math.max(0, p.in), comp.fps);
+  const wantOut = p.out === undefined ? undefined : snapToFrame(Math.max(0, p.out), comp.fps);
   if (wantIn === undefined && wantOut === undefined) {
     throw new CompositionOpError(
       `trimClip: at least one of --in / --out is required for clip ${clipId}`,

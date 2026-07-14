@@ -462,6 +462,8 @@ function refineTrack(
       id: string;
       in?: number;
       out?: number;
+      trackOffset: number;
+      duration?: number;
       keyframes?: { property: string; value: number; time?: number }[];
       transitionIn?: { durationSec: number };
     }[];
@@ -528,6 +530,17 @@ function refineTrack(
       });
     }
   });
+
+  // S15 (PRD-0014) — same-track overlap detection lives at WARNING level, NOT as a
+  // hard parse error. The existing product contract ACCEPTS overlapping clips on
+  // write (preflight.ts: "the write path accepts them") — bridge `POST /clip` and
+  // several works legitimately stack clips, so hard-erroring here would炸掉既有
+  // 合法重叠数据 (the PRD-0014 S15 禁). The half-open [start,end) video/audio
+  // detection — overlay-exempt for PiP — is therefore surfaced as a WARNING in
+  // `collectWarnings` (src/shared/composition/preflight.ts) and the lint rule
+  // `track-overlap` (src/composition/quality/lint.ts), both of which name BOTH
+  // clip ids. Promoting it to a schema error is deferred to a later version once
+  // existing overlapping works are migrated.
 }
 
 const TrackObjectSchema = z.object({

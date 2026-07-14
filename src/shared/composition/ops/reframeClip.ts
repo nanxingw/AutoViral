@@ -17,6 +17,7 @@
 
 import type { Composition, Clip, Transforms } from "../../composition.js";
 import { CompositionOpError } from "./errors.js";
+import { snapToFrame } from "../../frame.js";
 import { addKeyframe } from "./keyframe.js";
 
 export interface ReframeParams {
@@ -123,7 +124,11 @@ export function reframeClip(comp: Composition, p: ReframeParams): void {
     // `addKeyframe` rejects that as an off-clip time (code:4), so the default
     // punch-in would throw. Clamping keeps both endpoints inside the clip's own
     // span so the window can never fall out of bounds.
-    const snap = (sec: number) => Math.min(Math.max(Math.round(sec * fps) / fps, 0), dur);
+    // S15 — reuse the ONE shared frame-quantiser (was a private `Math.round(sec*
+    // fps)/fps` copy). `snapToFrame` rejects a negative window endpoint; the
+    // caller-facing窗口 defaults (0 / dur) are ≥ 0, and the `Math.min(_, dur)`
+    // clamp keeps a snapped-up fractional-frame `dur` inside the clip.
+    const snap = (sec: number) => Math.min(snapToFrame(sec, fps), dur);
     const from = snap(p.fromSec ?? 0);
     const to = snap(p.toSec ?? dur);
     // Reframe is composition sugar over the EXISTING transform keyframe family

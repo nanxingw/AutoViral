@@ -79,7 +79,10 @@ export function preflight(candidate: unknown): PreflightResult {
 function collectWarnings(comp: Composition, warnings: string[]): void {
   // track-overlap — two clips on one track whose timeline ranges intersect.
   // Video/audio clips span `in`..`out`; text/overlay clips span `duration`.
+  // S15 (PRD-0014) — overlay lanes are EXEMPT: picture-in-picture overlays
+  // legitimately stack, so overlapping overlay clips are NOT a smell.
   comp.tracks.forEach((track) => {
+    if ((track as { kind?: string }).kind === "overlay") return;
     const ranges: Array<{ id: string; start: number; end: number }> = [];
     track.clips.forEach((clip) => {
       const c = clip as unknown as {

@@ -14,6 +14,7 @@
 
 import type { Composition, Clip, Track } from "../../composition.js";
 import { CompositionOpError } from "./errors.js";
+import { snapToFrame } from "../../frame.js";
 import {
   TRANSITION_PRESET_META,
   getPresetMeta,
@@ -85,7 +86,12 @@ export function addTransition(
 
   const before = clips[beforeIdx];
   const after = clips[beforeIdx + 1];
-  const desired = durationSec ?? getPresetMeta(preset).defaultDurationSec;
+  // S15 — quantise an EXPLICIT cross-fade width to a whole frame before the
+  // handle clamp (which re-floors at TRANSITION_DURATION_MIN_SEC).
+  const desired =
+    durationSec !== undefined
+      ? snapToFrame(durationSec, comp.fps)
+      : getPresetMeta(preset).defaultDurationSec;
   const dur = clampHandleDuration(desired, clipDuration(before), clipDuration(after));
 
   const transitionId = `tr_${crypto.randomUUID()}`;
@@ -157,8 +163,14 @@ export function updateTransition(
       const clips = track.clips as Clip[];
       const beforeIdx = clips.findIndex((c) => c.id === tr.afterClipId);
       if (beforeIdx >= 0 && beforeIdx < clips.length - 1) {
+        // S15 — quantise an EXPLICIT duration edit to a whole frame; a preset-only
+        // edit keeps the stored value (already frame-aligned when it was written).
+        const desired =
+          p.durationSec !== undefined
+            ? snapToFrame(p.durationSec, comp.fps)
+            : tr.durationSec;
         tr.durationSec = clampHandleDuration(
-          p.durationSec ?? tr.durationSec,
+          desired,
           clipDuration(clips[beforeIdx]),
           clipDuration(clips[beforeIdx + 1]),
         );

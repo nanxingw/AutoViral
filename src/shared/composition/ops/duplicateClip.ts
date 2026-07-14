@@ -16,6 +16,7 @@
 // into the other — the #81/#86 spread-bleed lesson at the whole-clip scale.
 
 import type { Composition, Clip } from "../../composition.js";
+import { snapToFrame } from "../../frame.js";
 import { CompositionOpError } from "./errors.js";
 
 function cloneDeep<T>(value: T): T {
@@ -74,9 +75,11 @@ export function duplicateClip(
       p.offsetSec !== undefined && Number.isFinite(p.offsetSec)
         ? p.offsetSec
         : clipDuration(orig);
-    (copy as { trackOffset: number }).trackOffset = Math.max(
-      0,
-      orig.trackOffset + delta,
+    // S15 — snap the resulting timeline offset to a whole frame (the copy's
+    // placement is a caller-supplied delta from the original's start).
+    (copy as { trackOffset: number }).trackOffset = snapToFrame(
+      Math.max(0, orig.trackOffset + delta),
+      comp.fps,
     );
 
     // Insert directly after the original — keeps the array reference (#1).

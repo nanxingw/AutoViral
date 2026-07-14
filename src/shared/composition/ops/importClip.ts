@@ -32,6 +32,7 @@ import type {
   VideoClip,
 } from "../../composition.js";
 import { CompositionOpError } from "./errors.js";
+import { snapToFrame } from "../../frame.js";
 import { compositionContentEnd } from "./setDuration.js";
 
 /**
@@ -187,10 +188,12 @@ export function importClip(
 
   // (6) Place the VideoClip. Offset: 0 when replacing, else explicit atSec, else
   // append at the end of the destination lane (avoids stacking on an existing clip).
+  // S15 — a caller-supplied `--at` offset snaps to a whole frame so the imported
+  // clip lands frame-aligned (append/replace are already derived from aligned ends).
   const trackOffset = replaceTimeline
     ? 0
     : atSec != null
-      ? atSec
+      ? snapToFrame(atSec, comp.fps)
       : endOfVideoTrack(track);
   const clipId = newImportClipId();
   const clip: VideoClip = {

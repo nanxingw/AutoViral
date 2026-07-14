@@ -23,6 +23,7 @@
 
 import type { Composition, Clip, VideoClip } from "../../composition.js";
 import { effectiveClipDuration } from "../../speed-ramp.js";
+import { snapToFrame } from "../../frame.js";
 import {
   TRANSITION_PRESET_META,
   getPresetMeta,
@@ -96,8 +97,11 @@ export function setTransitionIn(
   // instead of a silent rejection. An EXPLICIT over-long duration is still
   // rejected below (agents/humans who type a number get told it doesn't fit).
   const explicit = p.spec.durationSec !== undefined;
+  // S15 — quantise an EXPLICIT entrance width to a whole frame. The auto-fit
+  // default (Math.min(registryDefault, eff)) is left as the clip's fractional
+  // effective width so snapping-up can't push it past `eff` and self-reject.
   const durationSec = explicit
-    ? (p.spec.durationSec as number)
+    ? snapToFrame(p.spec.durationSec as number, comp.fps)
     : Math.min(getPresetMeta(preset as TransitionPreset).defaultDurationSec, eff);
   if (!Number.isFinite(durationSec)) {
     throw new CompositionOpError(`setTransitionIn: durationSec must be a finite number`, 4);

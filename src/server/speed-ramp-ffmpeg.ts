@@ -42,6 +42,7 @@ import {
   effectiveClipDuration,
 } from "../shared/speed-ramp.js";
 import { interpolateProperty } from "../shared/keyframes.js";
+import { snapToFrame } from "../shared/frame.js";
 
 /**
  * Build the comma-chained `atempo=` filter expression for any speed in
@@ -251,7 +252,9 @@ export function planSpeedSegments(
   clip: { in: number; out: number; keyframes?: readonly Keyframe[] },
   fps: number,
 ): { segments: SpeedSegment[]; totalTimelineDuration: number } {
-  const snap = (sec: number) => Math.round(sec * fps) / fps;
+  // S15 — reuse the ONE shared frame-quantiser (was a private `Math.round(sec*
+  // fps)/fps` copy); clip.in/out are schema-guaranteed ≥ 0 source-window seconds.
+  const snap = (sec: number) => snapToFrame(sec, fps);
   const inSrc = snap(clip.in);
   const outSrc = snap(clip.out);
   const sourceDur = outSrc - inSrc;

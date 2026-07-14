@@ -26,6 +26,7 @@ import {
   isValidKeyframeEasing,
   KEYFRAME_TIME_EPSILON,
 } from "../../keyframes.js";
+import { snapToFrame } from "../../frame.js";
 import { CompositionOpError } from "./errors.js";
 
 // Floating-point tolerance for the upper-bound boundary check. Mirrors the
@@ -147,6 +148,13 @@ export function addKeyframe(comp: Composition, p: KeyframeWrite): void {
     );
   }
 
+  // S15 — quantise the keyframe time to a whole frame. `Math.min(_, maxAtSec)`:
+  // a keyframe authored AT a fractional-frame clip end (e.g. reframe's default
+  // punch-in window `to = dur` where dur = 2.06s @30fps) would otherwise snap UP
+  // past the clip end and get rejected as off-clip — clamping the snapped value
+  // to the clip's own span keeps a boundary keyframe valid.
+  const snappedAtSec = Math.min(snapToFrame(atSec, comp.fps), maxAtSec);
+
   // The clip is VideoClip | AudioClip | OverlayClip — all carry the optional
   // `keyframes?: Keyframe[]` leaf. `addOrReplaceKeyframe` returns a fresh array
   // (idempotent insert + re-sort); we assign it back onto the SAME clip object
@@ -155,7 +163,7 @@ export function addKeyframe(comp: Composition, p: KeyframeWrite): void {
   const target = clip as { keyframes?: import("../../composition.js").Keyframe[] };
   target.keyframes = addOrReplaceKeyframe(target.keyframes, {
     property,
-    time: atSec,
+    time: snappedAtSec,
     value,
     easing: easing ?? "linear",
   });
@@ -274,7 +282,11 @@ export function moveKeyframe(
     throw new CompositionOpError(`moveKeyframe: toSec ${p.toSec} must be finite`, 4);
   }
   const maxAtSec = clipKeyframeDuration(clip);
-  const clamped = Math.min(Math.max(p.toSec, 0), maxAtSec);
+  // S15 — clamp into [0, clipDuration] FIRST (a negative `toSec` clamps to 0, not
+  // a snapToFrame rejection), THEN quantise the clamped value to a whole frame,
+  // re-clamping so a fractional-frame clip end can't be overshot.
+  const clampedRaw = Math.min(Math.max(p.toSec, 0), maxAtSec);
+  const clamped = Math.min(snapToFrame(clampedRaw, comp.fps), maxAtSec);
   entry.time = clamped;
   // Keep the array sorted (property ASC, then time ASC) — the SAME order
   // addOrReplaceKeyframe maintains — so index-based consumers stay consistent.

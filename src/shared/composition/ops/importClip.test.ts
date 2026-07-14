@@ -136,15 +136,17 @@ describe("ops.importClip — clip construction", () => {
     expect(clip.trackOffset).toBe(4);
   });
 
-  it("honours an explicit atSec as trackOffset", () => {
-    const comp = defaultComp();
+  it("honours an explicit atSec as trackOffset — snapped to a whole frame (S15)", () => {
+    const comp = defaultComp(); // fps 30
     const { clipId } = importClip(comp, {
       probe: { durationSec: 3 },
       src: "output/c.mp4",
       atSec: 1.25,
     });
     const clip = comp.tracks[0].clips.find((c) => c.id === clipId)! as any;
-    expect(clip.trackOffset).toBe(1.25);
+    // S15 — a sub-frame `--at 1.25` (37.5 frames @30fps) quantises to frame 38 =
+    // 38/30 = 1.2667s so the imported clip lands on the frame grid.
+    expect(clip.trackOffset).toBeCloseTo(38 / 30, 9);
   });
 });
 

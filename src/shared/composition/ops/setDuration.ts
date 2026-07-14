@@ -23,6 +23,7 @@
 //                      duration with (`clipEnd = trackOffset + clipDuration`).
 
 import type { Composition, Clip } from "../../composition.js";
+import { snapToFrame } from "../../frame.js";
 import { CompositionOpError } from "./errors.js";
 
 // Inlined to keep this op free of the web-only `@autoviral/timeline` package
@@ -80,5 +81,7 @@ export function setCompositionDuration(
       4,
     );
   }
-  comp.duration = durationSec;
+  // S15 — quantise an EXPLICIT length to a whole frame (the { auto } branch above
+  // derives from already-placed clip ends, so it needs no re-snap).
+  comp.duration = snapToFrame(durationSec, comp.fps);
 }

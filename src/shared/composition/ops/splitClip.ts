@@ -15,6 +15,7 @@ import type { Composition, Clip, Keyframe } from "../../composition.js";
 import { splitKeyframesAtLocal } from "../../keyframes.js";
 import { effectiveClipDuration } from "../../speed-ramp.js";
 import { TRANSITION_DURATION_MIN_SEC } from "../../transitions.js";
+import { snapToFrame } from "../../frame.js";
 import { CompositionOpError } from "./errors.js";
 
 // Floating-point tolerance for the boundary no-op guards. Mirrors the
@@ -80,7 +81,10 @@ export function splitClip(
   comp: Composition,
   p: { clipId: string; atSec: number },
 ): { newClipId: string } {
-  const { clipId, atSec } = p;
+  const { clipId } = p;
+  // S15 — quantise the split point to a whole frame so child A's `out`, child B's
+  // `in`, and child B's `trackOffset` (all derived from atSec) land frame-aligned.
+  const atSec = snapToFrame(p.atSec, comp.fps);
   for (const track of comp.tracks) {
     const clips = track.clips as Clip[];
     const idx = clips.findIndex((c) => c.id === clipId);
