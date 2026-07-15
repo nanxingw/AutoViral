@@ -564,6 +564,13 @@ export class WsBridge {
   /** Processes intentionally replaced by a command must not later overwrite
    * the replacement process's idle/error state when their delayed exit fires. */
   private supersededCommandProcesses = new WeakSet<ChildProcess>();
+  /** W4.5 —— Processes deliberately killed via {@link requestKill} (destructive /stop,
+   *  idle-TTL, browser-disconnect, new-message with no active tasks). Distinct from
+   *  `supersededCommandProcesses` (model/command replacement, which returns early). Their
+   *  delayed exit must NOT re-broadcast `cli_exited` (session_killed + settled ui-workflow
+   *  already cover the user-visible surface); the exit handler consumes this marker to log a
+   *  `cli_exit_after_requested_kill` observation instead of going silent. */
+  private requestedKillProcesses = new WeakSet<ChildProcess>();
   /** TTL (ms) after which an idle session is auto-archived on sweep.
    *  Injectable so tests don't wait 7 days. */
   private readonly idleTtlMs: number;
@@ -1627,6 +1634,9 @@ export class WsBridge {
           generation: info.generation,
           from: info.from,
           to: info.to,
+          // W4.5 —— 带上拒绝类别，让 orphaned_requires_harvest / settled_generation /
+          // unknown_status / terminal_* 各自可观测（030/031 沉默面的取证钩子）。
+          kind: info.kind,
         }),
     }));
     const spawnGeneration = registry.beginGeneration();
@@ -1972,6 +1982,9 @@ export class WsBridge {
       // 进程状态抹掉（pre-existing 竞态）。settle 按代际寻址，不受此守卫影响，照常执行。
       // W4.5 H4 —— 捕获"本进程是否曾是活进程"（清位前判定），供下面的 cli_exited 广播门控。
       const wasActiveProc = session.cliProcess === proc;
+      // W4.5 —— 本进程是否经 requestKill 破坏性回收（消费标记）。requested-kill 已清 cliProcess，
+      // 故此时 wasActiveProc=false；用它把"被 /stop 等杀掉"与"陈旧竞态被新进程接管"区分开。
+      const wasRequestedKill = this.requestedKillProcesses.delete(proc);
       if (wasActiveProc) {
         session.cliProcess = undefined;
         session.idle = true;
@@ -2029,6 +2042,15 @@ export class WsBridge {
         this.broadcastToSession(session.workId, session.sessionId, {
           event: "cli_exited",
           data: { workId: session.workId, code, signal },
+        });
+      } else if (wasRequestedKill) {
+        // W4.5 —— 破坏性 requestKill（/stop 等）已清 cliProcess，本进程的迟到 exit 不再广播
+        // cli_exited（session_killed + 合成终态 ui-workflow 已覆盖用户可见面，避免重复终止信号）；
+        // 但绝不静默——落一条观测点，退出语义可取证（区别于 superseded 的早退与陈旧竞态）。
+        logBridge("cli_exit_after_requested_kill", session.workId, {
+          sessionId: session.sessionId,
+          code,
+          signal,
         });
       }
       // Persist chat to disk on CLI exit — default session only (others live
@@ -2550,6 +2572,10 @@ export class WsBridge {
       // 硬停语义（user_stop / abort / test_timeout）：SIGTERM 后 5s 仍未退则 SIGKILL。
       setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* dead */ } }, 5000);
     }
+    // W4.5 —— 清 cliProcess 前把该 proc 记为 requested-kill（superseded 的另有早退分支，不重记）。
+    // 其迟到 exit 因此 wasActiveProc=false → 不广播 cli_exited，但退出语义可观测（logBridge），
+    // 区别于"被替换(superseded)"（静默 return）与"陈旧竞态"（新进程接管，wasActiveProc 亦 false）。
+    if (!this.supersededCommandProcesses.has(proc)) this.requestedKillProcesses.add(proc);
     session.cliProcess = undefined;
     return "killed";
   }

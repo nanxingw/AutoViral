@@ -450,6 +450,10 @@ export class BackgroundTaskRegistry {
   ): BackgroundTaskSnapshot | undefined {
     const rec = this.tasks.get(this.keyFor(taskId, generation));
     if (!rec) return undefined;
+    // W4.5 幂等：已 orphaned 的任务再次打捞是彻底 no-op——返回 undefined（上层据此不再广播一次
+    // ui-workflow → 客户端不双 toast），且绝不用后到的 harvest 覆盖首个打捞结果。破坏性 settle
+    // 路径与进程 exit 路径会各触发一次打捞，此判定消除两者间的重复广播窗口。
+    if (rec.status === "orphaned") return undefined;
     // M9：唯一放行 orphaned 目标的地方——置内部旗，transition 内的 orphaned 守卫因此放行；
     // 白名单（stopped/killed→orphaned）仍生效，completed→orphaned 照旧被 terminal_to_terminal 拒。
     this.orphaningInternally = true;

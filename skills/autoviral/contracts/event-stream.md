@@ -139,7 +139,8 @@ An upsert (or terminal transition) of one task. Same-id delivery **REPLACES** th
 
 | field | type | notes |
 |---|---|---|
-| `sessionId` | string | Chat session the task belongs to. Half of the identity. |
+| `workId` | string | The work the task belongs to. Part of the identity — the client keys by `workId :: sessionId :: generation :: taskId` (W4.5 H5) so two works sharing session id `s_1` never cross-contaminate. |
+| `sessionId` | string | Chat session the task belongs to. Part of the identity (with `workId` / `generation` / `taskId`), not the whole of it. |
 | `taskId` | string | claude's ephemeral per-process task id (reused across turns). |
 | `generation` | number | Process generation (bumped each spawn). `taskId` alone is ambiguous across turns; `taskId + generation` is the stable key — an old turn's task and a new turn's same-`taskId` task are two rows. |
 | `status` | enum | `running` \| `pending-settle` \| `completed` \| `failed` \| `killed` \| `stopped` \| `orphaned`. |
@@ -174,7 +175,7 @@ Sent **once, first**, to a browser the moment it (re)connects — the full curre
                  "taskType": "local_workflow", "description": "深度调研" } ] } }
 ```
 
-`data.tasks` is an array of the same per-task shape as `ui-workflow`'s `data` (minus the envelope-level `sessionId`/`workId`/`ts`, which live on the snapshot wrapper). The client replaces its whole local task map for the session from this frame. Emitted only when the session has run at least one turn (no registry ⇒ no snapshot frame).
+`data.tasks` is an array of the same per-task shape as `ui-workflow`'s `data` (minus the envelope-level `sessionId`/`workId`/`ts`, which live on the snapshot wrapper). The client replaces its whole local task map for that **work + session** (keyed `workId :: sessionId`, W4.5 H5) from this frame. Emitted only when the session has run at least one turn (no registry ⇒ no snapshot frame).
 
 ### KillGate drain discipline (`chat_notice` + terminal `ui-workflow`)
 

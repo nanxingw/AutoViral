@@ -91,8 +91,10 @@ export function parseJournalCounts(text: string): JournalCounts | null {
       completed.add(key);
       started.add(key);
       anyValid = true;
-      const summary = summarizeResult(record.result);
-      if (summary) resultSummary = summary; // 保留"最后一个" result 的摘要
+      // 反映"最后一个" result 的摘要——无条件覆盖：若最后一个 result 无可摘要 payload
+      // （summarizeResult 返回 undefined），resultSummary 就该是 undefined，绝不残留前一条
+      // 摘要（否则卡片 tooltip 会挂上属于别的 agent 的过时摘要）。
+      resultSummary = summarizeResult(record.result);
     } else if (record.type === "started") {
       started.add(key);
       anyValid = true;
@@ -199,8 +201,13 @@ export function selectRunForWindow(
 ): WorkflowRun | null {
   if (startTime === undefined) return null;
   const hi = endTime ?? Number.POSITIVE_INFINITY;
-  const inWindow = runs.filter((r) => r.counts && r.mtimeMs >= startTime && r.mtimeMs <= hi);
-  return inWindow.length === 1 ? inWindow[0] : null;
+  // 唯一性判定在【剔除损坏 run 之前】：损坏 run（counts=null）落在窗口内同样占一个"歧义位"，
+  // 使这个任务无法唯一归属到某个 run（先剔除再判唯一会把"有效 run + 损坏 run 并存"误判成唯一，
+  // 把有效 run 的号错串到本任务上）。窗口内不唯一 → 保守不 enrich。
+  const inWindow = runs.filter((r) => r.mtimeMs >= startTime && r.mtimeMs <= hi);
+  if (inWindow.length !== 1) return null;
+  // 唯一命中：但若这条自身损坏（counts=null）则无可 enrich 的计数 → 仍不选中。
+  return inWindow[0].counts ? inWindow[0] : null;
 }
 
 /**

@@ -179,3 +179,90 @@ describe("WsBridge — PRD-0015 S2 registry 接线 + settleOnExit", () => {
     });
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRD-0015 W4.5 复核残留 —— exit 广播三分支（wasActiveProc 收窄 + requested-kill 观测）。
+// 面向客户端的 cli_exited 是 session 级、无代际——退出语义按进程"为何退出"分三支：
+//   ① 正常退出（本进程仍是活进程）→ 照常广播 cli_exited。
+//   ② 破坏性 requestKill（/stop）先清了 cliProcess → 迟到 exit 不广播 cli_exited（session_killed
+//      + ui-workflow 合成终态已覆盖用户可见面），但落一条 logBridge 观测（区别于 superseded 的静默）。
+//   ③ 被替换（superseded）→ 走 superseded 分支静默 return，不广播 cli_exited。
+// ─────────────────────────────────────────────────────────────────────────────
+describe("WsBridge — W4.5 exit 广播三分支", () => {
+  it("① 正常退出：本进程仍是活进程 → 广播 cli_exited", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, DEFAULT_CHAT_SESSION_ID } = await import("../../../ws-bridge.js");
+      const work = "w_exit_natural";
+      await mkdir(join(dir, "works", work), { recursive: true });
+      const bridge = new WsBridge(3271);
+      await bridge.createSession(work, "开工", undefined, DEFAULT_CHAT_SESSION_ID);
+      const session = bridge.getSession(work, DEFAULT_CHAT_SESSION_ID)!;
+      const proc = session.cliProcess as unknown as EventEmitter;
+
+      const captured: Array<{ event: string }> = [];
+      (bridge as any).onSessionEvent(work, (event: string) => captured.push({ event }));
+
+      proc.emit("exit", 0, null);
+      await sleep(10);
+
+      expect(captured.some((e) => e.event === "cli_exited")).toBe(true);
+    });
+  });
+
+  it("② /stop（破坏性 requestKill）：迟到 exit 不广播 cli_exited，但 logBridge 观测", async () => {
+    await withTempDataDir(async (dir) => {
+      const logger = await import("../../../infra/logger.js");
+      const logSpy = vi.spyOn(logger, "logBridge");
+      const { WsBridge, DEFAULT_CHAT_SESSION_ID } = await import("../../../ws-bridge.js");
+      const work = "w_exit_stop";
+      await mkdir(join(dir, "works", work), { recursive: true });
+      const bridge = new WsBridge(3271);
+      await bridge.createSession(work, "开工", undefined, DEFAULT_CHAT_SESSION_ID);
+      const session = bridge.getSession(work, DEFAULT_CHAT_SESSION_ID)!;
+      const proc = session.cliProcess as unknown as EventEmitter;
+
+      const captured: Array<{ event: string }> = [];
+      (bridge as any).onSessionEvent(work, (event: string) => captured.push({ event }));
+
+      // /stop：破坏性 requestKill 清 cliProcess 并广播 session_killed。
+      bridge.killSession(work, DEFAULT_CHAT_SESSION_ID, "user_stop");
+      await sleep(10);
+      expect(session.cliProcess).toBeUndefined();
+      logSpy.mockClear();
+
+      // 被杀进程迟到 exit：wasActiveProc 已 false（cliProcess 被清）→ 不广播 cli_exited；
+      // 但落一条 logBridge 观测（区别于 superseded 的静默 return）。
+      proc.emit("exit", null, "SIGTERM");
+      await sleep(10);
+
+      expect(captured.some((e) => e.event === "cli_exited")).toBe(false);
+      expect(captured.some((e) => e.event === "session_killed")).toBe(true);
+      expect(logSpy.mock.calls.some((c) => c[0] === "cli_exit_after_requested_kill")).toBe(true);
+      logSpy.mockRestore();
+    });
+  });
+
+  it("③ 被替换（superseded）：旧进程 exit 走 superseded 分支，不广播 cli_exited", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, DEFAULT_CHAT_SESSION_ID } = await import("../../../ws-bridge.js");
+      const work = "w_exit_superseded";
+      await mkdir(join(dir, "works", work), { recursive: true });
+      const bridge = new WsBridge(3271);
+      await bridge.createSession(work, "开工", undefined, DEFAULT_CHAT_SESSION_ID);
+      const session = bridge.getSession(work, DEFAULT_CHAT_SESSION_ID)!;
+      const proc1 = session.cliProcess as unknown as EventEmitter;
+
+      // 无活任务 → 切模型 kill+supersede proc1（不入 requested-kill 集）。
+      bridge.setSessionModel(work, "sonnet", DEFAULT_CHAT_SESSION_ID);
+
+      const captured: Array<{ event: string }> = [];
+      (bridge as any).onSessionEvent(work, (event: string) => captured.push({ event }));
+
+      proc1.emit("exit", null, "SIGTERM");
+      await sleep(10);
+
+      // superseded 分支在 wasActiveProc 判定前就 return，绝不广播 cli_exited。
+      expect(captured.some((e) => e.event === "cli_exited")).toBe(false);
+    });
+  });
+});

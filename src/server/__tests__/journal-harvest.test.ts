@@ -91,6 +91,19 @@ describe("parseJournalCounts — 按 journal key 去重（非行数）", () => {
     expect(parseJournalCounts("")).toBeNull();
     expect(parseJournalCounts(readFileSync(join(FIXTURE_DIR, "journal-corrupt.jsonl"), "utf8"))).toBeNull();
   });
+
+  it("L10 — 最后一个 result 无可摘要 payload → resultSummary undefined（不残留前一条摘要）", () => {
+    const text = [
+      JSON.stringify({ type: "result", key: "a", result: { conclusion: "first summary" } }),
+      JSON.stringify({ type: "result", key: "b", result: 42 }), // 数字 → summarizeResult 返回 undefined
+    ].join("\n");
+    const counts = parseJournalCounts(text);
+    expect(counts).not.toBeNull();
+    expect(counts!.completedAgents).toBe(2);
+    // resultSummary 反映"最后一个" result；最后一个无可摘要 payload 就是 undefined，
+    // 绝不残留前一条的 "first summary"（否则卡片 tooltip 会挂上错的 agent 摘要）。
+    expect(counts!.resultSummary).toBeUndefined();
+  });
 });
 
 describe("harvestWorkflowJournal — 派生路径 + 收割计数", () => {
@@ -195,5 +208,13 @@ describe("selectRunForWindow — M6 per-task 归属（两 run 并存不串号）
   it("损坏 run（counts=null）即便落窗内也不被选中", () => {
     const corrupt: WorkflowRun = { runId: "wf_C", journalPath: "/j/C", mtimeMs: 1000, counts: null };
     expect(selectRunForWindow([corrupt], 500, 1500)).toBeNull();
+  });
+
+  it("窗口内既有有效 run 又有损坏 run → 不唯一 → null（唯一性判定在剔除损坏 run 之前）", () => {
+    // corrupt（counts=null, mtime 1200）与有效 runA（mtime 1000）都落窗 [500,1500]。
+    // 若先剔除损坏 run 再判唯一，只剩 runA 看似可归属——但损坏 run 落在窗内本身就制造归属
+    // 歧义（这个任务究竟对应哪个 run 无从确定）→ 保守不 enrich，绝不把 runA 的号串上来。
+    const corrupt: WorkflowRun = { runId: "wf_C", journalPath: "/j/C", mtimeMs: 1200, counts: null };
+    expect(selectRunForWindow([runA, corrupt], 500, 1500)).toBeNull();
   });
 });

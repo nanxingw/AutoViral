@@ -557,4 +557,24 @@ describe("BackgroundTaskRegistry — markOrphaned + 终态覆盖白名单（S7�
     reg.settleOnExit("cli_exit", g);
     expect(reg.markOrphaned("wf", g, HARVEST)!.status).toBe("orphaned");
   });
+
+  it("W4.5 幂等 — 已 orphaned 再调 markOrphaned 返回 undefined（不重广播、不覆盖 harvest）", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "wf", taskType: "local_workflow" }, g);
+    reg.settleOnExit("cli_exit", g);
+
+    const first = reg.markOrphaned("wf", g, HARVEST);
+    expect(first).toBeDefined();
+    expect(first!.status).toBe("orphaned");
+
+    // 破坏性 settle 路径与进程 exit 路径会各触发一次 journal 打捞 → markOrphaned 被重复调用。
+    // 已 orphaned 的第二次调用必须是彻底 no-op：返回 undefined（上层据此绝不再广播一次
+    // ui-workflow → 客户端不双 toast），且绝不用后到的 harvest 覆盖首个打捞结果。
+    const SECOND_HARVEST = { ...HARVEST, completedAgents: 99, runId: "wf_other-run" };
+    const second = reg.markOrphaned("wf", g, SECOND_HARVEST);
+    expect(second).toBeUndefined();
+    expect(byId(reg, "wf")!.status).toBe("orphaned");
+    expect(byId(reg, "wf")!.harvest).toEqual(HARVEST);
+  });
 });
