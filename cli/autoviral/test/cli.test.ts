@@ -2695,6 +2695,25 @@ describe("autoviral CLI — end-to-end", () => {
     expect(r.stdout).toMatch(/toast/);
   });
 
+  // PRD-0014 S18 finding B [high] — the top-level --help omitted whole families
+  // of already-wired verbs (recon E2E D1/D6 had to read registry.ts /
+  // 03-cli-reference to discover clip reframe/detach-audio/mask and captions
+  // --script). Pin every verb + flag the help must advertise so it can't drift
+  // out of sync with the runtime again.
+  it("--help advertises the S5/S8/S9/S13/S14 clip + captions verbs (no registry spelunking)", async () => {
+    const r = await run(["--help"]);
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toMatch(/clip reframe/);
+    expect(r.stdout).toMatch(/clip detach-audio/);
+    expect(r.stdout).toMatch(/clip mask/);
+    expect(r.stdout).toMatch(/clip duplicate/);
+    expect(r.stdout).toMatch(/clip keyframe/);
+    expect(r.stdout).toMatch(/clip effects/);
+    expect(r.stdout).toMatch(/--ripple/);
+    expect(r.stdout).toMatch(/--script/);
+    expect(r.stdout).toMatch(/--max-cjk-chars/);
+  });
+
   // C2 (PRD-0009) — `docs` help must advertise the contracts/ + recipes/
   // sibling namespaces, not just the manual chapters. The manual散文 points at
   // those topics (`contracts/error-codes`, `recipes/video/…`) and the route now

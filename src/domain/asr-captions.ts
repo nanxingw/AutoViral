@@ -26,6 +26,35 @@ export interface CaptionSegment {
   text: string;
 }
 
+/**
+ * Parse the inline python's stdout, tolerating whisper's language-detection
+ * banner. When no `--language` is pinned, whisper auto-detects and prints
+ * "Detecting language…" / "Detected language: Chinese" to STDOUT (S18 B), ahead
+ * of the single-line `json.dumps` our script emits last. A naive
+ * `JSON.parse(whole stdout)` then throws and the caller 500s. We scan lines
+ * bottom-up for the first that parses to a JSON object (json.dumps emits ONE
+ * line, no indent), so any banner above it is ignored. Falls back to a
+ * whole-buffer parse for the clean case; if nothing parses this THROWS, which
+ * the caller maps to a real 500 (same family as the repo's historic "captions
+ * 500 stdout 污染"). Exported for the unit test.
+ */
+export function parseAsrStdout(stdout: string): any {
+  const lines = stdout.split(/\r?\n/);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!.trim();
+    if (!line.startsWith("{")) continue;
+    try {
+      const obj = JSON.parse(line);
+      if (obj && typeof obj === "object") return obj;
+    } catch {
+      /* not this line — keep scanning up */
+    }
+  }
+  // No object line matched — try the whole buffer (a clean multi-line JSON), and
+  // let a genuine non-JSON stdout throw up into the caller's 500 mapping.
+  return JSON.parse(stdout);
+}
+
 export type AsrCaptionsResult =
   | { ok: true; captions: CaptionSegment[]; words?: CaptionSegment[] }
   | { ok: false; status: 500 | 503; code: string; error: string };
@@ -58,14 +87,20 @@ export async function runAsrCaptions(
   // dumps timecoded segments as JSON on stdout.
   const wordLevel = opts?.wordLevel === true;
   const py = `
-import json, sys
+import json, sys, contextlib
 try:
     import stable_whisper
 except Exception as e:
     print(json.dumps({"error": "stable-whisper not installed: " + str(e)}), file=sys.stdout)
     sys.exit(0)
-model = stable_whisper.load_model("base")
-result = model.transcribe(${JSON.stringify(absAudioPath)}${language ? `, language=${JSON.stringify(language)}` : ""}${wordLevel ? ", word_timestamps=True" : ""})
+# S18 B — with no language pinned, whisper auto-detects and prints
+# "Detecting language…" / "Detected language: …" to STDOUT, which would pollute
+# the single json.dumps line below and break JSON.parse on the node side.
+# Redirect stdout to stderr around the noisy calls so ONLY our final JSON lands
+# on stdout (belt-and-suspenders with the node-side parseAsrStdout scanner).
+with contextlib.redirect_stdout(sys.stderr):
+    model = stable_whisper.load_model("base")
+    result = model.transcribe(${JSON.stringify(absAudioPath)}${language ? `, language=${JSON.stringify(language)}` : ""}${wordLevel ? ", word_timestamps=True" : ""})
 segs = []
 for s in result.segments:
     segs.append({"start": float(s.start), "end": float(s.end), "text": s.text.strip()})
@@ -94,7 +129,7 @@ print(json.dumps(out))
       timeout: 180_000,
       maxBuffer: 16 * 1024 * 1024,
     });
-    const parsed = JSON.parse(stdout);
+    const parsed = parseAsrStdout(stdout);
     if (parsed.error) {
       return {
         ok: false,

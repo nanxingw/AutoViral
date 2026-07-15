@@ -72,6 +72,52 @@ describe("runAsrCaptions — word-timing failure is not a false success", () => 
     }
   });
 
+  // PRD-0014 S18 finding B [high] — with no `--language` pinned, whisper
+  // auto-detects and prints "Detecting language…" / "Detected language: Chinese"
+  // to STDOUT, polluting the single json.dumps line the inline python emits.
+  // `JSON.parse(whole stdout)` then throws → the route 500s (`captions generate
+  // --script` without --language crashed in the recon E2E D6). The node side must
+  // recover the trailing JSON regardless of the banner (same family as the repo's
+  // historic "captions 500 stdout 污染").
+  it("tolerates whisper 'Detected language' stdout banner before the JSON (S18 B — no 500)", async () => {
+    const payload = { segments: [{ start: 0, end: 2, text: "内存条" }] };
+    execFileAsync.mockResolvedValueOnce({
+      stdout:
+        "Detecting language using up to the first 30 seconds...\n" +
+        "Detected language: Chinese\n" +
+        JSON.stringify(payload) +
+        "\n",
+      stderr: "",
+    });
+    const res = await runAsrCaptions("/abs/audio.mp3"); // no language → auto-detect
+    expect(res.ok).toBe(true);
+    if (res.ok) {
+      expect(res.captions).toHaveLength(1);
+      expect(res.captions[0]!.text).toBe("内存条");
+    }
+  });
+
+  it("word-level path also survives the banner (picks the trailing JSON with words)", async () => {
+    const payload = {
+      segments: [{ start: 0, end: 1, text: "你好" }],
+      words: [{ start: 0, end: 1, text: "你好" }],
+    };
+    execFileAsync.mockResolvedValueOnce({
+      stdout: "Detected language: Chinese\n" + JSON.stringify(payload),
+      stderr: "",
+    });
+    const res = await runAsrCaptions("/abs/audio.mp3", undefined, { wordLevel: true });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.words).toHaveLength(1);
+  });
+
+  it("stdout with no JSON object at all → 500 API_ERROR (not a crash)", async () => {
+    execFileAsync.mockResolvedValueOnce({ stdout: "totally not json\n", stderr: "" });
+    const res = await runAsrCaptions("/abs/audio.mp3");
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.status).toBe(500);
+  });
+
   it("a genuine stable-ts import error still surfaces as 503 PYTHON_DEP_MISSING", async () => {
     execFileAsync.mockResolvedValueOnce(
       stdout({ error: "stable-whisper not installed: No module named 'stable_whisper'" }),
