@@ -37,6 +37,7 @@ import {
   findIdleSessions,
   type SessionRecord,
 } from "./server/sessions/sessions-sidecar.js";
+import { BackgroundTaskRegistry } from "./server/sessions/background-task-registry.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -131,6 +132,12 @@ export interface WsSession {
   /** Structured command idempotency bookkeeping. */
   lastCommandKey?: string;
   lastCommandAt?: number;
+  /** PRD-0015 S2 —— per (workId×sessionId) 的后台任务生命周期登记表。S1 归一化的
+   *  ChatBackgroundTaskEvent 经此 applyEvent；每次 spawnCli 前 beginGeneration 推进进程
+   *  代际（旧代任务不被新代同名事件复活）；宿主进程 exit 时 settleOnExit 把仍活的任务合成
+   *  终态并标 reason（030"被杀无提示"止损）。跨 turn 持久（同一 WsSession 对象复用），
+   *  createSession 重建时从 existing 承接。广播（ui-workflow）留 S3。懒建于首个 spawnCli。 */
+  taskRegistry?: BackgroundTaskRegistry;
 }
 
 /** A2 (PRD-0010) — how long an identical, back-to-back user message is treated
@@ -780,6 +787,10 @@ export class WsBridge {
       // Provisional — overridden below by the persisted record's backend (an
       // established session's pin wins over the passed arg).
       backend: resolveBackendId(backend),
+      // PRD-0015 S2 — carry the task registry across a createSession re-pin so
+      // durable task history (per workId×sessionId) survives, like browserSockets
+      // / messageHistory above. Undefined on first创建 → lazily built in spawnCli.
+      taskRegistry: existing?.taskRegistry,
     };
     this.setSessionEntry(workId, sid, session);
 
@@ -1443,6 +1454,12 @@ export class WsBridge {
 
     session.cliProcess = proc;
 
+    // PRD-0015 S2 — 后台任务登记表：懒建（首个 spawnCli），每次 spawn 推进一个进程代际，
+    // 使旧 turn 的 ephemeral 任务 id 复用不会被新进程的同名 started 事件复活/吞并。捕获
+    // 本次代号进 exit handler 闭包，让退出只收尾【这个】进程的活任务。
+    const registry = (session.taskRegistry ??= new BackgroundTaskRegistry());
+    const spawnGeneration = registry.beginGeneration();
+
     // Accumulate assistant text chunks for this turn (also read by the exit
     // handler below, so these stay in method scope, not inside the parser).
     let turnText = "";
@@ -1687,11 +1704,12 @@ export class WsBridge {
         }
       },
 
-      // PRD-0015 S1 —— 后台任务生命周期归一化事件先以日志形式可观测。本片只加
-      // logBridge("bg_task", ...) 的观测点；registry 接管（applyEvent / settleOnExit /
-      // 广播 ui-workflow）留给 S2，这里【不】建 registry、【不】广播。task-class 帧
+      // PRD-0015 S2 —— 后台任务生命周期归一化事件喂入 registry（applyEvent：同 id
+      // upsert + 状态机推进）。作用于当代（beginGeneration 已在 spawn 时推进）。本片
+      // 仍【不】广播 ui-workflow（S3 的事），只做登记 + logBridge 观测。task-class 帧
       // 仍会经上面的 onOther 走既有 cli_event 转发（claude 后端故意双发，不回归）。
       onBackgroundTask: (event) => {
+        registry.applyEvent(event);
         logBridge("bg_task", session.workId, {
           kind: event.kind,
           taskId: event.taskId,
@@ -1741,6 +1759,20 @@ export class WsBridge {
       logBridge("cli_exit", session.workId, { code, signal, turnTextLen: turnText.length });
       session.cliProcess = undefined;
       session.idle = true;
+
+      // PRD-0015 S2 —— 宿主进程退出兜底：把【本代际】仍未落定（running / pending-settle）
+      // 的后台任务合成 stopped 终态并标 reason=cli_exit——这正是 030"被杀无提示"的止损处。
+      // 已终态（completed/killed/stopped）的任务不被覆盖（exp1 双 result：完成的不误标终止）。
+      // 本片仍不广播（S3 接 ui-workflow）；settle 结果 logBridge 可观测。
+      const settled = registry.settleOnExit("cli_exit", spawnGeneration);
+      if (settled.length > 0) {
+        logBridge("bg_settle_on_exit", session.workId, {
+          reason: "cli_exit",
+          generation: spawnGeneration,
+          count: settled.length,
+          taskIds: settled.map((t) => t.taskId),
+        });
+      }
 
       if (commandName && !commandSettled) {
         commandSettled = true;
