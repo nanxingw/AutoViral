@@ -83,3 +83,55 @@ jobs:
       # so this one step covers CLI build + test together.
       - name: Test (cli)
         run: npm run test:cli
+
+  # ─── PRD-0014 S16 — preview=export consistency gate (RUN_CONSISTENCY_GATE=1) ──
+  # The FULL A(still)-vs-B(export) fixtures (transitionIn / speed / mask / blend /
+  # effects / adjustment / freeze / reverse) are describe.skipIf(!RUN_CONSISTENCY_
+  # GATE) — WITHOUT this variable they NEVER run, so the WYSIWYG regression net had
+  # zero teeth in CI (S16 review finding #1). This dedicated job opts in. It is a
+  # SEPARATE runner from build-and-test, so it does NOT violate "绝不并发跑两个
+  # vitest" (that rule is about one machine — these are distinct VMs) and it does
+  # NOT re-run the whole test:server suite: it runs ONLY consistency-gate.test.ts.
+  #
+  # Deps the gate shells out to (execFile-probed at runtime, never guessed):
+  #   • ffmpeg/ffprobe — the daemon resolves the VENDORED ffmpeg-static /
+  #     @ffprobe-installer binaries (installed by `npm ci`), which include libx264
+  #     + lavfi; apt ffmpeg is belt-and-braces parity with build-and-test.
+  #   • Chromium — Remotion renders the still (A) + export Stage-1 (B) in a headless
+  #     Chrome. `remotion browser ensure` downloads chrome-headless-shell into
+  #     node_modules/.remotion where the renderer finds it (AUTOVIRAL_CHROMIUM_PATH
+  #     stays unset → renderer uses that cache).
+  consistency-gate:
+    name: consistency gate (WYSIWYG)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node 20.x
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20.x
+          cache: npm
+
+      - name: Install ffmpeg (parity with build-and-test)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Download the headless Chrome shell into node_modules/.remotion so the
+      # still (A) + export (B) render paths have a browser. Fails the job loudly
+      # here (not mid-render at the 120s delayRender timeout) if the download
+      # can't complete.
+      - name: Ensure Remotion Chromium
+        run: npx remotion browser ensure
+
+      # RUN only the gate file with the opt-in flag. `npm run test:server -- <file>`
+      # goes through the pretest hook (which no-ops under CI) and does NOT bypass
+      # npm; the FULL fixtures now actually execute.
+      - name: Consistency gate (RUN_CONSISTENCY_GATE=1)
+        env:
+          RUN_CONSISTENCY_GATE: "1"
+        run: npm run test:server -- src/server/__tests__/consistency-gate.test.ts
