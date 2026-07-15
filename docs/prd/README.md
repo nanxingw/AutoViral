@@ -50,4 +50,4 @@
 | [0011](0011-canvas-fps-editable.md) | 画布帧率可改（fps 一等公民化，v0.1.10） | Shipped | 2026-07-09 |
 | [0012](0012-export-fidelity-and-deliverables.md) | 导出保真与成品管理（v0.1.10，与 0011 同批） | Shipped | 2026-07-09 |
 | [0013](0013-studio-focus-and-slimdown.md) | v0.1.11 Studio 工作台聚焦：布局固定、时间线精修、slash 命令与产品瘦身 | Shipped | 2026-07-10 |
-| [0014](0014-wysiwyg-editing-parity.md) | v0.2.0 WYSIWYG 焊死与剪辑能力对标：承载 agent 亲手剪的完整短视频（OpenCut 对标 + AI↔Studio 双驱动，切片见 [issue-slices](0014-wysiwyg-editing-parity-issue-slices.md)） | Proposed | 2026-07-14 |
+| [0014](0014-wysiwyg-editing-parity.md) | v0.2.0 WYSIWYG 焊死与剪辑能力对标：承载 agent 亲手剪的完整短视频（OpenCut 对标 + AI↔Studio 双驱动，切片见 [issue-slices](0014-wysiwyg-editing-parity-issue-slices.md)） | Implemented | 2026-07-14 |

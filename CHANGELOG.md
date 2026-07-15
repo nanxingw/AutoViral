@@ -7,6 +7,50 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-07-15
+
+**WYSIWYG 焊死与剪辑能力对标**（PRD-0014，19 片）—— 一条主线：让 agent 亲手剪出一条完整短视频，且**预览认可的节奏就是成片的节奏**。两侧收敛同一份 composition：转场 / 变速 / mask / blend / effects 全部走 Remotion 同源组件（预览=导出 by construction），CLI 与 UI 每个新编辑动词都经共享 op 三端接线（sweep gate 常驻防止再造 store-only 动词）。全程测试先行（预设测试证红→转绿），每片经 codex 独立审查，S16 落地机器化的「预览=导出」逐像素回归 gate（8 fixture + 专用 CI job），S18 经三轮 Workflow 多纬度浏览器 E2E（截图 + DOM/computed-style 二确 + completeness-critic）终验：抓出并当日修复变速导出不可交付（served-URL 误判致 Remotion 解码 HTML）、四 cinematic 转场端点 500、captions 默认路径 500、硬件编码器 -12900 等真回归，末轮三证（成品 ffprobe + 抽帧非 HTML + 浏览器可见）齐全销账。
+
+### Added
+
+- **stylize / motion 转场进 Remotion 注册表**（WYSIWYG by construction）— `TRANSITION_PRESET_META` 新增 `glitch`、`light-leak`、`whip-pan-left`、`whip-pan-right`、`zoom-in`、`zoom-out` 六个 preset，各对应一个 Remotion presentation 组件（CSS filter/transform/keyframe 插值），预览与导出走同一组件、肉眼一致。
+- **入场转场 `VideoClip.transitionIn`** — clip 头部套 presentation 组件（preset + durationSec + easing，refine 校验时长不超 clip），支撑逐拍快切的表达根基；CLI `clip set --transition-in glitch:0.4`（`none` 清除）、Inspector 入场转场选择器。
+- **变速导出真实生效** — 多值 speed keyframe 按曲线切段、段内恒速 `setpts=PTS/k` + `atempo=k`（超 [0.5,2] 时 comma-chain）concat 拼接，产物进 pre-pass 缓存（cache key 覆盖曲线内容）；AudioClip 静态 speed 经 `atempo` 生效。同一 composition 预览播放时长与导出成片时长一致（±1 帧）。
+- **原声拆轨 `sourceAudio` + `detachAudio`** — schema 新增 `VideoClip.sourceAudio`（缺省 enabled，向后兼容）；`detachAudio` 原子生成同源 AudioClip（src/in/out/offset 对齐）并关掉源声开关，预览/导出两侧源声互斥不双份出声；CLI `clip detach-audio`、Inspector 原声开关 + 音量 + Detach 按钮。
+- **`clip import` 成片回填时间线** — 新增共享 op（ffprobe → 构造 VideoClip + Asset 登记 + `op:"import"` provenance 边）+ bridge 端点 + CLI `clip import <path> [--track] [--replace-timeline] [--at]`；素材库 video「添加到时间线」收敛到同一服务端 importClip（probe 是唯一真实时长来源），不再落固定 5s 占位。
+- **共享 ops 下沉两批** — `rippleDeleteClip` / `collapseGapsOnTrack` / `duplicateClip` / `setTrackProps` / `removeKeyframe` / `moveKeyframe` / `updateTransition` / 多目标 `select` 协议 / `reframe` 语义糖（组合 crop + scale/x/y keyframe，不引新 schema）全部提升为共享 op 三端接线，store 降为薄包装；CLI 补 `clip remove --ripple`、`track collapse`、`clip duplicate`、`track set --label/--language/--volume/--muted`、`clip keyframe remove/move`、`transition set`、`clip reframe`。新增 **opsSweepGate 棘轮**：枚举 store 全部编辑类 action 断言各有共享 op 对应，常驻防止再造 store-only 动词。
+- **cubic-bezier easing** — `KeyframeEasingSchema` 从 4 离散枚举扩为 `枚举 ∪ {type:"cubic-bezier", p:[x1,y1,x2,y2]}`（x 域校验），插值统一走 Remotion `Easing.bezier`；CLI `--easing "cubic-bezier(0.4,0,0.2,1)"`、Inspector 自定义 bezier 四数字输入。
+- **`snapToFrame` 帧量化 + 同轨 overlap 校验** — 共享 ops 层所有写 offset/in/out/durationSec 的 op 统一过 `snapToFrame(sec, fps)`；`refineTrack` 增同轨半开区间重叠检测（video/audio error 带双 clip id + 区间，overlay 轨放行 PiP）。CLI/bridge 全路径落点帧对齐。
+- **mask（rect/ellipse + feather + letterbox preset）** — schema 新增 `VideoClip.mask`；Remotion 侧 CSS `mask-image`（内嵌 data-URI SVG path + `feGaussianBlur` 软边，预览=导出同一组件）；letterbox 做成 preset（`clip mask --preset letterbox-2.35` 展开为居中 rect band）；CLI `clip mask --shape ellipse --feather 0.2 [--inverted]` / `--none`、Inspector mask 节。
+- **blendMode 五枚举 + 有序 effects 栈 + adjustment 轨** — `VideoClip/OverlayClip.blendMode`（normal/screen/multiply/overlay/add，CSS `mix-blend-mode`）；扁平 `filters` 升级为有序 `effects: [{id,type,params,enabled}]` 栈（读时旧 filters **无损自动投影**为一个 grade entry 并回写新格式，内置 grade/blur/vignette/grain），共享 op `add/remove/reorder/toggle/updateEffectParams`；新增 `kind:"adjustment"` 轨（时间窗内包裹下层轨输出）。CLI `clip effects add/remove/reorder/toggle/set`、`clip set --blend`、`track add --kind adjustment`。
+- **字幕闭环** — `captions generate --script <file> [--max-cjk-chars 14]`：ASR 词级 timing 与台词真值粗对齐（LCS 级）→ 替换文本 → CJK 按上限分行 → 产出 CaptionModel；CLI `export`/`render` 补 `--caption-tracks zh[,en]` 透传渲染队列。
+- **生成韧性** — 生成路由接入 request abort（客户端断连/显式 abort → 取消上游 provider job，不能取消的停止入账后续轮询并标 orphaned 记入 cost-ledger）；work 目录 `generation-manifest.json` 内容寻址幂等（done 跳过、in-flight 拒绝重复下单、failed 允许重试）；孤儿锁 fail-closed，重复下单返 409。
+- **render 队列全生命周期 CLI + 单帧快照** — `render enqueue` / `status <jobId>`（含 progress）/ `cancel` / `history` / `snapshot --frame N [--out png]`（走 `remotion-still` 单帧，agent 的廉价 ground-truth 自检点）；既有 `export` 同步语义保留。
+- **预览=导出一致性 gate** — 测试基建：A 路 Remotion 直出单帧 PNG（预览）、B 路导出管线（含 pre-pass）抽同帧 PNG，逐像素比对（容差能抓住「变速回退 1×」级差异）；fixture 覆盖 transitionIn/多值 speed/mask/blend/effects/adjustment/freeze/reverse，作为 `test:server` integration 族并入专用 `RUN_CONSISTENCY_GATE=1` CI job。
+- **skills/autoviral 六条 operator recipes + 手册补全** — decouple-narration / beat-cutting / burn-subtitles-asr-aligned / generate-cover 等操作机制片，生成韧性 gotcha、成本旋钮（720p vs 1080p）、managed ffmpeg gotcha、render 队列 / 快照端点文档；`autoviral docs` 输出源同步，每条 recipe 引用的 CLI 动词经 grep 断言真实存在。
+
+### Fixed
+
+- **四个 cinematic 转场 REST 端点渲染 500**（issue #93 根因）— `src/server/render/transitions.ts` 三种坏法一次修净：glitch-cut / domain-warp 的 `geq` 内小写 `t` 改大写 `T`、非法 `alpha(X,Y)` 改 `a(x,y)`/`ld,st`、grav-lens 塞进 `lenscorrection` 静态 option 的时间表达式改逐帧参数化；`POST /api/transitions/{glitch,light-leak,domain-warp,grav-lens}` 对含音轨 clip 4/4 → 200 出正常成片。附修无音轨 clip 打这四端点仍 500（`applyFn` 无条件 `acrossfade` 但端点只探视频流）→ 按有无音频流条件构建音轨链。
+- **freeze 预览黑帧** — 消费侧真裂缝，改用 Remotion `<Freeze>` HOLD 帧，预览定格与导出一致。
+- **变速 / 变换导出不可交付**（S18 E2E 抓获，两段根因）— ① Stage 0 speed 预处理在 `rewriteClipSrcsToAbsolute` 之前运行，daemon cwd≠workDir 时 ffprobe ENOENT（预处理入口先 join workDir 再 probe/pass）；② `rewriteSpeedBaked` 写 FS 绝对路径被 `resolveOne` 误当页绝对 URL → SPA catch-all 返 HTML → Remotion「Invalid data」（`resolveOne` 的 `/` 分支排除真实 FS 绝对路径，同型 crop/flip/timewarp 预处理产物统一受益）。R3 三证（成品 ffprobe 72f/3.000s ≈ comp 71.51f + 抽帧源时码 2.208s@输出 1.667s 证收缩 + 浏览器成品区可见）销账。
+- **硬件编码器 videotoolbox `-12900`** — `h264_videotoolbox` 设 bitrate 失败时自动降级软件 `libx264`，导出 deliverable 不再被特定 resolution/bitrate 阻断。
+- **ASR captions 默认路径 500** — `captions generate --script` 不带 `--language` 时 whisper "Detected language" banner 污染 `JSON.parse(stdout)`；`parseAsrStdout` 自底向上扫首个可解析 JSON + python `redirect_stdout(sys.stderr)`，canonical recipe 默认路径不再崩。
+- **`clip move --offset` 静默丢弃** — 同轨 `--offset` 分支曾静默 no-op（trackOffset 不变），修复 `moveClipToTrack` 同轨 offset 分支。
+- **`comp set --duration auto` 变速感知** — auto 时长曾忽略变速收缩（effectiveClipDuration 2.7 却回 4s），现按 effective 时长收缩（复验 4→2.98s）。
+- **adjustment kind 类型穿透** — adjustment 轨 kind 补齐 web 类型 / UI 映射（tsc 16 处）。
+
+### Deprecated
+
+- **四个 `/api/transitions/{glitch,light-leak,domain-warp,grav-lens}` REST 烘焙端点** — 被 S2 的 Remotion 注册表路径（预览=导出同源）替代，标 [RFC 9745](https://www.rfc-editor.org/rfc/rfc9745) `Deprecation` + `Link` successor-version 响应头，**计划 v0.3 移除**（暂不删，manual 注明）。
+
+### Known Issues
+
+- **UI 鼠标拖拽 clip 移动 / trim 落点写 off-grid offset**（S15 residual，已登记）— 真实鼠标拖拽仍直写时间字段绕过 `snapToFrame`（E2E 复现 offset×fps 非整数），完整 rewire 需新共享 move/resize op + keyframe rebasing，归 SINK_PENDING 棘轮欠账；CLI/bridge/op 全路径及 ripple/collapse 派生 offset 均已帧对齐，导出可能因此微抖。
+- **生成韧性（断连取消 / manifest 幂等）无 runtime E2E** — 真实付费 provider 弃单会烧用户额度，编排层有意跳过（intentional skip），已由 S10 单测 + 代码级覆盖。
+- **blend screen/multiply 导出侧像素级混合未抽帧验证** — 预览侧已 DOM 二确落点元素 + inline/computed `mix-blend-mode`（screen/multiply 皆落 overlay `<img>`），导出侧同码路但未抽帧比对。
+- **Studio 无内置 overlap lint 面板** — agent 写入重叠 clip 时结构化错误仅在 API 层（preflight/lint 端点），人-UI 侧仅把重叠 clip 真实渲染出来、无警示可见性。
+
 ## [0.1.11] - 2026-07-12
 
 ### Added
