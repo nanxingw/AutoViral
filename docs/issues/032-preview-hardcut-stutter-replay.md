@@ -127,6 +127,44 @@
 
 premount（S2）+ 音频 `pauseWhenBuffering`（S3）+ 1.2s 复审后，夹具**仍未全绿**：`waiting≈2`、audio 负跳 4–8 条 ~600ms（video 负跳 0、帧钟单调）。残留的 ~600ms 音频回放**不在视频 `acceptableTimeShiftInSeconds` 的可及范围内**——它由**音频元素自身**的漂移阈值主导（当前用 remotion 默认）。真正能压这条残留的下一手是**收窄 AudioTrackRenderer `<Audio>` 的 `acceptableTimeShiftInSeconds`**（本 slice 未纳入——task 明确把 ATS 决策限定在视频 prop、音频仅补 `pauseWhenBuffering`；且收窄音频阈值有"纠偏更频繁→音频更 choppy"的独立 tradeoff，需单独实测定夺）。本轮不硬凑绿：S3 交付 = 音频 `pauseWhenBuffering` + 视频 1.2s 复审（KEEP，两档数据存档），video 侧回放两档均 0、帧钟单调；audio 侧残留移交音频阈值单独立项。
 
+## S4 压力复测（2026-07-15）资源压力 + 媒体元素盘点
+
+**结论：premount 使稳态 Player clip `<video>` 峰值 1→2（实测证实），叠加 24-asset grid（24 poster `<video>` 常驻）压力复测无解码预算回归——无 ~3s hitch 族、video 负跳两态均 0、帧钟单调；残留 audio 负跳 7 条 ~600ms 两态全等，是 S3 已存档的音频阈值残留、与 grid 开/关无关、非本轮引入。** 媒体元素全盘点落 [`docs/research/2026-07-15-studio-media-element-inventory.md`](../research/2026-07-15-studio-media-element-inventory.md)。
+
+- **无实现代码变更**：S4 = 复测 + 盘点落档（premount 在 S2 已落）。故无预设测试（纯文档 + 浏览器复测，属 test-first.md「不可测变更」例外）；既有套件不触（仅新增 2 个 md）。
+- **环境**：同 S1/S2/S3（work `w_20260715_0035_20d`，daemon `localhost:3271`，HEAD `b10c195` 服务的 dist——已核对 bundle 携 `acceptableTimeShiftInSeconds:1.2` + `premountFor` + `pauseWhenBuffering`），浏览器插桩 S4 subagent 亲跑。**rAF 门控全程通过**：State A `rafRateMin=71`/105 样本；State B `rafRateMin=71`/90 样本（均 ≥30）。首次 play 真实鼠标手势解锁 AudioContext（截图二确 FRAME 00:08.71 真实视频帧 + 字幕前进）。
+
+### premount 1→2 稳态证据（暂停态元素计数，非播放态峰值噪声）
+
+| 位置 | 是否在 ~1s premount 窗内 | Player clip `<video>` 数 | 挂载的 src |
+|---|---|---|---|
+| 6.0s（clip#2 中段，8s 切点前 ~2s） | 否 | **1** | `seedance-9d57eec297ff.mp4#t=0,4` |
+| 7.58s（8s 切点前 ~0.4s） | 是 | **2** | `seedance-9d57...#t=0,4`（当前）+ `seedance-05ccae25a76a.mp4#t=0,4`（预挂下一 clip） |
+
+播放态两态 `peakMountedPlayerVideos=2`（挂载峰值；任一瞬间仅 1 个 `!paused` 实际前进，另一个 premount 冻结但已 `.load()` 占解码管线）。
+
+### 两态压力复测（AssetSidebar 关 / 开，各 unmuted 12 跨界 / 2 轮，startSec 3.2 → endSec 25，切点 4/8/12/16/20/24）
+
+| 指标 | S1 红基线（无 premount） | State A：关（Inspector，无 grid） | State B：开（LIBRARY·CLIPS·24，24 poster 常驻） |
+|---|---|---|---|
+| 并发 `<video>` 元素 | — | 2 Player + 5 `<audio>` | **24 poster + 2 Player + 5 `<audio>` = 26+** |
+| `peakMountedPlayerVideos` | 1 | 2 | 2 |
+| waiting（Player） | **40** | 2 | 3 |
+| stalled / clockFreeze | 0 / 0 | 0 / 0 | 0 / 0 |
+| **video 元素 ct 负跳** | 0（全 audio） | **0** | **0** |
+| audio 元素 ct 负跳 | 19（129–375ms，聚 8s 切点） | 7（全 BGM+VO，595–644ms） | 7（全 BGM+VO，602–669ms） |
+| `monotonicClock` | true | true | true |
+| **mount→canplay p50 / max** | 14 / 19 ms | 11 / 23 ms | **10 / 20 ms** |
+| rafRateMin | 74 | 71 | 71 |
+
+- **无 ~3s hitch 族**：两态 mount→canplay `max` ≤23ms——比历史 OffthreadVideo 池化 ~3s hitch（`LibraryTab.tsx:435` 教训）低 ~130×。24 poster 常驻不诱发 Player 冷挂载抬升。
+- **压力不放大回放**：video 负跳两态均 0；audio 负跳 7 条 ~600ms **两态全等**——premount 未触及的音频轨自身漂移阈值残留（S3 存档、mute-independent），**与 grid 开/关无关、非 S4 引入**，恒定 = 无回归。
+- **为何不炸预算**：① poster metadata-only + seek 一帧即释放解码器、经 mediaLoadGate 4 并发闸门错峰；② hover 全解码 `<video>` 至多 1 个且离开即 unmount；③ premount 子树冻结不预播、显式跳过全局 buffering；④ Player 刻意不进 gate 保 headroom。逐条挂点见盘点文档 §C/§F。
+
+### 与 #37 的互不回归
+
+S4 同时看守两故障族：#37（thumbnail 洪峰饿死 Player 启动，已修 mediaLoadGate）+ #98（切点冷交接，本 PRD premount）。24-asset grid 开态 24 poster 全挂 + Player premount 1→2 并存下，两者都不复现——mediaLoadGate 闸门与 premount 暖场正交、不互相抢解码预算。
+
 ## Acceptance criteria
 
 见 [PRD-0016](../prd/0016-preview-hardcut-fidelity.md) 验收与切片（S1 红基线夹具 → S2 premount → S3 音频语义 → S4 压力复测）。
