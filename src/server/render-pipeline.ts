@@ -7,7 +7,11 @@ import {
   applyTransformsPrePass,
   applyTimeWarpPrePass,
 } from "./transforms-ffmpeg.js";
-import { pickEncoder } from "./render/gpu-encoder.js";
+import {
+  pickEncoder,
+  softwareEncoderChoice,
+  type EncoderChoice,
+} from "./render/gpu-encoder.js";
 import {
   mixAudioTracks,
   normalizeLufs,
@@ -380,13 +384,16 @@ export function resolveExportPreset(
   return found;
 }
 
-export async function runEncodeStage(
+/** Spawn one ffmpeg encode with a specific EncoderChoice. Extracted so
+ *  runEncodeStage can retry with a different (software) choice on a hardware
+ *  encoder failure without duplicating the spawn/abort/stderr plumbing. */
+function spawnEncode(
   input: string,
   output: string,
   preset: ExportPreset,
+  choice: EncoderChoice,
   signal?: AbortSignal,
 ): Promise<void> {
-  const choice = await pickEncoder(preset.codec, "medium");
   const args = [
     "-y", "-loglevel", "error",
     "-i", input,
@@ -426,6 +433,35 @@ export async function runEncodeStage(
       reject(err);
     });
   });
+}
+
+export async function runEncodeStage(
+  input: string,
+  output: string,
+  preset: ExportPreset,
+  signal?: AbortSignal,
+): Promise<void> {
+  const choice = await pickEncoder(preset.codec, "medium");
+  try {
+    await spawnEncode(input, output, preset, choice, signal);
+  } catch (err) {
+    // S18 C — a hardware encoder (h264_videotoolbox etc.) can reject a specific
+    // resolution/bitrate combo ("Error setting bitrate property:-12900") while
+    // succeeding on others. That must NEVER hang the export: fall back to
+    // software libx264 ONCE and log a warning, so the deliverable always lands.
+    // Two things are NOT retried: a user abort (propagate it), and a failure
+    // that already came from the software encoder (a genuine input/encode error
+    // — surfacing it beats an infinite pick-the-same-encoder loop).
+    if (signal?.aborted) throw err;
+    if (choice.tier === "software") throw err;
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[render] hardware encoder ${choice.codec} failed; retrying with software libx264:`,
+      err instanceof Error ? err.message : err,
+    );
+    const soft = softwareEncoderChoice(preset.codec, "medium");
+    await spawnEncode(input, output, preset, soft, signal);
+  }
 }
 
 export async function runRenderPipeline(opts: RenderJobOptions): Promise<string> {

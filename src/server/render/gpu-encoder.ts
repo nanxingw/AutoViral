@@ -147,6 +147,31 @@ export function _resetEncoderCacheForTests(): void {
   cache = null;
 }
 
+/**
+ * The software (CPU) encoder choice for `codec`, ready to splice into an ffmpeg
+ * command. This is the always-available baseline ffmpeg ships everywhere
+ * (libx264/libx265/libvpx-vp9/libaom-av1). Extracted so callers can force it as
+ * a FALLBACK when a hardware encoder rejects a specific resolution/bitrate combo
+ * (S18 C — h264_videotoolbox "-12900") without re-implementing the codec map.
+ */
+export function softwareEncoderChoice(
+  codec: LogicalCodec,
+  preset: LibX264Preset = "medium",
+): EncoderChoice {
+  const softwareName: Record<LogicalCodec, string> = {
+    h264: "libx264",
+    h265: "libx265",
+    vp9: "libvpx-vp9",
+    av1: "libaom-av1",
+  };
+  return {
+    codec: softwareName[codec],
+    tier: "software",
+    presetArgs: ["-preset", preset],
+    extraArgs: [],
+  };
+}
+
 // ── Selection ────────────────────────────────────────────────────────────
 
 /**
@@ -233,16 +258,5 @@ export async function pickEncoder(
 
   // Software fallback always available (ffmpeg ships libx264/libx265/
   // libvpx-vp9/libaom-av1 by default in homebrew + Linux distros).
-  const softwareName: Record<LogicalCodec, string> = {
-    h264: "libx264",
-    h265: "libx265",
-    vp9: "libvpx-vp9",
-    av1: "libaom-av1",
-  };
-  return {
-    codec: softwareName[codec],
-    tier: "software",
-    presetArgs: ["-preset", preset],
-    extraArgs: [],
-  };
+  return softwareEncoderChoice(codec, preset);
 }

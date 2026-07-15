@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 
 // Mock the heavy deps so the pipeline test runs in <1s
@@ -348,6 +348,83 @@ describe("runEncodeStage — abort signal", () => {
     setTimeout(() => ac.abort(), 0);
     await expect(promise).rejects.toThrow(/aborted/);
     expect(killed).toBe(true);
+  });
+});
+
+// PRD-0014 S18 finding C [high] — h264_videotoolbox is picky about certain
+// resolution/bitrate combos ("Error setting bitrate property:-12900" at
+// 1280x720 / 8Mbps in the recon E2E D3, while 1080x1920 succeeded). A hardware
+// encoder failing must NEVER hang an export — the stage auto-falls-back to
+// software libx264 once and logs a warning, so the deliverable always lands.
+describe("runEncodeStage — hardware encoder fallback to software (S18 C)", () => {
+  const flushMicrotasks = async () => {
+    await new Promise<void>((r) => setImmediate(r));
+  };
+  beforeEach(async () => {
+    _spawn.mockClear();
+    // videotoolbox present AND the top h264 pick on this list → picked first.
+    process.env.AUTOVIRAL_FAKE_ENCODERS = "h264_videotoolbox,libx264";
+    const gpu = await import("./render/gpu-encoder.js");
+    gpu._resetEncoderCacheForTests();
+  });
+  afterEach(async () => {
+    process.env.AUTOVIRAL_FAKE_ENCODERS = "libx264,libx265,libvpx-vp9,libaom-av1";
+    const gpu = await import("./render/gpu-encoder.js");
+    gpu._resetEncoderCacheForTests();
+  });
+
+  it("retries with libx264 when h264_videotoolbox fails (-12900), then succeeds", async () => {
+    const promise = runEncodeStage("/in.mp4", "/out.mp4", douyin);
+    await flushMicrotasks();
+    // First spawn = the hardware encoder.
+    expect(_spawn.mock.calls[0][1]).toContain("h264_videotoolbox");
+    const first = _spawn.mock.results[0].value;
+    first.stderr.emit("data", Buffer.from("Error setting bitrate property:-12900"));
+    first.emit("close", 1);
+    await flushMicrotasks();
+    // Second spawn = software libx264 fallback.
+    expect(_spawn).toHaveBeenCalledTimes(2);
+    expect(_spawn.mock.calls[1][1]).toContain("libx264");
+    expect(_spawn.mock.calls[1][1]).not.toContain("h264_videotoolbox");
+    const second = _spawn.mock.results[1].value;
+    second.emit("close", 0);
+    await expect(promise).resolves.toBeUndefined();
+  });
+
+  it("does NOT double-encode when the hardware encoder succeeds", async () => {
+    const promise = runEncodeStage("/in.mp4", "/out.mp4", douyin);
+    await flushMicrotasks();
+    const first = _spawn.mock.results[0].value;
+    first.emit("close", 0);
+    await promise;
+    expect(_spawn).toHaveBeenCalledTimes(1); // no needless fallback re-encode
+  });
+
+  it("surfaces the software error when the fallback ALSO fails (bounded, no infinite retry)", async () => {
+    const promise = runEncodeStage("/in.mp4", "/out.mp4", douyin);
+    await flushMicrotasks();
+    _spawn.mock.results[0].value.emit("close", 1); // videotoolbox fails
+    await flushMicrotasks();
+    const second = _spawn.mock.results[1].value;
+    second.stderr.emit("data", Buffer.from("libx264 genuine failure"));
+    second.emit("close", 3);
+    await expect(promise).rejects.toThrow(/libx264 genuine failure/);
+    expect(_spawn).toHaveBeenCalledTimes(2); // exactly one fallback, not a loop
+  });
+
+  it("does NOT fall back on an aborted encode (abort is not an encoder-picky failure)", async () => {
+    const ac = new AbortController();
+    _spawn.mockImplementationOnce(() => {
+      const proc = new EventEmitter() as any;
+      proc.stdout = new EventEmitter();
+      proc.stderr = new EventEmitter();
+      proc.kill = () => proc.emit("close", 130);
+      return proc;
+    });
+    const promise = runEncodeStage("/in.mp4", "/out.mp4", douyin, ac.signal);
+    setTimeout(() => ac.abort(), 0);
+    await expect(promise).rejects.toThrow(/aborted/);
+    expect(_spawn).toHaveBeenCalledTimes(1); // aborted → no software retry
   });
 });
 
