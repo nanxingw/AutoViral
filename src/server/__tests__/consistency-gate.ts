@@ -103,6 +103,16 @@ export interface ColorSrcOpts {
   fps?: number; // default 30
   /** Use the `testsrc2` moving pattern instead of a flat color (time-varying). */
   testsrc?: boolean;
+  /**
+   * A TIME-VARYING "clock": each frame N is a DISTINCT FLAT colour computed from
+   * N via `geq`. This is the ideal teeth source for the frame-level gate —
+   * time-varying so picking the WRONG source instant (回退-1× speed, a
+   * hold-wrong / blank freeze) is a large meanΔ divergence, yet SPATIALLY FLAT so
+   * it carries none of testsrc2's hard-edge chroma-subsampling noise that would
+   * spuriously trip the secondary changedPct gate under the export's extra h264
+   * encode. Overrides `color`/`testsrc`.
+   */
+  clock?: boolean;
 }
 
 export async function makeSrc(
@@ -111,9 +121,19 @@ export async function makeSrc(
 ): Promise<string> {
   const size = opts.size ?? "256x256";
   const fps = opts.fps ?? 30;
-  const source = opts.testsrc
-    ? `testsrc2=size=${size}:rate=${fps}:duration=${opts.seconds}`
-    : `color=c=${opts.color ?? "gray"}:s=${size}:r=${fps}:d=${opts.seconds}`;
+  let source: string;
+  if (opts.clock) {
+    // Flat, per-frame-distinct colour: R/G/B are affine in the frame index N,
+    // clamped to [0,255]. Different slopes per channel so no two frames within
+    // the fixture window collide. `color=black` supplies a canvas geq paints over.
+    source =
+      `color=c=black:s=${size}:r=${fps}:d=${opts.seconds},` +
+      `geq=r='clip(40+3*N\\,0\\,255)':g='clip(70+2*N\\,0\\,255)':b='clip(120+1*N\\,0\\,255)'`;
+  } else if (opts.testsrc) {
+    source = `testsrc2=size=${size}:rate=${fps}:duration=${opts.seconds}`;
+  } else {
+    source = `color=c=${opts.color ?? "gray"}:s=${size}:r=${fps}:d=${opts.seconds}`;
+  }
   await ffmpegOk([
     "-y", "-hide_banner", "-loglevel", "error",
     "-f", "lavfi", "-i", source,
@@ -180,10 +200,35 @@ export interface CompareTolerance {
   /** Per-channel |Δ| above which a pixel counts as "changed". Default 14 —
    *  above the yuv420p round-trip floor for non-primary colors. */
   perChannelNoiseTol?: number;
-  /** Max % of pixels allowed over the noise floor. Default 2.5. */
+  /** Max % of pixels allowed over the noise floor. Default 6. */
   maxChangedPct?: number;
   /** Max average per-channel |Δ| across the whole frame. Default 4. */
   maxMeanDelta?: number;
+  /**
+   * S16 review fix (finding #6) — the THIRD gate. Per-channel |Δ| that counts as
+   * HARD corruption (far above any codec round-trip). Default 48.
+   */
+  hardNoiseTol?: number;
+  /**
+   * Max % of pixels allowed to exceed `hardNoiseTol`. Default 1. This closes the
+   * double-threshold BLIND SPOT: a localized patch of ~5% of pixels each off by
+   * Δ60 yields meanΔ≈3 (≤4, passes) AND changedPct≈5% (≤6%, passes) — both
+   * primary gates miss it — yet it is a visibly corrupt region. Those pixels have
+   * |Δ|=60 > 48 = hardNoiseTol, so 5% > 1% trips THIS gate. Codec noise (even on
+   * hard edges) sits well under hardNoiseTol on all but a sub-1% sliver, so the
+   * gate stays green on genuine matches.
+   */
+  maxHardPct?: number;
+  /**
+   * An OPTIONAL rectangle (px, in the frame's WxH grid) whose pixels are EXCLUDED
+   * from every metric. Used ONLY to account for an element that is preview≠export
+   * BY DESIGN — specifically the reverse clip's preview-only "仅导出生效" badge
+   * (reverse is export-only, so the preview stamps a warning the export can't
+   * carry). This is NOT a tolerance loosener: the reverse fixture separately
+   * asserts that the badge region DOES diverge (the badge is genuinely
+   * preview-only) and that OUTSIDE it the frame matches.
+   */
+  ignoreRect?: { x: number; y: number; w: number; h: number };
 }
 
 export interface DiffResult {
@@ -195,6 +240,9 @@ export interface DiffResult {
   /** % of pixels whose max per-channel |Δ| exceeded perChannelNoiseTol. */
   changedPct: number;
   changedCount: number;
+  /** % of pixels whose max per-channel |Δ| exceeded hardNoiseTol (finding #6). */
+  hardPct: number;
+  hardChangedCount: number;
   totalPixels: number;
   reason: string;
 }
@@ -205,9 +253,15 @@ const DEFAULT_TOL: Required<CompareTolerance> = {
   // reverse frame boundaries) while staying FAR below a 回退-1× divergence, which
   // repaints a large fraction of the frame AND is independently caught by the
   // primary meanDelta gate. The meanDelta gate (≤4) is the real workhorse; this
-  // is the secondary "localized garbage" guard.
+  // is the secondary "diffuse garbage" guard.
   maxChangedPct: 6,
   maxMeanDelta: 4,
+  // The THIRD gate (finding #6) — see maxHardPct doc. Catches a LOCALIZED hard
+  // patch that slips under both the mean gate (too few pixels to move the mean)
+  // and the changedPct gate (under 6%), by tightening the cap for pixels that are
+  // corrupt-level far (>48/channel) rather than codec-noise far (>14/channel).
+  hardNoiseTol: 48,
+  maxHardPct: 1,
 };
 
 /**
@@ -226,36 +280,56 @@ export function compareRawFrames(
     );
   }
   const t = { ...DEFAULT_TOL, ...tol };
-  const total = a.width * a.height;
+  const ignore = tol.ignoreRect;
   const bufA = a.buf;
   const bufB = b.buf;
   let sumDelta = 0;
   let maxDelta = 0;
   let changed = 0;
-  for (let p = 0; p < total; p++) {
-    const i = p * 3;
-    const dR = Math.abs(bufA[i] - bufB[i]);
-    const dG = Math.abs(bufA[i + 1] - bufB[i + 1]);
-    const dB = Math.abs(bufA[i + 2] - bufB[i + 2]);
-    sumDelta += dR + dG + dB;
-    const pixMax = dR > dG ? (dR > dB ? dR : dB) : dG > dB ? dG : dB;
-    if (pixMax > maxDelta) maxDelta = pixMax;
-    if (pixMax > t.perChannelNoiseTol) changed++;
+  let hardChanged = 0;
+  let counted = 0;
+  for (let y = 0; y < a.height; y++) {
+    for (let x = 0; x < a.width; x++) {
+      if (
+        ignore &&
+        x >= ignore.x &&
+        x < ignore.x + ignore.w &&
+        y >= ignore.y &&
+        y < ignore.y + ignore.h
+      ) {
+        continue; // excluded region (the reverse preview-only badge)
+      }
+      const i = (y * a.width + x) * 3;
+      const dR = Math.abs(bufA[i] - bufB[i]);
+      const dG = Math.abs(bufA[i + 1] - bufB[i + 1]);
+      const dB = Math.abs(bufA[i + 2] - bufB[i + 2]);
+      sumDelta += dR + dG + dB;
+      const pixMax = dR > dG ? (dR > dB ? dR : dB) : dG > dB ? dG : dB;
+      if (pixMax > maxDelta) maxDelta = pixMax;
+      if (pixMax > t.perChannelNoiseTol) changed++;
+      if (pixMax > t.hardNoiseTol) hardChanged++;
+      counted++;
+    }
   }
+  const total = counted || 1;
   const meanDelta = sumDelta / (total * 3);
   const changedPct = (100 * changed) / total;
+  const hardPct = (100 * hardChanged) / total;
   const meanOk = meanDelta <= t.maxMeanDelta;
   const pctOk = changedPct <= t.maxChangedPct;
-  const matched = meanOk && pctOk;
+  const hardOk = hardPct <= t.maxHardPct;
+  const matched = meanOk && pctOk && hardOk;
   const reason = matched
-    ? `matched (meanΔ=${meanDelta.toFixed(2)} ≤ ${t.maxMeanDelta}, changed=${changedPct.toFixed(2)}% ≤ ${t.maxChangedPct}%)`
-    : `MISMATCH (meanΔ=${meanDelta.toFixed(2)}${meanOk ? "" : ` > ${t.maxMeanDelta}`}, changed=${changedPct.toFixed(2)}%${pctOk ? "" : ` > ${t.maxChangedPct}%`}, maxΔ=${maxDelta})`;
+    ? `matched (meanΔ=${meanDelta.toFixed(2)} ≤ ${t.maxMeanDelta}, changed=${changedPct.toFixed(2)}% ≤ ${t.maxChangedPct}%, hard=${hardPct.toFixed(2)}% ≤ ${t.maxHardPct}%)`
+    : `MISMATCH (meanΔ=${meanDelta.toFixed(2)}${meanOk ? "" : ` > ${t.maxMeanDelta}`}, changed=${changedPct.toFixed(2)}%${pctOk ? "" : ` > ${t.maxChangedPct}%`}, hard=${hardPct.toFixed(2)}%${hardOk ? "" : ` > ${t.maxHardPct}%`}, maxΔ=${maxDelta})`;
   return {
     matched,
     meanDelta,
     maxDelta,
     changedPct,
     changedCount: changed,
+    hardPct,
+    hardChangedCount: hardChanged,
     totalPixels: total,
     reason,
   };
