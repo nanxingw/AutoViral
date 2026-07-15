@@ -33,6 +33,27 @@ import { writeFile, mkdir } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { FFMPEG_BIN } from "../ffmpeg-paths.js";
+import { probeHasAudioStream } from "../speed-ramp-ffmpeg.js";
+
+// PRD-0014 S18 E2E r2 · M-low-1 — the four cinematic transitions crossfade audio
+// via `[0:a][1:a]acrossfade`, which ffmpeg REJECTS ("Stream specifier ':a'
+// matches no streams") when EITHER input clip has no audio stream (a bare
+// color=/testsrc2 with no anullsrc, or a silent generation). We probe BOTH
+// inputs and only wire the audio chain when both carry audio — otherwise the
+// endpoint emits a video-only graph (no acrossfade, no `-map [a]`). Mirrors the
+// speed-ramp pre-pass's identical `probeHasAudioStream`-gated `hasAudio` idiom.
+async function bothInputsHaveAudio(clipA: string, clipB: string): Promise<boolean> {
+  const [a, b] = await Promise.all([
+    probeHasAudioStream(clipA).catch(() => false),
+    probeHasAudioStream(clipB).catch(() => false),
+  ]);
+  return a && b;
+}
+
+/** `-map [v]` always; `-map [a]` only when the audio chain was wired. */
+function transitionMaps(hasAudio: boolean): string[] {
+  return hasAudio ? ["-map", "[v]", "-map", "[a]"] : ["-map", "[v]"];
+}
 
 export interface TransitionInput {
   /** Path to the outgoing video clip. */
@@ -72,26 +93,22 @@ export async function applyLightLeakTransition(
   opts: TransitionInput,
 ): Promise<string> {
   const { clipA, clipB, outputPath, clipADuration, transitionDuration, width, height } = opts;
-  const offsetSec = clipADuration - transitionDuration;
+
+  // M-low-1 — only crossfade audio when BOTH inputs actually carry it.
+  const hasAudio = await bothInputsHaveAudio(clipA, clipB);
 
   // 1. Generate the light-leak overlay PNG (or reuse a cached one).
   const overlayPath = await ensureLightLeakOverlay(width, height);
 
   // 2. Build the filter graph. Three inputs:
   //    [0] clipA video, [1] clipB video, [2] static overlay image
-  //    Outputs: [v] mixed video, [a] crossfaded audio
-  const filterComplex = [
-    // xfade transition between the two videos with a `fade` curve.
-    `[0:v][1:v]xfade=transition=fade:duration=${transitionDuration}:offset=${offsetSec}[xfaded]`,
-    // Bring the overlay image up to fps + RGBA so blend can read its alpha.
-    `[2:v]format=rgba,fps=${opts.fps}[ovl]`,
-    // Animate the overlay's horizontal position so it sweeps from left to
-    // right through the transition window. We use overlay's `x` expression
-    // with `enable='between(t,offset,offset+duration)'`.
-    `[xfaded][ovl]overlay=x='if(between(t,${offsetSec},${offsetSec + transitionDuration}),(t-${offsetSec})/${transitionDuration}*(W-w)*1.5-w*0.25,NAN)':y=0:enable='between(t,${offsetSec},${offsetSec + transitionDuration})':format=auto[v]`,
-    // Audio: simple crossfade aligned with video xfade.
-    `[0:a][1:a]acrossfade=d=${transitionDuration}[a]`,
-  ].join(";");
+  //    Outputs: [v] mixed video, [a] crossfaded audio (only when hasAudio).
+  const filterComplex = buildLightLeakFilterGraph({
+    clipADuration,
+    transitionDuration,
+    fps: opts.fps,
+    hasAudio,
+  });
 
   await mkdir(dirname(outputPath), { recursive: true });
   const args = [
@@ -106,8 +123,7 @@ export async function applyLightLeakTransition(
     // frame while the B tail plays out.
     "-loop", "1", "-t", String(clipADuration), "-i", overlayPath,
     "-filter_complex", filterComplex,
-    "-map", "[v]",
-    "-map", "[a]",
+    ...transitionMaps(hasAudio),
     "-shortest",
     "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p",
     "-c:a", "aac", "-b:a", "192k",
@@ -215,14 +231,19 @@ export function buildLightLeakFilterGraph(opts: {
   clipADuration: number;
   transitionDuration: number;
   fps: number;
+  /** M-low-1 — when false, emit a VIDEO-ONLY graph (no acrossfade). Default true. */
+  hasAudio?: boolean;
 }): string {
   const offsetSec = opts.clipADuration - opts.transitionDuration;
-  return [
+  const parts = [
     `[0:v][1:v]xfade=transition=fade:duration=${opts.transitionDuration}:offset=${offsetSec}[xfaded]`,
     `[2:v]format=rgba,fps=${opts.fps}[ovl]`,
     `[xfaded][ovl]overlay=x='if(between(t,${offsetSec},${offsetSec + opts.transitionDuration}),(t-${offsetSec})/${opts.transitionDuration}*(W-w)*1.5-w*0.25,NAN)':y=0:enable='between(t,${offsetSec},${offsetSec + opts.transitionDuration})':format=auto[v]`,
-    `[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`,
-  ].join(";");
+  ];
+  if (opts.hasAudio ?? true) {
+    parts.push(`[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`);
+  }
+  return parts.join(";");
 }
 
 // ── Glitch-cut transition ───────────────────────────────────────────
@@ -240,10 +261,12 @@ export async function applyGlitchCutTransition(
   opts: TransitionInput,
 ): Promise<string> {
   const { clipA, clipB, outputPath, transitionDuration } = opts;
+  const hasAudio = await bothInputsHaveAudio(clipA, clipB);
   const filterComplex = buildGlitchCutFilterGraph({
     clipADuration: opts.clipADuration,
     transitionDuration,
     fps: opts.fps,
+    hasAudio,
   });
 
   await mkdir(dirname(outputPath), { recursive: true });
@@ -252,11 +275,10 @@ export async function applyGlitchCutTransition(
     "-i", clipA,
     "-i", clipB,
     "-filter_complex", filterComplex,
-    "-map", "[v]",
-    "-map", "[a]",
+    ...transitionMaps(hasAudio),
     "-shortest",
     "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p",
-    "-c:a", "aac", "-b:a", "192k",
+    ...(hasAudio ? ["-c:a", "aac", "-b:a", "192k"] : []),
     outputPath,
   ];
 
@@ -277,6 +299,8 @@ export function buildGlitchCutFilterGraph(opts: {
   clipADuration: number;
   transitionDuration: number;
   fps: number;
+  /** M-low-1 — when false, emit a VIDEO-ONLY graph (no acrossfade). Default true. */
+  hasAudio?: boolean;
 }): string {
   const offsetSec = opts.clipADuration - opts.transitionDuration;
   const endSec = offsetSec + opts.transitionDuration;
@@ -293,15 +317,18 @@ export function buildGlitchCutFilterGraph(opts: {
   // superfluous and the wrong sampler name for RGB-mode geq.
   const rOff = `if(between(T,${offsetSec},${endSec}),sin(T*200)*15,0)`;
   const bOff = `if(between(T,${offsetSec},${endSec}),-sin(T*200)*15,0)`;
-  return [
+  const parts = [
     `[0:v][1:v]xfade=transition=fade:duration=${opts.transitionDuration}:offset=${offsetSec}[xfaded]`,
     `[xfaded]format=rgba,fps=${opts.fps}[base]`,
     `[base]geq=` +
       `r='st(0,${rOff});p(X+ld(0),Y)':` +
       `g='p(X,Y)':` +
       `b='st(0,${bOff});p(X+ld(0),Y)'[v]`,
-    `[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`,
-  ].join(";");
+  ];
+  if (opts.hasAudio ?? true) {
+    parts.push(`[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`);
+  }
+  return parts.join(";");
 }
 
 // ── Domain-warp transition ──────────────────────────────────────────
@@ -316,10 +343,12 @@ export async function applyDomainWarpTransition(
   opts: TransitionInput,
 ): Promise<string> {
   const { clipA, clipB, outputPath, transitionDuration } = opts;
+  const hasAudio = await bothInputsHaveAudio(clipA, clipB);
   const filterComplex = buildDomainWarpFilterGraph({
     clipADuration: opts.clipADuration,
     transitionDuration,
     fps: opts.fps,
+    hasAudio,
   });
 
   await mkdir(dirname(outputPath), { recursive: true });
@@ -328,11 +357,10 @@ export async function applyDomainWarpTransition(
     "-i", clipA,
     "-i", clipB,
     "-filter_complex", filterComplex,
-    "-map", "[v]",
-    "-map", "[a]",
+    ...transitionMaps(hasAudio),
     "-shortest",
     "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p",
-    "-c:a", "aac", "-b:a", "192k",
+    ...(hasAudio ? ["-c:a", "aac", "-b:a", "192k"] : []),
     outputPath,
   ];
 
@@ -353,6 +381,8 @@ export function buildDomainWarpFilterGraph(opts: {
   clipADuration: number;
   transitionDuration: number;
   fps: number;
+  /** M-low-1 — when false, emit a VIDEO-ONLY graph (no acrossfade). Default true. */
+  hasAudio?: boolean;
 }): string {
   const offsetSec = opts.clipADuration - opts.transitionDuration;
   const endSec = offsetSec + opts.transitionDuration;
@@ -366,15 +396,18 @@ export function buildDomainWarpFilterGraph(opts: {
     `if(between(T,${offsetSec},${endSec}),` +
     `sin(Y/30+T*8)*40*((T-${offsetSec})/${opts.transitionDuration}),0)`;
   const warp = `st(0,${xOff});p(X+ld(0),Y)`;
-  return [
+  const parts = [
     `[0:v][1:v]xfade=transition=fade:duration=${opts.transitionDuration}:offset=${offsetSec}[xfaded]`,
     `[xfaded]format=rgba,fps=${opts.fps}[base]`,
     `[base]geq=` +
       `r='${warp}':` +
       `g='${warp}':` +
       `b='${warp}'[v]`,
-    `[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`,
-  ].join(";");
+  ];
+  if (opts.hasAudio ?? true) {
+    parts.push(`[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`);
+  }
+  return parts.join(";");
 }
 
 // ── Gravitational-lens transition ───────────────────────────────────
@@ -389,10 +422,12 @@ export async function applyGravLensTransition(
   opts: TransitionInput,
 ): Promise<string> {
   const { clipA, clipB, outputPath, transitionDuration } = opts;
+  const hasAudio = await bothInputsHaveAudio(clipA, clipB);
   const filterComplex = buildGravLensFilterGraph({
     clipADuration: opts.clipADuration,
     transitionDuration,
     fps: opts.fps,
+    hasAudio,
   });
 
   await mkdir(dirname(outputPath), { recursive: true });
@@ -401,11 +436,10 @@ export async function applyGravLensTransition(
     "-i", clipA,
     "-i", clipB,
     "-filter_complex", filterComplex,
-    "-map", "[v]",
-    "-map", "[a]",
+    ...transitionMaps(hasAudio),
     "-shortest",
     "-c:v", "libx264", "-preset", "medium", "-pix_fmt", "yuv420p",
-    "-c:a", "aac", "-b:a", "192k",
+    ...(hasAudio ? ["-c:a", "aac", "-b:a", "192k"] : []),
     outputPath,
   ];
 
@@ -426,6 +460,8 @@ export function buildGravLensFilterGraph(opts: {
   clipADuration: number;
   transitionDuration: number;
   fps: number;
+  /** M-low-1 — when false, emit a VIDEO-ONLY graph (no acrossfade). Default true. */
+  hasAudio?: boolean;
 }): string {
   const offsetSec = opts.clipADuration - opts.transitionDuration;
   const endSec = offsetSec + opts.transitionDuration;
@@ -458,12 +494,15 @@ export function buildGravLensFilterGraph(opts: {
     `st(3,(ld(1)*ld(1)+ld(2)*ld(2))/(W*W/4+H*H/4));` +
     `st(4,(${strength})*ld(3));` +
     `p(W/2+ld(1)*(1+ld(4)),H/2+ld(2)*(1+ld(4)))`;
-  return [
+  const parts = [
     `[0:v]format=gbrp,fps=${opts.fps},geq=r='${warp(aStrength)}':g='${warp(aStrength)}':b='${warp(aStrength)}'[a_dist]`,
     `[1:v]format=gbrp,fps=${opts.fps},geq=r='${warp(bStrength)}':g='${warp(bStrength)}':b='${warp(bStrength)}'[b_dist]`,
     `[a_dist][b_dist]xfade=transition=fade:duration=${opts.transitionDuration}:offset=${offsetSec}[v]`,
-    `[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`,
-  ].join(";");
+  ];
+  if (opts.hasAudio ?? true) {
+    parts.push(`[0:a][1:a]acrossfade=d=${opts.transitionDuration}[a]`);
+  }
+  return parts.join(";");
 }
 
 // ─── Roadmap (additional transitions worth porting) ─────────────────

@@ -222,6 +222,42 @@ describe("buildGravLensFilterGraph", () => {
 // ── S1 regression: the three geq/lenscorrection defects that aborted
 // filter-graph init on real ffmpeg. Pure-string assertions, no spawn. ──
 
+// PRD-0014 S18 E2E r2 · M-low-1 — an AUDIO-LESS clip (bare color=/testsrc2 with
+// no anullsrc) made all four endpoints 500: the filtergraph unconditionally
+// wired `[0:a][1:a]acrossfade` but ffprobe found no audio stream → ffmpeg
+// "Stream specifier ':a' matches no streams". A `hasAudio:false` build must emit
+// a VIDEO-ONLY graph (no acrossfade, no [0:a]/[1:a]/[a]).
+describe("M-low-1 · hasAudio:false → video-only graph (no acrossfade)", () => {
+  const builders = [
+    ["light-leak", buildLightLeakFilterGraph],
+    ["glitch", buildGlitchCutFilterGraph],
+    ["domain-warp", buildDomainWarpFilterGraph],
+    ["grav-lens", buildGravLensFilterGraph],
+  ] as const;
+
+  for (const [name, build] of builders) {
+    it(`${name}: omits the audio crossfade chain when hasAudio is false`, () => {
+      const g = build({
+        clipADuration: 5,
+        transitionDuration: 1,
+        fps: 30,
+        hasAudio: false,
+      });
+      expect(g).not.toContain("acrossfade");
+      expect(g).not.toContain("[0:a]");
+      expect(g).not.toContain("[1:a]");
+      expect(g).not.toContain("[a]");
+      // The video chain is untouched — still produces [v].
+      expect(g).toContain("[v]");
+    });
+
+    it(`${name}: keeps the audio crossfade when hasAudio defaults/true (unchanged)`, () => {
+      const g = build({ clipADuration: 5, transitionDuration: 1, fps: 30 });
+      expect(g).toContain("[0:a][1:a]acrossfade=d=1[a]");
+    });
+  }
+});
+
 describe("S1 · cinematic filtergraphs are ffmpeg-valid", () => {
   const cases = [
     ["glitch", buildGlitchCutFilterGraph],
@@ -477,6 +513,55 @@ describe("S1 · four cinematic endpoints render on real color clips", () => {
     },
     90_000,
   );
+
+  // PRD-0014 S18 E2E r2 · M-low-1 — an AUDIO-LESS input (no anullsrc) made every
+  // endpoint 500 (`[0:a][1:a]acrossfade` → "Stream specifier ':a' matches no
+  // streams"). With the ffprobe-gated audio chain the four endpoints must now
+  // exit 0 on video-only clips and produce a real (silent) mp4.
+  for (const [name, apply] of endpoints) {
+    integrationIt(
+      `${name}: succeeds on AUDIO-LESS clips (no acrossfade 500)`,
+      async () => {
+        const sDir = await mkdtemp(join(tmpdir(), "autoviral-tx-silent-"));
+        try {
+          const a = join(sDir, "a.mp4");
+          const b = join(sDir, "b.mp4");
+          const out = join(sDir, `out-${name}.mp4`);
+          // Bare color source — NO anullsrc, so the mp4 has zero audio streams.
+          await efp(FFMPEG_BIN, [
+            "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "color=c=green:size=320x240:duration=2:rate=30",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", a,
+          ]);
+          await efp(FFMPEG_BIN, [
+            "-y", "-loglevel", "error",
+            "-f", "lavfi", "-i", "color=c=purple:size=320x240:duration=2:rate=30",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p", b,
+          ]);
+          _resetLightLeakCacheForTests();
+          // Before the fix this REJECTS with the acrossfade "matches no streams"
+          // error; after, it renders a video-only product.
+          await apply({
+            clipA: a,
+            clipB: b,
+            outputPath: out,
+            clipADuration: 2,
+            transitionDuration: 0.8,
+            width: 320,
+            height: 240,
+            fps: 30,
+          });
+          expect(existsSync(out)).toBe(true);
+          const dur = await probeDuration(out);
+          expect(Number.isFinite(dur)).toBe(true);
+          expect(Math.abs(dur - 3.2)).toBeLessThan(0.2);
+        } finally {
+          await rm(sDir, { recursive: true, force: true });
+        }
+      },
+      90_000,
+    );
+  }
 });
 
 // ── S1 review fix #2 — exercise the four transitions as REAL HTTP routes,
