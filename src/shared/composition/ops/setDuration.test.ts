@@ -123,6 +123,30 @@ function multiTrackComp(
   } as unknown as Composition;
 }
 
+// A video clip carrying a STATIC speed keyframe — exercises the speed-aware
+// effective-width口径 (PRD-0014 S18 E2E r2 · M-low-3).
+function speedClip(p: {
+  id: string;
+  trackOffset: number;
+  in: number;
+  out: number;
+  speed: number;
+}): Clip {
+  return {
+    id: p.id,
+    kind: "video",
+    src: "assets/x.mp4",
+    in: p.in,
+    out: p.out,
+    trackOffset: p.trackOffset,
+    transforms: { scale: 1, x: 0, y: 0, rotation: 0 },
+    filters: { brightness: 0, contrast: 0, saturation: 0 },
+    keyframes: [
+      { property: "speed", time: 0, value: p.speed, easing: "linear" },
+    ],
+  } as unknown as Clip;
+}
+
 describe("@shared composition ops — setCompositionDuration", () => {
   it("sets an explicit duration in place", () => {
     const comp = compWith([videoClip({ id: "a", trackOffset: 0, in: 0, out: 6 })], 6);
@@ -170,6 +194,29 @@ describe("@shared composition ops — setCompositionDuration", () => {
     expect(comp.duration).toBe(10);
     // And compositionContentEnd reports the same cross-track end.
     expect(compositionContentEnd(comp)).toBe(10);
+  });
+
+  // PRD-0014 S18 E2E r2 · M-low-3 — auto口径 was NOT speed-aware: a 2× clip's
+  // raw (out-in)=4 was counted, so `--duration auto` returned 4 while the clip
+  // actually plays for 2s on the timeline (the same effectiveClipDuration the
+  // overlap detector and preview use). auto must use the SPEED-AWARE width.
+  it("auto mode uses SPEED-AWARE effective width — a 2× clip SHRINKS the derived duration", () => {
+    const comp = compWith(
+      [speedClip({ id: "a", trackOffset: 0, in: 0, out: 4, speed: 2 })],
+      99,
+    );
+    setCompositionDuration(comp, { auto: true });
+    expect(comp.duration).toBeCloseTo(2, 5); // NOT 4 (raw out-in)
+    expect(compositionContentEnd(comp)).toBeCloseTo(2, 5);
+  });
+
+  it("auto mode expands for a <1× clip (0.5× over a 4s window → effective 8)", () => {
+    const comp = compWith(
+      [speedClip({ id: "a", trackOffset: 0, in: 0, out: 4, speed: 0.5 })],
+      99,
+    );
+    setCompositionDuration(comp, { auto: true });
+    expect(comp.duration).toBeCloseTo(8, 5);
   });
 
   it("auto mode yields 0 for an empty composition (no tracks/clips)", () => {

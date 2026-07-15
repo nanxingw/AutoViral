@@ -24,12 +24,24 @@
 
 import type { Composition, Clip } from "../../composition.js";
 import { snapToFrame } from "../../frame.js";
+import { effectiveClipDuration } from "../../speed-ramp.js";
 import { CompositionOpError } from "./errors.js";
 
 // Inlined to keep this op free of the web-only `@autoviral/timeline` package
 // (mirrors trimClip.ts / splitClip.ts — the same clipEnd口径 the store uses).
+//
+// M-low-3 (PRD-0014 S18 E2E r2) — video/audio use the SPEED-AWARE timeline width
+// (`effectiveClipDuration`, not raw out-in): a 2× clip occupies HALF its source
+// window on the timeline, a 0.5× clip DOUBLE. This is the exact口径 the overlap
+// detector (overlap.ts) and the preview already use, so `--duration auto`
+// converges with them instead of over-reporting a sped-up clip's length.
 function clipDuration(c: Clip): number {
-  if (c.kind === "video" || c.kind === "audio") return Math.max(0, c.out - c.in);
+  if (c.kind === "video" || c.kind === "audio") {
+    return Math.max(
+      0,
+      effectiveClipDuration({ in: c.in, out: c.out, keyframes: c.keyframes }),
+    );
+  }
   return Math.max(0, (c as { duration: number }).duration);
 }
 
