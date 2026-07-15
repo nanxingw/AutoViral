@@ -1016,6 +1016,36 @@ export const en = {
         sticker: "sticker layer",
       },
     },
+    workflow: {
+      panelTitle: "Background tasks",
+      untitled: "Background task",
+      status: {
+        running: "Running",
+        "pending-settle": "Settling",
+        completed: "Done",
+        failed: "Failed",
+        killed: "Killed",
+        stopped: "Stopped",
+        orphaned: "Interrupted",
+      },
+      toast: {
+        completed: "Task finished · {name}",
+        failed: "Task failed · {name}",
+        killed: "Task killed · {name}",
+        stopped: "Task stopped · {name}",
+        orphaned: "Task interrupted · {name}",
+      },
+      notice: {
+        queued_message:
+          "A background task is running — your message will send once it finishes.",
+        kill_rejected:
+          "A background task is running — wait for it or use /stop first.",
+      },
+      tokens: "{count} tok",
+      agents: "{count} agents",
+      toolUses: "{count} calls",
+      reason: "reason: {reason}",
+    },
   },
   settings: {
     title: "Settings",
@@ -2052,6 +2082,34 @@ export const zh: DeepShape<Messages> = {
         shape: "形状图层",
         sticker: "贴纸图层",
       },
+    },
+    workflow: {
+      panelTitle: "后台任务",
+      untitled: "后台任务",
+      status: {
+        running: "运行中",
+        "pending-settle": "收尾中",
+        completed: "已完成",
+        failed: "已失败",
+        killed: "已终止",
+        stopped: "已停止",
+        orphaned: "已中断",
+      },
+      toast: {
+        completed: "任务完成 · {name}",
+        failed: "任务失败 · {name}",
+        killed: "任务被终止 · {name}",
+        stopped: "任务已停止 · {name}",
+        orphaned: "任务中断 · {name}",
+      },
+      notice: {
+        queued_message: "后台任务运行中，消息将在完成后发送。",
+        kill_rejected: "后台任务运行中——请先等它跑完或使用 /stop。",
+      },
+      tokens: "{count} tok",
+      agents: "{count} 个子任务",
+      toolUses: "{count} 次调用",
+      reason: "原因：{reason}",
     },
   },
   settings: {

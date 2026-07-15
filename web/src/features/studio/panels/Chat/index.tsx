@@ -19,6 +19,7 @@ import {
 } from "@/features/checkpoints/useCheckpoints";
 import { BackendSwitcher } from "./BackendSwitcher";
 import { ConnectionStatus } from "./ConnectionStatus";
+import { WorkflowTaskCards } from "@/features/chat/WorkflowTaskCards";
 import { useComposerDraft } from "@/stores/composerDraft";
 import { useToastStore } from "@/stores/toast";
 import { useActiveSessionId } from "@/features/chat/activeSession";
@@ -775,6 +776,12 @@ export function ChatPanel({
           </div>
         )}
       </div>
+
+      {/* Durable background-task dock (PRD-0015 S4) — a persistent card region
+          for Workflow/subagent tasks the agent launched, sitting between the
+          message stream and the composer so it never scrolls away. Renders
+          nothing when the session has no tasks. */}
+      <WorkflowTaskCards sessionId={activeSessionId} />
 
       {quickActions}
 

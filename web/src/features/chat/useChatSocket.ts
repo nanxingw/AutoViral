@@ -7,6 +7,14 @@ import { extractViewerActions } from "./types";
 import { seedBlocksFromHistory } from "./seed";
 import { apiFetch } from "@/lib/api";
 import type { ChatCommandCatalog, ChatCommandStatus } from "./types";
+import {
+  useWorkflowTaskStore,
+  type WorkflowTask,
+  type WorkflowTaskStatus,
+} from "./workflow-tasks.store";
+import { useToastStore } from "@/stores/toast";
+import { useLocaleStore } from "@/i18n/store";
+import { MESSAGES } from "@/i18n/messages";
 
 /** Minimal XML attribute escape for the <attachments> envelope. Filenames are
  *  server-sanitised (no slashes) but may still contain quotes / angle brackets. */
@@ -43,6 +51,40 @@ type DataDict = Record<string, unknown>;
 
 function asString(v: unknown): string {
   return typeof v === "string" ? v : v == null ? "" : JSON.stringify(v);
+}
+
+function asNumber(v: unknown): number | undefined {
+  return typeof v === "number" && Number.isFinite(v) ? v : undefined;
+}
+
+/** Translate a `ui-workflow` (or a `ui-workflow-snapshot` per-task entry) data
+ *  dict into a client `WorkflowTask`. `fallbackSessionId` supplies the session
+ *  for snapshot entries, whose sessionId lives on the wrapper, not per-task.
+ *  Only defined fields are set so a REPLACE never clobbers a value with
+ *  undefined. Returns null when the identity fields are missing. */
+function frameToTask(d: DataDict, fallbackSessionId: string): WorkflowTask | null {
+  const taskId = asString(d.taskId);
+  if (!taskId) return null;
+  const sessionId = asString(d.sessionId) || fallbackSessionId;
+  const generation = asNumber(d.generation) ?? 0;
+  const status = (asString(d.status) || "running") as WorkflowTaskStatus;
+  const task: WorkflowTask = { sessionId, taskId, generation, status };
+  if (typeof d.taskType === "string") task.taskType = d.taskType;
+  if (typeof d.description === "string") task.description = d.description;
+  if (typeof d.toolUseId === "string") task.toolUseId = d.toolUseId;
+  if (typeof d.summary === "string") task.summary = d.summary;
+  if (typeof d.outputFile === "string") task.outputFile = d.outputFile;
+  if (typeof d.settleReason === "string") task.settleReason = d.settleReason;
+  const startTime = asNumber(d.startTime);
+  if (startTime !== undefined) task.startTime = startTime;
+  const endTime = asNumber(d.endTime);
+  if (endTime !== undefined) task.endTime = endTime;
+  const ts = asNumber(d.ts);
+  if (ts !== undefined) task.ts = ts;
+  if (d.usage && typeof d.usage === "object") {
+    task.usage = d.usage as WorkflowTask["usage"];
+  }
+  return task;
 }
 
 /**
@@ -276,10 +318,56 @@ export function useChatSocket(
             }
             break;
           }
+          // PRD-0015 S4 — background-task lifecycle (event-stream.md). Task
+          // state is mutable concurrent state (a keyed registry), not chat
+          // blocks, so it flows into a SEPARATE store, not push(). The store
+          // enforces same-id replace + terminal monotonicity + one-shot toast.
+          case "ui-workflow": {
+            const task = frameToTask(data, sid);
+            if (task) useWorkflowTaskStore.getState().upsert(task);
+            break;
+          }
+          case "ui-workflow-snapshot": {
+            // Full session replace on (re)connect. Snapshot arrives FIRST (the
+            // server orders it before any incremental), so a refresh restores
+            // task state without depending on being online when each frame fired.
+            const snapSession = asString(data.sessionId) || sid;
+            const rawTasks = Array.isArray(data.tasks) ? (data.tasks as DataDict[]) : [];
+            const tasks = rawTasks
+              .map((d) => frameToTask(d, snapSession))
+              .filter((t): t is WorkflowTask => t != null);
+            useWorkflowTaskStore.getState().applySnapshot(snapSession, tasks);
+            break;
+          }
+          case "chat_notice": {
+            // Transient, NOT persisted to chat history (event-stream.md) — so a
+            // toast is the honest surface (a durable chat bubble would look
+            // persisted and get wiped on the next history reseed anyway). Prefer
+            // the server-supplied (already-localized) text; fall back to a
+            // locale string keyed by notice kind.
+            const kind = asString(data.kind);
+            const locale = useLocaleStore.getState().locale;
+            const fallback = (
+              MESSAGES[locale].chat.workflow.notice as Record<string, string | undefined>
+            )[kind];
+            const message = asString(data.message) || fallback;
+            if (message) {
+              useToastStore.getState().push({ variant: "info", message, ttlMs: 5000 });
+            }
+            break;
+          }
           case "session_killed":
           case "session_closed":
           case "cli_exited": {
             setStreaming(false);
+            // Local fallback: if the server's terminal ui-workflow broadcast
+            // never arrived, flip this session's still-live tasks to stopped so
+            // "killed with no notice" (issue 030) can't happen. When the server
+            // DID broadcast, those tasks are already terminal → this is a no-op
+            // (terminal monotonicity), so no double toast.
+            const settleSession = asString(data.sessionId) || sid;
+            const reason = asString(data.reason) || frame.event;
+            useWorkflowTaskStore.getState().settleRunning(settleSession, reason);
             break;
           }
           // Silently ignore research_*, search_*, cli_event, cli_stderr —
