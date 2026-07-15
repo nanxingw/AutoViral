@@ -18,6 +18,11 @@ export interface Config {
   // and enumerable by SECRET_PATHS (src/server/api.ts).
   jimeng?: { accessKey?: string; secretKey?: string };
   memory?: { apiKey: string; userId: string; syncEnabled: boolean };
+  // PRD-0015 S5 —— Studio chat 后端行为微调。目前仅 bgWaitCeilingMs：claude CLI
+  // print-mode 的后台任务等待上限（ms），注入子进程的
+  // CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS。省略时后端用 ADR-015 默认值 0（无限等待，
+  // result 帧不被 hold）；运维想要止损上限（如 600000）时在 config.yaml 里设。
+  chat?: { bgWaitCeilingMs?: number };
 }
 
 // AUTOVIRAL_DATA_DIR relocates ALL on-disk state (works, trends AND config.yaml)

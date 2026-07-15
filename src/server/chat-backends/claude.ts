@@ -25,6 +25,14 @@ import type {
 } from "./types.js";
 import { isDeniedChatCommandName } from "../chat-commands/registry.js";
 
+/** PRD-0015 S5 —— print-mode 后台任务等待上限默认值。
+ *  claude CLI 的 CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS 满上限后会在子进程内强杀全部
+ *  后台任务再退出（030 事故直接死因，2.1.210 二进制内默认 600000ms）。默认注入 0 =
+ *  无限等待：实测（ADR-015）result 帧不被 hold、首个回复不阻塞、chat UX 无损，而任何
+ *  有限值都会重演 030。服务端配置可覆盖为止损上限（AutoViral 侧的杀前 drain 由 S6
+ *  KillGate 负责，不靠这个上限止血）。 */
+export const DEFAULT_PRINT_BG_WAIT_CEILING_MS = 0;
+
 /** Normalize a claude `result` frame into the provider-agnostic summary. */
 function buildTurnComplete(msg: ChatRawMessage): ChatTurnComplete {
   const usage = msg.usage as Record<string, number> | undefined;
@@ -205,6 +213,12 @@ export const claudeBackend: ChatBackend = {
         AUTOVIRAL_WORK_ID: input.workId,
         AUTOVIRAL_PORT: String(input.serverPort),
         AUTOVIRAL_CWD: workCwd,
+        // PRD-0015 S5（止血）—— 显式钉住 print-mode 后台任务等待上限，别继承上游
+        // 二进制内默认的 600000ms（030 事故直接死因）。默认 0 = 无限等待；服务端
+        // 配置 chat.bgWaitCeilingMs 可覆盖为止损上限。详见 ADR-015。
+        CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS: String(
+          input.bgWaitCeilingMs ?? DEFAULT_PRINT_BG_WAIT_CEILING_MS,
+        ),
       },
     };
 

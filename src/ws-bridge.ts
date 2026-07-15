@@ -503,6 +503,13 @@ export class WsBridge {
   /** Backend HTTP port — injected into the agent env as AUTOVIRAL_PORT so the
    *  `autoviral` CLI (and any direct fetch) can reach this daemon. */
   private readonly serverPort: number;
+  /** PRD-0015 S5 —— 服务端配置的 print-mode 后台任务等待上限（ms）覆盖值，喂给
+   *  claude 后端的 buildSpawn（注入 CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS）。config
+   *  很少改（改了要重启 daemon 生效），lazy-load 一次缓存住（不放构造器：构造器不能有
+   *  异步副作用，否则 loadConfig 的 config.yaml 写入会 race 测试 teardown 删临时目录）。
+   *  未加载/未配置时保持 undefined，buildSpawn 回落到 ADR-015 默认 0（无限等待，安全侧）。 */
+  private bgWaitCeilingMs: number | undefined;
+  private bgWaitCeilingLoaded = false;
 
   constructor(serverPort: number, opts?: { idleTtlMs?: number }) {
     this.serverPort = serverPort;
@@ -743,6 +750,7 @@ export class WsBridge {
    * then spawns `claude -p <prompt> --output-format stream-json --verbose`.
    */
   async createSession(workId: string, initialPrompt: string, model?: string, sessionId?: string, backend?: string): Promise<WsSession> {
+    await this.ensureBgWaitCeiling(); // PRD-0015 S5 —— spawn 前把止损上限覆盖读进缓存。
     const sid = this.resolveSessionId(sessionId);
     logBridge("session_create", workId, { model, backend, promptLen: initialPrompt.length, sessionId: sid });
     const existing = this.getSessionEntry(workId, sid);
@@ -968,6 +976,7 @@ export class WsBridge {
     if (!session) {
       return { status: "error", command: name, errorCode: "session_not_found" };
     }
+    await this.ensureBgWaitCeiling(); // PRD-0015 S5 —— spawn 前把止损上限覆盖读进缓存。
 
     const backendId = resolveBackendId(session.backend);
     const resolution = resolveChatCommand({
@@ -1104,6 +1113,7 @@ export class WsBridge {
     const sid = this.resolveSessionId(sessionId);
     const session = this.getSessionEntry(workId, sid);
     if (!session) return false;
+    await this.ensureBgWaitCeiling(); // PRD-0015 S5 —— spawn 前把止损上限覆盖读进缓存。
 
     // Persist/display the CLEAN user text + structured attachments — spawnCli
     // below still gets the full envelope-prefixed `text` (the agent needs it).
@@ -1360,6 +1370,22 @@ export class WsBridge {
     this.spawnCli(session, prompt);
   }
 
+  /** PRD-0015 S5 —— lazy-load 服务端配置里的 print-mode 止损上限覆盖一次并缓存。
+   *  从异步的 spawn 入口（createSession / sendCommand / sendMessage）在 spawn 前 await，
+   *  这样写入 config.yaml 的副作用落在被测方法的 await 边界内，不会 race teardown；
+   *  不 spawn 的调用（unknown session 等早退路径）永不触发 loadConfig。失败/未配置时
+   *  bgWaitCeilingMs 保持 undefined，buildSpawn 回落到默认 0。 */
+  private async ensureBgWaitCeiling(): Promise<void> {
+    if (this.bgWaitCeilingLoaded) return;
+    this.bgWaitCeilingLoaded = true;
+    try {
+      const config = await loadConfig();
+      this.bgWaitCeilingMs = config.chat?.bgWaitCeilingMs;
+    } catch {
+      /* 保持默认（undefined → buildSpawn 用 0） */
+    }
+  }
+
   private spawnCli(
     session: WsSession,
     prompt: string,
@@ -1378,6 +1404,9 @@ export class WsBridge {
       model: session.model,
       workId: session.workId,
       serverPort: this.serverPort,
+      // PRD-0015 S5 —— 服务端配置的止损上限覆盖（undefined 时后端回落到 ADR-015
+      // 默认 0 = 无限等待）。claude 后端消费；codex 后端忽略。
+      bgWaitCeilingMs: this.bgWaitCeilingMs,
     });
 
     // Fail-fast guard (shared with terminal-ws.ts so both spawn faces stay in

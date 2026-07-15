@@ -1,0 +1,5 @@
+{"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "bn8y7ej1w", "task_type": "local_bash", "description": "Sleep 30 seconds then echo neverseen"}]}
+{"type": "system", "subtype": "task_started", "task_id": "bn8y7ej1w", "tool_use_id": "toolu_01GbxAeLbUiyxhDR8JsLeA4h", "description": "Sleep 30 seconds then echo neverseen", "task_type": "local_bash"}
+{"type": "system", "subtype": "background_tasks_changed", "tasks": []}
+{"type": "system", "subtype": "task_updated", "task_id": "bn8y7ej1w", "patch": {"status": "killed", "end_time": 1784114111794}}
+{"type": "system", "subtype": "task_notification", "task_id": "bn8y7ej1w", "tool_use_id": "toolu_01GbxAeLbUiyxhDR8JsLeA4h", "status": "stopped", "output_file": "<SCRATCH>/tasks/bn8y7ej1w.output", "summary": "Sleep 30 seconds then echo neverseen"}

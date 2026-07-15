@@ -35,6 +35,11 @@ export interface ChatSpawnInput {
   workId: string;
   /** The daemon's port — drives AUTOVIRAL_PORT so the CLI can reach the API. */
   serverPort: number;
+  /** PRD-0015 S5 —— print-mode 后台任务等待上限（ms），注入
+   *  CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS。省略时后端用 ADR-015 定的默认值
+   *  0（无限等待，result 帧不被 hold）。服务端配置（config.yaml `chat.bgWaitCeilingMs`）
+   *  想设止损上限时由 WsBridge 从配置读出后填这里。claude 后端消费；codex 后端忽略。 */
+  bgWaitCeilingMs?: number;
 }
 
 /** Everything `child_process.spawn(cmd, args, options)` needs. */
