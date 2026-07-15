@@ -10,6 +10,8 @@ autoviral whoami
 
 Returns `{workId, cwd, port, version}`. If this fails with exit code 2 you're not in a Studio terminal — the env vars `AUTOVIRAL_WORK_ID` / `AUTOVIRAL_PORT` / `AUTOVIRAL_CWD` aren't set. Tell the user.
 
+> Need to CREATE a work programmatically (rare — the Studio usually mints one for you)? `POST /api/works` with `{ type, platforms }`. `type` is an **enum**: `short-video` or `image-text`. Plain `video` is **not** valid (it 400s) — the short-video type string is `short-video`.
+
 ## 2. Read state
 
 ```bash

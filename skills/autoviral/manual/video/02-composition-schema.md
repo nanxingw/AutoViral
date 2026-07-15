@@ -12,6 +12,7 @@ width: 1280                # pixels
 height: 720
 duration: 81.40282         # seconds — derived from the longest track
 aspect: '16:9'             # one of 9:16 | 1:1 | 16:9 | 4:5
+updatedAt: '2026-05-13T19:30:00Z'  # ISO string — bumped on every write (REQUIRED)
 tracks: [...]              # ordered list, see below
 assets: [...]              # asset registry
 provenance: [...]          # how assets were produced (model, prompt, seed)
@@ -29,10 +30,12 @@ Four kinds, each with a typed clip array. The Studio renders them top-to-bottom,
 ```yaml
 tracks:
   - id: trk_video_main
-    kind: video             # video | audio | text | overlay
+    kind: video             # video | audio | text | overlay | adjustment
     label: main · 15 i2v · onset-aligned
+    displayOrder: 0         # REQUIRED — lane order (reordering/renaming ≠ id churn)
     muted: false
     hidden: false
+    volume: 0               # per-lane mix gain in dB (0 = unity); audio lanes only
     clips: [...]
 ```
 
@@ -157,28 +160,30 @@ See `recipes/video/script-to-storyboard.md` for the write-script-then-排-scenes
 ```yaml
 assets:
   - id: a_s01
-    name: s01.mp4
     kind: video               # image | video | audio | subtitle
-    path: assets/clips/s01.mp4
-    sourceUrl: null           # populated when the asset was pulled from a URL
-    metadata:                 # ONLY physical/format props live here
+    uri: assets/clips/s01.mp4  # work-relative path OR /api/works/<id>/assets/... URL
+    name: s01.mp4             # optional
+    metadata:                 # ONLY physical/format props live here (all optional)
       sizeBytes: 1234567
-      durationMs: 5000
+      duration: 5.0           # seconds
       width: 1920
       height: 1080
       codec: h264
-    status: ready             # pending | ready | failed
+    status: ready             # pending | ready | failed (default ready)
+    # optional: tags: [...]  · createdAt: '2026-05-13T19:30:00Z'
 ```
+
+The asset's disk location is `uri` (**not** `path` — that's the #1 schema-drift trap). `uri` accepts either a work-relative `assets/…` path or a page-absolute `/api/works/<id>/assets/…` URL.
 
 `metadata` is **physical only** — never put `model`, `prompt`, `seed`, `costUsd` there. Those belong in the provenance edge:
 
 ```yaml
 provenance:
-  - assetId: a_s01
+  - toAssetId: a_s01          # the produced asset (schema key is `toAssetId`, NOT `assetId`)
     fromAssetId: a_img01      # null = root asset (upload or text-only generation)
     operation:
-      type: i2v               # i2v | t2i | t2v | trim | mix | upscale | ...
-      actor: agent
+      type: derive            # generate | derive | upload | import | trim | mix | caption | grade | reframe
+      actor: agent            # user | agent | system
       params: { model: "seedance-2.0-i2v", seed: 42, durationSec: 5 }
       timestamp: "2026-05-13T19:30:00Z"
 ```

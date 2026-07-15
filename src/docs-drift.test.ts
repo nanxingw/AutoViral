@@ -301,6 +301,56 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     expect(recipe).toMatch(/captions generate --script/);
   });
 
+  // PRD-0014 S18 finding D [medium] — 02-composition-schema.md had drifted from
+  // the real zod schema on the FOUR fields that made `comp validate` throw four
+  // Required errors when an agent authored a comp straight from the doc (recon
+  // E2E D3): assets use `uri` (not `path`), provenance uses `toAssetId` (not
+  // `assetId`), tracks require `displayOrder`, and the top level requires
+  // `updatedAt`. Pin the corrected field names against src/shared/composition.ts
+  // so the drift can't creep back.
+  it("02-composition-schema.md uses the real zod field names (uri / toAssetId / displayOrder / updatedAt)", () => {
+    const schema = readFileSync(
+      join(MANUAL_DIR, "video", "02-composition-schema.md"),
+      "utf8",
+    );
+    // AssetEntry.uri (AssetEntrySchema has no `path`).
+    expect(schema, "asset registry must use `uri:`").toMatch(/^\s*uri:/m);
+    expect(
+      schema,
+      "the drifted `path: assets/clips/s01.mp4` asset line must be gone (no such field)",
+    ).not.toMatch(/path: assets\/clips\/s01\.mp4/);
+    // ProvenanceEdge.toAssetId (ProvenanceEdgeSchema key is toAssetId, not assetId).
+    expect(schema, "provenance edge must key on `toAssetId:`").toMatch(/toAssetId:/);
+    expect(
+      schema,
+      "the drifted bare `- assetId:` provenance key must be gone",
+    ).not.toMatch(/^\s*- assetId:/m);
+    // Track.displayOrder (required, no default — TrackSchema).
+    expect(
+      schema,
+      "track example must show `displayOrder` (TrackSchema requires it)",
+    ).toMatch(/displayOrder/);
+    // Composition.updatedAt (required — CompositionSchema).
+    expect(
+      schema,
+      "top-level example must show `updatedAt` (CompositionSchema requires it)",
+    ).toMatch(/updatedAt/);
+  });
+
+  // PRD-0014 S18 finding D — POST /api/works only accepts the type enum
+  // `short-video` / `image-text` (registry.ts); D1/D6 had to read the registry
+  // to discover `video` is INVALID. The quickstart must name the valid values so
+  // an agent creating a work programmatically doesn't guess.
+  it("00-quickstart documents the POST /api/works type enum (short-video / image-text)", () => {
+    const qs = readFileSync(
+      join(MANUAL_DIR, "_shared", "00-quickstart.md"),
+      "utf8",
+    );
+    expect(qs).toMatch(/\/api\/works/);
+    expect(qs).toMatch(/short-video/);
+    expect(qs).toMatch(/image-text/);
+  });
+
   // S9 review finding #6 — the managed-ffmpeg gotcha used to lie about the tool
   // semantics: it claimed ffmpeg is ONLY the managed `~/.autoviral/bin` copy and
   // that `autoviral doctor` "(re)provisions" it. In truth deps.ts resolves in a
