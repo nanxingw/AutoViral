@@ -114,6 +114,63 @@ Fires when `composition.yaml` is rewritten — either by a bridge `clip add/set/
 
 Triggered by the composition watcher; agents don't fire this manually.
 
+## Background-task lifecycle (`ui-workflow`)
+
+> **Different transport.** Unlike every envelope above (work-level `/ws/bridge/:workId`, `{type, workId, ts, payload}`), the `ui-workflow` family rides the **per-session chat WebSocket** `/ws/browser/:workId/:sessionId` and uses that stream's frame shape `{ event, data, timestamp }`. A background task belongs to one chat session (the CLI process that spawned it), so it is fanned to that session's sockets only — not work-wide. Consumed by the Studio chat task panel.
+
+Models the lifecycle of harness-tracked background tasks a chat agent starts (a Workflow run, a background Bash, a subagent). Task state is **mutable concurrent state**, not an append-only transcript — so it uses a registry + snapshot model (like the render progress channel), keyed by `sessionId + taskId + generation`.
+
+### `ui-workflow`
+
+An upsert (or terminal transition) of one task. Same-id delivery **REPLACES** the prior view of that task on the client — it is not appended.
+
+```json
+{ "event": "ui-workflow", "timestamp": "2026-07-15T06:32:50.202Z",
+  "data": {
+    "workId": "w_20260714_2317_f24", "sessionId": "s_1",
+    "taskId": "wf_296ee812", "generation": 3, "status": "running",
+    "taskType": "local_workflow", "description": "深度调研",
+    "toolUseId": "toolu_x", "summary": "报告已出",
+    "usage": { "total_tokens": 1234, "tool_uses": 3 },
+    "outputFile": "research/report.md",
+    "startTime": 1752561170195, "endTime": 1752561170712,
+    "settleReason": "cli_exit", "ts": 1752561170712 } }
+```
+
+| field | type | notes |
+|---|---|---|
+| `sessionId` | string | Chat session the task belongs to. Half of the identity. |
+| `taskId` | string | claude's ephemeral per-process task id (reused across turns). |
+| `generation` | number | Process generation (bumped each spawn). `taskId` alone is ambiguous across turns; `taskId + generation` is the stable key — an old turn's task and a new turn's same-`taskId` task are two rows. |
+| `status` | enum | `running` \| `pending-settle` \| `completed` \| `failed` \| `killed` \| `stopped` \| `orphaned`. |
+| `taskType` | string? | e.g. `local_workflow` / `local_bash` (passed through, not enumerated). |
+| `description` | string? | Human label. |
+| `toolUseId` | string? | The assistant `tool_use` block that launched it (stitches to the chat chip). |
+| `summary` | string? | Terminal notification summary. |
+| `usage` | object? | Counts (`total_tokens` / `tool_uses` / `duration_ms` …) — the "how much did it cost" surface. |
+| `outputFile` | string? | Produced artifact path, when the task reports one. |
+| `startTime` / `endTime` | number? | Epoch ms. |
+| `settleReason` | string? | Present only on a **synthesized** terminal state (host process exited while the task was still live) — e.g. `cli_exit` / `superseded`. A task that reached a natural terminal via a CLI frame has no `settleReason`. |
+| `ts` | number | Broadcast epoch ms. |
+
+**State machine.** A task is created `running`, may go `pending-settle` (dropped from the live snapshot but no terminal frame yet), and settles into one terminal: `completed` \| `failed` \| `killed` \| `stopped` \| `orphaned`. Terminal is **monotonic** — a late non-terminal frame never revives it (a CLI-authoritative terminal→terminal move like `killed`→`stopped` is allowed). `orphaned` is produced only by journal harvest (a later slice), never speculatively.
+
+**Process-exit behavior.** When the host CLI process exits (turn end, kill, crash), the server settles every still-live task of that generation to `stopped` with a `settleReason` and broadcasts a terminal `ui-workflow` — so "killed with no notice" (issue 030) is impossible. Tasks that already reached a terminal are not overwritten.
+
+### `ui-workflow-snapshot`
+
+Sent **once, first**, to a browser the moment it (re)connects — the full current task set for the session (current generation + un-cleaned terminals), so a refresh / reconnect restores task state without depending on being online at the moment each `ui-workflow` fired. Subsequent changes arrive as incremental `ui-workflow` frames.
+
+```json
+{ "event": "ui-workflow-snapshot", "timestamp": "2026-07-15T06:33:00.000Z",
+  "data": {
+    "workId": "w_20260714_2317_f24", "sessionId": "s_1", "ts": 1752561180000,
+    "tasks": [ { "taskId": "wf_296ee812", "generation": 3, "status": "running",
+                 "taskType": "local_workflow", "description": "深度调研" } ] } }
+```
+
+`data.tasks` is an array of the same per-task shape as `ui-workflow`'s `data` (minus the envelope-level `sessionId`/`workId`/`ts`, which live on the snapshot wrapper). The client replaces its whole local task map for the session from this frame. Emitted only when the session has run at least one turn (no registry ⇒ no snapshot frame).
+
 ## Inbound frames (Studio UI → Backend)
 
 The same WebSocket is bidirectional. The UI sends:

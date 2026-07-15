@@ -24,7 +24,7 @@ import { recordCostEvent } from "./server/cost-ledger/index.js";
 import { getContentType } from "./shared/content-types/registry.js";
 import { createCheckpoint } from "./server/checkpoints.js";
 import { getChatBackend, resolveBackendId, type ChatBackendId } from "./server/chat-backends/registry.js";
-import type { ChatProviderCapabilities } from "./server/chat-backends/types.js";
+import type { ChatProviderCapabilities, ChatBackgroundTaskEvent } from "./server/chat-backends/types.js";
 import { listChatCommands, resolveChatCommand } from "./server/chat-commands/registry.js";
 import { executeLocalChatCommand } from "./server/chat-commands/local.js";
 import type { ChatCommandCatalog, ChatCommandExecutionResult } from "./server/chat-commands/types.js";
@@ -37,7 +37,7 @@ import {
   findIdleSessions,
   type SessionRecord,
 } from "./server/sessions/sessions-sidecar.js";
-import { BackgroundTaskRegistry } from "./server/sessions/background-task-registry.js";
+import { BackgroundTaskRegistry, type BackgroundTaskSnapshot } from "./server/sessions/background-task-registry.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1713,14 +1713,16 @@ export class WsBridge {
         }
       },
 
-      // PRD-0015 S2 —— 后台任务生命周期归一化事件喂入 registry（applyEvent：同 id
-      // upsert + 状态机推进）。作用于当代（beginGeneration 已在 spawn 时推进）。本片
-      // 仍【不】广播 ui-workflow（S3 的事），只做登记 + logBridge 观测。task-class 帧
-      // 仍会经上面的 onOther 走既有 cli_event 转发（claude 后端故意双发，不回归）。
+      // PRD-0015 S2/S3 —— 后台任务生命周期归一化事件喂入 registry（applyEvent：同 id
+      // upsert + 状态机推进），随后把【本代】受影响的任务增量广播成 ui-workflow 信封
+      // （S3）。作用于当代（beginGeneration 已在 spawn 时推进）。task-class 帧仍会经上面的
+      // onOther 走既有 cli_event 转发（claude 后端故意双发，不回归）。
       onBackgroundTask: (event) => {
         // 显式传入 spawn 时捕获的代际——旧进程 parser 冲刷出的迟到帧必须落回【它自己的】代，
         // 绝不因 currentGeneration 已被新 spawn 推进而误入/污染新代同名 taskId（finding 1）。
         registry.applyEvent(event, spawnGeneration);
+        // S3 —— 增量广播 ui-workflow（同 sessionId+taskId+generation 覆盖式 replace）。
+        this.broadcastWorkflowChange(session, registry, spawnGeneration, event);
         logBridge("bg_task", session.workId, {
           kind: event.kind,
           taskId: event.taskId,
@@ -1762,10 +1764,11 @@ export class WsBridge {
       }
     });
 
-    // PRD-0015 S2 —— 后台任务退出兜底：把【本代际】仍未落定（running / pending-settle）的
+    // PRD-0015 S2/S3 —— 后台任务退出兜底：把【本代际】仍未落定（running / pending-settle）的
     // 任务合成 stopped 终态并标 reason——030"被杀无提示"的止损处。已终态（completed/killed/
     // stopped/failed）不被覆盖（exp1 双 result：完成的不误标终止）。按 spawnGeneration 寻址，
-    // 只收尾【这个】进程的活任务；不广播（S3 接 ui-workflow），settle 结果 logBridge 可观测。
+    // 只收尾【这个】进程的活任务。S3 —— 合成终态也向 chat 流广播 ui-workflow（030 AC「任务被
+    // 终止时向 chat 流广播用户可见事件」），被杀/退出不再静默。
     const settleThisGeneration = (reason: string): void => {
       const settled = registry.settleOnExit(reason, spawnGeneration);
       if (settled.length > 0) {
@@ -1775,6 +1778,7 @@ export class WsBridge {
           count: settled.length,
           taskIds: settled.map((t) => t.taskId),
         });
+        for (const task of settled) this.broadcastWorkflowTask(session, task);
       }
     };
 
@@ -1969,6 +1973,24 @@ export class WsBridge {
       }));
     }
 
+    // PRD-0015 S3 —— snapshot-on-connect：连接/重连时先发全量后台任务快照（对照 render-ws
+    // 的 snapshot-then-push），之后的增量 ui-workflow 经 broadcastToSession 补上。让刷新/
+    // 断线重连的客户端把任务状态恢复到权威快照（当前代际 + 尚未清理的终态），可见性不依赖
+    // "恰好在线的那一刻"。仅在本 session 已有 registry（至少 spawn 过一次）时发——没跑过
+    // 后台任务的 session 无快照可发。发给【本连接】（ws.send），不 fan 给其它 socket。
+    if (session.taskRegistry) {
+      ws.send(JSON.stringify({
+        event: "ui-workflow-snapshot",
+        data: {
+          workId,
+          sessionId: sid,
+          ts: Date.now(),
+          tasks: session.taskRegistry.snapshot(),
+        },
+        timestamp: new Date().toISOString(),
+      }));
+    }
+
     ws.on("message", async (raw) => {
       try {
         const msg = JSON.parse(raw.toString());
@@ -2078,6 +2100,55 @@ export class WsBridge {
         try { cb(payload.event, payload.data); } catch { /* listener error shouldn't crash bridge */ }
       }
     }
+  }
+
+  // ── PRD-0015 S3 · ui-workflow 信封广播 ─────────────────────────────────────
+
+  /**
+   * Broadcast one task snapshot as a `ui-workflow` envelope over the OWNING chat
+   * session's WS (broadcastToSession — a task belongs to a specific sessionId, so
+   * it does NOT ride the work-level bridge-ws). Identity = sessionId + taskId +
+   * generation; same-id delivery is a covering REPLACE on the client (upsert),
+   * not an append. `data` spreads the snapshot (taskId / generation / status +
+   * optional taskType / description / toolUseId / summary / outputFile / usage /
+   * startTime / endTime / settleReason) and stamps sessionId / workId / ts.
+   */
+  private broadcastWorkflowTask(session: WsSession, task: BackgroundTaskSnapshot): void {
+    this.broadcastToSession(session.workId, session.sessionId, {
+      event: "ui-workflow",
+      data: {
+        workId: session.workId,
+        sessionId: session.sessionId,
+        ts: Date.now(),
+        ...task,
+      },
+    });
+  }
+
+  /**
+   * After a registry applyEvent, incrementally broadcast the task(s) THIS event
+   * touched for the given generation. A task-keyed frame (started / updated /
+   * notification) broadcasts just that one task; a `list_changed` snapshot may
+   * add rows or flip absent-but-running ones to pending-settle, so it broadcasts
+   * the generation's full set. Tasks of OTHER generations (a superseded prior
+   * turn) are never re-broadcast here. Reads registry.snapshot() so the client
+   * always sees the reconciled post-transition state (terminal-monotonicity means
+   * a rejected late frame simply re-affirms the existing terminal status).
+   */
+  private broadcastWorkflowChange(
+    session: WsSession,
+    registry: BackgroundTaskRegistry,
+    generation: number,
+    event: ChatBackgroundTaskEvent,
+  ): void {
+    const all = registry.snapshot();
+    const affected =
+      event.kind === "list_changed"
+        ? all.filter((t) => t.generation === generation)
+        : event.taskId
+          ? all.filter((t) => t.taskId === event.taskId && t.generation === generation)
+          : [];
+    for (const task of affected) this.broadcastWorkflowTask(session, task);
   }
 
   // ── Sidecar bookkeeping + legacy migration (ADR-008 §2/§4/§5) ─────────────
