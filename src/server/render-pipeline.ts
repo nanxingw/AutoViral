@@ -84,18 +84,48 @@ export function rewriteClipSrcsToAbsolute(comp: Composition): Composition {
   const SCHEME = /^[a-z][a-z0-9+.\-]*:/i;
   const port = process.env.AUTOVIRAL_PORT ?? "3271";
   const baseUrl = `http://localhost:${port}/api/works/${comp.workId}`;
-  const resolveOne = (src: string): string => {
-    if (!src || SCHEME.test(src)) return src;
-    // Some comps store clip.src already as a page-absolute path
-    // ("/api/works/<id>/assets/..."). It only needs the localhost origin so
-    // headless Chromium can fetch it — re-wrapping it through the assets/
-    // prefix below would double-prefix into a 404 (snapshot E2E 2026-06-04;
-    // the mp4 export path shares this fn, so this fixes both).
-    if (src.startsWith("/")) return `http://localhost:${port}${src}`;
-    // Server route already prefixes "assets/", so we only need the suffix.
-    const trimmed = src.startsWith("assets/") ? src.slice("assets/".length) : src;
+  // Server route already prefixes "assets/", so we only need the suffix; strip a
+  // leading "assets/" and percent-encode each path segment.
+  const toServedUrl = (rel: string): string => {
+    const trimmed = rel.startsWith("assets/") ? rel.slice("assets/".length) : rel;
     const segments = trimmed.split("/").map(encodeURIComponent).join("/");
     return `${baseUrl}/assets/${segments}`;
+  };
+  const resolveOne = (src: string): string => {
+    if (!src || SCHEME.test(src)) return src;
+    if (src.startsWith("/")) {
+      // Some comps store clip.src already as a page-absolute API path
+      // ("/api/works/<id>/assets/..."). It only needs the localhost origin so
+      // headless Chromium can fetch it — re-wrapping it through the assets/
+      // prefix would double-prefix into a 404 (snapshot E2E 2026-06-04).
+      if (src.startsWith("/api/")) return `http://localhost:${port}${src}`;
+      // A genuine ABSOLUTE FILESYSTEM path. The pre-Remotion ffmpeg pre-passes
+      // (speed-ramp / time-warp / crop-flip) bake their cache to an absolute
+      // path under THIS work's `output/` dir and write it straight into
+      // clip.src (S18 A absolutised the input so ffprobe stops ENOENT-ing).
+      // Blindly origin-prefixing it minted
+      //   http://localhost:PORT/Users/.../works/<id>/output/clip-….mp4
+      // which NO route serves → the SPA catch-all returns index.html (200
+      // text/html) → Remotion decodes HTML as video → "Invalid data found when
+      // processing input" and the export dies before frame 0 (PRD-0014 S18 E2E
+      // r2 · M1 — the 变速导出 regression's second root cause). Map any path
+      // that lives under this work's asset roots back to its SERVED asset URL,
+      // keyed on the EXACT workId + a known asset-root segment (output/ |
+      // assets/ | plan/) so it survives an AUTOVIRAL_WORKS_ROOT that doesn't
+      // contain the literal "/works/". Covers the WHOLE pre-pass family (static
+      // speed / variable-speed concat / audio atempo / time-warp / crop-flip),
+      // all of which emit `join(outDir, cacheName)` under <workRoot>/<id>/output/.
+      const m = src.match(
+        new RegExp(`/${comp.workId}/((?:assets|output|plan)/.+)$`),
+      );
+      if (m) return toServedUrl(m[1]);
+      // An absolute path we can't recognise as under this work (e.g. a test's
+      // bespoke FS-server fixture — consistency-gate startFsServer): keep the
+      // origin-prefix so those setups keep working. A production pre-pass cache
+      // ALWAYS lands under <workRoot>/<id>/output/ and is mapped above.
+      return `http://localhost:${port}${src}`;
+    }
+    return toServedUrl(src);
   };
   return {
     ...comp,

@@ -338,6 +338,21 @@ export function compareRawFrames(
 // ─── static file server: serve any absolute path so headless Chromium can
 //     fetch both the fixture srcs AND the pre-pass cache mp4s (both live at
 //     absolute paths that rewriteClipSrcsToAbsolute maps to localhost URLs). ──
+//
+// ⚠ KNOWN BLIND SPOT (PRD-0014 S18 E2E r2 · M1): this server treats the URL path
+// as an absolute FILESYSTEM path (`fsPath = decoded` below) and streams it —
+// i.e. it serves http://localhost:PORT/Users/.../output/clip-…mp4 verbatim. The
+// PRODUCTION daemon does NOT: it only mounts /api/works/:id/assets/*, so any
+// other path SPA-catch-alls to index.html (200 text/html). That divergence is
+// exactly how the gate's ② speed fixture stayed GREEN while the real export was
+// broken — the pre-pass baked an ABSOLUTE cache path into clip.src and the old
+// `resolveOne` origin-prefixed it into an unservable /Users/… URL that Remotion
+// decoded as HTML ("Invalid data"). The gate's permissive server hid it.
+// The served-URL semantics resolveOne must honour in production are now locked
+// directly by render-pipeline.rewrite-src.test.ts (asserts the minted URL is a
+// /api/works/:id/assets/output/… one the REAL route serves, for the whole
+// pre-pass family). Fully mirroring THIS server onto that route would let the
+// full gate re-catch the class too — deferred; the unit lock is the S18 gate.
 
 export interface ServedRoot {
   port: number;
