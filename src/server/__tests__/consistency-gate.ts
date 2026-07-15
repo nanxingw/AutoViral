@@ -247,7 +247,12 @@ export interface DiffResult {
   reason: string;
 }
 
-const DEFAULT_TOL: Required<CompareTolerance> = {
+// `ignoreRect` is intentionally excluded from the defaults: the comparator reads
+// it straight off the caller's `tol` (see `const ignore = tol.ignoreRect` below),
+// never off DEFAULT_TOL, so there is no sensible "default rectangle". S16 added
+// the optional field to CompareTolerance; Omit keeps DEFAULT_TOL total over the
+// tolerance knobs it actually supplies without inventing a bogus ignoreRect.
+const DEFAULT_TOL: Required<Omit<CompareTolerance, "ignoreRect">> = {
   perChannelNoiseTol: 14,
   // 6% absorbs h264 chroma-subsampling artifacts along soft edges (mask feather,
   // reverse frame boundaries) while staying FAR below a 回退-1× divergence, which

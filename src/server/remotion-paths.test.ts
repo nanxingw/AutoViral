@@ -18,7 +18,9 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-const bundleMock = vi.fn(async () => "/fake/serve-url");
+const bundleMock = vi.fn<
+  (opts: { entryPoint: string; webpackOverride: (c: any) => any }) => Promise<string>
+>(async () => "/fake/serve-url");
 vi.mock("@remotion/bundler", () => ({ bundle: bundleMock }));
 
 // existsSync is the only fs gate resolveRemotionServeUrl uses (the entry-point

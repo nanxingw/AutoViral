@@ -4419,11 +4419,13 @@ exportPresets: []
   });
 
   function getComp() {
-    return app
-      .request("/api/bridge/v1/comp", {
+    // Hono's app.request() types as `Response | Promise<Response>`; normalize to
+    // a Promise before chaining .then (all other call sites `await` it instead).
+    return Promise.resolve(
+      app.request("/api/bridge/v1/comp", {
         headers: { "X-AutoViral-Work-Id": workId },
-      })
-      .then((r) => r.json()) as Promise<{
+      }),
+    ).then((r) => r.json()) as Promise<{
       result: {
         tracks: Array<{
           id: string;

@@ -176,6 +176,7 @@ describe("applyTimeWarpPrePass (S19 — prepass feeds the CLIP SPAN to ffmpeg, n
         output: string,
         vChain: string,
         aChain: string,
+        fps: number,
         signal?: AbortSignal,
       ) => Promise<void>
     >(async () => {});

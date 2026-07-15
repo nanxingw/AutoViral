@@ -20,7 +20,7 @@ import { join } from "node:path";
 const WORK_ID = "w_ckpt_test";
 
 async function withRouter<T>(
-  fn: (app: { request: (path: string, init?: RequestInit) => Promise<Response> }, dir: string) => Promise<T>,
+  fn: (app: { request: (path: string, init?: RequestInit) => Response | Promise<Response> }, dir: string) => Promise<T>,
 ): Promise<T> {
   const dir = await mkdtemp(join(tmpdir(), "av-ckpt-"));
   process.env.AUTOVIRAL_DATA_DIR = dir;

@@ -68,8 +68,8 @@ describe("fresh-work asset registration bootstraps a composition (C1.3)", () => 
       default: true,
       generateVideo: async (opts: VideoGenerateOptions): Promise<VideoGenerateResult> => {
         calls.push(opts);
-        const assetUri = join(opts.outputAbsoluteDir, "clip.mp4");
-        await mkdir(opts.outputAbsoluteDir, { recursive: true });
+        const assetUri = join(opts.outputAbsoluteDir!, "clip.mp4");
+        await mkdir(opts.outputAbsoluteDir!, { recursive: true });
         await writeFile(assetUri, Buffer.from([0x00, 0x00, 0x00, 0x18]));
         return { assetUri, costUsd: 0.5, stub: false, providerJobId: "job_1" };
       },
