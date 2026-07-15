@@ -56,11 +56,12 @@ Add a beat between two existing shots and you must bump the following clips' `tr
 yourself (the bridge does not auto-shift on insert — see `05-conventions`). Ripple only
 auto-shifts on *delete*.
 
-## Rule 4 — transitions are accents, not the cut
+## Rule 4 — two transition mechanisms (entrance vs cut-point)
 
-Most beat cuts are **hard cuts** — that's the energy. Use a transition only as an accent
-on specific beats. An **entrance transition** (S3) rides in at the head of a single clip
-and is orthogonal to any cut-point transition:
+AutoViral exposes two orthogonal transition mechanisms; pick by *where* the transition
+sits (whether to use one at all, and on which beat, is the taste call). An **entrance
+transition** (S3) rides in at the head of a single clip and is independent of any
+cut-point transition:
 
 ```bash
 # S3 — `--transition-in <preset>:<durationSec>`; writes a dedicated entrance

@@ -46,21 +46,34 @@ autoviral comp show --format json | jq '{strategy: .captionStrategy, hasCaptions
 
 ## Baking captions into the pixels (redistribution)
 
-When a target platform strips overlay layers or the mp4 is headed for a non-AutoViral
-tool, burn the caption lane into the video at export. **You do not need the retired libass
-path** (`src/domain/audio-tools.ts::burnSubtitles` throws now) — burn a `text` track
-directly:
+**The `--script` overlay is already baked at export — no extra step.** A
+`captionStrategy: "overlay"` CaptionModel renders through `<CaptionsLayer>` in the
+same Remotion pass as the preview (**preview = export**), so a plain `autoviral
+export` (or `render enqueue`) writes an mp4 with the captions composited into the
+pixels. You do **not** need `--caption-tracks` for this flow, and you do **not**
+need the retired libass path (`src/domain/audio-tools.ts::burnSubtitles` throws
+now). Just export.
+
+`--caption-tracks` is a **different** mechanism — it resolves real **text tracks**,
+not the overlay CaptionModel this recipe writes. Reach for it only when you have one
+or more text **lanes** tagged by language (e.g. from `autoviral captions generate`
+**without** `--script`, which writes TextClips into a text track, or a
+manually-added text lane) and want the first language burned in with the rest
+emitted as sidecar `.srt` files:
 
 ```bash
-# The FIRST --caption-tracks language is composited into the video by Remotion
-# (same renderer as preview); any further languages ride along as sidecar .srt.
-autoviral export --caption-tracks zh
-autoviral export --caption-tracks zh,en     # zh burned in, en as a sidecar .srt
+# export resolves each token against a text lane's `language` tag: the FIRST
+# language's text track is composited into the video by Remotion (same renderer as
+# preview), any further languages ride along as sidecar .srt files. A language with
+# no matching text track is a hard 400 — tag a text lane with that language first.
+autoviral export --caption-tracks zh          # burn the zh text lane
+autoviral export --caption-tracks zh,en       # zh burned in, en as a sidecar .srt
 ```
 
-`render enqueue --caption-tracks <trackId>[,...]` does the same on the async queue (the
-first track id is burned, the rest become sidecar `.srt`s) — see the render-queue section
-of `autoviral docs _shared/03-cli-reference`.
+`render enqueue --caption-tracks <trackId>[,...]` does the same on the async queue,
+but resolves by **track id** (not language): the first track id is burned, the rest
+become sidecar `.srt`s — see the render-queue section of
+`autoviral docs _shared/03-cli-reference`.
 
 ## Managed-ffmpeg gotcha (read before you burn)
 

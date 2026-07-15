@@ -6,7 +6,8 @@ don't need a separate text-compositing pass for a cover; describe the whole layo
 prompt and let the model render it.
 
 This is a mechanics recipe (how to drive the image endpoint + self-check the result). The
-*copy* — what the title says, the brand voice — is the taste/editorial job.
+*copy* — what the title says, the brand voice, the palette — is the taste job (a sibling
+skill), so the prompt below leaves style/colour as `<…>` placeholders.
 
 ## The prompt pattern
 
@@ -16,24 +17,29 @@ renders it verbatim.
 
 ```bash
 # POST /api/generate/image — canvas aspect is followed by default (omit
-# aspectRatio); it does NOT auto-register an AssetEntry, so this is for a cover
-# file, not a storyboard shot (use `autoviral scene generate` for those).
+# aspectRatio). It best-effort registers the result as an AssetEntry (+ a
+# `generate` provenance edge) and returns { relativeUri, assetId }; the PNG lands
+# under the work's assets/images/. It does NOT link the asset to a storyboard
+# scene — for a scene-bound shot use `autoviral scene generate` (registers AND
+# links atomically).
 curl -s "http://localhost:$AUTOVIRAL_PORT/api/generate/image" \
   -H 'content-type: application/json' \
   -d '{
         "workId": "'"$AUTOVIRAL_WORK_ID"'",
         "filename": "cover.png",
-        "prompt": "竖版短视频封面海报，9:16。深色高级质感背景，微噪点。\n主标题居中偏上：「一分钟看懂内存条」，超大号粗体中文，白色，排版果断。\n副标题在主标题下方：「AI 硬件科普 · 第 3 期」，中号中文，冷钢蓝色。\n右下角小字 logo：AutoViral。\n整体 editorial、克制、现代，避免高饱和堆叠。"
+        "prompt": "竖版短视频封面海报，9:16。<背景描述>。\n主标题居中偏上：「一分钟看懂内存条」，超大号粗体中文，<主标题颜色>。\n副标题在主标题下方：「AI 硬件科普 · 第 3 期」，中号中文，<副标题颜色>。\n右下角小字 logo：AutoViral。\n<整体风格一句>。"
       }'
-# → writes output under the work; response carries the relative path.
+# → { relativeUri: "assets/images/cover.png", assetId, ... } — the asset is
+#   registered and an asset-added event refreshes the Studio library live.
 ```
 
-Prompt-writing rules that keep the title clean:
+Prompt-writing rules (pure mechanics — the title copy + which palette/style to pick
+are the taste job, deferred to a sibling skill):
 
 - **Quote the exact title** (「…」 or "…") — the model renders the quoted string literally.
 - **Say the position** ("居中偏上", "右下角") so the title, subtitle, and logo don't collide.
-- **Keep the title short** — a 6–12 character 中文 title renders crisper than a long sentence.
-- **State the style once** at the end (editorial / 高级 / 克制) rather than sprinkling it.
+- **State the style once** at the end (a single `<风格>` clause) rather than sprinkling it —
+  *which* style is a taste call, not a mechanic.
 - Omit `aspectRatio` to follow the work's canvas (e.g. a 9:16 short → a vertical poster);
   pass it explicitly only to override. Field table:
   `autoviral docs _shared/03-cli-reference` ("POST /api/generate/image").
@@ -56,7 +62,8 @@ wraps oddly or a character is wrong.
 
 ## Use it as a work cover
 
-A cover PNG under `output/` is a deliverable; to also use it as the *first frame* of the
-video, add it as a short `video`/`image` clip at `trackOffset: 0`, or pass its
+The generated cover is registered in the asset library (`assets/images/`); to also use
+it as the *first frame* of the video, drop it on the timeline as an **overlay clip** (a
+static image maps to an `overlay` clip — there is no `image` clip/track kind), or pass its
 workspace-relative path as `firstFrame` to `POST /api/generate/video` to anchor an i2v
 open (stylized/object anchors only — Seedance rejects photo-real human faces).

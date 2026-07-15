@@ -129,11 +129,12 @@ These are landmines you'll step in if you ignore them:
 - **Missing asset file** — `clip add --src does-not-exist.mp4` succeeds; the render will fail later. Validate paths exist before adding when you can.
 - **Audio clip on a video track** — discriminated union catches `kind` mismatch but only at parse time; if you somehow craft a clip in a way that confuses the union, behavior is undefined.
 
-## Generation resilience — abort cancels upstream, batches are idempotent (S10)
+## Generation resilience — what's guarded, what isn't (S10)
 
-Asset generation (video / image / bgm / tts) is billed upstream, so the workstation
-guards two failure modes for you — know how they behave so you don't double-charge or
-strand a job:
+Asset generation is billed upstream, so the workstation guards two failure modes on the
+**manifest-gated single-generation endpoints** (`POST /api/generate/video`,
+`/api/generate/image`, `/api/generate/bgm`). The guarantees are **not uniform** across
+every generation call — know the exact scope so you don't double-charge or strand a job:
 
 - **A client-side timeout does NOT cancel a server-side generation by itself.** What
   cancels is a real **request abort**: when the CLI/HTTP client disconnects (or aborts the
@@ -143,13 +144,29 @@ strand a job:
   `orphaned` note in the cost-ledger so the spend is visible instead of silently
   double-billing on retry. Don't lean on a "generous timeout" as a fix; a genuine abort is
   what stops the upstream work.
-- **Batch generation is idempotent via a per-work `generation-manifest.json`**, keyed by
-  the **content hash** of `(prompt + params)` — never a timestamp. The entry point reserves
-  before dispatch: a `done` key **skips** (echoes the cached asset, no re-下单), an
+- **The manifest-gated endpoints are idempotent via a per-work `generation-manifest.json`**,
+  keyed by the **content hash** of `(prompt + params)` — never a timestamp. The entry point
+  reserves before dispatch: a `done` key **skips** (echoes the cached asset, no re-下单), an
   `in-flight` key is rejected with **HTTP 409** (no concurrent duplicate order), a
-  `failed`/absent key proceeds (retry allowed). So re-running the same prompt is safe and
-  free — it returns the existing asset rather than paying again. Statuses are
-  `in-flight | done | failed | orphaned`.
+  `failed`/absent key proceeds (retry allowed). So re-running the same prompt on these
+  endpoints is safe and free — it returns the existing asset rather than paying again.
+  Statuses are `in-flight | done | failed | orphaned`.
+- **Transient 5xx → bounded retry, don't abort.** Seedance / image providers occasionally
+  return a **transient 500** that succeeds on a second attempt. Retry a 5xx a few times
+  with exponential backoff (e.g. up to 3 attempts) rather than treating the first one as
+  fatal; because the manifest key stays `failed`/absent until a call succeeds, a retry
+  re-enters cleanly with no double-charge. If it still fails after the bounded retries,
+  surface the failure — don't loop forever, and don't abort the whole piece on one 5xx.
+- **Exceptions — these two do NOT get the manifest/abort guarantee above:**
+  - **TTS** (`POST /api/works/:id/tts` and `POST /api/audio/tts`) has **no manifest
+    reservation and no request-abort wiring** — it re-synthesizes on every call. edge-tts
+    is a free local binary, but the Gemini path is billed, so a repeated TTS call
+    **re-charges**; it is NOT idempotent. Don't assume a re-run is free.
+  - **The image BATCH endpoint** (`POST /api/generate/image/batch`) is **intentionally NOT
+    manifest-gated** (random seeds = variety by design) — every call bills anew for its
+    `count` candidates. It DOES thread the request-abort signal, so a client disconnect
+    cancels the in-flight (paid) candidates, but a repeat call is a fresh charge, not a
+    cached skip.
 - **Under session interruptions, prefer foreground single-clip calls over long background
   jobs.** A background job spanning a turn boundary can get torn down; a single-clip
   foreground generation (one `POST /api/generate/*` you wait on) survives better. Loop
@@ -158,9 +175,10 @@ strand a job:
 ## Cost knob — 720p vs 1080p (Seedance)
 
 Seedance video is priced per output pixel-second: roughly **720p ≈ $0.15/s, 1080p ≈
-$0.34/s** (per the `resolution` field of `POST /api/generate/video`). **720p upscaled to
-1080p is fine for 抖音 / 小红书** — most vertical shorts don't need native 1080p, so default
-to 720p and reserve 1080p for hero shots. Full cost table + fields:
+$0.34/s** (per the `resolution` field of `POST /api/generate/video`). That's the
+operational fact — 1080p costs ~2.3× a 720p second. **Which** resolution a given piece
+warrants is a quality/budget call for a sibling taste skill, not a mechanic; the price
+table is here so that call is informed. Full cost table + fields:
 `autoviral docs _shared/03-cli-reference` ("POST /api/generate/video"). Managed-ffmpeg
 resolution (why a burn/encode may fail on a stripped `PATH`) is in the *ASR-aligned
 subtitle* recipe's gotcha and `add-subtitle-overlay.md`.

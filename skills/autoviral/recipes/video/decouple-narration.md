@@ -19,13 +19,14 @@ clip lands in the Studio asset library automatically:
 
 ```bash
 # POST /api/works/:id/tts — one call, one locked voice, the full narration.
-curl -s "http://localhost:$AUTOVIRAL_PORT/api/works/$AUTOVIRAL_WORK_ID/tts" \
+# Capture the whole response: you need BOTH the file uri AND its real length.
+RESP=$(curl -s "http://localhost:$AUTOVIRAL_PORT/api/works/$AUTOVIRAL_WORK_ID/tts" \
   -H 'content-type: application/json' \
   -d '{
         "text": "第一句旁白。第二句旁白。第三句旁白，一气呵成。",
         "voice": "zh-CN-XiaoxiaoNeural",
         "language": "zh-CN"
-      }'
+      }')
 # → { relativeUri: "assets/audio/tts_<hash>.mp3", providerId, durationSec, voice }
 ```
 
@@ -38,11 +39,19 @@ curl -s "http://localhost:$AUTOVIRAL_PORT/api/works/$AUTOVIRAL_WORK_ID/tts" \
 - Full field table: the "Text-to-speech (TTS)" section of
   `autoviral docs _shared/03-cli-reference`.
 
-Add the returned file to its own audio lane:
+Add the returned file to its own audio lane — **pass the response's `durationSec`
+as `--duration`**. A bare `clip add` with neither `--duration` nor `--out` falls
+back to the bridge's `in + 5` default and **silently truncates a long narration
+to a 5-second clip** (the voice cuts off mid-sentence):
 
 ```bash
+VO_SRC=$(echo "$RESP" | jq -r .relativeUri)     # assets/audio/tts_<hash>.mp3
+VO_DUR=$(echo "$RESP" | jq -r .durationSec)      # full narration length, seconds
+
 TID=$(autoviral track add --kind audio --label "VO")
-autoviral clip add --src assets/audio/tts_<hash>.mp3 --track audio --track-id "$TID" --offset 0
+# --duration is the CLIP length; the bridge computes out = in + duration. Omit
+# it and the whole VO collapses to the 5s in+5 fallback.
+autoviral clip add --src "$VO_SRC" --track audio --track-id "$TID" --offset 0 --duration "$VO_DUR"
 ```
 
 ## 2 — Generate the picture SILENT

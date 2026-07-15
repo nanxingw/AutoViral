@@ -629,6 +629,191 @@ describe("docs-drift guard — manual/docs references must resolve to real files
     });
   });
 
+  // PRD-0014 S17 review 修复 — the first #95 recipe cut shipped recipe-vs-runtime
+  // lies the review caught: `clip add` without `--duration` truncates a long VO
+  // to the bridge's in+5 fallback; the `--script` overlay flow doesn't burn via
+  // `--caption-tracks` (that flag resolves real TEXT TRACKS); the image endpoint
+  // DOES best-effort register an AssetEntry (+ returns assetId, writes assets/
+  // images, maps to an OVERLAY clip); the resilience note over-promised the
+  // manifest/abort guarantee for TTS + the image BATCH endpoint; and aesthetic
+  // teaching leaked into mechanics recipes. These guards pin the corrected
+  // contracts so the docs can't drift back.
+  describe("PRD-0014 S17 review 修复 — recipes match the real runtime contracts", () => {
+    const VIDEO_RECIPE_DIR = join(REPO_ROOT, "skills", "autoviral", "recipes", "video");
+    const RECIPES_ROOT = join(REPO_ROOT, "skills", "autoviral", "recipes");
+    const CLI_DISPATCH = readFileSync(
+      join(REPO_ROOT, "cli", "autoviral", "src", "cli.ts"),
+      "utf8",
+    );
+    const readRecipe = (rel: string) => readFileSync(join(VIDEO_RECIPE_DIR, rel), "utf8");
+    const readShared = (name: string) =>
+      readFileSync(join(MANUAL_DIR, "_shared", name), "utf8");
+    // What `autoviral docs` (no topic) returns: the concatenation of manual/**.md
+    // (the /docs route recurses one level into the content-type subdirs). NOT
+    // SKILL.md, NOT recipes/. Mirror it here so the finding-#5 guard tests the
+    // real no-arg surface.
+    const manualConcat = () =>
+      manualChapterFiles()
+        .map((f) => readFileSync(join(MANUAL_DIR, f), "utf8"))
+        .join("\n\n");
+    // Every recipe file basename on disk (video + carousel), the sync oracle.
+    const recipeBasenames = (() => {
+      const out: string[] = [];
+      const walk = (dir: string) => {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (e.isFile() && e.name.endsWith(".md")) out.push(e.name);
+          else if (e.isDirectory()) walk(join(dir, e.name));
+        }
+      };
+      walk(RECIPES_ROOT);
+      return out;
+    })();
+
+    // Finding #7 — replace the 7 hard-coded verb pairs with a self-maintaining
+    // sweep: pull EVERY `autoviral <verb>` out of every recipe's fenced code
+    // blocks and assert the top-level verb is a key of the CLI dispatch table.
+    // A phantom verb in ANY recipe (new or old) now turns this red without a
+    // test edit.
+    it("every autoviral verb any recipe fenced block invokes is wired in cli.ts dispatch", () => {
+      const dispatchBlock =
+        CLI_DISPATCH.match(/const dispatch[^{]*\{([\s\S]*?)\n\};/)?.[1] ?? "";
+      const wired = new Set(
+        [...dispatchBlock.matchAll(/["']?([a-z][a-z0-9-]*)["']?\s*:/g)].map((m) => m[1]),
+      );
+      expect(wired.size, "failed to parse the CLI dispatch table").toBeGreaterThan(10);
+      const offenders: string[] = [];
+      for (const base of recipeBasenames) {
+        // resolve the file across both content-type subdirs
+        const candidates = [
+          join(RECIPES_ROOT, "video", base),
+          join(RECIPES_ROOT, "carousel", base),
+        ].filter((p) => existsSync(p));
+        const body = readFileSync(candidates[0], "utf8");
+        for (const block of body.match(/```[a-zA-Z]*\n[\s\S]*?```/g) ?? []) {
+          for (const line of block.split("\n")) {
+            const m = line.match(/^\s*autoviral\s+([a-z][a-z0-9-]*)/);
+            if (m && !wired.has(m[1])) offenders.push(`${base}: autoviral ${m[1]}`);
+          }
+        }
+      }
+      expect(
+        offenders,
+        `recipe(s) advertise an autoviral verb absent from cli.ts dispatch: ${offenders.join(", ")}`,
+      ).toEqual([]);
+    });
+
+    // Finding #1 — a long TTS voiceover added with a bare `clip add --src …`
+    // silently becomes a 5s clip (the bridge fills out = in + 5 when neither
+    // --duration nor --out is given). The recipe MUST read the TTS response's
+    // durationSec and pass --duration so the whole narration lands on the lane.
+    it("decouple-narration reads durationSec and passes --duration (no silent 5s truncation)", () => {
+      const r = readRecipe("decouple-narration.md");
+      expect(r, "must read the TTS response's durationSec").toMatch(/durationSec/);
+      expect(
+        r,
+        "`clip add` for the VO must carry --duration (bridge defaults to in+5 → truncated to 5s otherwise)",
+      ).toMatch(/clip add[^\n]*--duration/);
+    });
+
+    // Finding #2 — the `--script` path writes a CaptionModel overlay
+    // (captionStrategy: overlay), which Remotion composites in the SAME pass as
+    // preview (preview = export) — a plain `autoviral export` already burns it.
+    // `--caption-tracks` resolves real TEXT TRACKS (a separate flow), so the
+    // recipe must not tell the overlay flow to burn via --caption-tracks.
+    it("burn-subtitles: the --script overlay bakes at plain export; --caption-tracks is the text-track flow", () => {
+      const r = readRecipe("burn-subtitles-asr-aligned.md");
+      expect(
+        r,
+        "must state the overlay captions bake in the same pass as export (preview = export)",
+      ).toMatch(/overlay[\s\S]{0,200}(?:preview\s*=\s*export|自动|automatically|already)/i);
+      expect(
+        r,
+        "--caption-tracks must be framed as operating on real text tracks/lanes, not the overlay CaptionModel",
+      ).toMatch(/--caption-tracks[\s\S]{0,320}text\s+(?:track|lane)/i);
+    });
+
+    // Finding #4 — the raw image endpoint DOES best-effort register an
+    // AssetEntry (+ returns assetId, writes under assets/images), and a static
+    // image maps to an OVERLAY clip (there is no image clip/track kind).
+    it("generate-cover states the real image-endpoint contract (registers assetId, assets/images, overlay clip)", () => {
+      const r = readRecipe("generate-cover.md");
+      expect(
+        r,
+        "image endpoint DOES register an AssetEntry — the recipe must not deny it",
+      ).not.toMatch(/(?:does\s*not|doesn't|不自动)\s*(?:auto-)?(?:register|注册)/i);
+      expect(r, "must surface the returned assetId").toMatch(/assetId/);
+      expect(r, "provider writes under assets/images").toMatch(/assets\/images/);
+      expect(
+        r,
+        "a static image maps to an OVERLAY clip — say so (no image clip/track kind exists)",
+      ).toMatch(/overlay/i);
+    });
+
+    it("03-cli-reference image endpoint drops the stale 'does NOT register' claim and documents assetId", () => {
+      const ref = readShared("03-cli-reference.md");
+      expect(
+        ref,
+        "must not teach the stale 'raw image endpoint does NOT register an AssetEntry' claim",
+      ).not.toMatch(/image endpoint[\s\S]{0,80}does\s*NOT\s*register an AssetEntry/i);
+      const start = ref.indexOf("POST /api/generate/image");
+      const end = ref.indexOf("POST /api/generate/bgm", start);
+      const imgSection = ref.slice(start, end === -1 ? undefined : end);
+      expect(imgSection, "image endpoint section must document the returned assetId").toMatch(
+        /assetId/,
+      );
+    });
+
+    // Finding #3 + #8 — scope the manifest/abort guarantee to the endpoints that
+    // actually enforce it and name the exceptions (TTS + the image BATCH), and
+    // cover the transient-5xx bounded-retry strategy (#95 item 4).
+    it("05-conventions scopes the resilience guarantee, names TTS + image-batch exceptions, covers 5xx retry", () => {
+      const conv = readShared("05-conventions.md");
+      expect(
+        conv,
+        "TTS must be called out as NOT manifest-idempotent / not request-abort-guarded",
+      ).toMatch(/TTS[\s\S]{0,220}(?:例外|exception|not\s+(?:manifest|idempotent|guarded)|无\s*manifest|no\s+manifest|重新计费|re-?charge)/i);
+      expect(
+        conv,
+        "the image BATCH endpoint must be flagged as intentionally NOT manifest-gated",
+      ).toMatch(/batch[\s\S]{0,160}(?:not\s+manifest|例外|随机\s*seed|random\s+seed|intentionally)/i);
+      expect(
+        conv,
+        "must document a bounded retry (with backoff) for transient 5xx — retry, don't abort",
+      ).toMatch(/(?:transient|瞬时|暂时)[\s\S]{0,60}5\d\d[\s\S]{0,200}(?:retry|重试|backoff|退避)/i);
+    });
+
+    // Finding #6 — mechanics recipes must not carry aesthetic teaching (palette,
+    // composition, cut-energy, hero-shot judgments) — that's the sibling taste
+    // skill's job.
+    it("recipes carry no aesthetic teaching (taste is the sibling skill's job)", () => {
+      const cover = readRecipe("generate-cover.md");
+      const beat = readRecipe("beat-cutting.md");
+      const conv = readShared("05-conventions.md");
+      expect(cover, "cover recipe must not prescribe a palette/aesthetic").not.toMatch(
+        /冷钢蓝|editorial|避免高饱和|克制/,
+      );
+      expect(beat, "beat-cutting must not editorialize cut energy").not.toMatch(
+        /that's the energy|hard cuts\s*—\s*that's/i,
+      );
+      expect(conv, "the cost knob must not make a hero-shot taste judgment").not.toMatch(
+        /hero\s*shot/i,
+      );
+    });
+
+    // Finding #5 — `autoviral docs` (no topic) concatenates manual/**.md only.
+    // A recipe index chapter in the manual makes the recipes discoverable there,
+    // and the index must stay in sync with every recipe on disk.
+    it("autoviral docs (no topic) output indexes every recipe on disk", () => {
+      const manual = manualConcat();
+      for (const base of recipeBasenames) {
+        expect(
+          manual,
+          `the manual (autoviral docs no-arg source) must index recipe ${base}`,
+        ).toMatch(new RegExp(base.replace(/\./g, "\\.")));
+      }
+    });
+  });
+
   it("covers both reference families (docs-slug + file-path) so a new form can't slip the net unnoticed", () => {
     const refs = allRefs();
     const haveDocsSlug = refs.some((r) => r.kind === "docs");

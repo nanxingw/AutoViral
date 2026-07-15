@@ -390,11 +390,13 @@ autoviral scene generate scn_a1b2c3
 autoviral scene generate scn_a1b2c3 --provider openrouter-image   # pick an image provider
 ```
 
-Do **not** substitute a raw `POST /api/generate/image` + manual `scene link` for
-this verb — the raw image endpoint does not register an AssetEntry in
-`composition.assets`, so a hand-rolled link dangles. Video / TTS shots have no
-`scene generate` yet: generate via the HTTP endpoints (those DO register the
-asset), then record the handoff with `autoviral scene link`.
+Prefer this verb over a raw `POST /api/generate/image` + manual `scene link` for a
+storyboard shot: `scene generate` registers the asset **and** links it to the scene
+(and flips the scene's generation status) in one atomic op. The raw image endpoint
+registers the asset best-effort but does **not** link it to a scene — you'd have to
+`scene link` by hand, an extra step that's easy to skip or point at the wrong asset.
+Video / TTS shots have no `scene generate` yet: generate via the HTTP endpoints
+(those DO register the asset), then record the handoff with `autoviral scene link`.
 
 ### `autoviral scene remove <id>`
 
@@ -424,13 +426,13 @@ Body: `{ workId, prompt, filename, aspectRatio?, resolution?, durationSec?, firs
 
 Cost (per token, H×W×dur×24): roughly **720p ≈ $0.15/s, 1080p ≈ $0.34/s**.
 
-Response includes `assetId` — the clip is **registered as an AssetEntry + a `generate` provenance edge** on `composition.yaml`, so you can `autoviral scene link <sceneId> --asset <assetId>` directly with no dangling reference. (Contrast the image endpoint below.)
+Response includes `assetId` — the clip is **registered as an AssetEntry + a `generate` provenance edge** on `composition.yaml`, so you can `autoviral scene link <sceneId> --asset <assetId>` directly with no dangling reference. (The image endpoint below also registers an AssetEntry + returns `assetId`; the difference is scene *linking*, not registration.)
 
 ### `POST /api/generate/image`
 
 Body: `{ workId, prompt, filename, aspectRatio?, imageSize?, width?, height?, referenceImage? }`. Like video, the **canvas aspect is followed by default** (omit `aspectRatio`); `width`/`height` only derive the nearest ratio (the model picks exact pixels).
 
-Unlike the video endpoint, the **raw image endpoint does NOT register an AssetEntry** in `composition.assets`. For storyboard image shots use `autoviral scene generate <id>` (it registers + links atomically) — don't pair a raw `POST /api/generate/image` with a manual `scene link`, the link would dangle.
+Response includes `relativeUri` (under `assets/images/`) + `assetId` — the image is **best-effort registered as an AssetEntry + a `generate` provenance edge** on `composition.yaml`, and an `asset-added` event refreshes the Studio library live (same shape as the video/bgm endpoints). What it does NOT do is **link** the asset to a storyboard scene: for a scene-bound shot use `autoviral scene generate <id>` (it registers AND links atomically) — don't pair a raw `POST /api/generate/image` with a manual `scene link`, the link would dangle. A static image placed on the timeline maps to an `overlay` clip (there is no `image` clip/track kind).
 
 ### `POST /api/generate/bgm`
 

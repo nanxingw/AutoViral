@@ -366,6 +366,41 @@ describe("bridge router — Phase 3 clip writes", () => {
     expect(listBody.result.some((c) => c.id === body.result!.id)).toBe(true);
   });
 
+  // PRD-0014 S17 review 修复 (finding #1) — `clip add` with `--duration` and no
+  // explicit `--out` must land a clip of exactly that length (out = in +
+  // duration), NOT the in+5 fallback the bridge uses only when BOTH are absent.
+  // This is the regression guard behind the decouple-narration recipe: a long
+  // TTS voiceover added with its real durationSec must not be silently
+  // truncated to 5s.
+  it("POST /clip honors --duration (out = in + duration), not the in+5 fallback", async () => {
+    // in=2, duration=3 → out=5 → duration 3s. The in+5 fallback would give 5s.
+    const withIn = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ src: "assets/sample-shot.mp4", track: "video", in: 2, duration: 3 }),
+    });
+    const withInId = ((await withIn.json()) as { result: { id: string } }).result.id;
+
+    // duration only (in defaults 0) → out=17 → 17s. The in+5 fallback → 5s.
+    const longVo = await app.request("/api/bridge/v1/clip", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-AutoViral-Work-Id": workId },
+      body: JSON.stringify({ src: "assets/tts_full.mp3", track: "audio", duration: 17 }),
+    });
+    const longVoId = ((await longVo.json()) as { result: { id: string } }).result.id;
+
+    const list = await app.request("/api/bridge/v1/clips", {
+      headers: { "X-AutoViral-Work-Id": workId },
+    });
+    const clips = ((await list.json()) as { result: Array<{ id: string; duration: number }> })
+      .result;
+    expect(clips.find((c) => c.id === withInId)?.duration).toBeCloseTo(3, 1);
+    expect(
+      clips.find((c) => c.id === longVoId)?.duration,
+      "a 17s voiceover must NOT be truncated to the 5s in+5 fallback",
+    ).toBeCloseTo(17, 1);
+  });
+
   it("DELETE /clip/:id removes the clip", async () => {
     const post = await app.request("/api/bridge/v1/clip", {
       method: "POST",
