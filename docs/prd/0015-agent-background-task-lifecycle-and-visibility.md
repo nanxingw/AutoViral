@@ -1,6 +1,6 @@
 # PRD-0015 · Studio chat 后台任务生命周期与可见性：让 Workflow 编排在工位里活下来、看得见
 
-**Status: Proposed (2026-07-15) → Implemented (2026-07-15) · 目标版本：v0.2.1**
+**Status: Proposed → Implemented → Shipped (2026-07-15, v0.2.1) **
 > 交付实况：S1-S7 全交付（帧归一化 → registry → 信封 → web 任务卡片 → ceiling 配置 → KillGate → journal 打捞），四轮 codex review 全闭环；E2E 收口纬度见 Testing Decisions。
 
 > Source: GitHub issues [#96](https://github.com/nanxingw/AutoViral/issues/96)（[docs/issues/030](../issues/030-studio-chat-kills-background-workflow.md)）/ [#97](https://github.com/nanxingw/AutoViral/issues/97)（[docs/issues/031](../issues/031-studio-no-subagent-visibility.md)），用户 2026-07-15 报告并要求根因入 PRD。

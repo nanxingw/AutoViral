@@ -1,6 +1,6 @@
 # PRD-0016 · 预览硬切边界保真：warm handoff 与单调时钟
 
-**Status: Proposed (2026-07-15) → Implemented (2026-07-15) · 目标版本：v0.2.1（与 PRD-0015 同版）**
+**Status: Proposed → Implemented → Shipped (2026-07-15, v0.2.1)**
 > 交付实况：S1-S4 全交付（红基线 → premount → 音频语义 → 压力复测）。#98 切点级症状归零（切点回放清零、video 负跳 0、waiting 40→4、帧钟单调）；非切点 BGM/VO ~600ms 音频漂移为独立残留 → [issue 033](../issues/033-audio-track-drift-replay.md)。
 
 > Source: GitHub issue [#98](https://github.com/nanxingw/AutoViral/issues/98)（用户 2026-07-15 报告，含 12×4s CFR 最小复现夹具与三个排序假设）· 本地镜像 [docs/issues/032](../issues/032-preview-hardcut-stutter-replay.md)。
