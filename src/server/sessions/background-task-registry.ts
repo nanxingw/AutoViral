@@ -122,6 +122,8 @@ export interface WorkflowHarvest {
   startedAgents: number;
   /** 收割来源 journal 的绝对路径（取证/审计用）。 */
   journalPath: string;
+  /** L10 —— 最后一个 agent `result` 的截断摘要（≤120 字符）；卡片 tooltip 可见。缺省无。 */
+  resultSummary?: string;
 }
 
 /** registry 对外暴露的一条任务快照（拷贝，改它不污染内部状态）。 */
@@ -163,8 +165,15 @@ export interface RejectedTransition {
    *   - `terminal_monotonicity` —— 终态→non-terminal（迟到帧想复活已终态任务）。
    *   - `terminal_to_terminal`  —— 终态→终态但非 killed→stopped（M6：唯一放行的终态覆盖）。
    *   - `settled_generation`    —— 已 settleOnExit 的死代际任何迟到帧（H4：死代际不重开）。
-   *   - `unknown_status`        —— 词汇表未识别的状态词（M6：忽略该次推进，保留原状态）。 */
-  kind?: "terminal_monotonicity" | "terminal_to_terminal" | "settled_generation" | "unknown_status";
+   *   - `unknown_status`        —— 词汇表未识别的状态词（M6：忽略该次推进，保留原状态）。
+   *   - `orphaned_requires_harvest` —— 上游 CLI 帧携带 `status:"orphaned"`（M9：`orphaned`
+   *     只能经内部 {@link BackgroundTaskRegistry.markOrphaned} 打捞路径产生，绝不接受上游直传）。 */
+  kind?:
+    | "terminal_monotonicity"
+    | "terminal_to_terminal"
+    | "settled_generation"
+    | "unknown_status"
+    | "orphaned_requires_harvest";
 }
 
 export interface BackgroundTaskRegistryOptions {
@@ -183,6 +192,10 @@ export class BackgroundTaskRegistry {
   /** H4：已被 settleOnExit 收尾（进程退出/被杀）的死代际集合。死代际的任何迟到帧
    *  （含全新 taskId 的 started / list_changed）一律拒绝——绝不凭空重开一条 running 记录。 */
   private readonly settledGenerations = new Set<number>();
+  /** M9：`orphaned` 是打捞专属终态。仅 {@link markOrphaned} 在其内部 transition 前把此旗
+   *  置 true，使 orphaned 目标合法；任何上游 CLI 帧（applyEvent 路径）此旗恒为 false，
+   *  status:"orphaned" 一律被 transition 拒绝并记 `orphaned_requires_harvest`。 */
+  private orphaningInternally = false;
 
   constructor(options: BackgroundTaskRegistryOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -216,6 +229,19 @@ export class BackgroundTaskRegistry {
    *  被拒都走观测钩子（带 kind），不改状态。 */
   private transition(rec: TaskRecord, next: BackgroundTaskStatus): void {
     if (rec.status === next) return;
+    // M9：orphaned 是打捞专属终态——只有 markOrphaned 内部路径（orphaningInternally=true）
+    // 能把任务推进到 orphaned。上游 CLI 帧直传 status:"orphaned" 一律拒（不接受 speculative
+    // orphaned；避免绕过 journal 打捞凭空标中断）。
+    if (next === "orphaned" && !this.orphaningInternally) {
+      this.onRejectedTransition?.({
+        taskId: rec.taskId,
+        generation: rec.generation,
+        from: rec.status,
+        to: next,
+        kind: "orphaned_requires_harvest",
+      });
+      return;
+    }
     const fromTerminal = isTerminalStatus(rec.status);
     const toTerminal = isTerminalStatus(next);
     if (fromTerminal && !toTerminal) {
@@ -424,7 +450,14 @@ export class BackgroundTaskRegistry {
   ): BackgroundTaskSnapshot | undefined {
     const rec = this.tasks.get(this.keyFor(taskId, generation));
     if (!rec) return undefined;
-    this.transition(rec, "orphaned");
+    // M9：唯一放行 orphaned 目标的地方——置内部旗，transition 内的 orphaned 守卫因此放行；
+    // 白名单（stopped/killed→orphaned）仍生效，completed→orphaned 照旧被 terminal_to_terminal 拒。
+    this.orphaningInternally = true;
+    try {
+      this.transition(rec, "orphaned");
+    } finally {
+      this.orphaningInternally = false;
+    }
     // transition 被白名单拒绝（如 completed→orphaned）→ 状态没变，不挂 harvest、不广播。
     if (rec.status !== "orphaned") return undefined;
     rec.harvest = { ...harvest };

@@ -24,6 +24,7 @@ import { DEFAULT_SESSION_ID } from "../activeSession";
 
 function makeTask(over: Partial<WorkflowTask> = {}): WorkflowTask {
   return {
+    workId: "w1",
     sessionId: "s_1",
     taskId: "wf_a",
     generation: 1,
@@ -68,7 +69,7 @@ describe("workflow-tasks store", () => {
     s.upsert(makeTask({ sessionId: "s_1", taskId: "old_1", status: "running" }));
     s.upsert(makeTask({ sessionId: "s_2", taskId: "keep_2", status: "running" }));
     // Snapshot for s_1 contains a DIFFERENT task set — the old s_1 task is gone.
-    s.applySnapshot("s_1", [
+    s.applySnapshot("w1", "s_1", [
       makeTask({ taskId: "fresh_1", generation: 3, status: "running" }),
     ]);
     const tasks = useWorkflowTaskStore.getState().tasks;
@@ -79,7 +80,7 @@ describe("workflow-tasks store", () => {
   });
 
   it("does not toast when a snapshot brings in already-terminal tasks (reconnect must be silent)", () => {
-    useWorkflowTaskStore.getState().applySnapshot("s_1", [
+    useWorkflowTaskStore.getState().applySnapshot("w1", "s_1", [
       makeTask({ taskId: "done_1", status: "completed" }),
     ]);
     expect(useToastStore.getState().entries).toHaveLength(0);
@@ -108,12 +109,71 @@ describe("workflow-tasks store", () => {
     ).toBe("completed");
   });
 
+  it("H1 — allows stopped→orphaned / killed→orphaned and carries the harvest counts", () => {
+    const s = useWorkflowTaskStore.getState();
+    const key = taskKey(makeTask());
+    s.upsert(makeTask({ status: "stopped", settleReason: "cli_exit" }));
+    useToastStore.setState({ entries: [] });
+    s.upsert(
+      makeTask({
+        status: "orphaned",
+        harvest: { runId: "wf_x", completedAgents: 2, startedAgents: 3, journalPath: "/j" },
+      }),
+    );
+    const task = useWorkflowTaskStore.getState().tasks[key];
+    expect(task.status).toBe("orphaned"); // orphaned frame must NOT be rejected
+    expect(task.harvest).toEqual({
+      runId: "wf_x",
+      completedAgents: 2,
+      startedAgents: 3,
+      journalPath: "/j",
+    }); // harvest must survive the upgrade, not be dropped
+    expect(task.settleReason).toBe("cli_exit"); // settle reason preserved
+    // Upgrading an already-settled task is NOT a fresh terminal — no re-toast.
+    expect(useToastStore.getState().entries).toHaveLength(0);
+  });
+
+  it("H2 — a same-terminal re-broadcast REPLACES data (new summary/usage) without re-toasting", () => {
+    const s = useWorkflowTaskStore.getState();
+    const key = taskKey(makeTask());
+    s.upsert(makeTask({ status: "completed" })); // first terminal → one toast
+    expect(useToastStore.getState().entries).toHaveLength(1);
+    // Same completed status arrives again with a fresh summary + usage.
+    s.upsert(
+      makeTask({ status: "completed", summary: "报告已出", usage: { total_tokens: 999 } }),
+    );
+    const task = useWorkflowTaskStore.getState().tasks[key];
+    expect(task.summary).toBe("报告已出"); // new summary must NOT be dropped
+    expect(task.usage?.total_tokens).toBe(999);
+    expect(useToastStore.getState().entries).toHaveLength(1); // no second toast
+  });
+
+  it("H5 — two works that reuse the same session id do not cross-contaminate", () => {
+    const s = useWorkflowTaskStore.getState();
+    s.upsert(makeTask({ workId: "wA", sessionId: "s_1", taskId: "t", status: "running" }));
+    s.upsert(makeTask({ workId: "wB", sessionId: "s_1", taskId: "t", status: "running" }));
+    // Two distinct rows despite identical sessionId/generation/taskId.
+    expect(Object.keys(useWorkflowTaskStore.getState().tasks)).toHaveLength(2);
+    // settleRunning on work A must NOT touch work B's same-named session task.
+    s.settleRunning("wA", "s_1", "cli_exit");
+    const tasks = useWorkflowTaskStore.getState().tasks;
+    expect(tasks[taskKey(makeTask({ workId: "wA", taskId: "t" }))].status).toBe("stopped");
+    expect(tasks[taskKey(makeTask({ workId: "wB", taskId: "t" }))].status).toBe("running");
+    // A snapshot for work A does not wipe work B's task.
+    s.applySnapshot("wA", "s_1", []);
+    const after = useWorkflowTaskStore.getState().tasks;
+    expect(after[taskKey(makeTask({ workId: "wB", taskId: "t" }))]).toBeTruthy();
+    // The panel selector for work A only sees work A rows.
+    const { active: activeB } = panelTasksFor(after, "wB", "s_1");
+    expect(activeB.map((t) => t.taskId)).toEqual(["t"]);
+  });
+
   it("settleRunning flips still-running tasks of a session to stopped (with reason) and leaves terminals", () => {
     const s = useWorkflowTaskStore.getState();
     s.upsert(makeTask({ taskId: "live", status: "running" }));
     s.upsert(makeTask({ taskId: "done", status: "completed" }));
     useToastStore.setState({ entries: [] }); // ignore the completed-toast above
-    s.settleRunning("s_1", "cli_exit");
+    s.settleRunning("w1", "s_1", "cli_exit");
     const tasks = useWorkflowTaskStore.getState().tasks;
     const live = tasks[taskKey(makeTask({ taskId: "live" }))];
     const done = tasks[taskKey(makeTask({ taskId: "done" }))];
@@ -131,6 +191,7 @@ describe("workflow-tasks store", () => {
     s.upsert(makeTask({ sessionId: "s_2", taskId: "c", status: "running" }));
     const { active, terminal } = panelTasksFor(
       useWorkflowTaskStore.getState().tasks,
+      "w1",
       "s_1",
     );
     expect(active.map((t) => t.taskId)).toEqual(["a"]);

@@ -221,6 +221,113 @@ describe("WsBridge — PRD-0015 S3 ui-workflow 信封 + snapshot-on-connect", ()
     });
   });
 
+  // ⑤ W4.5 H3 —— ceiling 强杀：任务在进程 exit 前就带上 killed 终态帧（settleOnExit 无新结算），
+  //    journal 打捞仍必须触发，把该任务翻 orphaned 并广播（含 harvest 计数）。注入 harvestRunsFn
+  //    返回受控 run，避免碰真实 ~/.claude 文件系统。
+  it("H3 — 任务先收 killed 终态、进程再 exit，仍触发 journal 打捞并广播 orphaned", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, DEFAULT_CHAT_SESSION_ID } = await import("../../ws-bridge.js");
+      const work = "w_uiwf_ceiling";
+      await mkdir(join(dir, "works", work), { recursive: true });
+
+      const bridge = new WsBridge(3271);
+      await bridge.createSession(work, "开工", undefined, DEFAULT_CHAT_SESSION_ID);
+      const session = bridge.getSession(work, DEFAULT_CHAT_SESSION_ID)!;
+      // 打捞需要 cliSessionId 推导 journal 路径——设个假的即可（harvestRunsFn 被注入，不真读盘）。
+      session.cliSessionId = "sess-uuid-ceiling";
+      // 注入受控 run：mtime 在 call 时求值（晚于任务 startTime），落进任务生命周期窗口。
+      (bridge as any).harvestRunsFn = async () => [
+        {
+          runId: "wf_run",
+          journalPath: "/j/wf_run/journal.jsonl",
+          mtimeMs: Date.now(),
+          counts: { completedAgents: 2, startedAgents: 3, resultSummary: "最后一个 agent 交付了" },
+        },
+      ];
+
+      const proc = session.cliProcess as unknown as { stdout: EventEmitter } & EventEmitter;
+      emitLine(proc, {
+        type: "system",
+        subtype: "task_started",
+        task_id: "wf_ceil",
+        task_type: "local_workflow",
+        description: "编排中",
+      });
+      // ceiling 强杀语义：任务在进程 exit 前就被标 killed（终态帧先到）。
+      emitLine(proc, {
+        type: "system",
+        subtype: "task_notification",
+        task_id: "wf_ceil",
+        status: "killed",
+      });
+      await sleep(10);
+
+      const captured: Array<{ event: string; data: any }> = [];
+      bridge.onSessionEvent(work, (event, data) => captured.push({ event, data: data as any }));
+
+      // 进程 exit：settleOnExit 对 killed 任务无新结算，但 H3 打捞候选从快照重算仍命中它。
+      (proc as unknown as EventEmitter).emit("exit", 1, null);
+      await sleep(30);
+
+      const orphaned = captured
+        .filter((e) => e.event === "ui-workflow")
+        .map((e) => e.data)
+        .filter((d) => d.taskId === "wf_ceil" && d.status === "orphaned");
+      expect(orphaned.length).toBeGreaterThan(0);
+      const last = orphaned[orphaned.length - 1];
+      expect(last.harvest).toBeDefined();
+      expect(last.harvest.completedAgents).toBe(2);
+      expect(last.harvest.startedAgents).toBe(3);
+      expect(last.harvest.runId).toBe("wf_run");
+      expect(last.harvest.resultSummary).toBe("最后一个 agent 交付了"); // L10
+    });
+  });
+
+  // ⑥ W4.5 H4 —— 陈旧 exit 门控：一个已被新进程接管（session.cliProcess 已换）的旧进程，其
+  //    迟到 exit 绝不广播 cli_exited（否则客户端会把新代仍在跑的任务误翻 stopped）。但它仍按
+  //    自己代际 settle 自己的活任务（证明 handler 确实跑了，no-broadcast 是门控而非 handler 没执行）。
+  it("H4 — 被接管的旧进程迟到 exit 不广播 cli_exited（但仍 settle 自己代际的任务）", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, DEFAULT_CHAT_SESSION_ID } = await import("../../ws-bridge.js");
+      const work = "w_uiwf_stale";
+      await mkdir(join(dir, "works", work), { recursive: true });
+
+      const bridge = new WsBridge(3271);
+      await bridge.createSession(work, "开工", undefined, DEFAULT_CHAT_SESSION_ID);
+      const session = bridge.getSession(work, DEFAULT_CHAT_SESSION_ID)!;
+      const oldProc = session.cliProcess as unknown as { stdout: EventEmitter } & EventEmitter;
+
+      // 旧进程这代起了个活任务。
+      emitLine(oldProc, {
+        type: "system",
+        subtype: "task_started",
+        task_id: "wf_old",
+        task_type: "local_workflow",
+      });
+      await sleep(10);
+
+      // 模拟新进程接管：session.cliProcess 换成另一个（旧进程从此是 stale）。
+      const newProc = makeFakeProc();
+      session.cliProcess = newProc as any;
+
+      const captured: Array<{ event: string; data: any }> = [];
+      bridge.onSessionEvent(work, (event, data) => captured.push({ event, data: data as any }));
+
+      // 旧进程迟到 exit。
+      (oldProc as unknown as EventEmitter).emit("exit", 0, null);
+      await sleep(10);
+
+      // 门控：绝不广播 cli_exited（否则新代任务被误 settle）。
+      expect(captured.some((e) => e.event === "cli_exited")).toBe(false);
+      // 但旧进程这代的活任务仍被 settle 并广播 stopped（证明 exit handler 真的执行了）。
+      const settled = captured
+        .filter((e) => e.event === "ui-workflow")
+        .map((e) => e.data)
+        .filter((d) => d.taskId === "wf_old" && d.status === "stopped");
+      expect(settled.length).toBeGreaterThan(0);
+    });
+  });
+
   // ④ ui-progress 行为零变化：整段 bg 任务生命周期广播绝不发出 ui-progress，且 chat 流上
   //    唯一的新 ui-* 信封是 ui-workflow / ui-workflow-snapshot（不复用 ui-progress）。
   it("bg 任务生命周期广播不触碰 ui-progress（回归锁）", async () => {

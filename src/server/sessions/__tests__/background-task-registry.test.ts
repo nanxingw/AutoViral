@@ -540,4 +540,21 @@ describe("BackgroundTaskRegistry — markOrphaned + 终态覆盖白名单（S7�
     enriched.harvest!.completedAgents = 999;
     expect(byId(reg, "wf")!.harvest!.completedAgents).toBe(2);
   });
+
+  it("M9 — 上游 CLI 帧直传 status:\"orphaned\" 被拒（orphaned 只经 markOrphaned 产生）", () => {
+    const rejected: Array<{ from?: string; to?: string; kind?: string }> = [];
+    const reg = new BackgroundTaskRegistry({
+      now: () => 100,
+      onRejectedTransition: (info) => rejected.push({ from: info.from, to: info.to, kind: info.kind }),
+    });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "wf", taskType: "local_workflow" }, g);
+    // 一个恶意/漂移的上游 notification 想把 running 直接标 orphaned，绕过 journal 打捞。
+    reg.applyEvent({ kind: "notification", taskId: "wf", status: "orphaned" }, g);
+    expect(byId(reg, "wf")!.status).toBe("running"); // 未被推进
+    expect(rejected.some((r) => r.to === "orphaned" && r.kind === "orphaned_requires_harvest")).toBe(true);
+    // 而内部打捞路径（settle 后 markOrphaned）仍能正常产生 orphaned。
+    reg.settleOnExit("cli_exit", g);
+    expect(reg.markOrphaned("wf", g, HARVEST)!.status).toBe("orphaned");
+  });
 });

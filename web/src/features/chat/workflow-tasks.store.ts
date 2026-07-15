@@ -11,10 +11,12 @@ import { MESSAGES } from "@/i18n/messages";
  *
  * Task state is MUTABLE CONCURRENT state, not an append-only transcript — so
  * this is a keyed registry (like the render-progress channel), NOT the chat
- * block list. Identity is `sessionId :: generation :: taskId` (a taskId alone
- * is a per-process ephemeral id claude reuses across turns; the generation
- * disambiguates an old turn's task from a new turn's same-taskId one). A
- * same-id `ui-workflow` REPLACES the prior view — it never stacks.
+ * block list. Identity is `workId :: sessionId :: generation :: taskId` (a
+ * taskId alone is a per-process ephemeral id claude reuses across turns; the
+ * generation disambiguates an old turn's task from a new turn's same-taskId
+ * one; the workId keeps two DIFFERENT works that happen to share a session id —
+ * e.g. both default to `s_1` — from cross-contaminating, H5). A same-id
+ * `ui-workflow` REPLACES the prior view — it never stacks.
  */
 
 export type WorkflowTaskStatus =
@@ -49,7 +51,23 @@ export interface WorkflowTaskUsage {
   [k: string]: number | undefined;
 }
 
+/** Journal-harvest result (S7) — mirror of the server `WorkflowHarvest`. Carried
+ *  ONLY on an `orphaned` terminal: how many sub-agents actually finished (deduped
+ *  by journal `key`) out of how many started, plus the run id / journal path as
+ *  resume + audit leads, and (L10) a truncated summary of the last agent result. */
+export interface WorkflowHarvest {
+  runId: string;
+  completedAgents: number;
+  startedAgents: number;
+  journalPath: string;
+  /** L10 — truncated (~120 char) summary of the last harvested agent result. */
+  resultSummary?: string;
+}
+
 export interface WorkflowTask {
+  /** Owning work — part of the identity key so two works that share a session id
+   *  (both default `s_1`) never cross-contaminate (H5). */
+  workId: string;
   sessionId: string;
   taskId: string;
   generation: number;
@@ -66,33 +84,50 @@ export interface WorkflowTask {
    *  was live) — e.g. `cli_exit` / `daemon_shutdown`. A natural CLI terminal
    *  has none. */
   settleReason?: string;
+  /** S7 — journal-harvest counts, ONLY on an `orphaned` terminal. */
+  harvest?: WorkflowHarvest;
   ts?: number;
 }
 
-/** The stable client key: process generation + claude's ephemeral task id,
- *  scoped to the owning chat session. */
+/** The stable client key: work + chat session + process generation + claude's
+ *  ephemeral task id. workId leads so a session-only filter can never leak one
+ *  work's tasks into another work that reused the same session id (H5). */
 export function taskKey(t: {
+  workId: string;
   sessionId: string;
   generation: number;
   taskId: string;
 }): string {
-  return `${t.sessionId}::${t.generation}::${t.taskId}`;
+  return `${t.workId}::${t.sessionId}::${t.generation}::${t.taskId}`;
 }
 
+/** Allowed terminal→terminal transitions — mirror of the server
+ *  `TERMINAL_OVERRIDE_ALLOWED`. CLI-authoritative `killed→stopped` (a hard kill
+ *  refined into a clean stop) + journal-harvest `stopped→orphaned` /
+ *  `killed→orphaned` (S7: a settled task upgraded to orphaned with harvest
+ *  counts). Everything else (e.g. `completed→killed`) is rejected. */
+const TERMINAL_OVERRIDE_ALLOWED: ReadonlySet<string> = new Set([
+  "killed->stopped",
+  "stopped->orphaned",
+  "killed->orphaned",
+]);
+
 /**
- * Terminal is MONOTONIC. A settled task is never revived by a late non-terminal
- * frame (stale reorder / a resumed generation flushing old bytes). The one
- * terminal→terminal move allowed is the CLI-authoritative `killed → stopped`
- * (the server refines a hard kill into a clean stop). Everything else that
- * targets an already-terminal task is rejected. Mirrors the server rule so both
- * ends converge on the same final state regardless of frame ordering.
+ * Should the next frame's DATA replace the stored task? Terminal is MONOTONIC:
+ * a settled task is never revived by a late non-terminal frame (stale reorder /
+ * a resumed generation flushing old bytes). Terminal→terminal moves are allowed
+ * for the whitelist above, AND for an idempotent same-status re-broadcast — the
+ * DATA still overwrites (H2: a `completed` re-broadcast carrying a fresh
+ * summary/usage must not be dropped), but no NEW toast fires (that is gated
+ * separately on the FRESH terminal crossing in {@link applyOne}). Mirrors the
+ * server rule so both ends converge on the same final state regardless of order.
  */
 function shouldReplace(prev: WorkflowTask | undefined, next: WorkflowTask): boolean {
   if (!prev) return true;
   if (!isTerminalStatus(prev.status)) return true; // non-terminal always advances
   if (!isTerminalStatus(next.status)) return false; // terminal → non-terminal: revive rejected
-  if (prev.status === next.status) return false; // idempotent terminal re-broadcast: no-op (no re-toast)
-  return prev.status === "killed" && next.status === "stopped";
+  if (prev.status === next.status) return true; // H2: same-terminal REPLACES data (toast gated in applyOne)
+  return TERMINAL_OVERRIDE_ALLOWED.has(`${prev.status}->${next.status}`);
 }
 
 interface ApplyResult {
@@ -108,12 +143,20 @@ function applyOne(
   const key = taskKey(next);
   const prev = tasks[key];
   if (!shouldReplace(prev, next)) return { tasks, toasted: null };
-  // Same-id delivery REPLACES the prior view (event-stream.md) — not a merge.
+  // Same-id delivery advances the stored task. We MERGE prev←next (rather than a
+  // raw replace) so a frame that omits a field it already reported — e.g. an
+  // `orphaned` upgrade that carries `harvest` but re-affirms the settle — never
+  // silently drops earlier metadata. frameToTask only sets DEFINED fields, so
+  // next never clobbers with undefined; every field next DOES carry wins.
+  const merged: WorkflowTask = prev ? { ...prev, ...next } : next;
+  // Toast fires ONLY on the FRESH crossing into a terminal (prev was non-terminal
+  // or absent). A same-terminal re-broadcast / a killed→stopped|orphaned upgrade
+  // updates DATA but does not re-toast.
   const freshTerminal =
     isTerminalStatus(next.status) && (!prev || !isTerminalStatus(prev.status));
   return {
-    tasks: { ...tasks, [key]: next },
-    toasted: freshTerminal ? next : null,
+    tasks: { ...tasks, [key]: merged },
+    toasted: freshTerminal ? merged : null,
   };
 }
 
@@ -140,15 +183,16 @@ interface WorkflowTaskStore {
   tasks: Record<string, WorkflowTask>;
   /** Apply one incremental `ui-workflow` frame (upsert + state machine). */
   upsert: (task: WorkflowTask) => void;
-  /** Replace the whole task set FOR ONE SESSION from a `ui-workflow-snapshot`
-   *  (reconnect restore). Other sessions are untouched; no toasts fire. */
-  applySnapshot: (sessionId: string, tasks: WorkflowTask[]) => void;
+  /** Replace the whole task set FOR ONE (work, session) from a
+   *  `ui-workflow-snapshot` (reconnect restore). Other works/sessions are
+   *  untouched; no toasts fire. */
+  applySnapshot: (workId: string, sessionId: string, tasks: WorkflowTask[]) => void;
   /** Local fallback for `session_killed` / `cli_exited`: flip every still-live
-   *  task of a session to `stopped` with a reason. The server terminal
+   *  task of a (work, session) to `stopped` with a reason. The server terminal
    *  broadcast is primary — by the time this runs those tasks are usually
    *  already terminal (so this is a no-op); it only fires when the broadcast
    *  never arrived, so "killed with no notice" (issue 030) can't happen. */
-  settleRunning: (sessionId: string, reason: string) => void;
+  settleRunning: (workId: string, sessionId: string, reason: string) => void;
   clear: () => void;
 }
 
@@ -163,25 +207,25 @@ export const useWorkflowTaskStore = create<WorkflowTaskStore>((set) => ({
     });
     if (toasted) fireTerminalToast(toasted);
   },
-  applySnapshot: (sessionId, incoming) =>
+  applySnapshot: (workId, sessionId, incoming) =>
     set((s) => {
       const kept: Record<string, WorkflowTask> = {};
       for (const [k, v] of Object.entries(s.tasks)) {
-        if (v.sessionId !== sessionId) kept[k] = v;
+        if (!(v.workId === workId && v.sessionId === sessionId)) kept[k] = v;
       }
       for (const raw of incoming) {
-        const t: WorkflowTask = { ...raw, sessionId };
+        const t: WorkflowTask = { ...raw, workId, sessionId };
         kept[taskKey(t)] = t;
       }
       return { tasks: kept };
     }),
-  settleRunning: (sessionId, reason) => {
+  settleRunning: (workId, sessionId, reason) => {
     const toasts: WorkflowTask[] = [];
     set((s) => {
       let changed = false;
       const next = { ...s.tasks };
       for (const [k, v] of Object.entries(s.tasks)) {
-        if (v.sessionId === sessionId && !isTerminalStatus(v.status)) {
+        if (v.workId === workId && v.sessionId === sessionId && !isTerminalStatus(v.status)) {
           const stopped: WorkflowTask = {
             ...v,
             status: "stopped",
@@ -207,13 +251,18 @@ export interface PanelTasks {
   terminal: WorkflowTask[];
 }
 
-/** Split a session's tasks into the live list + the recent-terminal tail the
- *  panel renders. Pure — safe to call inside a `useMemo` over the task map. */
+/** Split a (work, session)'s tasks into the live list + the recent-terminal tail
+ *  the panel renders. Pure — safe to call inside a `useMemo` over the task map.
+ *  Filters by BOTH workId and sessionId so a work switch shows only its own
+ *  tasks even when two works share a session id (H5). */
 export function panelTasksFor(
   tasks: Record<string, WorkflowTask>,
+  workId: string,
   sessionId: string,
 ): PanelTasks {
-  const all = Object.values(tasks).filter((t) => t.sessionId === sessionId);
+  const all = Object.values(tasks).filter(
+    (t) => t.workId === workId && t.sessionId === sessionId,
+  );
   const active = all.filter((t) => !isTerminalStatus(t.status));
   const terminal = all.filter((t) => isTerminalStatus(t.status));
   active.sort((a, b) => (a.startTime ?? a.ts ?? 0) - (b.startTime ?? b.ts ?? 0));

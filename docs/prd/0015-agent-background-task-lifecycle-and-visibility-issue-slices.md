@@ -26,7 +26,7 @@
 
 **身份 key（实现实况）**：一条任务记录的身份是 **`generation :: taskId`**（进程代际 + claude 的 ephemeral 任务 id），不是裸 taskId——claude 的任务 id 是 per-process 短串、跨 turn 会复用，代际隔离才使旧代迟到帧不吞新代同名 taskId。`beginGeneration()` 每次 spawnCli 前推进代号；`applyEvent(event, generation)` 显式落代。
 
-**状态词汇表（实现实况）**：`running` · `pending-settle`（清单里消失但尚无终态，不抢跑 orphaned）· 终态 `completed` / `failed` / `killed` / `stopped` / `orphaned`（`orphaned` 仅 S7 journal 打捞产生）。归一化：上游同义词（done/success→completed、cancelled→killed、error→failed…）集中映射，**未识别词一律忽略该次推进并留观测点**（不 as-cast 硬塞）。终态单调性：终态→non-terminal 拒绝；终态→终态**仅**放行 CLI 权威的 `killed→stopped`（其余如 completed→killed 拒绝）。settleOnExit 后该代际**关闭**，任何迟到帧（含全新 taskId）被拒，绝不重开死代际（W3.5 H4）。
+**状态词汇表（实现实况）**：`running` · `pending-settle`（清单里消失但尚无终态，不抢跑 orphaned）· 终态 `completed` / `failed` / `killed` / `stopped` / `orphaned`。归一化：上游同义词（done/success→completed、cancelled→killed、error→failed…）集中映射，**未识别词一律忽略该次推进并留观测点**（不 as-cast 硬塞）。终态单调性：终态→non-terminal 拒绝；终态→终态**仅**放行 `TERMINAL_OVERRIDE_ALLOWED` 白名单三条——CLI 权威的 `killed→stopped`、S7 打捞的 `stopped→orphaned` / `killed→orphaned`（其余如 completed→killed 拒绝）。**`orphaned` 是打捞专属终态**：只能经内部 `markOrphaned` 产生，任何上游 CLI 帧直传 `status:"orphaned"` 一律拒绝并记 `orphaned_requires_harvest`（W4.5 M9）。settleOnExit 后该代际**关闭**，任何迟到帧（含全新 taskId）被拒，绝不重开死代际（W3.5 H4）。
 
 **预设测试**：`src/server/sessions/__tests__/background-task-registry.test.ts` — ① 同 id 两次 applyEvent 只有一条且状态覆盖；② settleOnExit 把 running→stopped 并带 reason；③ snapshot 返回当前全量；④ 进程代际隔离（新进程的任务不吞旧代终态）。
 
@@ -39,7 +39,7 @@
 
 ## S3 · ui-workflow 信封 + snapshot-on-connect + 契约文档（AFK）
 
-**What to build**：bridge 新事件 `ui-workflow`（任务 upsert 与终态，身份 = **sessionId + taskId + generation**），浏览器 WS 连接/重连时先发全量 snapshot 再增量（render 进度通道的既有 snapshot-then-push 模式）；`skills/autoviral/contracts/event-stream.md` 同步新信封（same-id replace 语义、状态机、进程退出行为）。不动 ui-progress。
+**What to build**：bridge 新事件 `ui-workflow`（任务 upsert 与终态，帧身份 = **workId + sessionId + taskId + generation**；registry 内键 = `generation::taskId`，客户端键 = `workId::sessionId::generation::taskId`，W4.5 H5 防两个 work 复用同名 session 串号），浏览器 WS 连接/重连时先发全量 snapshot 再增量（render 进度通道的既有 snapshot-then-push 模式）；`skills/autoviral/contracts/event-stream.md` 同步新信封（same-id replace 语义、状态机白名单三条、进程退出行为）。不动 ui-progress。
 
 > W3.5 M5 修正：snapshot 必须**先于**任何 ui-workflow 增量抵达一个新连接——`handleBrowserConnection` 里 socket 只在 snapshot 发出之后（同步帧块内）才加入 fan-out 集合，避免 setup 期间的并发增量抢在 snapshot 之前到达（snapshot-then-stream 严格序）。
 

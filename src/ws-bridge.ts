@@ -42,7 +42,11 @@ import {
   isTerminalStatus,
   type BackgroundTaskSnapshot,
 } from "./server/sessions/background-task-registry.js";
-import { harvestWorkflowJournal } from "./server/sessions/journal-harvest.js";
+import {
+  harvestWorkflowRuns,
+  selectRunForWindow,
+  runToHarvest,
+} from "./server/sessions/journal-harvest.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -575,6 +579,10 @@ export class WsBridge {
    *  未加载/未配置时保持 undefined，buildSpawn 回落到 ADR-015 默认 0（无限等待，安全侧）。 */
   private bgWaitCeilingMs: number | undefined;
   private bgWaitCeilingLoaded = false;
+  /** PRD-0015 S7/W4.5 —— journal 打捞的 run 枚举依赖。默认真实磁盘读取；测试可覆盖它
+   *  返回受控的 run 列表，从而验 harvest 触发面（H3）与 per-task 归属（M6）而不碰真实
+   *  `~/.claude` 文件系统（对齐 MEMORY「测试污染真实 home」教训）。 */
+  private harvestRunsFn = harvestWorkflowRuns;
   /** PRD-0015 S5 修正 —— 加载中的共享 Promise。并发的首批 spawn 都 await 同一个它，
    *  避免"第一个调用同步置位 loaded、第二个短路带 undefined 去 spawn"的竞态。加载
    *  成功后 loaded 置位并留空；失败置空以允许下次重试。 */
@@ -1939,12 +1947,14 @@ export class WsBridge {
           taskIds: settled.map((t) => t.taskId),
         });
         for (const task of settled) this.broadcastWorkflowTask(session, task);
-        // PRD-0015 S7 —— journal 打捞：本代际被 settle 成 `stopped` 的 local_workflow 任务，
-        // 尝试从磁盘上的 workflow journal 收割「已完成 agent 计数」，翻 `orphaned` 再广播一次
-        // （损失可见、花费可查）。异步、fire-and-forget——失败/无 journal 绝不阻塞 settle 主路径
-        // （AC「打捞失败不阻塞 settleOnExit」），stopped 保持不变即优雅降级。
-        this.harvestOrphanedWorkflows(session, registry, spawnGeneration, settled);
       }
+      // PRD-0015 S7 + W4.5 H3 —— journal 打捞。触发面不再局限于「本次 settle 新合成的
+      // stopped」：ceiling 强杀会让任务在进程 exit 前就带上 killed/stopped 终态帧，那时
+      // settleOnExit 返回空、但任务确已中断且有 journal 可收割。所以候选 = 本代际【任何
+      // 非 completed 终态】的 local_workflow 任务（由 harvestOrphanedWorkflows 从 registry
+      // 快照重算），把已完成 agent 计数翻 `orphaned` 再广播。异步、fire-and-forget——失败/
+      // 无 journal 绝不阻塞 settle 主路径，任务保持原终态即优雅降级。
+      this.harvestOrphanedWorkflows(session, registry, spawnGeneration);
     };
 
     proc.on("exit", (code, signal) => {
@@ -1960,7 +1970,9 @@ export class WsBridge {
       // finding 4 —— 仅当【本进程仍是 session 的活进程】才清 cliProcess/置 idle。一个被
       // sendMessage 杀掉后又立即 spawn 了新进程的旧进程，其迟到 exit 绝不能把刚 spawn 的新
       // 进程状态抹掉（pre-existing 竞态）。settle 按代际寻址，不受此守卫影响，照常执行。
-      if (session.cliProcess === proc) {
+      // W4.5 H4 —— 捕获"本进程是否曾是活进程"（清位前判定），供下面的 cli_exited 广播门控。
+      const wasActiveProc = session.cliProcess === proc;
+      if (wasActiveProc) {
         session.cliProcess = undefined;
         session.idle = true;
       }
@@ -2008,10 +2020,17 @@ export class WsBridge {
         void this.respawnFreshAfterStaleResume(session, prompt);
         return;
       }
-      this.broadcastToSession(session.workId, session.sessionId, {
-        event: "cli_exited",
-        data: { workId: session.workId, code, signal },
-      });
+      // W4.5 H4 —— 陈旧 exit 门控：只有【本进程曾是 session 的活进程】才广播 cli_exited。
+      // 场景：杀旧进程后立刻 spawn 新进程接管（同型于上面 finding 4 的 === proc 守卫），
+      // 旧进程的迟到 exit 若照广播，客户端 settleRunning 会把【新代】仍在跑的任务误翻 stopped
+      // （新代卡片被旧代的死讯误杀）。settle 按 spawnGeneration 寻址、只收本代任务，不受影响；
+      // 但面向客户端的 cli_exited 是 session 级、无代际，必须在此按 wasActiveProc 守住。
+      if (wasActiveProc) {
+        this.broadcastToSession(session.workId, session.sessionId, {
+          event: "cli_exited",
+          data: { workId: session.workId, code, signal },
+        });
+      }
       // Persist chat to disk on CLI exit — default session only (others live
       // in their own chat-{sessionId}.jsonl, see turn_complete above).
       if (session.sessionId === DEFAULT_CHAT_SESSION_ID) {
@@ -2332,37 +2351,68 @@ export class WsBridge {
   }
 
   /**
-   * PRD-0015 S7 —— journal 打捞。宿主进程退出后，把本代际被 settle 的 `local_workflow` 任务
-   * 从磁盘上的 workflow journal 里收割「已完成 agent 计数 + runId 线索」，registry.markOrphaned
-   * 把它翻 `orphaned` 并挂 harvest，再广播一次 `ui-workflow`——损失可见、花费可查（AC「orphaned
-   * 终态在任务卡片可见，含已完成计数」）。
+   * PRD-0015 S7 + W4.5（H3/M6/L10）—— journal 打捞。宿主进程退出/被杀后，把本代际里【非
+   * completed 终态】（killed / stopped）的 `local_workflow` 任务，从磁盘 workflow journal 里
+   * 收割「已完成 agent 计数 + runId + 最后 result 摘要」，registry.markOrphaned 翻 `orphaned` 挂
+   * harvest，再广播一次 `ui-workflow`——损失可见、花费可查（AC「orphaned 终态在任务卡片可见，含
+   * 已完成计数」）。
+   *
+   *   - **H3 触发面**：候选从 registry 快照重算，不只认本次 settle 新合成的——ceiling 强杀 /
+   *     KillGate 破坏性路径会在 exit 前就给任务打上 killed/stopped 终态，那些也要收割。
+   *   - **M6 归属**：多个 run 目录并存时，每个候选任务只认 journal mtime 落在自己进程生命周期
+   *     窗口内的那个 run；无法唯一归属 → 保守不 enrich（记 `bg_harvest_no_unique_run` 观测点）。
+   *   - **L10**：run 摘要带最后一个 agent result 的截断串，随 harvest 广播。
    *
    * 纪律：**异步、fire-and-forget、绝不阻塞 settle 主路径**（AC「打捞失败不阻塞 settleOnExit」）。
-   * 无 cliSessionId / 无 workflow 任务 / journal 缺失损坏 → 静默返回，settle 的 `stopped` 保持
-   * 不变即优雅降级。已 `completed` 的任务 markOrphaned 会被终态白名单拒（不降级已完成的）。
-   * cwd 用 `PACKAGE_ROOT`——与 claude 后端 spawn 的工作目录一致，journal slug 才对得上。
+   * 无 cliSessionId / 无候选 / 无 run / 归属不唯一 → 静默（或记观测），任务保持原终态即优雅降级。
+   * 已 `completed` 的任务 markOrphaned 会被终态白名单拒（不降级已完成的）。cwd 用 `PACKAGE_ROOT`
+   * ——与 claude 后端 spawn 的工作目录一致，journal slug 才对得上。
    */
   private harvestOrphanedWorkflows(
     session: WsSession,
     registry: BackgroundTaskRegistry,
     generation: number,
-    settled: BackgroundTaskSnapshot[],
   ): void {
-    const workflowTasks = settled.filter((t) => t.taskType === "local_workflow");
-    if (workflowTasks.length === 0) return;
+    // H3 —— 候选从 registry 快照重算：本代际里【非 completed 终态】（killed / stopped）的
+    // local_workflow 任务都要打捞——含"进程 exit 前就被 CLI 标 killed/stopped"（ceiling 强杀 /
+    // KillGate 破坏性路径）的那些，不再只认本次 settle 新合成的。已 completed 的不碰（markOrphaned
+    // 也会拒），已 orphaned 的不重复打捞。
+    const candidates = registry
+      .snapshot()
+      .filter(
+        (t) =>
+          t.generation === generation &&
+          t.taskType === "local_workflow" &&
+          (t.status === "killed" || t.status === "stopped"),
+      );
+    if (candidates.length === 0) return;
     const cliSessionId = session.cliSessionId;
     if (!cliSessionId) return;
 
-    void harvestWorkflowJournal({ cliSessionId, cwd: PACKAGE_ROOT })
-      .then((harvest) => {
-        if (!harvest) return; // 优雅降级：无 journal / 全损坏 → 保持 stopped，不打捞。
-        logBridge("bg_harvest", session.workId, {
-          generation,
-          runId: harvest.runId,
-          completedAgents: harvest.completedAgents,
-          startedAgents: harvest.startedAgents,
-        });
-        for (const task of workflowTasks) {
+    void this.harvestRunsFn({ cliSessionId, cwd: PACKAGE_ROOT })
+      .then((runs) => {
+        if (runs.length === 0) return; // 优雅降级：无任何带 journal 的 run → 保持终态，不打捞。
+        for (const task of candidates) {
+          // M6 —— 每个候选任务挑 journal mtime 落在【它自己进程生命周期窗口】内的 run；两个
+          // run 并存都落窗内（无法唯一归属）→ 保守不 enrich、记观测点，绝不把别的 run 的号串上来。
+          const run = selectRunForWindow(runs, task.startTime, task.endTime);
+          if (!run) {
+            logBridge("bg_harvest_no_unique_run", session.workId, {
+              generation,
+              taskId: task.taskId,
+              runCount: runs.length,
+            });
+            continue;
+          }
+          const harvest = runToHarvest(run);
+          if (!harvest) continue; // run 损坏（counts=null）—— 不 enrich。
+          logBridge("bg_harvest", session.workId, {
+            generation,
+            taskId: task.taskId,
+            runId: harvest.runId,
+            completedAgents: harvest.completedAgents,
+            startedAgents: harvest.startedAgents,
+          });
           const enriched = registry.markOrphaned(task.taskId, generation, harvest);
           // markOrphaned 拒绝（如任务已被后到帧落成 completed）→ undefined，不广播。
           if (enriched) this.broadcastWorkflowTask(session, enriched);
@@ -2393,7 +2443,8 @@ export class WsBridge {
   private settleAndBroadcast(session: WsSession, reason: KillCause): void {
     const registry = session.taskRegistry;
     if (!registry) return;
-    const settled = registry.settleOnExit(reason);
+    const generation = registry.generation;
+    const settled = registry.settleOnExit(reason, generation);
     if (settled.length > 0) {
       logBridge("bg_settle_on_kill", session.workId, {
         reason,
@@ -2402,6 +2453,10 @@ export class WsBridge {
       });
       for (const task of settled) this.broadcastWorkflowTask(session, task);
     }
+    // W4.5 H3 —— 破坏性 KillGate 路径同样走 journal 打捞：把刚合成 stopped（或此前已被 CLI 标
+    // killed）的 local_workflow 任务翻 orphaned。fire-and-forget，与后续进程 exit 的 settle 打捞
+    // 幂等叠加（markOrphaned 重复调用对已 orphaned 是 no-op 级重广播，客户端 REPLACE 不双 toast）。
+    this.harvestOrphanedWorkflows(session, registry, generation);
   }
 
   /** 活任务时切 backend/model 或命令 passthrough 被拒 → 向 chat 流广播用户可见提示。 */

@@ -559,13 +559,21 @@ worksRouter.post("/api/agent/model", async (c) => {
     );
   }
   const workId = body && typeof body.workId === "string" ? body.workId : null;
+  // W4.5 M8 — thread the ACTIVE session id so the gate + respawn target the chat
+  // the user is actually on (e.g. a named `s_2`), not always the default `s_1`.
+  // Omitted / invalid → undefined → the bridge resolves the default session
+  // (unchanged behavior for single-session works).
+  const sessionId =
+    body && typeof body.sessionId === "string" && SAFE_ID.test(body.sessionId)
+      ? body.sessionId
+      : undefined;
   const wsBridge = getWsBridge();
   // PRD-0015 W3.5 H2 — model_switch semantics (策略表): a tier change takes effect by
   // respawning the CLI, which would ABORT a running background workflow (030's root
-  // cause). GATE it at the HTTP layer with a real, reachable 409 when the work's
+  // cause). GATE it at the HTTP layer with a real, reachable 409 when the target
   // session has a live bg task — refuse the switch (config unchanged) instead of
   // silently killing the task. The user retries after it finishes or /stops.
-  if (workId && SAFE_ID.test(workId) && wsBridge && wsBridge.sessionHasActiveTasks(workId)) {
+  if (workId && SAFE_ID.test(workId) && wsBridge && wsBridge.sessionHasActiveTasks(workId, sessionId)) {
     return c.json(
       {
         error: "后台任务运行中，暂不能切换模型档位，请等任务完成或先 /stop 再切。",
@@ -578,10 +586,10 @@ worksRouter.post("/api/agent/model", async (c) => {
   config.model = model;
   const { saveConfig } = await import("../../infra/config.js");
   await saveConfig(config);
-  // Respawn the work's session (if any) so the new tier takes effect next turn.
+  // Respawn the target session (if any) so the new tier takes effect next turn.
   let respawned = false;
   if (workId && SAFE_ID.test(workId) && wsBridge) {
-    respawned = wsBridge.killSession(workId);
+    respawned = wsBridge.killSession(workId, sessionId);
   }
   return c.json({ ok: true, model, respawned });
 });

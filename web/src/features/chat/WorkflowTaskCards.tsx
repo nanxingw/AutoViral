@@ -164,6 +164,34 @@ function WorkflowTaskCard({
         </div>
       )}
 
+      {/* Orphaned harvest line (S7) — "N/M agents finished · recoverable". The
+          crash's already-completed work made visible + costed. Hover shows the
+          last agent result summary (L10) + the run id as a resume/audit lead. */}
+      {task.status === "orphaned" && task.harvest && (
+        <div
+          data-testid="workflow-harvest"
+          title={
+            [
+              task.harvest.resultSummary,
+              `run ${task.harvest.runId}`,
+            ]
+              .filter(Boolean)
+              .join(" — ") || undefined
+          }
+          style={{
+            fontSize: 10,
+            fontFamily: "var(--font-mono)",
+            letterSpacing: "0.03em",
+            color: "var(--status-warn, #d0a54f)",
+          }}
+        >
+          {t("chat.workflow.harvest", {
+            done: task.harvest.completedAgents,
+            total: task.harvest.startedAgents,
+          })}
+        </div>
+      )}
+
       {/* Terminal summary line, when the task reported one. */}
       {isTerminalStatus(task.status) && task.summary && (
         <div
@@ -186,9 +214,13 @@ function WorkflowTaskCard({
 }
 
 export function WorkflowTaskCards({
+  workId,
   sessionId,
   maxTerminal = 3,
 }: {
+  /** Owning work — filters the panel so a work switch never shows another
+   *  work's tasks even when both reused the same session id (H5). */
+  workId: string;
   sessionId: string;
   /** How many recently-settled cards to keep in the tail (older ones drop off). */
   maxTerminal?: number;
@@ -196,8 +228,8 @@ export function WorkflowTaskCards({
   const t = useT();
   const tasks = useWorkflowTaskStore((s) => s.tasks);
   const { active, terminal } = useMemo(
-    () => panelTasksFor(tasks, sessionId),
-    [tasks, sessionId],
+    () => panelTasksFor(tasks, workId, sessionId),
+    [tasks, workId, sessionId],
   );
   const shown = useMemo(
     () => [...active, ...terminal.slice(0, maxTerminal)],

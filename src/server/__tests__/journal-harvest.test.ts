@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
-import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, mkdir, writeFile, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -9,6 +9,9 @@ import {
   slugifyProjectPath,
   parseJournalCounts,
   harvestWorkflowJournal,
+  harvestWorkflowRuns,
+  selectRunForWindow,
+  type WorkflowRun,
 } from "../sessions/journal-harvest.js";
 
 // PRD-0015 S7 —— Journal 打捞 orphaned。
@@ -54,6 +57,11 @@ async function seedJournal(fixtureName: string, runId = RUN_ID): Promise<string>
   return journalPath;
 }
 
+/** 显式钉死一个 journal 的 mtime（秒），让多 run 的先后关系确定，不靠写序时钟。 */
+async function setMtime(journalPath: string, epochSeconds: number): Promise<void> {
+  await utimes(journalPath, epochSeconds, epochSeconds);
+}
+
 beforeEach(async () => {
   home = await mkdtemp(join(tmpdir(), "av-journal-harvest-"));
 });
@@ -75,8 +83,8 @@ describe("parseJournalCounts — 按 journal key 去重（非行数）", () => {
   it("② resume 重复 key 只计一次完成（同 key 两个 agentId）", () => {
     const raw = readFileSync(join(FIXTURE_DIR, "journal.jsonl"), "utf8");
     const counts = parseJournalCounts(raw);
-    // 3 个 result 行、但只有 2 个唯一 key（aaa 被 resume 以新 agentId 重跑）。
-    expect(counts).toEqual({ completedAgents: 2, startedAgents: 3 });
+    // 3 个 result 行、但只有 2 个唯一 key（aaa 被 resume 以新 agentId 重跑）。L10 顺带带 resultSummary。
+    expect(counts).toMatchObject({ completedAgents: 2, startedAgents: 3 });
   });
 
   it("空 / 全损坏文本 → null（无一行可解析）", () => {
@@ -109,12 +117,83 @@ describe("harvestWorkflowJournal — 派生路径 + 收割计数", () => {
   });
 
   it("多 run 目录时取 journal 最新修改的那个 run", async () => {
-    // 先铺一个较老的 run，再铺目标 run（后写 = mtime 更新）。
-    await seedJournal("journal-corrupt.jsonl", "wf_older-run");
+    // 老 run（较早 mtime，损坏）+ 目标 run（较新 mtime，有效）。
+    const olderPath = await seedJournal("journal-corrupt.jsonl", "wf_older-run");
     const journalPath = await seedJournal("journal.jsonl", RUN_ID);
+    await setMtime(olderPath, 1_000_000);
+    await setMtime(journalPath, 2_000_000);
     const result = await harvestWorkflowJournal({ cliSessionId: CLI_SESSION_ID, cwd: CWD, homeDir: home });
     expect(result).not.toBeNull();
     expect(result!.runId).toBe(RUN_ID);
     expect(result!.journalPath).toBe(journalPath);
+  });
+
+  it("L10 — 收割结果带最后一个 result 的截断摘要", async () => {
+    await seedJournal("journal.jsonl");
+    const result = await harvestWorkflowJournal({ cliSessionId: CLI_SESSION_ID, cwd: CWD, homeDir: home });
+    // 事故 journal 最后一个 result 的 conclusion 是脱敏占位串。
+    expect(result!.resultSummary).toBe("[redacted summary]");
+  });
+
+  it("M7 — 最新 run 的 journal 损坏即返回 null（不回退到较老的有效 run）", async () => {
+    // 老 run（较早 mtime，有效）+ 最新 run（较晚 mtime，损坏）。旧逻辑会回退到有效老 run；
+    // M7 要求：最新 run 才是崩溃真相，它损坏就 null，绝不把老号串上来。
+    const validOld = await seedJournal("journal.jsonl", "wf_valid-old");
+    const corruptNew = await seedJournal("journal-corrupt.jsonl", "wf_corrupt-new");
+    await setMtime(validOld, 1_000_000);
+    await setMtime(corruptNew, 2_000_000);
+    const result = await harvestWorkflowJournal({ cliSessionId: CLI_SESSION_ID, cwd: CWD, homeDir: home });
+    expect(result).toBeNull();
+  });
+
+  it("harvestWorkflowRuns 列出所有 run（含损坏，counts=null）按 mtime 降序", async () => {
+    const oldValid = await seedJournal("journal.jsonl", "wf_a");
+    const newCorrupt = await seedJournal("journal-corrupt.jsonl", "wf_b");
+    await setMtime(oldValid, 1_000_000);
+    await setMtime(newCorrupt, 2_000_000);
+    const runs = await harvestWorkflowRuns({ cliSessionId: CLI_SESSION_ID, cwd: CWD, homeDir: home });
+    expect(runs.map((r) => r.runId)).toEqual(["wf_b", "wf_a"]); // mtime 降序
+    expect(runs[0].counts).toBeNull(); // 损坏 run 仍在列，counts=null
+    expect(runs[1].counts).not.toBeNull();
+  });
+});
+
+describe("selectRunForWindow — M6 per-task 归属（两 run 并存不串号）", () => {
+  const runA: WorkflowRun = {
+    runId: "wf_A",
+    journalPath: "/j/A",
+    mtimeMs: 1000,
+    counts: { completedAgents: 1, startedAgents: 2 },
+  };
+  const runB: WorkflowRun = {
+    runId: "wf_B",
+    journalPath: "/j/B",
+    mtimeMs: 5000,
+    counts: { completedAgents: 3, startedAgents: 3 },
+  };
+  const runs = [runB, runA];
+
+  it("各任务用自己的生命周期窗口选到自己的 run（不串号）", () => {
+    // 任务 A 的进程窗口 [500,1500] 只覆盖 runA 的 mtime。
+    expect(selectRunForWindow(runs, 500, 1500)?.runId).toBe("wf_A");
+    // 任务 B 的窗口 [4000,6000] 只覆盖 runB。
+    expect(selectRunForWindow(runs, 4000, 6000)?.runId).toBe("wf_B");
+  });
+
+  it("窗口覆盖两个 run（无法唯一归属）→ null（保守不 enrich）", () => {
+    expect(selectRunForWindow(runs, 0, 10000)).toBeNull();
+  });
+
+  it("窗口不覆盖任何 run → null", () => {
+    expect(selectRunForWindow(runs, 2000, 3000)).toBeNull();
+  });
+
+  it("无 startTime → null（无从归属）", () => {
+    expect(selectRunForWindow(runs, undefined, 10000)).toBeNull();
+  });
+
+  it("损坏 run（counts=null）即便落窗内也不被选中", () => {
+    const corrupt: WorkflowRun = { runId: "wf_C", journalPath: "/j/C", mtimeMs: 1000, counts: null };
+    expect(selectRunForWindow([corrupt], 500, 1500)).toBeNull();
   });
 });

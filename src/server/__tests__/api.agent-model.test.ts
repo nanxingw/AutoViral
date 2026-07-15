@@ -109,6 +109,58 @@ describe("POST /api/agent/model", () => {
     });
   });
 
+  // W4.5 M8 — the gate + respawn must target the SESSION the user is on. A named
+  // session (s_2) with a live bg task 409s just like the default; the sessionId is
+  // threaded to sessionHasActiveTasks + killSession.
+  it("409 rejects a tier switch when a NAMED session has an active bg task (sessionId threaded)", async () => {
+    await withTempDataDir(async () => {
+      const { apiRoutes, setWsBridge } = await import("../api.js");
+      const seen: Array<string | undefined> = [];
+      const killSession = vi.fn();
+      setWsBridge({
+        // Busy ONLY for (w1, s_2) — a default-session check must NOT 409.
+        sessionHasActiveTasks: (id: string, sid?: string) => {
+          seen.push(sid);
+          return id === "w1" && sid === "s_2";
+        },
+        killSession,
+      } as any);
+      try {
+        const res = await apiRoutes.fetch(
+          jsonReq("POST", "/api/agent/model", { model: "sonnet", workId: "w1", sessionId: "s_2" }),
+        );
+        expect(res.status).toBe(409);
+        const json: any = await res.json();
+        expect(json.errorCode).toBe("busy_background_task");
+        // The named session id reached the bridge (not swallowed → default).
+        expect(seen).toContain("s_2");
+        expect(killSession).not.toHaveBeenCalled();
+      } finally {
+        setWsBridge(null as any);
+      }
+    });
+  });
+
+  it("200 threads the sessionId into killSession on respawn", async () => {
+    await withTempDataDir(async () => {
+      const { apiRoutes, setWsBridge } = await import("../api.js");
+      const killSession = vi.fn().mockReturnValue(true);
+      setWsBridge({
+        sessionHasActiveTasks: () => false,
+        killSession,
+      } as any);
+      try {
+        const res = await apiRoutes.fetch(
+          jsonReq("POST", "/api/agent/model", { model: "haiku", workId: "w1", sessionId: "s_2" }),
+        );
+        expect(res.status).toBe(200);
+        expect(killSession).toHaveBeenCalledWith("w1", "s_2");
+      } finally {
+        setWsBridge(null as any);
+      }
+    });
+  });
+
   it("200 respawns the session when workId given and NO active bg task", async () => {
     await withTempDataDir(async () => {
       const { apiRoutes, setWsBridge } = await import("../api.js");
@@ -125,7 +177,7 @@ describe("POST /api/agent/model", () => {
         const json: any = await res.json();
         expect(json.ok).toBe(true);
         expect(json.respawned).toBe(true);
-        expect(killSession).toHaveBeenCalledWith("w_idle");
+        expect(killSession).toHaveBeenCalledWith("w_idle", undefined);
       } finally {
         setWsBridge(null as any);
       }

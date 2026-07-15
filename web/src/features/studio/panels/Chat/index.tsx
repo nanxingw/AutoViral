@@ -781,7 +781,7 @@ export function ChatPanel({
           for Workflow/subagent tasks the agent launched, sitting between the
           message stream and the composer so it never scrolls away. Renders
           nothing when the session has no tasks. */}
-      <WorkflowTaskCards sessionId={activeSessionId} />
+      <WorkflowTaskCards workId={workId} sessionId={activeSessionId} />
 
       {quickActions}
 

@@ -58,17 +58,24 @@ function asNumber(v: unknown): number | undefined {
 }
 
 /** Translate a `ui-workflow` (or a `ui-workflow-snapshot` per-task entry) data
- *  dict into a client `WorkflowTask`. `fallbackSessionId` supplies the session
- *  for snapshot entries, whose sessionId lives on the wrapper, not per-task.
- *  Only defined fields are set so a REPLACE never clobbers a value with
- *  undefined. Returns null when the identity fields are missing. */
-function frameToTask(d: DataDict, fallbackSessionId: string): WorkflowTask | null {
+ *  dict into a client `WorkflowTask`. `fallbackWorkId` / `fallbackSessionId`
+ *  supply identity for snapshot entries, whose workId/sessionId live on the
+ *  wrapper, not per-task. Only defined fields are set so a REPLACE/MERGE never
+ *  clobbers a value with undefined. Returns null when the identity fields are
+ *  missing. The `harvest` object (S7) is carried through so an `orphaned` card
+ *  can show "N/M agents recovered". */
+function frameToTask(
+  d: DataDict,
+  fallbackWorkId: string,
+  fallbackSessionId: string,
+): WorkflowTask | null {
   const taskId = asString(d.taskId);
   if (!taskId) return null;
+  const workId = asString(d.workId) || fallbackWorkId;
   const sessionId = asString(d.sessionId) || fallbackSessionId;
   const generation = asNumber(d.generation) ?? 0;
   const status = (asString(d.status) || "running") as WorkflowTaskStatus;
-  const task: WorkflowTask = { sessionId, taskId, generation, status };
+  const task: WorkflowTask = { workId, sessionId, taskId, generation, status };
   if (typeof d.taskType === "string") task.taskType = d.taskType;
   if (typeof d.description === "string") task.description = d.description;
   if (typeof d.toolUseId === "string") task.toolUseId = d.toolUseId;
@@ -83,6 +90,10 @@ function frameToTask(d: DataDict, fallbackSessionId: string): WorkflowTask | nul
   if (ts !== undefined) task.ts = ts;
   if (d.usage && typeof d.usage === "object") {
     task.usage = d.usage as WorkflowTask["usage"];
+  }
+  // S7 — harvest counts ride along on an `orphaned` frame.
+  if (d.harvest && typeof d.harvest === "object") {
+    task.harvest = d.harvest as WorkflowTask["harvest"];
   }
   return task;
 }
@@ -323,20 +334,21 @@ export function useChatSocket(
           // blocks, so it flows into a SEPARATE store, not push(). The store
           // enforces same-id replace + terminal monotonicity + one-shot toast.
           case "ui-workflow": {
-            const task = frameToTask(data, sid);
+            const task = frameToTask(data, workId ?? "", sid);
             if (task) useWorkflowTaskStore.getState().upsert(task);
             break;
           }
           case "ui-workflow-snapshot": {
-            // Full session replace on (re)connect. Snapshot arrives FIRST (the
-            // server orders it before any incremental), so a refresh restores
+            // Full (work, session) replace on (re)connect. Snapshot arrives FIRST
+            // (the server orders it before any incremental), so a refresh restores
             // task state without depending on being online when each frame fired.
+            const snapWork = asString(data.workId) || workId || "";
             const snapSession = asString(data.sessionId) || sid;
             const rawTasks = Array.isArray(data.tasks) ? (data.tasks as DataDict[]) : [];
             const tasks = rawTasks
-              .map((d) => frameToTask(d, snapSession))
+              .map((d) => frameToTask(d, snapWork, snapSession))
               .filter((t): t is WorkflowTask => t != null);
-            useWorkflowTaskStore.getState().applySnapshot(snapSession, tasks);
+            useWorkflowTaskStore.getState().applySnapshot(snapWork, snapSession, tasks);
             break;
           }
           case "chat_notice": {
@@ -365,9 +377,10 @@ export function useChatSocket(
             // "killed with no notice" (issue 030) can't happen. When the server
             // DID broadcast, those tasks are already terminal → this is a no-op
             // (terminal monotonicity), so no double toast.
+            const settleWork = asString(data.workId) || workId || "";
             const settleSession = asString(data.sessionId) || sid;
             const reason = asString(data.reason) || frame.event;
-            useWorkflowTaskStore.getState().settleRunning(settleSession, reason);
+            useWorkflowTaskStore.getState().settleRunning(settleWork, settleSession, reason);
             break;
           }
           // Silently ignore research_*, search_*, cli_event, cli_stderr —

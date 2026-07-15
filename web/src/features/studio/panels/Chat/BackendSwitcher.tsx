@@ -107,7 +107,9 @@ export function BackendSwitcher({
     try {
       await apiFetch(`/api/agent/model`, {
         method: "POST",
-        body: { model: tier, workId },
+        // W4.5 M8 — target THIS session so the 409 gate + respawn hit the chat the
+        // user is actually on (a named session's live bg task must also block).
+        body: { model: tier, workId, ...(sessionId ? { sessionId } : {}) },
       });
     } catch {
       setAlias(prev);

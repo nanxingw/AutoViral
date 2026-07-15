@@ -1045,6 +1045,7 @@ export const en = {
       agents: "{count} agents",
       toolUses: "{count} calls",
       reason: "reason: {reason}",
+      harvest: "{done}/{total} agents finished · recoverable",
     },
   },
   settings: {
@@ -2110,6 +2111,7 @@ export const zh: DeepShape<Messages> = {
       agents: "{count} 个子任务",
       toolUses: "{count} 次调用",
       reason: "原因：{reason}",
+      harvest: "已完成 {done}/{total} agents · 可打捞",
     },
   },
   settings: {
