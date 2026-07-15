@@ -1,4 +1,10 @@
-import { Sequence, Audio, useVideoConfig, useCurrentFrame } from "remotion";
+import {
+  Sequence,
+  Audio,
+  useVideoConfig,
+  useCurrentFrame,
+  getRemotionEnvironment,
+} from "remotion";
 import type { AudioClip, Track } from "../../types";
 import { interpolateProperty } from "@shared/keyframes";
 
@@ -48,12 +54,25 @@ function AudioClipRenderer({
   const base =
     interpolateProperty(clip.keyframes, "volume", localSec) ?? clip.volume;
   const v = computeAudioVolumeForFrame(clip, frame, fps, base);
+  // PRD-0016 S3 — preview-ONLY buffering semantics, mirroring the preview
+  // <Video> (VideoTrackRenderer.previewOnlyProps). docs/issues/032: at a hard
+  // cut the incoming clip's <video> cold-mounts → global buffering block; while
+  // that block is up the audio elements (BGM/VO) are pulled back by Remotion's
+  // 0.15s aggressive drift-correction (use-media-playback.js:200-219) and the
+  // user HEARS ~0.6s of already-played audio (the S2-residual "replay" half of
+  // the stutter). Without pauseWhenBuffering an audio element that isn't ready
+  // just silently drifts instead of joining the block, widening that window.
+  // Preview-only: server render (isRendering=true) has no buffering concept
+  // (ffmpeg extracts frames directly), so the prop must NOT be forwarded there.
+  const { isRendering } = getRemotionEnvironment();
+  const previewOnlyProps = isRendering ? {} : ({ pauseWhenBuffering: true } as const);
   return (
     <Audio
       src={clip.src}
       startFrom={Math.round(clip.in * fps)}
       endAt={Math.round(clip.out * fps)}
       volume={v}
+      {...previewOnlyProps}
     />
   );
 }

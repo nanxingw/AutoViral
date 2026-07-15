@@ -191,6 +191,35 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   // a "rewind"). The default trips on every long main-thread commit /
   // decoder hiccup; 1.2s lets normal drift settle on its own. Pairs with
   // `pauseWhenBuffering` so we don't seek during load events either.
+  //
+  // PRD-0016 S3 (2026-07-15) — 1.2s RE-AUDITED under premount, KEPT. After S2
+  // premount removed the cold-mount drift source, I re-probed the 12×4s hardcut
+  // fixture (boundary-probe.md, work w_20260715_0035_20d, ≥12 crossings/run,
+  // rAF-gated visible tab) at TWO settings — this 1.2 vs the prop removed (back
+  // to Remotion's 0.45s default):
+  //   ┌─────────────────┬───────────┬───────────────┐
+  //   │ metric          │ ats = 1.2 │ ats = default │
+  //   ├─────────────────┼───────────┼───────────────┤
+  //   │ waiting (Player)│ 2         │ 2             │
+  //   │ stalled/freeze  │ 0 / 0     │ 0 / 0         │
+  //   │ monotonic clock │ true      │ true          │
+  //   │ VIDEO ct negjmp │ 0         │ 0             │  ← what THIS prop governs
+  //   │ audio ct negjmp │ 8 (~600ms)│ 4 (~600ms)    │  ← governed by AUDIO's own
+  //   │                 │           │               │    (default) tolerance
+  //   │ mount→canplay   │ 9/25 ms   │ 9/15 ms       │
+  //   └─────────────────┴───────────┴───────────────┘
+  // Every backward jump in BOTH settings is on the BGM/VO <audio> elements
+  // (mute-independent, ~600ms), ZERO on video — the video-element replay this
+  // prop actually controls is 0 either way. The 8-vs-4 audio-jump delta is
+  // run-to-run noise on an INDEPENDENT sync loop (each media element carries its
+  // own acceptableTimeShiftInSeconds; the audio tracks set none → Remotion
+  // default) that the video prop cannot touch. So the default gives NO
+  // measurable win on the axis this prop governs, while R47-fix5's motive —
+  // preventing false discrete seeks under main-thread jank — still holds
+  // (premount does NOT address that; the quiet probe env does not reproduce it).
+  // Conservative call: keep 1.2. The residual audio replay is out of this prop's
+  // reach (would need the AudioTrackRenderer <Audio> tolerance narrowed — a
+  // separate lever with its own choppiness tradeoff; see docs/issues/032 S3).
   const previewOnlyProps = isRendering
     ? {}
     : ({

@@ -98,6 +98,35 @@
 
 **S2 净结论**：premount 消除了**切点冷挂载**这个共同触发器——① stall 降 ~90%、切点级音频回放消失、mount→canplay 近零。残留是 BGM/VO 音频轨在 1.2s 自由漂移窗内渐进跑赢帧钟后的 ~600ms 纠偏回放（mute-independent），**未被 premount 触及**，正是 S3（AudioTrackRenderer `pauseWhenBuffering` + `acceptableTimeShiftInSeconds` 1.2s→默认复审）的收口目标。③ 帧钟单调全程保持。**S2 不宣称夹具全绿**——按 PRD-0016 只 ③ 转绿，① ② 移交 S3。
 
+## S3 实录（2026-07-15）音频轨 buffering 语义 + 1.2s 阈值复审
+
+**结论：AudioTrackRenderer 补 `pauseWhenBuffering`（对齐视频预览分支，rendering 分支不动）；`acceptableTimeShiftInSeconds: 1.2` 经两档实测复审后 KEEP（不收窄回默认）。残留的 ~600ms 音频回放证实由音频元素自身的漂移阈值主导，非视频 prop 可及——本轮不宣称夹具全绿。**
+
+- **实现**：`web/src/features/studio/composition/tracks/AudioTrackRenderer.tsx` 的 `AudioClipRenderer` 加 `getRemotionEnvironment` 分支——预览（`isRendering=false`）给 `<Audio>` 传 `pauseWhenBuffering: true`（与预览 `<Video>` 一致，音频未 ready 同样进全局 block 而非静默漂移）；server render（`isRendering=true`）不传该 preview-only prop（ffmpeg 无 buffering 概念）。预设测试 `AudioTrackRenderer.buffering.test.tsx` 三 case（预览带 / render 不带 / volume+fade 不回归）先证红（case ① fail：`pauseWhenBuffering` 缺失）后转绿。
+- **环境**：同 S1/S2（work `w_20260715_0035_20d`，daemon `localhost:3271`，两档各 `build:frontend` 后 reload dist），浏览器插桩本 agent 亲跑（S3 subagent，非主 agent）。**rAF 门控全程通过**：A 档 `rafRateMin=74`/74 样本；B 档 `rafRateMin=75`/76 样本（均 ≥30，未在节流环境判定）。首次 play 用真实鼠标手势解锁 AudioContext（截图二确画面从黑帧→FRAME 00:13/00:24 真实视频帧 + 字幕前进）。
+
+### acceptableTimeShiftInSeconds 两档实测（各 unmuted 12 跨界 / 2 轮，startSec 3.2 → endSec 25，cut 点 4/8/12/16/20/24）
+
+| 断言 / 指标 | A：ats = **1.2**（现值） | B：ats = **默认**（移除 prop，回 remotion 0.45s） |
+|---|---|---|
+| ① `waitingCount`（Player） | 2 | 2 |
+| `stalled` / `clockFreeze` | 0 / 0 | 0 / 0 |
+| ③ `monotonicClock` | true | true |
+| **video 元素 ct 负跳** | **0** | **0** |
+| ② audio 元素 ct 负跳 | 8（全 BGM+VO，579–666ms） | 4（全 BGM+VO，603–645ms） |
+| `mountToCanplay` p50 / max | 9 / 25 ms | 9 / 15 ms |
+
+- **两档在 video 侧完全等价**：`waiting`、`stalled`、`clockFreeze`、`monotonicClock` 全相同，且**视频元素 ct 负跳两档都为 0**——`acceptableTimeShiftInSeconds` 唯一真正管辖的量（视频元素回放）在两档下都无回放。
+- **负跳全落 audio、mute-independent**：两档下每一条负跳都在 `memory_secret_bgm.mp3` + `tts_79227f8e672c.mp3` 两条音频轨上、幅度 ~600ms，与 S2 残留同源。音频元素走**独立的**同步循环、带**自己的** `acceptableTimeShiftInSeconds`（AudioTrackRenderer 未设 → remotion 默认），视频 prop 从 1.2 改默认**在机制上无法触及音频漂移**。8 vs 4 的计数差是同一机制（BGM/VO 渐进跑赢帧钟被 0.15s 纠偏拽回）在 12 跨界小样本下的 run-to-run 噪声，非视频 prop 的因果贡献。
+
+### 决策：KEEP 1.2（保守保留）
+
+按 PRD-0016 S3 决策规则：两档均非 0（都有 ~2 waiting + 残留音频负跳），进入"默认档更优则改"分支比较。但**默认档在本 prop 真正管辖的轴（视频元素回放）上毫无增益（两档均 0）**，8-vs-4 的差异属不可归因于视频 prop 的音频噪声；而 R47-fix5 的历史动机（主线程 jank 下拓宽阈值防误 discrete seek）依旧成立——premount 不解决主线程 jank，安静的插桩环境也不复现它。故**保守保留 1.2**，两档数据落 `VideoTrackRenderer.tsx` previewOnlyProps 注释。
+
+### 残留与下一手（诚实标注）
+
+premount（S2）+ 音频 `pauseWhenBuffering`（S3）+ 1.2s 复审后，夹具**仍未全绿**：`waiting≈2`、audio 负跳 4–8 条 ~600ms（video 负跳 0、帧钟单调）。残留的 ~600ms 音频回放**不在视频 `acceptableTimeShiftInSeconds` 的可及范围内**——它由**音频元素自身**的漂移阈值主导（当前用 remotion 默认）。真正能压这条残留的下一手是**收窄 AudioTrackRenderer `<Audio>` 的 `acceptableTimeShiftInSeconds`**（本 slice 未纳入——task 明确把 ATS 决策限定在视频 prop、音频仅补 `pauseWhenBuffering`；且收窄音频阈值有"纠偏更频繁→音频更 choppy"的独立 tradeoff，需单独实测定夺）。本轮不硬凑绿：S3 交付 = 音频 `pauseWhenBuffering` + 视频 1.2s 复审（KEEP，两档数据存档），video 侧回放两档均 0、帧钟单调；audio 侧残留移交音频阈值单独立项。
+
 ## Acceptance criteria
 
 见 [PRD-0016](../prd/0016-preview-hardcut-fidelity.md) 验收与切片（S1 红基线夹具 → S2 premount → S3 音频语义 → S4 压力复测）。
