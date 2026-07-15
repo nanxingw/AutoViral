@@ -60,6 +60,18 @@ export function isTerminalStatus(status: BackgroundTaskStatus): boolean {
   return TERMINAL_STATUSES.has(status);
 }
 
+/** 终态→终态覆盖白名单（`${from}->${to}`）。终态本是单调不可覆盖的，这里是**受控的**例外：
+ *   - `killed->stopped` —— CLI 权威落定序（updated(killed) 后紧跟 notification(stopped)，exp7）。
+ *   - `stopped->orphaned` / `killed->orphaned` —— S7 journal 打捞：宿主进程死后从 workflow
+ *     journal 收割已完成 agent 计数，把已被 settle 的终态任务叠加成 `orphaned`（可见性 + 止损，
+ *     带 completedAgents/runId 线索）。这是唯二能落 orphaned 的路径，绝不 speculative。
+ *  其余终态→终态（如 completed→killed）一律拒。 */
+const TERMINAL_OVERRIDE_ALLOWED: ReadonlySet<string> = new Set([
+  "killed->stopped",
+  "stopped->orphaned",
+  "killed->orphaned",
+]);
+
 /** CLI 上游状态词的同义归一化（集中一处，避免各分支各自 as-cast）。未识别的原样透传
  *  （type 注释明说「透传不穷举」，S5 探针负责在上游改口时先红）。 */
 const STATUS_ALIASES: Readonly<Record<string, BackgroundTaskStatus>> = {
@@ -98,6 +110,20 @@ export function normalizeStatus(raw: string): BackgroundTaskStatus | undefined {
   return KNOWN_STATUSES.has(lower) ? (lower as BackgroundTaskStatus) : undefined;
 }
 
+/** S7 journal 打捞结果——宿主进程死后从 workflow journal 收割的已完成 agent 计数与 resume
+ *  线索（可见性 + 止损，不自动重跑）。仅 `orphaned` 终态携带。`journal-harvest.ts` 产出，
+ *  经 {@link BackgroundTaskRegistry.markOrphaned} 挂到任务快照上广播。 */
+export interface WorkflowHarvest {
+  /** workflow run 目录名（如 `wf_296ee812-c04`）——resume 恢复的线索。 */
+  runId: string;
+  /** 已完成的 agent 数（按 journal `key` 去重；resume 重跑同 key 只计一次，不虚高）。 */
+  completedAgents: number;
+  /** 启动过的 agent 总数（唯一 key）。completedAgents/startedAgents = 打捞回收率。 */
+  startedAgents: number;
+  /** 收割来源 journal 的绝对路径（取证/审计用）。 */
+  journalPath: string;
+}
+
 /** registry 对外暴露的一条任务快照（拷贝，改它不污染内部状态）。 */
 export interface BackgroundTaskSnapshot {
   /** claude 的 ephemeral 任务 id（进程内唯一，跨进程可能复用）。 */
@@ -119,6 +145,8 @@ export interface BackgroundTaskSnapshot {
   endTime?: number;
   /** 被 settleOnExit 合成终态时的原因（cli_exit | killed_by_us | …）；CLI 自然终态无此字段。 */
   settleReason?: string;
+  /** S7 —— journal 打捞收割的已完成计数与 resume 线索；仅 `orphaned` 终态携带。 */
+  harvest?: WorkflowHarvest;
 }
 
 /** 内部可变记录。 */
@@ -183,7 +211,8 @@ export class BackgroundTaskRegistry {
 
   /** 守卫式状态推进（终态单调性 + M6 收紧）：
    *   - 终态→non-terminal 一律拒绝（迟到帧想复活已终态任务）。
-   *   - 终态→终态**仅**放行 CLI 权威的 killed→stopped；其余终态覆盖（如 completed→killed）拒绝。
+   *   - 终态→终态**仅**放行 {@link TERMINAL_OVERRIDE_ALLOWED} 白名单（CLI 权威 killed→stopped +
+   *     S7 打捞 stopped→orphaned / killed→orphaned）；其余（如 completed→killed）拒绝。
    *  被拒都走观测钩子（带 kind），不改状态。 */
   private transition(rec: TaskRecord, next: BackgroundTaskStatus): void {
     if (rec.status === next) return;
@@ -199,7 +228,7 @@ export class BackgroundTaskRegistry {
       });
       return;
     }
-    if (fromTerminal && toTerminal && !(rec.status === "killed" && next === "stopped")) {
+    if (fromTerminal && toTerminal && !TERMINAL_OVERRIDE_ALLOWED.has(`${rec.status}->${next}`)) {
       this.onRejectedTransition?.({
         taskId: rec.taskId,
         generation: rec.generation,
@@ -377,16 +406,42 @@ export class BackgroundTaskRegistry {
     return settled;
   }
 
+  /**
+   * S7 journal 打捞：把一条【已被 settle / killed 的终态任务】叠加成 `orphaned`，并挂上从
+   * workflow journal 收割的 {@link WorkflowHarvest}（已完成 agent 计数 + runId + 路径）。
+   *
+   * 只作用于 {@link TERMINAL_OVERRIDE_ALLOWED} 白名单里的来源终态（`stopped` / `killed`）——
+   * 已 `completed` 的任务**绝不**被打捞降级（transition 拒绝，返回 `undefined`，状态与
+   * harvest 都不动，且走观测钩子记一次 terminal_to_terminal 拒绝）。settle 合成的
+   * `settleReason` 保留（可见性叠加，非替换）。未知 taskId → `undefined`，绝不凭空建条。
+   *
+   * 返回被打捞的任务快照（供上层再广播一次 `ui-workflow`），或 `undefined`（未命中/被拒）。
+   */
+  markOrphaned(
+    taskId: string,
+    generation: number,
+    harvest: WorkflowHarvest,
+  ): BackgroundTaskSnapshot | undefined {
+    const rec = this.tasks.get(this.keyFor(taskId, generation));
+    if (!rec) return undefined;
+    this.transition(rec, "orphaned");
+    // transition 被白名单拒绝（如 completed→orphaned）→ 状态没变，不挂 harvest、不广播。
+    if (rec.status !== "orphaned") return undefined;
+    rec.harvest = { ...harvest };
+    return cloneSnapshot(rec);
+  }
+
   /** 全量快照（深拷贝；插入顺序）。供重连 snapshot 与查询。 */
   snapshot(): BackgroundTaskSnapshot[] {
     return [...this.tasks.values()].map(cloneSnapshot);
   }
 }
 
-/** 对外快照的深拷贝：`usage` 是嵌套对象，浅拷贝会让外部突变污染内部状态。 */
+/** 对外快照的深拷贝：`usage` / `harvest` 是嵌套对象，浅拷贝会让外部突变污染内部状态。 */
 function cloneSnapshot(rec: TaskRecord): BackgroundTaskSnapshot {
   return {
     ...rec,
     usage: rec.usage ? { ...rec.usage } : undefined,
+    harvest: rec.harvest ? { ...rec.harvest } : undefined,
   };
 }

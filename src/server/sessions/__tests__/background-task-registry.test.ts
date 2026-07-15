@@ -472,3 +472,72 @@ describe("BackgroundTaskRegistry — 归一化收紧（M6）", () => {
     expect(byId(reg, "t")!.status).toBe("stopped");
   });
 });
+
+describe("BackgroundTaskRegistry — markOrphaned + 终态覆盖白名单（S7）", () => {
+  const HARVEST = {
+    runId: "wf_sanitized-a1b",
+    completedAgents: 2,
+    startedAgents: 3,
+    journalPath: "/home/.claude/projects/slug/sess/subagents/workflows/wf_sanitized-a1b/journal.jsonl",
+  };
+
+  it("stopped→orphaned 放行：settleOnExit 后 markOrphaned 翻 orphaned 并挂 harvest 字段", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "wf", taskType: "local_workflow" }, g);
+    reg.settleOnExit("cli_exit", g);
+    expect(byId(reg, "wf")!.status).toBe("stopped");
+
+    const enriched = reg.markOrphaned("wf", g, HARVEST);
+    expect(enriched).toBeDefined();
+    expect(enriched!.status).toBe("orphaned");
+    expect(enriched!.harvest).toEqual(HARVEST);
+    // settle 合成的 reason 不被打捞抹掉（可见性叠加，非替换）。
+    expect(enriched!.settleReason).toBe("cli_exit");
+    expect(byId(reg, "wf")!.status).toBe("orphaned");
+  });
+
+  it("killed→orphaned 放行（第二个终态→终态例外）", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "wf", taskType: "local_workflow" }, g);
+    reg.applyEvent({ kind: "updated", taskId: "wf", status: "killed" }, g);
+    const enriched = reg.markOrphaned("wf", g, HARVEST);
+    expect(enriched!.status).toBe("orphaned");
+    expect(byId(reg, "wf")!.status).toBe("orphaned");
+  });
+
+  it("completed→orphaned 被拒：已完成的任务不被打捞降级（返回 undefined，状态不变）", () => {
+    const rejected: Array<{ from?: string; to?: string; kind?: string }> = [];
+    const reg = new BackgroundTaskRegistry({
+      now: () => 100,
+      onRejectedTransition: (info) => rejected.push({ from: info.from, to: info.to, kind: info.kind }),
+    });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "wf", taskType: "local_workflow" }, g);
+    reg.applyEvent({ kind: "updated", taskId: "wf", status: "completed" }, g);
+
+    const enriched = reg.markOrphaned("wf", g, HARVEST);
+    expect(enriched).toBeUndefined();
+    expect(byId(reg, "wf")!.status).toBe("completed");
+    expect(byId(reg, "wf")!.harvest).toBeUndefined();
+    expect(rejected.some((r) => r.from === "completed" && r.to === "orphaned")).toBe(true);
+  });
+
+  it("markOrphaned 未知 taskId → undefined（不建条）", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    expect(reg.markOrphaned("nope", g, HARVEST)).toBeUndefined();
+    expect(reg.snapshot()).toHaveLength(0);
+  });
+
+  it("harvest 是深拷贝：改快照不污染内部记录", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "wf", taskType: "local_workflow" }, g);
+    reg.settleOnExit("cli_exit", g);
+    const enriched = reg.markOrphaned("wf", g, HARVEST)!;
+    enriched.harvest!.completedAgents = 999;
+    expect(byId(reg, "wf")!.harvest!.completedAgents).toBe(2);
+  });
+});

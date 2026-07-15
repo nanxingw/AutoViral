@@ -18,7 +18,7 @@ import type { Duplex } from "node:stream";
 import { appendFile } from "node:fs/promises";
 import { logBridge, logBridgeDebug } from "./infra/logger.js";
 import { loadConfig, dataDir, normalizeBgWaitCeilingMs } from "./infra/config.js";
-import { assertCliBinDir } from "./infra/paths.js";
+import { assertCliBinDir, PACKAGE_ROOT } from "./infra/paths.js";
 import { getWork, updateWork, saveWorkChat, loadWorkChat, listWorks, type Work } from "./domain/work-store.js";
 import { recordCostEvent } from "./server/cost-ledger/index.js";
 import { getContentType } from "./shared/content-types/registry.js";
@@ -42,6 +42,7 @@ import {
   isTerminalStatus,
   type BackgroundTaskSnapshot,
 } from "./server/sessions/background-task-registry.js";
+import { harvestWorkflowJournal } from "./server/sessions/journal-harvest.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -1938,6 +1939,11 @@ export class WsBridge {
           taskIds: settled.map((t) => t.taskId),
         });
         for (const task of settled) this.broadcastWorkflowTask(session, task);
+        // PRD-0015 S7 —— journal 打捞：本代际被 settle 成 `stopped` 的 local_workflow 任务，
+        // 尝试从磁盘上的 workflow journal 收割「已完成 agent 计数」，翻 `orphaned` 再广播一次
+        // （损失可见、花费可查）。异步、fire-and-forget——失败/无 journal 绝不阻塞 settle 主路径
+        // （AC「打捞失败不阻塞 settleOnExit」），stopped 保持不变即优雅降级。
+        this.harvestOrphanedWorkflows(session, registry, spawnGeneration, settled);
       }
     };
 
@@ -2323,6 +2329,49 @@ export class WsBridge {
           ? all.filter((t) => t.taskId === event.taskId && t.generation === generation)
           : [];
     for (const task of affected) this.broadcastWorkflowTask(session, task);
+  }
+
+  /**
+   * PRD-0015 S7 —— journal 打捞。宿主进程退出后，把本代际被 settle 的 `local_workflow` 任务
+   * 从磁盘上的 workflow journal 里收割「已完成 agent 计数 + runId 线索」，registry.markOrphaned
+   * 把它翻 `orphaned` 并挂 harvest，再广播一次 `ui-workflow`——损失可见、花费可查（AC「orphaned
+   * 终态在任务卡片可见，含已完成计数」）。
+   *
+   * 纪律：**异步、fire-and-forget、绝不阻塞 settle 主路径**（AC「打捞失败不阻塞 settleOnExit」）。
+   * 无 cliSessionId / 无 workflow 任务 / journal 缺失损坏 → 静默返回，settle 的 `stopped` 保持
+   * 不变即优雅降级。已 `completed` 的任务 markOrphaned 会被终态白名单拒（不降级已完成的）。
+   * cwd 用 `PACKAGE_ROOT`——与 claude 后端 spawn 的工作目录一致，journal slug 才对得上。
+   */
+  private harvestOrphanedWorkflows(
+    session: WsSession,
+    registry: BackgroundTaskRegistry,
+    generation: number,
+    settled: BackgroundTaskSnapshot[],
+  ): void {
+    const workflowTasks = settled.filter((t) => t.taskType === "local_workflow");
+    if (workflowTasks.length === 0) return;
+    const cliSessionId = session.cliSessionId;
+    if (!cliSessionId) return;
+
+    void harvestWorkflowJournal({ cliSessionId, cwd: PACKAGE_ROOT })
+      .then((harvest) => {
+        if (!harvest) return; // 优雅降级：无 journal / 全损坏 → 保持 stopped，不打捞。
+        logBridge("bg_harvest", session.workId, {
+          generation,
+          runId: harvest.runId,
+          completedAgents: harvest.completedAgents,
+          startedAgents: harvest.startedAgents,
+        });
+        for (const task of workflowTasks) {
+          const enriched = registry.markOrphaned(task.taskId, generation, harvest);
+          // markOrphaned 拒绝（如任务已被后到帧落成 completed）→ undefined，不广播。
+          if (enriched) this.broadcastWorkflowTask(session, enriched);
+        }
+      })
+      .catch((error) => {
+        // 打捞是尽力而为的可见性叠加——任何失败都不该冒泡；settle 主路径早已完成。
+        logBridge("bg_harvest_failed", session.workId, { generation, error: String(error) });
+      });
   }
 
   // ── PRD-0015 S6 · KillGate drain 纪律 ──────────────────────────────────────
