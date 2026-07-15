@@ -1457,7 +1457,16 @@ export class WsBridge {
     // PRD-0015 S2 — 后台任务登记表：懒建（首个 spawnCli），每次 spawn 推进一个进程代际，
     // 使旧 turn 的 ephemeral 任务 id 复用不会被新进程的同名 started 事件复活/吞并。捕获
     // 本次代号进 exit handler 闭包，让退出只收尾【这个】进程的活任务。
-    const registry = (session.taskRegistry ??= new BackgroundTaskRegistry());
+    const registry = (session.taskRegistry ??= new BackgroundTaskRegistry({
+      // 终态→non-terminal 被拒（迟到帧想复活已终态任务）时留观测点——030 事故的沉默面。
+      onRejectedTransition: (info) =>
+        logBridge("bg_transition_rejected", session.workId, {
+          taskId: info.taskId,
+          generation: info.generation,
+          from: info.from,
+          to: info.to,
+        }),
+    }));
     const spawnGeneration = registry.beginGeneration();
 
     // Accumulate assistant text chunks for this turn (also read by the exit
@@ -1709,7 +1718,9 @@ export class WsBridge {
       // 仍【不】广播 ui-workflow（S3 的事），只做登记 + logBridge 观测。task-class 帧
       // 仍会经上面的 onOther 走既有 cli_event 转发（claude 后端故意双发，不回归）。
       onBackgroundTask: (event) => {
-        registry.applyEvent(event);
+        // 显式传入 spawn 时捕获的代际——旧进程 parser 冲刷出的迟到帧必须落回【它自己的】代，
+        // 绝不因 currentGeneration 已被新 spawn 推进而误入/污染新代同名 taskId（finding 1）。
+        registry.applyEvent(event, spawnGeneration);
         logBridge("bg_task", session.workId, {
           kind: event.kind,
           taskId: event.taskId,
@@ -1751,28 +1762,41 @@ export class WsBridge {
       }
     });
 
-    proc.on("exit", (code, signal) => {
-      if (this.supersededCommandProcesses.has(proc)) {
-        this.supersededCommandProcesses.delete(proc);
-        return;
-      }
-      logBridge("cli_exit", session.workId, { code, signal, turnTextLen: turnText.length });
-      session.cliProcess = undefined;
-      session.idle = true;
-
-      // PRD-0015 S2 —— 宿主进程退出兜底：把【本代际】仍未落定（running / pending-settle）
-      // 的后台任务合成 stopped 终态并标 reason=cli_exit——这正是 030"被杀无提示"的止损处。
-      // 已终态（completed/killed/stopped）的任务不被覆盖（exp1 双 result：完成的不误标终止）。
-      // 本片仍不广播（S3 接 ui-workflow）；settle 结果 logBridge 可观测。
-      const settled = registry.settleOnExit("cli_exit", spawnGeneration);
+    // PRD-0015 S2 —— 后台任务退出兜底：把【本代际】仍未落定（running / pending-settle）的
+    // 任务合成 stopped 终态并标 reason——030"被杀无提示"的止损处。已终态（completed/killed/
+    // stopped/failed）不被覆盖（exp1 双 result：完成的不误标终止）。按 spawnGeneration 寻址，
+    // 只收尾【这个】进程的活任务；不广播（S3 接 ui-workflow），settle 结果 logBridge 可观测。
+    const settleThisGeneration = (reason: string): void => {
+      const settled = registry.settleOnExit(reason, spawnGeneration);
       if (settled.length > 0) {
         logBridge("bg_settle_on_exit", session.workId, {
-          reason: "cli_exit",
+          reason,
           generation: spawnGeneration,
           count: settled.length,
           taskIds: settled.map((t) => t.taskId),
         });
       }
+    };
+
+    proc.on("exit", (code, signal) => {
+      if (this.supersededCommandProcesses.has(proc)) {
+        this.supersededCommandProcesses.delete(proc);
+        // finding 3 —— 被 sendCommand/setSessionModel 顶掉的旧进程也必须先 settle【它这代】的
+        // 活任务，再跳过 UI/session 副作用。此前直接 return 会让旧代 running 任务永远残留
+        // （030 经"切模型/命令"路径复现）。用独立 reason 便于观测这是被替换而非自然退出。
+        settleThisGeneration("superseded");
+        return;
+      }
+      logBridge("cli_exit", session.workId, { code, signal, turnTextLen: turnText.length });
+      // finding 4 —— 仅当【本进程仍是 session 的活进程】才清 cliProcess/置 idle。一个被
+      // sendMessage 杀掉后又立即 spawn 了新进程的旧进程，其迟到 exit 绝不能把刚 spawn 的新
+      // 进程状态抹掉（pre-existing 竞态）。settle 按代际寻址，不受此守卫影响，照常执行。
+      if (session.cliProcess === proc) {
+        session.cliProcess = undefined;
+        session.idle = true;
+      }
+
+      settleThisGeneration("cli_exit");
 
       if (commandName && !commandSettled) {
         commandSettled = true;
