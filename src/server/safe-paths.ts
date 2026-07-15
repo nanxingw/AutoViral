@@ -4,7 +4,7 @@
 // audio/analyze, audio/mix, asset GET, and provider routes — this module
 // replaces the ad-hoc joins.
 
-import { resolve, sep, isAbsolute } from "node:path";
+import { resolve, sep, isAbsolute, dirname } from "node:path";
 import { join } from "node:path";
 
 // Read dataDir lazily so tests using AUTOVIRAL_DATA_DIR env see the right value
@@ -134,6 +134,52 @@ export function resolveAssetUriToPath(workId: string, uri: string): string {
     rest = nested;
   }
   return resolveAssetPath(workId, root, rest);
+}
+
+/**
+ * Resolve a composition clip's `src` to an ABSOLUTE filesystem path for the
+ * pre-Remotion ffmpeg pre-passes (speed-ramp / time-warp / crop-flip). Those
+ * passes run in render-pipeline Stage 0/0.4/0.5 — BEFORE
+ * rewriteClipSrcsToAbsolute (render-pipeline.ts) — so they see the RAW
+ * work-relative src straight out of composition.yaml (e.g.
+ * "assets/clips/s01.mp4"). Handing that relative string to ffprobe/ffmpeg
+ * resolves it against the DAEMON's cwd (the repo root in production, NOT the
+ * work dir) → "No such file or directory" (PRD-0014 S18 finding A — the whole
+ * class of "变速导出渲染前即挂" bugs the recon E2E D3 caught).
+ *
+ * `outDir` is the render output directory the pipeline already threads through,
+ * i.e. "<workRoot>/output"; clip srcs are work-relative to the work ROOT, so the
+ * resolution base is `dirname(outDir)`. Deriving the base from outDir (NOT from
+ * getWorksRoot()/env) keeps this in lock-step with where the pre-pass CACHE is
+ * written — sidestepping the AUTOVIRAL_WORKS_ROOT vs AUTOVIRAL_DATA_DIR
+ * divergence that resolveAssetUriToPath would reintroduce here.
+ *
+ * Pass-through (returned unchanged):
+ *   - URL-scheme srcs: data: / http: / https: / blob: / file:
+ *   - already-absolute filesystem paths — a prior pre-pass's cache output that a
+ *     chained pass reads (the speed→timewarp→cropflip order can hand one pass's
+ *     absolute cache path to the next)
+ * Rewritten to `<workRoot>/<rel>`:
+ *   - page-absolute API uris (/api/works/<id>/assets/foo → <workRoot>/assets/foo)
+ *   - plain work-relative paths ("assets/…" / "output/…")
+ */
+export function resolvePrePassSourcePath(src: string, outDir: string): string {
+  if (!src) return src;
+  // A URL scheme (data:, blob:, http:, https:, file:) is handed to ffmpeg / the
+  // caller verbatim — never a local join. Mirrors rewriteClipSrcsToAbsolute's
+  // SCHEME guard so the two path handlers agree on what "already absolute" means.
+  if (/^[a-z][a-z0-9+.\-]*:/i.test(src)) return src;
+  const workRoot = dirname(outDir);
+  // Page-absolute API uri form (/api/works/<id>/assets/… or api/works/…) — the
+  // "some comps store clip.src already page-absolute" case rewriteClipSrcs guards.
+  const apiStripped = src.replace(/^\/?api\/works\/[^/]+\//, "");
+  if (apiStripped !== src) {
+    return join(workRoot, apiStripped.replace(/^\/+/, ""));
+  }
+  // A genuine absolute filesystem path (prior pre-pass cache) is already usable.
+  if (isAbsolute(src)) return src;
+  // Work-relative ("assets/…" / "output/…") → resolve under the work root.
+  return join(workRoot, src);
 }
 
 /**

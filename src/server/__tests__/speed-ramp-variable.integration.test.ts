@@ -10,7 +10,7 @@
 // existsSync — S1 review lesson: probe the binary, don't guess by path).
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
@@ -21,7 +21,7 @@ import {
   applySpeedRampPrePass,
 } from "../speed-ramp-ffmpeg.js";
 import { effectiveClipDuration } from "../../shared/speed-ramp.js";
-import type { Composition, AudioClip } from "../../shared/composition.js";
+import type { Composition, AudioClip, VideoClip } from "../../shared/composition.js";
 
 const FPS = 30;
 const kf = (time: number, value: number) => ({
@@ -210,5 +210,60 @@ describe("variable-speed export — real ffmpeg integration (S4)", () => {
     const dur = await probeFormatDurationSec(outClip.src);
     expect(dur).toBeGreaterThan(1.8);
     expect(dur).toBeLessThan(2.25);
+  }, 120_000);
+
+  // S18 A [critical] — the export path's灵魂 regression. The pre-pass runs in
+  // render-pipeline Stage 0, BEFORE rewriteClipSrcsToAbsolute, so it sees the
+  // WORK-RELATIVE `clip.src` ("assets/…") exactly as composition.yaml stores it.
+  // The daemon's cwd is the repo root (NOT the work dir), so the old code's bare
+  // `probeAudio("assets/clip.mp4")` ffprobed the wrong directory → "No such file
+  // or directory" and the whole export died before Remotion ever ran. This drives
+  // the ACTUAL wired pre-pass on a real work-root layout with a work-relative src
+  // while process.cwd() stays at the repo root — the exact failing condition —
+  // and proves the export now succeeds (direct evidence for the fix).
+  it("STATIC-speed export succeeds when daemon cwd ≠ workDir (work-relative src — S18 A)", async () => {
+    if (!HAVE_FFMPEG) return;
+    const root = await mkdtemp(join(tmpdir(), "av-cwd-indep-"));
+    const assetsDir = join(root, "assets");
+    const outDir = join(root, "output"); // production shape: <workRoot>/output
+    await mkdir(assetsDir, { recursive: true });
+    await mkdir(outDir, { recursive: true });
+    // Real source on disk at <root>/assets/clip.mp4.
+    await makeColorSrc(assetsDir, "clip.mp4", 2, true);
+
+    // The pre-pass sees process.cwd() ≠ root — the exact condition the bug needs.
+    expect(process.cwd()).not.toBe(root);
+
+    const comp = {
+      id: "c", workId: "w", fps: FPS, width: 1080, height: 1920,
+      tracks: [
+        {
+          id: "trk_v", kind: "video", label: "V",
+          muted: false, hidden: false, volume: 0, displayOrder: 0,
+          clips: [
+            {
+              // WORK-RELATIVE src, as stored in composition.yaml (NOT absolute).
+              id: "vc1", kind: "video", src: "assets/clip.mp4",
+              in: 0, out: 2, trackOffset: 0,
+              transforms: {}, filters: {}, keyframes: [kf(0, 2)],
+            },
+          ],
+        },
+      ],
+      assets: [], provenance: [], exportPresets: [],
+    } as unknown as Composition;
+
+    // Before the fix this REJECTS (ffprobe ENOENT on "assets/clip.mp4"); after,
+    // it resolves the src against the work root and bakes the cache under output/.
+    const result = await applySpeedRampPrePass(comp, outDir);
+    const outClip = result.tracks[0].clips[0] as VideoClip;
+    expect(outClip.src).toContain("speed-200");
+    expect(outClip.src.startsWith(outDir)).toBe(true);
+    // 2s source at 2× ≈ 1s baked cache — proves the ffmpeg pass actually ran.
+    const dur = await probeFormatDurationSec(outClip.src);
+    expect(dur).toBeGreaterThan(0.9);
+    expect(dur).toBeLessThan(1.2);
+
+    await rm(root, { recursive: true, force: true });
   }, 120_000);
 });

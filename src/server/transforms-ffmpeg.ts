@@ -25,6 +25,7 @@ import { stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { FFMPEG_BIN, FFPROBE_BIN } from "./ffmpeg-paths.js";
+import { resolvePrePassSourcePath } from "./safe-paths.js";
 import type {
   Composition,
   Transforms,
@@ -495,10 +496,15 @@ export async function applyTransformsPrePass(
           const hasCrop = c.transforms.crop != null;
           const hasFlip = !!c.transforms.flipH || !!c.transforms.flipV;
           if (!hasCrop && !hasFlip) return c; // no crop/flip → no-op (skip probe)
+          // S18 A — absolutise the work-relative src BEFORE ffprobe/ffmpeg (this
+          // pre-pass runs before rewriteClipSrcsToAbsolute; the bare relative
+          // path would resolve against the daemon cwd ≠ work dir → ENOENT). Cache
+          // name still keys off clip.id + params (no cache-key impact).
+          const absSrc = resolvePrePassSourcePath(c.src, workDir);
           // The pixel basis for crop= is the SOURCE frame; ffprobe it. flip-only
           // clips don't strictly need real dims (hflip/vflip is resolution-free),
           // but we probe uniformly to keep one code path — cheap (one ffprobe).
-          const { width, height } = await probeDims(c.src, signal);
+          const { width, height } = await probeDims(absSrc, signal);
           const chain = transformsToFilterChain(c.transforms, width, height);
           if (chain === "") return c; // defensive (shouldn't happen given guards)
           const cachePath = join(
@@ -518,7 +524,7 @@ export async function applyTransformsPrePass(
           } catch {
             /* miss — fall through to ffmpeg */
           }
-          await runTransformsPass(c.src, cachePath, chain, comp.fps, signal);
+          await runTransformsPass(absSrc, cachePath, chain, comp.fps, signal);
           return { ...c, src: cachePath, transforms: consumedTransforms };
         }),
       );
@@ -585,6 +591,10 @@ export async function applyTimeWarpPrePass(
           const vChain = timeWarpVideoFilterChain(warp, comp.fps, playLen);
           const aChain = timeWarpAudioFilterChain(warp);
           if (vChain === "") return c; // defensive (shouldn't happen given guards)
+          // S18 A — absolutise the work-relative src for the reverse/freeze pass
+          // (runs before rewriteClipSrcsToAbsolute; bare relative → daemon-cwd
+          // ENOENT). Cache name keys off clip.id + warp params (no cache impact).
+          const absSrc = resolvePrePassSourcePath(c.src, workDir);
           const cachePath = join(
             workDir,
             timeWarpCacheName(c.id, warp, comp.fps),
@@ -608,7 +618,7 @@ export async function applyTimeWarpPrePass(
           } catch {
             /* miss — fall through to ffmpeg */
           }
-          await runWarp(c.src, cachePath, vChain, aChain, comp.fps, signal);
+          await runWarp(absSrc, cachePath, vChain, aChain, comp.fps, signal);
           return consumed;
         }),
       );

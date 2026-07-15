@@ -27,6 +27,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { FFMPEG_BIN, FFPROBE_BIN } from "./ffmpeg-paths.js";
+import { resolvePrePassSourcePath } from "./safe-paths.js";
 import type {
   Composition,
   VideoClip,
@@ -656,6 +657,13 @@ async function processVideoSpeed(
 ): Promise<VideoClip> {
   const staticSpeed = isStaticSpeed(c);
   const hasSpeedKf = (c.keyframes ?? []).some((k) => k.property === "speed");
+  // S18 A — this pre-pass runs BEFORE rewriteClipSrcsToAbsolute, so `c.src` is
+  // the raw work-relative path ("assets/clips/…"). Resolve it to an absolute
+  // work-root path up front; feeding the bare relative string to ffprobe/ffmpeg
+  // resolves it against the daemon's cwd (repo root ≠ work dir) → ENOENT. The
+  // cache NAME/PATH stay keyed off clip.id + workDir (unchanged — no cache-key
+  // impact); only the ffmpeg INPUT is absolutised.
+  const absSrc = resolvePrePassSourcePath(c.src, workDir);
   // Review fix #4 — resolve source-audio state ONCE up front and fold it into
   // BOTH cache names below, so the cached MP4's audio structure (video-only when
   // disabled vs audio-carrying when enabled) can't be served across a
@@ -687,8 +695,8 @@ async function processVideoSpeed(
     // drop — the禁 "detach 后源声双份出声"); skip the probe entirely and emit a
     // video-only concat graph. Otherwise probe on a cache miss (an ffmpeg pass is
     // about to run anyway).
-    const hasAudio = srcAudioEnabled ? await probeAudio(c.src, signal) : false;
-    await runVariableSpeedPass(c.src, cachePath, segments, fps, hasAudio, signal);
+    const hasAudio = srcAudioEnabled ? await probeAudio(absSrc, signal) : false;
+    await runVariableSpeedPass(absSrc, cachePath, segments, fps, hasAudio, signal);
     return rewritten;
   }
 
@@ -707,8 +715,8 @@ async function processVideoSpeed(
     /* miss — fall through to ffmpeg */
   }
   // S5 (PRD-0014) — detached source → video-only cache (see the variable branch).
-  const hasAudio = srcAudioEnabled ? await probeAudio(c.src, signal) : false;
-  await runSpeedRampPass(c.src, cachePath, staticSpeed, fps, hasAudio, signal);
+  const hasAudio = srcAudioEnabled ? await probeAudio(absSrc, signal) : false;
+  await runSpeedRampPass(absSrc, cachePath, staticSpeed, fps, hasAudio, signal);
   return { ...c, src: cachePath };
 }
 
@@ -747,7 +755,9 @@ async function processAudioSpeed(
   } catch {
     /* miss — fall through to ffmpeg */
   }
-  await runAudioSpeedPass(a.src, cachePath, inSec, outSec, staticSpeed, fps, signal);
+  // S18 A — absolutise the work-relative src for ffmpeg (see processVideoSpeed).
+  const absSrc = resolvePrePassSourcePath(a.src, workDir);
+  await runAudioSpeedPass(absSrc, cachePath, inSec, outSec, staticSpeed, fps, signal);
   return rewritten;
 }
 
