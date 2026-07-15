@@ -27,7 +27,7 @@
 | A1-props | 预览专属 props | `VideoTrackRenderer.tsx:223` `previewOnlyProps`，`:226` `acceptableTimeShiftInSeconds: 1.2`（S3 两档复审后 KEEP）+ `pauseWhenBuffering` | 仅 `!isRendering` 挂；`OffthreadVideo` 无 buffering 概念（`:180-183` 注释）。 |
 | A1-premount | 外层 Sequence `premountFor` | `VideoTrackRenderer.tsx:622` `PREMOUNT_FRAMES = Math.round(fps)`（≈24 帧≈1s）；挂点 `:643`（普通 clip）/`:660`（clip+entrance）/`:686`（多 clip TransitionSeries 外层） | remotion `Sequence.js:249` 只在 `!env.isRendering` 走 premounted 变体 → **仅预览生效，导出树零变化**。**稳态 Player clip `<video>` 峰值 1→2**（见 §F 实测）。 |
 | A1-blur | blur fitMode 背板 | `VideoTrackRenderer.tsx:252` `// the blur backdrop is a SECOND stacked <video>` | blur 适配模式下同源再堆一个 `<video>` → 该 clip 元素数翻倍（预览专属）。 |
-| A2 | 音频轨 `<Audio>`（原生 `<audio>`） | `AudioTrackRenderer.tsx:70` `<Audio>`；`:68` `previewOnlyProps = isRendering ? {} : { pauseWhenBuffering: true }`（S3 补） | BGM / VO / 视频自带 AAC 原声（`sourceAudio.enabled` 默认 true）。**音频元素走独立同步循环、带自己的 `acceptableTimeShiftInSeconds`（未设→remotion 默认）**——视频 prop 从 1.2 改默认在机制上触及不到音频漂移（S3 结论）。 |
+| A2 | 音频轨 `<Audio>`（原生 `<audio>`） | `AudioTrackRenderer.tsx:70` `<Audio>`；`:68` `previewOnlyProps = isRendering ? {} : { pauseWhenBuffering: true }`（S3 补） | BGM / VO（一等 AudioClip）。**视频自带 AAC 原声不在此列**——它经 `VideoTrackRenderer` 的 `<VideoEl>` `muted`/`volume` prop 留在视频元素上（`VideoTrackRenderer.tsx:164-179`，review 纠正）。**音频元素走独立同步循环、带自己的 `acceptableTimeShiftInSeconds`（未设→remotion 默认）**——视频 prop 从 1.2 改默认在机制上触及不到音频漂移（S3 结论）。 |
 | A3 | 覆盖 / 贴纸轨 `<Img>` | `OverlayTrackRenderer.tsx:48` `<Img>` | 静态图，非解码常驻。 |
 
 ---

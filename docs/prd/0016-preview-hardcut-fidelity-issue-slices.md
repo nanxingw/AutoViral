@@ -25,7 +25,7 @@
 
 **Acceptance criteria**
 - [ ] 预设测试先行落盘并证红
-- [ ] S1 夹具三断言转绿（waiting=0、同元素负跳=0、帧钟单调），跑法与数据存档
+- [x] ~~S1 夹具三断言转绿~~ **交付实况（2026-07-15）**：切点级归零达成（切点音频回放清零、video 负跳 0、帧钟单调、waiting 40→4）；非切点 BGM/VO ~600ms 漂移残留移交 [033](../issues/033-audio-track-drift-replay.md)（独立机制轴，见 032 § S2/S3 实录）
 - [ ] 既有 web 套件全绿（npm run test:web 一次性运行）
 
 **Blocked by**: S1
@@ -38,8 +38,8 @@
 
 **Acceptance criteria**
 - [ ] 预设测试先行落盘并证红
-- [ ] 阈值决策有 S1 夹具两档实测数据支撑并存档
-- [ ] S1 夹具静音/非静音两跑均绿
+- [x] 阈值决策有两档实测数据支撑并存档（KEEP 1.2；默认档实算 0.65s 非 0.45s——review 纠正已回填 032）
+- [x] ~~静音/非静音两跑均绿~~ **交付实况**：video 侧双档双态负跳 0；音频残留 → [033](../issues/033-audio-track-drift-replay.md)
 
 **Blocked by**: S2
 

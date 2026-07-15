@@ -107,7 +107,7 @@
 
 ### acceptableTimeShiftInSeconds 两档实测（各 unmuted 12 跨界 / 2 轮，startSec 3.2 → endSec 25，cut 点 4/8/12/16/20/24）
 
-| 断言 / 指标 | A：ats = **1.2**（现值） | B：ats = **默认**（移除 prop，回 remotion 0.45s） |
+| 断言 / 指标 | A：ats = **1.2**（现值） | B：ats = **默认**（移除 prop；remotion 4.0.459 实算 0.65s——0.45 基准 + 0.2 amplification 上浮，见 `use-media-playback.js:79-90`；review 纠正：非 0.45s） |
 |---|---|---|
 | ① `waitingCount`（Player） | 2 | 2 |
 | `stalled` / `clockFreeze` | 0 / 0 | 0 / 0 |
@@ -121,7 +121,7 @@
 
 ### 决策：KEEP 1.2（保守保留）
 
-按 PRD-0016 S3 决策规则：两档均非 0（都有 ~2 waiting + 残留音频负跳），进入"默认档更优则改"分支比较。但**默认档在本 prop 真正管辖的轴（视频元素回放）上毫无增益（两档均 0）**，8-vs-4 的差异属不可归因于视频 prop 的音频噪声；而 R47-fix5 的历史动机（主线程 jank 下拓宽阈值防误 discrete seek）依旧成立——premount 不解决主线程 jank，安静的插桩环境也不复现它。故**保守保留 1.2**，两档数据落 `VideoTrackRenderer.tsx` previewOnlyProps 注释。
+按 PRD-0016 S3 决策规则：两档均非 0（都有 ~2 waiting + 残留音频负跳），进入"默认档更优则改"分支比较。但**默认档在本 prop 真正管辖的轴（视频元素回放）上毫无增益（两档均 0）**，8-vs-4 的差异属不可归因于视频 prop 的音频噪声；而 R47-fix5 的历史动机（主线程 jank 下拓宽阈值防误 discrete seek）依旧成立——premount 不解决主线程 jank，安静的插桩环境也不复现它。故**保守保留 1.2**，两档数据落 `VideoTrackRenderer.tsx` previewOnlyProps 注释。残留的非切点音频漂移纠偏回放独立立案跟踪：[033](033-audio-track-drift-replay.md)。
 
 ### 残留与下一手（诚实标注）
 
@@ -147,7 +147,7 @@ premount（S2）+ 音频 `pauseWhenBuffering`（S3）+ 1.2s 复审后，夹具**
 
 | 指标 | S1 红基线（无 premount） | State A：关（Inspector，无 grid） | State B：开（LIBRARY·CLIPS·24，24 poster 常驻） |
 |---|---|---|---|
-| 并发 `<video>` 元素 | — | 2 Player + 5 `<audio>` | **24 poster + 2 Player + 5 `<audio>` = 26+** |
+| 并发媒体元素 | — | 2 `<video>`(Player) + 5 `<audio>` | **26 `<video>`（24 poster + 2 Player）+ 5 `<audio>` = 31 总媒体元素** |
 | `peakMountedPlayerVideos` | 1 | 2 | 2 |
 | waiting（Player） | **40** | 2 | 3 |
 | stalled / clockFreeze | 0 / 0 | 0 / 0 | 0 / 0 |
