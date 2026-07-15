@@ -2,6 +2,7 @@ import {
   Sequence,
   Video,
   OffthreadVideo,
+  Freeze,
   useVideoConfig,
   useCurrentFrame,
   Easing,
@@ -143,9 +144,21 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
   const VideoEl = isRendering ? OffthreadVideo : Video;
   // S19 (US 29/30) — freeze a single source frame. When freezeAtSec is set the
   // preview HOLDS one frame: startFrom = round(freezeAtSec*fps), endAt = that+1
-  // (a one-frame span the <Sequence> repeats for the clip duration). This is
-  // the WYSIWYG half — preview freezes on the SAME frame the ffmpeg trim+tpad
-  // pass bakes into the export (transforms-ffmpeg.timeWarpVideoFilterChain).
+  // selects the single source frame; a <Freeze frame={0}> wrapper (applied to
+  // `body` below) then PINS that frame for the whole clip. This is the WYSIWYG
+  // half — preview freezes on the SAME frame the ffmpeg trim+tpad pass bakes into
+  // the export (transforms-ffmpeg.timeWarpVideoFilterChain).
+  //
+  // S16 review fix (finding #3) — the <Freeze> wrapper is LOAD-BEARING, not
+  // cosmetic. A bare 1-frame startFrom/endAt window does NOT hold across the
+  // longer <Sequence>: at every sequence-local frame f>0 the video is asked for
+  // source frame startFrom+f, which is PAST endAt, so <OffthreadVideo> (the
+  // server/still `isRendering` path == `autoviral snapshot`) decodes NO frame and
+  // renders BLACK. The consistency gate caught this exactly — a time-varying
+  // freeze clip at frame 30 gave preview-luma=0 (black) vs export-luma=125
+  // (correctly held). <Freeze frame={0}> pins the descendants' local frame to 0
+  // so the <Video>/<OffthreadVideo> renders its ONE trimmed frame (source frame
+  // freezeStart) at EVERY composition frame — WYSIWYG past the freeze instant.
   const freezeStart =
     clip.freezeAtSec != null ? Math.round(clip.freezeAtSec * fps) : null;
   // S5 (PRD-0014) — source-audio gate. enabled:false → muted (detachAudio pulled
@@ -253,6 +266,21 @@ function VideoClipRenderer({ clip }: { clip: VideoClip }) {
     ) : (
       <div style={{ position: "absolute", inset: 0, overflow: "hidden", opacity }}>
         {layer}
+      </div>
+    );
+  }
+
+  // S16 review fix (finding #3) — HOLD the freeze frame for the whole clip. The
+  // 1-frame startFrom/endAt window above only SELECTS the frame; without this
+  // wrapper the video goes black past the freeze instant in the still/export
+  // renderer (see the freezeStart comment). <Freeze frame={0}> pins every
+  // descendant's local frame to 0, so the trimmed <Video>/<OffthreadVideo>
+  // renders its single frame (source frame freezeStart) at EVERY composition
+  // frame — matching the export's ffmpeg trim+tpad bake for the full duration.
+  if (freezeStart != null) {
+    body = (
+      <div data-test="clip-freeze" style={{ position: "absolute", inset: 0 }}>
+        <Freeze frame={0}>{body}</Freeze>
       </div>
     );
   }

@@ -39,6 +39,11 @@ vi.mock("remotion", async (orig) => {
   return {
     ...actual,
     Sequence: Passthrough,
+    // S16 review fix (finding #3) — freeze now HOLDS via a <Freeze> wrapper. In
+    // the unit test we render it as a passthrough (the mocked useCurrentFrame
+    // defeats Freeze's real frame-pinning anyway); the pixel-level hold-past-the-
+    // instant is proven by the FULL consistency gate (consistency-gate.test.ts ⑥).
+    Freeze: Passthrough,
     Video: FakeVideo,
     OffthreadVideo: FakeVideo,
     Audio: Passthrough,
@@ -105,24 +110,32 @@ function videoLayer(container: HTMLElement): HTMLElement {
 }
 
 describe("VideoTrackRenderer freeze is CONSUMED by the preview (S19)", () => {
-  it("no freeze (old work) → <Video> plays the normal in..out span", () => {
+  it("no freeze (old work) → <Video> plays the normal in..out span, NO freeze wrapper", () => {
     frameRef.current = 30;
     const { container } = render(<Scene comp={compWithVideo({})} />);
     const v = videoLayer(container);
     // in:0 out:4 @30fps → startFrom 0, endAt 120 (NOT a 1-frame hold)
     expect(v.getAttribute("data-start-from")).toBe("0");
     expect(v.getAttribute("data-end-at")).toBe("120");
+    // A non-freeze clip must NOT be wrapped in the hold wrapper (back-compat).
+    expect(container.querySelector("[data-test='clip-freeze']")).toBeNull();
   });
 
-  it("freezeAtSec:1.5 → <Video> is held at ONE frame (startFrom=45, endAt=46)", () => {
+  it("freezeAtSec:1.5 → <Video> selects the frozen frame (startFrom=45, endAt=46) AND is HELD by a <Freeze> wrapper", () => {
     frameRef.current = 30;
     const { container } = render(
       <Scene comp={compWithVideo({ freezeAtSec: 1.5 })} />,
     );
     const v = videoLayer(container);
-    // 1.5s @30fps → frame 45; a held still spans exactly one frame.
+    // 1.5s @30fps → frame 45; the trim window SELECTS exactly one source frame.
     expect(v.getAttribute("data-start-from")).toBe("45");
     expect(v.getAttribute("data-end-at")).toBe("46");
+    // S16 review fix (finding #3) — the selected frame must be HELD for the whole
+    // clip via a <Freeze> wrapper. Without it the 1-frame window goes black past
+    // the freeze instant in the still/export renderer (proven by the consistency
+    // gate). Assert the hold wrapper is wired (its pixel-level effect is verified
+    // end-to-end by consistency-gate.test.ts ⑥ at frame 30).
+    expect(container.querySelector("[data-test='clip-freeze']")).not.toBeNull();
   });
 });
 
@@ -171,9 +184,11 @@ describe("VideoTrackRenderer reverse shows an EXPLICIT export-only placeholder (
       container.querySelector("[data-test='reverse-export-only']"),
     ).toBeNull();
     // freeze is still WYSIWYG: the <Video> is held at the single freeze frame
-    // (1.5s @30fps = frame 45, one-frame span), exactly as the export bakes.
+    // (1.5s @30fps = frame 45, one-frame span), exactly as the export bakes, and
+    // pinned by the <Freeze> hold wrapper (S16 review fix #3).
     const v = videoLayer(container);
     expect(v.getAttribute("data-start-from")).toBe("45");
     expect(v.getAttribute("data-end-at")).toBe("46");
+    expect(container.querySelector("[data-test='clip-freeze']")).not.toBeNull();
   });
 });
