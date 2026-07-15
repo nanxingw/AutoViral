@@ -1,6 +1,8 @@
 # 032 · Studio 预览硬切边界卡顿/回放 ~0.x 秒（GitHub #98 本地镜像）
 
-**Severity: HIGH（WYSIWYG 命题的预览侧信任缺口） · triage: `ready-for-agent`（根因机制已证实，收编 [PRD-0016](../prd/0016-preview-hardcut-fidelity.md)） · 记录日期: 2026-07-15 · 根因确认: 2026-07-15**
+**Severity: HIGH · triage: `resolved`（v0.2.1，PRD-0016 交付；非切点音频残留 → [033](033-audio-track-drift-replay.md)） · 记录日期: 2026-07-15 · 根因确认: 2026-07-15 · 修复验证: 2026-07-15**
+
+> **RESOLVED**：premount 暖场 + 音频 pauseWhenBuffering。E2E（wf_1bb04dfb-751 D5）：12 跨界 video 负跳 0、帧钟单调、waiting=2（红基线 40）、mount→canplay p50 9ms、rAF 门控 122 样本 min70 硬过、截图肉眼单调前进。
 
 > GitHub: https://github.com/nanxingw/AutoViral/issues/98（用户直接在 GitHub 创建，本文件为 docs-only tracker 镜像 + 根因回填）
 > 复现夹具与排除清单见 GitHub issue 原文（12×4s CFR 硬切、无转场、导出侧无重复帧）。

@@ -1,6 +1,8 @@
 # 031 · Studio 前端对 agent 后台 subagent/Workflow 零可见性 — 无状态、无进度、被杀无提示
 
-**Severity: MEDIUM（用户对付费多 agent 任务零感知） · triage: `ready-for-agent`（根因已证实，收编 [PRD-0015](../prd/0015-agent-background-task-lifecycle-and-visibility.md)） · 记录日期: 2026-07-15 · 根因确认: 2026-07-15**
+**Severity: MEDIUM · triage: `resolved`（v0.2.1，PRD-0015 交付） · 记录日期: 2026-07-15 · 根因确认: 2026-07-15 · 修复验证: 2026-07-15**
+
+> **RESOLVED**：任务生命周期链路全量焊通（seam 归一化 → registry → ui-workflow 信封 → 任务卡片）。E2E 浏览器验证（新 daemon）：running 卡片 ≤15s 出现（data-status 二确）、整页刷新经 snapshot 恢复、完成翻 completed + toast 恰一次（wf_e9e6bb86-b44 R1，截图四张）。
 
 > GitHub: https://github.com/nanxingw/AutoViral/issues/97（用户 2026-07-15 明确要求同步上 GitHub）
 > Source: 用户报告（2026-07-15）——"前端也不能显示背后运行的 subagent"。

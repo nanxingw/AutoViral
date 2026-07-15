@@ -1,6 +1,8 @@
 # 030 · Studio chat 内 Claude 后台 Workflow 随 agent 进程退出被杀 — 无 drain/keepalive，resume 也活不过下一轮
 
-**Severity: HIGH（workflow 多 agent 编排在 Studio chat 里事实不可用） · triage: `ready-for-agent`（根因已证实，收编 [PRD-0015](../prd/0015-agent-background-task-lifecycle-and-visibility.md)） · 记录日期: 2026-07-15 · 根因确认: 2026-07-15**
+**Severity: HIGH · triage: `resolved`（v0.2.1，PRD-0015 交付） · 记录日期: 2026-07-15 · 根因确认: 2026-07-15 · 修复验证: 2026-07-15**
+
+> **RESOLVED**：ceiling 默认 0（无限等待，ADR-015）+ KillGate 11 kill 点 drain + 消息队列。E2E 浏览器验证（新 daemon）：后台 workflow 活过 turn 边界、完成通知下轮送达、running 期间发消息排队不杀（queued toast + 自动 flush + 回答）、全程无 "process exited" 讣告（wf_1bb04dfb-751 D1 / wf_e9e6bb86-b44 R3）。
 
 > GitHub: https://github.com/nanxingw/AutoViral/issues/96（用户 2026-07-15 明确要求同步上 GitHub）
 > Source: 用户报告（2026-07-15）——"现在使用 claude 用不了 workflow 模式"。
