@@ -1,6 +1,6 @@
 # 031 · Studio 前端对 agent 后台 subagent/Workflow 零可见性 — 无状态、无进度、被杀无提示
 
-**Severity: MEDIUM（用户对付费多 agent 任务零感知） · triage: `needs-triage` · 记录日期: 2026-07-15**
+**Severity: MEDIUM（用户对付费多 agent 任务零感知） · triage: `ready-for-agent`（根因已证实，收编 [PRD-0015](../prd/0015-agent-background-task-lifecycle-and-visibility.md)） · 记录日期: 2026-07-15 · 根因确认: 2026-07-15**
 
 > GitHub: https://github.com/nanxingw/AutoViral/issues/97（用户 2026-07-15 明确要求同步上 GitHub）
 > Source: 用户报告（2026-07-15）——"前端也不能显示背后运行的 subagent"。
@@ -15,6 +15,15 @@ Claude agent 在 chat 里 fan-out 的 Workflow/subagent（实例：work `w_20260
 - 任务被杀（见 030）时无任何提示——用户以为 agent 还在干活，实际早已死透
 
 用户唯一的信息源是 agent 的文字播报，播报之外的真实状态不可核查。
+
+## 根因（已证实 2026-07-15 · Workflow `wf_766f984e-a6c` codex 调研 + 对抗审计 + 主线亲验）
+
+**表述修正：不是链路断了，是最后一公里被静默丢弃；字面"零可见性"不成立**（Workflow/Agent 的 tool_use 会渲染成通用 tool chip），真缺口是任务生命周期状态。逐层：
+
+1. **seam 不归一化**：claude stream-json 的任务类 system 帧（task_started/task_progress/task_notification/background_tasks_changed 等）只有 `system/init` 被识别，其余 fall through onOther → 以 `cli_event` 原样转发（`src/ws-bridge.ts:1637-1640`）；且 tool_use block id / tool_result `tool_use_id` 被丢弃，launch↔lifecycle 无法关联（`src/server/chat-backends/claude.ts:95/108`）。
+2. **server 无任务 registry**：进程退出只广播 `cli_exited`，无法替仍在跑的任务合成 stopped/killed 终态——"被杀无提示"的结构成因。
+3. **契约/信封缺位**：`event-stream.md` 无任何 workflow 类信封；`ui-progress` 单线性无身份无并发无终态、前端消费为 ~2s toast（设计上不承载任务状态）；bridge 流无 replay/snapshot。
+4. **web 最终丢弃点**：`web/src/features/chat/useChatSocket.ts:285` 注释明写 "Silently ignore … cli_event …"；`session_killed`/`cli_exited` 只折叠成 `streaming` 布尔；chat store 无 task map / upsert 语义。
 
 ## 影响
 
