@@ -63,6 +63,41 @@
 
 **对修复方向的含义**：premount 暖场（S2）应同时消除两症状的共同触发器（切点冷挂载）；S3 的音频轨 `pauseWhenBuffering` + 1.2s 阈值复审直接针对本实录的 audio 回放主症状（回放幅度 0.12–0.38s ⊂ 1.2s 自由漂移窗，收窄阈值可压缩回放可及幅度）。转绿目标：三断言全绿（`waiting=0`、`backwardJumpPlayer=0`、`monotonicClock=true`），muted/unmuted 两跑一致。
 
+## S2 premount 后实录（2026-07-15）
+
+**结论：premount 大幅压低 stall（waiting 40→4，≈90%），但音频回放未清零——① 显著改善未到 0、② 音频负跳仍存、③ 帧钟仍单调。** 按 PRD-0016 S2 验收，只有 ③ 全绿；① ② 显著改善但未归零，**收口交给 S3**（音频轨 `pauseWhenBuffering` + 1.2s→默认 阈值复审直接针对残留的 audio 回放）。不硬凑绿。
+
+- **实现**：`web/src/features/studio/composition/tracks/VideoTrackRenderer.tsx` 三条外层 `<Sequence>`（普通单 clip / 单 clip+entrance / 多 clip TransitionSeries 外层）加 `premountFor = Math.round(fps)`（常数集中定义 `PREMOUNT_FRAMES`）。仅预览生效：remotion `Sequence.js:249` 只在 `!env.isRendering` 走 `PremountedPostmountedSequence`，导出树零变化（premount 态真 `.load()` 但显式跳过全局 buffering，`use-media-buffering.js:20-43`）。
+- **环境**：同 S1（work `w_20260715_0035_20d`，daemon `localhost:3271`，前端 `build:frontend` 后重载 dist），浏览器插桩本 agent 亲跑（S2 subagent，非主 agent）。**rAF 门控全程通过**：主跑 `rafRateMin=75`/117 样本；unmuted `rafRateMin=74`；muted `rafRateMin=69`（均 ≥30，未在节流环境判定）。首次 play 用真实鼠标手势解锁 AudioContext（截图二确画面从黑帧→真实视频帧前进）。
+
+### 主跑（unmuted，21 跨界 / 7 轮，endSec=13.5，rafRateMin=75）
+
+| 断言 | S1 红基线 | S2 premount 后 | 判定 |
+|---|---|---|---|
+| ① 无 stall | `waiting=40`、`stalled=0`、`clockFreeze=0` | `waiting=4`、`stalled=0`、`clockFreeze=0` | 改善 ≈90%，**未到 0** |
+| ② 无回放 | `backwardJumpPlayer=19`（全 audio，129–375ms，聚 8s 切点） | `backwardJumpPlayer=12`（全 audio，579–680ms，聚各轮**暂停端 ~13.4s**，非 8s 切点） | 改善，**未到 0** |
+| ③ 帧钟单调 | `monotonicClock=true` | `monotonicClock=true`、`clockBackward=0` | 绿（不变） |
+
+- mount→canplay（切点新 Player video 冷挂载代价）：n=21，min 8 / p50 9 / p90 16 / max 17 ms——比 S1（p50 14/max 19）更快，premount 已预暖新元素，切点几乎零挂载延迟。
+- **负跳性质变化（关键）**：S1 的负跳全落在 8s 切点（数据-URI narration/sourceAudio 段）；premount 后**切点级音频回放消失**，残留 12 条负跳全在 BGM(`memory_secret_bgm.mp3`)+VO(`tts_79227f8e672c.mp3`)两条 .mp3 上、且 `distToRoundEnd` 100–1038ms（贴各轮暂停端），幅度升至 ~600ms。
+
+### 主从诊断（endSec=25，12 跨界 matched，cut 点 4/8/12/16/20/24 与轮末 25s 充分分离）
+
+| 指标 | unmuted (12×, 3 轮) | muted (12×, 3 轮) |
+|---|---|---|
+| `waiting` | 3 | 6 |
+| `stalled` | 0 | 0 |
+| `clockFreeze` | 0 | 0 |
+| audio `backwardJumpPlayer` | 6 | 4 |
+| 负跳幅度 | 557–618ms | 557–571ms |
+| `monotonicClock` | true | true |
+| `mountToCanplay` p50/max | 9/18 ms | 10/29 ms |
+
+- **两态几乎全等（mute-independent，同 S1）**：静音**不减** waiting（3 vs 6，噪声内）、**不消除**音频回放（6 vs 4）。残留 stall/replay 都不看 Player 静音——与 S1 结论一致。
+- **长窗口下负跳位置**：unmuted 6 条负跳分布 masterSec ~12–16.7s（12/16 切点附近区域），非仅轮末——说明 BGM/VO 随播放渐进跑赢帧钟、到 ~600ms 时被 `use-media-playback.js:200-219` 拽回；幅度 ⊂ 1.2s 自由漂移窗，正是 S3 收窄阈值的靶点。
+
+**S2 净结论**：premount 消除了**切点冷挂载**这个共同触发器——① stall 降 ~90%、切点级音频回放消失、mount→canplay 近零。残留是 BGM/VO 音频轨在 1.2s 自由漂移窗内渐进跑赢帧钟后的 ~600ms 纠偏回放（mute-independent），**未被 premount 触及**，正是 S3（AudioTrackRenderer `pauseWhenBuffering` + `acceptableTimeShiftInSeconds` 1.2s→默认复审）的收口目标。③ 帧钟单调全程保持。**S2 不宣称夹具全绿**——按 PRD-0016 只 ③ 转绿，① ② 移交 S3。
+
 ## Acceptance criteria
 
 见 [PRD-0016](../prd/0016-preview-hardcut-fidelity.md) 验收与切片（S1 红基线夹具 → S2 premount → S3 音频语义 → S4 压力复测）。

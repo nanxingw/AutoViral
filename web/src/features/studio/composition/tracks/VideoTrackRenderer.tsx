@@ -570,6 +570,27 @@ export function VideoTrackRenderer({ track }: { track: Track }) {
   const { fps, width, height } = useVideoConfig();
   if (track.hidden) return null;
   const dims = { width, height };
+  // PRD-0016 S2 — premount warm-up window (≈1s). At a hard cut the outgoing
+  // clip's <Sequence> unmounts and the incoming one mounts in the SAME commit
+  // (remotion Sequence.js:182 — no overlap), so the new <video> gets its src
+  // only then; readyState < HAVE_FUTURE_DATA → blockMedia() + .load()
+  // (use-media-buffering.js:109), which stalls playback (S1 red baseline:
+  // waiting=40) and lets the 0.15s aggressive drift-correction replay ~0.x s of
+  // audio (docs/issues/032). Giving each chain's OUTER <Sequence> a premountFor
+  // window mounts+`.load()`s the next clip's media N frames early WITHOUT
+  // triggering the global buffering block: a premounting Sequence explicitly
+  // skips buffering and freezes its subtree time so it doesn't pre-play
+  // (use-media-buffering.js:20-43 + freeze.js:46-54). Math.round(fps) ≈ one
+  // second of lead — long enough for a cold H.264 GOP to reach
+  // HAVE_FUTURE_DATA before the cut, short enough to keep only one extra
+  // neighbour element resident (S4 resource re-test).
+  //
+  // PREVIEW-ONLY BY REMOTION'S CONSTRUCTION: Sequence.js:249-256 routes to the
+  // premounted variant ONLY when `!env.isRendering`; under isRendering=true it
+  // always renders the plain RegularSequence regardless of premountFor. So this
+  // prop is safe to pass unconditionally — the server render tree is provably
+  // unaffected (no OffthreadVideo/freeze/blur/entrance prop is perturbed).
+  const PREMOUNT_FRAMES = Math.round(fps);
   const chains = groupChains(track.clips as VideoClip[], track.transitions ?? []);
   return (
     <>
@@ -586,7 +607,12 @@ export function VideoTrackRenderer({ track }: { track: Track }) {
         if (chain.clips.length === 1 && entrance.length === 0) {
           const dur = Math.max(1, Math.round(effectiveClipDuration(first) * fps));
           return (
-            <Sequence key={first.id} from={from} durationInFrames={dur}>
+            <Sequence
+              key={first.id}
+              from={from}
+              durationInFrames={dur}
+              premountFor={PREMOUNT_FRAMES}
+            >
               <VideoClipRenderer clip={first} />
             </Sequence>
           );
@@ -598,7 +624,12 @@ export function VideoTrackRenderer({ track }: { track: Track }) {
         if (chain.clips.length === 1) {
           const clipDur = Math.max(1, Math.round(effectiveClipDuration(first) * fps));
           return (
-            <Sequence key={first.id} from={from} durationInFrames={clipDur}>
+            <Sequence
+              key={first.id}
+              from={from}
+              durationInFrames={clipDur}
+              premountFor={PREMOUNT_FRAMES}
+            >
               <TransitionSeries>
                 {entrance}
                 <TransitionSeries.Sequence
@@ -620,7 +651,11 @@ export function VideoTrackRenderer({ track }: { track: Track }) {
         // own `transitionIn` is honoured (not just the first) — see the per-clip
         // nesting below.
         return (
-          <Sequence key={chain.clips.map((c) => c.id).join(":")} from={from}>
+          <Sequence
+            key={chain.clips.map((c) => c.id).join(":")}
+            from={from}
+            premountFor={PREMOUNT_FRAMES}
+          >
             <TransitionSeries>
               {chain.clips.flatMap((c, i) => {
                 const seqDur = Math.max(1, Math.round(effectiveClipDuration(c) * fps));
