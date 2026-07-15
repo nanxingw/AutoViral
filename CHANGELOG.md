@@ -7,6 +7,34 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-07-15
+
+**Agent 后台任务生命周期 + 预览硬切保真**（PRD-0015 S1-S7 + PRD-0016 S1-S4，GitHub #96/#97/#98 三 issue 当日根因当日修）—— 两条主线：① Studio chat 里 agent 启动的后台 Workflow **活过 turn 边界、全程看得见、被杀有交代**（030 事故的结构性修复：九次受控实验钉死 claude CLI print-mode 行为真值表，帧归一化 → registry → `ui-workflow` 信封 → 任务卡片全链路焊通）；② 预览硬切边界**不卡不回放**（#98：remotion 源码级取证 + 浏览器插桩红基线 → premount 暖场，切点级症状归零）。全程测试先行（server 2047→2115、web 1920→1937，只增不减），六轮 codex 对抗审查闭环，联合多纬浏览器 E2E 收口。
+
+### Added
+
+- **后台任务生命周期链路（PRD-0015）** — ChatBackend seam 归一化 claude stream-json 任务帧（`task_started/updated/notification/background_tasks_changed`，真实抓取 fixture 锁形状，tool_use id 关联保留）；`BackgroundTaskRegistry` 深模块（同 id upsert、终态单调状态机、进程代际隔离、settleOnExit 合成终态带 reason、死代际不重开）；新 `ui-workflow` / `ui-workflow-snapshot` 信封（身份 = workId+sessionId+generation+taskId，snapshot-then-push 保序，契约入 `event-stream.md`）；Studio chat 任务卡片面板（durable 卡片 + 状态 chip + usage 摘要，仅终态首达 toast，刷新/重连经 snapshot 恢复，`session_killed`/`cli_exited` 联动兜底）。
+- **KillGate drain 纪律** — 全部 11 处进程回收路径收敛单一 `requestKill(session, cause)` chokepoint + cause 策略表：活任务时新消息**排队不杀**（`chat_notice` 提示 + result 后自动 flush，绕过去重、多 result 帧防重复 flush）、模型/后端切换返回 409 提示（含 named session）、断连 grace / idle-TTL 跳过回收、显式 /stop / 删 work（枚举全部 session）/ abort / test-runner 超时走杀 + settle + 终态广播绝不静默；daemon 退出 `shutdownAll` 立即收尾并如实广播；源码 grep-gate 挡未来新增裸 kill。
+- **spawn ceiling 配置（ADR-015）** — chat spawn env 注入 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`（默认 0 = workflow 无限等待，`config.chat.bgWaitCeilingMs` 可覆盖，非法值校验拒入 env）；九次受控实验真值表入库（workflow 型 result-hold/600s 默认/env 有效性；bash 型 result 后 ~5s 上游必杀、env 无效）＋脱敏 fixture ＋ `scripts/probes/recapture-ceiling.sh` 重采脚本。
+- **Journal 打捞 orphaned** — 宿主进程死后从 workflow journal 收割已完成 agent 计数（按 journal key 去重防 resume 虚高）+ result 摘要，registry 标 `orphaned`（仅 harvest 内部路径可产生）随卡片可见（"已完成 N/M · 可打捞"）；run 窗口唯一归属，损坏 journal 优雅降级。
+- **预览硬切保真（PRD-0016）** — 视频 clip Sequence `premountFor`（≈1s 暖场窗，premount 态预 `.load()` 不触发全局 buffering；仅预览生效，导出渲染树零变化）；AudioTrackRenderer 预览分支补 `pauseWhenBuffering`；`acceptableTimeShiftInSeconds: 1.2` 两档实测复审 KEEP（数据入注释）。
+- **边界保真回归夹具** — `scripts/probes/boundary-probe.js`（MutationObserver + 媒体事件 + 100ms poll + rAF 心跳门控 + 三断言汇总），可重复浏览器插桩回归；Studio 媒体元素全盘点落 `docs/research/2026-07-15-studio-media-element-inventory.md`。
+
+### Fixed
+
+- **#96 · Studio chat 后台 Workflow 随进程退出被杀** — 根因：claude CLI print-mode 600s 后台任务等待上限（上游行为，AutoViral 源码零出现；运行时日志两次事故同签名 + 二进制字符串双验证）到点在子进程内强杀任务。修复 = ceiling 默认 0（无限等）+ KillGate 防 AutoViral 侧 11 处 kill 点接棒 + 消息队列防 sendMessage SIGTERM 残活进程。
+- **#97 · 前端对 subagent 零可见性** — 根因修正：链路每层都在、最后一公里被静默丢弃（seam 不归一化 → 无 registry → 无信封 → web 显式 ignore `cli_event`）。修复 = 上述任务生命周期链路全量焊通。
+- **#98 · 硬切边界预览卡顿/回放 ~0.x 秒** — 根因：切点冷挂载（无 premount）→ 全局 buffering block（stall）+ 0.15s 激进纠偏向后 seek 超前媒体（回放），1.2s 自由漂移窗供弹药。修复后切点级归零：切点音频回放清零、video ct 负跳双档双态均 0、waiting 40→2-4（↓90%+）、帧钟全程单调、mount→canplay p50 14→9ms；24-asset 压力两态复测无解码预算回归。
+- **markOrphaned TS2367 收窄误报** — transition 返回 boolean，调用方用返回值而非重读被收窄的 status。
+
+### Known Issues
+
+- **非切点 BGM/VO 音频 ~600ms 漂移纠偏回放**（docs/issues/033）— 长音轨渐进跑赢帧钟后被拽回，与切点无关、与 premount/视频阈值无关（音频元素自带独立同步循环），幅度恒定 ~600ms、4-8 次/12 跨界；需独立实验轮定音频侧阈值（有 choppy tradeoff）。
+- **workflow 型任务的 result-hold 语义** — ceiling=0 下启动后台 workflow 的那一轮 chat，回复文本即时流出但 `turn_complete`（idle/cost 记账）延迟到 workflow 收尾（上游 print-mode 语义）；期间 UI 由任务卡片承担状态可见性，新消息自动排队。
+- **bash 型后台任务上游必杀** — claude CLI 对 `run_in_background` Bash 任务在最终 result 后 ~5s 一律收割且 env 不可救（九实验实证）；chat 内长后台工作必须用 Workflow 工具（后续在 skills/autoviral recipe 层补教学）。
+- **终止 UX 三残留**（docs/issues/034）— `/stop` 对"spawn turn 已结束但任务仍跑"的边缘态是 no-op（正常路径 turn 与任务同寿命；删 work 为兜底入口）；stopped 终态 toast 待 MutationObserver 级探针复核（completed toast 已证实、同机制）；排队提示（服务端中文）与终态 toast（前端 locale）语言混用。
+- **codex 后端无任务卡片** — codex chat 无 Workflow 工具、seam 空实现（by design，PRD-0015 Out of Scope）；任务生命周期可见性本期仅 claude 后端。
+
 ## [0.2.0] - 2026-07-15
 
 **WYSIWYG 焊死与剪辑能力对标**（PRD-0014，19 片）—— 一条主线：让 agent 亲手剪出一条完整短视频，且**预览认可的节奏就是成片的节奏**。两侧收敛同一份 composition：转场 / 变速 / mask / blend / effects 全部走 Remotion 同源组件（预览=导出 by construction），CLI 与 UI 每个新编辑动词都经共享 op 三端接线（sweep gate 常驻防止再造 store-only 动词）。全程测试先行（预设测试证红→转绿），每片经 codex 独立审查，S16 落地机器化的「预览=导出」逐像素回归 gate（8 fixture + 专用 CI job），S18 经三轮 Workflow 多纬度浏览器 E2E（截图 + DOM/computed-style 二确 + completeness-critic）终验：抓出并当日修复变速导出不可交付（served-URL 误判致 Remotion 解码 HTML）、四 cinematic 转场端点 500、captions 默认路径 500、硬件编码器 -12900 等真回归，末轮三证（成品 ffprobe + 抽帧非 HTML + 浏览器可见）齐全销账。
