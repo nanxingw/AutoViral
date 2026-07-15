@@ -227,8 +227,8 @@ export class BackgroundTaskRegistry {
    *   - 终态→终态**仅**放行 {@link TERMINAL_OVERRIDE_ALLOWED} 白名单（CLI 权威 killed→stopped +
    *     S7 打捞 stopped→orphaned / killed→orphaned）；其余（如 completed→killed）拒绝。
    *  被拒都走观测钩子（带 kind），不改状态。 */
-  private transition(rec: TaskRecord, next: BackgroundTaskStatus): void {
-    if (rec.status === next) return;
+  private transition(rec: TaskRecord, next: BackgroundTaskStatus): boolean {
+    if (rec.status === next) return false;
     // M9：orphaned 是打捞专属终态——只有 markOrphaned 内部路径（orphaningInternally=true）
     // 能把任务推进到 orphaned。上游 CLI 帧直传 status:"orphaned" 一律拒（不接受 speculative
     // orphaned；避免绕过 journal 打捞凭空标中断）。
@@ -240,7 +240,7 @@ export class BackgroundTaskRegistry {
         to: next,
         kind: "orphaned_requires_harvest",
       });
-      return;
+      return false;
     }
     const fromTerminal = isTerminalStatus(rec.status);
     const toTerminal = isTerminalStatus(next);
@@ -252,7 +252,7 @@ export class BackgroundTaskRegistry {
         to: next,
         kind: "terminal_monotonicity",
       });
-      return;
+      return false;
     }
     if (fromTerminal && toTerminal && !TERMINAL_OVERRIDE_ALLOWED.has(`${rec.status}->${next}`)) {
       this.onRejectedTransition?.({
@@ -262,9 +262,10 @@ export class BackgroundTaskRegistry {
         to: next,
         kind: "terminal_to_terminal",
       });
-      return;
+      return false;
     }
     rec.status = next;
+    return true;
   }
 
   /** M6：归一化上游状态词后推进状态。未识别词→忽略该次推进（保留原状态）+ 观测钩子，
@@ -457,13 +458,15 @@ export class BackgroundTaskRegistry {
     // M9：唯一放行 orphaned 目标的地方——置内部旗，transition 内的 orphaned 守卫因此放行；
     // 白名单（stopped/killed→orphaned）仍生效，completed→orphaned 照旧被 terminal_to_terminal 拒。
     this.orphaningInternally = true;
+    let orphanedNow: boolean;
     try {
-      this.transition(rec, "orphaned");
+      orphanedNow = this.transition(rec, "orphaned");
     } finally {
       this.orphaningInternally = false;
     }
     // transition 被白名单拒绝（如 completed→orphaned）→ 状态没变，不挂 harvest、不广播。
-    if (rec.status !== "orphaned") return undefined;
+    // 用 transition 的返回值判断（而非重读 rec.status——上方守卫的收窄会让 TS 误报 TS2367 永假）。
+    if (!orphanedNow) return undefined;
     rec.harvest = { ...harvest };
     return cloneSnapshot(rec);
   }
