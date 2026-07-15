@@ -1,0 +1,7 @@
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"w7unxiby6","task_type":"local_workflow","description":"slow agent probe 8"}]}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"w7unxiby6","task_type":"local_workflow","description":"slow agent probe 8"},{"task_id":"buoytymsk","task_type":"local_bash","description":"Sleep 30 seconds then echo inner8-done"}]}
+{"type":"system","subtype":"task_started","task_id":"buoytymsk","tool_use_id":"toolu_01Ve2eTDNrcuEtpXhM7Y7PxX","description":"Sleep 30 seconds then echo inner8-done","task_type":"local_bash"}
+{"type":"system","subtype":"task_notification","task_id":"w7unxiby6","tool_use_id":"toolu_0189ed3bKyFpF7rxR8o6h6oK","status":"stopped","output_file":"<SCRATCH>/tasks/w7unxiby6.output","summary":"slow agent probe 8"}
+{"type":"system","subtype":"background_tasks_changed","tasks":[{"task_id":"w7unxiby6","task_type":"local_workflow","description":"slow agent probe 8"}]}
+{"type":"system","subtype":"task_updated","task_id":"buoytymsk","patch":{"status":"killed","end_time":1784117090607}}
+{"type":"system","subtype":"task_notification","task_id":"buoytymsk","tool_use_id":"toolu_01Ve2eTDNrcuEtpXhM7Y7PxX","status":"stopped","output_file":"<SCRATCH>/tasks/buoytymsk.output","summary":"Sleep 30 seconds then echo inner8-done"}

@@ -97,3 +97,26 @@ export async function saveConfig(config: Config): Promise<void> {
 export function getConfigDir(): string {
   return CONFIG_DIR;
 }
+
+/**
+ * PRD-0015 S5 —— 校验 `chat.bgWaitCeilingMs`（注入子进程的
+ * CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS 之前）。config.yaml 是运行时无类型的（YAML
+ * 标量可以是任意值），一个手滑的负数 / 小数 / 字符串 / NaN 一旦被 `String()` 塞进 env，
+ * claude CLI 的解析行为不可控（`NaN`→立即杀 / 截断 / 未定义）。因此只接受**非负安全整数**；
+ * 非法值不返回 `value`（消费点回落 ADR-015 默认 0）并附带 `error` 供调用方记日志——
+ * 绝不把脏值 String() 出去。未配置（undefined/null）返回 `{}`（回落默认但不告警）。
+ */
+export function normalizeBgWaitCeilingMs(raw: unknown): { value?: number; error?: string } {
+  if (raw === undefined || raw === null) return {};
+  if (
+    typeof raw !== "number" ||
+    !Number.isFinite(raw) ||
+    !Number.isSafeInteger(raw) ||
+    raw < 0
+  ) {
+    return {
+      error: `chat.bgWaitCeilingMs 必须是非负安全整数（ms），收到 ${JSON.stringify(raw)}；已回落默认（0=无限等待）。`,
+    };
+  }
+  return { value: raw };
+}

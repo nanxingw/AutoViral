@@ -17,7 +17,7 @@ import type { IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import { appendFile } from "node:fs/promises";
 import { logBridge, logBridgeDebug } from "./infra/logger.js";
-import { loadConfig, dataDir } from "./infra/config.js";
+import { loadConfig, dataDir, normalizeBgWaitCeilingMs } from "./infra/config.js";
 import { assertCliBinDir } from "./infra/paths.js";
 import { getWork, updateWork, saveWorkChat, loadWorkChat, listWorks, type Work } from "./domain/work-store.js";
 import { recordCostEvent } from "./server/cost-ledger/index.js";
@@ -510,6 +510,10 @@ export class WsBridge {
    *  未加载/未配置时保持 undefined，buildSpawn 回落到 ADR-015 默认 0（无限等待，安全侧）。 */
   private bgWaitCeilingMs: number | undefined;
   private bgWaitCeilingLoaded = false;
+  /** PRD-0015 S5 修正 —— 加载中的共享 Promise。并发的首批 spawn 都 await 同一个它，
+   *  避免"第一个调用同步置位 loaded、第二个短路带 undefined 去 spawn"的竞态。加载
+   *  成功后 loaded 置位并留空；失败置空以允许下次重试。 */
+  private bgWaitCeilingLoadPromise: Promise<void> | undefined;
 
   constructor(serverPort: number, opts?: { idleTtlMs?: number }) {
     this.serverPort = serverPort;
@@ -1373,17 +1377,37 @@ export class WsBridge {
   /** PRD-0015 S5 —— lazy-load 服务端配置里的 print-mode 止损上限覆盖一次并缓存。
    *  从异步的 spawn 入口（createSession / sendCommand / sendMessage）在 spawn 前 await，
    *  这样写入 config.yaml 的副作用落在被测方法的 await 边界内，不会 race teardown；
-   *  不 spawn 的调用（unknown session 等早退路径）永不触发 loadConfig。失败/未配置时
-   *  bgWaitCeilingMs 保持 undefined，buildSpawn 回落到默认 0。 */
+   *  不 spawn 的调用（unknown session 等早退路径）永不触发 loadConfig。
+   *
+   *  修正（codex review）—— **竞态**：旧实现把 `loaded=true` 在 `await loadConfig()`
+   *  之前同步置位，导致并发的第二个调用看到 loaded=true 立刻短路返回、带着仍是 undefined
+   *  的 bgWaitCeilingMs 去 spawn（子进程拿默认 0 而非运维配置的止损上限）。现改为并发共享
+   *  同一个加载 Promise（都 await 到真正加载完），`loaded` 只在 await 成功后置位；加载失败
+   *  记 logBridge 且清空 Promise 以允许下次重试。失败/未配置/非法值时 bgWaitCeilingMs 保持
+   *  undefined，buildSpawn 回落到 ADR-015 默认 0（无限等待，安全侧）。 */
   private async ensureBgWaitCeiling(): Promise<void> {
     if (this.bgWaitCeilingLoaded) return;
-    this.bgWaitCeilingLoaded = true;
-    try {
-      const config = await loadConfig();
-      this.bgWaitCeilingMs = config.chat?.bgWaitCeilingMs;
-    } catch {
-      /* 保持默认（undefined → buildSpawn 用 0） */
+    if (!this.bgWaitCeilingLoadPromise) {
+      this.bgWaitCeilingLoadPromise = (async () => {
+        try {
+          const config = await loadConfig();
+          const { value, error } = normalizeBgWaitCeilingMs(config.chat?.bgWaitCeilingMs);
+          if (error) {
+            logBridge("bg_wait_ceiling_invalid", "-", {
+              error,
+              raw: config.chat?.bgWaitCeilingMs,
+            });
+          }
+          this.bgWaitCeilingMs = value; // 合法则缓存、非法/未配置为 undefined（回落 0）。
+          this.bgWaitCeilingLoaded = true; // 只在加载成功后置位（消灭竞态窗口）。
+        } catch (err) {
+          logBridge("bg_wait_ceiling_load_failed", "-", { error: String(err) });
+          // 不置位 loaded、清空 Promise —— 下次 spawn 前重试，不永久锁死在失败态。
+          this.bgWaitCeilingLoadPromise = undefined;
+        }
+      })();
     }
+    await this.bgWaitCeilingLoadPromise;
   }
 
   private spawnCli(

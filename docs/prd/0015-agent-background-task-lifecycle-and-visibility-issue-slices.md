@@ -63,7 +63,7 @@
 
 **What to build**：claude 后端 spawn env 注入 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`（服务端配置可覆盖）；实测 ceiling=0 下 result 帧 hold 行为与对 chat 交互/kill 路径的连锁影响；据实测在"高值+drain 兜底"vs"0+语义调整"间定默认值，结论落 ADR（短文）；stderr 签名探针回归测试钉上游行为漂移。
 
-**预设测试**：`src/server/chat-backends/__tests__/claude.spawn-env.test.ts` — ① buildSpawn env 含配置值；② 未配置时用 ADR 定的默认值；③ 显式 0 透传。探针：`src/server/__tests__/ceiling-signature.probe.test.ts` 对 fixture 化 stderr 签名断言（上游改口 CI 先红）。
+**预设测试**：`src/server/chat-backends/__tests__/claude.spawn-env.test.ts` — ① buildSpawn env 含配置值；② 未配置时用 ADR 定的默认值；③ 显式 0 透传。契约回归：`src/server/chat-backends/__tests__/parser-contract.regression.test.ts` 对 fixture 化任务帧形状/终态词汇断言（parser 契约锁；上游漂移探测靠 `scripts/probes/recapture-ceiling.sh` 手动重采，CI 无 claude 凭据无法自动红）。修正包另加：`config-bg-ceiling.test.ts`（`normalizeBgWaitCeilingMs` 校验）+ `ws-bridge-bg-ceiling.test.ts`（lazy-load 竞态/重试）。
 
 **Acceptance criteria**
 - [ ] 预设测试先行落盘并证红
