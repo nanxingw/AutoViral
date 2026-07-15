@@ -2,6 +2,7 @@
 
 **Severity: MEDIUM（用户对付费多 agent 任务零感知） · triage: `needs-triage` · 记录日期: 2026-07-15**
 
+> GitHub: https://github.com/nanxingw/AutoViral/issues/97（用户 2026-07-15 明确要求同步上 GitHub）
 > Source: 用户报告（2026-07-15）——"前端也不能显示背后运行的 subagent"。
 > 姊妹 issue：[030](030-studio-chat-kills-background-workflow.md)（后台 workflow 被进程回收杀死）——030 的问题因为本 issue 而对用户完全隐形。
 

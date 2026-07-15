@@ -2,6 +2,7 @@
 
 **Severity: HIGH（workflow 多 agent 编排在 Studio chat 里事实不可用） · triage: `needs-triage` · 记录日期: 2026-07-15**
 
+> GitHub: https://github.com/nanxingw/AutoViral/issues/96（用户 2026-07-15 明确要求同步上 GitHub）
 > Source: 用户报告（2026-07-15）——"现在使用 claude 用不了 workflow 模式"。
 > 同一 session 内完整复现两次，证据齐全（见下）。姊妹 issue：[031](031-studio-no-subagent-visibility.md)（前端对后台 subagent 零可见性——被杀了用户也无感知）。
 
