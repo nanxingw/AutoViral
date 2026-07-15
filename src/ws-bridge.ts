@@ -1663,6 +1663,21 @@ export class WsBridge {
         }
       },
 
+      // PRD-0015 S1 —— 后台任务生命周期归一化事件先以日志形式可观测。本片只加
+      // logBridge("bg_task", ...) 的观测点；registry 接管（applyEvent / settleOnExit /
+      // 广播 ui-workflow）留给 S2，这里【不】建 registry、【不】广播。task-class 帧
+      // 仍会经上面的 onOther 走既有 cli_event 转发（claude 后端故意双发，不回归）。
+      onBackgroundTask: (event) => {
+        logBridge("bg_task", session.workId, {
+          kind: event.kind,
+          taskId: event.taskId,
+          toolUseId: event.toolUseId,
+          taskType: event.taskType,
+          status: event.status,
+          taskCount: event.tasks?.length,
+        });
+      },
+
       // Forward everything else as a raw cli_event.
       onOther: (msg) => {
         this.broadcastToSession(session.workId, session.sessionId, {

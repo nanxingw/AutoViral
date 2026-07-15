@@ -1,0 +1,5 @@
+{"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "wm2372mc8", "task_type": "local_workflow", "description": "fixture probe"}]}
+{"type": "system", "subtype": "task_started", "task_id": "wm2372mc8", "tool_use_id": "toolu_014MPmLhAGgc258Mc3g4fiGz", "description": "fixture probe", "task_type": "local_workflow", "workflow_name": "noop-probe", "prompt": "export const meta={name:\"noop-probe\",description:\"fixture probe\",phases:[]}\nlog(\"hello\")\nreturn 42"}
+{"type": "system", "subtype": "background_tasks_changed", "tasks": []}
+{"type": "system", "subtype": "task_updated", "task_id": "wm2372mc8", "patch": {"status": "completed", "end_time": 1784114131599}}
+{"type": "system", "subtype": "task_notification", "task_id": "wm2372mc8", "tool_use_id": "toolu_014MPmLhAGgc258Mc3g4fiGz", "status": "completed", "output_file": "<SCRATCH>/tasks/wm2372mc8.output", "summary": "Dynamic workflow \"fixture probe\" completed", "usage": {"total_tokens": 0, "tool_uses": 0, "duration_ms": 6}}

@@ -16,6 +16,7 @@ import { dataDir } from "../../infra/config.js";
 import type {
   ChatBackend,
   ChatBackendCommandResult,
+  ChatBackgroundTaskEvent,
   ChatLineParser,
   ChatRawMessage,
   ChatSpawnDescriptor,
@@ -47,6 +48,71 @@ function buildTurnComplete(msg: ChatRawMessage): ChatTurnComplete {
     costUsd: cost,
     durationMs,
     usage,
+  };
+}
+
+/** PRD-0015 S1 —— claude print-mode 把后台任务生命周期写成这几个 `system` 帧的
+ *  subtype。它们不是 `init`，历史上直接落 onOther 当无名 cli_event 转发（030 事故
+ *  前端零可见性的根因之一）。 */
+const TASK_FRAME_SUBTYPES = new Set([
+  "background_tasks_changed",
+  "task_started",
+  "task_updated",
+  "task_notification",
+]);
+
+/** 把一个 claude 任务类 `system` 帧翻译成 provider-agnostic 的归一化事件；不是任务帧
+ *  返回 undefined。字段名映射 claude → 归一化：task_id→taskId、tool_use_id→toolUseId、
+ *  task_type→taskType、patch.end_time→endTime。task_type（local_bash / local_workflow…）
+ *  与 status（completed / killed / stopped…）均透传不穷举——上游改口靠 S5 探针先红。 */
+function normalizeBackgroundTaskFrame(
+  msg: ChatRawMessage,
+): ChatBackgroundTaskEvent | undefined {
+  if (msg.type !== "system") return undefined;
+  const subtype = msg.subtype;
+  if (!subtype || !TASK_FRAME_SUBTYPES.has(subtype)) return undefined;
+  const raw = msg as Record<string, unknown>;
+
+  if (subtype === "background_tasks_changed") {
+    const tasks = Array.isArray(raw.tasks)
+      ? (raw.tasks as Array<Record<string, unknown>>).map((t) => ({
+          taskId: t.task_id as string | undefined,
+          taskType: t.task_type as string | undefined,
+          description: t.description as string | undefined,
+        }))
+      : [];
+    return { kind: "list_changed", tasks };
+  }
+
+  if (subtype === "task_started") {
+    return {
+      kind: "started",
+      taskId: raw.task_id as string | undefined,
+      toolUseId: raw.tool_use_id as string | undefined,
+      taskType: raw.task_type as string | undefined,
+      description: raw.description as string | undefined,
+    };
+  }
+
+  if (subtype === "task_updated") {
+    const patch = (raw.patch as Record<string, unknown> | undefined) ?? {};
+    return {
+      kind: "updated",
+      taskId: raw.task_id as string | undefined,
+      status: patch.status as string | undefined,
+      endTime: patch.end_time as number | undefined,
+    };
+  }
+
+  // task_notification
+  return {
+    kind: "notification",
+    taskId: raw.task_id as string | undefined,
+    toolUseId: raw.tool_use_id as string | undefined,
+    status: raw.status as string | undefined,
+    summary: raw.summary as string | undefined,
+    outputFile: raw.output_file as string | undefined,
+    usage: raw.usage as Record<string, number> | undefined,
   };
 }
 
@@ -127,6 +193,14 @@ function dispatch(
   if (msg.type === "result") {
     cb.onTurnComplete(buildTurnComplete(msg), msg);
     return;
+  }
+
+  // PRD-0015 S1 —— 后台任务生命周期 system 帧归一化。命中的帧【同时】走
+  // onBackgroundTask（供 registry/任务卡片）【和】下面的 onOther（既有 cli_event 转发
+  // 不回归，故意不 return）。未命中的普通帧只走 onOther，行为逐字节不变。
+  const bgEvent = normalizeBackgroundTaskFrame(msg);
+  if (bgEvent) {
+    cb.onBackgroundTask?.(bgEvent, msg);
   }
 
   // Everything else.

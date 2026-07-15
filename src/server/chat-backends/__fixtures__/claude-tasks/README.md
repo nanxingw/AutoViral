@@ -21,11 +21,31 @@ CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=5000 claude -p \
   --output-format stream-json --verbose --dangerously-skip-permissions
 ```
 
+正常完成的 local_bash 任务（S1，`exp1-bgbash-terminal.jsonl`）：
+
+```sh
+claude -p \
+  '用 Bash 工具以 run_in_background:true 运行命令 `sleep 8 && echo bgdone`，然后立刻回复"started"结束本轮。不要等待任务。' \
+  --output-format stream-json --verbose --dangerously-skip-permissions
+```
+
+正常完成的 local_workflow 任务（S1，`exp3-workflow-terminal.jsonl`，Workflow 工具跑一个 noop-probe 脚本）：
+
+```sh
+CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=60000 claude -p \
+  '调用 Workflow 工具，script 参数用一个最小 noop-probe（meta.phases 为空），然后立刻回复"launched"结束本轮，不要等待。' \
+  --output-format stream-json --verbose --dangerously-skip-permissions
+```
+
 ## 文件清单
 
-| 文件 | 内容 |
-|---|---|
-| `exp2-ceiling-terminal.jsonl` | 从上述会话原样 stdout 抽取的 5 条任务生命周期 system 帧：`background_tasks_changed`（起点，tasks 非空）→ `task_started`（关联 `tool_use_id`）→ `background_tasks_changed`（终点，tasks 清空）→ `task_updated`（`patch.status="killed"`）→ `task_notification`（`status="stopped"`）。非任务帧（init/assistant/user/result 等）未纳入本 fixture。 |
+| 文件 | 采集会话 | 内容 |
+|---|---|---|
+| `exp2-ceiling-terminal.jsonl` | `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=5000` + `sleep 30`（上限强杀） | 5 条任务生命周期 system 帧：`background_tasks_changed`（起点，tasks 非空）→ `task_started`（关联 `tool_use_id`）→ `background_tasks_changed`（终点，tasks 清空）→ `task_updated`（`patch.status="killed"`）→ `task_notification`（`status="stopped"`）。 |
+| `exp1-bgbash-terminal.jsonl`（S1） | `run_in_background` 的 `sleep 8`（正常完成） | 同结构 5 帧，`task_type="local_bash"`，终态词汇 **completed**：`task_updated.patch.status="completed"` + `task_notification.status="completed"`。锁"任务自然收尾"这条 happy path。 |
+| `exp3-workflow-terminal.jsonl`（S1） | Workflow 工具跑 noop-probe 脚本（正常完成） | 同结构 5 帧，**`task_type="local_workflow"`**（与 bash 任务不同的类型），`task_started` 另带 `workflow_name`/`prompt`，`task_notification` 另带 `usage: {total_tokens, tool_uses, duration_ms}`。锁 Workflow 任务的类型与用量字段。 |
+
+非任务帧（init/assistant/user/result 等）未纳入这些 fixture——它们只服务于任务生命周期 seam 归一化与终态签名回归，assistant/result 帧的解析在 `../../claude.test.ts` 覆盖。
 
 ## 脱敏
 

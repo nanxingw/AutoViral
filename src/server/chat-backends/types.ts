@@ -83,6 +83,50 @@ export interface ChatProviderCapabilities {
   skills: string[];
 }
 
+/** One entry in a `list_changed` background-task snapshot. */
+export interface ChatBackgroundTaskSummary {
+  taskId?: string;
+  taskType?: string;
+  description?: string;
+}
+
+/**
+ * PRD-0015 S1 —— provider-agnostic 后台任务生命周期事件。
+ *
+ * claude print-mode 把后台任务的生命周期写成一组 `system` 帧
+ * （background_tasks_changed / task_started / task_updated / task_notification）；
+ * 归一化后同一形状供下游 registry（S2）/ 任务卡片（S4）消费，与具体 CLI 解耦。
+ * `kind` 语义：
+ *   - `started`      —— 任务起点（task_started）；带 tool_use id 缝合到启动它的 chip。
+ *   - `updated`      —— 状态推进（task_updated）；`status` 为 running/completed/killed…，
+ *                       `endTime` 是终态时间戳。
+ *   - `notification` —— 终态通知（task_notification）；`status` 为 completed/stopped…，
+ *                       带 `summary`/`outputFile`，Workflow 任务另带 `usage` 计数。
+ *   - `list_changed` —— 活任务集合快照（background_tasks_changed）；`tasks: []` = 全部
+ *                       drain。
+ * 原始帧经回调第二参 `msg` 保留，下游需要扩展字段（如 Workflow 的 workflow_name）时直接读。
+ */
+export interface ChatBackgroundTaskEvent {
+  kind: "started" | "updated" | "notification" | "list_changed";
+  /** ephemeral 任务 id（list_changed 用 `tasks[].taskId`，其余帧用顶层）。 */
+  taskId?: string;
+  /** 关联启动该任务的 assistant tool_use block（started/notification 携带）。 */
+  toolUseId?: string;
+  /** 任务类型，如 `local_bash` / `local_workflow`（透传，不穷举）。 */
+  taskType?: string;
+  description?: string;
+  /** 生命周期状态（updated/notification）：running/completed/killed/stopped…（透传）。 */
+  status?: string;
+  summary?: string;
+  outputFile?: string;
+  /** 终态时间戳（task_updated.patch.end_time）。 */
+  endTime?: number;
+  /** 用量/计数（Workflow task_notification.usage：total_tokens/tool_uses/duration_ms…）。 */
+  usage?: Record<string, number>;
+  /** list_changed 快照的活任务集合（`[]` = 全部 drain）。 */
+  tasks?: ChatBackgroundTaskSummary[];
+}
+
 /** A structured command request presented to a backend adapter. */
 export interface ChatBackendCommandInput {
   name: string;
@@ -134,6 +178,12 @@ export interface ChatStreamCallbacks {
   onToolResult(content: string, msg: ChatRawMessage): void;
   /** The end-of-turn result frame, normalized. */
   onTurnComplete(tc: ChatTurnComplete, msg: ChatRawMessage): void;
+  /** PRD-0015 S1 —— 后台任务生命周期归一化事件（started/updated/notification/
+   *  list_changed）。可选：codex 后端不产生这类帧、旧调用方不注册即视为未接管。
+   *  【关键语义】task-class system 帧【同时】走此回调【和】onOther——归一化事件供
+   *  registry/任务卡片消费，onOther 的 cli_event 转发保持不回归（web 侧既有消费不被
+   *  抢走）。第二参 `msg` 保留原始帧引用。 */
+  onBackgroundTask?(event: ChatBackgroundTaskEvent, msg: ChatRawMessage): void;
   /** Any frame not otherwise recognized (claude: forwarded as cli_event). */
   onOther(msg: ChatRawMessage): void;
 }

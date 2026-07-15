@@ -1,0 +1,5 @@
+{"type": "system", "subtype": "background_tasks_changed", "tasks": [{"task_id": "bvvyvbykg", "task_type": "local_bash", "description": "Sleep 8 seconds then echo bgdone in background"}]}
+{"type": "system", "subtype": "task_started", "task_id": "bvvyvbykg", "tool_use_id": "toolu_015f7QP6AYp2Gu2791Su5X2o", "description": "Sleep 8 seconds then echo bgdone in background", "task_type": "local_bash"}
+{"type": "system", "subtype": "background_tasks_changed", "tasks": []}
+{"type": "system", "subtype": "task_updated", "task_id": "bvvyvbykg", "patch": {"status": "completed", "end_time": 1784114076921}}
+{"type": "system", "subtype": "task_notification", "task_id": "bvvyvbykg", "tool_use_id": "toolu_015f7QP6AYp2Gu2791Su5X2o", "status": "completed", "output_file": "<SCRATCH>/tasks/bvvyvbykg.output", "summary": "Background command \"Sleep 8 seconds then echo bgdone in background\" completed (exit code 0)"}

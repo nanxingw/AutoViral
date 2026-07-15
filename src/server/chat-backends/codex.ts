@@ -152,6 +152,13 @@ function dispatch(msg: ChatRawMessage, cb: ChatStreamCallbacks): void {
     return;
   }
 
+  // PRD-0015 S1 —— 后台任务生命周期归一化（onBackgroundTask）是 claude print-mode
+  // 专有的 system 帧；codex exec 的事件流里没有对应帧，故本后端【空实现】——不产生
+  // 归一化任务事件（onBackgroundTask 可选，不注册即视为未接管）。未识别帧照常降级
+  // 到下面的 onOther。
+
+
+
   // turn.started and any unrecognized top-level type.
   cb.onOther(msg);
 }
