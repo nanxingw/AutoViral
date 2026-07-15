@@ -184,6 +184,9 @@ describe("WsBridge — PRD-0015 S6 KillGate drain 纪律", () => {
       // 破坏性用户意图 —— 总是杀 + 合成终态广播。
       { cause: "session_replace", disp: "killed", kills: true, settles: true },
       { cause: "user_stop", disp: "killed", kills: true, settles: true },
+      { cause: "abort", disp: "killed", kills: true, settles: true },
+      { cause: "test_timeout", disp: "killed", kills: true, settles: true },
+      { cause: "work_delete", disp: "killed", kills: true, settles: true },
       { cause: "session_delete", disp: "killed", kills: true, settles: true },
       { cause: "daemon_shutdown", disp: "killed", kills: true, settles: true },
       // 可延迟 —— 活任务时入队。

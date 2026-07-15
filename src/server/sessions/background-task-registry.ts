@@ -75,9 +75,27 @@ const STATUS_ALIASES: Readonly<Record<string, BackgroundTaskStatus>> = {
   failure: "failed",
 };
 
-export function normalizeStatus(raw: string): BackgroundTaskStatus {
-  const alias = STATUS_ALIASES[raw.toLowerCase()];
-  return alias ?? (raw as BackgroundTaskStatus);
+/** 所有合法的、可被状态机接受的状态词（含内部词）。M6：未识别词绝不 as-cast 写进状态机。 */
+const KNOWN_STATUSES: ReadonlySet<string> = new Set<BackgroundTaskStatus>([
+  "running",
+  "pending-settle",
+  "completed",
+  "killed",
+  "stopped",
+  "failed",
+  "orphaned",
+]);
+
+/**
+ * CLI 上游状态词归一化。别名映射优先，其余若本就是合法状态词则原样返回；**未识别一律返回
+ * `undefined`**（M6 收紧：不再 `as`-cast 未知词硬塞状态机——上游改口时忽略该次推进并留观测点，
+ * 由 S5 探针在词汇表漂移时先红）。
+ */
+export function normalizeStatus(raw: string): BackgroundTaskStatus | undefined {
+  const lower = raw.toLowerCase();
+  const alias = STATUS_ALIASES[lower];
+  if (alias) return alias;
+  return KNOWN_STATUSES.has(lower) ? (lower as BackgroundTaskStatus) : undefined;
 }
 
 /** registry 对外暴露的一条任务快照（拷贝，改它不污染内部状态）。 */
@@ -109,10 +127,16 @@ interface TaskRecord extends BackgroundTaskSnapshot {}
 export interface RejectedTransition {
   taskId?: string;
   generation: number;
-  /** 被拒的当前（终态）状态。 */
-  from: BackgroundTaskStatus;
-  /** 被拒的目标（non-terminal）状态。 */
-  to: BackgroundTaskStatus;
+  /** 被拒的当前状态（settled_generation / unknown_status 场景可能无 from）。 */
+  from?: BackgroundTaskStatus;
+  /** 被拒的目标状态（unknown_status / settled_generation 场景可能无 to）。 */
+  to?: BackgroundTaskStatus;
+  /** 拒绝类别（供上层区分观测）：
+   *   - `terminal_monotonicity` —— 终态→non-terminal（迟到帧想复活已终态任务）。
+   *   - `terminal_to_terminal`  —— 终态→终态但非 killed→stopped（M6：唯一放行的终态覆盖）。
+   *   - `settled_generation`    —— 已 settleOnExit 的死代际任何迟到帧（H4：死代际不重开）。
+   *   - `unknown_status`        —— 词汇表未识别的状态词（M6：忽略该次推进，保留原状态）。 */
+  kind?: "terminal_monotonicity" | "terminal_to_terminal" | "settled_generation" | "unknown_status";
 }
 
 export interface BackgroundTaskRegistryOptions {
@@ -128,6 +152,9 @@ export class BackgroundTaskRegistry {
   /** 键 = `${generation}::${taskId}`，值 = 可变记录。插入顺序即 snapshot 顺序。 */
   private readonly tasks = new Map<string, TaskRecord>();
   private currentGeneration = 0;
+  /** H4：已被 settleOnExit 收尾（进程退出/被杀）的死代际集合。死代际的任何迟到帧
+   *  （含全新 taskId 的 started / list_changed）一律拒绝——绝不凭空重开一条 running 记录。 */
+  private readonly settledGenerations = new Set<number>();
 
   constructor(options: BackgroundTaskRegistryOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -154,20 +181,51 @@ export class BackgroundTaskRegistry {
     return `${generation}::${taskId}`;
   }
 
-  /** 守卫式状态推进（终态单调性）：终态→non-terminal 一律拒绝并走观测钩子；其余照写
-   *  （含 CLI 权威的终态→终态 killed→stopped）。 */
+  /** 守卫式状态推进（终态单调性 + M6 收紧）：
+   *   - 终态→non-terminal 一律拒绝（迟到帧想复活已终态任务）。
+   *   - 终态→终态**仅**放行 CLI 权威的 killed→stopped；其余终态覆盖（如 completed→killed）拒绝。
+   *  被拒都走观测钩子（带 kind），不改状态。 */
   private transition(rec: TaskRecord, next: BackgroundTaskStatus): void {
     if (rec.status === next) return;
-    if (isTerminalStatus(rec.status) && !isTerminalStatus(next)) {
+    const fromTerminal = isTerminalStatus(rec.status);
+    const toTerminal = isTerminalStatus(next);
+    if (fromTerminal && !toTerminal) {
       this.onRejectedTransition?.({
         taskId: rec.taskId,
         generation: rec.generation,
         from: rec.status,
         to: next,
+        kind: "terminal_monotonicity",
+      });
+      return;
+    }
+    if (fromTerminal && toTerminal && !(rec.status === "killed" && next === "stopped")) {
+      this.onRejectedTransition?.({
+        taskId: rec.taskId,
+        generation: rec.generation,
+        from: rec.status,
+        to: next,
+        kind: "terminal_to_terminal",
       });
       return;
     }
     rec.status = next;
+  }
+
+  /** M6：归一化上游状态词后推进状态。未识别词→忽略该次推进（保留原状态）+ 观测钩子，
+   *  绝不 as-cast 硬塞（上游词汇漂移不再静默污染状态机）。 */
+  private applyStatus(rec: TaskRecord, rawStatus: string, generation: number): void {
+    const next = normalizeStatus(rawStatus);
+    if (next === undefined) {
+      this.onRejectedTransition?.({
+        taskId: rec.taskId,
+        generation,
+        from: rec.status,
+        kind: "unknown_status",
+      });
+      return;
+    }
+    this.transition(rec, next);
   }
 
   /** upsert 【指定代】的记录：不存在则以 running 起点建条并注入 startTime。只合并元数据，
@@ -208,6 +266,16 @@ export class BackgroundTaskRegistry {
     generation: number = this.currentGeneration,
   ): void {
     if (!this.isLiveGeneration(generation)) return;
+    // H4：死代际不重开——settleOnExit 收尾后的代际，任何迟到帧（含全新 taskId 的
+    // started / list_changed）一律拒绝，绝不凭空建一条 running 记录。
+    if (this.settledGenerations.has(generation)) {
+      this.onRejectedTransition?.({
+        taskId: event.taskId,
+        generation,
+        kind: "settled_generation",
+      });
+      return;
+    }
     switch (event.kind) {
       case "started": {
         if (!event.taskId) return;
@@ -228,7 +296,7 @@ export class BackgroundTaskRegistry {
           description: event.description,
         });
         // status 归一化后守卫式覆盖；终态→终态是 CLI 权威序列（killed→stopped），允许。
-        if (event.status) this.transition(rec, normalizeStatus(event.status));
+        if (event.status) this.applyStatus(rec, event.status, generation);
         if (event.endTime !== undefined) rec.endTime = event.endTime;
         return;
       }
@@ -243,7 +311,7 @@ export class BackgroundTaskRegistry {
           outputFile: event.outputFile,
           usage: event.usage,
         });
-        if (event.status) this.transition(rec, normalizeStatus(event.status));
+        if (event.status) this.applyStatus(rec, event.status, generation);
         return;
       }
 
@@ -303,6 +371,9 @@ export class BackgroundTaskRegistry {
       if (rec.endTime === undefined) rec.endTime = at;
       settled.push(cloneSnapshot(rec));
     }
+    // H4：该代际就此「关闭」——进程退出/被杀后，任何迟到帧（含全新 taskId）不得重开死代际。
+    // 仅对已初始化代际记账（0/未初始化不进集合）。
+    if (this.isLiveGeneration(generation)) this.settledGenerations.add(generation);
     return settled;
   }
 

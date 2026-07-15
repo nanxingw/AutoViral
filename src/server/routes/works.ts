@@ -169,8 +169,12 @@ worksRouter.delete("/api/works/:id", async (c) => {
       cancelInFlightRenders(renderQueue, id);
     }
     const wsBridge = getWsBridge();
-    if (work.cliSessionId && wsBridge) {
-      wsBridge.killSession(id);
+    if (wsBridge) {
+      // PRD-0015 W3.5 H3 — kill ALL of the work's chat sessions (not just the
+      // default s_1 keyed off work.cliSessionId): a second/named session's CLI +
+      // its active bg tasks would otherwise keep writing into a rm -rf'd work dir.
+      // Ordered AFTER cancelInFlightRenders and BEFORE storeDeleteWork (#63).
+      wsBridge.killAllSessions(id, "work_delete");
     }
     const deleted = await storeDeleteWork(id);
     if (!deleted) return c.json({ error: "Work not found", errorCode: "work_not_found" }, 404);
@@ -494,7 +498,10 @@ worksRouter.post("/api/works/:id/abort", async (c) => {
   } catch {
     // No body / not JSON — legacy single-session shape. sessionId stays undefined.
   }
-  const killed = wsBridge.killSession(id, sessionId);
+  // PRD-0015 W3.5 H2 — the abort route is destructive user intent: pass cause="abort"
+  // so any active bg tasks are settled + their terminal ui-workflow frames broadcast
+  // (never silent), distinct from a plain /stop in the settleReason surfaced to the UI.
+  const killed = wsBridge.killSession(id, sessionId, "abort");
   return c.json({ aborted: killed });
 });
 
@@ -551,14 +558,28 @@ worksRouter.post("/api/agent/model", async (c) => {
       400,
     );
   }
+  const workId = body && typeof body.workId === "string" ? body.workId : null;
+  const wsBridge = getWsBridge();
+  // PRD-0015 W3.5 H2 — model_switch semantics (策略表): a tier change takes effect by
+  // respawning the CLI, which would ABORT a running background workflow (030's root
+  // cause). GATE it at the HTTP layer with a real, reachable 409 when the work's
+  // session has a live bg task — refuse the switch (config unchanged) instead of
+  // silently killing the task. The user retries after it finishes or /stops.
+  if (workId && SAFE_ID.test(workId) && wsBridge && wsBridge.sessionHasActiveTasks(workId)) {
+    return c.json(
+      {
+        error: "后台任务运行中，暂不能切换模型档位，请等任务完成或先 /stop 再切。",
+        errorCode: "busy_background_task",
+      },
+      409,
+    );
+  }
   const config = await loadConfig();
   config.model = model;
   const { saveConfig } = await import("../../infra/config.js");
   await saveConfig(config);
   // Respawn the work's session (if any) so the new tier takes effect next turn.
-  const workId = body && typeof body.workId === "string" ? body.workId : null;
   let respawned = false;
-  const wsBridge = getWsBridge();
   if (workId && SAFE_ID.test(workId) && wsBridge) {
     respawned = wsBridge.killSession(workId);
   }

@@ -236,7 +236,9 @@ async function waitForStepCompletion(
       if (!settled) {
         settled = true;
         cleanup();
-        wsBridge.killSession(workId);
+        // PRD-0015 W3.5 H2 — distinct cause so a settled task's settleReason reads
+        // "test_timeout" (still destructive: settle + broadcast + SIGTERM/SIGKILL).
+        wsBridge.killSession(workId, undefined, "test_timeout");
         reject(new Error(`Step ${stepKey} timed out after ${timeout / 1000}s`));
       }
     }, timeout);

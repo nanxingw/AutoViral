@@ -369,3 +369,106 @@ describe("BackgroundTaskRegistry — snapshot 深拷贝 usage（finding 6）", (
     expect(reg.snapshot()[0].usage!.total_tokens).toBe(10);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRD-0015 W3.5 加固（W3 codex review findings）——逐条先落证红测试。
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("BackgroundTaskRegistry — 死代际重开（H4）", () => {
+  it("settleOnExit 后同代际迟到 task_started（全新 taskId）不建 running 记录", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t_live" }, g);
+    // 进程退出兜底：该代所有活任务合成终态，该代际就此「关闭」。
+    reg.settleOnExit("cli_exit", g);
+    expect(byId(reg, "t_live")!.status).toBe("stopped");
+
+    // 进程已死，旧 parser 冲刷出一个【全新 taskId】的迟到 task_started（同代际）——
+    // 死代际绝不重开：不得凭空建一条 running 记录。
+    reg.applyEvent({ kind: "started", taskId: "t_ghost" }, g);
+    expect(byId(reg, "t_ghost")).toBeUndefined();
+    // 已 settle 的老任务也不受影响。
+    expect(byId(reg, "t_live")!.status).toBe("stopped");
+    // 快照里只有原来那一条终态记录。
+    expect(reg.snapshot()).toHaveLength(1);
+  });
+
+  it("死代际的迟到 list_changed 也不重建任务", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "a" }, g);
+    reg.settleOnExit("killed_by_us", g);
+
+    // 迟到的全量快照（含全新 id）——死代际不重开，不建条。
+    reg.applyEvent({ kind: "list_changed", tasks: [{ taskId: "b", taskType: "local_bash" }] }, g);
+    expect(byId(reg, "b")).toBeUndefined();
+  });
+
+  it("死代际重开被拒时触发观测回调（可挂 logBridge）", () => {
+    const rejected: Array<{ generation: number; kind?: string }> = [];
+    const reg = new BackgroundTaskRegistry({
+      now: () => 100,
+      onRejectedTransition: (info) => rejected.push({ generation: info.generation, kind: info.kind }),
+    });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    reg.settleOnExit("cli_exit", g);
+    reg.applyEvent({ kind: "started", taskId: "ghost" }, g);
+    expect(rejected.some((r) => r.kind === "settled_generation" && r.generation === g)).toBe(true);
+  });
+
+  it("新代际不受旧代 settle 影响，正常建条", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g1 = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "x" }, g1);
+    reg.settleOnExit("cli_exit", g1);
+
+    // 新 spawn 推进代际——新代际是活的，照常建条。
+    const g2 = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "y" }, g2);
+    expect(byId(reg, "y")!.status).toBe("running");
+    expect(byId(reg, "y")!.generation).toBe(g2);
+  });
+});
+
+describe("BackgroundTaskRegistry — 归一化收紧（M6）", () => {
+  it("未知状态词不强转：忽略该次状态推进（保留原状态）", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    // 上游改口给了一个词汇表里没有的状态——绝不 as-cast 写进去污染状态机。
+    reg.applyEvent({ kind: "updated", taskId: "t", status: "reticulating_splines" }, g);
+    expect(byId(reg, "t")!.status).toBe("running");
+  });
+
+  it("未知状态词触发观测回调（logBridge 可挂）", () => {
+    const seen: Array<{ taskId?: string; kind?: string }> = [];
+    const reg = new BackgroundTaskRegistry({
+      now: () => 100,
+      onRejectedTransition: (info) => seen.push({ taskId: info.taskId, kind: info.kind }),
+    });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    reg.applyEvent({ kind: "notification", taskId: "t", status: "kerfuffle" }, g);
+    expect(seen.some((s) => s.taskId === "t" && s.kind === "unknown_status")).toBe(true);
+  });
+
+  it("终态→终态仅放行 killed→stopped；completed→killed 被拒（保留原终态）", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    reg.applyEvent({ kind: "updated", taskId: "t", status: "completed" }, g);
+    // completed 是权威终态，绝不被后到的 killed 覆盖（非 killed→stopped 的终态→终态一律拒）。
+    reg.applyEvent({ kind: "updated", taskId: "t", status: "killed" }, g);
+    expect(byId(reg, "t")!.status).toBe("completed");
+  });
+
+  it("killed→stopped 仍放行（CLI 权威落定序）", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    reg.applyEvent({ kind: "updated", taskId: "t", status: "killed" }, g);
+    reg.applyEvent({ kind: "notification", taskId: "t", status: "stopped" }, g);
+    expect(byId(reg, "t")!.status).toBe("stopped");
+  });
+});

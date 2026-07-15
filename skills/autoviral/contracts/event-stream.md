@@ -177,12 +177,14 @@ Every CLI-process recycle — a new message, `/stop`, a model/backend switch, a 
 
 | Cause family | With an active task |
 |---|---|
-| Destructive user intent — `/stop`, delete session, session replace, daemon shutdown | Settle the task(s) to `stopped` + broadcast a terminal `ui-workflow` (`settleReason` = the cause), then kill. Never silent. |
-| New user message | **Not killed.** The message is queued behind the running task and a `chat_notice` (`kind: "queued_message"`) is broadcast. When a `result` frame later arrives with the task settled, the queued message is dispatched as a fresh turn. |
-| Model switch / backend switch / command passthrough | **Not killed.** The operation is refused and a `chat_notice` (`kind: "kill_rejected"`) is broadcast; the caller (e.g. `setSessionModel`) returns a failure so the UI can prompt "wait or /stop". |
+| Destructive intent — `/stop`, `abort`, test-runner timeout, delete session, delete work (all sessions), session replace, daemon shutdown | Settle the task(s) to `stopped` + broadcast a terminal `ui-workflow` (`settleReason` = the cause), then kill. Never silent. |
+| New user message | **Not killed.** The message is queued behind the running task and a `chat_notice` (`kind: "queued_message"`) is broadcast. When a `result` frame later arrives with the task settled, the queued message is dispatched as a fresh turn (queue replay bypasses the A2 dedup window and is mutually exclusive, so a double `result` frame flushes at most one queued message). |
+| Model switch / backend switch / command passthrough | **Not killed.** The operation is refused and a `chat_notice` (`kind: "kill_rejected"`) is broadcast; the caller (e.g. `setSessionModel`, or the `POST /api/agent/model` route which returns **HTTP 409** `busy_background_task`) returns a failure so the UI can prompt "wait or /stop". |
 | Browser-disconnect grace / idle-TTL sweep | **Skipped this round** — the process keeps running so its task finishes; it exits on its own. |
 
 With no active task, every path behaves exactly as before (kill + respawn / archive).
+
+> **"Drain" here means *immediate settle-and-broadcast*, not *wait-for-completion*.** Daemon shutdown (`shutdownAll`) walks every in-memory session and, for each, **immediately** synthesizes a terminal `ui-workflow` for its live tasks and SIGTERMs the CLI — it does **not** block waiting for background tasks to finish. The discipline is "close out honestly and tell the user (`settleReason: "daemon_shutdown"`), never leave a task silently orphaned", not "gracefully await the workflow". A settled generation is also *closed*: any late frame the dying process flushes for that generation is rejected, never reopening a dead task.
 
 ```json
 { "event": "chat_notice", "timestamp": "2026-07-15T06:34:00.000Z",

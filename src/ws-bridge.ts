@@ -55,6 +55,9 @@ import {
 export type KillCause =
   | "session_replace"          // createSession 复用同 sid 时替换残留进程
   | "user_stop"                // /stop（killSession）
+  | "abort"                    // POST /api/works/:id/abort（破坏性 settle+广播）
+  | "test_timeout"             // test-runner 步骤超时（破坏性）
+  | "work_delete"             // 删除 work → killAllSessions（破坏性）
   | "session_delete"           // 删除会话
   | "daemon_shutdown"          // daemon SIGTERM/SIGINT
   | "user_new_message"         // sendMessage 起新 turn
@@ -71,8 +74,19 @@ export type KillDisposition = "killed" | "queued" | "rejected" | "skipped" | "no
 const KILL_DESTRUCTIVE: ReadonlySet<KillCause> = new Set<KillCause>([
   "session_replace",
   "user_stop",
+  "abort",
+  "test_timeout",
+  "work_delete",
   "session_delete",
   "daemon_shutdown",
+]);
+
+/** 硬停语义：SIGTERM 后 5s 仍未退则升级 SIGKILL（既有 /stop 行为，abort/test_timeout 沿用——
+ *  它们迁移前都走 killSession=user_stop，保留升级避免行为回退）。 */
+const KILL_SIGKILL_ESCALATE: ReadonlySet<KillCause> = new Set<KillCause>([
+  "user_stop",
+  "abort",
+  "test_timeout",
 ]);
 
 /** Media the user attached to a chat message. Parsed out of the <attachments>
@@ -177,6 +191,10 @@ export interface WsSession {
    *  "运行中，完成后发送" 提示；进程 result 帧到达（turn 完成、任务落定）后 flush 队列，
    *  逐条以新 turn 真正发出。跨 turn 持久（同一 WsSession），createSession 重建时承接。 */
   pendingMessages?: string[];
+  /** PRD-0015 W3.5 H1 —— flush 互斥标记。一次 flushPendingMessages 释放队首消息后置位，
+   *  待该 sendMessage 落定（spawn 完成）清空。同一进程连发多个 result 帧时，只有第一帧能
+   *  释放一条队列消息，其余帧看到本标志直接跳过——绝不并发起多个 turn。 */
+  flushInFlight?: boolean;
 }
 
 /** A2 (PRD-0010) — how long an identical, back-to-back user message is treated
@@ -1188,7 +1206,12 @@ export class WsBridge {
    *     spurious "Failed to send message" for a benign double-send (a
    *     regression from the pre-A2 200). WS callers ignore the return entirely.
    */
-  async sendMessage(workId: string, text: string, sessionId?: string): Promise<boolean> {
+  async sendMessage(
+    workId: string,
+    text: string,
+    sessionId?: string,
+    opts?: { skipDedup?: boolean },
+  ): Promise<boolean> {
     const sid = this.resolveSessionId(sessionId);
     const session = this.getSessionEntry(workId, sid);
     if (!session) return false;
@@ -1209,7 +1232,12 @@ export class WsBridge {
     // legitimate resend and falls through. Idle is flipped to false
     // synchronously here (before the awaits below) so a rapid second call in
     // the spawn window still sees the turn as in-flight.
+    // PRD-0015 W3.5 H1 —— flushPendingMessages 的回放路径带 skipDedup，绕过 A2 去重窗口：
+    // 队列里的消息本就是"运行中被延迟"的合法待发消息，回放时其文本很可能等于本 session 刚
+    // record 的 lastUserText 且落在 3s 窗口内——若不绕过，A2 会把它当双发吞掉（shift 出队却
+    // 不 record 不 spawn，人间蒸发）。skipDedup 只由内部 flush 路径传入。
     if (
+      !opts?.skipDedup &&
       !session.idle &&
       session.lastUserText === displayText &&
       session.lastUserAt !== undefined &&
@@ -1330,23 +1358,63 @@ export class WsBridge {
     return true;
   }
 
-  killSession(workId: string, sessionId?: string): boolean {
+  /**
+   * Kill ONE session's CLI, routing through the KillGate chokepoint. The optional
+   * `cause` lets callers distinguish the kill's origin (PRD-0015 W3.5 H2): `/stop`
+   * → default `user_stop`; the abort route → `abort`; a test-runner step timeout →
+   * `test_timeout`. All three are destructive (settle active bg tasks + broadcast
+   * their synthesized terminal ui-workflow frames — never silent — then SIGTERM,
+   * with a 5s SIGKILL escalation). session_killed below is the complementary
+   * per-session UI signal (kept). Returns false only for an unknown session.
+   */
+  killSession(workId: string, sessionId?: string, cause: KillCause = "user_stop"): boolean {
     const sid = this.resolveSessionId(sessionId);
     const session = this.getSessionEntry(workId, sid);
     if (!session) return false;
 
-    // PRD-0015 S6 — /stop is destructive user intent: the KillGate chokepoint
-    // settles any active bg tasks (settleOnExit("user_stop")) + broadcasts their
-    // synthesized terminal ui-workflow frames (never silent), SIGTERMs the CLI, and
-    // escalates to SIGKILL after 5s. session_killed below is the complementary
-    // per-session UI signal (kept).
-    this.requestKill(session, "user_stop");
+    this.requestKill(session, cause);
 
     session.idle = true;
     // Kill is per-session lifecycle (ADR-008 §3) — only this session's sockets
     // should learn its CLI was killed, not every chat on the work.
     this.broadcastToSession(workId, sid, { event: "session_killed", data: { workId, sessionId: sid } });
     return true;
+  }
+
+  /**
+   * PRD-0015 W3.5 H3 —— kill EVERY in-memory session of a work through the
+   * KillGate chokepoint. The delete-work cascade must not orphan a NON-default
+   * chat session (s_2, s_3, …): the old cascade only killed `work.cliSessionId`'s
+   * default session (s_1), so a second session's CLI + its active bg tasks kept
+   * running into a rm -rf'd work dir. Enumerates the per-work session map and
+   * settles + broadcasts + SIGTERMs each (destructive `work_delete` cause, never
+   * silent). Returns the number of sessions handled. Idempotent for a work with
+   * none in memory (returns 0). Callers invoke it BEFORE storeDeleteWork, keeping
+   * the pre-existing cancelInFlightRenders-then-kill-then-delete order (#63).
+   */
+  killAllSessions(workId: string, cause: KillCause = "work_delete"): number {
+    const perWork = this.sessions.get(workId);
+    if (!perWork) return 0;
+    let killed = 0;
+    // Snapshot the values first — requestKill mutates session state but not the
+    // map membership, so iterating the live map is safe; the copy is defensive.
+    for (const session of [...perWork.values()]) {
+      this.requestKill(session, cause);
+      session.idle = true;
+      killed += 1;
+    }
+    return killed;
+  }
+
+  /**
+   * PRD-0015 W3.5 H2 —— does the work's (default or named) session currently have
+   * a live background task? Public predicate so HTTP routes can GATE a recycle
+   * (e.g. the global model-tier switch) with a real 409 instead of aborting a
+   * running workflow. Wraps the KillGate's internal {@link hasActiveTasks}.
+   */
+  sessionHasActiveTasks(workId: string, sessionId?: string): boolean {
+    const session = this.getSessionEntry(workId, this.resolveSessionId(sessionId));
+    return session ? this.hasActiveTasks(session) : false;
   }
 
   getSession(workId: string, sessionId?: string): WsSession | undefined {
@@ -1799,7 +1867,9 @@ export class WsBridge {
         // PRD-0015 S6 —— turn 完成（result 帧）是 flush 点：若有消息在活任务运行期间被入队，
         // 且此刻任务已落定（无活任务），把队首消息作为一个新 turn 真正发出。exp 实证同进程可
         // 有多个 result 帧——flush 每次 result 后检查即可（仍有活任务则本次不发，等下一个 result）。
-        this.flushPendingMessages(session);
+        // W3.5 H1 —— 仅当【本进程仍是 session 的活进程】才 flush：一个已被顶掉的旧进程冲刷出
+        // 的迟到 result 绝不能把队列消息注进正在跑的新 turn（配合 flushInFlight 互斥双保险）。
+        if (session.cliProcess === proc) this.flushPendingMessages(session);
       },
 
       // PRD-0015 S2/S3 —— 后台任务生命周期归一化事件喂入 registry（applyEvent：同 id
@@ -1993,7 +2063,13 @@ export class WsBridge {
     // Lazy legacy migration / sidecar seed so a refresh recovers the list.
     await this.ensureSidecarRecord(workId, sid).catch(() => {});
     const session = this.ensureSession(workId, sid);
-    session.browserSockets.add(ws);
+    // PRD-0015 W3.5 M5 —— DO NOT join the fan-out set yet. All the async loads
+    // below (history / cliSessionId) are AWAIT points; if this socket were already
+    // in browserSockets, a concurrent bg-task event during those awaits would fan a
+    // ui-workflow INCREMENT to it BEFORE the snapshot is sent (out-of-order state).
+    // We add(ws) only inside the synchronous send block below — after the awaits,
+    // atomically with the initial frames — so the ui-workflow-snapshot is guaranteed
+    // to precede any live increment this socket receives (snapshot-then-stream).
 
     // Load persisted chat history from disk if session has no in-memory history.
     // Reads the per-session log (default session → legacy chat.jsonl).
@@ -2034,6 +2110,12 @@ export class WsBridge {
         }
       } catch { /* ignore */ }
     }
+
+    // ── Synchronous initial-frame block (NO awaits between here and the snapshot
+    //    send) — join the fan-out set FIRST so `connected` reflects this socket,
+    //    then emit session_state / capabilities / message_history / snapshot. Being
+    //    await-free, no live increment can interleave before the snapshot (M5). ──
+    session.browserSockets.add(ws);
 
     ws.send(JSON.stringify({
       event: "session_state",
@@ -2294,13 +2376,22 @@ export class WsBridge {
     const queue = session.pendingMessages;
     if (!queue || queue.length === 0) return;
     if (this.hasActiveTasks(session)) return; // 仍在跑，继续等下一个 result 帧
+    // H1 flush 互斥：同一进程连发多个 result 帧时，只有第一帧释放一条队列消息，其余帧看到
+    // in-flight 标志直接返回——绝不并发起两个 turn（多条队列消息由各自 turn 的 result 逐条推进）。
+    if (session.flushInFlight) return;
     const next = queue.shift();
     if (next === undefined) return;
+    session.flushInFlight = true;
     logBridge("bg_flush_queued_message", session.workId, {
       sessionId: session.sessionId,
       remaining: queue.length,
     });
-    void this.sendMessage(session.workId, next, session.sessionId);
+    // 回放走 skipDedup：队列消息本是被延迟的合法待发，绝不能被 A2 去重窗口吞掉。
+    void this.sendMessage(session.workId, next, session.sessionId, { skipDedup: true }).finally(
+      () => {
+        session.flushInFlight = false;
+      },
+    );
   }
 
   // ── PRD-0015 S6 · requestKill chokepoint (BEGIN) ──────────────────────────
@@ -2351,8 +2442,8 @@ export class WsBridge {
     }
 
     try { proc.kill("SIGTERM"); } catch { /* dead */ }
-    if (cause === "user_stop") {
-      // /stop 的硬升级：SIGTERM 后 5s 仍未退则 SIGKILL（既有 killSession 行为）。
+    if (KILL_SIGKILL_ESCALATE.has(cause)) {
+      // 硬停语义（user_stop / abort / test_timeout）：SIGTERM 后 5s 仍未退则 SIGKILL。
       setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* dead */ } }, 5000);
     }
     session.cliProcess = undefined;

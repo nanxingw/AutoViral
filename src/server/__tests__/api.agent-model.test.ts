@@ -78,4 +78,57 @@ describe("POST /api/agent/model", () => {
       expect(json.respawned).toBe(false);
     });
   });
+
+  // PRD-0015 W3.5 H2 — model_switch semantics: a live background task must NOT be
+  // aborted by a tier switch. The route GATES with a real 409 (HTTP-reachable) when
+  // the work's session has an active bg task — config unchanged, session untouched.
+  it("409 rejects a tier switch while the work's session has an active bg task", async () => {
+    await withTempDataDir(async () => {
+      const { apiRoutes, setWsBridge } = await import("../api.js");
+      const killSession = vi.fn();
+      setWsBridge({
+        sessionHasActiveTasks: (id: string) => id === "w_busy",
+        killSession,
+      } as any);
+      try {
+        const res = await apiRoutes.fetch(
+          jsonReq("POST", "/api/agent/model", { model: "sonnet", workId: "w_busy" }),
+        );
+        expect(res.status).toBe(409);
+        const json: any = await res.json();
+        expect(json.errorCode).toBe("busy_background_task");
+        expect(typeof json.error).toBe("string");
+        expect(json.error.length).toBeGreaterThan(0);
+        // Session was NOT killed and config was NOT changed (still the default).
+        expect(killSession).not.toHaveBeenCalled();
+        const status: any = await (await apiRoutes.fetch(jsonReq("GET", "/api/status"))).json();
+        expect(status.model).not.toBe("sonnet");
+      } finally {
+        setWsBridge(null as any);
+      }
+    });
+  });
+
+  it("200 respawns the session when workId given and NO active bg task", async () => {
+    await withTempDataDir(async () => {
+      const { apiRoutes, setWsBridge } = await import("../api.js");
+      const killSession = vi.fn().mockReturnValue(true);
+      setWsBridge({
+        sessionHasActiveTasks: () => false,
+        killSession,
+      } as any);
+      try {
+        const res = await apiRoutes.fetch(
+          jsonReq("POST", "/api/agent/model", { model: "haiku", workId: "w_idle" }),
+        );
+        expect(res.status).toBe(200);
+        const json: any = await res.json();
+        expect(json.ok).toBe(true);
+        expect(json.respawned).toBe(true);
+        expect(killSession).toHaveBeenCalledWith("w_idle");
+      } finally {
+        setWsBridge(null as any);
+      }
+    });
+  });
 });

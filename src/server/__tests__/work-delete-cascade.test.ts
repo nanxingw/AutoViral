@@ -23,14 +23,17 @@ vi.mock("../../infra/config.js", () => ({
 
 describe("DELETE /api/works/:id — in-flight protection", () => {
   let app: Hono;
-  const killSessionMock = vi.fn();
+  // PRD-0015 W3.5 H3 — the delete cascade now kills ALL of a work's chat sessions
+  // (killAllSessions), not just the default one keyed off work.cliSessionId.
+  const killAllSessionsMock = vi.fn();
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    killSessionMock.mockReset();
+    killAllSessionsMock.mockReset();
     const { apiRoutes, setWsBridge } = await import("../api.js");
     setWsBridge({
-      killSession: killSessionMock,
+      killSession: vi.fn(),
+      killAllSessions: killAllSessionsMock,
       getSession: vi.fn(),
       createSession: vi.fn(),
       sendMessage: vi.fn(),
@@ -45,7 +48,7 @@ describe("DELETE /api/works/:id — in-flight protection", () => {
     setWsBridge(null as any);
   });
 
-  it("kills active CLI session before deleting a creating work", async () => {
+  it("kills ALL sessions before deleting a creating work", async () => {
     const { getWork, deleteWork } = await import("../../domain/work-store.js");
     const callOrder: string[] = [];
     (getWork as any).mockResolvedValue({
@@ -53,9 +56,9 @@ describe("DELETE /api/works/:id — in-flight protection", () => {
       status: "creating",
       cliSessionId: "sess_abc",
     });
-    killSessionMock.mockImplementation(() => {
+    killAllSessionsMock.mockImplementation(() => {
       callOrder.push("kill");
-      return true;
+      return 2;
     });
     (deleteWork as any).mockImplementation(() => {
       callOrder.push("delete");
@@ -65,17 +68,20 @@ describe("DELETE /api/works/:id — in-flight protection", () => {
     const res = await app.request("/api/works/w_test_creating", { method: "DELETE" });
     expect(res.status).toBe(200);
     expect(callOrder).toEqual(["kill", "delete"]);
-    expect(killSessionMock).toHaveBeenCalledWith("w_test_creating");
+    // H3 — kills EVERY session (not just work.cliSessionId's default), before delete.
+    expect(killAllSessionsMock).toHaveBeenCalledWith("w_test_creating", "work_delete");
   });
 
-  it("skips killSession when work has no cliSessionId", async () => {
+  it("calls killAllSessions even when work has no cliSessionId (no-op returns 0)", async () => {
     const { getWork, deleteWork } = await import("../../domain/work-store.js");
     (getWork as any).mockResolvedValue({ id: "w_done", status: "ready" });
+    killAllSessionsMock.mockReturnValue(0);
     (deleteWork as any).mockResolvedValue(true);
 
     const res = await app.request("/api/works/w_done", { method: "DELETE" });
     expect(res.status).toBe(200);
-    expect(killSessionMock).not.toHaveBeenCalled();
+    // Always routed through killAllSessions (safe no-op when no in-memory sessions).
+    expect(killAllSessionsMock).toHaveBeenCalledWith("w_done", "work_delete");
   });
 
   it("returns 404 when work does not exist", async () => {

@@ -22,7 +22,11 @@
 
 ## S2 · BackgroundTaskRegistry + settleOnExit（AFK）
 
-**What to build**：server 侧每 chat session × 进程代际的任务表深模块：`applyEvent`（同 id upsert + 状态机 running/done/failed/stopped/killed）、`snapshot`、`settleOnExit`（宿主进程退出时把仍 running 的任务合成终态 + reason）。ws-bridge 把 S1 归一化事件喂入 registry；进程 exit 路径调用 settleOnExit。纯逻辑、时钟注入、零 I/O。
+**What to build**：server 侧每 chat session × 进程代际的任务表深模块：`applyEvent`（同 id upsert + 状态机）、`snapshot`、`settleOnExit`（宿主进程退出时把仍 running 的任务合成终态 + reason）。ws-bridge 把 S1 归一化事件喂入 registry；进程 exit 路径调用 settleOnExit。纯逻辑、时钟注入、零 I/O。
+
+**身份 key（实现实况）**：一条任务记录的身份是 **`generation :: taskId`**（进程代际 + claude 的 ephemeral 任务 id），不是裸 taskId——claude 的任务 id 是 per-process 短串、跨 turn 会复用，代际隔离才使旧代迟到帧不吞新代同名 taskId。`beginGeneration()` 每次 spawnCli 前推进代号；`applyEvent(event, generation)` 显式落代。
+
+**状态词汇表（实现实况）**：`running` · `pending-settle`（清单里消失但尚无终态，不抢跑 orphaned）· 终态 `completed` / `failed` / `killed` / `stopped` / `orphaned`（`orphaned` 仅 S7 journal 打捞产生）。归一化：上游同义词（done/success→completed、cancelled→killed、error→failed…）集中映射，**未识别词一律忽略该次推进并留观测点**（不 as-cast 硬塞）。终态单调性：终态→non-terminal 拒绝；终态→终态**仅**放行 CLI 权威的 `killed→stopped`（其余如 completed→killed 拒绝）。settleOnExit 后该代际**关闭**，任何迟到帧（含全新 taskId）被拒，绝不重开死代际（W3.5 H4）。
 
 **预设测试**：`src/server/sessions/__tests__/background-task-registry.test.ts` — ① 同 id 两次 applyEvent 只有一条且状态覆盖；② settleOnExit 把 running→stopped 并带 reason；③ snapshot 返回当前全量；④ 进程代际隔离（新进程的任务不吞旧代终态）。
 
@@ -35,7 +39,9 @@
 
 ## S3 · ui-workflow 信封 + snapshot-on-connect + 契约文档（AFK）
 
-**What to build**：bridge 新事件 `ui-workflow`（任务 upsert 与终态，身份 = sessionId+taskId），浏览器 WS 连接/重连时先发全量 snapshot 再增量（render 进度通道的既有 snapshot-then-push 模式）；`skills/autoviral/contracts/event-stream.md` 同步新信封（same-id replace 语义、状态机、进程退出行为）。不动 ui-progress。
+**What to build**：bridge 新事件 `ui-workflow`（任务 upsert 与终态，身份 = **sessionId + taskId + generation**），浏览器 WS 连接/重连时先发全量 snapshot 再增量（render 进度通道的既有 snapshot-then-push 模式）；`skills/autoviral/contracts/event-stream.md` 同步新信封（same-id replace 语义、状态机、进程退出行为）。不动 ui-progress。
+
+> W3.5 M5 修正：snapshot 必须**先于**任何 ui-workflow 增量抵达一个新连接——`handleBrowserConnection` 里 socket 只在 snapshot 发出之后（同步帧块内）才加入 fan-out 集合，避免 setup 期间的并发增量抢在 snapshot 之前到达（snapshot-then-stream 严格序）。
 
 **预设测试**：`src/server/__tests__/ui-workflow-envelope.test.ts` — ① registry 变更触发 ui-workflow 广播且 payload 合 schema；② 新连接先收到 snapshot；③ settleOnExit 触发终态广播。
 

@@ -213,8 +213,9 @@ describe("works abort HTTP endpoint forwards sessionId (B1)", () => {
       );
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ aborted: true });
+      // PRD-0015 W3.5 H2 — abort forwards cause="abort" (destructive settle+broadcast).
       // The exact session the user was streaming in must be the one killed.
-      expect(spy).toHaveBeenCalledWith("w_kill", "s_2");
+      expect(spy).toHaveBeenCalledWith("w_kill", "s_2", "abort");
     });
   });
 
@@ -231,7 +232,7 @@ describe("works abort HTTP endpoint forwards sessionId (B1)", () => {
       expect(await res.json()).toEqual({ aborted: false });
       // Forwarded undefined → killSession resolves it to the default session,
       // exactly as the pre-B1 single-arg call did. No crash on missing body.
-      expect(spy).toHaveBeenCalledWith("w_legacy", undefined);
+      expect(spy).toHaveBeenCalledWith("w_legacy", undefined, "abort");
     });
   });
 });

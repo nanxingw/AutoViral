@@ -49,6 +49,6 @@ workflow 内 subagent 的 bash 任务会出现在**外层进程**的 `background
 ## 后果
 
 - **止血生效**：默认 0 后，claude CLI 不再在子进程内替我们杀 **workflow 型**后台任务；宿主进程能活到 workflow 收尾。
-- **杀前 drain 归 S6**：本 ADR 只放开上游这把"计时器凶器"。放开 ceiling 后，AutoViral 侧无 drain 的进程回收点会接棒成为新凶手——**AutoViral 侧的 kill 点治理（杀前问一句、按 cause 分级 drain/广播终态）由 PRD-0015 S6 `KillGate` 负责**，与本止血是同一交付单元（只做其一都不完整，见 PRD Further Notes）。
+- **杀前收尾归 S6**：本 ADR 只放开上游这把"计时器凶器"。放开 ceiling 后，AutoViral 侧不做收尾的进程回收点会接棒成为新凶手——**AutoViral 侧的 kill 点治理（按 cause 分级：可延迟的入队、可拒绝的 409、破坏性的立即 settle+广播终态）由 PRD-0015 S6 `KillGate` 负责**，与本止血是同一交付单元（只做其一都不完整，见 PRD Further Notes）。**注意"drain"在此是"立即收尾并如实广播终态"（settleOnExit + `ui-workflow` stopped），不是"等待后台任务跑完再退"**——`daemon_shutdown` 走 `shutdownAll` 遍历所有会话，逐一**立即**合成终态 + SIGTERM，绝不阻塞等待 workflow 完成；死代际就此关闭，退出进程冲刷出的迟到帧一律拒绝（不重开已 settle 的任务）。
 - **上游漂移探测靠重采脚本，CI 无 claude 凭据无法自动红**：`CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS`、600s 默认、任务类 system 帧全是 claude 2.1.210 的外部行为。fixture（exp1/2/3/7/8/9 脱敏帧）入库 `__fixtures__/claude-tasks/`，`parser-contract.regression.test.ts` 钉住帧形状与终态词汇（`killed`/`stopped`/`completed`）——但它只是 **parser 契约回归**（给定已采集帧，parser 期望形状仍成立），**不能**自动探测上游改口。上游漂移的唯一发现手段是升级 claude CLI 后手动跑 `scripts/probes/recapture-ceiling.sh`、diff 新旧帧，形状变了再脱敏更新 fixture + parser + 回归测试。
 - **运维可止损**：`config.yaml` 设 `chat: { bgWaitCeilingMs: 600000 }` 即恢复一个有限上限（重启 daemon 生效）；此时 workflow 型任务仍会在上限到点被杀，但 S6 落地后会带 settleOnExit + 终态广播，不再静默。
