@@ -2072,16 +2072,32 @@ bridgeRouter.post("/clip/:id/move", async (c) => {
   }
   const body = (await c.req.json().catch(() => ({}))) as {
     toTrackId?: unknown;
+    offset?: unknown;
   };
   if (typeof body.toTrackId !== "string" || !body.toTrackId) {
     return c.json({ ok: false, error: "missing toTrackId", code: 4 }, 400);
   }
   const toTrackId = body.toTrackId;
+  // M-low-2 — an optional `offset` REPOSITIONS the clip on its new lane (frame-
+  // quantised like every other caller-supplied SECONDS field). Undefined ⇒ keep
+  // the clip's current trackOffset. Reject a non-number offset with code:4.
+  if (body.offset !== undefined && typeof body.offset !== "number") {
+    return c.json({ ok: false, error: "offset must be a number", code: 4 }, 400);
+  }
+  const offsetSec = body.offset as number | undefined;
   try {
     await mutateCompositionFor(
       { workId: g.workId },
       (comp) => {
-        ops.moveClipToTrack(comp, { clipId: id, targetTrackId: toTrackId });
+        const offset =
+          offsetSec !== undefined && Number.isFinite(offsetSec)
+            ? snapToFrame(Math.max(0, offsetSec), comp.fps)
+            : undefined;
+        ops.moveClipToTrack(comp, {
+          clipId: id,
+          targetTrackId: toTrackId,
+          offset,
+        });
         return comp;
       },
       () => broadcast(g.workId, "composition-changed", { reason: "clip-move" }),

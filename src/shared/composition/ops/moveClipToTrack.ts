@@ -41,14 +41,18 @@ import { CompositionOpError } from "./errors.js";
  *  - no track matches `targetTrackId`, or
  *  - the target track is a different `kind` than the source track.
  *
- * A move to the SAME track the clip already lives on is a no-op (returns
- * without throwing) — there is nothing to relocate.
+ * A move to the SAME track the clip already lives on is a no-op UNLESS an
+ * explicit `offset` is supplied — `clip move <id> --to-track <same> --offset N`
+ * is a legitimate same-lane REPOSITION (PRD-0014 S18 E2E r2 · M-low-2; the old
+ * early-return silently dropped the offset). When `offset` is given it becomes
+ * the clip's new `trackOffset` on WHICHEVER lane it ends up on; when omitted the
+ * clip keeps its current `trackOffset` (the horizontal position is preserved).
  */
 export function moveClipToTrack(
   comp: Composition,
-  p: { clipId: string; targetTrackId: string },
+  p: { clipId: string; targetTrackId: string; offset?: number },
 ): void {
-  const { clipId, targetTrackId } = p;
+  const { clipId, targetTrackId, offset } = p;
 
   // Locate the clip + the track it currently lives on.
   let sourceTrack: Track | undefined;
@@ -73,8 +77,14 @@ export function moveClipToTrack(
     );
   }
 
-  // Already there → nothing to do (idempotent, not an error).
-  if (target.id === sourceTrack.id) return;
+  // Already there → same-lane relocation. With an explicit offset this is a
+  // REPOSITION (apply it); without one it is an idempotent no-op (M-low-2).
+  if (target.id === sourceTrack.id) {
+    if (offset !== undefined) {
+      (sourceTrack.clips as Clip[])[clipIdx].trackOffset = offset;
+    }
+    return;
+  }
 
   // Kind guard: a clip only belongs on a track of its own kind. The source
   // track kind is authoritative (the clip was validly placed there).
@@ -90,6 +100,9 @@ export function moveClipToTrack(
   // the EXISTING clip object out of the source `clips` array and push it onto
   // the target `clips` array; both arrays keep their identity (decision #1).
   const [clip] = (sourceTrack.clips as Clip[]).splice(clipIdx, 1);
+  // M-low-2 — an explicit offset REPOSITIONS the clip on its new lane; otherwise
+  // its existing trackOffset (horizontal position) is preserved.
+  if (offset !== undefined) clip.trackOffset = offset;
   (target.clips as Clip[]).push(clip);
 
   // #54 / S8 — prune transitions the move just orphaned on the source track, in

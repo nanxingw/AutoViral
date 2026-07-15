@@ -3927,6 +3927,51 @@ exportPresets: []
     expect(body.code).toBe(4);
   });
 
+  // PRD-0014 S18 E2E r2 · M-low-2 — `clip move <id> --to-track <SAME lane>
+  // --offset N` was a silent no-op (200, trackOffset unchanged). The offset must
+  // now REPOSITION the clip (frame-quantised). Own isolated fixture so the shared
+  // YAML mutation order stays independent.
+  it("same-lane move with --offset repositions trackOffset (frame-quantised)", async () => {
+    const { mkdtemp, writeFile, mkdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const isoWorkId = "w_move_offset";
+    const isoRoot = await mkdtemp(join(tmpdir(), "autoviral-move-offset-"));
+    await mkdir(join(isoRoot, isoWorkId), { recursive: true });
+    const yaml = TWO_VIDEO_LANE_YAML.replace(/w_move/g, isoWorkId);
+    await writeFile(join(isoRoot, isoWorkId, "composition.yaml"), yaml, "utf8");
+    const prev = process.env.AUTOVIRAL_WORKS_ROOT;
+    process.env.AUTOVIRAL_WORKS_ROOT = isoRoot;
+    try {
+      // c2 currently at trackOffset 4.0 on trk_v1; move to the SAME lane at 1.0.
+      const res = await app.request(`/api/bridge/v1/clip/c2/move`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-AutoViral-Work-Id": isoWorkId,
+        },
+        body: JSON.stringify({ toTrackId: "trk_v1", offset: 1.0 }),
+      });
+      expect(res.status).toBe(200);
+      const comp = await app.request("/api/bridge/v1/comp", {
+        headers: { "X-AutoViral-Work-Id": isoWorkId },
+      });
+      const compBody = (await comp.json()) as {
+        result: {
+          tracks: Array<{
+            id: string;
+            clips: Array<{ id: string; trackOffset: number }>;
+          }>;
+        };
+      };
+      const v1 = compBody.result.tracks.find((t) => t.id === "trk_v1")!;
+      const c2 = v1.clips.find((c) => c.id === "c2")!;
+      expect(c2.trackOffset).toBeCloseTo(1.0); // repositioned, NOT still 4.0
+    } finally {
+      if (prev === undefined) delete process.env.AUTOVIRAL_WORKS_ROOT;
+      else process.env.AUTOVIRAL_WORKS_ROOT = prev;
+    }
+  });
+
   it("rejects a missing work-id header → 400 + code 4", async () => {
     const res = await app.request(`/api/bridge/v1/clip/c2/move`, {
       method: "POST",

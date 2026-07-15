@@ -201,9 +201,40 @@ describe("@shared composition ops — moveClipToTrack", () => {
     }
   });
 
-  it("is a no-op when the target is the clip's current track", () => {
+  it("is a no-op when the target is the clip's current track (no offset)", () => {
     const comp = compWith([videoTrack("trk_v1", [videoClip("c1", 1)])]);
     moveClipToTrack(comp, { clipId: "c1", targetTrackId: "trk_v1" });
     expect((comp.tracks[0].clips as Clip[]).map((c) => c.id)).toEqual(["c1"]);
+    expect((comp.tracks[0].clips as Clip[])[0].trackOffset).toBe(1);
+  });
+
+  // PRD-0014 S18 E2E r2 · M-low-2 — `clip move <id> --to-track <SAME track>
+  // --offset N` was a SILENT no-op (early-return skipped the offset). A same-lane
+  // move with an explicit offset must REPOSITION the clip's trackOffset.
+  it("same-track move WITH an explicit offset repositions trackOffset", () => {
+    const comp = compWith([videoTrack("trk_v1", [videoClip("c1", 1)])]);
+    moveClipToTrack(comp, { clipId: "c1", targetTrackId: "trk_v1", offset: 3.5 });
+    const clips = comp.tracks[0].clips as Clip[];
+    expect(clips.map((c) => c.id)).toEqual(["c1"]);
+    expect(clips[0].trackOffset).toBe(3.5);
+  });
+
+  it("cross-track move WITH an explicit offset lands on the new lane at that offset", () => {
+    const v1 = videoTrack("trk_v1", [videoClip("c1", 2)]);
+    const v2 = videoTrack("trk_v2", []);
+    const comp = compWith([v1, v2]);
+    moveClipToTrack(comp, { clipId: "c1", targetTrackId: "trk_v2", offset: 6 });
+    expect((comp.tracks[0].clips as Clip[]).length).toBe(0);
+    const moved = comp.tracks[1].clips as Clip[];
+    expect(moved).toHaveLength(1);
+    expect(moved[0].trackOffset).toBe(6); // NOT the preserved 2
+  });
+
+  it("cross-track move WITHOUT an offset still preserves trackOffset (unchanged)", () => {
+    const v1 = videoTrack("trk_v1", [videoClip("c1", 2)]);
+    const v2 = videoTrack("trk_v2", []);
+    const comp = compWith([v1, v2]);
+    moveClipToTrack(comp, { clipId: "c1", targetTrackId: "trk_v2" });
+    expect((comp.tracks[1].clips as Clip[])[0].trackOffset).toBe(2);
   });
 });

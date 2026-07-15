@@ -185,11 +185,26 @@ export async function clipCommand(args: string[]): Promise<void> {
       process.stderr.write("autoviral clip move: --to-track <trackId> required\n");
       process.exit(4);
     }
+    // M-low-2 — an optional `--offset <seconds>` REPOSITIONS the clip on its new
+    // (or SAME) lane. Without it the clip keeps its current trackOffset. The old
+    // command dropped the flag entirely, so `--to-track <same> --offset N` was a
+    // silent no-op; forward it so the bridge/op honour it.
+    const moveBody: { toTrackId: string; offset?: number } = { toTrackId };
+    if (opts["--offset"] !== undefined) {
+      const off = Number(opts["--offset"]);
+      if (!Number.isFinite(off)) {
+        process.stderr.write(
+          "autoviral clip move: --offset <seconds> must be a number\n",
+        );
+        process.exit(4);
+      }
+      moveBody.offset = off;
+    }
     await bridgeRequest(
       ctx,
       "POST",
       `/clip/${encodeURIComponent(id)}/move`,
-      { toTrackId },
+      moveBody,
     );
     return;
   }
