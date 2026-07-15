@@ -102,4 +102,71 @@ describe("WsBridge — PRD-0015 S2 registry 接线 + settleOnExit", () => {
       expect(settled.settleReason).toBe("cli_exit");
     });
   });
+
+  // finding 3 —— superseded 进程 exit 也要 settle：setSessionModel/sendCommand 替换进程后，
+  // 被顶掉的旧进程走 exit handler 的 superseded 分支（跳过 UI/session 副作用），此前直接
+  // return 导致旧代活任务永远残留 running（030"被杀无提示"经切模型/命令路径复现）。
+  it("setSessionModel 替换进程后旧代任务被 settle(superseded)，不残留 running", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, DEFAULT_CHAT_SESSION_ID } = await import("../../../ws-bridge.js");
+      const work = "w_supersede";
+      await mkdir(join(dir, "works", work), { recursive: true });
+
+      const bridge = new WsBridge(3271);
+      await bridge.createSession(work, "跑个后台任务", undefined, DEFAULT_CHAT_SESSION_ID);
+      const session = bridge.getSession(work, DEFAULT_CHAT_SESSION_ID)!;
+      const proc1 = session.cliProcess as unknown as { stdout: EventEmitter } & EventEmitter;
+
+      emitLine(proc1, {
+        type: "system",
+        subtype: "task_started",
+        task_id: "wf_old",
+        task_type: "local_workflow",
+      });
+      await sleep(10);
+      expect(
+        session.taskRegistry!.snapshot().find((t) => t.taskId === "wf_old")!.status,
+      ).toBe("running");
+
+      // 切模型 → supersede + SIGTERM proc1（加入 supersededSet），不 respawn。
+      bridge.setSessionModel(work, "sonnet", DEFAULT_CHAT_SESSION_ID);
+      // proc1 退出走 superseded 分支——必须先按本代 settleOnExit 收尾活任务。
+      (proc1 as unknown as EventEmitter).emit("exit", null, "SIGTERM");
+      await sleep(10);
+
+      const settled = session.taskRegistry!.snapshot().find((t) => t.taskId === "wf_old")!;
+      expect(settled.status).toBe("stopped");
+      expect(settled.settleReason).toBe("superseded");
+    });
+  });
+
+  // finding 4 —— 迟到 exit 不清空新进程状态：sendMessage 杀旧进程（未入 supersededSet）后
+  // 立即 spawn 新进程；旧进程的迟到 exit 走主分支，若无条件清 cliProcess/置 idle，会把刚
+  // spawn 的新进程状态抹掉（pre-existing 竞态）。仅当 session.cliProcess === proc 才清。
+  it("sendMessage 杀旧进程→立即 spawn 新进程→旧 exit 迟到→新进程状态不被覆盖", async () => {
+    await withTempDataDir(async (dir) => {
+      const { WsBridge, DEFAULT_CHAT_SESSION_ID } = await import("../../../ws-bridge.js");
+      const work = "w_late_exit";
+      await mkdir(join(dir, "works", work), { recursive: true });
+
+      const bridge = new WsBridge(3271);
+      await bridge.createSession(work, "开工", undefined, DEFAULT_CHAT_SESSION_ID);
+      const session = bridge.getSession(work, DEFAULT_CHAT_SESSION_ID)!;
+      const proc1 = session.cliProcess;
+
+      // 发新消息（文案不同，绕开 dedup）：杀 proc1（不入 supersededSet）+ 立即 spawn proc2。
+      await bridge.sendMessage(work, "再来一条不同的消息", DEFAULT_CHAT_SESSION_ID);
+      const proc2 = session.cliProcess;
+      expect(proc2).not.toBe(proc1);
+      expect(proc2).toBeDefined();
+      expect(session.idle).toBe(false);
+
+      // proc1 迟到 exit——不得清掉 proc2 / 置 idle=true。
+      (proc1 as unknown as EventEmitter).emit("exit", 0, null);
+      await sleep(10);
+
+      expect(session.cliProcess).toBe(proc2);
+      expect(session.idle).toBe(false);
+    });
+  });
 });

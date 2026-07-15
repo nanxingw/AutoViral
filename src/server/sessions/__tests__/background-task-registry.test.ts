@@ -244,3 +244,128 @@ describe("BackgroundTaskRegistry — fixture 回放（真值表保真）", () =>
     expect(byId(reg, "bvvyvbykg")!.settleReason).toBeUndefined();
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PRD-0015 S2 加固（codex review findings）——逐条先落证红测试。
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("BackgroundTaskRegistry — 显式代际绑定（finding 1）", () => {
+  it("旧代迟到帧只更新旧代记录，绝不污染新代同名 taskId", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 1000 });
+    const g1 = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "reused" }, g1);
+    // 新进程代际：CLI ephemeral id 复用同一短串。
+    const g2 = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "reused" }, g2);
+
+    // 旧代 g1 的一帧迟到 updated(completed)——必须显式落在 g1，不动 g2。
+    reg.applyEvent({ kind: "updated", taskId: "reused", status: "completed" }, g1);
+
+    const snap = reg.snapshot();
+    const g1Task = snap.find((t) => t.taskId === "reused" && t.generation === g1)!;
+    const g2Task = snap.find((t) => t.taskId === "reused" && t.generation === g2)!;
+    expect(g1Task.status).toBe("completed");
+    // 关键：新代 g2 不被旧代迟到帧污染。
+    expect(g2Task.status).toBe("running");
+  });
+
+  it("拒绝未初始化代际（0 / 未来代）——不建记录", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 1000 });
+    // 尚未 beginGeneration：currentGeneration=0。
+    reg.applyEvent({ kind: "started", taskId: "x" }, 0);
+    expect(reg.snapshot()).toHaveLength(0);
+
+    const g1 = reg.beginGeneration();
+    // 未来代（尚不存在）也拒绝，避免凭空建代。
+    reg.applyEvent({ kind: "started", taskId: "y" }, g1 + 5);
+    expect(reg.snapshot()).toHaveLength(0);
+
+    // 合法当前代正常建条。
+    reg.applyEvent({ kind: "started", taskId: "z" }, g1);
+    expect(reg.snapshot().map((t) => t.taskId)).toEqual(["z"]);
+  });
+});
+
+describe("BackgroundTaskRegistry — 终态单调性（finding 2）", () => {
+  it("settleOnExit 后迟到的 started 帧不得复活任务", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    reg.settleOnExit("cli_exit", g);
+    expect(byId(reg, "t")!.status).toBe("stopped");
+
+    // 进程死后 parser 冲刷出的迟到 started 不得把 stopped 拉回 running。
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    expect(byId(reg, "t")!.status).toBe("stopped");
+  });
+
+  it("终态后迟到的 updated(running) 帧不得复活任务", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    reg.applyEvent({ kind: "updated", taskId: "t", status: "completed" }, g);
+    reg.applyEvent({ kind: "updated", taskId: "t", status: "running" }, g);
+    expect(byId(reg, "t")!.status).toBe("completed");
+  });
+
+  it("终态→终态（CLI 权威 killed→stopped）仍允许覆盖", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    reg.applyEvent({ kind: "updated", taskId: "t", status: "killed" }, g);
+    expect(byId(reg, "t")!.status).toBe("killed");
+    reg.applyEvent({ kind: "notification", taskId: "t", status: "stopped" }, g);
+    expect(byId(reg, "t")!.status).toBe("stopped");
+  });
+
+  it("rejected transition 触发观测回调（logBridge 可挂）", () => {
+    const rejected: Array<{ taskId?: string; from: string; to: string }> = [];
+    const reg = new BackgroundTaskRegistry({
+      now: () => 100,
+      onRejectedTransition: (info) =>
+        rejected.push({ taskId: info.taskId, from: info.from, to: info.to }),
+    });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    reg.applyEvent({ kind: "updated", taskId: "t", status: "completed" }, g);
+    reg.applyEvent({ kind: "updated", taskId: "t", status: "running" }, g);
+    expect(rejected).toEqual([{ taskId: "t", from: "completed", to: "running" }]);
+  });
+});
+
+describe("BackgroundTaskRegistry — 状态词汇归一化（finding 5）", () => {
+  it("failed 纳入终态：settleOnExit 不覆盖成 stopped", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    reg.applyEvent({ kind: "updated", taskId: "t", status: "failed" }, g);
+    expect(byId(reg, "t")!.status).toBe("failed");
+
+    const settled = reg.settleOnExit("cli_exit", g);
+    expect(settled).toHaveLength(0);
+    expect(byId(reg, "t")!.status).toBe("failed");
+  });
+
+  it("done → completed 集中归一化", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent({ kind: "started", taskId: "t" }, g);
+    reg.applyEvent({ kind: "notification", taskId: "t", status: "done" }, g);
+    expect(byId(reg, "t")!.status).toBe("completed");
+  });
+});
+
+describe("BackgroundTaskRegistry — snapshot 深拷贝 usage（finding 6）", () => {
+  it("snapshot/settleOnExit 返回的 usage 是深拷贝，改它不污染内部", () => {
+    const reg = new BackgroundTaskRegistry({ now: () => 100 });
+    const g = reg.beginGeneration();
+    reg.applyEvent(
+      { kind: "notification", taskId: "t", status: "completed", usage: { total_tokens: 10 } },
+      g,
+    );
+    const snap = reg.snapshot();
+    snap[0].usage!.total_tokens = 999;
+    // 内部 usage 不受快照拷贝的突变影响。
+    expect(reg.snapshot()[0].usage!.total_tokens).toBe(10);
+  });
+});
