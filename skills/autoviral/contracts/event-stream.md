@@ -171,6 +171,29 @@ Sent **once, first**, to a browser the moment it (re)connects — the full curre
 
 `data.tasks` is an array of the same per-task shape as `ui-workflow`'s `data` (minus the envelope-level `sessionId`/`workId`/`ts`, which live on the snapshot wrapper). The client replaces its whole local task map for the session from this frame. Emitted only when the session has run at least one turn (no registry ⇒ no snapshot frame).
 
+### KillGate drain discipline (`chat_notice` + terminal `ui-workflow`)
+
+Every CLI-process recycle — a new message, `/stop`, a model/backend switch, a slash-command passthrough, a browser-disconnect grace timeout, an idle-TTL sweep, deleting a session, daemon shutdown — passes through one server-side chokepoint (`requestKill(session, cause)`). When the current generation has an **active** background task (a non-terminal task), the chokepoint refuses to silently abort it. Behavior by cause family (issue 030 fix):
+
+| Cause family | With an active task |
+|---|---|
+| Destructive user intent — `/stop`, delete session, session replace, daemon shutdown | Settle the task(s) to `stopped` + broadcast a terminal `ui-workflow` (`settleReason` = the cause), then kill. Never silent. |
+| New user message | **Not killed.** The message is queued behind the running task and a `chat_notice` (`kind: "queued_message"`) is broadcast. When a `result` frame later arrives with the task settled, the queued message is dispatched as a fresh turn. |
+| Model switch / backend switch / command passthrough | **Not killed.** The operation is refused and a `chat_notice` (`kind: "kill_rejected"`) is broadcast; the caller (e.g. `setSessionModel`) returns a failure so the UI can prompt "wait or /stop". |
+| Browser-disconnect grace / idle-TTL sweep | **Skipped this round** — the process keeps running so its task finishes; it exits on its own. |
+
+With no active task, every path behaves exactly as before (kill + respawn / archive).
+
+```json
+{ "event": "chat_notice", "timestamp": "2026-07-15T06:34:00.000Z",
+  "data": {
+    "workId": "w_20260714_2317_f24", "sessionId": "s_1",
+    "kind": "queued_message",
+    "message": "后台任务运行中，消息将在完成后发送。" } }
+```
+
+`kind` is `"queued_message"` (a message was deferred behind a running task) or `"kill_rejected"` (a switch/command was refused; `data.cause` names which). `chat_notice` is a transient user-visible notice — it is **not** persisted to chat history.
+
 ## Inbound frames (Studio UI → Backend)
 
 The same WebSocket is bidirectional. The UI sends:

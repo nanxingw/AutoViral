@@ -37,9 +37,43 @@ import {
   findIdleSessions,
   type SessionRecord,
 } from "./server/sessions/sessions-sidecar.js";
-import { BackgroundTaskRegistry, type BackgroundTaskSnapshot } from "./server/sessions/background-task-registry.js";
+import {
+  BackgroundTaskRegistry,
+  isTerminalStatus,
+  type BackgroundTaskSnapshot,
+} from "./server/sessions/background-task-registry.js";
 
 // ── Types ────────────────────────────────────────────────────────────────────
+
+/**
+ * PRD-0015 S6 —— 一次 CLI 进程回收的「起因」。全部回收路径（新消息替换、/stop、删会话、
+ * 切 backend/model、命令 passthrough、断连 grace、idle-TTL 清扫、daemon 退出）都带着自己的
+ * cause 走同一个 {@link WsBridge.requestKill} chokepoint。cause 决定活任务时的分级处理，
+ * 见 requestKill 的 KILL_DESTRUCTIVE / 家族判定。新增 cause 必须同步 kill-gate.test.ts 的
+ * sweep matrix（contract-test-sweep-gate 纪律），否则测试红。
+ */
+export type KillCause =
+  | "session_replace"          // createSession 复用同 sid 时替换残留进程
+  | "user_stop"                // /stop（killSession）
+  | "session_delete"           // 删除会话
+  | "daemon_shutdown"          // daemon SIGTERM/SIGINT
+  | "user_new_message"         // sendMessage 起新 turn
+  | "backend_switch"           // 切 chat backend
+  | "model_switch"             // 切模型档位
+  | "command_passthrough"      // 斜杠命令 passthrough 起新进程
+  | "browser_disconnect_grace" // 断连 60s grace 超时回收
+  | "idle_ttl";                // idle-TTL 自动归档清扫
+
+/** requestKill 的处置结果（供调用方做各自的善后：入队 / 拒绝提示 / 跳过 / 已杀）。 */
+export type KillDisposition = "killed" | "queued" | "rejected" | "skipped" | "noop";
+
+/** 破坏性用户意图 —— 无论有无活任务都杀；杀前先 settleOnExit(cause) + 广播合成终态。 */
+const KILL_DESTRUCTIVE: ReadonlySet<KillCause> = new Set<KillCause>([
+  "session_replace",
+  "user_stop",
+  "session_delete",
+  "daemon_shutdown",
+]);
 
 /** Media the user attached to a chat message. Parsed out of the <attachments>
  *  envelope when the message is recorded, so the persisted/reloaded user block
@@ -138,6 +172,11 @@ export interface WsSession {
    *  终态并标 reason（030"被杀无提示"止损）。跨 turn 持久（同一 WsSession 对象复用），
    *  createSession 重建时从 existing 承接。广播（ui-workflow）留 S3。懒建于首个 spawnCli。 */
   taskRegistry?: BackgroundTaskRegistry;
+  /** PRD-0015 S6 —— 后台任务运行中收到的用户新消息队列。requestKill(user_new_message) 判定
+   *  当前代际有活任务时，sendMessage 把消息压这里而非杀活进程（030 根因止损），并广播
+   *  "运行中，完成后发送" 提示；进程 result 帧到达（turn 完成、任务落定）后 flush 队列，
+   *  逐条以新 turn 真正发出。跨 turn 持久（同一 WsSession），createSession 重建时承接。 */
+  pendingMessages?: string[];
 }
 
 /** A2 (PRD-0010) — how long an identical, back-to-back user message is treated
@@ -766,7 +805,10 @@ export class WsBridge {
     logBridge("session_create", workId, { model, backend, promptLen: initialPrompt.length, sessionId: sid });
     const existing = this.getSessionEntry(workId, sid);
     if (existing?.cliProcess) {
-      try { existing.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
+      // PRD-0015 S6 — route through the KillGate chokepoint. `session_replace` is
+      // destructive intent (user is (re)starting this session): any bg tasks on the
+      // stale process are settled + broadcast (never silently orphaned), then killed.
+      this.requestKill(existing, "session_replace");
     }
 
     // Lazy legacy migration + sidecar bookkeeping (ADR-008 §4). Ensure a
@@ -791,6 +833,8 @@ export class WsBridge {
       // durable task history (per workId×sessionId) survives, like browserSockets
       // / messageHistory above. Undefined on first创建 → lazily built in spawnCli.
       taskRegistry: existing?.taskRegistry,
+      // PRD-0015 S6 — carry any queued-behind-tasks messages across the re-pin.
+      pendingMessages: existing?.pendingMessages,
     };
     this.setSessionEntry(workId, sid, session);
 
@@ -887,16 +931,19 @@ export class WsBridge {
     if (!session) return false;
     // Established? Cross-backend resume is incompatible — refuse to switch.
     if (session.cliSessionId || session.messageHistory.length > 0) return false;
+    // PRD-0015 S6 — the CLI is recycled to apply the switch, so gate it BEFORE we
+    // mutate the pin: while bg tasks run, refuse and hint (don't switch, don't kill).
+    if (session.cliProcess) {
+      if (this.requestKill(session, "backend_switch") === "rejected") {
+        this.broadcastKillRejected(session, "backend_switch");
+        return false;
+      }
+      session.idle = true;
+    }
     const next = resolveBackendId(backend);
     session.backend = next;
     // Persist the new pin so a refresh / restart keeps the choice.
     this.sidecarFor(workId)?.patch(sid, { backend: next }).catch(() => {});
-    // Respawn on the next turn so the backend change takes effect.
-    if (session.cliProcess) {
-      try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-      session.cliProcess = undefined;
-      session.idle = true;
-    }
     return true;
   }
 
@@ -905,12 +952,16 @@ export class WsBridge {
     const sid = this.resolveSessionId(sessionId);
     const session = this.getSessionEntry(workId, sid);
     if (!session) return false;
-    session.model = model;
+    // PRD-0015 S6 — the model change takes effect by respawning, so gate the recycle
+    // BEFORE mutating session.model: while bg tasks run, refuse and hint (leave the
+    // model + process untouched). requestKill marks the replaced proc superseded.
     if (session.cliProcess) {
-      this.supersededCommandProcesses.add(session.cliProcess);
-      try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-      session.cliProcess = undefined;
+      if (this.requestKill(session, "model_switch") === "rejected") {
+        this.broadcastKillRejected(session, "model_switch");
+        return false;
+      }
     }
+    session.model = model;
     session.idle = true;
     return true;
   }
@@ -1060,10 +1111,23 @@ export class WsBridge {
       return result;
     }
 
+    // PRD-0015 S6 — a passthrough command respawns the CLI, so gate the recycle:
+    // while bg tasks run, refuse and hint (don't kill the running turn). Clear the
+    // command dedup bookkeeping so a legit retry after tasks finish isn't swallowed.
     if (session.cliProcess) {
-      this.supersededCommandProcesses.add(session.cliProcess);
-      try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-      session.cliProcess = undefined;
+      if (this.requestKill(session, "command_passthrough") === "rejected") {
+        this.broadcastKillRejected(session, "command_passthrough");
+        session.lastCommandKey = undefined;
+        session.lastCommandAt = undefined;
+        const result: ChatCommandExecutionResult = {
+          status: "error",
+          command: name,
+          errorCode: "task_running",
+          message: "后台任务运行中，请先等待完成或 /stop",
+        };
+        this.broadcastCommandResult(session, result);
+        return result;
+      }
     }
     session.idle = false;
     this.broadcastToSession(workId, sid, {
@@ -1163,6 +1227,30 @@ export class WsBridge {
     }
     session.lastUserText = displayText;
     session.lastUserAt = Date.now();
+
+    // PRD-0015 S6 — KillGate. Route the mid-turn recycle through the chokepoint.
+    // If the in-flight process has ACTIVE background tasks, `requestKill` refuses to
+    // SIGTERM it (030's root cause: sending a new message aborted the running
+    // workflow) and returns "queued": we stash the RAW wire text on the session and
+    // broadcast a user-visible "running, will send after it finishes" notice. The
+    // message is NOT recorded to history yet — it is replayed through sendMessage by
+    // flushPendingMessages once a result frame arrives with the tasks settled. When
+    // there are no active tasks, requestKill kills the (stray) process as before and
+    // we fall through to record + spawn the new turn normally.
+    if (this.requestKill(session, "user_new_message") === "queued") {
+      (session.pendingMessages ??= []).push(text);
+      logBridge("send_queued_behind_tasks", workId, { sessionId: sid, textLen: displayText.length });
+      this.broadcastToSession(workId, sid, {
+        event: "chat_notice",
+        data: {
+          workId,
+          sessionId: sid,
+          kind: "queued_message",
+          message: "后台任务运行中，消息将在完成后发送。",
+        },
+      });
+      return true;
+    }
     session.idle = false;
 
     const userBlock: ChatBlock = {
@@ -1181,11 +1269,9 @@ export class WsBridge {
       syncMessage(workId, w.title, "chat", "user", text).catch(() => {});
     }).catch(() => {});
 
-    // If CLI is still running (shouldn't normally be, but just in case)
-    if (session.cliProcess) {
-      try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-      session.cliProcess = undefined;
-    }
+    // The in-flight CLI (if any) was already recycled by the KillGate above
+    // (requestKill(user_new_message) → killed/noop when there were no active tasks;
+    // the "queued" path returned early). No bare kill here anymore.
 
     // Try to resume: in-memory cliSessionId → sidecar record → work.yaml.
     // C4 — ALSO hydrate the session's pinned backend from the record when it is
@@ -1249,13 +1335,12 @@ export class WsBridge {
     const session = this.getSessionEntry(workId, sid);
     if (!session) return false;
 
-    // Kill creator CLI process
-    if (session.cliProcess) {
-      try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-      const proc = session.cliProcess;
-      setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* dead */ } }, 5000);
-      session.cliProcess = undefined;
-    }
+    // PRD-0015 S6 — /stop is destructive user intent: the KillGate chokepoint
+    // settles any active bg tasks (settleOnExit("user_stop")) + broadcasts their
+    // synthesized terminal ui-workflow frames (never silent), SIGTERMs the CLI, and
+    // escalates to SIGKILL after 5s. session_killed below is the complementary
+    // per-session UI signal (kept).
+    this.requestKill(session, "user_stop");
 
     session.idle = true;
     // Kill is per-session lifecycle (ADR-008 §3) — only this session's sockets
@@ -1711,6 +1796,10 @@ export class WsBridge {
             syncMessage(session.workId, w.title, "chat", "assistant", resultText).catch(() => {});
           }).catch(() => {});
         }
+        // PRD-0015 S6 —— turn 完成（result 帧）是 flush 点：若有消息在活任务运行期间被入队，
+        // 且此刻任务已落定（无活任务），把队首消息作为一个新 turn 真正发出。exp 实证同进程可
+        // 有多个 result 帧——flush 每次 result 后检查即可（仍有活任务则本次不发，等下一个 result）。
+        this.flushPendingMessages(session);
       },
 
       // PRD-0015 S2/S3 —— 后台任务生命周期归一化事件喂入 registry（applyEvent：同 id
@@ -2028,8 +2117,11 @@ export class WsBridge {
         // mid-turn after 1s was destructive; allow a 60s reconnect grace.
         setTimeout(() => {
           if (session.browserSockets.size === 0 && session.cliProcess) {
-            try { session.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-            session.cliProcess = undefined;
+            // PRD-0015 S6 — a disconnect grace timeout is NOT user intent to abort
+            // the work. If bg tasks are still running, requestKill returns "skipped":
+            // leave the process alive so its tasks finish (it exits on its own). Only
+            // when idle do we reclaim it as before.
+            if (this.requestKill(session, "browser_disconnect_grace") === "skipped") return;
             session.idle = true;
             // Grace-timeout abort is per-session lifecycle (ADR-008 §3) — fan
             // it only to this session's sockets, not every chat on the work.
@@ -2151,6 +2243,136 @@ export class WsBridge {
     for (const task of affected) this.broadcastWorkflowTask(session, task);
   }
 
+  // ── PRD-0015 S6 · KillGate drain 纪律 ──────────────────────────────────────
+
+  /** 当前代际是否有非终态（活）后台任务。requestKill 的分级判定依据——registry（S2）报告
+   *  当前代际存在 running / pending-settle 的任务即为"活"。无 registry / 未跑过任务 → false。 */
+  private hasActiveTasks(session: WsSession): boolean {
+    const registry = session.taskRegistry;
+    if (!registry) return false;
+    const gen = registry.generation;
+    return registry
+      .snapshot()
+      .some((t) => t.generation === gen && !isTerminalStatus(t.status));
+  }
+
+  /** 破坏性 cause 的"绝不静默"落点：把当前代际仍活的任务合成终态（settleOnExit(reason)）
+   *  并逐条广播 ui-workflow（stopped + settleReason=cause）。随后的进程 exit 里 settleThisGeneration
+   *  会因终态单调性成为 no-op（不重复广播）。无活任务时为空操作。 */
+  private settleAndBroadcast(session: WsSession, reason: KillCause): void {
+    const registry = session.taskRegistry;
+    if (!registry) return;
+    const settled = registry.settleOnExit(reason);
+    if (settled.length > 0) {
+      logBridge("bg_settle_on_kill", session.workId, {
+        reason,
+        count: settled.length,
+        taskIds: settled.map((t) => t.taskId),
+      });
+      for (const task of settled) this.broadcastWorkflowTask(session, task);
+    }
+  }
+
+  /** 活任务时切 backend/model 或命令 passthrough 被拒 → 向 chat 流广播用户可见提示。 */
+  private broadcastKillRejected(session: WsSession, cause: KillCause): void {
+    this.broadcastToSession(session.workId, session.sessionId, {
+      event: "chat_notice",
+      data: {
+        workId: session.workId,
+        sessionId: session.sessionId,
+        kind: "kill_rejected",
+        cause,
+        message: "后台任务运行中，请先等待完成或 /stop。",
+      },
+    });
+  }
+
+  /** turn 完成（result 帧）后的队列 flush：若队列非空且当前无活任务，把队首消息作为一个新
+   *  turn 真正发出（sendMessage 会正常记录 + spawn）。仍有活任务则本次不发（下一个 result
+   *  帧再检查）——保证"后台任务运行中的消息在完成后发送"。fire-and-forget（sendMessage 异步）。 */
+  private flushPendingMessages(session: WsSession): void {
+    const queue = session.pendingMessages;
+    if (!queue || queue.length === 0) return;
+    if (this.hasActiveTasks(session)) return; // 仍在跑，继续等下一个 result 帧
+    const next = queue.shift();
+    if (next === undefined) return;
+    logBridge("bg_flush_queued_message", session.workId, {
+      sessionId: session.sessionId,
+      remaining: queue.length,
+    });
+    void this.sendMessage(session.workId, next, session.sessionId);
+  }
+
+  // ── PRD-0015 S6 · requestKill chokepoint (BEGIN) ──────────────────────────
+  /**
+   * 单一 chokepoint：全部 CLI 进程回收路径都带自己的 {@link KillCause} 走这里。裸
+   * `cliProcess` SIGTERM/SIGKILL 只允许出现在本方法内部（kill-gate.test.ts 的源码
+   * sweep-gate 强制：全文件的裸进程终止调用恰好 2 处且都在本 chokepoint 内）。
+   * 依据当前代际是否有活后台任务（{@link hasActiveTasks}）+ cause 分级：
+   *
+   *   - **破坏性用户意图**（session_replace / user_stop / session_delete / daemon_shutdown，
+   *     见 {@link KILL_DESTRUCTIVE}）：总是杀。杀前先 {@link settleAndBroadcast}(cause)——把活
+   *     任务合成 stopped 终态并广播（030"被杀无提示"的止损，绝不静默）。user_stop 额外 5s 后
+   *     升级 SIGKILL。返回 `"killed"`。
+   *   - **user_new_message**：活任务 → 返回 `"queued"`（不杀，调用方把消息入队并广播提示）；
+   *     无活任务 → 杀，返回 `"killed"`。
+   *   - **model_switch / backend_switch / command_passthrough**：活任务 → 返回 `"rejected"`
+   *     （不杀，调用方广播"请先 /stop"提示并回滚）；无活任务 → 杀（model/command 顺带把被替换
+   *     的进程标记 superseded，使其 exit 不触发 UI 副作用），返回 `"killed"`。
+   *   - **browser_disconnect_grace / idle_ttl**：活任务 → 返回 `"skipped"`（不杀，进程继续跑，
+   *     任务完成后自然退出）；无活任务 → 杀，返回 `"killed"`。
+   *
+   * 无进程可杀时：破坏性 cause 仍 settle 任何残留活任务（防御性，活任务本应蕴含活进程），
+   * 返回 `"noop"`；非破坏性返回 `"noop"`。返回处置由调用方善后（入队 / 拒绝提示 / 跳过）。
+   */
+  private requestKill(session: WsSession, cause: KillCause): KillDisposition {
+    const proc = session.cliProcess;
+    const destructive = KILL_DESTRUCTIVE.has(cause);
+    const active = this.hasActiveTasks(session);
+
+    // 非破坏性 + 活任务 → 按家族放行（不杀）。
+    if (!destructive && active) {
+      if (cause === "user_new_message") return "queued";
+      if (cause === "backend_switch" || cause === "model_switch" || cause === "command_passthrough") {
+        return "rejected";
+      }
+      if (cause === "browser_disconnect_grace" || cause === "idle_ttl") return "skipped";
+    }
+
+    // 破坏性 cause：先合成终态 + 广播，再杀（后续 proc exit 的 settle 因终态单调性 no-op）。
+    if (destructive) this.settleAndBroadcast(session, cause);
+
+    if (!proc) return "noop";
+
+    // model/command passthrough 顶掉旧进程时标记 superseded：其迟到 exit 只 settle 本代活任务，
+    // 跳过 UI/session 副作用（既有行为，保留）。
+    if (cause === "model_switch" || cause === "command_passthrough") {
+      this.supersededCommandProcesses.add(proc);
+    }
+
+    try { proc.kill("SIGTERM"); } catch { /* dead */ }
+    if (cause === "user_stop") {
+      // /stop 的硬升级：SIGTERM 后 5s 仍未退则 SIGKILL（既有 killSession 行为）。
+      setTimeout(() => { try { proc.kill("SIGKILL"); } catch { /* dead */ } }, 5000);
+    }
+    session.cliProcess = undefined;
+    return "killed";
+  }
+  // ── requestKill chokepoint (END) ──────────────────────────────────────────
+
+  /**
+   * PRD-0015 S6 —— daemon 退出（SIGTERM/SIGINT）时的尽力回收：遍历所有在内存里的会话，
+   * 各带 `daemon_shutdown` cause 走 chokepoint（settle 活任务 + 尽力广播终态 + 杀）。同步、
+   * 幂等（重复调用对已无进程的会话是 no-op）。调用方（cli.ts 信号 handler）在 exit 前触发。
+   */
+  shutdownAll(): void {
+    for (const perWork of this.sessions.values()) {
+      for (const session of perWork.values()) {
+        this.requestKill(session, "daemon_shutdown");
+      }
+    }
+  }
+
   // ── Sidecar bookkeeping + legacy migration (ADR-008 §2/§4/§5) ─────────────
 
   /**
@@ -2261,12 +2483,11 @@ export class WsBridge {
     const sidecar = this.sidecarFor(workId);
     if (!sidecar) return false;
     const sid = this.resolveSessionId(sessionId);
-    // Dispose live session + CLI.
+    // Dispose live session + CLI. PRD-0015 S6 — deleting a session is destructive
+    // user intent: the KillGate settles any active bg tasks + broadcasts their
+    // terminal ui-workflow frames (never silent) before the SIGTERM.
     const live = this.getSessionEntry(workId, sid);
-    if (live?.cliProcess) {
-      try { live.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-      live.cliProcess = undefined;
-    }
+    if (live?.cliProcess) this.requestKill(live, "session_delete");
     this.deleteSessionEntry(workId, sid);
     const ok = await sidecar.delete(sid);
     if (ok) {
@@ -2298,8 +2519,10 @@ export class WsBridge {
       // Release in-memory state if loaded.
       const live = this.getSessionEntry(workId, rec.id);
       if (live?.cliProcess) {
-        try { live.cliProcess.kill("SIGTERM"); } catch { /* dead */ }
-        live.cliProcess = undefined;
+        // PRD-0015 S6 — an idle-TTL sweep is bookkeeping, not user intent. If bg
+        // tasks are still running, requestKill returns "skipped": keep the session
+        // live this round (it exits when its tasks finish) rather than orphaning them.
+        if (this.requestKill(live, "idle_ttl") === "skipped") continue;
       }
       this.deleteSessionEntry(workId, rec.id);
       await sidecar.archive(rec.id);

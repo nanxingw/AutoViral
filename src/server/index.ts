@@ -57,7 +57,7 @@ export function createHttpApp(webDist = WEB_DIST): Hono {
   return app;
 }
 
-export async function startServer(port: number): Promise<{ server: Server }> {
+export async function startServer(port: number): Promise<{ server: Server; wsBridge: WsBridge }> {
   // Repair PATH before initProviders() probes ffmpeg/edge-tts. A daemon started
   // outside a login shell lacks /opt/homebrew/bin, making bare-name spawns fail
   // with ENOENT. Idempotent — also called at the CLI entry. See spawn-path.ts.
@@ -208,7 +208,9 @@ export async function startServer(port: number): Promise<{ server: Server }> {
     console.warn("[session-sweep] startup archive sweep failed:", err),
   );
 
-  return { server: httpServer };
+  // PRD-0015 S6 — expose the bridge so the daemon signal handler can drain it
+  // (shutdownAll → requestKill(daemon_shutdown) settles + broadcasts + kills) before exit.
+  return { server: httpServer, wsBridge };
 }
 
 /**

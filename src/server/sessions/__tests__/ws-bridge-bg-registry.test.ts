@@ -103,20 +103,31 @@ describe("WsBridge — PRD-0015 S2 registry 接线 + settleOnExit", () => {
     });
   });
 
-  // finding 3 —— superseded 进程 exit 也要 settle：setSessionModel/sendCommand 替换进程后，
-  // 被顶掉的旧进程走 exit handler 的 superseded 分支（跳过 UI/session 副作用），此前直接
-  // return 导致旧代活任务永远残留 running（030"被杀无提示"经切模型/命令路径复现）。
-  it("setSessionModel 替换进程后旧代任务被 settle(superseded)，不残留 running", async () => {
+  // finding 3（PRD-0015 S6 更新）—— superseded 进程 exit 也要 settle 它代际里【迟到冲出】的
+  // 活任务：被顶掉的旧进程走 exit handler 的 superseded 分支（跳过 UI/session 副作用），此前
+  // 直接 return 导致旧代活任务永远残留 running（030"被杀无提示"经切模型/命令路径复现）。
+  //
+  // S6 收窄了触发条件：切模型/命令 passthrough 遇【活】后台任务时改为【拒绝】（不杀，见
+  // kill-gate.test.ts ⑥），所以"顶掉带活任务的进程"这一 orphan 场景从源头被 KillGate 挡住。
+  // 但【无活任务时】切模型照旧 kill+supersede；若被杀进程的 stdout 缓冲里迟到冲出一个同代
+  // task_started，exit 的 superseded 分支仍必须把它 settle 成 stopped(superseded)——本 case 锁这条。
+  it("superseded 进程 exit settle 迟到活任务(superseded)，不残留 running", async () => {
     await withTempDataDir(async (dir) => {
       const { WsBridge, DEFAULT_CHAT_SESSION_ID } = await import("../../../ws-bridge.js");
       const work = "w_supersede";
       await mkdir(join(dir, "works", work), { recursive: true });
 
       const bridge = new WsBridge(3271);
-      await bridge.createSession(work, "跑个后台任务", undefined, DEFAULT_CHAT_SESSION_ID);
+      await bridge.createSession(work, "开工", undefined, DEFAULT_CHAT_SESSION_ID);
       const session = bridge.getSession(work, DEFAULT_CHAT_SESSION_ID)!;
       const proc1 = session.cliProcess as unknown as { stdout: EventEmitter } & EventEmitter;
 
+      // 无活任务 → 切模型照旧 kill+supersede proc1（S6 只在【有】活任务时才拒绝）。
+      const ok = bridge.setSessionModel(work, "sonnet", DEFAULT_CHAT_SESSION_ID);
+      expect(ok).toBe(true);
+      expect(session.cliProcess).toBeUndefined();
+
+      // proc1 stdout 缓冲里迟到冲出一个 task_started（同代 running）——被杀但 parser 仍在读缓冲。
       emitLine(proc1, {
         type: "system",
         subtype: "task_started",
@@ -128,9 +139,7 @@ describe("WsBridge — PRD-0015 S2 registry 接线 + settleOnExit", () => {
         session.taskRegistry!.snapshot().find((t) => t.taskId === "wf_old")!.status,
       ).toBe("running");
 
-      // 切模型 → supersede + SIGTERM proc1（加入 supersededSet），不 respawn。
-      bridge.setSessionModel(work, "sonnet", DEFAULT_CHAT_SESSION_ID);
-      // proc1 退出走 superseded 分支——必须先按本代 settleOnExit 收尾活任务。
+      // proc1 退出走 superseded 分支——必须先按本代 settleOnExit 收尾迟到活任务。
       (proc1 as unknown as EventEmitter).emit("exit", null, "SIGTERM");
       await sleep(10);
 

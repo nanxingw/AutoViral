@@ -113,23 +113,23 @@ export function runCLI(): void {
       // So the injected port wins, with config.port as the dev fallback.
       const bindPort = resolveBindPort(config.port);
       const { startServer } = await import("./server/index.js");
-      await startServer(bindPort);
+      const { wsBridge } = await startServer(bindPort);
       console.log(`Dashboard: http://localhost:${bindPort}`);
 
+      // PRD-0015 S6 — on daemon shutdown, drain the bridge through the KillGate
+      // chokepoint (daemon_shutdown cause): every live session's active bg tasks are
+      // settled + best-effort broadcast + the CLI killed, so a stop doesn't silently
+      // orphan running workflows. Best-effort: a drain failure never blocks exit.
+      const gracefulShutdown = async () => {
+        console.log("\nShutting down...");
+        try { wsBridge.shutdownAll(); } catch { /* best-effort */ }
+        try { await unlink(PID_FILE); } catch { /* ignore */ }
+        process.exit(0);
+      };
+
       // Keep process alive
-      process.on("SIGTERM", async () => {
-        console.log("\nShutting down...");
-
-        try { await unlink(PID_FILE); } catch { /* ignore */ }
-        process.exit(0);
-      });
-
-      process.on("SIGINT", async () => {
-        console.log("\nShutting down...");
-
-        try { await unlink(PID_FILE); } catch { /* ignore */ }
-        process.exit(0);
-      });
+      process.on("SIGTERM", gracefulShutdown);
+      process.on("SIGINT", gracefulShutdown);
     });
 
   program
